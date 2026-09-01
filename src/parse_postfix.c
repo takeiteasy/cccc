@@ -2974,6 +2974,31 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 sc = NULL;
         }
 
+        // #1250: the mirror image of the #887 guard above. A comptime
+        // body's *own source* referencing a demand-driven-spliceable
+        // file-scope global (e.g. `int probe = gx;`) causes
+        // comptime_index_splice's CDK_OBJECT branch to splice that global
+        // in as a first-class part of the comptime program -- storage in
+        // the comptime program's own data segment, flagged
+        // is_macro_program_global (new_gvar, src/parse_core.c). Later,
+        // outside macro mode (comptime *execution* calling Quote()/
+        // QuoteN()), the runtime file scope is chained onto
+        // vm->compiler.scope (macro_context_scope, src/macros.c) so
+        // find_var() resolves that same comptime-program Obj by name --
+        // building a var node from it would compile cleanly and silently
+        // write/read the comptime program's copy, never the runtime TU's
+        // actual global, with no diagnostic at all. Hide it and let the
+        // ordinary undefined-variable path (below) fire instead, exactly as
+        // it already does for the same body if it hadn't read the global
+        // during the comptime parse.
+        bool hid_macro_program_global = false;
+        if (!vm->compiler.in_macro_mode && sc && sc->var &&
+            !sc->var->is_local && !sc->var->is_function &&
+            sc->var->is_macro_program_global) {
+            sc                       = NULL;
+            hid_macro_program_global = true;
+        }
+
         // #894: on a miss during the comptime parse, ask the demand-driven
         // declaration index to splice a matching object/function/enum
         // constant in, then retry once. Deliberately placed AFTER the #887
@@ -3187,6 +3212,18 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 "forwarded to comptime bodies -- mark it [[cccc::comptime]] "
                 "(see #188), or route its value through a #define @shared)",
                 tok->len, tok->loc);
+        } else if (hid_macro_program_global) {
+            // #1250: see the guard's own comment above.
+            msg = arena_format(
+                vm,
+                "undefined variable '%.*s' (this comptime body already read "
+                "the runtime translation unit's '%.*s', so only the "
+                "comptime program's own copy -- with storage in the "
+                "comptime program's own data segment -- is in scope here; "
+                "a Quote() template cannot reference a runtime global by "
+                "name, because file-scope comptime generation runs before "
+                "the runtime translation unit is parsed)",
+                tok->len, tok->loc, tok->len, tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,
                                tok->loc);

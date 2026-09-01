@@ -108,6 +108,9 @@ cc_register_cfunc(vm, "__builtin_ast_funcall", (void *)__builtin_ast_funcall, 3,
 cc_register_cfunc(vm, "__builtin_ast_while", (void *)__builtin_ast_while, 2, 0);
 cc_register_cfunc(vm, "__builtin_ast_for", (void *)__builtin_ast_for, 4, 0);
 cc_register_cfunc(vm, "__builtin_ast_do_while", (void *)__builtin_ast_do_while, 2, 0);
+cc_register_cfunc(vm, "__builtin_ast_push_loop", (void *)__builtin_ast_push_loop, 1, 0);
+cc_register_cfunc(vm, "__builtin_ast_pop_loop", (void *)__builtin_ast_pop_loop, 0, 0);
+cc_register_cfunc(vm, "__builtin_ast_loop_set_body", (void *)__builtin_ast_loop_set_body, 2, 0);
 cc_register_cfunc(vm, "__builtin_ast_function", (void *)__builtin_ast_function, 2, 0);
 cc_register_cfunc(vm, "__builtin_ast_publish", (void *)__builtin_ast_publish, 2, 0);
 cc_register_cfunc(vm, "__builtin_ast_publish_type", (void *)__builtin_ast_publish_type, 2, 0);

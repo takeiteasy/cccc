@@ -644,7 +644,24 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "break")) {
         if (!vm->compiler.brk_label) {
-            if (!error_tok_recover(vm, tok, "stray break")) {
+            // #1249: an eager Quote()/QuoteN() template is parsed
+            // immediately, at the Quote() call site, against whatever loop
+            // context happens to be live there -- not the loop it is later
+            // spliced/attached into (see man/MACROS.md, "Deferred templates
+            // with QuoteLazy"). Point at the fix instead of leaving the
+            // reporter to wonder why a `break` inside what looks like a loop
+            // body is "stray".
+            const char *stray_break_msg =
+                vm->compiler.comptime_splice_active
+                    ? "stray break (a break/continue inside a Quote() "
+                      "template binds to the loop enclosing the Quote() "
+                      "call, not one it is later spliced into -- use "
+                      "QuoteLazy() so the fragment is parsed inside "
+                      "MakeWhile()/MakeFor()/MakeDoWhile()'s own loop "
+                      "context, or WithLoop(loop) { LoopSetBody(loop, "
+                      "Quote(...)); })"
+                    : "stray break";
+            if (!error_tok_recover(vm, tok, "%s", stray_break_msg)) {
                 *rest = tok->next;
                 return new_node(vm, ND_NULL_EXPR, tok);
             }
@@ -662,7 +679,18 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "continue")) {
         if (!vm->compiler.cont_label) {
-            if (!error_tok_recover(vm, tok, "stray continue")) {
+            // #1249: see the matching comment on the "break" arm above.
+            const char *stray_continue_msg =
+                vm->compiler.comptime_splice_active
+                    ? "stray continue (a break/continue inside a Quote() "
+                      "template binds to the loop enclosing the Quote() "
+                      "call, not one it is later spliced into -- use "
+                      "QuoteLazy() so the fragment is parsed inside "
+                      "MakeWhile()/MakeFor()/MakeDoWhile()'s own loop "
+                      "context, or WithLoop(loop) { LoopSetBody(loop, "
+                      "Quote(...)); })"
+                    : "stray continue";
+            if (!error_tok_recover(vm, tok, "%s", stray_continue_msg)) {
                 *rest = tok->next;
                 return new_node(vm, ND_NULL_EXPR, tok);
             }

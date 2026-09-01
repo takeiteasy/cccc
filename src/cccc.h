@@ -2255,7 +2255,18 @@ struct Obj {
     bool is_implicit;        // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via
                              // $function/$global_var
-    bool  is_splice_placeholder; // true for $@k vars synthesised by quote_core
+    bool is_splice_placeholder; // true for $@k vars synthesised by quote_core
+    // #1250: true for any Obj created by new_gvar() while
+    // vm->compiler.in_macro_mode is set -- i.e. this object's storage lives
+    // in the *comptime program's* data segment (init_macro_globals,
+    // src/macros.c), not the runtime translation unit's. A comptime body
+    // that reads its own file-scope global during the comptime parse (e.g.
+    // `int probe = gx;`) causes comptime_index_splice's CDK_OBJECT branch to
+    // splice a copy of that global in as exactly such an Obj; a later
+    // Quote() referencing the same name by identifier must not be allowed
+    // to silently resolve to this copy outside macro mode -- see the guard
+    // in primary(), src/parse_postfix.c.
+    bool  is_macro_program_global;
     Node *lazy_quote; // #1242: for a $k placeholder whose argument was a
                       // QuoteLazy()/QuoteLazyN() fragment -- the
                       // ND_QUOTE_LAZY node to parse at this placeholder's
@@ -4850,6 +4861,13 @@ bool cc_file_is_command_line_input(VirtualMachine *vm,
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
+
+// #1249: exposed here (defined in src/parse_core.c, otherwise declared only
+// in the parse_*.c-private src/parse_internal.h) so src/reflection.c's
+// MakeWhile/MakeFor/MakeDoWhile builders can hand a builder loop node the
+// same kind of unique brk_label/cont_label pointer the ordinary parser path
+// does.
+char *new_unique_name(VirtualMachine *vm);
 
 // #894: demand-driven comptime declaration index. Defined in src/macros.c
 // (which owns the index's data structures); cc_parse_splice_range is

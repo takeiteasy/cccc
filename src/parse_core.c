@@ -740,11 +740,17 @@ Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
 }
 
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    Obj *var             = new_var(vm, name, name_len, ty);
-    var->next            = vm->compiler.globals;
-    var->is_static       = true;
-    var->is_definition   = true;
-    vm->compiler.globals = var;
+    Obj *var           = new_var(vm, name, name_len, ty);
+    var->next          = vm->compiler.globals;
+    var->is_static     = true;
+    var->is_definition = true;
+    // #1250: every global built while compiling the comptime program (in
+    // particular one spliced in on demand by comptime_index_splice's
+    // CDK_OBJECT branch, src/macros.c) lands storage in the comptime
+    // program's own data segment, not the runtime translation unit's -- see
+    // is_macro_program_global's comment, src/cccc.h.
+    var->is_macro_program_global = vm->compiler.in_macro_mode;
+    vm->compiler.globals         = var;
     return var;
 }
 

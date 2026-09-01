@@ -1255,6 +1255,49 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     return node;
 }
 
+// #1249: MakeWhile/MakeFor/MakeDoWhile previously left node->brk_label/
+// cont_label NULL, unlike the parser's own for/while/do handlers
+// (parse_stmt.c), so a body containing break/continue had nothing to bind
+// to. reflect_assign_loop_labels gives a builder loop node the same kind of
+// unique label pointers new_unique_name() hands out at parse_stmt.c:516-517/
+// 570-571/598-599 — SerJumpFrame matching (serialize_stmt.c) and
+// parse_analysis.c's break/continue target resolution both work by pointer
+// identity, so this alone is enough for the two existing consumers to treat
+// a builder loop exactly like a parsed one.
+static void reflect_assign_loop_labels(VirtualMachine *vm, Node *node) {
+    node->brk_label  = new_unique_name(vm);
+    node->cont_label = new_unique_name(vm);
+}
+
+// #1249: if body is an unexpanded QuoteLazy() fragment, parse it now, inside
+// this loop's own brk_label/cont_label/cleanup depth — mirroring the
+// save/install/restore parse_stmt.c performs around a real for/while/do
+// body's statement parse. Without this, a QuoteLazy("break;") body would
+// still parse against whatever loop context happened to be live at the
+// MakeWhile/MakeFor/MakeDoWhile call site instead of this loop.
+static Node *reflect_expand_loop_body(VirtualMachine *vm, Node *node,
+                                      Node *body) {
+    if (!body || body->kind != ND_QUOTE_LAZY)
+        return body;
+
+    char *saved_brk                 = vm->compiler.brk_label;
+    char *saved_cont                = vm->compiler.cont_label;
+    int   saved_brk_cleanup_depth   = vm->compiler.brk_cleanup_depth;
+    int   saved_cont_cleanup_depth  = vm->compiler.cont_cleanup_depth;
+    vm->compiler.brk_label          = node->brk_label;
+    vm->compiler.cont_label         = node->cont_label;
+    vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
+    vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
+
+    body                   = cc_quote_expand_lazy(vm, body, /*want_stmt=*/true);
+
+    vm->compiler.brk_label = saved_brk;
+    vm->compiler.cont_label         = saved_cont;
+    vm->compiler.brk_cleanup_depth  = saved_brk_cleanup_depth;
+    vm->compiler.cont_cleanup_depth = saved_cont_cleanup_depth;
+    return body;
+}
+
 // __builtin_ast_while: while(cond) body — represented as ND_FOR with init/inc
 // NULL
 Node *__builtin_ast_while(Node *cond, Node *body) {
@@ -1264,7 +1307,8 @@ Node *__builtin_ast_while(Node *cond, Node *body) {
 
     Node *node = alloc_node(vm, ND_FOR);
     node->cond = cond;
-    node->then = body;
+    reflect_assign_loop_labels(vm, node);
+    node->then = reflect_expand_loop_body(vm, node, body);
     // node->init and node->inc left NULL — this is a while loop
     return node;
 }
@@ -1278,7 +1322,8 @@ Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body) {
     node->init = init;
     node->cond = cond;
     node->inc  = inc;
-    node->then = body;
+    reflect_assign_loop_labels(vm, node);
+    node->then = reflect_expand_loop_body(vm, node, body);
     return node;
 }
 
@@ -1288,7 +1333,8 @@ Node *__builtin_ast_do_while(Node *body, Node *cond) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_DO);
-    node->then = body;
+    reflect_assign_loop_labels(vm, node);
+    node->then = reflect_expand_loop_body(vm, node, body);
     node->cond = cond;
     return node;
 }
@@ -2583,6 +2629,97 @@ void __builtin_ast_pop_fn(void) {
     int d                   = --_fn_context_depth;
     vm->compiler.current_fn = _fn_context_stack[d];
     vm->compiler.locals     = _fn_locals_stack[d]; // restore outer locals
+}
+
+// ============================================================================
+// #1249: WithLoop(loop) / LoopSetBody(loop, body) — scoped loop-body context
+// ============================================================================
+//
+// MakeWhile/MakeFor/MakeDoWhile assign a loop node's brk_label/cont_label at
+// construction time (reflect_assign_loop_labels, above) and expand a
+// QuoteLazy() body passed as their `body` argument under those labels
+// (reflect_expand_loop_body). But C evaluates function-call arguments before
+// the call, so an *eager* Quote("{ break; }") passed directly as that `body`
+// argument is still parsed before MakeWhile/MakeFor/MakeDoWhile ever runs --
+// no fix inside those three builders can change that. WithLoop(loop) {
+// LoopSetBody(loop, Quote(...)); } instead builds the (bodyless) loop node
+// first, then parses the eager Quote() *inside* a block that has already
+// installed the loop's labels, exactly mirroring WithFn(fn) { ... Quote(...)
+// ... } for functions above.
+
+#define CCCC_LOOP_CONTEXT_STACK_DEPTH 16
+static Node *_loop_context_stack[CCCC_LOOP_CONTEXT_STACK_DEPTH];
+static char *_loop_brk_stack[CCCC_LOOP_CONTEXT_STACK_DEPTH];
+static char *_loop_cont_stack[CCCC_LOOP_CONTEXT_STACK_DEPTH];
+static int   _loop_brk_cleanup_depth_stack[CCCC_LOOP_CONTEXT_STACK_DEPTH];
+static int   _loop_cont_cleanup_depth_stack[CCCC_LOOP_CONTEXT_STACK_DEPTH];
+static int   _loop_context_depth = 0;
+
+// Push a loop context: saves brk_label/cont_label/brk_cleanup_depth/
+// cont_cleanup_depth, then installs loop's own labels and the current
+// cleanup_scope_depth -- the same four fields parse_stmt.c's own for/while/
+// do handlers save/install/restore around a real loop body parse. Saving
+// only some of the four would leave a break/continue's cleanup-scope target
+// wrong even though its jump target resolved correctly (the same class of
+// bug documented for WithFn's own locals save/restore).
+void __builtin_ast_push_loop(Node *loop) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !loop)
+        return;
+    if (_loop_context_depth >= CCCC_LOOP_CONTEXT_STACK_DEPTH) {
+        error("__builtin_ast_push_loop: loop context stack overflow (max %d)",
+              CCCC_LOOP_CONTEXT_STACK_DEPTH);
+        return;
+    }
+    int d                             = _loop_context_depth++;
+    _loop_context_stack[d]            = loop;
+    _loop_brk_stack[d]                = vm->compiler.brk_label;
+    _loop_cont_stack[d]               = vm->compiler.cont_label;
+    _loop_brk_cleanup_depth_stack[d]  = vm->compiler.brk_cleanup_depth;
+    _loop_cont_cleanup_depth_stack[d] = vm->compiler.cont_cleanup_depth;
+    vm->compiler.brk_label            = loop->brk_label;
+    vm->compiler.cont_label           = loop->cont_label;
+    vm->compiler.brk_cleanup_depth    = vm->compiler.cleanup_scope_depth;
+    vm->compiler.cont_cleanup_depth   = vm->compiler.cleanup_scope_depth;
+}
+
+// Pop the most recently pushed loop context, restoring the outer brk_label/
+// cont_label/brk_cleanup_depth/cont_cleanup_depth.
+void __builtin_ast_pop_loop(void) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm)
+        return;
+    if (_loop_context_depth <= 0) {
+        // Unmatched pop — reset to NULL rather than crashing (matches
+        // __builtin_ast_pop_fn's own fallback).
+        vm->compiler.brk_label  = NULL;
+        vm->compiler.cont_label = NULL;
+        return;
+    }
+    int d                           = --_loop_context_depth;
+    vm->compiler.brk_label          = _loop_brk_stack[d];
+    vm->compiler.cont_label         = _loop_cont_stack[d];
+    vm->compiler.brk_cleanup_depth  = _loop_brk_cleanup_depth_stack[d];
+    vm->compiler.cont_cleanup_depth = _loop_cont_cleanup_depth_stack[d];
+}
+
+// Attach body to loop, expanding a QuoteLazy() fragment (same rule as
+// FunctionSetBody, __builtin_ast_function_set_body above) — used either
+// standalone (body already built elsewhere) or, typically, inside a
+// WithLoop(loop) block so an eager Quote() call constructing body parses
+// against loop's own brk_label/cont_label.
+Node *__builtin_ast_loop_set_body(Node *loop, Node *body) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !loop || !body)
+        return loop;
+
+    if (body->kind == ND_QUOTE_LAZY) {
+        body = cc_quote_expand_lazy(vm, body, /*want_stmt=*/true);
+        if (!body)
+            return loop;
+    }
+    loop->then = body;
+    return loop;
 }
 
 // ============================================================================

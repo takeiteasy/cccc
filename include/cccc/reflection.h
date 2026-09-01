@@ -1103,10 +1103,17 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n);
 
 /*! @brief Create a while loop node.
  * @param cond The loop condition expression.
- * @param body The loop body statement.
+ * @param body The loop body statement, or NULL to attach one later with
+ *             LoopSetBody (typically inside a WithLoop(loop) block).
  * @return A NK_FOR node (CCCC represents while as for with no init/inc),
  *         or NULL on error.
- * @details Convenience wrapper: MakeWhile(cond, body).
+ * @details Convenience wrapper: MakeWhile(cond, body). Assigns the loop's
+ *             own break/continue targets, so a body statement built with
+ *             `break`/`continue` resolves against this loop -- see
+ *             QuoteLazy (a lazily-parsed body materialises inside this
+ *             loop's context automatically) and WithLoop/LoopSetBody (an
+ *             eagerly-parsed Quote() body needs the loop pushed first,
+ *             since a body argument is evaluated before this call runs).
  */
 Node *__builtin_ast_while(Node *cond, Node *body);
 
@@ -1114,19 +1121,57 @@ Node *__builtin_ast_while(Node *cond, Node *body);
  * @param init Initialiser expression/statement (may be NULL).
  * @param cond Loop condition (may be NULL for infinite loop).
  * @param inc Increment expression (may be NULL).
- * @param body Loop body.
+ * @param body Loop body, or NULL to attach one later with LoopSetBody.
  * @return A NK_FOR node, or NULL on error.
- * @details Convenience wrapper: MakeFor(init, cond, inc, body).
+ * @details Convenience wrapper: MakeFor(init, cond, inc, body). See
+ *             MakeWhile for break/continue target details -- note only
+ *             `body` gets loop-context treatment, not init/cond/inc.
  */
 Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body);
 
 /*! @brief Create a do-while loop node.
- * @param body The loop body.
+ * @param body The loop body, or NULL to attach one later with LoopSetBody.
  * @param cond The loop condition (tested after each iteration).
  * @return A NK_DO node, or NULL on error.
- * @details Convenience wrapper: MakeDoWhile(body, cond).
+ * @details Convenience wrapper: MakeDoWhile(body, cond). See MakeWhile for
+ *             break/continue target details.
  */
 Node *__builtin_ast_do_while(Node *body, Node *cond);
+
+// ============================================================================
+// Loop-building context (ticket #1249)
+// ============================================================================
+
+/*! @brief Establish loop as the current loop context, so an eagerly-parsed
+ *           Quote("break;")/Quote("continue;") call made while it is
+ *           active resolves against loop's own break/continue targets.
+ * @param loop A loop node returned by MakeWhile/MakeFor/MakeDoWhile.
+ * @details Call __builtin_ast_pop_loop (or use the WithLoop macro) to
+ *             restore the previous loop context. Needed only for an eager
+ *             Quote() body passed to LoopSetBody -- MakeWhile/MakeFor/
+ *             MakeDoWhile already expand a QuoteLazy() `body` argument
+ *             under the new loop's own context without this.
+ */
+void __builtin_ast_push_loop(Node *loop);
+
+/*! @brief Restore the loop context saved by the most recent push.
+ * @details Inverse of __builtin_ast_push_loop; typically used through the
+ *             @c WithLoop(loop) { ... } block helper, which performs the
+ *             matching pop even on early exit.
+ */
+void __builtin_ast_pop_loop(void);
+
+/*! @brief Attach body to loop (a node from MakeWhile/MakeFor/MakeDoWhile).
+ * @param loop The loop node to attach the body to.
+ * @param body The loop body statement; a QuoteLazy() fragment is expanded
+ *             in loop's own context.
+ * @return loop, for chaining.
+ * @details Convenience wrapper: LoopSetBody(loop, body). Typically called
+ *             inside a @c WithLoop(loop) { ... } block so an eager
+ *             Quote("break;")/Quote("continue;") call building body
+ *             resolves against loop.
+ */
+Node *__builtin_ast_loop_set_body(Node *loop, Node *body);
 
 // ============================================================================
 // Function Generation
@@ -1870,6 +1915,19 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param body The loop body.
  * @param cond The loop condition (tested after each iteration). */
 #define MakeDoWhile(body, cond) __builtin_ast_do_while(body, cond)
+/*! @def LoopSetBody
+ * @brief Attach body to loop (from MakeWhile/MakeFor/MakeDoWhile).
+ * @param loop The loop node to attach the body to.
+ * @param body The loop body statement. */
+#define LoopSetBody(loop, body) __builtin_ast_loop_set_body(loop, body)
+/*! @def WithLoop
+ * @brief Scoped block establishing loop as the current loop context, so an
+ *          eager Quote("break;")/Quote("continue;") call inside the block
+ *          resolves against loop's own break/continue targets.
+ * @param loop A loop node returned by MakeWhile/MakeFor/MakeDoWhile. */
+#define WithLoop(loop)                                                         \
+    for (int _cccc_loop_ctx_ = (__builtin_ast_push_loop((loop)), 1);           \
+         _cccc_loop_ctx_; _cccc_loop_ctx_ = (__builtin_ast_pop_loop(), 0))
 
 /*! @def MakePointer
  * @brief Build a pointer-to-base type.
