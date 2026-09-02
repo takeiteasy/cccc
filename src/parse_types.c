@@ -281,7 +281,19 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
     bool  is_const     = false;
     bool  is_volatile  = false;
 
-    while (is_typename(vm, tok) || equal(tok, "__attribute__") ||
+    // #1267: once a type specifier is already established (counter != 0), the
+    // token being probed here can only be this declaration's own declarator
+    // name -- and if it is a plain identifier, declspec_kw() returns DK_NONE
+    // and that branch's first act is `if (counter) goto declspec_done;`, so
+    // the lookup's result is discarded unconditionally. Suppressing the #894
+    // demand-driven splice in that case cannot change any accepted/rejected
+    // program; it only stops a bare declarator name that happens to be in the
+    // comptime declaration index (e.g. an anonymous `typedef enum { ... }
+    // Name;` in a header reached both `#include @comptime` and via a
+    // #1243-forwarded second input) from re-splicing its whole declaration
+    // and redeclaring its enumerators.
+    while (is_typename_ex(vm, tok, /*allow_splice=*/counter == 0) ||
+           equal(tok, "__attribute__") ||
            (equal(tok, "[") && equal(tok->next, "["))) {
         if (equal(tok, "__attribute__")) {
             tok = attribute_list(vm, tok, NULL, attr);

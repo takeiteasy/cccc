@@ -1006,8 +1006,32 @@ static bool comptime_index_splice(VirtualMachine *vm, HashMap *map,
     decl->state         = CD_IN_PROGRESS;
     Token *materialized = materialize_comptime_range(vm, decl->start, decl->end,
                                                      decl->synth_semi);
-    bool   ok           = cc_parse_splice_range(vm, materialized);
-    decl->state         = ok ? CD_DONE : CD_FAILED;
+
+    // #1267: this splice is speculative -- it fires from a lookup miss, and
+    // that lookup may be discarded whether or not it resolves (e.g. declspec's
+    // continuation probe on a declarator name). cc_parse_splice_range is not
+    // transactional: a failed parse leaves the errors it recorded, which
+    // aborts the whole comptime compile (compile_macro_program's
+    // vm->error_count > saved check), and can leave a half-parsed Obj on
+    // vm->compiler.globals that init_macro_globals / Step-2 gen_function would
+    // then walk (the #1261 hazard). Snapshot both and rewind them on failure,
+    // mirroring splice_missing_macro_fn_bodies. The residual partial scope
+    // registration the caller already tolerates via CD_FAILED stays tolerated.
+    Obj          *globals_before = vm->compiler.globals;
+    int           pre_err_count  = vm->error_count;
+    CompileError *pre_err_tail   = vm->errors_tail;
+
+    bool          ok             = cc_parse_splice_range(vm, materialized);
+    decl->state                  = ok ? CD_DONE : CD_FAILED;
+    if (!ok) {
+        vm->compiler.globals = globals_before;
+        if (pre_err_tail)
+            pre_err_tail->next = NULL;
+        else
+            vm->errors = NULL;
+        vm->errors_tail = pre_err_tail;
+        vm->error_count = pre_err_count;
+    }
     return ok;
 }
 

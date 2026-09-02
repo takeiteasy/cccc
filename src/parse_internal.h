@@ -363,6 +363,7 @@ bool is_end(Token *tok);
 bool is_function(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_typename(VirtualMachine *vm, Token *tok);
+bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice);
 void leave_scope(VirtualMachine *vm);
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
 void mark_addr_escapes(Node *node);

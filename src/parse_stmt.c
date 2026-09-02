@@ -22,8 +22,14 @@
 
 #include "./parse_internal.h"
 
-// Returns true if a given token represents a type.
-bool is_typename(VirtualMachine *vm, Token *tok) {
+// Returns true if a given token represents a type. `allow_splice` gates the
+// #894 demand-driven comptime splice below: a caller that is only probing
+// whether the *next* token continues a type-specifier list (declspec's loop
+// condition, once a specifier is already established) must pass false, so a
+// bare declarator identifier that happens to be registered in the comptime
+// declaration index does not drag its whole declaration in as a side effect
+// of a lookup whose result is about to be discarded (#1267).
+bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice) {
     pthread_once(&typename_map_once, init_typename_map);
 
     if (hashmap_get2(&typename_map, tok->loc, tok->len) ||
@@ -37,7 +43,8 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
     // $Name/$type(Name) reflection operators (primary(), parse_postfix.c)
     // call find_typedef() directly to reach into the *runtime*
     // Obj/Type tables, which must never be redirected through this index.
-    if ((vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
+    if (allow_splice &&
+        (vm->compiler.in_macro_mode || vm->compiler.comptime_splice_active) &&
         tok->kind == TK_IDENT && cc_comptime_resolve_typename(vm, tok) &&
         find_typedef(vm, tok))
         return true;
@@ -49,6 +56,10 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
     // regardless of token kind).
     return tok->kind == TK_KEYWORD &&
            (equal(tok, "bool") || equal(tok, "thread_local"));
+}
+
+bool is_typename(VirtualMachine *vm, Token *tok) {
+    return is_typename_ex(vm, tok, /*allow_splice=*/true);
 }
 
 // asm-stmt = ("asm" | "__asm__" | "__asm") ("volatile" | "inline")* "("
