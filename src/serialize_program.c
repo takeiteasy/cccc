@@ -4470,6 +4470,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         serialize_native_accessor_shims(f, prog);
         serialize_reallocarray_shim(f, prog); // #1155
     }
+    // #1123: the __cccc_biK container(s) + wide-_BitInt runtime, whenever the
+    // program reaches a _BitInt wider than 128 bits. Unlike its neighbours in
+    // this block, not !generated_only-gated -- see the function's own
+    // comment (src/serialize_shims.c). Must run before
+    // serialize_type_defs_for_owner just below: a struct/union definition
+    // may itself have a __cccc_biK member.
+    serialize_wide_bitint_preamble(f, prog);
     serialize_asm_prefix_preamble(f, prog);
 
     // Serialize file-scope type definitions before declarations that reference

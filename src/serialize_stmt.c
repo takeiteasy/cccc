@@ -181,7 +181,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         case ND_IF:
             print_indent_level(f, indent);
             fprintf(f, "if (");
-            serialize_expr(f, vm, ctx, node->cond, 0);
+            // #1123: a wide-_BitInt cond can't appear bare here.
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
+                serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, ")\n");
             serialize_stmt(f, vm, ctx, node->then, indent + 1);
             if (node->els) {
@@ -250,7 +252,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 }
             }
             fprintf(f, "; ");
-            if (node->cond)
+            // #1123: a wide-_BitInt cond can't appear bare here.
+            if (node->cond &&
+                !serialize_wide_bitint_truth(f, vm, ctx, node->cond))
                 serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, "; ");
             if (node->inc)
@@ -281,7 +285,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             }
             print_indent_level(f, indent);
             fprintf(f, "while (");
-            serialize_expr(f, vm, ctx, node->cond, 0);
+            // #1123: a wide-_BitInt cond can't appear bare here.
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
+                serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, ");\n");
             break;
 

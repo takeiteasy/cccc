@@ -41,7 +41,19 @@ OUT_INC = REPO_ROOT / "src" / "shims.inc"
 GROUPS = [
     "native_accessor", "reallocarray", "threads", "uchar",
     "posix_compat", "canonical_const", "dlfcn", "c23_fromfp",
+    "wide_bitint",
 ]
+
+# #1123: most groups' source of truth is the untouched-by-any-compiler
+# src/shims/<group>.c. wide_bitint is the one exception -- its text doubles
+# as the VM's own compiled src/stdlib/wide_bitint.c (see that file's own
+# top-of-file comment), so VM and -c=native/-m/-c=generated agree on
+# multi-word _BitInt arithmetic by construction rather than by two hand-kept-
+# in-sync copies. This maps a group name straight onto that path instead of
+# the default src/shims/<group>.c.
+GROUP_SOURCE_OVERRIDE = {
+    "wide_bitint": REPO_ROOT / "src" / "stdlib" / "wide_bitint.c",
+}
 
 BANNER = """\
 /* GENERATED FILE -- DO NOT EDIT.
@@ -55,8 +67,9 @@ CLOSE_RE = re.compile(r"^//\s*<<<\s*shim\s*$")
 
 
 def parse_group(group):
-    """Return [(section_name, text), ...] for one src/shims/<group>.c."""
-    path = SHIMS_DIR / f"{group}.c"
+    """Return [(section_name, text), ...] for one src/shims/<group>.c
+    (or GROUP_SOURCE_OVERRIDE[group], if the group has one)."""
+    path = GROUP_SOURCE_OVERRIDE.get(group, SHIMS_DIR / f"{group}.c")
     out = []
     cur = None
     body = []

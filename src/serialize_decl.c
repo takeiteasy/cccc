@@ -1201,14 +1201,23 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
                     (unsigned long long)lo);
             return;
         }
-        // size > 16 (bit_width > 128): named error, consistent with
-        // serialize_type()'s own #1123 refusal for this width -- distinct
-        // from the generic fallback below so this doesn't read as an
-        // unrecognized/unknown type (#1128 audit).
-        error("cccc: cannot serialize initializer for global '%s' in native "
-              "mode: _BitInt(%d) exceeds 128 bits, which has no native/-m "
-              "lowering (#1123)",
-              var->name, ty->bit_width);
+        // #1123: size > 16 (bit_width > 128) -- the __cccc_biK container
+        // (serialize_type()'s TY_BITINT case, serialize_wide_bitint_preamble
+        // in serialize_shims.c) is a brace-initialized array of K
+        // little-endian 64-bit words, read straight off the same byte image
+        // every other arm here reads from. No sign handling needed: the
+        // stored bytes are already the two's-complement representation
+        // regardless of signedness, exactly as the size<=8/==16 arms above
+        // read them verbatim.
+        int words = ty->size / 8;
+        fprintf(f, "((__cccc_bi%d){{", words);
+        for (int i = 0; i < words; i++) {
+            uint64_t w;
+            memcpy(&w, var->init_data + offset + i * 8, 8);
+            fprintf(f, "%s0x%llxULL", i ? ", " : "", (unsigned long long)w);
+        }
+        fprintf(f, "}})");
+        return;
     }
 
     // Any kind with no verified byte layout here (TY_COMPLEX has had its own

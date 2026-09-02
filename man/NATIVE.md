@@ -66,8 +66,11 @@ Where a construct has genuine VM-specific semantics with no faithful host
 translation, CCCC emits a diagnosed compile error rather than silently
 divergent C. The main cases:
 
-- `_BitInt(N)` with `N > 128` (the host backends have no multi-word lowering;
-  `N ≤ 128` maps to `__int128`).
+- A bitfield whose *declared type* is itself a `_BitInt` wider than 128 bits
+  (e.g. `_BitInt(256) f : 193;`) -- a bit-field's type has no legal C
+  spelling once it needs the multi-word container below (that container is a
+  `struct`, and `struct T f : 193;` is as illegal as it looks). A plain
+  (non-bitfield) object or value of the same width lowers fine; see below.
 - `__builtin_decimal_to_chars` and `#include <decimal_math.h>`; any decimal
   construct at all in a `CCCC_HAS_DECIMAL=0` build.
 - A VLA declared in a `for`-loop initializer (`for (int i = 0, v[n]; …)`).
@@ -103,6 +106,20 @@ left to be discovered:
 lowers to), which differs from clang's/gcc's own native `_BitInt` alignment on
 x86_64 — so don't assume a cccc-compiled and a clang-compiled `_BitInt(65..128)`
 object share layout on that target. `__int128` itself has no such divergence.
+
+`_BitInt(N)` with `N > 128` lowers to an emitted `struct { unsigned long long
+w[K]; }` container (`K` = `sizeof`/8) plus the same runtime helper functions
+the VM itself uses for every width past 64 bits (`src/stdlib/wide_bitint.c`,
+shared verbatim with the emitted output — see that file's own comment for
+how) — every arithmetic/bitwise/comparison/cast operation lowers to a GNU
+statement expression calling into it. `sizeof`/`_Alignof` match the VM
+exactly (the container is size- and alignment-identical to CCCC's own
+`_BitInt(N>128)` representation, unlike clang's or gcc's own native
+`_BitInt`, which neither accepts this width range on every target this
+project supports nor agrees with CCCC's layout where it does). The one
+residual is the bitfield case above — a bitfield's own declared type still
+has no lowering, since the container is a `struct` and a bit-field's type
+must be a plain integer type.
 
 ## See also
 

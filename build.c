@@ -730,13 +730,16 @@ BuildTarget *reflection_ffi_check(Builder *ctx) {
 // src/std.c) so plain `make` needs no python3; this step keeps it fresh on
 // every default build, shims_check below (wired into the test target)
 // catches staleness for any build that skips it. AddInput declares the real
-// dependency -- every src/shims/*.c plus the generator itself.
+// dependency -- every src/shims/*.c plus the generator itself, plus (#1123)
+// src/stdlib/wide_bitint.c, whose text doubles as the "wide_bitint" group's
+// source via gen_shims.py's GROUP_SOURCE_OVERRIDE.
 [[cccc::build_target]]
 BuildTarget *shims_gen(Builder *ctx) {
     BuildTarget *gen =
         RunCustom(ctx, "shims-gen", "python3 tools/gen_shims.py");
     DeclareOutput(gen, "src/shims.inc");
     AddInput(gen, "tools/gen_shims.py");
+    AddInput(gen, "src/stdlib/wide_bitint.c");
     const char **shims = GlobFiles(ctx, "src/shims/*.c");
     for (int i = 0; shims && shims[i]; i++)
         AddInput(gen, shims[i]);

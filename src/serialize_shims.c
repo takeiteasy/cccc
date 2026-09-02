@@ -1463,3 +1463,244 @@ void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 
     fprintf(f, "\n");
 }
+
+// ---------- #1123: wide _BitInt (N>128) multi-word lowering ----------
+
+// A visited-set of Type pointers, threaded through the scans below. A depth
+// cap alone is not enough to bound this walk: a forward-declared struct
+// graph is routinely both cyclic (a struct pointing to itself/a mutual peer
+// through a member pointer) and branching (many members, each its own
+// nested struct), and a depth-only guard re-explores that graph along every
+// distinct path -- exponential in the branching factor before the cap ever
+// bites. Marking a Type as seen the first time it's reached turns the walk
+// linear in the number of distinct Type nodes and, as a side effect, is a
+// strictly stronger cycle-breaker than the depth cap (kept below anyway, as
+// a second line of defence). Grown on demand; freed by the caller that owns
+// it (serialize_wide_bitint_preamble).
+typedef struct {
+    Type **seen;
+    int    n, cap;
+} WideBitintSeen;
+
+// Returns true iff `ty` was already marked seen (caller should not
+// re-descend into it); otherwise marks it and returns false. Best-effort on
+// allocation failure: falls back to "not seen" rather than crash, so a
+// pathological program at worst reverts to the depth-capped behaviour
+// instead of aborting the compile.
+static bool wide_bitint_seen_mark(WideBitintSeen *seen, Type *ty) {
+    for (int i = 0; i < seen->n; i++)
+        if (seen->seen[i] == ty)
+            return true;
+    if (seen->n == seen->cap) {
+        int    new_cap = seen->cap ? seen->cap * 2 : 256;
+        Type **grown   = realloc(seen->seen, sizeof(Type *) * new_cap);
+        if (!grown)
+            return false;
+        seen->seen = grown;
+        seen->cap  = new_cap;
+    }
+    seen->seen[seen->n++] = ty;
+    return false;
+}
+
+// True iff `ty` is, or (through pointer/array/struct/union/function-type
+// nesting) reaches, a TY_BITINT wider than 128 bits -- the range
+// serialize_type()'s TY_BITINT arm can no longer spell as a host scalar or
+// __int128 and must instead route through an emitted __cccc_biK container.
+static bool type_has_wide_bitint_depth(Type *ty, WideBitintSeen *seen,
+                                       int depth) {
+    if (!ty || depth > 64 || wide_bitint_seen_mark(seen, ty))
+        return false;
+    if (ty->kind == TY_BITINT && ty->size > 16)
+        return true;
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_ARRAY:
+        case TY_VLA:
+            return type_has_wide_bitint_depth(ty->base, seen, depth + 1);
+        case TY_STRUCT:
+        case TY_UNION:
+            for (Member *m = ty->members; m; m = m->next)
+                if (type_has_wide_bitint_depth(m->ty, seen, depth + 1))
+                    return true;
+            return false;
+        case TY_FUNC:
+            if (type_has_wide_bitint_depth(ty->return_ty, seen, depth + 1))
+                return true;
+            for (Type *p = ty->params; p; p = p->next)
+                if (type_has_wide_bitint_depth(p, seen, depth + 1))
+                    return true;
+            return false;
+        default:
+            return false;
+    }
+}
+
+bool type_has_wide_bitint(Type *ty) {
+    WideBitintSeen seen = {0};
+    bool           ret  = type_has_wide_bitint_depth(ty, &seen, 0);
+    free(seen.seen);
+    return ret;
+}
+
+// Every distinct K = ty->size/8 (64-bit word count) a __cccc_biK container is
+// needed for, collected across the whole program. A fixed-size table is fine
+// here: K is bounded by BITINT_MAXWIDTH (65535 bits => K <= 1025), and in
+// practice a TU uses a handful of distinct wide widths at most; if a program
+// somehow exceeds the table it still compiles correctly, just with more
+// __cccc_biK typedefs than strictly distinct K values (a handful of
+// duplicate-K skips lost, never a correctness issue) -- see the bounds check
+// in wide_bitint_note_k below.
+#define WIDE_BITINT_MAX_DISTINCT_K 256
+typedef struct {
+    int  ks[WIDE_BITINT_MAX_DISTINCT_K];
+    int  n;
+    bool any;
+} WideBitintNeed;
+
+static void wide_bitint_note_k(WideBitintNeed *need, int k) {
+    need->any = true;
+    for (int i = 0; i < need->n; i++)
+        if (need->ks[i] == k)
+            return;
+    if (need->n < WIDE_BITINT_MAX_DISTINCT_K)
+        need->ks[need->n++] = k;
+}
+
+static void wide_bitint_scan_type(Type *ty, WideBitintNeed *need,
+                                  WideBitintSeen *seen, int depth) {
+    if (!ty || depth > 64 || wide_bitint_seen_mark(seen, ty))
+        return;
+    if (ty->kind == TY_BITINT && ty->size > 16) {
+        wide_bitint_note_k(need, ty->size / 8);
+        return; // TY_BITINT never nests further
+    }
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_ARRAY:
+        case TY_VLA:
+            wide_bitint_scan_type(ty->base, need, seen, depth + 1);
+            break;
+        case TY_STRUCT:
+        case TY_UNION:
+            for (Member *m = ty->members; m; m = m->next)
+                wide_bitint_scan_type(m->ty, need, seen, depth + 1);
+            break;
+        case TY_FUNC:
+            wide_bitint_scan_type(ty->return_ty, need, seen, depth + 1);
+            for (Type *p = ty->params; p; p = p->next)
+                wide_bitint_scan_type(p, need, seen, depth + 1);
+            break;
+        default:
+            break;
+    }
+}
+
+// Same recursive-field traversal shape as node_scan_f2i_native
+// (serialize_program.c) -- exhaustive over every child-pointing field Node
+// has. Catches a wide-_BitInt type reached only through an expression's own
+// node->ty (a cast target, a temporary, a wb/uwb literal) rather than
+// through any declared Obj/Member type wide_bitint_scan_type above already
+// walks. Unlike Type nodes, Node trees are not deduplicated by identity here
+// (a real AST doesn't share nodes the way a forward-declared type graph
+// shares Type pointers), but every node->ty they visit still funnels through
+// the same `seen` set, so a huge function body costs one seen-set probe per
+// node rather than re-exploring a shared type graph from scratch each time.
+static void wide_bitint_scan_node(Node *node, WideBitintNeed *need,
+                                  WideBitintSeen *seen) {
+    if (!node)
+        return;
+    if (node->ty)
+        wide_bitint_scan_type(node->ty, need, seen, 0);
+    wide_bitint_scan_node(node->lhs, need, seen);
+    wide_bitint_scan_node(node->rhs, need, seen);
+    wide_bitint_scan_node(node->cond, need, seen);
+    wide_bitint_scan_node(node->then, need, seen);
+    wide_bitint_scan_node(node->els, need, seen);
+    wide_bitint_scan_node(node->init, need, seen);
+    wide_bitint_scan_node(node->inc, need, seen);
+    wide_bitint_scan_node(node->body, need, seen);
+    wide_bitint_scan_node(node->args, need, seen);
+    wide_bitint_scan_node(node->next, need, seen);
+}
+
+// Emits, at most once per translation unit and only when actually needed:
+//   - one `typedef struct { unsigned long long w[K]; } __cccc_biK;` per
+//     distinct word count K a wide _BitInt container is used at, and
+//   - the full wide-_BitInt runtime (src/stdlib/wide_bitint.c, extracted
+//     verbatim by tools/gen_shims.py's `wide_bitint` GROUP_SOURCE_OVERRIDE --
+//     see that file's own top comment).
+//
+// Unlike the libc-replacement shims elsewhere in this file, every helper is
+// width-generic (words/width are runtime int arguments, not baked into the
+// function), so there is exactly one copy of the runtime regardless of how
+// many distinct K values the program uses -- only the container typedef
+// needs one instance per K. No fine-grained "which of the ~26 functions does
+// this TU actually call" gate: they're small, always emitted together, and
+// the native/generated build has no -Werror to make an unused one costly
+// (mirrors this file's own `any`-gated whole-block shape, just without the
+// per-function split serialize_c23_fromfp_shims above needs because *those*
+// functions aren't all mutually width-generic call targets of one lowering).
+//
+// Called from the accessor-shim slot in cc_serialize_program
+// (serialize_program.c), before serialize_type_defs_for_owner -- a struct
+// definition may itself contain a __cccc_biK member, so the typedef must
+// already be visible. Deliberately NOT gated on !generated_only: this is
+// language lowering, not a libc-accessor replacement, so -c=generated needs
+// it exactly as -c=native/-m do.
+void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
+    WideBitintNeed need = {0};
+    WideBitintSeen seen = {0};
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        wide_bitint_scan_type(obj->ty, &need, &seen, 0);
+        if (obj->is_function) {
+            for (Obj *v = obj->locals; v; v = v->next)
+                wide_bitint_scan_type(v->ty, &need, &seen, 0);
+            if (obj->body)
+                wide_bitint_scan_node(obj->body, &need, &seen);
+        }
+    }
+    free(seen.seen);
+    if (!need.any)
+        return;
+
+    fprintf(f, "/* #1123: multi-word _BitInt(N>128) containers + runtime */\n");
+    for (int i = 0; i < need.n; i++)
+        fprintf(f,
+                "typedef struct { unsigned long long w[%d]; } __cccc_bi%d;\n",
+                need.ks[i], need.ks[i]);
+    fprintf(f, "\n");
+
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_impl);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_trunc);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_add);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sub);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_mul);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_udivmod_impl);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_udiv);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_umod);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sdivmod_impl);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sdiv);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_smod);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_shl);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_ushr);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sshr);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_cmp);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_i64);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_u64);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_extend);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_to_i64);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_to_double);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_double);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_and);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_or);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_xor);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_not);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_neg);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_nonzero);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_str);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_bitfield_extract);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_bitfield_insert);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_reinterpret);
+    fprintf(f, "\n");
+}

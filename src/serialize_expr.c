@@ -867,6 +867,352 @@ void print_indent_level(FILE *f, int indent) {
         fprintf(f, "    ");
 }
 
+// ---------- #1123: multi-word _BitInt(N>128) expression lowering ----------
+//
+// A _BitInt wider than 128 bits has no host scalar container (serialize_type
+// spells 65..128 as __int128, but nothing exists past that) -- it lowers to
+// an emitted `__cccc_bi<K>` struct (K = size/8 64-bit words,
+// serialize_wide_bitint_preamble, src/serialize_shims.c) and every operation
+// on it routes through src/stdlib/wide_bitint.c's runtime, extracted
+// verbatim into this TU by the same preamble. This section is the
+// expression-level half: it whitelists exactly the node kinds
+// src/codegen_expr.c's own wide-_BitInt arms implement (that switch is the
+// VM's authoritative enumeration -- it hard-errors on anything it doesn't
+// handle, so mirroring it here is provably complete) and prints nothing
+// (returning false) for every other node, so the ordinary switch below is
+// unaffected for the overwhelming majority of expressions.
+
+// True iff `ty` needs the __cccc_biK lowering -- i.e. has no host scalar/
+// __int128 container. size<=16 (bit_width<=128) already round-trips through
+// an ordinary integer or __int128 and every C operator works on it directly;
+// only size>16 needs anything in this section.
+static bool ty_is_super_wide_bitint(Type *ty) {
+    return ty && ty->kind == TY_BITINT && ty->size > 16;
+}
+
+// #1123: wraps a wide-_BitInt-typed `node` with __cccc_bitint_nonzero()
+// wherever C expects a scalar truth value (if/while/for conditions, `!`,
+// `&&`/`||` operands, a `?:` condition) -- a raw __cccc_biK struct value
+// cannot appear directly in any of those. Prints nothing and returns false
+// when `node` isn't wide (the overwhelming common case); callers fall back
+// to their own ordinary serialize_expr() call unchanged.
+bool serialize_wide_bitint_truth(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Node *node) {
+    if (!node || !ty_is_super_wide_bitint(node->ty))
+        return false;
+    int words = node->ty->size / 8;
+    int seq   = ctx->wide_bitint_seq++;
+    fprintf(f, "({ __cccc_bi%d __cccc_bi_t%d = (", words, seq);
+    serialize_expr(f, vm, ctx, node, 0);
+    fprintf(f, "); __cccc_bitint_nonzero(__cccc_bi_t%d.w, %d); })", seq, words);
+    return true;
+}
+
+// The int/narrow-BitInt/__int128 -> wide cast arm and the wide -> same range
+// cast arm both need a source value bridged into a 2-word buffer at a known
+// 128-bit width, since __cccc_bitint_extend (like every helper here) only
+// ever reads a words/width-described buffer, never a scalar. `sign_spell` is
+// "" for an unsigned source (zero-extend to 128 bits) or "unsigned " for a
+// signed one -- wait, backwards: C's own (T) conversion sign/zero-extends
+// per the *source*'s signedness when narrowing is not in play, so casting to
+// `(is_signed ? "" : "unsigned ") __int128` performs the correct 128-bit
+// widening before this function ever runs; see its call sites.
+static void serialize_wide_bitint_int_bridge(FILE *f, VirtualMachine *vm,
+                                             SerializeContext *ctx,
+                                             Node *src_node, bool src_signed,
+                                             int seq) {
+    fprintf(f, "unsigned __int128 __cccc_bi_s%d = (unsigned __int128)(%s)(",
+            seq, src_signed ? "__int128" : "unsigned __int128");
+    serialize_expr(f, vm, ctx, src_node, 0);
+    fprintf(f,
+            "); unsigned long long __cccc_bi_sw%d[2] = { "
+            "(unsigned long long)__cccc_bi_s%d, "
+            "(unsigned long long)(__cccc_bi_s%d >> 64) };",
+            seq, seq, seq);
+}
+
+// #1123: the ND_CAST arm of the whitelist below. Handles all four
+// direction combinations a cast can take across the size>16 boundary; every
+// other cast (both sides <=128 bits, or neither side TY_BITINT at all) never
+// reaches here -- see serialize_wide_bitint_expr's own gate.
+static bool serialize_wide_bitint_cast(FILE *f, VirtualMachine *vm,
+                                       SerializeContext *ctx, Node *node,
+                                       int seq) {
+    Type *dst      = node->ty;
+    Type *src      = node->lhs->ty;
+    bool  dst_wide = ty_is_super_wide_bitint(dst);
+    bool  src_wide = ty_is_super_wide_bitint(src);
+
+    if (src_wide && dst_wide) {
+        // wide -> wide: a direct multi-word extend/truncate, no bridging.
+        int words_src = src->size / 8, words_dst = dst->size / 8;
+        fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words_src, seq);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f,
+                "); __cccc_bi%d __cccc_bi_r%d; __cccc_bitint_extend("
+                "__cccc_bi_r%d.w, __cccc_bi_a%d.w, %d, %d, %d, %d, %d); "
+                "__cccc_bi_r%d; })",
+                words_dst, seq, seq, seq, words_src, src->bit_width, words_dst,
+                dst->bit_width, !src->is_unsigned ? 1 : 0, seq);
+        return true;
+    }
+
+    if (dst_wide) {
+        int words = dst->size / 8;
+        if (is_flonum(src)) {
+            // float/double/long double -> wide: bounce through a raw bit
+            // pattern (matches __cccc_bitint_from_double/to_double's own
+            // long-long-not-double interface, chosen so this file's
+            // interface doesn't need to change to add wide-_BitInt support,
+            // #457 -- see src/stdlib/wide_bitint.c's own comment).
+            fprintf(f,
+                    "({ __cccc_bi%d __cccc_bi_r%d; __cccc_bitint_from_double("
+                    "__cccc_bi_r%d.w, __cccc_double_to_bits((double)(",
+                    words, seq, seq);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, ")), %d, %d, %d); __cccc_bi_r%d; })", words,
+                    dst->bit_width, !dst->is_unsigned ? 1 : 0, seq);
+            return true;
+        }
+        // int/narrow-BitInt/__int128 -> wide: bridge to 2 words at 128 bits
+        // (sign/zero-extended per src's own signedness by the ordinary C
+        // cast in the bridge), then extend to the real destination width.
+        fprintf(f, "({ ");
+        serialize_wide_bitint_int_bridge(f, vm, ctx, node->lhs,
+                                         !src->is_unsigned, seq);
+        fprintf(f,
+                " __cccc_bi%d __cccc_bi_r%d; __cccc_bitint_extend("
+                "__cccc_bi_r%d.w, __cccc_bi_sw%d, 2, 128, %d, %d, %d); "
+                "__cccc_bi_r%d; })",
+                words, seq, seq, seq, words, dst->bit_width,
+                !src->is_unsigned ? 1 : 0, seq);
+        return true;
+    }
+
+    // src_wide, !dst_wide: wide -> int/float/_Bool/__int128-or-narrower.
+    int words = src->size / 8;
+    if (dst->kind == TY_BOOL) {
+        fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f, "); __cccc_bitint_nonzero(__cccc_bi_a%d.w, %d); })", seq,
+                words);
+        return true;
+    }
+    if (is_flonum(dst)) {
+        fprintf(f, "((");
+        serialize_type(f, ctx, dst);
+        fprintf(f, ")({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+        serialize_expr(f, vm, ctx, node->lhs, 0);
+        fprintf(f,
+                "); __cccc_bits_to_double(__cccc_bitint_to_double("
+                "__cccc_bi_a%d.w, %d, %d, %d)); }))",
+                seq, words, src->bit_width, !src->is_unsigned ? 1 : 0);
+        return true;
+    }
+    // Any other destination (int/narrow-BitInt/__int128/pointer): extend
+    // the source down to its own low 2 words (128 bits) -- correct for any
+    // dst width, since a narrowing conversion only ever keeps the low bits
+    // and a plain C (T) cast on the reassembled 128-bit value truncates the
+    // rest exactly like an ordinary narrowing conversion would. The dst-side
+    // #1124 mask wrapper (serialize_expr(), bitint_needs_mask/
+    // bitint_op_needs_mask -- ND_CAST is in that set) still runs around this
+    // whole call for a dst bit_width that isn't a multiple of 8, since that
+    // logic lives in the public serialize_expr() entry point, not here.
+    fprintf(f, "((");
+    serialize_type(f, ctx, dst);
+    fprintf(f, ")({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+    serialize_expr(f, vm, ctx, node->lhs, 0);
+    fprintf(f,
+            "); unsigned long long __cccc_bi_e%d[2]; __cccc_bitint_extend("
+            "__cccc_bi_e%d, __cccc_bi_a%d.w, %d, %d, 2, 128, %d); "
+            "((unsigned __int128)__cccc_bi_e%d[1] << 64) | __cccc_bi_e%d[0]; "
+            "}))",
+            seq, seq, seq, words, src->bit_width, !src->is_unsigned ? 1 : 0,
+            seq, seq);
+    return true;
+}
+
+// #1123: the value-producing whitelist itself. Mirrors src/codegen_expr.c's
+// own wide-_BitInt arms one-for-one; see that file's ND_* switch (codegen_
+// expr.c:1162 hard-errors on anything not implemented there, making this
+// whitelist provably exhaustive). Prints nothing and returns false when
+// `node` doesn't touch a size>16 _BitInt at all -- serialize_expr_raw falls
+// through to its ordinary switch unchanged.
+//
+// Every arm stages its operand(s) into a __cccc_biK temporary via a GNU
+// statement expression rather than taking their address in place --
+// mandatory, not stylistic: an array member (`.w`) of a struct *rvalue*
+// (the result of a nested lowering, a function call, ...) does not decay to
+// a usable pointer the way an lvalue's does. A nested wide-_BitInt
+// sub-expression needs no special handling: the plain serialize_expr() calls
+// below re-enter serialize_expr_raw for that sub-node, which re-enters this
+// same dispatcher.
+static bool serialize_wide_bitint_expr(FILE *f, VirtualMachine *vm,
+                                       SerializeContext *ctx, Node *node) {
+    Type *ty           = node->ty;
+    bool  result_wide  = ty_is_super_wide_bitint(ty);
+    Type *operand_ty   = node->lhs ? node->lhs->ty : NULL;
+    bool  operand_wide = ty_is_super_wide_bitint(operand_ty);
+
+    switch (node->kind) {
+        case ND_NUM:
+            if (!result_wide || !node->wide_digits)
+                return false;
+            break;
+        case ND_NEG:
+        case ND_BITNOT:
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+            if (!operand_wide)
+                return false;
+            break;
+        case ND_SHL:
+        case ND_SHR:
+            if (!result_wide)
+                return false;
+            break;
+        case ND_CAST:
+            if (!operand_wide && !result_wide)
+                return false;
+            break;
+        default:
+            return false;
+    }
+
+    int seq = ctx->wide_bitint_seq++;
+
+    switch (node->kind) {
+        case ND_NUM: {
+            int words = ty->size / 8;
+            fprintf(f,
+                    "({ __cccc_bi%d __cccc_bi_r%d; __cccc_bitint_from_str("
+                    "__cccc_bi_r%d.w, \"%s\", %d, %d, %d); __cccc_bi_r%d; })",
+                    words, seq, seq, node->wide_digits, node->wide_base, words,
+                    ty->bit_width, seq);
+            return true;
+        }
+        case ND_NEG:
+        case ND_BITNOT: {
+            int         words  = operand_ty->size / 8;
+            const char *helper = node->kind == ND_NEG ? "__cccc_bitint_neg"
+                                                      : "__cccc_bitint_not";
+            fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f,
+                    "), __cccc_bi_r%d; %s(__cccc_bi_r%d.w, __cccc_bi_a%d.w, "
+                    "%d, %d); __cccc_bi_r%d; })",
+                    seq, helper, seq, seq, words, operand_ty->bit_width, seq);
+            return true;
+        }
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_DIV:
+        case ND_MOD: {
+            int         words   = operand_ty->size / 8;
+            bool        signedv = !operand_ty->is_unsigned;
+            const char *helper  = NULL;
+            switch (node->kind) {
+                case ND_ADD:
+                    helper = "__cccc_bitint_add";
+                    break;
+                case ND_SUB:
+                    helper = "__cccc_bitint_sub";
+                    break;
+                case ND_MUL:
+                    helper = "__cccc_bitint_mul";
+                    break;
+                case ND_BITAND:
+                    helper = "__cccc_bitint_and";
+                    break;
+                case ND_BITOR:
+                    helper = "__cccc_bitint_or";
+                    break;
+                case ND_BITXOR:
+                    helper = "__cccc_bitint_xor";
+                    break;
+                case ND_DIV:
+                    helper =
+                        signedv ? "__cccc_bitint_sdiv" : "__cccc_bitint_udiv";
+                    break;
+                case ND_MOD:
+                    helper =
+                        signedv ? "__cccc_bitint_smod" : "__cccc_bitint_umod";
+                    break;
+                default:
+                    break;
+            }
+            fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "), __cccc_bi_b%d = (", seq);
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f,
+                    "), __cccc_bi_r%d; %s(__cccc_bi_r%d.w, __cccc_bi_a%d.w, "
+                    "__cccc_bi_b%d.w, %d, %d); __cccc_bi_r%d; })",
+                    seq, helper, seq, seq, seq, words, operand_ty->bit_width,
+                    seq);
+            return true;
+        }
+        case ND_SHL:
+        case ND_SHR: {
+            int         words   = ty->size / 8;
+            bool        signedv = !ty->is_unsigned;
+            const char *helper =
+                node->kind == ND_SHL
+                    ? "__cccc_bitint_shl"
+                    : (signedv ? "__cccc_bitint_sshr" : "__cccc_bitint_ushr");
+            fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f,
+                    "), __cccc_bi_r%d; %s(__cccc_bi_r%d.w, __cccc_bi_a%d.w, "
+                    "(long long)(",
+                    seq, helper, seq, seq);
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f, "), %d, %d); __cccc_bi_r%d; })", words, ty->bit_width,
+                    seq);
+            return true;
+        }
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE: {
+            int         words   = operand_ty->size / 8;
+            bool        signedv = !operand_ty->is_unsigned;
+            const char *cmpop   = node->kind == ND_EQ   ? "=="
+                                  : node->kind == ND_NE ? "!="
+                                  : node->kind == ND_LT ? "<"
+                                                        : "<=";
+            fprintf(f, "({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "), __cccc_bi_b%d = (", seq);
+            serialize_expr(f, vm, ctx, node->rhs, 0);
+            fprintf(f,
+                    "); __cccc_bitint_cmp(__cccc_bi_a%d.w, __cccc_bi_b%d.w, "
+                    "%d, %d, %d) %s 0; })",
+                    seq, seq, words, operand_ty->bit_width, signedv ? 1 : 0,
+                    cmpop);
+            return true;
+        }
+        case ND_CAST:
+            return serialize_wide_bitint_cast(f, vm, ctx, node, seq);
+        default:
+            return false;
+    }
+}
+
 // Serialize an expression
 static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Node *node,
@@ -927,6 +1273,37 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 break;
         }
     }
+
+    // #1123: multi-word _BitInt(N>128) lowering. `!x`/`x && y`/`x || y` need
+    // their own hook here (not serialize_wide_bitint_expr's whitelist below):
+    // the result is always a plain int, so there's no single "does this node
+    // touch a wide type" test that works for a binary op whose two operands
+    // can be wide independently of one another. A statement expression is
+    // always a primary expression (highest precedence), so none of these
+    // three need node_prec/need_parens below.
+    if (node->kind == ND_NOT && node->lhs &&
+        ty_is_super_wide_bitint(node->lhs->ty)) {
+        fprintf(f, "(!");
+        serialize_wide_bitint_truth(f, vm, ctx, node->lhs);
+        fprintf(f, ")");
+        return;
+    }
+    if ((node->kind == ND_LOGAND || node->kind == ND_LOGOR) &&
+        ((node->lhs && ty_is_super_wide_bitint(node->lhs->ty)) ||
+         (node->rhs && ty_is_super_wide_bitint(node->rhs->ty)))) {
+        fprintf(f, "(");
+        if (!serialize_wide_bitint_truth(f, vm, ctx, node->lhs))
+            serialize_expr(f, vm, ctx, node->lhs, 4);
+        fprintf(f, " %s ", node->kind == ND_LOGAND ? "&&" : "||");
+        if (!serialize_wide_bitint_truth(f, vm, ctx, node->rhs))
+            serialize_expr(f, vm, ctx, node->rhs, 4);
+        fprintf(f, ")");
+        return;
+    }
+    // The value-producing whitelist (arithmetic/bitwise/compare/cast/wb
+    // literal) -- see serialize_wide_bitint_expr's own comment.
+    if (serialize_wide_bitint_expr(f, vm, ctx, node))
+        return;
 
     int  node_prec   = get_precedence(node->kind);
     bool need_parens = (node_prec < parent_prec);
@@ -1619,7 +1996,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, ")__cccc_vsel_f)); })");
                 break;
             }
-            serialize_expr(f, vm, ctx, node->cond, 0);
+            // #1123: a wide-_BitInt cond can't appear bare in `?:` -- see
+            // serialize_wide_bitint_truth's own comment.
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
+                serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, " ? ");
             serialize_expr(f, vm, ctx, node->then, 0);
             fprintf(f, " : ");

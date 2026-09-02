@@ -696,18 +696,22 @@ static bool type_has_printable_name(SerializeContext *ctx, Type *ty);
 // + type_has_printable_name()), not a broader "collect it just in case"
 // test. Collecting unconditionally regressed test_suite_structs.c's own
 // `_Static_assert(sizeof(struct tc_bi1135_wide) == 32, ...)`: that struct
-// has a `_BitInt(129)` member with no native/-m lowering at all
-// (serialize_type.c's own TY_BITINT case hard-errors on it) -- it compiled
-// fine before #1167 because the struct was never collected (the assert
-// stays folded; type_layout_is_host_owned() is false for a plain
-// non-from_include struct) and so its body was never emitted. Collecting
-// it anyway, only to have serialize_layout_const() decline to re-
-// materialize the operator for the exact same reason, forced that
-// otherwise-never-emitted body into the output and hit the hard error. A
+// has a `_BitInt(129)` member, which back when serialize_type.c's TY_BITINT
+// case still hard-errored on N>128 (before #1123's __cccc_biK lowering) blew
+// up here even though it compiled fine pre-#1167 -- the struct was never
+// collected (the assert stays folded; type_layout_is_host_owned() is false
+// for a plain non-from_include struct), so its body was never emitted.
+// Collecting it anyway, only to have serialize_layout_const() decline to
+// re-materialize the operator for the exact same reason, forced that
+// otherwise-never-emitted body into the output and hit the hard error. #1123
+// removed that hard error (a wide-_BitInt member now prints its __cccc_biK
+// container like any other member type), so this is no longer a correctness
+// hazard -- kept as-is regardless, since the gate this function applies
+// (type_layout_is_host_owned() + type_has_printable_name()) is still the
+// correct, narrower test for whether re-materialization is even possible: a
 // type ctx->defs contains gets its FULL body printed by
-// serialize_type_defs_for_owner() (unless from_include-suppressed) -- this
-// is a much stronger action than "available for re-materialization", so
-// collection must apply the identical gate emission does, not a superset.
+// serialize_type_defs_for_owner() (unless from_include-suppressed), a much
+// stronger action than "available for re-materialization".
 static bool layout_type_needs_collecting(SerializeContext *ctx, Type *ty) {
     return ty && type_layout_is_host_owned(ctx, ty, 0) &&
            type_has_printable_name(ctx, ty);
@@ -1515,6 +1519,43 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         // Re-emit it the same way, as a trailing GNU attribute after the
         // width instead of a declspec prefix.
         if (m->is_bitfield) {
+            // #1123: a bitfield whose *declared* type is a wide (>128-bit)
+            // _BitInt has no legal C spelling at all -- a bit-field's type
+            // must be an integer type, and the __cccc_biK container
+            // serialize_type() now emits for a bare wide _BitInt object is a
+            // struct, so `__cccc_bi4 f : 193;` is exactly as illegal as
+            // `struct S f : 193;` would be (confirmed: gcc/clang both reject
+            // it, "bit-field 'f' has invalid type"). #1123's own value-level
+            // lowering (a statement-expression per operation, an emitted
+            // __cccc_biK container) does not by itself cover this -- it
+            // would need every member access on the *whole enclosing
+            // aggregate* rewritten to opaque byte storage (m->offset-based
+            // extract/insert for every member, not just this one), a
+            // separate, larger piece of work than the value-level case this
+            // ticket closes. Refuse loudly here rather than let this fall
+            // through to the __cccc_biK spelling above, which a host
+            // compiler rejects with a confusing diagnostic that doesn't
+            // name CCCC or this member at all.
+            //
+            // Plain error(), not error_tok(ctx->vm, m->tok, ...): m->tok
+            // does exist here, but routing through error_tok crashed
+            // (SIGSEGV) reached from an ND_ASSIGN into this exact member --
+            // this file's aggregate-body printing is apparently not a safe
+            // place to re-enter error_tok's longjmp path. serialize_decl.c's
+            // own bitfield-initializer refusal (the sibling #1123 note this
+            // mirrors, "bitfield wider than 128 bits") uses plain error()
+            // too. Neither goes through the batched cc_print_all_errors()
+            // summary path this way, so the trailer below is appended by
+            // hand to match the "N error(s) generated." phrasing the test
+            // harness's compile-error heuristic (tools/testing/runner.py)
+            // already scans for -- same reason serialize_type()'s own
+            // TY_BITINT case (just above) needed one.
+            if (m->ty && m->ty->kind == TY_BITINT && m->ty->size > 16)
+                error("cccc: cannot serialize a bitfield whose declared "
+                      "type is _BitInt(%d) in native mode: no bitfield wider "
+                      "than 128 bits has a native/-m lowering yet\n\n1 error "
+                      "generated.",
+                      m->ty->bit_width);
             serialize_type_decl(f, ctx, m->ty, name);
             fprintf(f, " : %d", m->bit_width);
             if (m->explicit_align > 1)
@@ -1851,22 +1892,20 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             else if (ty->size == 16)
                 fprintf(f, ty->is_unsigned ? "unsigned __int128" : "__int128");
             else
-                // #1121: no multi-word lowering exists for _BitInt(N>128) in
-                // the native/-m serializer (only the VM's address-based
-                // wide_bitint.c path handles it) -- refuse loudly per the
-                // no-lossy-emulation policy (#824) rather than silently
-                // truncating to a container that cannot hold the value.
-                // Implementing a real lowering is deferred to #1123. No
-                // Token is available at a bare type-emission site (unlike
-                // error_tok's usual call sites), so this can't go through
-                // the batched cc_print_all_errors() summary path -- the
-                // trailer is appended by hand to match the "N error(s)
-                // generated." phrasing the test harness's compile-error
-                // heuristic (tools/testing/runner.py) already scans for.
-                error("cccc: _BitInt(%d) exceeds 128 bits, which has no "
-                      "native/-m lowering (VM only)\n\n1 "
-                      "error generated.",
-                      ty->bit_width);
+                // #1123: multi-word lowering. ty->size is always a multiple
+                // of 8 above 16 bytes (bitint_type(), src/type.c), so
+                // ty->size/8 names one of the __cccc_biK containers
+                // serialize_wide_bitint_preamble() has already emitted into
+                // this TU's preamble (serialize_program.c) -- signedness
+                // makes no difference to the container's own spelling, only
+                // to which runtime helper a use of this type calls
+                // (serialize_expr.c). #1121 previously hard-errored here
+                // ("exceeds 128 bits, which has no native/-m lowering"); see
+                // man/NATIVE.md for the divergence from clang's/gcc's own
+                // native _BitInt(N>128), which is unsupported at all widths
+                // this large by clang and layout-incompatible (align 16 vs
+                // this project's align 8, #1135) even where gcc accepts it.
+                fprintf(f, "__cccc_bi%d", ty->size / 8);
             break;
         case TY_BLOCK:
             // #965: on the default (non `-fblocks`) lowering path a block value

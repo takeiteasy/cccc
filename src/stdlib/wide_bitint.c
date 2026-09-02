@@ -4,7 +4,21 @@
 // "words" is the number of 64-bit words (ceil(N/64), max 1025).
 // After arithmetic ops, __cccc_bitint_trunc must be called on the result to
 // enforce the exact bit width (mask the top word).
+//
+// #1123: this file is compiled into the VM *and* is the source of truth
+// tools/gen_shims.py extracts into src/shims.inc (a `wide_bitint` GROUPS
+// entry with a path override onto this file, rather than a separate
+// src/shims/wide_bitint.c transcription) -- VM and `-c=native`/`-m`/
+// `-c=generated` agree on wide-_BitInt arithmetic by construction instead of
+// by hand-kept-in-sync duplication. The `// >>> shim: <name>` / `// <<< shim`
+// markers below select exactly the text that becomes each
+// `CCCC_SHIM_wide_bitint_<name>[]` constant; `#include "../cccc.h"` and
+// `register_wide_bitint_functions` stay outside any marked region (VM-only).
+// See CLAUDE.md for the one-line exception this carves out of "src/shims/*.c
+// is never compiled".
 #include "../cccc.h"
+
+// >>> shim: impl
 #include <stdint.h>
 #include <string.h>
 
@@ -29,16 +43,20 @@ static void sign_extend_top(uint64_t *a, int words, int width) {
         a[words - 1] &= (sign_bit << 1) - 1;
     }
 }
+// <<< shim
 
 // ---------- truncation ----------
 
+// >>> shim: trunc
 // Mask dst to exactly width bits (zero-fill bits above bit_width-1).
 void __cccc_bitint_trunc(uint64_t *dst, int words, int width) {
     dst[words - 1] &= top_word_mask(width);
 }
+// <<< shim
 
 // ---------- arithmetic ----------
 
+// >>> shim: add
 void __cccc_bitint_add(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
     uint64_t carry = 0;
@@ -49,7 +67,9 @@ void __cccc_bitint_add(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     }
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: sub
 void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
     uint64_t borrow = 0;
@@ -60,7 +80,9 @@ void __cccc_bitint_sub(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     }
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: mul
 void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
     uint64_t tmp[words];
@@ -76,9 +98,11 @@ void __cccc_bitint_mul(uint64_t *dst, const uint64_t *a, const uint64_t *b,
     memcpy(dst, tmp, (size_t)words * 8);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- unsigned division (Knuth Algorithm D, simplified) ----------
 
+// >>> shim: udivmod_impl
 // Divide two-word (128-bit) numerator [hi:lo] by a 64-bit denominator d.
 // Returns quotient; *rem receives the remainder.
 static uint64_t div128_by_64(uint64_t lo, uint64_t hi, uint64_t d,
@@ -205,23 +229,29 @@ static void udivmod(uint64_t *dst_q, uint64_t *dst_r, const uint64_t *a,
         }
     }
 }
+// <<< shim
 
+// >>> shim: udiv
 void __cccc_bitint_udiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
     uint64_t r[words];
     udivmod(dst, r, a, b, words);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: umod
 void __cccc_bitint_umod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
     uint64_t q[words];
     udivmod(q, dst, a, b, words);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- signed division/modulo ----------
 
+// >>> shim: sdivmod_impl
 // Two's-complement negate a multi-word integer in place.
 static void negate(uint64_t *a, int words) {
     uint64_t carry = 1;
@@ -237,7 +267,9 @@ static int is_negative(const uint64_t *a, int words, int width) {
     int top_bit = (width & 63) ? (width & 63) - 1 : 63;
     return (a[words - 1] >> top_bit) & 1;
 }
+// <<< shim
 
+// >>> shim: sdiv
 void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
     uint64_t ua[words], ub[words];
@@ -258,7 +290,9 @@ void __cccc_bitint_sdiv(uint64_t *dst, const uint64_t *a, const uint64_t *b,
         negate(dst, words);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: smod
 void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                         int words, int width) {
     uint64_t ua[words], ub[words];
@@ -278,9 +312,11 @@ void __cccc_bitint_smod(uint64_t *dst, const uint64_t *a, const uint64_t *b,
         negate(dst, words); // remainder has sign of dividend
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- shifts ----------
 
+// >>> shim: shl
 void __cccc_bitint_shl(uint64_t *dst, const uint64_t *a, long long shift,
                        int words, int width) {
     memset(dst, 0, (size_t)words * 8);
@@ -296,7 +332,9 @@ void __cccc_bitint_shl(uint64_t *dst, const uint64_t *a, long long shift,
     }
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: ushr
 // Logical (unsigned) right shift.
 void __cccc_bitint_ushr(uint64_t *dst, const uint64_t *a, long long shift,
                         int words, int width) {
@@ -312,7 +350,9 @@ void __cccc_bitint_ushr(uint64_t *dst, const uint64_t *a, long long shift,
             dst[i] |= a[i + word_sh + 1] << (64 - bit_sh);
     }
 }
+// <<< shim
 
+// >>> shim: sshr
 // Arithmetic (signed) right shift.
 void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a, long long shift,
                         int words, int width) {
@@ -336,9 +376,11 @@ void __cccc_bitint_sshr(uint64_t *dst, const uint64_t *a, long long shift,
     }
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- comparison ----------
 
+// >>> shim: cmp
 // Returns -1, 0, or 1.  is_signed controls whether to treat values as signed.
 long long __cccc_bitint_cmp(const uint64_t *a, const uint64_t *b, int words,
                             int width, int is_signed) {
@@ -374,9 +416,11 @@ long long __cccc_bitint_cmp(const uint64_t *a, const uint64_t *b, int words,
     }
     return 0;
 }
+// <<< shim
 
 // ---------- conversions ----------
 
+// >>> shim: from_i64
 // Convert int64 → wide _BitInt (sign-extend or zero-extend).
 void __cccc_bitint_from_i64(uint64_t *dst, long long val, int words,
                             int width) {
@@ -386,7 +430,9 @@ void __cccc_bitint_from_i64(uint64_t *dst, long long val, int words,
         dst[i] = fill;
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: from_u64
 // Convert uint64 → wide _BitInt (zero-extend).
 void __cccc_bitint_from_u64(uint64_t *dst, unsigned long long val, int words,
                             int width) {
@@ -395,7 +441,9 @@ void __cccc_bitint_from_u64(uint64_t *dst, unsigned long long val, int words,
         dst[i] = 0;
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: extend
 // Convert wide _BitInt(width_src) → wide _BitInt(width_dst), sign- or
 // zero-extending (per is_signed_src) when growing, truncating when shrinking.
 void __cccc_bitint_extend(uint64_t *dst, const uint64_t *src, int words_src,
@@ -415,7 +463,9 @@ void __cccc_bitint_extend(uint64_t *dst, const uint64_t *src, int words_src,
     }
     __cccc_bitint_trunc(dst, words_dst, width_dst);
 }
+// <<< shim
 
+// >>> shim: to_i64
 // Convert wide _BitInt → int64 (truncate).
 long long __cccc_bitint_to_i64(const uint64_t *a, int words, int width,
                                int is_signed) {
@@ -424,7 +474,9 @@ long long __cccc_bitint_to_i64(const uint64_t *a, int words, int width,
     (void)is_signed;
     return (long long)a[0];
 }
+// <<< shim
 
+// >>> shim: to_double
 // Convert wide _BitInt → double, returned as raw IEEE-754 bit-pattern (long
 // long).
 long long __cccc_bitint_to_double(const uint64_t *a, int words, int width,
@@ -468,7 +520,9 @@ long long __cccc_bitint_to_double(const uint64_t *a, int words, int width,
     memcpy(&bits, &d, sizeof(bits));
     return bits;
 }
+// <<< shim
 
+// >>> shim: from_double
 // Convert double → wide _BitInt.  val_bits is the raw IEEE-754 bit pattern
 // passed as int64 (avoids float calling-convention complexity in the VM).
 void __cccc_bitint_from_double(uint64_t *dst, long long val_bits, int words,
@@ -507,42 +561,54 @@ void __cccc_bitint_from_double(uint64_t *dst, long long val_bits, int words,
         negate(dst, words);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- bitwise ops ----------
 
+// >>> shim: and
 void __cccc_bitint_and(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
     for (int i = 0; i < words; i++)
         dst[i] = a[i] & b[i];
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: or
 void __cccc_bitint_or(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                       int words, int width) {
     for (int i = 0; i < words; i++)
         dst[i] = a[i] | b[i];
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: xor
 void __cccc_bitint_xor(uint64_t *dst, const uint64_t *a, const uint64_t *b,
                        int words, int width) {
     for (int i = 0; i < words; i++)
         dst[i] = a[i] ^ b[i];
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: not
 void __cccc_bitint_not(uint64_t *dst, const uint64_t *a, int words, int width) {
     for (int i = 0; i < words; i++)
         dst[i] = ~a[i];
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: neg
 void __cccc_bitint_neg(uint64_t *dst, const uint64_t *a, int words, int width) {
     memcpy(dst, a, (size_t)words * 8);
     negate(dst, words);
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
+// >>> shim: nonzero
 // Truth test: 1 if any word is non-zero, else 0. Used for boolean contexts
 // (if/while/for conditions, !, &&, ||, casts to _Bool), where the value is
 // kept in canonical (truncated) form so an OR over the words is sufficient.
@@ -552,7 +618,9 @@ int __cccc_bitint_nonzero(const uint64_t *a, int words) {
         acc |= a[i];
     return acc != 0;
 }
+// <<< shim
 
+// >>> shim: from_str
 // Convert base-10/16/2/8 string → wide _BitInt (for wb literals > 64 bits).
 // str points to the digit string (no prefix), base is 2/8/10/16.
 void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
@@ -583,6 +651,7 @@ void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
     }
     __cccc_bitint_trunc(dst, words, width);
 }
+// <<< shim
 
 // ---------- bitfield access (#1125) ----------
 //
@@ -603,6 +672,7 @@ void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
 // type's* word count (e.g. 4 for _BitInt(256)), which may exceed
 // ceil(width/64) -- the field's own bit_width may be narrower than its
 // declared type, same as any other bitfield.
+// >>> shim: bitfield_extract
 void __cccc_bitfield_extract(uint64_t *dst, const unsigned char *base,
                              long long bit_off, int width, int words,
                              int is_signed) {
@@ -637,11 +707,13 @@ void __cccc_bitfield_extract(uint64_t *dst, const unsigned char *base,
             dst[i] = fill;
     }
 }
+// <<< shim
 
 // Write the low `width` bits of `src` into the bitfield at bit `bit_off`
 // (relative to `base`), leaving every other bit in the spanned bytes intact
 // (the RMW proper -- surrounding bitfields packed into the same bytes must
 // survive).
+// >>> shim: bitfield_insert
 void __cccc_bitfield_insert(unsigned char *base, const uint64_t *src,
                             long long bit_off, int width) {
     long long byte_idx  = bit_off / 8;
@@ -669,6 +741,32 @@ void __cccc_bitfield_insert(unsigned char *base, const uint64_t *src,
         byte_idx++;
     }
 }
+// <<< shim
+
+// ---------- raw bit-pattern reinterpretation ----------
+//
+// __cccc_bitint_to_double/_from_double (above) exchange a `double` with the
+// VM by smuggling it through a `long long` bit pattern rather than a real
+// `double` parameter (the VM's own calling convention keeps float and
+// integer registers separate; matching that shape here means this file's
+// interface didn't have to change to add wide-_BitInt support, see #457).
+// The emitted `-c=native`/`-m`/`-c=generated` lowering (#1123) needs the same
+// bit-pattern exchange at its call sites but has no VM register file to
+// reason about, so these two are serializer-only: never called from VM
+// codegen (src/codegen_expr.c) and never registered as an FFI cfunc below.
+// >>> shim: reinterpret
+double __cccc_bits_to_double(long long bits) {
+    double d;
+    memcpy(&d, &bits, sizeof(d));
+    return d;
+}
+
+long long __cccc_double_to_bits(double d) {
+    long long bits;
+    memcpy(&bits, &d, sizeof(bits));
+    return bits;
+}
+// <<< shim
 
 // ---------- registration ----------
 

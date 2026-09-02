@@ -253,6 +253,12 @@ typedef struct {
     // to decide whether to emit the guarded #error preamble; see that
     // function's own comment for why gcc must not be affected.
     bool saw_decimal;
+    // #1123: bumped once per wide-_BitInt (N>128) statement-expression
+    // lowering emitted (serialize_expr.c) so nested/repeated occurrences in
+    // one TU each get their own __cccc_bi_<n> temporaries instead of
+    // shadowing -- same reasoning as va_fwd_seq above, and for the same
+    // reason (these constructs nest: e.g. a masked cast of a binop result).
+    int wide_bitint_seq;
 } SerializeContext;
 
 typedef struct {
@@ -344,6 +350,28 @@ void serialize_reallocarray_shim(FILE *f, Obj *prog);
 void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm,
                                 Obj *prog); // #1195
+// #1123: emits the __cccc_biK container typedef(s) and the wide-_BitInt
+// (N>128) runtime helper functions whenever any are reachable from `prog` --
+// see the function's own comment (src/serialize_shims.c) for the collection
+// pass. Unlike its neighbours above, deliberately NOT !generated_only-gated:
+// this is a language lowering (needed for -c=generated too), not a libc
+// replacement tied to the replayed #include pass.
+void serialize_wide_bitint_preamble(FILE *f, Obj *prog);
+// Returns true iff `ty` is (or contains, through pointer/array/struct/union/
+// function nesting) a TY_BITINT wider than 128 bits -- i.e. one with no
+// direct host container, requiring the __cccc_biK lowering above. Shared by
+// the preamble's own collection pass and by callers elsewhere that need to
+// know whether a type touches the lowering at all (serialize_type.c's
+// layout_type_needs_collecting, serialize_decl.c's bitfield-member loop).
+bool type_has_wide_bitint(Type *ty);
+// #1123: wraps a wide-_BitInt(N>128) `node` with __cccc_bitint_nonzero()
+// wherever C expects a scalar truth value -- a raw __cccc_biK struct value
+// can't appear there directly. Prints nothing and returns false when `node`
+// isn't wide; caller falls back to its own plain serialize_expr() call.
+// Defined in serialize_expr.c; also used by serialize_stmt.c's if/while/
+// do-while/for condition sites.
+bool serialize_wide_bitint_truth(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Node *node);
 void serialize_static_assert(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                              Node *cond, const char *msg, int msg_len,
                              Token *tok, int indent);
