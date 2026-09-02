@@ -1796,6 +1796,15 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
     }
 }
 
+// Defined in src/codegen_regalloc.c (declared in codegen_internal.h for the
+// codegen TU group, which this file is not part of). Used below to bind an
+// unresolved comptime CALL / function-address / relocation to an FFI-
+// registered host symbol, exactly as the runtime patcher does
+// (src/codegen_func.c, src/codegen_regalloc.c). Not taken from internal.h
+// because main.c has its own file-static obj_external_name.
+int find_ffi_function(VirtualMachine *vm, const char *name);
+const char *obj_external_name(Obj *obj);
+
 // Apply relocations for macro global initializers that reference other
 // globals or comptime functions. Must run after gen_function has assigned
 // code_addr to every macro function (Step 2), since function-pointer table
@@ -1819,10 +1828,24 @@ static void apply_macro_global_relocations(VirtualMachine *vm,
 
             long long data_offset = var->offset + rel->offset;
             if (target->is_function) {
-                if (!target->body)
-                    error("unsupported macro relocation to undefined function: "
-                          "%s",
-                          target->name);
+                if (!target->body) {
+                    // No comptime body: if the name is an FFI-registered host
+                    // symbol, store the FFI dispatch token
+                    // (CCCC_FFI_TOKEN_BASE - idx) so a call through the
+                    // pointer resolves via CALLN, mirroring the runtime
+                    // static-initializer path (apply_global_relocations,
+                    // src/codegen_regalloc.c). The token is segment-
+                    // independent, so no data reloc is recorded.
+                    int ffi_idx =
+                        find_ffi_function(vm, obj_external_name(target));
+                    if (ffi_idx < 0)
+                        error("unsupported macro relocation to undefined "
+                              "function: %s",
+                              target->name);
+                    *(long long *)(vm->data_seg + data_offset) =
+                        CCCC_FFI_TOKEN_BASE - ffi_idx;
+                    continue;
+                }
                 *(long long *)(vm->data_seg + data_offset) =
                     cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend;
             } else {
@@ -1838,13 +1861,21 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
         Obj *fn     = vm->compiler.call_patches[i].function;
         Pc   loc    = vm->compiler.call_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
-        if (!fn_def)
+        if (!fn_def) {
+            // A direct call to an FFI-registered host symbol is emitted as
+            // CALLF and records no call patch, so reaching here for one
+            // should not happen -- but mirror the runtime patcher
+            // (src/codegen_func.c) and skip it defensively rather than
+            // hard-erroring on a name the comptime VM can in fact dispatch.
+            if (find_ffi_function(vm, obj_external_name(fn)) >= 0)
+                continue;
             error("undefined function in macro bytecode: '%s' -- comptime "
                   "code calls it but no body is available to the comptime "
                   "pass; define it in a source file cccc is given, or pull "
                   "the definition in textually with "
                   "'#include @comptime \"file.c\"'",
                   fn->name);
+        }
         vm->text_seg[loc] = (Pc)fn_def->code_addr;
     }
 
@@ -1852,13 +1883,28 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
         Obj *fn     = vm->compiler.func_addr_patches[i].function;
         Pc   loc    = vm->compiler.func_addr_patches[i].location;
         Obj *fn_def = find_macro_function(macro_prog, fn->name);
-        if (!fn_def)
+        if (!fn_def) {
+            // Comptime code took the address of a function with no comptime
+            // body. If it is an FFI-registered host symbol, store the FFI
+            // dispatch token so CALLN can call it through the pointer,
+            // exactly as the runtime function-address patch does
+            // (src/codegen_func.c). There is deliberately no compile_only
+            // deferral here: comptime bytecode executes in-process during
+            // compilation, so an unresolved reference has no host linker to
+            // fall through to -- it would be a wild jump when the comptime
+            // function runs.
+            int ffi_idx = find_ffi_function(vm, obj_external_name(fn));
+            if (ffi_idx >= 0) {
+                cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
+                continue;
+            }
             error("undefined function address in macro bytecode: '%s' -- "
                   "comptime code takes its address but no body is available "
                   "to the comptime pass; define it in a source file cccc is "
                   "given, or pull the definition in textually with "
                   "'#include @comptime \"file.c\"'",
                   fn->name);
+        }
         cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
     }
 }
@@ -1904,29 +1950,27 @@ static ComptimeDecl *find_comptime_fn_definition(VirtualMachine *vm,
     return pick;
 }
 
-// Does any expression in `root`'s tree reference `target` -- as a call, an
-// address-of, or a bare mention? An ordinary-recursion walk would blow the
-// host stack on a deep tree, so use an explicit worklist (the same lesson as
-// the labels-as-values static walker, #1044); pointer identity on node->var
-// catches every reference form (ND_FUNCALL's callee is an ND_VAR in its lhs,
-// &fn is ND_ADDR over the same, a function-pointer table entry is a bare
-// ND_VAR).
-static bool node_refs_obj(Node *root, Obj *target) {
-    if (!root || !target)
-        return false;
+// Record every Obj referenced from `root`'s tree -- as a call, an address-of,
+// or a bare mention -- into `refs` (int-keyed by Obj pointer). An ordinary-
+// recursion walk would blow the host stack on a deep tree, so use an explicit
+// worklist (the same lesson as the labels-as-values static walker, #1044);
+// pointer identity on node->var catches every reference form (ND_FUNCALL's
+// callee is an ND_VAR in its lhs, &fn is ND_ADDR over the same, a function-
+// pointer table entry is a bare ND_VAR). `self` is never recorded -- a
+// function mentioning its own name is not a forwarding trigger.
+static void collect_node_refs(Node *root, Obj *self, HashMap *refs) {
+    if (!root)
+        return;
     Node  *inline_stack[64];
     Node **stack = inline_stack;
     int    cap = 64, top = 0;
-    bool   found = false;
     stack[top++] = root;
     while (top > 0) {
         Node *n = stack[--top];
         if (!n)
             continue;
-        if (n->var == target) {
-            found = true;
-            break;
-        }
+        if (n->var && n->var != self)
+            hashmap_put_int(refs, (long long)(intptr_t)n->var, (void *)1);
         Node *kids[] = {n->next, n->lhs,  n->rhs, n->cond, n->then,
                         n->els,  n->init, n->inc, n->body, n->args};
         for (size_t i = 0; i < sizeof(kids) / sizeof(kids[0]); i++) {
@@ -1949,47 +1993,76 @@ static bool node_refs_obj(Node *root, Obj *target) {
     }
     if (stack != inline_stack)
         free(stack);
-    return found;
 }
 
-// Is `target` referenced from anything already in the comptime program? #1243
-// forwarding is demand-driven: a bodyless prototype only gets its definition
-// pulled in when comptime code actually names it (directly, or transitively
-// from an already-forwarded body -- the fixed-point loop below re-checks each
-// round). A `#include @shared` header of a runtime-only module leaves dozens
-// of prototypes bodyless in the comptime program; speculatively forwarding
-// every one of them dragged in file-static helpers that cannot parse in the
-// isolated comptime context (#1261).
-static bool macro_prog_refs_obj(Obj *macro_prog, Obj *target) {
+// #1257: (re)build the reference sets from every comptime-program object whose
+// outgoing references have not been harvested yet -- or that has gained a body
+// since the last pass. function() (parse_decl.c) attaches a spliced body onto
+// the existing in-scope prototype Obj, so an object first seen bodyless must
+// be re-scanned once it acquires one, or its callees never become visible and
+// transitive forwarding silently stops. `scanned` records 1 for "harvested
+// while bodyless", 2 for "harvested with a body". Positive membership in
+// `refs`/`ref_names` is permanent (nothing is ever removed from the comptime
+// program), so this only ever adds -- replacing the old O(rounds x prototypes
+// x program-nodes) re-walk (#1243 forwarding is still demand-driven; #1261's
+// "do not speculatively forward an unreferenced prototype" rule is unchanged).
+static void harvest_macro_prog_refs(Obj *macro_prog, HashMap *scanned,
+                                    HashMap *refs, HashMap *ref_names) {
     for (Obj *o = macro_prog; o; o = o->next) {
-        if (o == target)
+        long long key = (long long)(intptr_t)o;
+        // A function that has gained a body since the last pass must be
+        // re-scanned for its own callees (function() attaches a spliced body
+        // onto the in-scope prototype Obj). Non-functions carry no ->body and
+        // their reference sources (init_expr, rel) are fixed after parse, so
+        // they scan exactly once.
+        void *want = (o->is_function && o->body) ? (void *)2 : (void *)1;
+        if (hashmap_get_int(scanned, key) == want)
             continue;
-        if (o->is_function && o->body && node_refs_obj(o->body, target))
-            return true;
-        if (o->init_expr && node_refs_obj(o->init_expr, target))
-            return true;
+        if (o->is_function && o->body)
+            collect_node_refs(o->body, o, refs);
+        if (o->init_expr)
+            collect_node_refs(o->init_expr, o, refs);
         // A comptime-side static function-pointer table (#309) names its
         // targets through relocations, with no Node behind the reference.
         for (Relocation *r = o->rel; r; r = r->next)
-            if (r->label && *r->label && target->name &&
-                strcmp(*r->label, target->name) == 0)
-                return true;
+            if (r->label && *r->label)
+                hashmap_put_borrowed(ref_names, *r->label, (void *)1);
+        hashmap_put_int(scanned, key, want);
     }
-    return false;
 }
 
 static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
                                            Obj           **macro_prog) {
+    // Cross-round memos (all local, freed on exit; none may live on an Obj --
+    // a failed splice does `*fn = fn_before`, silently reverting Obj fields).
+    // `scanned`/`refs` are int-keyed by pointer, `ref_names` string-keyed by
+    // borrowed relocation label, `no_def` int-keyed by prototype Obj for a
+    // name the one-shot comptime decl index has no definition for (that NULL
+    // result can never later become non-NULL -- cc_comptime_index_build runs
+    // once).
+    HashMap scanned = {}, refs = {}, ref_names = {}, no_def = {};
     for (;;) {
+        // Harvest only at the top of a round, never mid-round: a failed
+        // splice transiently prepends half-parsed objects onto
+        // vm->compiler.globals before rewinding them, and harvesting those
+        // would seed `refs` with references that do not exist -- resurrecting
+        // exactly the speculative forwarding #1261 removed. A successful
+        // splice's new body is simply picked up on the next round.
+        harvest_macro_prog_refs(*macro_prog, &scanned, &refs, &ref_names);
         bool progress = false;
         for (Obj *fn = *macro_prog; fn; fn = fn->next) {
             if (!fn->is_function || fn->body)
                 continue;
-            if (!macro_prog_refs_obj(*macro_prog, fn))
+            if (!hashmap_get_int(&refs, (long long)(intptr_t)fn) &&
+                !hashmap_get(&ref_names, fn->name))
+                continue;
+            if (hashmap_get_int(&no_def, (long long)(intptr_t)fn))
                 continue;
             ComptimeDecl *def = find_comptime_fn_definition(vm, fn->name);
-            if (!def)
+            if (!def) {
+                hashmap_put_int(&no_def, (long long)(intptr_t)fn, (void *)1);
                 continue;
+            }
 
             def->body_spliced = true;
             Token *materialized =
@@ -2044,6 +2117,12 @@ static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
         if (!progress)
             break;
     }
+    // No map owns its keys (int keys are raw values; ref_names keys are
+    // borrowed relocation labels), so the borrowed-deinit is correct for all.
+    hashmap_deinit_borrowed(&scanned);
+    hashmap_deinit_borrowed(&refs);
+    hashmap_deinit_borrowed(&ref_names);
+    hashmap_deinit_borrowed(&no_def);
 }
 
 // hashmap_foreach callback: delete the key from the macros table so that

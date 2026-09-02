@@ -377,6 +377,16 @@ is never even attempted. Only a function a comptime body actually calls (or
 takes the address of), directly or transitively through another forwarded
 body, has its definition forwarded.
 
+A host libc or otherwise FFI-registered function is the exception to the
+"definition must be an input" rule. It has no C body to forward, but the
+comptime VM can dispatch it through the same FFI mechanism runtime code uses,
+so comptime code may call it, take its address, and store it in a
+function-pointer table — provided its *declaration* reaches the comptime pass
+(an explicit prototype in the primary file, or `@comptime`/`@shared` routing
+of the header that declares it; a plain `#include` does not route
+declarations to comptime). An ordinary C function still needs its definition
+among cccc's inputs.
+
 ### Macro isolation between comptime functions
 
 All `[[cccc::comptime]]` function bodies are assembled into a single
