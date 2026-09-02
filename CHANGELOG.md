@@ -8,6 +8,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: `cccc -c=generated` replayed a vacuous `#ifndef X` / `#endif` shell
+  into the output when the guard's only `#define` had been pre-empted by a
+  command-line `-D`. A conditional whose entire body was resolved away by
+  cccc's own preprocessor — nested shells included — is now dropped from the
+  generated output; a conditional with surviving content is still replayed
+  verbatim.
+- Fixed: `cccc -c=generated` on a translation unit that published nothing
+  from comptime and defined no ordinary function printed `failed to link
+  programs`, wrote no file, and exited 0. Such a unit now serializes to a
+  valid near-empty file. Without `-c=generated` the same input reports
+  `input defines no functions or variables` and exits non-zero.
 - Fixed: comptime `GetType()` returned `NULL` for any multi-word base-type
   spelling (`"unsigned char"`, `"long long"`, `"unsigned int"`), which then
   flowed silently through `MakeArray`/`MakeConst`/`GlobalVar` into malformed

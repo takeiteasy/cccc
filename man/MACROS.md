@@ -680,11 +680,21 @@ of every generated declaration in the output, even if the source line that
 produced it appears later in the file — so a generated global whose type
 comes from an `#include @shared`d header always has that header's `#include`
 in scope. A directive still inside a conditional shell keeps its original,
-interleaved position instead. If a generated global's type comes from a
+interleaved position instead. A conditional shell that CCCC's own
+preprocessor has already emptied — for example an include guard whose only
+`#define` was pre-empted by a command-line `-D` — is dropped from the output
+entirely rather than replayed as a bare `#ifndef` / `#endif` pair; nested
+empty shells are dropped too. If a generated global's type comes from a
 header reached only through `#include @comptime`/`@build`/`@test` — routes
 that are never replayed into `-c=generated` output at all — `cccc` reports a
 compile error naming the type rather than writing C nothing declares it in;
 route the header with `#include @shared` instead so it's captured too.
+
+A translation unit whose comptime code publishes nothing and which defines
+no ordinary function still serializes: `-c=generated` writes a valid,
+near-empty file (the banner plus any auto-captured directives). Without
+`-c=generated`, the same input has nothing to compile or run, so `cccc`
+reports `input defines no functions or variables` and exits non-zero.
 
 `--emit-only`/`[[cccc::emit]]` (above) controls *which* directives are
 captured into `-c=generated` output. A separate, similarly-named flag, `--emit-cccc`,

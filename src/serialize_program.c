@@ -2804,25 +2804,42 @@ bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }
 
-// #1064: true if `line` (a raw captured directive line, `#...`, from
-// copy_raw_directive_line()/copy_routed_directive_line() in preprocess.c) is
-// one of the conditional-group directives -- see the call site in
+// #1064: classify `line` (a raw captured directive line, `#...`, from
+// copy_raw_directive_line()/copy_routed_directive_line() in preprocess.c) as
+// a conditional-group directive -- see the call site in
 // cc_serialize_program()'s emit_directives loop for why these are dropped
 // from ordinary replay. Matches on the directive word after `#` and
 // optional whitespace; deliberately textual rather than pp_directive()
 // (token-level, not available on this already-flattened string).
-static bool line_is_conditional_directive(const char *line) {
+// #1263: split into open/middle/close so the -c=generated replay can pair an
+// `#if*` with its matching `#endif` and drop a shell that CCCC's own
+// preprocessor already emptied (a `#define`-only include guard whose
+// `#define` a command-line `-D` pre-empted).
+typedef enum {
+    COND_NONE = 0,
+    COND_OPEN,   // #if / #ifdef / #ifndef
+    COND_MIDDLE, // #elif / #elifdef / #elifndef / #else
+    COND_CLOSE,  // #endif
+} CondDirectiveKind;
+
+static CondDirectiveKind conditional_directive_kind(const char *line) {
     if (!line || line[0] != '#')
-        return false;
+        return COND_NONE;
     const char *p = line + 1;
     while (*p == ' ' || *p == '\t')
         p++;
-    static const char *const kw[] = {
-        "if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif",
+    static const struct {
+        const char       *kw;
+        CondDirectiveKind kind;
+    } kw[] = {
+        {"if", COND_OPEN},        {"ifdef", COND_OPEN},
+        {"ifndef", COND_OPEN},    {"elif", COND_MIDDLE},
+        {"elifdef", COND_MIDDLE}, {"elifndef", COND_MIDDLE},
+        {"else", COND_MIDDLE},    {"endif", COND_CLOSE},
     };
     for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
-        size_t len = strlen(kw[i]);
-        if (strncmp(p, kw[i], len) == 0) {
+        size_t len = strlen(kw[i].kw);
+        if (strncmp(p, kw[i].kw, len) == 0) {
             char c = p[len];
             // Require a word boundary so "ifdef" doesn't also match a
             // (nonexistent) directive starting "ifdefine" etc, and "if"
@@ -2832,10 +2849,14 @@ static bool line_is_conditional_directive(const char *line) {
             // followed by 'd'/'n' fails the boundary test and falls
             // through to the next table entry.
             if (c == '\0' || c == ' ' || c == '\t' || c == '(')
-                return true;
+                return kw[i].kind;
         }
     }
-    return false;
+    return COND_NONE;
+}
+
+static bool line_is_conditional_directive(const char *line) {
+    return conditional_directive_kind(line) != COND_NONE;
 }
 
 // #1264: true if `line` (a raw captured directive line) is an `#include`.
@@ -2852,6 +2873,46 @@ static bool line_is_include_directive(const char *line) {
         return false;
     char c = p[7];
     return c == ' ' || c == '\t' || c == '<' || c == '"';
+}
+
+// #1263: `open` is a CCCC_EMIT_SOURCE event whose line is a COND_OPEN
+// directive (`#if`/`#ifdef`/`#ifndef`). Walk forward, tracking nesting
+// depth, and return the matching `#endif` event iff the whole span is
+// *empty* -- every event between the open and its close is either another
+// conditional directive (open/middle/close, at any depth) or a
+// CCCC_EMIT_OBJECT the -c=generated replay loop would itself skip
+// (`!obj || !obj->is_macro_generated`, mirroring that loop's own filter).
+// A span carrying any real emitted content, or one that never closes
+// before the event list ends, returns NULL -- so a live conditional and
+// malformed input are both left exactly as captured. Called only from the
+// generated replay loop, where CCCC's own preprocessor has already
+// resolved every conditional: a surviving shell here means its guarded
+// body (typically a lone `#define`) was pre-empted -- e.g. by a
+// command-line `-D` -- leaving inert noise.
+static EmitEvent *empty_conditional_span_end(EmitEvent *open) {
+    int depth = 1;
+    for (EmitEvent *ev = open->next; ev; ev = ev->next) {
+        if (ev->kind == CCCC_EMIT_SOURCE) {
+            switch (conditional_directive_kind(ev->source)) {
+                case COND_OPEN:
+                    depth++;
+                    continue;
+                case COND_CLOSE:
+                    if (--depth == 0)
+                        return ev;
+                    continue;
+                case COND_MIDDLE:
+                    continue;
+                case COND_NONE:
+                    return NULL; // any other replayed directive line is content
+            }
+        }
+        // CCCC_EMIT_OBJECT: only a printer-skipped object keeps the span
+        // empty; anything the replay would actually serialize does not.
+        if (ev->obj && ev->obj->is_macro_generated)
+            return NULL;
+    }
+    return NULL; // unterminated -- leave the input untouched
 }
 
 // #1118: true if `line` (a raw captured directive line, `#...`, from
@@ -3765,7 +3826,13 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
 
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness) {
-    if (!f || !prog)
+    // #1266: `prog` is legitimately NULL for a translation unit that
+    // creates no globals -- an all-comptime file whose comptime code
+    // publishes nothing and which defines no ordinary function. That must
+    // still produce a valid (near-empty: banner plus any auto-captured
+    // #include) generated file, not fail. Every pass below iterates
+    // `for (Obj *obj = prog; obj; ...)` and is a no-op on NULL.
+    if (!f)
         return;
 
     SerializeContext ctx = {.generated_only = generated_only,
@@ -3906,10 +3973,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     EmitEvent *replay_start = vm->compiler.emit_events_head;
     if (generated_only && vm->compiler.emit_events_head) {
         bool printed_any = false;
-        // #1263: a captured `#ifndef X`/`#endif` shell whose only body was a
-        // `#define` that a command-line `-D` pre-empted is replayed by the
-        // main loop below with an empty body -- inert but noisy. An empty
-        // conditional shell should be dropped from generated output.
         for (EmitEvent *ev = vm->compiler.emit_events_head;
              ev && ev->kind == CCCC_EMIT_SOURCE &&
              !line_is_conditional_directive(ev->source);
@@ -4037,6 +4100,20 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // this loop would otherwise need to see.
         for (EmitEvent *ev = replay_start; ev; ev = ev->next) {
             if (ev->kind == CCCC_EMIT_SOURCE) {
+                // #1263: a captured `#if*`/`#endif` shell whose entire body
+                // was resolved away by CCCC's own preprocessor (an include
+                // guard whose only `#define` a command-line `-D` pre-empted)
+                // is inert but noisy in the output. Drop the whole span --
+                // `ev` lands on the matching `#endif` and the for-increment
+                // steps past it. Non-empty and unterminated shells return
+                // NULL and are replayed verbatim, as before.
+                if (conditional_directive_kind(ev->source) == COND_OPEN) {
+                    EmitEvent *end = empty_conditional_span_end(ev);
+                    if (end) {
+                        ev = end;
+                        continue;
+                    }
+                }
                 fprintf(f, "%s\n", ev->source);
                 continue;
             }

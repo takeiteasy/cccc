@@ -2768,8 +2768,19 @@ int main(int argc, const char *argv[]) {
 
     // Link all programs together
     Obj *merged_prog = cc_link_progs(&vm, input_progs, input_files_count);
-    if (!merged_prog) {
-        fprintf(stderr, "error: failed to link programs\n");
+    // #1266: cc_link_progs returns NULL when every input TU parsed to an
+    // empty global list -- an all-comptime file that publishes nothing and
+    // defines no ordinary function. For -m / -c=generated that is a valid
+    // (near-empty) serialization, so let it through; the dump_expanded_only
+    // branch below tolerates a NULL program. Every other path genuinely has
+    // nothing to compile or run: emit a clear diagnostic and a non-zero
+    // exit, rather than the old "failed to link programs" which also left
+    // exit_code at 0 (stderr text with a success status -- a Makefile
+    // footgun), and rather than letting it reach gen()'s "main() function
+    // not found" which is suppressed under --build / --testing / -c.
+    if (!merged_prog && !dump_expanded_only) {
+        fprintf(stderr, "error: input defines no functions or variables\n");
+        exit_code = 1;
         goto BAIL;
     }
 
