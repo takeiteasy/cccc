@@ -2838,6 +2838,22 @@ static bool line_is_conditional_directive(const char *line) {
     return false;
 }
 
+// #1264: true if `line` (a raw captured directive line) is an `#include`.
+// The line is already spacing-normalized by normalize_include_operand_spacing
+// in preprocess.c, so identical includes compare equal as plain strings.
+// Textual match, same style as line_is_conditional_directive above.
+static bool line_is_include_directive(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "include", 7) != 0)
+        return false;
+    char c = p[7];
+    return c == ' ' || c == '\t' || c == '<' || c == '"';
+}
+
 // #1118: true if `line` (a raw captured directive line, `#...`, from
 // copy_raw_directive_line()/copy_routed_directive_line() in preprocess.c) is
 // a #define or #undef whose macro NAME starts with a non-ASCII byte (UTF-8
@@ -3894,11 +3910,37 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // `#define` that a command-line `-D` pre-empted is replayed by the
         // main loop below with an empty body -- inert but noisy. An empty
         // conditional shell should be dropped from generated output.
-        while (replay_start && replay_start->kind == CCCC_EMIT_SOURCE &&
-               !line_is_conditional_directive(replay_start->source)) {
-            fprintf(f, "%s\n", replay_start->source);
+        for (EmitEvent *ev = vm->compiler.emit_events_head;
+             ev && ev->kind == CCCC_EMIT_SOURCE &&
+             !line_is_conditional_directive(ev->source);
+             ev = ev->next) {
+            // #1264: the emit-event channel that feeds this -c=generated
+            // replay never deduped identical #include lines, unlike its
+            // push_emit_directive sibling that feeds -c=native/-m. A single
+            // primary file that included the same header twice therefore
+            // emitted one #include under -c=native but two here. This
+            // leading run is the contiguous *unconditional* prefix (the
+            // loop stops at the first conditional shell), so dropping a
+            // duplicate #include here cannot leave an empty #ifdef branch.
+            // Non-#include directives are left alone -- they may legitimately
+            // repeat around macro calls.
+            if (line_is_include_directive(ev->source)) {
+                bool dup = false;
+                for (EmitEvent *prev  = vm->compiler.emit_events_head;
+                     prev != ev; prev = prev->next)
+                    if (line_is_include_directive(prev->source) &&
+                        strcmp(prev->source, ev->source) == 0) {
+                        dup = true;
+                        break;
+                    }
+                if (dup) {
+                    replay_start = ev->next;
+                    continue;
+                }
+            }
+            fprintf(f, "%s\n", ev->source);
             printed_any  = true;
-            replay_start = replay_start->next;
+            replay_start = ev->next;
         }
         if (printed_any)
             fprintf(f, "\n");

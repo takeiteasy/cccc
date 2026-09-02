@@ -8,6 +8,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: comptime `GetType()` returned `NULL` for any multi-word base-type
+  spelling (`"unsigned char"`, `"long long"`, `"unsigned int"`), which then
+  flowed silently through `MakeArray`/`MakeConst`/`GlobalVar` into malformed
+  generated C. `GetType()` now resolves every standard base-type spelling
+  regardless of word order, and an unresolved name is a hard comptime error
+  naming the string — `FindType`/`TypeExists` remain the `NULL`-returning
+  probes.
+- Fixed: `cccc -c=generated` emitted a header twice when a single input
+  `#include`d it twice, because the emit-event replay that feeds generated
+  output did not dedup identical `#include` lines the way the `-c=native`
+  replay does. Identical includes in the unconditional leading run are now
+  collapsed.
 - Fixed: cross-file `[[cccc::comptime]]` body forwarding pulled in a
   definition for *every* bodyless prototype in the comptime program, not
   only the ones comptime code calls. A `#include @shared` header that also

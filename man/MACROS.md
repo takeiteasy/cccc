@@ -1858,13 +1858,22 @@ Useful reflection entry points include:
 
 | Task | API |
 |------|-----|
-| Find a type by name | `FindType(name)` |
-| Get a built-in or named type | `GetType(name)` |
+| Find a type by name (NULL if absent) | `FindType(name)` |
+| Get a base, typedef, or tag type (errors if absent) | `GetType(name)` |
 | Count enum constants | `EnumCount(ty)` |
 | Read enum constants | `EnumAt(ty, i)`, `EnumConstantName(ec)`, `EnumConstantValue(ec)` |
 | Count struct/union members | `StructMemberCount(ty)` |
 | Read members | `StructMemberAt(ty, i)`, `MemberName(m)`, `MemberType(m)`, `MemberOffset(m)` |
 | Find globals | `FindGlobal(name)`, `GlobalCount()`, `GlobalAt(i)` |
+
+`GetType(name)` resolves any standard base-type spelling regardless of word
+order — `"int"`, `"unsigned char"`, `"long long"`, `"signed int"`, `"long
+double _Complex"`, `"bool"` — before falling back to a typedef or tag lookup.
+It is the right call when the result feeds straight into
+`MakeArray`/`MakeConst`/`GlobalVar`: an unresolved name is a hard comptime
+error rather than a `NULL` that silently corrupts the generated declaration.
+Use `FindType(name)` or `TypeExists(name)` to probe for a type that may not
+exist.
 
 For call-site macro expansion, `MakeVarRef(name)` and `FindType(name)`
 use the lexical scope where the macro call appears, including nested block
@@ -2412,7 +2421,7 @@ Underlying functions: `__builtin_macroexpand_1(Node *node)` and
 |-------------------|-------------|
 | `FindType(name)` | Find a typedef, struct, union, or enum by name |
 | `TypeExists(name)` | Test whether a type name exists |
-| `GetType(name)` | Get a named or built-in type such as `"int"` |
+| `GetType(name)` | Get a base type (any spelling, e.g. `"unsigned char"`, `"long long"`), typedef, or tag; hard error if the name does not resolve |
 | `GetTypeKind(ty)` | Get `TypeKind` |
 | `TypeSize(ty)` | Get size in bytes |
 | `TypeAlign(ty)` | Get alignment in bytes |

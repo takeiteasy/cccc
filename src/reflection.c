@@ -194,33 +194,175 @@ bool __builtin_ast_type_exists(const char *name) {
     return __builtin_ast_find_type(name) != NULL;
 }
 
+// Resolve a standard base-type *spelling* -- including multi-word forms
+// ("unsigned char", "long long", "signed int", "long double _Complex") --
+// to its canonical Type*. This mirrors the counter->Type switch in
+// declspec() (src/parse_types.c) and must stay in sync with it, including
+// the two places cccc is deliberately not C-pedantic: `long long` resolves
+// to ty_llong (a spelling-only wider variant of ty_long, so -c=native/
+// -c=generated reproduce the spelling the caller asked for) and `signed
+// char` resolves to ty_char (cccc conflates the two). Word order is
+// irrelevant, matching C23 6.7.2p2. Returns NULL for anything that is not a
+// recognised base-type spelling; the caller then falls back to a typedef/
+// tag lookup. declspec() itself is not reused: it is a parser entry point
+// that error_tok()s on invalid combinations, warns on the empty spelling,
+// and can *define* struct/enum tags as a side effect.
+static Type *base_type_from_spelling(const char *name) {
+    if (strcmp(name, "_Decimal32") == 0)
+        return ty_decimal32;
+    if (strcmp(name, "_Decimal64") == 0)
+        return ty_decimal64;
+    if (strcmp(name, "_Decimal128") == 0)
+        return ty_decimal128;
+
+    enum {
+        VOID      = 1 << 0,
+        BOOL      = 1 << 2,
+        CHAR      = 1 << 4,
+        SHORT     = 1 << 6,
+        INT       = 1 << 8,
+        LONG      = 1 << 10,
+        FLOAT     = 1 << 12,
+        DOUBLE    = 1 << 14,
+        SIGNED    = 1 << 17,
+        UNSIGNED  = 1 << 18,
+        COMPLEX   = 1 << 19,
+        IMAGINARY = 1 << 20,
+    };
+
+    int         counter = 0;
+    const char *p       = name;
+    while (*p) {
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (!*p)
+            break;
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+        size_t n = (size_t)(p - start);
+#define WORD(s) (n == sizeof(s) - 1 && memcmp(start, s, n) == 0)
+        if (WORD("void"))
+            counter += VOID;
+        else if (WORD("_Bool") || WORD("bool"))
+            counter += BOOL;
+        else if (WORD("char"))
+            counter += CHAR;
+        else if (WORD("short"))
+            counter += SHORT;
+        else if (WORD("int"))
+            counter += INT;
+        else if (WORD("long"))
+            counter += LONG;
+        else if (WORD("float"))
+            counter += FLOAT;
+        else if (WORD("double"))
+            counter += DOUBLE;
+        else if (WORD("signed"))
+            counter |= SIGNED;
+        else if (WORD("unsigned"))
+            counter |= UNSIGNED;
+        else if (WORD("_Complex"))
+            counter += COMPLEX;
+        else if (WORD("_Imaginary"))
+            counter += IMAGINARY;
+        else
+            return NULL;
+#undef WORD
+    }
+    if (counter == 0)
+        return NULL;
+
+    switch (counter) {
+        case VOID:
+            return ty_void;
+        case BOOL:
+            return ty_bool;
+        case CHAR:
+        case SIGNED + CHAR:
+            return ty_char;
+        case UNSIGNED + CHAR:
+            return ty_uchar;
+        case SHORT:
+        case SHORT + INT:
+        case SIGNED + SHORT:
+        case SIGNED + SHORT + INT:
+            return ty_short;
+        case UNSIGNED + SHORT:
+        case UNSIGNED + SHORT + INT:
+            return ty_ushort;
+        case INT:
+        case SIGNED:
+        case SIGNED + INT:
+            return ty_int;
+        case UNSIGNED:
+        case UNSIGNED + INT:
+            return ty_uint;
+        case LONG:
+        case LONG + INT:
+        case SIGNED + LONG:
+        case SIGNED + LONG + INT:
+            return ty_long;
+        case LONG + LONG:
+        case LONG + LONG + INT:
+        case SIGNED + LONG + LONG:
+        case SIGNED + LONG + LONG + INT:
+            return ty_llong;
+        case UNSIGNED + LONG:
+        case UNSIGNED + LONG + INT:
+            return ty_ulong;
+        case UNSIGNED + LONG + LONG:
+        case UNSIGNED + LONG + LONG + INT:
+            return ty_ullong;
+        case FLOAT:
+            return ty_float;
+        case FLOAT + COMPLEX:
+        case FLOAT + IMAGINARY:
+            return ty_fcomplex;
+        case DOUBLE:
+            return ty_double;
+        case DOUBLE + COMPLEX:
+        case DOUBLE + IMAGINARY:
+        case COMPLEX:
+        case IMAGINARY:
+            return ty_dcomplex;
+        case LONG + DOUBLE:
+            return ty_ldouble;
+        case LONG + DOUBLE + COMPLEX:
+        case LONG + DOUBLE + IMAGINARY:
+            return ty_ldcomplex;
+        default:
+            return NULL;
+    }
+}
+
 Type *__builtin_ast_get_type(const char *name) {
     if (!name)
         return NULL;
 
-    const struct {
-        const char *name;
-        Type       *type;
-    } builtins[] = {
-        {"void", ty_void},
-        {"char", ty_char},
-        {"short", ty_short},
-        {"int", ty_int},
-        {"long", ty_long},
-        {"float", ty_float},
-        {"double", ty_double},
-        {"_Bool", ty_bool},
-        {"_Decimal32", ty_decimal32},
-        {"_Decimal64", ty_decimal64},
-        {"_Decimal128", ty_decimal128},
-    };
+    Type *ty = base_type_from_spelling(name);
+    if (ty)
+        return ty;
 
-    for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++)
-        if (strlen(name) == strlen(builtins[i].name) &&
-            strncmp(name, builtins[i].name, strlen(builtins[i].name)) == 0)
-            return builtins[i].type;
+    ty = __builtin_ast_find_type(name);
+    if (ty)
+        return ty;
 
-    return __builtin_ast_find_type(name);
+    // #1265: an unresolved name used to return NULL, which then flowed
+    // silently through MakeConst/MakeArray/GlobalVar (each just returns
+    // NULL on a NULL input) into malformed emitted C with no diagnostic.
+    // GetType()'s contract is "give me the type" -- fail loudly here.
+    // FindType(name)/TypeExists(name) remain the probing entry points that
+    // return NULL/false on a miss (they share this same lookup path).
+    VirtualMachine *vm = __builtin_current_vm;
+    if (vm && vm->compiler.macro_call_tok)
+        error_tok(vm, vm->compiler.macro_call_tok,
+                  "GetType: unknown type name '%s'; use FindType(name) or "
+                  "TypeExists(name) to probe for an optional type",
+                  name);
+    error("GetType: unknown type name '%s'; use FindType(name) or "
+          "TypeExists(name) to probe for an optional type",
+          name);
 }
 
 TypeKind __builtin_ast_type_kind(Type *ty) {

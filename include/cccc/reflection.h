@@ -462,10 +462,16 @@ Type *__builtin_ast_find_type(const char *name);
  */
 bool __builtin_ast_type_exists(const char *name);
 
-/*! @brief Look up a type by name, falling back to the built-in primitives.
- * @param name The type name to look up.
- * @return The matching Type*, or NULL if not found.
- * @details Convenience wrapper: GetType(name).
+/*! @brief Look up a type by name, resolving standard base-type spellings.
+ * @param name The type name to look up. Any standard base-type spelling is
+ *             accepted regardless of word order: "int", "unsigned char",
+ *             "long long", "signed int", "long double _Complex", "bool", ...
+ *             Otherwise the name is resolved as a typedef or tag.
+ * @return The matching Type*.
+ * @details An unresolved name is a hard comptime error, since the result
+ *          normally flows straight into MakeArray()/MakeConst()/GlobalVar().
+ *          Use FindType(name) or TypeExists(name) to probe for an optional
+ *          type without erroring. Convenience wrapper: GetType(name).
  */
 Type *__builtin_ast_get_type(const char *name);
 
@@ -1640,7 +1646,9 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param name The type name to look up. */
 #define TypeExists(name) __builtin_ast_type_exists(name)
 /*! @def GetType
- * @brief Look up a type by name, falling back to the built-in primitives.
+ * @brief Look up a type by name, resolving any standard base-type spelling
+ *        ("unsigned char", "long long", ...); an unresolved name is a hard
+ *        comptime error. Use FindType/TypeExists to probe without erroring.
  * @param name The type name to look up. */
 #define GetType(name) __builtin_ast_get_type(name)
 
