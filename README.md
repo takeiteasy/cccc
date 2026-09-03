@@ -5,13 +5,15 @@
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
 
-CCCC adds compile-time macro expansion and AST building capabilities on top of the existing toolchain by adding a new 'comptime' pass that runs between the preprocessor and the AST parser. Functions marked with `[[cccc::comptime]]` are run and expanded inside the VM during compilation and can then be forwarded to your native compiler.
+## Introduction
+
+CCCC adds compile-time macro expansion and AST building capabilities on top of the existing toolchain by adding a new 'comptime' pass that runs between the preprocessor and the AST parser. Functions marked with `[[cccc::comptime]]` are run and expanded inside the VM during compilation and can then be forwarded to your native compiler. Included with the compile-time pass are a built-in testing framework and build system, so a project needs no external test runner or build tool. For a longer list of features see [below](#features).
 
 Currently targets **MacOS** (aarch64) and **Linux** (aarch64/x86_64). Windows support is planned but not started. Release builds are published at [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases).
 
 Generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
-## Comptime example
+## Example
 
 A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), and emit whole declarations into the program:
 
@@ -40,13 +42,65 @@ int main(void) {
     printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // prints: 256 32
     return 0;
 }
+
+// (4) A test — discovered and run by `cccc --testing demo.c`.
+@test void dot_product(void) {
+    struct Vec2 a = { 3, 4 }, b = { square(2), 5 };
+    AssertEq(vec2_dot(a, b), 32);
+}
+
+// (5) A build recipe — run by `cccc --build demo.c`.
+@build_target BuildTarget *demo(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "demo");
+    AddSource(t, "demo.c");
+    return t;
+}
 ```
 
-The same source runs on the VM (`cccc demo.c`) or lowers to a native binary (`cccc -c=native -o demo demo.c`). See [MACROS.md](man/MACROS.md) for the full API.
+Items 1–3 are the program: `cccc demo.c` runs it on the VM, `cccc -c=native -o demo demo.c` lowers it to a native binary. `cccc --testing demo.c` runs the `@test`. Items 4 and 5 are shown together for illustration — today the `@test` needs `--testing` and the `@build_target` needs its own file with no `main()`; see [TEST_MODE.md](man/TEST_MODE.md) and [BUILD_MODE.md](man/BUILD_MODE.md). See [MACROS.md](man/MACROS.md) for the full comptime API.
 
-## Guides
+## Features
 
-Guides live in [`man/`](man/):
+- **Compile-time macros** — C functions annotated with `[[cccc::comptime]]`, `__attribute__((comptime))`, the `@comptime` shorthand, or the `__comptime`/`__comptime__` keywords that CCCC compiles and runs during compilation to generate functions, globals, and types or rewrite call sites (see [MACROS.md](man/MACROS.md))
+  - Global generation via file-scope calls (run before the main parse; generated definitions are auto-forward-declared) and call-site expansion via inline `Node *` macros (replace the call with a returned AST during macro expansion)
+  - Custom attribute handlers (`@comptime(attribute("name"))`) that run when a file-scope declaration is parsed
+  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)`/`QuoteN(...)` templates with `$1`/`$$`/`$@` splicing, the `$identifier` reflect operator, `Gensym`, and a full AST builder API (`MakeFunction`, `MakeVarRef`, `MakeLocalVarUnique`, ...)
+  - `#pragma cccc comptime begin/end` blocks, `@comptime`/`@shared`/`@emit` include and `#define` routing, comptime variables, C23 `constexpr` readback, and a bundled macro standard library in `reflection.h`
+- **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build (see [NATIVE.md](man/NATIVE.md))
+  - This is the production path: full toolchain performance, system libraries, no VM overhead
+  - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
+  - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
+- **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](man/SAFETY.md))
+  - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
+  - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
+  - `--test-run[=LEVEL]` smoke-tests the program under the VM at a safety preset and refuses to compile on a crash/safety violation (see [SAFETY.md](man/SAFETY.md))
+- **Interactive debugger** — GDB-like source-level debugging (see [DEBUGGER.md](man/DEBUGGER.md))
+  - Breakpoints (line, function, conditional), watchpoints, register and memory inspection
+  - Source map export API for IDE integrations (`cc_output_source_map_json`)
+- **Interactive REPL** — top-level read-eval-print loop for declarations and expressions (see [REPL.md](man/REPL.md))
+  - `-r`/`--repl`; declarations persist and compile incrementally across the session, expressions print a typed result
+  - Multi-line continuation, `:type`/`:load`/`:help`/`:quit` session commands, optional readline history
+- **URL includes & embeds** — fetch headers and data directly from URLs with `#include <https://...>` and `#embed <https://...>`; build with `CCCC_HAS_CURL=1 ./cccc --build build.c` (optional, requires libcurl)
+- **Real IEEE-754-2008 decimal floating-point** — `_Decimal32/64/128` arithmetic, `<decimal_math.h>` transcendentals (`sqrtd64`, `powd128`, ...), `strtod32/64/128`, `fesetround()`-aware rounding and `fetestexcept()`-visible exceptions, and compile-time constant folding, via the Intel BID library; build with `tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 ./cccc --build build.c` (optional, never vendored; see [STDLIB.md](man/STDLIB.md)).
+- **Built-in test framework** — `[[cccc::test]]`, `__attribute__((test))`, or `@test` attribute and `Assert*` macros for writing tests in C (see [TEST_MODE.md](man/TEST_MODE.md))
+  - Run with `--testing`; outputs TAP 13 format; no external dependencies or includes needed
+  - `#include [[cccc::test]] "fixtures.h"` conditionally includes a file only in `--testing` mode
+- **Mode predefined macros** — `__CCCC_BUILD_MODE__`, `__CCCC_TEST_MODE__`, or `__CCCC_COMP_MODE__` is defined at compile time to reflect the active execution mode, enabling `#ifdef`-based mode branching
+- **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [ATTRIBUTES.md](man/ATTRIBUTES.md))
+  - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `comptime`/`test` (the `macro` alias is deprecated)
+  - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
+  - `-E`/`-m`/`-c=generated`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
+- **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [WARNINGS.md](man/WARNINGS.md))
+  - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
+- **JSON reflection output** — dump all function, struct, union, enum, and global definitions
+  - `./cccc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
+- **VM heap** — built-in allocator that intercepts `malloc`/`free`/`calloc`/`realloc` at compile time
+  - On by default at every safety level, including `-0`; pass `-V`/`--no-vm-heap` to opt back into the
+    host allocator (only valid at safety level 0 — `-1`/`-2`/`-3` require the VM heap)
+
+## Manuals
+
+Manuals live in [`man/`](man/):
 
 | Guide | Covers |
 |---|---|
@@ -83,6 +137,10 @@ Options:
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
+	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
+	   --url-cache-clear     Clear the URL fetch cache and exit
+	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
+	   --url-max-size=SIZE   Cap fetched URL payload size (e.g., 50MB, default: 10MB)
 	-D/--define <macro>[=def] Define a macro
 	-U/--undef <macro>       Undefine a macro
 	-a/--ast                 Dump AST
@@ -278,7 +336,7 @@ Example:
 	echo 'int main() { return 42; }' | ./build/cccc -
 ```
 
-## Credits 
+## Credits
 
 This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `python3 tools/test.py --match "*c4*"`).
 

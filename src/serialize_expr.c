@@ -925,7 +925,7 @@ static void serialize_wide_bitint_int_bridge(FILE *f, VirtualMachine *vm,
             seq, src_signed ? "__int128" : "unsigned __int128");
     serialize_expr(f, vm, ctx, src_node, 0);
     fprintf(f,
-            "); unsigned long long __cccc_bi_sw%d[2] = { "
+            "); uint64_t __cccc_bi_sw%d[2] = { "
             "(unsigned long long)__cccc_bi_s%d, "
             "(unsigned long long)(__cccc_bi_s%d >> 64) };",
             seq, seq, seq);
@@ -1023,7 +1023,7 @@ static bool serialize_wide_bitint_cast(FILE *f, VirtualMachine *vm,
     fprintf(f, ")({ __cccc_bi%d __cccc_bi_a%d = (", words, seq);
     serialize_expr(f, vm, ctx, node->lhs, 0);
     fprintf(f,
-            "); unsigned long long __cccc_bi_e%d[2]; __cccc_bitint_extend("
+            "); uint64_t __cccc_bi_e%d[2]; __cccc_bitint_extend("
             "__cccc_bi_e%d, __cccc_bi_a%d.w, %d, %d, 2, 128, %d); "
             "((unsigned __int128)__cccc_bi_e%d[1] << 64) | __cccc_bi_e%d[0]; "
             "}))",

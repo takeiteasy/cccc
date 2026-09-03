@@ -128,3 +128,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   rejected as specifying two compatible types; it is now accepted, and an
   unqualified controlling expression selects the unqualified arm — its own
   top-level `_Atomic` is dropped by lvalue conversion, matching `const`.
+- Added: `_BitInt(N)` with `N > 128` lowers to a real multi-word runtime
+  under `-c=native`, `-m`, and `-c=generated` — an emitted little-endian
+  word-array container plus width-generic arithmetic, bitwise, shift,
+  comparison, and cast helpers shared verbatim with the VM. A `_BitInt(N)`
+  bit-field member with `N > 128` is still rejected (no legal C spelling for
+  the container as a bit-field type).

@@ -1665,9 +1665,16 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
         return;
 
     fprintf(f, "/* #1123: multi-word _BitInt(N>128) containers + runtime */\n");
+    // The word array must be spelled `uint64_t`, not `unsigned long long`:
+    // every wide-_BitInt runtime helper (src/stdlib/wide_bitint.c) takes
+    // `uint64_t *`, and on LP64 glibc `uint64_t` is `unsigned long`, a
+    // distinct type from `unsigned long long` -- passing `container.w` to a
+    // helper then trips -Wincompatible-pointer-types (fatal in the native
+    // build). Emit the <stdint.h> the spelling needs up front, before the
+    // typedefs and before the shim bodies' own include.
+    fprintf(f, "#include <stdint.h>\n");
     for (int i = 0; i < need.n; i++)
-        fprintf(f,
-                "typedef struct { unsigned long long w[%d]; } __cccc_bi%d;\n",
+        fprintf(f, "typedef struct { uint64_t w[%d]; } __cccc_bi%d;\n",
                 need.ks[i], need.ks[i]);
     fprintf(f, "\n");
 
