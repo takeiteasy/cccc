@@ -109,3 +109,22 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   defined only inside a `Quote()`/`QuoteLazy()` template spliced into it —
   it is `use of undeclared label`, matching what an eager `Quote()` already
   reported and making the eager and deferred paths consistent.
+- Added: `--compiler-family=gcc|clang|auto` selects which host compiler
+  family CCCC's front end models where gcc and clang genuinely disagree on
+  type compatibility — a top-level `_Atomic`, an array element's `_Atomic`,
+  and a function type's own return-type `const`/`volatile` in
+  `__builtin_types_compatible_p`. Default `gcc` (unchanged); `clang` matches
+  a stock clang install; `auto` probes `CCCC_NATIVE_CC`. `__CCCC_COMPILER_FAMILY__`
+  is predefined for source-level branching. See `man/TYPES.md`.
+- Fixed: `__builtin_types_compatible_p` reported two arrays of equal length
+  (and a complete array vs an unspecified-length one of the same element
+  type) as incompatible; both are compatible.
+- Fixed: `__builtin_types_compatible_p` ignored `_Atomic` below the top
+  level, so `_Atomic int *` / `int *` and `void(_Atomic int)` / `void(int)`
+  compared equal. `_Atomic` is now significant at a pointee, a function
+  parameter, and a function return position.
+- Fixed: a `_Generic` selection with an `_Atomic`-qualified association
+  alongside its unqualified counterpart (`_Atomic int:` and `int:`) was
+  rejected as specifying two compatible types; it is now accepted, and an
+  unqualified controlling expression selects the unqualified arm — its own
+  top-level `_Atomic` is dropped by lvalue conversion, matching `const`.
