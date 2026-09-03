@@ -536,6 +536,59 @@ int test_generic_pointee_qualifiers(void) {
     return 42;
 }
 
+// Type-compatibility rules that gcc and clang *agree* on, and that CCCC now
+// matches (all verified directly against gcc-16 and clang, -std=c11):
+//   - two complete arrays of equal length are compatible, and a complete
+//     array is compatible with an unspecified-length one of the same element
+//     type;
+//   - `_Atomic` is significant below the top level (a pointee, a function
+//     parameter, a function's own return type) -- `_Atomic int *` and
+//     `int *` are NOT compatible;
+//   - an `_Atomic T:` and a plain `T:` association may coexist in one
+//     `_Generic`, and an unqualified controlling expression picks the plain
+//     arm (its own `_Atomic` is stripped by lvalue conversion).
+typedef _Atomic int atomic_int_ts;
+typedef void fn_atomic_param(_Atomic int);
+typedef void fn_plain_param(int);
+typedef _Atomic int fn_atomic_ret(void);
+typedef int fn_plain_ret(void);
+
+[[cccc::test(return = 42)]]
+int test_compat_unanimous(void) {
+    // arrays: equal length compatible, unequal not, unspecified vs complete
+    // compatible
+    if (!__builtin_types_compatible_p(int[3], int[3]))
+        return 1;
+    if (__builtin_types_compatible_p(int[3], int[4]))
+        return 2;
+    if (!__builtin_types_compatible_p(int[3], int[]))
+        return 3;
+
+    // _Atomic below the top level is significant
+    if (__builtin_types_compatible_p(_Atomic int *, int *))
+        return 4;
+    if (__builtin_types_compatible_p(fn_atomic_param, fn_plain_param))
+        return 5;
+    if (__builtin_types_compatible_p(fn_atomic_ret, fn_plain_ret))
+        return 6;
+
+    // top-level _Atomic: gcc keeps `_Generic` arm selection significant, so a
+    // plain `int` control never matches an `_Atomic int:` arm...
+    if (_Generic((int)0, atomic_int_ts: 1, int: 2, default: 0) != 2)
+        return 7;
+    // ...and the two arms are not a collision (this used to be rejected)
+    _Atomic int ai = 0;
+    if (_Generic(ai, atomic_int_ts: 1, int: 2, default: 0) != 2)
+        return 8;
+
+    // a plain-`int` control still matches a plain `int:` arm with an
+    // `_Atomic int:` arm also present
+    if (_Generic((int)0, int: 42, atomic_int_ts: 0, default: 0) != 42)
+        return 9;
+
+    return 42;
+}
+
 // #1122: file-scope initializers wider than 8 bytes (__int128,
 // _BitInt(65..128), long double, _Complex) used to crash write_gvar_data
 // (`internal error at src/parse_init.c:1601`) at parse time -- and, for the

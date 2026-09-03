@@ -1217,9 +1217,10 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.file_buffers.capacity = 0;
 
     // Default to GNU C17 (matches modern gcc/clang defaults)
-    vm->compiler.c_std       = CCCC_STD_C23;
-    vm->compiler.c_std_gnu   = true;
-    vm->compiler.attr_target = CCCC_ATTR_TARGET_AUTO;
+    vm->compiler.c_std           = CCCC_STD_C23;
+    vm->compiler.c_std_gnu       = true;
+    vm->compiler.attr_target     = CCCC_ATTR_TARGET_AUTO;
+    vm->compiler.compiler_family = CCCC_COMPILER_FAMILY_GCC;
 
     init_macros(vm);
     cc_init_parser(vm);
@@ -2757,6 +2758,54 @@ static char *find_cc_via_env_or_path(const char *env_name,
 // (see cccc_find_build_cc() below, #1198).
 char *cccc_find_native_cc(void) {
     return find_cc_via_env_or_path("CCCC_NATIVE_CC", getenv("CCCC_NATIVE_CC"));
+}
+
+// C-side mirror of tools/testing/platform.py's detect_native_cc_family(): ask
+// the compiler -c=native would use what it is, via its own predefined macros.
+// `cc -dM -E -` on an empty translation unit is the portable way -- clang
+// defines __clang__, plain gcc defines __GNUC__ without it. Only reached when
+// --compiler-family=auto is passed explicitly (src/main.c); the default path
+// never spawns this. Cached: the probe is one fast compiler invocation, but
+// even that should happen at most once.
+CCCCCompilerFamily cccc_detect_native_cc_family(void) {
+    static int                cached = 0;
+    static CCCCCompilerFamily result;
+    if (cached)
+        return result;
+    cached   = 1;
+    result   = CCCC_COMPILER_FAMILY_GCC; // conservative fallback
+
+    char *cc = cccc_find_native_cc();    // prints its own diagnostic on miss
+    if (!cc)
+        return result;
+
+    char cmd[PATH_MAX + 64];
+    snprintf(cmd, sizeof(cmd), "%s -dM -E - < /dev/null 2>/dev/null", cc);
+    free(cc);
+
+    FILE *p = popen(cmd, "r");
+    if (!p) {
+        fprintf(stderr, "warning: --compiler-family=auto: could not probe the "
+                        "native compiler; assuming gcc\n");
+        return result;
+    }
+    char line[512];
+    int  saw_clang = 0, saw_gnuc = 0;
+    while (fgets(line, sizeof(line), p)) {
+        if (strstr(line, "__clang__"))
+            saw_clang = 1;
+        else if (strstr(line, "__GNUC__"))
+            saw_gnuc = 1;
+    }
+    int rc = pclose(p);
+    if (rc == 0 && saw_clang)
+        result = CCCC_COMPILER_FAMILY_CLANG;
+    else if (rc == 0 && saw_gnuc)
+        result = CCCC_COMPILER_FAMILY_GCC;
+    else
+        fprintf(stderr, "warning: --compiler-family=auto: native compiler "
+                        "family unrecognized; assuming gcc\n");
+    return result;
 }
 
 // Selects the host compiler `--build` uses to compile/link cccc's own (or

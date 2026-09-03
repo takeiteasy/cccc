@@ -582,6 +582,10 @@ unsigned char *read_binary_file(VirtualMachine *vm, char *path,
 
 char *cccc_path_find_executable(const char *name);
 char *cccc_find_native_cc(void);
+// Probe CCCC_NATIVE_CC's compiler family for --compiler-family=auto. Returns
+// CCCC_COMPILER_FAMILY_GCC or _CLANG (never _AUTO); falls back to gcc when no
+// compiler is found or the probe fails. Result cached.
+CCCCCompilerFamily cccc_detect_native_cc_family(void);
 char *cccc_find_build_cc(
     void); // #1198: --build's own compiler, separate from -c=native's
 void define_std_macros(VirtualMachine *vm);
@@ -819,7 +823,7 @@ bool cccc_dec_strtod(int w, void *dst, const char *s, char **endptr, int env);
 // include/decimal_math.h.
 void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
-bool is_compatible_qualified(Type *t1, Type *t2);
+bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family);
 bool is_compatible_qualified_strict(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);

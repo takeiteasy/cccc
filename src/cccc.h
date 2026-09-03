@@ -3466,6 +3466,22 @@ typedef enum {
     CCCC_ATTR_TARGET_STRIP,
 } CCCCAttrTarget;
 
+/*!
+ @brief Which host compiler family CCCC's own front end models where gcc and
+ clang genuinely disagree.
+ @details Currently the only consumers are __builtin_types_compatible_p's
+ treatment of a top-level `_Atomic` and of a function type's own top-level
+ qualifiers (see is_compatible_qualified(), src/type.c). Default is gcc --
+ today's behaviour, unchanged for anyone who does nothing. `AUTO` is resolved
+ before parsing (from CCCC_NATIVE_CC's family) and never stored. See
+ man/TYPES.md.
+*/
+typedef enum {
+    CCCC_COMPILER_FAMILY_GCC,
+    CCCC_COMPILER_FAMILY_CLANG,
+    CCCC_COMPILER_FAMILY_AUTO,
+} CCCCCompilerFamily;
+
 typedef enum { CTX_COMPTIME, CTX_EMIT } ComptimeCtxType;
 
 typedef struct {
@@ -4022,8 +4038,12 @@ typedef struct Compiler {
     CStdVersion    c_std; // Selected standard version (default: CCCC_STD_C23)
     bool           c_std_gnu;   // True for gnuXX variants (gnu17, gnu11, …)
     CCCCAttrTarget attr_target; // Generated/preprocessed attribute spelling
-    bool           emit_cccc;   // --emit-cccc: preserve CCCC dialect syntax in
-                                // -E/-m/-c=generated/-c=native output
+    CCCCCompilerFamily compiler_family; // --compiler-family: gcc vs clang
+                                        // reading of front-end type-compat
+                                        // divergences (never AUTO here --
+                                        // resolved in main.c). Default gcc.
+    bool emit_cccc;        // --emit-cccc: preserve CCCC dialect syntax in
+                           // -E/-m/-c=generated/-c=native output
     bool no_layout_guards; // --no-layout-guards: suppress the _Static_assert
                            // layout guards (#1172) next to emitted aggregate
                            // definitions in -m/-c=generated/-c=native output

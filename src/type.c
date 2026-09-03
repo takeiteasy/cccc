@@ -256,32 +256,70 @@ static Type *enum_compat_type(Type *ty) {
     return ty->is_unsigned ? ty_uint : ty_int;
 }
 
-// #1225: two spellings of "compatible types". The default (`strict` false,
-// reached via is_compatible()) is deliberately qualifier-*insensitive* --
-// C 6.5.16.1/6.5.9p2 let a `char *` and a `const char *` be assigned and
+// Two spellings of "compatible types". The default (`strict` false, reached
+// via is_compatible()) is deliberately qualifier-*insensitive* -- C
+// 6.5.16.1/6.5.9p2 let a `char *` and a `const char *` be assigned and
 // compared, so the pointer-conversion and vector-operand diagnostics that
 // call is_compatible() must not fire on a qualifier mismatch. The strict
-// spelling (compat_q, reached via is_compatible_qualified*()) keeps
-// qualifiers below the top level, which is the C notion the _Generic arm
-// match and __builtin_types_compatible_p want.
+// spelling keeps qualifiers, which is the C notion the _Generic arm match
+// and __builtin_types_compatible_p want.
+//
+// Because `_Atomic` is significant at nested positions (`_Atomic int *` and
+// `int *` are incompatible under both gcc and clang) but NOT at the top
+// level under gcc (`__builtin_types_compatible_p(_Atomic int, int)` is 1
+// under gcc, 0 under clang), one comparator is not enough. Four recursion
+// helpers, each naming exactly which top-level state it drops:
+//
+//   helper           drops cvr   drops _Atomic
+//   compat_body      yes         yes
+//   compat_adjusted  yes         no     (a function's adjusted param/return)
+//   compat_q         no          yes
+//   compat_nested    no          no     (every position below the top level)
+//
+// `family` selects the gcc vs clang reading at the three positions where the
+// two disagree (the is_compatible_qualified entry, a function's return type,
+// and an array's element type -- see the switch below). It is threaded
+// through every helper so the recursion composes; helpers that never branch
+// on it still forward it. is_compatible() and is_compatible_qualified_strict()
+// pin it to gcc, so only __builtin_types_compatible_p is policy-sensitive.
 static bool quals_match(Type *a, Type *b) {
-    // `_Atomic` is a specifier, not a cvr-qualifier; gcc's
-    // __builtin_types_compatible_p(_Atomic int, int) is 1 (clang says 0 --
-    // #1226 tracks the clang-family divergence, CCCC follows gcc for now),
-    // so it stays out of this comparison.
+    // cvr only. `_Atomic` significance rides the compat_adjusted /
+    // compat_nested split above, never this function -- so _Generic arm
+    // selection (which strips the controlling type's own _Atomic first,
+    // parse_postfix.c) keeps matching a plain `int:` arm correctly.
     return a->is_const == b->is_const && a->is_volatile == b->is_volatile &&
            a->is_restrict == b->is_restrict;
 }
 
-static bool compat_body(Type *t1, Type *t2, bool strict);
+static bool compat_body(Type *t1, Type *t2, bool strict,
+                        CCCCCompilerFamily family);
 
-static bool compat_q(Type *t1, Type *t2, bool strict) {
+static bool compat_q(Type *t1, Type *t2, bool strict,
+                     CCCCCompilerFamily family) {
     if (strict && !quals_match(t1, t2))
         return false;
-    return compat_body(t1, t2, strict);
+    return compat_body(t1, t2, strict, family);
 }
 
-static bool compat_body(Type *t1, Type *t2, bool strict) {
+// drops top-level cvr but keeps _Atomic -- the adjusted-type rule at a
+// function's parameter and (gcc) return positions.
+static bool compat_adjusted(Type *t1, Type *t2, bool strict,
+                            CCCCCompilerFamily family) {
+    if (strict && t1->is_atomic != t2->is_atomic)
+        return false;
+    return compat_body(t1, t2, strict, family);
+}
+
+// keeps cvr AND _Atomic -- every position below the top level.
+static bool compat_nested(Type *t1, Type *t2, bool strict,
+                          CCCCCompilerFamily family) {
+    if (strict && t1->is_atomic != t2->is_atomic)
+        return false;
+    return compat_q(t1, t2, strict, family);
+}
+
+static bool compat_body(Type *t1, Type *t2, bool strict,
+                        CCCCCompilerFamily family) {
     if (t1 == t2)
         return true;
 
@@ -289,11 +327,13 @@ static bool compat_body(Type *t1, Type *t2, bool strict) {
     // sets origin, and a qualified Type is a copy-with-flag of its
     // unqualified original -- re-running the qualifier check after the
     // unwrap would compare against the stripped original and always fail.
+    // Any top-level _Atomic that mattered was already checked by
+    // compat_adjusted/compat_nested before control reached here.
     if (t1->origin)
-        return compat_body(t1->origin, t2, strict);
+        return compat_body(t1->origin, t2, strict, family);
 
     if (t2->origin)
-        return compat_body(t1, t2->origin, strict);
+        return compat_body(t1, t2->origin, strict, family);
 
     // #1223: enum-vs-enum stays incompatible (two separately-declared enums
     // are distinct types even at identical width/signedness -- verified
@@ -303,9 +343,9 @@ static bool compat_body(Type *t1, Type *t2, bool strict) {
     // since an enum underlying type can never itself be TY_ENUM
     // (parse_types.c rejects that).
     if (t1->kind == TY_ENUM && t2->kind != TY_ENUM)
-        return compat_body(enum_compat_type(t1), t2, strict);
+        return compat_body(enum_compat_type(t1), t2, strict, family);
     if (t2->kind == TY_ENUM && t1->kind != TY_ENUM)
-        return compat_body(t1, enum_compat_type(t2), strict);
+        return compat_body(t1, enum_compat_type(t2), strict, family);
 
     if (t1->kind != t2->kind)
         return false;
@@ -325,17 +365,27 @@ static bool compat_body(Type *t1, Type *t2, bool strict) {
         case TY_DECIMAL128:
             return true;
         case TY_COMPLEX:
-            return compat_q(t1->base, t2->base, strict);
+            return compat_nested(t1->base, t2->base, strict, family);
         case TY_PTR:
             // #1225: the pointee's qualifiers count under `strict` -- this
-            // is where `char *` and `const char *` diverge.
-            return compat_q(t1->base, t2->base, strict);
+            // is where `char *` and `const char *` diverge. A pointee
+            // `_Atomic` counts too (`_Atomic int *` / `int *` incompatible
+            // under both gcc and clang), hence compat_nested.
+            return compat_nested(t1->base, t2->base, strict, family);
         case TY_FUNC: {
-            // Return and parameter types are compared after adjustment,
-            // which drops their top-level qualifiers (C: `void(const int)`
-            // and `void(int)` are compatible) -- recurse via compat_body,
-            // not compat_q.
-            if (!compat_body(t1->return_ty, t2->return_ty, strict))
+            // A function's return and parameter types are compared after
+            // adjustment, which drops their top-level cvr qualifiers (C:
+            // `void(const int)` and `void(int)` are compatible). `_Atomic`
+            // at those positions is significant under both families for a
+            // parameter, and under clang for the return type -- gcc drops
+            // it there too. compat_adjusted keeps _Atomic and drops cvr;
+            // compat_nested keeps both.
+            bool ret_ok = family == CCCC_COMPILER_FAMILY_CLANG
+                              ? compat_nested(t1->return_ty, t2->return_ty,
+                                              strict, family)
+                              : compat_adjusted(t1->return_ty, t2->return_ty,
+                                                strict, family);
+            if (!ret_ok)
                 return false;
             if (t1->is_variadic != t2->is_variadic)
                 return false;
@@ -343,20 +393,30 @@ static bool compat_body(Type *t1, Type *t2, bool strict) {
             Type *p1 = t1->params;
             Type *p2 = t2->params;
             for (; p1 && p2; p1 = p1->next, p2 = p2->next)
-                if (!compat_body(p1, p2, strict))
+                if (!compat_adjusted(p1, p2, strict, family))
                     return false;
             return p1 == NULL && p2 == NULL;
         }
-        case TY_ARRAY:
+        case TY_ARRAY: {
             // A qualifier on the element type qualifies the array itself,
             // i.e. it is top-level: `char[3]` and `const char[3]` are
-            // compatible (verified against gcc-16/clang). Skip exactly this
-            // one level via compat_body; qualifiers nested deeper still
-            // count.
-            if (!compat_body(t1->base, t2->base, strict))
+            // compatible (verified against gcc-16/clang). `_Atomic` on the
+            // element is top-level too -- significant under clang, dropped
+            // under gcc, same split as the is_compatible_qualified entry.
+            bool elem_ok =
+                family == CCCC_COMPILER_FAMILY_CLANG
+                    ? compat_adjusted(t1->base, t2->base, strict, family)
+                    : compat_body(t1->base, t2->base, strict, family);
+            if (!elem_ok)
                 return false;
-            return t1->array_len < 0 && t2->array_len < 0 &&
+            // Compatible when both element types match AND either length is
+            // unspecified (`-1`, the array_of() sentinel) or the two lengths
+            // are equal -- `int[3]`/`int[3]` and `int[3]`/`int[]` are
+            // compatible, `int[3]`/`int[4]` is not (all verified against
+            // gcc-16/clang).
+            return t1->array_len < 0 || t2->array_len < 0 ||
                    t1->array_len == t2->array_len;
+        }
         case TY_BITINT:
             return t1->is_unsigned == t2->is_unsigned &&
                    t1->bit_width == t2->bit_width;
@@ -364,28 +424,38 @@ static bool compat_body(Type *t1, Type *t2, bool strict) {
             return true;
         case TY_VECTOR:
             return t1->vec_len == t2->vec_len &&
-                   compat_q(t1->base, t2->base, strict);
+                   compat_nested(t1->base, t2->base, strict, family);
         default:
             return false;
     }
 }
 
 bool is_compatible(Type *t1, Type *t2) {
-    return compat_body(t1, t2, false);
+    // Qualifier-lax; never policy-sensitive.
+    return compat_body(t1, t2, false, CCCC_COMPILER_FAMILY_GCC);
 }
 
 // #1225: compatible with pointee (and deeper) qualifiers honored, but
-// top-level qualifiers ignored -- the rule __builtin_types_compatible_p
-// follows.
-bool is_compatible_qualified(Type *t1, Type *t2) {
-    return compat_body(t1, t2, true);
+// top-level cvr qualifiers ignored -- the rule __builtin_types_compatible_p
+// follows. `family` selects whether top-level `_Atomic` (and array-element
+// `_Atomic`, and a function's return-type cvr) is significant: gcc drops it,
+// clang keeps it (--compiler-family, see man/TYPES.md). The _Generic
+// collision path passes gcc explicitly -- that construct is not
+// policy-sensitive.
+bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family) {
+    if (family == CCCC_COMPILER_FAMILY_CLANG)
+        return compat_adjusted(t1, t2, true, family);
+    return compat_body(t1, t2, true, family);
 }
 
-// #1225: as is_compatible_qualified() but also compares the top-level
-// qualifiers. Used for _Generic arm selection / collision, where lvalue
-// conversion has already stripped the controlling type's own qualifiers.
+// #1225: as is_compatible_qualified() but also compares the top-level cvr
+// qualifiers, and top-level `_Atomic` (both families agree here -- an
+// `_Atomic int:` and a plain `int:` _Generic association are distinct, and a
+// controlling expression whose own `_Atomic` was stripped by lvalue
+// conversion matches the plain arm). Used for _Generic arm selection /
+// collision.
 bool is_compatible_qualified_strict(Type *t1, Type *t2) {
-    return compat_q(t1, t2, true);
+    return compat_nested(t1, t2, true, CCCC_COMPILER_FAMILY_GCC);
 }
 
 Type *copy_type(VirtualMachine *vm, Type *ty) {

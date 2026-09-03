@@ -1101,7 +1101,7 @@ static bool assoc_types_collide(Type *a, Type *b) {
     if (!a || !b)
         return false;
     if (a->is_const != b->is_const || a->is_volatile != b->is_volatile ||
-        a->is_restrict != b->is_restrict)
+        a->is_restrict != b->is_restrict || a->is_atomic != b->is_atomic)
         return false;
     if (a->kind == TY_PTR && b->kind == TY_PTR)
         return assoc_types_collide(a->base, b->base);
@@ -1109,8 +1109,11 @@ static bool assoc_types_collide(Type *a, Type *b) {
         return false;
     // #1225: is_compatible_qualified() honors pointee qualifiers, so the
     // explicit TY_PTR recursion above is what still lets the long/long-long
-    // guard reach every pointer level (`long *:` / `long long *:`).
-    return is_compatible_qualified(a, b);
+    // guard reach every pointer level (`long *:` / `long long *:`). A
+    // _Generic association-type collision is not compiler-family-sensitive
+    // (both gcc and clang accept `_Atomic int:` next to `int:` and pick the
+    // plain arm) -- pass gcc explicitly.
+    return is_compatible_qualified(a, b, CCCC_COMPILER_FAMILY_GCC);
 }
 
 // generic-selection = "(" assign "," generic-assoc ("," generic-assoc)* ")"
@@ -1133,14 +1136,21 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     t1->is_const    = false;
     t1->is_volatile = false;
     t1->is_restrict = false;
+    t1->is_atomic   = false;
     // These strips are the lvalue conversion of the controlling expression
-    // (C23 6.7.11p3): all three top-level qualifiers are dropped before any
-    // arm is matched. Since #1225 the arm match compares qualifiers, so an
-    // association naming a top-level-qualified type (`const int:`) can now
-    // never be selected -- matching gcc/clang. origin is deliberately kept:
-    // it is the only link back to the original Type*, so an association
-    // naming a tagged type (`struct S`, `enum G`) still matches its own
-    // controlling expression by identity (#1223).
+    // (C23 6.7.11p3): the top-level cvr qualifiers AND `_Atomic` are dropped
+    // before any arm is matched. Since #1225 the arm match compares
+    // qualifiers, so an association naming a top-level-qualified type
+    // (`const int:`, `_Atomic int:`) can now never be selected by an
+    // unqualified controlling expression -- matching gcc/clang, both of
+    // which pick a plain `int:` arm for an `_Atomic int` lvalue. (gcc also
+    // strips `_Atomic` from a non-lvalue cast like `(_Atomic int)0`; clang
+    // keeps it there. CCCC has no general lvalue predicate and that cast
+    // shape is pathological -- strip unconditionally, i.e. follow gcc; see
+    // man/TYPES.md.) origin is deliberately kept: it is the only link back
+    // to the original Type*, so an association naming a tagged type
+    // (`struct S`, `enum G`) still matches its own controlling expression by
+    // identity (#1223).
 
     Node *match        = NULL;
     Node *default_node = NULL;
@@ -1537,9 +1547,14 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *t2 = typename(vm, &tok, tok);
         *rest    = skip(vm, tok, ")");
         // #1225: honors pointee (and deeper) qualifiers -- `char *` and
-        // `const char *` are not compatible -- but ignores top-level
-        // qualifiers, matching gcc/clang.
-        return new_num(vm, is_compatible_qualified(t1, t2), start);
+        // `const char *` are not compatible -- but ignores top-level cvr
+        // qualifiers, matching gcc/clang. Top-level `_Atomic`, a function
+        // return type's own cvr, and an array element's `_Atomic` are where
+        // gcc and clang genuinely disagree; --compiler-family picks the
+        // reading (see man/TYPES.md).
+        return new_num(
+            vm, is_compatible_qualified(t1, t2, vm->compiler.compiler_family),
+            start);
     }
 
     // __builtin_classify_type(expr) (GCC extension): returns a small integer
