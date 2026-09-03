@@ -87,27 +87,52 @@ union sigval {
     void *sival_ptr;
 };
 
+/* si_addr (#1277) -- the faulting address, reported for SIGSEGV/SIGBUS/
+   SIGILL/SIGFPE. On both platforms it is a different arm of the same union
+   as si_pid/si_uid/si_status (the SIGCHLD arm), so it is modelled as an
+   overlapping member at the real offset rather than appended: macOS lays
+   si_addr right after si_status at offset 24; glibc overlays it on the
+   SIGCHLD arm at offset 16. Sizes stay the full host sizeof (104 / 128)
+   with explicit trailing padding, as before. */
 #ifdef __APPLE__
 typedef struct {
-    int  si_signo;
-    int  si_errno;
-    int  si_code;
-    int  si_pid;
-    int  si_uid;
-    int  si_status;
-    char __si_pad[104 - 6 * sizeof(int)];
+    int   si_signo;
+    int   si_errno;
+    int   si_code;
+    int   si_pid;
+    int   si_uid;
+    int   si_status;
+    void *si_addr;
+    char  __si_pad[104 - 24 - sizeof(void *)];
 } siginfo_t;
+_Static_assert(sizeof(siginfo_t) == 104, "macOS siginfo_t layout mismatch");
+_Static_assert(offsetof(siginfo_t, si_status) == 20,
+               "macOS siginfo_t si_status offset mismatch");
+_Static_assert(offsetof(siginfo_t, si_addr) == 24,
+               "macOS siginfo_t si_addr offset mismatch");
 #else
 typedef struct {
-    int  si_signo;
-    int  si_errno;
-    int  si_code;
-    int  __si_pad0;
-    int  si_pid;
-    int  si_uid;
-    int  si_status;
-    char __si_pad[128 - 7 * sizeof(int)];
+    int si_signo;
+    int si_errno;
+    int si_code;
+    int __si_pad0;
+    union {
+        struct {
+            int si_pid;
+            int si_uid;
+            int si_status;
+        };
+        void *si_addr;
+    };
+    char __si_pad[128 - 16 - 16];
 } siginfo_t;
+_Static_assert(sizeof(siginfo_t) == 128, "glibc siginfo_t layout mismatch");
+_Static_assert(offsetof(siginfo_t, si_pid) == 16,
+               "glibc siginfo_t si_pid offset mismatch");
+_Static_assert(offsetof(siginfo_t, si_status) == 24,
+               "glibc siginfo_t si_status offset mismatch");
+_Static_assert(offsetof(siginfo_t, si_addr) == 16,
+               "glibc siginfo_t si_addr offset mismatch");
 #endif
 
 /* struct sigevent (#804, #805, #870) -- used by aio.h's aiocb.aio_sigevent
@@ -202,6 +227,21 @@ extern int sigfillset(sigset_t *set);
 extern int sigaddset(sigset_t *set, int signo);
 extern int sigdelset(sigset_t *set, int signo);
 extern int sigismember(const sigset_t *set, int signo);
+
+/* sigprocmask() how-values. macOS: 1/2/3; Linux: 0/1/2. Verified against
+   real macOS and Linux x86_64/aarch64 headers (Linux values match across
+   x86_64/aarch64). */
+#ifdef __APPLE__
+#define SIG_BLOCK   1
+#define SIG_UNBLOCK 2
+#define SIG_SETMASK 3
+#else
+#define SIG_BLOCK   0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+#endif
+
+extern int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 
 /* SA_* flags (#745) -- previously unconditional macOS values, which is a
    genuine bug beyond cosmetics: real Linux SA_SIGINFO is 0x4, which

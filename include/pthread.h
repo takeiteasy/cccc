@@ -30,6 +30,30 @@
 typedef void        *pthread_t;
 typedef unsigned int pthread_key_t;
 
+/* pthread_once: declared so CCCC's own frontend can parse its own source
+ * (src/tokenize.c and src/parse_init.c hold
+ * `static pthread_once_t ... = PTHREAD_ONCE_INIT` for their lazy
+ * keyword/typename maps and call pthread_once() on them) and so a
+ * -c=native re-emission's replayed `#include <pthread.h>` binds these
+ * names to the real host definitions. The type mirrors the real host
+ * layout per platform (unlike the {void*,long,int} projections below,
+ * which are CCCC's own FFI-wrapper polyfill) so a serialized
+ * `pthread_once_t x = PTHREAD_ONCE_INIT;` stays valid against the replayed
+ * real header. The VM does not itself execute pthread_once -- it is not
+ * FFI-registered; guest code that calls it under the VM gets an
+ * undefined-function error. */
+#ifdef __APPLE__
+typedef struct {
+    long __sig;
+    char __opaque[8];
+} pthread_once_t;
+#define PTHREAD_ONCE_INIT {0x30B1BCBA, {0}}
+#else
+typedef int pthread_once_t;
+#define PTHREAD_ONCE_INIT 0
+#endif
+int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+
 typedef struct {
     void *__handle;
     long  __state;

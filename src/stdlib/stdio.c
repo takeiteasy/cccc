@@ -259,6 +259,7 @@ void register_stdio_functions(VirtualMachine *vm) {
     // Process I/O (POSIX)
     cc_register_cfunc(vm, "popen", (void *)popen, 2, 0);
     cc_register_cfunc(vm, "pclose", (void *)pclose, 1, 0);
+    cc_register_cfunc(vm, "fileno", (void *)fileno, 1, 0);
 
     // Thread-safety file locking (POSIX)
     cc_register_cfunc(vm, "flockfile", (void *)flockfile, 1, 0);

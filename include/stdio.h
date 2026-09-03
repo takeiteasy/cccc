@@ -167,6 +167,7 @@ extern void perror(const char *s);
 /* present on both macOS and glibc. */
 extern FILE *popen(const char *command, const char *mode);
 extern int pclose(FILE *stream);
+extern int fileno(FILE *stream);
 extern int fseeko(FILE *stream, off_t offset, int whence);
 extern off_t ftello(FILE *stream);
 extern void flockfile(FILE *stream);

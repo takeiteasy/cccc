@@ -8,6 +8,36 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: CCCC's `#pragma once` (and `#ifndef` include-guard) suppression was
+  keyed on the raw resolved path *string*, so one physical header reached
+  under two spellings in a single translation unit — e.g. `"./internal.h"`
+  and, via another header's own `#include "./internal.h"` resolved against
+  *its* directory, `"src/././internal.h"` — was included twice and every
+  `static inline` helper it defined was reported as a redefinition. The key
+  is now canonicalized with `realpath()` on every lookup and insert, falling
+  back to the literal string for synthetic/embedded paths. A real host `cc`
+  never hit this because its `#pragma once` is inode-based. Surfaced by the
+  self-hosting spike (`src/macros.c` includes both `"./internal.h"` and
+  `"./parse_internal.h"`).
+- Added: `<stdio.h>` now declares `fileno`, and `<signal.h>` now declares
+  `sigprocmask` (with `SIG_BLOCK`/`SIG_UNBLOCK`/`SIG_SETMASK`) and gives
+  `siginfo_t` its `si_addr` member. All three are used by
+  `src/host_signal.c` and were missing from the bundled headers. `fileno`
+  is a plain passthrough; `sigprocmask` is a translating wrapper (the guest
+  `sigset_t` is CCCC's own 4-byte bitmask, not the host's real `sigset_t`),
+  registered for VM/bytecode execution too. `si_addr` overlaps the SIGCHLD
+  union arm at its real per-platform offset (24 on macOS, 16 on glibc),
+  guarded by `_Static_assert`. Surfaced by the self-hosting spike.
+- Added: the bundled `<pthread.h>` now declares `pthread_once`,
+  `pthread_once_t`, and `PTHREAD_ONCE_INIT` (the type mirrors the real host
+  layout per platform — a 16-byte struct on macOS, `int` on glibc — so a
+  serialized `pthread_once_t x = PTHREAD_ONCE_INIT;` stays valid against the
+  replayed real header). `-c=native`/`-c=generated` of code using
+  `pthread_once` now works. It is not yet FFI-registered for VM/bytecode
+  execution — a guest calling it under the VM gets an undefined-function
+  error; `call_once` (`<threads.h>`) is the fully VM-backed one-time init.
+  Surfaced by the self-hosting spike (`src/tokenize.c` /
+  `src/parse_init.c`).
 - Added: `sigsetjmp`/`siglongjmp`/`sigjmp_buf` support. On the VM they alias
   the plain `setjmp`/`longjmp` opcodes — the VM has no signal-mask concept,
   so the `savemask` argument is evaluated for its side effects then

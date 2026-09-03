@@ -2807,17 +2807,42 @@ static void register_stdlib_for_header(VirtualMachine *vm,
     }
 }
 
+// The `#pragma once` / include-guard maps are keyed by path *string*, but
+// one physical header can be reached under several spellings in a single
+// TU: e.g. src/macros.c includes both "./internal.h" (resolved against its
+// own dir -> "src/./internal.h") and "./parse_internal.h", whose own
+// `#include "./internal.h"` resolves against *its* dir -> "src/././
+// internal.h". Two different strings, one file -- so `#pragma once` fails
+// to suppress the second include and every `static inline` helper in the
+// header is redefined. A real host cc doesn't hit this because its
+// `#pragma once` is inode/realpath-based. Canonicalize the key the same
+// way files_are_same() (serialize_program.c, #1032) does: realpath() when
+// it resolves, the literal string otherwise (synthetic/embedded paths such
+// as "<embedded>/foo.h" have no file on disk and are already self-
+// consistent). Must be applied on *every* get and put of these maps or the
+// two sides drift.
+static const char *pragma_once_key(VirtualMachine *vm, const char *path) {
+    if (!path)
+        return path;
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved))
+        return arena_strdup(vm, resolved);
+    return path;
+}
+
 static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
                            Token *filename_tok, const char *include_name,
                            bool is_system) {
+    const char *once_key = pragma_once_key(vm, path);
+
     // Check for "#pragma once"
-    if (hashmap_get(&vm->compiler.pragma_once, path))
+    if (hashmap_get(&vm->compiler.pragma_once, once_key))
         return tok;
 
     // If we read the same file before, and if the file was guarded
     // by the usual #ifndef ... #endif pattern, we may be able to
     // skip the file without opening it.
-    char *guard_name = hashmap_get(&vm->compiler.include_guards, path);
+    char *guard_name = hashmap_get(&vm->compiler.include_guards, once_key);
     if (guard_name && hashmap_get(&vm->compiler.macros, guard_name))
         return tok;
 
@@ -2834,7 +2859,7 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
 
     guard_name = detect_include_guard(vm, tok2);
     if (guard_name) {
-        hashmap_put(&vm->compiler.include_guards, path, guard_name);
+        hashmap_put(&vm->compiler.include_guards, once_key, guard_name);
         hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
     }
 
@@ -2892,12 +2917,13 @@ static char *embedded_header_key(VirtualMachine *vm, const char *filename) {
 static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
                                       char *filename, char *src,
                                       Token *filename_tok) {
-    char *key = embedded_header_key(vm, filename);
+    char       *key      = embedded_header_key(vm, filename);
+    const char *once_key = pragma_once_key(vm, key);
 
-    if (hashmap_get(&vm->compiler.pragma_once, key))
+    if (hashmap_get(&vm->compiler.pragma_once, once_key))
         return tok;
 
-    char *guard_name = hashmap_get(&vm->compiler.include_guards, key);
+    char *guard_name = hashmap_get(&vm->compiler.include_guards, once_key);
     if (guard_name && hashmap_get(&vm->compiler.macros, guard_name))
         return tok;
 
@@ -2912,7 +2938,7 @@ static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
 
     guard_name = detect_include_guard(vm, tok2);
     if (guard_name) {
-        hashmap_put(&vm->compiler.include_guards, key, guard_name);
+        hashmap_put(&vm->compiler.include_guards, once_key, guard_name);
         hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
     }
 
@@ -5151,7 +5177,11 @@ static Token *handle_pragma_pack(VirtualMachine *vm, Token *tok) {
 // string).
 static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "once")) {
-        hashmap_put(&vm->compiler.pragma_once, tok->file->name, (void *)1);
+        // Canonicalize identically to include_file()'s lookup key
+        // (pragma_once_key) so a header pragma-onced under one path spelling
+        // is still recognized when reached under another in the same TU.
+        hashmap_put(&vm->compiler.pragma_once,
+                    pragma_once_key(vm, tok->file->name), (void *)1);
         return skip_line(vm, tok->next);
     } else if (equal(tok, "macro")) {
         error_tok(vm, tok,

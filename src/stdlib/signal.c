@@ -391,6 +391,43 @@ static long long wrap_sigismember(long long set, long long signo) {
     return (*(unsigned int *)set & (1u << (unsigned)(signo - 1))) ? 1 : 0;
 }
 
+// sigprocmask (#1277). The guest sigset_t is CCCC's own 4-byte bitmask
+// (see the sigset_t operations block above), never the host's real
+// sigset_t (a 128-byte struct on Linux). Translate the guest `set` into a
+// real host sigset_t for the call, and translate the host `oldset` back
+// into the guest's 4-byte form afterwards. `how` needs no translation:
+// include/signal.h's SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK are #ifdef
+// __APPLE__-guarded to the host's own values, exactly like the SIG*
+// signal numbers themselves.
+static long long wrap_sigprocmask(long long how, long long set,
+                                  long long oldset) {
+    sigset_t  host_set;
+    sigset_t  host_old;
+    sigset_t *host_set_ptr = NULL;
+
+    if (set) {
+        sigemptyset(&host_set);
+        for (int signo = 1; signo < CCCC_NSIG; signo++) {
+            if (*(unsigned int *)set & (1u << (unsigned)(signo - 1)))
+                sigaddset(&host_set, signo);
+        }
+        host_set_ptr = &host_set;
+    }
+
+    if (sigprocmask((int)how, host_set_ptr, oldset ? &host_old : NULL) != 0)
+        return -1; /* errno set by the host */
+
+    if (oldset) {
+        unsigned int guest_old = 0;
+        for (int signo = 1; signo < CCCC_NSIG; signo++) {
+            if (sigismember(&host_old, signo))
+                guest_old |= (1u << (unsigned)(signo - 1));
+        }
+        *(unsigned int *)oldset = guest_old;
+    }
+    return 0;
+}
+
 void register_signal_functions(VirtualMachine *vm) {
     /* signal() and raise() are handled via VSIGNAL/VRAISE opcodes;
        no FFI registration is needed */
@@ -400,4 +437,5 @@ void register_signal_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "sigaddset", (void *)wrap_sigaddset, 2, 0);
     cc_register_cfunc(vm, "sigdelset", (void *)wrap_sigdelset, 2, 0);
     cc_register_cfunc(vm, "sigismember", (void *)wrap_sigismember, 2, 0);
+    cc_register_cfunc(vm, "sigprocmask", (void *)wrap_sigprocmask, 3, 0);
 }
