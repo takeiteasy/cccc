@@ -7571,6 +7571,59 @@ def case_generated_shared_typedef_global_1241(cccc: Path, tmp: str) -> bool:
     return True
 
 
+COMPILER_FAMILY_AUTO_PROGRAM = """
+// __CCCC_COMPILER_FAMILY__ is 0 (gcc policy) or 1 (clang policy); with
+// --compiler-family=auto it must track CCCC_NATIVE_CC's own family.
+#if __CCCC_COMPILER_FAMILY__ == 1
+int main(void) { return 1; }   // clang policy resolved
+#else
+int main(void) { return 0; }   // gcc policy resolved
+#endif
+"""
+
+
+def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
+    print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
+          "own compiler family (via its predefined macros) and resolves "
+          "__CCCC_COMPILER_FAMILY__ to match: 1 when it points at a real "
+          "clang, 0 when at a real gcc. Runs the -m preprocessor branch "
+          "under each family found on PATH; skips a family that isn't "
+          "installed.")
+    src = Path(tmp) / "compiler_family_auto_1226.c"
+    write(src, COMPILER_FAMILY_AUTO_PROGRAM)
+
+    checked = 0
+    for want, cc in (("clang", _find_family_cc(["clang", "cc"], "clang")),
+                     ("gcc", _find_family_cc(
+                         ["gcc-16", "gcc-15", "gcc-14", "gcc-13", "gcc",
+                          "/opt/homebrew/bin/gcc-16"], "gcc"))):
+        if not cc:
+            print(f"    skip: no real {want} on PATH")
+            continue
+        checked += 1
+        env = dict(os.environ)
+        env["CCCC_NATIVE_CC"] = cc
+        # -m expands the source through the preprocessor; the surviving
+        # main() body tells us which branch __CCCC_COMPILER_FAMILY__ took.
+        r = run([str(cccc), "--compiler-family=auto", "-m", src.name],
+                cwd=tmp, env=env)
+        if r.returncode != 0:
+            print(f"    FAIL: --compiler-family=auto -m exited {r.returncode} "
+                  f"under CCCC_NATIVE_CC={cc}\n    {r.stderr}")
+            return False
+        want_marker = "return 1;" if want == "clang" else "return 0;"
+        other_marker = "return 0;" if want == "clang" else "return 1;"
+        if want_marker not in r.stdout or other_marker in r.stdout:
+            print(f"    FAIL: auto did not resolve to {want} for {cc}\n"
+                  f"    {r.stdout}")
+            return False
+    if checked == 0:
+        print("    skip: neither a real gcc nor a real clang on PATH")
+        return True
+    print("    ok")
+    return True
+
+
 # Every case this script runs, in a fixed order matching each case's own
 # hand-maintained case number (see each function's own print()). Hoisted to
 # module scope (#1197) so both main() and audit_skips() below share one
@@ -7731,6 +7784,7 @@ CASES = [
     case_anon_typedef_signature_18,
     case_ret_buffer_unused_local_19,
     case_generated_shared_typedef_global_1241,
+    case_compiler_family_auto_resolves_1226,
 ]
 
 

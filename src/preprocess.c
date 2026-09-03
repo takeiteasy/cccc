@@ -6647,6 +6647,12 @@ void init_mode_macros(VirtualMachine *vm) {
         define_macro(vm, "__CCCC_TEST_MODE__", "1");
     if (!vm->compiler.build_mode && !vm->compiler.testing_mode)
         define_macro(vm, "__CCCC_COMP_MODE__", "1");
+    // Which host compiler family the front end models where gcc and clang
+    // genuinely disagree (--compiler-family). 0 = gcc (default), 1 = clang.
+    // Always defined and never AUTO here (main.c resolves it).
+    define_macro(
+        vm, "__CCCC_COMPILER_FAMILY__",
+        vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_CLANG ? "1" : "0");
 }
 
 typedef enum {

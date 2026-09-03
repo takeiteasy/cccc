@@ -549,6 +549,12 @@ static void usage(const char *argv0, int exit_code) {
            "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
            "auto, c23, gnu, msvc, strip\n");
+    printf(
+        "\t   --compiler-family=FAM  Host family CCCC's front end models "
+        "where gcc/clang\n"
+        "\t                         disagree (__builtin_types_compatible_p): "
+        "gcc (default),\n"
+        "\t                         clang, auto (probe CCCC_NATIVE_CC)\n");
     printf("\t   --emit-cccc           Preserve CCCC dialect syntax "
            "([[cccc::...]], @-attrs, "
            "checked-pointer\n");
@@ -1331,11 +1337,13 @@ int main(int argc, const char *argv[]) {
     int    url_timeout     = 0;    // --url-timeout (0 = use default)
     size_t url_max_size    = 0;    // --url-max-size (0 = use default)
 #endif
-    CCCCAttrTarget attr_target    = CCCC_ATTR_TARGET_AUTO; // --attr-target
-    int            emit_cccc_mode = 0;                     // --emit-cccc
-    int            no_layout_guards_mode = 0; // --no-layout-guards (#1172)
-    int            test_run_mode         = 0; // --test-run[=LEVEL]
-    uint64_t       test_run_flags =
+    CCCCAttrTarget     attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
+    CCCCCompilerFamily compiler_family =
+        CCCC_COMPILER_FAMILY_GCC;                           // --compiler-family
+    int      emit_cccc_mode        = 0;                     // --emit-cccc
+    int      no_layout_guards_mode = 0; // --no-layout-guards (#1172)
+    int      test_run_mode         = 0; // --test-run[=LEVEL]
+    uint64_t test_run_flags =
         0;                // safety preset bits for --test-run's VM smoke test
     int compile_only = 0; // -c (set whenever -c/--compile is given; semantics:
                           //   "compile, do not execute". -c=native hands off to
@@ -1436,6 +1444,7 @@ int main(int argc, const char *argv[]) {
         {"emit-cccc", no_argument, 0, 1120},
         {"test-run", optional_argument, 0, 1121},
         {"no-layout-guards", no_argument, 0, 1122},
+        {"compiler-family", required_argument, 0, 1123},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -1987,11 +1996,26 @@ int main(int argc, const char *argv[]) {
                     usage(argv[0], 1);
                 }
                 break;
-            case 1120:   // --emit-cccc
+            case 1120: // --emit-cccc
                 emit_cccc_mode = 1;
                 break;
-            case 1122:   // --no-layout-guards (#1172)
+            case 1122: // --no-layout-guards (#1172)
                 no_layout_guards_mode = 1;
+                break;
+            case 1123: // --compiler-family=gcc|clang|auto
+                if (strcmp(optarg, "gcc") == 0) {
+                    compiler_family = CCCC_COMPILER_FAMILY_GCC;
+                } else if (strcmp(optarg, "clang") == 0) {
+                    compiler_family = CCCC_COMPILER_FAMILY_CLANG;
+                } else if (strcmp(optarg, "auto") == 0) {
+                    compiler_family = CCCC_COMPILER_FAMILY_AUTO;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --compiler-family '%s' "
+                            "(use 'gcc', 'clang', or 'auto')\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
                 break;
             case 1121: { // --test-run[=LEVEL]
                 test_run_mode     = 1;
@@ -2373,11 +2397,18 @@ int main(int argc, const char *argv[]) {
     vm.compiler.emit_strict             = emit_only;
     vm.compiler.emit_generated_only     = (bool)emit_generated_only;
     vm.compiler.attr_target             = attr_target;
-    vm.compiler.emit_cccc               = (bool)emit_cccc_mode;
-    vm.compiler.no_layout_guards        = (bool)no_layout_guards_mode;
-    vm.compiler.entry_name              = (char *)entry_name;
-    vm.compiler.testing_mode            = (bool)testing_mode;
-    vm.compiler.build_mode              = (bool)build_mode;
+    // Resolve --compiler-family=auto now, before any parsing -- the
+    // front-end type-compat helpers (src/type.c) and __CCCC_COMPILER_FAMILY__
+    // both need a settled value, never AUTO. `auto` probes CCCC_NATIVE_CC's
+    // family; anything unresolvable falls back to gcc with a warning.
+    vm.compiler.compiler_family  = compiler_family == CCCC_COMPILER_FAMILY_AUTO
+                                       ? cccc_detect_native_cc_family()
+                                       : compiler_family;
+    vm.compiler.emit_cccc        = (bool)emit_cccc_mode;
+    vm.compiler.no_layout_guards = (bool)no_layout_guards_mode;
+    vm.compiler.entry_name       = (char *)entry_name;
+    vm.compiler.testing_mode     = (bool)testing_mode;
+    vm.compiler.build_mode       = (bool)build_mode;
     init_mode_macros(&vm);
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi          = disable_all_ffi;

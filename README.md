@@ -63,6 +63,7 @@ Guides live in [`man/`](man/):
 | [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
 | [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
 | [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
+| [TYPES.md](man/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |
 
 ## Usage
 
@@ -90,6 +91,9 @@ Options:
 	-m/--dump-expanded       Output macro-expanded source code (for gcc compatibility)
 	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
+	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
+	                         disagree (__builtin_types_compatible_p): gcc (default),
+	                         clang, auto (probe CCCC_NATIVE_CC)
 	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
 	                         qualifiers, cccc-only #includes) in -E/-m/-c=native/-c=generated output
 	                         instead of stripping it to portable C. With -c=native, the usual

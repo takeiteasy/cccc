@@ -971,8 +971,12 @@ def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
         # --test=GLOB/--test-suite/--fail-fast/--test-timeout/--list-tests
         # are baked into the generated harness at compile time, same as
         # --testing itself, so none of them need a skip here either.
-        if f in ("-c", "-o", "--out") or f.startswith("-c=") or f.startswith("-o=") \
-                or f.startswith("--compile") or f.startswith("--out="):
+        if f in ("-c", "-o", "--out", "--compile") or f.startswith("-c=") \
+                or f.startswith("-o=") or f.startswith("--compile=") \
+                or f.startswith("--out="):
+            # NB: exact "--compile"/"--compile=" only -- a bare startswith
+            # here also swallowed --compiler-family=... (harmless in effect,
+            # but the wrong skip reason).
             return "test drives -c/-o itself"
         for p in _NATIVE_FRONTEND_PREFIXES:
             if f == p or f.startswith(p):
