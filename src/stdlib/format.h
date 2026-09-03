@@ -35,12 +35,15 @@ int cccc_printf(const char *fmt, ...);
 int cccc_fprintf(FILE *stream, const char *fmt, ...);
 int cccc_sprintf(char *buf, const char *fmt, ...);
 int cccc_snprintf(char *buf, size_t count, const char *fmt, ...);
+int cccc_vasprintf(char **strp, const char *fmt, va_list ap);
+int cccc_asprintf(char **strp, const char *fmt, ...);
 
 long long wrap_cccc_vprintf(const char *fmt, long long va_ptr);
 long long wrap_cccc_vsprintf(char *str, const char *fmt, long long va_ptr);
 long long wrap_cccc_vsnprintf(char *str, long long size, const char *fmt,
                               long long va_ptr);
 long long wrap_cccc_vfprintf(FILE *stream, const char *fmt, long long va_ptr);
+long long wrap_cccc_vasprintf(char **strp, const char *fmt, long long va_ptr);
 
 // ---- scanf family (format_scanf.c) ----
 int cccc_vscanf(const char *fmt, va_list ap);

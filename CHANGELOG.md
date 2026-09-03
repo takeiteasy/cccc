@@ -169,3 +169,28 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `-c=native`'s dialect-widening reasons apply here). An unhonourable
   `--std=` now fails only that target, with `--build-keep-going` and
   `--build-dry-run` both behaving as expected. See `man/BUILD_MODE.md`.
+- Fixed: a `for (;;) { ...; goto DONE; } DONE: return ...;` function body
+  (a named label statement whose own statement unconditionally returns)
+  wrongly failed with "control reaches end of non-void aggregate function"
+  for a struct/union return type, because the missing-return check
+  (`statement_terminates`) never looked inside a labeled statement. It now
+  recurses into a label's own statement the same way it already does for a
+  block's last statement or an `if`/`else` pair.
+- Fixed: several standard-library coverage gaps surfaced by attempting a
+  self-hosting compile of cccc's own source under `-c=native`: `<string.h>`
+  was missing `strtok`; `<glob.h>` was missing `GLOB_TILDE` and several other
+  GNU/BSD extension bits; `<sys/stat.h>`'s `struct stat` had no
+  `st_atime`/`st_mtime`/`st_ctime` compatibility macros aliasing the
+  timespec-based fields it does declare; `<stdio.h>` was missing
+  `asprintf`/`vasprintf` entirely (now also registered for VM/bytecode-mode
+  execution, including a from-scratch `vasprintf` implementation for hosts
+  routed through the custom `%b`/`%B` printf engine).
+- Fixed: `<locale.h>` had no `#ifdef __CCCC__` / `#include_next <locale.h>`
+  hand-off (unlike `<pthread.h>`/`<fenv.h>`/`<stdio.h>`, #1021/#1022/#1040),
+  so a real host compiler reprocessing it under `-c=native`/`-c=generated`
+  saw its own trimmed `struct lconv` collide with the real host's — surfaced
+  by the same self-hosting attempt. `<ctype.h>`, `<langinfo.h>`, and
+  `<monetary.h>` also quote-included `"locale.h"` rather than `<locale.h>`,
+  which would have bypassed the hand-off entirely (#1070's own rule against
+  a bundled header quote-including one with a hand-off) — switched to
+  angle brackets.

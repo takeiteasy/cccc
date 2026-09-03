@@ -377,6 +377,16 @@ static bool statement_terminates(Node *node) {
         case ND_IF:
             return node->els && statement_terminates(node->then) &&
                    statement_terminates(node->els);
+        case ND_LABEL:
+            // A named label statement (`DONE: return ...;`) terminates iff
+            // the statement it labels does -- reachable only via `goto`, but
+            // whatever reaches it still can't fall off the end past it. Was
+            // unhandled (fell to `default`), a false-positive "control
+            // reaches end" for the common `for (;;) { ...; goto DONE; }
+            // DONE: return ...;` shape (e.g. src/build_shell.c's read_word())
+            // whenever the return type is a struct/union, since that path is
+            // a hard error rather than a warning.
+            return statement_terminates(node->lhs);
         default:
             return false;
     }

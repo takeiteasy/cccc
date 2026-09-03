@@ -34,6 +34,23 @@
 #ifndef __LOCALE_H
 #define __LOCALE_H
 
+/* #1132 self-hosting spike: this exact file is also what a native/generated
+ * re-emission's replayed `#include <locale.h>` resolves to (run_native_
+ * backend forwards -I./include straight through to the host cc, and -I
+ * paths are searched ahead of system directories) -- but struct lconv below
+ * is CCCC's own trimmed ISO C89 subset (missing the C99+ int_p_cs_precedes/
+ * int_n_cs_precedes/int_p_sep_by_space/int_n_sep_by_space/int_p_sign_posn/
+ * int_n_sign_posn fields real hosts have), so a real host compiler that also
+ * reaches the real system <locale.h> (as cccc's own src/build.c's transitive
+ * includes do) sees two incompatible `struct lconv` definitions -- same
+ * shape as #1021/#1022/#1040 (fenv.h/pthread.h/stdio.h): guard the whole
+ * CCCC-flavored body and hand off to the host's own <locale.h> via
+ * #include_next. __CCCC__ is defined unconditionally by CCCC's own
+ * preprocessor before any header is read, so its absence here means a
+ * genuine host compiler is reprocessing this file -- only possible during
+ * -c=native/-c=generated serializer replay. */
+#ifdef __CCCC__
+
 #include "stddef.h" /* C requires <locale.h> to define NULL */
 
 #define LC_ALL      0
@@ -89,5 +106,9 @@ extern locale_t newlocale(int category_mask, const char *locale, locale_t base);
 extern locale_t duplocale(locale_t locobj);
 extern void freelocale(locale_t locobj);
 extern locale_t uselocale(locale_t newloc);
+
+#else
+#include_next <locale.h>
+#endif /* __CCCC__ */
 
 #endif /* __LOCALE_H */

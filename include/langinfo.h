@@ -22,7 +22,7 @@
 #endif
 
 #include "sys/types.h"
-#include "locale.h"
+#include <locale.h> /* #1070: angle-bracket for the locale.h #include_next handoff */
 
 #define CODESET    0
 #define D_T_FMT    1

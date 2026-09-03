@@ -8,7 +8,7 @@
 #ifndef __CTYPE_H
 #define __CTYPE_H
 
-#include "locale.h"
+#include <locale.h> /* #1070: angle-bracket for the locale.h #include_next handoff */
 
 extern int isalnum(int c);
 extern int isalpha(int c);

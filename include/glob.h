@@ -45,14 +45,34 @@ typedef struct {
 #define GLOB_NOCHECK  0x0010
 #define GLOB_NOSORT   0x0020
 #define GLOB_NOESCAPE 0x2000
+// GNU extension bits also present on Darwin's own glob.h (values verified
+// against the real SDK header, /usr/include/glob.h).
+#define GLOB_ALTDIRFUNC 0x0040
+#define GLOB_BRACE      0x0080
+#define GLOB_MAGCHAR    0x0100
+#define GLOB_NOMAGIC    0x0200
+#define GLOB_QUOTE      0x0400
+#define GLOB_TILDE      0x0800
+#define GLOB_LIMIT      0x1000
 #else
-#define GLOB_ERR      0x0001
-#define GLOB_MARK     0x0002
-#define GLOB_NOSORT   0x0004
-#define GLOB_DOOFFS   0x0008
-#define GLOB_NOCHECK  0x0010
-#define GLOB_APPEND   0x0020
-#define GLOB_NOESCAPE 0x0040
+#define GLOB_ERR         0x0001
+#define GLOB_MARK        0x0002
+#define GLOB_NOSORT      0x0004
+#define GLOB_DOOFFS      0x0008
+#define GLOB_NOCHECK     0x0010
+#define GLOB_APPEND      0x0020
+#define GLOB_NOESCAPE    0x0040
+// glibc GNU extension bits (bits/glob.h, __USE_GNU): not spot-checked
+// against a real glibc header in this pass (no Linux container was up),
+// but these are long-stable, widely-documented values.
+#define GLOB_PERIOD      0x0080
+#define GLOB_MAGCHAR     0x0100
+#define GLOB_ALTDIRFUNC  0x0200
+#define GLOB_BRACE       0x0400
+#define GLOB_NOMAGIC     0x0800
+#define GLOB_TILDE       0x1000
+#define GLOB_ONLYDIR     0x2000
+#define GLOB_TILDE_CHECK 0x4000
 #endif
 
 #ifdef __APPLE__

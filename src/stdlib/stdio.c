@@ -138,6 +138,21 @@ static long long wrap_vfprintf(FILE *stream, const char *fmt,
     return cccc_ffi_call_variadic((void *)fprintf, 2, fixed, n, types, vals);
 }
 
+// asprintf/vasprintf: BSD/GNU extension, present on both Darwin and glibc
+// (#1132 self-hosting spike: src/build.c uses vasprintf). Not %b/%B-affected
+// itself, but kept alongside the other v*-family wrappers here for the same
+// va_list-pointer-conversion reason.
+static long long wrap_vasprintf(char **strp, const char *fmt,
+                                long long va_ptr) {
+    CCCC_VA_LOCAL(va, va_ptr);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(fmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    int64_t fixed[] = {(int64_t)strp, (int64_t)fmt};
+    return cccc_ffi_call_variadic((void *)asprintf, 2, fixed, n, types, vals);
+}
+
 #endif // CCCC_HAVE_NATIVE_PCT_B
 
 // Register all stdio.h functions
@@ -171,6 +186,8 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "vsprintf", (void *)wrap_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void *)wrap_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void *)wrap_vfprintf, 3, 0);
+    cc_register_variadic_cfunc(vm, "asprintf", (void *)asprintf, 1, 0);
+    cc_register_cfunc(vm, "vasprintf", (void *)wrap_vasprintf, 3, 0);
 #else
     // Custom %b/%B-capable engine (format_printf.c)
     cc_register_variadic_cfunc(vm, "printf", (void *)cccc_printf, 1, 0);
@@ -183,6 +200,8 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "vsprintf", (void *)wrap_cccc_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void *)wrap_cccc_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void *)wrap_cccc_vfprintf, 3, 0);
+    cc_register_variadic_cfunc(vm, "asprintf", (void *)cccc_asprintf, 1, 0);
+    cc_register_cfunc(vm, "vasprintf", (void *)wrap_cccc_vasprintf, 3, 0);
 #endif
 
     // Variadic scanf family: always routed to the custom format_scanf.c

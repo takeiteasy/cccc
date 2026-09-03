@@ -26,7 +26,7 @@
 #endif
 
 #include "unistd.h"
-#include "locale.h"
+#include <locale.h> /* #1070: angle-bracket for the locale.h #include_next handoff */
 
 extern ssize_t strfmon(char *s, size_t maxsize, const char *format, ...);
 extern ssize_t strfmon_l(char *s, size_t maxsize, locale_t loc,

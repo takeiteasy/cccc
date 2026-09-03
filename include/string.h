@@ -62,6 +62,7 @@ extern char *strerror(int errnum);
 extern char *strdup(const char *s);
 extern char *strndup(const char *s, long n);
 /* extern long strnlen_s(const char *s, long maxsize); */
+extern char *strtok(char *restrict str, const char *restrict delim);
 /* extern char* strtok_s(char *str, const char *delim, char **context); */
 extern void *memset_explicit(void *s, int c, long n);
 /* extern int memset_s(void *s, long smax, int c, long n); */

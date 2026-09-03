@@ -84,6 +84,20 @@ struct stat {
 
 #endif
 
+/* POSIX's plain st_atime/st_mtime/st_ctime are macros aliasing the tv_sec
+ * field of the finer-grained timespec member above -- both real Darwin and
+ * glibc provide them this way (Darwin via st_mtimespec.tv_sec, glibc via
+ * st_mtim.tv_sec), never as their own struct field. */
+#ifdef __APPLE__
+#define st_atime st_atimespec.tv_sec
+#define st_mtime st_mtimespec.tv_sec
+#define st_ctime st_ctimespec.tv_sec
+#else
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
+#endif
+
 #define S_IFMT      0xF000
 #define S_IFIFO     0x1000
 #define S_IFCHR     0x2000

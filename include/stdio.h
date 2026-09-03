@@ -106,7 +106,8 @@ extern int sscanf(const char *str, const char *fmt, ...)
 extern int fscanf(FILE *stream, const char *fmt, ...)
     __attribute__((format(scanf, 2, 3)));
 
-/* V* variants (take va_list) - Note: va_list manipulation not fully supported */
+/* V* variants (take va_list) - Note: va_list manipulation not fully supported
+ */
 /* in VM These are provided for completeness but may not work as expected */
 extern int vprintf(char *fmt, va_list ap);
 extern int vsprintf(char *str, char *fmt, va_list ap);
@@ -115,6 +116,12 @@ extern int vfprintf(FILE *stream, char *fmt, va_list ap);
 extern int vscanf(char *fmt, va_list ap);
 extern int vsscanf(char *str, char *fmt, va_list ap);
 extern int vfscanf(FILE *stream, char *fmt, va_list ap);
+
+/* asprintf/vasprintf: BSD/GNU extension, not standard C, but present on both
+ * Darwin and glibc (allocates the destination buffer with malloc(3)). */
+extern int asprintf(char **strp, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+extern int vasprintf(char **strp, const char *fmt, va_list ap);
 
 /* ================================================== */
 /* Common non-variadic stdio functions (both modes) */
