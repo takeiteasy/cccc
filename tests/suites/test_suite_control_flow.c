@@ -131,6 +131,21 @@ static int     _ex_code;
 #define CATCH(e) else if (_ex_code == (e))
 #define THROW(e) longjmp(_ex_buf, (e))
 
+// sigsetjmp/siglongjmp: on the VM these alias the plain SETJMP/LONGJMP
+// opcodes and the savemask argument is evaluated for side effects only.
+static sigjmp_buf _sig_buf;
+static int        _sig_code;
+static int        _sig_savemask_calls;
+
+static int _sig_savemask(void) {
+    _sig_savemask_calls++;
+    return 0;
+}
+
+#define SIG_TRY if ((_sig_code = sigsetjmp(_sig_buf, _sig_savemask())) == 0)
+#define SIG_CATCH(e) else if (_sig_code == (e))
+#define SIG_THROW(e) siglongjmp(_sig_buf, (e))
+
 // [from test_edge_url_as_label_comment]
 // Tests: a URL literal in function body parses as a valid C statement —
 // "https:" is a goto label, "//git.sr.ht/..." is a C99 line comment.
@@ -761,6 +776,38 @@ int test_edge_try_catch(void) {
     }
     if (!outer || !inner)
         return 4;
+
+    return 42;
+}
+
+// test_edge_sig_try_catch
+[[cccc::test(return = 42)]]
+int test_edge_sig_try_catch(void) {
+    _sig_savemask_calls = 0;
+
+    int caught          = 0;
+    SIG_TRY {
+        SIG_THROW(1);
+    }
+    SIG_CATCH(1) {
+        caught = 1;
+    }
+    if (caught != 1)
+        return 1;
+
+    int reached = 0;
+    SIG_TRY {
+        SIG_THROW(2);
+        reached = 1;
+    }
+    SIG_CATCH(2) { /* ok */ }
+    if (reached)
+        return 2;
+
+    // savemask argument must still be evaluated on every sigsetjmp expansion
+    // (two SIG_TRY blocks above -> at least two calls).
+    if (_sig_savemask_calls < 2)
+        return 3;
 
     return 42;
 }

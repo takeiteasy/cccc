@@ -1398,6 +1398,25 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     vm->compiler.builtin__longjmp = new_gvar(vm, "_longjmp", 8, longjmp_ty);
     vm->compiler.builtin__longjmp->is_definition = false;
 
+    // sigsetjmp(sigjmp_buf, int savemask) -> int
+    // siglongjmp(sigjmp_buf, int) -> void (noreturn)
+    // The VM has no signal-mask concept, so on the VM path these alias the
+    // plain SETJMP/LONGJMP opcodes exactly (codegen_expr.c) and the
+    // `savemask` argument is evaluated for side effects then discarded --
+    // the same reasoning that lets _setjmp/_longjmp alias directly. Under
+    // -c=native they lower to the real host sigsetjmp()/siglongjmp() so the
+    // mask save/restore host_signal.c's crash guard depends on is genuine
+    // (serialize_expr.c / serialize_program.c). sigjmp_buf is
+    // include/setjmp.h's `long long[40]`, the same padded shape as jmp_buf.
+    Type *sigsetjmp_ty             = func_type(vm, ty_int);
+    sigsetjmp_ty->params           = pointer_to(vm, ty_long);
+    sigsetjmp_ty->params->next     = copy_type(vm, ty_int);
+    vm->compiler.builtin_sigsetjmp = new_gvar(vm, "sigsetjmp", 9, sigsetjmp_ty);
+    vm->compiler.builtin_sigsetjmp->is_definition = false;
+    vm->compiler.builtin_siglongjmp =
+        new_gvar(vm, "siglongjmp", 10, longjmp_ty);
+    vm->compiler.builtin_siglongjmp->is_definition = false;
+
     Type *dlopen_ty             = func_type(vm, pointer_to(vm, ty_void));
     dlopen_ty->params           = pointer_to(vm, ty_char);
     dlopen_ty->params->next     = copy_type(vm, ty_int);

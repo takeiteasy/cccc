@@ -3761,6 +3761,10 @@ typedef struct Compiler {
                              // setjmp)
     Obj *builtin__longjmp;   // Builtin _longjmp (POSIX alias, same semantics as
                              // longjmp)
+    Obj *builtin_sigsetjmp;  // Builtin sigsetjmp (aliases SETJMP on the VM;
+                             // savemask discarded -- real host sigsetjmp under
+                             // -c=native)
+    Obj *builtin_siglongjmp; // Builtin siglongjmp (aliases LONGJMP on the VM)
     Obj *builtin_signal;     // VM-managed signal() registration
     Obj *builtin_raise;      // VM-managed raise() delivery
     Obj *builtin_dlopen;     // VM-managed dlopen

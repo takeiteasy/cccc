@@ -1450,27 +1450,68 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm,
 // This also matches VM semantics exactly: the VM's own SETJMP/LONGJMP
 // opcodes never touch a signal mask (ops.c), the same behavior `_setjmp`/
 // `_longjmp` document (parse_decl.c's own comment on this).
+//
+// sigsetjmp/siglongjmp are the exception to the "no header dependency"
+// framing above: their signal-mask save/restore is load-bearing for
+// host_signal.c's crash guard, so they DO lower to the real host
+// sigsetjmp/siglongjmp -- see serialize_synth_setjmp_decls's own body.
+
+// Does any function body in `prog` call any of the given builtin Objs?
+static bool prog_calls_any(Obj *prog, Obj **family, int n) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !obj->body)
+            continue;
+        for (int i = 0; i < n; i++)
+            if (family[i] && node_calls_obj(obj->body, family[i]))
+                return true;
+    }
+    return false;
+}
+
 static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
                                          Obj *prog) {
-    Obj *family[4] = {
+    // The plain/POSIX family lowers to `_setjmp`/`_longjmp` -- plain
+    // `extern`-declared functions on every supported host (unlike `setjmp`, a
+    // macro on glibc). `returns_twice` is load-bearing, not cosmetic: a caller
+    // keeps non-volatile locals live across the setjmp (e.g. host_signal.c's
+    // crash guard reads guard.previous/guard.vm after the longjmp return), and
+    // without the attribute the host cc has no reason to treat the call as a
+    // multi-entry point.
+    Obj *plain[4] = {
         vm->compiler.builtin_setjmp,
         vm->compiler.builtin_longjmp,
         vm->compiler.builtin__setjmp,
         vm->compiler.builtin__longjmp,
     };
-    bool used = false;
-    for (Obj *obj = prog; obj && !used; obj = obj->next) {
-        if (!obj->is_function || !obj->body)
-            continue;
-        for (int i = 0; i < 4 && !used; i++)
-            if (family[i] && node_calls_obj(obj->body, family[i]))
-                used = true;
+    if (prog_calls_any(prog, plain, 4)) {
+        fprintf(f, "extern int _setjmp(void *) __attribute__((returns_twice));"
+                   "\n");
+        fprintf(f, "extern void _longjmp(void *, int) "
+                   "__attribute__((noreturn));\n\n");
     }
-    if (!used)
-        return;
-    fprintf(f, "extern int _setjmp(void *);\n");
-    fprintf(f,
-            "extern void _longjmp(void *, int) __attribute__((noreturn));\n\n");
+    // sigsetjmp/siglongjmp lower to the real host functions so the
+    // signal-mask save/restore is genuine (serialize_expr's ND_FUNCALL case).
+    // On glibc `sigsetjmp` is a macro to `__sigsetjmp(env, savemask)` with no
+    // exported `sigsetjmp` symbol; on macOS `sigsetjmp` is a plain exported
+    // function. `siglongjmp` is a plain extern on both. The `__cccc_sigsetjmp`
+    // macro papers over the name difference for serialize_expr.
+    Obj *sig[2] = {
+        vm->compiler.builtin_sigsetjmp,
+        vm->compiler.builtin_siglongjmp,
+    };
+    if (prog_calls_any(prog, sig, 2)) {
+        fprintf(f, "#if defined(__linux__)\n");
+        fprintf(f, "extern int __sigsetjmp(void *, int) "
+                   "__attribute__((returns_twice));\n");
+        fprintf(f, "#define __cccc_sigsetjmp __sigsetjmp\n");
+        fprintf(f, "#else\n");
+        fprintf(f, "extern int sigsetjmp(void *, int) "
+                   "__attribute__((returns_twice));\n");
+        fprintf(f, "#define __cccc_sigsetjmp sigsetjmp\n");
+        fprintf(f, "#endif\n");
+        fprintf(f, "extern void siglongjmp(void *, int) "
+                   "__attribute__((noreturn));\n\n");
+    }
 }
 
 // #1068: real-floating -> non-floating cast helpers, emitted on demand for
@@ -3059,7 +3100,7 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     // raw-extern pattern (_setjmp/_longjmp over a void* buffer) instead of
     // #include <setjmp.h>, so a TU that also uses the guest setjmp builtin
     // never sees two conflicting declarations of the same symbol.
-    "extern int _setjmp(void *);\n"
+    "extern int _setjmp(void *) __attribute__((returns_twice));\n"
     "extern void _longjmp(void *, int) __attribute__((noreturn));\n"
     "#include <string.h>\n"
     "#include <stdio.h>\n"

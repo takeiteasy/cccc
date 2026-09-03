@@ -8,6 +8,25 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Added: `sigsetjmp`/`siglongjmp`/`sigjmp_buf` support. On the VM they alias
+  the plain `setjmp`/`longjmp` opcodes — the VM has no signal-mask concept,
+  so the `savemask` argument is evaluated for its side effects then
+  discarded. Under `-c=native` they lower to the real host `sigsetjmp`/
+  `siglongjmp` (on glibc: `__sigsetjmp`, via a generated `#if defined(__linux__)`
+  declaration block) so the signal-mask save/restore that `src/host_signal.c`'s
+  crash-recovery guard depends on is genuine. `sigjmp_buf` is the same padded
+  `long long[40]` shape as `jmp_buf`. Surfaced by the self-hosting spike —
+  `src/host_signal.c` is the first cccc source to ask cccc's own frontend to
+  parse this construct.
+- Fixed: the synthesized `_setjmp` declaration emitted into `-c=native`/`-m`
+  output now carries `__attribute__((returns_twice))`, so the host `cc` does
+  not miscompile non-volatile locals kept live across a native `setjmp`
+  (`src/host_signal.c` reads such locals after the `siglongjmp` return).
+- Fixed: a `setjmp`/`longjmp` (or `sigsetjmp`/`siglongjmp`) argument
+  containing a function call — e.g. `longjmp(env, cleanup())` — could clobber
+  the register holding the `jmp_buf` address mid-sequence on the VM, causing
+  a segfault on the subsequent jump. The env address and the value/savemask
+  operand are now evaluated into temporaries in a clobber-safe order.
 - Fixed: `src/stdlib/ctype.c`'s own `#include <xlocale.h>` (macOS FFI
   registration for the `_l`-suffixed locale-explicit functions) had no
   bundled counterpart, so it fell through to the real SDK's own

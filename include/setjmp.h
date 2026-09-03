@@ -40,6 +40,13 @@
  * the rest exists solely so a -c=native build's real host setjmp/longjmp
  * has somewhere safe to write.
  *
+ * sigjmp_buf (sigsetjmp/siglongjmp) uses the identical strategy and the
+ * identical 320-byte size -- the real host's sigjmp_buf is the same size as
+ * or slightly larger than its jmp_buf (it also stores the saved signal
+ * mask): macOS arm64 int[49] = 196 bytes, glibc aarch64 320 bytes (the
+ * max), glibc x86_64 200 bytes. On glibc the real callee is __sigsetjmp,
+ * not sigsetjmp (a macro); the -c=native output handles that.
+ *
  * Implementation Strategy:
  * setjmp and longjmp are implemented using dedicated VM instructions:
  * - SETJMP: Saves the current VM state to jmp_buf and returns 0
@@ -86,6 +93,24 @@
  *   rest is headroom for -c=native's real host setjmp()/longjmp().
  */
 typedef long long jmp_buf[40];
+
+/*
+ * sigjmp_buf type: execution context buffer for sigsetjmp/siglongjmp
+ *
+ * Deliberately the same shape as jmp_buf above (40 long long, 320 bytes,
+ * 8-byte aligned). On the VM, sigsetjmp/siglongjmp alias the plain
+ * SETJMP/LONGJMP opcodes and only slots [0]-[3] carry meaning; the VM has
+ * no signal mask, so the savemask argument is evaluated for side effects
+ * then discarded. Under -c=native, sigsetjmp()/siglongjmp() are emitted as
+ * calls to the real host sigsetjmp()/siglongjmp() (on glibc: __sigsetjmp)
+ * against this same CCCC-sized storage, so the host's own, larger
+ * sigjmp_buf write has room -- measured: macOS arm64 int[49] = 196 bytes,
+ * glibc aarch64 320 bytes (the max), glibc x86_64 200 bytes. The buffer
+ * stays CCCC's own type in serialized output, never the host's sigjmp_buf
+ * alias, so a guest-folded sizeof(sigjmp_buf)/offsetof stays correct on
+ * both paths (same strategy jmp_buf uses, #1054/#1030).
+ */
+typedef long long sigjmp_buf[40];
 
 /*
  * setjmp(env) - Save execution context

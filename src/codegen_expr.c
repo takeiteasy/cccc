@@ -2384,18 +2384,38 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
 
-            // Check if this is setjmp builtin (or its POSIX _setjmp alias)
+            // Check if this is setjmp builtin (or its POSIX _setjmp alias, or
+            // sigsetjmp -- the VM has no signal mask, so sigsetjmp aliases the
+            // same SETJMP opcode and its savemask arg is evaluated for side
+            // effects then discarded).
             if (node->lhs->kind == ND_VAR &&
                 (node->lhs->var == vm->compiler.builtin_setjmp ||
-                 node->lhs->var == vm->compiler.builtin__setjmp)) {
-                if (!node->args) {
+                 node->lhs->var == vm->compiler.builtin__setjmp ||
+                 node->lhs->var == vm->compiler.builtin_sigsetjmp)) {
+                bool is_sig = node->lhs->var == vm->compiler.builtin_sigsetjmp;
+                if (!node->args || (is_sig && !node->args->next)) {
                     error_tok(vm, node->tok,
-                              "setjmp requires a jmp_buf argument");
+                              is_sig ? "sigsetjmp requires sigjmp_buf and int "
+                                       "arguments"
+                                     : "setjmp requires a jmp_buf argument");
                 }
-                // Evaluate jmp_buf address into REG_A0 (SETJMP reads from
-                // REG_A0)
+                // For sigsetjmp, evaluate the savemask first -- purely for its
+                // side effects; the VM has no signal mask so SETJMP ignores
+                // it -- then the env address last, so a savemask expression
+                // containing a call can't clobber the register the env
+                // address lands in (a CALL clobbers caller-saved temps
+                // regardless of the temp-reg allocator's bookkeeping; see the
+                // decimal-op case earlier in this file for the same hazard).
                 reset_temp_regs();
-                gen_expr(vm, node->args, REG_A0);
+                if (is_sig && node->args->next) {
+                    int r_mask = alloc_temp_reg();
+                    gen_expr(vm, node->args->next, r_mask);
+                }
+                reset_temp_regs();
+                int r_env = alloc_temp_reg();
+                gen_expr(vm, node->args, r_env);
+                mark_temp_reg_used(r_env);
+                emit_mov3(vm, REG_A0, r_env);
                 emit(vm, SETJMP); // Save context, returns 0 in REG_A0
                 if (dest_reg != REG_A0) {
                     emit_mov3(vm, dest_reg, REG_A0);
@@ -2403,18 +2423,31 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
 
-            // Check if this is longjmp builtin (or its POSIX _longjmp alias)
+            // Check if this is longjmp builtin (or its POSIX _longjmp alias, or
+            // siglongjmp -- aliases LONGJMP on the VM for the same reason).
             if (node->lhs->kind == ND_VAR &&
                 (node->lhs->var == vm->compiler.builtin_longjmp ||
-                 node->lhs->var == vm->compiler.builtin__longjmp)) {
+                 node->lhs->var == vm->compiler.builtin__longjmp ||
+                 node->lhs->var == vm->compiler.builtin_siglongjmp)) {
                 if (!node->args || !node->args->next) {
                     error_tok(vm, node->tok,
                               "longjmp requires jmp_buf and int arguments");
                 }
-                // LONGJMP: env in REG_A0, val in REG_A1
+                // LONGJMP: env in REG_A0, val in REG_A1. Evaluate val (the
+                // operand that may contain a call) first, then the env
+                // address last, so the call can't clobber the register the
+                // env address lands in -- then move both into place. Passing
+                // REG_A0/REG_A1 straight to gen_expr for a call-bearing val
+                // segfaults the subsequent LONGJMP restore.
                 reset_temp_regs();
-                gen_expr(vm, node->args, REG_A0);       // env (jmp_buf address)
-                gen_expr(vm, node->args->next, REG_A1); // val
+                int r_val = alloc_temp_reg();
+                gen_expr(vm, node->args->next, r_val); // val
+                mark_temp_reg_used(r_val);
+                int r_env = alloc_temp_reg();
+                gen_expr(vm, node->args, r_env);       // env (jmp_buf address)
+                mark_temp_reg_used(r_env);
+                emit_mov3(vm, REG_A0, r_env);
+                emit_mov3(vm, REG_A1, r_val);
                 emit(vm, LONGJMP); // Restore context and jump (does not return)
                 return;
             }

@@ -2049,6 +2049,11 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // it declares exactly these two names, and never replays the
             // captured `#include <setjmp.h>` line, so nothing else may spell
             // the callee any other way here.
+            // sigsetjmp/siglongjmp lower to the *real* host sigsetjmp()/
+            // siglongjmp() (via the __cccc_sigsetjmp macro
+            // serialize_synth_setjmp_decls emits -- on glibc the real name is
+            // __sigsetjmp) so the signal-mask save/restore is genuine; the
+            // savemask/val argument rides through the trailing arg loop below.
             if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                 ((vm->compiler.builtin_setjmp &&
                   node->lhs->var == vm->compiler.builtin_setjmp) ||
@@ -2057,13 +2062,26 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                  (vm->compiler.builtin__setjmp &&
                   node->lhs->var == vm->compiler.builtin__setjmp) ||
                  (vm->compiler.builtin__longjmp &&
-                  node->lhs->var == vm->compiler.builtin__longjmp))) {
+                  node->lhs->var == vm->compiler.builtin__longjmp) ||
+                 (vm->compiler.builtin_sigsetjmp &&
+                  node->lhs->var == vm->compiler.builtin_sigsetjmp) ||
+                 (vm->compiler.builtin_siglongjmp &&
+                  node->lhs->var == vm->compiler.builtin_siglongjmp))) {
+                bool is_sigsetjmp =
+                    vm->compiler.builtin_sigsetjmp &&
+                    node->lhs->var == vm->compiler.builtin_sigsetjmp;
+                bool is_siglongjmp =
+                    vm->compiler.builtin_siglongjmp &&
+                    node->lhs->var == vm->compiler.builtin_siglongjmp;
                 bool is_longjmp =
                     (vm->compiler.builtin_longjmp &&
                      node->lhs->var == vm->compiler.builtin_longjmp) ||
                     (vm->compiler.builtin__longjmp &&
                      node->lhs->var == vm->compiler.builtin__longjmp);
-                fprintf(f, is_longjmp ? "_longjmp(" : "_setjmp(");
+                fprintf(f, is_siglongjmp  ? "siglongjmp("
+                           : is_sigsetjmp ? "__cccc_sigsetjmp("
+                           : is_longjmp   ? "_longjmp("
+                                          : "_setjmp(");
                 Node *arg = node->args;
                 if (arg) {
                     Node *env = arg;
