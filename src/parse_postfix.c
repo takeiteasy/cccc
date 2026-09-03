@@ -1147,8 +1147,8 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     // strips `_Atomic` from a non-lvalue cast like `(_Atomic int)0`; clang
     // keeps it there. CCCC has no general lvalue predicate and that cast
     // shape is pathological -- strip unconditionally, i.e. follow gcc; see
-    // man/TYPES.md.) origin is deliberately kept: it is the only link back
-    // to the original Type*, so an association naming a tagged type
+    // man/TYPES.md and #1271.) origin is deliberately kept: it is the only link
+    // back to the original Type*, so an association naming a tagged type
     // (`struct S`, `enum G`) still matches its own controlling expression by
     // identity (#1223).
 
