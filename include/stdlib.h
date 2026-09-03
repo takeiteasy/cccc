@@ -94,6 +94,11 @@ extern int unsetenv(const char *name);
 extern int putenv(char *string);
 extern void quick_exit(int status);
 extern int system(const char *string);
+/* realpath: resolve a pathname to a canonical absolute path. POSIX; present
+   on both Darwin and glibc. A NULL resolved_path asks libc to malloc the
+   result; otherwise the caller must supply a buffer of at least PATH_MAX
+   bytes (see <limits.h>). */
+extern char *realpath(const char *restrict path, char *restrict resolved_path);
 extern int posix_memalign(void **memptr, size_t alignment, size_t size);
 extern void *bsearch(const void *key, void *base, size_t nmemb, size_t size,
                      int (*compar)(const void *, const void *));

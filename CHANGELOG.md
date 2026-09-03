@@ -32,12 +32,29 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `pthread_once_t`, and `PTHREAD_ONCE_INIT` (the type mirrors the real host
   layout per platform — a 16-byte struct on macOS, `int` on glibc — so a
   serialized `pthread_once_t x = PTHREAD_ONCE_INIT;` stays valid against the
-  replayed real header). `-c=native`/`-c=generated` of code using
-  `pthread_once` now works. It is not yet FFI-registered for VM/bytecode
-  execution — a guest calling it under the VM gets an undefined-function
-  error; `call_once` (`<threads.h>`) is the fully VM-backed one-time init.
-  Surfaced by the self-hosting spike (`src/tokenize.c` /
-  `src/parse_init.c`).
+  replayed real header). `pthread_once` is now also FFI-registered for
+  VM/bytecode execution: `wrap_pthread_once` runs the one-shot itself with a
+  compare-exchange on the control object's state word (the first 4 bytes of
+  `__opaque` on macOS, the whole `int` on glibc) and a guest callback for
+  the winner. POSIX's "concurrent callers block until the initializer
+  completes" holds by construction under the VM's GIL rather than by a
+  spin-wait; under `-c=native` the replayed real `<pthread.h>` binds it to
+  the host `pthread_once` directly, so no shim is emitted. Surfaced by the
+  self-hosting spike (`src/tokenize.c` / `src/parse_init.c`).
+- Added: bundled-header POSIX coverage for a batch of symbols CCCC's own
+  source uses that resolved against the real system headers under a plain
+  `make` build but were missing from the bundled `include/` copy —
+  `strtok_r` and `strsignal` (`<string.h>`), `realpath` (`<stdlib.h>`),
+  `ctime_r` / `asctime_r` (`<time.h>`), `open_memstream` (`<stdio.h>`), and
+  `PATH_MAX` (`<limits.h>`, defined 4096 to cover both hosts — macOS 1024,
+  glibc 4096 — with `<sys/param.h>`'s `MAXPATHLEN` now deriving from it).
+  All are registered for VM/bytecode execution too (raw host passthroughs).
+  `src/main.c` also gains `#include <strings.h>` — it called `strcasecmp`
+  relying on a `<string.h>` leak. Surfaced by the self-hosting spike.
+- Fixed: `strtok` was declared in the bundled `<string.h>` but never
+  FFI-registered, so guest code that included the header and called it
+  compiled cleanly and then failed at run time with an undefined-function
+  error. Now registered.
 - Added: `sigsetjmp`/`siglongjmp`/`sigjmp_buf` support. On the VM they alias
   the plain `setjmp`/`longjmp` opcodes — the VM has no signal-mask concept,
   so the `savemask` argument is evaluated for its side effects then

@@ -651,6 +651,9 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "unsetenv", (void *)wrap_unsetenv, 1, 0);
     cc_register_cfunc(vm, "putenv", (void *)wrap_putenv, 1, 0);
     cc_register_cfunc(vm, "system", (void *)wrap_system, 1, 0);
+    // realpath: real host passthrough. The guest supplies a PATH_MAX-sized
+    // buffer (or NULL to have libc malloc the result); returns a host pointer.
+    cc_register_cfunc(vm, "realpath", (void *)realpath, 2, 0);
 
     // Search and sort
     cc_register_cfunc(vm, "bsearch", (void *)wrap_bsearch, 5, 0);

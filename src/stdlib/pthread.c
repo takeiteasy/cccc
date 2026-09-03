@@ -892,8 +892,53 @@ static long long wrap_pthread_attr_getstack(long long attrp,
     return 0;
 }
 
+// pthread_once(pthread_once_t *, void (*)(void)) -- #1278. Unlike the
+// {void*,long,int} mutex/cond projections, the guest pthread_once_t
+// deliberately mirrors the real host layout per platform (see
+// include/pthread.h), so under -c=native the replayed real <pthread.h>
+// binds it to the real host pthread_once directly and no shim is emitted.
+// Under the VM the init_routine is a guest function pointer that cannot be
+// handed to the host pthread_once, so this wrapper does the one-shot itself:
+// a 0->1 compare-exchange on a state word, then cccc_call_guest_callback for
+// the winner. POSIX requires concurrent callers to block until the
+// initializer completes; that holds here by construction rather than by a
+// spin-wait, because the GIL serializes this cfunc end-to-end (guest
+// callback included) -- a losing thread cannot even enter this function
+// until the winner has returned and released the GIL, by which point the
+// state word is already 1 and the init has run. (The -c=native call_once
+// shim in serialize_shims.c *does* need an explicit in-progress spin state
+// precisely because native has no GIL; pthread_once there is the real host
+// function and needs nothing.) Model: wrap_call_once, just above.
+static long long wrap_pthread_once(long long once_control,
+                                   long long init_routine) {
+    VirtualMachine *vm = current_vm();
+    if (!vm || !once_control)
+        return EINVAL;
+#ifdef __APPLE__
+    // struct { long __sig; char __opaque[8]; }, PTHREAD_ONCE_INIT =
+    // {0x30B1BCBA, {0}} -- the first 4 bytes of __opaque are zero at init,
+    // so CAS those, not __sig.
+    _Static_assert(sizeof(pthread_once_t) == 16,
+                   "unexpected macOS pthread_once_t layout");
+    int *state = (int *)((char *)once_control + 8);
+#else
+    // glibc: plain int, PTHREAD_ONCE_INIT = 0.
+    _Static_assert(sizeof(pthread_once_t) == sizeof(int),
+                   "unexpected glibc pthread_once_t layout");
+    int *state = (int *)once_control;
+#endif
+    int expected = 0;
+    if (__atomic_compare_exchange_n(state, &expected, 1, 0, __ATOMIC_SEQ_CST,
+                                    __ATOMIC_SEQ_CST)) {
+        long long ignored;
+        cccc_call_guest_callback(vm, init_routine, NULL, 0, &ignored);
+    }
+    return 0;
+}
+
 void register_pthread_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pthread_create", (void *)wrap_pthread_create, 4, 0);
+    cc_register_cfunc(vm, "pthread_once", (void *)wrap_pthread_once, 2, 0);
     cc_register_cfunc(vm, "pthread_join", (void *)wrap_pthread_join, 2, 0);
     cc_register_cfunc(vm, "pthread_detach", (void *)wrap_pthread_detach, 1, 0);
     cc_register_cfunc(vm, "pthread_exit", (void *)wrap_pthread_exit, 1, 0);

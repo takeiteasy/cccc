@@ -29,6 +29,9 @@ void register_time_functions(VirtualMachine *vm) {
     // Time conversion
     cc_register_cfunc(vm, "asctime", (void *)asctime, 1, 0);
     cc_register_cfunc(vm, "ctime", (void *)ctime, 1, 0);
+    // Re-entrant forms: caller-owned 26-byte buffer, host pointer returned.
+    cc_register_cfunc(vm, "asctime_r", (void *)asctime_r, 2, 0);
+    cc_register_cfunc(vm, "ctime_r", (void *)ctime_r, 2, 0);
     cc_register_cfunc(vm, "gmtime", (void *)gmtime, 1, 0);
     cc_register_cfunc(vm, "gmtime_r", (void *)gmtime_r, 2, 0);
     cc_register_cfunc(vm, "localtime", (void *)localtime, 1, 0);

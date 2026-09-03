@@ -79,6 +79,12 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strchr", (void *)strchr, 2, 0);
     cc_register_cfunc(vm, "strrchr", (void *)strrchr, 2, 0);
     cc_register_cfunc(vm, "strstr", (void *)strstr, 2, 0);
+    // strtok was declared in <string.h> but never registered here; guest
+    // code that #include'd the header and called it compiled clean and then
+    // failed at call time. strtok_r is the POSIX re-entrant form. Both take
+    // and return real host pointers, no wrapper needed.
+    cc_register_cfunc(vm, "strtok", (void *)strtok, 2, 0);
+    cc_register_cfunc(vm, "strtok_r", (void *)strtok_r, 3, 0);
     cc_register_cfunc(vm, "strpbrk", (void *)strpbrk, 2, 0);
     cc_register_cfunc(vm, "strspn", (void *)strspn, 2, 0);
     cc_register_cfunc(vm, "strcspn", (void *)strcspn, 2, 0);
@@ -87,6 +93,7 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strxfrm", (void *)strxfrm, 3, 0);
     cc_register_cfunc(vm, "strcoll", (void *)strcoll, 2, 0);
     cc_register_cfunc(vm, "strerror", (void *)strerror, 1, 0);
+    cc_register_cfunc(vm, "strsignal", (void *)strsignal, 1, 0);
     cc_register_cfunc(vm, "strdup", (void *)strdup, 1, 0);
     cc_register_cfunc(vm, "strndup", (void *)strndup, 2, 0);
 }

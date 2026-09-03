@@ -53,4 +53,13 @@
 /* C23: maximum supported _BitInt width */
 #define BITINT_MAXWIDTH 65535
 
+/* PATH_MAX - POSIX maximum byte length of a pathname (including the NUL). */
+/* realpath() (declared in <stdlib.h>) is a real host FFI passthrough -- a */
+/* guest `char buf[PATH_MAX]` is handed straight to the *host's* realpath, */
+/* which writes up to the host's own PATH_MAX bytes into it. Undersizing */
+/* this is therefore a guest buffer overrun, same soundness class as */
+/* MB_LEN_MAX above and jmp_buf's sizing (see include/setjmp.h); oversizing */
+/* is harmless. Host values: macOS 1024, glibc 4096. 4096 covers both. */
+#define PATH_MAX 4096
+
 #endif /* __LIMITS_H */

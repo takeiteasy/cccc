@@ -54,6 +54,9 @@ extern long strcspn(const char *s, const char *reject);
 extern long strxfrm(char *dest, const char *src, long n);
 extern int strcoll(const char *s1, const char *s2);
 extern char *strerror(int errnum);
+/* strsignal: printable description of a signal number, pointer into static
+   storage (like strerror). POSIX.1-2008; present on both Darwin and glibc. */
+extern char *strsignal(int sig);
 
 /* extern char* strcpy_s(char *dest, long destsz, const char *src); */
 /* extern char* strncpy_s(char *dest, long destsz, const char *src, long n); */
@@ -63,6 +66,10 @@ extern char *strdup(const char *s);
 extern char *strndup(const char *s, long n);
 /* extern long strnlen_s(const char *s, long maxsize); */
 extern char *strtok(char *restrict str, const char *restrict delim);
+/* strtok_r: POSIX re-entrant strtok, caller-owned saveptr. Present on both
+   Darwin and glibc. */
+extern char *strtok_r(char *restrict str, const char *restrict delim,
+                      char **restrict saveptr);
 /* extern char* strtok_s(char *str, const char *delim, char **context); */
 extern void *memset_explicit(void *s, int c, long n);
 /* extern int memset_s(void *s, long smax, int c, long n); */

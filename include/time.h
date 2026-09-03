@@ -63,6 +63,10 @@ extern int nanosleep(const struct timespec *req, struct timespec *rem);
 /* extern int timespec_getres(struct timespec *ts, int base); */
 extern char *asctime(const struct tm *tm); /* deprecated */
 extern char *ctime(const time_t *timer);   /* deprecated */
+/* Re-entrant asctime/ctime: caller supplies a buffer of at least 26 bytes.
+   POSIX.1-2008; present on both Darwin and glibc. */
+extern char *asctime_r(const struct tm *restrict tm, char *restrict buf);
+extern char *ctime_r(const time_t *restrict timer, char *restrict buf);
 extern struct tm *gmtime(const time_t *timer);
 extern struct tm *gmtime_r(const time_t *timer, struct tm *result);
 extern struct tm *localtime(const time_t *timer);

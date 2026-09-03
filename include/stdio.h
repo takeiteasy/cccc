@@ -135,6 +135,10 @@ extern int fclose(FILE *stream);
 extern int fflush(FILE *stream);
 extern FILE *fopen(const char *filename, const char *mode);
 extern FILE *freopen(const char *filename, const char *mode, FILE *stream);
+/* open_memstream: a write-only FILE* backed by a dynamically-grown heap
+   buffer; *bufp / *sizep are updated on fflush()/fclose(). POSIX.1-2008;
+   present on both Darwin and glibc. */
+extern FILE *open_memstream(char **bufp, size_t *sizep);
 extern void setbuf(FILE *stream, char *buf);
 extern int setvbuf(FILE *stream, char *buf, int mode, size_t size);
 extern int fgetc(FILE *stream);

@@ -39,9 +39,10 @@ typedef unsigned int pthread_key_t;
  * layout per platform (unlike the {void*,long,int} projections below,
  * which are CCCC's own FFI-wrapper polyfill) so a serialized
  * `pthread_once_t x = PTHREAD_ONCE_INIT;` stays valid against the replayed
- * real header. The VM does not itself execute pthread_once -- it is not
- * FFI-registered; guest code that calls it under the VM gets an
- * undefined-function error. */
+ * real header. Under the VM, wrap_pthread_once (src/stdlib/pthread.c) runs
+ * the one-shot itself -- a compare-exchange on a state word (the first 4
+ * bytes of __opaque on macOS, the whole int on glibc, both zero at init)
+ * plus a guest callback for the winner. */
 #ifdef __APPLE__
 typedef struct {
     long __sig;

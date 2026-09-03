@@ -26,6 +26,7 @@
 #define CCCC_FILENO _fileno
 #else
 #include <fnmatch.h>
+#include <strings.h> // host <strings.h>, for strcasecmp() in the -l/-L dedup below
 #include <unistd.h>
 #include <sys/wait.h>
 #define CCCC_ISATTY isatty

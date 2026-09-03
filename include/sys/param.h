@@ -9,9 +9,10 @@
 
 #include "limits.h"
 
-/* Maximum length of a pathname, including the terminating NUL */
+/* Maximum length of a pathname, including the terminating NUL. Kept in step
+   with <limits.h>'s PATH_MAX (the BSD spelling of the same quantity). */
 #ifndef MAXPATHLEN
-#define MAXPATHLEN 1024
+#define MAXPATHLEN PATH_MAX
 #endif
 
 #ifndef NBBY

@@ -226,6 +226,11 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fflush", (void *)wrap_fflush, 1, 0);
     cc_register_cfunc(vm, "fopen", (void *)fopen, 2, 0);
     cc_register_cfunc(vm, "freopen", (void *)freopen, 3, 0);
+    // open_memstream: not printf-family, so it sits outside the
+    // CCCC_HAVE_NATIVE_PCT_B split above. Plain 2-arg passthrough returning a
+    // real host FILE*; the guest's char**/size_t* out-params are host
+    // pointers written by the host libc on fflush/fclose.
+    cc_register_cfunc(vm, "open_memstream", (void *)open_memstream, 2, 0);
     cc_register_cfunc(vm, "setbuf", (void *)setbuf, 2, 0);
     cc_register_cfunc(vm, "setvbuf", (void *)wrap_setvbuf, 4, 0);
 
