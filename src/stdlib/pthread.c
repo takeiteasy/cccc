@@ -920,7 +920,8 @@ static long long wrap_pthread_once(long long once_control,
     // so CAS those, not __sig.
     _Static_assert(sizeof(pthread_once_t) == 16,
                    "unexpected macOS pthread_once_t layout");
-    int *state = (int *)((char *)once_control + 8);
+    int *state =
+        (int *)((char *)once_control + offsetof(pthread_once_t, __opaque));
 #else
     // glibc: plain int, PTHREAD_ONCE_INIT = 0.
     _Static_assert(sizeof(pthread_once_t) == sizeof(int),
