@@ -8,6 +8,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Fixed: `src/stdlib/ctype.c`'s own `#include <xlocale.h>` (macOS FFI
+  registration for the `_l`-suffixed locale-explicit functions) had no
+  bundled counterpart, so it fell through to the real SDK's own
+  `<xlocale.h>` -- whose `struct lconv` (via `<_locale.h>`) collided with
+  CCCC's own trimmed `struct lconv` (`<locale.h>`) in the same translation
+  unit. Only reproduced once cccc's own source was compiled under
+  `-c=native`/`-c=generated`, surfaced by the self-hosting spike. Added a
+  bundled `<xlocale.h>` (a plain alias for `<locale.h>` + `<ctype.h>`,
+  portable on every host) and a matching non-Darwin replay filter so a
+  captured `#include <xlocale.h>` is dropped rather than replayed to a host
+  where glibc removed the header entirely.
 - Fixed: `cccc -c=generated` replayed a vacuous `#ifndef X` / `#endif` shell
   into the output when the guard's only `#define` had been pre-empted by a
   command-line `-D`. A conditional whose entire body was resolved away by

@@ -4366,6 +4366,19 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         }
         if (resolved && path_basename_is(resolved, "tgmath.h"))
             seen_tgmath_h = true;
+#ifndef __APPLE__
+        // #1275: CCCC's own bundled <xlocale.h> (new) is a universal alias
+        // for locale.h+ctype.h, so guest code that includes it directly
+        // stays portable -- but real glibc dropped its own <xlocale.h> in
+        // 2.26, so a bare replayed `#include <xlocale.h>` here would fail
+        // to resolve at all on a modern Linux host ("file not found"). Drop
+        // it outright: everything the bundled body pulls in (locale_t,
+        // LC_*_MASK, is*_l/to*_l) is already covered by this same loop's
+        // ordinary replay of locale.h/ctype.h, so nothing is lost.
+        if (!vm->compiler.emit_cccc && resolved &&
+            path_basename_is(resolved, "xlocale.h"))
+            continue;
+#endif
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
         // `struct statfs` into scope the way it does on macOS/BSD -- real

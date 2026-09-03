@@ -47,6 +47,21 @@ Cases:
      through the native round-trip -- cccc's own resolution of the nested
      "../time.h" happens the same way regardless of backend, but this
      confirms the fix reaches -c=native's compile step too, not just the VM.
+  12. `-c=native` with `<locale.h>` + `<xlocale.h>` (#1275): CCCC bundles a
+     trimmed `struct lconv` in locale.h and, before #1275, had no bundled
+     xlocale.h at all -- a bare `#include <xlocale.h>` fell through to the
+     real host's own copy, whose transitively-included `_locale.h`
+     redeclares `struct lconv` incompatibly with CCCC's. Runs on both hosts:
+     on macOS it exercises the collision directly; on Linux (where glibc
+     dropped its own `<xlocale.h>` in 2.26) it exercises
+     serialize_program.c's replay filter that drops the captured
+     `#include <xlocale.h>` line rather than replaying it to a host that no
+     longer has the file.
+  13. Static audit, generalizing #1275: every `#include <...>` in cccc's own
+     `src/*.c`/`src/*.h`/`src/stdlib/*`/`include/cccc/*.h` must either
+     resolve under `include/` or appear in an explicit allowlist below, so a
+     future unbundled system header collision gets caught at edit time
+     rather than at #1132's ~10-minute-per-run self-hosting spike scale.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -247,6 +262,79 @@ def case_owned_header_include_form(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_xlocale(cccc: Path, tmp: str) -> bool:
+    print("  12: -c=native with #include <locale.h> + <xlocale.h> (#1275)")
+    src = Path(tmp) / "native_xlocale.c"
+    out = Path(tmp) / "native_xlocale_out"
+    write(src, "#include <locale.h>\n#include <xlocale.h>\nint main(void){return 42;}\n")
+    result = run([str(cccc), "-c=native", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}")
+        return False
+    print("    ok")
+    return True
+
+
+# #1275: system headers cccc's own source reaches for via a bare
+# `#include <...>` that are NOT bundled under include/ -- each entry needs a
+# one-line reason this is safe (Windows/Linux-only source, or a library with
+# no CCCC-guest-visible ABI surface at all, unlike locale.h/xlocale.h/etc).
+# A name reaching this allowlist without a reason is exactly the #1275 bug
+# class: an unbundled header a real host resolves on its own, silently ready
+# to collide with a same-named bundled header elsewhere in the same TU.
+UNBUNDLED_SYSTEM_HEADER_ALLOWLIST = {
+    "ffi.h":                "libffi's own public header, no bundled copy",
+    "curl/curl.h":           "optional CCCC_HAS_CURL dependency, no bundled copy",
+    "readline/readline.h":  "optional line-editing dependency, no bundled copy",
+    "readline/history.h":   "optional line-editing dependency, no bundled copy",
+    "features.h":           "glibc-only feature-test header, Linux source paths only",
+    "sys/vfs.h":             "Linux-only struct statfs location, no macOS bundled copy",
+    "io.h":                  "Windows-only, no POSIX bundled copy",
+    "windows.h":             "Windows-only, no POSIX bundled copy",
+    "synchapi.h":            "Windows-only, no POSIX bundled copy",
+    "processthreadsapi.h":  "Windows-only, no POSIX bundled copy",
+}
+
+
+def case_unbundled_header_audit(cccc: Path, tmp: str) -> bool:
+    print("  13: every #include <...> in cccc's own source is bundled or allowlisted (#1275)")
+    root = Path(__file__).parent.parent
+    src_dirs = [root / "src", root / "include" / "cccc"]
+    include_dir = root / "include"
+    angle_re = re.compile(r'^\s*#\s*include\s*<([^>]+)>', re.MULTILINE)
+    bad = []
+    for d in src_dirs:
+        for f in d.rglob("*"):
+            if f.suffix not in (".c", ".h") or f.name in ("std.c",):
+                continue
+            # src/backtrace is a vendored libbacktrace copy, built as its
+            # own separate library (Makefile's build/lib/libbacktrace) and
+            # never part of the self-hosting spike's `src/*.c` file set
+            # (a bare glob, not recursive) -- its own platform-probing
+            # system includes (link.h, mach-o/dyld.h, ...) are out of this
+            # audit's scope, the same way they're out of #1132's.
+            if "backtrace" in f.relative_to(root).parts:
+                continue
+            for m in angle_re.finditer(f.read_text(errors="ignore")):
+                name = m.group(1)
+                if (include_dir / name).exists():
+                    continue
+                if name in UNBUNDLED_SYSTEM_HEADER_ALLOWLIST:
+                    continue
+                bad.append(f"{f.relative_to(root)}: #include <{name}>")
+    if bad:
+        print("    FAIL: unbundled, unallowlisted system header include(s):")
+        for line in bad:
+            print(f"      {line}")
+        return False
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -283,6 +371,8 @@ def main() -> int:
             case_sys_time,
             case_sys_times,
             case_native_sys_stat,
+            case_native_xlocale,
+            case_unbundled_header_audit,
         ]
         results = [case(cccc, tmp) for case in cases]
 
