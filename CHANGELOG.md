@@ -134,3 +134,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   comparison, and cast helpers shared verbatim with the VM. A `_BitInt(N)`
   bit-field member with `N > 128` is still rejected (no legal C spelling for
   the container as a bit-field type).
+- Changed: under `-c=native`, an explicit `--std=` naming a standard the host
+  compiler accepts no `-std=` spelling of is now a hard error naming the
+  compiler and the spellings tried, raised before compilation — previously the
+  rejected spelling was forwarded anyway, producing a confusing host-compiler
+  failure. Without an explicit `--std=` the behaviour is unchanged (no `-std=`
+  is forwarded and the host uses its own default). The host `-std=` probe also
+  now prefers the `gnu<NN>` spelling of a standard over the strict ISO `c<NN>`
+  one consistently. See `man/NATIVE.md`.

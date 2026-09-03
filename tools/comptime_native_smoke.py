@@ -142,6 +142,15 @@ Cases:
       still be re-derived, since nothing else supplies it. Also asserts the
       `@comptime`-routed `#include` itself is never leaked into the output.
 
+  157: #1218 -- an explicit `--std=` naming a standard the host cc accepts
+      no `-std=` spelling of is now a plain CCCC error, raised before
+      serialization, rather than a silent forward of the just-rejected
+      spelling (a guaranteed host-compiler failure with a worse
+      diagnostic). Asserted via a wrapper that rejects every `-std=` flag:
+      `--std=c23 -c=native` must fail with a CCCC `--std=` diagnostic,
+      while the same wrapper with no `--std=` still compiles and runs
+      (the implicit path keeps its forward-nothing degrade).
+
 Exit codes: 0 = all cases pass, 1 = any failure.
 
 Pass --audit-skips (#1197) to run the SMOKE_CASE_SKIPS_GCC_MACOS staleness
@@ -4183,6 +4192,69 @@ def case_native_explicit_std_probed(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_explicit_std_host_rejects_1218(cccc: Path, tmp: str) -> bool:
+    print("  157: #1218 -- an explicit --std= that the host cc accepts no "
+          "-std= spelling of used to fall through to forwarding the user's "
+          "literal spelling unprobed: a spelling the ladder had just seen "
+          "the host reject, i.e. a guaranteed compile failure surfaced as "
+          "a confusing host-compiler error. Now native_resolve_std_ladder() "
+          "runs before serialization and a NULL result for an explicit "
+          "--std= is a plain CCCC error naming the compiler and the "
+          "spellings tried. Asserted via a wrapper that rejects every "
+          "'-std=' flag and exec's the real cc otherwise: '--std=c23 "
+          "-c=native' must fail with a CCCC diagnostic mentioning '--std=', "
+          "and the SAME wrapper with no --std= must still compile and run "
+          "42 (the implicit path keeps degrading to forward-nothing, not "
+          "erroring).")
+    src = Path(tmp) / "native_explicit_std_reject_1218.c"
+    write(src, NATIVE_LM_PROGRAM)
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_explicit_std_reject_1218_cc_wrapper.sh"
+    write(wrapper, (
+        "#!/bin/sh\n"
+        "for a in \"$@\"; do\n"
+        "  case \"$a\" in -std=*) exit 1;; esac\n"
+        "done\n"
+        f"exec {real_cc} \"$@\"\n"
+    ))
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+
+    out_bad = Path(tmp) / "native_explicit_std_reject_1218_bad"
+    bad = run(
+        [str(cccc), "--std=c23", "-c=native", "-o", out_bad.name, src.name],
+        cwd=tmp, env=env,
+    )
+    if bad.returncode == 0:
+        print("    FAIL: --std=c23 compile unexpectedly succeeded against a "
+              "host cc that rejects every -std= spelling")
+        return False
+    if "--std=" not in bad.stderr:
+        print(f"    FAIL: expected a CCCC '--std=' diagnostic, got:\n"
+              f"    {bad.stderr}")
+        return False
+
+    out_ok = Path(tmp) / "native_explicit_std_reject_1218_ok"
+    ok = run(
+        [str(cccc), "-c=native", "-o", out_ok.name, src.name],
+        cwd=tmp, env=env,
+    )
+    if ok.returncode != 0:
+        print(f"    FAIL: no-op --std= path should still compile (host cc "
+              f"default), exited {ok.returncode}\n    {ok.stderr}")
+        return False
+    run_result = run([f"./{out_ok.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
     print("  103: two -D flags used to reach the host cc mangled two "
           "different ways (#1065): parse_define() (src/main.c) split each "
@@ -7740,6 +7812,7 @@ CASES = [
     case_native_cond_directive_not_replayed,
     case_flt_rounds_native_round_trip,
     case_native_explicit_std_probed,
+    case_native_explicit_std_host_rejects_1218,
     case_nested_decl_binding_native_round_trip,
     case_mb_cur_max_native_round_trip,
     case_nested_fn_native_round_trip,
@@ -7792,7 +7865,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

@@ -46,8 +46,33 @@ passed through the front end to the host `cc`. `-c=native` additionally always
 adds `-lm`, `-pthread`, and `-fsigned-char` (CCCC models `char` as signed on
 every target, so the host build must match).
 
-`--std=` is only used as a flag-spelling probe; the emitted dialect is a fixed
-**GNU C11** floor regardless of what `--std=` you pass.
+### How `--std=` is handled
+
+The emitted C is a fixed **GNU C11** floor regardless of what `--std=` you
+pass — the front end accepts the whole C23 superset and the serializer lowers
+everything past C11 (`auto` → the resolved concrete type, single-argument
+`static_assert` → two-argument `_Static_assert`, `nullptr` → `void *`,
+`_BitInt(N)` → a fixed integer container, `[[gnu::…]]` → `__attribute__`, digit
+separators and binary literals folded away). So `--std=` never changes what is
+emitted; it only decides which `-std=` *spelling* to forward to the host
+compiler, so that host doesn't choke on that fixed-floor output.
+
+That spelling is chosen by probing the host `cc`:
+
+- The `gnu<NN>` spelling of a standard is always tried before the strict ISO
+  `c<NN>` one. The serializer emits GNU constructs (statement expressions,
+  `__int128`, `case A ... B` range labels, `__asm__`) unconditionally, and a
+  strict `-std=c<NN>` rejects them — CCCC's own front end only pedantic-warns.
+- With an explicit `--std=`, the probe only tries spellings of *that* standard
+  (`c23`/`gnu23`/`c2x`/`gnu2x` for C23, and so on) — it never silently
+  descends to an older standard than the one you named. With no `--std=`, it
+  descends the ladder toward older standards and forwards the newest rung the
+  host accepts, or nothing if the host has no usable `-std=` at all.
+- If you pass an explicit `--std=` and the host compiler accepts **none** of
+  that standard's spellings, `-c=native` fails with an error naming the
+  compiler and the spellings tried, rather than compiling for a different
+  dialect. (With no explicit `--std=`, the same situation just forwards
+  nothing and lets the host use its own default.)
 
 ### Rejected in this mode
 

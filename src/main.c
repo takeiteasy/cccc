@@ -136,6 +136,17 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 // below is probe-verified, not guessed: Apple clang 17 accepts all of
 // them; Ubuntu GCC 13.3.0 rejects "23"/"gnu23" outright but accepts
 // "2x"/"gnu2x" and every other listed spelling.
+//
+// Every `-std=` spelling native_resolve_std_ladder() tried on its one probe
+// run, as a human-readable comma list -- so the "your host cc honours none of
+// these" error can name them. Populated by the function below on its first
+// call; empty until then.
+static char native_std_probed_list[96];
+
+static const char *native_std_probed_spellings(void) {
+    return native_std_probed_list;
+}
+
 static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
                                              bool explicit_std) {
     static bool probed = false;
@@ -197,10 +208,30 @@ static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
             break;
     }
 
-    for (int i = 0; i < n; i++) {
-        for (int p = 0; p < prefix_n; p++) {
+    // Prefix-major, not suffix-major: try every "gnu<suffix>" rung before
+    // any "c<suffix>" one, so a host that accepts a strict ISO `c23` but
+    // also `gnu2x` gets the GNU spelling -- the serializer emits GNU
+    // constructs (statement expressions, `__int128`, `case A ... B`,
+    // `__asm__`) unconditionally, and a strict `-std=c<NN>` rejects them.
+    // The "c" prefix is only in the list at all when the user explicitly
+    // typed `c<NN>` (c_std_gnu == false), which forces explicit_std, which
+    // restricts `suffixes` to aliases of that one standard -- so no
+    // ordering here can downgrade the standard, only the GNU-ness.
+    size_t list_len           = 0;
+    native_std_probed_list[0] = '\0';
+    for (int p = 0; p < prefix_n; p++) {
+        for (int i = 0; i < n; i++) {
             char cand[16];
             snprintf(cand, sizeof(cand), "%s%s", prefixes[p], suffixes[i]);
+            if (list_len + strlen(cand) + 2 < sizeof(native_std_probed_list)) {
+                if (list_len)
+                    list_len += (size_t)snprintf(
+                        native_std_probed_list + list_len,
+                        sizeof(native_std_probed_list) - list_len, ", ");
+                list_len += (size_t)snprintf(
+                    native_std_probed_list + list_len,
+                    sizeof(native_std_probed_list) - list_len, "%s", cand);
+            }
             char probe_flag[24];
             snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
             char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
@@ -245,6 +276,25 @@ static int run_native_backend(
     char *cc = cccc_find_native_cc();
     if (!cc)
         return 1;
+
+    // #1218: resolve the target dialect BEFORE serializing, not after. The
+    // serializer itself is std-agnostic (fixed GNU C11 floor -- see
+    // man/NATIVE.md), so this does not change what gets emitted; it exists
+    // so an explicit --std= the host cc cannot honour is a plain CCCC error
+    // here, rather than a confusing host-compiler failure later. The ladder
+    // memoizes its probe in function statics, so the call at the -std=
+    // forwarding site below reuses this result at no cost. Only implicit
+    // --std= (nothing named on the command line) still degrades silently to
+    // "forward nothing" -- the user asked for no specific target, so the
+    // host cc's own default is a fine answer.
+    if (std_arg && !native_resolve_std_ladder(vm, cc, true)) {
+        fprintf(stderr,
+                "error: -c=native: --std=%s: host compiler '%s' accepts none "
+                "of the -std= spellings for that standard (tried: %s)\n",
+                std_arg, cc, native_std_probed_spellings());
+        free(cc);
+        return 1;
+    }
 
     char *source_path = make_tmp_path(".c");
     if (!source_path) {
@@ -316,14 +366,16 @@ static int run_native_backend(
     // bypassing the ladder entirely and hitting the exact spelling
     // asymmetry it exists to route around (e.g. GCC rejects "-std=c23"
     // but accepts "-std=c2x"). Route it through the same probe, restricted
-    // to spellings of the SAME standard (explicit_std=true) -- falling
-    // back to the user's literal spelling, unprobed, only if none of that
-    // standard's own spellings are accepted (today's pre-fix behaviour,
-    // so this can never turn a working compile into a failing one).
+    // to spellings of the SAME standard (explicit_std=true).
+    // #1218: an explicit --std= that survives to here has already been
+    // probe-verified above (the pre-serialization bail-out), so the ladder
+    // returns a real spelling. There is no literal-spelling fallback any
+    // more -- it could only ever forward a spelling the probe just
+    // rejected, i.e. a guaranteed host-compiler failure with a worse
+    // diagnostic than the one we now emit ourselves. Implicit --std=
+    // (nothing named): ladder NULL still means "forward nothing".
     const char *resolved_std =
         native_resolve_std_ladder(vm, cc, std_arg != NULL);
-    if (!resolved_std)
-        resolved_std = std_arg;
     if (resolved_std)
         push_owned_flag(&cc_args, &owned, "-std=", resolved_std);
     // #891/#1006: cccc auto-captures each command-line input file's own
