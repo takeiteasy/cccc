@@ -63,16 +63,31 @@ That spelling is chosen by probing the host `cc`:
   `c<NN>` one. The serializer emits GNU constructs (statement expressions,
   `__int128`, `case A ... B` range labels, `__asm__`) unconditionally, and a
   strict `-std=c<NN>` rejects them — CCCC's own front end only pedantic-warns.
-- With an explicit `--std=`, the probe only tries spellings of *that* standard
-  (`c23`/`gnu23`/`c2x`/`gnu2x` for C23, and so on) — it never silently
-  descends to an older standard than the one you named. With no `--std=`, it
-  descends the ladder toward older standards and forwards the newest rung the
-  host accepts, or nothing if the host has no usable `-std=` at all.
+- The probe never resolves to anything **older than C11** — the emitted C11
+  floor (`_Atomic`, `_Thread_local`, `_Alignas`/`_Alignof`, `_Static_assert`,
+  `_Complex`, all unconditional) needs at least that. A `--std=` naming an
+  older standard (`c99`, `c89`, and their `gnu` spellings) still has its
+  probe run, but against C11's own spellings instead — `--std=c99` forwards
+  `-std=gnu11` (or the newest C11 spelling the host accepts), not a spelling
+  of C99. This describes the emitted file honestly: it is C11 regardless of
+  what `--std=` you passed, so the older standard's spelling would be a lie
+  about the file the host is about to see.
+- With an explicit `--std=` naming C11 or later, the probe only tries
+  spellings of *that* standard (`c23`/`gnu23`/`c2x`/`gnu2x` for C23, and so
+  on) — it never silently descends to an older standard than the one you
+  named. With no `--std=` at all, it descends the ladder toward older
+  standards (bottoming out at C11) and forwards the newest rung the host
+  accepts, or nothing if the host has no usable `-std=` at all.
 - If you pass an explicit `--std=` and the host compiler accepts **none** of
-  that standard's spellings, `-c=native` fails with an error naming the
-  compiler and the spellings tried, rather than compiling for a different
-  dialect. (With no explicit `--std=`, the same situation just forwards
-  nothing and lets the host use its own default.)
+  the resulting standard's spellings (C11's, for a `--std=` naming C99 or
+  C89), `-c=native` fails with an error naming the compiler and the
+  spellings tried, rather than compiling for a different dialect.
+- With no explicit `--std=`, a host that accepts no `-std=` spelling at all
+  still gets nothing forwarded — but its own *default* dialect is then
+  checked against the same C11 floor (one extra probe, only reached when the
+  ladder already found nothing to forward), and `-c=native` fails rather
+  than handing the emitted file to a host whose default dialect cannot
+  parse it.
 
 ### Rejected in this mode
 

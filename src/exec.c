@@ -187,3 +187,238 @@ int run_argv_quiet(char *const argv[]) {
     return 1;
 #endif
 }
+
+// ============================================================================
+// Host `-std=` ladder (#1053/#1073/#1187/#1218/#1273/#1274)
+// ============================================================================
+//
+// Shared by -c=native (run_native_backend(), src/main.c) and --build native
+// targets (push_compile_flags(), src/build.c): both hand a fixed-dialect
+// emitted/compiled TU to a host cc and need to know which -std=<spelling> (if
+// any) that specific host compiler actually accepts.
+//
+// CCCC's own frontend is uniformly permissive across every C standard it
+// parses, and the -c=native serializer emits a fixed GNU C11 floor no matter
+// what --std= was passed (see man/NATIVE.md) -- so a strict ISO `c<NN>`
+// spelling forwarded to the host compiler is a promise the rest of CCCC does
+// not keep. A real host GCC's strict `-std=c89` rejects constructs (`//`
+// comments, mixed declarations, VLAs, compound literals, designated
+// initializers) that CCCC's own `--std=c89` only pedantic-warns on -- the
+// identical guest program that compiled and ran fine under the VM would then
+// fail to compile natively for a dialect reason CCCC itself never enforced.
+// CCCC_STD_PROBE_PREFER_GNU (-c=native only, #1187) tries "gnu<NN>" before
+// "c<NN>", falling back to "c<NN>" only if the host rejects it, restoring
+// "VM passes => native passes" without weakening anything: a host that
+// accepts neither spelling still gets nothing forwarded. --build targets
+// compile the user's own source rather than serializer output, so that
+// rationale does not transfer -- omitting the flag keeps the ladder to
+// alias spellings of the user's own prefix (#1274).
+//
+// CCCC_STD_PROBE_EXPLICIT (#1073): when the user passes --std= explicitly,
+// only the equivalent-spelling rungs of THAT standard are tried (e.g.
+// "23"/"2x", both CCCC_STD_C23) -- the ladder never descends to an older
+// standard. Omitting it selects the full best-effort descend-to-older ladder
+// the implicit-default path uses (nothing was named, so falling back is
+// fine).
+//
+// CCCC_STD_PROBE_C11_FLOOR (-c=native only, #1273): the serializer's fixed
+// GNU C11 floor (_Atomic, _Thread_local, _Alignas/_Alignof, _Static_assert,
+// _Complex) is emitted unconditionally regardless of --std=, so forwarding a
+// pre-C11 spelling (e.g. -std=gnu99) mis-describes the file to the host --
+// the identical invariant violation CCCC_STD_PROBE_PREFER_GNU fixed one rung
+// up. With this flag, a c_std below CCCC_STD_C11 is treated as CCCC_STD_C11
+// when building the candidate list; --build targets compile the user's own
+// (possibly genuinely pre-C11) source, so they never pass it.
+// CCCC_STD_PROBE_* flags themselves are declared in internal.h (shared with
+// src/build.c).
+//
+// Every spelling a given (vm, flags) request would try, in probe order.
+// Returns the candidate count; writes at most `cap` NUL-terminated spellings
+// into `out[i]` (each sized [16]). Pure function of vm->compiler.c_std,
+// vm->compiler.c_std_gnu and flags -- independent of which host cc is being
+// probed, so this is shared by the prober and by the "spellings tried"
+// diagnostic list.
+static int build_std_candidates(VirtualMachine *vm, int flags, char out[][16],
+                                int cap) {
+    CStdVersion c_std = vm->compiler.c_std;
+    if ((flags & CCCC_STD_PROBE_C11_FLOOR) &&
+        (c_std == CCCC_STD_C89 || c_std == CCCC_STD_C99))
+        c_std = CCCC_STD_C11;
+
+    const char *prefixes[2];
+    int         prefix_n = 0;
+    if (flags & CCCC_STD_PROBE_PREFER_GNU) {
+        prefixes[prefix_n++] = "gnu";
+        if (!vm->compiler.c_std_gnu)
+            prefixes[prefix_n++] = "c";
+    } else {
+        prefixes[prefix_n++] = vm->compiler.c_std_gnu ? "gnu" : "c";
+    }
+
+    bool        explicit_std = flags & CCCC_STD_PROBE_EXPLICIT;
+    const char *suffixes[6];
+    int         n = 0;
+    switch (c_std) {
+        case CCCC_STD_C23:
+            suffixes[n++] = "23";
+            suffixes[n++] = "2x";
+            if (!explicit_std) {
+                suffixes[n++] = "17";
+                suffixes[n++] = "11";
+            }
+            break;
+        case CCCC_STD_C17:
+            suffixes[n++] = "17";
+            suffixes[n++] = "18";
+            if (!explicit_std)
+                suffixes[n++] = "11";
+            break;
+        case CCCC_STD_C11:
+            suffixes[n++] = "11";
+            suffixes[n++] = "1x";
+            break;
+        case CCCC_STD_C99:
+            suffixes[n++] = "99";
+            suffixes[n++] = "9x";
+            break;
+        case CCCC_STD_C89:
+            suffixes[n++] = "89";
+            suffixes[n++] = "90";
+            break;
+    }
+
+    // Prefix-major, not suffix-major (#1218): try every "gnu<suffix>" rung
+    // before any "c<suffix>" one, so a host that accepts a strict ISO `c23`
+    // but also `gnu2x` gets the GNU spelling. The "c" prefix is only in the
+    // list at all when PREFER_GNU is set and the user explicitly typed
+    // `c<NN>` (c_std_gnu == false), which forces explicit_std, which
+    // restricts `suffixes` to aliases of that one standard -- so no
+    // ordering here can downgrade the standard, only the GNU-ness.
+    int count = 0;
+    for (int p = 0; p < prefix_n && count < cap; p++)
+        for (int i = 0; i < n && count < cap; i++)
+            snprintf(out[count++], 16, "%s%s", prefixes[p], suffixes[i]);
+    return count;
+}
+
+void cccc_host_std_spellings(VirtualMachine *vm, int flags, char *buf,
+                             size_t n) {
+    char cand[12][16];
+    int  count = build_std_candidates(vm, flags, cand, 12);
+    buf[0]     = '\0';
+    size_t len = 0;
+    for (int i = 0; i < count; i++) {
+        if (len && len + 2 < n)
+            len += (size_t)snprintf(buf + len, n - len, ", ");
+        if (len < n)
+            len += (size_t)snprintf(buf + len, n - len, "%s", cand[i]);
+    }
+}
+
+// #1274: -c=native can call this at most a handful of times per process with
+// a small, fixed set of (cc, flags) pairs; --build can call it once per
+// target, each potentially resolving a different compiler
+// (effective_cc_for_target()) -- unlike the single-cc, single-flags memo
+// this replaces, the cache must be keyed on both, or a later target could
+// silently reuse an earlier, unrelated target's probed spelling.
+#define CCCC_STD_PROBE_CACHE_CAP 8
+typedef struct {
+    char cc[512];
+    int  flags;
+    bool has_result;
+    bool found;
+    char resolved[16];
+} CcccStdProbeCacheEntry;
+
+static CcccStdProbeCacheEntry cccc_std_probe_cache[CCCC_STD_PROBE_CACHE_CAP];
+static int                    cccc_std_probe_cache_len = 0;
+
+const char *cccc_resolve_host_std(VirtualMachine *vm, const char *cc,
+                                  int flags) {
+    for (int i = 0; i < cccc_std_probe_cache_len; i++) {
+        CcccStdProbeCacheEntry *e = &cccc_std_probe_cache[i];
+        if (e->flags == flags && strcmp(e->cc, cc) == 0)
+            return e->has_result && e->found ? e->resolved : NULL;
+    }
+
+    char cand[12][16];
+    int  count = build_std_candidates(vm, flags, cand, 12);
+    bool found = false;
+    int  hit   = -1;
+    for (int i = 0; i < count && !found; i++) {
+        char probe_flag[24];
+        snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand[i]);
+        char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
+                              "c",        "/dev/null",     NULL};
+        if (run_argv_quiet(probe_argv) == 0) {
+            found = true;
+            hit   = i;
+        }
+    }
+
+    // A full cache table (CCCC_STD_PROBE_CACHE_CAP distinct (cc, flags)
+    // pairs probed in one process) re-probes on every further call rather
+    // than caching -- correct either way, just no longer O(1); a real run
+    // never approaches 8 distinct pairs (one or two host compilers, a
+    // handful of flag combinations).
+    if (cccc_std_probe_cache_len < CCCC_STD_PROBE_CACHE_CAP) {
+        CcccStdProbeCacheEntry *e =
+            &cccc_std_probe_cache[cccc_std_probe_cache_len++];
+        snprintf(e->cc, sizeof(e->cc), "%s", cc);
+        e->flags      = flags;
+        e->has_result = true;
+        e->found      = found;
+        if (found)
+            snprintf(e->resolved, sizeof(e->resolved), "%s", cand[hit]);
+        return found ? e->resolved : NULL;
+    }
+
+    // Cache overflow: still correct, just answers from a static scratch
+    // buffer instead of a cache slot (single caller per return value, so no
+    // aliasing hazard -- the caller uses/copies it before calling again).
+    static char overflow_resolved[16];
+    if (found)
+        snprintf(overflow_resolved, sizeof(overflow_resolved), "%s", cand[hit]);
+    return found ? overflow_resolved : NULL;
+}
+
+// #1273: even with no --std= forwarded at all (implicit path, ladder found
+// nothing), the serializer's fixed GNU C11 floor still has to land on
+// something the host's own DEFAULT dialect accepts. One -fsyntax-only probe
+// against a tiny TU exercising exactly that floor (_Static_assert,
+// _Thread_local, _Atomic, _Alignas/_Alignof, _Complex) -- a pass means the
+// host's default dialect is safe to compile the emitted file under.
+bool cccc_host_default_has_c11(const char *cc) {
+    static char cached_cc[512];
+    static bool has_result = false;
+    static bool result     = false;
+    if (has_result && strcmp(cached_cc, cc) == 0)
+        return result;
+
+    char *probe_path = make_tmp_path(".c");
+    if (!probe_path)
+        return true; // fail open: don't block a compile on a tmpfile error
+    FILE *f = fopen(probe_path, "w");
+    if (!f) {
+        unlink(probe_path);
+        free(probe_path);
+        return true;
+    }
+    fputs("_Static_assert(1, \"\");\n"
+          "_Thread_local int __cccc_c11_probe_tls;\n"
+          "_Atomic int __cccc_c11_probe_atomic;\n"
+          "_Alignas(16) int __cccc_c11_probe_align;\n"
+          "int __cccc_c11_probe_alignof = _Alignof(int);\n"
+          "double _Complex __cccc_c11_probe_complex;\n",
+          f);
+    fclose(f);
+
+    char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_path, NULL};
+    result             = run_argv_quiet(probe_argv) == 0;
+    unlink(probe_path);
+    free(probe_path);
+
+    snprintf(cached_cc, sizeof(cached_cc), "%s", cc);
+    has_result = true;
+    return result;
+}

@@ -113,6 +113,30 @@ Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`
 `-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-m`, `--ast`)
 are rejected in `--build` mode.
 
+### How `--std=` is handled
+
+Unlike `-c=native`, a `--build` target compiles the source *you wrote*, not
+serializer output — there is no fixed dialect floor to protect, so `--std=`
+is honoured far more literally here:
+
+- Each target's own resolved compiler (`SetToolchain`, `--build-cc=`/
+  `CCCC_BUILD_CC`, or the system default — see "Cross-compilation" below) is
+  probed independently for a `-std=` spelling of the *named* standard: the
+  standard you passed is tried first (`c23`), then its other spellings
+  (`c2x`), stopping there — it never falls back to the `gnu<NN>` prefix and
+  never descends to an older standard. This exists purely to route around
+  the same spelling asymmetry `-c=native` handles (a host that rejects
+  strict `-std=c23` but accepts `-std=c2x`); it never loosens a strict-ISO
+  build to a GNU one the way `-c=native`'s ladder does for its own emitted C.
+- If a target's compiler accepts **none** of the named standard's spellings,
+  that target fails with an error naming the compiler and the spellings
+  tried — the other targets in the build are unaffected, and
+  `--build-keep-going` applies normally.
+- `--build-dry-run` still runs this probe (a single `-fsyntax-only` spawn
+  per distinct compiler), so the printed command lines show the spelling
+  that would actually be forwarded, and an unhonourable `--std=` is caught
+  during a dry run too.
+
 ## Parallel builds
 
 `--build-jobs=N` operates at two levels that share the same `-j` slot budget:

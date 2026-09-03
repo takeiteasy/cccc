@@ -151,6 +151,14 @@ Cases:
       while the same wrapper with no `--std=` still compiles and runs
       (the implicit path keeps its forward-nothing degrade).
 
+  158: #1273 -- an explicit `--std=` naming a pre-C11 standard (e.g. c99)
+      used to forward a spelling of that same older standard, even though
+      the serializer emits a fixed GNU C11 floor unconditionally (struct
+      layout guards among others). Fixed by flooring the probed spelling
+      at C11. Asserted via a wrapper that logs argv: `--std=c99 -c=native`
+      on a program with a struct must forward a C11 spelling, never a C99
+      one, and the binary must still run 42.
+
 Exit codes: 0 = all cases pass, 1 = any failure.
 
 Pass --audit-skips (#1197) to run the SMOKE_CASE_SKIPS_GCC_MACOS staleness
@@ -4255,6 +4263,67 @@ def case_native_explicit_std_host_rejects_1218(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_std_c11_floor_1273(cccc: Path, tmp: str) -> bool:
+    print("  158: #1273 -- the -c=native ladder used to forward a spelling "
+          "of whatever standard the user *named* (--std=c99 -> -std=gnu99), "
+          "even though the serializer emits a fixed GNU C11 floor "
+          "unconditionally (_Static_assert/_Alignof struct-layout guards, "
+          "among others) regardless of --std= -- a plain struct definition "
+          "is enough to trigger those guards, no explicit C11 construct "
+          "needed in the source. Fixed by flooring the probed spelling at "
+          "C11: a --std= naming a pre-C11 standard now resolves to a C11 "
+          "spelling instead of the older one named. Asserted via a wrapper "
+          "that logs every argv and exec's the real cc: '--std=c99 "
+          "-c=native' on a program with a struct must forward a C11 "
+          "spelling ('-std=gnu11' or '-std=gnu1x'), never '-std=gnu99'/"
+          "'-std=c99', and the binary must still run 42.")
+    src = Path(tmp) / "native_std_c11_floor_1273.c"
+    write(src, (
+        "struct point { int x, y; };\n"
+        "int main(void) { struct point p = {40, 2}; return p.x + p.y; }\n"
+    ))
+    out = Path(tmp) / "native_std_c11_floor_1273_out"
+    log = Path(tmp) / "native_std_c11_floor_1273_argv.log"
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not real_cc:
+        print("    FAIL: no real cc/clang/gcc found to wrap")
+        return False
+    wrapper = Path(tmp) / "native_std_c11_floor_1273_cc_wrapper.sh"
+    write(wrapper, (
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" >> {log}\n"
+        f"exec {real_cc} \"$@\"\n"
+    ))
+    wrapper.chmod(0o755)
+    env = dict(os.environ)
+    env["CCCC_NATIVE_CC"] = str(wrapper)
+    result = run(
+        [str(cccc), "--std=c99", "-c=native", "-o", out.name, src.name],
+        cwd=tmp, env=env,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    lines = log.read_text().splitlines() if log.exists() else []
+    forwarded = [l for l in lines if l.startswith("-std=")]
+    if any(s in ("-std=gnu99", "-std=c99", "-std=gnu9x", "-std=c9x")
+           for s in forwarded):
+        print(f"    FAIL: a pre-C11 -std= spelling was forwarded despite "
+              f"the emitted file requiring C11: {forwarded}")
+        return False
+    if not any(s in ("-std=gnu11", "-std=gnu1x", "-std=c11", "-std=c1x")
+               for s in forwarded):
+        print(f"    FAIL: expected a C11 -std= spelling to be forwarded "
+              f"(floored from --std=c99), got {forwarded}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_native_defines_survive_argv(cccc: Path, tmp: str) -> bool:
     print("  103: two -D flags used to reach the host cc mangled two "
           "different ways (#1065): parse_define() (src/main.c) split each "
@@ -7813,6 +7882,7 @@ CASES = [
     case_flt_rounds_native_round_trip,
     case_native_explicit_std_probed,
     case_native_explicit_std_host_rejects_1218,
+    case_native_std_c11_floor_1273,
     case_nested_decl_binding_native_round_trip,
     case_mb_cur_max_native_round_trip,
     case_nested_fn_native_round_trip,
@@ -7865,7 +7935,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

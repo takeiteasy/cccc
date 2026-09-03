@@ -109,142 +109,15 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
     argv_push(cc_args, flag);
 }
 
-// #1053: CCCC's own internal default standard is gnu23 (src/vm.c), but
-// -c=native only ever forwarded -std= when the user passed --std=
-// explicitly on the CCCC command line -- a plain `cccc foo.c -c=native`
-// relied entirely on the host cc's own default standard, which can be
-// older (e.g. Ubuntu's plain `cc` -> gcc defaults to gnu17, see
-// man/NATIVE.md), silently rejecting any C23 construct the serializer
-// legitimately emitted even though the VM run succeeded. Forwarding
-// CCCC's resolved default unconditionally isn't safe either -- a host cc
-// that doesn't recognize "-std=gnu23" at all would then fail *every*
-// -c=native compile outright, trading a narrow failure for a total one.
-// Instead, probe the host cc (quietly -- a rejected rung's diagnostic
-// isn't the user's business) down a ladder from CCCC's resolved default
-// toward older standards, and forward the newest rung it actually
-// accepts. "2x" is its own separate rung from "23": gcc 13 accepts
-// "-std=gnu2x" but rejects "-std=gnu23" outright. If nothing in the
-// ladder is accepted, forward nothing -- exactly today's behaviour, so
-// this can never make a native compile that used to succeed fail.
-// #1073: when the user passes --std= explicitly, the equivalent-spelling
-// rungs (e.g. "23"/"2x", both CCCC_STD_C23) are tried, but the ladder never
-// descends to an OLDER standard -- a user who named C23 must never
-// silently get C17 semantics on the native half while the VM half stayed
-// C23. explicit_std selects between that narrower probe and the full
-// best-effort descend-to-older ladder the implicit-default path already
-// used (nothing was named there, so falling back is fine). Every spelling
-// below is probe-verified, not guessed: Apple clang 17 accepts all of
-// them; Ubuntu GCC 13.3.0 rejects "23"/"gnu23" outright but accepts
-// "2x"/"gnu2x" and every other listed spelling.
-//
-// Every `-std=` spelling native_resolve_std_ladder() tried on its one probe
-// run, as a human-readable comma list -- so the "your host cc honours none of
-// these" error can name them. Populated by the function below on its first
-// call; empty until then.
-static char native_std_probed_list[96];
-
-static const char *native_std_probed_spellings(void) {
-    return native_std_probed_list;
-}
-
-static const char *native_resolve_std_ladder(VirtualMachine *vm, const char *cc,
-                                             bool explicit_std) {
-    static bool probed = false;
-    static bool found  = false;
-    static char cached[16];
-    if (probed)
-        return found ? cached : NULL;
-    probed = true;
-
-    // #1187: always probe "gnu<NN>" before "c<NN>", regardless of which
-    // prefix the user actually typed. CCCC's own frontend is uniformly
-    // permissive -- c_std_gnu (Compiler.c_std_gnu) has no reader left
-    // besides this function, and the serializer emits a fixed GNU C11
-    // floor no matter what --std= was passed (see man/NATIVE.md) -- so a
-    // strict ISO `c<NN>` spelling forwarded to the host compiler is a
-    // promise the rest of CCCC does not keep. A real host GCC's strict
-    // `-std=c89` rejects constructs (`//` comments, mixed declarations,
-    // VLAs, compound literals, designated initializers) that CCCC's own
-    // `--std=c89` only pedantic-warns on -- the identical guest program
-    // that compiled and ran fine under the VM would then fail to compile
-    // natively for a dialect reason CCCC itself never enforced. Trying
-    // "gnu<NN>" first (falling back to "c<NN>" only if the host rejects
-    // it) restores "VM passes => native passes" without weakening
-    // anything: a host that accepts neither spelling still gets nothing
-    // forwarded, same as before.
-    const char *prefixes[2];
-    int         prefix_n = 0;
-    prefixes[prefix_n++] = "gnu";
-    if (!vm->compiler.c_std_gnu)
-        prefixes[prefix_n++] = "c";
-    const char *suffixes[6];
-    int         n = 0;
-    switch (vm->compiler.c_std) {
-        case CCCC_STD_C23:
-            suffixes[n++] = "23";
-            suffixes[n++] = "2x";
-            if (!explicit_std) {
-                suffixes[n++] = "17";
-                suffixes[n++] = "11";
-            }
-            break;
-        case CCCC_STD_C17:
-            suffixes[n++] = "17";
-            suffixes[n++] = "18";
-            if (!explicit_std)
-                suffixes[n++] = "11";
-            break;
-        case CCCC_STD_C11:
-            suffixes[n++] = "11";
-            suffixes[n++] = "1x";
-            break;
-        case CCCC_STD_C99:
-            suffixes[n++] = "99";
-            suffixes[n++] = "9x";
-            break;
-        case CCCC_STD_C89:
-            suffixes[n++] = "89";
-            suffixes[n++] = "90";
-            break;
-    }
-
-    // Prefix-major, not suffix-major: try every "gnu<suffix>" rung before
-    // any "c<suffix>" one, so a host that accepts a strict ISO `c23` but
-    // also `gnu2x` gets the GNU spelling -- the serializer emits GNU
-    // constructs (statement expressions, `__int128`, `case A ... B`,
-    // `__asm__`) unconditionally, and a strict `-std=c<NN>` rejects them.
-    // The "c" prefix is only in the list at all when the user explicitly
-    // typed `c<NN>` (c_std_gnu == false), which forces explicit_std, which
-    // restricts `suffixes` to aliases of that one standard -- so no
-    // ordering here can downgrade the standard, only the GNU-ness.
-    size_t list_len           = 0;
-    native_std_probed_list[0] = '\0';
-    for (int p = 0; p < prefix_n; p++) {
-        for (int i = 0; i < n; i++) {
-            char cand[16];
-            snprintf(cand, sizeof(cand), "%s%s", prefixes[p], suffixes[i]);
-            if (list_len + strlen(cand) + 2 < sizeof(native_std_probed_list)) {
-                if (list_len)
-                    list_len += (size_t)snprintf(
-                        native_std_probed_list + list_len,
-                        sizeof(native_std_probed_list) - list_len, ", ");
-                list_len += (size_t)snprintf(
-                    native_std_probed_list + list_len,
-                    sizeof(native_std_probed_list) - list_len, "%s", cand);
-            }
-            char probe_flag[24];
-            snprintf(probe_flag, sizeof(probe_flag), "-std=%s", cand);
-            char *probe_argv[] = {(char *)cc, "-fsyntax-only", probe_flag, "-x",
-                                  "c",        "/dev/null",     NULL};
-            if (run_argv_quiet(probe_argv) == 0) {
-                snprintf(cached, sizeof(cached), "%s", cand);
-                found = true;
-                return cached;
-            }
-        }
-    }
-    return NULL;
-}
+// #1053/#1073/#1187/#1218/#1273: the host `-std=` ladder itself now lives in
+// src/exec.c (cccc_resolve_host_std() et al, declared in internal.h) --
+// shared with --build's native targets (#1274, src/build.c). See the
+// rationale comment above build_std_candidates() there. The two call sites
+// below always pass CCCC_STD_PROBE_PREFER_GNU | CCCC_STD_PROBE_C11_FLOOR:
+// -c=native's serializer emits GNU constructs and a fixed GNU C11 floor
+// unconditionally, regardless of --std= (man/NATIVE.md).
+#define NATIVE_STD_PROBE_FLAGS                                                 \
+    (CCCC_STD_PROBE_PREFER_GNU | CCCC_STD_PROBE_C11_FLOOR)
 
 static int run_native_backend(
     VirtualMachine *vm, Obj *prog, const char *out_file, const char **inc_paths,
@@ -281,17 +154,44 @@ static int run_native_backend(
     // serializer itself is std-agnostic (fixed GNU C11 floor -- see
     // man/NATIVE.md), so this does not change what gets emitted; it exists
     // so an explicit --std= the host cc cannot honour is a plain CCCC error
-    // here, rather than a confusing host-compiler failure later. The ladder
-    // memoizes its probe in function statics, so the call at the -std=
-    // forwarding site below reuses this result at no cost. Only implicit
-    // --std= (nothing named on the command line) still degrades silently to
-    // "forward nothing" -- the user asked for no specific target, so the
-    // host cc's own default is a fine answer.
-    if (std_arg && !native_resolve_std_ladder(vm, cc, true)) {
+    // here, rather than a confusing host-compiler failure later. The
+    // resolver memoizes its probe, so the call at the -std= forwarding site
+    // below reuses this result at no cost.
+    // #1273: CCCC_STD_PROBE_C11_FLOOR means a --std= naming a pre-C11
+    // standard (c99/c89) is resolved to a C11 spelling here, not refused --
+    // the emitted file is C11 regardless of what --std= named, so promoting
+    // the forwarded spelling describes it honestly instead of mis-describing
+    // it as the older standard. Refusal now means the host honours NO C11
+    // spelling at all.
+    if (std_arg &&
+        !cccc_resolve_host_std(
+            vm, cc, NATIVE_STD_PROBE_FLAGS | CCCC_STD_PROBE_EXPLICIT)) {
+        char spellings[96];
+        cccc_host_std_spellings(
+            vm, NATIVE_STD_PROBE_FLAGS | CCCC_STD_PROBE_EXPLICIT, spellings,
+            sizeof(spellings));
         fprintf(stderr,
-                "error: -c=native: --std=%s: host compiler '%s' accepts none "
-                "of the -std= spellings for that standard (tried: %s)\n",
-                std_arg, cc, native_std_probed_spellings());
+                "error: -c=native: --std=%s: the emitted C requires a C11 "
+                "host dialect and compiler '%s' accepts none of the -std= "
+                "spellings tried (%s)\n",
+                std_arg, cc, spellings);
+        free(cc);
+        return 1;
+    }
+    // #1273: implicit path (no --std= named at all) -- the ladder forwards
+    // nothing and the host's own default dialect applies. That default still
+    // has to cover the serializer's unconditional C11 floor; check it
+    // explicitly rather than letting a pre-C11-by-default host (no known
+    // gcc/clang ships one, but nothing enforces it) fail deep inside the
+    // host compiler's own diagnostics.
+    if (!std_arg && !cccc_resolve_host_std(vm, cc, NATIVE_STD_PROBE_FLAGS) &&
+        !cccc_host_default_has_c11(cc)) {
+        fprintf(stderr,
+                "error: -c=native: host compiler '%s' accepts no -std= "
+                "spelling of C11 or later, and its own default dialect does "
+                "not implement _Atomic/_Thread_local/_Static_assert/"
+                "_Alignas/_Complex, which the emitted C requires\n",
+                cc);
         free(cc);
         return 1;
     }
@@ -374,8 +274,9 @@ static int run_native_backend(
     // rejected, i.e. a guaranteed host-compiler failure with a worse
     // diagnostic than the one we now emit ourselves. Implicit --std=
     // (nothing named): ladder NULL still means "forward nothing".
-    const char *resolved_std =
-        native_resolve_std_ladder(vm, cc, std_arg != NULL);
+    const char *resolved_std = cccc_resolve_host_std(
+        vm, cc,
+        NATIVE_STD_PROBE_FLAGS | (std_arg ? CCCC_STD_PROBE_EXPLICIT : 0));
     if (resolved_std)
         push_owned_flag(&cc_args, &owned, "-std=", resolved_std);
     // #891/#1006: cccc auto-captures each command-line input file's own

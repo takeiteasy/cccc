@@ -123,15 +123,16 @@ struct BuildTarget {
 #define TARGET_SKIPPED  4 // blocked: a dep failed/was skipped
 
 struct Builder {
-    char       *root;
-    char       *out_dir;
-    const char *host;
-    const char *target_filter; // --build-target=NAME, or NULL (build all)
-    int         verbose;    // -v or --build-verbose: enables per-target headers
-    int         quiet;      // --build-quiet: suppress per-step command lines
-    int         keep_going; // --build-keep-going: continue past target failures
-    int         dry_run;
-    int         jobs; // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
+    VirtualMachine *vm;   // #1274: needed by push_compile_flags()'s -std= probe
+    char           *root;
+    char           *out_dir;
+    const char     *host;
+    const char     *target_filter; // --build-target=NAME, or NULL (build all)
+    int   verbose;    // -v or --build-verbose: enables per-target headers
+    int   quiet;      // --build-quiet: suppress per-step command lines
+    int   keep_going; // --build-keep-going: continue past target failures
+    int   dry_run;
+    int   jobs;       // --build-jobs=N: max parallel cc -c slots (<=1 = serial)
     char *cache_dir; // --build-cache[=PATH]: content-addressable cache root, or
                      // NULL (#546)
     BuildTarget              **targets;
@@ -149,10 +150,10 @@ struct Builder {
     // --build-target=NAME invocation.
     const char **factory_names;
     int          factory_count;
-    const char  *profile;  // --build-profile=NAME global default (#548)
+    const char  *profile; // --build-profile=NAME global default (#548)
     const char
-        *cross_triple;     // --build-triple=TRIPLE global target triple (#547)
-    const char *cross_cc;  // --build-cc=COMPILER global CC override (#547)
+        *cross_triple;    // --build-triple=TRIPLE global target triple (#547)
+    const char *cross_cc; // --build-cc=COMPILER global CC override (#547)
     // Strings returned by CaptureCommand/GlobFiles/ReadFile; freed at teardown.
     char **captures;
     int    captures_count, captures_cap;
@@ -1482,13 +1483,28 @@ static void push_profile_defines(ArgVec *args, const char *profile) {
 // Append the CLI defaults and a target's own compile flags to an ArgVec.
 // `owned` accumulates heap strings (e.g. "-DFOO") that must outlive the spawn.
 static void push_compile_flags(ArgVec *args, const Builder *ctx,
-                               const BuildTarget *t, StringArray *owned) {
+                               const BuildTarget *t, const char *cc,
+                               StringArray *owned) {
     const CcNativeCompileArgs *d = ctx->defaults;
+    // #1274: route through the same probed ladder -c=native uses (#1073/
+    // #1187/#1218), restricted to alias spellings of the NAMED standard
+    // only (no CCCC_STD_PROBE_PREFER_GNU, no CCCC_STD_PROBE_C11_FLOOR) --
+    // unlike -c=native's serializer output, a --build target compiles the
+    // user's own source, so neither the "prefer GNU" nor the "C11 floor"
+    // rationale applies here; the user's own c/gnu prefix and named
+    // standard are honoured exactly, just with the c23-vs-c2x spelling
+    // asymmetry probed around. The caller (run_step, above) has already
+    // confirmed this resolves to a real spelling for this target's `cc`, so
+    // the memoized re-probe here is free and cannot return NULL.
     if (d && d->std_arg) {
-        char *f = malloc(strlen(d->std_arg) + 8);
-        snprintf(f, strlen(d->std_arg) + 8, "-std=%s", d->std_arg);
-        strarray_push(owned, f);
-        argv_push(args, f);
+        const char *resolved =
+            cccc_resolve_host_std(ctx->vm, cc, CCCC_STD_PROBE_EXPLICIT);
+        if (resolved) {
+            char *f = malloc(strlen(resolved) + 8);
+            snprintf(f, strlen(resolved) + 8, "-std=%s", resolved);
+            strarray_push(owned, f);
+            argv_push(args, f);
+        }
     }
     for (int i = 0; d && i < d->inc_paths_count; i++) {
         argv_push(args, "-I");
@@ -2118,7 +2134,7 @@ static void build_compile_argv(ArgVec *a, StringArray *owned, Builder *ctx,
     argv_push(a, "-MMD");
     argv_push(a, "-MF");
     argv_push(a, dfile);
-    push_compile_flags(a, ctx, t, owned);
+    push_compile_flags(a, ctx, t, cc, owned);
 }
 
 // Compile one target's sources to object files; collect the .o paths in `objs`.
@@ -2414,7 +2430,7 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         const char *kind_str = t->kind == CCCC_TGT_EXE       ? "executable"
                                : t->kind == CCCC_TGT_STATIC  ? "static library"
                                : t->kind == CCCC_TGT_DYNAMIC ? "dynamic library"
-                                                              : "custom";
+                                                             : "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
         else
@@ -2497,6 +2513,32 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
     if (!eff_cc) {
         fprintf(stderr, "build: could not find a C compiler for target '%s'\n",
                 t->name);
+        free(out_rel);
+        free(out_abs);
+        free(out_dir);
+        free(tobjdir);
+        return 1;
+    }
+
+    // #1274: an explicit --std= must be probe-verified against THIS target's
+    // own compiler before compile_sources() spends any work -- push_compile_
+    // flags() (below, via build_compile_argv()) forwards whatever this
+    // resolves to, and a target whose compiler honours none of the named
+    // standard's spellings should fail cleanly here, not with a host-cc
+    // parse error deep inside the first source file. Per-target, not
+    // process-fatal (unlike -c=native, a build graph has many targets and
+    // --build-keep-going exists) -- this only fails the target the caller
+    // already handles failure for via `rc`/`goto done` below.
+    if (ctx->defaults && ctx->defaults->std_arg &&
+        !cccc_resolve_host_std(ctx->vm, eff_cc, CCCC_STD_PROBE_EXPLICIT)) {
+        char spellings[96];
+        cccc_host_std_spellings(ctx->vm, CCCC_STD_PROBE_EXPLICIT, spellings,
+                                sizeof(spellings));
+        fprintf(stderr,
+                "build: target '%s': --std=%s: compiler '%s' accepts none of "
+                "the -std= spellings for that standard (tried: %s)\n",
+                t->name, ctx->defaults->std_arg, eff_cc, spellings);
+        free(eff_cc);
         free(out_rel);
         free(out_abs);
         free(out_dir);
@@ -2624,7 +2666,7 @@ static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
         if (order[i]->kind == CCCC_TGT_CUSTOM)
-            total += 1; // one step: run the custom command
+            total += 1;                    // one step: run the custom command
         else
             total +=
                 order[i]->sources.len + 1; // one compile per source + 1 link/ar
@@ -3182,6 +3224,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     snprintf(cwd, sizeof(cwd), ".");
 
                 Builder ctx = {0};
+                ctx.vm      = vm;
                 ctx.root    = cwd;
                 ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
                 ctx.host    = CCCC_BUILD_HOST;
@@ -3219,7 +3262,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
                 s_ctx            = NULL;
 
-                int exit_code = 0;
+                int exit_code    = 0;
                 if (!tgt) {
                     fprintf(stderr, "build: factory '%s' returned NULL\n",
                             opts->target_name);
@@ -3275,6 +3318,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         snprintf(cwd, sizeof(cwd), ".");
 
     Builder ctx       = {0};
+    ctx.vm            = vm;
     ctx.root          = cwd;
     ctx.out_dir       = xstrdup(opts->out_dir ? opts->out_dir : "build");
     ctx.host          = CCCC_BUILD_HOST;

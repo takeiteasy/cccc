@@ -1289,6 +1289,26 @@ int run_argv(char *const argv[]);
 int run_argv_env(char *const argv[], char *const envp[]);
 int run_argv_quiet(char *const argv[]);
 
+// Host `-std=` ladder (#1053/#1073/#1187/#1218/#1273/#1274): shared by
+// -c=native (src/main.c) and --build native targets (src/build.c). See the
+// rationale comment above build_std_candidates() in src/exec.c.
+enum {
+    CCCC_STD_PROBE_EXPLICIT   = 1 << 0, // user named --std=: never descend
+    CCCC_STD_PROBE_PREFER_GNU = 1 << 1, // try gnu<NN> before c<NN> (#1187)
+    CCCC_STD_PROBE_C11_FLOOR  = 1 << 2, // never resolve below C11 (#1273)
+};
+// First -std=<spelling> `cc` accepts for this (vm, flags) request, or NULL
+// if none are. Memoized per (cc, flags).
+const char *cccc_resolve_host_std(VirtualMachine *vm, const char *cc,
+                                  int flags);
+// Every spelling that request would try, as a human-readable comma list --
+// for a "host compiler accepts none of these" diagnostic.
+void cccc_host_std_spellings(VirtualMachine *vm, int flags, char *buf,
+                             size_t n);
+// Does `cc`, with no -std= forwarded at all, accept the C11 constructs the
+// -c=native serializer emits unconditionally? Memoized per cc.
+bool cccc_host_default_has_c11(const char *cc);
+
 // Preprocess include/cccc/building.h; see cc_inject_build_header's
 // definition (src/build.c) for the full contract.
 Token *cc_inject_build_header(VirtualMachine *vm);

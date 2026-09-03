@@ -142,3 +142,30 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   is forwarded and the host uses its own default). The host `-std=` probe also
   now prefers the `gnu<NN>` spelling of a standard over the strict ISO `c<NN>`
   one consistently. See `man/NATIVE.md`.
+- Fixed: under `-c=native`, an explicit `--std=` naming a pre-C11 standard
+  (`c99`, `c89`) used to forward a `-std=` spelling of that same older
+  standard, even though the serializer emits a fixed GNU C11 floor
+  (`_Atomic`, `_Thread_local`, `_Alignas`/`_Alignof`, `_Static_assert`,
+  `_Complex`) unconditionally, regardless of `--std=` — a plain `struct`
+  definition alone triggers layout-guard `_Static_assert`/`_Alignof`
+  output, no explicit C11 construct required in the source. The probed
+  spelling is now floored at C11: `--std=c99` resolves a C11 spelling
+  (`gnu11`, `gnu1x`, `c11`, or `c1x`) instead, failing only if the host
+  compiler accepts none of those. When no `--std=` is passed at all and the
+  host accepts no `-std=` spelling, its own default dialect is now checked
+  against the same C11 floor, failing with a clear diagnostic rather than
+  handing the emitted file to a host whose default dialect cannot parse it.
+  See `man/NATIVE.md`.
+- Fixed: `--build` native targets forwarded an explicit `--std=` to each
+  target's compiler byte-for-byte, with no spelling probe at all — a build
+  script run with `--std=c23` on a host compiler that only accepts
+  `-std=c2x` (not `-std=c23`) failed with a host-compiler parse error
+  instead of a CCCC diagnostic, the same asymmetry already handled for
+  `-c=native`. `--build` targets now probe each target's own resolved
+  compiler for a spelling of the *named* standard (trying the user's own
+  `c`/`gnu` prefix, e.g. `c23` then `c2x`, never falling back to the other
+  prefix and never descending to an older standard — a `--build` target
+  compiles the user's own source, not serializer output, so neither of
+  `-c=native`'s dialect-widening reasons apply here). An unhonourable
+  `--std=` now fails only that target, with `--build-keep-going` and
+  `--build-dry-run` both behaving as expected. See `man/BUILD_MODE.md`.
