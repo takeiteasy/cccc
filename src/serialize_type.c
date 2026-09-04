@@ -51,16 +51,47 @@
 // independently-parsed occurrences of a self-referential struct (`struct S {
 // struct S *next; };`, the shape of any cons-cell-style runtime type) walks
 // member `next`'s pointer type back into the very same pair of struct Types
-// being compared -- without this, that recursion never terminates. A small
-// fixed-depth stack of in-progress pairs breaks the cycle the standard
-// equirecursive way: once a pair is already being compared higher up the
-// call stack, assume it equal (co-inductively) rather than re-deriving it.
+// being compared -- without this, that recursion never terminates. A stack
+// of in-progress pairs breaks the cycle the standard equirecursive way:
+// once a pair is already being compared higher up the call stack, assume it
+// equal (co-inductively) rather than re-deriving it.
+//
+// #1283: the stack was a fixed 64 entries and, once full, ALSO returned
+// "assume equal" -- silently answering "same type" for two types that may
+// not be, a hazard that only grows with the depth of the type graph
+// (whole-program self-hosting scale). It is now grown on demand so the only
+// path that returns true is an actual detected cycle; a hard ceiling far
+// above any legal C type-nesting depth aborts rather than guesses, so a
+// real infinite recursion still surfaces as a bug instead of silent
+// corruption.
+//
 // Not thread-safe -- same_type_or_origin() and its callers only ever run
 // during the single-threaded `-c=native`/`-c=generated`/`-m` serialize pass.
-#define SAME_TYPE_PTR_STACK_MAX 64
-static Type *g_same_type_ptr_stack_a[SAME_TYPE_PTR_STACK_MAX];
-static Type *g_same_type_ptr_stack_b[SAME_TYPE_PTR_STACK_MAX];
-static int   g_same_type_ptr_stack_len = 0;
+#define SAME_TYPE_PTR_STACK_CEILING 100000
+static Type **g_same_type_ptr_stack_a   = NULL;
+static Type **g_same_type_ptr_stack_b   = NULL;
+static int    g_same_type_ptr_stack_len = 0;
+static int    g_same_type_ptr_stack_cap = 0;
+
+static void same_type_ptr_stack_push(Type *a, Type *b) {
+    if (g_same_type_ptr_stack_len >= g_same_type_ptr_stack_cap) {
+        int newcap =
+            g_same_type_ptr_stack_cap ? g_same_type_ptr_stack_cap * 2 : 64;
+        if (newcap > SAME_TYPE_PTR_STACK_CEILING)
+            error("cccc: internal error: same_type_or_origin() pointer "
+                  "recursion exceeded %d levels -- non-terminating structural "
+                  "comparison",
+                  SAME_TYPE_PTR_STACK_CEILING);
+        g_same_type_ptr_stack_a =
+            realloc(g_same_type_ptr_stack_a, sizeof(Type *) * newcap);
+        g_same_type_ptr_stack_b =
+            realloc(g_same_type_ptr_stack_b, sizeof(Type *) * newcap);
+        g_same_type_ptr_stack_cap = newcap;
+    }
+    g_same_type_ptr_stack_a[g_same_type_ptr_stack_len] = a;
+    g_same_type_ptr_stack_b[g_same_type_ptr_stack_len] = b;
+    g_same_type_ptr_stack_len++;
+}
 
 // #1283: env-gated cost instrumentation for same_type_or_origin(). This
 // predicate became a whole-program-scale performance wall in the
@@ -71,7 +102,6 @@ static int   g_same_type_ptr_stack_len = 0;
 static long long g_sto_calls_total    = 0; // every entry, including recursion
 static long long g_sto_calls_toplevel = 0; // entries with recursion depth 0
 static long long g_sto_cycle_hits = 0; // TY_PTR guard: real in-progress cycle
-static long long g_sto_cap_hits   = 0; // TY_PTR guard: depth cap exhausted
 static int       g_sto_recursion_depth = 0;
 static int       g_sto_max_depth       = 0;
 
@@ -99,13 +129,13 @@ void serialize_type_stats_report(SerializeContext *ctx) {
     fprintf(stderr,
             "[cccc type-stats #1283] same_type_or_origin: total=%lld "
             "toplevel=%lld ratio=%.1f max_depth=%d cycle_hits=%lld "
-            "cap_hits=%lld | tags=%d typedefs=%d defs=%d\n",
+            "| tags=%d typedefs=%d defs=%d\n",
             g_sto_calls_total, g_sto_calls_toplevel,
             g_sto_calls_toplevel
                 ? (double)g_sto_calls_total / (double)g_sto_calls_toplevel
                 : 0.0,
-            g_sto_max_depth, g_sto_cycle_hits, g_sto_cap_hits, ctx->tags_len,
-            ctx->typedefs_len, ctx->defs.len);
+            g_sto_max_depth, g_sto_cycle_hits, ctx->tags_len, ctx->typedefs_len,
+            ctx->defs.len);
 }
 
 static bool same_type_or_origin_impl(Type *a, Type *b) {
@@ -133,13 +163,7 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
                 g_sto_cycle_hits++;
                 return true; // cycle: already assumed equal higher up
             }
-        if (g_same_type_ptr_stack_len >= SAME_TYPE_PTR_STACK_MAX) {
-            g_sto_cap_hits++;
-            return true; // depth cap: assume equal rather than infinite-loop
-        }
-        g_same_type_ptr_stack_a[g_same_type_ptr_stack_len] = a;
-        g_same_type_ptr_stack_b[g_same_type_ptr_stack_len] = b;
-        g_same_type_ptr_stack_len++;
+        same_type_ptr_stack_push(a, b);
         bool result = same_type_or_origin(a->base, b->base);
         g_same_type_ptr_stack_len--;
         return result;
