@@ -2220,11 +2220,26 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // case and untouched: `const MyPtrT` correctly spells "const-qualify
     // the whole aliased type", i.e. exactly `T *const`, so that alias arm
     // below still needs the leading `const` -- only the un-aliased,
-    // structurally-printed TY_PTR fallthrough drops it.
+    // structurally-printed TY_PTR fallthrough drops it. #1291: is_volatile
+    // has the identical pointer-level hazard (`volatile MyPtrT` legitimately
+    // needs the leading keyword; a bare `TY_PTR`'s `*volatile p` is never
+    // printed by serialize_type_decl's TY_PTR branch either), so it shares
+    // the same suppress_ptr_const gate rather than getting its own.
     bool suppress_ptr_const =
         ty->kind == TY_PTR && !find_typedef_name_exact(ctx, ty);
     if (ty->is_const && !suppress_ptr_const)
         fprintf(f, "const ");
+    // #1291: was previously never emitted at all (see the removed comment
+    // this replaced) -- a header-declared `extern volatile sig_atomic_t g;`
+    // re-declared by -c=native/-m as plain `sig_atomic_t g;` collides with
+    // the replayed header's own `volatile` declaration ("redeclaration...
+    // with a different type") the moment that global is re-spelled anywhere
+    // (the #918 forward-declare-every-global pass, and the definition site).
+    // restrict and _Atomic (outside the one atomic_flag alias case below)
+    // are still never serialized -- deliberately out of scope here, tracked
+    // as a follow-up.
+    if (ty->is_volatile && !suppress_ptr_const)
+        fprintf(f, "volatile ");
 
     // Deliberately no output for ty->checked_kind (#770/#482-484): a
     // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
@@ -2232,7 +2247,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // reject the attribute names outright, and #488 requires -E/-c=generated
     // native output to be unchanged for a checked declaration ("no change to
     // ABI or to unchecked callers"). Falls out for free today since this
-    // function only ever emits is_const anyway (is_volatile/is_restrict are
+    // function only ever emits is_const/is_volatile anyway (is_restrict is
     // likewise never serialized), but noted explicitly so it isn't "fixed" by a
     // future generalization of the qualifier-printing above.
 
