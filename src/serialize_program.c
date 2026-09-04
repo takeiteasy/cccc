@@ -3898,7 +3898,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
     rename_colliding_type_tags(vm, prog, &ctx);      // #1014
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
-    collect_deferred_static_labels(vm, prog, &ctx);  // #1044
+    // #1283: build the type-name candidate index only now -- the passes above
+    // mutate Type.struct_tag (an index key) and TypeName.name in place. Reset
+    // here rather than before collect_scope_names so a lazy build triggered
+    // from inside a rename pass can't key on pre-rename tags, and so a process
+    // serializing multiple programs starts each one clean.
+    serialize_type_index_reset();
+    collect_deferred_static_labels(vm, prog, &ctx); // #1044
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
@@ -4190,6 +4196,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 serialize_global_var(f, vm, &ctx, obj);
             }
         }
+        serialize_type_stats_report(&ctx); // #1283
+        serialize_type_index_reset();      // #1283
         free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
@@ -4830,7 +4838,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     }
 
     serialize_type_stats_report(
-        &ctx); // #1283: no-op unless CCCC_TYPE_STATS set
+        &ctx);                    // #1283: no-op unless CCCC_TYPE_STATS set
+    serialize_type_index_reset(); // #1283: free the candidate index
 
     free(ctx.seen.data);
     free(ctx.defs.data);

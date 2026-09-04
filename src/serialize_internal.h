@@ -386,6 +386,9 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 // CCCC_TYPE_STATS is set; no-op otherwise. Called once at the end of
 // cc_serialize_program().
 void serialize_type_stats_report(SerializeContext *ctx);
+// #1283: free the type-name candidate index and re-read its env toggles.
+// Called after the rename passes and at the end of cc_serialize_program().
+void serialize_type_index_reset(void);
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,

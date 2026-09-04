@@ -361,6 +361,331 @@ void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
     }
 }
 
+// ===========================================================================
+// #1283: type-name registry candidate index.
+//
+// `ctx->tags` / `ctx->typedefs` are whole-program (not per-TU): at
+// self-hosting scale they hold thousands of entries, mostly the same
+// bundled-header tags/typedefs re-parsed once per input file under #1001's
+// per-TU preprocessor isolation. Every provenance/dedup lookup below used to
+// linear-scan the whole array calling same_type_or_origin() per entry -- an
+// O(n) probe run O(n) times, the measured performance wall.
+//
+// Each probe is now narrowed to a small candidate set via three hash
+// indices; same_type_or_origin() (plus each caller's own extra predicates)
+// stays the final arbiter on that set. Correctness reduces to one property:
+// the candidate set is a SUPERSET of every entry E for which
+// same_type_or_origin(E.ty, ty) is true. CCCC_TYPE_INDEX_VERIFY=1 checks it
+// against a full linear scan on every probe; CCCC_TYPE_INDEX_DISABLE=1 forces
+// the old path.
+//
+//   by_root : origin_root(E.ty) -> entries. same_type_or_origin()'s first arm
+//             is true iff the two ->origin chains intersect, i.e. iff they
+//             share the same root (single-successor chain). Covers every
+//             origin-identity match, every scalar (no structural arm at all),
+//             and -- since a chain node shares its chain's root -- is a
+//             superset of the 8-hop identity pre-scans.
+//   by_tag  : hash(E.ty->struct_tag bytes) -> entries. A tag mismatch is
+//             conclusive for TY_STRUCT/TY_UNION, and an incomplete tagged
+//             aggregate matches only same-tag entries. (Enums keep their tag
+//             in ->enum_tag, which that arm never reads -- not indexed here.)
+//   by_fp   : depth-0 structural fingerprint -> entries, for every
+//             struct/union/enum/func/array/pointer entry. A NECESSARY
+//             condition for a same-kind structural match; member/param types
+//             are NOT folded in (the recursion re-enters same_type_or_origin
+//             with its full origin arm).
+//
+// The arrays are append-only; the later mutating passes
+// (rename_colliding_type_tags, hoist_local_type_to_file_scope) rewrite only
+// name / name_len / owner_fn -- read fresh at match time, never index keys.
+// So the index is built incrementally on demand. One wrinkle:
+// serialize_typedef_alias() (#999) transiently blanks a registered
+// TypeName.ty to NULL while it prints that alias's own RHS; an ensure() that
+// runs inside that window records the entry as a "hole" and retries it on the
+// next ensure rather than skipping it forever.
+// ===========================================================================
+
+#define TYPE_CAND_CAP 1024
+
+typedef struct {
+    int *v;
+    int  len, cap;
+} IdxList;
+
+typedef struct {
+    HashMap by_root;
+    HashMap by_tag;
+    HashMap by_fp;
+    int     indexed; // # of entries visited at least once
+    IdxList holes;   // visited indices whose .ty was NULL then -- retried
+} CandIndex;
+
+static CandIndex g_tag_ix;
+static CandIndex g_td_ix;
+static int       g_type_index_disabled = -1; // -1 = env not yet read
+static int       g_type_index_verify   = -1;
+
+static void idxlist_add(IdxList *l, int x) {
+    if (l->len >= l->cap) {
+        l->cap = l->cap ? l->cap * 2 : 4;
+        l->v   = realloc(l->v, sizeof(int) * l->cap);
+    }
+    l->v[l->len++] = x;
+}
+
+static void cand_bucket_add(HashMap *m, long long key, int idx) {
+    IdxList *l = hashmap_get_int(m, key);
+    if (!l) {
+        l = calloc(1, sizeof(IdxList));
+        hashmap_put_int(m, key, l);
+    }
+    idxlist_add(l, idx);
+}
+
+static Type *type_origin_root(Type *t) {
+    if (!t)
+        return NULL;
+    int hop = 0;
+    while (t->origin && hop++ < 1000000)
+        t = t->origin;
+    return t;
+}
+
+static unsigned long long fp_step(unsigned long long h, unsigned long long x) {
+    h ^= x;
+    h *= 1099511628211ULL;
+    return h;
+}
+
+static bool type_kind_has_fp(TypeKind k) {
+    return k == TY_PTR || k == TY_ARRAY || k == TY_FUNC || k == TY_STRUCT ||
+           k == TY_UNION || k == TY_ENUM;
+}
+
+// hash of a struct/union tag's spelling; 0 when untagged (never indexed).
+static long long type_tag_key(Type *t) {
+    Token *tg = t ? t->struct_tag : NULL;
+    if (!tg)
+        return 0;
+    unsigned long long h = 1469598103934665603ULL;
+    for (int i = 0; i < tg->len; i++)
+        h = fp_step(h, (unsigned char)tg->loc[i]);
+    return (long long)(h ? h : 1);
+}
+
+// depth-0 structural fingerprint -- a necessary condition for a same-kind
+// structural match in same_type_or_origin(). Deliberately does NOT recurse
+// into member/param/element types.
+static long long type_fp_key(Type *t) {
+    unsigned long long h = 1469598103934665603ULL;
+    h                    = fp_step(h, (unsigned)t->kind);
+    switch (t->kind) {
+        case TY_PTR:
+            h = fp_step(h, t->base ? (unsigned)t->base->kind + 1u : 0u);
+            break;
+        case TY_ARRAY:
+            h = fp_step(h, (unsigned long long)(unsigned)t->array_len);
+            break;
+        case TY_FUNC: {
+            int np = 0;
+            for (Type *p = t->params; p; p = p->next)
+                np++;
+            h = fp_step(h, t->is_variadic ? 1u : 0u);
+            h = fp_step(h, (unsigned)np);
+            break;
+        }
+        case TY_STRUCT:
+        case TY_UNION: {
+            int mc = 0;
+            for (Member *m = t->members; m; m = m->next) {
+                mc++;
+                if (m->name)
+                    for (int i = 0; i < m->name->len; i++)
+                        h = fp_step(h, (unsigned char)m->name->loc[i]);
+                h = fp_step(h, 0x100u | (m->name ? 1u : 0u));
+            }
+            h = fp_step(h, (unsigned)mc);
+            break;
+        }
+        case TY_ENUM: {
+            int ec = 0;
+            for (EnumConstant *e = t->enum_constants; e; e = e->next) {
+                ec++;
+                if (e->name)
+                    for (const char *s = e->name; *s; s++)
+                        h = fp_step(h, (unsigned char)*s);
+                h = fp_step(h, 0x100u | (e->name ? 1u : 0u));
+                h = fp_step(h, (unsigned long long)e->value);
+            }
+            h = fp_step(h, (unsigned)ec);
+            break;
+        }
+        default:
+            break;
+    }
+    return (long long)(h ? h : 1);
+}
+
+// Returns false when `t` is NULL (caller records `i` as a hole to retry).
+static bool cand_add_one(CandIndex *ix, Type *t, int i) {
+    if (!t)
+        return false;
+    cand_bucket_add(&ix->by_root, (long long)(intptr_t)type_origin_root(t), i);
+    if (t->struct_tag)
+        cand_bucket_add(&ix->by_tag, type_tag_key(t), i);
+    if (type_kind_has_fp(t->kind))
+        cand_bucket_add(&ix->by_fp, type_fp_key(t), i);
+    return true;
+}
+
+static int free_idxlist_cb(char *k, int kl, void *v, void *ud) {
+    (void)k;
+    (void)kl;
+    (void)ud;
+    IdxList *l = v;
+    free(l->v);
+    free(l);
+    return 0;
+}
+
+static void cand_index_clear(CandIndex *ix) {
+    hashmap_foreach(&ix->by_root, free_idxlist_cb, NULL);
+    hashmap_foreach(&ix->by_tag, free_idxlist_cb, NULL);
+    hashmap_foreach(&ix->by_fp, free_idxlist_cb, NULL);
+    hashmap_deinit(&ix->by_root);
+    hashmap_deinit(&ix->by_tag);
+    hashmap_deinit(&ix->by_fp);
+    free(ix->holes.v);
+    *ix = (CandIndex){0};
+}
+
+// #1283: called at the start (after the rename passes) and end of
+// cc_serialize_program() so a stale index from a prior program is never
+// carried over.
+void serialize_type_index_reset(void) {
+    cand_index_clear(&g_tag_ix);
+    cand_index_clear(&g_td_ix);
+    g_type_index_disabled = -1;
+    g_type_index_verify   = -1;
+}
+
+// Fold every entry appended since the last call into the index; retry entries
+// that were NULL last time (holes). O(holes + new entries) per call.
+static void cand_index_ensure(CandIndex *ix, TypeName *arr, int len) {
+    int w = 0;
+    for (int h = 0; h < ix->holes.len; h++) {
+        int i = ix->holes.v[h];
+        if (!cand_add_one(ix, arr[i].ty, i))
+            ix->holes.v[w++] = i;
+    }
+    ix->holes.len = w;
+    for (int i = ix->indexed; i < len; i++)
+        if (!cand_add_one(ix, arr[i].ty, i))
+            idxlist_add(&ix->holes, i);
+    ix->indexed = len;
+}
+
+static bool type_index_off(void) {
+    if (g_type_index_disabled < 0)
+        g_type_index_disabled = getenv("CCCC_TYPE_INDEX_DISABLE") ? 1 : 0;
+    return g_type_index_disabled != 0;
+}
+
+// Fill `buf` (capacity TYPE_CAND_CAP) with the ascending, de-duplicated
+// candidate index set for `ty`. Returns the count, or -1 for "no narrowing --
+// scan all `len`" (index disabled, ty NULL, or the set overflowed the buffer).
+static int cand_index_probe(CandIndex *ix, TypeName *arr, int len, Type *ty,
+                            int *buf) {
+    if (type_index_off() || !ty)
+        return -1;
+    cand_index_ensure(ix, arr, len);
+
+    int n = 0;
+    for (int pass = 0; pass < 3; pass++) {
+        long long key;
+        HashMap  *m;
+        if (pass == 0) {
+            m   = &ix->by_root;
+            key = (long long)(intptr_t)type_origin_root(ty);
+        } else if (pass == 1) {
+            if (!ty->struct_tag)
+                continue;
+            m   = &ix->by_tag;
+            key = type_tag_key(ty);
+        } else {
+            if (!type_kind_has_fp(ty->kind))
+                continue;
+            m   = &ix->by_fp;
+            key = type_fp_key(ty);
+        }
+        IdxList *l = hashmap_get_int(m, key);
+        if (!l)
+            continue;
+        for (int j = 0; j < l->len; j++) {
+            if (n >= TYPE_CAND_CAP)
+                return -1;
+            buf[n++] = l->v[j];
+        }
+    }
+    // insertion sort + dedup (n is small: entries per bucket ~= number of
+    // input files declaring one shared type)
+    for (int i = 1; i < n; i++) {
+        int v = buf[i], j = i - 1;
+        while (j >= 0 && buf[j] > v) {
+            buf[j + 1] = buf[j];
+            j--;
+        }
+        buf[j + 1] = v;
+    }
+    int w = 0;
+    for (int i = 0; i < n; i++)
+        if (w == 0 || buf[w - 1] != buf[i])
+            buf[w++] = buf[i];
+
+    if (g_type_index_verify < 0)
+        g_type_index_verify = getenv("CCCC_TYPE_INDEX_VERIFY") ? 1 : 0;
+    if (g_type_index_verify) {
+        for (int i = 0; i < len; i++) {
+            if (!arr[i].ty || !same_type_or_origin(arr[i].ty, ty))
+                continue;
+            bool found = false;
+            for (int k = 0; k < w && !found; k++)
+                found = (buf[k] == i);
+            if (!found)
+                error("cccc: internal error (#1283): type-name index missed a "
+                      "match -- entry %d (kind=%d) matches same_type_or_origin "
+                      "but is not a candidate",
+                      i, (int)arr[i].ty->kind);
+        }
+    }
+    return w;
+}
+
+static int type_cand_tags(SerializeContext *ctx, Type *ty, int *buf) {
+    return cand_index_probe(&g_tag_ix, ctx->tags, ctx->tags_len, ty, buf);
+}
+static int type_cand_typedefs(SerializeContext *ctx, Type *ty, int *buf) {
+    return cand_index_probe(&g_td_ix, ctx->typedefs, ctx->typedefs_len, ty,
+                            buf);
+}
+
+// Candidate-index scratch pool: each TYPE_CAND_FOR loop takes one slot for
+// its lifetime, rotating so nested uses don't clobber. The 8-hop identity
+// scans deliberately probe once into a caller-local buffer instead, so live
+// nesting never approaches 16.
+static int          g_tc_pool[16][TYPE_CAND_CAP];
+static unsigned int g_tc_pool_next;
+
+// Iterate the candidate entry indices for `ty` against a registry, binding
+// `ivar` (ascending array order); `cntexpr` is the fallback length when the
+// index yields no narrowing. A single `for` -- safe to use several times in
+// one scope and to nest.
+#define TYPE_CAND_FOR(ivar, cndfn, ctxp, typ, cntexpr)                         \
+    for (int *_tcb = g_tc_pool[g_tc_pool_next++ & 15u],                        \
+             _tcn  = cndfn((ctxp), (typ), _tcb),                               \
+             _tct = _tcn < 0 ? (cntexpr) : _tcn, _tck = 0, ivar = 0;           \
+         _tck < _tct && (ivar = (_tcn < 0 ? _tck : _tcb[_tck]), 1); _tck++)
+
 static bool name_visible(TypeName *name, Obj *fn) {
     return name->owner_fn == NULL || name->owner_fn == fn;
 }
@@ -428,17 +753,17 @@ static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     // renamed) group. Skipped entirely when nothing was renamed, so a
     // program with no tag collision serializes byte-identically to before.
     if (ctx->tag_renamed)
-        for (int i = 0; i < ctx->tags_len; i++)
-            if (name_visible(&ctx->tags[i], ctx->current_fn) &&
-                !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
-                same_type_strong(ctx->tags[i].ty, ty))
-                return &ctx->tags[i];
+        TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        same_type_strong(ctx->tags[i].ty, ty))
+        return &ctx->tags[i];
 
-    for (int i = 0; i < ctx->tags_len; i++)
-        if (name_visible(&ctx->tags[i], ctx->current_fn) &&
-            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
-            same_type_or_origin(ctx->tags[i].ty, ty))
-            return &ctx->tags[i];
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (name_visible(&ctx->tags[i], ctx->current_fn) &&
+        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        same_type_or_origin(ctx->tags[i].ty, ty))
+        return &ctx->tags[i];
     return NULL;
 }
 
@@ -463,7 +788,7 @@ static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
         return NULL;
 
     TypeName *first_match = NULL;
-    for (int i = 0; i < ctx->tags_len; i++) {
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len) {
         if (!name_visible(&ctx->tags[i], ctx->current_fn) ||
             !same_type_or_origin(ctx->tags[i].ty, ty))
             continue;
@@ -497,10 +822,10 @@ TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
     if (exact)
         return exact;
 
-    for (int i = 0; i < ctx->typedefs_len; i++)
-        if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
-            same_type_or_origin(ctx->typedefs[i].ty, ty))
-            return &ctx->typedefs[i];
+    TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
+    if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
+        same_type_or_origin(ctx->typedefs[i].ty, ty))
+        return &ctx->typedefs[i];
     return NULL;
 }
 
@@ -529,12 +854,21 @@ static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
     // handful of hops -- copy_type() chains built while parsing one
     // declarator are short; this is a safety margin against an unforeseen
     // cycle, not a realistic depth.
-    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
-        for (int i = 0; i < ctx->typedefs_len; i++)
-            if (ctx->typedefs[i].ty == ty &&
+    // #1283: probe once for `ty` (every origin-chain hop's candidate set is a
+    // subset -- all chain nodes share an origin root), then iterate hop-major
+    // over that fixed set to preserve "nearest hop wins" ordering.
+    int cb[TYPE_CAND_CAP];
+    int cn    = type_cand_typedefs(ctx, ty, cb);
+    int total = cn < 0 ? ctx->typedefs_len : cn;
+    int hop   = 0;
+    for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++)
+        for (int k = 0; k < total; k++) {
+            int i = cn < 0 ? k : cb[k];
+            if (ctx->typedefs[i].ty == cur &&
                 (!require_visible ||
                  name_visible(&ctx->typedefs[i], ctx->current_fn)))
                 return &ctx->typedefs[i];
+        }
     return NULL;
 }
 
@@ -561,13 +895,19 @@ static bool tag_record_owner_exact(SerializeContext *ctx, Type *ty,
         *owner = NULL;
     if (!ctx || !ty)
         return false;
-    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++)
-        for (int i = 0; i < ctx->tags_len; i++)
-            if (ctx->tags[i].ty == ty) {
+    int cb[TYPE_CAND_CAP];
+    int cn    = type_cand_tags(ctx, ty, cb);
+    int total = cn < 0 ? ctx->tags_len : cn;
+    int hop   = 0;
+    for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++)
+        for (int k = 0; k < total; k++) {
+            int i = cn < 0 ? k : cb[k];
+            if (ctx->tags[i].ty == cur) {
                 if (owner)
                     *owner = ctx->tags[i].owner_fn;
                 return true;
             }
+        }
     return false;
 }
 
@@ -712,7 +1052,7 @@ static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return NULL;
 
-    for (int i = 0; i < ctx->typedefs_len; i++) {
+    TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len) {
         TypeName *name = &ctx->typedefs[i];
         if (!name_visible(name, ctx->current_fn) || !name->ty ||
             name->ty->kind != ty->kind)
@@ -737,22 +1077,36 @@ static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
     // strictly more precise; the structural fallback keeps every pre-#1116
     // caller (use-site copies with no traceable record of their own)
     // behaving exactly as before.
-    Type *orig = ty;
-    for (int hop = 0; ty && hop < 8; ty = ty->origin, hop++) {
-        for (int i = 0; i < ctx->tags_len; i++)
-            if (ctx->tags[i].ty == ty)
+    // #1283: probe both registries once for `ty`; every origin-chain hop's
+    // candidate set is a subset. Iterate hop-major to keep "nearest hop wins".
+    int tcb[TYPE_CAND_CAP], ycb[TYPE_CAND_CAP];
+    int tcn  = type_cand_tags(ctx, ty, tcb);
+    int ycn  = type_cand_typedefs(ctx, ty, ycb);
+    int ttot = tcn < 0 ? ctx->tags_len : tcn;
+    int ytot = ycn < 0 ? ctx->typedefs_len : ycn;
+    int hop  = 0;
+    for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++) {
+        for (int k = 0; k < ttot; k++) {
+            int i = tcn < 0 ? k : tcb[k];
+            if (ctx->tags[i].ty == cur)
                 return ctx->tags[i].owner_fn;
-        for (int i = 0; i < ctx->typedefs_len; i++)
-            if (ctx->typedefs[i].ty == ty)
+        }
+        for (int k = 0; k < ytot; k++) {
+            int i = ycn < 0 ? k : ycb[k];
+            if (ctx->typedefs[i].ty == cur)
                 return ctx->typedefs[i].owner_fn;
+        }
     }
-    ty = orig;
-    for (int i = 0; i < ctx->tags_len; i++)
+    for (int k = 0; k < ttot; k++) {
+        int i = tcn < 0 ? k : tcb[k];
         if (same_type_or_origin(ctx->tags[i].ty, ty))
             return ctx->tags[i].owner_fn;
-    for (int i = 0; i < ctx->typedefs_len; i++)
+    }
+    for (int k = 0; k < ytot; k++) {
+        int i = ycn < 0 ? k : ycb[k];
         if (same_type_or_origin(ctx->typedefs[i].ty, ty))
             return ctx->typedefs[i].owner_fn;
+    }
     return NULL;
 }
 
@@ -2154,19 +2508,19 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
 }
 
 bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
-    for (int i = 0; i < ctx->tags_len; i++)
-        if (ctx->tags[i].owner_fn == owner_fn &&
-            // #1091: same guard as find_tag_name() -- a tagless `ty`
-            // structurally matching a *differently*-tagged record (e.g. a
-            // tagless typedef next to a same-shaped tagged struct) does not
-            // mean `ty` itself "has" that tag; without this,
-            // aggregate_typedef_is_definition() wrongly concludes the
-            // tagless typedef isn't the definition, and its own standalone
-            // body (correctly printed elsewhere, via serialize_struct_def)
-            // gets a second, redundant copy from serialize_typedef_alias.
-            !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
-            same_type_or_origin(ctx->tags[i].ty, ty))
-            return true;
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (ctx->tags[i].owner_fn == owner_fn &&
+        // #1091: same guard as find_tag_name() -- a tagless `ty`
+        // structurally matching a *differently*-tagged record (e.g. a
+        // tagless typedef next to a same-shaped tagged struct) does not
+        // mean `ty` itself "has" that tag; without this,
+        // aggregate_typedef_is_definition() wrongly concludes the
+        // tagless typedef isn't the definition, and its own standalone
+        // body (correctly printed elsewhere, via serialize_struct_def)
+        // gets a second, redundant copy from serialize_typedef_alias.
+        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        same_type_or_origin(ctx->tags[i].ty, ty))
+        return true;
     return false;
 }
 
@@ -2176,14 +2530,14 @@ bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
 // no record either way, so type_decl_owner() alone can't tell the two
 // apart -- see hoist_local_type_to_file_scope()).
 static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
-    for (int i = 0; i < ctx->tags_len; i++)
-        if (ctx->tags[i].owner_fn == NULL &&
-            same_type_or_origin(ctx->tags[i].ty, ty))
-            return true;
-    for (int i = 0; i < ctx->typedefs_len; i++)
-        if (ctx->typedefs[i].owner_fn == NULL &&
-            same_type_or_origin(ctx->typedefs[i].ty, ty))
-            return true;
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (ctx->tags[i].owner_fn == NULL &&
+        same_type_or_origin(ctx->tags[i].ty, ty))
+        return true;
+    TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
+    if (ctx->typedefs[i].owner_fn == NULL &&
+        same_type_or_origin(ctx->typedefs[i].ty, ty))
+        return true;
     return false;
 }
 
@@ -2238,11 +2592,11 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     // keeps its original spelling -- this leaves existing -m output and
     // existing tests untouched in the common (no-collision) case.
     TypeName *existing_tag = NULL;
-    for (int i = 0; i < ctx->tags_len; i++)
-        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
-            existing_tag = &ctx->tags[i];
-            break;
-        }
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+        existing_tag = &ctx->tags[i];
+        break;
+    }
 
     char *chosen_name;
     int   chosen_len;
@@ -2281,15 +2635,15 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     // just the first: type_decl_owner() above only inspected the first hit,
     // but find_tag_name()/find_typedef_name() may later return a different
     // one depending on ctx->current_fn.
-    for (int i = 0; i < ctx->tags_len; i++)
-        if (same_type_or_origin(ctx->tags[i].ty, ty)) {
-            ctx->tags[i].owner_fn = NULL;
-            ctx->tags[i].name     = chosen_name;
-            ctx->tags[i].name_len = chosen_len;
-        }
-    for (int i = 0; i < ctx->typedefs_len; i++)
-        if (same_type_or_origin(ctx->typedefs[i].ty, ty))
-            ctx->typedefs[i].owner_fn = NULL;
+    TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
+    if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+        ctx->tags[i].owner_fn = NULL;
+        ctx->tags[i].name     = chosen_name;
+        ctx->tags[i].name_len = chosen_len;
+    }
+    TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
+    if (same_type_or_origin(ctx->typedefs[i].ty, ty))
+        ctx->typedefs[i].owner_fn = NULL;
 
     if (!existing_tag)
         // No tag record existed at all (a tagless local aggregate) --
