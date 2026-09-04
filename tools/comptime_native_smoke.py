@@ -7858,6 +7858,85 @@ def case_infunc_include_not_hoisted_1287(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1290: header-exposed half -- a plain #include of the shared header, used
+# by value so the header's own from_include record actually reaches
+# ctx->defs/ctx->typedefs.
+DUP_TYPEDEF_1290_HEADER = (
+    "#pragma once\n"
+    "typedef struct { int a; int b; } DupTypedef1290Smoke;\n"
+)
+DUP_TYPEDEF_1290_A = (
+    '#include "dup_typedef_1290_smoke.h"\n'
+    "int dup_typedef_1290_smoke_sum(DupTypedef1290Smoke v) { return v.a + v.b; }\n"
+)
+
+# #1290: the actual repro shape (src/json.c vs. src/serialize_internal.h in
+# the real corpus) -- a SECOND TU that never includes the header at all,
+# independently declaring the identical tagless typedef struct under the
+# same name. Both this and the header's own copy land in the merged
+# program's whole-program TypeName registry.
+DUP_TYPEDEF_1290_B = (
+    "typedef struct { int a; int b; } DupTypedef1290Smoke;\n"
+    "int dup_typedef_1290_smoke_make_and_use(void) {\n"
+    "    DupTypedef1290Smoke v;\n"
+    "    v.a = 19;\n"
+    "    v.b = 23;\n"
+    "    return v.a + v.b;\n"
+    "}\n"
+)
+
+DUP_TYPEDEF_1290_MAIN = (
+    '#include "dup_typedef_1290_smoke.h"\n'
+    "extern int dup_typedef_1290_smoke_sum(DupTypedef1290Smoke v);\n"
+    "extern int dup_typedef_1290_smoke_make_and_use(void);\n"
+    "int main(void) {\n"
+    "    DupTypedef1290Smoke v = { 21, 21 };\n"
+    "    if (dup_typedef_1290_smoke_sum(v) != 42) return 1;\n"
+    "    if (dup_typedef_1290_smoke_make_and_use() != 42) return 1;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_dup_typedef_1290_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  159: -c=native, two translation units each independently "
+          "declaring the identical tagless typedef struct -- one via a "
+          "shared header's own #include, the other with no #include at "
+          "all (src/json.c's own TypeVec vs. src/serialize_internal.h's, "
+          "#1290's real-corpus shape). Previously the non-header TU's copy "
+          "was reconstructed from scratch right next to the replayed "
+          "#include -- a host 'redefinition' compile failure no -m shape "
+          "assertion alone can see -- this is that proof, VM 42 -> "
+          "native 42.")
+    write(Path(tmp) / "dup_typedef_1290_smoke.h", DUP_TYPEDEF_1290_HEADER)
+    a_src = Path(tmp) / "dup_typedef_1290_smoke_a.c"
+    b_src = Path(tmp) / "dup_typedef_1290_smoke_b.c"
+    main_src = Path(tmp) / "dup_typedef_1290_smoke_main.c"
+    write(a_src, DUP_TYPEDEF_1290_A)
+    write(b_src, DUP_TYPEDEF_1290_B)
+    write(main_src, DUP_TYPEDEF_1290_MAIN)
+    order = [a_src.name, b_src.name, main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "dup_typedef_1290_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8065,6 +8144,7 @@ CASES = [
     case_compiler_family_auto_resolves_1226,
     case_compound_literal_header_type_1286,
     case_infunc_include_not_hoisted_1287,
+    case_dup_typedef_1290_native_round_trip,
 ]
 
 

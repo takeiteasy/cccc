@@ -2819,6 +2819,40 @@ bool path_is_captured(SerializeContext *ctx, const char *path) {
 // typedef_alias_header_suppressed() already applies for typedef aliases,
 // and the shape #892's AttrTarget regression showed a divergent copy here
 // can break.
+// #1290: does some OTHER typedef record spelling the exact same name say
+// this name is already supplied by a replayed #include? ctx->typedefs is a
+// whole-program registry (vm->compiler.type_names is one VM-wide list,
+// never reset between the per-TU preprocessor state #1001 resets --
+// record_type_name() just keeps prepending), so a header's own from_include
+// record and an unrelated command-line-input TU's independently-declared,
+// identically-shaped local typedef of the same name (e.g. two unconnected
+// `typedef struct {...} TypeVec;` -- src/serialize_internal.h's and
+// src/json.c's own, #1290's repro) both land in this one list. Matched by
+// NAME, deliberately not by structure: a structural match here would
+// reintroduce the exact trap find_generated_uncaptured_typedef()'s own
+// #1168/#1169 comment documents -- a scalar typedef structurally matches
+// any same-representation type, so a plain `int`/`long` alias would falsely
+// collide with the first same-width header typedef anywhere in the program.
+// The *name* is what actually collides in the emitted C text, so the name
+// is the right key. Shared by type_def_is_from_include_suppressed() below
+// (the ctx->defs standalone-definition loop) and typedef_alias_header_
+// suppressed() (the ctx->typedefs loop, serialize_type.c further down) --
+// #1290's repro hits whichever of the two actually reaches this type first,
+// so both must apply the same rule or the same collision reappears through
+// the other loop.
+static bool typedef_name_is_header_supplied(SerializeContext *ctx,
+                                            TypeName         *td) {
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *other = &ctx->typedefs[i];
+        if (other == td || !other->from_include || other->always_emit)
+            continue;
+        if (other->name_len == td->name_len &&
+            !strncmp(other->name, td->name, (size_t)td->name_len))
+            return true;
+    }
+    return false;
+}
+
 static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
                                                 Type             *ty) {
     if (!ty || ctx->emit_strict)
@@ -2827,8 +2861,35 @@ static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
     TypeName *alias = find_typedef_name(ctx, ty);
     TypeName *provenance_source =
         tag ? find_tag_name_for_provenance(ctx, ty) : alias;
-    return provenance_source && provenance_source->from_include &&
-           !provenance_source->always_emit &&
+    if (!provenance_source || provenance_source->always_emit)
+        return false;
+    // #1290: a tagless aggregate's resolved provenance record may itself be
+    // a non-header TU's own independently-declared typedef of the same name
+    // (find_typedef_name()'s exact-identity match resolves to whichever
+    // record's own Type this exact pointer is, which may not be the header's
+    // copy at all) -- fall back to the name-matched check above in that
+    // case. Restricted to a TAGLESS AGGREGATE (tag == NULL but ty->kind IS
+    // struct/union/enum) -- deliberately excludes two other shapes this
+    // function is also called with: tag-based provenance (a tag collision
+    // is a different hazard, two distinct types sharing a spelling, that
+    // rename_colliding_type_tags() already renames apart rather than
+    // suppresses), and a NAMED SCALAR from_include typedef (size_t et al,
+    // reached via find_typedef_name_exact()'s identity match at the callers
+    // above) -- a user program's own same-named scalar typedef colliding
+    // with a comptime-synthesized one (e.g. #1057's own `typedef unsigned
+    // long size_t;` test) is a real, deliberately-supported redeclaration
+    // has_colliding_user_typedef() already defers to; folding the name
+    // check in here would suppress the user's own declaration and strand
+    // every reference to it on an #include that serialize_synth_typedef_
+    // includes() correctly decided never to print.
+    bool is_tagless_aggregate =
+        !tag &&
+        (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM);
+    bool from_include =
+        provenance_source->from_include ||
+        (is_tagless_aggregate && !ctx->generated_only &&
+         typedef_name_is_header_supplied(ctx, provenance_source));
+    return from_include &&
            (!ctx->generated_only ||
             path_is_captured(ctx, provenance_source->file_path));
 }
@@ -3310,8 +3371,21 @@ static bool aggregate_typedef_is_definition(SerializeContext *ctx,
 // on the exact same rule -- a divergent copy here is how #892's AttrTarget
 // regression happened.
 bool typedef_alias_header_suppressed(SerializeContext *ctx, TypeName *alias) {
-    return !ctx->generated_only && !ctx->emit_strict && alias->from_include &&
-           !alias->always_emit;
+    if (ctx->generated_only || ctx->emit_strict || alias->always_emit)
+        return false;
+    if (alias->from_include)
+        return true;
+    // #1290: restricted to a tagless AGGREGATE alias -- see
+    // type_def_is_from_include_suppressed()'s matching comment for why a
+    // scalar typedef (size_t et al) must not take this fallback: a user
+    // program's own same-named scalar typedef colliding with a comptime-
+    // synthesized one is a real, deliberately-supported redeclaration
+    // (#1057's own collision test), not a #1290-shaped hazard.
+    Type *ty = alias->ty;
+    if (ty &&
+        (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM))
+        return typedef_name_is_header_supplied(ctx, alias);
+    return false;
 }
 
 static void serialize_typedef_alias(FILE *f, SerializeContext *ctx,
