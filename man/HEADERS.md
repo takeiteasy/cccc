@@ -129,6 +129,18 @@ real host compiler, so header handling shifts:
   does not, and `-c=generated` reports a compile error rather than writing
   C nothing declares the type in. See
   [MACROS.md](MACROS.md#emit-directives-and-includes-in-generated-output).
+- A bodiless declaration sourced from one of CCCC's own bundled headers
+  (reached transitively through a captured `#include`, so never itself
+  auto-captured — e.g. a user header's own `#include <nl_types.h>`) is
+  re-derived from CCCC's own header text rather than relied upon, the same
+  as any other declaration this section describes. Two care points there:
+  its declarator is parenthesized (`int (getc_unlocked)(FILE *stream);`),
+  so a host header spelling the same name as a function-like macro (the
+  unlocked-stdio family, or a `_FORTIFY_SOURCE` checked-function rewrite)
+  doesn't expand it away; and a pointer parameter or return type that is
+  itself a from_include typedef is spelled by that alias rather than
+  decomposed to its underlying pointer type, so it still matches the real
+  header's own declaration once both are visible to the host compiler.
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 

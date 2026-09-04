@@ -192,7 +192,30 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     char  *decl   = NULL;
     size_t declsz = 0;
     FILE  *df     = open_memstream(&decl, &declsz);
-    fprintf(df, "%s(", fn->name);
+    // #1294: a bodiless declaration whose own token traces back to real
+    // source text (not comptime-synthesized -- see the is_macro_generated
+    // exclusion just below) is the ONLY emission site for its own
+    // signature, unlike a defined function's matching prototype+definition
+    // pair, which both print from fn->params and so can never disagree
+    // with each other. That makes it safe to parenthesize just this
+    // declarator: `(name)(params)` defeats a host function-like macro of
+    // the same name (macOS's own getc_unlocked/putchar_unlocked family,
+    // and the _FORTIFY_SOURCE snprintf/sprintf/vsnprintf ->
+    // __builtin___*_chk rewrite) without giving up the prototype -- see
+    // man/HEADERS.md's auto-captured-includes section. A definition's own
+    // declarator is never parenthesized: GCC/clang both reject `(name)
+    // (params) { ... }` as a function *definition* the same way they
+    // reject a trailing asm-label on one (see with_asm_label's own comment
+    // just below). is_macro_generated is excluded: a comptime-synthesized
+    // declaration (MakeFunction()/PublishNode(), reflection.c) has no
+    // corresponding real host declaration to ever collide with -- there is
+    // nothing for the parens to defend against -- and #1253's own template
+    // label plumbing plus this file's macro-generated-function test
+    // coverage both assert an exact, unparenthesized spelling.
+    if (!fn->body && !fn->is_macro_generated)
+        fprintf(df, "(%s)(", fn->name);
+    else
+        fprintf(df, "%s(", fn->name);
 
     bool first = true;
     if (fn->params) {
@@ -236,7 +259,12 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             } else {
                 snprintf(buf, sizeof buf, "__a%d", anon++);
             }
-            serialize_type_decl(df, ctx, param, buf);
+            // #1296: a from_include pointer typedef (e.g. nl_types.h's
+            // real `nl_catd`) must be spelled by its alias here too, not
+            // decomposed to its underlying pointer type -- see
+            // serialize_aliased_ptr_type_decl's own comment.
+            if (!serialize_aliased_ptr_type_decl(df, ctx, param, buf))
+                serialize_type_decl(df, ctx, param, buf);
         }
     }
 
@@ -273,9 +301,15 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
         fprintf(df, " __asm__(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
 
     fclose(df);
-    serialize_type_decl(
-        f, ctx, (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int,
-        decl ? decl : "");
+    Type *ret_ty = (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int;
+    // #1296: same alias-preservation rule as the parameter loop above,
+    // applied to the return type -- only reachable for a bodiless
+    // declaration (same reasoning as the parenthesized declarator above:
+    // a defined function's return type is never a decomposition risk,
+    // since both its emission sites print the identical fn->ty).
+    if (fn->body ||
+        !serialize_aliased_ptr_type_decl(f, ctx, ret_ty, decl ? decl : ""))
+        serialize_type_decl(f, ctx, ret_ty, decl ? decl : "");
     free(decl);
 }
 

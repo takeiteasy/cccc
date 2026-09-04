@@ -53,8 +53,10 @@ Cases:
       needed, but the downstream system compiler does, and the prototype
       used to be silently dropped from the generated C entirely.
   11. #901 regression, direct assertion: `-m` output for case 10's program
-      must contain the real parameter type (`int abs(int`), not a
-      parameter-less signature -- serialize_function_signature used to
+      must contain the real parameter type (`int (abs)(int` -- the
+      declarator is parenthesized since #1294, defeating a host
+      function-like macro of the same name), not a parameter-less
+      signature -- serialize_function_signature used to
       degrade a bodiless declaration's params to `(void)` since only a
       parsed body populates the Obj-based parameter list it read.
   12. #901 regression guard: a program that `#include <stdio.h>` and calls
@@ -476,8 +478,8 @@ def case_bodiless_decl_m_output(cccc: Path, tmp: str) -> bool:
     write(src, BODILESS_DECL_PROGRAM)
     result = run([str(cccc), "-m", src.name], cwd=tmp)
     out = result.stdout
-    if "int abs(int" not in out:
-        print(f"    FAIL: -m output missing 'int abs(int ...)' prototype\n    {out}")
+    if "int (abs)(int" not in out:
+        print(f"    FAIL: -m output missing 'int (abs)(int ...)' prototype\n    {out}")
         return False
     print("    ok")
     return True

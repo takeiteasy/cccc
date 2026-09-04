@@ -108,7 +108,7 @@ extern int setrlimit(int resource, const struct rlimit *rlim);
 #define PRIO_PGRP    1
 #define PRIO_USER    2
 
-extern int getpriority(int which, int who);
-extern int setpriority(int which, int who, int prio);
+extern int getpriority(int which, id_t who);
+extern int setpriority(int which, id_t who, int prio);
 
 #endif /* __SYS_RESOURCE_H */

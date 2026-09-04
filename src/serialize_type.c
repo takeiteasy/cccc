@@ -2014,17 +2014,35 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 // and is unaffected -- decomposition already produces identical,
 // correctly-sized C for those, so this only changes behavior for exactly
 // the divergent, from_include case.
-void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
-                                   const char *name) {
+// #1296: factored out of serialize_local_var_type_decl (below) so
+// serialize_function_signature (src/serialize_decl.c) can apply the exact
+// same alias-preservation rule to a bodiless declaration's parameter/return
+// types -- a from_include *pointer* typedef (e.g. nl_types.h's real
+// `nl_catd`, an opaque `struct __nl_cat_d *` on macOS) must be spelled by
+// its alias there too, not decomposed to `void *`: CCCC's own #1096
+// fallback prototype for `catclose`/`catgets`/`catopen` used to always
+// decompose, colliding with the real SDK's `nl_catd`-typed declaration
+// ("conflicting types for 'catclose'"). Returns true (and has already
+// printed `name`) when the alias-preserving spelling applied; false when
+// the caller should fall back to serialize_type_decl itself.
+bool serialize_aliased_ptr_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                                     const char *name) {
     if (ty && ty->kind == TY_PTR) {
         TypeName *ptr_alias = find_typedef_name_exact(ctx, ty);
         if (ptr_alias && type_def_is_from_include_suppressed(ctx, ty)) {
             serialize_type(f, ctx, ty);
             if (name && *name)
                 fprintf(f, " %s", name);
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                                   const char *name) {
+    if (serialize_aliased_ptr_type_decl(f, ctx, ty, name))
+        return;
     serialize_type_decl(f, ctx, ty, name);
 }
 

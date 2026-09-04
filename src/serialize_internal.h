@@ -409,6 +409,8 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                    const char *name);
+bool serialize_aliased_ptr_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
+                                     const char *name);
 void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                    Obj *owner_fn);
 void serialize_uchar_shims(FILE *f, VirtualMachine *vm, Obj *prog);
