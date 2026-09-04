@@ -1893,10 +1893,53 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
 
     if (ty->kind == TY_PTR) {
         char buf[1024];
+        // #1295: pointer-level const/volatile/restrict/_Atomic (`int
+        // *const p`, `int *restrict p`, as opposed to `const int *p`, whose
+        // qualifier lives on the pointee's base type instead) live on this
+        // TY_PTR Type itself and were never printed anywhere -- this is the
+        // declarator-position home for them (serialize_type()'s
+        // suppress_ptr_qual gate deliberately suppresses the leading-keyword
+        // spelling for a bare, non-typedef'd pointer so it doesn't land on
+        // the pointee instead; see that gate's own comment). `restrict` is
+        // only ever legal on a pointer-to-object, so this is also the only
+        // place it is ever emitted. Order follows the canonical C spelling.
+        bool   has_name      = name && *name;
+        char   qualwords[48] = "";
+        size_t qwlen         = 0;
+#define APPEND_QUALWORD(word)                                                  \
+    qwlen += (size_t)snprintf(qualwords + qwlen, sizeof(qualwords) - qwlen,    \
+                              "%s" word, qwlen ? " " : "")
+        if (ty->is_const)
+            APPEND_QUALWORD("const");
+        if (ty->is_volatile)
+            APPEND_QUALWORD("volatile");
+        if (ty->is_restrict)
+            APPEND_QUALWORD("restrict");
+        // #1295 follow-up: unlike const/volatile/restrict, `_Atomic` is
+        // ONLY printed here when a real name follows (a genuine
+        // declaration) -- never in the abstract-declarator form an explicit
+        // cast uses (`(int *_Atomic)expr`). A verified Apple clang 17
+        // (Xcode 17.0, the native host compiler CCCC_NATIVE_CC resolves to
+        // by default on macOS) Sema/constant-folding bug segfaults the
+        // FRONTEND outright compiling exactly that cast spelling applied to
+        // a non-null pointer value (`(int *_Atomic)&x` crashes; `int
+        // *_Atomic p;`, `void f(int *_Atomic);`, and `(int *_Atomic)0` all
+        // compile fine -- isolated by hand, not from any upstream bug
+        // report). CCCC's own serializer inserts exactly such a cast on
+        // every assignment to an atomic-pointer-typed variable (matching
+        // #1045's `*const`/#1291's `*volatile` cast-insertion behaviour),
+        // so emitting the qualifier there would crash a real, currently
+        // shipping host toolchain on ordinary code. Dropping it from the
+        // cast is safe: the cast's only job is re-asserting the pointer's
+        // bit pattern, and an unqualified-to-atomic-qualified pointer
+        // conversion needs no cast in real C anyway.
+        if (ty->is_atomic && has_name)
+            APPEND_QUALWORD("_Atomic");
+#undef APPEND_QUALWORD
         char qual[256] = "";
         if (ctx->emit_cccc)
             format_checked_ptr_qualifier(qual, sizeof(qual), ty);
-        const char *sep = qual[0] ? " " : "";
+        const char *sep = (has_name && (qualwords[0] || qual[0])) ? " " : "";
         // #971: TY_VLA is an array type for declarator-parenthesization
         // purposes, same as TY_ARRAY -- pointer-to-VLA (the row type of a
         // multi-dimensional VLA, `int (*)[m]`) needs the same `(*name)`
@@ -1904,10 +1947,11 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         // element type and mis-spells it as `int *[m]` (array of pointers).
         if (ty->base && (ty->base->kind == TY_ARRAY ||
                          ty->base->kind == TY_VLA || ty->base->kind == TY_FUNC))
-            snprintf(buf, sizeof(buf), "(*%s%s%s)", qual, sep,
-                     name ? name : "");
+            snprintf(buf, sizeof(buf), "(*%s%s%s%s)", qualwords, qual, sep,
+                     has_name ? name : "");
         else
-            snprintf(buf, sizeof(buf), "*%s%s%s", qual, sep, name ? name : "");
+            snprintf(buf, sizeof(buf), "*%s%s%s%s", qualwords, qual, sep,
+                     has_name ? name : "");
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
     }
@@ -2200,45 +2244,36 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // the TY_PTR Type itself, not its base) used to print this leading
     // `const ` unconditionally, then fall through to the switch's TY_PTR
     // case below, which recurses into serialize_type_decl() -- whose own
-    // TY_PTR branch has never emitted pointer-level const at all (it only
-    // ever prints `*name`, never `*const name`). The leading `const ` above
+    // TY_PTR branch never emitted pointer-level const at all (it only ever
+    // printed `*name`, never `*const name`). The leading `const ` above
     // therefore ended up qualifying the *pointee* instead: `const int *`
     // (pointer to const int) rather than `int *const` (const pointer to
     // int) -- a genuinely incompatible type the host compiler rejects
     // ("incompatible function pointer types") wherever a const-pointer
     // value is cast to or declared alongside its non-const-pointer
-    // counterpart. Same bug, latent: TY_FUNC's parameter list
-    // (serialize_type_decl below) prints each param through this same
-    // function, so a `void f(int *const p)` parameter's prototype and
-    // definition could disagree the same way. Fixed by normalizing rather
-    // than relocating the qualifier: a bare (non-typedef'd) pointer never
-    // gets pointer-level const printed here either, matching what
-    // declarator position already does -- dropping a top-level qualifier
-    // is always type-compatible C, and CCCC's own parser already enforced
-    // constness before this point. A *typedef'd* pointer (`const MyPtrT`,
-    // where MyPtrT's underlying type is itself a pointer) is a different
-    // case and untouched: `const MyPtrT` correctly spells "const-qualify
-    // the whole aliased type", i.e. exactly `T *const`, so that alias arm
-    // below still needs the leading `const` -- only the un-aliased,
-    // structurally-printed TY_PTR fallthrough drops it. #1291: is_volatile
-    // has the identical pointer-level hazard (`volatile MyPtrT` legitimately
-    // needs the leading keyword; a bare `TY_PTR`'s `*volatile p` is never
-    // printed by serialize_type_decl's TY_PTR branch either), so it shares
-    // the same suppress_ptr_const gate rather than getting its own.
-    bool suppress_ptr_const =
+    // counterpart. #1291 hit the identical hazard for is_volatile. #1295:
+    // rather than keep dropping the qualifier, serialize_type_decl()'s
+    // TY_PTR branch now prints pointer-level const/volatile/restrict/
+    // _Atomic in the correct declarator position -- so a bare
+    // (non-typedef'd) pointer must never *also* print the leading keyword
+    // here, or the qualifier would land on both the pointer and its
+    // pointee. A *typedef'd* pointer (`const MyPtrT`, where MyPtrT's
+    // underlying type is itself a pointer) is a different case and
+    // untouched: `const MyPtrT` correctly spells "const-qualify the whole
+    // aliased type", i.e. exactly `T *const`, so that alias arm below still
+    // needs the leading keyword -- only the un-aliased, structurally-printed
+    // TY_PTR fallthrough suppresses it (in favour of declarator position).
+    bool suppress_ptr_qual =
         ty->kind == TY_PTR && !find_typedef_name_exact(ctx, ty);
-    if (ty->is_const && !suppress_ptr_const)
+    if (ty->is_const && !suppress_ptr_qual)
         fprintf(f, "const ");
-    // #1291: was previously never emitted at all (see the removed comment
-    // this replaced) -- a header-declared `extern volatile sig_atomic_t g;`
-    // re-declared by -c=native/-m as plain `sig_atomic_t g;` collides with
-    // the replayed header's own `volatile` declaration ("redeclaration...
-    // with a different type") the moment that global is re-spelled anywhere
-    // (the #918 forward-declare-every-global pass, and the definition site).
-    // restrict and _Atomic (outside the one atomic_flag alias case below)
-    // are still never serialized -- deliberately out of scope here, tracked
-    // as a follow-up.
-    if (ty->is_volatile && !suppress_ptr_const)
+    // #1291: was previously never emitted at all -- a header-declared
+    // `extern volatile sig_atomic_t g;` re-declared by -c=native/-m as plain
+    // `sig_atomic_t g;` collides with the replayed header's own `volatile`
+    // declaration ("redeclaration... with a different type") the moment
+    // that global is re-spelled anywhere (the #918 forward-declare-every-
+    // global pass, and the definition site).
+    if (ty->is_volatile && !suppress_ptr_qual)
         fprintf(f, "volatile ");
 
     // Deliberately no output for ty->checked_kind (#770/#482-484): a
@@ -2246,10 +2281,11 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // cccc-internal VM-side check, not a real C construct -- gcc/clang would
     // reject the attribute names outright, and #488 requires -E/-c=generated
     // native output to be unchanged for a checked declaration ("no change to
-    // ABI or to unchecked callers"). Falls out for free today since this
-    // function only ever emits is_const/is_volatile anyway (is_restrict is
-    // likewise never serialized), but noted explicitly so it isn't "fixed" by a
-    // future generalization of the qualifier-printing above.
+    // ABI or to unchecked callers"). This isn't affected by #1295's
+    // const/volatile/restrict/_Atomic generalization below/above -- the
+    // checked-pointer attribute is printed by
+    // format_checked_ptr_qualifier(), a separate --emit-cccc-gated function,
+    // never by the plain-qualifier logic here.
 
     // #999: a scalar (non-aggregate) typedef -- e.g. `typedef unsigned long
     // DyValue;` -- previously always spelled as its canonical underlying
@@ -2267,6 +2303,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
     // kind gets the same treatment here, via find_typedef_name_exact's
     // pointer-identity match (see its own comment for why identity, not
     // structural, matching is required for a scalar).
+    bool printed_atomic_via_alias = false;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM &&
         ty->kind != TY_FUNC) {
         TypeName *alias = find_typedef_name_exact(ctx, ty);
@@ -2294,8 +2331,21 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
                 return;
             }
             fprintf(f, "_Atomic ");
+            printed_atomic_via_alias = true;
         }
     }
+    // #1295: a bare (non-typedef'd) _Atomic-qualified scalar/aggregate --
+    // e.g. `_Atomic int`, previously spelled as plain `int` -- only survived
+    // by accident when it happened to also have a typedef alias printed
+    // above (`atomic_int` etc). Emitted structurally here, after the alias
+    // arm (which already returns for every alias except the atomic_flag
+    // divergence, itself handled by printed_atomic_via_alias), so a typedef
+    // alias still prints as its own name rather than `_Atomic <alias>`.
+    // Suppressed on a bare pointer for the same reason is_const/is_volatile
+    // are above: an atomic *pointer* (`int *_Atomic p`) is spelled in
+    // declarator position by serialize_type_decl()'s TY_PTR branch instead.
+    if (ty->is_atomic && !suppress_ptr_qual && !printed_atomic_via_alias)
+        fprintf(f, "_Atomic ");
 
     switch (ty->kind) {
         case TY_VOID:

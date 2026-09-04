@@ -105,6 +105,23 @@ typedef enum {
 /* where the old ALDR-based form silently fell back to a plain load. */
 /* Neither was ever valid C for atomic_fetch_* (C11 7.17.7.5 requires an */
 /* atomic *integer* type), so this turns silent nonsense into a diagnostic. */
+/* */
+/* #1295: since serialize_type()/serialize_type_decl() started spelling a */
+/* bare (non-typedef'd) _Atomic-qualified declaration correctly, this */
+/* statement expression's overall type is genuinely `_Atomic T` (from its */
+/* last statement, __cccc_fetch_old itself) rather than the plain T it used */
+/* to silently decay to when the qualifier went unprinted. C11 6.3.2.1p2's */
+/* footnote makes an atomic lvalue-to-rvalue conversion (T, non-atomic) */
+/* implicit -- real gcc and current upstream clang both accept assigning */
+/* that value straight to a plain-T variable -- but the Apple-clang release */
+/* this project also targets as a native host compiler mistypes the */
+/* statement expression's result as still-atomic and rejects the outer */
+/* `old = (...)` assignment ("assigning to 'int' from incompatible type */
+/* '_Atomic(int)'"). Route the yield through an explicit plain-T temporary */
+/* so the atomic-to-nonatomic conversion happens via a plain-typed */
+/* initializer INSIDE the statement expression, which every tested */
+/* compiler accepts, rather than relying on the statement expression's own */
+/* result type. */
 #define __cccc_atomic_fetch_op(obj, val, op)                                   \
     ({                                                                         \
         __typeof__(obj)    __cccc_fetch_p = (obj);                             \
@@ -116,7 +133,8 @@ typedef enum {
             __cccc_fetch_new = __cccc_fetch_old op __cccc_fetch_v;             \
         } while (!__builtin_compare_and_swap(                                  \
             __cccc_fetch_p, &__cccc_fetch_old, __cccc_fetch_new));             \
-        __cccc_fetch_old;                                                      \
+        __typeof__(val) __cccc_fetch_result = __cccc_fetch_old;                \
+        __cccc_fetch_result;                                                   \
     })
 #define atomic_fetch_add(obj, val) __cccc_atomic_fetch_op((obj), (val), +)
 #define atomic_fetch_sub(obj, val) __cccc_atomic_fetch_op((obj), (val), -)
