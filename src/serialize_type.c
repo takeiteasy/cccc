@@ -446,8 +446,17 @@ static Type *type_origin_root(Type *t) {
     if (!t)
         return NULL;
     int hop = 0;
-    while (t->origin && hop++ < 1000000)
+    while (t->origin) {
+        // copy_type() is the only writer of Type.origin and never closes a
+        // loop, so a cycle here is a bug -- and a soft "return whatever we're
+        // at" would give two entries in the same cycle different roots
+        // depending on start phase, silently breaking the by_root superset
+        // property. Fail loud instead.
+        if (++hop > 1000000)
+            error("cccc: internal error (#1283): Type.origin chain does not "
+                  "terminate");
         t = t->origin;
+    }
     return t;
 }
 
