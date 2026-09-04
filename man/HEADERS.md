@@ -129,9 +129,16 @@ real host compiler, so header handling shifts:
   does not, and `-c=generated` reports a compile error rather than writing
   C nothing declares the type in. See
   [MACROS.md](MACROS.md#emit-directives-and-includes-in-generated-output).
-- A bodiless declaration sourced from one of CCCC's own bundled headers
-  (reached transitively through a captured `#include`, so never itself
-  auto-captured — e.g. a user header's own `#include <nl_types.h>`) is
+- A CCCC bundled header reached through a captured, ordinary (non-bundled)
+  header's own `#include` is treated as captured too — a user header's own
+  `#include <nl_types.h>` is replayed as part of that header's own text, so
+  the host compiler reaches the real `nl_types.h` the same way it reaches
+  the header that names it, and no bodiless declaration is needed. A
+  bundled header reached through *another* bundled header (e.g. bundled
+  `fcntl.h`'s own `#include "unistd.h"`) is the one case this does not
+  cover: the replayed `#include <fcntl.h>` resolves to the *host's*
+  `fcntl.h` under `-c=native`, whose own include graph CCCC cannot vouch
+  for, so a bodiless declaration sourced from such a chain is still
   re-derived from CCCC's own header text rather than relied upon, the same
   as any other declaration this section describes. Two care points there:
   its declarator is parenthesized (`int (getc_unlocked)(FILE *stream);`),

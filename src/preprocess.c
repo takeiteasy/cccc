@@ -536,6 +536,24 @@ bool cc_file_is_cccc_bundled(VirtualMachine *vm, const char *filename) {
            hashmap_get(&vm->compiler.cccc_bundled_files, filename) != NULL;
 }
 
+// #1297: mark `path` (any of the resolved-include-target key shapes the
+// PP_INCLUDE handler below produces -- an on-disk path or an
+// "<embedded>/name" synthetic key) as captured -- i.e. its text really will
+// reach the host compiler, either because it is a directly auto-captured
+// #include target (see emit_include_paths, populated alongside every call
+// site below) or because it is a CCCC bundled header reached one hop
+// through a captured, non-bundled includer (the transitive case this
+// ticket adds). Canonicalized on the way in, same contract as
+// cc_canonical_path_key()'s other callers (pragma_once/captured_paths) --
+// path_is_captured() (serialize_type.c) canonicalizes its own query path to
+// match.
+static void mark_include_target_captured(VirtualMachine *vm, const char *path) {
+    if (!path)
+        return;
+    hashmap_put(&vm->compiler.captured_include_targets,
+                cc_canonical_path_key(vm, path), (void *)1);
+}
+
 // #1143: mark `dir` (one of vm->compiler.include_paths/system_include_paths'
 // own stored strings -- cc_include()/cc_system_include(), src/vm.c) as an
 // entry that resolved one of CCCC's own bundled std headers
@@ -5727,6 +5745,18 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                       // auto-captured, so the PP_INCLUDE
                                       // case can pair it with its resolved
                                       // path once that's known
+        // #1297: set below when this directive is a PP_INCLUDE whose
+        // *includer* (start->file) is itself already a captured,
+        // non-bundled, non-cccc-only file -- so whatever this directive
+        // resolves to, if it turns out to be one of CCCC's own bundled
+        // headers, is reached by the host compiler through the includer's
+        // own replayed #include and should be marked captured too (see the
+        // mark_cccc_bundled_file() call sites in the PP_INCLUDE case
+        // below). Deliberately mutually exclusive with ac_include_line
+        // above in practice -- a directive that qualifies for direct
+        // auto-capture has its own target registered directly by that path
+        // instead.
+        bool ac_transitive_capture = false;
         {
             ComptimeCtxEntry *_ac = ctx_top(vm);
             // #1262: under -c=generated, an unrouted directive from a
@@ -5795,6 +5825,29 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 cc_record_emit_source(vm, _ac_line);
                 if (pp_directive(tok) == PP_INCLUDE)
                     ac_include_line = _ac_line;
+            } else if (!vm->compiler.emit_strict &&
+                       !vm->compiler.in_macro_mode &&
+                       !_ac_in_function_include &&
+                       pp_directive(tok) == PP_INCLUDE && start->file &&
+                       !(_ac && _ac->type == CTX_COMPTIME) &&
+                       // #1297: the includer itself must not be one of
+                       // CCCC's own bundled/cccc-only headers -- `#include
+                       // <fcntl.h>` replays to the *host's* fcntl.h under
+                       // -c=native, whose own include graph is not CCCC's
+                       // to vouch for (#1096's own fcntl.h -> "unistd.h"
+                       // case, and test_sys_mount_statfs.c, both need this
+                       // exact exclusion to keep re-deriving/replaying as
+                       // before). Mixed key convention deliberately: the two
+                       // maps checked here have different canonicalization
+                       // contracts (cccc_bundled_files/cccc_only_files are
+                       // raw File.name strings; captured_include_targets is
+                       // canonicalized), each honoring its own.
+                       !cc_file_is_cccc_bundled(vm, start->file->name) &&
+                       !cc_file_is_cccc_only(vm, start->file->name) &&
+                       hashmap_get(
+                           &vm->compiler.captured_include_targets,
+                           cc_canonical_path_key(vm, start->file->name))) {
+                ac_transitive_capture = true;
             }
         }
 
@@ -5910,10 +5963,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     if (file_exists(path)) {
                         record_include_edge(
                             vm, start->file ? start->file->name : NULL,
-                            path);           // #896
-                        if (ac_include_line) // #896
+                            path);                                  // #896
+                        if (ac_include_line) {                      // #896
                             hashmap_put(&vm->compiler.emit_include_paths,
                                         ac_include_line, path);
+                            mark_include_target_captured(vm, path); // #1297
+                        }
                         // #1096: a bundled header quote-#including another
                         // bundled header by relative path (fcntl.h's own
                         // `#include "unistd.h"`) takes this early branch,
@@ -5927,8 +5982,23 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // the *host's* fcntl.h, which never declares
                         // close()). get_std_header() identifies the target
                         // by name, same test the on-disk branch below uses.
-                        if (get_std_header(filename))
+                        if (get_std_header(filename)) {
                             mark_cccc_bundled_file(vm, path);
+                            // #1297: a *user* (non-bundled) header quote-
+                            // #including a CCCC bundled header by relative
+                            // path -- the includer will be re-opened by the
+                            // host compiler through the outer replayed
+                            // #include, and this bundled header's own text
+                            // reaches it the same way, so it is captured
+                            // too. Must run after mark_cccc_bundled_file()
+                            // above, whose result ac_transitive_capture's
+                            // own gate already excludes -- if this file
+                            // were itself bundled/cccc-only,
+                            // ac_transitive_capture would never have been
+                            // set for a directive nested inside it.
+                            if (ac_transitive_capture)
+                                mark_include_target_captured(vm, path);
+                        }
                         tok = include_file(vm, tok, path, start->next->next,
                                            filename,
                                            start->file->is_system_header);
@@ -5952,15 +6022,21 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         char *embedded_src =
                             try_embedded_std_header(vm, resolved);
                         if (embedded_src) {
-                            if (ac_include_line)
+                            if (ac_include_line) {
                                 hashmap_put(&vm->compiler.emit_include_paths,
                                             ac_include_line,
                                             embedded_header_key(vm, resolved));
+                                mark_include_target_captured( // #1297
+                                    vm, embedded_header_key(vm, resolved));
+                            }
                             if (is_cccc_supplied_only_header(resolved))
                                 mark_cccc_only_file(
                                     vm, embedded_header_key(vm, resolved));
                             mark_cccc_bundled_file(
                                 vm, embedded_header_key(vm, resolved));
+                            if (ac_transitive_capture) // #1297
+                                mark_include_target_captured(
+                                    vm, embedded_header_key(vm, resolved));
                             tok = include_embedded_header(vm, tok, resolved,
                                                           embedded_src,
                                                           start->next->next);
@@ -6018,10 +6094,13 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // over the embedded copy would answer a question about
                         // the wrong file -- it could only ever cause a false
                         // suppression of a legitimate #include.
-                        if (ac_include_line)
+                        if (ac_include_line) {
                             hashmap_put(&vm->compiler.emit_include_paths,
                                         ac_include_line,
                                         embedded_header_key(vm, filename));
+                            mark_include_target_captured( // #1297
+                                vm, embedded_header_key(vm, filename));
+                        }
                         // #1003: a header whose CCCC copy is the only
                         // implementation likely to exist on a typical host
                         // (see is_cccc_supplied_only_header's comment above)
@@ -6045,6 +6124,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // prototype-suppression gate in serialize_program.c.
                         mark_cccc_bundled_file(
                             vm, embedded_header_key(vm, filename));
+                        if (ac_transitive_capture) // #1297
+                            mark_include_target_captured(
+                                vm, embedded_header_key(vm, filename));
                         tok = include_embedded_header(
                             vm, tok, filename, embedded_src, start->next->next);
                         break;
@@ -6053,9 +6135,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
                 record_include_edge(vm, start->file ? start->file->name : NULL,
                                     path ? path : filename); // #896
-                if (ac_include_line)                         // #896
+                if (ac_include_line) {                       // #896
                     hashmap_put(&vm->compiler.emit_include_paths,
                                 ac_include_line, path ? path : filename);
+                    mark_include_target_captured(            // #1297
+                        vm, path ? path : filename);
+                }
                 // #1003: same reasoning as the embedded branch above -- this is
                 // the branch a polyfill header resolves through when found on
                 // disk (e.g. under tools/tests.py's -I./include), which #1003's
@@ -6072,8 +6157,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // regardless of which of the two resolution paths a given
                 // invocation took (this on-disk path is what the test
                 // harness's standard -I./include invocation always uses).
-                if (get_std_header(filename))
+                if (get_std_header(filename)) {
                     mark_cccc_bundled_file(vm, path ? path : filename);
+                    if (ac_transitive_capture) // #1297
+                        mark_include_target_captured(vm,
+                                                     path ? path : filename);
+                }
                 tok = include_file(vm, tok, path ? path : filename,
                                    start->next->next, filename,
                                    !is_dquote || found_in_sys);

@@ -22,6 +22,17 @@
 // actually called, so they're only referenced (never invoked) behind an
 // always-false volatile guard -- is_used still fires at parse time, so
 // their prototypes are still emitted and still exercise the bug.
+//
+// A CCCC bundled header reached through this companion header's own
+// #include is now (#1297) treated as captured -- the host compiler
+// follows this header's own replayed #include straight through to the
+// real <stdio.h>/<stdarg.h>, so the fallback prototype this test used to
+// exercise no longer fires here at all. This program now instead proves
+// the replayed real declarations alone are enough for a native build to
+// accept every one of these calls; the parenthesized-declarator fix
+// itself stays covered by tools/comptime_native_smoke.py's
+// case_bundled_chain_macro_shadow_1294 (a bundled->bundled chain #1297
+// deliberately leaves uncaptured).
 #include "native_libc_macro_shadow_1294.h"
 
 static volatile int g_never = 0;

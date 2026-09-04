@@ -1516,25 +1516,29 @@ const char *enum_const_spelling(SerializeContext *ctx, Type *ty,
     return name;
 }
 
-// #953: hashmap_foreach callback collecting emit_include_paths' values
-// (resolved paths of auto-captured #include directives) into
-// ctx->captured_paths for path_is_captured() to scan.
+// #953: hashmap_foreach callback collecting
+// vm->compiler.captured_include_targets' keys (resolved paths whose text
+// the host compiler will actually see -- every directly auto-captured
+// #include target, plus, since #1297, a CCCC bundled header reached one
+// hop through a captured non-bundled includer) into ctx->captured_paths
+// for path_is_captured() to scan.
 //
-// #1292: canonicalized on the way in (cc_canonical_path_key(), shared with
-// `#pragma once`'s own key -- see its doc comment in preprocess.c) so a
-// header reached under two textual #include spellings (e.g. "./cccc.h" from
-// one TU, "cccc.h" from another -- both resolve to the same on-disk file)
-// registers one canonical key here, matching the canonicalization
-// path_is_captured() now applies to its query path.
+// #1292: the keys here are already canonicalized (cc_canonical_path_key(),
+// shared with `#pragma once`'s own key -- see its doc comment in
+// preprocess.c) at every mark_include_target_captured() call site, so a
+// header reached under two textual #include spellings (e.g. "./cccc.h"
+// from one TU, "cccc.h" from another -- both resolve to the same on-disk
+// file) is already registered under one canonical key here, matching the
+// canonicalization path_is_captured() applies to its own query path -- no
+// need to re-canonicalize on the way out.
 static int collect_captured_path(char *key, int keylen, void *val,
                                  void *user_data) {
-    (void)key;
-    (void)keylen;
+    (void)val;
     SerializeContext *ctx = user_data;
+    char             *dup = arena_strndup(ctx->vm, key, keylen);
     ctx->captured_paths   = realloc(
         ctx->captured_paths, sizeof(char *) * (ctx->captured_paths_len + 1));
-    ctx->captured_paths[ctx->captured_paths_len++] =
-        (char *)cc_canonical_path_key(ctx->vm, (char *)val);
+    ctx->captured_paths[ctx->captured_paths_len++] = dup;
     return 0;
 }
 
@@ -4122,8 +4126,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // still gated `!ctx->generated_only || path_is_captured(...)`, so it
     // short-circuits before ever consulting captured_paths whenever
     // generated_only is false, exactly as before this change.
-    hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path,
-                    &ctx);
+    hashmap_foreach(&vm->compiler.captured_include_targets,
+                    collect_captured_path, &ctx);
     // #1283: same_type_or_origin() is the whole-program-scale bottleneck in
     // both collect_scope_names() (type_vec_find_nominal dedup scans) and
     // rename_colliding_type_tags() (pairwise same_type_strong over cccc's own

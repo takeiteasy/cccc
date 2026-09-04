@@ -22,6 +22,18 @@
 // parse time, so their prototypes are still emitted and still exercise the
 // bug, without this test actually touching process priority or opening a
 // message catalog. getpriority() is harmless to call for real.
+//
+// A CCCC bundled header reached through this companion header's own
+// #include is now (#1297) treated as captured -- the host compiler
+// follows this header's own replayed #include straight through to the
+// real <sys/resource.h>/<nl_types.h>, so the fallback prototype this test
+// used to exercise no longer fires here at all. This program now instead
+// proves the replayed real declarations alone are enough for a native
+// build to accept every one of these calls; the id_t-parameter and
+// alias-preservation fixes themselves stay covered by
+// tools/comptime_native_smoke.py's case_bundled_chain_prototype_still_
+// emitted_1297 and case_bundled_ptr_typedef_alias_1296 (bundled->bundled
+// chains #1297 deliberately leaves uncaptured).
 #include "native_decl_alias_1296.h"
 
 static volatile int g_never = 0;

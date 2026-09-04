@@ -3880,6 +3880,21 @@ typedef struct Compiler {
                             // re-emission filter can test
     // cc_file_is_cccc_only() against the path a line in
     // emit_directives actually resolved to
+    // #1297: the full set of resolved include paths whose text the host
+    // compiler will actually see -- a superset of emit_include_paths'
+    // values (every directly auto-captured target), plus a CCCC bundled
+    // header reached one hop through a captured, non-bundled, non-cccc-only
+    // includer (e.g. a user header's own `#include <nl_types.h>`). Lets
+    // path_is_captured() (serialize_type.c) recognize that a declaration
+    // sourced from such a bundled header is already supplied once the
+    // includer's own #include is replayed, without widening the fallback-
+    // prototype suppression to a bundled header reached through *another*
+    // bundled header (#1096's own fcntl.h -> "unistd.h" case, and
+    // test_sys_mount_statfs.c, both need to keep re-deriving/replaying as
+    // before). Keys go through cc_canonical_path_key() on every get and put
+    // -- same contract as pragma_once/captured_paths -- see
+    // mark_include_target_captured() in preprocess.c.
+    HashMap captured_include_targets;
 
     // #1050: Obj -> host-header records for libc functions a comptime
     // reflection-API builder called (e.g. memcpy()/strlen() via Serialize()

@@ -8103,6 +8103,209 @@ def case_typedef_differently_shaped_collision_1293(cccc: Path, tmp: str) -> bool
     return True
 
 
+# #1297: a CCCC bundled header reached through a *user* header's own
+# #include -- unlike #1096's fcntl.h->"unistd.h" case, the includer here
+# (transitive_bundled_capture_1297.h) is not itself one of CCCC's bundled
+# headers, so the host compiler reaches nl_types.h's real declarations by
+# following the replayed `#include "transitive_bundled_capture_1297.h"`
+# straight through to its own real `#include <nl_types.h>`. The #1096
+# fallback-prototype pass used to have no way to know that, and emitted a
+# redundant (and, pre-#1294/#1296, sometimes conflicting) prototype anyway.
+TRANSITIVE_BUNDLED_CAPTURE_1297_HEADER = (
+    "#ifndef TRANSITIVE_BUNDLED_CAPTURE_1297_H\n"
+    "#define TRANSITIVE_BUNDLED_CAPTURE_1297_H\n"
+    "#include <nl_types.h>\n"
+    "#endif\n"
+)
+TRANSITIVE_BUNDLED_CAPTURE_1297_PROGRAM = (
+    '#include "transitive_bundled_capture_1297.h"\n'
+    "static volatile int g_never_1297 = 0;\n"
+    "int main(void) {\n"
+    "    if (g_never_1297) {\n"
+    "        nl_catd c = catopen(\"x\", 0);\n"
+    "        catclose(c);\n"
+    "    }\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_transitive_bundled_capture_1297(cccc: Path, tmp: str) -> bool:
+    print("  162: #1297 -- a CCCC bundled header (<nl_types.h>) reached "
+          "through a replayed *user* header's own #include (not another "
+          "CCCC bundled header, the #1096 case) is now treated as "
+          "captured -- the host compiler follows the user header's own "
+          "replayed #include straight through to the real nl_types.h, so "
+          "the #901/#1096 fallback prototype for catopen()/catclose() is "
+          "redundant and no longer emitted. catopen/catclose are only "
+          "referenced (never invoked) behind an always-false volatile "
+          "guard -- is_used still fires at parse time, so a pre-fix build "
+          "still exercises the (now absent) fallback prototype without "
+          "actually opening a message catalog. Asserts -m output replays "
+          "the user header's own #include, contains no bodiless catopen "
+          "prototype, plus VM 42 -> native 42.")
+    write(Path(tmp) / "transitive_bundled_capture_1297.h",
+          TRANSITIVE_BUNDLED_CAPTURE_1297_HEADER)
+    src = Path(tmp) / "transitive_bundled_capture_1297.c"
+    write(src, TRANSITIVE_BUNDLED_CAPTURE_1297_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if '#include "transitive_bundled_capture_1297.h"' not in m_result.stdout:
+        print(f"    FAIL: -m output missing the replayed user header "
+              f"#include\n    {m_result.stdout}")
+        return False
+    if "nl_catd (catopen)" in m_result.stdout:
+        print(f"    FAIL: -m output still emits a bodiless catopen "
+              f"prototype\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp,
+                                   "transitive_bundled_capture_1297_rt",
+                                   TRANSITIVE_BUNDLED_CAPTURE_1297_PROGRAM)
+
+
+# #1297 control: a CCCC bundled header reached through ANOTHER CCCC bundled
+# header (<sys/wait.h>'s own #include "sys/resource.h") is deliberately
+# NOT widened by #1297's fix -- the includer itself resolves to the HOST's
+# own <sys/wait.h> under -c=native, whose own include graph CCCC cannot
+# vouch for (same reasoning as #1096's fcntl.h->"unistd.h" case, and
+# test_sys_mount_statfs.c). The fallback prototype must keep firing here,
+# with its id_t-vs-int parameter fix from #1296 intact.
+BUNDLED_CHAIN_STILL_EMITTED_1297_PROGRAM = (
+    "#include <sys/wait.h>\n"
+    "static volatile int g_never_1297b = 0;\n"
+    "int main(void) {\n"
+    "    int p = getpriority(0, 0);\n"
+    "    (void)p;\n"
+    "    if (g_never_1297b) {\n"
+    "        setpriority(0, 0, 0);\n"
+    "    }\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_bundled_chain_prototype_still_emitted_1297(cccc: Path, tmp: str) -> bool:
+    print("  163: #1297 control -- a CCCC bundled header reached through "
+          "ANOTHER CCCC bundled header (<sys/wait.h>'s own #include "
+          "\"sys/resource.h\") is deliberately excluded from #1297's "
+          "transitive-capture widening: the includer itself resolves to "
+          "the HOST's own <sys/wait.h> under -c=native, whose own include "
+          "graph CCCC cannot vouch for -- same #1096 reasoning that keeps "
+          "test_sys_mount_statfs.c's fcntl.h/unistd.h case re-deriving. "
+          "Asserts the getpriority()/setpriority() fallback prototype "
+          "(#1296's id_t-typed parameter) is still emitted, plus VM 42 -> "
+          "native 42.")
+    src = Path(tmp) / "bundled_chain_still_emitted_1297.c"
+    write(src, BUNDLED_CHAIN_STILL_EMITTED_1297_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "int (getpriority)(int which, id_t who)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing the expected getpriority "
+              f"fallback prototype\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(
+        cccc, tmp, "bundled_chain_still_emitted_1297_rt",
+        BUNDLED_CHAIN_STILL_EMITTED_1297_PROGRAM)
+
+
+# #1296 re-anchor: with #1297 landed, a plain non-bundled user header no
+# longer exercises the pointer-typedef-alias-preservation half of #1296 (the
+# fallback prototype it used to trigger no longer fires at all -- see case
+# 162 above). The alias-preservation fix itself is general, so pin it here
+# against the one bundled->bundled chain case 163 already established stays
+# untouched: <xlocale.h>'s own #include <locale.h> (both CCCC bundled), a
+# `locale_t` (`typedef void *locale_t;`) pointer parameter/return. Uses
+# duplocale() only, not freelocale() -- freelocale()'s return type
+# genuinely diverges between macOS (int) and glibc (void), a real,
+# unrelated host mismatch (see include/locale.h's own comment) that would
+# make this case's native compile fail on macOS for a reason having
+# nothing to do with #1296/#1297.
+BUNDLED_PTR_TYPEDEF_ALIAS_1296_PROGRAM = (
+    "#include <xlocale.h>\n"
+    "static volatile int g_never_1297c = 0;\n"
+    "int main(void) {\n"
+    "    if (g_never_1297c) {\n"
+    "        locale_t l = duplocale((locale_t)0);\n"
+    "        (void)l;\n"
+    "    }\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_bundled_ptr_typedef_alias_1296(cccc: Path, tmp: str) -> bool:
+    print("  164: #1296 re-anchor -- <xlocale.h>'s own #include <locale.h> "
+          "(both CCCC bundled, so #1297 deliberately leaves this chain "
+          "uncaptured, see case 163) is where the pointer-typedef-alias "
+          "half of #1296 is now the only remaining direct coverage: "
+          "duplocale()'s fallback prototype must spell its parameter/"
+          "return `locale_t`, the real header's own alias, not decomposed "
+          "to the underlying `void *` -- serialize_aliased_ptr_type_decl. "
+          "Asserts -m output spells `locale_t (duplocale)(locale_t`, plus "
+          "VM 42 -> native 42.")
+    src = Path(tmp) / "bundled_ptr_typedef_alias_1296.c"
+    write(src, BUNDLED_PTR_TYPEDEF_ALIAS_1296_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "locale_t (duplocale)(locale_t" not in m_result.stdout:
+        print(f"    FAIL: -m output does not preserve the locale_t alias "
+              f"on duplocale's fallback prototype\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(
+        cccc, tmp, "bundled_ptr_typedef_alias_1296_rt",
+        BUNDLED_PTR_TYPEDEF_ALIAS_1296_PROGRAM)
+
+
+# #1294 re-anchor, same reasoning as case 164 above but for #1294's
+# parenthesized-declarator fix rather than #1296's alias-preservation one:
+# with #1297 landed, native_libc_macro_shadow_1294.h's own direct
+# `#include <stdio.h>` no longer triggers the fallback prototype at all
+# (stdio.h is reached through a plain, non-bundled companion header, #1297's
+# exact new case). <assert.h>'s own `#include <stdio.h>` (both CCCC bundled)
+# is the one remaining shape that still exercises it: getchar_unlocked() is
+# a function-like macro in the real macOS SDK's <_stdio.h>
+# (`#define getchar_unlocked() getc_unlocked(stdin)`) -- CCCC's own
+# fallback prototype must parenthesize the declarator to defeat that macro
+# rather than expand through it.
+BUNDLED_CHAIN_MACRO_SHADOW_1294_PROGRAM = (
+    "#include <assert.h>\n"
+    "static volatile int g_never_1297d = 0;\n"
+    "int main(void) {\n"
+    "    if (g_never_1297d) {\n"
+    "        getchar_unlocked();\n"
+    "    }\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_bundled_chain_macro_shadow_1294(cccc: Path, tmp: str) -> bool:
+    print("  165: #1294 re-anchor -- <assert.h>'s own #include <stdio.h> "
+          "(both CCCC bundled, so #1297 deliberately leaves this chain "
+          "uncaptured, same as case 163) is where the parenthesized-"
+          "declarator half of #1294 is now the only remaining direct "
+          "coverage: getchar_unlocked()'s fallback prototype must "
+          "parenthesize its declarator so it isn't expanded through the "
+          "real macOS SDK's own function-like getchar_unlocked() macro. "
+          "Asserts -m output spells `int (getchar_unlocked)(void)`, plus "
+          "VM 42 -> native 42.")
+    src = Path(tmp) / "bundled_chain_macro_shadow_1294.c"
+    write(src, BUNDLED_CHAIN_MACRO_SHADOW_1294_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if "int (getchar_unlocked)(void)" not in m_result.stdout:
+        print(f"    FAIL: -m output missing the parenthesized "
+              f"getchar_unlocked fallback prototype\n    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(
+        cccc, tmp, "bundled_chain_macro_shadow_1294_rt",
+        BUNDLED_CHAIN_MACRO_SHADOW_1294_PROGRAM)
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8313,6 +8516,10 @@ CASES = [
     case_dup_typedef_1290_native_round_trip,
     case_include_path_spelling_dedup_1292,
     case_typedef_differently_shaped_collision_1293,
+    case_transitive_bundled_capture_1297,
+    case_bundled_chain_prototype_still_emitted_1297,
+    case_bundled_ptr_typedef_alias_1296,
+    case_bundled_chain_macro_shadow_1294,
 ]
 
 
