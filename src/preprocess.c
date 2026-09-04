@@ -2827,27 +2827,36 @@ static void register_stdlib_for_header(VirtualMachine *vm,
     }
 }
 
-// The `#pragma once` / include-guard maps are keyed by path *string*, but
-// one physical header can be reached under several spellings in a single
-// TU: e.g. src/macros.c includes both "./internal.h" (resolved against its
-// own dir -> "src/./internal.h") and "./parse_internal.h", whose own
-// `#include "./internal.h"` resolves against *its* dir -> "src/././
-// internal.h". Two different strings, one file -- so `#pragma once` fails
-// to suppress the second include and every `static inline` helper in the
-// header is redefined. A real host cc doesn't hit this because its
-// `#pragma once` is inode/realpath-based. Canonicalize the key the same
-// way files_are_same() (serialize_program.c, #1032) does: realpath() when
-// it resolves, the literal string otherwise (synthetic/embedded paths such
-// as "<embedded>/foo.h" have no file on disk and are already self-
-// consistent). Must be applied on *every* get and put of these maps or the
-// two sides drift.
-static const char *pragma_once_key(VirtualMachine *vm, const char *path) {
+// A path string can name the same physical header under several spellings
+// in a single TU: e.g. src/macros.c includes both "./internal.h" (resolved
+// against its own dir -> "src/./internal.h") and "./parse_internal.h",
+// whose own `#include "./internal.h"` resolves against *its* dir ->
+// "src/././internal.h". Two different strings, one file. A real host cc
+// doesn't hit this because its own path keys (`#pragma once`, include
+// guards) are inode/realpath-based. Canonicalize the same way
+// files_are_same() (serialize_program.c, #1032) does: realpath() when it
+// resolves, the literal string otherwise (synthetic/embedded paths such as
+// "<embedded>/foo.h" have no file on disk and are already self-
+// consistent). Must be applied on *every* get and put of a map keyed this
+// way or the two sides drift -- originally written for the `#pragma once` /
+// include-guard maps below, and reused by #1292 for
+// vm->compiler.emit_include_paths / SerializeContext.captured_paths
+// (serialize_type.c/serialize_program.c), which have the identical
+// two-spellings-one-file hazard: `path_is_captured()`'s plain strcmp()
+// against an un-canonicalized key let one TU's replayed #include register
+// under a spelling the other TU's check never matched, so the same header
+// got replayed twice under -c=generated ("typedef redefinition").
+const char *cc_canonical_path_key(VirtualMachine *vm, const char *path) {
     if (!path)
         return path;
     char resolved[PATH_MAX];
     if (realpath(path, resolved))
         return arena_strdup(vm, resolved);
     return path;
+}
+
+static const char *pragma_once_key(VirtualMachine *vm, const char *path) {
+    return cc_canonical_path_key(vm, path);
 }
 
 static Token *include_file(VirtualMachine *vm, Token *tok, char *path,

@@ -7937,6 +7937,80 @@ def case_dup_typedef_1290_native_round_trip(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1292: an UNGUARDED header (no #pragma once/#ifndef guard -- the actual
+# failure mode; a guarded header's second replay is merely redundant, not
+# broken) reached under two different textual #include spellings from two
+# different TUs. Both resolve to the same on-disk file, but before #1292's
+# fix collect_captured_path()/path_is_captured() compared the raw,
+# un-canonicalized path strings, and the #include-replay loop had no
+# path-based dedup at all -- so the header's own typedef+static-inline
+# function definition was replayed twice verbatim into one -c=native
+# translation unit ("typedef redefinition", "redefinition of ...").
+INCLUDE_SPELLING_1292_HEADER = (
+    "typedef struct { int a; int b; } IncludeSpelling1292Pair;\n"
+    "static inline int include_spelling_1292_sum(IncludeSpelling1292Pair p) "
+    "{ return p.a + p.b; }\n"
+)
+INCLUDE_SPELLING_1292_A = (
+    '#include "./include_spelling_1292.h"\n'
+    "int include_spelling_1292_use_a(void) {\n"
+    "    IncludeSpelling1292Pair p;\n"
+    "    p.a = 1;\n"
+    "    p.b = 2;\n"
+    "    return include_spelling_1292_sum(p);\n"
+    "}\n"
+)
+INCLUDE_SPELLING_1292_MAIN = (
+    '#include "include_spelling_1292.h"\n'
+    "int include_spelling_1292_use_a(void);\n"
+    "int main(void) {\n"
+    "    IncludeSpelling1292Pair p;\n"
+    "    p.a = 20;\n"
+    "    p.b = 19;\n"
+    "    int r = include_spelling_1292_use_a() + include_spelling_1292_sum(p);\n"
+    "    return r == 42 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_include_path_spelling_dedup_1292(cccc: Path, tmp: str) -> bool:
+    print("  160: -c=native, an unguarded shared header included as "
+          "\"./include_spelling_1292.h\" from one TU and "
+          "\"include_spelling_1292.h\" from another -- two different "
+          "resolved-path strings for the identical on-disk file. "
+          "path_is_captured()/emit_include_paths keys were un-canonicalized "
+          "and the #include-replay loop had no path-based dedup, so the "
+          "header's own typedef + static inline function were replayed "
+          "twice into one native TU -- a host 'typedef redefinition' "
+          "compile failure no -m shape assertion alone can see. "
+          "Asserts VM 42 -> native 42.")
+    write(Path(tmp) / "include_spelling_1292.h", INCLUDE_SPELLING_1292_HEADER)
+    a_src = Path(tmp) / "include_spelling_1292_a.c"
+    main_src = Path(tmp) / "include_spelling_1292_main.c"
+    write(a_src, INCLUDE_SPELLING_1292_A)
+    write(main_src, INCLUDE_SPELLING_1292_MAIN)
+    order = [a_src.name, main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "include_spelling_1292_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8145,6 +8219,7 @@ CASES = [
     case_compound_literal_header_type_1286,
     case_infunc_include_not_hoisted_1287,
     case_dup_typedef_1290_native_round_trip,
+    case_include_path_spelling_dedup_1292,
 ]
 
 

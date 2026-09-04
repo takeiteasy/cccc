@@ -156,6 +156,15 @@ typedef struct {
     VirtualMachine *vm;
     char          **captured_paths;
     int             captured_paths_len;
+    // #1292: memoizes cc_canonical_path_key()'s realpath() call for
+    // path_is_captured()'s query side (raw path -> canonical key) --
+    // path_is_captured() runs once per bodiless Obj/TypeName lookup across
+    // the whole program, and realpath() is a syscall the #1283 perf wall
+    // work made a point of keeping off any whole-program-scale path.
+    // Zero-initialized like every other ad-hoc HashMap field on this
+    // struct (see e.g. the `anchors`/`claimed` locals in
+    // rename_colliding_static_names).
+    HashMap path_key_memo;
     // #965: block-literal env structs -- see BlockEnvEntry and
     // serialize_block_preamble().
     BlockEnvEntry *block_envs;

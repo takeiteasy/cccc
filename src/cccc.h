@@ -4933,6 +4933,13 @@ char *find_cccc_bundled_header_path(VirtualMachine *vm,
                                     const char *basename); // #1143 regression
 bool cc_file_is_command_line_input(VirtualMachine *vm,
                                    const char     *name);  // #1006
+// #1292: realpath()-canonicalizes a path key (falls back to the literal
+// string when realpath() can't resolve it, e.g. a synthetic "<embedded>/..."
+// path). Originally private to preprocess.c's `#pragma once`/include-guard
+// maps; exported so serialize_type.c/serialize_program.c's
+// captured_paths/emit_include_paths keys go through the identical
+// canonicalization -- see this function's own doc comment in preprocess.c.
+const char *cc_canonical_path_key(VirtualMachine *vm, const char *path);
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);

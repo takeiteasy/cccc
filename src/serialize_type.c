@@ -2819,8 +2819,21 @@ bool path_basename_is(const char *path, const char *name) {
 bool path_is_captured(SerializeContext *ctx, const char *path) {
     if (!path)
         return false;
+    // #1292: canonicalize the query path the same way collect_captured_path()
+    // canonicalized ctx->captured_paths' values -- otherwise two textual
+    // spellings of one on-disk header (e.g. "./cccc.h" vs "cccc.h") compare
+    // unequal here even though the #include really was replayed, and this
+    // type's definition is wrongly re-derived from scratch alongside it
+    // ("typedef redefinition"/"redefinition of ..."). Memoized: this runs
+    // once per bodiless declaration/typedef lookup across the whole
+    // program, and realpath() is a syscall.
+    const char *key = hashmap_get(&ctx->path_key_memo, path);
+    if (!key) {
+        key = cc_canonical_path_key(ctx->vm, path);
+        hashmap_put(&ctx->path_key_memo, path, (void *)key);
+    }
     for (int i = 0; i < ctx->captured_paths_len; i++)
-        if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], path) == 0)
+        if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], key) == 0)
             return true;
     return false;
 }

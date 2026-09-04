@@ -1321,6 +1321,13 @@ const char *enum_const_spelling(SerializeContext *ctx, Type *ty,
 // #953: hashmap_foreach callback collecting emit_include_paths' values
 // (resolved paths of auto-captured #include directives) into
 // ctx->captured_paths for path_is_captured() to scan.
+//
+// #1292: canonicalized on the way in (cc_canonical_path_key(), shared with
+// `#pragma once`'s own key -- see its doc comment in preprocess.c) so a
+// header reached under two textual #include spellings (e.g. "./cccc.h" from
+// one TU, "cccc.h" from another -- both resolve to the same on-disk file)
+// registers one canonical key here, matching the canonicalization
+// path_is_captured() now applies to its query path.
 static int collect_captured_path(char *key, int keylen, void *val,
                                  void *user_data) {
     (void)key;
@@ -1328,7 +1335,8 @@ static int collect_captured_path(char *key, int keylen, void *val,
     SerializeContext *ctx = user_data;
     ctx->captured_paths   = realloc(
         ctx->captured_paths, sizeof(char *) * (ctx->captured_paths_len + 1));
-    ctx->captured_paths[ctx->captured_paths_len++] = val;
+    ctx->captured_paths[ctx->captured_paths_len++] =
+        (char *)cc_canonical_path_key(ctx->vm, (char *)val);
     return 0;
 }
 
@@ -4322,9 +4330,26 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // since it doesn't call the C23 IEEE family this substitution exists
     // for).
     bool seen_tgmath_h = false;
+    // #1292: -c=native/-m's #include-replay loop (unlike its -c=generated
+    // sibling above, fixed by #1264) never deduped two *different* literal
+    // spellings of one on-disk header ("./cccc.h" vs "cccc.h" -- both
+    // resolve to the same file). A header without its own guard/#pragma
+    // once then gets replayed twice verbatim ("typedef redefinition",
+    // "redefinition of ..."); a guarded header degrades to a harmless but
+    // needless duplicate line. Keyed on the canonicalized resolved path
+    // (cc_canonical_path_key(), shared with path_is_captured()'s memo
+    // above) rather than the literal `resolved` string, so the two
+    // spellings collapse to one key.
+    HashMap emitted_resolved_paths = {0};
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
+        if (resolved) {
+            const char *key = cc_canonical_path_key(vm, resolved);
+            if (hashmap_get(&emitted_resolved_paths, key))
+                continue;
+            hashmap_put(&emitted_resolved_paths, key, (void *)1);
+        }
         // --emit-cccc: re-emit cccc-only includes too -- the caller has
         // opted into dialect-fidelity output, so a downstream reader is
         // expected to understand the routing syntax those files carry.
