@@ -142,6 +142,18 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
                               : "anon";
         obj->name =
             arena_format(vm, "__cccc_%s_%d", tag, ctx->anon_global_counter++);
+        // #1286: this object has no declaration of its own -- ty->name (a
+        // compound literal, via postfix()) or nothing at all (a reflection-
+        // API anon global, reflect_new_anon_gvar()) is all obj->tok can
+        // point at, and neither names a real declaration site. Whatever
+        // file that token happens to sit in (often a header, if the *type*
+        // is header-declared) is not this object's provenance --
+        // global_is_header_supplied() must not read it as "already
+        // supplied by a replayed #include" on that basis. A hoisted static
+        // local passes through this same branch but already carries its
+        // own correct provenance (its declarator's real token), so this
+        // flag is a no-op for it.
+        obj->is_anon_synthesized = true;
         // An anonymous global (compound literal or static local) can never
         // be referenced from another translation unit -- internal linkage
         // makes the #918 forward-declaration pass ahead of global
@@ -2835,6 +2847,19 @@ static bool bodyless_decl_from_input_or_bundled(VirtualMachine   *vm,
 bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                Obj *obj) {
     if (obj->is_macro_generated)
+        return false;
+    // #1286: same rationale as is_macro_generated just above -- an anon
+    // global rename_anon_globals() synthesized (a compound literal's
+    // backing store, or a reflection-API anon global) has no declaration of
+    // its own to collide with. Its obj->tok, if any, is inherited from its
+    // *type*'s name/tag token (postfix()'s compound-literal branch never
+    // sets a declarator token of its own) -- when that type happens to be
+    // declared in a header, the checks below used to misread the object as
+    // "already supplied by that header's replayed #include", dropping both
+    // its forward declaration and its definition while
+    // serialize_reloc_init() still emitted a reference to it, producing an
+    // "undeclared identifier" from the host compiler.
+    if (obj->is_anon_synthesized)
         return false;
     Token *t = obj->tok;
     if (!t || !t->file)

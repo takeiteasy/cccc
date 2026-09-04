@@ -7723,6 +7723,82 @@ int main(void) { return 0; }   // gcc policy resolved
 """
 
 
+COMPOUND_LITERAL_HEADER_1286_HEADER = (
+    "#ifndef COMPOUND_LITERAL_HEADER_1286_H\n"
+    "#define COMPOUND_LITERAL_HEADER_1286_H\n"
+    "typedef struct TaggedThing1286 { int a; int b; } TaggedThing1286;\n"
+    "#endif\n"
+)
+
+COMPOUND_LITERAL_HEADER_1286_PROGRAM = (
+    '#include "compound_literal_header_1286.h"\n'
+    "TaggedThing1286 *thing_1286 = &(TaggedThing1286){.a = 19, .b = 23};\n"
+    "int main(void) {\n"
+    "    return thing_1286->a + thing_1286->b;\n"
+    "}\n"
+)
+
+
+def case_compound_literal_header_type_1286(cccc: Path, tmp: str) -> bool:
+    print("  157: a file-scope pointer initialized from a compound literal "
+          "(`T *x = &(T){...};`) whose type T is declared in an included "
+          "header loses its anonymous backing global entirely under "
+          "-c=native (#1286) -- rename_anon_globals()'s synthesized Obj "
+          "inherits obj->tok from the *type*'s name token, and "
+          "global_is_header_supplied() misread that as \"already supplied "
+          "by the replayed #include\", dropping both the forward "
+          "declaration and the definition while the reference to it was "
+          "still emitted. Fixed via a dedicated Obj.is_anon_synthesized "
+          "flag rename_anon_globals() sets, checked before any "
+          "token/file-provenance test. Reproduced directly against "
+          "src/type.c's own scalar-type singleton pattern.")
+    write(Path(tmp) / "compound_literal_header_1286.h",
+          COMPOUND_LITERAL_HEADER_1286_HEADER)
+    src = Path(tmp) / "compound_literal_header_1286.c"
+    write(src, COMPOUND_LITERAL_HEADER_1286_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if m_result.returncode != 0:
+        print(f"    FAIL: -m exited {m_result.returncode}\n    {m_result.stderr}")
+        return False
+    if "__cccc_TaggedThing1286" not in m_result.stdout:
+        print(f"    FAIL: -m output never names the anon backing global\n"
+              f"    {m_result.stdout}")
+        return False
+    # The bug's shape: a reference to the anon global with no matching
+    # definition anywhere in the same output.
+    def_marker = "static struct TaggedThing1286 __cccc_TaggedThing1286_0"
+    if def_marker not in m_result.stdout:
+        print(f"    FAIL: -m output never defines the anon backing global "
+              f"it references\n    {m_result.stdout}")
+        return False
+
+    obj = Path(tmp) / "compound_literal_header_1286.o"
+    cc_result = run(["cc", "-c", "-o", obj.name, "-x", "c", "-"],
+                     cwd=tmp, input=m_result.stdout)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -m output\n"
+              f"    {cc_result.stderr}\n    {m_result.stdout}")
+        return False
+
+    out_bin = Path(tmp) / "compound_literal_header_1286_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -7928,6 +8004,7 @@ CASES = [
     case_ret_buffer_unused_local_19,
     case_generated_shared_typedef_global_1241,
     case_compiler_family_auto_resolves_1226,
+    case_compound_literal_header_type_1286,
 ]
 
 

@@ -2296,6 +2296,22 @@ struct Obj {
                               // write_gvar_data's #720 splice-in path gates
                               // on this flag rather than merely having
                               // init_data.
+    bool is_anon_synthesized; // True for any anonymous global the compiler
+                              // itself synthesized and renamed to a real C
+                              // identifier (rename_anon_globals(),
+                              // serialize_program.c) -- a compound-literal
+                              // backing store (postfix()) or a reflection-
+                              // API anon global (reflect_new_anon_gvar(),
+                              // reflection.c; that path does NOT set
+                              // is_compound_literal, so this flag is the
+                              // one both share). Such an object has no
+                              // source declaration of its own: whatever
+                              // file its ty->name token happens to point at
+                              // (often a header, if the *type* is header-
+                              // declared) is irrelevant provenance, and no
+                              // header can ever supply its definition
+                              // (#1286) -- global_is_header_supplied() must
+                              // never suppress it on that basis.
     bool is_string_literal;   // Anonymous global synthesized by
                               // new_string_literal() to hold a string
                               // literal's bytes. new_anon_gvar()'s `.L..N`
