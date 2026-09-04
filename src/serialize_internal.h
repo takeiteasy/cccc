@@ -389,6 +389,13 @@ void serialize_type_stats_report(SerializeContext *ctx);
 // #1283: free the type-name candidate index and re-read its env toggles.
 // Called after the rename passes and at the end of cc_serialize_program().
 void serialize_type_index_reset(void);
+// #1283: the same_type_or_origin() (a, b)-result memo. Live for the whole
+// serialize pass: begin() before collect_scope_names(), clear() after the
+// rename passes (they mutate struct_tag), end() at each cleanup path.
+// CCCC_TYPE_SAME_MEMO_DISABLE keeps it off entirely.
+void same_type_memo_begin(void);
+void same_type_memo_clear(void);
+void same_type_memo_end(void);
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,

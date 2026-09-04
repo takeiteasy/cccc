@@ -3893,6 +3893,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // generated_only is false, exactly as before this change.
     hashmap_foreach(&vm->compiler.emit_include_paths, collect_captured_path,
                     &ctx);
+    // #1283: same_type_or_origin() is the whole-program-scale bottleneck in
+    // both collect_scope_names() (type_vec_find_nominal dedup scans) and
+    // rename_colliding_type_tags() (pairwise same_type_strong over cccc's own
+    // heavily-shared Type/Node/Obj graph). Its (a, b)-result memo is live for
+    // the entire pass; only complete<->complete results are stored so the
+    // #1010 in-place completion swap during this collect walk can't stale it.
+    same_type_memo_begin();
     collect_scope_names(&ctx, vm);
     rename_anon_globals(vm, prog, &ctx);
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
@@ -3902,8 +3909,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // mutate Type.struct_tag (an index key) and TypeName.name in place. Reset
     // here rather than before collect_scope_names so a lazy build triggered
     // from inside a rename pass can't key on pre-rename tags, and so a process
-    // serializing multiple programs starts each one clean.
+    // serializing multiple programs starts each one clean. The rename passes
+    // also mutated struct_tag out from under the memo -- clear it too.
     serialize_type_index_reset();
+    same_type_memo_clear();
     collect_deferred_static_labels(vm, prog, &ctx); // #1044
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
@@ -4198,6 +4207,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         }
         serialize_type_stats_report(&ctx); // #1283
         serialize_type_index_reset();      // #1283
+        same_type_memo_end();              // #1283
         free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
@@ -4840,6 +4850,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     serialize_type_stats_report(
         &ctx);                    // #1283: no-op unless CCCC_TYPE_STATS set
     serialize_type_index_reset(); // #1283: free the candidate index
+    same_type_memo_end();         // #1283: free the result memo
 
     free(ctx.seen.data);
     free(ctx.defs.data);

@@ -47,50 +47,111 @@
 // #964: mutually recursive with serialize_stmt -- see the comment on its
 // definition, near ND_BLOCK below.
 
-// #1233: a recursion guard for the TY_PTR case below. Comparing two
-// independently-parsed occurrences of a self-referential struct (`struct S {
-// struct S *next; };`, the shape of any cons-cell-style runtime type) walks
-// member `next`'s pointer type back into the very same pair of struct Types
-// being compared -- without this, that recursion never terminates. A stack
-// of in-progress pairs breaks the cycle the standard equirecursive way:
-// once a pair is already being compared higher up the call stack, assume it
-// equal (co-inductively) rather than re-deriving it.
+// #1233 / #1283: equirecursive-comparison support for same_type_or_origin().
 //
-// #1283: the stack was a fixed 64 entries and, once full, ALSO returned
-// "assume equal" -- silently answering "same type" for two types that may
-// not be, a hazard that only grows with the depth of the type graph
-// (whole-program self-hosting scale). It is now grown on demand so the only
-// path that returns true is an actual detected cycle; a hard ceiling far
-// above any legal C type-nesting depth aborts rather than guesses, so a
-// real infinite recursion still surfaces as a bug instead of silent
-// corruption.
+// Two things live here:
+//
+//  1. An in-progress (a, b) pair stack. Comparing two independently-parsed
+//     occurrences of a recursive type (`struct S { struct S *next; };`, or
+//     any mutually-referential group like cccc's own Type/Node/Obj) walks a
+//     member's type back to a pair already being compared higher up. The
+//     stack breaks that the standard co-inductive way: a pair already on it
+//     is assumed equal rather than re-derived. #1233 guarded only the
+//     TY_PTR arm; at whole-program self-hosting scale the struct-member,
+//     function and array arms recurse through freshly-copied Type nodes the
+//     TY_PTR-only check never matched, so the guard is now applied uniformly
+//     in same_type_or_origin() itself, ahead of every arm.
+//
+//  2. An (a, b) -> result memo (16-byte exact key, no hash collisions).
+//     Without it, comparing two copies of a heavily-shared *acyclic*
+//     subgraph re-walks it once per path that reaches it -- exponential on
+//     cccc's real type graph, and the actual self-hosting-spike wall in
+//     rename_colliding_type_tags(). A result is cached only when its
+//     computation consumed no co-inductive assumption from an ancestor
+//     frame (tracked via g_stm_min_assume): a result derived under "assume
+//     (x, y) equal" is not sound to reuse in a context where that
+//     assumption does not hold. The memo is explicitly begin/end-scoped
+//     (same_type_memo_begin/end) around the one hot consumer; every other
+//     caller uses the un-memoized but still guard-protected path.
 //
 // Not thread-safe -- same_type_or_origin() and its callers only ever run
 // during the single-threaded `-c=native`/`-c=generated`/`-m` serialize pass.
-#define SAME_TYPE_PTR_STACK_CEILING 100000
-static Type **g_same_type_ptr_stack_a   = NULL;
-static Type **g_same_type_ptr_stack_b   = NULL;
-static int    g_same_type_ptr_stack_len = 0;
-static int    g_same_type_ptr_stack_cap = 0;
+#define SAME_TYPE_PAIR_STACK_CEILING 200000
+static Type  **g_stp_a   = NULL;
+static Type  **g_stp_b   = NULL;
+static int     g_stp_len = 0;
+static int     g_stp_cap = 0;
 
-static void same_type_ptr_stack_push(Type *a, Type *b) {
-    if (g_same_type_ptr_stack_len >= g_same_type_ptr_stack_cap) {
-        int newcap =
-            g_same_type_ptr_stack_cap ? g_same_type_ptr_stack_cap * 2 : 64;
-        if (newcap > SAME_TYPE_PTR_STACK_CEILING)
-            error("cccc: internal error: same_type_or_origin() pointer "
-                  "recursion exceeded %d levels -- non-terminating structural "
-                  "comparison",
-                  SAME_TYPE_PTR_STACK_CEILING);
-        g_same_type_ptr_stack_a =
-            realloc(g_same_type_ptr_stack_a, sizeof(Type *) * newcap);
-        g_same_type_ptr_stack_b =
-            realloc(g_same_type_ptr_stack_b, sizeof(Type *) * newcap);
-        g_same_type_ptr_stack_cap = newcap;
+static HashMap g_same_type_memo; // key: 2 Type* ; val: 1 NEQ / 2 EQ
+static bool    g_same_type_memo_on = false;
+// Shallowest ancestor-frame stack index whose co-inductive "assume equal"
+// was used by the subtree currently being evaluated; INT_MAX == none. A
+// result is memoizable only if this stays >= the frame's own depth.
+static int g_stm_min_assume = INT_MAX;
+
+static void same_type_pair_push(Type *a, Type *b) {
+    if (g_stp_len >= g_stp_cap) {
+        int newcap = g_stp_cap ? g_stp_cap * 2 : 64;
+        if (newcap > SAME_TYPE_PAIR_STACK_CEILING)
+            error("cccc: internal error: same_type_or_origin() structural "
+                  "recursion exceeded %d levels -- non-terminating comparison",
+                  SAME_TYPE_PAIR_STACK_CEILING);
+        g_stp_a   = realloc(g_stp_a, sizeof(Type *) * newcap);
+        g_stp_b   = realloc(g_stp_b, sizeof(Type *) * newcap);
+        g_stp_cap = newcap;
     }
-    g_same_type_ptr_stack_a[g_same_type_ptr_stack_len] = a;
-    g_same_type_ptr_stack_b[g_same_type_ptr_stack_len] = b;
-    g_same_type_ptr_stack_len++;
+    g_stp_a[g_stp_len] = a;
+    g_stp_b[g_stp_len] = b;
+    g_stp_len++;
+}
+
+// The memo is live for the whole serialize pass. same_type_or_origin() is
+// the bottleneck in *two* phases -- collect_scope_names()'s
+// type_vec_find_nominal() dedup scans and rename_colliding_type_tags()'s
+// pairwise same_type_strong() -- so a memo scoped to just one of them leaves
+// the other exponential.
+//
+//  begin()  start of cc_serialize_program(), before collect_scope_names().
+//           Self-healing: deinits first, so an error() that unwound past a
+//           previous end() cannot leak a stale enabled memo into the next
+//           program.
+//  clear()  after the rename passes: they mutate struct_tag (which the
+//           tag-compare arms read), so every pre-rename entry must go.
+//  end()    the two cc_serialize_program() cleanup paths.
+//
+// Only complete<->complete results are ever stored (see the guarded layer):
+// an incomplete tagged aggregate is completed in place by the #1010
+// swap during the same collect walk, which would otherwise stale a cached
+// comparison against it.
+void same_type_memo_begin(void) {
+    hashmap_deinit(&g_same_type_memo);
+    g_same_type_memo    = (HashMap){0};
+    g_same_type_memo_on = !getenv("CCCC_TYPE_SAME_MEMO_DISABLE");
+}
+
+void same_type_memo_clear(void) {
+    bool was_on = g_same_type_memo_on;
+    hashmap_deinit(&g_same_type_memo);
+    g_same_type_memo    = (HashMap){0};
+    g_same_type_memo_on = was_on;
+}
+
+void same_type_memo_end(void) {
+    hashmap_deinit(&g_same_type_memo);
+    g_same_type_memo    = (HashMap){0};
+    g_same_type_memo_on = false;
+}
+
+// A tagged aggregate / enum with no body yet -- may be completed in place
+// later in the same pass, so a comparison touching one is not memoizable.
+static bool type_is_incomplete_tagged(Type *t) {
+    if (!t)
+        return false;
+    if (t->kind == TY_STRUCT || t->kind == TY_UNION)
+        return t->size < 0;
+    if (t->kind == TY_ENUM)
+        return t->enum_constants == NULL;
+    return false;
 }
 
 // #1283: env-gated cost instrumentation for same_type_or_origin(). This
@@ -99,13 +160,70 @@ static void same_type_ptr_stack_push(Type *a, Type *b) {
 // registry scans" (n^2) from "the recursion re-walks the same subgraphs"
 // (needs memoization). These counters, dumped by serialize_type_stats_report()
 // when CCCC_TYPE_STATS is set, make the distinction measurable.
-static long long g_sto_calls_total    = 0; // every entry, including recursion
-static long long g_sto_calls_toplevel = 0; // entries with recursion depth 0
-static long long g_sto_cycle_hits = 0; // TY_PTR guard: real in-progress cycle
+static long long g_sto_calls_total     = 0; // every entry, including recursion
+static long long g_sto_calls_toplevel  = 0; // entries with recursion depth 0
+static long long g_sto_cycle_hits      = 0; // in-progress-pair guard hits
+static long long g_sto_memo_hits       = 0; // resolved straight from the memo
 static int       g_sto_recursion_depth = 0;
 static int       g_sto_max_depth       = 0;
 
 static bool same_type_or_origin_impl(Type *a, Type *b);
+
+// The guard + memo layer described at the top of this file. same_type_or_
+// origin_impl() holds only the structural per-kind logic and recurses back
+// through same_type_or_origin() (below) so every sub-pair is guarded and
+// memoized too.
+static bool same_type_or_origin_guarded(Type *a, Type *b) {
+    if (!a || !b)
+        return same_type_or_origin_impl(a, b); // NULL edges cannot recurse
+
+    Type *k1 = a < b ? a : b; // symmetric relation -> order-normalized key
+    Type *k2 = a < b ? b : a;
+
+    for (int i = 0; i < g_stp_len; i++)
+        if (g_stp_a[i] == k1 && g_stp_b[i] == k2) {
+            g_sto_cycle_hits++;
+            if (i < g_stm_min_assume)
+                g_stm_min_assume = i; // record which ancestor we leaned on
+            return true;              // co-inductive: assumed equal higher up
+        }
+
+    unsigned char key[2 * sizeof(Type *)];
+    memcpy(key, &k1, sizeof k1);
+    memcpy(key + sizeof k1, &k2, sizeof k2);
+    if (g_same_type_memo_on) {
+        void *m = hashmap_get2(&g_same_type_memo, (char *)key, (int)sizeof key);
+        if (m) {
+            g_sto_memo_hits++;
+            return m == (void *)2;
+        }
+    }
+
+    int my_depth = g_stp_len;
+    same_type_pair_push(k1, k2);
+    int saved_min    = g_stm_min_assume;
+    g_stm_min_assume = INT_MAX; // fresh accounting for this subtree
+    bool r           = same_type_or_origin_impl(a, b);
+    int  subtree_min = g_stm_min_assume;
+    g_stp_len--;
+
+    if (subtree_min >= my_depth) {
+        // Self-contained: the only assumption in play was (k1, k2) itself,
+        // now fully resolved -> the result is unconditionally valid. Skip
+        // caching if either side is an incomplete tagged type: it can be
+        // completed in place later this pass, staling the entry.
+        if (g_same_type_memo_on && !type_is_incomplete_tagged(a) &&
+            !type_is_incomplete_tagged(b))
+            hashmap_put2(&g_same_type_memo, (char *)key, (int)sizeof key,
+                         r ? (void *)2 : (void *)1);
+        g_stm_min_assume = saved_min;
+    } else {
+        // An ancestor's assumption is baked into r; propagate the debt so
+        // that ancestor's frame decides, and do not memoize here.
+        g_stm_min_assume = saved_min < subtree_min ? saved_min : subtree_min;
+    }
+    return r;
+}
 
 static bool same_type_or_origin(Type *a, Type *b) {
     g_sto_calls_total++;
@@ -114,7 +232,7 @@ static bool same_type_or_origin(Type *a, Type *b) {
     if (g_sto_recursion_depth > g_sto_max_depth)
         g_sto_max_depth = g_sto_recursion_depth;
     g_sto_recursion_depth++;
-    bool r = same_type_or_origin_impl(a, b);
+    bool r = same_type_or_origin_guarded(a, b);
     g_sto_recursion_depth--;
     return r;
 }
@@ -129,13 +247,13 @@ void serialize_type_stats_report(SerializeContext *ctx) {
     fprintf(stderr,
             "[cccc type-stats #1283] same_type_or_origin: total=%lld "
             "toplevel=%lld ratio=%.1f max_depth=%d cycle_hits=%lld "
-            "| tags=%d typedefs=%d defs=%d\n",
+            "memo_hits=%lld | tags=%d typedefs=%d defs=%d\n",
             g_sto_calls_total, g_sto_calls_toplevel,
             g_sto_calls_toplevel
                 ? (double)g_sto_calls_total / (double)g_sto_calls_toplevel
                 : 0.0,
-            g_sto_max_depth, g_sto_cycle_hits, ctx->tags_len, ctx->typedefs_len,
-            ctx->defs.len);
+            g_sto_max_depth, g_sto_cycle_hits, g_sto_memo_hits, ctx->tags_len,
+            ctx->typedefs_len, ctx->defs.len);
 }
 
 static bool same_type_or_origin_impl(Type *a, Type *b) {
@@ -154,20 +272,11 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
     // colliding groups and rename one of them -- see that ticket for the
     // full symptom (a renamed spelling with no body, since the real body is
     // supplied by a verbatim-replayed header under the original spelling).
-    if (a && b && a->kind == TY_PTR && b->kind == TY_PTR) {
-        for (int i = 0; i < g_same_type_ptr_stack_len; i++)
-            if ((g_same_type_ptr_stack_a[i] == a &&
-                 g_same_type_ptr_stack_b[i] == b) ||
-                (g_same_type_ptr_stack_a[i] == b &&
-                 g_same_type_ptr_stack_b[i] == a)) {
-                g_sto_cycle_hits++;
-                return true; // cycle: already assumed equal higher up
-            }
-        same_type_ptr_stack_push(a, b);
-        bool result = same_type_or_origin(a->base, b->base);
-        g_same_type_ptr_stack_len--;
-        return result;
-    }
+    // The in-progress-pair cycle break that used to live here is now applied
+    // uniformly by same_type_or_origin() ahead of every arm (see the top of
+    // this file), so this is just the structural recursion.
+    if (a && b && a->kind == TY_PTR && b->kind == TY_PTR)
+        return same_type_or_origin(a->base, b->base);
 
     if (a && b && a->kind == b->kind &&
         (a->kind == TY_STRUCT || a->kind == TY_UNION)) {
