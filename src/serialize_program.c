@@ -4829,6 +4829,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             serialize_function(f, vm, &ctx, obj);
     }
 
+    serialize_type_stats_report(
+        &ctx); // #1283: no-op unless CCCC_TYPE_STATS set
+
     free(ctx.seen.data);
     free(ctx.defs.data);
     free(ctx.tags);

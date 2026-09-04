@@ -62,7 +62,53 @@ static Type *g_same_type_ptr_stack_a[SAME_TYPE_PTR_STACK_MAX];
 static Type *g_same_type_ptr_stack_b[SAME_TYPE_PTR_STACK_MAX];
 static int   g_same_type_ptr_stack_len = 0;
 
+// #1283: env-gated cost instrumentation for same_type_or_origin(). This
+// predicate became a whole-program-scale performance wall in the
+// self-hosting spike; `sample` could not distinguish "too many top-level
+// registry scans" (n^2) from "the recursion re-walks the same subgraphs"
+// (needs memoization). These counters, dumped by serialize_type_stats_report()
+// when CCCC_TYPE_STATS is set, make the distinction measurable.
+static long long g_sto_calls_total    = 0; // every entry, including recursion
+static long long g_sto_calls_toplevel = 0; // entries with recursion depth 0
+static long long g_sto_cycle_hits = 0; // TY_PTR guard: real in-progress cycle
+static long long g_sto_cap_hits   = 0; // TY_PTR guard: depth cap exhausted
+static int       g_sto_recursion_depth = 0;
+static int       g_sto_max_depth       = 0;
+
+static bool same_type_or_origin_impl(Type *a, Type *b);
+
 static bool same_type_or_origin(Type *a, Type *b) {
+    g_sto_calls_total++;
+    if (g_sto_recursion_depth == 0)
+        g_sto_calls_toplevel++;
+    if (g_sto_recursion_depth > g_sto_max_depth)
+        g_sto_max_depth = g_sto_recursion_depth;
+    g_sto_recursion_depth++;
+    bool r = same_type_or_origin_impl(a, b);
+    g_sto_recursion_depth--;
+    return r;
+}
+
+// #1283: reports the same_type_or_origin() call-cost counters (see their
+// declaration above) to stderr at the end of the serialize pass when
+// CCCC_TYPE_STATS is set in the environment. Registry sizes come from the
+// caller since they live on SerializeContext.
+void serialize_type_stats_report(SerializeContext *ctx) {
+    if (!getenv("CCCC_TYPE_STATS"))
+        return;
+    fprintf(stderr,
+            "[cccc type-stats #1283] same_type_or_origin: total=%lld "
+            "toplevel=%lld ratio=%.1f max_depth=%d cycle_hits=%lld "
+            "cap_hits=%lld | tags=%d typedefs=%d defs=%d\n",
+            g_sto_calls_total, g_sto_calls_toplevel,
+            g_sto_calls_toplevel
+                ? (double)g_sto_calls_total / (double)g_sto_calls_toplevel
+                : 0.0,
+            g_sto_max_depth, g_sto_cycle_hits, g_sto_cap_hits, ctx->tags_len,
+            ctx->typedefs_len, ctx->defs.len);
+}
+
+static bool same_type_or_origin_impl(Type *a, Type *b) {
     for (Type *pa = a; pa; pa = pa->origin)
         for (Type *pb = b; pb; pb = pb->origin)
             if (pa == pb)
@@ -83,10 +129,14 @@ static bool same_type_or_origin(Type *a, Type *b) {
             if ((g_same_type_ptr_stack_a[i] == a &&
                  g_same_type_ptr_stack_b[i] == b) ||
                 (g_same_type_ptr_stack_a[i] == b &&
-                 g_same_type_ptr_stack_b[i] == a))
+                 g_same_type_ptr_stack_b[i] == a)) {
+                g_sto_cycle_hits++;
                 return true; // cycle: already assumed equal higher up
-        if (g_same_type_ptr_stack_len >= SAME_TYPE_PTR_STACK_MAX)
+            }
+        if (g_same_type_ptr_stack_len >= SAME_TYPE_PTR_STACK_MAX) {
+            g_sto_cap_hits++;
             return true; // depth cap: assume equal rather than infinite-loop
+        }
         g_same_type_ptr_stack_a[g_same_type_ptr_stack_len] = a;
         g_same_type_ptr_stack_b[g_same_type_ptr_stack_len] = b;
         g_same_type_ptr_stack_len++;

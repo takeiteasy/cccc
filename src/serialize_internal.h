@@ -382,6 +382,10 @@ void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
 void serialize_string_n(FILE *f, const char *str, int len);
 void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
+// #1283: dumps same_type_or_origin() call-cost counters to stderr when
+// CCCC_TYPE_STATS is set; no-op otherwise. Called once at the end of
+// cc_serialize_program().
+void serialize_type_stats_report(SerializeContext *ctx);
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
