@@ -2868,14 +2868,48 @@ bool path_is_captured(SerializeContext *ctx, const char *path) {
 // #1290's repro hits whichever of the two actually reaches this type first,
 // so both must apply the same rule or the same collision reappears through
 // the other loop.
+// #1293: name match alone is not enough to justify SUPPRESSING td's body --
+// it only tells us some from_include record spells the identical name, not
+// that it spells the identical *type*. Two unconnected tagless aggregate
+// typedefs sharing a name but disagreeing on members (e.g. one TU's
+// header-supplied `typedef struct { int a, b; } Same;` next to another
+// TU's own `typedef struct { double x, y, z; } Same;`) used to both match
+// here on name alone, so the non-header TU's body was dropped outright --
+// not a redefinition, a silently WRONG program (every member access on the
+// non-header TU's own value resolved against the header's unrelated
+// shape, "no member named 'x'"). same_type_strong() (#1014's own tag-
+// collision grouping key) gates the two outcomes #1290 and #1293 both
+// need: identical shape -> still suppress (the replayed #include really
+// does supply this exact body, #1290's original case); different shape ->
+// return false here, so the caller falls through and emits td's own body,
+// which rename_colliding_typedef_names() (serialize_program.c) then gives
+// a distinct name so it doesn't collide with the header's copy under the
+// plain spelling.
 static bool typedef_name_is_header_supplied(SerializeContext *ctx,
                                             TypeName         *td) {
     for (int i = 0; i < ctx->typedefs_len; i++) {
         TypeName *other = &ctx->typedefs[i];
         if (other == td || !other->from_include || other->always_emit)
             continue;
-        if (other->name_len == td->name_len &&
-            !strncmp(other->name, td->name, (size_t)td->name_len))
+        if (other->name_len != td->name_len ||
+            strncmp(other->name, td->name, (size_t)td->name_len) != 0)
+            continue;
+        // #1293: `other->ty` can be transiently NULL here -- emit_typedef_
+        // and_deps()'s own self-hide trick (blank td->ty before chasing
+        // this record's dependencies, restore after) blanks whichever
+        // record is currently mid-emission, and with TWO OR MORE
+        // structurally-identical from_include records for one name (one
+        // per TU that #includes the shared header -- exactly this
+        // function's own #1290 scenario), find_anonymous_typedef_name()'s
+        // structural match can chain through several of them before ever
+        // reaching `td`, hiding more than one at once. A hidden record's
+        // shape is unknowable here, but it was only ever reached BY a
+        // structural match in the first place, so treat it the same way
+        // #1290's original (pre-#1293, name-only) check did: matching by
+        // name is enough to suppress. Only a record whose shape is
+        // actually VISIBLE gets the stricter same_type_strong() gate
+        // #1293 added.
+        if (!other->ty || same_type_strong(other->ty, td->ty))
             return true;
     }
     return false;

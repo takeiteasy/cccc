@@ -8011,6 +8011,96 @@ def case_include_path_spelling_dedup_1292(cccc: Path, tmp: str) -> bool:
     return True
 
 
+# #1293: two DIFFERENTLY-shaped tagless typedef structs sharing one name --
+# one header-supplied (from_include), one TU-local -- unlike #1290's
+# same-shape collision (which is correctly suppressed: the replayed
+# #include already supplies an identical body). #1290's fix
+# (typedef_name_is_header_supplied()) originally matched on name alone, so
+# it wrongly suppressed the TU-local body here too even though the two
+# shapes disagree -- the host compiler then resolved every member access
+# against the header's (wrong) shape ("no member named 'x' in
+# 'TypedefShape1293'"). The fix adds a same_type_strong() shape gate
+# (suppress only when the shapes truly match) plus
+# rename_colliding_typedef_names() to give the differently-shaped TU-local
+# body a distinct name (mirroring rename_colliding_type_tags()'s #1014
+# treatment for tagged structs) instead of letting both bodies collide
+# under the plain name.
+TYPEDEF_SHAPE_1293_HEADER = (
+    "typedef struct { int a; int b; } TypedefShape1293;\n"
+    "TypedefShape1293 typedef_shape_1293_hdr_make(void);\n"
+)
+TYPEDEF_SHAPE_1293_A = (
+    '#include "typedef_shape_1293.h"\n'
+    "TypedefShape1293 typedef_shape_1293_hdr_make(void) {\n"
+    "    TypedefShape1293 s;\n"
+    "    s.a = 20;\n"
+    "    s.b = 19;\n"
+    "    return s;\n"
+    "}\n"
+)
+TYPEDEF_SHAPE_1293_B = (
+    "typedef struct { double x; double y; double z; } TypedefShape1293;\n"
+    "static TypedefShape1293 typedef_shape_1293_mk(void) {\n"
+    "    TypedefShape1293 s;\n"
+    "    s.x = 1;\n"
+    "    s.y = 2;\n"
+    "    s.z = 3;\n"
+    "    return s;\n"
+    "}\n"
+    "int typedef_shape_1293_local_use(void) {\n"
+    "    TypedefShape1293 s = typedef_shape_1293_mk();\n"
+    "    return (int)(s.x + s.y + s.z);\n"
+    "}\n"
+)
+TYPEDEF_SHAPE_1293_MAIN = (
+    '#include "typedef_shape_1293.h"\n'
+    "int typedef_shape_1293_local_use(void);\n"
+    "int main(void) {\n"
+    "    TypedefShape1293 s = typedef_shape_1293_hdr_make();\n"
+    "    int r = s.a + s.b + typedef_shape_1293_local_use();\n"
+    "    return r == 45 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_typedef_differently_shaped_collision_1293(cccc: Path, tmp: str) -> bool:
+    print("  161: -c=native, two TUs each independently declaring a "
+          "tagless typedef struct under the same name but DIFFERENT "
+          "member shapes -- one header-supplied (int a, b), one TU-local "
+          "(double x, y, z). #1290's name-only suppression check wrongly "
+          "treated this as the same-shape case it was written for, "
+          "dropping the TU-local body entirely -- a host "
+          "'no member named x' compile failure no -m shape assertion "
+          "alone can see. Asserts VM 42 -> native 42.")
+    write(Path(tmp) / "typedef_shape_1293.h", TYPEDEF_SHAPE_1293_HEADER)
+    a_src = Path(tmp) / "typedef_shape_1293_a.c"
+    b_src = Path(tmp) / "typedef_shape_1293_b.c"
+    main_src = Path(tmp) / "typedef_shape_1293_main.c"
+    write(a_src, TYPEDEF_SHAPE_1293_A)
+    write(b_src, TYPEDEF_SHAPE_1293_B)
+    write(main_src, TYPEDEF_SHAPE_1293_MAIN)
+    order = [a_src.name, b_src.name, main_src.name]
+
+    vm_result = run([str(cccc), *order], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "typedef_shape_1293_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, *order], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8220,6 +8310,7 @@ CASES = [
     case_infunc_include_not_hoisted_1287,
     case_dup_typedef_1290_native_round_trip,
     case_include_path_spelling_dedup_1292,
+    case_typedef_differently_shaped_collision_1293,
 ]
 
 

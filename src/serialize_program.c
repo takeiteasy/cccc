@@ -1005,6 +1005,204 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     free(collided);
 }
 
+// #1293: the tagless-typedef analogue of rename_colliding_type_tags() just
+// above. That pass only ever walks ctx->tags, so it has nothing to say
+// about two unconnected TAGLESS typedefs sharing a name -- e.g. one TU's
+// header-supplied `typedef struct { int a, b; } Same;` next to another
+// TU's own, differently-shaped `typedef struct { double x, y, z; } Same;`.
+// typedef_name_is_header_supplied() (serialize_type.c, #1290/#1293)
+// suppresses the non-header copy's body when the two shapes genuinely
+// match (the replayed #include really does supply it) -- but when they
+// DON'T match, that check now falls through and both bodies serialize
+// under the identical plain name, the same "redefinition" class of
+// failure #1014 exists to prevent for tagged structs. This pass gives the
+// losing group the `<name>__cccc_dup<N>` treatment instead.
+//
+// Restricted to TAGLESS aggregates (TY_STRUCT/TY_UNION/TY_ENUM with no
+// struct_tag/enum_tag) for the identical reason type_def_is_from_include_
+// suppressed()'s own is_tagless_aggregate check exists: a SCALAR typedef
+// (e.g. `typedef unsigned long DyValue;`) structurally matches any other
+// same-representation type under same_type_strong() (type_is_complete_
+// tagged() is false for both sides, so the comparison degenerates to bare
+// same_type_or_origin() -- exactly the trap find_generated_uncaptured_
+// typedef()'s #1168/#1169 comment documents), so grouping scalars this way
+// would falsely "collide" and rename unrelated typedefs apart. A TAGGED
+// typedef (`typedef struct Foo {...} Foo;`) is left to rename_colliding_
+// type_tags() above -- that pass renames the tag itself, and every
+// serialize_type() site for a tagged aggregate spells the tag
+// (`struct Foo`), not the typedef alias, so renaming the typedef name here
+// too would be a no-op at best and a stale alias at worst.
+//
+// Must run AFTER rename_colliding_type_tags(): that pass already mutates
+// ctx->typedefs[i].name for any non-from_include record whose Type matches
+// a renamed tag group (see its own rename loop above), so this pass has to
+// see those names post-rename to avoid computing groups against a stale
+// spelling. Must run BEFORE serialize_type_index_reset() (cc_serialize_
+// program, #1283) -- like the tag pass, it mutates TypeName.name, an index
+// key.
+//
+// TypeName carries no creation-order field (unlike rename_colliding_enum_
+// constants()'s own #1079-#1083 comment on the identical gap) -- array
+// position in ctx->typedefs is used as an approximate tiebreak instead,
+// same discipline, same caveat: "exact only within this one list, not a
+// true whole-program order".
+static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
+                                           SerializeContext *ctx) {
+    typedef struct {
+        Type *rep;
+        int   name_len;
+        char *name;
+        int   first_seen;
+        bool  header_exposed;
+        bool  extern_ref;
+    } TypedefGroup;
+    TypedefGroup *groups     = NULL;
+    int           groups_len = 0, groups_cap = 0;
+    bool         *collided = NULL;
+
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *rec = &ctx->typedefs[i];
+        if (rec->owner_fn != NULL)
+            continue;
+        Type *ty = rec->ty;
+        if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
+                    ty->kind != TY_ENUM))
+            continue;
+        bool tagless = ty->kind == TY_ENUM ? !ty->enum_tag : !ty->struct_tag;
+        if (!tagless || !type_is_complete_tagged(ty))
+            continue;
+
+        int found = -1;
+        for (int g = 0; g < groups_len; g++) {
+            if (groups[g].name_len == rec->name_len &&
+                strncmp(groups[g].name, rec->name, rec->name_len) == 0 &&
+                same_type_strong(groups[g].rep, ty)) {
+                found = g;
+                break;
+            }
+        }
+        if (found >= 0)
+            continue;
+
+        if (groups_len == groups_cap) {
+            groups_cap = groups_cap ? groups_cap * 2 : 8;
+            groups     = realloc(groups, sizeof(TypedefGroup) * groups_cap);
+            collided   = realloc(collided, sizeof(bool) * groups_cap);
+        }
+        groups[groups_len].rep            = ty;
+        groups[groups_len].name_len       = rec->name_len;
+        groups[groups_len].name           = rec->name;
+        groups[groups_len].first_seen     = i;
+        groups[groups_len].header_exposed = false;
+        groups[groups_len].extern_ref     = false;
+        collided[groups_len]              = false;
+        groups_len++;
+    }
+
+    if (groups_len == 0)
+        return;
+
+    for (int g1 = 0; g1 < groups_len; g1++)
+        for (int g2 = g1 + 1; g2 < groups_len; g2++)
+            if (groups[g1].name_len == groups[g2].name_len &&
+                strncmp(groups[g1].name, groups[g2].name,
+                        groups[g1].name_len) == 0) {
+                collided[g1] = true;
+                collided[g2] = true;
+            }
+
+    bool any_collision = false;
+    for (int g = 0; g < groups_len; g++)
+        if (collided[g])
+            any_collision = true;
+    if (!any_collision) {
+        free(groups);
+        free(collided);
+        return;
+    }
+
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (collided[g] &&
+                same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+                groups[g].header_exposed = true;
+    }
+
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_static)
+            continue;
+        bool is_defining =
+            obj->is_function ? obj->body != NULL : obj->is_definition;
+        if (!is_defining || !obj->ty)
+            continue;
+        for (int g = 0; g < groups_len; g++)
+            if (collided[g] && type_reaches_group(obj->ty, groups[g].rep))
+                groups[g].extern_ref = true;
+    }
+
+    for (int g = 0; g < groups_len; g++) {
+        if (!collided[g] || groups[g].rep == NULL)
+            continue;
+
+        int members[64];
+        int members_len = 0;
+        for (int g2 = g; g2 < groups_len && members_len < 64; g2++)
+            if (collided[g2] && groups[g2].rep &&
+                groups[g2].name_len == groups[g].name_len &&
+                strncmp(groups[g2].name, groups[g].name, groups[g].name_len) ==
+                    0)
+                members[members_len++] = g2;
+        if (members_len < 2)
+            continue;
+
+        bool any_header_exposed = false;
+        for (int m = 0; m < members_len; m++)
+            if (groups[members[m]].header_exposed)
+                any_header_exposed = true;
+
+        int keeper = -1;
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (any_header_exposed && !groups[idx].header_exposed)
+                continue;
+            if (keeper < 0)
+                keeper = idx;
+            else if (groups[idx].extern_ref && !groups[keeper].extern_ref)
+                keeper = idx;
+            else if (groups[idx].extern_ref == groups[keeper].extern_ref &&
+                     groups[idx].first_seen < groups[keeper].first_seen)
+                keeper = idx;
+        }
+        if (keeper < 0)
+            keeper = members[0];
+
+        for (int m = 0; m < members_len; m++) {
+            int idx = members[m];
+            if (idx == keeper) {
+                groups[idx].rep = NULL;
+                continue;
+            }
+            char *new_name =
+                arena_format(vm, "%.*s__cccc_dup%d", groups[idx].name_len,
+                             groups[idx].name, ctx->anon_global_counter++);
+            int   new_len = (int)strlen(new_name);
+            Type *victim  = groups[idx].rep;
+            for (int i = 0; i < ctx->typedefs_len; i++)
+                if (!(ctx->typedefs[i].from_include &&
+                      !ctx->typedefs[i].always_emit) &&
+                    same_type_strong(ctx->typedefs[i].ty, victim))
+                    ctx->typedefs[i].name     = new_name,
+                    ctx->typedefs[i].name_len = new_len;
+            groups[idx].rep = NULL;
+        }
+    }
+
+    free(groups);
+    free(collided);
+}
+
 // #1015: two translation units can each independently declare a same-named
 // enumerator inside a differently-shaped enum -- reachable even when the
 // enclosing enum's own tag doesn't collide (different tags, same
@@ -3937,6 +4135,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_anon_globals(vm, prog, &ctx);
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
     rename_colliding_type_tags(vm, prog, &ctx);      // #1014
+    rename_colliding_typedef_names(vm, prog, &ctx);  // #1293
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
     // #1283: build the type-name candidate index only now -- the passes above
     // mutate Type.struct_tag (an index key) and TypeName.name in place. Reset
