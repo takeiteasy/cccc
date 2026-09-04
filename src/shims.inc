@@ -20,6 +20,8 @@ static const char CCCC_SHIM_native_accessor___cccc_opterr_ptr[] =
     "static int *__cccc_opterr_ptr(void) { return &opterr; }\n";
 static const char CCCC_SHIM_native_accessor___cccc_optopt_ptr[] =
     "static int *__cccc_optopt_ptr(void) { return &optopt; }\n";
+static const char CCCC_SHIM_native_accessor___cccc_optreset_ptr[] =
+    "static int *__cccc_optreset_ptr(void) { return &optreset; }\n";
 static const char CCCC_SHIM_native_accessor___cccc_isnan_f[] =
     "static int __cccc_isnan_f(float x) { return __builtin_isnan(x); }\n";
 static const char CCCC_SHIM_native_accessor___cccc_isnan_d[] =

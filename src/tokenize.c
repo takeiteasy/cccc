@@ -22,6 +22,7 @@
 
 #include "./internal.h"
 #include <pthread.h>
+#include <strings.h> /* strncasecmp (#1282) */
 
 // Reports an error and exit (or longjmp if error handling is enabled).
 void error(char *fmt, ...) {

@@ -49,6 +49,7 @@
 #include <errno.h> // host <errno.h>, for init_errno_macros() (#813)
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dlfcn.h> // host <dlfcn.h>, for init_dlfcn_macros() (#1152)
+#include <time.h>  // host <time.h>, for init_time_macros() (#1282)
 #endif
 
 #define MAX_PP_NESTING 1000
@@ -6431,11 +6432,44 @@ static void init_dlfcn_macros(VirtualMachine *vm) {
 #endif
 }
 
+// #1282: same reasoning as init_errno_macros/init_dlfcn_macros above --
+// CLOCK_REALTIME/CLOCK_MONOTONIC's numeric values are a real cross-platform
+// skew (e.g. glibc CLOCK_MONOTONIC == 1, Darwin's own <time.h> uses a
+// different numbering), not portable constants a bundled header can just
+// hardcode -- the same class of bug #779 fixed for errno codes and
+// include/signal.h:231 already calls out for sigprocmask()'s how-values.
+// Deriving them from this binary's own compile-time <time.h> makes the skew
+// structurally impossible: whichever platform builds cccc is the platform
+// whose real clock ids get baked in. CLOCK_PROCESS_CPUTIME_ID/
+// CLOCK_THREAD_CPUTIME_ID are real on both Darwin and glibc; CLOCK_BOOTTIME/
+// CLOCK_TAI/CLOCK_MONOTONIC_RAW are Linux-only and simply not injected on
+// Darwin, following the #824 no-lossy-emulation policy (an undefined guest
+// macro is a compile error, not a silently wrong integer).
+static void init_time_macros(VirtualMachine *vm) {
+#define T(name)                                                                \
+    define_macro(vm, "__CCCC_" #name "__", arena_format(vm, "%d", name))
+    T(CLOCK_REALTIME);
+    T(CLOCK_MONOTONIC);
+    T(CLOCK_PROCESS_CPUTIME_ID);
+    T(CLOCK_THREAD_CPUTIME_ID);
+#ifdef CLOCK_MONOTONIC_RAW /* Darwin + Linux, not POSIX */
+    T(CLOCK_MONOTONIC_RAW);
+#endif
+#ifdef CLOCK_BOOTTIME      /* Linux only */
+    T(CLOCK_BOOTTIME);
+#endif
+#ifdef CLOCK_TAI           /* Linux only */
+    T(CLOCK_TAI);
+#endif
+#undef T
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
     init_fenv_macros(vm);
     init_errno_macros(vm);
     init_dlfcn_macros(vm);
+    init_time_macros(vm);
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");
@@ -6471,6 +6505,19 @@ void init_macros(VirtualMachine *vm) {
 #endif
     define_macro(vm, "__STDC_UTF_16__", "1");
     define_macro(vm, "__STDC_UTF_32__", "1");
+    // #1282: GCC's real __ATOMIC_* memory-order values, for the __atomic_*
+    // builtin family (src/parse_postfix.c) -- every operation using them
+    // discards the requested order and runs seq_cst regardless (see that
+    // file's own comment), but the values still need to match GCC's so a
+    // guest program that inspects/compares them (rather than just passing
+    // them straight to an __atomic_* call) sees the same constants a real
+    // compiler would.
+    define_macro(vm, "__ATOMIC_RELAXED", "0");
+    define_macro(vm, "__ATOMIC_CONSUME", "1");
+    define_macro(vm, "__ATOMIC_ACQUIRE", "2");
+    define_macro(vm, "__ATOMIC_RELEASE", "3");
+    define_macro(vm, "__ATOMIC_ACQ_REL", "4");
+    define_macro(vm, "__ATOMIC_SEQ_CST", "5");
     define_std_macros(vm);
     define_macro(vm, "__STDC__", "1");
     define_macro(vm, "__USER_LABEL_PREFIX__", "");

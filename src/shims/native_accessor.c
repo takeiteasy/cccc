@@ -39,6 +39,13 @@ static int *__cccc_opterr_ptr(void) { return &opterr; }
 static int *__cccc_optopt_ptr(void) { return &optopt; }
 // <<< shim
 
+// >>> shim: __cccc_optreset_ptr
+// #1282: BSD/Darwin-only -- the guest declaration (include/getopt.h) is
+// itself gated the same way, so this is only ever pulled in on a platform
+// where the real `optreset` extern exists.
+static int *__cccc_optreset_ptr(void) { return &optreset; }
+// <<< shim
+
 // >>> shim: __cccc_isnan_f
 static int __cccc_isnan_f(float x) { return __builtin_isnan(x); }
 // <<< shim

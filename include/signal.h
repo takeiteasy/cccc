@@ -279,4 +279,20 @@ extern int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 extern void (*signal(int sig, void (*func)(int)))(int);
 extern int raise(int sig);
 
+/* #1282: kill()/killpg() -- cccc's own src/testing.c sends a signal to a
+   forked test-timeout watchdog; a bundled-header gap the self-hosting spike
+   hit. sigwait() and sigqueue() (the latter Linux-only -- POSIX real-time
+   signal queueing, not implemented as a syscall on Darwin) are the obvious
+   siblings from the same family. pid_t is plain `int` on every CCCC target
+   (include/sys/types.h) -- spelled `int` directly here rather than pulling
+   in sys/types.h, matching this file's own siginfo_t.si_pid above, which
+   does the same for the identical reason: this is a self-contained header
+   with no real host include_next hand-off. */
+extern int kill(int pid, int sig);
+extern int killpg(int pgrp, int sig);
+extern int sigwait(const sigset_t *restrict set, int *restrict sig);
+#ifdef __linux__
+extern int sigqueue(int pid, int sig, const union sigval value);
+#endif
+
 #endif /* __SIGNAL_H */

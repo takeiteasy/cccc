@@ -1439,6 +1439,88 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
     return postfix(vm, rest, head.next);
 }
 
+// #1282: shared CAS-retry-loop desugar for the __atomic_fetch_*/
+// __atomic_*_fetch builtin family (primary()'s "__atomic_fetch_{add,sub,and,
+// or,xor,nand}"/"__atomic_{add,sub,and,or,xor,nand}_fetch" arms below). Same
+// shape as to_assign()'s `_Atomic x op= y` desugar (src/parse_expr.c), minus
+// that desugar's lvalue-specific checked-pointer (CHKR/CHKNT) propagation --
+// deliberately not reused here since it doesn't apply: `obj` is a plain
+// pointer expression, not a checked-pointer lvalue, exactly like every other
+// __atomic_*/__builtin_atomic_* builtin beside this one.
+//
+//   ({ T *addr = (obj); T val = (valexpr); T old = *addr; T new;
+//      do { new = is_nand ? ~(old & val) : (old op_kind val); }
+//      while (!__atomic_compare_exchange_n(addr, &old, new, ...));
+//      want_old ? old : new;
+//   })
+//
+// obj/val are hoisted into fresh locals *before* the loop so a CAS retry
+// never re-evaluates them (single evaluation, e.g.
+// __atomic_fetch_add(ptr, f(), order) must call f() exactly once) -- the
+// same invariant include/stdatomic.h's __cccc_atomic_fetch_op documents.
+static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
+                                   Node *valexpr, NodeKind op_kind,
+                                   bool is_nand, bool want_old) {
+    add_type(vm, obj);
+    if (!obj->ty || obj->ty->kind != TY_PTR)
+        error_tok(vm, tok, "atomic builtin: first argument must be a pointer");
+    Type *pointee = obj->ty->base;
+
+    Node  head    = {};
+    Node *cur     = &head;
+
+    Obj  *addr    = new_lvar(vm, "", 0, obj->ty);
+    Obj  *val     = new_lvar(vm, "", 0, pointee);
+    Obj  *old     = new_lvar(vm, "", 0, pointee);
+    Obj  *newv    = new_lvar(vm, "", 0, pointee);
+
+    cur = cur->next = new_unary(
+        vm, ND_EXPR_STMT,
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, addr, tok), obj, tok), tok);
+    cur = cur->next = new_unary(
+        vm, ND_EXPR_STMT,
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, val, tok), valexpr, tok),
+        tok);
+    cur = cur->next = new_unary(
+        vm, ND_EXPR_STMT,
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, old, tok),
+                   new_unary(vm, ND_DEREF, new_var_node(vm, addr, tok), tok),
+                   tok),
+        tok);
+
+    Node *loop       = new_node(vm, ND_DO, tok);
+    loop->brk_label  = new_unique_name(vm);
+    loop->cont_label = new_unique_name(vm);
+
+    Node *combined;
+    if (is_nand) {
+        Node *andv = new_binary(vm, ND_BITAND, new_var_node(vm, old, tok),
+                                new_var_node(vm, val, tok), tok);
+        combined   = new_unary(vm, ND_BITNOT, andv, tok);
+    } else {
+        combined = new_binary(vm, op_kind, new_var_node(vm, old, tok),
+                              new_var_node(vm, val, tok), tok);
+    }
+    Node *body =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, newv, tok), combined, tok);
+    loop->then       = new_node(vm, ND_BLOCK, tok);
+    loop->then->body = new_unary(vm, ND_EXPR_STMT, body, tok);
+
+    Node *cas        = new_node(vm, ND_CAS, tok);
+    cas->cas_addr    = new_var_node(vm, addr, tok);
+    cas->cas_old     = new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
+    cas->cas_new     = new_var_node(vm, newv, tok);
+    loop->cond       = new_unary(vm, ND_NOT, cas, tok);
+
+    cur = cur->next = loop;
+    cur = cur->next = new_unary(
+        vm, ND_EXPR_STMT, new_var_node(vm, want_old ? old : newv, tok), tok);
+
+    Node *node = new_node(vm, ND_STMT_EXPR, tok);
+    node->body = head.next;
+    return node;
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -2029,6 +2111,252 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->lhs       = assign(vm, &tok, tok);
         *rest           = skip(vm, tok, ")");
         return node;
+    }
+
+    // #1282: GCC/Clang __atomic_* builtin family, added to let cccc's own
+    // src/stdlib/pthread.c self-host (it calls __atomic_compare_exchange_n
+    // directly, not through <stdatomic.h>'s __builtin_* spellings above).
+    // Every memory-order argument is parsed as a full assignment expression
+    // (not const_expr -- C11 makes these functions, matching the reasoning
+    // on __builtin_atomic_thread_fence just above) then discarded: every
+    // operation here is unconditionally seq_cst regardless of the requested
+    // order, exactly like every operation on stdatomic.h's own page (see
+    // that file's #1184 comment) -- conforming, since seq_cst is stronger
+    // than any order a caller can request, never weaker.
+    if (equal(tok, "__atomic_load_n")) {
+        Node *node = new_node(vm, ND_ALOAD, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    if (equal(tok, "__atomic_store_n")) {
+        Node *node = new_node(vm, ND_ASTORE, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        node->rhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    if (equal(tok, "__atomic_exchange_n")) {
+        Node *node = new_node(vm, ND_EXCH, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        node->rhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    if (equal(tok, "__atomic_compare_exchange_n")) {
+        // (obj, *expected, desired, weak, order_success, order_failure) ->
+        // bool. `weak` is discarded along with the two orders: like
+        // stdatomic.h's atomic_compare_exchange_weak/strong (#1184),
+        // __builtin_compare_and_swap is a single-attempt CAS with no
+        // spurious-failure path, conforming either way C11 permits an
+        // implementation of the weak form that never spuriously fails.
+        Node *node     = new_node(vm, ND_CAS, tok);
+        tok            = skip(vm, tok->next, "(");
+        node->cas_addr = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        node->cas_old  = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        node->cas_new  = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // weak, discarded
+        tok = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order_success, discarded
+        tok = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order_failure, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    // __atomic_thread_fence/__atomic_signal_fence: identical signature to
+    // the __builtin_* spellings above, just the GCC name.
+    if (equal(tok, "__atomic_thread_fence") ||
+        equal(tok, "__atomic_signal_fence")) {
+        bool  is_signal = equal(tok, "__atomic_signal_fence");
+        Node *node      = new_node(vm, ND_FENCE, tok);
+        node->val       = is_signal ? 1 : 0;
+        tok             = skip(vm, tok->next, "(");
+        node->lhs       = assign(vm, &tok, tok);
+        *rest           = skip(vm, tok, ")");
+        return node;
+    }
+
+    // Non-"_n" forms take/return everything through pointers instead of by
+    // value -- desugar to the _n shape by dereferencing the value pointers
+    // (and, for load/exchange, assigning through the caller's result
+    // pointer). All discard their trailing order argument(s) the same way
+    // the _n forms above do.
+    if (equal(tok, "__atomic_load")) {
+        tok        = skip(vm, tok->next, "(");
+        Node *ptr  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *retp = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest      = skip(vm, tok, ")");
+        Node *load = new_node(vm, ND_ALOAD, tok);
+        load->lhs  = ptr;
+        return new_binary(vm, ND_ASSIGN, new_unary(vm, ND_DEREF, retp, tok),
+                          load, tok);
+    }
+
+    if (equal(tok, "__atomic_store")) {
+        tok        = skip(vm, tok->next, "(");
+        Node *ptr  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *valp = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_ASTORE, tok);
+        node->lhs  = ptr;
+        node->rhs  = new_unary(vm, ND_DEREF, valp, tok);
+        return node;
+    }
+
+    if (equal(tok, "__atomic_exchange")) {
+        tok        = skip(vm, tok->next, "(");
+        Node *ptr  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *valp = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        Node *retp = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest      = skip(vm, tok, ")");
+        Node *exch = new_node(vm, ND_EXCH, tok);
+        exch->lhs  = ptr;
+        exch->rhs  = new_unary(vm, ND_DEREF, valp, tok);
+        return new_binary(vm, ND_ASSIGN, new_unary(vm, ND_DEREF, retp, tok),
+                          exch, tok);
+    }
+
+    if (equal(tok, "__atomic_compare_exchange")) {
+        // (obj, expectedp, desiredp, weak, order_success, order_failure) ->
+        // bool. Unlike the _n form, expectedp is already a pointer (matches
+        // ND_CAS's own cas_old contract directly, no ND_ADDR needed), and
+        // desired must be dereferenced from desiredp to get the value
+        // ND_CAS's cas_new wants.
+        Node *node     = new_node(vm, ND_CAS, tok);
+        tok            = skip(vm, tok->next, "(");
+        node->cas_addr = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        node->cas_old  = assign(vm, &tok, tok);
+        tok            = skip(vm, tok, ",");
+        node->cas_new  = new_unary(vm, ND_DEREF, assign(vm, &tok, tok), tok);
+        tok            = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // weak, discarded
+        tok = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order_success, discarded
+        tok = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order_failure, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    // __atomic_test_and_set(ptr, order) -> bool: set *ptr to 1, return the
+    // previous value. atomic_flag_test_and_set (stdatomic.h) already routes
+    // through atomic_exchange for the identical reason.
+    if (equal(tok, "__atomic_test_and_set")) {
+        Node *node = new_node(vm, ND_EXCH, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        node->rhs  = new_num(vm, 1, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    // __atomic_clear(ptr, order): store 0. atomic_flag_clear (stdatomic.h)
+    // already routes through atomic_store for the identical reason.
+    if (equal(tok, "__atomic_clear")) {
+        Node *node = new_node(vm, ND_ASTORE, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        node->rhs  = new_num(vm, 0, tok);
+        tok        = skip(vm, tok, ",");
+        assign(vm, &tok, tok); // order, discarded
+        *rest = skip(vm, tok, ")");
+        return node;
+    }
+
+    // __atomic_{always_,}is_lock_free(size, ptr) -> bool. Every {1,2,4,8}
+    // integer/pointer size this VM supports is genuinely lock-free on both
+    // backends (a single ACAS/ALDR/ASTORE opcode, or the real host
+    // __atomic_* builtin under -c=native) -- matches stdatomic.h's own
+    // unconditional atomic_is_lock_free(x) => 1 for the same reason.
+    // `ptr` is only ever meaningful for a hypothetical lock-free-at-this-
+    // specific-address answer that no libc actually gives either; parsed
+    // (for any side effects) and otherwise ignored.
+    if (equal(tok, "__atomic_is_lock_free") ||
+        equal(tok, "__atomic_always_lock_free")) {
+        tok              = skip(vm, tok->next, "(");
+        Node *size_expr  = assign(vm, &tok, tok);
+        tok              = skip(vm, tok, ",");
+        Node *ptr_expr   = assign(vm, &tok, tok); // side effects only
+        *rest            = skip(vm, tok, ")");
+        int64_t sz       = eval(vm, size_expr);
+        Node   *lockfree = new_num(
+            vm, (sz == 1 || sz == 2 || sz == 4 || sz == 8) ? 1 : 0, tok);
+        return new_binary(vm, ND_COMMA, ptr_expr, lockfree, tok);
+    }
+
+    // __atomic_fetch_{add,sub,and,or,xor,nand} (fetch-then-op, returns the
+    // OLD value) and __atomic_{add,sub,and,or,xor,nand}_fetch (op-then-fetch,
+    // returns the NEW value) -- a CAS retry loop, same shape as
+    // to_assign()'s `_Atomic x op= y` desugar (src/parse_expr.c) minus that
+    // desugar's lvalue-specific checked-pointer (CHKR/CHKNT) propagation,
+    // which doesn't apply here: these builtins take a plain pointer
+    // expression, not a checked-pointer lvalue, exactly like every other
+    // __atomic_*/__builtin_atomic_* builtin beside them.
+    {
+        static const struct {
+            const char *fetch_first_name; // __atomic_fetch_OP
+            const char *op_fetch_name;    // __atomic_OP_fetch
+            NodeKind    op_kind;          // ignored when is_nand
+            bool        is_nand;
+        } fetch_ops[] = {
+            {"__atomic_fetch_add", "__atomic_add_fetch", ND_ADD, false},
+            {"__atomic_fetch_sub", "__atomic_sub_fetch", ND_SUB, false},
+            {"__atomic_fetch_and", "__atomic_and_fetch", ND_BITAND, false},
+            {"__atomic_fetch_or", "__atomic_or_fetch", ND_BITOR, false},
+            {"__atomic_fetch_xor", "__atomic_xor_fetch", ND_BITXOR, false},
+            {"__atomic_fetch_nand", "__atomic_nand_fetch", ND_BITAND, true},
+        };
+        for (size_t i = 0; i < sizeof(fetch_ops) / sizeof(fetch_ops[0]); i++) {
+            bool want_old;
+            if (equal(tok, (char *)fetch_ops[i].fetch_first_name))
+                want_old = true;
+            else if (equal(tok, (char *)fetch_ops[i].op_fetch_name))
+                want_old = false;
+            else
+                continue;
+
+            tok           = skip(vm, tok->next, "(");
+            Node *obj     = assign(vm, &tok, tok);
+            tok           = skip(vm, tok, ",");
+            Node *valexpr = assign(vm, &tok, tok);
+            tok           = skip(vm, tok, ",");
+            assign(vm, &tok, tok); // order, discarded
+            *rest = skip(vm, tok, ")");
+            return build_atomic_fetch_op(vm, tok, obj, valexpr,
+                                         fetch_ops[i].op_kind,
+                                         fetch_ops[i].is_nand, want_old);
+        }
     }
 
     // __builtin_frame_address(0) - returns the current frame's base pointer

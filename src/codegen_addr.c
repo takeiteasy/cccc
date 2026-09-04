@@ -891,6 +891,24 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
             return;
 
+        // #1282: `f().member`/`f()->` on a function returning a struct/union
+        // by value -- legal C (6.5.2.3p3: a function-call result is not an
+        // lvalue, but member access on it is still permitted; you just can't
+        // take &f().member's own address beyond this expression's lifetime,
+        // which nothing here does). A struct/union-valued ND_FUNCALL already
+        // has a caller-allocated ret_buffer (parse_postfix.c's funcall()),
+        // and gen_expr's own ND_FUNCALL case already yields that buffer's
+        // ADDRESS in dest_reg for a struct/union return (not the bytes --
+        // the same by-reference convention every aggregate value uses
+        // throughout this file), so there is nothing address-specific left
+        // to do here: just run the call. Surfaced by the self-hosting spike
+        // (src/macros.c: `comptime_aggregate_cast(cv).kind`).
+        case ND_FUNCALL:
+            if (node->ty->kind != TY_STRUCT && node->ty->kind != TY_UNION)
+                error_tok(vm, node->tok, "not an lvalue");
+            gen_expr(vm, node, dest_reg);
+            return;
+
         default:
             error_tok(vm, node->tok, "not an lvalue");
     }

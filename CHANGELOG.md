@@ -295,3 +295,69 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   which would have bypassed the hand-off entirely (#1070's own rule against
   a bundled header quote-including one with a hand-off) — switched to
   angle brackets.
+- Added: bundled-header POSIX coverage for a further batch of symbols
+  CCCC's own source uses that resolved against the real system headers
+  under a plain `make` build but were missing from the bundled `include/`
+  copy, surfaced by continuing the self-hosting spike past the previous
+  batch — `clock_gettime`/`clock_settime`/`clock_getres` (plus Linux-only
+  `clock_nanosleep`) in `<time.h>`, with `CLOCK_REALTIME`/`CLOCK_MONOTONIC`/
+  `CLOCK_PROCESS_CPUTIME_ID`/`CLOCK_THREAD_CPUTIME_ID` (and, where the
+  building host has them, `CLOCK_MONOTONIC_RAW`/`CLOCK_BOOTTIME`/
+  `CLOCK_TAI`) injected as host-derived `__CCCC_CLOCK_*__` macros
+  (`src/preprocess.c`'s `init_time_macros`) rather than hand-transcribed,
+  since their numeric values genuinely differ between Darwin and glibc —
+  the same class of skew `#779` fixed for errno codes; `kill`/`killpg`/
+  `sigwait` in `<signal.h>` and `pthread_sigmask`/`pthread_kill` in
+  `<pthread.h>`; `SIZE_MAX`/`PTRDIFF_MIN`/`PTRDIFF_MAX` in `<stdint.h>`,
+  plus the `SIG_ATOMIC_MIN`/`SIG_ATOMIC_MAX`/`WCHAR_MIN`/`WCHAR_MAX`/
+  `WINT_MIN`/`WINT_MAX` siblings; and `optreset` (BSD/Darwin only) in
+  `<getopt.h>`, following the same `wrap_*`-named accessor-macro pattern
+  already used for `optarg`/`optind`/`opterr`/`optopt`, including its own
+  `-c=native` shim. All are registered for VM/bytecode execution too (raw
+  host passthroughs, or translating wrappers where the guest and host
+  representations differ, e.g. `sigwait`/`pthread_sigmask`'s guest 4-byte
+  `sigset_t`). `src/tokenize.c` also gains `#include <strings.h>` — it
+  called `strncasecmp` relying on a `<string.h>` leak.
+- Added: frontend support for the GCC/Clang `__atomic_*` builtin family
+  (`src/parse_postfix.c`), needed for `src/stdlib/pthread.c`'s
+  `__atomic_compare_exchange_n` calls to self-host — cccc's frontend
+  already had the underlying machinery (`ND_ALOAD`/`ND_ASTORE`/`ND_EXCH`/
+  `ND_CAS`/`ND_FENCE`) but reached it only through `<stdatomic.h>`'s
+  `__builtin_*` spellings. `__atomic_load_n`/`_store_n`/`_exchange_n`/
+  `_compare_exchange_n` alias those nodes directly; `__atomic_thread_fence`/
+  `_signal_fence` are the same signature as the existing `__builtin_*`
+  form under a new name; the non-`_n` pointer-based forms
+  (`__atomic_load`/`_store`/`_exchange`/`_compare_exchange`) desugar to the
+  `_n` shape; `__atomic_fetch_{add,sub,and,or,xor,nand}` and
+  `__atomic_{add,sub,and,or,xor,nand}_fetch` share a new CAS retry-loop
+  helper (single-evaluation of both operands, same invariant
+  `<stdatomic.h>`'s own `__cccc_atomic_fetch_op` documents); `nand` has no
+  direct `NodeKind`, built as `~(old & val)`; `__atomic_test_and_set`/
+  `_clear` route through exchange/store; `__atomic_is_lock_free`/
+  `_always_lock_free` return true for every `{1,2,4,8}`-byte size this VM
+  supports. Every memory-order argument is parsed (for side effects) and
+  discarded — every operation here is unconditionally seq_cst, the same
+  reasoning `<stdatomic.h>`'s own page already documents for its
+  `__builtin_*`-backed macros. `__ATOMIC_RELAXED`/`_CONSUME`/`_ACQUIRE`/
+  `_RELEASE`/`_ACQ_REL`/`_SEQ_CST` are now predefined with GCC's real
+  values (0–5).
+- Fixed: `f().member`/`f()->member` on a function returning a struct/union
+  by value — legal C (a function-call result is not an lvalue, but member
+  access on it is still permitted) that `gen_addr`'s switch rejected with
+  "not an lvalue", since it had no case for `ND_FUNCALL`. A struct/union
+  return already gets a caller-allocated `ret_buffer`, and `gen_expr`'s own
+  `ND_FUNCALL` case already yields that buffer's address (not the bytes) for
+  a struct/union result — the same by-reference convention every aggregate
+  value uses throughout codegen — so `gen_addr` just needed to run the call
+  and reuse that address. Surfaced by the self-hosting spike
+  (`src/macros.c`: `comptime_aggregate_cast(cv).kind`).
+- Fixed: a single function with more labels than codegen's internal label
+  table could hold hard-errored with "codegen: too many labels" (no
+  location — the check had no token to report), surfaced by the
+  self-hosting spike hitting a large NodeKind/opcode-switch function
+  somewhere in cccc's own source. The label and label-patch tables (reset
+  per function) are raised 256/1024 → 4096/16384, and the error now names
+  the offending function. Renamed to `CG_MAX_LABELS`/`CG_MAX_LABEL_PATCHES`
+  in the process — `src/cccc.h` separately `#define`s its own unused
+  `MAX_LABELS 256` for a pair of struct fields with no reader or writer
+  anywhere in the codebase, and the two names collided.

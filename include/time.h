@@ -4,11 +4,34 @@
 #define __TIME_H
 
 #include "stddef.h"
+#include "sys/types.h" /* clockid_t */
 
 typedef long clock_t;
 typedef long time_t;
 
 #define CLOCKS_PER_SEC 1000000
+
+/* #1282: CLOCK_* ids, injected as __CCCC_CLOCK_*__ by this binary's own
+ * compile-time <time.h> (src/preprocess.c's init_time_macros) rather than
+ * hand-transcribed -- their numeric values are a real cross-platform skew
+ * (Darwin vs. glibc number them differently), the same class of bug #779
+ * already fixed for errno codes. Linux-only ids are only defined when the
+ * host that built cccc actually had them (#824 no-lossy-emulation policy):
+ * using CLOCK_BOOTTIME/CLOCK_TAI on a macOS-built cccc is a compile error,
+ * not a silently wrong integer. */
+#define CLOCK_REALTIME           __CCCC_CLOCK_REALTIME__
+#define CLOCK_MONOTONIC          __CCCC_CLOCK_MONOTONIC__
+#define CLOCK_PROCESS_CPUTIME_ID __CCCC_CLOCK_PROCESS_CPUTIME_ID__
+#define CLOCK_THREAD_CPUTIME_ID  __CCCC_CLOCK_THREAD_CPUTIME_ID__
+#ifdef __CCCC_CLOCK_MONOTONIC_RAW__
+#define CLOCK_MONOTONIC_RAW __CCCC_CLOCK_MONOTONIC_RAW__
+#endif
+#ifdef __CCCC_CLOCK_BOOTTIME__
+#define CLOCK_BOOTTIME __CCCC_CLOCK_BOOTTIME__
+#endif
+#ifdef __CCCC_CLOCK_TAI__
+#define CLOCK_TAI __CCCC_CLOCK_TAI__
+#endif
 
 /* #1022: `_STRUCT_TIMESPEC` is the real guard both glibc */
 /* (bits/types/struct_timespec.h, whose own comment says "Include guard */
@@ -61,6 +84,17 @@ extern time_t time(time_t *t);
 extern int timespec_get(struct timespec *ts, int base);
 extern int nanosleep(const struct timespec *req, struct timespec *rem);
 /* extern int timespec_getres(struct timespec *ts, int base); */
+/* #1282: clockid_t-taking POSIX.1-2001 clock functions -- cccc's own
+   src/stdlib/time.c and src/stdlib/pthread.c (CLOCK_REALTIME-based deadline
+   polling on macOS, which lacks pthread_mutex_timedlock) already call
+   clock_gettime(); a bundled-header gap the self-hosting spike hit. */
+extern int clock_gettime(clockid_t clk_id, struct timespec *tp);
+extern int clock_settime(clockid_t clk_id, const struct timespec *tp);
+extern int clock_getres(clockid_t clk_id, struct timespec *res);
+#ifdef __linux__ /* glibc only -- Darwin has no clock_nanosleep() */
+extern int clock_nanosleep(clockid_t clk_id, int flags,
+                           const struct timespec *req, struct timespec *rem);
+#endif
 extern char *asctime(const struct tm *tm); /* deprecated */
 extern char *ctime(const time_t *timer);   /* deprecated */
 /* Re-entrant asctime/ctime: caller supplies a buffer of at least 26 bytes.

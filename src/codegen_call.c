@@ -479,8 +479,25 @@ Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args) {
     return n;
 }
 
-#define MAX_LABELS        256
-#define MAX_LABEL_PATCHES 1024
+// #1282: was 256/1024 (as plain MAX_LABELS/MAX_LABEL_PATCHES -- renamed
+// with a CG_ prefix here since src/cccc.h separately, and confusingly,
+// #defines its own unused MAX_LABELS 256 for a LabelEntry/GotoPatch pair of
+// struct fields that have no reader or writer anywhere in the codebase;
+// out of scope to remove here, so this file just stops colliding with it).
+// Self-hosting hit a single function somewhere in cccc's own ~95k-line
+// source that defines more labels than either table could hold -- "codegen:
+// too many labels", with no token attached to say which function
+// (define_label() only ever called the token-less error(); it now names the
+// function). Both tables are reset per-function (codegen_func.c's
+// reset_labels()), so this is a per-function ceiling, not a whole-program
+// one -- plausible for one of cccc's own large NodeKind/opcode-switch
+// functions (serialize_*.c, dump.c, codegen_expr.c all have 100+ `case`
+// arms across their file, and a single such function plus its own internal
+// control-flow labels can add up). Raised generously rather than tuned to
+// the exact offender, since the cost is a few tens of KB of static storage
+// either way.
+#define CG_MAX_LABELS        4096
+#define CG_MAX_LABEL_PATCHES 16384
 
 typedef struct {
     char *name;
@@ -493,10 +510,10 @@ typedef struct {
     bool  text_relative;
 } LabelPatch;
 
-static LabelDef   label_defs[MAX_LABELS];
+static LabelDef   label_defs[CG_MAX_LABELS];
 static int        num_label_defs = 0;
 
-static LabelPatch label_patches[MAX_LABEL_PATCHES];
+static LabelPatch label_patches[CG_MAX_LABEL_PATCHES];
 static int        num_label_patches = 0;
 
 void reset_labels(void) {
@@ -508,8 +525,12 @@ void reset_labels(void) {
 void define_label(VirtualMachine *vm, char *name) {
     if (!name)
         return;
-    if (num_label_defs >= MAX_LABELS) {
-        error("codegen: too many labels");
+    if (num_label_defs >= CG_MAX_LABELS) {
+        error("codegen: too many labels in function '%s' (limit %d)",
+              vm->compiler.current_fn && vm->compiler.current_fn->name
+                  ? vm->compiler.current_fn->name
+                  : "?",
+              CG_MAX_LABELS);
     }
     Pc label_pc                       = vm->text_ptr + 1;
     label_defs[num_label_defs].name   = name;
@@ -537,7 +558,7 @@ void define_label(VirtualMachine *vm, char *name) {
 void add_label_patch(char *name, Pc patch_location, bool text_relative) {
     if (!name)
         return;
-    if (num_label_patches >= MAX_LABEL_PATCHES) {
+    if (num_label_patches >= CG_MAX_LABEL_PATCHES) {
         error("codegen: too many label patches");
     }
     label_patches[num_label_patches].name           = name;

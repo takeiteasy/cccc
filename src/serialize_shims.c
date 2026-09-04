@@ -58,6 +58,9 @@ static const struct {
     {"__cccc_optind_ptr", CCCC_SHIM_native_accessor___cccc_optind_ptr},
     {"__cccc_opterr_ptr", CCCC_SHIM_native_accessor___cccc_opterr_ptr},
     {"__cccc_optopt_ptr", CCCC_SHIM_native_accessor___cccc_optopt_ptr},
+    {"__cccc_optreset_ptr",
+     CCCC_SHIM_native_accessor___cccc_optreset_ptr}, // #1282, BSD/Darwin only
+
     // #1021: include/math.h's isnan/isinf/signbit/fpclassify are themselves
     // #defined as `_Generic((x), float: __cccc_isnan_f, default:
     // __cccc_isnan_d)(x)` etc -- a shim body that read the plain macro name

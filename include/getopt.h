@@ -44,6 +44,17 @@ extern int getopt(int argc, char *const argv[], const char *optstring);
 extern int getopt_long(int argc, char *const argv[], const char *optstring,
                        const struct option *longopts, int *longindex);
 
+/* #1282: optreset -- BSD/Darwin-only (no glibc equivalent; glibc's getopt()
+ * restarts a scan on its own the moment it notices optind went backwards,
+ * see src/vm.c's cccc_reset_getopt_state() for the full explanation this
+ * mirrors). Same accessor-macro shape as optarg/optind/opterr/optopt above,
+ * same #1040/#736 reasoning. */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
+    defined(__NetBSD__)
+extern int *__cccc_optreset_ptr(void);
+#define optreset (*__cccc_optreset_ptr())
+#endif
+
 #else
 #include_next <getopt.h>
 #endif /* __CCCC__ */

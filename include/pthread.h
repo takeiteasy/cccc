@@ -25,6 +25,7 @@
 #ifdef __CCCC__
 
 #include "stddef.h"
+#include "signal.h" /* sigset_t, for pthread_sigmask (#1282) */
 #include "time.h"
 
 typedef void        *pthread_t;
@@ -134,6 +135,18 @@ int pthread_attr_destroy(pthread_attr_t *attr);
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
 int pthread_attr_getstack(const pthread_attr_t *attr, void **stackaddr,
                           size_t *stacksize);
+
+/* #1282: the per-thread analogue of sigprocmask() -- cccc's own
+   src/stdlib/posix_poll.c uses it to implement ppoll() on macOS (which has
+   no native ppoll()): block the caller's own signal mask around poll(),
+   then restore it. Takes the same guest bitmask sigset_t representation as
+   sigprocmask (include/signal.h) -- see wrap_sigprocmask's own comment in
+   src/stdlib/signal.c for why a host sigset_t has to be built from it
+   rather than passed straight through. pthread_kill() is the obvious
+   sibling from the same family. */
+int pthread_sigmask(int how, const sigset_t *restrict set,
+                    sigset_t *restrict oldset);
+int pthread_kill(pthread_t thread, int sig);
 
 #else
 #include_next <pthread.h>

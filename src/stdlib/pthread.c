@@ -937,6 +937,52 @@ static long long wrap_pthread_once(long long once_control,
     return 0;
 }
 
+// #1282: pthread_sigmask() takes the same guest bitmask sigset_t
+// representation sigprocmask()/sigwait() do (include/signal.h) -- see
+// wrap_sigprocmask's own comment in src/stdlib/signal.c for why a host
+// sigset_t has to be built from it rather than passed straight through.
+// pthread_kill() is a plain passthrough, same as kill()/killpg().
+static long long wrap_pthread_sigmask(long long how, long long set,
+                                      long long oldset) {
+    sigset_t  host_set;
+    sigset_t  host_old;
+    sigset_t *host_set_ptr = NULL;
+
+    if (set) {
+        sigemptyset(&host_set);
+        for (int signo = 1; signo < CCCC_NSIG; signo++) {
+            if (*(unsigned int *)set & (1u << (unsigned)(signo - 1)))
+                sigaddset(&host_set, signo);
+        }
+        host_set_ptr = &host_set;
+    }
+
+    int rc = pthread_sigmask((int)how, host_set_ptr, oldset ? &host_old : NULL);
+    if (rc != 0)
+        return rc;
+
+    if (oldset) {
+        unsigned int guest_old = 0;
+        for (int signo = 1; signo < CCCC_NSIG; signo++) {
+            if (sigismember(&host_old, signo))
+                guest_old |= (1u << (unsigned)(signo - 1));
+        }
+        *(unsigned int *)oldset = guest_old;
+    }
+    return 0;
+}
+
+static long long wrap_pthread_kill(long long thread, long long sig) {
+    // Guest pthread_t is a ThreadRecord* (wrap_pthread_self returns one
+    // directly), not the real host pthread_t -- host_thread is the actual
+    // handle libpthread needs, same indirection wrap_pthread_join/detach
+    // already go through.
+    ThreadRecord *rec = (ThreadRecord *)thread;
+    if (!rec)
+        return ESRCH;
+    return pthread_kill(rec->host_thread, (int)sig);
+}
+
 void register_pthread_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pthread_create", (void *)wrap_pthread_create, 4, 0);
     cc_register_cfunc(vm, "pthread_once", (void *)wrap_pthread_once, 2, 0);
@@ -991,6 +1037,9 @@ void register_pthread_functions(VirtualMachine *vm) {
                       (void *)wrap_pthread_attr_setstacksize, 2, 0);
     cc_register_cfunc(vm, "pthread_attr_getstack",
                       (void *)wrap_pthread_attr_getstack, 3, 0);
+    cc_register_cfunc(vm, "pthread_sigmask", (void *)wrap_pthread_sigmask, 3,
+                      0);
+    cc_register_cfunc(vm, "pthread_kill", (void *)wrap_pthread_kill, 2, 0);
 }
 
 // ---- C11 threads.h wrappers ----

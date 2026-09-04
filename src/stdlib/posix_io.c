@@ -330,6 +330,15 @@ static int *wrap_opterr_ptr(void) {
 static int *wrap_optopt_ptr(void) {
     return &optopt;
 }
+// #1282: optreset -- BSD/Darwin-only extern (include/getopt.h), guarded the
+// same way there and at the registration below, matching src/vm.c's own
+// #ifdef for cccc_reset_getopt_state()'s optreset=1.
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
+    defined(__NetBSD__)
+static int *wrap_optreset_ptr(void) {
+    return &optreset;
+}
+#endif
 // #957: environ (declared via the same accessor-macro pattern in
 // include/unistd.h) -- extern char **environ is the host's real process
 // environment array here, declared by the host <unistd.h> included above
@@ -514,6 +523,11 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_optind_ptr", (void *)wrap_optind_ptr, 0, 0);
     cc_register_cfunc(vm, "__cccc_opterr_ptr", (void *)wrap_opterr_ptr, 0, 0);
     cc_register_cfunc(vm, "__cccc_optopt_ptr", (void *)wrap_optopt_ptr, 0, 0);
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
+    defined(__NetBSD__)
+    cc_register_cfunc(vm, "__cccc_optreset_ptr", (void *)wrap_optreset_ptr, 0,
+                      0);
+#endif
     cc_register_cfunc(vm, "__cccc_errno_ptr", (void *)wrap_errno_ptr, 0, 0);
     cc_register_cfunc(vm, "__cccc_environ_ptr", (void *)wrap_environ_ptr, 0, 0);
 

@@ -39,4 +39,13 @@ void register_time_functions(VirtualMachine *vm) {
 
     // Formatting
     cc_register_cfunc(vm, "strftime", (void *)strftime, 4, 0);
+
+    // #1282: clockid_t-taking clock functions -- raw host passthroughs per
+    // the #824 no-lossy-emulation policy.
+    cc_register_cfunc(vm, "clock_gettime", (void *)clock_gettime, 2, 0);
+    cc_register_cfunc(vm, "clock_settime", (void *)clock_settime, 2, 0);
+    cc_register_cfunc(vm, "clock_getres", (void *)clock_getres, 2, 0);
+#ifdef __linux__
+    cc_register_cfunc(vm, "clock_nanosleep", (void *)clock_nanosleep, 4, 0);
+#endif
 }

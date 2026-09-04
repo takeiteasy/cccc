@@ -428,6 +428,43 @@ static long long wrap_sigprocmask(long long how, long long set,
     return 0;
 }
 
+// #1282: kill()/killpg() are plain passthroughs (signal numbers already
+// match between guest and host -- the same macros in include/signal.h back
+// both), unlike the guest-bitmask-vs-host-sigset_t translation
+// wrap_sigprocmask needs above.
+static long long wrap_kill(long long pid, long long sig) {
+    return kill((int)pid, (int)sig);
+}
+
+static long long wrap_killpg(long long pgrp, long long sig) {
+    return killpg((int)pgrp, (int)sig);
+}
+
+// sigwait() takes the same guest bitmask sigset_t representation as
+// sigprocmask -- see wrap_sigprocmask above for why a host sigset_t has to
+// be built from it rather than passed straight through.
+static long long wrap_sigwait(long long set, long long sig) {
+    sigset_t host_set;
+    sigemptyset(&host_set);
+    for (int signo = 1; signo < CCCC_NSIG; signo++) {
+        if (*(unsigned int *)set & (1u << (unsigned)(signo - 1)))
+            sigaddset(&host_set, signo);
+    }
+    return sigwait(&host_set, (int *)sig);
+}
+
+#ifdef __linux__
+// sigqueue()'s union sigval is exactly pointer-sized on every CCCC target
+// (a single `void *`/`int` union member), so it round-trips through one
+// FFI register slot unconverted -- the same shape posix_aio.c's own
+// guest_sival already relies on for sigevent's notify function.
+static long long wrap_sigqueue(long long pid, long long sig, long long value) {
+    union sigval sv;
+    sv.sival_ptr = (void *)value;
+    return sigqueue((int)pid, (int)sig, sv);
+}
+#endif
+
 void register_signal_functions(VirtualMachine *vm) {
     /* signal() and raise() are handled via VSIGNAL/VRAISE opcodes;
        no FFI registration is needed */
@@ -438,4 +475,10 @@ void register_signal_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "sigdelset", (void *)wrap_sigdelset, 2, 0);
     cc_register_cfunc(vm, "sigismember", (void *)wrap_sigismember, 2, 0);
     cc_register_cfunc(vm, "sigprocmask", (void *)wrap_sigprocmask, 3, 0);
+    cc_register_cfunc(vm, "kill", (void *)wrap_kill, 2, 0);
+    cc_register_cfunc(vm, "killpg", (void *)wrap_killpg, 2, 0);
+    cc_register_cfunc(vm, "sigwait", (void *)wrap_sigwait, 2, 0);
+#ifdef __linux__
+    cc_register_cfunc(vm, "sigqueue", (void *)wrap_sigqueue, 3, 0);
+#endif
 }
