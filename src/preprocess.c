@@ -320,6 +320,25 @@ static char *copy_routed_directive_line(VirtualMachine *vm, Token *hash,
     return line;
 }
 
+// #1287: a `{`/`}` seen while streaming ordinary tokens through preprocess2()
+// bumps/drops *depth (a local to preprocess2(), threaded through every
+// token-append site so it stays valid across an #include's spliced-in
+// tokens too -- there is no recursive call to unwind). The decrement is
+// clamped at zero rather than allowed to go negative: a missed `{` this
+// pass doesn't know how to see (there isn't one -- ordinary tokens are
+// literally every non-directive token in the TU) must degrade to today's
+// behaviour for the rest of the file, never leave *depth permanently
+// stuck below the true nesting and start silently dropping legitimate
+// file-scope `#include`s later on.
+static void track_brace_depth(int *depth, Token *tok) {
+    if (tok->kind != TK_PUNCT || tok->len != 1)
+        return;
+    if (tok->loc[0] == '{')
+        (*depth)++;
+    else if (tok->loc[0] == '}' && *depth > 0)
+        (*depth)--;
+}
+
 static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
     if (!line)
         return;
@@ -5364,6 +5383,17 @@ static void queue_comptime_directive(VirtualMachine *vm, char *line) {
 static Token *preprocess2(VirtualMachine *vm, Token *tok) {
     Token  head = {};
     Token *cur  = &head;
+    // #1287: brace depth over every ordinary (non-directive) token this
+    // function streams to the output, kept as a plain local -- an #include's
+    // tokens are spliced directly into `tok`'s stream rather than reached by
+    // a recursive call, so depth naturally carries across a file boundary
+    // exactly like it should (an #include written inside a function body is
+    // still inside that function once its own tokens are flattened in).
+    // Consulted by the auto-capture gate below: an #include whose own
+    // directive line is seen at depth > 0 is inside a function body and
+    // must not be hoisted to file scope on replay -- see
+    // track_brace_depth()'s comment.
+    int brace_depth = 0;
 
     while (tok->kind != TK_EOF) {
         if (tok->kind == TK_MACRO_SCOPE_PUSH) {
@@ -5421,6 +5451,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
                 tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
                 tok->pack_align    = vm->compiler.pack_cur;
+                track_brace_depth(&brace_depth, tok);
                 cur = cur->next = tok;
                 tok             = tok->next;
             }
@@ -5509,6 +5540,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                             tok->diag_werror =
                                 (1ULL << 63) | vm->compiler.warning_errors;
                             tok->pack_align = vm->compiler.pack_cur;
+                            track_brace_depth(&brace_depth, tok);
                             cur = cur->next = tok;
                             tok             = tok->next;
                         }
@@ -5528,6 +5560,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // struct_union_decl can read it off the struct/union keyword
             // token later, at parse time (#1173).
             tok->pack_align = vm->compiler.pack_cur;
+            track_brace_depth(&brace_depth, tok);
             cur = cur->next = tok;
             tok             = tok->next;
             continue;
@@ -5723,8 +5756,21 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // file->name) is already true here for a directive nested
             // inside one -- widen the gate to also auto-capture from a
             // cccc-only includer, not just a command-line input file.
+            // #1287: an #include written inside a function body (brace_
+            // depth > 0) is not replayable at file scope -- its own tokens
+            // are already parsed and serialized in place inside whatever
+            // function encloses it, so hoisting the directive line too
+            // just duplicates it, and the duplicate copy's contents don't
+            // even parse standalone at file scope (they typically aren't a
+            // legal top-level declaration at all). Scoped to PP_INCLUDE
+            // only: a #define/#undef written inside a function body has no
+            // block scope in C, so hoisting one is harmless and this gate
+            // must not widen to suppress it.
+            bool _ac_in_function_include =
+                brace_depth > 0 && pp_directive(tok) == PP_INCLUDE;
             if (!vm->compiler.emit_strict && !vm->compiler.in_macro_mode &&
-                !_ac_generated_nonprimary && start->file &&
+                !_ac_generated_nonprimary && !_ac_in_function_include &&
+                start->file &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&

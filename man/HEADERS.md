@@ -111,7 +111,11 @@ real host compiler, so header handling shifts:
   comptime-support modules whose runtime code never reaches the output, so
   their `#include`/`#define` scaffolding would only be dead weight (and
   force an extra `-I` on the downstream `cc`). Route a directive with
-  `@emit` or `@shared` to opt one in from such a file.
+  `@emit` or `@shared` to opt one in from such a file. Only a **top-level**
+  `#include` is replayed this way: one written inside a function body is
+  block-scoped in C, so it is never hoisted to file scope — its contents
+  are parsed and serialized in place, inside the function that contains it,
+  same as any other statement.
 - Where a user `-I`/`-isystem` entry also contains CCCC's own bundled
   headers, it is demoted to `-idirafter` so the real host header always
   wins — CCCC's bundled copies are VM polyfills and must not shadow the

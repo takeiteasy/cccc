@@ -7799,6 +7799,65 @@ def case_compound_literal_header_type_1286(cccc: Path, tmp: str) -> bool:
     return True
 
 
+INFUNC_INCLUDE_1287_FRAGMENT = "acc += n;\nacc += n * 2;\n"
+
+INFUNC_INCLUDE_1287_PROGRAM = (
+    "static int accumulate_1287(int n) {\n"
+    "    int acc = 0;\n"
+    '#include "infunc_include_1287.inc"\n'
+    "    return acc;\n"
+    "}\n"
+    "int main(void) {\n"
+    "    return accumulate_1287(14);\n"
+    "}\n"
+)
+
+
+def case_infunc_include_not_hoisted_1287(cccc: Path, tmp: str) -> bool:
+    print("  158: an #include written *inside a function body* (a bare "
+          "statement fragment, not a header) was hoisted to file scope AND "
+          "duplicated under -c=native/-c=generated (#1287) -- the "
+          "preprocessor's auto-capture gate tested routing/mode/file "
+          "identity only, never lexical position, so the directive line "
+          "was captured for verbatim file-scope replay even though the "
+          "fragment's own tokens were separately (and correctly) parsed "
+          "into the enclosing function. Fixed by tracking brace depth over "
+          "ordinary tokens in preprocess2() and excluding a PP_INCLUDE seen "
+          "at depth > 0 from the auto-capture gate. Reproduced directly "
+          "against src/macros.c's register_reflection_ffi().")
+    write(Path(tmp) / "infunc_include_1287.inc", INFUNC_INCLUDE_1287_FRAGMENT)
+    src = Path(tmp) / "infunc_include_1287.c"
+    write(src, INFUNC_INCLUDE_1287_PROGRAM)
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    gen_result = run([str(cccc), "-c=generated", "-o", "/dev/stdout", src.name],
+                      cwd=tmp)
+    if gen_result.returncode != 0:
+        print(f"    FAIL: -c=generated exited {gen_result.returncode}\n"
+              f"    {gen_result.stderr}")
+        return False
+    if '#include "infunc_include_1287.inc"' in gen_result.stdout:
+        print(f"    FAIL: -c=generated output still hoists the in-function "
+              f"#include to file scope\n    {gen_result.stdout}")
+        return False
+
+    out_bin = Path(tmp) / "infunc_include_1287_out"
+    native = run([str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if native.returncode != 0:
+        print(f"    FAIL: -c=native exited {native.returncode}\n"
+              f"    {native.stderr}")
+        return False
+    if run([f"./{out_bin.name}"], cwd=tmp).returncode != 42:
+        print("    FAIL: native binary did not exit 42")
+        return False
+    print("    ok")
+    return True
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8005,6 +8064,7 @@ CASES = [
     case_generated_shared_typedef_global_1241,
     case_compiler_family_auto_resolves_1226,
     case_compound_literal_header_type_1286,
+    case_infunc_include_not_hoisted_1287,
 ]
 
 
