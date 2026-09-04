@@ -705,6 +705,50 @@ int test_posix_sys_mman(void) {
     return 42;
 }
 
+// test_posix_shm_open (#1294): shm_open's real POSIX signature is variadic
+// (`int shm_open(const char *, int, ...)`) -- the trailing mode_t is only
+// meaningful with O_CREAT and must not be consumed when the caller doesn't
+// pass it (wrap_shm_open, posix_io.c). Exercises both the two-argument
+// (no O_CREAT) rejection path and the three-argument O_CREAT path, plus a
+// round trip through mmap to prove the descriptor is real shared memory.
+[[cccc::test(return = 42)]]
+int test_posix_shm_open(void) {
+    const char *name = "/cccc_test_shm";
+    shm_unlink(name);
+
+    // No O_CREAT and the object doesn't exist yet -- must fail without
+    // touching an unpassed variadic mode_t argument.
+    int fd = shm_open(name, O_RDWR);
+    if (fd != -1)
+        return 1;
+
+    fd = shm_open(name, O_CREAT | O_RDWR, 0600);
+    if (fd < 0)
+        return 2;
+
+    size_t pagesize = 4096;
+    if (ftruncate(fd, (off_t)pagesize) != 0) {
+        close(fd);
+        shm_unlink(name);
+        return 3;
+    }
+
+    void *p = mmap(0, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == (void *)-1) {
+        close(fd);
+        shm_unlink(name);
+        return 4;
+    }
+
+    strcpy((char *)p, "shm ok");
+    int ok = strcmp((char *)p, "shm ok") == 0;
+
+    munmap(p, pagesize);
+    close(fd);
+    shm_unlink(name);
+    return ok ? 42 : 5;
+}
+
 // test_posix_sys_stat
 [[cccc::test(return = 42)]]
 int test_posix_sys_stat(void) {

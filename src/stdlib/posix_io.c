@@ -192,6 +192,22 @@ static long long wrap_creat(const char *path, long long mode) {
     return (long long)creat(path, (mode_t)mode);
 }
 
+// wrap_shm_open (#1294): shm_open's trailing `mode_t mode` is only
+// meaningful with O_CREAT (POSIX; matches the real host SDK/glibc
+// declaration, `int shm_open(const char *, int, ...)`), so it must not
+// consume a variadic argument the guest never passed -- same shape as
+// wrap_open just above.
+static long long wrap_shm_open(const char *name, long long oflag, ...) {
+    mode_t mode = 0;
+    if (oflag & O_CREAT) {
+        va_list ap;
+        va_start(ap, oflag);
+        mode = (mode_t)(unsigned int)va_arg(ap, unsigned int);
+        va_end(ap);
+    }
+    return (long long)shm_open(name, (int)oflag, mode);
+}
+
 // wrap_ioctl (#795): request-code allowlist. See the registration comment
 // (register_posix_functions) for why this exists; see include/sys/ioctl.h
 // for the allowlisted constants themselves. Switches on `request` before
@@ -445,7 +461,7 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "munlock", (void *)munlock, 2, 0);
     cc_register_cfunc(vm, "mlockall", (void *)mlockall, 1, 0);
     cc_register_cfunc(vm, "munlockall", (void *)munlockall, 0, 0);
-    cc_register_cfunc(vm, "shm_open", (void *)shm_open, 3, 0);
+    cc_register_variadic_cfunc(vm, "shm_open", (void *)wrap_shm_open, 2, 0);
     cc_register_cfunc(vm, "shm_unlink", (void *)shm_unlink, 1, 0);
 #ifdef __linux__
     // mremap: Linux-only glibc/syscall extension for resizing an existing

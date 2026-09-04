@@ -68,7 +68,10 @@ extern int mlock(const void *addr, size_t len);
 extern int munlock(const void *addr, size_t len);
 extern int mlockall(int flags);
 extern int munlockall(void);
-extern int shm_open(const char *name, int oflag, mode_t mode);
+/* #1294: variadic, matching POSIX and the real host SDK/glibc declaration --
+ * the trailing `mode_t mode` is only meaningful with O_CREAT and must not be
+ * consumed when the caller never passed it (see wrap_shm_open, posix_io.c). */
+extern int shm_open(const char *name, int oflag, ...);
 extern int shm_unlink(const char *name);
 #ifdef __linux__
 /* mremap resizes/moves an existing mapping; Linux-only glibc/syscall */
