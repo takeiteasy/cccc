@@ -22,14 +22,19 @@
 // engine stays in use for the scan family regardless of this macro; #728).
 #include "format.h"
 
-// Standard stream getters (since we can't easily register global pointers)
-static FILE *__cccc_stdin(void) {
+// Standard stream getters (since we can't easily register global pointers).
+// Named wrap_* rather than __cccc_stdin/stdout/stderr: those names are the
+// *guest*-facing macro targets (include/stdio.h expands stdin/stdout/stderr
+// to `(*__cccc_stdin())` etc.), and under self-hosting a host-side
+// definition spelled the same way collides with its own extern declaration
+// at parse time, then recurses into itself once that's reconciled (#1280).
+static FILE *wrap_stdin(void) {
     return stdin;
 }
-static FILE *__cccc_stdout(void) {
+static FILE *wrap_stdout(void) {
     return stdout;
 }
-static FILE *__cccc_stderr(void) {
+static FILE *wrap_stderr(void) {
     return stderr;
 }
 
@@ -158,9 +163,9 @@ static long long wrap_vasprintf(char **strp, const char *fmt,
 // Register all stdio.h functions
 void register_stdio_functions(VirtualMachine *vm) {
     // Standard streams
-    cc_register_cfunc(vm, "__cccc_stdin", (void *)__cccc_stdin, 0, 0);
-    cc_register_cfunc(vm, "__cccc_stdout", (void *)__cccc_stdout, 0, 0);
-    cc_register_cfunc(vm, "__cccc_stderr", (void *)__cccc_stderr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stdin", (void *)wrap_stdin, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stdout", (void *)wrap_stdout, 0, 0);
+    cc_register_cfunc(vm, "__cccc_stderr", (void *)wrap_stderr, 0, 0);
 
     // Variadic printf family
     //

@@ -32,9 +32,9 @@ convention, but they still count as registered for the missing-registration
 and zero-registered-header checks below.
 
 Exit code is nonzero iff a mismatch, an unregistered declaration, a
-zero-registered header (not in COMPILER_LOWERED_HEADERS), or a guard
-mismatch (see below) was found. Wired into `make audit-ffi` and the
-`audit_ffi` sub-suite of `make test` (#784).
+zero-registered header (not in COMPILER_LOWERED_HEADERS), a guard
+mismatch (see below), or a namespace collision (see below) was found.
+Wired into the `audit_ffi` sub-suite of `tools/run_tests.py` (#784).
 
 Guard-presence check (#869): a declaration can be wrapped in a preprocessor
 conditional (`#ifdef __linux__`, `#if defined(__linux__) ||
@@ -65,6 +65,13 @@ flag corresponds to a macro (`__CCCC_POSIX_EMULATION__`) defined for the
 *guest*'s own preprocessor at guest-compile time, which is a wholly
 different evaluation context from `posix.c`'s own one-time host compile,
 so there is no sound way for this tool to relate the two.
+
+Namespace-collision check (#1280): a `__cccc_*` name declared in a bundled
+include/**/*.h header belongs to the *guest*'s namespace (it's the target of
+an accessor-macro like `#define errno (*__cccc_errno_ptr())`). Flags any
+`static`-linkage function in src/stdlib/*.c defined under that exact name --
+see STATIC_DEF_RE's docstring for why that specific shape (not just any
+same-named definition) is the bug.
 """
 import glob
 import re
@@ -85,7 +92,16 @@ SKIP_HEADER_DIRS = ("cccc/",)
 DECL_RE = re.compile(
     r'^\s*(?:extern\s+)?'
     r'((?:const\s+|unsigned\s+|signed\s+|long\s+|short\s+|struct\s+|union\s+)*'
-    r'\w+[\w \*]*?)\s+'
+    r'\w+[\w \*]*?)'
+    # Separator between the return type and the name: at least one space
+    # and/or '*'. Plain `\s+` here misses `TYPE *name(...)` (#1281) --
+    # `char *strtok(...)`-shaped declarations have no whitespace between the
+    # '*' and the name, so the star must be an acceptable separator on its
+    # own. Captured separately (not folded into group 1) so a lazy group 1
+    # doesn't end up swallowing the name itself when the only separator is a
+    # star; the star(s) are folded back into the return type below so
+    # param_kind() still sees them.
+    r'([\s*]+)'
     r'(\w+)\s*\(([^)]*)\)\s*;',
     re.MULTILINE,
 )
@@ -161,6 +177,34 @@ COMPILER_LOWERED_HEADERS = {
     # in codegen, not FFI calls.
     "stdbit.h",
 }
+
+# Namespace-collision check (#1280): a `__cccc_*` name declared in a bundled
+# include/**/*.h header (e.g. errno.h/getopt.h/stdio.h/float.h's
+# accessor-macro targets, `#define errno (*__cccc_errno_ptr())` and friends)
+# belongs to the *guest*'s namespace. cccc's own host-side implementation
+# must bind to it purely by the FFI registration string
+# (cc_register_cfunc(vm, "__cccc_errno_ptr", (void *)wrap_errno_ptr, ...)) --
+# never by defining a same-spelled C identifier in src/stdlib/*.c. Under
+# ordinary (non-self-hosting) builds a same-spelled `static` definition is
+# invisible outside its own TU and looks harmless, but once cccc compiles
+# its own source (-c=native self-hosting), that TU also sees the bundled
+# header's `extern` declaration of the same name -- a `static` definition
+# following a non-static declaration is a constraint violation cccc's own
+# frontend (correctly) rejects, and even a linkage-reconciled `extern`
+# definition would recurse into itself the moment the accessor macro expands
+# inside its own body. This was the exact #1280 bug in
+# src/stdlib/posix_io.c/stdio.c/fenv.c before their host identifiers were
+# renamed to wrap_*. Only `static`-linkage definitions are flagged here --
+# a handful of `__cccc_*` families (decimal_math.c's __cccc_dec_math1/2/3
+# etc., wide_bitint.c's __cccc_bitint_*) are deliberately defined as plain
+# non-static functions matching their include/ declaration by design (their
+# body doesn't re-expand the guest macro, so no recursion hazard, and their
+# guard is in GUEST_ONLY_DECL_GUARDS) -- those aren't the bug shape this
+# check exists to catch.
+STATIC_DEF_RE = re.compile(
+    r'^static\b[^;{]*?\b(__cccc_\w+)\s*\([^;]*?\)\s*\{',
+    re.MULTILINE,
+)
 
 
 def strip_comments(text):
@@ -298,7 +342,8 @@ def load_declarations():
         line_guard = scan_conditionals(text)
         file_decls = []  # (name, ret, args, guard)
         for m in DECL_RE.finditer(text):
-            ret, name, argstr = m.group(1).strip(), m.group(2), m.group(3).strip()
+            ret, sep, name, argstr = m.group(1).strip(), m.group(2), m.group(3), m.group(4).strip()
+            ret += '*' * sep.count('*')
             args = [] if argstr in ('', 'void') else [a.strip() for a in argstr.split(',')]
             lineno = text.count('\n', 0, m.start()) + 1
             guard = line_guard.get(lineno, ())
@@ -454,12 +499,24 @@ def audit():
                 (paths, name, hdr,
                  f"declared unconditionally but only registered under: {', '.join(conditions)}"))
 
-    return problems, missing, zero_registered, guard_mismatches, runtime_gated_count
+    # Namespace-collision check (#1280): see STATIC_DEF_RE's docstring above.
+    namespace_collisions = []
+    for path in sorted(glob.glob(STDLIB_GLOB)):
+        text = strip_comments(open(path).read())
+        for m in STATIC_DEF_RE.finditer(text):
+            name = m.group(1)
+            if name in decls:
+                namespace_collisions.append((path, name, decls[name][2]))
+
+    return (problems, missing, zero_registered, guard_mismatches,
+            runtime_gated_count, namespace_collisions)
 
 
 def main():
-    problems, missing, zero_registered, guard_mismatches, runtime_gated_count = audit()
-    if not problems and not missing and not zero_registered and not guard_mismatches:
+    (problems, missing, zero_registered, guard_mismatches, runtime_gated_count,
+     namespace_collisions) = audit()
+    if (not problems and not missing and not zero_registered and
+            not guard_mismatches and not namespace_collisions):
         print("audit_ffi: no mismatches found")
         if runtime_gated_count:
             print(f"({runtime_gated_count} runtime-flag-gated registration(s) not checked "
@@ -482,9 +539,16 @@ def main():
         where = ", ".join(str(Path(p).relative_to(REPO_ROOT)) for p in paths)
         print(f"{where}: \"{name}\" (declared in {hdr}) -- {reason}")
 
+    for path, name, hdr in namespace_collisions:
+        rel = str(Path(path).relative_to(REPO_ROOT))
+        print(f"{rel}: static \"{name}\" collides with the guest-namespace "
+              f"declaration in {hdr} -- rename the host-side identifier "
+              f"(bind by FFI string only, see #1280)")
+
     print(f"\naudit_ffi: {len(problems)} mismatch(es), {len(missing)} unregistered "
           f"declaration(s), {len(zero_registered)} zero-registered header(s), "
-          f"{len(guard_mismatches)} guard mismatch(es)")
+          f"{len(guard_mismatches)} guard mismatch(es), "
+          f"{len(namespace_collisions)} namespace collision(s)")
     if runtime_gated_count:
         print(f"({runtime_gated_count} runtime-flag-gated registration(s) not checked "
               f"for guard presence -- see module docstring)")

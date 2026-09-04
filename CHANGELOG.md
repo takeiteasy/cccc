@@ -55,6 +55,30 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   FFI-registered, so guest code that included the header and called it
   compiled cleanly and then failed at run time with an undefined-function
   error. Now registered.
+- Fixed: `src/stdlib/posix_io.c`/`stdio.c`/`fenv.c` defined their `#736`
+  host-global accessors (`errno`, `optarg`/`optind`/`opterr`/`optopt`,
+  `environ`, `stdin`/`stdout`/`stderr`, `FLT_ROUNDS`) as `static` C functions
+  spelled exactly like the *guest*-facing `__cccc_*` name the bundled
+  headers `extern`-declare for guest code (e.g. `__cccc_errno_ptr`). Under a
+  normal build this is invisible (the `static` definition never meets the
+  `extern` declaration in the same translation unit), but self-hosting
+  compiles cccc's own source against its own bundled headers and hits a
+  real "static declaration follows a non-static declaration" error — and
+  even with linkage reconciled, the accessor's own body would recurse into
+  itself, since `errno` and friends macro-expand back to a call of the same
+  name. Renamed the host-side identifiers out of the guest namespace
+  (`wrap_errno_ptr`, `wrap_stdin`, `wrap_flt_rounds`, etc., following the
+  `wrap_mb_cur_max` precedent already in `src/stdlib/stdlib.c`); the FFI
+  registration string, which is what guest code actually sees, is
+  unchanged. `tools/audit_ffi.py` now flags any future `static` definition
+  that reuses a `__cccc_*` name a bundled header declares, so the class
+  can't be silently reintroduced. Surfaced by the self-hosting spike.
+- Fixed: `tools/audit_ffi.py`'s declaration scanner required whitespace
+  between a return type and the function name, so every
+  `TYPE *name(...)`-shaped declaration (no space before the `*`) was
+  invisible to it — about 90 real declarations across `include/**/*.h`
+  undercounted, though none of them turned out to be actually broken once
+  found.
 - Added: `sigsetjmp`/`siglongjmp`/`sigjmp_buf` support. On the VM they alias
   the plain `setjmp`/`longjmp` opcodes — the VM has no signal-mask concept,
   so the `savemask` argument is evaluated for its side effects then

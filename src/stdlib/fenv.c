@@ -55,7 +55,11 @@ static long long wrap_feupdateenv(long long envp) {
 // FLT_ROUNDS (<float.h>, C11 dynamic requirement) maps the host's current
 // rounding mode -- as last set by fesetround() -- to the encoding C requires:
 // 0 toward-zero, 1 to-nearest, 2 toward +inf, 3 toward -inf, -1 indeterminate.
-long long __cccc_flt_rounds(void) {
+// Named wrap_flt_rounds (not __cccc_flt_rounds, and static rather than
+// extern) since __cccc_flt_rounds is the guest-facing macro target declared
+// in include/float.h -- a host-side definition spelled and linked the same
+// way collides with that extern declaration under self-hosting (#1280).
+static long long wrap_flt_rounds(void) {
     switch (fegetround()) {
         case FE_TOWARDZERO:
             return 0;
@@ -84,5 +88,5 @@ void register_fenv_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "feholdexcept", (void *)wrap_feholdexcept, 1, 0);
     cc_register_cfunc(vm, "fesetenv", (void *)wrap_fesetenv, 1, 0);
     cc_register_cfunc(vm, "feupdateenv", (void *)wrap_feupdateenv, 1, 0);
-    cc_register_cfunc(vm, "__cccc_flt_rounds", (void *)__cccc_flt_rounds, 0, 0);
+    cc_register_cfunc(vm, "__cccc_flt_rounds", (void *)wrap_flt_rounds, 0, 0);
 }

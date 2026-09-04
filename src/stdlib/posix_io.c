@@ -306,19 +306,28 @@ static long long wrap_dirname(long long path) {
 // preserved for free: the same host OS thread that made the failing call
 // also executes the guest code that reads it back, since VM bytecode
 // execution never migrates mid-call to a different host thread.
-static int *__cccc_errno_ptr(void) {
+// Named wrap_* rather than __cccc_*_ptr: under self-hosting, include/errno.h
+// / include/getopt.h expand errno/optarg/optind/opterr/optopt to
+// `(*__cccc_..._ptr())`, so a host-side definition spelled the same way
+// would (a) collide at parse time with its own extern declaration -- a
+// static definition following a non-static extern is a constraint violation
+// -- and (b) recurse into itself once the linkage was reconciled, since the
+// macro expansion inside the accessor's own body would call itself (#1280).
+// The FFI registration name below is a string, independent of the C
+// identifier, so the guest-visible name is unaffected.
+static int *wrap_errno_ptr(void) {
     return &errno;
 }
-static char **__cccc_optarg_ptr(void) {
+static char **wrap_optarg_ptr(void) {
     return &optarg;
 }
-static int *__cccc_optind_ptr(void) {
+static int *wrap_optind_ptr(void) {
     return &optind;
 }
-static int *__cccc_opterr_ptr(void) {
+static int *wrap_opterr_ptr(void) {
     return &opterr;
 }
-static int *__cccc_optopt_ptr(void) {
+static int *wrap_optopt_ptr(void) {
     return &optopt;
 }
 // #957: environ (declared via the same accessor-macro pattern in
@@ -326,7 +335,7 @@ static int *__cccc_optopt_ptr(void) {
 // environment array here, declared by the host <unistd.h> included above
 // (via posix_util.h).
 extern char **environ;
-static char ***__cccc_environ_ptr(void) {
+static char ***wrap_environ_ptr(void) {
     return &environ;
 }
 
@@ -501,13 +510,12 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fnmatch", (void *)fnmatch, 3, 0);
     cc_register_cfunc(vm, "getopt", (void *)getopt, 3, 0);
     cc_register_cfunc(vm, "getopt_long", (void *)getopt_long, 5, 0);
-    cc_register_cfunc(vm, "__cccc_optarg_ptr", (void *)__cccc_optarg_ptr, 0, 0);
-    cc_register_cfunc(vm, "__cccc_optind_ptr", (void *)__cccc_optind_ptr, 0, 0);
-    cc_register_cfunc(vm, "__cccc_opterr_ptr", (void *)__cccc_opterr_ptr, 0, 0);
-    cc_register_cfunc(vm, "__cccc_optopt_ptr", (void *)__cccc_optopt_ptr, 0, 0);
-    cc_register_cfunc(vm, "__cccc_errno_ptr", (void *)__cccc_errno_ptr, 0, 0);
-    cc_register_cfunc(vm, "__cccc_environ_ptr", (void *)__cccc_environ_ptr, 0,
-                      0);
+    cc_register_cfunc(vm, "__cccc_optarg_ptr", (void *)wrap_optarg_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_optind_ptr", (void *)wrap_optind_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_opterr_ptr", (void *)wrap_opterr_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_optopt_ptr", (void *)wrap_optopt_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_errno_ptr", (void *)wrap_errno_ptr, 0, 0);
+    cc_register_cfunc(vm, "__cccc_environ_ptr", (void *)wrap_environ_ptr, 0, 0);
 
     // sys/ipc.h etc via posix_ipc.c, sockets via posix_net.c, etc. are
     // registered by their own domain files -- see register_posix_functions
