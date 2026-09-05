@@ -3004,7 +3004,7 @@ emit_copy_and_free:
 // them #included. Replaces a plain `== vm->compiler.primary_file` token-file
 // comparison, which only ever names input_files[0] (cc_preprocess/linker.c
 // pin primary_file to the *first* input file forever) -- so a static
-// function or bodyless declaration written in input_files[1..N] used to be
+// function or bodiless declaration written in input_files[1..N] used to be
 // misidentified as "supplied by a replayed header" and silently dropped
 // from -c=native/-m output (found investigating #1002; not what that ticket
 // itself reported, but blocks it -- see CLAUDE.md). #1006: promoted to a
@@ -3016,15 +3016,55 @@ static bool file_is_command_line_input(VirtualMachine *vm, const char *name) {
     return cc_file_is_command_line_input(vm, name);
 }
 
+// #1298: does `name` (a File.name -- a real on-disk path, or an
+// "<embedded>/foo.h" synthetic key) name a C *source* file rather than a
+// header? Used only to narrow the external-linkage arm just below to the
+// shape #1298 actually fixes -- a captured/replayed .c textual amalgamation
+// (src/vm.c's `#include "ops.c"`) -- and deliberately not any vendored
+// single-header library (.h, built via an IMPLEMENTATION-style macro in one
+// TU): that shape's declarator names are macro-token-pasted, and Token
+// (src/cccc.h) has no way to distinguish a macro-expanded token's spelling
+// location from its expansion location, so a file-identity test alone
+// misattributes an ordinary command-line-input function's body to the
+// defining macro's own file (confirmed against tests/test_pthread_once_1278.c
+// while investigating #1298) -- left for a follow-up ticket. No extension
+// notion exists elsewhere in this file; kept local and narrow rather than
+// promoted to a shared helper.
+static bool path_is_c_source_file(const char *name) {
+    if (!name)
+        return false;
+    size_t len = strlen(name);
+    return len >= 2 && name[len - 2] == '.' && name[len - 1] == 'c';
+}
+
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj) {
-    if (!obj->is_static || !obj->body || obj->is_macro_generated)
+    if (!obj->body || obj->is_macro_generated)
         return false;
     Token *t = obj->tok;
     if (!t || !t->file)
         return false;
     if (file_is_command_line_input(vm, t->file->name) ||
         cc_file_is_cccc_only(vm, t->file->name))
+        return false;
+    // #999: a `static` (internal-linkage) function's body is always
+    // header-supplied once its declaring file passes the checks above --
+    // cc_link_progs (#957) deliberately leaves statics uncanonicalized
+    // across TUs, so its own file's replayed #include is the only thing
+    // that can supply it.
+    //
+    // #1298: an ordinary *external*-linkage function is header-supplied too,
+    // but only when its declaring file is itself a captured/replayed .c
+    // amalgamation -- path_is_captured() asks the positive question a bare
+    // extension test can't: whether this file's text is really reaching the
+    // host compiler, rather than inferring it from file identity alone (the
+    // #999-era naive fix, dropping is_static outright, skipped this check and
+    // broke 7 tests -- the opaque-handle idiom #1010/#1014 and the
+    // global-block-splice #1034 case -- whose Objs trace to some
+    // non-command-line-input file for unrelated reasons and are not actually
+    // header-supplied).
+    if (!obj->is_static && !(path_is_c_source_file(t->file->name) &&
+                             path_is_captured(ctx, t->file->name)))
         return false;
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }

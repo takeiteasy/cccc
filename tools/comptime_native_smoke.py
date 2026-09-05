@@ -2436,6 +2436,53 @@ def case_static_name_collision_multi_tu(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_included_c_amalgam_external_linkage_1298(cccc: Path, tmp: str) -> bool:
+    print("  #1298: -c=native, a plain (external-linkage) function defined "
+          "in a .c file #include'd by one TU (mirroring src/vm.c's own "
+          "`#include \"ops.c\"` amalgamation shape) and merely declared+"
+          "called, never re-included, by a second TU. "
+          "function_is_header_supplied() (#999) only ever suppressed a "
+          "`static` definition reached this way; a non-static one used to "
+          "be re-serialized on top of the first TU's replayed #include, a "
+          "host 'redefinition' error. Asserts VM 42 -> native 42 -- the "
+          "prototype-suppression exposure this fixes is a link failure no "
+          "-m shape assertion (tests/test_serialize_included_c_amalgam_"
+          "1298.c) alone can see")
+    ops_src = Path(tmp) / "amalgam_1298_smoke_ops.c"
+    a_src = Path(tmp) / "amalgam_1298_smoke_a.c"
+    b_src = Path(tmp) / "amalgam_1298_smoke_b.c"
+    write(ops_src, "int amalgam_1298_smoke_add(int x) { return x + 1; }\n")
+    write(a_src,
+          '#include "amalgam_1298_smoke_ops.c"\n'
+          "int amalgam_1298_smoke_call_a(void) { "
+          "return amalgam_1298_smoke_add(20); }\n")
+    write(b_src,
+          "int amalgam_1298_smoke_add(int x);\n"
+          "int amalgam_1298_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return amalgam_1298_smoke_call_a() + amalgam_1298_smoke_add(20); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "amalgam_1298_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool:
     print("  80: -c=native, a header-defined static inline function shared "
           "by two TUs, invoked with one input file as an absolute path and "
@@ -8725,6 +8772,7 @@ CASES = [
     case_transitive_capture_two_hops_1288,
     case_hostowned_empty_init_no_dangling_comma_1289,
     case_setjmp_multi_tu_builtin_identity,
+    case_included_c_amalgam_external_linkage_1298,
 ]
 
 
@@ -8732,7 +8780,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

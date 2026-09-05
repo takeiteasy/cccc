@@ -150,6 +150,16 @@ real host compiler, so header handling shifts:
   itself a from_include typedef is spelled by that alias rather than
   decomposed to its underlying pointer type, so it still matches the real
   header's own declaration once both are visible to the host compiler.
+- A `#include`d **`.c`** file that is itself captured (a deliberate textual
+  amalgamation, e.g. `#include "ops.c"`) already supplies every function it
+  defines to the output, external linkage included -- none of them are
+  re-serialized on top of the replayed `#include`. This does not extend to a
+  vendored single-header **library** (a `.h` built via an
+  `#define FOO_IMPLEMENTATION` idiom in exactly one TU): its own
+  externally-linked functions are still re-serialized independently and can
+  collide with the replayed `#include`, since the two shapes are not
+  distinguishable from the compiler's own perspective without a change to
+  how a macro-expanded declarator name's source location is tracked.
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
