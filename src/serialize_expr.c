@@ -1947,7 +1947,27 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // between differently-shaped vectors) still needs to print.
             bool scalar_splat =
                 dst && dst->kind == TY_VECTOR && src && src->kind != TY_VECTOR;
-            if (widening || scalar_splat) {
+            // #1300 (item 3): a cast whose destination is a pointer to an
+            // *anonymous* struct/union (no tag, no typedef name) cannot be
+            // spelled in C -- serialize_type() below re-synthesizes a fresh
+            // `struct {...} *` body, and C's nominal typing makes that a
+            // distinct type from the field's own identically-shaped anonymous
+            // struct at every assignment site (`vm->compiler.call_patches`,
+            // cccc.h, is exactly this: an anon-struct pointer assigned
+            // realloc()'s result). Newer GCC promotes the resulting
+            // -Wincompatible-pointer-types to a hard error. Every such cast is
+            // an implicit conversion the type checker inserted, and the source
+            // is always a pointer (a `void *` realloc/malloc return, in
+            // practice) that converts implicitly with no cast at all -- emit
+            // the operand bare. Guarded on src being a pointer so a genuine
+            // integer->pointer reinterpret still prints its cast (however
+            // unspellable the target); dropping it there is no worse than the
+            // broken cast, but the pointer case is the only one that actually
+            // occurs.
+            bool anon_agg_ptr_cast = dst && dst->kind == TY_PTR && src &&
+                                     src->kind == TY_PTR &&
+                                     type_needs_anon_aggregate(ctx, dst);
+            if (widening || scalar_splat || anon_agg_ptr_cast) {
                 serialize_expr(f, vm, ctx, node->lhs, parent_prec);
             } else {
                 fprintf(f, "(");

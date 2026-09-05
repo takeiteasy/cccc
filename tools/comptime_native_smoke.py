@@ -3254,6 +3254,77 @@ def case_assert_ternary_comma_1305(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_anon_struct_ptr_cast_1300(cccc: Path, tmp: str) -> bool:
+    print("  #1300 (item 3): -c=native / -m, a cast whose destination is a "
+          "pointer to an *anonymous* struct (`vm->compiler.call_patches` in "
+          "cccc.h, assigned realloc()'s result). serialize_type() "
+          "re-synthesizes a fresh `struct {...} *` body, which C nominal "
+          "typing makes a distinct type from the field's own identically- "
+          "shaped anon struct -- a -Wincompatible-pointer-types diagnostic "
+          "(warning on Apple clang, hard error on newer GCC / with "
+          "-Werror). Every such cast is an implicit void*->ptr conversion "
+          "that needs no cast at all; serialize_expr.c's ND_CAST case now "
+          "emits the operand bare. Asserts the -m output has no synthesized "
+          "`(struct {` cast on the assignment, the -m output compiles clean "
+          "under -Werror=incompatible-pointer-types, and VM 42 -> native 42")
+    src = Path(tmp) / "anon_struct_ptr_cast_1300_smoke.c"
+    write(src,
+          "#include <stdlib.h>\n"
+          "struct AnonPtr1300 {\n"
+          "    struct { long loc; int fn; } *patches;\n"
+          "    int n, cap;\n"
+          "};\n"
+          "static struct AnonPtr1300 g;\n"
+          "int main(void) {\n"
+          "    g.cap = 4;\n"
+          "    g.patches = realloc(g.patches,\n"
+          "                        (size_t)g.cap * sizeof(*g.patches));\n"
+          "    if (!g.patches) return 1;\n"
+          "    g.patches[0].loc = 40;\n"
+          "    g.patches[0].fn = 2;\n"
+          "    return (int)g.patches[0].loc + g.patches[0].fn;\n"
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    m_out = Path(tmp) / "anon_struct_ptr_cast_1300_smoke.m.c"
+    m_result = run([str(cccc), "-m", "-o", m_out.name, src.name], cwd=tmp)
+    if m_result.returncode != 0:
+        print(f"    FAIL: -m exited {m_result.returncode}\n    {m_result.stderr}")
+        return False
+    text = m_out.read_text()
+    for line in text.splitlines():
+        if "g.patches =" in line and "(struct {" in line:
+            print(f"    FAIL: -m output still synthesizes an anon-struct cast:"
+                  f"\n    {line.strip()}")
+            return False
+
+    obj = Path(tmp) / "anon_struct_ptr_cast_1300_smoke.o"
+    cc_result = run(["cc", "-c", "-Werror=incompatible-pointer-types",
+                     m_out.name, "-o", str(obj)], cwd=tmp)
+    if cc_result.returncode != 0:
+        print(f"    FAIL: host cc rejected the -m output under "
+              f"-Werror=incompatible-pointer-types\n    {cc_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "anon_struct_ptr_cast_1300_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_macro_declared_fn_bodyless_1303(cccc: Path, tmp: str) -> bool:
     print("  #1303: -c=native, bodyless_decl_from_input_or_bundled()'s own "
           "version of #1301's function fix. A captured header's macro that "
@@ -9592,6 +9663,7 @@ CASES = [
     case_local_shadows_global_1302,
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
+    case_anon_struct_ptr_cast_1300,
     case_assert_ternary_comma_1305,
     case_macro_declared_global_1303,
     case_macro_declared_fn_bodyless_1303,
