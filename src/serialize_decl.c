@@ -393,6 +393,63 @@ static Type *hoist_mutable_type(VirtualMachine *vm, Type *ty) {
     return cpy;
 }
 
+// #1302: lazily populate ctx->global_names (name -> Obj*) from
+// vm->compiler.globals. A plain serialize_find_global() linear scan here
+// would be O(locals x globals x functions) across a whole program -- the
+// #1283 perf wall work made a point of keeping whole-program-scale work off
+// this path, hence the one-time HashMap build instead.
+static void ensure_global_name_index(VirtualMachine   *vm,
+                                     SerializeContext *ctx) {
+    if (ctx->built_global_names)
+        return;
+    ctx->built_global_names = true;
+    for (Obj *g = vm->compiler.globals; g; g = g->next)
+        hashmap_put(&ctx->global_names, g->name, g);
+}
+
+// #1302: lazily populate ctx->file_typedef_names (name -> 1) from every
+// file-scope (owner_fn == NULL) entry of ctx->typedefs. A function-local
+// typedef (owner_fn == fn) is a short per-function scan instead -- it is
+// already re-emitted per owning function by serialize_type_defs_for_owner()
+// and there are normally few of them, so a whole-program index buys nothing
+// there.
+static void ensure_file_typedef_name_index(SerializeContext *ctx) {
+    if (ctx->built_file_typedef_names)
+        return;
+    ctx->built_file_typedef_names = true;
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (!ctx->typedefs[i].owner_fn)
+            hashmap_put(&ctx->file_typedef_names, ctx->typedefs[i].name,
+                        (void *)1);
+}
+
+// #1302: visitor for serialize_ast_walk() collecting every non-local Obj
+// (global, or FFI/libc-declared function/variable -- ND_FUNCALL's callee is
+// an ordinary ND_VAR, serialize_expr.c's ND_FUNCALL case reads it the same
+// way) an ND_VAR node in this function's body actually names -- used to
+// gate the hoisted-local rename below on the global actually being
+// referenced, so a program with no collision emits byte-identical output.
+// serialize_ast_walk() already dedups by Node* identity; a duplicate Obj*
+// from two distinct ND_VAR nodes naming the same global is harmless here
+// (the caller only does a linear name-match scan), so this deliberately
+// doesn't also dedup by Obj*.
+typedef struct {
+    Obj **refs;
+    int   len;
+    int   cap;
+} ReferencedGlobals;
+
+static void collect_referenced_globals(Node *n, void *vctx) {
+    if (n->kind != ND_VAR || !n->var || n->var->is_local)
+        return;
+    ReferencedGlobals *rg = vctx;
+    if (rg->len == rg->cap) {
+        rg->cap  = rg->cap ? rg->cap * 2 : 8;
+        rg->refs = realloc(rg->refs, rg->cap * sizeof(*rg->refs));
+    }
+    rg->refs[rg->len++] = n->var;
+}
+
 // Serialize a function
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn) {
@@ -461,6 +518,14 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         // (flattened) scope; params occupy an identifier too (they are on
         // fn->locals with is_param set, just not declared here) so they
         // seed the collision check.
+        // #1302: lazily built (only if some local's name actually turns out
+        // to collide with a referenced global -- the common case builds
+        // nothing) list of every non-local Obj this function's body
+        // references. See collect_referenced_globals()'s own comment for
+        // why a duplicate entry here is harmless.
+        ReferencedGlobals referenced_globals       = {0};
+        bool              referenced_globals_built = false;
+
         for (Obj *var = fn->locals; var; var = var->next) {
             // Params are never renamed here -- serialize_function_signature
             // already printed the function's signature (with each param's
@@ -545,6 +610,30 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // name, when its own turn comes. Linear scan per local (O(n^2)
             // in locals), matching this file's existing style; move to a
             // hashmap if a function with enough locals to matter shows up.
+            // #1302: the hoist above widens var's scope from its original
+            // (possibly block-scoped) declaration to the whole function --
+            // if var's name collides with a global or file-scope typedef
+            // name that the *rest* of this function still legitimately
+            // refers to, that reference now silently resolves to the
+            // hoisted local instead. Fold both checks into the same
+            // do-while as the #926 local-vs-local check above: mutating
+            // var->name here is exactly as sound as it is there (every
+            // reference resolves through this Obj* -- serialize_expr.c's
+            // ND_VAR case prints node->var->name -- so a rename here can
+            // never affect an unrelated Obj's own references), and
+            // re-running the whole do-while after any rename validates the
+            // new name against all three collision sources for free.
+            //
+            // Global collision is reference-gated (only checked once
+            // ctx->global_names says the name is even in use anywhere in
+            // the program, and only actually renamed if this function's
+            // body still names that specific Obj outside of the local's own
+            // assignment) so a program with no collision emits
+            // byte-identical output. Typedef collision has no equivalently
+            // cheap "is this typedef spelled again later" test, so it is
+            // unconditional: a local literally named after an in-scope
+            // typedef always gets the suffix, whether or not the typedef
+            // name reappears.
             bool renamed_again;
             do {
                 renamed_again = false;
@@ -555,6 +644,44 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                                                  ctx->anon_local_counter++);
                     renamed_again = true;
                     break;
+                }
+                if (renamed_again)
+                    continue;
+
+                ensure_global_name_index(vm, ctx);
+                if (hashmap_get(&ctx->global_names, var->name)) {
+                    if (!referenced_globals_built) {
+                        serialize_ast_walk(fn->body, collect_referenced_globals,
+                                           &referenced_globals);
+                        referenced_globals_built = true;
+                    }
+                    for (int i = 0; i < referenced_globals.len; i++) {
+                        Obj *g = referenced_globals.refs[i];
+                        if (g == var || strcmp(g->name, var->name) != 0)
+                            continue;
+                        var->name = arena_format(vm, "%s__cccc_%d", var->name,
+                                                 ctx->anon_local_counter++);
+                        renamed_again = true;
+                        break;
+                    }
+                }
+                if (renamed_again)
+                    continue;
+
+                ensure_file_typedef_name_index(ctx);
+                bool typedef_collision =
+                    hashmap_get(&ctx->file_typedef_names, var->name) != NULL;
+                if (!typedef_collision)
+                    for (int i = 0; i < ctx->typedefs_len; i++)
+                        if (ctx->typedefs[i].owner_fn == fn &&
+                            strcmp(ctx->typedefs[i].name, var->name) == 0) {
+                            typedef_collision = true;
+                            break;
+                        }
+                if (typedef_collision) {
+                    var->name     = arena_format(vm, "%s__cccc_%d", var->name,
+                                                 ctx->anon_local_counter++);
+                    renamed_again = true;
                 }
             } while (renamed_again);
 
@@ -653,6 +780,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             ctx->allow_layout_dims = false;
             fprintf(f, ";\n");
         }
+        free(referenced_globals.refs); // #1302: no-op if never built
 
         // #1044: a static (or compound-literal) global deferred here by
         // collect_deferred_static_labels() because its initializer takes

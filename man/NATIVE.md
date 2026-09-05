@@ -121,6 +121,23 @@ divergent C. The main cases:
 accepts and clang does not; CCCC emits a guarded `#error` preamble so clang
 gives a clear diagnostic instead of a confusing one.
 
+## Local variable hoisting
+
+The emitted C flattens every local variable of a function to one C89-style
+declaration list at the top of that function, with any initializer split out
+into a separate assignment where it originally appeared. Block structure
+(braces) is otherwise preserved, purely for readability — it carries no
+scoping weight in the output.
+
+If a local's source name happens to collide with a global (a variable,
+function, or an FFI/host-library function) or a file-scope `typedef` that the
+same function refers to elsewhere, CCCC renames the *local* — never the
+global or the typedef, which may already have other references emitted
+elsewhere — by appending a `__cccc_N` suffix. This means `-m`/`-c=generated`
+output is not guaranteed to preserve every local's exact source spelling; if
+you are diffing or grepping generated output for a local variable by name and
+it doesn't appear verbatim, check for this suffix.
+
 ## Serialized-output divergences
 
 Everywhere else the rule is that the emitted C behaves as the VM behaves. A

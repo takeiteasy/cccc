@@ -2547,6 +2547,95 @@ def case_vendored_single_header_1301(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_local_shadows_global_1302(cccc: Path, tmp: str) -> bool:
+    print("  #1302: -c=native, a hoisted block-scoped local whose name "
+          "collides with a global/typedef the same function still "
+          "references OUTSIDE the local's own (narrower, pre-hoist) scope. "
+          "serialize_function() (src/serialize_decl.c) flattens every local "
+          "to one top-of-function C89-style declaration, which widens the "
+          "local's scope to the whole function -- silently shadowing that "
+          "later reference. Found via #1132's round-13 self-hosting spike "
+          "(src/parse_postfix.c's primary(): a hoisted local `Node *expr` "
+          "shadowed the later, unrelated call to the global expr() parser "
+          "function). Four collision shapes in one program: a global "
+          "FUNCTION (compile error pre-fix), a global VARIABLE (a SILENT "
+          "wrong answer pre-fix, not a compile error -- the strongest "
+          "regression guard, since a future change could make the compile "
+          "error disappear without fixing the underlying scope widening), "
+          "an FFI/libc function (strlen), and a file-scope TYPEDEF. Fixed "
+          "by widening the existing #926 hoisted-local collision-rename "
+          "loop to also check a hoisted local's name against every global "
+          "this function's body actually references (reference-gated, so "
+          "a non-colliding program's output is unaffected) and against "
+          "every file-scope typedef name (unconditional -- no equivalently "
+          "cheap reference test exists for typedefs). Asserts VM 42 -> "
+          "native 42 -- the global-variable shape is a link-succeeds, "
+          "wrong-answer miscompile no -m shape assertion alone can see")
+    src = Path(tmp) / "local_shadows_global_1302_smoke.c"
+    write(
+        src,
+        "#include <string.h>\n"
+        "typedef struct { int a; } LocalShadows1302Widget;\n"
+        "int local_shadows_1302_helper(int x) { return x + 1; }\n"
+        "int local_shadows_1302_g = 7;\n"
+        "int local_shadows_1302_use_fn(int flag, int a) {\n"
+        "    if (flag) {\n"
+        "        int local_shadows_1302_helper = a * 2;\n"
+        "        return local_shadows_1302_helper;\n"
+        "    }\n"
+        "    return local_shadows_1302_helper(a);\n"
+        "}\n"
+        "int local_shadows_1302_use_var(int flag, int a) {\n"
+        "    if (flag) {\n"
+        "        int local_shadows_1302_g = a * 2;\n"
+        "        a = local_shadows_1302_g;\n"
+        "    }\n"
+        "    return a + local_shadows_1302_g;\n"
+        "}\n"
+        "int local_shadows_1302_use_ffi(int flag, const char *s) {\n"
+        "    if (flag) {\n"
+        "        int strlen = 3;\n"
+        "        return strlen;\n"
+        "    }\n"
+        "    return (int)strlen(s);\n"
+        "}\n"
+        "int local_shadows_1302_use_typedef(int flag) {\n"
+        "    if (flag) {\n"
+        "        int LocalShadows1302Widget = 5;\n"
+        "        return LocalShadows1302Widget;\n"
+        "    }\n"
+        "    LocalShadows1302Widget w;\n"
+        "    w.a = 42;\n"
+        "    return w.a;\n"
+        "}\n"
+        "int main(void) {\n"
+        "    if (local_shadows_1302_use_fn(0, 41) != 42) return 1;\n"
+        "    if (local_shadows_1302_use_var(0, 42) != 49) return 1;\n"
+        "    if (local_shadows_1302_use_ffi(0, \"ab\") != 2) return 1;\n"
+        "    if (local_shadows_1302_use_typedef(0) != 42) return 1;\n"
+        "    return 42;\n"
+        "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "local_shadows_global_1302_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_setjmp_transitive_header_1299(cccc: Path, tmp: str) -> bool:
     print("  #1299: -c=native, an ordinary project header that itself "
           "`#include`s <setjmp.h> (mirroring src/cccc.h's own shape, hit "
@@ -8939,6 +9028,7 @@ CASES = [
     case_setjmp_multi_tu_builtin_identity,
     case_included_c_amalgam_external_linkage_1298,
     case_vendored_single_header_1301,
+    case_local_shadows_global_1302,
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
 ]
@@ -8948,7 +9038,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

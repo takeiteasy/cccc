@@ -165,6 +165,22 @@ typedef struct {
     // struct (see e.g. the `anchors`/`claimed` locals in
     // rename_colliding_static_names).
     HashMap path_key_memo;
+    // #1302: name -> Obj* for every entry of vm->compiler.globals, and
+    // name -> 1 for every file-scope (owner_fn == NULL) ctx->typedefs
+    // entry -- both lazily built on first use (built_global_names /
+    // built_typedef_names guard a one-time populate, see
+    // ensure_global_name_index()/ensure_file_typedef_name_index() in
+    // serialize_decl.c) so a program that hits neither collision class
+    // pays nothing beyond the guard check. Consulted by serialize_
+    // function()'s hoisted-local collision loop (the #926 do-while) to
+    // catch a hoisted local's name colliding with a global or file-scope
+    // typedef that the same function still references outside the
+    // local's original (narrower, pre-hoist) scope -- see that loop's own
+    // #1302 comment.
+    HashMap global_names;
+    HashMap file_typedef_names;
+    bool    built_global_names;
+    bool    built_file_typedef_names;
     // #965: block-literal env structs -- see BlockEnvEntry and
     // serialize_block_preamble().
     BlockEnvEntry *block_envs;
@@ -345,6 +361,11 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                             Node *node, int parent_prec);
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn);
+// #1044/#1302: iterative (explicit stack), pointer-identity-deduped AST
+// walk -- safe over cccc's own heavily-shared Node graph, unlike naive
+// recursion. Shared between serialize_program.c's label/var-ref passes and
+// serialize_decl.c's hoisted-local-vs-referenced-global collision check.
+void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx);
 // #1253: give a fresh source spelling to each duplicate ND_LABEL a hygienic
 // Quote() template produced in `body`, rewriting references keyed by
 // unique_label. Called once per function body before it is emitted.

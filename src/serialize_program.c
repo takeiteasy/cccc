@@ -228,8 +228,11 @@ static bool node_set_add(NodeSet *set, Node *n) {
     return true;
 }
 
-static void ast_walk_1044(Node *root, void (*visit)(Node *, void *),
-                          void *ctx) {
+// #1302: was static/file-local (originally #1044, hence the suffix); shared
+// with serialize_decl.c's hoisted-local-vs-referenced-global collision check,
+// which needs the same iterative, pointer-identity-deduped walk (a naive
+// recursive walk loops forever over cccc's own heavily-shared Node graph).
+void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx) {
     Node  **stack = NULL;
     int     len = 0, cap = 0;
     NodeSet seen = {0};
@@ -315,9 +318,9 @@ void serialize_dedupe_function_labels(VirtualMachine *vm, Node *body) {
     if (!body)
         return;
     LabelDedupeCtx d = {.vm = vm};
-    ast_walk_1044(body, label_dedupe_scan, &d);
+    serialize_ast_walk(body, label_dedupe_scan, &d);
     if (d.renames.buckets)
-        ast_walk_1044(body, label_dedupe_apply, &d);
+        serialize_ast_walk(body, label_dedupe_apply, &d);
     hashmap_deinit(&d.first_seen);
     hashmap_deinit(&d.renames);
 }
@@ -399,7 +402,7 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
         if (!fn->is_function || !fn->body)
             continue;
         LabelCollectCtx lc = {.ctx = ctx, .owner_fn = fn};
-        ast_walk_1044(fn->body, collect_label_visit, &lc);
+        serialize_ast_walk(fn->body, collect_label_visit, &lc);
     }
 
     for (Obj *var = prog; var; var = var->next) {
@@ -425,7 +428,7 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
             if (!fn->is_function || !fn->body || fn == owner)
                 continue;
             VarRefCtx vr = {.var = var, .found = false};
-            ast_walk_1044(fn->body, var_ref_visit, &vr);
+            serialize_ast_walk(fn->body, var_ref_visit, &vr);
             if (vr.found) {
                 referenced_elsewhere = true;
                 break;
