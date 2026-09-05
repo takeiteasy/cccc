@@ -146,8 +146,23 @@ static const char *get_unary_op_str(NodeKind kind) {
 // what's underneath. Do not rely on operand position (new_add() canonicalizes
 // pointer-to-lhs, but set_checked_deref_bounds() in parse.c builds ND_ADD via
 // new_binary() directly, which does not canonicalize).
+// #1300: peels exactly ONE cast layer, not an unbounded
+// chain -- usual_arith_conv()'s own bogus pointer-typed wrap (the one this
+// helper exists to see past) is applied exactly once, directly around the
+// scaled offset/pointer operand. A `while` loop here also peels *underneath*
+// a second, genuinely meaningful cast the ORIGINAL guest source itself
+// wrote -- e.g. `(char *)an_integer_variable`, an explicit integer-to-
+// pointer conversion (pthread.c's own `(int *)((char *)once_control +
+// offsetof(pthread_once_t, __opaque))`, `once_control` a `long long`
+// parameter) -- revealing the *pre-cast* integer operand and misclassifying
+// a genuinely pointer-typed operand position as integer-ish, which fell
+// through to the plain-arithmetic branch below and printed the RHS's own
+// still-bogus pointer-typed cast unstripped: `(char *)x + (char *)(offset)`,
+// an "invalid operands" error on two `char *`s (confirmed: reproduces with
+// no cccc source involved at all, any `(char *)an_int_expr + offsetof(...)`
+// pattern under -c=native).
 static Node *strip_casts(Node *n) {
-    while (n && n->kind == ND_CAST && n->lhs)
+    if (n && n->kind == ND_CAST && n->lhs)
         n = n->lhs;
     return n;
 }

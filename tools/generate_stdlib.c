@@ -200,7 +200,16 @@ void generate_stdlib_reg_fn(void) {
     if (!headers)
         return;
 
-    Type *char_ptr_ty = MakePointer(GetType("char"));
+    // #1132 self-hosting spike: src/internal.h's own hand-written prototype
+    // spells both the return and the "header" param `const char *` --
+    // MakePointer(GetType("char")) here used to spell a plain `char *`
+    // instead, a genuine signature mismatch between this generated
+    // definition and internal.h's declaration that's always been latent
+    // (the VM never cross-checks a definition against a hand-written
+    // prototype the way a real C compiler does) and only surfaces once
+    // both texts reach the same host TU under -c=native self-hosting
+    // ("conflicting types for 'get_stdlib_reg_fn_name'").
+    Type *char_ptr_ty = MakePointer(MakeConst(GetType("char")));
     Obj  *fn          = MakeFunction("get_stdlib_reg_fn_name", char_ptr_ty);
     FunctionAddParam(fn, "header", char_ptr_ty);
 
@@ -349,8 +358,10 @@ void generate_stdlib_mark_headers(void) {
     if (!headers)
         return;
 
-    Type *int_ty      = GetType("int");
-    Type *char_ptr_ty = MakePointer(GetType("char"));
+    Type *int_ty = GetType("int");
+    // #1132: same const mismatch as generate_stdlib_reg_fn() just above --
+    // src/internal.h declares `const char *get_std_header_name(int i);`.
+    Type *char_ptr_ty = MakePointer(MakeConst(GetType("char")));
     Obj  *fn          = MakeFunction("get_std_header_name", char_ptr_ty);
     FunctionAddParam(fn, "i", int_ty);
 

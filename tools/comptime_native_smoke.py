@@ -2483,6 +2483,107 @@ def case_included_c_amalgam_external_linkage_1298(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_setjmp_transitive_header_1299(cccc: Path, tmp: str) -> bool:
+    print("  #1299: -c=native, an ordinary project header that itself "
+          "`#include`s <setjmp.h> (mirroring src/cccc.h's own shape, hit "
+          "during #1132's round-13 self-hosting spike). serialize_synth_setjmp_"
+          "decls() always emitted its own void*-shaped extern _setjmp/"
+          "_longjmp declarations for a TU using setjmp/longjmp -- correct "
+          "when <setjmp.h> is never otherwise reachable, but this header's "
+          "own inclusion is replayed as ONE line and the host re-reads its "
+          "real content straight off disk, following its nested #include "
+          "<setjmp.h> with no chance for the top-level suppression to "
+          "intervene -- so the real header's declarations and these synth "
+          "ones both reached the output, a host 'conflicting types for "
+          "_setjmp' error. Asserts VM 42 -> native 42 -- "
+          "tests/test_serialize_setjmp_transitive_1299.c is the -m shape "
+          "half")
+    hdr = Path(tmp) / "setjmp_transitive_1299_smoke.h"
+    src = Path(tmp) / "setjmp_transitive_1299_smoke.c"
+    write(hdr,
+          "#include <setjmp.h>\n"
+          "typedef struct { int x; } setjmp_transitive_1299_smoke_dummy;\n")
+    write(src,
+          '#include "setjmp_transitive_1299_smoke.h"\n'
+          "static jmp_buf env;\n"
+          "static void unwind(void) { longjmp(env, 42); }\n"
+          "int main(void) {\n"
+          "    int rv = setjmp(env);\n"
+          "    if (rv == 0) { unwind(); return 1; }\n"
+          "    return rv;\n"
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "setjmp_transitive_1299_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_ptr_int_cast_offsetof_1300(cccc: Path, tmp: str) -> bool:
+    print("  #1300: -c=native, `(char *)an_integer_variable + offsetof(...)` "
+          "(mirroring src/stdlib/pthread.c's own wrap_pthread_once(): "
+          "`(int *)((char *)once_control + offsetof(pthread_once_t, "
+          "__opaque))`, once_control a `long long` parameter). strip_casts() "
+          "(serialize_expr.c) used an unbounded `while` loop peeling past "
+          "usual_arith_conv()'s own single bogus pointer-typed wrap around "
+          "the scaled offset -- straight through a second, genuinely "
+          "meaningful cast the guest source itself wrote, revealing the "
+          "pre-cast *integer* operand and misclassifying a genuinely "
+          "pointer-typed operand as integer-ish, which fell through to "
+          "plain arithmetic and printed the RHS's own still-bogus pointer-"
+          "typed cast unstripped: `(char *)x + (char *)(offset)`, a host "
+          "'invalid operands' error (pointer + pointer). Fixed by peeling "
+          "exactly one cast layer. Asserts VM 42 -> native 42 -- a host "
+          "compile failure no -m shape assertion alone can see")
+    src = Path(tmp) / "ptr_int_cast_offsetof_1300_smoke.c"
+    write(src,
+          "#include <stddef.h>\n"
+          "typedef struct { long sig; char opaque[8]; } "
+          "ptr_int_cast_1300_smoke_t;\n"
+          "static int compute(long long base) {\n"
+          "    int *slot = (int *)((char *)base + "
+          "offsetof(ptr_int_cast_1300_smoke_t, opaque));\n"
+          "    return *slot;\n"
+          "}\n"
+          "int main(void) {\n"
+          "    ptr_int_cast_1300_smoke_t v = {0, {42, 0, 0, 0, 0, 0, 0, 0}};\n"
+          "    return compute((long long)&v);\n"
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "ptr_int_cast_offsetof_1300_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool:
     print("  80: -c=native, a header-defined static inline function shared "
           "by two TUs, invoked with one input file as an absolute path and "
@@ -8773,6 +8874,8 @@ CASES = [
     case_hostowned_empty_init_no_dangling_comma_1289,
     case_setjmp_multi_tu_builtin_identity,
     case_included_c_amalgam_external_linkage_1298,
+    case_setjmp_transitive_header_1299,
+    case_ptr_int_cast_offsetof_1300,
 ]
 
 
@@ -8780,7 +8883,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

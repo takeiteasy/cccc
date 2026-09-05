@@ -382,3 +382,49 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   all). Surfaced by the self-hosting spike (a two-plus-file `-c=native`
   compile is the first thing to exercise more than one TU calling any of
   these builtins).
+- Fixed: an ordinary external-linkage function *defined* in a captured,
+  quoted `#include` target that is itself replayed (a deliberate `.c`
+  textual amalgamation, e.g. `#include "ops.c"`) was re-serialized on top
+  of the replayed text under `-c=native`/`-m` — a host `redefinition`
+  error. `function_is_header_supplied()` (`src/serialize_program.c`) only
+  ever suppressed a `static` definition reached this way; now a captured,
+  replayed `.c` file's own non-static functions are suppressed too,
+  gated on both a plain `.c`-extension check and `path_is_captured()` — a
+  positive "does this file's text really reach the host compiler" test,
+  not a bare file-identity guess. A vendored single-header library built
+  via an `IMPLEMENTATION`-style macro in one TU is deliberately not
+  covered (its declarator names are macro-token-pasted, which needs a
+  separate `Token` spelling-vs-expansion-location split). Surfaced by the
+  self-hosting spike (`src/vm.c`'s own `#include "ops.c"` amalgamation).
+- Fixed: the fix above missed a case where the external-linkage function is
+  reached by another translation unit purely through a shared header's own
+  bodiless prototype (never re-including the `.c` amalgamation itself) —
+  `cc_link_progs` merges such a function across every TU that declares it,
+  and the merged declaration's own representative token can end up tracing
+  to the header, not the amalgamation, so the suppression never fired.
+  `function_is_header_supplied()` now also consults the function body's own
+  token (which always traces to the real defining file) as a fallback.
+  Surfaced by the self-hosting spike (`src/internal.h`'s own bodiless
+  prototypes for several of `src/vm.c`'s `ops.c`-defined functions, reached
+  from other translation units).
+- Fixed: a real `<setjmp.h>` reachable through some *other* captured
+  header's own `#include` chain (rather than a translation unit's own,
+  always-suppressed top-level `#include <setjmp.h>`) collided with
+  `-c=native`'s own synthesized `extern _setjmp`/`_longjmp`/`sigsetjmp`/
+  `siglongjmp` declarations — a host `conflicting types` error, since the
+  real header's declarations and the synthesized ones disagree on
+  parameter type. The synthesized declarations are now skipped whenever
+  this is detected. Surfaced by the self-hosting spike (`src/cccc.h`'s own
+  `#include <setjmp.h>`, needed for the compiler's own internal error
+  recovery, reached this way from nearly every translation unit).
+- Fixed: `(char *)an_integer_expression + offsetof(...)` (or the
+  equivalent with the pointer and offset swapped) under `-c=native`/`-m`
+  turned into a `pointer + pointer` expression — an "invalid operands"
+  host compile error — whenever the pointer side carried an explicit,
+  meaningful cast from a non-pointer type written by the guest source
+  itself (rather than a cast the serializer's own arithmetic-conversion
+  pass had added). The serializer's internal cast-peeling helper now peels
+  exactly the one wrapping cast it's meant to see past, not an unbounded
+  chain. Surfaced by the self-hosting spike
+  (`wrap_pthread_once()`'s `(int *)((char *)once_control +
+  offsetof(pthread_once_t, __opaque))`).

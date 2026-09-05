@@ -554,6 +554,45 @@ static void mark_include_target_captured(VirtualMachine *vm, const char *path) {
                 cc_canonical_path_key(vm, path), (void *)1);
 }
 
+// #1299: same suffix-match contract as path_basename_is() (serialize_type.c)
+// -- duplicated locally (this file has no other reason to depend on the
+// serializer) rather than shared.
+static bool path_ends_in_setjmp_h(const char *path) {
+    if (!path)
+        return false;
+    static const char suf[] = "setjmp.h";
+    size_t            plen = strlen(path), slen = sizeof(suf) - 1;
+    if (plen < slen || strcmp(path + plen - slen, suf) != 0)
+        return false;
+    return plen == slen || path[plen - slen - 1] == '/';
+}
+
+// #1299: wraps mark_include_target_captured() for the four ac_transitive_
+// capture call sites below only -- deliberately NOT the ac_include_line
+// (top-level, #896) ones. Both call the same underlying mark, which just
+// records "this file's text really reaches the host compiler" with no
+// record of *how* -- insufficient for serialize_synth_setjmp_decls()
+// (serialize_program.c), which needs to know specifically whether a real
+// <setjmp.h> is reachable through a chain the top-level setjmp.h
+// suppression (cc_serialize_program's own directive-replay loop) does NOT
+// cover: a captured, ordinary project header that itself contains
+// `#include <setjmp.h>` (src/cccc.h is exactly this shape, found via
+// #1299) -- that header's own #include is replayed as
+// ONE line, and the host re-reads its real, unmodified content straight off
+// disk, following its nested #include <setjmp.h> with no chance for CCCC's
+// per-line suppression to intervene. A *top-level* `#include <setjmp.h>`
+// (ac_include_line's own branch) is always suppressed at replay time
+// regardless of this mark, so tracking it the same way would be a false
+// positive -- confirmed: it broke tests/test_serialize_setjmp_1054.c and
+// three siblings ("use of undeclared identifier '_setjmp'") before this was
+// split out from the plain mark.
+static void mark_transitive_include_target(VirtualMachine *vm,
+                                           const char     *path) {
+    mark_include_target_captured(vm, path);
+    if (path_ends_in_setjmp_h(path))
+        vm->compiler.setjmp_h_reached_transitively = true;
+}
+
 // #1143: mark `dir` (one of vm->compiler.include_paths/system_include_paths'
 // own stored strings -- cc_include()/cc_system_include(), src/vm.c) as an
 // entry that resolved one of CCCC's own bundled std headers
@@ -6010,7 +6049,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // case) still stops the closure exactly where it
                         // did before.
                         if (ac_transitive_capture)
-                            mark_include_target_captured(vm, path);
+                            mark_transitive_include_target(vm, path);
                         tok = include_file(vm, tok, path, start->next->next,
                                            filename,
                                            start->file->is_system_header);
@@ -6047,7 +6086,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                             mark_cccc_bundled_file(
                                 vm, embedded_header_key(vm, resolved));
                             if (ac_transitive_capture) // #1297
-                                mark_include_target_captured(
+                                mark_transitive_include_target(
                                     vm, embedded_header_key(vm, resolved));
                             tok = include_embedded_header(vm, tok, resolved,
                                                           embedded_src,
@@ -6137,7 +6176,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         mark_cccc_bundled_file(
                             vm, embedded_header_key(vm, filename));
                         if (ac_transitive_capture) // #1297
-                            mark_include_target_captured(
+                            mark_transitive_include_target(
                                 vm, embedded_header_key(vm, filename));
                         tok = include_embedded_header(
                             vm, tok, filename, embedded_src, start->next->next);
@@ -6179,7 +6218,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // standard header. See that branch's own comment for the
                 // full rationale.
                 if (ac_transitive_capture)
-                    mark_include_target_captured(vm, path ? path : filename);
+                    mark_transitive_include_target(vm, path ? path : filename);
                 tok = include_file(vm, tok, path ? path : filename,
                                    start->next->next, filename,
                                    !is_dquote || found_in_sys);

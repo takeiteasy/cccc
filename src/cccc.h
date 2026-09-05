@@ -3896,6 +3896,18 @@ typedef struct Compiler {
     // mark_include_target_captured() in preprocess.c.
     HashMap captured_include_targets;
 
+    // #1299: true once some ac_transitive_capture-reached header (a
+    // captured, ordinary project header that itself contains `#include
+    // <setjmp.h>`, e.g. src/cccc.h) has been seen this run -- narrower than
+    // (and NOT derivable from) captured_include_targets above, which also
+    // records a plain top-level `#include <setjmp.h>` that
+    // cc_serialize_program's own directive-replay loop always suppresses
+    // regardless. Set by mark_transitive_include_target() (preprocess.c),
+    // read by serialize_synth_setjmp_decls() (serialize_program.c) to skip
+    // its own void*-shaped extern declarations when the real ones are
+    // already reachable this way.
+    bool setjmp_h_reached_transitively;
+
     // #1050: Obj -> host-header records for libc functions a comptime
     // reflection-API builder called (e.g. memcpy()/strlen() via Serialize()
     // or the Memcpy()/Strlen()/Strcmp() macros) without the TU #include-ing

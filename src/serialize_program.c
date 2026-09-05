@@ -1722,7 +1722,29 @@ static bool prog_calls_any_named(Obj *prog, const char **family, int n) {
 
 static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
                                          Obj *prog) {
-    (void)vm;
+    // #1299: vm->compiler.setjmp_h_reached_transitively
+    // (preprocess.c's mark_transitive_include_target(), set only for the
+    // ac_transitive_capture case -- see that function's own comment) means a
+    // real <setjmp.h> is already reachable in this TU through some OTHER
+    // captured header's own #include chain: a captured project header H
+    // that itself contains `#include <setjmp.h>` (src/cccc.h is exactly
+    // this shape) has its own inclusion replayed as ONE line
+    // (`#include "H.h"`), and the host re-reads H.h's real, unmodified
+    // content straight off disk, following its own #include <setjmp.h>
+    // with no chance for the setjmp.h suppression in cc_serialize_program's
+    // directive-replay loop to intervene -- that suppression only filters
+    // lines CCCC itself chooses to re-emit one at a time. When it's
+    // reachable this way, the host already has the real, correctly-shaped
+    // _setjmp/_longjmp/sigsetjmp/siglongjmp declarations in scope --
+    // emitting these void*-shaped ones on top is a hard "conflicting types"
+    // error (confirmed during the spike). Every call site (serialize_expr.c's
+    // ND_FUNCALL case) already passes `(void *)env` -- a void* argument
+    // converts implicitly to any real jmp_buf/sigjmp_buf parameter type, so
+    // skipping the `extern`s below needs no other change -- except the
+    // `__cccc_sigsetjmp` macro just below, which is CCCC's own invented name
+    // (not a real libc symbol on either platform) and so is never supplied
+    // by the real header; that still needs defining either way.
+    bool skip_externs = vm->compiler.setjmp_h_reached_transitively;
     // The plain/POSIX family lowers to `_setjmp`/`_longjmp` -- plain
     // `extern`-declared functions on every supported host (unlike `setjmp`, a
     // macro on glibc). `returns_twice` is load-bearing, not cosmetic: a caller
@@ -1731,7 +1753,7 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
     // without the attribute the host cc has no reason to treat the call as a
     // multi-entry point.
     const char *plain[4] = {"setjmp", "longjmp", "_setjmp", "_longjmp"};
-    if (prog_calls_any_named(prog, plain, 4)) {
+    if (!skip_externs && prog_calls_any_named(prog, plain, 4)) {
         fprintf(f, "extern int _setjmp(void *) __attribute__((returns_twice));"
                    "\n");
         fprintf(f, "extern void _longjmp(void *, int) "
@@ -1746,16 +1768,19 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
     const char *sig[2] = {"sigsetjmp", "siglongjmp"};
     if (prog_calls_any_named(prog, sig, 2)) {
         fprintf(f, "#if defined(__linux__)\n");
-        fprintf(f, "extern int __sigsetjmp(void *, int) "
-                   "__attribute__((returns_twice));\n");
+        if (!skip_externs)
+            fprintf(f, "extern int __sigsetjmp(void *, int) "
+                       "__attribute__((returns_twice));\n");
         fprintf(f, "#define __cccc_sigsetjmp __sigsetjmp\n");
         fprintf(f, "#else\n");
-        fprintf(f, "extern int sigsetjmp(void *, int) "
-                   "__attribute__((returns_twice));\n");
+        if (!skip_externs)
+            fprintf(f, "extern int sigsetjmp(void *, int) "
+                       "__attribute__((returns_twice));\n");
         fprintf(f, "#define __cccc_sigsetjmp sigsetjmp\n");
         fprintf(f, "#endif\n");
-        fprintf(f, "extern void siglongjmp(void *, int) "
-                   "__attribute__((noreturn));\n\n");
+        if (!skip_externs)
+            fprintf(f, "extern void siglongjmp(void *, int) "
+                       "__attribute__((noreturn));\n\n");
     }
 }
 
@@ -3063,9 +3088,25 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     // global-block-splice #1034 case -- whose Objs trace to some
     // non-command-line-input file for unrelated reasons and are not actually
     // header-supplied).
-    if (!obj->is_static && !(path_is_c_source_file(t->file->name) &&
-                             path_is_captured(ctx, t->file->name)))
-        return false;
+    if (!obj->is_static) {
+        // #1298 (residual): cc_link_progs (#957) merges an external-
+        // linkage Obj across every TU that so much as declares it (a
+        // shared header's own bodiless prototype, reached from an
+        // unrelated TU, counts) -- obj->tok, "the" representative
+        // declaring token, can end up pointing at whichever TU's
+        // declaration the linker kept last, not necessarily the TU whose
+        // #include actually supplies the body's own text. obj->body's own
+        // token always traces to the file that really contains the
+        // definition, so it's consulted too when obj->tok's own file
+        // doesn't already qualify.
+        bool from_tok = t->file->name && path_is_c_source_file(t->file->name) &&
+                        path_is_captured(ctx, t->file->name);
+        bool from_body = !from_tok && obj->body->tok && obj->body->tok->file &&
+                         path_is_c_source_file(obj->body->tok->file->name) &&
+                         path_is_captured(ctx, obj->body->tok->file->name);
+        if (!from_tok && !from_body)
+            return false;
+    }
     return !ctx->generated_only || path_is_captured(ctx, t->file->name);
 }
 
