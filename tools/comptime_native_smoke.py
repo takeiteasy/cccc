@@ -3199,6 +3199,61 @@ def case_macro_declared_global_1303(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_assert_ternary_comma_1305(cccc: Path, tmp: str) -> bool:
+    # NB: the pre-existing case_shared_header_unrelated_define_1305 etc. carry
+    # an *informal* #1305-#1308 tag from #1132's own numbering convention and
+    # are really part of the #1304 #include-dedup family. THIS case is the real
+    # sr.ht ticket #1305: the self-hosting spike's stage-(c) SIGABRT.
+    print("  #1305: -c=native, serialize_expr.c's ND_COND (ternary) case "
+          "serialized all three operands at parent precedence 0, so a comma- "
+          "or assignment-expression operand was never parenthesized -- but "
+          "C's grammar makes the condition a logical-OR-expression and the "
+          "else-branch a conditional-expression, both tighter than `,`/`=`. "
+          "The bundled <assert.h> `((e) ? (void)0 : (puts(...), abort()))` "
+          "serialized as `e ? (void)0 : puts(...) , abort()`, i.e. "
+          "`(e ? (void)0 : puts(...)) , abort()` -- abort() unconditionally, "
+          "so every passing assert() aborted. Found via #1132's self-hosting "
+          "spike: the compiled compiler SIGABRT'd on the first hashmap "
+          "rehash (hashmap.c has cccc's only two assert() sites). Asserts "
+          "VM 42 -> native 42; pre-fix the native binary aborts (exit 134) "
+          "on a *passing* assert, which no -m shape assertion can see")
+    src = Path(tmp) / "assert_ternary_comma_1305_smoke.c"
+    write(src,
+          "#include <assert.h>\n"
+          "static int checked_add(int a, int b) {\n"
+          "    assert(a >= 0);\n"          # passing assert -- must not abort
+          "    assert(b >= 0);\n"
+          "    int s = a + b;\n"
+          "    assert(s == a + b);\n"
+          "    return s;\n"
+          "}\n"
+          "int main(void) {\n"
+          "    int c = 0, e = 0;\n"
+          "    int r = (c = 1, c + 1) ? (c + 10) : (e = 99, e + 1);\n"
+          "    if (r != 11 || e != 0) return 1;\n"
+          "    return checked_add(20, 22) - 20 + 20;\n"  # 42
+          "}\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "assert_ternary_comma_1305_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_macro_declared_fn_bodyless_1303(cccc: Path, tmp: str) -> bool:
     print("  #1303: -c=native, bodyless_decl_from_input_or_bundled()'s own "
           "version of #1301's function fix. A captured header's macro that "
@@ -9537,6 +9592,7 @@ CASES = [
     case_local_shadows_global_1302,
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
+    case_assert_ternary_comma_1305,
     case_macro_declared_global_1303,
     case_macro_declared_fn_bodyless_1303,
     case_vendored_multi_tu_include_1304,

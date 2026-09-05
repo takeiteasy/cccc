@@ -2034,12 +2034,30 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             }
             // #1123: a wide-_BitInt cond can't appear bare in `?:` -- see
             // serialize_wide_bitint_truth's own comment.
+            //
+            // Precedence of the three operands is NOT 0. In C's grammar the
+            // condition is a logical-OR-expression and the else-branch a
+            // conditional-expression, so a comma or assignment expression in
+            // either position must be parenthesized -- `a ? b : (c, d)` and
+            // `(a = b) ? c : d`. Passing 0 (as the middle operand, a full
+            // `expression`, legitimately may) dropped the parens the bundled
+            // <assert.h> macro relies on: `((expr) ? (void)0 : (puts(...),
+            // abort()))` serialized as `expr ? (void)0 : puts(...) , abort()`,
+            // which re-parses as `(expr ? (void)0 : puts(...)) , abort()` --
+            // abort() unconditionally. (Found via #1132's self-hosting spike:
+            // every assert() in the compiled compiler fired on the first
+            // hashmap rehash.) get_precedence(ND_COND) forces parens on
+            // anything looser than `?:` itself (comma, assignment) while
+            // leaving a right-associated nested ternary in the else-branch
+            // bare; +1 additionally parenthesizes a nested ternary sitting in
+            // the condition.
             if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
-                serialize_expr(f, vm, ctx, node->cond, 0);
+                serialize_expr(f, vm, ctx, node->cond,
+                               get_precedence(ND_COND) + 1);
             fprintf(f, " ? ");
             serialize_expr(f, vm, ctx, node->then, 0);
             fprintf(f, " : ");
-            serialize_expr(f, vm, ctx, node->els, 0);
+            serialize_expr(f, vm, ctx, node->els, get_precedence(ND_COND));
             break;
 
         case ND_FUNCALL:
