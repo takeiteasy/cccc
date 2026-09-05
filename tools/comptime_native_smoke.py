@@ -2547,6 +2547,125 @@ def case_vendored_single_header_1301(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_vendored_multi_tu_include_1304(cccc: Path, tmp: str) -> bool:
+    print("  #1304: -c=native, a vendored single-header library #include'd "
+          "with IDENTICAL text by two TUs -- only one of them (not "
+          "necessarily the one captured first) defines the "
+          "IMPLEMENTATION-style macro ahead of its own #include. "
+          "push_emit_directive()'s (src/preprocess.c) identical-line dedup "
+          "used to keep whichever TU's #include was captured first, "
+          "permanently -- if that was the non-defining TU, the other TU's "
+          "own `#define ..._IMPLEMENTATION` line, captured afterwards, was "
+          "replayed too late to configure the header, and the function "
+          "body never reached the host compiler's output ('undefined "
+          "symbol' at link time, confirmed pre-fix -- #1301's own "
+          "function_is_header_supplied() suppression assumes the replayed "
+          "#include supplies the body, turning this into a silent link "
+          "failure rather than a redefinition error). Fixed by relocating "
+          "a dedup hit to the LAST TU's own #include position whenever a "
+          "#define/#undef was captured in between. The non-defining TU is "
+          "listed FIRST on the command line here, so the dedup hit lands "
+          "on it and exercises the relocation directly. Asserts VM 42 -> "
+          "native 42 -- the link failure this fixes is invisible to a -m "
+          "shape assertion alone")
+    lib_src = Path(tmp) / "vendored_1304_smoke_lib.h"
+    a_src   = Path(tmp) / "vendored_1304_smoke_a.c"  # non-IMPLEMENTATION TU
+    b_src   = Path(tmp) / "vendored_1304_smoke_b.c"  # IMPLEMENTATION TU
+    write(lib_src,
+          "#ifndef VENDORED_1304_SMOKE_LIB_H\n"
+          "#define VENDORED_1304_SMOKE_LIB_H\n"
+          "#define V1304_SMOKE_DECORATE(name) v1304_smoke_##name\n"
+          "int V1304_SMOKE_DECORATE(add)(int x);\n"
+          "#ifdef VENDORED_1304_SMOKE_IMPLEMENTATION\n"
+          "int V1304_SMOKE_DECORATE(add)(int x) { return x + 1; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#include "vendored_1304_smoke_lib.h"\n'
+          "int vendored_1304_smoke_call_a(void) { "
+          "return v1304_smoke_add(20); }\n")
+    write(b_src,
+          "#define VENDORED_1304_SMOKE_IMPLEMENTATION\n"
+          '#include "vendored_1304_smoke_lib.h"\n'
+          "int vendored_1304_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return vendored_1304_smoke_call_a() + v1304_smoke_add(20); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "vendored_1304_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_vendored_multi_tu_include_spelling_1304(cccc: Path, tmp: str) -> bool:
+    print("  #1304 (spelling variant): the same hazard as "
+          "case_vendored_multi_tu_include_1304, but the two TUs spell the "
+          "#include differently (\"lib.h\" vs \"./lib.h\") -- the push-time "
+          "identical-text dedup never sees a duplicate at all here, so this "
+          "exercises the OTHER route into the same bug: the #1292 "
+          "canonical-resolved-path dedup in cc_serialize_program()'s "
+          "replay loop (src/serialize_program.c), which also used to keep "
+          "the first-captured occurrence unconditionally. Asserts VM 42 -> "
+          "native 42")
+    lib_src = Path(tmp) / "vendored_1304_smoke_lib2.h"
+    a_src   = Path(tmp) / "vendored_1304_smoke_a2.c"  # non-IMPLEMENTATION TU
+    b_src   = Path(tmp) / "vendored_1304_smoke_b2.c"  # IMPLEMENTATION TU
+    write(lib_src,
+          "#ifndef VENDORED_1304_SMOKE_LIB2_H\n"
+          "#define VENDORED_1304_SMOKE_LIB2_H\n"
+          "#define V1304_SMOKE2_DECORATE(name) v1304_smoke2_##name\n"
+          "int V1304_SMOKE2_DECORATE(add)(int x);\n"
+          "#ifdef VENDORED_1304_SMOKE2_IMPLEMENTATION\n"
+          "int V1304_SMOKE2_DECORATE(add)(int x) { return x + 1; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#include "./vendored_1304_smoke_lib2.h"\n'
+          "int vendored_1304_smoke2_call_a(void) { "
+          "return v1304_smoke2_add(20); }\n")
+    write(b_src,
+          "#define VENDORED_1304_SMOKE2_IMPLEMENTATION\n"
+          '#include "vendored_1304_smoke_lib2.h"\n'
+          "int vendored_1304_smoke2_call_a(void);\n"
+          "int main(void) { "
+          "return vendored_1304_smoke2_call_a() + v1304_smoke2_add(20); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "vendored_1304_smoke_out2"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_local_shadows_global_1302(cccc: Path, tmp: str) -> bool:
     print("  #1302: -c=native, a hoisted block-scoped local whose name "
           "collides with a global/typedef the same function still "
@@ -9120,6 +9239,8 @@ CASES = [
     case_ptr_int_cast_offsetof_1300,
     case_macro_declared_global_1303,
     case_macro_declared_fn_bodyless_1303,
+    case_vendored_multi_tu_include_1304,
+    case_vendored_multi_tu_include_spelling_1304,
 ]
 
 
@@ -9127,7 +9248,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302/#1303)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302/#1303/#1304)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

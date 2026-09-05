@@ -3316,6 +3316,30 @@ static bool line_is_conditional_directive(const char *line) {
     return conditional_directive_kind(line) != COND_NONE;
 }
 
+// #1304: true if `line` (a raw captured directive line) is a `#define` or
+// `#undef` -- same two-keyword textual test as preprocess.c's identically
+// named helper (push_emit_directive's own #1304 fix), duplicated here rather
+// than shared across the two files. Used below to decide which of several
+// TUs' captured `#include` lines for one header should survive the
+// #1292 canonical-path dedup.
+static bool line_is_define_or_undef_directive(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    static const char *const kw[] = {"define", "undef"};
+    for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+        size_t len = strlen(kw[i]);
+        if (strncmp(p, kw[i], len) == 0) {
+            char c = p[len];
+            if (c == '\0' || c == ' ' || c == '\t')
+                return true;
+        }
+    }
+    return false;
+}
+
 // #1264: true if `line` (a raw captured directive line) is an `#include`.
 // The line is already spacing-normalized by normalize_include_operand_spacing
 // in preprocess.c, so identical includes compare equal as plain strings.
@@ -4724,15 +4748,47 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // (cc_canonical_path_key(), shared with path_is_captured()'s memo
     // above) rather than the literal `resolved` string, so the two
     // spellings collapse to one key.
-    HashMap emitted_resolved_paths = {0};
+    //
+    // #1304: which OCCURRENCE survives matters too, for the identical
+    // reason push_emit_directive's own #1304 fix (preprocess.c) applies to
+    // an identically-spelled duplicate -- a vendored single-header
+    // library's `#include` reached via two different spellings from two
+    // TUs (one spelling per TU's own `#define FOO_IMPLEMENTATION` ahead of
+    // its own #include) must keep the LAST such occurrence whenever a
+    // #define/#undef was captured in between, so every TU's own
+    // configuration macro is in effect once the survivor is replayed;
+    // first-wins is kept (as before #1304) whenever nothing intervenes, so
+    // this is a no-op for every existing single-spelling program. One
+    // forward pass: `candidate_index` tracks the chosen index per key seen
+    // so far, moved forward only past a #define/#undef line.
+    HashMap candidate_index = {0}; // canonical path key -> chosen index + 1
+    {
+        int last_define_idx = -1;
+        for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
+            char *line = vm->compiler.emit_directives.data[i];
+            if (line_is_define_or_undef_directive(line)) {
+                last_define_idx = i;
+                continue;
+            }
+            char *resolved =
+                hashmap_get(&vm->compiler.emit_include_paths, line);
+            if (!resolved)
+                continue;
+            const char *key      = cc_canonical_path_key(vm, resolved);
+            void       *existing = hashmap_get(&candidate_index, key);
+            if (!existing || last_define_idx > (int)(intptr_t)existing - 1)
+                hashmap_put(&candidate_index, key, (void *)(intptr_t)(i + 1));
+        }
+    }
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
         if (resolved) {
-            const char *key = cc_canonical_path_key(vm, resolved);
-            if (hashmap_get(&emitted_resolved_paths, key))
+            const char *key        = cc_canonical_path_key(vm, resolved);
+            void       *chosen     = hashmap_get(&candidate_index, key);
+            int         chosen_idx = chosen ? (int)(intptr_t)chosen - 1 : i;
+            if (chosen_idx != i)
                 continue;
-            hashmap_put(&emitted_resolved_paths, key, (void *)1);
         }
         // --emit-cccc: re-emit cccc-only includes too -- the caller has
         // opted into dialect-fidelity output, so a downstream reader is

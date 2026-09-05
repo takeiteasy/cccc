@@ -339,14 +339,69 @@ static void track_brace_depth(int *depth, Token *tok) {
         (*depth)--;
 }
 
+// #1304: true if `line` (a raw captured directive line, `#...`) is a
+// `#define` or `#undef` -- the same two-keyword textual test
+// serialize_program.c's line_macro_name_is_non_ascii()/
+// line_is_threads_h_private_alias_directive() already apply to a flattened
+// directive line, duplicated here rather than shared across the two files
+// (push_emit_directive below is the only caller, and the match is two
+// lines). See push_emit_directive's own comment for why this matters.
+static bool line_is_define_or_undef_directive(const char *line) {
+    if (!line || line[0] != '#')
+        return false;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    static const char *const kw[] = {"define", "undef"};
+    for (size_t i = 0; i < sizeof(kw) / sizeof(kw[0]); i++) {
+        size_t len = strlen(kw[i]);
+        if (strncmp(p, kw[i], len) == 0) {
+            char c = p[len];
+            if (c == '\0' || c == ' ' || c == '\t')
+                return true;
+        }
+    }
+    return false;
+}
+
 static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
     if (!line)
         return;
     StringArray *arr = &vm->compiler.emit_directives;
     if (dedup) {
-        for (int i = 0; i < arr->len; i++)
-            if (strcmp(arr->data[i], line) == 0)
-                return;
+        for (int i = 0; i < arr->len; i++) {
+            if (strcmp(arr->data[i], line) != 0)
+                continue;
+            // #1304: a later TU capturing the identical #include line text
+            // (e.g. a vendored single-header library's own `#include
+            // "lib.h"`, re-included by a second TU that never repeats any
+            // other directive) used to be a pure no-op here -- the first
+            // TU's position always won, permanently. -c=native/-m replay
+            // every captured directive into ONE accumulated macro
+            // namespace, so if any #define/#undef was captured in between
+            // (typically that second TU's own `#define FOO_IMPLEMENTATION`
+            // ahead of its #include), the surviving line's original
+            // position no longer sees that TU's own configuration macro --
+            // the body-defining #define ends up replayed AFTER the #include
+            // it was meant to configure. Relocate the surviving entry to
+            // the end (this TU's own position) instead, so every TU's own
+            // #define/#undef capture prior to its own #include of this
+            // header is in effect by the time it's replayed. A dedup hit
+            // with nothing but ordinary lines in between is unaffected --
+            // moving it would be observable for no reason, so it stays put.
+            for (int j = i + 1; j < arr->len; j++) {
+                if (!line_is_define_or_undef_directive(arr->data[j]))
+                    continue;
+                if (i != arr->len - 1) {
+                    char *existing = arr->data[i];
+                    memmove(&arr->data[i], &arr->data[i + 1],
+                            (size_t)(arr->len - i - 1) * sizeof(char *));
+                    arr->data[arr->len - 1] = existing;
+                }
+                break;
+            }
+            return;
+        }
     }
     strarray_push(arr, strdup(line));
 }

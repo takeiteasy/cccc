@@ -172,6 +172,23 @@ real host compiler, so header handling shifts:
   macro that only *declares* a function, or that *defines* a global, when
   invoked elsewhere is likewise resolved by where it is invoked, not by
   where the producing macro happens to be written.
+- When several TUs `#include` the *same* vendored single-header library,
+  only one of the replayed lines survives — the rest are the ordinary
+  `#include` dedup any repeated header goes through — but which one
+  survives matters here, unlike for a plain header: only the TU that
+  defines the `IMPLEMENTATION`-style macro *ahead of* its own `#include`
+  actually supplies the function bodies, and the replayed output shares one
+  accumulated macro namespace across every TU. The surviving line is placed
+  at the position of the **last** TU's own `#include` whenever some other
+  captured `#define`/`#undef` line sits between two TUs' occurrences of it —
+  so every TU's own configuration macro is in effect once the header is
+  replayed — and left at the first occurrence otherwise, which is every
+  ordinary (non-configuring) repeated `#include`. One shape this does not
+  cover: an *earlier* TU that captures a `#define`/`#undef` colliding with
+  the header's own configuration macro *after* its own `#include` line
+  would see that macro applied a second time, ahead of the header, when it
+  wasn't meant to configure that inclusion at all — a pathological ordering
+  no real vendored-header usage produces.
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
