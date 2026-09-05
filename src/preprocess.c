@@ -5982,23 +5982,35 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // the *host's* fcntl.h, which never declares
                         // close()). get_std_header() identifies the target
                         // by name, same test the on-disk branch below uses.
-                        if (get_std_header(filename)) {
+                        if (get_std_header(filename))
                             mark_cccc_bundled_file(vm, path);
-                            // #1297: a *user* (non-bundled) header quote-
-                            // #including a CCCC bundled header by relative
-                            // path -- the includer will be re-opened by the
-                            // host compiler through the outer replayed
-                            // #include, and this bundled header's own text
-                            // reaches it the same way, so it is captured
-                            // too. Must run after mark_cccc_bundled_file()
-                            // above, whose result ac_transitive_capture's
-                            // own gate already excludes -- if this file
-                            // were itself bundled/cccc-only,
-                            // ac_transitive_capture would never have been
-                            // set for a directive nested inside it.
-                            if (ac_transitive_capture)
-                                mark_include_target_captured(vm, path);
-                        }
+                        // #1288: the mark below used to sit inside the
+                        // get_std_header() branch above (#1297), so the
+                        // transitive-capture closure only ever grew one
+                        // bundled hop past a captured includer -- a
+                        // *non-bundled* target reached this way (e.g. a
+                        // user header's own `#include "cccc.h"`, itself
+                        // reached through an already-captured header) was
+                        // never added, so a CCCC bundled header *that*
+                        // header goes on to #include (e.g. cccc.h's own
+                        // `#include <string.h>`) never saw
+                        // ac_transitive_capture set for its own directive
+                        // and stayed uncaptured -- the #901/#1151
+                        // fallback-prototype pass then re-declared
+                        // memcpy/memset/strlen/etc even though the
+                        // replayed #include chain already supplies them
+                        // (#1288). Marking every transitively-reached
+                        // target here, bundled or not, lets the closure
+                        // continue through an arbitrary run of ordinary
+                        // headers before it reaches a bundled one; the
+                        // ac_transitive_capture gate itself still requires
+                        // *this* directive's own includer to be
+                        // non-bundled/non-cccc-only, so a bundled ->
+                        // bundled chain (#1096's own fcntl.h -> "unistd.h"
+                        // case) still stops the closure exactly where it
+                        // did before.
+                        if (ac_transitive_capture)
+                            mark_include_target_captured(vm, path);
                         tok = include_file(vm, tok, path, start->next->next,
                                            filename,
                                            start->file->is_system_header);
@@ -6157,12 +6169,17 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // regardless of which of the two resolution paths a given
                 // invocation took (this on-disk path is what the test
                 // harness's standard -I./include invocation always uses).
-                if (get_std_header(filename)) {
+                if (get_std_header(filename))
                     mark_cccc_bundled_file(vm, path ? path : filename);
-                    if (ac_transitive_capture) // #1297
-                        mark_include_target_captured(vm,
-                                                     path ? path : filename);
-                }
+                // #1288: same widening as the quote-relative on-disk branch
+                // above -- mark every transitively-reached target, not just
+                // a bundled one, so the capture closure can pass through an
+                // arbitrary run of ordinary (non-bundled) `-I`-resolved
+                // headers before it reaches CCCC's own bundled copy of a
+                // standard header. See that branch's own comment for the
+                // full rationale.
+                if (ac_transitive_capture)
+                    mark_include_target_captured(vm, path ? path : filename);
                 tok = include_file(vm, tok, path ? path : filename,
                                    start->next->next, filename,
                                    !is_dquote || found_in_sys);

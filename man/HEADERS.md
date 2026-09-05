@@ -129,11 +129,13 @@ real host compiler, so header handling shifts:
   does not, and `-c=generated` reports a compile error rather than writing
   C nothing declares the type in. See
   [MACROS.md](MACROS.md#emit-directives-and-includes-in-generated-output).
-- A CCCC bundled header reached through a captured, ordinary (non-bundled)
-  header's own `#include` is treated as captured too — a user header's own
-  `#include <nl_types.h>` is replayed as part of that header's own text, so
-  the host compiler reaches the real `nl_types.h` the same way it reaches
-  the header that names it, and no bodiless declaration is needed. A
+- A header reached through a chain of captured, ordinary (non-bundled)
+  `#include`s is treated as captured too, however many hops the chain
+  runs — a user header's own `#include "helper.h"`, whose own
+  `#include <nl_types.h>` in turn reaches a CCCC bundled header, is
+  replayed as part of that chain's own text, so the host compiler reaches
+  the real `nl_types.h` the same way it reaches every header that names
+  it, and no bodiless declaration is needed anywhere along the chain. A
   bundled header reached through *another* bundled header (e.g. bundled
   `fcntl.h`'s own `#include "unistd.h"`) is the one case this does not
   cover: the replayed `#include <fcntl.h>` resolves to the *host's*
