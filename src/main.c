@@ -2574,7 +2574,16 @@ int main(int argc, const char *argv[]) {
                              (void *)(intptr_t)1);
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
+    // #1305/#1306: one entry per TU, recording where its own captured
+    // directives begin in emit_directives -- see that field's own comment
+    // (cccc.h) for who reads it.
+    vm.compiler.emit_directives_tu_starts =
+        calloc((size_t)input_files_count, sizeof(int));
+    vm.compiler.emit_directives_tu_starts_count = input_files_count;
     for (int i = 0; i < input_files_count; i++) {
+        vm.compiler.emit_directives_tu_starts[i] =
+            vm.compiler.emit_directives.len;
+
         // #1001: each command-line input file is its own translation unit,
         // so it gets its own preprocessor state -- a #define, #pragma once,
         // or include guard set while preprocessing file i must not still be

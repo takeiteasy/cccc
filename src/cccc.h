@@ -3813,6 +3813,22 @@ typedef struct Compiler {
     HashMap     url_to_path;     // Maps URLs to cached file paths
     StringArray emit_directives; // Preprocessor directives to prepend to
                                  // serialized output
+    int *emit_directives_tu_starts; // #1305/#1306: per-command-line-input
+                                    // starting index into emit_directives
+                                    // (one entry per TU, set once in main.c's
+                                    // per-TU loop, sized to
+                                    // input_files_count) -- lets a dedup pass
+                                    // tell "this TU's own #define/#undef"
+                                    // apart from one merely captured earlier
+                                    // by an unrelated TU/header. Read by
+                                    // push_emit_directive() (preprocess.c,
+                                    // #1305) via its last entry (the TU
+                                    // currently being preprocessed) and by
+                                    // cc_serialize_program()'s own #1292
+                                    // canonical-path dedup (serialize_
+                                    // program.c, #1306) to resolve any index
+                                    // to its owning TU.
+    int emit_directives_tu_starts_count;
     int emit_strict; // --emit-only: suppress auto-capture; only explicitly
                      // tagged content appears in -c=generated output
     bool emit_generated_only; // -c=generated (not -m alone): narrows

@@ -1678,6 +1678,7 @@ void cc_destroy(VirtualMachine *vm) {
             free(vm->compiler.emit_directives.data[i]);
         free(vm->compiler.emit_directives.data);
     }
+    free(vm->compiler.emit_directives_tu_starts); // #1305/#1306
 
     // Free comptime_pending_includes data array (strings are arena-allocated)
     free(vm->compiler.comptime_pending_includes.data);

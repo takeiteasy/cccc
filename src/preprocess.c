@@ -389,7 +389,35 @@ static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
             // header is in effect by the time it's replayed. A dedup hit
             // with nothing but ordinary lines in between is unaffected --
             // moving it would be observable for no reason, so it stays put.
-            for (int j = i + 1; j < arr->len; j++) {
+            //
+            // #1305: the search for that #define/#undef used to scan the
+            // WHOLE array from i+1 onward, so a totally unrelated #define
+            // captured by some other file processed between the two
+            // occurrences -- nothing to do with configuring this header --
+            // triggered the same relocation. That moves the header's own
+            // replay position past every use the FIRST (kept) TU already
+            // made of it before that unrelated #define, which is exactly
+            // as broken as never relocating at all (src/stdlib/format.h,
+            // shared by format_printf.c and format_scanf.c: format_printf.c's
+            // own STB_SPRINTF_IMPLEMENTATION #define, captured for
+            // stb_sprintf.h and unrelated to format.h, wrongly relocated
+            // format.h's #include all the way to format_scanf.c's later
+            // position, past format_printf.c's own use of format.h's
+            // macros). Scope the scan to directives captured by THIS TU
+            // (its own emit_directives_tu_starts entry onward -- the LAST
+            // one, since this function only ever runs while preprocessing
+            // the TU that owns it) -- only a #define/#undef the CURRENT
+            // occurrence's own TU captured ahead of its own #include can
+            // mean "this TU configured the header before including it".
+            int scan_from   = i + 1;
+            int tu_starts_n = vm->compiler.emit_directives_tu_starts_count;
+            int tu_start =
+                tu_starts_n > 0
+                    ? vm->compiler.emit_directives_tu_starts[tu_starts_n - 1]
+                    : 0;
+            if (scan_from < tu_start)
+                scan_from = tu_start;
+            for (int j = scan_from; j < arr->len; j++) {
                 if (!line_is_define_or_undef_directive(arr->data[j]))
                     continue;
                 if (i != arr->len - 1) {
