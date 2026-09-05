@@ -8306,6 +8306,134 @@ def case_bundled_chain_macro_shadow_1294(cccc: Path, tmp: str) -> bool:
         BUNDLED_CHAIN_MACRO_SHADOW_1294_PROGRAM)
 
 
+# #1288: #1297's transitive-capture closure only ever grew ONE hop past a
+# captured includer, and only when the target it reached was itself a CCCC
+# bundled header (the mark call sat inside `if (get_std_header(filename))`,
+# preprocess.c). A THREE-level chain -- primary file -> ordinary user
+# header A -> ordinary user header B -> a CCCC bundled header (<string.h>)
+# -- exposes the gap: A is captured directly, B is reached through A (a
+# non-bundled target, never marked before this fix), and <string.h> is
+# reached through B, but B was never in the map for that lookup to
+# succeed. A two-level chain (case 162's own nl_types.h shape) is already
+# covered by #1297 alone and would pass before this fix -- proves nothing.
+TRANSITIVE_CAPTURE_1288_HEADER_A = (
+    "#ifndef TRANSITIVE_CAPTURE_1288_A_H\n"
+    "#define TRANSITIVE_CAPTURE_1288_A_H\n"
+    '#include "transitive_capture_1288_b.h"\n'
+    "#endif\n"
+)
+TRANSITIVE_CAPTURE_1288_HEADER_B = (
+    "#ifndef TRANSITIVE_CAPTURE_1288_B_H\n"
+    "#define TRANSITIVE_CAPTURE_1288_B_H\n"
+    "#include <string.h>\n"
+    "#endif\n"
+)
+TRANSITIVE_CAPTURE_1288_PROGRAM = (
+    '#include "transitive_capture_1288_a.h"\n'
+    "static volatile int g_never_1288 = 0;\n"
+    "int main(void) {\n"
+    "    char buf[8];\n"
+    "    memset(buf, 0, sizeof(buf));\n"
+    "    if (g_never_1288) {\n"
+    "        memcpy(buf, buf, 0);\n"
+    "        (void)strlen(buf);\n"
+    "    }\n"
+    "    return buf[0] == 0 ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_transitive_capture_two_hops_1288(cccc: Path, tmp: str) -> bool:
+    print("  166: #1288 -- the #1297 transitive-capture closure stopped "
+          "one hop short: a target reached through a captured, "
+          "non-bundled includer only joined the closure when that target "
+          "was ITSELF a CCCC bundled header, so a plain user header "
+          "reached transitively (never bundled) was never added, and a "
+          "CCCC bundled header reached one hop further through THAT "
+          "header stayed uncaptured. A -> B -> <string.h> (both A and B "
+          "ordinary user headers) exercises exactly this: memset/memcpy/"
+          "strlen's #901/#1151 fallback prototypes collided with the "
+          "real SDK declarations the replayed #include chain already "
+          "supplies ('conflicting types for memset/memcpy'). Fixed by "
+          "marking every transitively-reached target captured, not just "
+          "a bundled one. Asserts -m output replays the top header only "
+          "and emits no bodiless memset/memcpy/strlen prototype, plus "
+          "VM 42 -> native 42.")
+    write(Path(tmp) / "transitive_capture_1288_a.h",
+          TRANSITIVE_CAPTURE_1288_HEADER_A)
+    write(Path(tmp) / "transitive_capture_1288_b.h",
+          TRANSITIVE_CAPTURE_1288_HEADER_B)
+    src = Path(tmp) / "transitive_capture_1288.c"
+    write(src, TRANSITIVE_CAPTURE_1288_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if '#include "transitive_capture_1288_a.h"' not in m_result.stdout:
+        print(f"    FAIL: -m output missing the replayed top header "
+              f"#include\n    {m_result.stdout}")
+        return False
+    for name in ("memset", "memcpy", "strlen"):
+        if f"({name})(" in m_result.stdout:
+            print(f"    FAIL: -m output still emits a bodiless {name} "
+                  f"fallback prototype\n    {m_result.stdout}")
+            return False
+
+    return _vm_and_native_run_case(cccc, tmp,
+                                   "transitive_capture_1288_rt",
+                                   TRANSITIVE_CAPTURE_1288_PROGRAM)
+
+
+# #1289: `serialize_host_owned_zero_init_chain()` printed its `" , "`
+# separator before checking whether the link it was about to serialize
+# produces any text at all -- a `{}`-initialized host-owned-layout
+# aggregate whose every member store folds away (create_lvar_init(),
+# parse_init.c) leaves the chain's tail as a bare ND_NULL_EXPR, which
+# serializes to nothing, so the separator was left with an empty operand
+# on one side. `struct timespec` (include/time.h) is host-owned (defers
+# its real layout to the host's own <time.h>) and has no synthetic
+# `__opaque` member, so `= {}` on it takes a plain HOST_OWNED_KEEP
+# classification for its (folded-away) member stores rather than the
+# #1103 HOST_OWNED_DROP path the existing regression test covers -- this
+# is the shape #1103's own fix never anticipated.
+HOSTOWNED_EMPTY_INIT_1289_PROGRAM = (
+    "#include <time.h>\n"
+    "struct Wrap1289 { struct timespec ts; };\n"
+    "int main(void) {\n"
+    "    struct timespec ts = {};\n"
+    "    struct Wrap1289 w;\n"
+    "    w.ts = (struct timespec){};\n"
+    "    (void)ts;\n"
+    "    (void)w;\n"
+    "    return 42;\n"
+    "}\n"
+)
+
+
+def case_hostowned_empty_init_no_dangling_comma_1289(
+        cccc: Path, tmp: str) -> bool:
+    print("  167: #1289 -- a host-owned-layout local/compound-literal "
+          "zero-initialized with empty braces (`struct timespec ts = "
+          "{};`) used to serialize an ND_NULL_EXPR chain tail as an empty "
+          "comma operand: `__builtin_memset(&ts, 0, sizeof(ts)) , ;` for "
+          "a plain local, and `(__builtin_memset(...) ,  , tmp)` for a "
+          "compound-literal assignment through a struct field -- both "
+          "'expected expression' from a real host cc. Fixed by treating "
+          "a noop chain link (host_owned_zero_init_classify()) the same "
+          "as an already-dropped one. Asserts -m output contains neither "
+          "shape, plus VM 42 -> native 42.")
+    src = Path(tmp) / "hostowned_empty_init_1289.c"
+    write(src, HOSTOWNED_EMPTY_INIT_1289_PROGRAM)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    if " ,  ," in m_result.stdout or " , ;" in m_result.stdout:
+        print(f"    FAIL: -m output still emits an empty comma operand\n"
+              f"    {m_result.stdout}")
+        return False
+
+    return _vm_and_native_run_case(cccc, tmp,
+                                   "hostowned_empty_init_1289_rt",
+                                   HOSTOWNED_EMPTY_INIT_1289_PROGRAM)
+
+
 def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
     print("  156: #1226 -- --compiler-family=auto probes CCCC_NATIVE_CC's "
           "own compiler family (via its predefined macros) and resolves "
@@ -8520,6 +8648,8 @@ CASES = [
     case_bundled_chain_prototype_still_emitted_1297,
     case_bundled_ptr_typedef_alias_1296,
     case_bundled_chain_macro_shadow_1294,
+    case_transitive_capture_two_hops_1288,
+    case_hostowned_empty_init_no_dangling_comma_1289,
 ]
 
 

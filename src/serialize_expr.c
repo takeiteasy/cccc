@@ -246,6 +246,18 @@ typedef enum {
 } HostOwnedZeroInitAction;
 static HostOwnedZeroInitAction host_owned_zero_init_classify(Node *node,
                                                              Obj  *v) {
+    // #1289: a `{0}`/`{}` initializer whose every member store folds away
+    // as redundantly zero (create_lvar_init(), parse_init.c) leaves the
+    // chain's tail as a bare ND_NULL_EXPR instead of an ND_ASSIGN --
+    // serializes to nothing (is_noop_expr()/serialize_expr's own
+    // ND_NULL_EXPR case), so it must be dropped exactly like a
+    // HOST_OWNED_DROP link rather than printed as a HOST_OWNED_KEEP value:
+    // printing it left a `" , "` separator with an empty operand on both
+    // sides (`memset(...) , ;` and `(memset(...) ,  , tmp)`), which the
+    // generic ND_COMMA case just below (is_noop_expr guards) already
+    // avoids for the non-host-owned path.
+    if (is_noop_expr(node))
+        return HOST_OWNED_DROP;
     if (!node || node->kind != ND_ASSIGN)
         return HOST_OWNED_KEEP;
     Node *target = node->lhs;
@@ -785,6 +797,15 @@ static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
 // caller emits the enclosing parentheses unconditionally: a bare comma
 // chain must never leak into a context that saw `&(...)`'s precedence
 // (e.g. `p = &(cl)` would otherwise re-parse as `(p = a), b`).
+// #1289 follow-up (not this ticket's scope, not reachable from either of
+// its repros): the `" , "` at the bottom of this function is printed
+// unconditionally, the same shape host_owned_zero_init_classify() used to
+// get wrong before #1289 -- if comma->lhs or comma->rhs ever resolves to a
+// noop (ND_NULL_EXPR), this would print an empty operand too. The
+// is_noop_expr guards at the recursive call above and at this function's
+// own call site only cover comma->lhs's *immediate* children, not
+// comma->rhs after it flattens through another ND_COMMA. Left as-is here;
+// track any real repro as its own ticket rather than widening #1289.
 static void serialize_addr_comma(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Node *comma, Node *end,
                                  Node *wrap) {
