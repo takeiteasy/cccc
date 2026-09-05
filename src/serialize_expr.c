@@ -2076,29 +2076,19 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // __sigsetjmp) so the signal-mask save/restore is genuine; the
             // savemask/val argument rides through the trailing arg loop below.
             if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
-                ((vm->compiler.builtin_setjmp &&
-                  node->lhs->var == vm->compiler.builtin_setjmp) ||
-                 (vm->compiler.builtin_longjmp &&
-                  node->lhs->var == vm->compiler.builtin_longjmp) ||
-                 (vm->compiler.builtin__setjmp &&
-                  node->lhs->var == vm->compiler.builtin__setjmp) ||
-                 (vm->compiler.builtin__longjmp &&
-                  node->lhs->var == vm->compiler.builtin__longjmp) ||
-                 (vm->compiler.builtin_sigsetjmp &&
-                  node->lhs->var == vm->compiler.builtin_sigsetjmp) ||
-                 (vm->compiler.builtin_siglongjmp &&
-                  node->lhs->var == vm->compiler.builtin_siglongjmp))) {
+                (obj_is_reserved_builtin(node->lhs->var, "setjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "longjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "_setjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "_longjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "sigsetjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "siglongjmp"))) {
                 bool is_sigsetjmp =
-                    vm->compiler.builtin_sigsetjmp &&
-                    node->lhs->var == vm->compiler.builtin_sigsetjmp;
+                    obj_is_reserved_builtin(node->lhs->var, "sigsetjmp");
                 bool is_siglongjmp =
-                    vm->compiler.builtin_siglongjmp &&
-                    node->lhs->var == vm->compiler.builtin_siglongjmp;
+                    obj_is_reserved_builtin(node->lhs->var, "siglongjmp");
                 bool is_longjmp =
-                    (vm->compiler.builtin_longjmp &&
-                     node->lhs->var == vm->compiler.builtin_longjmp) ||
-                    (vm->compiler.builtin__longjmp &&
-                     node->lhs->var == vm->compiler.builtin__longjmp);
+                    obj_is_reserved_builtin(node->lhs->var, "longjmp") ||
+                    obj_is_reserved_builtin(node->lhs->var, "_longjmp");
                 fprintf(f, is_siglongjmp  ? "siglongjmp("
                            : is_sigsetjmp ? "__cccc_sigsetjmp("
                            : is_longjmp   ? "_longjmp("

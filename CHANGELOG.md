@@ -361,3 +361,24 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   in the process — `src/cccc.h` separately `#define`s its own unused
   `MAX_LABELS 256` for a pair of struct fields with no reader or writer
   anywhere in the codebase, and the two names collided.
+- Fixed: `declare_builtin_functions()` (`src/parse_decl.c`) runs once per
+  translation unit and reassigns the six setjmp-family singleton fields
+  (`vm->compiler.builtin_setjmp`/`_longjmp`/`__setjmp`/`__longjmp`/
+  `_sigsetjmp`/`_siglongjmp`) every time it runs, so in a multi-TU program
+  only the last-parsed TU's `Obj` survived in each singleton. Both
+  `src/codegen_expr.c` (VM bytecode) and `src/serialize_expr.c`
+  (`-c=native`/`-m`) recognized these builtins by pointer identity against
+  the singleton, so every earlier TU's own `setjmp`/`longjmp`/`sigsetjmp`/
+  `siglongjmp` call silently fell through to ordinary call handling — an
+  indirect call to an unresolved symbol (`"invalid indirect call target"`)
+  on the VM, or a call to literally `setjmp`/`sigsetjmp` cast to the
+  VM-side `(long *)` type instead of the real host `_setjmp`/
+  `__cccc_sigsetjmp` spelling under `-c=native`. Fixed by matching these
+  six reserved builtins by name instead of singleton identity (new
+  `obj_is_reserved_builtin()`, `src/codegen_internal.h`, shared by both
+  files), plus `src/serialize_program.c`'s `serialize_synth_setjmp_decls()`
+  (which decided via the identical singleton-identity bug whether to emit
+  the `extern _setjmp`/`_longjmp`/`sigsetjmp`/`siglongjmp` declarations at
+  all). Surfaced by the self-hosting spike (a two-plus-file `-c=native`
+  compile is the first thing to exercise more than one TU calling any of
+  these builtins).

@@ -1678,13 +1678,43 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm,
 // host_signal.c's crash guard, so they DO lower to the real host
 // sigsetjmp/siglongjmp -- see serialize_synth_setjmp_decls's own body.
 
-// Does any function body in `prog` call any of the given builtin Objs?
-static bool prog_calls_any(Obj *prog, Obj **family, int n) {
+// Does `node` (or anything reachable from it) call a reserved-name builtin
+// -- matched by name, not Obj identity. #1132 self-hosting spike:
+// declare_builtin_functions() (parse_decl.c) runs once per TU, so a
+// multi-TU program has one independent Obj per TU for each of these names;
+// node_calls_obj's identity match against a single vm->compiler.builtin_*
+// singleton (whichever TU parsed last) would silently miss every earlier
+// TU's own call, which would then wrongly skip emitting the extern
+// declaration an earlier TU's call (correctly recognized by name in
+// serialize_expr.c) still needs.
+static bool node_calls_named_builtin(Node *node, const char *name) {
+    if (!node)
+        return false;
+    if (node->kind == ND_FUNCALL && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var && !node->lhs->var->is_local &&
+        !node->lhs->var->is_definition && node->lhs->var->name &&
+        !strcmp(node->lhs->var->name, name))
+        return true;
+    return node_calls_named_builtin(node->lhs, name) ||
+           node_calls_named_builtin(node->rhs, name) ||
+           node_calls_named_builtin(node->cond, name) ||
+           node_calls_named_builtin(node->then, name) ||
+           node_calls_named_builtin(node->els, name) ||
+           node_calls_named_builtin(node->init, name) ||
+           node_calls_named_builtin(node->inc, name) ||
+           node_calls_named_builtin(node->body, name) ||
+           node_calls_named_builtin(node->args, name) ||
+           node_calls_named_builtin(node->next, name);
+}
+
+// Does any function body in `prog` call any of the given reserved-name
+// builtins?
+static bool prog_calls_any_named(Obj *prog, const char **family, int n) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || !obj->body)
             continue;
         for (int i = 0; i < n; i++)
-            if (family[i] && node_calls_obj(obj->body, family[i]))
+            if (node_calls_named_builtin(obj->body, family[i]))
                 return true;
     }
     return false;
@@ -1692,6 +1722,7 @@ static bool prog_calls_any(Obj *prog, Obj **family, int n) {
 
 static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
                                          Obj *prog) {
+    (void)vm;
     // The plain/POSIX family lowers to `_setjmp`/`_longjmp` -- plain
     // `extern`-declared functions on every supported host (unlike `setjmp`, a
     // macro on glibc). `returns_twice` is load-bearing, not cosmetic: a caller
@@ -1699,13 +1730,8 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
     // crash guard reads guard.previous/guard.vm after the longjmp return), and
     // without the attribute the host cc has no reason to treat the call as a
     // multi-entry point.
-    Obj *plain[4] = {
-        vm->compiler.builtin_setjmp,
-        vm->compiler.builtin_longjmp,
-        vm->compiler.builtin__setjmp,
-        vm->compiler.builtin__longjmp,
-    };
-    if (prog_calls_any(prog, plain, 4)) {
+    const char *plain[4] = {"setjmp", "longjmp", "_setjmp", "_longjmp"};
+    if (prog_calls_any_named(prog, plain, 4)) {
         fprintf(f, "extern int _setjmp(void *) __attribute__((returns_twice));"
                    "\n");
         fprintf(f, "extern void _longjmp(void *, int) "
@@ -1717,11 +1743,8 @@ static void serialize_synth_setjmp_decls(FILE *f, VirtualMachine *vm,
     // exported `sigsetjmp` symbol; on macOS `sigsetjmp` is a plain exported
     // function. `siglongjmp` is a plain extern on both. The `__cccc_sigsetjmp`
     // macro papers over the name difference for serialize_expr.
-    Obj *sig[2] = {
-        vm->compiler.builtin_sigsetjmp,
-        vm->compiler.builtin_siglongjmp,
-    };
-    if (prog_calls_any(prog, sig, 2)) {
+    const char *sig[2] = {"sigsetjmp", "siglongjmp"};
+    if (prog_calls_any_named(prog, sig, 2)) {
         fprintf(f, "#if defined(__linux__)\n");
         fprintf(f, "extern int __sigsetjmp(void *, int) "
                    "__attribute__((returns_twice));\n");

@@ -3872,6 +3872,80 @@ def case_setjmp_native_round_trip(cccc: Path, tmp: str) -> bool:
     return _native_run_case(cccc, tmp, "setjmp_1054", SETJMP_PROGRAM)
 
 
+def case_setjmp_multi_tu_builtin_identity(cccc: Path, tmp: str) -> bool:
+    print("  #1132 self-hosting spike: declare_builtin_functions() "
+          "(parse_decl.c) runs once per TU and reassigns "
+          "vm->compiler.builtin_setjmp/longjmp/sigsetjmp/etc. every time, "
+          "so in a multi-TU program only the LAST-parsed TU's Obj survived "
+          "in that singleton field. codegen_expr.c's identity comparison "
+          "against it silently failed for every EARLIER TU's own "
+          "setjmp/longjmp call, which fell through to an ordinary indirect "
+          "call to an unresolved 'setjmp' symbol -- 'invalid indirect call "
+          "target' at VM runtime. serialize_expr.c had the identical bug: "
+          "an earlier TU's call serialized with the VM-side `(long *)` cast "
+          "calling literally 'setjmp' (never declared for the host, since "
+          "<setjmp.h> is compiler-owned and never replayed) instead of the "
+          "'(void *)'-cast '_setjmp' every other TU correctly gets. Fixed "
+          "by matching these six reserved builtins by name "
+          "(obj_is_reserved_builtin(), codegen_internal.h) instead of "
+          "singleton Obj identity in both codegen_expr.c and "
+          "serialize_expr.c, plus serialize_program.c's "
+          "serialize_synth_setjmp_decls() (which decided via the same "
+          "singleton-identity bug whether to emit the extern _setjmp/"
+          "_longjmp/sigsetjmp/siglongjmp declarations at all). Asserts VM "
+          "42 -> native 42 across three separate TUs, two of which call "
+          "setjmp/longjmp and sigsetjmp/siglongjmp before the final TU "
+          "parses (and re-registers the singleton) -- a single-TU repro "
+          "cannot see this class of bug at all")
+    a_src = Path(tmp) / "setjmp_multi_a.c"
+    b_src = Path(tmp) / "setjmp_multi_b.c"
+    main_src = Path(tmp) / "setjmp_multi_main.c"
+    write(a_src,
+          "#include <setjmp.h>\n"
+          "int setjmp_multi_fn_a(void) {\n"
+          "    jmp_buf jb;\n"
+          "    if (setjmp(jb) == 0) longjmp(jb, 1);\n"
+          "    return 0;\n"
+          "}\n")
+    write(b_src,
+          "#include <setjmp.h>\n"
+          "int setjmp_multi_fn_b(void) {\n"
+          "    sigjmp_buf jb;\n"
+          "    if (sigsetjmp(jb, 1) == 0) siglongjmp(jb, 1);\n"
+          "    return 0;\n"
+          "}\n")
+    write(main_src,
+          "extern int setjmp_multi_fn_a(void);\n"
+          "extern int setjmp_multi_fn_b(void);\n"
+          "int main(void) {\n"
+          "    setjmp_multi_fn_a();\n"
+          "    setjmp_multi_fn_b();\n"
+          "    return 42;\n"
+          "}\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name, main_src.name],
+                     cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "setjmp_multi_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name,
+         main_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_double_literal_native_round_trip(cccc: Path, tmp: str) -> bool:
     print("  96: -c=native, serialize_expr's ND_NUM TY_DOUBLE arm printed a "
           "bare `%.17g` of the folded value with no \".0\"-if-integral "
@@ -8650,6 +8724,7 @@ CASES = [
     case_bundled_chain_macro_shadow_1294,
     case_transitive_capture_two_hops_1288,
     case_hostowned_empty_init_no_dangling_comma_1289,
+    case_setjmp_multi_tu_builtin_identity,
 ]
 
 

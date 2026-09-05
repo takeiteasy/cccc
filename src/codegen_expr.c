@@ -2389,10 +2389,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // same SETJMP opcode and its savemask arg is evaluated for side
             // effects then discarded).
             if (node->lhs->kind == ND_VAR &&
-                (node->lhs->var == vm->compiler.builtin_setjmp ||
-                 node->lhs->var == vm->compiler.builtin__setjmp ||
-                 node->lhs->var == vm->compiler.builtin_sigsetjmp)) {
-                bool is_sig = node->lhs->var == vm->compiler.builtin_sigsetjmp;
+                (obj_is_reserved_builtin(node->lhs->var, "setjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "_setjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "sigsetjmp"))) {
+                bool is_sig =
+                    obj_is_reserved_builtin(node->lhs->var, "sigsetjmp");
                 if (!node->args || (is_sig && !node->args->next)) {
                     error_tok(vm, node->tok,
                               is_sig ? "sigsetjmp requires sigjmp_buf and int "
@@ -2426,9 +2427,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Check if this is longjmp builtin (or its POSIX _longjmp alias, or
             // siglongjmp -- aliases LONGJMP on the VM for the same reason).
             if (node->lhs->kind == ND_VAR &&
-                (node->lhs->var == vm->compiler.builtin_longjmp ||
-                 node->lhs->var == vm->compiler.builtin__longjmp ||
-                 node->lhs->var == vm->compiler.builtin_siglongjmp)) {
+                (obj_is_reserved_builtin(node->lhs->var, "longjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "_longjmp") ||
+                 obj_is_reserved_builtin(node->lhs->var, "siglongjmp"))) {
                 if (!node->args || !node->args->next) {
                     error_tok(vm, node->tok,
                               "longjmp requires jmp_buf and int arguments");

@@ -25,6 +25,24 @@
 
 #include "./internal.h"
 
+// #1132 self-hosting spike: declare_builtin_functions() (parse_decl.c) runs
+// once per TU and reassigns vm->compiler.builtin_setjmp/longjmp/etc. every
+// time -- in a multi-TU program only the LAST-parsed TU's Obj survives in
+// that singleton field, so an identity comparison against it silently fails
+// for every earlier TU's own setjmp/longjmp call site (codegen_expr.c falls
+// through to an ordinary indirect call to an unresolved symbol -- "invalid
+// indirect call target" at runtime; serialize_expr.c falls through to an
+// ordinary call serialized with the VM-side `long *` parameter type instead
+// of the `(void *)`/real-host-name spelling these builtins need). Match by
+// name instead: every TU's own registration creates a bodiless, non-local
+// Obj with the exact reserved name, so name identity is exactly as precise
+// as the old pointer identity but survives which TU's copy the singleton
+// field happens to still point to.
+static inline bool obj_is_reserved_builtin(Obj *var, const char *name) {
+    return var && !var->is_local && !var->is_definition && var->name &&
+           !strcmp(var->name, name);
+}
+
 // Grow a dynamic patch table by 2x when full (initial capacity 256).
 // 'field' is the array pointer member, 'nf' is the count, 'cf' is the cap.
 #define PATCH_GROW(vm, field, nf, cf)                                          \
