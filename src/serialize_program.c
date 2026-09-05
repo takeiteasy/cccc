@@ -3079,37 +3079,48 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     Token *t = obj->tok;
     if (!t || !t->file)
         return false;
-    if (file_is_command_line_input(vm, t->file->name) ||
-        cc_file_is_cccc_only(vm, t->file->name))
+    // #1308: this early gate used to test `t->file` (obj->tok's own raw
+    // spelling location) directly, unconditionally, ahead of EITHER
+    // branch below -- including the external-linkage one, which only
+    // consults `obj->body->tok`'s own expansion site (walked further
+    // down) and never re-derives anything from `t`/`obj->tok` at all. For
+    // a macro-token-pasted declarator (`#define DECORATE(name)
+    // prefix_##name`) whose #define lives OUTSIDE the header it's invoked
+    // from -- e.g. src/stdlib/format_printf.c's own `#define
+    // STB_SPRINTF_DECORATE(name) cccc_stbsp_##name`, invoked inside the
+    // captured stb_sprintf.h -- `t->file` is the paste's own synthetic
+    // file naming where the `##` operator itself was WRITTEN (the
+    // includer, format_printf.c), not where `DECORATE(...)` was invoked
+    // (the header). Since format_printf.c is a command-line input, this
+    // gate wrongly returned false immediately, before the external-
+    // linkage branch's own (correct) body_exp-based check ever ran --
+    // "redefinition of 'cccc_stbsp_vsprintfcb'" et al under -c=native
+    // (the header's own replayed body collides with CCCC's own
+    // independently re-serialized one). #1301's own fixture never hit
+    // this because its DECORATE macro is defined INSIDE the header, where
+    // the paste's synthetic file already happens to equal the correct
+    // answer. Walk to the expansion site here too -- identity for an
+    // ordinary (non-macro) token, matching this file's other ->origin
+    // walks -- so the early-out asks the same question either branch
+    // would ask on `obj->tok` itself.
+    Token *t_gate = token_expansion_site(t);
+    if (!t_gate || !t_gate->file)
+        return false;
+    if (file_is_command_line_input(vm, t_gate->file->name) ||
+        cc_file_is_cccc_only(vm, t_gate->file->name))
         return false;
 
     // #999: a `static` (internal-linkage) function's body is always
     // header-supplied once its declaring file passes the checks above --
     // cc_link_progs (#957) deliberately leaves statics uncanonicalized
     // across TUs, so its own file's replayed #include is the only thing
-    // that can supply it. #1301: but a declarator name that is itself
-    // macro-token-pasted (e.g. `#define DECORATE(name) prefix_##name`)
-    // carries `t->file` for the *macro's own defining file* (its spelling
-    // site), not the file the macro was invoked from (its expansion site).
-    // A captured header's own such macro, invoked in a command-line-input
-    // file to *define* a function, would otherwise be misread as an
-    // ordinary in-header declaration and wrongly suppressed. Walk
-    // Token.origin (stamped on every token of a macro body by
-    // expand_macro(), src/preprocess.c, `##`-pasted tokens included, and
-    // already walked the same way by file_macro()/line_macro() there for
-    // __FILE__/__LINE__) to the expansion site and require THAT to also
-    // pass the same checks. Hop-capped at 8, matching this file's other
-    // ->origin walks (find_typedef_name_exact() and friends,
-    // serialize_type.c) -- ->origin has writers past preprocessing too
-    // (macros.c's comptime expansion, parse_postfix.c).
-    if (obj->is_static) {
-        Token *t_exp = token_expansion_site(t);
-        if (!t_exp || !t_exp->file ||
-            file_is_command_line_input(vm, t_exp->file->name) ||
-            cc_file_is_cccc_only(vm, t_exp->file->name))
-            return false;
-        return !ctx->generated_only || path_is_captured(ctx, t_exp->file->name);
-    }
+    // that can supply it. #1308: t_gate (above) already is
+    // token_expansion_site(t) -- the #1301 walk this branch used to redo
+    // itself -- and the early gate already re-ran these same two checks
+    // against it, so just reuse it instead of walking ->origin twice.
+    if (obj->is_static)
+        return !ctx->generated_only ||
+               path_is_captured(ctx, t_gate->file->name);
 
     // #1298/#1301: an ordinary *external*-linkage function is header-
     // supplied too, whenever the file whose text really produced its

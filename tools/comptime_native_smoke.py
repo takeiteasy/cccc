@@ -2902,6 +2902,70 @@ def case_third_includer_unrelated_define_1307(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_vendored_macro_defined_outside_1308(cccc: Path, tmp: str) -> bool:
+    print("  #1308 (residual of #1301): function_is_header_supplied()'s "
+          "(src/serialize_program.c) early gate tested obj->tok's raw file "
+          "identity directly, ahead of either branch below it -- including "
+          "the external-linkage branch, which only ever consults "
+          "obj->body->tok's own expansion site. For a macro-token-pasted "
+          "declarator whose #define lives OUTSIDE the header it's invoked "
+          "from (unlike #1301's own fixture, whose DECORATE macro is "
+          "defined INSIDE the header), the pasted token's raw file is the "
+          "paste's own synthetic file naming where the '##' operator was "
+          "WRITTEN (the includer) not where it was INVOKED (the header). "
+          "Since the includer is a command-line input, the early gate "
+          "wrongly returned false before the external-linkage branch's "
+          "own correct check ever ran, so the header's own captured body "
+          "was independently re-serialized a second time: 'redefinition' "
+          "under -c=native. Found via #1132's self-hosting spike round 14: "
+          "src/stdlib/format_printf.c defines STB_SPRINTF_DECORATE OUTSIDE "
+          "stb_sprintf.h. Fixed by walking token_expansion_site() in the "
+          "early gate too. Asserts VM 42 -> native 42 -- a -m shape "
+          "assertion alone doesn't invoke the host compiler and can't see "
+          "the 'redefinition' this fixes")
+    lib_src = Path(tmp) / "vendored_1308_smoke_lib.h"
+    a_src   = Path(tmp) / "vendored_macro_outside_1308_smoke_a.c"
+    b_src   = Path(tmp) / "vendored_macro_outside_1308_smoke_b.c"
+    write(lib_src,
+          "#ifndef VENDORED_1308_SMOKE_LIB_H\n"
+          "#define VENDORED_1308_SMOKE_LIB_H\n"
+          "int DECORATE_1308_SMOKE(add)(int x);\n"
+          "#ifdef VENDORED_1308_SMOKE_IMPLEMENTATION\n"
+          "int DECORATE_1308_SMOKE(add)(int x) { return x + 1; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          "#define DECORATE_1308_SMOKE(name) v1308_smoke_##name\n"
+          "#define VENDORED_1308_SMOKE_IMPLEMENTATION\n"
+          '#include "vendored_1308_smoke_lib.h"\n'
+          "int vendored_macro_outside_1308_smoke_use(void) { "
+          "return v1308_smoke_add(41); }\n")
+    write(b_src,
+          "int vendored_macro_outside_1308_smoke_use(void);\n"
+          "int main(void) { "
+          "return vendored_macro_outside_1308_smoke_use(); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "vendored_macro_outside_1308_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_local_shadows_global_1302(cccc: Path, tmp: str) -> bool:
     print("  #1302: -c=native, a hoisted block-scoped local whose name "
           "collides with a global/typedef the same function still "
@@ -9480,6 +9544,7 @@ CASES = [
     case_shared_header_unrelated_define_1305,
     case_spelling_dedup_unrelated_define_1306,
     case_third_includer_unrelated_define_1307,
+    case_vendored_macro_defined_outside_1308,
 ]
 
 
