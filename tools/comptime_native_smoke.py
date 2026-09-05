@@ -2737,6 +2737,93 @@ def case_ptr_int_cast_offsetof_1300(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_macro_declared_global_1303(cccc: Path, tmp: str) -> bool:
+    print("  #1303: -c=native, global_is_header_supplied()'s own version of "
+          "#1301's function fix. A captured header's macro that *produces* "
+          "a global definition when invoked (`#define DEFINE_G(n) int "
+          "g_##n = 21;`) has its declarator name's *spelling* location in "
+          "the header (where the macro is defined), not its *expansion* "
+          "location (the invoking file, which really supplies the "
+          "definition). Before the fix, global_is_header_supplied() keyed "
+          "purely on obj->tok's raw file, so the global was misread as "
+          "already supplied by the header's own replayed #include and "
+          "silently dropped -- both the #918 forward declaration and the "
+          "definition -- an 'undeclared identifier' at its own use site. "
+          "Asserts VM 42 -> native 42 -- a host compile failure no -m "
+          "shape assertion alone can see")
+    lib_src = Path(tmp) / "macro_declared_global_1303_smoke_lib.h"
+    src = Path(tmp) / "macro_declared_global_1303_smoke.c"
+    write(lib_src,
+          "#define G1303_SMOKE_DEFINE(n) int g1303_smoke_##n = 21;\n")
+    write(src,
+          '#include "macro_declared_global_1303_smoke_lib.h"\n'
+          "G1303_SMOKE_DEFINE(thing)\n"
+          "int main(void) { return g1303_smoke_thing * 2; }\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "macro_declared_global_1303_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_macro_declared_fn_bodyless_1303(cccc: Path, tmp: str) -> bool:
+    print("  #1303: -c=native, bodyless_decl_from_input_or_bundled()'s own "
+          "version of #1301's function fix. A captured header's macro that "
+          "only *declares* (never defines) a function when invoked -- its "
+          "declarator name produced by a `##` paste of a macro-body "
+          "literal onto the invocation's own argument, naming a real host "
+          "libc function (`abs`) -- has that name's *spelling* location in "
+          "the header, not its *expansion* location (the invoking file). "
+          "Before the fix, bodyless_decl_from_input_or_bundled() keyed "
+          "purely on obj->tok's raw file, so the declaration was misread "
+          "as already supplied by the header's own replayed #include "
+          "(which never actually declares it) and dropped entirely, a "
+          "host 'call to undeclared library function' error. Asserts VM "
+          "42 -> native 42 -- a host compile failure no -m shape assertion "
+          "alone can see")
+    lib_src = Path(tmp) / "macro_declared_fn_1303_smoke_lib.h"
+    src = Path(tmp) / "macro_declared_fn_1303_smoke.c"
+    write(lib_src, "#define G1303_SMOKE_MK_NAME(x) ab##x\n")
+    write(src,
+          '#include "macro_declared_fn_1303_smoke_lib.h"\n'
+          "int G1303_SMOKE_MK_NAME(s)(int);\n"
+          "int main(void) { "
+          "return G1303_SMOKE_MK_NAME(s)(-42) == 42 ? 42 : 1; }\n")
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "macro_declared_fn_1303_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool:
     print("  80: -c=native, a header-defined static inline function shared "
           "by two TUs, invoked with one input file as an absolute path and "
@@ -9031,6 +9118,8 @@ CASES = [
     case_local_shadows_global_1302,
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
+    case_macro_declared_global_1303,
+    case_macro_declared_fn_bodyless_1303,
 ]
 
 
@@ -9038,7 +9127,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302/#1303)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

@@ -3182,10 +3182,23 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
 static bool bodyless_decl_from_input_or_bundled(VirtualMachine   *vm,
                                                 SerializeContext *ctx,
                                                 Obj              *obj) {
-    Token *t          = obj->tok;
-    bool   from_input = t && t->file &&
-                        (file_is_command_line_input(vm, t->file->name) ||
-                         cc_file_is_cccc_only(vm, t->file->name));
+    Token *t = obj->tok;
+    // #1303: a captured header's macro that only *declares* (never
+    // defines) a function when invoked -- e.g. a `##`-pasted declarator
+    // name naming a real host libc function -- carries obj->tok's raw file
+    // for the macro's own defining file (its spelling site), not the file
+    // the macro was invoked from (its expansion site). Confirmed via a
+    // standalone repro mirroring #1301's own vendored-header shape: without
+    // this walk, such a declaration was misread as "already supplied by
+    // that header's replayed #include" and silently dropped, a host
+    // "call to undeclared library function" error. Directionally safe even
+    // for an ordinary (non-macro) token: token_expansion_site() is the
+    // identity there, so only the macro-produced case changes behavior.
+    // See that function's own comment above.
+    Token *t_exp      = token_expansion_site(t);
+    bool   from_input = t_exp && t_exp->file &&
+                        (file_is_command_line_input(vm, t_exp->file->name) ||
+                         cc_file_is_cccc_only(vm, t_exp->file->name));
     bool cccc_bundled_uncaptured = obj->is_used && t && t->file &&
                                    cc_file_is_cccc_bundled(vm, t->file->name) &&
                                    !path_is_captured(ctx, t->file->name);
@@ -3231,7 +3244,21 @@ bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     if (file_is_command_line_input(vm, t->file->name) ||
         cc_file_is_cccc_only(vm, t->file->name))
         return false;
-    return !ctx->generated_only || path_is_captured(ctx, t->file->name);
+    // #1303: same latent gap #1301 fixed for function_is_header_supplied()'s
+    // is_static arm -- a captured header's macro that *defines* a global
+    // when invoked (e.g. `#define DEFINE_G(n) int g_##n = 21;`) carries
+    // obj->tok's raw file for the macro's own defining file (its spelling
+    // site), not the file the macro was invoked from (its expansion site).
+    // Confirmed via a standalone repro: without this walk, such a global
+    // was silently dropped from both the #918 forward-declare pass and its
+    // own definition, an "undeclared identifier" from the host compiler at
+    // its own use site. See token_expansion_site()'s own comment above.
+    Token *t_exp = token_expansion_site(t);
+    if (!t_exp || !t_exp->file ||
+        file_is_command_line_input(vm, t_exp->file->name) ||
+        cc_file_is_cccc_only(vm, t_exp->file->name))
+        return false;
+    return !ctx->generated_only || path_is_captured(ctx, t_exp->file->name);
 }
 
 // #1064: classify `line` (a raw captured directive line, `#...`, from

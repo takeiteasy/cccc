@@ -167,7 +167,11 @@ real host compiler, so header handling shifts:
   thing_##T(void) { ... }` invoked in an ordinary command-line-input file --
   since the invocation site, not the header, is what actually needs to
   supply that body; the same expansion-site test correctly leaves this
-  case alone.
+  case alone. The same expansion-site rule governs a **bodiless
+  declaration** and a **global** produced the same way: a captured header's
+  macro that only *declares* a function, or that *defines* a global, when
+  invoked elsewhere is likewise resolved by where it is invoked, not by
+  where the producing macro happens to be written.
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
