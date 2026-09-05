@@ -2483,6 +2483,70 @@ def case_included_c_amalgam_external_linkage_1298(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_vendored_single_header_1301(cccc: Path, tmp: str) -> bool:
+    print("  #1301: -c=native, a vendored single-header library (stb_sprintf."
+          "h's own shape: an `#ifdef FOO_IMPLEMENTATION` block, defined by "
+          "exactly one TU) whose public declarator names are macro-token-"
+          "pasted (`#define DECORATE(name) prefix_##name`). "
+          "function_is_header_supplied()'s #1298 external-linkage arm was "
+          "deliberately narrowed to a plain `.c`-extension check, excluding "
+          "this shape on the theory that Token had no way to tell a pasted "
+          "token's *spelling* location (the header, where the macro is "
+          "defined) apart from its *expansion* location -- Token.origin "
+          "already carries exactly that distinction (already walked by "
+          "__FILE__/__LINE__), so the fix keys the decision on obj->body->"
+          "tok's own expansion site instead. Before the fix: a second TU "
+          "reaching the vendored function purely through a plain "
+          "declaration (never re-including the header) got it re-serialized "
+          "on top of the first TU's replayed #include, a host "
+          "'redefinition' error. Asserts VM 42 -> native 42 -- the "
+          "prototype-suppression exposure this fixes is a link failure no "
+          "-m shape assertion (tests/test_serialize_vendored_single_header_"
+          "1301.c) alone can see")
+    lib_src = Path(tmp) / "vendored_1301_smoke_lib.h"
+    a_src = Path(tmp) / "vendored_1301_smoke_a.c"
+    b_src = Path(tmp) / "vendored_1301_smoke_b.c"
+    write(lib_src,
+          "#ifndef VENDORED_1301_SMOKE_LIB_H\n"
+          "#define VENDORED_1301_SMOKE_LIB_H\n"
+          "#define V1301_SMOKE_DECORATE(name) v1301_smoke_##name\n"
+          "int V1301_SMOKE_DECORATE(add)(int x);\n"
+          "#ifdef VENDORED_1301_SMOKE_IMPLEMENTATION\n"
+          "int V1301_SMOKE_DECORATE(add)(int x) { return x + 1; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#define VENDORED_1301_SMOKE_IMPLEMENTATION\n'
+          '#include "vendored_1301_smoke_lib.h"\n'
+          "int vendored_1301_smoke_call_a(void) { "
+          "return v1301_smoke_add(20); }\n")
+    write(b_src,
+          "int v1301_smoke_add(int x);\n"
+          "int vendored_1301_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return vendored_1301_smoke_call_a() + v1301_smoke_add(20); }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "vendored_1301_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_setjmp_transitive_header_1299(cccc: Path, tmp: str) -> bool:
     print("  #1299: -c=native, an ordinary project header that itself "
           "`#include`s <setjmp.h> (mirroring src/cccc.h's own shape, hit "
@@ -8874,6 +8938,7 @@ CASES = [
     case_hostowned_empty_init_no_dangling_comma_1289,
     case_setjmp_multi_tu_builtin_identity,
     case_included_c_amalgam_external_linkage_1298,
+    case_vendored_single_header_1301,
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
 ]
@@ -8883,7 +8948,7 @@ def main() -> int:
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
 
-    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300)")
+    print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301)")
 
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")

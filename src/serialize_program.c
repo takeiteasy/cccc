@@ -3041,25 +3041,32 @@ static bool file_is_command_line_input(VirtualMachine *vm, const char *name) {
     return cc_file_is_command_line_input(vm, name);
 }
 
-// #1298: does `name` (a File.name -- a real on-disk path, or an
-// "<embedded>/foo.h" synthetic key) name a C *source* file rather than a
-// header? Used only to narrow the external-linkage arm just below to the
-// shape #1298 actually fixes -- a captured/replayed .c textual amalgamation
-// (src/vm.c's `#include "ops.c"`) -- and deliberately not any vendored
-// single-header library (.h, built via an IMPLEMENTATION-style macro in one
-// TU): that shape's declarator names are macro-token-pasted, and Token
-// (src/cccc.h) has no way to distinguish a macro-expanded token's spelling
-// location from its expansion location, so a file-identity test alone
-// misattributes an ordinary command-line-input function's body to the
-// defining macro's own file (confirmed against tests/test_pthread_once_1278.c
-// while investigating #1298) -- left for a follow-up ticket. No extension
-// notion exists elsewhere in this file; kept local and narrow rather than
-// promoted to a shared helper.
-static bool path_is_c_source_file(const char *name) {
-    if (!name)
-        return false;
-    size_t len = strlen(name);
-    return len >= 2 && name[len - 2] == '.' && name[len - 1] == 'c';
+// #1301: Token.origin (src/cccc.h) links a macro-expanded token back to the
+// token that invoked the macro -- expand_macro() (src/preprocess.c) stamps
+// it on every token of a macro body, `##`-pasted declarator names included,
+// specifically so file_macro()/line_macro() (src/preprocess.c) can walk it
+// to the root and make __FILE__/__LINE__ name the *expansion* site (where
+// the macro was written) rather than the *spelling* site (t->file, where
+// the macro body/definition lives) -- the exact distinction #1298 filed as
+// #1301 believing it didn't exist yet. Walking here answers the same
+// question for a declarator name: is this function's definition text
+// really written in a captured header (spelling == expansion, an ordinary
+// declaration), or does a captured header's macro merely *produce* the
+// declarator when invoked somewhere else (spelling in the header,
+// expansion at the invocation site) -- in which case the invocation site is
+// what actually needs to supply the body.
+//
+// Hop-capped at 8, matching this file's other ->origin walks
+// (find_typedef_name_exact() and friends, serialize_type.c): ->origin has
+// writers past preprocessing too (macros.c's comptime expansion,
+// parse_postfix.c), so this must never become an unbounded chase. Only
+// ->file->name is read off the result, never line/col -- paste()'s output
+// (src/preprocess.c) carries a fresh synthetic File with the right name but
+// meaningless line numbers for a `##`-pasted token.
+static Token *token_expansion_site(Token *t) {
+    for (int hop = 0; t && t->origin && hop < 8; t = t->origin, hop++)
+        ;
+    return t;
 }
 
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
@@ -3072,42 +3079,82 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     if (file_is_command_line_input(vm, t->file->name) ||
         cc_file_is_cccc_only(vm, t->file->name))
         return false;
+
     // #999: a `static` (internal-linkage) function's body is always
     // header-supplied once its declaring file passes the checks above --
     // cc_link_progs (#957) deliberately leaves statics uncanonicalized
     // across TUs, so its own file's replayed #include is the only thing
-    // that can supply it.
-    //
-    // #1298: an ordinary *external*-linkage function is header-supplied too,
-    // but only when its declaring file is itself a captured/replayed .c
-    // amalgamation -- path_is_captured() asks the positive question a bare
-    // extension test can't: whether this file's text is really reaching the
-    // host compiler, rather than inferring it from file identity alone (the
-    // #999-era naive fix, dropping is_static outright, skipped this check and
-    // broke 7 tests -- the opaque-handle idiom #1010/#1014 and the
-    // global-block-splice #1034 case -- whose Objs trace to some
-    // non-command-line-input file for unrelated reasons and are not actually
-    // header-supplied).
-    if (!obj->is_static) {
-        // #1298 (residual): cc_link_progs (#957) merges an external-
-        // linkage Obj across every TU that so much as declares it (a
-        // shared header's own bodiless prototype, reached from an
-        // unrelated TU, counts) -- obj->tok, "the" representative
-        // declaring token, can end up pointing at whichever TU's
-        // declaration the linker kept last, not necessarily the TU whose
-        // #include actually supplies the body's own text. obj->body's own
-        // token always traces to the file that really contains the
-        // definition, so it's consulted too when obj->tok's own file
-        // doesn't already qualify.
-        bool from_tok = t->file->name && path_is_c_source_file(t->file->name) &&
-                        path_is_captured(ctx, t->file->name);
-        bool from_body = !from_tok && obj->body->tok && obj->body->tok->file &&
-                         path_is_c_source_file(obj->body->tok->file->name) &&
-                         path_is_captured(ctx, obj->body->tok->file->name);
-        if (!from_tok && !from_body)
+    // that can supply it. #1301: but a declarator name that is itself
+    // macro-token-pasted (e.g. `#define DECORATE(name) prefix_##name`)
+    // carries `t->file` for the *macro's own defining file* (its spelling
+    // site), not the file the macro was invoked from (its expansion site).
+    // A captured header's own such macro, invoked in a command-line-input
+    // file to *define* a function, would otherwise be misread as an
+    // ordinary in-header declaration and wrongly suppressed. Walk
+    // Token.origin (stamped on every token of a macro body by
+    // expand_macro(), src/preprocess.c, `##`-pasted tokens included, and
+    // already walked the same way by file_macro()/line_macro() there for
+    // __FILE__/__LINE__) to the expansion site and require THAT to also
+    // pass the same checks. Hop-capped at 8, matching this file's other
+    // ->origin walks (find_typedef_name_exact() and friends,
+    // serialize_type.c) -- ->origin has writers past preprocessing too
+    // (macros.c's comptime expansion, parse_postfix.c).
+    if (obj->is_static) {
+        Token *t_exp = token_expansion_site(t);
+        if (!t_exp || !t_exp->file ||
+            file_is_command_line_input(vm, t_exp->file->name) ||
+            cc_file_is_cccc_only(vm, t_exp->file->name))
             return false;
+        return !ctx->generated_only || path_is_captured(ctx, t_exp->file->name);
     }
-    return !ctx->generated_only || path_is_captured(ctx, t->file->name);
+
+    // #1298/#1301: an ordinary *external*-linkage function is header-
+    // supplied too, whenever the file whose text really produced its
+    // definition -- a captured/replayed .c textual amalgamation
+    // (src/vm.c's `#include "ops.c"`) OR a captured vendored single-header
+    // library (a .h built via an IMPLEMENTATION-style macro in one TU,
+    // src/stdlib/format_printf.c's stb_sprintf.h) -- is itself captured.
+    //
+    // Keyed on obj->body->tok exclusively, not obj->tok: cc_link_progs
+    // (#957) merges an external-linkage Obj across every TU that so much
+    // as declares it (a shared header's own bodiless prototype, reached
+    // from an unrelated TU, counts), so obj->tok -- "the" representative
+    // declaring token -- can end up pointing at whichever TU's declaration
+    // the linker kept last, e.g. the shared header itself (#1298
+    // residual). obj->body->tok always traces to the file that genuinely
+    // contains the definition. Its own expansion site is walked too
+    // (#1301) since the body's leading token can itself be produced by a
+    // macro invoked elsewhere -- do_init(){ atomic_fetch_add(...); }
+    // (tests/test_pthread_once_1278.c) is the confirmed real shape:
+    // <stdatomic.h>'s macro attributed that token to its own defining
+    // file, not the invocation site, misclassifying an ordinary
+    // command-line-input function as header-supplied and silently
+    // dropping its body.
+    //
+    // path_is_captured() asks the positive question a bare extension test
+    // can't: whether this file's text is really reaching the host
+    // compiler, rather than inferring it from file identity alone (the
+    // #999-era naive fix, dropping is_static outright, skipped this check
+    // and broke 7 tests -- the opaque-handle idiom #1010/#1014 and the
+    // global-block-splice #1034 case -- whose Objs trace to some
+    // non-command-line-input file for unrelated reasons and are not
+    // actually header-supplied). No .c-extension gate is needed once the
+    // check is keyed on the body's own expansion site rather than
+    // obj->tok's raw file identity: a vendored .h's own definition text
+    // (its body's leading token isn't macro-produced at all) now
+    // correctly resolves to the header itself, while a mere bodiless
+    // prototype reached through that same header (obj->tok, in the
+    // opaque-handle idiom) is never consulted here at all.
+    if (!obj->body->tok)
+        return false;
+    Token *body_exp = token_expansion_site(obj->body->tok);
+    if (!body_exp || !body_exp->file ||
+        file_is_command_line_input(vm, body_exp->file->name) ||
+        cc_file_is_cccc_only(vm, body_exp->file->name))
+        return false;
+    if (!path_is_captured(ctx, body_exp->file->name))
+        return false;
+    return !ctx->generated_only || path_is_captured(ctx, body_exp->file->name);
 }
 
 // #1151: the bodiless-declaration counterpart of the from_input/
