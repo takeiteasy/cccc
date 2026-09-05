@@ -2666,6 +2666,158 @@ def case_vendored_multi_tu_include_spelling_1304(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_shared_header_unrelated_define_1305(cccc: Path, tmp: str) -> bool:
+    print("  #1305 (follow-up to #1304): push_emit_directive()'s "
+          "(src/preprocess.c) #1304 dedup-relocation scanned for a "
+          "#define/#undef captured ANYWHERE between the two occurrences of "
+          "an identical #include line, not just ones the second occurrence's "
+          "own TU captured -- a totally unrelated #define, captured by the "
+          "FIRST (kept) TU for a completely different header, wrongly "
+          "triggered the same relocation, moving the shared header's replay "
+          "position past every use the first TU had already made of it. "
+          "Found via #1132's self-hosting spike round 14: src/stdlib/"
+          "format.h (a plain, non-IMPLEMENTATION shared header) is #include'd "
+          "by both format_printf.c and format_scanf.c; format_printf.c uses "
+          "format.h's macros inside stb_sprintf.h's own captured body, but "
+          "ALSO defines STB_SPRINTF_IMPLEMENTATION (for stb_sprintf.h, an "
+          "unrelated header) in between -- the old scan found that unrelated "
+          "#define and relocated format.h's #include past format_printf.c's "
+          "own need for it ('use of undeclared identifier' under -c=native). "
+          "Fixed by scoping the relocation scan to the CURRENT (deduping) "
+          "TU's own captured directives (emit_directives_tu_starts, set once "
+          "per TU in main.c's per-TU loop). Asserts VM 42 -> native 42 -- "
+          "a -m shape assertion alone doesn't invoke the host compiler and "
+          "can't see the 'undeclared identifier' this fixes")
+    cfg_src  = Path(tmp) / "plain_config_1305_smoke.h"
+    lib_src  = Path(tmp) / "vendored_1305_smoke_lib.h"
+    a_src    = Path(tmp) / "shared_header_1305_smoke_a.c"
+    b_src    = Path(tmp) / "shared_header_1305_smoke_b.c"
+    write(cfg_src,
+          "#ifndef PLAIN_CONFIG_1305_SMOKE_H\n"
+          "#define PLAIN_CONFIG_1305_SMOKE_H\n"
+          "#define CFG_1305_SMOKE_VAL 5\n"
+          "int cfg_1305_smoke_helper(int x);\n"
+          "#endif\n")
+    write(lib_src,
+          "#ifndef VENDORED_1305_SMOKE_LIB_H\n"
+          "#define VENDORED_1305_SMOKE_LIB_H\n"
+          "#ifdef VENDORED_1305_SMOKE_IMPLEMENTATION\n"
+          "int v1305_smoke_use_cfg(int x) { return x + CFG_1305_SMOKE_VAL; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#include "plain_config_1305_smoke.h"\n'
+          "#define VENDORED_1305_SMOKE_IMPLEMENTATION\n"
+          '#include "vendored_1305_smoke_lib.h"\n'
+          "int shared_header_1305_smoke_call_a(void) { "
+          "return v1305_smoke_use_cfg(3); }\n")
+    write(b_src,
+          '#include "plain_config_1305_smoke.h"\n'
+          "int cfg_1305_smoke_helper(int x) { return x; }\n"
+          "int shared_header_1305_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return shared_header_1305_smoke_call_a() + 34; }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "shared_header_1305_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_spelling_dedup_unrelated_define_1306(cccc: Path, tmp: str) -> bool:
+    print("  #1306 (sibling to #1305): cc_serialize_program()'s own #1292 "
+          "canonical-path dedup (serialize_program.c) -- which collapses "
+          "two DIFFERENT literal spellings of one on-disk header to a "
+          "single replayed #include -- tracked a single last_define_idx "
+          "watermark across the WHOLE captured-directive array, so at real "
+          "multi-TU scale (dozens of files, thousands of intervening "
+          "#define/#undef for unrelated headers) the next occurrence of a "
+          "repeated canonical key almost always looked newer than the "
+          "running candidate and won, regardless of any actual configuring "
+          "relationship. Found via #1132's self-hosting spike round 14 "
+          "right after #1305 landed: src/internal.h, reached under three "
+          "spellings ('internal.h'/'./internal.h' from most of src/*.c, "
+          "'../internal.h' from every src/stdlib/*.c file processed only "
+          "after all of src/*.c), always preferred the LAST (stdlib) "
+          "spelling -- moving internal.h's #include past src/macros.c's "
+          "and src/reflection.c's own need for its Node/Type/Obj/Token "
+          "typedefs before their #include of reflection_ffi_protos.inc "
+          "('unknown type name' errors under -c=native). Fixed by resetting "
+          "the watermark at every TU boundary (emit_directives_tu_starts, "
+          "shared with #1305's fix) -- only a #define/#undef the CURRENT "
+          "occurrence's own TU captured ahead of it can win. Asserts VM 42 "
+          "-> native 42 -- a -m shape assertion alone doesn't invoke the "
+          "host compiler and can't see the 'unknown type name' this fixes")
+    cfg_src = Path(tmp) / "config_1306_smoke.h"
+    lib_src = Path(tmp) / "vendored_1306_smoke_lib.h"
+    a_src   = Path(tmp) / "spelling_dedup_1306_smoke_a.c"
+    b_dir   = Path(tmp) / "sub1306"
+    b_dir.mkdir(exist_ok=True)
+    b_src   = b_dir / "spelling_dedup_1306_smoke_b.c"
+    write(cfg_src,
+          "#ifndef CONFIG_1306_SMOKE_H\n"
+          "#define CONFIG_1306_SMOKE_H\n"
+          "#define CFG_1306_SMOKE_VAL 5\n"
+          "int cfg_1306_smoke_helper(int x);\n"
+          "#endif\n")
+    write(lib_src,
+          "#ifndef VENDORED_1306_SMOKE_LIB_H\n"
+          "#define VENDORED_1306_SMOKE_LIB_H\n"
+          "#ifdef VENDORED_1306_SMOKE_IMPLEMENTATION\n"
+          "int v1306_smoke_use_cfg(int x) { return x + CFG_1306_SMOKE_VAL; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#include "config_1306_smoke.h"\n'
+          "#define VENDORED_1306_SMOKE_IMPLEMENTATION\n"
+          '#include "vendored_1306_smoke_lib.h"\n'
+          "int spelling_dedup_1306_smoke_call_a(void) { "
+          "return v1306_smoke_use_cfg(3); }\n")
+    write(b_src,
+          '#include "../config_1306_smoke.h"\n'
+          "int cfg_1306_smoke_helper(int x) { return x; }\n"
+          "int spelling_dedup_1306_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return spelling_dedup_1306_smoke_call_a() + 34; }\n")
+
+    vm_result = run([str(cccc), a_src.name, str(b_src.relative_to(tmp))],
+                     cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "spelling_dedup_1306_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name,
+         str(b_src.relative_to(tmp))],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_local_shadows_global_1302(cccc: Path, tmp: str) -> bool:
     print("  #1302: -c=native, a hoisted block-scoped local whose name "
           "collides with a global/typedef the same function still "
@@ -9241,6 +9393,8 @@ CASES = [
     case_macro_declared_fn_bodyless_1303,
     case_vendored_multi_tu_include_1304,
     case_vendored_multi_tu_include_spelling_1304,
+    case_shared_header_unrelated_define_1305,
+    case_spelling_dedup_unrelated_define_1306,
 ]
 
 

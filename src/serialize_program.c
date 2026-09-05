@@ -4761,13 +4761,42 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // this is a no-op for every existing single-spelling program. One
     // forward pass: `candidate_index` tracks the chosen index per key seen
     // so far, moved forward only past a #define/#undef line.
+    //
+    // #1306: `last_define_idx` used to track the most recent #define/#undef
+    // ANYWHERE in the whole array, not just ones the CURRENT occurrence's
+    // own TU captured -- so with dozens of TUs and thousands of intervening
+    // #define/#undef lines for entirely unrelated headers (routine at
+    // self-hosting's 82-file scale), the very next occurrence of a repeated
+    // key almost always looked newer than the running candidate and won,
+    // regardless of any actual configuring relationship. That silently
+    // preferred whichever spelling of a shared header (e.g. src/internal.h,
+    // reached via "internal.h"/"./internal.h" from most of src/*.c and
+    // "../internal.h" from every src/stdlib/*.c file) happened to be
+    // captured LAST overall -- for internal.h that's the stdlib spelling,
+    // captured only after all of src/*.c (including src/macros.c and
+    // src/reflection.c, both of which need internal.h's Node/Type/Obj/
+    // Token typedefs before their own #include of reflection_ffi_protos.inc)
+    // has already been processed. The result: internal.h's replayed
+    // #include landed AFTER reflection_ffi_protos.inc's own need for it --
+    // "unknown type name 'Node'"/'Type'/'Obj'/'Token' under -c=native.
+    // Scoped the same way push_emit_directive's own #1305 fix scopes its
+    // sibling check: `local_last_define` resets to -1 at every TU boundary
+    // (vm->compiler.emit_directives_tu_starts), so only a #define/#undef
+    // the CURRENT occurrence's own TU captured ahead of it can win.
     HashMap candidate_index = {0}; // canonical path key -> chosen index + 1
     {
-        int last_define_idx = -1;
+        int local_last_define = -1;
+        int tu_starts_n       = vm->compiler.emit_directives_tu_starts_count;
+        int next_tu_idx       = 0; // index into emit_directives_tu_starts
         for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
+            while (next_tu_idx < tu_starts_n &&
+                   vm->compiler.emit_directives_tu_starts[next_tu_idx] <= i) {
+                local_last_define = -1;
+                next_tu_idx++;
+            }
             char *line = vm->compiler.emit_directives.data[i];
             if (line_is_define_or_undef_directive(line)) {
-                last_define_idx = i;
+                local_last_define = i;
                 continue;
             }
             char *resolved =
@@ -4776,7 +4805,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 continue;
             const char *key      = cc_canonical_path_key(vm, resolved);
             void       *existing = hashmap_get(&candidate_index, key);
-            if (!existing || last_define_idx > (int)(intptr_t)existing - 1)
+            if (!existing || local_last_define >= 0)
                 hashmap_put(&candidate_index, key, (void *)(intptr_t)(i + 1));
         }
     }
