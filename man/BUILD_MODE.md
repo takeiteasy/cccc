@@ -4,6 +4,9 @@ A Zig/Rust-style build system embedded in C. The build script is a normal `.c`
 source file that CCCC compiles and runs at build time; the script declares
 targets (executables, static libraries, dynamic libraries) and the CCCC build
 runner compiles and links them with the system toolchain (`cc` / `ar` / `ld`).
+A target can also be built by `cccc` itself — a `CcccExecutable` (see
+[Target kinds](#target-kinds)) — so a project whose sources use
+`[[cccc::comptime]]` needs no external build orchestrator.
 
 There is no DSL and no separate config language: the build script is C, compiled
 by the same preprocessor / parser / VM as every other CCCC source file. The mode
@@ -97,13 +100,13 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
 | `--build-tool-allow=NAME[,NAME...]` | (allow all) | Comma-separated allowlist of tool names that may be probed via `HaveTool` / `PkgConfig`, executed via `RunCustom`, or called via `CaptureCommand`. Repeated flags accumulate. `cc`/`ar`/`ld` are always invoked directly by the runner and are not subject to this list. |
-| `--build-jobs=N` | `1` | Controls parallelism at two levels (POSIX only; non-POSIX always serial). **Target-level** (N>1, multiple simultaneously-ready targets): forks up to N target children in parallel, each compiling its sources serially. **Source-level** (N>1, only one target ready at a time): compiles up to N `cc -c` invocations within that target in parallel. The `-j` budget covers both modes — at most N compiler processes run at once. |
+| `--build-jobs=N` | `1` | Controls parallelism at two levels (POSIX only; non-POSIX always serial). **Target-level** (N>1, multiple simultaneously-ready targets): forks up to N target children in parallel, each compiling its sources serially. **Source-level** (N>1, only one target ready at a time): compiles up to N `cc -c` invocations within that target in parallel. The `-j` budget covers both modes — at most N compiler processes run at once. A `CcccExecutable` target is a single whole-program invocation, so source-level parallelism does not apply to it; it still participates in target-level parallelism. |
 | `--build-keep-going` | off | Continue building independent targets when one fails, rather than stopping at the first error. Failed target names are listed in the final summary. Targets whose dependency chain includes a failed target are skipped (not attempted) and listed as `skipped:` in the summary. |
 | `--build-quiet` | off | Suppress per-step `[N/M] cc ...` lines. Errors and the final summary are still printed. Overridden by `--build-verbose`. |
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD`, gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD`, gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native `Executable`/`StaticLib`/`DynamicLib` targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check. A `CcccExecutable` target is whole-program — no per-source `.o` — so it caches **per target**: a single key over the host-arch tag, the running `cccc`'s own content hash (a rebuilt `cccc` invalidates every `CcccExecutable` output), the invocation, and the content of every source *and* every path declared with `AddInput`. It never touches the shared CAS. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. |
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. |
@@ -111,13 +114,17 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 Existing flags forwarded to every target's compile as defaults: `-I`, `-i`, `-D`,
 `-U`, `--std=`, `-L`, `-l`. VM-only / output options (`-c`, `-d`/`--disassemble`,
 `-O<n>`/`--optimize`, `--vm-profile`, `-g`/`--debug`, `-o`, `-E`, `-m`, `--ast`)
-are rejected in `--build` mode.
+are rejected on the `cccc --build` command line. (This is about the CLI flag
+`-c`; a `CcccExecutable` target invokes `cccc --compile=native` internally, and
+that is unrelated.)
 
 ### How `--std=` is handled
 
-Unlike `-c=native`, a `--build` target compiles the source *you wrote*, not
-serializer output — there is no fixed dialect floor to protect, so `--std=`
-is honoured far more literally here:
+An `Executable`/`StaticLib`/`DynamicLib` target compiles the source *you
+wrote*, not serializer output — there is no fixed dialect floor to protect, so
+`--std=` is honoured far more literally here than for `-c=native` (a
+`CcccExecutable` target is the exception: `--std=` is forwarded verbatim to
+`cccc --compile=native`, which applies its own C11 floor to the C it emits):
 
 - Each target's own resolved compiler (`SetToolchain`, `--build-cc=`/
   `CCCC_BUILD_CC`, or the system default — see "Cross-compilation" below) is
@@ -318,7 +325,10 @@ for (int i = 0; i < n; i++)
 
 `kind=native` is the only supported value (on-disk bytecode targets were
 removed) -- it exists mainly so the attribute has an explicit form to
-match its C23/GNU spellings below.
+match its C23/GNU spellings below. It describes the *factory*, not the
+target the factory returns: a factory is free to return a `CcccExecutable`
+(compiled by `cccc` itself — see [Target kinds](#target-kinds)) just as it
+returns an `Executable`.
 
 The attribute accepts C23 and GNU forms:
 
@@ -337,7 +347,20 @@ __attribute__((cccc::build_target))
 | Executable | `Executable(name)` | `bin/<name>` | system `cc` |
 | Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
+| cccc executable | `CcccExecutable(name)` | `bin/<name>` | `cccc --compile=native` |
 | Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
+
+A **`CcccExecutable`** target is compiled by the running `cccc` itself, not a
+system `cc`: one whole-program `cccc --compile=native <sources...> -o
+bin/<name>` invocation, so its sources may contain `[[cccc::comptime]]`. It has
+no per-source object files — it caches per target, not per source (see
+[Incremental builds](#incremental-builds-and-header-dependencies) below) — and
+accepts only the flags `cccc --compile=native` understands:
+`-I`/`-isystem`/`-D`/`-U`/`-L`/`-l`/`--std=`. `AddCFlag`, `AddLdFlag`,
+`AddFramework`, `SetProfile`, and `SetTargetTriple` are rejected on this kind;
+there is no host-`cc` flag pass-through. Use `SetTargetEnv(t, "CCCC_NATIVE_CC",
+"...")` to choose the host compiler that links the emitted C — e.g. `cosmocc`
+for a portable binary.
 
 ## Builder API
 
@@ -355,6 +378,8 @@ int         BuildVerbose(Builder *ctx);
 BuildTarget *Executable(Builder *ctx, const char *name);
 BuildTarget *StaticLib(Builder *ctx, const char *name);
 BuildTarget *DynamicLib(Builder *ctx, const char *name);
+BuildTarget *CcccExecutable(Builder *ctx, const char *name); // compiled by cccc itself
+const char  *CcccPath(Builder *ctx);     // the running cccc, for a RunCustom cmd
 
 // Output / sources
 void SetOutput(BuildTarget *t, const char *path);
@@ -471,9 +496,9 @@ whatever **`DeclareOutput(t, path)`** recorded — verbatim, not joined onto
 may be called more than once on the same target (e.g. a codegen step that
 produces two files); `TargetOutput()` returns the **first** one recorded.
 
-**`AddInput(t, path)`** records a file a `RunCustom` step reads.
-Combined with `DeclareOutput`, this gives `build_target()` a real "up to
-date" skip check: if the target has at least one declared input and one
+**`AddInput(t, path)`** records a file a `RunCustom` (or `CcccExecutable`)
+step reads. On a `RunCustom` target, combined with `DeclareOutput`, this
+gives `build_target()` a real "up to date" skip check: if the target has at least one declared input and one
 declared output, and every output exists and is at least as new as every
 input, the command is skipped — printed as `(up to date)` rather than
 `(custom)`. A target with no `AddInput` calls keeps the old behavior
@@ -492,6 +517,15 @@ Without `AddInput`, `DeclareOutput()` alone is invalidation metadata only —
 it just lets `TargetOutput()` resolve a path for downstream consumers; the
 step still runs every build.
 
+`AddInput` is also accepted on a **`CcccExecutable`** target, where it means
+something different: the declared paths' contents fold into the target's
+cache key. `cccc --compile=native` emits no `-MMD` depfile, so a header the
+target `#include`s — or a data file it reads at comptime through a `-D`
+define, which has no `#include` at all — will not otherwise invalidate the
+cached binary. Declare those with `AddInput` (and `CcccPath(ctx)` gives a
+`RunCustom` step the path of the same `cccc`, e.g. to run `-c=generated`
+alongside).
+
 **`SetTargetEnv(t, name, value)`** sets an environment variable for `t`'s
 compiler/linker child process only — e.g. `AFL_USE_ASAN=1` for a target
 whose toolchain is an AFL++ wrapper that reads it at invocation time:
@@ -506,6 +540,11 @@ vendored build shell (`src/build_shell.c`), not through `t`'s compiler
 invocation. That shell also has no `VAR=value cmd` env-prefix syntax (a
 real POSIX shell feature it doesn't implement); use `env VAR=value cmd
 args...` inside a `RunCustom` command instead.
+
+For a `CcccExecutable` target the child process *is* `cccc`, so
+`SetTargetEnv(t, "CCCC_NATIVE_CC", "cosmocc")` selects the host compiler
+`cccc --compile=native` uses to compile and link the C it emits — this is the
+supported way to produce a portable binary from a build target.
 
 ### Source-set ergonomics
 
@@ -832,11 +871,12 @@ the `PREFIX` environment variable, falling back to `/usr/local`.
 entry returns and the build succeeded, registered artifacts are copied to the
 appropriate subdirectory of the install prefix:
 
-| Target kind   | Destination                  |
-|---------------|------------------------------|
-| executable    | `{prefix}/bin/{name}`        |
-| static lib    | `{prefix}/lib/lib{name}.a`   |
-| dynamic lib   | `{prefix}/lib/lib{name}.{so\|dylib}` |
+| Target kind      | Destination                  |
+|------------------|------------------------------|
+| executable       | `{prefix}/bin/{name}`        |
+| cccc executable  | `{prefix}/bin/{name}`        |
+| static lib       | `{prefix}/lib/lib{name}.a`   |
+| dynamic lib      | `{prefix}/lib/lib{name}.{so\|dylib}` |
 
 **`BuildWantsInstall(ctx)`** returns 1 if `--build-install` was passed — useful
 for skipping registration when the user did not request an install:
@@ -984,6 +1024,12 @@ SetTargetTriple(t, "aarch64-apple-macosx14.0");
 **Precedence** for CC binary: `SetToolchain(t, …)` > `--build-cc` > system CC.
 **Precedence** for triple: `SetTargetTriple(t, …)` > `--build-triple` (no triple = no `--target` flag).
 
+`SetToolchain` and `SetTargetTriple` apply to `Executable`/`StaticLib`/
+`DynamicLib` targets. To have a target compiled by `cccc` itself, use a
+`CcccExecutable` target — not `SetToolchain(t, "cccc")`, which would hand
+`cccc` a host-`cc` command line it does not accept. `SetTargetTriple` is
+rejected on a `CcccExecutable` target.
+
 **`BuildTargetTriple(ctx)`** returns the global triple set by `--build-triple`,
 or `NULL` if none was passed.  Use it to conditionally add target-specific
 sources or defines:
@@ -1039,11 +1085,13 @@ use `--build-tool-allow` (see above).
 
 ## Not yet supported
 
-Everything the builder API declares is implemented for the three native
-target kinds. There is no self-hosting (compiling `cccc` with `cccc`), no
-on-disk bytecode-target output, and idle `-j` slots are not redistributed
-between a parallel target build and its children (see
-[Parallel builds](#parallel-builds)).
+Everything the builder API declares is implemented for all target kinds. A
+`CcccExecutable` target compiles guest programs with `cccc`, but `cccc`'s own
+`build.c` does not yet build `cccc` that way — full self-hosting is still
+future work. There is no on-disk bytecode-target output, a `CcccExecutable`
+target has no `-MMD`-style header-dependency tracking (declare headers with
+`AddInput`), and idle `-j` slots are not redistributed between a parallel
+target build and its children (see [Parallel builds](#parallel-builds)).
 
 ## See also
 
@@ -1051,4 +1099,5 @@ between a parallel target build and its children (see
 - [TEST_MODE.md](TEST_MODE.md) — `--testing` mode, the working analog this mode mirrors.
 - [MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
 - [COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
-- [NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations.
+- [NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations; the
+  backend a `CcccExecutable` target uses.

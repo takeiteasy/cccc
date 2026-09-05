@@ -64,7 +64,11 @@ typedef enum {
     CCCC_TGT_EXE,
     CCCC_TGT_STATIC,
     CCCC_TGT_DYNAMIC,
-    CCCC_TGT_CUSTOM, // arbitrary shell command (#544)
+    CCCC_TGT_CUSTOM,      // arbitrary shell command (#544)
+    CCCC_TGT_NATIVE_CCCC, // whole-program compile via `cccc --compile=native`
+                          // (#1133): the running cccc is the compiler, not a
+                          // host cc. No per-source .o — one invocation per
+                          // target, cached per target.
 } CcTargetKind;
 
 typedef struct BuildTarget BuildTarget;
@@ -154,6 +158,13 @@ struct Builder {
     const char
         *cross_triple;    // --build-triple=TRIPLE global target triple (#547)
     const char *cross_cc; // --build-cc=COMPILER global CC override (#547)
+    // Absolute path to the running cccc, resolved once at cc_run_build entry
+    // before any SetCwd() can move the process (#1133). A CCCC_TGT_NATIVE_CCCC
+    // target spawns this exact binary as its compiler; its content hash also
+    // folds into that target's cache key so a rebuilt cccc invalidates.
+    const char *cccc_self;
+    uint64_t    cccc_self_hash; // fnv1a of cccc_self's bytes; 0 = not computed
+    int         cccc_self_hashed; // 1 once cccc_self_hash is populated
     // Strings returned by CaptureCommand/GlobFiles/ReadFile; freed at teardown.
     char **captures;
     int    captures_count, captures_cap;
@@ -188,6 +199,26 @@ static char *xstrdup(const char *s) {
     if (!p)
         error("build: out of memory");
     return p;
+}
+
+// Resolve the running cccc's own executable path to an absolute path (#1133),
+// so a CcccExecutable target invokes THIS cccc regardless of the build's cwd
+// (SetCwd) or the caller's `./cccc` spelling. `argv0` is the process argv[0].
+// realpath() handles a relative or ./-prefixed spelling; a bare "cccc" from
+// PATH falls back to a PATH probe. Returns a newly-allocated string, or NULL if
+// nothing resolves. Caller frees.
+static char *resolve_cccc_self(const char *argv0) {
+    if (argv0 && *argv0) {
+        char resolved[4096];
+        if (realpath(argv0, resolved))
+            return xstrdup(resolved);
+        if (!strchr(argv0, '/')) {
+            char *found = cccc_path_find_executable(argv0);
+            if (found)
+                return found;
+        }
+    }
+    return cccc_path_find_executable("cccc");
 }
 
 // mkdir -p semantics for a directory path.
@@ -260,6 +291,7 @@ static char *default_output(const BuildTarget *t) {
     char buf[512];
     switch (t->kind) {
         case CCCC_TGT_EXE:
+        case CCCC_TGT_NATIVE_CCCC:
             snprintf(buf, sizeof(buf), "bin/%s", t->name);
             break;
         case CCCC_TGT_STATIC:
@@ -445,6 +477,26 @@ static long long impl_dynamic_lib(long long ctx, long long name) {
     return (long long)(intptr_t)new_target(CCCC_TGT_DYNAMIC,
                                            (const char *)name);
 }
+// #1133: an executable whose compiler is the running cccc, invoked
+// `cccc --compile=native <sources...> -o bin/<name>`. Whole-program: no
+// per-source .o, no host `cc -c`. Its sources may contain [[cccc::comptime]].
+static long long impl_cccc_executable(long long ctx, long long name) {
+    (void)ctx;
+    return (long long)(intptr_t)new_target(CCCC_TGT_NATIVE_CCCC,
+                                           (const char *)name);
+}
+
+// Reject a builder call that has no meaning for a CCCC_TGT_NATIVE_CCCC target
+// (#1133). `cccc --compile=native` accepts only -I/-i/-D/-U/-L/-l/--std=/-O<n>;
+// there is no host-cc flag pass-through, so silently dropping -Wall /
+// -fsanitize=… / a cross triple would be a quiet correctness change. Hard-error
+// naming the call, like check_name_unique() — declaration-time, fatal.
+static void reject_for_cccc_target(const BuildTarget *t, const char *call) {
+    if (t->kind == CCCC_TGT_NATIVE_CCCC)
+        error("build: %s is not supported on a CcccExecutable target ('%s') — "
+              "cccc --compile=native takes only -I/-D/-U/-L/-l/--std=/-O<n>",
+              call, t->name);
+}
 
 static long long impl_set_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
@@ -508,20 +560,25 @@ static long long impl_declare_output(long long t, long long path) {
     return 0;
 }
 
-// AddInput: record a path a CCCC_TGT_CUSTOM step reads (#851). RunCustom-only,
-// same diagnostic shape as DeclareOutput. Combined with DeclareOutput, gives
-// build_target() a real "up to date" skip check: if every declared output
-// exists and is at least as new as every declared input, the command is
-// skipped rather than re-run unconditionally. A target with no AddInput
-// calls keeps today's behaviour (always runs) — the check only activates
-// once both inputs and outputs are declared.
+// AddInput: record a path a target reads but does not list as a source (#851).
+// On a RunCustom target, combined with DeclareOutput it gives build_target() a
+// real "up to date" skip check: if every declared output exists and is at least
+// as new as every declared input, the command is skipped rather than re-run
+// unconditionally. A target with no AddInput calls keeps today's behaviour (the
+// check only activates once both inputs and outputs are declared).
+//
+// On a CcccExecutable target (#1133) it is the ONLY way to make a header — or a
+// comptime data file read via -D, which no depfile could ever see (there is no
+// -MMD under `--compile=native`) — invalidate the target's cache. Its contents
+// fold into the per-target cache key.
 static long long impl_add_input(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    if (tgt->kind != CCCC_TGT_CUSTOM) {
-        fprintf(stderr,
-                "build: AddInput is only valid on a RunCustom target ('%s' is "
-                "not one)\n",
-                tgt->name);
+    if (tgt->kind != CCCC_TGT_CUSTOM && tgt->kind != CCCC_TGT_NATIVE_CCCC) {
+        fprintf(
+            stderr,
+            "build: AddInput is only valid on a RunCustom or CcccExecutable "
+            "target ('%s' is neither)\n",
+            tgt->name);
         return 0;
     }
     strarray_push(&tgt->inputs, xstrdup((const char *)path));
@@ -580,11 +637,13 @@ static long long impl_add_undef(long long t, long long name) {
     return 0;
 }
 static long long impl_add_cflag(long long t, long long flag) {
+    reject_for_cccc_target((BuildTarget *)(intptr_t)t, "AddCFlag");
     strarray_push(&((BuildTarget *)(intptr_t)t)->cflags,
                   xstrdup((const char *)flag));
     return 0;
 }
 static long long impl_add_ldflag(long long t, long long flag) {
+    reject_for_cccc_target((BuildTarget *)(intptr_t)t, "AddLdFlag");
     strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags,
                   xstrdup((const char *)flag));
     return 0;
@@ -997,6 +1056,7 @@ static long long impl_add_framework(long long t, long long name) {
     const char  *fw  = (const char *)name;
     if (!tgt || !fw)
         return -1;
+    reject_for_cccc_target(tgt, "AddFramework");
     strarray_push(&tgt->ldflags, xstrdup("-framework"));
     strarray_push(&tgt->ldflags, xstrdup(fw));
     return 0;
@@ -1159,6 +1219,15 @@ static long long impl_build_host(long long ctx) {
     (void)ctx;
     return (long long)(intptr_t)(s_ctx ? s_ctx->host : CCCC_BUILD_HOST);
 }
+// CcccPath: absolute path of the running cccc (#1133). A CcccExecutable target
+// uses it as its compiler automatically; this exposes it to a RunCustom command
+// that wants to invoke the same cccc (e.g. for -c=generated or -E). "" if
+// unresolved.
+static long long impl_build_cccc_path(long long ctx) {
+    (void)ctx;
+    return (long long)(intptr_t)((s_ctx && s_ctx->cccc_self) ? s_ctx->cccc_self
+                                                             : "");
+}
 static long long impl_build_verbose(long long ctx) {
     (void)ctx;
     return s_ctx ? s_ctx->verbose : 0;
@@ -1188,6 +1257,7 @@ static long long impl_set_target_triple(long long t, long long triple) {
     const char  *tr  = (const char *)triple;
     if (!tgt || !tr)
         return 0;
+    reject_for_cccc_target(tgt, "SetTargetTriple");
     free(tgt->target_triple);
     tgt->target_triple = xstrdup(tr);
     return 0;
@@ -1207,6 +1277,11 @@ static long long impl_set_profile(long long t, long long p) {
     const char  *prof = (const char *)p;
     if (!tgt || !prof)
         return 0;
+    // #1133: a profile emits -g / -O2 / -Os as host-cc flags; -c=native has no
+    // pass-through for -g (it is warn-and-dropped) and the profile machinery is
+    // all-or-nothing. A cccc target that wants optimisation passes -O<n> on the
+    // cccc command line (forwarded from the CLI defaults).
+    reject_for_cccc_target(tgt, "SetProfile");
     free(tgt->profile);
     tgt->profile = xstrdup(prof);
     return 0;
@@ -1253,6 +1328,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       2, 0);
     cc_register_cfunc(vm, "__builtin_build_dynamic_lib",
                       (void *)impl_dynamic_lib, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_cccc_executable",
+                      (void *)impl_cccc_executable, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_set_output", (void *)impl_set_output,
                       2, 0);
     cc_register_cfunc(vm, "__builtin_build_target_output",
@@ -1309,6 +1386,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       1, 0);
     cc_register_cfunc(vm, "__builtin_build_host", (void *)impl_build_host, 1,
                       0);
+    cc_register_cfunc(vm, "__builtin_build_cccc_path",
+                      (void *)impl_build_cccc_path, 1, 0);
     cc_register_cfunc(vm, "__builtin_build_verbose", (void *)impl_build_verbose,
                       1, 0);
     cc_register_cfunc(vm, "__builtin_build_run", (void *)impl_build_run, 2, 0);
@@ -1943,6 +2022,250 @@ static int link_output_is_current(const char *out_abs, char *const *obj_paths,
     return link_stamp_matches(tobjdir, link_argv_hash(argv));
 }
 
+// ============================================================================
+// #1133 — CcccExecutable target: whole-program `cccc --compile=native`
+// ============================================================================
+
+// Compile-side flags a CcccExecutable target forwards to `cccc
+// --compile=native`. Deliberately narrow: `cccc --compile=native` understands
+// only -I/-i/-D/-U/-L/-l/--std=/-O<n>, and there is no host-cc flag
+// pass-through, so AddCflag/AddLdflag/AddFramework/SetProfile/SetTargetTriple
+// are rejected at declaration time (reject_for_cccc_target). --std= is
+// forwarded byte-for-byte (not through cccc_resolve_host_std — that probes a
+// *host* cc; cccc applies its own C11 floor internally). `owned` accumulates
+// heap strings freed after the spawn, exactly like push_compile_flags().
+static void push_compile_flags_cccc(ArgVec *args, const Builder *ctx,
+                                    const BuildTarget *t, StringArray *owned) {
+    const CcNativeCompileArgs *d = ctx->defaults;
+    if (d && d->std_arg) {
+        char *f = malloc(strlen(d->std_arg) + 8);
+        snprintf(f, strlen(d->std_arg) + 8, "--std=%s", d->std_arg);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; d && i < d->inc_paths_count; i++) {
+        argv_push(args, "-I");
+        argv_push(args, d->inc_paths[i]);
+    }
+    for (int i = 0; d && i < d->sys_inc_paths_count; i++) {
+        argv_push(args, "-isystem");
+        argv_push(args, d->sys_inc_paths[i]);
+    }
+    for (int i = 0; d && i < d->defines_count; i++) {
+        char *f = malloc(strlen(d->defines[i]) + 3);
+        snprintf(f, strlen(d->defines[i]) + 3, "-D%s", d->defines[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; d && i < d->undefs_count; i++) {
+        char *f = malloc(strlen(d->undefs[i]) + 3);
+        snprintf(f, strlen(d->undefs[i]) + 3, "-U%s", d->undefs[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; i < t->includes.len; i++) {
+        argv_push(args, "-I");
+        argv_push(args, t->includes.data[i]);
+    }
+    for (int i = 0; i < t->defines.len; i++) {
+        char *f = malloc(strlen(t->defines.data[i]) + 3);
+        snprintf(f, strlen(t->defines.data[i]) + 3, "-D%s", t->defines.data[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; i < t->undefs.len; i++) {
+        char *f = malloc(strlen(t->undefs.data[i]) + 3);
+        snprintf(f, strlen(t->undefs.data[i]) + 3, "-U%s", t->undefs.data[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; d && i < d->lib_paths_count; i++) {
+        argv_push(args, "-L");
+        argv_push(args, d->lib_paths[i]);
+    }
+    for (int i = 0; i < t->libpaths.len; i++) {
+        argv_push(args, "-L");
+        argv_push(args, t->libpaths.data[i]);
+    }
+    for (int i = 0; d && i < d->libs_count; i++) {
+        char *f = malloc(strlen(d->libs[i]) + 3);
+        snprintf(f, strlen(d->libs[i]) + 3, "-l%s", d->libs[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+    for (int i = 0; i < t->libs.len; i++) {
+        char *f = malloc(strlen(t->libs.data[i]) + 3);
+        snprintf(f, strlen(t->libs.data[i]) + 3, "-l%s", t->libs.data[i]);
+        strarray_push(owned, f);
+        argv_push(args, f);
+    }
+}
+
+// Content hash of the running cccc binary, memoized on the Builder (#1133).
+// ccccl declares eight CcccExecutable targets; without memoization each one
+// would re-read the multi-MB binary on every --build.
+static uint64_t cccc_self_content_hash(Builder *ctx) {
+    if (!ctx->cccc_self_hashed) {
+        ctx->cccc_self_hash =
+            ctx->cccc_self ? fnv1a_file(ctx->cccc_self, CACHE_FNV_OFFSET) : 0;
+        ctx->cccc_self_hashed = 1;
+    }
+    return ctx->cccc_self_hash;
+}
+
+// Per-target cache key for a CcccExecutable target. Unlike a native EXE there
+// is no per-source .o, so this does NOT go through the shared CAS — it is
+// written into the target's own objdir stamp. Folds:
+//   - a namespace prefix, so it can never collide with a source_cache_key()
+//   - CCCC_HOST_ARCH_TAG (kept, not exempted like the retired .c4 targets:
+//     `--compile=native` output IS architecture-specific)
+//   - the running cccc's own content hash (the identity stamp #1133 requires:
+//     rebuilding cccc's serializer must invalidate every CcccExecutable object)
+//   - every argv token except the -o <path> pair
+//   - the content of every source and every AddInput()-declared path
+static uint64_t cccc_native_cache_key(Builder *ctx, char *const *argv,
+                                      const BuildTarget *t) {
+    uint64_t h = CACHE_FNV_OFFSET;
+    h          = fnv1a_update(h, "cccc-native\0", 12);
+    h = fnv1a_update(h, CCCC_HOST_ARCH_TAG, strlen(CCCC_HOST_ARCH_TAG));
+    h = fnv1a_update(h, "\0", 1);
+    uint64_t self = cccc_self_content_hash(ctx);
+    h             = fnv1a_update(h, &self, sizeof(self));
+    for (int i = 0; argv[i]; i++) {
+        if (strcmp(argv[i], "-o") == 0) {
+            i++;
+            continue;
+        }
+        h = fnv1a_update(h, argv[i], strlen(argv[i]));
+        h = fnv1a_update(h, "\0", 1);
+    }
+    for (int i = 0; i < t->sources.len; i++)
+        h = fnv1a_file(t->sources.data[i], h);
+    for (int i = 0; i < t->inputs.len; i++)
+        h = fnv1a_file(t->inputs.data[i], h);
+    return h;
+}
+
+static int cccc_native_stamp_matches(const char *tobjdir, uint64_t key) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-native", tobjdir);
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    char   buf[32] = {0};
+    size_t n       = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+        buf[--n] = '\0';
+    return strtoull(buf, NULL, 16) == key;
+}
+
+static void cccc_native_stamp_write(const char *tobjdir, uint64_t key) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.cccc-native", tobjdir);
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "%016llx", (unsigned long long)key);
+    fclose(f);
+}
+
+// Skip a CcccExecutable rebuild when the output exists, is at least as new as
+// every source and every AddInput() path, and the cache key is unchanged.
+// Gated on ctx->cache_dir like every other build.c staleness check.
+static int cccc_native_output_is_current(const BuildTarget *t,
+                                         const char *out_abs, uint64_t key,
+                                         const char *tobjdir) {
+    struct stat out_st;
+    if (stat(out_abs, &out_st) != 0)
+        return 0;
+    for (int i = 0; i < t->sources.len; i++) {
+        struct stat s_st;
+        if (stat(t->sources.data[i], &s_st) != 0 ||
+            out_st.st_mtime < s_st.st_mtime)
+            return 0;
+    }
+    for (int i = 0; i < t->inputs.len; i++) {
+        struct stat s_st;
+        if (stat(t->inputs.data[i], &s_st) != 0 ||
+            out_st.st_mtime < s_st.st_mtime)
+            return 0;
+    }
+    return cccc_native_stamp_matches(tobjdir, key);
+}
+
+// Build one CcccExecutable target: a single
+// `<cccc> <sources...> --compile=native -o <out_abs> <flags>` invocation.
+static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
+                                    const char *out_abs, const char *tobjdir,
+                                    int *step, int total) {
+    if (t->sources.len == 0) {
+        fprintf(stderr, "build: CcccExecutable target '%s' has no sources\n",
+                t->name);
+        return 1;
+    }
+    if (!ctx->cccc_self || !*ctx->cccc_self) {
+        fprintf(stderr,
+                "build: CcccExecutable target '%s': could not resolve the "
+                "running cccc binary\n",
+                t->name);
+        return 1;
+    }
+
+    ArgVec      a     = {0};
+    StringArray owned = {0};
+    argv_push(&a, (char *)ctx->cccc_self);
+    for (int i = 0; i < t->sources.len; i++)
+        argv_push(&a, t->sources.data[i]);
+    // Long form: `-c` takes an optional_argument, so the space-separated short
+    // form would swallow the next token as a source file (same reason the
+    // retired --compile=bytecode path used the long form).
+    argv_push(&a, "--compile=native");
+    argv_push(&a, "-o");
+    argv_push(&a, (char *)out_abs);
+    push_compile_flags_cccc(&a, ctx, t, &owned);
+    // LinkWith deps: -L<out>/lib -l<dep>, mirroring the native EXE link branch.
+    char *libdir      = join(ctx->out_dir, "lib");
+    int   have_libdir = 0;
+    for (int i = 0; i < t->deps_count; i++) {
+        if (!t->deps_link[i])
+            continue; // DependsOn: ordering only
+        if (!have_libdir) {
+            argv_push(&a, "-L");
+            argv_push(&a, libdir);
+            have_libdir = 1;
+        }
+        char *f = malloc(strlen(t->deps[i]->name) + 3);
+        snprintf(f, strlen(t->deps[i]->name) + 3, "-l%s", t->deps[i]->name);
+        strarray_push(&owned, f);
+        argv_push(&a, f);
+    }
+
+    uint64_t key = 0;
+    if (ctx->cache_dir && !ctx->dry_run) {
+        key = cccc_native_cache_key(ctx, (char *const *)a.data, t);
+        if (cccc_native_output_is_current(t, out_abs, key, tobjdir)) {
+            if (!ctx->quiet || ctx->verbose)
+                printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
+            else
+                ++(*step);
+            free(a.data);
+            free_strarray(&owned);
+            free(libdir);
+            return 0;
+        }
+    }
+
+    int rc = run_step(ctx, ++(*step), total, &a, t);
+    if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
+        cccc_native_stamp_write(tobjdir, key);
+
+    free(a.data);
+    free_strarray(&owned);
+    free(libdir);
+    return rc;
+}
+
 // CAS layout: <cache_dir>/<key[0:2]>/<key_hex><ext>
 static void cache_entry_path(char *buf, size_t len, const char *cache_dir,
                              uint64_t key, const char *ext) {
@@ -2421,7 +2744,10 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         for (int i = 0; i < t->deferred_globs.len; i++)
             glob_into(&t->sources, t->deferred_globs.data[i]);
         int added = t->sources.len - before;
-        if (added > 0 && t->kind != CCCC_TGT_CUSTOM)
+        // CUSTOM has no per-source step; NATIVE_CCCC is one whole-program step
+        // regardless of source count — neither grows the step total.
+        if (added > 0 && t->kind != CCCC_TGT_CUSTOM &&
+            t->kind != CCCC_TGT_NATIVE_CCCC)
             *total_p += added;
     }
     int total = *total_p;
@@ -2430,7 +2756,9 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         const char *kind_str = t->kind == CCCC_TGT_EXE       ? "executable"
                                : t->kind == CCCC_TGT_STATIC  ? "static library"
                                : t->kind == CCCC_TGT_DYNAMIC ? "dynamic library"
-                                                             : "custom";
+                               : t->kind == CCCC_TGT_NATIVE_CCCC
+                                   ? "cccc executable"
+                                   : "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
         else
@@ -2506,6 +2834,20 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         free(out_dir);
         free(tobjdir);
         return 1;
+    }
+
+    // #1133: a CcccExecutable target is one whole-program `cccc
+    // --compile=native` invocation — no host cc, no per-source .o, no --std=
+    // host probe. Handle it here, before effective_cc_for_target()/the --std=
+    // probe both of which assume a host compiler.
+    if (t->kind == CCCC_TGT_NATIVE_CCCC) {
+        int rc =
+            build_cccc_native_target(ctx, t, out_abs, tobjdir, step, total);
+        free(out_rel);
+        free(out_abs);
+        free(out_dir);
+        free(tobjdir);
+        return rc;
     }
 
     // Resolve the effective compiler for this target (#547).
@@ -2665,8 +3007,10 @@ done:
 static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
-        if (order[i]->kind == CCCC_TGT_CUSTOM)
-            total += 1;                    // one step: run the custom command
+        if (order[i]->kind == CCCC_TGT_CUSTOM ||
+            order[i]->kind == CCCC_TGT_NATIVE_CCCC)
+            total += 1; // one step: the custom command, or one whole-program
+                        // `cccc --compile=native` invocation
         else
             total +=
                 order[i]->sources.len + 1; // one compile per source + 1 link/ar
@@ -3079,6 +3423,7 @@ static int run_install(Builder *ctx) {
         char dest_rel[512];
         switch (t->kind) {
             case CCCC_TGT_EXE:
+            case CCCC_TGT_NATIVE_CCCC:
                 snprintf(dest_rel, sizeof(dest_rel), "bin/%s", t->name);
                 break;
             case CCCC_TGT_STATIC:
@@ -3161,7 +3506,7 @@ static int run_install(Builder *ctx) {
         }
 #ifdef _POSIX_VERSION
         // Preserve executable bit for binaries.
-        if (t->kind == CCCC_TGT_EXE)
+        if (t->kind == CCCC_TGT_EXE || t->kind == CCCC_TGT_NATIVE_CCCC)
             chmod(dst, 0755);
 #endif
         if (ctx->verbose)
@@ -3242,6 +3587,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 ctx.profile          = opts->profile;
                 ctx.cross_triple     = opts->cross_triple;
                 ctx.cross_cc         = opts->cross_cc;
+                ctx.cccc_self        = resolve_cccc_self(opts->argv0);
                 if (opts->build_cache) {
                     ctx.cache_dir = *opts->build_cache
                                         ? xstrdup(opts->build_cache)
@@ -3280,6 +3626,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 free(ctx.targets);
                 free(ctx.out_dir);
                 free(ctx.cache_dir);
+                free((char *)ctx.cccc_self);
                 for (int j = 0; j < ctx.captures_count; j++)
                     free(ctx.captures[j]);
                 free(ctx.captures);
@@ -3336,6 +3683,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.profile          = opts->profile;
     ctx.cross_triple     = opts->cross_triple;
     ctx.cross_cc         = opts->cross_cc;
+    ctx.cccc_self        = resolve_cccc_self(opts->argv0);
     if (opts->build_cache) {
         ctx.cache_dir = *opts->build_cache ? xstrdup(opts->build_cache)
                                            : join(ctx.out_dir, ".cccc-cache");
@@ -3371,6 +3719,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     free(ctx.targets);
     free(ctx.out_dir);
     free(ctx.cache_dir);
+    free((char *)ctx.cccc_self);
     for (int i = 0; i < ctx.captures_count; i++)
         free(ctx.captures[i]);
     free(ctx.captures);

@@ -80,6 +80,16 @@ const char *__builtin_build_host(Builder *ctx);
 int __builtin_build_verbose(Builder *ctx);
 
 /*!
+ * @brief Absolute path of the running @c cccc executable.
+ * @details A @c CcccExecutable target uses this as its compiler automatically;
+ *            this accessor exposes it to a @c RunCustom command that wants to
+ *            invoke the same @c cccc (e.g. for @c -c=generated or @c -E).
+ * @param ctx Build context.
+ * @return The @c cccc path, as an interned string (@c "" if unresolved).
+ */
+const char *__builtin_build_cccc_path(Builder *ctx);
+
+/*!
  * @brief Create an executable target named @c name (output @c bin/\<name\>).
  * @param ctx Build context.
  * @param name Target name.
@@ -103,6 +113,29 @@ BuildTarget *__builtin_build_static_lib(Builder *ctx, const char *name);
  * @return The new target handle.
  */
 BuildTarget *__builtin_build_dynamic_lib(Builder *ctx, const char *name);
+
+/*!
+ * @brief Create an executable compiled by the running @c cccc itself
+ *          (output @c bin/\<name\>).
+ * @details The target is built with a single
+ *            @c "cccc --compile=native \<sources...\> -o bin/\<name\>"
+ *            invocation — whole-program, no per-source object files, no host
+ *            @c cc. Its sources may contain @c [[cccc::comptime]]. Set
+ *            @c CCCC_NATIVE_CC via @c SetTargetEnv to choose the host compiler
+ *            that links the emitted C (e.g. @c cosmocc for a portable binary).
+ *
+ *            Only @c AddSource / @c AddInclude / @c AddDefine / @c AddUndef /
+ *            @c AddLib / @c AddLibPath / @c AddInput / @c LinkWith /
+ *            @c DependsOn / @c SetOutput / @c SetTargetEnv apply.
+ *            @c AddCFlag / @c AddLdFlag / @c AddFramework / @c SetProfile /
+ *            @c SetTargetTriple are rejected: @c cccc @c --compile=native takes
+ *            only @c -I/-D/-U/-L/-l/--std= and has no host-cc flag
+ *            pass-through.
+ * @param ctx Build context.
+ * @param name Target name.
+ * @return The new target handle.
+ */
+BuildTarget *__builtin_build_cccc_executable(Builder *ctx, const char *name);
 
 /*!
  * @brief Override the target's output path (relative to the out dir).
@@ -146,15 +179,19 @@ const char *__builtin_build_target_output(BuildTarget *t);
 void __builtin_build_declare_output(BuildTarget *t, const char *path);
 
 /*!
- * @brief Record a file path a @c RunCustom target (only) reads.
- * @details Combined with @c DeclareOutput, gives @c build_target() a real
- *            "up to date" skip check: if the target has at least one
- *            declared input and one declared output, and every output exists
- *            and is at least as new as every input, the command is skipped.
- *            A target with no @c AddInput calls always runs, as before.
- *            No-op with a diagnostic on non-@c RunCustom targets.
- * @param t Target to record against (must be a @c RunCustom target).
- * @param path Input path the command reads.
+ * @brief Record a file path a @c RunCustom or @c CcccExecutable target reads.
+ * @details On a @c RunCustom target, combined with @c DeclareOutput, gives
+ *            @c build_target() a real "up to date" skip check: if the target
+ *            has at least one declared input and one declared output, and
+ *            every output exists and is at least as new as every input, the
+ *            command is skipped. A target with no @c AddInput calls always
+ *            runs, as before. On a @c CcccExecutable target the declared
+ *            paths' contents fold into the cache key — the only way to make a
+ *            header, or a comptime data file read via @c -D, invalidate the
+ *            target (there is no depfile under @c --compile=native). No-op
+ *            with a diagnostic on any other target kind.
+ * @param t Target to record against (@c RunCustom or @c CcccExecutable).
+ * @param path Input path the target reads.
  */
 void __builtin_build_add_input(BuildTarget *t, const char *path);
 
@@ -647,6 +684,12 @@ int __builtin_build_run_default(Builder *ctx);
  * @param ctx Build context. */
 #define BuildVerbose(ctx) __builtin_build_verbose(ctx)
 
+/*! @def CcccPath
+ * @brief Absolute path of the running @c cccc — for a @c RunCustom command that
+ * needs to invoke the same @c cccc.
+ * @param ctx Build context. */
+#define CcccPath(ctx) __builtin_build_cccc_path(ctx)
+
 /*! @def Executable
  * @brief Create an executable target (output @c bin/\<name\>).
  * @param ctx Build context.
@@ -665,6 +708,17 @@ int __builtin_build_run_default(Builder *ctx);
  * @param ctx Build context.
  * @param name Target name. */
 #define DynamicLib(ctx, name) __builtin_build_dynamic_lib(ctx, name)
+
+/*! @def CcccExecutable
+ * @brief Create an executable compiled by the running @c cccc itself via
+ * @c "cccc --compile=native" — whole-program, no host @c cc, sources may
+ * contain @c [[cccc::comptime]]. Set @c CCCC_NATIVE_CC with @c SetTargetEnv to
+ * pick the host compiler that links the emitted C. @c AddCFlag / @c AddLdFlag /
+ * @c AddFramework / @c SetProfile / @c SetTargetTriple are rejected on this
+ * kind.
+ * @param ctx Build context.
+ * @param name Target name. */
+#define CcccExecutable(ctx, name) __builtin_build_cccc_executable(ctx, name)
 
 /*! @def SetOutput
  * @brief Override the target's output path (relative to the out dir).
@@ -713,9 +767,15 @@ int __builtin_build_run_default(Builder *ctx);
 #define AddSourceStr(t, n, c) __builtin_build_add_source_str(t, n, c)
 
 /*! @def AddInput
- * @brief Record a file path a @c RunCustom target (only) reads.
+ * @brief Record a file path a @c RunCustom or @c CcccExecutable target reads
+ *          but does not list as a source.
+ * @details On a @c RunCustom target, with @c DeclareOutput, this drives the
+ *            "up to date" skip check. On a @c CcccExecutable target it is the
+ *            only way to make a header — or a comptime data file read via
+ *            @c -D, which has no @c \#include for a depfile to see — invalidate
+ *            the target's cache; its contents fold into the cache key.
  * @param t Target to record against.
- * @param p Input path the command reads. */
+ * @param p Input path the target reads. */
 #define AddInput(t, p) __builtin_build_add_input(t, p)
 
 /*! @def ExcludeSource

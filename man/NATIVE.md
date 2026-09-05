@@ -34,7 +34,13 @@ therefore needs `CCCC_NATIVE_CC` pointed at a `cccc`-aware compiler.
 ```sh
 cccc -c=native -o program program.c
 CCCC_NATIVE_CC=clang cccc -c=native -o program program.c
+cccc -c=native -o program a.c b.c c.c   # multiple inputs, one program
 ```
+
+`-c=native` is whole-program: pass any number of source files in one
+invocation and the front end links their ASTs into a single program before
+serializing one temporary `.c` and spawning the host `cc` once. This is the
+shape a [`CcccExecutable` build target](BUILD_MODE.md#target-kinds) drives.
 
 The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 `gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
@@ -182,4 +188,5 @@ must be a plain integer type.
 
 - [HEADERS.md](HEADERS.md) — header resolution and host-header hand-off.
 - [COVERAGE.md](COVERAGE.md) — the C language surface CCCC accepts.
-- [BUILD_MODE.md](BUILD_MODE.md) — `--build` scripts can produce native targets.
+- [BUILD_MODE.md](BUILD_MODE.md) — `--build` scripts can produce native
+  targets, and a `CcccExecutable` target drives `-c=native` directly.

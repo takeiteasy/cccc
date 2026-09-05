@@ -5470,6 +5470,9 @@ typedef struct {
     int build_install; // --build-install: copy artifacts after build (#560)
     const char **user_args; // positional args after -- on the CLI (#558)
     int          user_args_count;
+    const char  *argv0;     // the cccc process's own argv[0]; cc_run_build
+                            // resolves it to an absolute path and uses it as
+                            // the compiler for CcccExecutable targets (#1133)
 } CcBuildOptions;
 
 void cc_load_build_runtime(VirtualMachine *vm);

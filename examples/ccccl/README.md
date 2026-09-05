@@ -16,10 +16,11 @@ cccc -c=native src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
 
 That one invocation reads `examples/append.lisp`, lowers it to C, and
 compiles and links the whole program in a single step — no intermediate
-`.gen.c`, no separate `cc`. `make -C examples/ccccl native` does the same for
-every example below. There is no `cccc as target` support in the `build.c`
-DSL yet, so this directory is built with a plain `Makefile`, not
-`cccc --build build.c`.
+`.gen.c`, no separate `cc`. `build.c` declares that invocation as a
+`CcccExecutable` target — a build target whose compiler is `cccc` itself — so
+`cccc --build build.c` builds every example below the same way, with
+incremental caching. That is the whole reason this directory has a `build.c`
+rather than a hand-written `Makefile`.
 
 `append.lisp` above is a *library*: it defines a function and a
 hand-written `examples/append_main.c` calls it. A `.lisp` file that also
@@ -39,8 +40,8 @@ See [Toplevel forms and `main`](#toplevel-forms-and-main) below.
 
 This is a condensed copy kept as a worked example of cccc's comptime pass,
 not a full project checkout — it has no test suite or `docs/` subdirectory
-of its own, and `make -C examples/ccccl check`/`native` is a separate,
-opt-in target: nothing in cccc's own `test` build or CI runs it.
+of its own, and `cccc --build build.c` here is separate and opt-in: nothing
+in cccc's own `test` build or CI runs it.
 
 ## Two universes
 
@@ -82,29 +83,36 @@ defines it. Every operation goes through an accessor function (`ccccl_car`,
 
 ## Building
 
+Run from this directory:
+
 ```sh
-make -C examples/ccccl              # build every example's binary under build/
-make -C examples/ccccl check        # build + run every example, diff against .expected
-make -C examples/ccccl native       # one-shot `cccc -c=native` per example -- the headline path
-make -C examples/ccccl show-append  # print the generated C for one example
-make -C examples/ccccl clean
+cccc --build build.c                    # build + check every example
+cccc --build build.c --build-target=fib # just one native binary
+cccc --build build.c --build-cache      # incremental
 ```
 
-`make check` goes through `cccc -c=generated` to produce a `build/NAME.gen.c`
-file, then a separate `cc` step links it against the hand-written
-`examples/NAME_main.c` and `runtime/ccccl_rt.c` — the portability proof: the
-generated C is inspectable, and needs nothing but a C compiler from that
-point on. `make native` does the same work in one `cccc -c=native`
-invocation, with no intermediate file. Both must produce byte-identical
-program output; `make check` and `make native` are run separately in CI-like
-verification for exactly that reason.
+Every example is built two ways and both must produce identical output:
 
-`CCCC` (default `../../cccc`) and `CC` (default `cc`) are both overridable —
-`CCCC=../../build/cccc make native` runs the full build's binary instead of
-the stage0 one. cccc's own `build.c` and repo-root `./cccc` binaries go
-stale independently of each other; if `make native` behaves unexpectedly
-after touching cccc's own source, rebuild both before assuming this
-directory regressed.
+- **native** — one `cccc --compile=native` invocation, declared as a
+  `CcccExecutable` target (a build target whose compiler is `cccc`). The
+  comptime pass lowers the `.lisp` and the whole program is compiled and
+  linked in a single step, no intermediate file. This is the path a plain
+  `Makefile` had to reach for directly, because a build target could not use
+  `cccc` as its compiler.
+- **generated** — a `RunCustom` step runs `cccc -c=generated` to write an
+  inspectable `build/NAME.gen.c`, then an ordinary `Executable` target links
+  it against the hand-written `examples/NAME_main.c` (library examples) and
+  `runtime/ccccl_rt.c` with the system `cc`. The portability proof: the
+  generated C needs nothing but a C compiler from that point on.
+
+The `check` target depends on both and diffs each binary's output against
+`examples/NAME.expected`; a plain `cccc --build build.c` runs it.
+
+`build.c` uses the running `cccc` as the compiler for its `CcccExecutable`
+targets — the same binary you invoked `--build` with. The repo-root `./cccc`
+(stage0) and `build/cccc` (full build) go stale independently; if a build
+here behaves unexpectedly after touching cccc's own source, rebuild the one
+you are driving this with.
 
 ## Invoking cccc directly
 
@@ -197,7 +205,7 @@ parameters aren't clobbered mid-update) plus setting a repeat flag, inside
 a loop wrapping the whole function body:
 
 ```sh
-make -C examples/ccccl show-reverse
+cccc --build build.c --build-target=reverse.gen && cat build/reverse.gen.c
 ```
 
 ```c
@@ -225,7 +233,7 @@ LObj *reverse_acc(LObj *xs, LObj *acc) {
 }
 ```
 
-(Reformatted for readability; the real output — `make show-reverse` — casts
+(Reformatted for readability; the real output — `cat build/reverse.gen.c` — casts
 every `LObj*` operand explicitly and prints the serializer's own canonical
 brace style, which reflows `while` back out as `for (; cond; )`.)
 
@@ -331,7 +339,7 @@ defines" and "after all the defines" are the same observable behaviour.
 ```
 
 ```sh
-make -C examples/ccccl show-hello   # the generated ccccl_toplevel + main
+cccc --build build.c --build-target=hello.gen && cat build/hello.gen.c
 ```
 
 `print` writes no newline of its own, so a program's output is the
@@ -361,7 +369,8 @@ this compiler could do, just not one built here.
 
 Every example has a `NAME.lisp` and a `NAME.expected`; the library ones also
 have a hand-written `NAME_main.c` (`hello`, being a program, does not).
-`make check`/`make native` build, run, and diff every one.
+`cccc --build build.c` builds each one both ways, runs it, and diffs the
+output.
 
 ## Lowering, worked example
 
@@ -385,8 +394,8 @@ lowers through three stages:
    an already-declared local) so nested control flow composes as real
    `if`/`else` statements, not an expression.
 
-The result (`make show-append`, reformatted here for readability — the real
-output casts every operand and keeps everything on few, long lines):
+The result (`cat build/append.gen.c`, reformatted here for readability — the
+real output casts every operand and keeps everything on few, long lines):
 
 ```c
 LObj *append(LObj *x, LObj *y) {

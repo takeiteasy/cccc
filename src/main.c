@@ -3087,6 +3087,7 @@ int main(int argc, const char *argv[]) {
             .user_args_count     = (dashdash >= 0 && dashdash + 1 < argc)
                                        ? argc - dashdash - 1
                                        : 0,
+            .argv0               = argv[0],
         };
 
         int build_code = cc_run_build(&vm, merged_prog, &build_opts);

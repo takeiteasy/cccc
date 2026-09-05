@@ -8,6 +8,21 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [0.1.0] - Unreleased
 
 - Initial release.
+- Added: `CcccExecutable` build target — a `--build` target kind whose
+  compiler is the running `cccc` itself, built with one whole-program
+  `cccc --compile=native` invocation. Its sources may contain
+  `[[cccc::comptime]]`, so a project that lowers a DSL at compile time no
+  longer needs an external Makefile driving one-shot `cccc -c=native`. Caches
+  per target: the key folds the host-arch tag, the `cccc` binary's own
+  content hash (a rebuilt `cccc` invalidates), the invocation, and the
+  content of every source plus every `AddInput`-declared path — the last
+  covers headers and comptime data files, since `--compile=native` emits no
+  `-MMD` depfile. `AddCFlag`/`AddLdFlag`/`AddFramework`/`SetProfile`/
+  `SetTargetTriple` are rejected on this kind; `SetTargetEnv(t,
+  "CCCC_NATIVE_CC", "...")` chooses the host compiler that links the emitted
+  C. New `CcccPath(ctx)` exposes the running `cccc` to a `RunCustom` command.
+  `examples/ccccl/` now builds through `cccc --build build.c` instead of a
+  hand-written `Makefile`.
 - Fixed: CCCC's `#pragma once` (and `#ifndef` include-guard) suppression was
   keyed on the raw resolved path *string*, so one physical header reached
   under two spellings in a single translation unit — e.g. `"./internal.h"`
