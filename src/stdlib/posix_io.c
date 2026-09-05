@@ -192,11 +192,12 @@ static long long wrap_creat(const char *path, long long mode) {
     return (long long)creat(path, (mode_t)mode);
 }
 
-// wrap_shm_open (#1294): shm_open's trailing `mode_t mode` is only
-// meaningful with O_CREAT (POSIX; matches the real host SDK/glibc
-// declaration, `int shm_open(const char *, int, ...)`), so it must not
-// consume a variadic argument the guest never passed -- same shape as
-// wrap_open just above.
+// wrap_shm_open: shm_open's trailing `mode_t mode` is only meaningful with
+// O_CREAT. POSIX and glibc declare it fixed-arity `(const char *, int,
+// mode_t)`; the macOS SDK spells it variadic. This wrapper is variadic
+// either way and must not consume an argument the guest never passed --
+// same shape as wrap_open just above. include/sys/mman.h picks the matching
+// guest-visible prototype per host.
 static long long wrap_shm_open(const char *name, long long oflag, ...) {
     mode_t mode = 0;
     if (oflag & O_CREAT) {

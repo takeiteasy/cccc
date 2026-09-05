@@ -4729,6 +4729,20 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // an extra `#include <stdlib.h>` is harmless on macOS/BSD, where
     // mkstemp is already visible through unistd.h alone.
     bool emitted_stdlib_h_for_mkstemp = false;
+    // #1307: on a modern glibc host a replayed `#include <xlocale.h>` is
+    // dropped outright (see the drop block below -- glibc removed its own
+    // copy in 2.26). CCCC's bundled <xlocale.h> is a universal alias for
+    // <locale.h>+<ctype.h>, so a guest that reaches xlocale.h through a
+    // bundled->bundled chain #1297 leaves uncaptured (<xlocale.h> ->
+    // <locale.h>, no other program text pulling those in) is left with
+    // neither the replayed line nor any substitute -- a fallback prototype
+    // spelled with `locale_t` then has nothing declaring the alias. Emit
+    // <locale.h>/<ctype.h> in its place; same latched-injection shape as
+    // sys_stat_h/stdlib_h_for_mkstemp above -- one of each per program.
+#ifndef __APPLE__
+    bool emitted_locale_h_for_xlocale = false;
+    bool emitted_ctype_h_for_xlocale  = false;
+#endif
     // #1143 regression: the real host's <tgmath.h> (never intercepted --
     // only math.h/float.h are, see the math.h/float.h substitution below)
     // includes the real host's own <math.h> internally to build its
@@ -4979,13 +4993,35 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // for locale.h+ctype.h, so guest code that includes it directly
         // stays portable -- but real glibc dropped its own <xlocale.h> in
         // 2.26, so a bare replayed `#include <xlocale.h>` here would fail
-        // to resolve at all on a modern Linux host ("file not found"). Drop
-        // it outright: everything the bundled body pulls in (locale_t,
-        // LC_*_MASK, is*_l/to*_l) is already covered by this same loop's
-        // ordinary replay of locale.h/ctype.h, so nothing is lost.
+        // to resolve at all on a modern Linux host ("file not found").
+        // Substitute the two real headers the bundled body is an alias for
+        // rather than the bare line: everything it pulls in (locale_t,
+        // LC_*_MASK, is*_l/to*_l) lives in <locale.h>/<ctype.h>. #1307:
+        // this MUST be an explicit substitution, not a plain drop -- a
+        // bundled->bundled chain #1297 leaves uncaptured (<xlocale.h> ->
+        // <locale.h>) means nothing else in the program replays those
+        // headers, so a dropped line left a `locale_t`-spelled fallback
+        // prototype with no declaration of the alias. Latched so each
+        // substitute lands at most once regardless of how many
+        // <xlocale.h> directives were captured.
+        // (Residual: glibc gates `locale_t` in <locale.h> behind
+        // __USE_XOPEN2K8; the default -c=native path forwards a gnu<NN>
+        // spelling (CCCC_STD_PROBE_PREFER_GNU) so _DEFAULT_SOURCE is on
+        // and it is declared. A strict explicit --std=c<NN> would not get
+        // it -- a distinct strict-ISO feature-test-gating gap, tracked
+        // separately, not this fix's concern.)
         if (!vm->compiler.emit_cccc && resolved &&
-            path_basename_is(resolved, "xlocale.h"))
+            path_basename_is(resolved, "xlocale.h")) {
+            if (!emitted_locale_h_for_xlocale) {
+                fprintf(f, "#include <locale.h>\n");
+                emitted_locale_h_for_xlocale = true;
+            }
+            if (!emitted_ctype_h_for_xlocale) {
+                fprintf(f, "#include <ctype.h>\n");
+                emitted_ctype_h_for_xlocale = true;
+            }
             continue;
+        }
 #endif
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring

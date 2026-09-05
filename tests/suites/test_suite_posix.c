@@ -705,20 +705,26 @@ int test_posix_sys_mman(void) {
     return 42;
 }
 
-// test_posix_shm_open (#1294): shm_open's real POSIX signature is variadic
-// (`int shm_open(const char *, int, ...)`) -- the trailing mode_t is only
-// meaningful with O_CREAT and must not be consumed when the caller doesn't
-// pass it (wrap_shm_open, posix_io.c). Exercises both the two-argument
-// (no O_CREAT) rejection path and the three-argument O_CREAT path, plus a
-// round trip through mmap to prove the descriptor is real shared memory.
+// test_posix_shm_open: shm_open's trailing mode_t is only meaningful with
+// O_CREAT. POSIX and glibc declare it fixed-arity, `int shm_open(const char *,
+// int, mode_t)`; only the macOS SDK spells it variadic. CCCC's bundled
+// <sys/mman.h> now matches whichever the host declares (see the header), so a
+// no-O_CREAT call passes `0` for the ignored mode on non-Apple hosts and omits
+// it on macOS. The FFI wrapper (wrap_shm_open, posix_io.c) is variadic and
+// never consumes a mode the guest didn't pass. Exercises the no-O_CREAT
+// rejection path and the O_CREAT create path, plus a round trip through mmap
+// to prove the descriptor is real shared memory.
 [[cccc::test(return = 42)]]
 int test_posix_shm_open(void) {
     const char *name = "/cccc_test_shm";
     shm_unlink(name);
 
-    // No O_CREAT and the object doesn't exist yet -- must fail without
-    // touching an unpassed variadic mode_t argument.
+    // No O_CREAT and the object doesn't exist yet -- must fail.
+#ifdef __APPLE__
     int fd = shm_open(name, O_RDWR);
+#else
+    int fd = shm_open(name, O_RDWR, 0);
+#endif
     if (fd != -1)
         return 1;
 

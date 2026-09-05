@@ -68,10 +68,18 @@ extern int mlock(const void *addr, size_t len);
 extern int munlock(const void *addr, size_t len);
 extern int mlockall(int flags);
 extern int munlockall(void);
-/* #1294: variadic, matching POSIX and the real host SDK/glibc declaration --
- * the trailing `mode_t mode` is only meaningful with O_CREAT and must not be
- * consumed when the caller never passed it (see wrap_shm_open, posix_io.c). */
+/* shm_open's trailing `mode_t mode` is only meaningful with O_CREAT. POSIX
+ * and glibc declare it fixed-arity, `int shm_open(const char *, int, mode_t)`;
+ * the variadic spelling is a macOS SDK extension. Match whichever the host
+ * actually declares so the VM and -c=native agree on the same host -- a 2-arg
+ * call is a compile error natively on Linux (as it is with the real host cc).
+ * The FFI wrapper (wrap_shm_open, posix_io.c) is variadic and serves both
+ * arities, so it needs no #ifdef. */
+#ifdef __APPLE__
 extern int shm_open(const char *name, int oflag, ...);
+#else
+extern int shm_open(const char *name, int oflag, mode_t mode);
+#endif
 extern int shm_unlink(const char *name);
 #ifdef __linux__
 /* mremap resizes/moves an existing mapping; Linux-only glibc/syscall */

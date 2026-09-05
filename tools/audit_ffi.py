@@ -349,9 +349,22 @@ def load_declarations():
             guard = line_guard.get(lineno, ())
             file_decls.append((name, ret, args, guard))
         stripped = strip_common_wrapper([(n, g) for n, _, _, g in file_decls])
+        # A name declared more than once in one header is usually a
+        # per-platform pair (`#ifdef __APPLE__ ... #else ...`, e.g.
+        # sys/mman.h's shm_open, variadic on macOS and fixed-arity
+        # elsewhere). Collapse an exhaustive #if/#else across those
+        # declarations the same way the registration side does, so the
+        # symbol reads as unconditionally declared rather than tripping
+        # the guard-presence check against an unconditional registration.
+        per_name_guards = {}
+        for (name, _, _, _), (_, guard) in zip(file_decls, stripped):
+            per_name_guards.setdefault(name, []).append(guard)
         for (name, ret, args, _), (_, guard) in zip(file_decls, stripped):
             if name in decls:
                 continue  # first declaration wins (e.g. redeclared under #if)
+            collapsed = collapse_exhaustive_guards(per_name_guards[name])
+            if any(not g for g in collapsed):
+                guard = ()
             decls[name] = (ret, args, rel, guard)
     return decls
 
