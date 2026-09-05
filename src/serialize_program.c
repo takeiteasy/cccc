@@ -4779,33 +4779,52 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // has already been processed. The result: internal.h's replayed
     // #include landed AFTER reflection_ffi_protos.inc's own need for it --
     // "unknown type name 'Node'"/'Type'/'Obj'/'Token' under -c=native.
-    // Scoped the same way push_emit_directive's own #1305 fix scopes its
-    // sibling check: `local_last_define` resets to -1 at every TU boundary
-    // (vm->compiler.emit_directives_tu_starts), so only a #define/#undef
-    // the CURRENT occurrence's own TU captured ahead of it can win.
+    //
+    // #1307: scoping the check to the current occurrence's own TU (as
+    // #1306 first did, mirroring push_emit_directive's own #1305 fix) is
+    // still not precise enough -- ANY #define that TU happens to capture
+    // anywhere ahead of its own #include, not just one that actually
+    // configures the header in question, still wins. src/stdlib/format.h
+    // (reached identically by format_printf.c, format_scanf.c, AND
+    // stdio.c) hits this exact residual: stdio.c's own, wholly unrelated
+    // `#define CCCC_HAVE_NATIVE_PCT_B 1` -- guarding an unrelated feature
+    // probe, with a conditional-group `#endif` shell (#1064) as the
+    // directive immediately before its own #include "format.h" -- was
+    // still (wrongly) treated as "this TU configured format.h" by the
+    // whole-TU scan, relocating format.h's #include to stdio.c's position,
+    // later than format_printf.c's own need for it. Narrowed to match the
+    // only pattern a real IMPLEMENTATION-style header actually relies on:
+    // the configuring #define/#undef is the directive CAPTURED IMMEDIATELY
+    // BEFORE this occurrence (nothing but ordinary, uncaptured code lines
+    // between them) and belongs to the same TU -- not merely "some define
+    // exists somewhere earlier in this TU". A conditional-group shell is
+    // captured too (#1064) but is never itself a #define/#undef, so
+    // stdio.c's own `#endif` correctly fails this check.
     HashMap candidate_index = {0}; // canonical path key -> chosen index + 1
     {
-        int local_last_define = -1;
-        int tu_starts_n       = vm->compiler.emit_directives_tu_starts_count;
-        int next_tu_idx       = 0; // index into emit_directives_tu_starts
+        int tu_starts_n = vm->compiler.emit_directives_tu_starts_count;
+        int next_tu_idx = 0;       // index into emit_directives_tu_starts
         for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
+            bool crosses_tu_boundary = false;
             while (next_tu_idx < tu_starts_n &&
                    vm->compiler.emit_directives_tu_starts[next_tu_idx] <= i) {
-                local_last_define = -1;
+                crosses_tu_boundary = true;
                 next_tu_idx++;
             }
             char *line = vm->compiler.emit_directives.data[i];
-            if (line_is_define_or_undef_directive(line)) {
-                local_last_define = i;
+            if (line_is_define_or_undef_directive(line))
                 continue;
-            }
             char *resolved =
                 hashmap_get(&vm->compiler.emit_include_paths, line);
             if (!resolved)
                 continue;
             const char *key      = cc_canonical_path_key(vm, resolved);
             void       *existing = hashmap_get(&candidate_index, key);
-            if (!existing || local_last_define >= 0)
+            bool        prev_is_define_same_tu =
+                i > 0 && !crosses_tu_boundary &&
+                line_is_define_or_undef_directive(
+                    vm->compiler.emit_directives.data[i - 1]);
+            if (!existing || prev_is_define_same_tu)
                 hashmap_put(&candidate_index, key, (void *)(intptr_t)(i + 1));
         }
     }

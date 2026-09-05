@@ -403,30 +403,45 @@ static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
             // stb_sprintf.h and unrelated to format.h, wrongly relocated
             // format.h's #include all the way to format_scanf.c's later
             // position, past format_printf.c's own use of format.h's
-            // macros). Scope the scan to directives captured by THIS TU
-            // (its own emit_directives_tu_starts entry onward -- the LAST
-            // one, since this function only ever runs while preprocessing
-            // the TU that owns it) -- only a #define/#undef the CURRENT
-            // occurrence's own TU captured ahead of its own #include can
-            // mean "this TU configured the header before including it".
-            int scan_from   = i + 1;
+            // macros).
+            //
+            // #1307: scoping the search to THIS TU's own captured range
+            // (#1305's own fix) still isn't precise enough: ANY #define
+            // that TU happens to capture anywhere ahead of its own
+            // #include -- not just one that actually configures THIS
+            // header -- still wrongly wins. src/stdlib/stdio.c is a THIRD
+            // includer of format.h, with its own, wholly unrelated
+            // `#define CCCC_HAVE_NATIVE_PCT_B 1` guarding an unrelated
+            // feature probe earlier in the same file; #1305's scoped scan
+            // still found it and relocated format.h's #include to stdio.c's
+            // position -- later than format_printf.c's own need for it,
+            // reproducing the exact same "undeclared identifier" this
+            // ticket's predecessor already fixed once. The pattern every
+            // real IMPLEMENTATION-style header actually relies on is
+            // narrower: the configuring #define is the directive
+            // IMMEDIATELY ahead of the TU's own #include (nothing but
+            // ordinary, uncaptured code lines between them) -- so only
+            // relocate when the single directive captured right before
+            // THIS occurrence is itself a #define/#undef, not merely
+            // "some define exists somewhere earlier in this TU". A
+            // conditional-group shell (#1064 -- #if/#ifdef/.../#endif) is
+            // captured too but is never itself a #define/#undef, so
+            // stdio.c's `#endif` closing its own __GLIBC_PREREQ guard
+            // right before `#include "format.h"` correctly fails this
+            // check.
             int tu_starts_n = vm->compiler.emit_directives_tu_starts_count;
             int tu_start =
                 tu_starts_n > 0
                     ? vm->compiler.emit_directives_tu_starts[tu_starts_n - 1]
                     : 0;
-            if (scan_from < tu_start)
-                scan_from = tu_start;
-            for (int j = scan_from; j < arr->len; j++) {
-                if (!line_is_define_or_undef_directive(arr->data[j]))
-                    continue;
-                if (i != arr->len - 1) {
-                    char *existing = arr->data[i];
-                    memmove(&arr->data[i], &arr->data[i + 1],
-                            (size_t)(arr->len - i - 1) * sizeof(char *));
-                    arr->data[arr->len - 1] = existing;
-                }
-                break;
+            bool relocate =
+                arr->len > tu_start &&
+                line_is_define_or_undef_directive(arr->data[arr->len - 1]);
+            if (relocate && i != arr->len - 1) {
+                char *existing = arr->data[i];
+                memmove(&arr->data[i], &arr->data[i + 1],
+                        (size_t)(arr->len - i - 1) * sizeof(char *));
+                arr->data[arr->len - 1] = existing;
             }
             return;
         }

@@ -2818,6 +2818,90 @@ def case_spelling_dedup_unrelated_define_1306(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_third_includer_unrelated_define_1307(cccc: Path, tmp: str) -> bool:
+    print("  #1307 (follow-up to #1305/#1306): scoping the dedup-relocation "
+          "scan to the current occurrence's own TU (#1305/#1306's own fix) "
+          "still wasn't precise enough -- ANY #define/#undef that TU "
+          "happens to capture anywhere ahead of its own #include, not just "
+          "one that actually configures the header in question, still "
+          "won. Found via #1132's self-hosting spike round 14 immediately "
+          "after #1305 landed: src/stdlib/format.h is reached identically "
+          "by THREE TUs -- format_printf.c (needs it before stb_sprintf.h's "
+          "own captured body), format_scanf.c (plain second includer), and "
+          "src/stdlib/stdio.c (a third includer with its own, wholly "
+          "unrelated #define guarding an unrelated feature probe inside a "
+          "conditional-group shell, #1064). #1305's own scan still found "
+          "that unrelated #define anywhere in stdio.c's own range and "
+          "relocated format.h's #include to stdio.c's position -- later "
+          "than format_printf.c's own need for it. Fixed by narrowing both "
+          "#1305's and #1306's checks from 'any #define/#undef this TU "
+          "captured ahead of its own #include' to 'the directive captured "
+          "IMMEDIATELY before this occurrence, in the same TU' -- a "
+          "conditional-group shell's own #endif is captured too but is "
+          "never itself a #define/#undef, so it correctly fails the check. "
+          "Asserts VM 42 -> native 42 -- a -m shape assertion alone "
+          "doesn't invoke the host compiler and can't see the 'undeclared "
+          "identifier' this fixes")
+    cfg_src = Path(tmp) / "config_1307_smoke.h"
+    lib_src = Path(tmp) / "vendored_1307_smoke_lib.h"
+    a_src   = Path(tmp) / "third_includer_1307_smoke_a.c"
+    b_src   = Path(tmp) / "third_includer_1307_smoke_b.c"
+    c_src   = Path(tmp) / "third_includer_1307_smoke_c.c"
+    write(cfg_src,
+          "#ifndef CONFIG_1307_SMOKE_H\n"
+          "#define CONFIG_1307_SMOKE_H\n"
+          "#define CFG_1307_SMOKE_VAL 5\n"
+          "int cfg_1307_smoke_helper(int x);\n"
+          "#endif\n")
+    write(lib_src,
+          "#ifndef VENDORED_1307_SMOKE_LIB_H\n"
+          "#define VENDORED_1307_SMOKE_LIB_H\n"
+          "#ifdef VENDORED_1307_SMOKE_IMPLEMENTATION\n"
+          "int v1307_smoke_use_cfg(int x) { return x + CFG_1307_SMOKE_VAL; }\n"
+          "#endif\n"
+          "#endif\n")
+    write(a_src,
+          '#include "config_1307_smoke.h"\n'
+          "#define VENDORED_1307_SMOKE_IMPLEMENTATION\n"
+          '#include "vendored_1307_smoke_lib.h"\n'
+          "int third_includer_1307_smoke_call_a(void) { "
+          "return v1307_smoke_use_cfg(3); }\n")
+    write(b_src,
+          '#include "config_1307_smoke.h"\n'
+          "int cfg_1307_smoke_helper(int x) { return x; }\n"
+          "int third_includer_1307_smoke_call_a(void);\n"
+          "int main(void) { "
+          "return third_includer_1307_smoke_call_a() + 34; }\n")
+    write(c_src,
+          "#if 1\n"
+          "#define C_UNRELATED_1307_SMOKE 1\n"
+          "#endif\n"
+          '#include "config_1307_smoke.h"\n'
+          "int third_includer_1307_smoke_c_unused(void) { "
+          "return C_UNRELATED_1307_SMOKE; }\n")
+
+    vm_result = run([str(cccc), a_src.name, b_src.name, c_src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "third_includer_1307_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, a_src.name, b_src.name,
+         c_src.name],
+        cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_local_shadows_global_1302(cccc: Path, tmp: str) -> bool:
     print("  #1302: -c=native, a hoisted block-scoped local whose name "
           "collides with a global/typedef the same function still "
@@ -9395,6 +9479,7 @@ CASES = [
     case_vendored_multi_tu_include_spelling_1304,
     case_shared_header_unrelated_define_1305,
     case_spelling_dedup_unrelated_define_1306,
+    case_third_includer_unrelated_define_1307,
 ]
 
 
