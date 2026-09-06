@@ -940,6 +940,34 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
 
 static void inherit_semantic_attrs(Type *dst, Type *src);
 
+// Several bundled system headers define an ordinarily-a-variable name as an
+// object-like accessor macro that expands to a call:
+//   <getopt.h>  optarg optind opterr optopt optreset  (#736)
+//   <errno.h>   errno
+//   <stdio.h>   stdin stdout stderr                    (#1040)
+// (kept in sync with native_accessor_shims[] in src/serialize_shims.c). CCCC's
+// preprocessor expands these everywhere the token appears -- including in
+// declarator position -- so a parameter, local, or struct member named `optind`
+// silently parses as `int (*__cccc_optind_ptr)(void)`, a bogus function
+// pointer. This only bites when CCCC compiles code with `-I include` and
+// __CCCC__ defined (self-hosting): a normal build sees the real system headers.
+// Diagnose it here rather than let it become a SIGBUS / "invalid indirect call
+// target" at run time. `environ` is deliberately absent: its own bundled-header
+// contract (include/unistd.h) documents `extern char **environ;` re-expanding
+// into the accessor declaration as a supported spelling.
+static bool tok_is_host_accessor_macro_name(Token *tok) {
+    if (!tok || tok->kind != TK_IDENT)
+        return false;
+    static const char *const names[] = {
+        "optarg", "optind", "opterr", "optopt", "optreset",
+        "errno",  "stdin",  "stdout", "stderr",
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (equal(tok, (char *)names[i]))
+            return true;
+    return false;
+}
+
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
@@ -951,6 +979,18 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
+
+    // A declarator name that was macro-expanded from a bundled host-accessor
+    // macro (`optind`, `errno`, `stdin`, ...) lands here as the `(` of the
+    // expansion `(*__cccc_optind_ptr())`, with tok->origin pointing back at the
+    // source identifier. Catch it with a clear message instead of silently
+    // building a function-pointer declarator that crashes when called.
+    if (tok && tok->origin && tok_is_host_accessor_macro_name(tok->origin))
+        error_tok(vm, tok->origin,
+                  "'%.*s' is defined as a macro by a bundled system header and "
+                  "cannot be used as a declarator name; rename this parameter, "
+                  "variable, or member",
+                  tok->origin->len, tok->origin->loc);
 
     // Handle block type: int (^name)(params)
     // The ^ indicates this is a block type, not a function pointer
