@@ -1210,15 +1210,22 @@ static void parse_warning_option(const char *arg, uint64_t *warnings,
     }
 }
 
+// NB: the index-of-first-operand parameter is deliberately NOT named `optind`.
+// The bundled <getopt.h> defines `optind` as an object-like accessor macro
+// (`#define optind (*__cccc_optind_ptr())`, aliasing the host's real getopt
+// state -- #736), and cccc's preprocessor expands it even in declarator
+// position. When cccc compiles its own source (-I include, __CCCC__ defined)
+// a parameter named `optind` would become a bogus function-pointer parameter;
+// calling through it jumps to an integer. Any other declarator name is fine.
 static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
-                                int optind, int dashdash) {
+                                int first_operand, int dashdash) {
     int prog_start;
     if (dashdash >= 0) {
         prog_start = dashdash + 1;
         *prog_argc = argc - dashdash; // argv[0] + everything after "--"
     } else {
-        prog_start = optind;
-        *prog_argc = argc - optind + 1;
+        prog_start = first_operand;
+        *prog_argc = argc - first_operand + 1;
     }
 
     char **prog_argv = malloc(sizeof(char *) * (size_t)*prog_argc);
