@@ -129,11 +129,15 @@ int run_argv_env(char *const argv[], char *const envp[]) {
         return 1;
     }
     if (pid == 0) {
+        // Point `environ` at the merged set (rather than execve(argv[0], ...))
+        // so execvp still performs a PATH search — a target whose compiler is
+        // a bare name like "gcc-16" (SetToolchain) with SetTargetEnv overrides
+        // would otherwise fail with ENOENT. execvpe() would do both in one
+        // call but is glibc-only (absent on macOS).
         char **merged = merge_env(envp);
         if (merged)
-            execve(argv[0], argv, merged);
-        else
-            execvp(argv[0], argv);
+            environ = merged;
+        execvp(argv[0], argv);
         fprintf(stderr, "error: failed to execute %s: %s\n", argv[0],
                 strerror(errno));
         _exit(127);

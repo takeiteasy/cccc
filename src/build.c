@@ -2625,6 +2625,13 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                 continue;
             }
             if (pid == 0) {
+                // #1309: the serial path applies SetTargetEnv (t->env) via
+                // run_step()/run_argv_env(); this pool forks and execs
+                // directly, so apply the overrides here in the child, where
+                // the mutation is private. putenv() takes no copy, but
+                // t->env.data[e] outlives the child.
+                for (int e = 0; e < t->env.len; e++)
+                    putenv(t->env.data[e]);
                 execvp(a.data[0], (char *const *)a.data);
                 _exit(127);
             }
