@@ -23,6 +23,20 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   C. New `CcccPath(ctx)` exposes the running `cccc` to a `RunCustom` command.
   `examples/ccccl/` now builds through `cccc --build build.c` instead of a
   hand-written `Makefile`.
+- Fixed: an enum constant defined as an expression over *earlier
+  enumerators of the same enum* whose values need more than 32 bits
+  truncated each earlier reference to `int`. CCCC selects an enum's
+  underlying type from its enumerator values only after the whole body is
+  parsed; while the body is still open, a reference to a prior enumerator
+  was typed with the enum's not-yet-widened default `int`, so
+  `enum { A = 1ULL<<40, B = 1ULL<<2, ALL = A|B }` folded `ALL` to `4`
+  instead of `1099511627780` (matching gcc/clang, C17 and C23 alike). A
+  reference to a prior enumerator is now widened to a type that actually
+  holds its value whenever the enum's own type is still too narrow.
+  Surfaced by the self-hosting spike: `src/cccc.h`'s `CCCC_WARN_ALL` /
+  `CCCC_WARN_EXTRA` are `|`-chains of `CCCC_WARN_*` values, several past
+  bit 31, so a self-hosted `cccc` lost every `-Wall`/`-Wextra` flag whose
+  bit was >= 32.
 - Fixed: `-c=native`/`-m`/`-c=generated` dropped a widening integer cast on
   a shift operand. The serializer suppresses a same-signedness widening
   integer cast everywhere as "always implicit in C", but a shift applies the

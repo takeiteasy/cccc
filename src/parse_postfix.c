@@ -3416,6 +3416,27 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 } else {
                     num->ty = sc->enum_ty;
                 }
+                // A reference to an EARLIER enumerator of an enum whose body
+                // is still being parsed sees that enum's Type before the
+                // underlying-type selection (#1175/#1205, end of
+                // enum_specifier) has widened it past the default `int` --
+                // so `enum { A = 1ULL<<40, B = 1ULL<<2, ALL = A|B }` typed
+                // the `A` reference `int`, usual_arith_conv() then folded
+                // `A|B` in `int`, and eval2()'s ND_CAST arm truncated `A` to
+                // 0 (ALL == 4, not 1099511627780 -- gcc-16/clang, C17/C23).
+                // Never hand out an ND_NUM whose value doesn't fit its type:
+                // widen the node to one that holds sc->enum_val. A no-op
+                // once the enum is finalized (its own size then fits every
+                // member) and for every enum whose members fit `int`.
+                if (num->ty && is_integer(num->ty) && num->ty->size < 8) {
+                    int64_t v = sc->enum_val;
+                    if (num->ty->is_unsigned) {
+                        if ((uint64_t)v > 0xFFFFFFFFULL)
+                            num->ty = v < 0 ? ty_long : ty_ulong;
+                    } else if (v < INT32_MIN || v > INT32_MAX) {
+                        num->ty = ty_long;
+                    }
+                }
                 // #1095: propagate layout provenance from the enumerator's
                 // own `= sizeof(T)` (see VarScope.enum_layout_ty's own
                 // comment) so this USE, not just the enum body, flows
