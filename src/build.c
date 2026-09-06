@@ -3408,6 +3408,7 @@ static void free_target(BuildTarget *t) {
     free_strarray(&t->ldflags);
     free_strarray(&t->libs);
     free_strarray(&t->libpaths);
+    free_strarray(&t->env);
     free(t->deps);
     free(t->deps_link);
     free(t);
