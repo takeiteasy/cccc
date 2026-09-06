@@ -2,6 +2,12 @@
 #include "../cccc.h"
 #include <locale.h>
 
+// #1315: restore the real host's LC_*/LC_*_MASK values for
+// guest_to_host_lc/guest_to_host_lc_mask below when this file is itself
+// compiled as guest input under self-hosting and CCCC's own bundled
+// <locale.h> shadowed those names above. No-op under a real host compiler.
+#include "../host_shadow_macros.h"
+
 // setlocale() (fix for #819) -- CCCC's guest-visible LC_* numbering
 // (include/locale.h) doesn't match either host's real numbering (macOS
 // happens to use 0-5 in ALL/COLLATE/CTYPE/MONETARY/NUMERIC/TIME order;

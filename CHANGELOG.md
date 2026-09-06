@@ -468,3 +468,20 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   chain. Surfaced by the self-hosting spike
   (`wrap_pthread_once()`'s `(int *)((char *)once_control +
   offsetof(pthread_once_t, __opaque))`).
+- Fixed: a handful of files under `src/stdlib/` whose whole purpose is
+  translating CCCC's canonical guest numbering to the *real* host's
+  numbering (`posix_sched.c`'s `sysconf`/`pathconf`/`fpathconf`/`confstr`
+  wrappers and its scheduling-policy translation, `posix_poll.c`'s
+  `poll`/`ppoll` event-bit translation, `locale.c`'s `setlocale`/
+  `newlocale` category translation) got CCCC's own bundled, canonically-
+  numbered headers instead of the real system headers when compiled as
+  guest input — collapsing every translation table to identity and passing
+  an untranslated canonical constant straight to the real host libc (e.g.
+  `sysconf(_SC_PAGESIZE)` returning a garbage value instead of the real
+  page size). A normal `make` build never hits this: cccc never processes
+  its own source there, so the real header is always what's seen. The real
+  host's value for every affected name is now injected as a
+  `__CCCC_HOSTV_<NAME>__` macro (the same pattern already used for errno
+  codes and `CLOCK_*` ids) and restored via a new shared header included by
+  each affected file, closing the gap regardless of what mode compiles
+  them. Surfaced by the self-hosting spike.

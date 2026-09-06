@@ -121,6 +121,14 @@
 #include <ndbm.h>
 #endif
 
+// #1315: restore the real host's _SC_*/_PC_*/_CS_*/SCHED_*/POLL* values for
+// the translating wrappers below (wrap_sysconf and friends in
+// posix_sched.c, guest_to_host_pollev/host_to_guest_pollev in posix_poll.c)
+// when this file is itself compiled as guest input under self-hosting and
+// CCCC's own bundled headers shadowed those names above. No-op under a real
+// host compiler.
+#include "../host_shadow_macros.h"
+
 // ---------------------------------------------------------------------------
 // GIL helpers (mirrors the pattern in stdlib/pthread.c)
 // These are used around blocking POSIX calls so other VM threads can run.

@@ -6768,6 +6768,7 @@ void init_macros(VirtualMachine *vm) {
     init_errno_macros(vm);
     init_dlfcn_macros(vm);
     init_time_macros(vm);
+    cccc_init_host_shadow_macros(vm); // src/host_values.c, #1315
     define_macro(vm, "__C99_MACRO_WITH_VA_ARGS", "1");
     define_macro(vm, "__SIZEOF_DOUBLE__", "8");
     define_macro(vm, "__SIZEOF_FLOAT__", "4");

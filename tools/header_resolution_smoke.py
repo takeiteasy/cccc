@@ -62,6 +62,20 @@ Cases:
      resolve under `include/` or appear in an explicit allowlist below, so a
      future unbundled system header collision gets caught at edit time
      rather than at #1132's ~10-minute-per-run self-hosting spike scale.
+  14. `-E` on cccc's own `src/stdlib/posix_sched.c`, `posix_poll.c` and
+     `locale.c` with `-Iinclude -Isrc` (the same header-resolution
+     circumstances #1132's self-hosting spike compiles them under, minus
+     the full 82-file link): confirms `src/host_shadow_macros.h`'s
+     injection chain actually restores the real host's `_SC_PAGESIZE` /
+     `setlocale()` category numbering rather than leaving CCCC's own
+     bundled, canonical-numbered values baked in (#1315). `_SC_PAGESIZE`
+     and `LC_ALL` (glibc's real ordering genuinely differs from the
+     canonical one; macOS's happens to match it) are checked on every
+     platform; `POLLWRBAND`'s translation arm only exists in
+     `posix_poll.c` under `#ifdef __APPLE__` (glibc's canonical numbering
+     already matches the guest's, so there's no arm to find on Linux), so
+     that one's Darwin-only. Covers the fix at smoke-test speed instead of
+     only at the spike's ~10-minute scale.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -335,6 +349,136 @@ def case_unbundled_header_audit(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def host_cc_default_search_paths() -> list:
+    """The real host cc's own built-in `#include <...>` search directories
+    (e.g. a multiarch /usr/include/x86_64-linux-gnu holding <ffi.h> on
+    Ubuntu, which a real host cc searches by default -- via
+    -Wp,-v -- but which cccc's own -I resolution for guest-parsed source
+    has no equivalent built-in default for, so it must be handed
+    explicitly). pkg-config's own `--cflags libffi` is not a substitute:
+    it deliberately omits a "default" prefix like -I/usr/include, which is
+    exactly the directory that's non-default from cccc's own perspective.
+    """
+    result = run(["cc", "-Wp,-v", "-E", "-x", "c", "-"])
+    # icc/gcc/clang all print this same "search starts here" block to
+    # stderr; the paths are the indented lines between the two banners.
+    m = re.search(
+        r"#include <\.\.\.> search starts here:\n(.*?)\nEnd of search list",
+        result.stderr, re.S)
+    if not m:
+        return []
+    return [line.strip() for line in m.group(1).splitlines() if line.strip()]
+
+
+def self_host_include_flags() -> list:
+    """The subset of #1132's self-hosting spike include flags needed to
+    preprocess one of cccc's own src/stdlib/*.c files as guest input:
+    resolves posix_util.h's system headers plus <ffi.h> (via cccc.h),
+    exactly like the real spike, minus the link step."""
+    root = Path(__file__).parent.parent.resolve()
+    flags = ["-I", str(root / "include"), "-I", str(root / "src")]
+    if sys.platform == "darwin":
+        sdk = sysroot()
+        flags += ["-i", f"{sdk}/usr/include", "-I", f"{sdk}/usr/include/ffi"]
+    else:
+        for path in host_cc_default_search_paths():
+            flags += ["-I", path]
+    return flags
+
+
+def host_macro_value(name: str, header: str) -> int:
+    """The real host cc's own numeric value for a macro or enum constant.
+
+    Compiles and runs a one-line probe rather than text-scanning `-E -dM`:
+    glibc's _SC_*/LC_* families are enum constants, each merely re-#define'd
+    to itself (`#define _SC_PAGESIZE _SC_PAGESIZE`) purely so `#ifdef` still
+    works -- `-dM` would print that self-reference verbatim, not the
+    enum's actual integer value. Actually compiling `printf("%d", NAME)`
+    resolves it correctly regardless of whether the host spells it as a
+    macro or an enum constant. Raises on failure (caller decides how to
+    report)."""
+    src = f'#include <{header}>\n#include <stdio.h>\nint main(void){{printf("%d", (int)({name}));return 0;}}\n'
+    with tempfile.TemporaryDirectory() as probe_tmp:
+        probe_c = Path(probe_tmp) / "probe.c"
+        probe_out = Path(probe_tmp) / "probe"
+        probe_c.write_text(src)
+        compile_result = run(["cc", "-o", probe_out.name, probe_c.name], cwd=probe_tmp)
+        if compile_result.returncode != 0:
+            raise ValueError(f"host cc could not compile a probe for {name} in <{header}>: {compile_result.stderr}")
+        run_result = run([f"./{probe_out.name}"], cwd=probe_tmp)
+        return int(run_result.stdout.strip())
+
+
+def case_host_macro_shadow_injection(cccc: Path, tmp: str) -> bool:
+    print("  14: self-hosted -E restores real host _SC_*/POLL*/LC_* values (#1315)")
+    root = Path(__file__).parent.parent.resolve()
+    flags = self_host_include_flags()
+
+    try:
+        real_sc_pagesize = host_macro_value("_SC_PAGESIZE", "unistd.h")
+        real_lc_all = host_macro_value("LC_ALL", "locale.h")
+    except ValueError as e:
+        print(f"    FAIL: {e} -- audit is stale")
+        return False
+
+    sched_src = root / "src" / "stdlib" / "posix_sched.c"
+    result = run([str(cccc), "-E"] + flags + [str(sched_src)], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -E on posix_sched.c exited {result.returncode}\n    {result.stderr}")
+        return False
+    m = re.search(
+        r"case CCCC_SC_PAGESIZE:\s*\n\s*return \(long long\)sysconf\((\d+)\);",
+        result.stdout)
+    if not m:
+        print("    FAIL: could not find CCCC_SC_PAGESIZE's sysconf() call in expanded posix_sched.c")
+        return False
+    if int(m.group(1)) != real_sc_pagesize:
+        print(f"    FAIL: _SC_PAGESIZE expanded to {m.group(1)}, host's real value is {real_sc_pagesize}")
+        return False
+
+    # posix_poll.c's own POLLWRBAND translation only exists under
+    # `#ifdef __APPLE__` (glibc's canonical numbering already matches the
+    # guest's, so the file's `#else` arm is a bare passthrough with no
+    # translation arm to find at all) -- only meaningful on Darwin.
+    if sys.platform == "darwin":
+        real_pollwrband = host_macro_value("POLLWRBAND", "poll.h")
+        poll_src = root / "src" / "stdlib" / "posix_poll.c"
+        result = run([str(cccc), "-E"] + flags + [str(poll_src)], cwd=tmp)
+        if result.returncode != 0:
+            print(f"    FAIL: -E on posix_poll.c exited {result.returncode}\n    {result.stderr}")
+            return False
+        m = re.search(
+            r"if \(guest_events & 0x0200\)\s*\n\s*host \|= (\d+);",
+            result.stdout)
+        if not m:
+            print("    FAIL: could not find the POLLWRBAND translation arm in expanded posix_poll.c")
+            return False
+        if int(m.group(1)) != real_pollwrband:
+            print(f"    FAIL: POLLWRBAND expanded to {m.group(1)}, host's real value is {real_pollwrband}")
+            return False
+
+    # locale.c's guest_to_host_lc: `case 0` is always the guest's canonical
+    # LC_ALL (0) -- genuinely divergent on Linux (glibc's real LC_ALL is 6,
+    # a totally different category ordering), a no-op on macOS (whose real
+    # ordering happens to equal the canonical one), so this exercises the
+    # injection chain on Linux where the POLLWRBAND check above cannot.
+    locale_src = root / "src" / "stdlib" / "locale.c"
+    result = run([str(cccc), "-E"] + flags + [str(locale_src)], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -E on locale.c exited {result.returncode}\n    {result.stderr}")
+        return False
+    m = re.search(r"case 0:\s*\n\s*return (\d+);", result.stdout)
+    if not m:
+        print("    FAIL: could not find guest_to_host_lc's LC_ALL case in expanded locale.c")
+        return False
+    if int(m.group(1)) != real_lc_all:
+        print(f"    FAIL: LC_ALL expanded to {m.group(1)}, host's real value is {real_lc_all}")
+        return False
+
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -373,6 +517,7 @@ def main() -> int:
             case_native_sys_stat,
             case_native_xlocale,
             case_unbundled_header_audit,
+            case_host_macro_shadow_injection,
         ]
         results = [case(cccc, tmp) for case in cases]
 

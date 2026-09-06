@@ -596,6 +596,8 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag);
 void init_macros(VirtualMachine *vm);
+void cccc_init_host_shadow_macros(
+    VirtualMachine *vm); // src/host_values.c, #1315
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);

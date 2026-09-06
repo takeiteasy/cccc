@@ -39,6 +39,7 @@ Sub-suites:
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
   shims_check          — src/shims.inc freshness vs src/shims/*.c
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
+  audit_host_macro_shadow — host-facing translation macros shadowed under self-hosting (ticket #1315)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
 
 Optional:
@@ -765,6 +766,34 @@ def _run_shims_check():
         return f"FAILED ({e})", False
 
 
+def _run_audit_host_macro_shadow():
+    """Check that every host-facing translation macro cccc's own source
+    relies on is covered by src/host_shadow_macros.h or documented as
+    exempt (#1315).
+
+    Pure source scan plus a host cc `-E -dM` probe -- no cccc binary
+    needed. Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "audit_host_macro_shadow.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "audit_host_macro_shadow", script
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(check=True)
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
 def _run_fuzz_suite(cccc):
     """Run the fuzz regression corpus replay (#625).
 
@@ -1158,6 +1187,14 @@ def main():
     enum_status, ok_enum = _run_audit_reflection_enums_suite()
     print(f"  {enum_status}")
     suite_results["audit_reflection_enums"] = ok_enum
+
+    # --- Host-facing translation macro shadowing audit (#1315) ---
+    print()
+    print("[ audit_host_macro_shadow ]")
+    wedge.arm("audit_host_macro_shadow", scalar_phase_timeout)
+    hms_status, ok_hms = _run_audit_host_macro_shadow()
+    print(f"  {hms_status}")
+    suite_results["audit_host_macro_shadow"] = ok_hms
 
     # --- Fuzz regression corpus replay ---
     print()
