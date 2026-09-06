@@ -106,7 +106,7 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 | `--build-verbose` | off | Print a per-target header (`>> target 'name' [kind, N source(s)]`) before each target and show all command lines. Overrides `--build-quiet`. `-v` also enables this. |
 | `--build-list-targets` | off | Print the names of all `[[cccc::build_target]]` factory functions (one per line) and exit without running the build entry. |
 | `--build-profile=NAME` | (none) | Set a global build profile for all targets: `debug`, `release`, `relwithdebinfo`, or `minsizerel`. Individual targets can override with `SetProfile`. |
-| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD`, gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native `Executable`/`StaticLib`/`DynamicLib` targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check. A `CcccExecutable` target is whole-program — no per-source `.o` — so it caches **per target**: a single key over the host-arch tag, the running `cccc`'s own content hash (a rebuilt `cccc` invalidates every `CcccExecutable` output), the invocation, and the content of every source *and* every path declared with `AddInput`. It never touches the shared CAS. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
+| `--build-cache[=PATH]` | (off) | Enable incremental builds. Two-level strategy: (1) mtime fast path — skips recompile when the existing output is newer than all sources *and* every header prerequisite recorded by `-MMD`, gated by a per-target host-architecture-and-compiler stamp (see below); (2) content-hash CAS — on a mtime miss, looks up `hash(host-arch + source_content + header_content + compile_flags)` in a content-addressable store and restores the cached output without recompiling (the resolved compiler's own path is part of `compile_flags` here, via `argv[0]`, so the CAS already discriminates by compiler). Native `Executable`/`StaticLib`/`DynamicLib` targets cache at per-source (`.o`) granularity, plus a separate link/archive-step check. A `CcccExecutable` target is whole-program — no per-source `.o` — so it caches **per target**: a single key over the host-arch tag, the running `cccc`'s own content hash (a rebuilt `cccc` invalidates every `CcccExecutable` output), the invocation, the content of every source, every path declared with `AddInput`, *and* every header prerequisite `cccc --compile=native` reported through a `--deps-file` depfile (the front end's own record of the files it opened — the equivalent of `-MMD` for this mode). It never touches the shared CAS. Outputs compiled fresh are stored in the CAS for future reuse. Default cache directory: `<out-dir>/.cccc-cache`. Pass `=PATH` to use a shared or cross-build cache directory — for genuine cross-compiles the target triple set via `--build-cc`/`--build-triple` is folded into the compile flags and thus the key; for two *native* builds sharing an out-dir but differing in host architecture (e.g. arm64 and Rosetta x86_64 macOS binaries) or resolved compiler (e.g. clang then `--build-cc=`/`CCCC_BUILD_CC=` a different gcc), a per-target toolchain stamp (`<out-dir>/obj/<target>/.cccc-toolchain`, arch tag + compiler path) additionally invalidates the mtime fast path on either changing, so a build dir reused across architectures or compilers always recompiles instead of linking mismatched objects. |
 | `--build-option=KEY=VALUE` | (none) | Pass a typed build option to the build script. Queried via `GetBuildOption(ctx, key)` / `HaveBuildOption(ctx, key)`. Repeated flags accumulate. |
 | `--build-install` | off | After a successful build, copy artifacts registered with `InstallArtifact` to the install prefix. Default prefix: `PREFIX` env var or `/usr/local`. |
 | `-- [args...]` | (none) | Positional arguments forwarded to the build entry. Accessible via `BuildArgc(ctx)` / `BuildArgv(ctx, i)`. |
@@ -519,12 +519,15 @@ step still runs every build.
 
 `AddInput` is also accepted on a **`CcccExecutable`** target, where it means
 something different: the declared paths' contents fold into the target's
-cache key. `cccc --compile=native` emits no `-MMD` depfile, so a header the
-target `#include`s — or a data file it reads at comptime through a `-D`
-define, which has no `#include` at all — will not otherwise invalidate the
-cached binary. Declare those with `AddInput` (and `CcccPath(ctx)` gives a
-`RunCustom` step the path of the same `cccc`, e.g. to run `-c=generated`
-alongside).
+cache key. Headers the target `#include`s are tracked **automatically** under
+`--build-cache` — `cccc --compile=native` writes the set of files its front
+end opened (sources plus resolved `#include`s) to a depfile, which the
+builder folds into the cache key the way it folds a host `cc`'s `-MMD` output
+for an ordinary `Executable`. `AddInput` remains for an input no depfile can
+see: a data file the target reads at comptime through a `-D` define, which
+has no `#include` at all. Declare those with `AddInput` (and `CcccPath(ctx)`
+gives a `RunCustom` step the path of the same `cccc`, e.g. to run
+`-c=generated` alongside).
 
 **`SetTargetEnv(t, name, value)`** sets an environment variable for `t`'s
 compiler/linker child process only — e.g. `AFL_USE_ASAN=1` for a target
@@ -625,6 +628,17 @@ All of this is gated on `ctx->cache_dir` (i.e. `--build-cache` must be
 passed) — without it, every step rebuilds unconditionally, which the
 two-pass stdlib regeneration in `build.c` explicitly relies on (see its
 `stdlib_regen_step` comment).
+
+A **`CcccExecutable`** target has no per-source `.o` and no host `cc` to
+pass `-MMD` to, so under `--build-cache` the builder instead passes
+`cccc --compile=native --deps-file=<objdir>/<target>.d`. `cccc` writes the
+set of files its front end opened — the sources plus every `#include` it
+resolved from disk — and the builder folds those paths' *content* into the
+target's single per-target cache key, and mtime-checks them the same way
+Level 1 checks a `.d`'s prerequisites. A target with no `.d` yet (first
+build) is never trusted by mtime alone. The upshot: editing a header a
+`CcccExecutable` source `#include`s invalidates the cached binary with no
+`AddInput` declaration.
 
 ### Environment and filesystem
 
@@ -1088,10 +1102,9 @@ use `--build-tool-allow` (see above).
 Everything the builder API declares is implemented for all target kinds. A
 `CcccExecutable` target compiles guest programs with `cccc`, but `cccc`'s own
 `build.c` does not yet build `cccc` that way — full self-hosting is still
-future work. There is no on-disk bytecode-target output, a `CcccExecutable`
-target has no `-MMD`-style header-dependency tracking (declare headers with
-`AddInput`), and idle `-j` slots are not redistributed between a parallel
-target build and its children (see [Parallel builds](#parallel-builds)).
+future work. There is no on-disk bytecode-target output, and idle `-j` slots
+are not redistributed between a parallel target build and its children (see
+[Parallel builds](#parallel-builds)).
 
 ## See also
 

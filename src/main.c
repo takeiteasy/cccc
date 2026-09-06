@@ -51,6 +51,61 @@ static char *host_dirname_dup(const char *path) {
     return dir;
 }
 
+// --deps-file=PATH (#1308): write a make-style dependency rule naming every
+// on-disk file the front end opened -- primary sources, -include files, and
+// #includes resolved from disk (embedded standard headers go through
+// tokenize_string() and never enter vm->compiler.input_files, so they are
+// correctly absent). src/build.c folds these into a CcccExecutable target's
+// cache key the way compile_sources() folds a host cc's -MMD .d file, so a
+// header a CcccExecutable #includes invalidates the cached binary without a
+// hand-written AddInput(). The rule is one line: `<target>: <path> <path>...`
+// with spaces/tabs backslash-escaped, matching what build.c's
+// read_dep_prereqs() parses. Duplicate paths (a header included from two
+// TUs) are emitted once.
+static int write_deps_file(const char *deps_path, const char *target,
+                           File **files) {
+    FILE *f = fopen(deps_path, "w");
+    if (!f) {
+        fprintf(stderr, "error: failed to open deps file %s: %s\n", deps_path,
+                strerror(errno));
+        return 0;
+    }
+    fputs(target, f);
+    fputc(':', f);
+
+    char **seen     = NULL;
+    int    seen_len = 0, seen_cap = 0;
+    for (int i = 0; files && files[i]; i++) {
+        const char *name = files[i]->name;
+        if (!name || !*name)
+            continue;
+        int dup = 0;
+        for (int j = 0; j < seen_len; j++)
+            if (strcmp(seen[j], name) == 0) {
+                dup = 1;
+                break;
+            }
+        if (dup)
+            continue;
+        if (seen_len == seen_cap) {
+            seen_cap = seen_cap ? seen_cap * 2 : 16;
+            seen     = realloc(seen, sizeof(char *) * seen_cap);
+        }
+        seen[seen_len++] = (char *)name;
+
+        fputc(' ', f);
+        for (const char *p = name; *p; p++) {
+            if (*p == ' ' || *p == '\t' || *p == '\\' || *p == '#')
+                fputc('\\', f);
+            fputc(*p, f);
+        }
+    }
+    fputc('\n', f);
+    free(seen);
+    fclose(f);
+    return 1;
+}
+
 // #1006: run_native_backend()'s -I forwarding used to name only
 // dirname(primary_file) -- fine when every replayed #include came from
 // input_files[0], but #1006 widened auto-capture (preprocess.c) to replay
@@ -555,6 +610,13 @@ static void usage(const char *argv0, int exit_code) {
            "form must be\n");
     printf("\t                         attached; long form may use '=' or "
            "separate arg).\n");
+    printf("\t   --deps-file=PATH      With -c=native/-m/-c=generated: write a "
+           "make-style\n");
+    printf(
+        "\t                         dependency rule (`out: sources + resolved "
+        "#includes`)\n");
+    printf("\t                         to PATH, for a build system to track "
+           "header deps.\n");
     printf("\t   --test-run[=LEVEL]    Run the program under the VM "
            "(safety=max by default; LEVEL\n");
     printf("\t                         accepts none/basic/standard/max or "
@@ -1276,20 +1338,21 @@ int main(int argc, const char *argv[]) {
     bool vm_heap_disable_requested =
         false; // True if -V/--no-vm-heap was passed (now toggles the heap off)
                // (#665)
-    int print_tokens        = 0;   // -p
-    int preprocess_only     = 0;   // -E
-    int dump_expanded_only  = 0;   // -m
-    int emit_generated_only = 0;   // -c=generated
-    int emit_only           = 0;   // --emit-only
-    int skip_preprocess     = 0;   // -X
-    int skip_stdlib         = 0;   // -S
-    int output_json         = 0;   // -j (general "emit JSON" flag)
-    int output_ffi_decls    = 0;   // -J/--ffi-decls
+    int   print_tokens        = 0;    // -p
+    int   preprocess_only     = 0;    // -E
+    int   dump_expanded_only  = 0;    // -m
+    int   emit_generated_only = 0;    // -c=generated
+    int   emit_only           = 0;    // --emit-only
+    int   skip_preprocess     = 0;    // -X
+    int   skip_stdlib         = 0;    // -S
+    int   output_json         = 0;    // -j (general "emit JSON" flag)
+    int   output_ffi_decls    = 0;    // -J/--ffi-decls
+    char *deps_file           = NULL; // --deps-file=PATH (#1308)
 #ifdef CCCC_HAS_CURL
-    char  *url_cache_dir   = NULL; // --url-cache-dir
-    int    url_cache_clear = 0;    // --url-cache-clear
-    int    url_timeout     = 0;    // --url-timeout (0 = use default)
-    size_t url_max_size    = 0;    // --url-max-size (0 = use default)
+    char  *url_cache_dir   = NULL;    // --url-cache-dir
+    int    url_cache_clear = 0;       // --url-cache-clear
+    int    url_timeout     = 0;       // --url-timeout (0 = use default)
+    size_t url_max_size    = 0;       // --url-max-size (0 = use default)
 #endif
     CCCCAttrTarget     attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
     CCCCCompilerFamily compiler_family =
@@ -1399,6 +1462,7 @@ int main(int argc, const char *argv[]) {
         {"test-run", optional_argument, 0, 1121},
         {"no-layout-guards", no_argument, 0, 1122},
         {"compiler-family", required_argument, 0, 1123},
+        {"deps-file", required_argument, 0, 1124},
         {"uaf-detection", no_argument, 0, 1078},
         {"type-checks", no_argument, 0, 1079},
         {"uninitialized-detection", no_argument, 0, 1038},
@@ -1971,6 +2035,10 @@ int main(int argc, const char *argv[]) {
                     usage(argv[0], 1);
                 }
                 break;
+            case 1124: // --deps-file=PATH (#1308)
+                free(deps_file);
+                deps_file = strdup(optarg);
+                break;
             case 1121: { // --test-run[=LEVEL]
                 test_run_mode     = 1;
                 const char *level = optarg;
@@ -2280,6 +2348,16 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "error: --build cannot be combined with --debug\n");
             usage(argv[0], 1);
         }
+    }
+
+    // --deps-file (#1308) only makes sense for a mode that opens the full set
+    // of source and header files and then exits without running the VM: it is
+    // read by src/build.c to invalidate a CcccExecutable's cache. `dump_
+    // expanded_only` covers both -m and -c=generated.
+    if (deps_file && compile_format != COMPILE_NATIVE && !dump_expanded_only) {
+        fprintf(stderr, "error: --deps-file requires -c=native, -m, or "
+                        "-c=generated\n");
+        usage(argv[0], 1);
     }
 
     if (compile_format == COMPILE_NATIVE) {
@@ -2730,6 +2808,18 @@ int main(int argc, const char *argv[]) {
         cc_print_all_errors(&vm);
         exit_code = 1;
         goto BAIL;
+    }
+
+    // --deps-file (#1308): every real on-disk file the front end opened is now
+    // recorded in vm.compiler.input_files. Write the make-style rule before
+    // handing off to the backend; a front-end error above bails first, so a
+    // stale deps file is never left claiming a build that did not complete.
+    if (deps_file) {
+        const char *deps_target = out_file ? out_file : "a.out";
+        if (!write_deps_file(deps_file, deps_target, vm.compiler.input_files)) {
+            exit_code = 1;
+            goto BAIL;
+        }
     }
 
     // For --ffi-decls, emit parsed function/struct/enum declarations. We
@@ -3220,6 +3310,7 @@ BAIL:
     }
     if (out_file)
         free(out_file);
+    free(deps_file);
     if (inc_paths) {
         for (int i = 0; i < inc_paths_count; i++)
             free((void *)inc_paths[i]);

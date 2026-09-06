@@ -174,6 +174,9 @@ Options:
 	                         Aliases: native=n, generated=gen=g. Use
 	                         -cnative or --compile=native (short form must be
 	                         attached; long form may use '=' or separate arg).
+	   --deps-file=PATH      With -c=native/-m/-c=generated: write a make-style
+	                         dependency rule (`out: sources + resolved #includes`)
+	                         to PATH, for a build system to track header deps.
 	   --test-run[=LEVEL]    Run the program under the VM (safety=max by default; LEVEL
 	                         accepts none/basic/standard/max or 0/1/2/3, same as --safety=)
 	                         before compiling. Refuses to compile (nonzero exit, no

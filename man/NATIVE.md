@@ -45,6 +45,19 @@ shape a [`CcccExecutable` build target](BUILD_MODE.md#target-kinds) drives.
 The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 `gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
 
+### `--deps-file=PATH`
+
+`--deps-file=PATH` writes a make-style dependency rule — `<output>: <source>
+<source> <resolved-#include> …` — listing every file the front end opened:
+the command-line sources, any `-include` files, and every `#include` it
+resolved from disk (`cccc`'s own bundled standard headers, served from an
+in-memory table, do not appear). It is accepted only alongside `-c=native`,
+`-m`, or `-c=generated`, and never runs the program. A build system reads it
+to know which headers a `-c=native` compile depends on, the same way it would
+read a host `cc`'s `-MMD` output; `--build` mode uses it internally to give
+[`CcccExecutable` targets](BUILD_MODE.md#incremental-builds-and-header-dependencies)
+automatic header-dependency tracking.
+
 ### Flags forwarded to the host compiler
 
 `-I`, `-i`/`--isystem`, `-D`, `-U`, `-L`, `-l`, `--std=`, and `-O<n>` are

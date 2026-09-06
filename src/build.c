@@ -2123,8 +2123,15 @@ static uint64_t cccc_self_content_hash(Builder *ctx) {
 //     rebuilding cccc's serializer must invalidate every CcccExecutable object)
 //   - every argv token except the -o <path> pair
 //   - the content of every source and every AddInput()-declared path
+//   - the content of every header prerequisite in `prereqs` (#1308; from the
+//     `--deps-file` list cccc --compile=native just wrote -- the equivalent of
+//     folding a host cc's -MMD .d into source_cache_key()). `prereqs` may be
+//     NULL, which a caller does only when no deps file exists yet for this
+//     target (first build): the same "cannot trust it / not zero headers"
+//     contract read_dep_prereqs() documents.
 static uint64_t cccc_native_cache_key(Builder *ctx, char *const *argv,
-                                      const BuildTarget *t) {
+                                      const BuildTarget *t,
+                                      StringArray       *prereqs) {
     uint64_t h = CACHE_FNV_OFFSET;
     h          = fnv1a_update(h, "cccc-native\0", 12);
     h = fnv1a_update(h, CCCC_HOST_ARCH_TAG, strlen(CCCC_HOST_ARCH_TAG));
@@ -2143,6 +2150,9 @@ static uint64_t cccc_native_cache_key(Builder *ctx, char *const *argv,
         h = fnv1a_file(t->sources.data[i], h);
     for (int i = 0; i < t->inputs.len; i++)
         h = fnv1a_file(t->inputs.data[i], h);
+    if (prereqs)
+        for (int i = 0; i < prereqs->len; i++)
+            h = fnv1a_file(prereqs->data[i], h);
     return h;
 }
 
@@ -2171,11 +2181,17 @@ static void cccc_native_stamp_write(const char *tobjdir, uint64_t key) {
 }
 
 // Skip a CcccExecutable rebuild when the output exists, is at least as new as
-// every source and every AddInput() path, and the cache key is unchanged.
-// Gated on ctx->cache_dir like every other build.c staleness check.
+// every source, every AddInput() path, and every `--deps-file` header
+// prerequisite, and the cache key is unchanged. Gated on ctx->cache_dir like
+// every other build.c staleness check. `prereqs` NULL means no deps file has
+// been written yet (first build) -- the mtime fast path cannot be trusted, so
+// force a rebuild (read_dep_prereqs()'s documented contract).
 static int cccc_native_output_is_current(const BuildTarget *t,
                                          const char *out_abs, uint64_t key,
-                                         const char *tobjdir) {
+                                         const char  *tobjdir,
+                                         StringArray *prereqs) {
+    if (!prereqs)
+        return 0;
     struct stat out_st;
     if (stat(out_abs, &out_st) != 0)
         return 0;
@@ -2189,6 +2205,12 @@ static int cccc_native_output_is_current(const BuildTarget *t,
         struct stat s_st;
         if (stat(t->inputs.data[i], &s_st) != 0 ||
             out_st.st_mtime < s_st.st_mtime)
+            return 0;
+    }
+    for (int i = 0; i < prereqs->len; i++) {
+        struct stat h_st;
+        if (stat(prereqs->data[i], &h_st) != 0 ||
+            out_st.st_mtime < h_st.st_mtime)
             return 0;
     }
     return cccc_native_stamp_matches(tobjdir, key);
@@ -2241,10 +2263,31 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
         argv_push(&a, f);
     }
 
+    // #1308: ask cccc for the set of files its front end opened (sources +
+    // resolved #includes) so a header change invalidates the cached binary
+    // without a hand-written AddInput(). Only when a cache is in play -- it is
+    // the sole consumer, and the flag is folded into the cache key below.
+    char dfile[1024] = {0};
+    if (ctx->cache_dir) {
+        snprintf(dfile, sizeof(dfile), "%s/%s.d", tobjdir, t->name);
+        char *deps_flag = malloc(strlen(dfile) + 13);
+        snprintf(deps_flag, strlen(dfile) + 13, "--deps-file=%s", dfile);
+        strarray_push(&owned, deps_flag);
+        argv_push(&a, deps_flag);
+    }
+
     uint64_t key = 0;
     if (ctx->cache_dir && !ctx->dry_run) {
-        key = cccc_native_cache_key(ctx, (char *const *)a.data, t);
-        if (cccc_native_output_is_current(t, out_abs, key, tobjdir)) {
+        // Lookup key: fold in whatever `.d` a previous build left (NULL on the
+        // first build -- forces a rebuild, see cccc_native_output_is_current).
+        StringArray prereqs = {0};
+        int         have    = read_dep_prereqs(dfile, &prereqs);
+        key         = cccc_native_cache_key(ctx, (char *const *)a.data, t,
+                                            have ? &prereqs : NULL);
+        int current = cccc_native_output_is_current(t, out_abs, key, tobjdir,
+                                                    have ? &prereqs : NULL);
+        free_strarray(&prereqs);
+        if (current) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (up to date) %s\n", ++(*step), total, t->name);
             else
@@ -2257,8 +2300,16 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
     }
 
     int rc = run_step(ctx, ++(*step), total, &a, t);
-    if (rc == 0 && ctx->cache_dir && !ctx->dry_run)
-        cccc_native_stamp_write(tobjdir, key);
+    if (rc == 0 && ctx->cache_dir && !ctx->dry_run) {
+        // Store-time key: recompute from the `.d` THIS compile just wrote, not
+        // the one the lookup saw (mirrors compile_sources()'s parallel pool).
+        StringArray post = {0};
+        int         have = read_dep_prereqs(dfile, &post);
+        uint64_t    skey = cccc_native_cache_key(ctx, (char *const *)a.data, t,
+                                                 have ? &post : NULL);
+        free_strarray(&post);
+        cccc_native_stamp_write(tobjdir, skey);
+    }
 
     free(a.data);
     free_strarray(&owned);
