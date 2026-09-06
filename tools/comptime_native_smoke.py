@@ -3254,6 +3254,69 @@ def case_assert_ternary_comma_1305(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_widening_cast_shift_1312(cccc: Path, tmp: str) -> bool:
+    print("  #1312: -c=native, serialize_expr.c's ND_CAST case suppresses a "
+          "same-signedness widening integer cast as 'always implicit in C'. "
+          "True almost everywhere -- but NOT for a shift operand: `<<`/`>>` "
+          "apply the integer promotions to each operand independently and "
+          "never the usual arithmetic conversions, so `(long long)x << 32` "
+          "and `x << 32` differ once the cast widens past `int` (the latter "
+          "is a 32-bit shift, undefined for a count >= 32). src/codegen_func.c "
+          "packs `spill_param_count` (an int) into the ENT3 operand's high "
+          "word exactly this way; with the cast dropped the high word came "
+          "out zero, op_ENT3_fn spilled no argument registers, and every "
+          "self-hosted guest function read its incoming parameter as 0 "
+          "(`id(int a){return a;} id(42)` -> 0, `fib(10)` -> 0). Found via "
+          "#1132's self-hosting spike. Fixed by serialize_shift_operand(), "
+          "which keeps an explicit widening cast on a shift operand. Asserts "
+          "the -m output keeps `(long long)` on the shifted operand and "
+          "VM 42 -> native 42; pre-fix the native binary returns the wrong "
+          "value with a -Wshift-count-overflow warning")
+    src = Path(tmp) / "widening_cast_shift_1312_smoke.c"
+    write(src,
+          "static long long pack(int stack_size, int spill_param_count) {\n"
+          "    return (long long)stack_size | ((long long)spill_param_count << 32);\n"
+          "}\n"
+          "static int fib(int n) { return n < 2 ? n : fib(n-1) + fib(n-2); }\n"
+          "int main(void) {\n"
+          "    long long p = pack(48, 3);\n"
+          "    int hi = (int)((p >> 32) & 0xFFFFFFFF);\n"
+          "    int lo = (int)(p & 0xFFFFFFFF);\n"
+          "    if (hi != 3 || lo != 48) return 1;\n"
+          "    if (fib(10) != 55) return 2;\n"
+          "    return 42;\n"
+          "}\n")
+
+    dump = run([str(cccc), "-m", src.name], cwd=tmp)
+    if dump.returncode != 0:
+        print(f"    FAIL: -m exited {dump.returncode}\n    {dump.stderr}")
+        return False
+    if "(long long)spill_param_count << 32" not in dump.stdout:
+        print("    FAIL: -m output dropped the widening cast on the shift "
+              "operand\n"
+              f"    {dump.stdout}")
+        return False
+
+    vm_result = run([str(cccc), src.name], cwd=tmp)
+    if vm_result.returncode != 42:
+        print(f"    FAIL: VM exit {vm_result.returncode}\n    {vm_result.stderr}")
+        return False
+
+    out_bin = Path(tmp) / "widening_cast_shift_1312_smoke_out"
+    compile_result = run(
+        [str(cccc), "-c=native", "-o", out_bin.name, src.name], cwd=tmp)
+    if compile_result.returncode != 0:
+        print(f"    FAIL: -c=native exited {compile_result.returncode}\n"
+              f"    {compile_result.stderr}")
+        return False
+    run_result = run([f"./{out_bin.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: native exit {run_result.returncode}\n    {run_result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
 def case_anon_struct_ptr_cast_1300(cccc: Path, tmp: str) -> bool:
     print("  #1300 (item 3): -c=native / -m, a cast whose destination is a "
           "pointer to an *anonymous* struct (`vm->compiler.call_patches` in "
@@ -9673,6 +9736,7 @@ CASES = [
     case_spelling_dedup_unrelated_define_1306,
     case_third_includer_unrelated_define_1307,
     case_vendored_macro_defined_outside_1308,
+    case_widening_cast_shift_1312,
 ]
 
 

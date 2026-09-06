@@ -23,6 +23,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   C. New `CcccPath(ctx)` exposes the running `cccc` to a `RunCustom` command.
   `examples/ccccl/` now builds through `cccc --build build.c` instead of a
   hand-written `Makefile`.
+- Fixed: `-c=native`/`-m`/`-c=generated` dropped a widening integer cast on
+  a shift operand. The serializer suppresses a same-signedness widening
+  integer cast everywhere as "always implicit in C", but a shift applies the
+  integer promotions to each operand independently and never the usual
+  arithmetic conversions — so `(long long)x << 32` and `x << 32` differ once
+  the cast widens past `int` (the second is a 32-bit shift, undefined for a
+  count of 32). A shift operand that is a would-be-suppressed widening cast
+  now keeps its explicit cast. Surfaced by the self-hosting spike:
+  `src/codegen_func.c` packs an `int` `spill_param_count` into the `ENT3`
+  instruction operand's high word this way, and the dropped cast made every
+  self-hosted guest function read its incoming parameter as `0`.
 - Fixed: CCCC's `#pragma once` (and `#ifndef` include-guard) suppression was
   keyed on the raw resolved path *string*, so one physical header reached
   under two spellings in a single translation unit — e.g. `"./internal.h"`

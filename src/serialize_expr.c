@@ -74,6 +74,28 @@ static int get_precedence(NodeKind kind) {
     }
 }
 
+// Integer-conversion-rank table for the plain integer kinds, shared by the
+// ND_CAST suppression check and serialize_shift_operand() below.
+static const int cccc_int_conv_rank[] = {
+    [TY_BOOL] = 0, [TY_CHAR] = 1, [TY_SHORT] = 2, [TY_INT] = 3, [TY_LONG] = 4};
+
+static bool is_ranked_int_kind(TypeKind k) {
+    return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT || k == TY_INT ||
+           k == TY_LONG;
+}
+
+// Would serialize_expr()'s ND_CAST arm drop this dst<-src integer cast as an
+// always-implicit widening conversion? (Same-signedness, dst rank >= src rank.)
+// Such a cast is genuinely redundant in almost every context -- but NOT as a
+// shift operand; see serialize_shift_operand().
+static bool cast_is_implicit_int_widening(Type *dst, Type *src) {
+    if (!dst || !src || !is_ranked_int_kind(dst->kind) ||
+        !is_ranked_int_kind(src->kind))
+        return false;
+    return dst->is_unsigned == src->is_unsigned &&
+           cccc_int_conv_rank[dst->kind] >= cccc_int_conv_rank[src->kind];
+}
+
 // Get operator string for binary operations
 static const char *get_binary_op_str(NodeKind kind) {
     switch (kind) {
@@ -1249,6 +1271,27 @@ static bool serialize_wide_bitint_expr(FILE *f, VirtualMachine *vm,
     }
 }
 
+// Serialize one operand of a `<<` / `>>`. Ordinarily identical to
+// serialize_expr(), but preserves a widening integer cast the ND_CAST arm
+// would drop when that cast widens past `int` -- see the ND_SHL/ND_SHR arm's
+// comment. Only the immediate cast node is forced; anything deeper keeps
+// serialize_expr()'s normal suppression.
+static void serialize_shift_operand(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Node *node,
+                                    int parent_prec) {
+    if (node && node->kind == ND_CAST && node->lhs && node->ty &&
+        node->lhs->ty &&
+        cast_is_implicit_int_widening(node->ty, node->lhs->ty) &&
+        cccc_int_conv_rank[node->ty->kind] > cccc_int_conv_rank[TY_INT]) {
+        fprintf(f, "(");
+        serialize_type(f, ctx, node->ty);
+        fprintf(f, ")");
+        serialize_expr(f, vm, ctx, node->lhs, get_precedence(ND_CAST));
+        return;
+    }
+    serialize_expr(f, vm, ctx, node, parent_prec);
+}
+
 // Serialize an expression
 static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Node *node,
@@ -1675,14 +1718,29 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             break;
         }
 
+        case ND_SHL:
+        case ND_SHR:
+            // A shift never applies the usual arithmetic conversions -- each
+            // operand only undergoes the integer promotions (to `int`). A
+            // widening cast that the ND_CAST arm would otherwise drop as
+            // "implicit" is therefore significant here once it widens past
+            // `int`: `(long long)x << 32` shifts in 64-bit, `x << 32` is a
+            // 32-bit shift and undefined for a count >= 32. Found by #1132's
+            // self-hosting spike -- codegen_func.c packs `spill_param_count`
+            // into an ENT3 operand's high word exactly this way, and dropping
+            // the cast made every self-hosted guest function read its incoming
+            // parameter as 0.
+            serialize_shift_operand(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, " %s ", get_binary_op_str(node->kind));
+            serialize_shift_operand(f, vm, ctx, node->rhs, node_prec + 1);
+            break;
+
         case ND_MUL:
         case ND_DIV:
         case ND_MOD:
         case ND_BITAND:
         case ND_BITOR:
         case ND_BITXOR:
-        case ND_SHL:
-        case ND_SHR:
         case ND_EQ:
         case ND_NE:
         case ND_LT:
@@ -1917,22 +1975,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, ")");
                 break;
             }
-            bool dst_int =
-                dst && (dst->kind == TY_BOOL || dst->kind == TY_CHAR ||
-                        dst->kind == TY_SHORT || dst->kind == TY_INT ||
-                        dst->kind == TY_LONG);
-            bool src_int =
-                src && (src->kind == TY_BOOL || src->kind == TY_CHAR ||
-                        src->kind == TY_SHORT || src->kind == TY_INT ||
-                        src->kind == TY_LONG);
-            static const int int_rank[] = {[TY_BOOL]  = 0,
-                                           [TY_CHAR]  = 1,
-                                           [TY_SHORT] = 2,
-                                           [TY_INT]   = 3,
-                                           [TY_LONG]  = 4};
-            bool widening = dst_int && src_int &&
-                            dst->is_unsigned == src->is_unsigned &&
-                            int_rank[dst->kind] >= int_rank[src->kind];
+            bool widening = cast_is_implicit_int_widening(dst, src);
             // #1019: a scalar operand of a `vector op scalar` binary op gets an
             // implicit ND_CAST(vector_ty, scalar) inserted by usual_arith_conv
             // (type.c) as its internal marker for "broadcast this scalar across
