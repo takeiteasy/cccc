@@ -76,6 +76,21 @@ Cases:
      already matches the guest's, so there's no arm to find on Linux), so
      that one's Darwin-only. Covers the fix at smoke-test speed instead of
      only at the spike's ~10-minute scale.
+  15. `--sysroot`/`--use-system-headers` with a real `<pthread.h>` (#1319 /
+     #1318 gap 1): the real SDK's pthread.h wraps a `#if` guard in
+     `defined(...)`/`__is_modern_darwin(...)` macros that only produce the
+     `defined`/`__has_*` operator *after* expansion -- previously corrupted
+     into a bogus `0(...)` function call ("not a function", no indication
+     it was ever a `#if` problem).
+  16. `--use-system-headers -c=native` with a real `<unistd.h>` (#1318 gap
+     2): the real SDK declares functions (setattrlistat/getattrlistbulk)
+     whose parameters are uint32_t/uint64_t -- stdint.h is CCCC's own
+     compiler-owned header, so its typedefs are suppressed from -c=native
+     output on the assumption a replayed #include supplies them, and
+     nothing did. Fixed via synth_typedef_headers (src/serialize_program.c,
+     the same compensating-#include mechanism #1057 built for
+     size_t/ptrdiff_t/wchar_t). `-D_FORTIFY_SOURCE=0` is still required
+     (CCCC has no `__builtin___*_chk`) and is not what this case checks.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -479,6 +494,54 @@ def case_host_macro_shadow_injection(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_sysroot_pthread(cccc: Path, tmp: str) -> bool:
+    print("  15: --sysroot with real <pthread.h> (#1319 / #1318 gap 1)")
+    root = sysroot()
+    src = Path(tmp) / "sysroot_pthread.c"
+    write(src, (
+        "#include <pthread.h>\n"
+        "int main(void){ pthread_t t; (void)t; return 42; }\n"
+    ))
+    result = run(
+        [str(cccc), "--sysroot", root, "-D_FORTIFY_SOURCE=0", src.name],
+        cwd=tmp,
+    )
+    if result.returncode != 42:
+        print(f"    FAIL: exit {result.returncode}\n    {result.stderr}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_native_unistd_stdint(cccc: Path, tmp: str) -> bool:
+    print("  16: --use-system-headers -c=native with real <unistd.h> (#1318 gap 2)")
+    root = sysroot()
+    src = Path(tmp) / "native_unistd_stdint.c"
+    out = Path(tmp) / "native_unistd_stdint_out"
+    write(src, (
+        "#include <unistd.h>\n"
+        "#include <stdio.h>\n"
+        'int main(void){ printf("hi\\n"); return 42; }\n'
+    ))
+    result = run(
+        [str(cccc), "-D_FORTIFY_SOURCE=0", "--use-system-headers", "-i",
+         f"{root}/usr/include", "-c=native", "-o", out.name, src.name],
+        cwd=tmp,
+    )
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    if "unknown type name" in result.stderr:
+        print(f"    FAIL: host cc rejected emitted C\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42 or "hi" not in run_result.stdout:
+        print(f"    FAIL: exit {run_result.returncode}, stdout={run_result.stdout!r}")
+        return False
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -518,6 +581,8 @@ def main() -> int:
             case_native_xlocale,
             case_unbundled_header_audit,
             case_host_macro_shadow_injection,
+            case_sysroot_pthread,
+            case_native_unistd_stdint,
         ]
         results = [case(cccc, tmp) for case in cases]
 

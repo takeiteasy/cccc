@@ -2134,19 +2134,35 @@ static void serialize_synth_complex_decls(FILE *f, VirtualMachine *vm,
 // name, parse_core.c), so typedef_alias_header_suppressed() drops its alias
 // line under -c=native/-m -- correctly, since the ordinary assumption is
 // that the user's own #include supplies it -- but nothing here ever does,
-// leaving a bare, undeclared name. Scoped to exactly the trio verified to
-// match the real host's own typedef on every supported combo (LP64 macOS/
-// Linux x aarch64/x86_64): long/unsigned long/int respectively (include/
-// stddef.h). nullptr_t excluded (C23-only, typeof(nullptr)-defined, no
-// repro); stdint.h's fixed-width names left for their own ticket if a repro
-// turns up.
+// leaving a bare, undeclared name. Scoped to the trio verified to match the
+// real host's own typedef on every supported combo (LP64 macOS/Linux x
+// aarch64/x86_64): long/unsigned long/int respectively (include/stddef.h),
+// plus stdint.h's fixed-width names (#1318): the real SDK's <unistd.h>
+// declares functions like setattrlistat/getattrlistbulk whose parameter
+// types are uint32_t/uint64_t, and under --use-system-headers those
+// declarations reach -c=native output the same "header-supplied, no
+// replayed #include" way. nullptr_t excluded (C23-only, typeof(nullptr)-
+// defined, no repro).
 static const struct {
     const char *name;
     const char *header;
 } synth_typedef_headers[] = {
-    {"size_t", "stddef.h"},
-    {"ptrdiff_t", "stddef.h"},
-    {"wchar_t", "stddef.h"},
+    {"size_t", "stddef.h"},         {"ptrdiff_t", "stddef.h"},
+    {"wchar_t", "stddef.h"},        {"int8_t", "stdint.h"},
+    {"int16_t", "stdint.h"},        {"int32_t", "stdint.h"},
+    {"int64_t", "stdint.h"},        {"uint8_t", "stdint.h"},
+    {"uint16_t", "stdint.h"},       {"uint32_t", "stdint.h"},
+    {"uint64_t", "stdint.h"},       {"intptr_t", "stdint.h"},
+    {"uintptr_t", "stdint.h"},      {"intmax_t", "stdint.h"},
+    {"uintmax_t", "stdint.h"},      {"int_least8_t", "stdint.h"},
+    {"int_least16_t", "stdint.h"},  {"int_least32_t", "stdint.h"},
+    {"int_least64_t", "stdint.h"},  {"uint_least8_t", "stdint.h"},
+    {"uint_least16_t", "stdint.h"}, {"uint_least32_t", "stdint.h"},
+    {"uint_least64_t", "stdint.h"}, {"int_fast8_t", "stdint.h"},
+    {"int_fast16_t", "stdint.h"},   {"int_fast32_t", "stdint.h"},
+    {"int_fast64_t", "stdint.h"},   {"uint_fast8_t", "stdint.h"},
+    {"uint_fast16_t", "stdint.h"},  {"uint_fast32_t", "stdint.h"},
+    {"uint_fast64_t", "stdint.h"},
 };
 
 static const char *synth_typedef_header_for_name(const char *name,
@@ -2313,8 +2329,14 @@ static void serialize_synth_typedef_includes(FILE *f, SerializeContext *ctx,
 
         bool needed = false;
         for (Obj *obj = prog; obj && !needed; obj = obj->next) {
-            if (obj->is_function && !obj->is_definition && !obj->body)
-                continue;
+            // #1318: a bodiless function *declaration* (e.g. a real SDK
+            // prototype like setattrlistat/getattrlistbulk, forwarded as a
+            // header-supplied declaration under --use-system-headers) still
+            // reaches -c=native output and can still reference a suppressed
+            // typedef in its return type or parameters -- don't skip it.
+            // obj_needs_synth_typedef_header()/node_needs_synth_typedef_
+            // header() are already NULL-safe for a NULL obj->body, so there
+            // is nothing unsafe about walking a declaration-only Obj here.
             TypeVec seen = {0};
             needed = obj_needs_synth_typedef_header(ctx, obj, header, &seen);
             free(seen.data);

@@ -178,6 +178,12 @@ typedef struct shell_lexer {
     char          *error;
     unsigned char *input_begin;
     size_t         error_pos;
+    /* #1311: the sandbox context substituted commands run under, so
+     * `$(cmd)` inherits the same allowlist/blacklist as the command it
+     * appears in. NULL for a lexer that never calls
+     * shell_lexer_with_ctx() -- command substitution is simply unavailable
+     * in that case (see expand_cmd_subst()). */
+    struct shell_ctx *ctx;
 } shell_lexer_t;
 
 typedef enum shell_ast_type {
@@ -274,7 +280,26 @@ static void shell_lexer(shell_lexer_t *l, unsigned char *line) {
     l->error            = NULL;
     l->input_begin      = line;
     l->error_pos        = (size_t)-1;
+    l->ctx              = NULL;
 }
+
+/* #1311: like shell_lexer(), but records the sandbox context so
+ * expand_cmd_subst() can run a substituted `$(...)` command under the same
+ * allowlist/blacklist as the command it appears in. */
+static void shell_lexer_with_ctx(shell_lexer_t *l, unsigned char *line,
+                                 struct shell_ctx *ctx) {
+    shell_lexer(l, line);
+    l->ctx = ctx;
+}
+
+/* #1311: bounds `$(echo $(echo $(...)))`-style nesting. Each level forks a
+ * fresh process (see expand_cmd_subst()), and this counter is inherited
+ * across that fork -- incrementing it before the inner shell_with_ctx()
+ * call and forking means the child that lexes the inner command already
+ * sees the incremented value, so depth tracking needs no explicit
+ * threading through shell_ctx or the lexer. */
+#define SHELL_SUBST_MAX_DEPTH 8
+static int g_shell_subst_depth = 0;
 
 static inline wchar_t peek(shell_lexer_t *l) {
     return l->cursor.ch;
@@ -365,15 +390,124 @@ static inline bool is_name_char(wchar_t c) {
     return is_name_start_char(c) || (c >= '0' && c <= '9');
 }
 
-/* `$NAME` / `${NAME}` expansion (unquoted and double-quoted words only).
- * Assumes the cursor is currently on the '$'. Appends the expanded value (or
- * a literal '$' if it isn't followed by a name) to `out`. Returns false and
- * sets l->error on a malformed `${...}`. Expansion is a single literal
- * chunk: the result is never re-split or globbed. */
+/* #1311: `$(cmd)` command substitution. Assumes the '$' has already been
+ * consumed and the cursor is positioned on '('. Captures the raw text up to
+ * the matching ')' -- honoring nested parens and quotes, so a `)` inside
+ * e.g. a quoted argument to the inner command doesn't terminate the
+ * substitution early -- runs it through the same shell_with_ctx() capture
+ * path RunCustom itself uses (so the substituted command inherits the
+ * calling command's allowlist/blacklist, and no separate execution path
+ * needs maintaining), strips trailing newlines from its stdout the way
+ * every other shell's `$(...)` does, and appends the result to `out` as a
+ * single literal chunk -- like $VAR, never re-split or globbed. Returns
+ * false and sets l->error on an unterminated `$(`/quote or once
+ * SHELL_SUBST_MAX_DEPTH is exceeded.
+ *
+ * Substitution happens here, at lex time -- eagerly, before the surrounding
+ * command's `&&`/`||`/`;` structure is even parsed. Unlike a real shell,
+ * `false && $(cmd)` still runs `cmd`. This matches how $VAR already
+ * expands unconditionally and keeps the change small; documented as a
+ * known limitation in man/BUILD_MODE.md. */
+static bool expand_cmd_subst(shell_lexer_t *l, word_buf_t *out) {
+    advance(l); /* consume '(' */
+
+    if (g_shell_subst_depth >= SHELL_SUBST_MAX_DEPTH) {
+        l->error     = "command substitution nested too deeply";
+        l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+        return false;
+    }
+
+    word_buf_t sub;
+    word_buf_init(&sub);
+    int paren_depth = 1;
+    for (;;) {
+        if (is_eof(l)) {
+            l->error     = "unterminated $(";
+            l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+            free(sub.buf);
+            return false;
+        }
+        wchar_t c = peek(l);
+        if (c == '(') {
+            paren_depth++;
+            word_buf_push_current(l, &sub);
+            continue;
+        }
+        if (c == ')') {
+            paren_depth--;
+            if (paren_depth == 0) {
+                advance(l); /* consume closing ')' */
+                break;
+            }
+            word_buf_push_current(l, &sub);
+            continue;
+        }
+        if (c == '\'' || c == '"') {
+            wchar_t quote = c;
+            word_buf_push_current(l, &sub);             /* opening quote */
+            while (!is_eof(l) && peek(l) != quote) {
+                if (peek(l) == '\\' && quote == '"') {
+                    word_buf_push_current(l, &sub);     /* backslash */
+                    if (!is_eof(l))
+                        word_buf_push_current(l, &sub); /* escaped char */
+                    continue;
+                }
+                word_buf_push_current(l, &sub);
+            }
+            if (is_eof(l)) {
+                l->error     = "unterminated quote in $(...)";
+                l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+                free(sub.buf);
+                return false;
+            }
+            word_buf_push_current(l, &sub); /* closing quote */
+            continue;
+        }
+        word_buf_push_current(l, &sub);
+    }
+    word_buf_push(&sub, '\0');
+
+    if (!l->ctx) {
+        /* A lexer built via plain shell_lexer() (no sandbox context) has
+         * nothing to run the substituted command under. */
+        l->error     = "command substitution is not supported here";
+        l->error_pos = (size_t)(l->cursor.ptr - l->input_begin);
+        free(sub.buf);
+        return false;
+    }
+
+    shell_io io = {0};
+    g_shell_subst_depth++;
+    shell_with_ctx((const char *)sub.buf, &io, l->ctx);
+    g_shell_subst_depth--;
+    free(sub.buf);
+
+    if (io.out) {
+        size_t n = io.out_len;
+        while (n > 0 && io.out[n - 1] == '\n')
+            n--;
+        for (size_t i = 0; i < n; i++)
+            word_buf_push(out, (unsigned char)io.out[i]);
+        free(io.out);
+    }
+    /* $(...)'s exit status is discarded, matching every other shell --
+     * only stdout is substituted. */
+    free(io.err);
+    return true;
+}
+
+/* `$NAME` / `${NAME}` / `$(cmd)` expansion (unquoted and double-quoted
+ * words only). Assumes the cursor is currently on the '$'. Appends the
+ * expanded value (or a literal '$' if it isn't followed by a name or '(')
+ * to `out`. Returns false and sets l->error on a malformed `${...}`/`$(`.
+ * Expansion is a single literal chunk: the result is never re-split or
+ * globbed. */
 static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
     advance(l); /* consume '$' */
-    wchar_t c      = peek(l);
-    bool    braced = (c == '{');
+    wchar_t c = peek(l);
+    if (c == '(')
+        return expand_cmd_subst(l, out);
+    bool braced = (c == '{');
     if (braced)
         advance(l);
     if (!braced && !is_name_start_char(c)) {
@@ -695,25 +829,43 @@ static inline shell_ast_t *handle_redirection(shell_parser    *p,
     return ast;
 }
 
+// #1311: a simple command may carry any number of redirections, in any
+// mix and order (`cmd < in > out`, `cmd > out < in`, ...) -- loop rather
+// than checking '<'/'>' once each, which only ever absorbed a single
+// redirect and left the rest of the tokens unconsumed, tripping
+// shell_eval_parser()'s whole-input check and failing the whole command
+// with no diagnostic (SHELL_ERR_EVAL, exit 253). Each iteration wraps the
+// AST built so far in one more REDIR node, exactly like the old code did
+// for its one supported redirect; eval_redirection() already nests
+// REDIR_OUT/REDIR_IN correctly regardless of how many or which order.
 static shell_ast_t *command(shell_parser *p) {
-    shell_ast_t *simple = simple_command(p);
-    if (!simple)
+    shell_ast_t *ast = simple_command(p);
+    if (!ast)
         return NULL;
-    if (match_token(p, SHELL_TOKEN_GREATER)) {
-        parser_next(p);
-        shell_ast_t *ast = handle_redirection(p, SHELL_AST_REDIR_OUT, simple);
-        if (ast == NULL)
-            free_ast(simple);
-        return ast;
+    for (;;) {
+        if (match_token(p, SHELL_TOKEN_GREATER)) {
+            parser_next(p);
+            shell_ast_t *next = handle_redirection(p, SHELL_AST_REDIR_OUT, ast);
+            if (!next) {
+                free_ast(ast);
+                return NULL;
+            }
+            ast = next;
+            continue;
+        }
+        if (match_token(p, SHELL_TOKEN_LESSER)) {
+            parser_next(p);
+            shell_ast_t *next = handle_redirection(p, SHELL_AST_REDIR_IN, ast);
+            if (!next) {
+                free_ast(ast);
+                return NULL;
+            }
+            ast = next;
+            continue;
+        }
+        break;
     }
-    if (match_token(p, SHELL_TOKEN_LESSER)) {
-        parser_next(p);
-        shell_ast_t *ast = handle_redirection(p, SHELL_AST_REDIR_IN, simple);
-        if (!ast)
-            free_ast(simple);
-        return ast;
-    }
-    return simple;
+    return ast;
 }
 
 static shell_ast_t *_pipe(shell_parser *p) {
@@ -1416,10 +1568,21 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
             die("strdup");
 
         shell_lexer_t lexer;
-        shell_lexer(&lexer, (unsigned char *)cmd_copy);
+        shell_lexer_with_ctx(&lexer, (unsigned char *)cmd_copy, ctx);
         shell_token_array_t tokens = shell_parse(&lexer);
 
         if (!tokens.data || lexer.error) {
+            /* #1311: this used to _exit() with no diagnostic at all -- the
+             * only visible symptom was "build: custom step 'x' failed (exit
+             * 253)" with no hint of what was malformed, even though the
+             * lexer already records the reason and offset. stderr is
+             * already dup2'd above, so this reaches the parent's captured
+             * output. */
+            if (lexer.error)
+                fprintf(stderr, "shell: %s (at offset %zu)\n", lexer.error,
+                        lexer.error_pos);
+            else
+                fprintf(stderr, "shell: tokenize error\n");
             shell_token_array_free(&tokens);
             free(cmd_copy);
             _exit(SHELL_ERR_TOKENIZE);
@@ -1427,6 +1590,7 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
 
         shell_ast_t *ast = shell_eval_parser(tokens);
         if (!ast) {
+            fprintf(stderr, "shell: syntax error\n");
             shell_token_array_free(&tokens);
             free(cmd_copy);
             _exit(SHELL_ERR_EVAL);
@@ -1539,7 +1703,7 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
     }
 
     shell_lexer_t lexer;
-    shell_lexer(&lexer, (unsigned char *)cmd_copy);
+    shell_lexer_with_ctx(&lexer, (unsigned char *)cmd_copy, ctx);
 
     shell_token_array_t tokens = shell_parse(&lexer);
     if (!tokens.data || lexer.error) {
@@ -1553,6 +1717,8 @@ static int posix_shell_inline(const char *cmd, shell_ctx *ctx) {
 
     shell_ast_t *ast = shell_eval_parser(tokens);
     if (!ast) {
+        /* #1311: was silent here too. */
+        printf("error: syntax error\n");
         shell_token_array_free(&tokens);
         free(cmd_copy);
         return -1;

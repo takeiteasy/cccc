@@ -84,6 +84,34 @@ Two different classifications drive the rules above:
   compiler `-c=native` shells out to; unrelated to header search but
   documented here since the interaction below is easy to miss.
 
+### Real SDK headers under `--use-system-headers`/`--sysroot`
+
+A real SDK header's own `#if` guards can use constructs CCCC's preprocessor
+needs help with:
+
+- **`defined`/`__has_*` reached through a macro expansion.** A macro can
+  itself expand *to* `defined(...)` or `__has_builtin(...)`/
+  `__has_attribute(...)`/etc — e.g. macOS's `<pthread.h>` wraps
+  `defined(__DRIVERKIT_VERSION_MIN_REQUIRED)` inside its own
+  `_PTHREAD_SWIFT_IMPORTER_NULLABILITY_COMPAT()` compat macro, and
+  `<secure/_string.h>`'s `__is_modern_darwin()` does the same. CCCC's `#if`
+  evaluator (`src/preprocess.c`) recognizes these operators wherever they
+  end up in the expression, not just where they're written literally, so
+  `#include <pthread.h>` under `--sysroot`/`--use-system-headers` resolves
+  cleanly.
+- **`secure/_string.h`'s `_FORTIFY_SOURCE` macros still need
+  `-D_FORTIFY_SOURCE=0`.** Apple's fortified `strcpy`/`memcpy`/etc rewrite to
+  `__builtin___*_chk(...)` calls CCCC doesn't implement — pass
+  `-D_FORTIFY_SOURCE=0` to skip that header section entirely when using a
+  real SDK's `<string.h>`.
+- **`-c=native` with a real `<unistd.h>`** can declare functions (e.g.
+  `setattrlistat`/`getattrlistbulk`) whose parameters use `<stdint.h>`'s
+  fixed-width names. `stdint.h` is one of CCCC's *owned* headers (its
+  typedefs are VM-ABI-coupled — see "Owned vs. known" above), so a
+  compensating `#include <stdint.h>` is added automatically when the
+  emitted C references one of those names but nothing else in the TU
+  already includes it.
+
 ### Pragma suppression in system-header mode
 
 When `--use-system-headers` is active (or a file is marked as a system header

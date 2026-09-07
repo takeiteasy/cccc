@@ -97,6 +97,7 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
+static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok);
 
 static bool is_hash(Token *tok) {
     return tok->at_bol && equal(tok, "#");
@@ -1881,9 +1882,19 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
     return 0;
 }
 
-static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
-    tok         = copy_line(vm, rest, tok);
-
+// Rewrite `defined(foo)` / `defined foo` / `__has_include(...)` /
+// `__has_feature(...)` / `__has_extension(...)` / `__has_attribute(...)` /
+// `__has_builtin(...)` / `__has_c_attribute(...)` / `__has_cpp_attribute(...)`
+// / `__has_embed(...)` into number tokens. Shared by read_const_expr() (the
+// pre-expansion pass) and eval_const_expr()'s post-expansion pass (#1319,
+// #1318): a macro invoked inside a #if/#elif expression can itself expand
+// *to* one of these operators (e.g. Apple SDK headers wrapping
+// `defined(__DRIVERKIT_VERSION_MIN_REQUIRED)` inside their own compat
+// macros), so a single pre-expansion rewrite pass misses it and leaves the
+// literal `defined`/`__has_*` identifier to fall through the generic
+// identifier -> "0" rule further down, corrupting e.g. `defined(FOO)` into
+// `0(0)` -- which the parser then rejects as "not a function".
+static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok) {
     Token  head = {};
     Token *cur  = &head;
 
@@ -1981,6 +1992,11 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return head.next;
 }
 
+static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
+    tok = copy_line(vm, rest, tok);
+    return rewrite_pp_operators(vm, tok);
+}
+
 // Read and evaluate a constant expression.
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
@@ -1995,6 +2011,16 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     vm->compiler.pp_const_expr_depth = saved_depth + 1;
     expr                             = preprocess2(vm, expr);
     vm->compiler.pp_const_expr_depth = saved_depth;
+
+    // #1319/#1318: a macro expanded by the preprocess2() call above may
+    // itself have introduced a fresh `defined`/`__has_*` operator (one that
+    // wasn't there for read_const_expr()'s pre-expansion pass to rewrite).
+    // preprocess2() is asked, via pp_const_expr_depth, to leave such an
+    // operator and its operand unexpanded (see the depth check in
+    // preprocess2() itself), so a second rewrite pass here catches it before
+    // the generic identifier -> "0" fallback below would otherwise turn it
+    // into a bogus function call.
+    expr = rewrite_pp_operators(vm, expr);
 
     if (expr->kind == TK_EOF)
         error_tok(vm, start, "no expression");
@@ -5620,6 +5646,55 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok             = tok->next;
             }
             continue;
+        }
+
+        // #1319/#1318: while evaluating a #if/#elif constant expression
+        // (pp_const_expr_depth > 0), don't macro-expand the operand of a
+        // `defined`/`__has_*` operator that only exists here because an
+        // outer macro expanded *to* it (e.g. Apple SDK headers wrapping
+        // `defined(__DRIVERKIT_VERSION_MIN_REQUIRED)` inside their own
+        // compat macros). A literal top-level occurrence of these operators
+        // is already handled by read_const_expr() before this function ever
+        // runs; this guard exists only for the operators a macro expansion
+        // reveals mid-stream. Pass the operator and its raw operand straight
+        // through so eval_const_expr()'s post-expansion rewrite pass
+        // (rewrite_pp_operators()) can turn them into 0/1 correctly -- same
+        // as it would for a literal, pre-expansion `defined(FOO)`.
+        if (vm->compiler.pp_const_expr_depth > 0) {
+            static char *const pp_operand_protect[] = {
+                "defined",           "__has_include",
+                "__has_feature",     "__has_extension",
+                "__has_attribute",   "__has_builtin",
+                "__has_c_attribute", "__has_cpp_attribute",
+                "__has_embed",       NULL};
+            char *matched = NULL;
+            for (int i = 0; pp_operand_protect[i]; i++) {
+                if (equal(tok, pp_operand_protect[i])) {
+                    matched = pp_operand_protect[i];
+                    break;
+                }
+            }
+            if (matched) {
+                cur = cur->next = copy_token(vm, tok);
+                tok             = tok->next;
+                if (tok->kind != TK_EOF && equal(tok, "(")) {
+                    int paren_depth = 0;
+                    do {
+                        if (equal(tok, "("))
+                            paren_depth++;
+                        else if (equal(tok, ")"))
+                            paren_depth--;
+                        cur = cur->next = copy_token(vm, tok);
+                        tok             = tok->next;
+                    } while (paren_depth > 0 && tok->kind != TK_EOF);
+                } else if (!strcmp(matched, "defined") &&
+                           tok->kind == TK_IDENT) {
+                    // "defined FOO" (no parens) form.
+                    cur = cur->next = copy_token(vm, tok);
+                    tok             = tok->next;
+                }
+                continue;
+            }
         }
 
         // If it is a macro, expand it.

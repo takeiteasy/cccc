@@ -949,24 +949,38 @@ with `AddUndef(t, "NDEBUG")`).
 
 **`RunCustom(ctx, name, cmd)`** registers an arbitrary shell command as a build
 step in the DAG. The command runs through a vendored bourne-compatible shell
-(`src/build_shell.c`) supporting pipes, `<`/`>` redirection, `;`/`&`
-sequencing, and `&&`/`||` with real short-circuit semantics. The
-step's exit code is propagated — a non-zero exit stops the build, and a
-malformed command is itself a non-zero exit (never a silent no-op).
+(`src/build_shell.c`) supporting pipes, `<`/`>` redirection (any number, in
+any order, on one command — `cmd < in > out` and `cmd > out < in` both
+work), `;`/`&` sequencing, and `&&`/`||` with real short-circuit semantics.
+The step's exit code is propagated — a non-zero exit stops the build, and a
+malformed command is itself a non-zero exit with a diagnostic on stderr
+naming what was wrong (never a silent no-op, never a bare exit code with no
+explanation).
 
 Word splitting follows POSIX quote-removal rules: `'...'` is fully literal
 (no escapes, no expansion); `"..."` allows `\"`, `\\`, `\$` and `\<newline>`
-escapes plus `$VAR`/`${VAR}` expansion; unquoted text allows the same
-escapes and expansion. `$VAR`/`${VAR}` expands to the value from the
+escapes plus `$VAR`/`${VAR}`/`$(...)` expansion; unquoted text allows the
+same escapes and expansion. `$VAR`/`${VAR}` expands to the value from the
 process environment (empty if unset) as a single literal chunk — the
 expansion is never re-split into multiple words and never globbed, so
 `$CFLAGS`-style "one variable, several arguments" splitting is unavailable
-by design. Everything else stays literal and unsupported: no `$(...)` or
-backtick command substitution, no `VAR=value cmd` env-prefix syntax, no
-globbing (`*`, `?`), no `~` expansion, no positional/special parameters
-(`$1`, `$@`, `$?`, ...), no `for`/`if`/`while`. For anything needing those,
-either use `env VAR=value cmd args...` (a plain command, not special syntax)
-or delegate to a real shell/script:
+by design.
+
+`$(cmd)` runs `cmd` under the same allowlist/blacklist as the command it
+appears in, captures its stdout with trailing newlines stripped, and
+substitutes the result as a single literal chunk — same non-splitting,
+non-globbing rule as `$VAR`. Nesting is supported (`$(echo $(echo x))`) up
+to a fixed depth. Two things distinguish it from a real shell: substitution
+happens at *lex* time, eagerly, before `&&`/`||`/`;` structure is even
+parsed — `false && $(cmd)` still runs `cmd`, unlike a real shell's deferred
+evaluation. And only `$(...)` is recognized; backtick `` `cmd` ``
+substitution stays literal and unsupported.
+
+Everything else stays literal and unsupported: no `VAR=value cmd`
+env-prefix syntax, no globbing (`*`, `?`), no `~` expansion, no
+positional/special parameters (`$1`, `$@`, `$?`, ...), no `for`/`if`/`while`.
+For anything needing those, either use `env VAR=value cmd args...` (a plain
+command, not special syntax) or delegate to a real shell/script:
 `RunCustom(ctx, "regen", "sh tools/some_script.sh arg")`. `SetToolchain(t,
 cc)` has the same constraint in a different spot — its argument is a single
 executable path, not a command line, so `SetToolchain(t, "clang -arch
