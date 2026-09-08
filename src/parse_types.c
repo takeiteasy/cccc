@@ -1054,27 +1054,50 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
             ty->nodiscard_msg = prefix_attr.nodiscard_msg;
     }
 
-    // Handle __attribute__ after declarator
-    VarAttr suffix_attr = {};
-    tok                 = attribute_list(vm, *rest, NULL, &suffix_attr);
-    tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
-    append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
-    ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
+    // Handle __attribute__ and an asm-label after the declarator. GNU C
+    // allows these in either order, and real glibc headers rely on both:
+    // __REDIRECT_NTH's expansion produces `name proto __asm__ ("realname")
+    // __THROW` (asm-label BEFORE any trailing __attribute__, e.g.
+    // sys/cdefs.h's strerror_r), the opposite order from the common
+    // `__attribute__((...))` -only case this loop used to assume. A single
+    // one-shot "attributes, then asm_label" pass (the pre-fix shape) missed
+    // an attribute-list that follows an asm-label instead of preceding it --
+    // "extern int foo(void) __asm__("bar") __attribute__((__nothrow__));"
+    // errored "expected '{'", confirmed against real glibc's <string.h>
+    // under --use-system-headers (found while verifying #1329's Linux CI
+    // fix: __REDIRECT_NTH is reached via sched.h/string.h's strerror_r).
+    // Loop until a pass consumes nothing, so any interleaving -- multiple
+    // attribute-lists and an asm-label in any order -- is accepted.
+    // Seeded from *rest (type_suffix()'s own out-param), not the local
+    // `tok`, which type_suffix() leaves stale (pointing before the
+    // parameter list it consumed) -- the original one-shot code below read
+    // *rest for exactly this reason; the loop must too, on its first pass.
+    tok = *rest;
+    for (;;) {
+        Token  *before      = tok;
+        VarAttr suffix_attr = {};
+        tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
+        tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+        append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
+        ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
 
-    // #1160: __attribute__((aligned(N))) / [[gnu::aligned(N)]] in
-    // declarator-suffix position (`int b __attribute__((aligned(16)));`) --
-    // apply_var_attrs_to_type() above doesn't know about gnu_align, so
-    // apply it here. copy_type() is what stops it from leaking onto a
-    // sibling declarator sharing this basety (`int b
-    // __attribute__((aligned(16))), c;` -- gcc-16 verified `c` stays at its
-    // natural offset).
-    if (suffix_attr.gnu_align) {
-        ty = copy_type(vm, ty);
-        if (suffix_attr.gnu_align > ty->decl_align)
-            ty->decl_align = suffix_attr.gnu_align;
+        // #1160: __attribute__((aligned(N))) / [[gnu::aligned(N)]] in
+        // declarator-suffix position (`int b __attribute__((aligned(16)));`)
+        // -- apply_var_attrs_to_type() above doesn't know about gnu_align, so
+        // apply it here. copy_type() is what stops it from leaking onto a
+        // sibling declarator sharing this basety (`int b
+        // __attribute__((aligned(16))), c;` -- gcc-16 verified `c` stays at
+        // its natural offset).
+        if (suffix_attr.gnu_align) {
+            ty = copy_type(vm, ty);
+            if (suffix_attr.gnu_align > ty->decl_align)
+                ty->decl_align = suffix_attr.gnu_align;
+        }
+
+        tok = asm_label(vm, tok, &ty->asm_label);
+        if (tok == before)
+            break;
     }
-
-    tok          = asm_label(vm, tok, &ty->asm_label);
 
     ty->name     = name;
     ty->name_pos = name_pos;

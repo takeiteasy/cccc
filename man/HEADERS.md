@@ -118,6 +118,20 @@ needs help with:
   compensating `#include <stdint.h>` is added automatically when the
   emitted C references one of those names but nothing else in the TU
   already includes it.
+- **`--sysroot` on a Debian/Ubuntu-style multiarch Linux distro** also adds
+  `<path>/usr/include/<arch>-linux-gnu` (derived from the running `cccc`
+  binary's own architecture — there's no cross-`--sysroot` story today, so
+  that's always right) alongside `<path>/usr/include`: a chunk of glibc's
+  headers, notably `bits/wordsize.h`, live only under the triplet
+  subdirectory. A bare `-i` stays literal and does not get this — supply the
+  triplet directory explicitly if resolving real glibc headers by hand.
+- **A declarator's trailing `__asm__("name")` (asm-label) followed by a
+  `__attribute__(...)`** — real glibc's `<sys/cdefs.h>` `__REDIRECT_NTH`
+  macro expands to exactly this order (`name proto __asm__ ("realname")
+  __THROW`), the reverse of the common attribute-then-asm-label case —
+  parses correctly; `declarator()` (`src/parse_types.c`) loops
+  attribute-list/asm-label parsing until a pass consumes nothing, so any
+  interleaving of the two is accepted.
 
 ### Pragma suppression in system-header mode
 

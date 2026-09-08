@@ -538,9 +538,21 @@ def case_native_unistd_stdint(cccc: Path, tmp: str) -> bool:
         "#include <stdio.h>\n"
         'int main(void){ printf("hi\\n"); return 42; }\n'
     ))
+    # #1329: this case builds its own `-i` list by hand rather than going
+    # through --sysroot (which auto-adds the Debian/Ubuntu multiarch dir,
+    # /usr/include/x86_64-linux-gnu, since #1329) -- a bare `-i` is meant to
+    # stay literal (no directory-shape magic), so on Linux this case has to
+    # supply the same dirs a real manual --use-system-headers -i invocation
+    # would need itself, the same way self_host_include_flags() already
+    # does for case 14. host_cc_default_search_paths() gets them from the
+    # real host cc rather than hardcoding a triplet.
+    flags = ["-i", f"{root}/usr/include"]
+    if sys.platform != "darwin":
+        for path in host_cc_default_search_paths():
+            flags += ["-i", path]
     result = run(
-        [str(cccc), "-D_FORTIFY_SOURCE=0", "--use-system-headers", "-i",
-         f"{root}/usr/include", "-c=native", "-o", out.name, src.name],
+        [str(cccc), "-D_FORTIFY_SOURCE=0", "--use-system-headers"] + flags +
+        ["-c=native", "-o", out.name, src.name],
         cwd=tmp,
     )
     if result.returncode != 0:

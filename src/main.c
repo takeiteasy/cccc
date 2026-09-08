@@ -2623,21 +2623,37 @@ int main(int argc, const char *argv[]) {
     // --sysroot: auto-configure system include paths from the SDK root.
     // Implies --use-system-headers.
     //
-    // #1329: on a Debian/Ubuntu-style multiarch Linux distro, this misses
-    // the architecture-triplet subdirectory (/usr/include/x86_64-linux-gnu
-    // etc.) that a chunk of glibc's own headers -- notably bits/wordsize.h,
-    // transitively pulled in by features-time64.h from an ordinary
-    // #include <unistd.h>/<pthread.h> -- actually live under, not directly
-    // under usr/include. Confirmed via tools/header_resolution_smoke.py's
-    // cases 15/16 failing on the cccc-linux-amd64 Colima container. Not
-    // fixed here -- pre-existing, unrelated to whatever change you're
-    // reading this comment alongside.
+    // #1329: on a Debian/Ubuntu-style multiarch Linux distro, usr/include
+    // alone isn't enough -- a chunk of glibc's own headers -- notably
+    // bits/wordsize.h, transitively pulled in by features-time64.h from an
+    // ordinary #include <unistd.h>/<pthread.h> -- live under the
+    // architecture-triplet subdirectory (/usr/include/x86_64-linux-gnu on
+    // amd64, /usr/include/aarch64-linux-gnu on arm64) instead. CCCC_HOST_ARCH
+    // (defined above in print_version -- #define isn't function-scoped, so
+    // it's already visible here) matches the two Linux targets CLAUDE.md
+    // documents as supported (aarch64/x86_64); there's no cross-sysroot
+    // story today (--sysroot always targets the arch cccc itself is running
+    // as), so deriving the triplet from the running binary's own arch is
+    // exactly right, not a guess. Same stat()-gated optional-directory
+    // pattern as usr/local/include below -- confirmed via
+    // tools/header_resolution_smoke.py's cases 15/16 in the
+    // cccc-linux-amd64 Colima container.
+#ifdef __linux__
+#define CCCC_SYSROOT_MULTIARCH_TRIPLET CCCC_HOST_ARCH "-linux-gnu"
+#endif
     if (sysroot) {
         struct stat _st;
         char        sysroot_inc[4096];
         snprintf(sysroot_inc, sizeof(sysroot_inc), "%s/usr/include", sysroot);
         if (!stat(sysroot_inc, &_st))
             cc_system_include(&vm, sysroot_inc);
+#ifdef __linux__
+        char sysroot_multiarch_inc[4096];
+        snprintf(sysroot_multiarch_inc, sizeof(sysroot_multiarch_inc),
+                 "%s/usr/include/%s", sysroot, CCCC_SYSROOT_MULTIARCH_TRIPLET);
+        if (!stat(sysroot_multiarch_inc, &_st))
+            cc_system_include(&vm, sysroot_multiarch_inc);
+#endif
         char sysroot_local_inc[4096];
         snprintf(sysroot_local_inc, sizeof(sysroot_local_inc),
                  "%s/usr/local/include", sysroot);
