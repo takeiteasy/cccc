@@ -16,11 +16,18 @@
 // stages terminate on their own. The infinite-producer / early-exiting-
 // reader shape (`yes | head`) is covered separately by
 // test_build_custom_pipe_early_exit.c.
+//
+// Scratch files use a unique `cccc_test_1322_*.txt` prefix: `*.txt` is
+// gitignored, so a run whose cwd is the repo root (rather than an isolated
+// per-test tmp dir) does not leave untracked artifacts behind.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    RunCustom(ctx, "seed", "head -c 300000 /dev/urandom > big.bin");
-    RunCustom(ctx, "pipe", "cat big.bin | cat > copy.bin");
-    RunCustom(ctx, "verify", "cmp big.bin copy.bin");
+    RunCustom(ctx, "seed",
+              "head -c 300000 /dev/urandom > cccc_test_1322_big.txt");
+    RunCustom(ctx, "pipe",
+              "cat cccc_test_1322_big.txt | cat > cccc_test_1322_copy.txt");
+    RunCustom(ctx, "verify",
+              "cmp cccc_test_1322_big.txt cccc_test_1322_copy.txt");
     return BuildDefault(ctx);
 }
