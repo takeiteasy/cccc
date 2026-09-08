@@ -957,21 +957,25 @@ malformed command is itself a non-zero exit with a diagnostic on stderr
 naming what was wrong (never a silent no-op, never a bare exit code with no
 explanation).
 
+When one command carries two redirects of the same direction (`cmd > o1 >
+o2`), the last one wins — `cmd`'s output goes to `o2`, and `o1` is created
+but left empty — matching real `sh`/`bash`.
+
 Every stage of a pipeline is forked before any of them is waited on, so a
 stage producing more output than fits in one pipe buffer doesn't deadlock
 the build waiting for a reader that hasn't started yet. When a pipeline
 stage also carries its own redirect (`a | b > f | c`), the redirect wins —
 `b`'s output goes to `f`, and `c` sees an empty input — matching real
-`sh`/`bash`, not the other way around.
+`sh`/`bash`, not the other way around. A pipeline whose upstream stage
+never terminates on its own (`producer | head`) stops cleanly once the
+downstream reader has taken what it needs and exited: the producer sees
+end-of-pipe and is signalled, rather than blocking forever.
 
-Two things are not (yet) supported: a pipeline stage that never terminates
-on its own can hang forever even after every stage downstream of it has
-exited (`producer | head`, where `producer` doesn't stop once `head` has
-read enough and exits) — every forked stage inherits every pipe fd across
-its own `fork`+`exec`, not just the ones dup2'd onto its own stdin/stdout,
-so the pipe never looks fully closed to the kernel from `producer`'s side;
-and a shell builtin (`cd`, `pwd`, `exit`) ignores redirects and pipes
-entirely, since it runs before any fork and never sees the stage's fds.
+The builtins `cd`, `pwd` and `exit` honour redirects and pipes and report a
+real exit status, so `pwd > file`, `pwd | wc -c` and `cd nonexistent ||
+fallback` all behave. A builtin used as a pipeline stage runs in a subshell,
+so `cd sub | cmd` does not change the working directory of later commands in
+the same step; a bare `cd` (no pipe) does.
 
 Word splitting follows POSIX quote-removal rules: `'...'` is fully literal
 (no escapes, no expansion); `"..."` allows `\"`, `\\`, `\$` and `\<newline>`

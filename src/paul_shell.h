@@ -16,6 +16,14 @@
        any of them, instead of the original fork-then-wait-immediately
        sequencing (which deadlocked on any pipeline payload larger than a
        pipe buffer).
+     - shell_builtin_func_t returns `int` (an exit status) rather than `void`,
+       so command_execute() reports a builtin's real result; builtins also
+       honour a stage's redirect/pipe fds (run via a forked subshell inside a
+       pipeline, via a temporary dup2 of the shell's own std fds otherwise).
+     - eval_pipeline() sets FD_CLOEXEC on every pipe it creates, so a forked
+       stage does not inherit unrelated pipe ends across exec() -- an
+       early-exiting downstream reader (`producer | head`) now lets the
+       producer see EOF/SIGPIPE instead of hanging forever.
 
  Copyright (C) 2025 George Watson
 
@@ -111,7 +119,9 @@ typedef struct shell_io {
     void             *userdata;
 } shell_io;
 
-typedef void (*shell_builtin_func_t)(int argc, char **argv);
+/* CCCC patch (#1325): returns an exit status (0 = success), not void, so a
+ * builtin's real result reaches command_execute() instead of a hardcoded 0. */
+typedef int (*shell_builtin_func_t)(int argc, char **argv);
 
 typedef struct shell_builtin_entry {
     char                       *name;
@@ -172,7 +182,8 @@ void shell_ctx_destroy(shell_ctx *ctx);
 /*!
  @function shell_ctx_add_builtin
  @brief Register a builtin command. Overrides existing builtins with the same
- name.
+ name. The callback returns an exit status (0 = success); it is honoured
+ for redirects and pipes just like an external command.
  */
 void shell_ctx_add_builtin(shell_ctx *ctx, const char *name,
                            shell_builtin_func_t func);

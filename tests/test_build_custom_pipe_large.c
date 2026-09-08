@@ -12,14 +12,10 @@
 // rather than failing cleanly, so this only proves anything if it
 // completes at all.
 //
-// The seed step deliberately does NOT itself use a pipe (`head -c N
-// /dev/urandom`, a single command) -- an infinite producer piped into an
-// early-exiting reader (`yes | head`) hits a separate, pre-existing fd-
-// inheritance gap (children inherit *every* pipe fd across fork+exec, not
-// just the ones dup2'd onto their own stdin/stdout, so the producer never
-// sees EOF/SIGPIPE once the reader exits) that this ticket does not fix;
-// filed as #1327. Piping a file that already exists, through `cat`, avoids
-// that gap entirely (both stages terminate on their own).
+// This exercises a finite payload through a two-stage pipeline where both
+// stages terminate on their own. The infinite-producer / early-exiting-
+// reader shape (`yes | head`) is covered separately by
+// test_build_custom_pipe_early_exit.c.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {

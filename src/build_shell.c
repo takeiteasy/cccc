@@ -34,9 +34,9 @@ static shell_ctx *g_default_ctx = NULL;
 
 /* --- Context Management --- */
 
-static void builtin_exit(int argc, char **argv);
-static void builtin_cd(int argc, char **argv);
-static void builtin_pwd(int argc, char **argv);
+static int builtin_exit(int argc, char **argv);
+static int builtin_cd(int argc, char **argv);
+static int builtin_pwd(int argc, char **argv);
 
 shell_ctx *shell_ctx_create(void) {
     shell_ctx *ctx = (shell_ctx *)malloc(sizeof(shell_ctx));
@@ -816,66 +816,60 @@ static shell_ast_t *simple_command(shell_parser *p) {
     return ast;
 }
 
+// Builds one bare REDIR node (its ->right is filled in by command()).
 static inline shell_ast_t *handle_redirection(shell_parser    *p,
-                                              shell_ast_type_t type,
-                                              shell_ast_t     *simple) {
+                                              shell_ast_type_t type) {
     if (!expect_token(p, SHELL_TOKEN_ATOM))
         return NULL;
     shell_ast_t *ast = new_ast();
     ast->type        = type;
-    ast->right       = simple;
     ast->token       = parser_peek(p);
     parser_next(p);
     return ast;
 }
 
-// #1311: a simple command may carry any number of redirections, in any
-// mix and order (`cmd < in > out`, `cmd > out < in`, ...) -- loop rather
-// than checking '<'/'>' once each, which only ever absorbed a single
-// redirect and left the rest of the tokens unconsumed, tripping
-// shell_eval_parser()'s whole-input check and failing the whole command
-// with no diagnostic (SHELL_ERR_EVAL, exit 253). Each iteration wraps the
-// AST built so far in one more REDIR node, exactly like the old code did
-// for its one supported redirect; eval_redirection() already nests
-// REDIR_OUT/REDIR_IN correctly regardless of how many or which order.
+// #1311: a simple command may carry any number of redirections, in any mix
+// and order (`cmd < in > out`, `cmd > out < in`, ...) -- loop rather than
+// checking '<'/'>' once each, which only ever absorbed a single redirect
+// and left the rest of the tokens unconsumed, tripping shell_eval_parser()'s
+// whole-input check and failing the whole command with no diagnostic
+// (SHELL_ERR_EVAL, exit 253).
 //
-// LIMITATION: for two redirects of the *same* direction (`cmd > o1 > o2`),
-// this nesting makes the first-written one (o1) the one whose fd the
-// command actually inherits: the outer (last-parsed, o2) REDIR node opens
-// its file first, but then unconditionally calls ast_exec() on its ->right,
-// which is the inner (first-parsed, o1) REDIR node -- that reopens and
-// re-assigns ctx->output_fd to o1's fd before the command ever runs, so o1
-// wins (o2 is created empty). Real `sh`/`bash` give the *last* redirect
-// priority (o2 would win, verified against both). Not fixed here; filed as
-// #1326.
+// #1326: each new redirect is spliced *innermost* -- just above the command
+// node, below every earlier redirect -- so `cmd > o1 > o2` parses to
+// REDIR_OUT(o1) -> REDIR_OUT(o2) -> CMD. eval_redirection() descends
+// outer-to-inner, opening (and O_TRUNC'ing) o1 first then o2, so the fd the
+// command inherits is o2's: the *last* same-direction redirect wins and the
+// earlier one is left created-but-empty, matching real `sh`/`bash`. Mixed
+// directions independently keep last-of-each-direction.
 static shell_ast_t *command(shell_parser *p) {
-    shell_ast_t *ast = simple_command(p);
-    if (!ast)
+    shell_ast_t *root = simple_command(p);
+    if (!root)
         return NULL;
+    shell_ast_t *cmd_head  = root; // the CMD chain; redirects splice above it
+    shell_ast_t *innermost = NULL; // deepest REDIR node so far, or NULL
     for (;;) {
-        if (match_token(p, SHELL_TOKEN_GREATER)) {
-            parser_next(p);
-            shell_ast_t *next = handle_redirection(p, SHELL_AST_REDIR_OUT, ast);
-            if (!next) {
-                free_ast(ast);
-                return NULL;
-            }
-            ast = next;
-            continue;
+        shell_ast_type_t type;
+        if (match_token(p, SHELL_TOKEN_GREATER))
+            type = SHELL_AST_REDIR_OUT;
+        else if (match_token(p, SHELL_TOKEN_LESSER))
+            type = SHELL_AST_REDIR_IN;
+        else
+            break;
+        parser_next(p);
+        shell_ast_t *node = handle_redirection(p, type);
+        if (!node) {
+            free_ast(root);
+            return NULL;
         }
-        if (match_token(p, SHELL_TOKEN_LESSER)) {
-            parser_next(p);
-            shell_ast_t *next = handle_redirection(p, SHELL_AST_REDIR_IN, ast);
-            if (!next) {
-                free_ast(ast);
-                return NULL;
-            }
-            ast = next;
-            continue;
-        }
-        break;
+        node->right = cmd_head;
+        if (innermost)
+            innermost->right = node;
+        else
+            root = node;
+        innermost = node;
     }
-    return ast;
+    return root;
 }
 
 static shell_ast_t *_pipe(shell_parser *p) {
@@ -972,6 +966,15 @@ typedef struct shell_command {
 /* Forward declare internal AST executor */
 static int ast_exec(shell_ctx *ctx, shell_ast_t *ast);
 
+/* #1327: mark an fd close-on-exec. macOS has no pipe2(), so eval_pipeline()
+ * creates plain pipe()s and sets FD_CLOEXEC here; dup2() clears it on the
+ * destination, so a stage keeps its own dup2'd stdin/stdout across exec()
+ * while every unrelated inherited pipe end closes automatically. */
+static int set_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD, 0);
+    return flags == -1 ? -1 : fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
 static void command_argv_from_ast(shell_command_t *cmd, shell_ast_t *ast) {
     cmd->argc = 0;
     cmd->argv = NULL;
@@ -1001,30 +1004,45 @@ static void command_argv_from_ast(shell_command_t *cmd, shell_ast_t *ast) {
     cmd->argv[cmd->argc] = NULL;
 }
 
-static void builtin_exit(int argc, char **argv) {
+/* CCCC patch (#1325): builtins return an int exit status (0 = success)
+ * instead of void, so command_execute() can report what a builtin actually
+ * did rather than an unconditional 0. */
+static int builtin_exit(int argc, char **argv) {
     exit(argc >= 2 ? atoi(argv[1]) : 0);
 }
 
-static void builtin_cd(int argc, char **argv) {
+static int builtin_cd(int argc, char **argv) {
     if (argc == 1) {
-        if (chdir(getenv("HOME")) == -1)
+        if (chdir(getenv("HOME")) == -1) {
             perror("cd");
+            return 1;
+        }
     } else if (argc == 2) {
-        if (chdir(argv[1]) == -1)
+        if (chdir(argv[1]) == -1) {
             perror("cd");
-    } else
+            return 1;
+        }
+    } else {
         eprintf("cd: too many arguments\n");
+        return 1;
+    }
+    return 0;
 }
 
-static void builtin_pwd(int argc, char **argv) {
+static int builtin_pwd(int argc, char **argv) {
     (void)argv;
     if (argc > 1) {
         eprintf("pwd: too many arguments\n");
-        return;
+        return 1;
     }
     char *cwd = getcwd(NULL, 0);
+    if (!cwd) {
+        _perror("pwd");
+        return 1;
+    }
     printf("%s\n", cwd);
     free(cwd);
+    return 0;
 }
 
 static shell_builtin_entry_t *builtin_find(shell_ctx *ctx, const char *name) {
@@ -1102,19 +1120,83 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
     }
 
     /* 2. Check Builtins (User defined builtins override everything; always
-     * allowed)
+     * allowed).
      *
-     * LIMITATION: builtins run here, in the parent, before the fork below
-     * ever happens -- they never see cmd->input_fd/output_fd, so `pwd > f`
-     * writes to the shell's own stdout and leaves `f` empty, and a builtin
-     * placed in a pipeline neither reads its stdin nor writes its stdout.
-     * builtin_func_t is also void, so a builtin always "succeeds" here
-     * regardless of what it actually did. Filed as #1325; not fixed as
-     * part of #1322's fd-ownership/pipeline-concurrency fix. */
+     * #1325: a builtin honours the stage's redirect/pipe fds and reports its
+     * real exit status. Inside a pipeline it runs in a forked subshell
+     * (POSIX semantics -- `cd x | y` doesn't change the step's later
+     * commands, and an in-process builtin writing more than one pipe buffer
+     * would deadlock before the reader stage is forked); outside a pipeline
+     * it runs in-process with the shell's own std fds temporarily dup2'd
+     * onto cmd->input_fd/output_fd, so `cd x > log` still changes this
+     * shell's cwd. */
     shell_builtin_entry_t *builtin = builtin_find(ctx, exec_name);
     if (builtin) {
-        builtin->func(cmd->argc, cmd->argv);
-        return 0; /* builtins are void; treat as success */
+        int has_redir = (cmd->input_fd != -1 || cmd->output_fd != -1);
+
+        if (ctx->defer_wait && !cmd->bg) {
+            /* Pipeline stage: fork a subshell, exactly like an external
+             * command, so eval_pipeline()'s stage_deferred[] accounting is
+             * unchanged. */
+            if (ctx->deferred_pid_count >= SHELL_MAX_DEFERRED_PIDS) {
+                eprintf("shell: pipeline exceeds %d stages\n",
+                        SHELL_MAX_DEFERRED_PIDS);
+                return SHELL_ERR_PIPE;
+            }
+            fflush(NULL); /* parent-side: don't let the child re-flush our
+                           * pending (pipe-buffered) stdout */
+            pid_t pid = fork();
+            if (pid == -1) {
+                _perror("fork");
+                return SHELL_ERR_FORK;
+            }
+            if (pid == 0) {
+                if (cmd->input_fd != -1) {
+                    dup2(cmd->input_fd, STDIN_FILENO);
+                    close(cmd->input_fd);
+                }
+                if (cmd->output_fd != -1) {
+                    dup2(cmd->output_fd, STDOUT_FILENO);
+                    close(cmd->output_fd);
+                }
+                /* This child does not exec(), so the FD_CLOEXEC on the
+                 * other stages' pipe ends (#1327) doesn't fire here -- but
+                 * the builtins (cd/pwd/exit) all terminate immediately on
+                 * their own, so no downstream reader is left waiting. */
+                int brc = builtin->func(cmd->argc, cmd->argv);
+                fflush(stdout);
+                _exit(brc < 0 ? 1 : brc);
+            }
+            ctx->deferred_pids[ctx->deferred_pid_count++] = pid;
+            return 0;
+        }
+
+        if (!has_redir)
+            return builtin->func(cmd->argc, cmd->argv);
+
+        /* Redirect, no pipe: temporarily point the shell's own std fds at
+         * the redirect targets around the in-process call. */
+        int saved_in = -1, saved_out = -1;
+        if (cmd->input_fd != -1) {
+            saved_in = dup(STDIN_FILENO);
+            dup2(cmd->input_fd, STDIN_FILENO);
+        }
+        if (cmd->output_fd != -1) {
+            fflush(stdout);
+            saved_out = dup(STDOUT_FILENO);
+            dup2(cmd->output_fd, STDOUT_FILENO);
+        }
+        int brc = builtin->func(cmd->argc, cmd->argv);
+        if (saved_out != -1) {
+            fflush(stdout);
+            dup2(saved_out, STDOUT_FILENO);
+            close(saved_out);
+        }
+        if (saved_in != -1) {
+            dup2(saved_in, STDIN_FILENO);
+            close(saved_in);
+        }
+        return brc;
     }
 
     /* 3. Allowlist check for external commands */
@@ -1303,15 +1385,17 @@ static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
  *
  * `stage_deferred[i]` says whether stage i actually pushed a pid onto
  * ctx->deferred_pids -- it is NOT inferable from `stage_rc[i] >= 0` alone.
- * A stage can return >= 0 without deferring anything: a builtin (runs
- * synchronously in command_execute(), returns before the fork), or a
- * command that inherited ctx->bg == 1 from an enclosing `&` (the `&`/`;`
- * quirk in eval_sequence() leaves ctx->bg set to 1 across *both* sides of
- * the `&`, so `bg-cmd & a | b | c` runs the whole pipeline in
- * command_execute()'s background branch, which forks, doesn't wait, and
- * returns 0 immediately without touching ctx->deferred_pids at all). Any
- * stage with `stage_deferred[i] == false` already carries its final result
- * in `stage_rc[i]` and must not consume a pid. */
+ * A stage can return >= 0 without deferring anything: chiefly a command
+ * (external or builtin) that inherited ctx->bg == 1 from an enclosing `&`
+ * (the `&`/`;` quirk in eval_sequence() leaves ctx->bg set to 1 across
+ * *both* sides of the `&`, so `bg-cmd & a | b | c` runs the whole pipeline
+ * in command_execute()'s background branch, which forks, doesn't wait, and
+ * returns 0 immediately without touching ctx->deferred_pids at all).
+ * (Builtins used to be another such case -- they ran synchronously before
+ * the fork -- but #1325 makes a builtin in a pipeline fork a subshell and
+ * push a pid like any other stage.) Any stage with
+ * `stage_deferred[i] == false` already carries its final result in
+ * `stage_rc[i]` and must not consume a pid. */
 static int wait_deferred_pipeline(shell_ctx *ctx, const int *stage_rc,
                                   const bool *stage_deferred, int stage_count) {
     int last_status_rc = 0;
@@ -1408,6 +1492,8 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
         _perror("pipe");
         goto cleanup;
     }
+    set_cloexec(pipefd[0]); /* #1327 */
+    set_cloexec(pipefd[1]);
 
     ctx->input_fd  = -1;
     ctx->output_fd = pipefd[1];
@@ -1423,6 +1509,8 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
             _perror("pipe");
             goto cleanup;
         }
+        set_cloexec(pipefd[0]); /* #1327 */
+        set_cloexec(pipefd[1]);
         ctx->output_fd = pipefd[1];
         PIPELINE_RUN_STAGE(ast->left);
         close(pipefd[1]);
@@ -1438,20 +1526,14 @@ static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
 #undef PIPELINE_RUN_STAGE
 
     /* Close the parent's own copy of the final read end *before* waiting,
-     * not after -- a strict improvement in fd hygiene even though it does
-     * NOT, by itself, make an early-exiting reader (`producer | head`)
-     * reliably stop a still-running producer: every forked stage inherits
-     * the WHOLE fd table across its own fork+exec (not just the fds
-     * dup2'd onto its own stdin/stdout), so the producer's own child
-     * process typically still holds its own unrelated copy of this read
-     * end regardless of what the parent shell does here. That's a
-     * separate, pre-existing gap (filed as #1327; see man/BUILD_MODE.md's
-     * "Custom steps" section) this close() doesn't reach. What it does
-     * fix: without it, the parent's own copy remained
-     * open through the whole wait, which is wrong on general principle
-     * (every other pipe fd this function creates is closed as soon as no
-     * stage needs it) even where it isn't the only thing keeping a
-     * producer alive. */
+     * not after -- every other pipe fd this function creates is closed as
+     * soon as no stage needs it. #1327: combined with set_cloexec() on
+     * every pipe end above, this is what lets an early-exiting reader
+     * (`producer | head`) actually stop a still-running producer: each
+     * forked stage's own copies of the unrelated pipe ends now close
+     * automatically at exec(), so once the real reader exits the kernel
+     * sees no readers left and the producer's write() gets EPIPE/SIGPIPE
+     * instead of blocking forever. */
     close(prev_read);
     prev_read = -1;
 
@@ -1785,6 +1867,10 @@ static int posix_shell_with_io(const char *cmd, shell_io *io, shell_ctx *ctx) {
         shell_token_array_free(&tokens);
         free_ast(ast);
         free(cmd_copy);
+        /* #1325: a builtin (cd/pwd/exit) that ran in-process here wrote to
+         * this child's fully-buffered stdout; _exit() would discard it, so
+         * `$(pwd)` and `pwd`-into-a-capture came back empty. */
+        fflush(NULL);
         _exit(result >= 0 ? result : 1);
     }
 
