@@ -2622,6 +2622,16 @@ int main(int argc, const char *argv[]) {
 
     // --sysroot: auto-configure system include paths from the SDK root.
     // Implies --use-system-headers.
+    //
+    // #1329: on a Debian/Ubuntu-style multiarch Linux distro, this misses
+    // the architecture-triplet subdirectory (/usr/include/x86_64-linux-gnu
+    // etc.) that a chunk of glibc's own headers -- notably bits/wordsize.h,
+    // transitively pulled in by features-time64.h from an ordinary
+    // #include <unistd.h>/<pthread.h> -- actually live under, not directly
+    // under usr/include. Confirmed via tools/header_resolution_smoke.py's
+    // cases 15/16 failing on the cccc-linux-amd64 Colima container. Not
+    // fixed here -- pre-existing, unrelated to whatever change you're
+    // reading this comment alongside.
     if (sysroot) {
         struct stat _st;
         char        sysroot_inc[4096];

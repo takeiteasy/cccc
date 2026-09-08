@@ -225,6 +225,39 @@ real host compiler, so header handling shifts:
   wasn't meant to configure that inclusion at all — a pathological ordering
   no real vendored-header usage produces.
 
+### Host-owned type/struct layout under self-hosting
+
+When cccc compiles its own `src/stdlib/*.c` FFI-translation source as guest
+input, a bundled header whose real host layout genuinely diverges from
+CCCC's own guest-side projection (`sys/mount.h`'s `struct statfs`,
+`sys/statvfs.h`'s `struct statvfs`, `fenv.h`'s `fenv_t`) needs its own
+`#ifdef __CCCC__` / `#include_next` hand-off — the `-idirafter` demotion
+above is a directory-wide backstop for a *user* `-I` entry, not the
+mechanism that keeps a self-hosted `-c=native` build's own type layout
+correct. Without the hand-off, the guest-side parse resolves the type
+against CCCC's bundled projection, and that's what any `sizeof`/member
+access folds against in the emitted C too.
+
+This is why type-layout shadowing self-corrects far more often than macro
+*value* shadowing does (see `src/host_shadow_macros.h`): a `sizeof(struct
+statfs)` or `host_buf->f_bsize` re-materializes as literal source text in
+the generated C, resolved by the real host compiler against the header the
+hand-off replays — no injection step is needed once the hand-off exists,
+unlike an `_SC_PAGESIZE`/`POLLWRBAND` numeric constant, which is baked into
+the AST as an integer at cccc's own preprocess time and has nothing left to
+resolve against once the guest value has already been substituted in.
+`#1035` is the same shape one level up: `fenv_t` itself is already
+host-sized (`__CCCC_SIZEOF_FENV_T__`, injected transitively the same way
+errno codes and `CLOCK_*` ids are), and the one host-side-only *value* it
+carries (`FE_DFL_ENV`, an opaque host address on some platforms) is
+recognized and re-emitted as the bare identifier by a dedicated
+`serialize_expr.c` case rather than folded to a number.
+
+`-E` is the wrong probe for this class — it only shows the preprocessed
+*text*, before serialization ever runs, so a still-correctly-substituted
+sentinel can look wrong there. Check `-m` (or `-c=native`'s actual output)
+instead.
+
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
 ## URL includes under `-c=native`/`-m`/`-c=generated`

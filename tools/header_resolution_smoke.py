@@ -91,6 +91,21 @@ Cases:
      the same compensating-#include mechanism #1057 built for
      size_t/ptrdiff_t/wchar_t). `-D_FORTIFY_SOURCE=0` is still required
      (CCCC has no `__builtin___*_chk`) and is not what this case checks.
+  17. Self-hosted `-m` (NOT `-E`) resolves type/struct-shape shadowing
+     (#1317): distinct from case 14's macro-*value* shadowing (fixed at
+     preprocess time, so `-E` is the right probe there) -- a bundled
+     header's *type layout* is resolved later, at serialization, so `-E`
+     on `src/stdlib/fenv.c` still shows the sentinel's raw encoding
+     (`((const fenv_t *)-1)`) while `-m` shows it correctly substituted
+     back to the bare `FE_DFL_ENV` identifier (the #1035 recognizer in
+     `src/serialize_expr.c`, type-driven, fires here exactly as it does for
+     ordinary guest code). Using `-E` for this case would be a false
+     pass/fail depending on which stage happens to be probed -- asserting
+     on `-m` is deliberate, not a copy-paste of case 14. Also confirms
+     `src/stdlib/posix_statfs.c`'s `struct statfs`/`struct statvfs` layouts
+     are deferred to the replayed real header (`struct statfs host_buf;` /
+     `(*host_buf).f_bsize`, not a folded byte offset) rather than resolved
+     against CCCC's own bundled projections.
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -542,6 +557,40 @@ def case_native_unistd_stdint(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_type_shadow_1317(cccc: Path, tmp: str) -> bool:
+    print("  17: self-hosted -m restores real host type/struct layout (#1317)")
+    root = Path(__file__).parent.parent.resolve()
+    flags = self_host_include_flags()
+
+    fenv_src = root / "src" / "stdlib" / "fenv.c"
+    result = run([str(cccc), "-m"] + flags + [str(fenv_src)], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -m on fenv.c exited {result.returncode}\n    {result.stderr}")
+        return False
+    if "FE_DFL_ENV" not in result.stdout:
+        print("    FAIL: -m output never substituted the FE_DFL_ENV sentinel back")
+        return False
+    if re.search(r"\(const fenv_t \*\)\s*-\s*1", result.stdout):
+        print("    FAIL: -m output still contains the raw -1 sentinel encoding")
+        return False
+
+    statfs_src = root / "src" / "stdlib" / "posix_statfs.c"
+    result = run([str(cccc), "-m"] + flags + [str(statfs_src)], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -m on posix_statfs.c exited {result.returncode}\n    {result.stderr}")
+        return False
+    for needle in ("struct statfs host_buf;", "struct statvfs host_buf;",
+                   "(*host_buf).f_bsize"):
+        if needle not in result.stdout:
+            print(f"    FAIL: -m output missing {needle!r} -- layout may have "
+                  f"folded against CCCC's own bundled projection instead of "
+                  f"deferring to the replayed real header")
+            return False
+
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -583,6 +632,7 @@ def main() -> int:
             case_host_macro_shadow_injection,
             case_sysroot_pthread,
             case_native_unistd_stdint,
+            case_native_type_shadow_1317,
         ]
         results = [case(cccc, tmp) for case in cases]
 
