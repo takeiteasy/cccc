@@ -117,7 +117,10 @@ Run those against the default VM build.
 
 Plain runtime `#include <stdio.h>` and other real system headers work here —
 see [HEADERS.md](HEADERS.md) for how header resolution and host-header
-hand-off change under native mode.
+hand-off change under native mode. A URL `#include` (curl-enabled builds
+only) is likewise replayed as an ordinary `#include` of its resolved cache
+path rather than the literal URL a host compiler cannot resolve — see
+[HEADERS.md's URL includes section](HEADERS.md#url-includes-under--c=native-m-c=generated).
 
 ## What `-c=native` refuses to lower
 

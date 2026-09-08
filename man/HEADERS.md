@@ -73,13 +73,13 @@ Two different classifications drive the rules above:
 - **`--sysroot <path>`**: adds `<path>/usr/include` and
   `<path>/usr/local/include` to the system search paths; implies
   `--use-system-headers`.
-- **`--no-builtin-includes`** (requires `--use-system-headers`): for known,
-  non-owned standard headers, do **not** fall back to CCCC's own copy (step
-  2/3 above) if the SDK copy isn't found — fail instead of silently
-  substituting. Owned headers are exempt from this too, for the same
-  reason: there's no SDK substitute to prefer in the first place, so
-  "don't fall back" would just mean "never resolve `stdbool.h`", which
-  isn't useful to anyone.
+- **`--no-builtin-includes`** (requires `--use-system-headers`; passing it
+  alone is a CLI error): for known, non-owned standard headers, do **not**
+  fall back to CCCC's own copy (step 2/3 above) if the SDK copy isn't found
+  — fail instead of silently substituting. Owned headers are exempt from
+  this too, for the same reason: there's no SDK substitute to prefer in the
+  first place, so "don't fall back" would just mean "never resolve
+  `stdbool.h`", which isn't useful to anyone.
 - **`CCCC_NATIVE_CC`** and friends (see `cccc_find_native_cc`) select the
   compiler `-c=native` shells out to; unrelated to header search but
   documented here since the interaction below is easy to miss.
@@ -219,6 +219,30 @@ real host compiler, so header handling shifts:
   no real vendored-header usage produces.
 
 See [NATIVE.md](NATIVE.md) for the native pipeline itself.
+
+## URL includes under `-c=native`/`-m`/`-c=generated`
+
+A URL `#include`/`#embed` (curl-enabled builds only — see
+[BUILD.md](BUILD.md)) fetches into a shared on-disk cache
+(`--url-cache-dir`, default `$TMPDIR/.cccc`) on every path, VM included.
+Under `-c=native`/`-m`/`-c=generated`, a captured URL `#include` is rewritten
+to an absolute `#include` of that cache entry rather than being replayed as
+the literal URL, which a real host compiler cannot resolve. A URL `#embed`
+never needs this treatment: like every captured `#embed`, its bytes are
+already spliced into the token stream at parse time and the directive itself
+is dropped from the replayed output.
+
+Two consequences worth knowing:
+
+- The emitted `.c`/`.gen.c` names an absolute path under the URL cache
+  directory. If that output is saved and compiled later (a different
+  process, a different machine, or after `--url-cache-clear`), the include
+  only resolves as long as the cache entry is still there.
+- A URL `#include` reached only through an ordinary *project header* (not a
+  command-line input file, not one of CCCC's own bundled headers) is never
+  auto-captured in the first place, so nothing rewrites it — the host
+  compiler reads that header's own text and hits the raw URL directly. This
+  is a narrower case than the top-level one above and is not handled.
 
 ## Private headers
 

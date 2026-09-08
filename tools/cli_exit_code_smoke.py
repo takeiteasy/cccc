@@ -28,6 +28,12 @@ Cases:
      run -- exits non-zero with the "defines no functions or variables"
      driver diagnostic (the per-test-file harness can't assert a bare
      driver error + non-zero exit outside --build/--testing mode).
+  9. #1320: `--no-builtin-includes` alone (no `--use-system-headers`) is a
+     bare driver usage error -- not classifiable by the per-test-file
+     harness (tools/testing/runner.py needs a compile-error marker in
+     stderr, and this fires before any file is even opened).
+  10. #1320 floor: `--use-system-headers --no-builtin-includes` together
+      must NOT trip the new check (the documented, supported pairing).
 
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
@@ -163,6 +169,35 @@ def case_empty_tu_plain_error(cccc, tmp):
     return True
 
 
+def case_no_builtin_includes_requires_use_system_headers(cccc, tmp):
+    print("  9: --no-builtin-includes alone is a usage error")
+    src = Path(tmp) / "nbi9.c"
+    src.write_text(GOOD_SRC)
+    result = run([str(cccc), "--no-builtin-includes", src.name], cwd=tmp)
+    if result.returncode == 0:
+        print(f"    FAIL: exited 0\n    stderr={result.stderr!r}")
+        return False
+    if "requires --use-system-headers" not in result.stderr:
+        print(f"    FAIL: missing driver diagnostic\n    stderr={result.stderr!r}")
+        return False
+    print("    ok")
+    return True
+
+
+def case_no_builtin_includes_paired_ok(cccc, tmp):
+    print("  10: --use-system-headers --no-builtin-includes together is unaffected")
+    src = Path(tmp) / "nbi10.c"
+    src.write_text(GOOD_SRC)
+    result = run(
+        [str(cccc), "--use-system-headers", "--no-builtin-includes", src.name],
+        cwd=tmp)
+    if "requires --use-system-headers" in result.stderr:
+        print(f"    FAIL: paired flags still rejected\n    stderr={result.stderr!r}")
+        return False
+    print("    ok")
+    return True
+
+
 def main():
     root = Path(__file__).parent.parent.resolve()
     cccc = root / "cccc"
@@ -182,6 +217,8 @@ def main():
             case_good_still_zero,
             case_empty_tu_generated_ok,
             case_empty_tu_plain_error,
+            case_no_builtin_includes_requires_use_system_headers,
+            case_no_builtin_includes_paired_ok,
         ]
         results = [c(cccc, tmp) for c in cases]
 

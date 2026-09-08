@@ -6159,6 +6159,20 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     // Track URL -> cache path mapping for error reporting
                     hashmap_put(&vm->compiler.url_to_path, cache_path,
                                 (void *)filename);
+                    // #1313: register the fetched cache path so the
+                    // -c=native/-m/-c=generated replay loop
+                    // (cc_serialize_program, serialize_program.c) can rewrite
+                    // this directive to the on-disk cache entry instead of
+                    // re-emitting the raw URL, which the host cc cannot
+                    // resolve. Guarded on cache_path being non-NULL --
+                    // error_tok() above accumulates rather than aborting, so
+                    // a fetch failure must not register a NULL "resolved
+                    // path" (indistinguishable from "never captured").
+                    if (cache_path && ac_include_line) {
+                        hashmap_put(&vm->compiler.emit_include_paths,
+                                    ac_include_line, cache_path);
+                        mark_include_target_captured(vm, cache_path);
+                    }
                     tok = include_file(vm, tok, cache_path, start->next->next,
                                        filename, false);
                     continue;

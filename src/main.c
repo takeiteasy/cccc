@@ -2367,6 +2367,17 @@ int main(int argc, const char *argv[]) {
         usage(argv[0], 1);
     }
 
+    // #1320: documented (usage text above, man/HEADERS.md) but never
+    // enforced -- --no-builtin-includes alone silently did a partial,
+    // confusing thing (search_include_paths()'s force_cccc still won for std
+    // headers) instead of the clear failure the docs promise.
+    if (no_builtin_includes && !use_system_headers) {
+        fprintf(stderr, "error: --no-builtin-includes requires "
+                        "--use-system-headers (or --sysroot, which implies "
+                        "it)\n");
+        usage(argv[0], 1);
+    }
+
     if (compile_format == COMPILE_NATIVE) {
         if (preprocess_only || dump_expanded_only || print_tokens ||
             output_json || output_ffi_decls || dump_ast) {

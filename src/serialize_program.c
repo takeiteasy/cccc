@@ -3389,6 +3389,52 @@ static bool line_is_include_directive(const char *line) {
     return c == ' ' || c == '\t' || c == '<' || c == '"';
 }
 
+// #1313: true when `line` is a captured `#include` whose operand is a URL
+// (`#include "https://..."` or `#include <https://...>`) -- the shape
+// emit_url_include_rewrite() below must intercept before it ever reaches a
+// verbatim fprintf, since a real host cc has no concept of a URL #include.
+static bool line_is_url_include_directive(const char *line) {
+    if (!line_is_include_directive(line))
+        return false;
+    const char *start = strchr(line, '<');
+    if (!start)
+        start = strchr(line, '"');
+    if (!start)
+        return false;
+    // is_url() (src/url_fetch.c) only strncmp()s a fixed "http://"/
+    // "https://" prefix, so it is safe to call directly on the operand's
+    // start -- it never reads past the prefix length, regardless of where
+    // the closing '>'/'"' actually is.
+    return is_url(start + 1);
+}
+
+// #1313: shared choke point for every site that replays a captured
+// directive line verbatim (the -c=native/-m emit_directives loop and both
+// the leading-run and resumed halves of the -c=generated CCCC_EMIT_SOURCE
+// replay) -- a URL #include must never reach the host cc as-is (it fetched
+// fine on the VM path via fetch_url_to_cache(), but the host cc has no
+// concept of an https:// #include). Rewrites to the on-disk cache path the
+// preprocess.c PP_INCLUDE URL branch registered in emit_include_paths
+// (keyed on this exact line text -- both replay channels are handed the
+// same captured _ac_line pointer, see preprocess.c's push_emit_directive/
+// cc_record_emit_source call sites). Returns true (and has already printed)
+// when `line` was a URL include; false means the caller should print it
+// itself. `--emit-cccc` is exempted like every other replay-time rewrite in
+// this file -- dialect-fidelity output expects a cccc-aware reader that
+// understands URL includes directly.
+static bool emit_url_include_rewrite(FILE *f, VirtualMachine *vm,
+                                     const char *line) {
+    if (vm->compiler.emit_cccc || !line_is_url_include_directive(line))
+        return false;
+    char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
+    if (!resolved)
+        error("cccc: URL #include has no resolved cache path -- fetch must "
+              "have failed earlier: %s",
+              line);
+    fprintf(f, "#include \"%s\"\n", resolved);
+    return true;
+}
+
 // #1263: `open` is a CCCC_EMIT_SOURCE event whose line is a COND_OPEN
 // directive (`#if`/`#ifdef`/`#ifndef`). Walk forward, tracking nesting
 // depth, and return the matching `#endif` event iff the whole span is
@@ -4531,7 +4577,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                     continue;
                 }
             }
-            fprintf(f, "%s\n", ev->source);
+            if (!emit_url_include_rewrite(f, vm, ev->source))
+                fprintf(f, "%s\n", ev->source);
             printed_any  = true;
             replay_start = ev->next;
         }
@@ -4644,7 +4691,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                         continue;
                     }
                 }
-                fprintf(f, "%s\n", ev->source);
+                if (!emit_url_include_rewrite(f, vm, ev->source))
+                    fprintf(f, "%s\n", ev->source);
                 continue;
             }
             Obj *obj = ev->obj;
@@ -5045,6 +5093,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         }
 #endif
+        // #1313: resolved is NULL for a URL #include (nothing in the
+        // per-basename substitutions above could have matched it either),
+        // so this is the last chance to intercept it before the plain
+        // verbatim replay below.
+        if (emit_url_include_rewrite(f, vm, line))
+            continue;
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
         // `struct statfs` into scope the way it does on macOS/BSD -- real
