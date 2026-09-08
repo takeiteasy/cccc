@@ -200,6 +200,10 @@ language coverage figures apply.
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths; also accepts URLs in curl-enabled builds, probing the same shared cache a real fetch uses (non-curl builds report 0 for URLs) |
+| `__has_include_next` | ✓ | Recognized and parses correctly; always returns `0` (answering for real would need the current header's own search-path position, not reliably recoverable at an arbitrary `#if` site) |
+| `__has_declspec_attribute` | ✓ | Recognized and parses correctly; always returns `0` (CCCC supports no `__declspec` attributes) |
+| `__has_warning` | ✓ | Recognized and parses correctly; always returns `0` (no `-W`-name-keyed diagnostic registry) |
+| Unrecognized `__has_*`-shaped operator | ✓ | Evaluates to `0` and warns (`-Wcpp`) naming the operator, whether literal or reached through a macro expansion, instead of a "not a function" error |
 | Leading `#!` (shebang) line | ✓ | CCCC-specific: a `#!` on line 1 of the command-line input file (or a file piped via `-`) is blanked before tokenization, so line numbers are unaffected. Not applied to `#include`d files, which still error on a stray `#!`. |
 
 ---

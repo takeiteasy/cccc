@@ -7,8 +7,9 @@ rest are **parsed and silently ignored** by the attribute consumer.
 ## Feature-Test Preprocessor Operators
 
 CCCC provides the common `__has_*` operators in preprocessor conditionals:
-`__has_include`, `__has_feature`, `__has_extension`, `__has_attribute`,
-`__has_builtin`, `__has_c_attribute`, and `__has_cpp_attribute`.
+`__has_include`, `__has_include_next`, `__has_feature`, `__has_extension`,
+`__has_attribute`, `__has_builtin`, `__has_c_attribute`,
+`__has_cpp_attribute`, `__has_declspec_attribute`, and `__has_warning`.
 
 `__has_feature` and `__has_extension` report selected-standard support for
 `c99`, `c11`, `c23`, `c_alignas`, `c_alignof`, `c_generic_selections`, and
@@ -27,6 +28,18 @@ diverge; genuinely unrecognized attributes return `0`.
 `__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
 attributes (C23 N3220 §6.10.10.2) and `1` for CCCC vendor attributes;
 unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
+
+`__has_declspec_attribute` and `__has_warning` are recognized (so headers
+using them parse instead of erroring) but always return `0` — CCCC supports
+no `__declspec` attributes and has no `-W`-name-keyed diagnostic registry.
+`__has_include_next` is likewise always `0`: unlike `__has_include`,
+answering it correctly would require knowing exactly where in the include
+search path the *current* header itself was found, which isn't reliably
+recoverable at an arbitrary `#if` site.
+
+Any other `__has_*`-shaped operator CCCC doesn't recognize evaluates to `0`
+and emits a `-Wcpp` warning naming it, rather than the confusing "not a
+function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 
 ## Quick Reference
 

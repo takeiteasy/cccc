@@ -1879,21 +1879,46 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
         return is_has_builtin_supported(name);
     if (!strcmp(kind, "__has_c_attribute"))
         return is_has_c_attribute_supported(vendor, name);
-    return 0;
+    if (!strcmp(kind, "__has_declspec_attribute"))
+        // #1323: CCCC is not MSVC/clang-cl and supports no __declspec
+        // attributes -- always 0, but recognised so real SDK headers using
+        // it (seen in the macOS SDK) parse instead of hitting the generic
+        // identifier->"0" fallback and corrupting into a bogus function
+        // call ("not a function").
+        return 0;
+    return 0; /* __has_cpp_attribute */
 }
 
 // Rewrite `defined(foo)` / `defined foo` / `__has_include(...)` /
 // `__has_feature(...)` / `__has_extension(...)` / `__has_attribute(...)` /
 // `__has_builtin(...)` / `__has_c_attribute(...)` / `__has_cpp_attribute(...)`
-// / `__has_embed(...)` into number tokens. Shared by read_const_expr() (the
-// pre-expansion pass) and eval_const_expr()'s post-expansion pass (#1319,
-// #1318): a macro invoked inside a #if/#elif expression can itself expand
-// *to* one of these operators (e.g. Apple SDK headers wrapping
+// / `__has_embed(...)` / `__has_declspec_attribute(...)` /
+// `__has_warning(...)` / `__has_include_next(...)` into number tokens.
+// Shared by read_const_expr() (the pre-expansion pass) and
+// eval_const_expr()'s post-expansion pass (#1319, #1318): a macro invoked
+// inside a #if/#elif expression can itself expand *to* one of these
+// operators (e.g. Apple SDK headers wrapping
 // `defined(__DRIVERKIT_VERSION_MIN_REQUIRED)` inside their own compat
 // macros), so a single pre-expansion rewrite pass misses it and leaves the
 // literal `defined`/`__has_*` identifier to fall through the generic
 // identifier -> "0" rule further down, corrupting e.g. `defined(FOO)` into
-// `0(0)` -- which the parser then rejects as "not a function".
+// `0(0)` -- which the parser then rejects as "not a function". Either call
+// consumes (rewrites) any operator occurrence it sees, so a given
+// occurrence is always handled by exactly one of the two calls, never both:
+// a literal top-level one is consumed here by the pre-expansion call before
+// macro expansion ever runs; a macro-revealed one is invisible to that
+// call (still hidden inside the macro's name) and is instead protected
+// from expansion mid-stream (see pp_operand_protect below) so it survives
+// intact for the post-expansion call to consume.
+//
+// #1323: an operator that is `__has_*`-shaped but not one CCCC recognises
+// (real SDK headers use __has_declspec_attribute/__has_warning/
+// __has_include_next, none known before this ticket) fell through the same
+// generic identifier -> "0" rule as an ordinary unrecognised identifier,
+// with the same "0(...)" / "not a function" corruption. The fallback arm at
+// the end of this function now catches any *other* __has_*(...) instead,
+// consuming its balanced-paren argument, evaluating to 0, and warning by
+// name (single-consumption, as above, means this can't double-fire).
 static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok) {
     Token  head = {};
     Token *cur  = &head;
@@ -1929,11 +1954,51 @@ static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok) {
         if (equal(tok, "__has_feature") || equal(tok, "__has_extension") ||
             equal(tok, "__has_attribute") || equal(tok, "__has_builtin") ||
             equal(tok, "__has_c_attribute") ||
-            equal(tok, "__has_cpp_attribute")) {
+            equal(tok, "__has_cpp_attribute") ||
+            equal(tok, "__has_declspec_attribute")) {
             Token *start  = tok;
             char  *kind   = arena_strndup(vm, tok->loc, tok->len);
             int    result = eval_has_name(vm, &tok, tok, kind);
             cur = cur->next = new_num_token(vm, result, start);
+            continue;
+        }
+
+        // "__has_warning(\"-Wname\")" -- the argument is a string literal,
+        // not an identifier, so it can't go through eval_has_name()'s
+        // consume_pp_name(). No -W name is queryable this way today;
+        // conservatively 0, but recognised so real SDK headers (macOS SDK
+        // uses this) parse instead of corrupting into a bogus function
+        // call.
+        if (equal(tok, "__has_warning")) {
+            Token *start = tok;
+            tok          = skip(vm, tok->next, "(");
+            if (tok->kind != TK_STR)
+                error_tok(vm, tok, "expected a string literal");
+            tok = tok->next;
+            tok = skip(vm, tok, ")");
+            cur = cur->next = new_num_token(vm, 0, start);
+            continue;
+        }
+
+        // "__has_include_next(<foo.h>)" / "\"foo.h\"" -- unlike
+        // __has_include, evaluating this for real would need
+        // vm->compiler.include_next_idx to reflect *this header's* own
+        // search-path position at the point the #if runs, but that global
+        // is mutated by ordinary #include resolution throughout the whole
+        // translation unit (see search_include_next()/resolve_include_
+        // paths()) -- a header that #includes anything before its own
+        // `#if __has_include_next(...)` may already have moved it
+        // elsewhere. A plausibly-wrong 1 is worse than an honest 0, so this
+        // is conservatively always 0 (real SDK usage of the operator is
+        // exactly 2 hits, neither load-bearing).
+        if (equal(tok, "__has_include_next")) {
+            Token *start = tok;
+            tok          = skip(vm, tok->next, "(");
+            bool is_dquote;
+            int  filename_len;
+            read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
+            tok = skip(vm, tok, ")");
+            cur = cur->next = new_num_token(vm, 0, start);
             continue;
         }
 
@@ -1981,6 +2046,33 @@ static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok) {
             }
 
             cur = cur->next = new_num_token(vm, result, start);
+            continue;
+        }
+
+        // #1323: an operator-shaped identifier none of the arms above
+        // recognised (e.g. __has_frobnicate -- not a real name, but the
+        // same shape as one). Consume its balanced-paren argument (same
+        // walk as pp_operand_protect's macro-revealed case below) and
+        // evaluate to 0 rather than falling through to the generic
+        // identifier -> "0" rule, which would leave the "(args)" behind and
+        // corrupt this into a bogus function call.
+        //
+        if (tok->kind == TK_IDENT && tok->len > 6 &&
+            memcmp(tok->loc, "__has_", 6) == 0 && equal(tok->next, "(")) {
+            Token *start    = tok;
+            char  *name     = arena_strndup(vm, tok->loc, tok->len);
+            tok             = tok->next; /* the '(' */
+            int paren_depth = 0;
+            do {
+                if (equal(tok, "("))
+                    paren_depth++;
+                else if (equal(tok, ")"))
+                    paren_depth--;
+                tok = tok->next;
+            } while (paren_depth > 0 && tok->kind != TK_EOF);
+            warn_tok(vm, start, CCCC_WARN_CPP,
+                     "unknown preprocessor operator '%s'; assuming 0", name);
+            cur = cur->next = new_num_token(vm, 0, start);
             continue;
         }
 
@@ -5661,12 +5753,28 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // (rewrite_pp_operators()) can turn them into 0/1 correctly -- same
         // as it would for a literal, pre-expansion `defined(FOO)`.
         if (vm->compiler.pp_const_expr_depth > 0) {
+            // #1323: __has_declspec_attribute/__has_warning/
+            // __has_include_next added alongside the three original
+            // operators. This list is deliberately NOT the same set as the
+            // macro fallbacks below (__has_embed is protected here with no
+            // fallback macro; "defined" is protected but isn't a macro at
+            // all) -- keep it that way rather than merging the two, or an
+            // operator gains behavior (e.g. an outside-#if macro fallback)
+            // nothing asked for.
             static char *const pp_operand_protect[] = {
-                "defined",           "__has_include",
-                "__has_feature",     "__has_extension",
-                "__has_attribute",   "__has_builtin",
-                "__has_c_attribute", "__has_cpp_attribute",
-                "__has_embed",       NULL};
+                "defined",
+                "__has_include",
+                "__has_feature",
+                "__has_extension",
+                "__has_attribute",
+                "__has_builtin",
+                "__has_c_attribute",
+                "__has_cpp_attribute",
+                "__has_embed",
+                "__has_declspec_attribute",
+                "__has_warning",
+                "__has_include_next",
+                NULL};
             char *matched = NULL;
             for (int i = 0; pp_operand_protect[i]; i++) {
                 if (equal(tok, pp_operand_protect[i])) {
@@ -5674,6 +5782,14 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     break;
                 }
             }
+            // An operator-shaped identifier not in the list above (an
+            // operator CCCC has never heard of) gets the same protection
+            // generically, by prefix, so rewrite_pp_operators()'s
+            // unknown-operator fallback arm sees it intact on the final
+            // pass instead of a general macro lookup mangling it first.
+            if (!matched && tok->kind == TK_IDENT && tok->len > 6 &&
+                memcmp(tok->loc, "__has_", 6) == 0)
+                matched = "__has_unknown";
             if (matched) {
                 cur = cur->next = copy_token(vm, tok);
                 tok             = tok->next;
@@ -6951,6 +7067,11 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__has_builtin(x)", "0");
     define_macro(vm, "__has_c_attribute(x)", "0");
     define_macro(vm, "__has_cpp_attribute(x)", "0");
+    // #1323: __has_declspec_attribute/__has_warning/__has_include_next are
+    // deliberately NOT given a fallback macro here, same as __has_embed
+    // (also absent from this list, also #if-only) -- outside-#if usage of
+    // any of these is essentially unheard of, and rewrite_pp_operators()'s
+    // #if handling already covers the real case.
 
     // GCC compatibility macros for system headers
     // Claim GCC 4.2.1 compatibility (minimum version for modern headers)

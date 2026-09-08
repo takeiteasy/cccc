@@ -838,6 +838,16 @@ static inline shell_ast_t *handle_redirection(shell_parser    *p,
 // AST built so far in one more REDIR node, exactly like the old code did
 // for its one supported redirect; eval_redirection() already nests
 // REDIR_OUT/REDIR_IN correctly regardless of how many or which order.
+//
+// LIMITATION: for two redirects of the *same* direction (`cmd > o1 > o2`),
+// this nesting makes the first-written one (o1) the one whose fd the
+// command actually inherits: the outer (last-parsed, o2) REDIR node opens
+// its file first, but then unconditionally calls ast_exec() on its ->right,
+// which is the inner (first-parsed, o1) REDIR node -- that reopens and
+// re-assigns ctx->output_fd to o1's fd before the command ever runs, so o1
+// wins (o2 is created empty). Real `sh`/`bash` give the *last* redirect
+// priority (o2 would win, verified against both). Not fixed here; filed as
+// #1326.
 static shell_ast_t *command(shell_parser *p) {
     shell_ast_t *ast = simple_command(p);
     if (!ast)
@@ -1092,7 +1102,15 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
     }
 
     /* 2. Check Builtins (User defined builtins override everything; always
-     * allowed) */
+     * allowed)
+     *
+     * LIMITATION: builtins run here, in the parent, before the fork below
+     * ever happens -- they never see cmd->input_fd/output_fd, so `pwd > f`
+     * writes to the shell's own stdout and leaves `f` empty, and a builtin
+     * placed in a pipeline neither reads its stdin nor writes its stdout.
+     * builtin_func_t is also void, so a builtin always "succeeds" here
+     * regardless of what it actually did. Filed as #1325; not fixed as
+     * part of #1322's fd-ownership/pipeline-concurrency fix. */
     shell_builtin_entry_t *builtin = builtin_find(ctx, exec_name);
     if (builtin) {
         builtin->func(cmd->argc, cmd->argv);
@@ -1113,6 +1131,12 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
     }
 
     /* 5. External Execution */
+    if (ctx->defer_wait && !cmd->bg &&
+        ctx->deferred_pid_count >= SHELL_MAX_DEFERRED_PIDS) {
+        eprintf("shell: pipeline exceeds %d stages\n", SHELL_MAX_DEFERRED_PIDS);
+        return SHELL_ERR_PIPE;
+    }
+
     pid_t pid = fork();
     if (pid == -1) {
         _perror("fork");
@@ -1145,6 +1169,16 @@ static int command_execute(shell_ctx *ctx, shell_command_t *cmd) {
 
     /* Parent */
     if (!cmd->bg) {
+        /* #1322: under a pipeline (ctx->defer_wait), record the pid and
+         * return immediately instead of waiting here -- eval_pipeline()
+         * needs every stage forked before it waits on any of them, or a
+         * stage whose output exceeds one pipe buffer deadlocks (this
+         * stage blocked in write(), the shell blocked in waitpid() before
+         * the next stage -- the reader -- is even forked). */
+        if (ctx->defer_wait) {
+            ctx->deferred_pids[ctx->deferred_pid_count++] = pid;
+            return 0;
+        }
         int status;
         do {
             waitpid(pid, &status, WUNTRACED);
@@ -1227,6 +1261,15 @@ static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
         return SHELL_ERR_PERM;
     }
 
+    /* #1322: save the fds this node is about to overwrite, so they can be
+     * restored on the way out instead of being hardcoded to -1. A
+     * redirect nested inside a pipeline stage (`a | b > f | c`) must not
+     * wipe out the pipe fd eval_pipeline() put here before descending into
+     * this stage -- doing so left eval_pipeline()'s own cleanup closing -1
+     * instead of the previous stage's pipe read end, leaking it. */
+    int saved_input_fd  = ctx->input_fd;
+    int saved_output_fd = ctx->output_fd;
+
     if (ast->type == SHELL_AST_REDIR_IN) {
         fd = open(filename, O_RDONLY);
         if (fd == -1) {
@@ -1249,45 +1292,185 @@ static int eval_redirection(shell_ctx *ctx, shell_ast_t *ast) {
 
     int rc                                = ast_exec(ctx, ast->right);
     close(fd);
-    ctx->input_fd  = -1;
-    ctx->output_fd = -1;
+    ctx->input_fd  = saved_input_fd;
+    ctx->output_fd = saved_output_fd;
     return rc;
 }
 
-/* CCCC patch: returns the exit code of the last command in the pipeline. */
+/* #1322: reaps every pid this pipeline forked, in order, and returns the
+ * exit status of the last stage (matching command_execute()'s own
+ * WEXITSTATUS/WTERMSIG convention).
+ *
+ * `stage_deferred[i]` says whether stage i actually pushed a pid onto
+ * ctx->deferred_pids -- it is NOT inferable from `stage_rc[i] >= 0` alone.
+ * A stage can return >= 0 without deferring anything: a builtin (runs
+ * synchronously in command_execute(), returns before the fork), or a
+ * command that inherited ctx->bg == 1 from an enclosing `&` (the `&`/`;`
+ * quirk in eval_sequence() leaves ctx->bg set to 1 across *both* sides of
+ * the `&`, so `bg-cmd & a | b | c` runs the whole pipeline in
+ * command_execute()'s background branch, which forks, doesn't wait, and
+ * returns 0 immediately without touching ctx->deferred_pids at all). Any
+ * stage with `stage_deferred[i] == false` already carries its final result
+ * in `stage_rc[i]` and must not consume a pid. */
+static int wait_deferred_pipeline(shell_ctx *ctx, const int *stage_rc,
+                                  const bool *stage_deferred, int stage_count) {
+    int last_status_rc = 0;
+    int error_rc       = 0; /* 0 = none seen yet; SHELL_ERR_* are all < 0 */
+    for (int i = 0, pid_idx = 0; i < stage_count; i++) {
+        if (!stage_deferred[i]) {
+            if (stage_rc[i] < 0) {
+                /* A pre-fork failure (blacklist/allowlist/builtin-only/
+                 * fork) or a builtin/backgrounded stage's already-final
+                 * result. The first negative result aborts the pipeline's
+                 * reported outcome; later stages may still have forked
+                 * (the original loop doesn't short-circuit on a
+                 * mid-pipeline error) and must still be reaped below. */
+                if (!error_rc)
+                    error_rc = stage_rc[i];
+            } else {
+                last_status_rc = stage_rc[i];
+            }
+            continue;
+        }
+        pid_t pid = ctx->deferred_pids[pid_idx++];
+        int   status;
+        do {
+            waitpid(pid, &status, WUNTRACED);
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        if (WIFEXITED(status))
+            last_status_rc = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status))
+            last_status_rc = 128 + WTERMSIG(status);
+        else
+            last_status_rc = SHELL_ERR_GENERIC;
+    }
+    ctx->deferred_pid_count = 0;
+    return error_rc ? error_rc : last_status_rc;
+}
+
+/* CCCC patch: returns the exit code of the last command in the pipeline.
+ *
+ * #1322: forks every stage before waiting on any of them (ctx->defer_wait,
+ * see command_execute()) -- the original code forked and waited on one
+ * stage at a time, so a stage writing more than one pipe buffer's worth of
+ * output (~16KB macOS / 64KB Linux) blocked in write() with nobody yet
+ * forked to read it, and the shell blocked right behind it in waitpid();
+ * `a | b` deadlocked the whole build on any non-trivial payload. Pipe fds
+ * are now tracked in a local (prev_read) rather than read back out of ctx
+ * for closing -- ctx->input_fd/output_fd get clobbered to whatever a
+ * stage's own redirect last touched, so closing "ctx->input_fd" after a
+ * redirect-carrying stage closed the wrong fd (or -1) and leaked the real
+ * pipe read end. SIGCHLD is blocked for the whole fork-and-wait span so
+ * sigchld_reaper() (installed once any `&` background job has run) can't
+ * reap a stage out from under this function's own waitpid() calls. */
 static int eval_pipeline(shell_ctx *ctx, shell_ast_t *ast) {
+    int      saved_input_fd   = ctx->input_fd;
+    int      saved_output_fd  = ctx->output_fd;
+    bool     saved_defer_wait = ctx->defer_wait;
+
+    sigset_t block_set, saved_set;
+    sigemptyset(&block_set);
+    sigaddset(&block_set, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &block_set, &saved_set);
+
+    ctx->defer_wait         = true;
+    ctx->deferred_pid_count = 0;
+
+    /* One slot per stage in the pipeline. `stage_rc[i]` is that stage's
+     * ast_exec() return; `stage_deferred[i]` says whether it actually
+     * pushed a pid (see wait_deferred_pipeline()'s comment for why that
+     * can't be inferred from stage_rc alone). Sized to
+     * SHELL_MAX_DEFERRED_PIDS, enforced below independently of
+     * command_execute()'s own pid-count check (a stage can take a slot
+     * here without ever forking). */
+    int  stage_rc[SHELL_MAX_DEFERRED_PIDS];
+    bool stage_deferred[SHELL_MAX_DEFERRED_PIDS];
+    int  stage_count = 0;
+    int  prev_read   = -1;
+    int  rc          = SHELL_ERR_PIPE;
+    bool waited      = false;
+
+#define PIPELINE_RUN_STAGE(stage_ast)                                          \
+    do {                                                                       \
+        if (stage_count >= SHELL_MAX_DEFERRED_PIDS) {                          \
+            eprintf("shell: pipeline exceeds %d stages\n",                     \
+                    SHELL_MAX_DEFERRED_PIDS);                                  \
+            goto cleanup;                                                      \
+        }                                                                      \
+        int before                  = ctx->deferred_pid_count;                 \
+        stage_rc[stage_count]       = ast_exec(ctx, (stage_ast));              \
+        stage_deferred[stage_count] = ctx->deferred_pid_count > before;        \
+        stage_count++;                                                         \
+    } while (0)
+
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         _perror("pipe");
-        return SHELL_ERR_PIPE;
+        goto cleanup;
     }
 
     ctx->input_fd  = -1;
     ctx->output_fd = pipefd[1];
-    ast_exec(ctx, ast->left);
+    PIPELINE_RUN_STAGE(ast->left);
     close(pipefd[1]);
 
     ast           = ast->right;
-
-    ctx->input_fd = pipefd[0];
+    prev_read     = pipefd[0];
+    ctx->input_fd = prev_read;
 
     while (ast->type == SHELL_AST_PIPE) {
         if (pipe(pipefd) == -1) {
             _perror("pipe");
-            close(ctx->input_fd);
-            return SHELL_ERR_PIPE;
+            goto cleanup;
         }
         ctx->output_fd = pipefd[1];
-        ast_exec(ctx, ast->left);
+        PIPELINE_RUN_STAGE(ast->left);
         close(pipefd[1]);
-        close(ctx->input_fd);
-        ctx->input_fd = pipefd[0];
+        close(prev_read);
+        prev_read     = pipefd[0];
+        ctx->input_fd = prev_read;
         ast           = ast->right;
     }
     ctx->output_fd = -1;
-    ctx->input_fd  = pipefd[0];
-    int rc = ast_exec(ctx, ast); /* exit code of last command in pipeline */
-    close(pipefd[0]);
+    ctx->input_fd  = prev_read;
+    PIPELINE_RUN_STAGE(ast); /* last stage */
+
+#undef PIPELINE_RUN_STAGE
+
+    /* Close the parent's own copy of the final read end *before* waiting,
+     * not after -- a strict improvement in fd hygiene even though it does
+     * NOT, by itself, make an early-exiting reader (`producer | head`)
+     * reliably stop a still-running producer: every forked stage inherits
+     * the WHOLE fd table across its own fork+exec (not just the fds
+     * dup2'd onto its own stdin/stdout), so the producer's own child
+     * process typically still holds its own unrelated copy of this read
+     * end regardless of what the parent shell does here. That's a
+     * separate, pre-existing gap (filed as #1327; see man/BUILD_MODE.md's
+     * "Custom steps" section) this close() doesn't reach. What it does
+     * fix: without it, the parent's own copy remained
+     * open through the whole wait, which is wrong on general principle
+     * (every other pipe fd this function creates is closed as soon as no
+     * stage needs it) even where it isn't the only thing keeping a
+     * producer alive. */
+    close(prev_read);
+    prev_read = -1;
+
+    rc     = wait_deferred_pipeline(ctx, stage_rc, stage_deferred, stage_count);
+    waited = true;
+
+cleanup:
+    if (prev_read != -1)
+        close(prev_read);
+    /* Reap whatever already forked before returning, even on an early
+     * (pipe()-failure or too-many-stages) exit -- discard those statuses,
+     * the error already produced above (rc stays SHELL_ERR_PIPE) is the
+     * more meaningful diagnostic. */
+    if (!waited && stage_count > 0)
+        wait_deferred_pipeline(ctx, stage_rc, stage_deferred, stage_count);
+    ctx->defer_wait = saved_defer_wait;
+    sigprocmask(SIG_SETMASK, &saved_set, NULL);
+    ctx->input_fd  = saved_input_fd;
+    ctx->output_fd = saved_output_fd;
     return rc;
 }
 

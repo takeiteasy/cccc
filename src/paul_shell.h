@@ -11,6 +11,11 @@
        (v1 limitation: die() still calls exit(EXIT_FAILURE) on OOM/open failure,
        which terminates the entire process rather than failing one build step.
        Filed: see BUILDMODE ticket for die()-abort-on-error improvement.)
+     - Added `defer_wait`/`deferred_pids`/`deferred_pid_count` to shell_ctx so
+       eval_pipeline() can fork every stage of a pipeline before waiting on
+       any of them, instead of the original fork-then-wait-immediately
+       sequencing (which deadlocked on any pipeline payload larger than a
+       pipe buffer).
 
  Copyright (C) 2025 George Watson
 
@@ -114,6 +119,12 @@ typedef struct shell_builtin_entry {
     struct shell_builtin_entry *next;
 } shell_builtin_entry_t;
 
+/* #1322: cap on how many pipeline stages eval_pipeline() can defer waiting
+ * on at once (see shell_ctx.deferred_pids below). Kept outside the struct
+ * body so a future re-vendor of this file against the upstream original
+ * diffs cleanly on the struct itself. */
+#define SHELL_MAX_DEFERRED_PIDS 64
+
 typedef struct shell_ctx {
     /* Configuration */
     bool builtin_only; /* If true, only builtins are executed */
@@ -128,9 +139,20 @@ typedef struct shell_ctx {
                               (read/write/exec) */
 
     /* Internal Execution State */
-    int   input_fd;
-    int   output_fd;
-    int   bg;
+    int input_fd;
+    int output_fd;
+    int bg;
+
+    /* #1322: pipeline concurrency. When set, command_execute() records a
+     * forked stage's pid instead of waiting on it immediately, so
+     * eval_pipeline() can fork every stage before waiting on any of them
+     * (fixing the sequential fork+wait deadlock on payloads bigger than a
+     * pipe buffer). Saved/restored (not set/cleared) around a pipeline,
+     * since `$(...)` command substitution re-enters the shell with this
+     * same ctx. */
+    bool  defer_wait;
+    pid_t deferred_pids[SHELL_MAX_DEFERRED_PIDS];
+    int   deferred_pid_count;
 
     void *userdata; /* For custom use in builtins */
 } shell_ctx;

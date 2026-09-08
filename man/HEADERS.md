@@ -99,6 +99,13 @@ needs help with:
   end up in the expression, not just where they're written literally, so
   `#include <pthread.h>` under `--sysroot`/`--use-system-headers` resolves
   cleanly.
+- **An `__has_*`-shaped operator CCCC doesn't recognize** (real SDK headers
+  use `__has_declspec_attribute`/`__has_warning`/`__has_include_next` —
+  see [ATTRIBUTES.md](ATTRIBUTES.md#feature-test-preprocessor-operators))
+  evaluates to `0` and emits a `-Wcpp` warning naming it, whether it's
+  written literally or reached through a macro expansion, rather than the
+  confusing "not a function" error a raw, unhandled `__has_foo(...)` would
+  otherwise produce.
 - **`secure/_string.h`'s `_FORTIFY_SOURCE` macros still need
   `-D_FORTIFY_SOURCE=0`.** Apple's fortified `strcpy`/`memcpy`/etc rewrite to
   `__builtin___*_chk(...)` calls CCCC doesn't implement — pass
