@@ -140,6 +140,13 @@ typedef struct {
     bool   has_vector_size;
     int    vector_size_bytes;
     Token *vector_size_tok; // for diagnostics
+
+    // [[cccc::checked]] / [[cccc::unchecked]] (#485): the checked-region this
+    // attribute introduces for a function definition or compound statement.
+    // CHECKED_SCOPE_UNSET if neither attribute was seen. See
+    // cc_checked_scope_at() (src/parse_checked.c) for how this composes with
+    // a #pragma cccc checked/unchecked region.
+    CheckedScope checked_scope;
 } VarAttr;
 
 struct CustomAttrUse {
@@ -289,6 +296,11 @@ void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
 Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Type *ty, const char *name);
+// #485: effective checked-region state at `tok` -- see cc_checked_scope_at()'s
+// own comment (src/parse_checked.c) for the composition rule.
+CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok);
+void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
+                                 const char *what);
 Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr);
 Token *asm_label(VirtualMachine *vm, Token *tok, char **label);
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok);

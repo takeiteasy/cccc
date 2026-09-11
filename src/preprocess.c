@@ -170,6 +170,53 @@ static void suite_pop(VirtualMachine *vm) {
     }
 }
 
+// #485: push a #pragma cccc checked/unchecked begin region, mirroring
+// suite_push()'s shape immediately above -- a stack entry remembering the
+// state to restore on `end`, so regions nest correctly (an `unchecked begin`
+// nested inside a `checked begin` restores to CHECKED_SCOPE_ON on its own
+// `end`, not to UNSET).
+static void checked_scope_push(VirtualMachine *vm, CheckedScope state,
+                               Token *open_tok) {
+    if (vm->compiler.checked_scope_stack_len ==
+        vm->compiler.checked_scope_stack_cap) {
+        vm->compiler.checked_scope_stack_cap =
+            vm->compiler.checked_scope_stack_cap
+                ? vm->compiler.checked_scope_stack_cap * 2
+                : 4;
+        vm->compiler.checked_scope_stack =
+            realloc(vm->compiler.checked_scope_stack,
+                    vm->compiler.checked_scope_stack_cap *
+                        sizeof(*vm->compiler.checked_scope_stack));
+    }
+    vm->compiler.checked_scope_stack[vm->compiler.checked_scope_stack_len++] =
+        (struct CheckedScopeEntry){vm->compiler.checked_scope_pp, open_tok};
+    vm->compiler.checked_scope_pp = state;
+}
+
+// Pop the innermost checked-region level. Must only be called when
+// checked_scope_stack_len > 0.
+static void checked_scope_pop(VirtualMachine *vm) {
+    vm->compiler.checked_scope_pp =
+        vm->compiler.checked_scope_stack[--vm->compiler.checked_scope_stack_len]
+            .prev;
+}
+
+// #485: the checked-region state to stamp onto `tok`, mirroring pack_align's
+// "read the compiler's current value" stamp -- but ONLY for a token whose
+// file is a command-line input (cc_file_is_command_line_input(),
+// src/preprocess.c). A region opened in the primary .c file must never
+// apply to tokens from a #included header: every libc prototype is an
+// unchecked pointer, and there are no annotated headers to fall back on.
+// The vm->compiler.checked_scope_pp != UNSET short-circuit keeps the
+// hashmap lookup off the hot path for every TU that opens no region at all.
+static CheckedScope checked_scope_for_stamp(VirtualMachine *vm, Token *tok) {
+    if (vm->compiler.checked_scope_pp == CHECKED_SCOPE_UNSET)
+        return CHECKED_SCOPE_UNSET;
+    if (!tok->file || !cc_file_is_command_line_input(vm, tok->file->name))
+        return CHECKED_SCOPE_UNSET;
+    return vm->compiler.checked_scope_pp;
+}
+
 // Stack of vm->compiler.macros snapshots used to isolate #define/#undef
 // directives inside individual [[cccc::comptime]] function bodies from each
 // other (#283). Pushed/popped by TK_MACRO_SCOPE_PUSH/POP marker tokens
@@ -844,6 +891,13 @@ void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm) {
     memset(&vm->compiler.guard_macros, 0, sizeof(vm->compiler.guard_macros));
 
     vm->compiler.cond_incl = NULL;
+
+    // #485: a #pragma cccc checked/unchecked region must not leak from one
+    // command-line input file into the next. (pack_cur has this same latent
+    // gap and is not reset here either -- pre-existing, not fixed by this
+    // change; filed separately.)
+    vm->compiler.checked_scope_pp        = CHECKED_SCOPE_UNSET;
+    vm->compiler.checked_scope_stack_len = 0;
 }
 
 static IncludeRoute read_include_route(Token **tok_ptr) {
@@ -1673,6 +1727,12 @@ static const AttrInfo known_attrs[] = {
     {"count", ATTR_CCCC, true, 1},
     {"byte_count", ATTR_CCCC, true, 1},
     {"bounds", ATTR_CCCC, true, 1},
+    // Checked-region attributes (#485). Unlike the six above these
+    // appertain to a declaration or a compound statement, not to a TY_PTR
+    // (see apply_checked_scope_attr(), src/parse_types.c); listed here so
+    // @checked/@unchecked route to [[cccc::...]] the same way.
+    {"checked", ATTR_CCCC, true, 1},
+    {"unchecked", ATTR_CCCC, true, 1},
     // Macro standard library attribute handlers (ticket #235)
     {"serialize", ATTR_CCCC, true, 1},
     {"deserialize", ATTR_CCCC, true, 1},
@@ -5701,6 +5761,32 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                     vm, after && after->kind != TK_EOF ? after : sub,
                     "expected 'begin' or 'end' after '#pragma cccc suite'");
             }
+        } else if (equal(sub, "checked") || equal(sub, "unchecked")) {
+            // #485: #pragma cccc checked/unchecked begin|end -- a positional
+            // TU default, deliberately NOT a `config()` option: config() is
+            // resolved for the whole file before parsing begins (see
+            // man/SAFETY.md's checked_pointers section), so it has no
+            // lexical position and could never express a region. Modelled
+            // on the `suite begin`/`suite end` shape just above.
+            bool   is_checked = equal(sub, "checked");
+            Token *after      = sub->next;
+            if (equal(after, "begin")) {
+                checked_scope_push(
+                    vm, is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF, tok);
+                return skip_line(vm, after->next);
+            } else if (equal(after, "end")) {
+                if (vm->compiler.checked_scope_stack_len == 0)
+                    error_tok(vm, tok,
+                              "stray #pragma cccc %s end without matching "
+                              "begin",
+                              is_checked ? "checked" : "unchecked");
+                checked_scope_pop(vm);
+                return skip_line(vm, after->next);
+            } else {
+                error_tok(vm, after && after->kind != TK_EOF ? after : sub,
+                          "expected 'begin' or 'end' after '#pragma cccc %s'",
+                          is_checked ? "checked" : "unchecked");
+            }
         } else if (equal(sub, "config")) {
             return handle_pragma_config(vm, sub);
         } else if (equal(sub, "link")) {
@@ -5856,6 +5942,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
                 tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
                 tok->pack_align    = vm->compiler.pack_cur;
+                tok->checked_scope = checked_scope_for_stamp(vm, tok);
                 track_brace_depth(&brace_depth, tok);
                 cur = cur->next = tok;
                 tok             = tok->next;
@@ -6018,6 +6105,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                             tok->diag_werror =
                                 (1ULL << 63) | vm->compiler.warning_errors;
                             tok->pack_align = vm->compiler.pack_cur;
+                            tok->checked_scope =
+                                checked_scope_for_stamp(vm, tok);
                             track_brace_depth(&brace_depth, tok);
                             cur = cur->next = tok;
                             tok             = tok->next;
@@ -6038,6 +6127,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // struct_union_decl can read it off the struct/union keyword
             // token later, at parse time (#1173).
             tok->pack_align = vm->compiler.pack_cur;
+            // Stamp the effective #pragma cccc checked/unchecked region
+            // (#485), gated to command-line-input tokens only.
+            tok->checked_scope = checked_scope_for_stamp(vm, tok);
             track_brace_depth(&brace_depth, tok);
             cur = cur->next = tok;
             tok             = tok->next;
@@ -7545,6 +7637,11 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.suite_stack_len > 0)
         error_tok(vm, vm->compiler.suite_len_stack[0].open_tok,
                   "unclosed #pragma cccc suite begin");
+    // #485: same shape as the suite check just above -- points at the
+    // outermost opener.
+    if (vm->compiler.checked_scope_stack_len > 0)
+        error_tok(vm, vm->compiler.checked_scope_stack[0].open_tok,
+                  "unclosed #pragma cccc checked/unchecked begin");
     if (vm->compiler.cond_incl) {
         Token      *ci_tok = vm->compiler.cond_incl->tok;
         const char *hint   = "";

@@ -1514,6 +1514,39 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
             warn_tok(vm, start, CCCC_WARN_CAST_ALIGN,
                      "cast increases required alignment of target type");
 
+        // #485: checked-region cast ban (v1 ban list, item 2 of 2). Hooked
+        // here in cast() -- the explicit "(" type-name ")" grammar
+        // production -- and NOT in new_cast() (src/parse_core.c), which is
+        // also the implicit-conversion constructor used for return-value
+        // coercion, usual arithmetic conversions, assignment conversion and
+        // similar compiler-internal conversions that must stay unaffected.
+        // Guarded on !in_type_lookahead like the -Wcast-qual/-Wcast-align
+        // checks just above, for the same reason: is_typename()'s
+        // speculative probes must never fire a fatal error_tok() for a cast
+        // that is ultimately discarded. A function-pointer destination is
+        // exempt, mirroring cc_check_checked_scope_decl()'s own exemption --
+        // there is no bounds form that applies to it.
+        if (!vm->compiler.in_type_lookahead &&
+            cc_checked_scope_at(vm, start) == CHECKED_SCOPE_ON) {
+            add_type(vm, expr);
+            if (ty && ty->kind == TY_PTR && ty->checked_kind == CHECKED_NONE &&
+                !(ty->base && ty->base->kind == TY_FUNC)) {
+                error_tok(vm, start,
+                          "cast to an unchecked pointer type is not allowed "
+                          "in a checked region -- wrap this code in "
+                          "[[cccc::unchecked]] { ... }");
+            } else if (ty && expr->ty && ty->kind == TY_PTR &&
+                       expr->ty->kind == TY_PTR &&
+                       expr->ty->checked_kind != CHECKED_NONE &&
+                       ty->checked_kind != CHECKED_NONE &&
+                       ty->checked_kind != expr->ty->checked_kind) {
+                error_tok(vm, start,
+                          "cast changes a pointer's checked kind in a "
+                          "checked region -- wrap this code in "
+                          "[[cccc::unchecked]] { ... }");
+            }
+        }
+
         // type cast
         Node *node = new_cast(vm, expr, ty);
         node->tok  = start;

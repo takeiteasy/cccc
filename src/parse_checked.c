@@ -1563,3 +1563,69 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
     }
     return after;
 }
+
+// ---------------------------------------------------------------------
+// Checked regions (#485): [[cccc::checked]]/[[cccc::unchecked]] (function
+// definitions and compound statements) and #pragma cccc checked/unchecked
+// begin/end (a positional, file-scope-restricted TU default). Unlike the
+// checked-*pointer* attributes above, a region carries no Type/Obj/Node
+// state of its own -- it is purely two diagnostics (an unchecked pointer
+// declaration, and a cast to/between unchecked pointer kinds) that fire
+// while a region is in effect. Always on, independent of
+// --checked-pointers -- same footing as the single-pointer-arithmetic ban
+// in parse_expr.c and the bounds side-effect rejection in parse_core.c.
+// ---------------------------------------------------------------------
+
+// The only reader of Token.checked_scope (the #pragma-introduced region,
+// stamped by the preprocessor onto every command-line-input token) and
+// Compiler.checked_scope_attr (an enclosing [[cccc::checked]]/
+// [[cccc::unchecked]] attribute, saved/restored by the parser around each
+// function body and attributed compound statement -- see function()
+// (src/parse_decl.c) and stmt() (src/parse_stmt.c)). An attribute region
+// always overrides the pragma stamp for its lexical extent; there is no
+// interleaving case to adjudicate because a pragma region can only ever be
+// opened/closed at file scope (outside any function body), so the stamp on
+// every token inside one attribute frame's extent is constant. Nothing
+// outside this function should read either field directly -- that is what
+// keeps the two sources from drifting apart.
+CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok) {
+    if (vm->compiler.checked_scope_attr != CHECKED_SCOPE_UNSET)
+        return vm->compiler.checked_scope_attr;
+    return tok ? tok->checked_scope : CHECKED_SCOPE_UNSET;
+}
+
+// Declaration-ban diagnostic (#485 v1 ban list, item 1 of 2): a local,
+// parameter, global or struct/union member whose type is an unchecked
+// pointer, declared while a checked region is in effect. Called once per
+// declarator from declaration()/global_variable() (src/parse_init.c,
+// src/parse_decl.c), create_param_lvars() (src/parse_decl.c) and the
+// struct/union member loop (src/parse_types.c) -- never from new_lvar()/
+// new_gvar() directly, which would also fire on compiler-synthesized
+// pointer locals (__alloca_size__, __static_link, propagation temps) that
+// carry no user-visible checked-kind annotation at all.
+//
+// A function-pointer type is deliberately exempt: there is no bounds form
+// that applies to it, so banning it would make a checked region unable to
+// hold a callback local at all -- a hole in the ban, not a gap in
+// enforcement. Guarded on !in_type_lookahead like every other checked-
+// pointer frontend check (parse_expr.c's single-arithmetic ban,
+// resolve_bounds_tokens()'s side-effect rejection): is_typename_ex()'s
+// speculative probes must never fire a fatal error_tok() for a declaration
+// that is ultimately discarded.
+void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
+                                 const char *what) {
+    if (vm->compiler.in_type_lookahead || !ty || !name_tok)
+        return;
+    if (ty->kind != TY_PTR || ty->checked_kind != CHECKED_NONE)
+        return;
+    if (ty->base && ty->base->kind == TY_FUNC)
+        return;
+    if (cc_checked_scope_at(vm, name_tok) != CHECKED_SCOPE_ON)
+        return;
+    error_tok(vm, name_tok,
+              "unchecked pointer %s '%.*s' is not allowed in a checked "
+              "region -- declare it [[cccc::single]], [[cccc::array]] or "
+              "[[cccc::ntarray]], or move it into an [[cccc::unchecked]] "
+              "block",
+              what, name_tok->len, name_tok->loc);
+}

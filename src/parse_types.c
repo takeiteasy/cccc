@@ -1792,8 +1792,12 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                 error_tok(vm, mem->name ? mem->name : tok,
                           "custom attributes are only supported on file-scope "
                           "declarations");
-            mem->name           = mem->ty->name;
-            mem->idx            = idx++;
+            mem->name = mem->ty->name;
+            mem->idx  = idx++;
+
+            // #485: reject an unchecked pointer member in a checked region.
+            cc_check_checked_scope_decl(vm, mem->ty, mem->name,
+                                        "struct member");
             mem->explicit_align = explicit_decl_align(
                 vm, mem->name ? mem->name : tok, mem->ty, &attr);
             mem->align = mem->explicit_align > mem->ty->align
@@ -2104,6 +2108,38 @@ static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
     return tok;
 }
 
+// Shared body for [[cccc::checked]] / [[cccc::unchecked]] and their
+// __attribute__((checked))/((unchecked)) and __checked__/__unchecked__
+// spellings (#485). Unlike the six checked-*pointer* attributes
+// (apply_checked_ptr_attr(), src/parse_checked.c), these attach to a
+// declaration or statement -- a function definition or a compound
+// statement -- not to a TY_PTR, so they are recorded on VarAttr rather than
+// on a Type. `attr` is NULL when the attribute appears somewhere it cannot
+// take effect (e.g. post-'*' position, where pointers() passes ty but not
+// attr); that is a compile error here, matching apply_checked_ptr_attr()'s
+// own out-of-position diagnostic style. Neither attribute takes an argument
+// list. Returns the token past the attribute name.
+static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
+                                       Token *tok, VarAttr *attr,
+                                       bool is_checked) {
+    const char *name = is_checked ? "checked" : "unchecked";
+    if (equal(tok, "("))
+        error_tok(vm, name_tok, "'%s' takes no arguments", name);
+    if (!attr)
+        error_tok(vm, name_tok,
+                  "'%s' applies to a function definition or a compound "
+                  "statement, not to this position",
+                  name);
+    CheckedScope want = is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
+    if (attr->checked_scope != CHECKED_SCOPE_UNSET &&
+        attr->checked_scope != want)
+        error_tok(vm, name_tok,
+                  "'checked' and 'unchecked' cannot both apply to the same "
+                  "declaration");
+    attr->checked_scope = want;
+    return tok;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
@@ -2136,6 +2172,16 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                                        ? "byte_count"
                                        : "bounds";
                 tok = apply_checked_ptr_attr(vm, attr_tok, tok->next, ty, name);
+                continue;
+            }
+
+            // Checked-region attributes (#485): __attribute__((checked)) /
+            // ((unchecked)) -- see apply_checked_scope_attr()'s comment.
+            if (is_attr_name(tok, "checked") ||
+                is_attr_name(tok, "unchecked")) {
+                bool is_checked = is_attr_name(tok, "checked");
+                tok = apply_checked_scope_attr(vm, attr_tok, tok->next, attr,
+                                               is_checked);
                 continue;
             }
 
@@ -2656,6 +2702,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 equal(name_tok, "single") || equal(name_tok, "array") ||
                 equal(name_tok, "ntarray") || equal(name_tok, "count") ||
                 equal(name_tok, "byte_count") || equal(name_tok, "bounds");
+            bool is_checked_scope_attr =
+                equal(name_tok, "checked") || equal(name_tok, "unchecked");
             tok = tok->next;
 
             // Checked-pointer attributes (#770/#482-484): [[cccc::single]] /
@@ -2672,6 +2720,15 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                                        ? "byte_count"
                                        : "bounds";
                 tok = apply_checked_ptr_attr(vm, attr_tok, tok, ty, name);
+                continue;
+            }
+
+            // Checked-region attributes (#485): [[cccc::checked]] /
+            // [[cccc::unchecked]] -- see apply_checked_scope_attr()'s
+            // comment.
+            if (is_checked_scope_attr) {
+                tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
+                                               equal(name_tok, "checked"));
                 continue;
             }
 

@@ -73,6 +73,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
 | `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](SAFETY.md#checked-pointers) |
 | `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [SAFETY.md](SAFETY.md#checked-pointers)) |
+| `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -697,6 +698,41 @@ transparent, #482/#488) — see [SAFETY.md § Checked
 Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
 note.
 
+### `checked` / `unchecked` (CCCC-specific)
+
+```c
+int  * [[cccc::single]]                    p;  // exactly one object
+int  * [[cccc::array, cccc::count(n)]]     a;  // n elements from p's own value
+```
+
+is the pointer-*type* half of the checked-pointer layer; `checked`/
+`unchecked` is the region half — a way to require every pointer *declared*
+within a lexical extent to be one of the checked kinds above, rather than
+relying on each declaration to opt in individually:
+
+```c
+[[cccc::checked]] void f(void) {
+    int * [[cccc::array, cccc::count(n)]] a = ...;   // fine
+    int *p = a;                                       // error: unchecked local
+    [[cccc::unchecked]] {
+        int *raw = (int *)a;                           // fine -- escape hatch
+    }
+}
+```
+
+Attaches to a function definition (its whole body is the region) or to a
+compound statement (`{ ... }`, nestable to any depth, innermost wins); also
+available as `#pragma cccc checked begin`/`end` (and the `unchecked` pair)
+for a positional, file-scope default. `__attribute__((checked))`/
+`((unchecked))`, `__checked__`/`__unchecked__`, and `@checked`/`@unchecked`
+all work too. Unlike every other attribute on this page, the diagnostics it
+enables are **always on** — never gated behind `--checked-pointers` — and
+fire in `-c=native` too; the attributes themselves are stripped from
+`-E`/`-m`/`-c=generated`/`-c=native` output the same way the six
+checked-pointer attributes are. Full reference, including the exact v1 ban
+list and the header-contamination exemption: [SAFETY.md § Checked
+Regions](SAFETY.md#checked-regions).
+
 ---
 
 ## Parsed but Ignored
@@ -741,7 +777,7 @@ the canonical attribute form before parsing:
 
 | Usage | Rewrites to | Example |
 |-------|-------------|---------|
-| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)` |
+| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)`, `@checked`, `@unchecked` |
 | `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 | `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |

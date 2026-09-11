@@ -2142,7 +2142,13 @@ static bool token_is_gnu_attr_start(Token *tok) {
 static bool attr_name_is_cccc(char *name) {
     return !strcmp(name, "comptime") || !strcmp(name, "emit") ||
            !strcmp(name, "macro") || !strcmp(name, "test") ||
-           !strcmp(name, "test_setup") || !strcmp(name, "test_teardown");
+           !strcmp(name, "test_setup") || !strcmp(name, "test_teardown") ||
+           // #485: checked-region attributes. Without this, the GNU
+           // spelling __attribute__((checked)) (unscoped, unlike
+           // [[cccc::checked]]) would survive -E/-c=native/-c=generated
+           // output and get handed to the host compiler, which rejects an
+           // unknown attribute name.
+           !strcmp(name, "checked") || !strcmp(name, "unchecked");
 }
 
 static bool attr_name_is_std(char *name) {

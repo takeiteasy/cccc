@@ -1203,6 +1203,23 @@ typedef enum {
 
 typedef struct Type Type;
 
+// Checked-region state (#485): whether [[cccc::checked]]/[[cccc::unchecked]]
+// or a #pragma cccc checked/unchecked begin/end region is in effect at a
+// given point. A tri-state, not a bool+depth: an unchecked region must be
+// able to turn OFF a surrounding checked region, and a nested checked region
+// must turn it back ON -- only the innermost enclosing region ever matters,
+// so a single scalar save/restore per construct is sufficient. UNSET (0) is
+// "no region in effect", matching every other checked-pointer field's
+// zero-is-default convention. See cc_checked_scope_at() (src/parse_checked.c)
+// for how the two independent sources (a stamped Token.checked_scope from the
+// preprocessor, and Compiler.checked_scope_attr from an enclosing attribute)
+// compose -- nothing else should read either field directly.
+typedef enum {
+    CHECKED_SCOPE_UNSET = 0, // no region in effect
+    CHECKED_SCOPE_ON,        // [[cccc::checked]] / #pragma cccc checked begin
+    CHECKED_SCOPE_OFF, // [[cccc::unchecked]] / #pragma cccc unchecked begin
+} CheckedScope;
+
 /*!
  @brief Token produced by the lexer or by macro expansion.
 */
@@ -1252,6 +1269,15 @@ typedef struct Token {
     // thing to struct_union_decl. Read off the `struct`/`union` keyword
     // token by struct_union_decl (src/parse_types.c).
     int pack_align;
+
+    // Effective #pragma cccc checked/unchecked begin/end region (#485),
+    // stamped the same way as pack_align above -- but only for a token whose
+    // file is a command-line input (cc_file_is_command_line_input(),
+    // src/preprocess.c), never for one from a #included header: a checked
+    // region spanning `#include <stdio.h>` must not reject every libc
+    // prototype, and there are no annotated headers to fall back on. Read
+    // via cc_checked_scope_at() (src/parse_checked.c), never directly.
+    CheckedScope checked_scope;
 
     // Comptime expansion-origin chain stamped when this token is created by
     // (or attached to a node created by) comptime code, mirroring
@@ -3549,9 +3575,35 @@ typedef struct Compiler {
         size_t prev_len; // strlen(current_suite) before this begin was pushed
         Token *open_tok; // token of the #pragma cccc suite begin (for error
                          // messages)
-    }   *suite_len_stack;    // Stack entry per open suite begin block
-    int  suite_stack_len;    // Number of currently open suite begin blocks
-    int  suite_stack_cap;    // Allocated capacity of suite_len_stack
+    }  *suite_len_stack; // Stack entry per open suite begin block
+    int suite_stack_len; // Number of currently open suite begin blocks
+    int suite_stack_cap; // Allocated capacity of suite_len_stack
+
+    // #pragma cccc checked/unchecked begin/end stack (#485), mirroring
+    // suite_len_stack's shape immediately above: each entry remembers the
+    // region state in effect *before* this begin was pushed, so `end`
+    // restores the enclosing state (rather than resetting to UNSET) and
+    // regions nest correctly. checked_scope_pp is the current top-of-stack
+    // value (or UNSET if the stack is empty) -- what preprocess() stamps onto
+    // each command-line-input token's Token.checked_scope, alongside
+    // pack_cur below. Never read directly outside the stamp sites and
+    // cc_checked_scope_at() (src/parse_checked.c).
+    struct CheckedScopeEntry {
+        CheckedScope prev;     // region state before this begin was pushed
+        Token       *open_tok; // token of the #pragma cccc checked/unchecked
+                               // begin (for "unclosed" diagnostics)
+    }           *checked_scope_stack;
+    int          checked_scope_stack_len;
+    int          checked_scope_stack_cap;
+    CheckedScope checked_scope_pp; // current #pragma-introduced region state
+
+    // [[cccc::checked]]/[[cccc::unchecked]] region state introduced by an
+    // attribute on a function definition or compound statement (#485).
+    // Saved/restored around each such body by the parser; overrides
+    // checked_scope_pp (via Token.checked_scope) for its lexical extent --
+    // see cc_checked_scope_at()'s composition rule.
+    CheckedScope checked_scope_attr;
+
     bool in_macro_mode;      // True when compiling/executing a macro function
     bool in_macro_expansion; // True during macro AST expansion pass
     ComptimeCtxEntry *ctx_stack;     // Stack of active comptime/emit contexts

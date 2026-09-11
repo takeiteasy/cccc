@@ -5,6 +5,16 @@ All notable changes to CCCC are documented here. Format loosely follows
 before the 0.1.0 reset is not relisted here — see the ticket tracker and
 `git log` for the historical record.
 
+## [Unreleased]
+
+- Checked regions: `[[cccc::checked]]`/`[[cccc::unchecked]]` on a function
+  definition or compound statement, and `#pragma cccc checked/unchecked
+  begin/end`, require every pointer declared within their extent to be a
+  checked kind (`single`/`array`/`ntarray`) and forbid casting to or between
+  unchecked pointer types there — the incremental-migration half of the
+  checked-pointer layer. Always-on compile-time diagnostics, independent of
+  `--checked-pointers`; see `man/SAFETY.md`'s "Checked Regions" section.
+
 ## [0.2.0] - 2026-09-11
 
 - Inline build recipes and tests alongside `main()`: a single `.c` file can

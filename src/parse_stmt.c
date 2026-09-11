@@ -739,6 +739,15 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
+        // #485: a region attribute written before the label name itself
+        // (`[[cccc::checked]] foo: ...;`) would otherwise be silently
+        // dropped -- label_attr is reused below for the label-body
+        // attributes, and nothing here ever consumes checked_scope for a
+        // bare ND_LABEL node.
+        if (label_attr.checked_scope != CHECKED_SCOPE_UNSET)
+            error_tok(vm, tok,
+                      "'checked'/'unchecked' is not allowed on a label; "
+                      "write it on the compound statement instead");
         Node *node         = new_node(vm, ND_LABEL, tok);
         node->label        = arena_strndup(vm, tok->loc, tok->len);
         node->unique_label = new_unique_name(vm);
@@ -752,14 +761,43 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
         node->label_maybe_unused = label_attr.is_maybe_unused;
-        node->lhs                = stmt_or_decl(vm, rest, body_tok);
-        node->goto_next          = vm->compiler.labels;
-        vm->compiler.labels      = node;
+        if (label_attr.checked_scope != CHECKED_SCOPE_UNSET) {
+            if (!equal(body_tok, "{"))
+                error_tok(vm, body_tok,
+                          "'checked'/'unchecked' must be followed by a "
+                          "compound statement '{ ... }'");
+            CheckedScope saved              = vm->compiler.checked_scope_attr;
+            vm->compiler.checked_scope_attr = label_attr.checked_scope;
+            node->lhs                       = stmt_or_decl(vm, rest, body_tok);
+            vm->compiler.checked_scope_attr = saved;
+        } else {
+            node->lhs = stmt_or_decl(vm, rest, body_tok);
+        }
+        node->goto_next     = vm->compiler.labels;
+        vm->compiler.labels = node;
         return node;
     }
 
-    if (equal(tok, "{"))
+    if (equal(tok, "{")) {
+        if (label_attr.checked_scope != CHECKED_SCOPE_UNSET) {
+            // #485: [[cccc::checked]] { ... } / [[cccc::unchecked]] { ... }
+            // -- innermost wins, restored on exit so it never leaks past
+            // this block's closing '}'. See cc_checked_scope_at()
+            // (src/parse_checked.c) for the composition rule against a
+            // surrounding #pragma cccc checked/unchecked region.
+            CheckedScope saved              = vm->compiler.checked_scope_attr;
+            vm->compiler.checked_scope_attr = label_attr.checked_scope;
+            Node *n = compound_stmt(vm, rest, tok->next, NULL);
+            vm->compiler.checked_scope_attr = saved;
+            return n;
+        }
         return compound_stmt(vm, rest, tok->next, NULL);
+    }
+
+    if (label_attr.checked_scope != CHECKED_SCOPE_UNSET)
+        error_tok(vm, tok,
+                  "'checked'/'unchecked' must be followed by a compound "
+                  "statement '{ ... }'");
 
     return expr_stmt(vm, rest, tok);
 }

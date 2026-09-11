@@ -118,6 +118,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             error_tok(vm, ty->name_pos, "variable name omitted");
         }
 
+        // #485: reject an unchecked pointer local in a checked region.
+        cc_check_checked_scope_decl(vm, ty, ty->name, "local variable");
+
         if (attr && attr->is_constexpr && ty->kind == TY_VLA)
             error_tok(
                 vm, ty->name,

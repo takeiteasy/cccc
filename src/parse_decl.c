@@ -92,6 +92,11 @@ static void create_param_lvars(VirtualMachine *vm, Type *param) {
         create_param_lvars(vm, param->next);
         if (!param->name)
             error_tok(vm, param->name_pos, "parameter name omitted");
+        // #485: reject an unchecked pointer parameter in a checked region.
+        // vm->compiler.checked_scope_attr was already seeded from this
+        // function's own attribute by the time create_param_lvars() runs
+        // (function(), src/parse_decl.c).
+        cc_check_checked_scope_decl(vm, param, param->name, "parameter");
         Obj *var =
             new_lvar(vm, get_ident(vm, param->name), param->name->len, param);
         var->is_param = true;
@@ -588,6 +593,14 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     fn->is_root = !(fn->is_static && fn->is_inline);
 
     if (consume(vm, &tok, tok, ";")) {
+        // #485: [[cccc::checked]]/[[cccc::unchecked]] applies to a
+        // function's *body* -- a bodyless declaration has nothing for it to
+        // take effect over.
+        if (attr->checked_scope != CHECKED_SCOPE_UNSET)
+            error_tok(vm, ty->name,
+                      "'checked'/'unchecked' on a function declaration has "
+                      "no effect -- it applies to a function definition's "
+                      "body");
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
                               fn->ty, fn, fn->tok);
         return tok;
@@ -664,6 +677,23 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.fn_nesting_depth++;
 
     enter_scope(vm);
+
+    // Checked-region attribute (#485): a function body is a hard boundary,
+    // never inherited from whatever region was in effect at the call site
+    // that parsed this function() -- unconditionally seed from attr's own
+    // checked_scope (UNSET if neither [[cccc::checked]] nor
+    // [[cccc::unchecked]] was written on this definition), not from the
+    // outer vm->compiler.checked_scope_attr. Set before create_param_lvars()
+    // below so a checked function's parameters are covered too, and this is
+    // also what matters for demand-driven body splicing
+    // (splice_missing_macro_fn_bodies()/comptime_index_splice(),
+    // #894/#1243/#1267), which can parse an unrelated function's body
+    // mid-parse of this one -- without the reset, a splice firing inside a
+    // [[cccc::checked]] body would silently make the spliced function
+    // checked too. Restored once, after the body is fully parsed (see the
+    // single restore point below, after the neg_rec/normal if/else merges).
+    CheckedScope saved_checked_scope_attr = vm->compiler.checked_scope_attr;
+    vm->compiler.checked_scope_attr       = attr->checked_scope;
 
     // K&R declaration-list: type declarations between ')' and '{' that give
     // explicit types to the parameter names.  Update ty->params *before*
@@ -919,6 +949,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // that callee's may-return-null summary.
     }
 
+    // Restore the checked-region boundary set before "{" above. One restore
+    // point for both branches (the neg_rec negative-test path above has its
+    // own nested setjmp/longjmp with two exits of its own) rather than one
+    // per body-exit, so a longjmp out of a negative test can't skip it.
+    vm->compiler.checked_scope_attr = saved_checked_scope_attr;
+
     // Restore parent function context if this was a nested function
     if (is_nested) {
         vm->compiler.current_fn       = parent_fn;
@@ -1037,6 +1073,9 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
 
         char *var_name     = get_ident(vm, ty->name);
         int   var_name_len = (int)ty->name->len;
+
+        // #485: reject an unchecked pointer global in a checked region.
+        cc_check_checked_scope_decl(vm, ty, ty->name, "global variable");
 
         if (type_has_vla(ty))
             error_tok(vm, ty->name, "variably modified '%s' at file scope",
