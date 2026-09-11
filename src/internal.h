@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.1.0"
+#define CCCC_RELEASE_VERSION "0.2.0"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
