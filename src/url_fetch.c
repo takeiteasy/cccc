@@ -100,6 +100,13 @@ static void remove_path_recursive(const char *path) {
 }
 
 void clear_url_cache(VirtualMachine *vm) {
+    // #1330: url_cache_dir is otherwise only set by an explicit
+    // --url-cache-dir or lazily by init_url_cache() the first time a URL is
+    // actually fetched -- so a bare --url-cache-clear with neither of those
+    // in the same process saw a NULL dir here and silently cleared nothing.
+    // Resolve the default path the same way the fetch path does before
+    // deciding there's nothing to clear.
+    init_url_cache(vm);
     if (!vm->compiler.url_cache_dir)
         return;
 
