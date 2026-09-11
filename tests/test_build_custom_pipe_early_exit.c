@@ -16,5 +16,6 @@ int build_main(Builder *ctx) {
     RunCustom(ctx, "producer_head", "yes | head -c 200000 > c1327_out.txt");
     RunCustom(ctx, "check_size",
               "test \"$(wc -c < c1327_out.txt)\" -eq 200000");
+    RunCustom(ctx, "cleanup", "rm -f c1327_out.txt");
     return BuildDefault(ctx);
 }

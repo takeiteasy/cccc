@@ -13,5 +13,6 @@ int build_main(Builder *ctx) {
               "cat c1326_in.txt > c1326_o1.txt > c1326_o2.txt");
     RunCustom(ctx, "check_o2", "test \"$(cat c1326_o2.txt)\" = payload");
     RunCustom(ctx, "check_o1_empty", "test ! -s c1326_o1.txt");
+    RunCustom(ctx, "cleanup", "rm -f c1326_in.txt c1326_o1.txt c1326_o2.txt");
     return BuildDefault(ctx);
 }

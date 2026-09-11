@@ -43,5 +43,7 @@ int build_main(Builder *ctx) {
               "cat in.txt > routed.txt | wc -c > pipe_side.txt ; "
               "test \"$(cat routed.txt)\" = hello ; "
               "grep -q '^[[:space:]]*0$' pipe_side.txt");
+    RunCustom(ctx, "cleanup",
+              "rm -f in.txt n1.txt mid.txt n2.txt routed.txt pipe_side.txt");
     return BuildDefault(ctx);
 }

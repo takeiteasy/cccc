@@ -17,9 +17,10 @@
 // reader shape (`yes | head`) is covered separately by
 // test_build_custom_pipe_early_exit.c.
 //
-// Scratch files use a unique `cccc_test_1322_*.txt` prefix: `*.txt` is
-// gitignored, so a run whose cwd is the repo root (rather than an isolated
-// per-test tmp dir) does not leave untracked artifacts behind.
+// Scratch files use a unique `cccc_test_1322_*.txt` prefix (this suite's cwd
+// is the repo root, not an isolated per-test tmp dir, so a collision with
+// another test's scratch name is possible) and are removed by the final
+// `cleanup` step below on a passing run.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
@@ -29,5 +30,7 @@ int build_main(Builder *ctx) {
               "cat cccc_test_1322_big.txt | cat > cccc_test_1322_copy.txt");
     RunCustom(ctx, "verify",
               "cmp cccc_test_1322_big.txt cccc_test_1322_copy.txt");
+    RunCustom(ctx, "cleanup",
+              "rm -f cccc_test_1322_big.txt cccc_test_1322_copy.txt");
     return BuildDefault(ctx);
 }

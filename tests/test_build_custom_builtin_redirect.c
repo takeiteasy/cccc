@@ -22,5 +22,6 @@ int build_main(Builder *ctx) {
               "cd /cccc/no/such/dir || echo caught > c1325_cd.txt");
     RunCustom(ctx, "check_cd", "test \"$(cat c1325_cd.txt)\" = caught");
 
+    RunCustom(ctx, "cleanup", "rm -f c1325_p.txt c1325_n.txt c1325_cd.txt");
     return BuildDefault(ctx);
 }

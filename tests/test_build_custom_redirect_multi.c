@@ -11,5 +11,7 @@ int build_main(Builder *ctx) {
     RunCustom(ctx, "redirect",
               "cat > cccc_test_1311m_out.txt < cccc_test_1311m_in.txt");
     RunCustom(ctx, "verify", "cat cccc_test_1311m_out.txt");
+    RunCustom(ctx, "cleanup",
+              "rm -f cccc_test_1311m_in.txt cccc_test_1311m_out.txt");
     return BuildDefault(ctx);
 }
