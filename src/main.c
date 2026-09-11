@@ -374,6 +374,21 @@ static int run_native_backend(
         argv_push(&cc_args, bundled ? "-idirafter" : "-isystem");
         argv_push(&cc_args, sys_inc_paths[i]);
     }
+    // #1324: a URL #include reached only through an ordinary project header
+    // (not a command-line input, not one of CCCC's own bundled/cccc-only
+    // headers) is never auto-captured, so #1313's emit_include_paths rewrite
+    // never sees it and the includer's own captured text is replayed
+    // verbatim -- the raw `https://` line reaches the host cc unchanged. Any
+    // fetched URL is now also mirrored on disk under a URL-shaped path
+    // (fetch_url_to_cache(), src/url_fetch.c) so that raw line resolves as
+    // written, given this directory in the search path. `-idirafter`
+    // (last-resort) like the bundled-dir forwarding above: a URL-shaped
+    // path can never collide with a real header, so a real host header
+    // should still win when both exist.
+    if (vm->compiler.url_mirror_used && vm->compiler.url_cache_dir) {
+        argv_push(&cc_args, "-idirafter");
+        argv_push(&cc_args, vm->compiler.url_cache_dir);
+    }
     for (int i = 0; i < defines_count; i++)
         push_owned_flag(&cc_args, &owned, "-D", defines[i]);
     for (int i = 0; i < undefs_count; i++)

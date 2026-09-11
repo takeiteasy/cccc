@@ -1204,7 +1204,8 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.url_to_path.capacity = 0;
     vm->compiler.url_to_path.buckets  = NULL;
     vm->compiler.url_to_path.used     = 0;
-    vm->compiler.url_cache_dir = NULL; // Initialized on first URL include
+    vm->compiler.url_cache_dir   = NULL;  // Initialized on first URL include
+    vm->compiler.url_mirror_used = false; // #1324
 
     // Initialize include_cache HashMap
     vm->compiler.include_cache.capacity = 0;

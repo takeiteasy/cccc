@@ -24,6 +24,8 @@ Sub-suites:
                         link regression under a real gcc (ticket #1199);
                         skips when no real (non-clang) gcc is on PATH
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
+  url_mirror_smoke    — URL #include mirror path-join + nested-project-header
+                        repro (ticket #1324); case 2 skips on a non-curl build
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
                         own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
                         "nothing to audit" on any platform/family other than
@@ -438,6 +440,32 @@ def _run_cli_exit_code_suite():
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("cli_exit_code_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_url_mirror_smoke_suite():
+    """Run the URL #include mirror smoke tests (#1324).
+
+    Case 1 (no network/curl needed) pins the path-join assumption the
+    #1324 fix rests on; case 2 is the ticket's own nested-project-header
+    repro and needs a curl-enabled build, skipping cleanly otherwise.
+    Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "url_mirror_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("url_mirror_smoke", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -1086,6 +1114,14 @@ def main():
     cli_ec_status, ok_cli_ec = _run_cli_exit_code_suite()
     print(f"  {cli_ec_status}")
     suite_results["cli_exit_code_smoke"] = ok_cli_ec
+
+    # --- URL #include mirror smoke (#1324) ---
+    print()
+    print("[ url_mirror_smoke ]")
+    wedge.arm("url_mirror_smoke", scalar_phase_timeout)
+    url_mirror_status, ok_url_mirror = _run_url_mirror_smoke_suite()
+    print(f"  {url_mirror_status}")
+    suite_results["url_mirror_smoke"] = ok_url_mirror
 
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()

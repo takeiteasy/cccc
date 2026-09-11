@@ -92,7 +92,7 @@ shim's shape and its residual gaps.
 | K&R-style function definitions | ✓ | |
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
 | Digraphs (`<:` `:>` `<%` `%>` `%:` `%:%:`) | ✓ | Equivalent to `[` `]` `{` `}` `#` `##` (C23 §6.4.6); original spelling preserved during stringification |
-| `#include`, `#define`, `#undef` | ✓ | `#include` also accepts URLs (`#include <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into a cache (`--url-cache-dir`); under `-c=native`/`-m`/`-c=generated` a captured URL `#include` replays as an `#include` of its resolved cache path rather than the literal URL — see [HEADERS.md](HEADERS.md#url-includes-under--c=native-m-c=generated) |
+| `#include`, `#define`, `#undef` | ✓ | `#include` also accepts URLs (`#include <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into a cache (`--url-cache-dir`) that also mirrors each fetch under a URL-shaped path so the raw directive resolves anywhere in the include graph; under `-c=native`/`-m`/`-c=generated` a captured top-level URL `#include` additionally replays as an `#include` of its resolved cache path — see [HEADERS.md](HEADERS.md#url-includes-under--c=native-m-c=generated) |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
 | CCCC-routed preprocessor directives | ✓ | `@emit` routes directives to generated output; `@comptime` routes directives to the comptime stream |
 | `#error` | ✓ | |

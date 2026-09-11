@@ -28,6 +28,7 @@ bool is_url(const char *filename) {
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <limits.h>
 #include <curl/curl.h>
 
 // Fetch knobs live in vm->compiler (url_timeout / url_max_size), defaulted
@@ -70,6 +71,34 @@ void init_url_cache(VirtualMachine *vm) {
     }
 }
 
+// #1324: recursively remove `path` (file or directory tree) -- clear_url_
+// cache() below now has to remove the URL-shaped mirror tree
+// (mirror_cache_entry()) alongside the flat cache entries, and unlink() on a
+// non-empty directory just fails silently, leaving the mirror to survive
+// --url-cache-clear forever.
+static void remove_path_recursive(const char *path) {
+    struct stat st;
+    if (lstat(path, &st) != 0)
+        return;
+    if (!S_ISDIR(st.st_mode)) {
+        unlink(path);
+        return;
+    }
+    DIR *dir = opendir(path);
+    if (!dir)
+        return;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        char *child = format("%s/%s", path, entry->d_name);
+        remove_path_recursive(child);
+        free(child);
+    }
+    closedir(dir);
+    rmdir(path);
+}
+
 void clear_url_cache(VirtualMachine *vm) {
     if (!vm->compiler.url_cache_dir)
         return;
@@ -81,10 +110,11 @@ void clear_url_cache(VirtualMachine *vm) {
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.')
-            continue; // Skip . and ..
+            continue;                // Skip . and ..
 
         char *path = format("%s/%s", vm->compiler.url_cache_dir, entry->d_name);
-        unlink(path);
+        remove_path_recursive(path); // #1324: was a plain unlink()
+        free(path);
     }
     closedir(dir);
 }
@@ -95,6 +125,116 @@ static unsigned long hash_url(const char *url) {
     while ((c = *url++))
         hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
     return hash;
+}
+
+// #1324: build the on-disk mirror path for `url` under
+// vm->compiler.url_cache_dir -- exactly the path a host preprocessor forms
+// when it path-joins a search directory against a directive operand spelled
+// `url` verbatim (a run of consecutive '/' collapses to one on every POSIX
+// filesystem, so "https://host/x" joined against a search directory resolves
+// identically to "https:/host/x" under that directory). Mirroring the fetch
+// there lets a URL #include reached only through an ordinary project header
+// (never auto-captured -- see the auto-capture gate in preprocess.c, whose
+// only inputs are command-line files and CCCC's own bundled/cccc-only
+// headers) still resolve as written, once that directory is forwarded via
+// `-idirafter` (src/main.c) or named in a banner (-m/-c=generated,
+// src/serialize_program.c) -- with no rewriting anywhere in the include
+// graph. Returns NULL (skip mirroring; the flat cache entry #1313 already
+// relies on is untouched either way) for a shape that can't be safely
+// materialized: a `.`/`..` path component, an empty final component (a URL
+// ending in '/'), or a result that would exceed PATH_MAX.
+static char *url_mirror_path(VirtualMachine *vm, const char *url) {
+    size_t cache_len = strlen(vm->compiler.url_cache_dir);
+    size_t url_len   = strlen(url);
+    if (cache_len + 1 + url_len + 1 > PATH_MAX)
+        return NULL;
+    char *copy = strdup(url);
+    if (!copy)
+        return NULL;
+    bool ok             = true;
+    bool saw_final_part = false;
+    for (char *save = NULL, *part = strtok_r(copy, "/", &save); part;
+         part = strtok_r(NULL, "/", &save)) {
+        if (!strcmp(part, ".") || !strcmp(part, "..")) {
+            ok = false;
+            break;
+        }
+        saw_final_part = true;
+    }
+    free(copy);
+    if (!ok || !saw_final_part)
+        return NULL;
+    // Join with single '/' separators (equivalent to the raw "cache_dir/url"
+    // concatenation once the OS collapses the doubled slash after the
+    // scheme, but this way mkdir_p_parents() never has to walk an empty
+    // path component).
+    char  *joined = format("%s/%s", vm->compiler.url_cache_dir, url);
+    size_t len    = strlen(joined);
+    char  *out    = malloc(len + 1);
+    if (!out) {
+        free(joined);
+        return NULL;
+    }
+    size_t w = 0;
+    for (size_t r = 0; r < len; r++) {
+        if (joined[r] == '/' && w > 0 && out[w - 1] == '/')
+            continue;
+        out[w++] = joined[r];
+    }
+    out[w] = '\0';
+    free(joined);
+    return out;
+}
+
+// #1324: mkdir -p over every parent directory of `path` (0755, matching
+// init_url_cache()'s own permissions), skipping the leading empty component
+// of an absolute path.
+static void mkdir_p_parents(char *path) {
+    for (char *p = path + 1; *p; p++) {
+        if (*p != '/')
+            continue;
+        *p = '\0';
+        mkdir(path, 0755);
+        *p = '/';
+    }
+}
+
+// #1324: hardlink `cache_path` (the flat #1313 cache entry, already
+// downloaded/verified) into its URL-shaped mirror location so the raw
+// directive resolves as written; falls back to a byte copy when link()
+// can't (cross-device, or a filesystem without hardlinks). Sets
+// vm->compiler.url_mirror_used on success so main.c/serialize_program.c know
+// to forward/announce the cache directory. Best-effort: a mirroring failure
+// is silently skipped, not an error -- the flat cache entry and #1313's own
+// rewrite already make the top-level case work regardless.
+static void mirror_cache_entry(VirtualMachine *vm, const char *cache_path,
+                               const char *url) {
+    char *mirror_path = url_mirror_path(vm, url);
+    if (!mirror_path)
+        return;
+    mkdir_p_parents(mirror_path);
+    unlink(mirror_path); // drop a stale mirror (e.g. cache entry replaced)
+    if (link(cache_path, mirror_path) != 0) {
+        // Cross-device or no hardlink support: fall back to a byte copy.
+        FILE *src = fopen(cache_path, "rb");
+        FILE *dst = src ? fopen(mirror_path, "wb") : NULL;
+        if (src && dst) {
+            char   buf[8192];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), src)) > 0)
+                fwrite(buf, 1, n, dst);
+        }
+        if (src)
+            fclose(src);
+        if (dst)
+            fclose(dst);
+        else {
+            free(mirror_path);
+            return;
+        }
+    }
+    vm->compiler.url_mirror_used = true;
+    free(mirror_path);
 }
 
 static char *get_url_cache_path(VirtualMachine *vm, const char *url) {
@@ -135,6 +275,7 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
         // already local
         if ((size_t)st.st_size > vm->compiler.url_max_size)
             return NULL;
+        mirror_cache_entry(vm, cache_path, url); // #1324
         return cache_path;
     }
 
@@ -193,6 +334,7 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
         }
     }
 
+    mirror_cache_entry(vm, cache_path, url); // #1324
     return cache_path;
 }
 #else

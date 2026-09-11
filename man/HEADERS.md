@@ -278,25 +278,33 @@ See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 
 A URL `#include`/`#embed` (curl-enabled builds only — see
 [BUILD.md](BUILD.md)) fetches into a shared on-disk cache
-(`--url-cache-dir`, default `$TMPDIR/.cccc`) on every path, VM included.
-Under `-c=native`/`-m`/`-c=generated`, a captured URL `#include` is rewritten
-to an absolute `#include` of that cache entry rather than being replayed as
-the literal URL, which a real host compiler cannot resolve. A URL `#embed`
-never needs this treatment: like every captured `#embed`, its bytes are
-already spliced into the token stream at parse time and the directive itself
-is dropped from the replayed output.
+(`--url-cache-dir`, default `$TMPDIR/.cccc`) on every path, VM included. Every
+fetch is also mirrored into that same directory under a URL-shaped path
+(`<cache-dir>/https:/<host>/<path>`), so a raw `#include "https://…"` line
+resolves exactly as written given that directory in the search path — at any
+depth in the include graph, whether the directive sits in a command-line
+input, one of CCCC's own bundled headers, or an ordinary project header that
+itself `#include`s a URL.
 
-Two consequences worth knowing:
+Under `-c=native`, CCCC forwards the cache directory to the host compiler
+itself (`-idirafter`), so nothing further is needed. A captured top-level URL
+`#include` is additionally rewritten to an absolute `#include` of its
+resolved cache entry, for tidier output; the mirror is what makes an
+uncaptured one (reached only through a project header) resolve too. A URL
+`#embed` never needs either treatment: like every captured `#embed`, its
+bytes are already spliced into the token stream at parse time and the
+directive itself is dropped from the replayed output.
 
-- The emitted `.c`/`.gen.c` names an absolute path under the URL cache
-  directory. If that output is saved and compiled later (a different
-  process, a different machine, or after `--url-cache-clear`), the include
-  only resolves as long as the cache entry is still there.
-- A URL `#include` reached only through an ordinary *project header* (not a
-  command-line input file, not one of CCCC's own bundled headers) is never
-  auto-captured in the first place, so nothing rewrites it — the host
-  compiler reads that header's own text and hits the raw URL directly. This
-  is a narrower case than the top-level one above and is not handled.
+Under `-m`/`-c=generated`, the dump is compiled by the caller, so CCCC has no
+way to pass `-idirafter` on their behalf — when a URL was fetched, the output
+carries a leading comment naming the exact flag to add
+(`/* cccc: compile with -idirafter <cache-dir> (URL #include mirror) */`).
+
+One consequence worth knowing: the resolved path (in the top-level rewrite,
+and implicitly via the mirror) lives under the URL cache directory. If the
+output is saved and compiled later (a different process, a different
+machine, or after `--url-cache-clear`), the include only resolves as long as
+the cache entry — flat or mirrored — is still there.
 
 ## Private headers
 

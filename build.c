@@ -23,7 +23,8 @@
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
 //   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
-//   header_resolution_smoke, cli_exit_code_smoke, comptime_native_smoke,
+//   header_resolution_smoke, cli_exit_code_smoke, url_mirror_smoke,
+//   comptime_native_smoke,
 //   audit_ffi,
 //   audit_reflection_enums, reflection_ffi_gen / _check
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
@@ -656,6 +657,26 @@ BuildTarget *cli_exit_code_smoke(Builder *ctx) {
              "&& python3 tools/cli_exit_code_smoke.py",
              TargetOutput(cccc));
     BuildTarget *step = RunCustom(ctx, "cli-exit-code-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *url_mirror_smoke(Builder *ctx) {
+    // tools/url_mirror_smoke.py (#1324) hardcodes root/"cccc", same as
+    // header_resolution_smoke above -- see the comment on sqlite_smoke for
+    // why the built binary is placed via `cp` + atomic `mv` rather than a
+    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
+    // run_tests.py; this standalone target is for running it in isolation.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cp %s ./cccc.url-mirror-smoke-tmp && "
+             "mv ./cccc.url-mirror-smoke-tmp ./cccc "
+             "&& python3 tools/url_mirror_smoke.py",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "url-mirror-smoke", cmd);
     DependsOn(step, cccc);
     return step;
 }

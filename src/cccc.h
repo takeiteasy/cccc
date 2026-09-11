@@ -3806,13 +3806,21 @@ typedef struct Compiler {
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
     // URL include cache (only used when CCCC_HAS_CURL is enabled)
-    char  *url_cache_dir;        // Directory for caching downloaded headers
-    int    url_timeout;          // curl fetch timeout in seconds (default 30)
-    size_t url_max_size;         // Cap on any fetched URL payload (default
-                                 // 10MB), independent of the #embed limits
-    HashMap     url_to_path;     // Maps URLs to cached file paths
-    StringArray emit_directives; // Preprocessor directives to prepend to
-                                 // serialized output
+    char  *url_cache_dir; // Directory for caching downloaded headers
+    int    url_timeout;   // curl fetch timeout in seconds (default 30)
+    size_t url_max_size;  // Cap on any fetched URL payload (default
+                          // 10MB), independent of the #embed limits
+    HashMap url_to_path;  // Maps URLs to cached file paths
+    // #1324: true once any URL #include/#embed has been mirrored into
+    // <url_cache_dir> under a URL-shaped path (fetch_url_to_cache(),
+    // src/url_fetch.c) -- lets a directive reached only through an ordinary
+    // project header (never auto-captured, so #1313's emit_include_paths
+    // rewrite never sees it) still resolve as-written against a forwarded
+    // `-idirafter <url_cache_dir>` (src/main.c) / a banner naming that flag
+    // (-m/-c=generated, src/serialize_program.c).
+    bool        url_mirror_used;
+    StringArray emit_directives;    // Preprocessor directives to prepend to
+                                    // serialized output
     int *emit_directives_tu_starts; // #1305/#1306: per-command-line-input
                                     // starting index into emit_directives
                                     // (one entry per TU, set once in main.c's
