@@ -94,8 +94,8 @@ cccc --build build.c --build-cache=~/.cache/cccc  # incremental builds with expl
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-b`/`--build` | (off) | Switch to build mode. The input is a build script; `main()` is not required (and is rejected). |
-| `--build-entry=NAME` | `build_main` | Symbol to invoke as the build entry. |
+| `-b`/`--build` | (off) | Switch to build mode. The input is a build script; `main()` is not required, and if present is simply ignored — never called. |
+| `--build-entry=NAME` | `build_main`, or every `[[cccc::build_target]]` factory if none is found | Symbol to invoke as the build entry. |
 | `--build-out-dir=PATH` | `build/` | Output directory for artifacts. |
 | `--build-dry-run` | off | Topo-sort and print the resolved command lines without executing them. |
 | `--build-target=NAME` | (all) | Build only the named registered target and its transitive dependencies. Pruning happens at `Build*` call time — the full graph is declared first, then the filter is applied. |
@@ -185,11 +185,19 @@ order:
 2. **Attribute:** a function tagged `[[cccc::build]]`. Exactly one is required;
    more than one is an ambiguity error listing every candidate.
 3. **Default name:** a function named `build_main`.
+4. **Every factory:** if none of the above is found but the file declares one
+   or more `[[cccc::build_target]]` factories, every factory is invoked and
+   the union of their declared targets is built — equivalent to calling
+   `BuildAll(ctx)` from an entry that did nothing but invoke each factory.
+   This is what makes `cccc --build demo.c` work on a file whose only build
+   recipe is an inline `@build_target` next to `main()` — see
+   [Discoverable factory functions](#discoverable-factory-functions) below.
 
 A `[[cccc::build]]`-tagged function can be named anything — the tag alone
 resolves it. The `build_main` fallback only applies when a script has no
 `[[cccc::build]]` attribute and no `--build-entry` flag at all; it is not a
-second requirement layered on top of the attribute.
+second requirement layered on top of the attribute. The factory fallback only
+applies when neither of those exists either.
 
 The attribute accepts the C23 and GNU forms, like `[[cccc::comptime]]`:
 
@@ -208,6 +216,44 @@ void build_main(Builder *ctx);   // success iff all targets built
 
 The same file is still valid C: in default mode (`cccc build.c`) the
 `[[cccc::build]]` attribute is consumed and the entry is simply not called.
+
+## Build recipes in a program file
+
+A build script does not need its own file. A single `.c` that defines
+`main()`, `[[cccc::test]]` functions, and a `[[cccc::build]]`/
+`[[cccc::build_target]]` recipe all in one place works exactly as you would
+expect from each flag on its own:
+
+```c
+[[cccc::build_target]]
+BuildTarget *demo(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "demo");
+    AddSource(t, "demo.c");
+    return t;
+}
+
+int main(void) {
+    return 0;
+}
+```
+
+| Command | Behaviour |
+|---|---|
+| `cccc demo.c` | Runs `main()` on the VM. The build recipe compiles but is never invoked. |
+| `cccc -c=native -o demo demo.c` | Native binary of `main()`. The `[[cccc::build_target]]`/`[[cccc::build]]` bodies are never emitted — see [NATIVE.md](NATIVE.md). |
+| `cccc --build demo.c` | Runs the build recipe (here, the entry-less factory fallback above). `main()` is ignored. |
+
+`building.h` (the `Builder`/`BuildTarget` types and every `Build*`/`Executable`/
+etc. macro) is injected automatically whenever the file's own source carries a
+`[[cccc::build]]`/`[[cccc::build_target]]` attribute (`@build`/`@build_target`,
+`[[cccc::build...]]`, or `__attribute__((build...))`) — you don't need
+`--build` just to get the file to parse. This is demand-driven, not
+unconditional: a file with no such attribute anywhere sees none of
+`building.h`'s ~90 names, so an ordinary program is free to define its own
+`Build`/`Executable`/etc. without a collision. The scan only looks at the
+file's own text, so an attribute produced by macro expansion, or written only
+in an `#include`d header, is not enough by itself — pass `--build` explicitly
+in that case, or `#include <cccc/building.h>` directly.
 
 ## Mode predefined macros
 

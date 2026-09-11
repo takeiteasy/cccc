@@ -5078,9 +5078,15 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog);
                           the program's [[cccc::test]] functions. Used with
                           --testing=native (#1033); ignored when
                           generated_only is true.
+ @param no_emit_tests If true, [[cccc::test]] function bodies are dropped
+                      entirely instead of being emitted inert (#1272).
+                      [[cccc::build]]/[[cccc::build_target]] bodies are
+                      always dropped regardless of this flag -- their
+                      __builtin_build_* calls have no native lowering.
 */
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
-                          bool generated_only, bool emit_test_harness);
+                          bool generated_only, bool emit_test_harness,
+                          bool no_emit_tests);
 
 /*!
  @brief Link multiple parsed programs (Obj lists) into a single program.

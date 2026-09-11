@@ -181,7 +181,7 @@ static int run_native_backend(
     const char **lib_paths, int lib_paths_count, const char **libs,
     int libs_count, const char **defines, int defines_count,
     const char **undefs, int undefs_count, const char *std_arg, bool emit_cccc,
-    bool emit_test_harness, int opt_level) {
+    bool emit_test_harness, bool no_emit_tests, int opt_level) {
     if (!out_file) {
         fprintf(
             stderr,
@@ -278,7 +278,7 @@ static int run_native_backend(
         free(cc);
         return 1;
     }
-    cc_serialize_program(f, vm, prog, false, emit_test_harness);
+    cc_serialize_program(f, vm, prog, false, emit_test_harness, no_emit_tests);
     // #1017: cc_serialize_program() can itself queue a warning (e.g.
     // CCCC_WARN_NATIVE_NAME_COLLISION) via warn_tok()/vm->collect_errors --
     // nothing upstream of this call flushes vm->errors again, so print (and
@@ -692,6 +692,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         [[cccc::test(timeout = ms)]])\n");
     printf("\t   --test-format=FMT     Output format for test results: tap "
            "(default), plain, json\n");
+    printf("\t   --no-emit-tests       -c=native/-c=generated: drop "
+           "[[cccc::test]] bodies from the\n");
+    printf("\t                         output instead of emitting them "
+           "inert\n");
     printf("\nBuild Options:\n");
     printf("\t-b/--build               Run the input as a build script "
            "(declares native targets)\n");
@@ -1436,6 +1440,7 @@ int main(int argc, const char *argv[]) {
     int          fail_fast     = 0;               // --fail-fast
     int          test_timeout  = 0;               // --test-timeout=N
     CcTestFormat test_format   = TEST_FORMAT_TAP; // --test-format=FORMAT
+    int          no_emit_tests = 0;               // --no-emit-tests (#1272)
     int          build_mode    = 0;               // --build
     const char  *build_entry   = NULL;            // --build-entry=NAME
     const char  *build_target  = NULL;            // --build-target=NAME
@@ -1543,6 +1548,7 @@ int main(int argc, const char *argv[]) {
         {"fail-fast", no_argument, 0, 1064},
         {"test-timeout", required_argument, 0, 1065},
         {"test-format", required_argument, 0, 1066},
+        {"no-emit-tests", no_argument, 0, 1125}, // #1272
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
         {"no-debug-on-crash", no_argument, 0, 1071},
@@ -2204,6 +2210,9 @@ int main(int argc, const char *argv[]) {
                 }
                 testing_mode = 1;
                 break;
+            case 1125: // --no-emit-tests (#1272)
+                no_emit_tests = 1;
+                break;
             case 'J':
                 output_ffi_decls = 1;
                 break;
@@ -2729,6 +2738,19 @@ int main(int argc, const char *argv[]) {
         if (i > 0)
             cc_reset_preprocessor_state_for_next_tu(&vm);
 
+        // #1272: a TU that didn't ask for --testing/--build may still carry
+        // its own [[cccc::test]]/[[cccc::build]] (or @test/@build,
+        // __attribute__((test))/((build))) attribute alongside main() --
+        // scan the raw source for one so the header injection below still
+        // fires for it. Deliberately demand-driven, not unconditional:
+        // building.h/testing.h declare ~90 generic names (Build, Executable,
+        // ReadFile, GetEnv, Assert, ...) that would collide with ordinary
+        // user code in a plain compile. See cc_scan_source_for_mode_attrs's
+        // own comment for what does and doesn't trigger it.
+        bool wants_test = false, wants_build = false;
+        cc_scan_source_for_mode_attrs(input_files[i], &wants_test,
+                                      &wants_build);
+
         // #1007: inject mode headers (testing.h/building.h) into *every*
         // TU's own parse stream, not just input_tokens[0]. Their real
         // payload is a side effect of preprocessing them -- registering the
@@ -2745,9 +2767,9 @@ int main(int argc, const char *argv[]) {
         // headers are injected and their declaration lists are chained
         // together, same as before.
         Token *test_decls = NULL;
-        if (testing_mode)
+        if (testing_mode || wants_test)
             test_decls = cc_inject_test_header(&vm);
-        if (build_mode) {
+        if (build_mode || wants_build) {
             Token *build_decls = cc_inject_build_header(&vm);
             if (build_decls && test_decls) {
                 Token *tail = build_decls;
@@ -2819,9 +2841,14 @@ int main(int argc, const char *argv[]) {
     // Register test-runtime FFI symbols after the comptime pass so that any
     // [[cccc::comptime]] calling Assert produces an unresolved-symbol error
     // instead of longjmp-ing through an uninitialised jmp_buf (ticket #334).
-    if (testing_mode)
+    // #1272: also loaded when a TU registered [[cccc::test]]/[[cccc::build]]
+    // functions on its own (inline test/build alongside main(), no
+    // --testing/--build flag) -- the registries are populated by the
+    // preprocess-time attribute scan (preprocess.c) regardless of mode, so
+    // this also covers a manual `#include <cccc/testing.h>`.
+    if (testing_mode || vm.compiler.test_fns)
         cc_load_test_runtime(&vm);
-    if (build_mode)
+    if (build_mode || vm.compiler.build_fns || vm.compiler.build_target_fns)
         cc_load_build_runtime(&vm);
     cc_load_symbolize_runtime(&vm);
 
@@ -2994,7 +3021,8 @@ int main(int argc, const char *argv[]) {
         // assignment (the -c=native path, which runs cc_compile() first
         // and already sees the merged list) for the same reason.
         vm.compiler.globals = merged_prog;
-        cc_serialize_program(f, &vm, merged_prog, emit_generated_only, false);
+        cc_serialize_program(f, &vm, merged_prog, emit_generated_only, false,
+                             (bool)no_emit_tests);
         // #1017: as above (run_native_backend) -- a warning queued by
         // cc_serialize_program() itself (e.g. CCCC_WARN_NATIVE_NAME_COLLISION)
         // is otherwise silently dropped, since this path bails out to BAIL
@@ -3184,16 +3212,10 @@ int main(int argc, const char *argv[]) {
     }
 
     if (build_mode) {
-        // A build script must not define main() in --build mode.
-        for (Obj *o = merged_prog; o; o = o->next) {
-            if (o->is_function && o->name && strcmp(o->name, "main") == 0) {
-                fprintf(stderr,
-                        "error: a --build script must not define main()\n");
-                exit_code = 1;
-                goto BAIL;
-            }
-        }
-
+        // #1272: main(), if present, is simply ignored under --build --
+        // cc_run_build() below never calls it, only the resolved build
+        // entry/factory. This lets a single file carry both a runnable
+        // main() and its own build recipe (see man/BUILD_MODE.md).
         CcNativeCompileArgs build_defaults = {
             .inc_paths           = inc_paths,
             .inc_paths_count     = inc_paths_count,
@@ -3248,6 +3270,17 @@ int main(int argc, const char *argv[]) {
 
     if (compile_format == COMPILE_NATIVE) {
         if (testing_backend == TESTING_BACKEND_NATIVE) {
+            // #1272: --no-emit-tests would drop the very tests the
+            // generated harness exists to run -- reject the combination
+            // outright rather than silently producing an empty suite.
+            if (no_emit_tests) {
+                fprintf(stderr,
+                        "error: --no-emit-tests is incompatible with "
+                        "--testing=native (the harness needs the tests it "
+                        "would drop)\n");
+                exit_code = 1;
+                goto BAIL;
+            }
             // The generated harness supplies its own main(); a test file
             // that defines one too would collide (mirrors the --build
             // check above).
@@ -3305,7 +3338,8 @@ int main(int argc, const char *argv[]) {
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
             libs, libs_count, defines, defines_count, undefs, undefs_count,
             std_arg, (bool)emit_cccc_mode,
-            testing_backend == TESTING_BACKEND_NATIVE, opt_level);
+            testing_backend == TESTING_BACKEND_NATIVE, (bool)no_emit_tests,
+            opt_level);
         goto BAIL;
     }
 

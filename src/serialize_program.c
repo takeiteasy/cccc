@@ -3640,7 +3640,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "    char fail_msg[512];\n"
     "} __cccc_test_run_state;\n"
     "static __cccc_test_run_state *__cccc_s_run = NULL;\n"
-    "static void __builtin_assert(int cond, const char *expr, const char "
+    "static void __attribute__((unused)) __builtin_assert(int cond, const char "
+    "*expr, const char "
     "*file, int line) {\n"
     "    if (!cond) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"Assert called outside a "
@@ -3651,7 +3652,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_false(int cond, const char *expr, const "
+    "static void __attribute__((unused)) __builtin_assert_false(int cond, "
+    "const char *expr, const "
     "char *file, int line) {\n"
     "    if (cond) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertFalse called "
@@ -3662,7 +3664,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_fail(const char *file, int line) {\n"
+    "static void __attribute__((unused)) __builtin_assert_fail(const char "
+    "*file, int line) {\n"
     "    if (!__cccc_s_run) { fprintf(stderr, \"AssertFail called outside a "
     "test run at %s:%d\\n\", file, line); return; }\n"
     "    snprintf(__cccc_s_run->fail_msg, sizeof(__cccc_s_run->fail_msg), "
@@ -3670,7 +3673,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "    __cccc_s_run->failed = 1;\n"
     "    _longjmp(__cccc_s_run->jmp, 1);\n"
     "}\n"
-    "static void __builtin_assert_fail_msg(const char *msg, const char "
+    "static void __attribute__((unused)) __builtin_assert_fail_msg(const char "
+    "*msg, const char "
     "*file, int line) {\n"
     "    if (!__cccc_s_run) { fprintf(stderr, \"AssertFailMsg called outside "
     "a test run at %s:%d\\n\", file, line); return; }\n"
@@ -3679,7 +3683,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "    __cccc_s_run->failed = 1;\n"
     "    _longjmp(__cccc_s_run->jmp, 1);\n"
     "}\n"
-    "static void __builtin_assert_eq(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_eq(long long a, long "
+    "long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (a != b) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertEq called outside "
@@ -3690,7 +3695,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_neq(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_neq(long long a, "
+    "long long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (a == b) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNeq called outside "
@@ -3701,7 +3707,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_gt(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_gt(long long a, long "
+    "long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (!(a > b)) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertGt called outside "
@@ -3712,7 +3719,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_lt(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_lt(long long a, long "
+    "long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (!(a < b)) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertLt called outside "
@@ -3723,7 +3731,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_ge(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_ge(long long a, long "
+    "long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (!(a >= b)) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertGe called outside "
@@ -3734,7 +3743,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_le(long long a, long long b, const char "
+    "static void __attribute__((unused)) __builtin_assert_le(long long a, long "
+    "long b, const char "
     "*as, const char *bs, const char *file, int line) {\n"
     "    if (!(a <= b)) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertLe called outside "
@@ -3745,7 +3755,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_within(long long delta, long long "
+    "static void __attribute__((unused)) __builtin_assert_within(long long "
+    "delta, long long "
     "expected, long long actual, const char *ds, const char *es, const char "
     "*as, const char *file, int line) {\n"
     "    long long diff = expected - actual;\n"
@@ -3760,7 +3771,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_null(const void *p, const char *ps, const "
+    "static void __attribute__((unused)) __builtin_assert_null(const void *p, "
+    "const char *ps, const "
     "char *file, int line) {\n"
     "    if (p != NULL) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNull called "
@@ -3771,7 +3783,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_not_null(const void *p, const char *ps, "
+    "static void __attribute__((unused)) __builtin_assert_not_null(const void "
+    "*p, const char *ps, "
     "const char *file, int line) {\n"
     "    if (p == NULL) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNotNull called "
@@ -3782,7 +3795,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_streq(const char *a, const char *b, const "
+    "static void __attribute__((unused)) __builtin_assert_streq(const char *a, "
+    "const char *b, const "
     "char *as, const char *bs, const char *file, int line) {\n"
     "    if (strcmp(a, b) != 0) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertStrEq called "
@@ -3794,7 +3808,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_streq_len(const char *a, const char *b, "
+    "static void __attribute__((unused)) __builtin_assert_streq_len(const char "
+    "*a, const char *b, "
     "long long len, const char *as, const char *bs, const char *file, int "
     "line) {\n"
     "    if (strncmp(a, b, (size_t)len) != 0) {\n"
@@ -3807,7 +3822,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_mem_eq(const void *expected, const void "
+    "static void __attribute__((unused)) __builtin_assert_mem_eq(const void "
+    "*expected, const void "
     "*actual, long long len, const char *es, const char *as, const char "
     "*file, int line) {\n"
     "    if (memcmp(expected, actual, (size_t)len) != 0) {\n"
@@ -3819,7 +3835,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_float_within(double delta, double "
+    "static void __attribute__((unused)) __builtin_assert_float_within(double "
+    "delta, double "
     "expected, double actual, const char *ds, const char *es, const char "
     "*as, const char *file, int line) {\n"
     "    double diff = expected - actual;\n"
@@ -3834,13 +3851,15 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_double_within(double delta, double "
+    "static void __attribute__((unused)) __builtin_assert_double_within(double "
+    "delta, double "
     "expected, double actual, const char *ds, const char *es, const char "
     "*as, const char *file, int line) {\n"
     "    __builtin_assert_float_within(delta, expected, actual, ds, es, as, "
     "file, line);\n"
     "}\n"
-    "static void __builtin_assert_bits(long long mask, long long expected, "
+    "static void __attribute__((unused)) __builtin_assert_bits(long long mask, "
+    "long long expected, "
     "long long actual, const char *ms, const char *es, const char *as, "
     "const char *file, int line) {\n"
     "    if ((actual & mask) != (expected & mask)) {\n"
@@ -3854,7 +3873,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_bit_high(int bit, long long actual, const "
+    "static void __attribute__((unused)) __builtin_assert_bit_high(int bit, "
+    "long long actual, const "
     "char *bs, const char *as, const char *file, int line) {\n"
     "    if (!(actual & (1LL << bit))) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBitHigh called "
@@ -3865,7 +3885,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_bit_low(int bit, long long actual, const "
+    "static void __attribute__((unused)) __builtin_assert_bit_low(int bit, "
+    "long long actual, const "
     "char *bs, const char *as, const char *file, int line) {\n"
     "    if (actual & (1LL << bit)) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertBitLow called "
@@ -3876,7 +3897,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_eq_array(const void *expected, const void "
+    "static void __attribute__((unused)) __builtin_assert_eq_array(const void "
+    "*expected, const void "
     "*actual, long long elem_size, long long count, const char *es, const "
     "char *as, const char *file, int line) {\n"
     "    size_t total = (size_t)elem_size * (size_t)count;\n"
@@ -3890,7 +3912,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_msg(int cond, const char *expr, const "
+    "static void __attribute__((unused)) __builtin_assert_msg(int cond, const "
+    "char *expr, const "
     "char *msg, const char *file, int line) {\n"
     "    if (!cond) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertMsg called outside "
@@ -3901,7 +3924,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_eq_msg(long long a, long long b, const "
+    "static void __attribute__((unused)) __builtin_assert_eq_msg(long long a, "
+    "long long b, const "
     "char *as, const char *bs, const char *msg, const char *file, int "
     "line) {\n"
     "    if (a != b) {\n"
@@ -3914,7 +3938,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_streq_msg(const char *a, const char *b, "
+    "static void __attribute__((unused)) __builtin_assert_streq_msg(const char "
+    "*a, const char *b, "
     "const char *as, const char *bs, const char *msg, const char *file, "
     "int line) {\n"
     "    if (strcmp(a, b) != 0) {\n"
@@ -3927,7 +3952,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_null_msg(const void *p, const char *ps, "
+    "static void __attribute__((unused)) __builtin_assert_null_msg(const void "
+    "*p, const char *ps, "
     "const char *msg, const char *file, int line) {\n"
     "    if (p != NULL) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNullMsg called "
@@ -3938,7 +3964,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_not_null_msg(const void *p, const char "
+    "static void __attribute__((unused)) __builtin_assert_not_null_msg(const "
+    "void *p, const char "
     "*ps, const char *msg, const char *file, int line) {\n"
     "    if (p == NULL) {\n"
     "        if (!__cccc_s_run) { fprintf(stderr, \"AssertNotNullMsg called "
@@ -3949,7 +3976,8 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
     "        _longjmp(__cccc_s_run->jmp, 1);\n"
     "    }\n"
     "}\n"
-    "static void __builtin_assert_bits_msg(long long mask, long long "
+    "static void __attribute__((unused)) __builtin_assert_bits_msg(long long "
+    "mask, long long "
     "expected, long long actual, const char *ms, const char *es, const "
     "char *as, const char *msg, const char *file, int line) {\n"
     "    if ((actual & mask) != (expected & mask)) {\n"
@@ -4391,8 +4419,41 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
     free(skip);
 }
 
+// #1272: an inline [[cccc::build]]/[[cccc::build_target]] function's body
+// calls __builtin_build_* FFI that has no native lowering (the build runtime
+// is host-side only, see cc_load_build_runtime) -- so unlike [[cccc::test]]
+// bodies (which stay valid, inert C via CCCC_TEST_ASSERT_RUNTIME_SRC) a
+// build function must never reach generated/native output, or the downstream
+// system compiler fails to link on the undefined __builtin_build_* symbols.
+// Matches by name against the same two registries cc_run_build() reads
+// (build_fns for the [[cccc::build]] entry, build_target_fns for
+// [[cccc::build_target]] factories) -- same shape as serialize_test_harness's
+// own test_fns name-matching walk just above.
+static bool obj_is_build_fn(VirtualMachine *vm, const Obj *o) {
+    if (!o->is_function || !o->name)
+        return false;
+    for (BuildFnRecord *r = vm->compiler.build_fns; r; r = r->next)
+        if (!strcmp(r->name, o->name))
+            return true;
+    for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r; r = r->next)
+        if (!strcmp(r->name, o->name))
+            return true;
+    return false;
+}
+
+// #1272: a [[cccc::test]] function, for the --no-emit-tests skip below.
+static bool obj_is_test_fn(VirtualMachine *vm, const Obj *o) {
+    if (!o->is_function || !o->name)
+        return false;
+    for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next)
+        if (!strcmp(r->name, o->name))
+            return true;
+    return false;
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
-                          bool generated_only, bool emit_test_harness) {
+                          bool generated_only, bool emit_test_harness,
+                          bool no_emit_tests) {
     // #1266: `prog` is legitimately NULL for a translation unit that
     // creates no globals -- an all-comptime file whose comptime code
     // publishes nothing and which defines no ordinary function. That must
@@ -5438,6 +5499,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         if (!obj->is_function)
             continue;
+        // #1272: [[cccc::build]]/[[cccc::build_target]] bodies never reach
+        // native/generated output (see obj_is_build_fn's comment); a
+        // [[cccc::test]] body is dropped too when --no-emit-tests is set.
+        if (obj_is_build_fn(vm, obj))
+            continue;
+        if (no_emit_tests && obj_is_test_fn(vm, obj))
+            continue;
         // #965: __cccc_block_copy_impl is a VM-only FFI shim (its real
         // implementation is host-side, src/stdlib/stdlib.c) -- it has no
         // obj->tok (ty->name was never set for this builtin prototype, see
@@ -5519,12 +5587,29 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // where in `prog` the real definition sits.
     if (!generated_only && emit_test_harness)
         serialize_test_harness(f, vm, prog);
+    // #1272: [[cccc::test]] bodies reaching this native/generated output
+    // with no harness driving them (an inline @test alongside main(), or
+    // -c=native with no --testing=native) still call __builtin_assert_* --
+    // emit just that runtime, not the fork-per-test TAP harness, so the call
+    // sites link. With no __cccc_s_run installed each assert prints "...
+    // called outside a test run" and returns, i.e. the test is inert. Every
+    // definition in CCCC_TEST_ASSERT_RUNTIME_SRC is __attribute__((unused))
+    // for exactly this path, where nothing may call some of them.
+    else if (!generated_only && !no_emit_tests && vm->compiler.test_fns)
+        fputs(CCCC_TEST_ASSERT_RUNTIME_SRC, f);
 
     // Serialize functions
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
-        if (obj->is_function && !function_is_header_supplied(vm, &ctx, obj))
+        if (!obj->is_function)
+            continue;
+        // #1272: mirrors the prototype loop's skip above.
+        if (obj_is_build_fn(vm, obj))
+            continue;
+        if (no_emit_tests && obj_is_test_fn(vm, obj))
+            continue;
+        if (!function_is_header_supplied(vm, &ctx, obj))
             serialize_function(f, vm, &ctx, obj);
     }
 

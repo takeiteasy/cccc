@@ -57,7 +57,7 @@ int main(void) {
 }
 ```
 
-Items 1–3 are the program: `cccc demo.c` runs it on the VM, `cccc -c=native -o demo demo.c` lowers it to a native binary. `cccc --testing demo.c` runs the `@test`. Items 4 and 5 are shown together for illustration — today the `@test` needs `--testing` and the `@build_target` needs its own file with no `main()`; see [TEST_MODE.md](man/TEST_MODE.md) and [BUILD_MODE.md](man/BUILD_MODE.md). See [MACROS.md](man/MACROS.md) for the full comptime API.
+All five items live in one file: `cccc demo.c` runs `main()` on the VM (the `@test` is inert), `cccc -c=native -o demo demo.c` lowers it to a native binary (same inert `@test`), `cccc --testing demo.c` discovers and runs the `@test`, and `cccc --build demo.c` runs the `@build_target` (`main()` is ignored). See [TEST_MODE.md](man/TEST_MODE.md) and [BUILD_MODE.md](man/BUILD_MODE.md) for the full detail on running tests/build recipes inline like this, and [MACROS.md](man/MACROS.md) for the full comptime API.
 
 ## Features
 
@@ -212,6 +212,8 @@ Testing Options:
 	                         individual tests may override via
 	                         [[cccc::test(timeout = ms)]])
 	   --test-format=FMT     Output format for test results: tap (default), plain, json
+	   --no-emit-tests       -c=native/-c=generated: drop [[cccc::test]] bodies from the
+	                         output instead of emitting them inert
 
 Build Options:
 	-b/--build               Run the input as a build script (declares native targets)

@@ -45,6 +45,25 @@ shape a [`CcccExecutable` build target](BUILD_MODE.md#target-kinds) drives.
 The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 `gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
 
+### `[[cccc::test]]`/`[[cccc::build]]` alongside `main()`
+
+A program compiled with `-c=native` (or `-m`/`-c=generated`) may also carry
+its own inline `[[cccc::test]]` functions and/or a
+`[[cccc::build]]`/`[[cccc::build_target]]` recipe — see
+[BUILD_MODE.md's Build recipes in a program file](BUILD_MODE.md#build-recipes-in-a-program-file)
+and [TEST_MODE.md](TEST_MODE.md). Under plain `-c=native` (not
+`--testing=native`) the two kinds are treated differently:
+
+- `[[cccc::test]]` bodies **are emitted**, alongside the same
+  `__builtin_assert_*` runtime `--testing=native`'s generated harness uses —
+  but with no harness driving them, each assertion call is inert (it prints
+  "called outside a test run" and returns). Pass `--no-emit-tests` to drop
+  the bodies entirely instead.
+- `[[cccc::build]]`/`[[cccc::build_target]]` bodies are **always dropped**,
+  regardless of `--no-emit-tests` — the build runtime's `__builtin_build_*`
+  calls are host-side only (see `cc_load_build_runtime`) and have no native
+  lowering, so emitting them would fail to link.
+
 ### `--deps-file=PATH`
 
 `--deps-file=PATH` writes a make-style dependency rule — `<output>: <source>

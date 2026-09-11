@@ -42,7 +42,7 @@ void test_pointers(void) {
 }
 ```
 
-No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`.
+No `#include` is required — the assertion macros and their backing declarations are injected automatically when running with `--testing`, or when the file's own source carries a `[[cccc::test]]`/`@test`/`__attribute__((test))` attribute even without `--testing` (see [Tests alongside `main()`](#tests-alongside-main) below). Outside `--testing` the test functions still compile, but nothing calls them.
 
 ### Multi-file `--testing` invocations
 
@@ -59,6 +59,43 @@ found in any input file`, exit 1), not a silent `TAP version 13 / 1..0` pass
 — this catches an invocation whose test file's declarations never reached
 the parser. A `--test=GLOB`/`--test-suite=` filter that matches nothing is
 unaffected and keeps exiting 0 (that's a filter miss, not a broken build).
+
+### Tests alongside `main()`
+
+A file does not need `--testing` to compile a `[[cccc::test]]` function next
+to `main()` — `testing.h` (the `Assert*` macros and their
+`__builtin_assert_*` backing declarations) is injected automatically whenever
+the file's own source carries a `[[cccc::test]]`/`[[cccc::test_setup]]`/
+`[[cccc::test_teardown]]` attribute (`@test`, `[[cccc::test]]`, or
+`__attribute__((test))`, all recognized), the same way it always is under
+`--testing`:
+
+```c
+int main(void) {
+    return 0;
+}
+
+@test void it_works(void) {
+    AssertEq(1 + 1, 2);
+}
+```
+
+What each invocation does with that file:
+
+| Command | Behaviour |
+|---|---|
+| `cccc demo.c` | Runs `main()` on the VM. `it_works` compiles but is never run. |
+| `cccc -c=native -o demo demo.c` | Native binary of `main()`. `it_works` is emitted (inert) alongside the assert runtime — see [NATIVE.md](NATIVE.md). |
+| `cccc --testing demo.c` | Discovers and runs `it_works`, exactly as if it were the whole file. |
+
+This is demand-driven, not unconditional: a file with no `@test`/
+`[[cccc::test...]]` attribute anywhere sees none of `testing.h`'s `Assert*`
+macros, so an ordinary program is free to define its own function named
+`Assert` (or any other assertion-macro name) without a collision. The scan
+only looks at the file's own text, so an attribute produced by macro
+expansion, or written only in an `#include`d header, is not enough by
+itself — pass `--testing` explicitly in that case, or
+`#include <cccc/testing.h>` directly.
 
 ### Programmatic test generation via emit blocks
 
@@ -1241,7 +1278,7 @@ Tests that assert on parse-time warnings must remain as legacy files using
 
 ## Assertion Macros
 
-All assertion macros use the `$` prefix and are injected automatically in `--testing` mode.
+All assertion macros use the `$` prefix and are injected automatically in `--testing` mode, or whenever the file itself carries a `[[cccc::test]]` attribute — see [Tests alongside `main()`](#tests-alongside-main).
 
 ### Basic Validity
 

@@ -3472,6 +3472,73 @@ static void free_target(BuildTarget *t) {
     free(t);
 }
 
+// #1272: shared Builder-context setup used by all three cc_run_build()
+// drivers (factory-direct --build-target=NAME, the entry-less "run every
+// factory" fallback, and the ordinary entry-based flow) -- previously
+// duplicated verbatim across the first two. factory_names/factory_count are
+// passed separately rather than read off opts because the entry-less
+// fallback needs them before opts->target_name resolution would apply.
+static void init_builder_ctx(Builder *ctx, VirtualMachine *vm,
+                             const CcBuildOptions *opts,
+                             const char **factory_names, int factory_count) {
+    char cwd[1024];
+    if (!getcwd(cwd, sizeof(cwd)))
+        snprintf(cwd, sizeof(cwd), ".");
+
+    *ctx            = (Builder){0};
+    ctx->vm         = vm;
+    ctx->root       = cwd;
+    ctx->out_dir    = xstrdup(opts->out_dir ? opts->out_dir : "build");
+    ctx->host       = CCCC_BUILD_HOST;
+    ctx->verbose    = opts->verbose || opts->build_verbose;
+    ctx->quiet      = opts->quiet && !(opts->verbose || opts->build_verbose);
+    ctx->keep_going = opts->keep_going;
+    ctx->dry_run    = opts->dry_run;
+    ctx->jobs       = opts->jobs > 1 ? opts->jobs : 1;
+    ctx->defaults   = opts->defaults;
+    ctx->tool_allow = opts->tool_allow;
+    ctx->tool_allow_count = opts->tool_allow_count;
+    ctx->factory_names    = factory_names;
+    ctx->factory_count    = factory_count;
+    ctx->profile          = opts->profile;
+    ctx->cross_triple     = opts->cross_triple;
+    ctx->cross_cc         = opts->cross_cc;
+    ctx->cccc_self        = resolve_cccc_self(opts->argv0);
+    if (opts->build_cache) {
+        ctx->cache_dir = *opts->build_cache ? xstrdup(opts->build_cache)
+                                            : join(ctx->out_dir, ".cccc-cache");
+        mkdir_p(ctx->cache_dir);
+    }
+    ctx->build_options       = opts->build_options;
+    ctx->build_options_count = opts->build_options_count;
+    ctx->build_install       = opts->build_install;
+    ctx->user_args           = opts->user_args;
+    ctx->user_args_count     = opts->user_args_count;
+    const char *prefix_env   = getenv("PREFIX");
+    ctx->install_prefix      = xstrdup(prefix_env ? prefix_env : "/usr/local");
+}
+
+// Mirrors init_builder_ctx's teardown half, minus the final install-prefix
+// chdir restore which run_install() itself may have moved away from --
+// callers still free/restore ctx->original_cwd themselves right after this.
+static void teardown_builder_ctx(Builder *ctx) {
+    for (int i = 0; i < ctx->targets_count; i++)
+        free_target(ctx->targets[i]);
+    free(ctx->targets);
+    free(ctx->out_dir);
+    free(ctx->cache_dir);
+    free((char *)ctx->cccc_self);
+    for (int i = 0; i < ctx->captures_count; i++)
+        free(ctx->captures[i]);
+    free(ctx->captures);
+    free(ctx->install_prefix);
+    free(ctx->install_targets);
+    if (ctx->original_cwd) {
+        chdir(ctx->original_cwd);
+        free(ctx->original_cwd);
+    }
+}
+
 // run_install: copy all registered install_targets to install_prefix/{bin,lib}.
 // Respects dry_run.  Returns 0 on success, non-zero if any copy fails.
 static int run_install(Builder *ctx) {
@@ -3623,44 +3690,8 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     return 1;
                 }
 
-                char cwd[1024];
-                if (!getcwd(cwd, sizeof(cwd)))
-                    snprintf(cwd, sizeof(cwd), ".");
-
-                Builder ctx = {0};
-                ctx.vm      = vm;
-                ctx.root    = cwd;
-                ctx.out_dir = xstrdup(opts->out_dir ? opts->out_dir : "build");
-                ctx.host    = CCCC_BUILD_HOST;
-                ctx.verbose = opts->verbose || opts->build_verbose;
-                ctx.quiet =
-                    opts->quiet && !(opts->verbose || opts->build_verbose);
-                ctx.keep_going       = opts->keep_going;
-                ctx.dry_run          = opts->dry_run;
-                ctx.jobs             = opts->jobs > 1 ? opts->jobs : 1;
-                ctx.defaults         = opts->defaults;
-                ctx.tool_allow       = opts->tool_allow;
-                ctx.tool_allow_count = opts->tool_allow_count;
-                ctx.factory_names    = factory_names;
-                ctx.factory_count    = factory_count;
-                ctx.profile          = opts->profile;
-                ctx.cross_triple     = opts->cross_triple;
-                ctx.cross_cc         = opts->cross_cc;
-                ctx.cccc_self        = resolve_cccc_self(opts->argv0);
-                if (opts->build_cache) {
-                    ctx.cache_dir = *opts->build_cache
-                                        ? xstrdup(opts->build_cache)
-                                        : join(ctx.out_dir, ".cccc-cache");
-                    mkdir_p(ctx.cache_dir);
-                }
-                ctx.build_options       = opts->build_options;
-                ctx.build_options_count = opts->build_options_count;
-                ctx.build_install       = opts->build_install;
-                ctx.user_args           = opts->user_args;
-                ctx.user_args_count     = opts->user_args_count;
-                const char *prefix_env  = getenv("PREFIX");
-                ctx.install_prefix =
-                    xstrdup(prefix_env ? prefix_env : "/usr/local");
+                Builder ctx;
+                init_builder_ctx(&ctx, vm, opts, factory_names, factory_count);
 
                 s_ctx = &ctx;
                 cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
@@ -3680,21 +3711,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                     if (run_install(&ctx) != 0)
                         exit_code = 1;
 
-                for (int j = 0; j < ctx.targets_count; j++)
-                    free_target(ctx.targets[j]);
-                free(ctx.targets);
-                free(ctx.out_dir);
-                free(ctx.cache_dir);
-                free((char *)ctx.cccc_self);
-                for (int j = 0; j < ctx.captures_count; j++)
-                    free(ctx.captures[j]);
-                free(ctx.captures);
-                free(ctx.install_prefix);
-                free(ctx.install_targets);
-                if (ctx.original_cwd) {
-                    chdir(ctx.original_cwd);
-                    free(ctx.original_cwd);
-                }
+                teardown_builder_ctx(&ctx);
                 free(factory_names);
                 return exit_code;
             }
@@ -3702,6 +3719,52 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         // NAME did not match any factory; fall through to entry-based flow
         // where run_graph will match it against registered target names
         // (existing behaviour).
+    }
+
+    // #1272: entry-less flow -- no --build-entry, no [[cccc::build]] entry,
+    // and no conventional "build_main" name, but one or more
+    // [[cccc::build_target]] factories exist. Run every factory (each
+    // registers its own target(s) into ctx.targets as a side effect of
+    // Executable()/StaticLib()/...) and then build everything, same as
+    // BuildAll(ctx) would from inside an explicit entry. This is what makes
+    // `cccc --build demo.c` work on a file whose only build recipe is an
+    // inline `@build_target` next to main() -- see man/BUILD_MODE.md.
+    if (!opts->entry_name && !vm->compiler.build_fns && factory_count > 0 &&
+        !find_fn(prog, "build_main")) {
+        Builder ctx;
+        init_builder_ctx(&ctx, vm, opts, factory_names, factory_count);
+        ctx.target_filter  = opts->target_name;
+
+        int failed_factory = 0;
+        for (BuildTargetFnRecord *r = vm->compiler.build_target_fns; r;
+             r                      = r->next) {
+            Obj *factory_fn = find_fn(prog, r->name);
+            if (!factory_fn || !factory_fn->is_function) {
+                fprintf(stderr,
+                        "build: factory '%s' not found in compiled output\n",
+                        r->name);
+                failed_factory = 1;
+                break;
+            }
+            s_ctx = &ctx;
+            cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
+            BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
+            s_ctx            = NULL;
+            if (!tgt) {
+                fprintf(stderr, "build: factory '%s' returned NULL\n", r->name);
+                failed_factory = 1;
+                break;
+            }
+        }
+
+        int exit_code = failed_factory ? 1 : (run_graph(&ctx, NULL) ? 1 : 0);
+        if (exit_code == 0 && ctx.build_install && ctx.install_count > 0)
+            if (run_install(&ctx) != 0)
+                exit_code = 1;
+
+        teardown_builder_ctx(&ctx);
+        free(factory_names);
+        return exit_code;
     }
 
     // Entry-based flow: resolve and invoke build_main (or the --build-entry
@@ -3719,46 +3782,11 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         return 1;
     }
 
-    char cwd[1024];
-    if (!getcwd(cwd, sizeof(cwd)))
-        snprintf(cwd, sizeof(cwd), ".");
-
-    Builder ctx       = {0};
-    ctx.vm            = vm;
-    ctx.root          = cwd;
-    ctx.out_dir       = xstrdup(opts->out_dir ? opts->out_dir : "build");
-    ctx.host          = CCCC_BUILD_HOST;
+    Builder ctx;
+    init_builder_ctx(&ctx, vm, opts, factory_names, factory_count);
     ctx.target_filter = opts->target_name;
-    ctx.verbose       = opts->verbose || opts->build_verbose;
-    ctx.quiet         = opts->quiet && !(opts->verbose || opts->build_verbose);
-    ctx.keep_going    = opts->keep_going;
-    ctx.dry_run       = opts->dry_run;
-    ctx.jobs          = opts->jobs > 1 ? opts->jobs : 1;
-    ctx.defaults      = opts->defaults;
-    ctx.tool_allow    = opts->tool_allow;
-    ctx.tool_allow_count = opts->tool_allow_count;
-    ctx.factory_names    = factory_names;
-    ctx.factory_count    = factory_count;
-    ctx.profile          = opts->profile;
-    ctx.cross_triple     = opts->cross_triple;
-    ctx.cross_cc         = opts->cross_cc;
-    ctx.cccc_self        = resolve_cccc_self(opts->argv0);
-    if (opts->build_cache) {
-        ctx.cache_dir = *opts->build_cache ? xstrdup(opts->build_cache)
-                                           : join(ctx.out_dir, ".cccc-cache");
-        mkdir_p(ctx.cache_dir);
-    }
-    ctx.build_options       = opts->build_options;
-    ctx.build_options_count = opts->build_options_count;
-    ctx.build_install       = opts->build_install;
-    ctx.user_args           = opts->user_args;
-    ctx.user_args_count     = opts->user_args_count;
-    {
-        const char *prefix_env = getenv("PREFIX");
-        ctx.install_prefix = xstrdup(prefix_env ? prefix_env : "/usr/local");
-    }
 
-    s_ctx = &ctx;
+    s_ctx             = &ctx;
     cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
     long long ret = vm->regs[REG_A0];
     s_ctx         = NULL;
@@ -3773,21 +3801,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
         if (run_install(&ctx) != 0)
             exit_code = 1;
 
-    for (int i = 0; i < ctx.targets_count; i++)
-        free_target(ctx.targets[i]);
-    free(ctx.targets);
-    free(ctx.out_dir);
-    free(ctx.cache_dir);
-    free((char *)ctx.cccc_self);
-    for (int i = 0; i < ctx.captures_count; i++)
-        free(ctx.captures[i]);
-    free(ctx.captures);
-    free(ctx.install_prefix);
-    free(ctx.install_targets);
-    if (ctx.original_cwd) {
-        chdir(ctx.original_cwd);
-        free(ctx.original_cwd);
-    }
+    teardown_builder_ctx(&ctx);
     free(factory_names);
     return exit_code;
 }

@@ -2936,6 +2936,129 @@ Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag) {
     return toks;
 }
 
+// #1272: cheap pre-parse scan deciding whether a TU that did NOT ask for
+// --testing/--build should still get testing.h/building.h auto-injected,
+// because it carries its own [[cccc::test]]/[[cccc::build]] (or @test/
+// @build, or __attribute__((test))/((build))) attribute. Deliberately a raw
+// byte scan, not a real tokenize_file() pass -- calling tokenize_file() here
+// would register a second File/input_files entry for the same path (it bumps
+// vm->compiler.file_no as a side effect) ahead of the real per-TU
+// cc_preprocess() call below. Skips // and /* */ comments and "..."/'...'
+// string/char literals so a match only ever fires on real attribute syntax,
+// never on a mention in a comment or diagnostic string.
+//
+// A name counts only in an attribute position: immediately preceded (modulo
+// whitespace) by '@', by "cccc::", or by "((" whose own preceding identifier
+// is "__attribute__". This deliberately does NOT match a bare `build_main`
+// function definition -- see cc_scan_source_for_mode_attrs's caller for why
+// (a bare identifier in ordinary code position is exactly the collision this
+// scan exists to avoid triggering on).
+void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
+                                   bool *wants_build) {
+    *wants_test  = false;
+    *wants_build = false;
+
+    FILE *f      = fopen(path, "rb");
+    if (!f)
+        return;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    if (len <= 0) {
+        fclose(f);
+        return;
+    }
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) {
+        fclose(f);
+        return;
+    }
+    size_t got = fread(buf, 1, (size_t)len, f);
+    fclose(f);
+    buf[got] = '\0';
+
+    // Position of the last identifier's start/end, and what directly
+    // precedes it (skipping whitespace), so a match can be judged once the
+    // identifier's extent is known.
+    const char *p = buf;
+    while (*p) {
+        // Skip comments and string/char literals verbatim.
+        if (p[0] == '/' && p[1] == '/') {
+            p += 2;
+            while (*p && *p != '\n')
+                p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/'))
+                p++;
+            if (*p)
+                p += 2;
+            continue;
+        }
+        if (p[0] == '"' || p[0] == '\'') {
+            char quote = *p++;
+            while (*p && *p != quote) {
+                if (*p == '\\' && p[1])
+                    p++;
+                p++;
+            }
+            if (*p)
+                p++;
+            continue;
+        }
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char *start = p;
+            while (isalnum((unsigned char)*p) || *p == '_')
+                p++;
+            size_t len_id = (size_t)(p - start);
+
+            bool   name_is_test =
+                (len_id == 4 && !strncmp(start, "test", 4)) ||
+                (len_id == 11 && !strncmp(start, "test_setup", 11)) ||
+                (len_id == 14 && !strncmp(start, "test_teardown", 14));
+            bool name_is_build =
+                (len_id == 5 && !strncmp(start, "build", 5)) ||
+                (len_id == 12 && !strncmp(start, "build_target", 12));
+
+            if (name_is_test || name_is_build) {
+                // Look backward (skipping whitespace) for '@', "::" preceded
+                // by "cccc", or "((" preceded by "__attribute__".
+                const char *q = start;
+                while (q > buf && isspace((unsigned char)q[-1]))
+                    q--;
+                bool in_attr_pos = false;
+                if (q > buf && q[-1] == '@') {
+                    in_attr_pos = true;
+                } else if (q - buf >= 2 && q[-1] == ':' && q[-2] == ':') {
+                    const char *r = q - 2;
+                    while (r > buf && isspace((unsigned char)r[-1]))
+                        r--;
+                    if (r - buf >= 4 && !strncmp(r - 4, "cccc", 4))
+                        in_attr_pos = true;
+                } else if (q - buf >= 2 && q[-1] == '(' && q[-2] == '(') {
+                    const char *r = q - 2;
+                    while (r > buf && isspace((unsigned char)r[-1]))
+                        r--;
+                    if (r - buf >= 13 && !strncmp(r - 13, "__attribute__", 13))
+                        in_attr_pos = true;
+                }
+                if (in_attr_pos) {
+                    if (name_is_test)
+                        *wants_test = true;
+                    if (name_is_build)
+                        *wants_build = true;
+                }
+            }
+            continue;
+        }
+        p++;
+    }
+
+    free(buf);
+}
+
 static char *search_include_next(VirtualMachine *vm, char *filename) {
     // First search include_paths
     for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;
