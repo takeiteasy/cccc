@@ -1019,6 +1019,114 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
     leave_scope(vm);
 }
 
+// Walks a resolved parameter-bounds template (Type.checked_param_bounds_lo/hi,
+// #488) validating every ND_VAR it contains -- the parameter analogue of
+// check_member_bounds_template() above. A sibling-parameter reference
+// resolves to a checked_self_param_idx placeholder (legal, substituted with
+// the actual argument expression at each call site by
+// clone_param_bounds_node(), src/parse_checked.c); a global resolves to a
+// non-local Obj (legal); a LOCAL leaking in from whatever scope the function
+// declarator happens to be nested in would be unsound to trust the same way
+// a struct member's leaked local is -- resolve_param_checked_bounds() below
+// pins resolution to file scope specifically so this case can never actually
+// occur, but the check stays as defense in depth (e.g. if that pin is ever
+// weakened).
+static void check_param_bounds_template(VirtualMachine *vm, Node *n,
+                                        Token *tok) {
+    if (!n)
+        return;
+    if (n->kind == ND_VAR) {
+        Obj *v = n->var;
+        if (!v->checked_self_param_idx && v->is_local)
+            error_tok(vm, tok,
+                      "checked-pointer bounds on a function parameter may "
+                      "only reference sibling parameters or globals");
+    }
+    check_param_bounds_template(vm, n->lhs, tok);
+    check_param_bounds_template(vm, n->rhs, tok);
+    check_param_bounds_template(vm, n->cond, tok);
+    check_param_bounds_template(vm, n->then, tok);
+    check_param_bounds_template(vm, n->els, tok);
+}
+
+// #488: resolves a callee's checked-pointer PARAMETER bounds expressions
+// into a reusable TEMPLATE, once per distinct function Type, for
+// rewrite_checked_call_args() (src/parse_checked.c) to substitute at every
+// call site. A prototype-only declaration never resolves its parameters'
+// bounds tokens at all (resolve_checked_bounds() is never called for one --
+// see its own comment -- because it has no body scope to resolve into and
+// no accesses of its own to check); this is what finally consumes those
+// token spans, deferred exactly so a caller could someday do so.
+//
+// Mirrors resolve_member_checked_bounds() immediately above -- same
+// synthetic-scope-of-placeholders shape -- with one deliberate difference:
+// this scope is pinned to FILE scope before entering it (walking
+// vm->compiler.scope up via ->next), not left at whatever scope happens to
+// be current. Resolving at an arbitrary call site's scope would let a bound
+// naming a global bind to a global declared AFTER the callee's own
+// declaration -- a silent divergence from every other bounds resolution in
+// the compiler, which always resolves in the scope live at the declaration
+// being resolved, not the scope live at first use. Pinning to file scope
+// also happens to make this correct regardless of how early or late the
+// first call site is (a prototype's very first call may be lexically
+// before, after, or in a wholly different function to its declaration).
+//
+// Idempotent and cheap to over-call: checked_param_tmpl_done (on the
+// TY_FUNC type itself, not on any one parameter) is set unconditionally
+// before the scope-of-placeholders work below runs, so a function type
+// with no enforceable parameter bounds at all still short-circuits on
+// every call after the first. Guarded on !in_type_lookahead, same reason
+// cc_check_checked_scope_decl() is: resolve_bounds_tokens() can call
+// error_tok() and a speculative type-lookahead declarator probe must never
+// fire a fatal error for a declaration that is about to be discarded.
+void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
+    if (fn_ty->checked_param_tmpl_done || vm->compiler.in_type_lookahead)
+        return;
+    fn_ty->checked_param_tmpl_done = true;
+
+    bool any                       = false;
+    for (Type *p = fn_ty->params; p; p = p->next)
+        if (p->name && p->checked_bounds_form != CB_NONE &&
+            p->checked_bounds_form != CB_UNKNOWN) {
+            any = true;
+            break;
+        }
+    if (!any)
+        return;
+
+    Scope *saved_scope = vm->compiler.scope;
+    while (vm->compiler.scope->next)
+        vm->compiler.scope = vm->compiler.scope->next;
+    enter_scope(vm);
+
+    int idx = 0;
+    for (Type *p = fn_ty->params; p; p = p->next) {
+        idx++;
+        if (!p->name)
+            continue;
+        Obj *placeholder = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+        memset(placeholder, 0, sizeof(Obj));
+        placeholder->name = arena_strndup(vm, p->name->loc, p->name->len);
+        placeholder->display_name                       = placeholder->name;
+        placeholder->ty                                 = p;
+        placeholder->checked_self_param_idx             = idx;
+        push_scope(vm, p->name->loc, p->name->len)->var = placeholder;
+    }
+
+    for (Type *p = fn_ty->params; p; p = p->next) {
+        if (!p->name || p->checked_bounds_form == CB_NONE ||
+            p->checked_bounds_form == CB_UNKNOWN)
+            continue;
+        resolve_bounds_tokens(vm, p, &p->checked_param_bounds_lo,
+                              &p->checked_param_bounds_hi);
+        check_param_bounds_template(vm, p->checked_param_bounds_lo, p->name);
+        check_param_bounds_template(vm, p->checked_param_bounds_hi, p->name);
+    }
+
+    leave_scope(vm);
+    vm->compiler.scope = saved_scope;
+}
+
 // Create a function Obj that is NOT in the global scope or globals list.
 // Used for __builtin_strlen/__builtin_strcmp stubs so they don't interfere
 // with user redeclarations of strlen/strcmp.

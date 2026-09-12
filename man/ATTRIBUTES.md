@@ -699,6 +699,19 @@ transparent, #482/#488) — see [SAFETY.md § Checked
 Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
 note.
 
+**Bounds-safe interfaces** (#488): annotating a *parameter* with any of
+these six attributes needs no separate marker to also serve as a Checked
+C-style bounds-safe interface — a checked attribute already imposes zero
+restriction on an unchecked caller, so the annotation itself is the
+interface. At every call site whose argument is itself declared-checked,
+CCCC verifies (via the same `CHKAB` opcode above, under
+`--checked-pointers`) that the argument's own bounds imply the parameter's
+declared bounds evaluated with that call's actual arguments — closing the
+one caller-side gap this layer otherwise left. See [SAFETY.md § Bounds-safe
+interfaces](SAFETY.md#checked-pointers) for the full reference, including
+the substitutability rule for non-trivial arguments and the same-TU
+callee-body caveat.
+
 **Checked arrays** (#487) extend the same layer to array declarations
 directly — `int a _Checked[10]` / `char s _Nt_checked[11]` — so an array's own
 extent is checked the same way a checked pointer's `count(n)` is, with no new

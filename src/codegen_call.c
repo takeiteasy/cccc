@@ -190,8 +190,23 @@ static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
                 continue;
             case ND_COMMA:
             case ND_ASSIGN:
-                n = n->rhs;
-                continue;
+                // #488: was `n = n->rhs; continue;` (comma-tail only). A
+                // checked-pointer call-argument desugar (`(__ca = arg, __ca)`,
+                // rewrite_checked_call_args(), src/parse_checked.c) has the
+                // frame-address-carrying expression on the ASSIGN's rhs, but
+                // the comma's own rhs is just a plain ND_VAR read of `__ca` --
+                // following only the comma's rhs therefore walks straight past
+                // `arg` and never sees it, so a tail call like
+                // `return sink(buf + i, 4);` (buf a frame-local array) would
+                // silently pass the #716/#718 frame-escape check and get
+                // wrongly tail-call-optimized, handing the callee a pointer
+                // into the about-to-be-reused frame. Recursing into BOTH sides
+                // (matching the ND_COND arm just below) catches it via the
+                // inner ND_ASSIGN's own rhs; this also retroactively covers
+                // #486's structurally identical `(__cv = (T[[...]])e, __cv)`
+                // bounds-cast desugar, which had the same latent gap.
+                return tail_arg_carries_frame_addr(fn, n->lhs) ||
+                       tail_arg_carries_frame_addr(fn, n->rhs);
             case ND_COND:
                 return tail_arg_carries_frame_addr(fn, n->then) ||
                        tail_arg_carries_frame_addr(fn, n->els);

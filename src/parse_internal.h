@@ -429,7 +429,10 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
 void mark_last_type_name_as_definition(VirtualMachine *vm, Type *ty); // #1010
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var);
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members);
+void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
+void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
+                               Token *tok);
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                            AttrTargetKind kind, char *name, Type *target_ty,
                            Obj *obj, Token *tok);

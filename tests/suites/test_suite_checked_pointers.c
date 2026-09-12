@@ -2280,3 +2280,120 @@ void test_dynamic_check_true_no_trap(void) {
     __builtin_cccc_dynamic_check(i < n);
     AssertEq(i, 3);
 }
+
+// ---------------------------------------------------------------------
+// #488: bounds-safe interfaces -- caller-side verification of a checked
+// pointer PARAMETER's declared bounds against the actual argument
+// expressions at each call site (rewrite_checked_call_args(),
+// src/parse_checked.c). The headline trap and most negative-coverage
+// cases live in standalone tests/test_checked_call_arg_*.c files (a
+// compile-clean trap can't share this suite's single compiling TU with a
+// runtime one that must run to completion for a DIFFERENT reason -- see
+// this suite's own header comment); the cases below are the ones that
+// fit comfortably as ordinary [[cccc::test]]/exit_code=255 cases.
+// ---------------------------------------------------------------------
+
+static void checked_call_arg_sink(int *[[cccc::array, cccc::count(n)]] p,
+                                  int n) {
+    (void)p;
+    (void)n;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_pass(void) {
+    int *[[cccc::array, cccc::count(4)]] big = (int[4]){1, 2, 3, 4};
+    checked_call_arg_sink(big, 4); // satisfies the callee's claim -- no trap
+    AssertEq(big[0], 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_count_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_sink(small, 8); // lies -- CHKAB traps
+}
+
+[[cccc::test]]
+void test_checked_call_arg_unchecked_caller_no_check(void) {
+    int raw[2] = {1, 2};
+    // An ordinary unchecked pointer argument gets no caller-side check at
+    // all -- unchecked-to-unchecked interop is unaffected by #488, even
+    // though this call's own declared claim is false.
+    checked_call_arg_sink(raw, 100);
+    AssertEq(raw[0], 1);
+}
+
+static void
+checked_call_arg_byte_sink(char *[[cccc::array, cccc::byte_count(n)]] p,
+                           int n) {
+    (void)p;
+    (void)n;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_byte_count_trap(void) {
+    char *[[cccc::array, cccc::byte_count(2)]] small = (char[2]){1, 2};
+    checked_call_arg_byte_sink(small, 100);
+}
+
+static void
+checked_call_arg_range_sink(int *[[cccc::array, cccc::bounds(p, p + n)]] p,
+                            int n) {
+    (void)p;
+    (void)n;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_bounds_range_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_range_sink(small, 100);
+}
+
+static void checked_call_arg_single_sink(int *[[cccc::single]] p) {
+    (void)p;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_single_pass(void) {
+    int *[[cccc::array, cccc::count(1)]] one = (int[1]){9};
+    checked_call_arg_single_sink(one); // valid for exactly one object
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_single_trap(void) {
+    int *[[cccc::array, cccc::count(0)]] zero = (int[1]){9};
+    checked_call_arg_single_sink(zero); // valid for zero objects -- traps
+}
+
+static void
+checked_call_arg_unknown_sink(int *[[cccc::array, cccc::bounds(unknown)]] p,
+                              int n) {
+    (void)p;
+    (void)n;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_unknown_no_check(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    // bounds(unknown) declares a checked type but nothing to enforce --
+    // no caller-side check is emitted, so this false claim doesn't trap.
+    checked_call_arg_unknown_sink(small, 8);
+    AssertEq(small[0], 1);
+}
+
+static int checked_call_arg_global_bound = 4;
+static void checked_call_arg_global_sink(
+    int *[[cccc::array, cccc::count(checked_call_arg_global_bound)]] p) {
+    (void)p;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_global_bound_pass(void) {
+    int *[[cccc::array, cccc::count(4)]] big = (int[4]){1, 2, 3, 4};
+    checked_call_arg_global_sink(big); // satisfies the global bound
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_global_bound_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_global_sink(small); // only 2 elements -- traps
+}

@@ -1525,6 +1525,242 @@ void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn) {
     verify_checked_assign_scan(vm, fn, fn->body);
 }
 
+// ---------------------------------------------------------------------
+// #488: bounds-safe interfaces -- caller-side verification of a checked
+// pointer PARAMETER's declared bounds against the actual argument
+// expressions, at each call site. Unlike #919/#944 above, this is not a
+// whole-function tail pass: a call site is one local, syntactic spot, so
+// rewrite_checked_call_args() runs inline from funcall() (src/parse_
+// postfix.c), once per call, right before the ND_FUNCALL node is built.
+//
+// The mechanism deliberately reuses #944's own machinery wholesale rather
+// than duplicating it: for each qualifying argument this rewrites
+// `arg` into `(__ca = arg, __ca)`, where `__ca` is a fresh, ordinary
+// declared-checked local carrying the PARAMETER's bounds template with
+// every sibling-parameter reference substituted by a clone of that call's
+// actual argument expression (clone_param_bounds_node() below). No CHKAB
+// stamping happens here at all -- verify_checked_assign_bounds() (just
+// above), which already runs after this function's parent function
+// finishes parsing, discovers the resulting `__ca = arg` ND_ASSIGN on its
+// own ordinary whole-body walk (verify_checked_assign_scan() already
+// recurses into node->args, and from there into an ND_COMMA's ->lhs/->rhs
+// like any other node) and instruments it exactly as if the programmer had
+// written `__ca = arg;` by hand -- same CHKAB pair, same dst-after-store/
+// src-before-store ordering, zero new codegen. Verified empirically before
+// committing to this design: an ND_ASSIGN nested in an ND_COMMA that is
+// itself a call argument is reached by verify_checked_assign_scan()'s
+// existing descent.
+// ---------------------------------------------------------------------
+
+// Walks a resolved parameter-bounds TEMPLATE (Type.checked_param_bounds_lo/
+// hi, resolved once by resolve_param_checked_bounds(), src/parse_core.c)
+// checking that every OTHER parameter it references (every ND_VAR whose
+// var->checked_self_param_idx names a different parameter than `self_idx`)
+// is fed, at THIS call site, by a side-effect-free argument expression --
+// the substitutability gate. `arg_by_idx[k-1]` is that call's actual
+// argument for parameter k (1-based), captured once before any rewriting
+// begins; node_has_side_effects() is the same predicate
+// resolve_bounds_tokens() already uses for the identical "this expression
+// is re-evaluated, so it must have no side effects" reasoning -- NOT
+// checked_obj_is_trivial(), which has no ND_NUM arm and would wrongly
+// decline a plain integer-literal argument (the ticket's own headline
+// case, `sink(small, 8)`). A reference to `self_idx` itself needs no
+// argument at all -- it substitutes to `__ca`'s own value, not to any
+// argument expression -- so it is always accepted here. An
+// ND_BLOCK_CALL argument is explicitly declined even though
+// node_has_side_effects() has no true-arm for that kind (a known,
+// separately-tracked gap in the shared predicate) -- a block invocation
+// can run arbitrary side-effecting code same as any other call.
+static bool checked_param_bounds_args_ok(Node *n, Node **arg_by_idx, int nargs,
+                                         int self_idx) {
+    if (!n)
+        return true;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
+        int k = n->var->checked_self_param_idx;
+        if (k != self_idx) {
+            if (k < 1 || k > nargs || !arg_by_idx[k - 1])
+                return false;
+            Node *a = arg_by_idx[k - 1];
+            if (node_has_side_effects(a) || a->kind == ND_BLOCK_CALL)
+                return false;
+        }
+        return true;
+    }
+    return checked_param_bounds_args_ok(n->lhs, arg_by_idx, nargs, self_idx) &&
+           checked_param_bounds_args_ok(n->rhs, arg_by_idx, nargs, self_idx) &&
+           checked_param_bounds_args_ok(n->cond, arg_by_idx, nargs, self_idx) &&
+           checked_param_bounds_args_ok(n->then, arg_by_idx, nargs, self_idx) &&
+           checked_param_bounds_args_ok(n->els, arg_by_idx, nargs, self_idx);
+}
+
+// Like clone_bounds_node()/clone_member_bounds_node(), but for a
+// PARAMETER's resolved bounds template (#488): every ND_VAR that
+// references the SAME parameter this template belongs to
+// (var->checked_self_param_idx == self_idx) is rewritten to a read of
+// `ca` (the temp standing in for that parameter's value at this call --
+// e.g. `bounds(p, p+n)` on parameter `p` itself must read `ca`, not the
+// raw argument expression, since `ca` is what CHKAB will actually verify
+// against). A reference to any OTHER parameter k substitutes a deep clone
+// of that call's actual argument expression, arg_by_idx[k-1] -- safe to
+// clone with the restricted, args/body-free clone_bounds_node() only
+// because checked_param_bounds_args_ok() (above) has already required
+// every such reference to be side-effect-free, which rules out an
+// ND_FUNCALL/ND_STMT_EXPR/etc. actually needing its ->args/->body cloned.
+static Node *clone_param_bounds_node(VirtualMachine *vm, Node *n,
+                                     Node **arg_by_idx, int nargs, int self_idx,
+                                     Obj *ca) {
+    if (!n)
+        return NULL;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
+        int k = n->var->checked_self_param_idx;
+        if (k == self_idx) {
+            Node *v = new_var_node(vm, ca, n->tok);
+            add_type(vm, v);
+            return v;
+        }
+        Node *v = clone_bounds_node(vm, arg_by_idx[k - 1]);
+        return v;
+    }
+    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *c      = *n;
+    c->next = NULL;
+    c->lhs =
+        clone_param_bounds_node(vm, n->lhs, arg_by_idx, nargs, self_idx, ca);
+    c->rhs =
+        clone_param_bounds_node(vm, n->rhs, arg_by_idx, nargs, self_idx, ca);
+    c->cond =
+        clone_param_bounds_node(vm, n->cond, arg_by_idx, nargs, self_idx, ca);
+    c->then =
+        clone_param_bounds_node(vm, n->then, arg_by_idx, nargs, self_idx, ca);
+    c->els =
+        clone_param_bounds_node(vm, n->els, arg_by_idx, nargs, self_idx, ca);
+    return c;
+}
+
+// Allocates the hidden `__ca` local this rewrite assigns each qualifying
+// argument through. Deliberately bypasses new_lvar() -- new_lvar() calls
+// warn_if_shadowing(vm, ty->name), and `ty` here is the CALLEE's parameter
+// Type, whose ->name is the callee's own parameter identifier (e.g. `n`);
+// checking that name for shadowing against the CALLER's scope would be
+// meaningless at best and a spurious "shadows a variable" warning at
+// worst. Same "" name / direct vm->compiler.locals prepend pattern as
+// checked_cast_desugar()'s `__cv` (#486) and new_checked_prop_temp()'s
+// phase-B temps (#941) -- new_var() alone still copies checked_kind/
+// checked_bounds_form off `ty`, which is what makes the result an ordinary
+// declared-checked Obj every existing pass already knows how to handle.
+static Obj *new_checked_call_temp(VirtualMachine *vm, Type *ty) {
+    Obj *var            = new_var(vm, "", 0, ty);
+    var->is_local       = true;
+    var->next           = vm->compiler.locals;
+    vm->compiler.locals = var;
+    return var;
+}
+
+// #488 entry point, called once per call site from funcall() (src/parse_
+// postfix.c), after every other per-argument validation there and before
+// the ND_FUNCALL node is built. `fn_ty` is the callee's function type
+// (already unwrapped from a function-pointer type by funcall()'s own
+// `ty` computation); `args` is the just-built, already param-type-cast
+// argument list (funcall()'s `head.next`); `tok` is the call's own token,
+// used for every node built here.
+//
+// No-op (silent) unless CCCC_CHECKED_BOUNDS is set -- ABI transparency:
+// with the flag off, this never runs, so -m/-c=native/-c=generated output
+// is unaffected. Also a no-op with no vm->compiler.current_fn live (a call
+// in a context with no enclosing function body, e.g. a global
+// initializer) -- new_checked_call_temp() needs a live locals list to
+// attach to, the same precondition checked_cast_desugar() enforces (by
+// erroring) for its own temp; here it is simply skipped, since a call in
+// such a context is either already invalid C or a constant-folding path
+// this ticket has no reason to newly reject.
+void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
+                               Token *tok) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !vm->compiler.current_fn)
+        return;
+
+    int nargs = 0;
+    for (Node *a = args; a; a = a->next)
+        nargs++;
+    if (nargs == 0)
+        return;
+
+    // Snapshot positional argument pointers -- stable for the whole call.
+    // A pointer here may later point at an ALREADY-rewritten node (this
+    // function processes parameters left to right, and an earlier
+    // parameter's argument may itself have just been rewritten into
+    // `(ca = arg, ca)`); checked_param_bounds_args_ok()'s side-effect
+    // check handles that correctly with no special-casing needed, since
+    // the rewritten shape's inner ND_ASSIGN makes node_has_side_effects()
+    // report true for it -- a param-i bounds expression referencing an
+    // already-checked param-k argument is naturally (and correctly)
+    // declined, not corrupted.
+    Node **arg_by_idx =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * nargs);
+    {
+        int i = 0;
+        for (Node *a = args; a; a = a->next)
+            arg_by_idx[i++] = a;
+    }
+
+    resolve_param_checked_bounds(vm, fn_ty);
+
+    int   idx = 0;
+    Node *a   = args;
+    for (Type *p = fn_ty->params; p && a; p = p->next, a = a->next) {
+        idx++;
+        if (p->kind != TY_PTR || p->checked_kind == CHECKED_NONE)
+            continue;
+        bool has_form = p->checked_kind == CHECKED_SINGLE ||
+                        (p->checked_bounds_form != CB_NONE &&
+                         p->checked_bounds_form != CB_UNKNOWN);
+        if (!has_form)
+            continue;
+
+        // Gate: the argument itself must be checked-rooted (#944's "kind 1"
+        // source only -- a directly declared-checked var/member, never a
+        // #941-propagated local, which can hold the [lo=-1,hi=0) OPT
+        // sentinel CHKAB has no sentinel-aware variant for).
+        CheckedBase src_base = find_checked_base(a);
+        if (!checked_base_is_declared(src_base))
+            continue;
+
+        // Gate: every OTHER parameter this parameter's bounds template
+        // references must be fed, at this call, by a side-effect-free
+        // argument.
+        if (!checked_param_bounds_args_ok(p->checked_param_bounds_lo,
+                                          arg_by_idx, nargs, idx) ||
+            !checked_param_bounds_args_ok(p->checked_param_bounds_hi,
+                                          arg_by_idx, nargs, idx))
+            continue;
+
+        Obj *ca               = new_checked_call_temp(vm, p);
+        ca->checked_bounds_lo = clone_param_bounds_node(
+            vm, p->checked_param_bounds_lo, arg_by_idx, nargs, idx, ca);
+        ca->checked_bounds_hi = clone_param_bounds_node(
+            vm, p->checked_param_bounds_hi, arg_by_idx, nargs, idx, ca);
+
+        // `(ca = arg, ca)`, same shape and in-place-overwrite trick as
+        // checked_cast_desugar()'s `(__cv = (T[[...]])e, __cv)` (#486).
+        Node *arg_copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+        *arg_copy      = *a;
+        arg_copy->next = NULL;
+
+        Node *lhs      = new_var_node(vm, ca, tok);
+        add_type(vm, lhs);
+        Node *store = new_binary(vm, ND_ASSIGN, lhs, arg_copy, tok);
+        add_type(vm, store);
+
+        Node *result = new_var_node(vm, ca, tok);
+        add_type(vm, result);
+        Node *comma = new_binary(vm, ND_COMMA, store, result, tok);
+        add_type(vm, comma);
+
+        Node *saved_next = a->next;
+        *a               = *comma;
+        a->next          = saved_next;
+    }
+}
+
 bool is_attr_name(Token *tok, char *name) {
     if (equal(tok, name))
         return true;

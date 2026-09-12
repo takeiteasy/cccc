@@ -1137,9 +1137,29 @@ static void find_and_mark_escaping_addr(Node *n) {
             case ND_CAST:
                 n = n->lhs;
                 continue;
+            case ND_ASSIGN: // the *value* of `a = b` is its rhs
+                n = n->rhs;
+                continue;
             case ND_COMMA:
-            case ND_ASSIGN: // the *value* of `a = b` (or the tail of a comma)
-                            // is its rhs
+                // #488: was `n = n->rhs; continue;` (comma-tail only, same as
+                // ND_ASSIGN above). A checked-pointer call-argument desugar
+                // (`(__ca = arg, __ca)`, rewrite_checked_call_args(), src/
+                // parse_checked.c) has the actual frame-address-carrying
+                // expression on the ASSIGN's rhs (inside the comma's lhs), but
+                // the comma's own rhs is just a plain ND_VAR read of `__ca` --
+                // following only the comma's rhs walks straight past `arg` and
+                // never marks its root escaping, the same latent gap this
+                // ticket's TCO fix (tail_arg_carries_frame_addr(),
+                // src/codegen_call.c) closes for CALLT specifically. Left
+                // unfixed here, a frame-local array/struct passed through this
+                // desugar would wrongly keep addr_escapes false, which feeds
+                // op_LEA3_fn's stack_ptr_epochs recording decision (#673/#676)
+                // -- a real, if narrower, dangling-pointer-detection gap, not
+                // just a TCO one. The comma's lhs can be an ND_ASSIGN (this
+                // desugar's own shape) or, in general, anything else a comma
+                // might wrap -- recurse into it with the same walk rather than
+                // assuming ND_ASSIGN specifically.
+                find_and_mark_escaping_addr(n->lhs);
                 n = n->rhs;
                 continue;
             case ND_COND: // ternary: both arms can be the value actually passed

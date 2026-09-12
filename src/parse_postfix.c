@@ -1065,6 +1065,17 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         }
     }
 
+    // #488: bounds-safe interfaces -- caller-side verification of a checked
+    // pointer parameter's declared bounds against the actual argument
+    // expressions. Must run after every other argument-list validation
+    // above (which all expect the plain, unwrapped argument nodes they were
+    // written against) and before ND_FUNCALL is built. Skipped for a
+    // deferred splice ($@k) the same as every other per-argument check
+    // above -- positional param<->arg pairing is meaningless once arity
+    // itself is deferred.
+    if (!deferred_splice)
+        rewrite_checked_call_args(vm, ty, head.next, tok);
+
     *rest                = skip(vm, tok, ")");
 
     Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);

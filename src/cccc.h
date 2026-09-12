@@ -1664,6 +1664,32 @@ struct Type {
     // Appended at the very end for the same positional-initializer reason as
     // decl_align/pack_align/checked_cast_kind above.
     int checked_array_extent;
+
+    // #488: bounds-safe interfaces -- caller-side verification of a checked
+    // pointer PARAMETER's declared bounds against the actual argument
+    // expressions at each call site. A prototype's checked_bounds_arg1/arg2
+    // (above) are raw, unresolved token spans (a prototype has no body scope
+    // for resolve_checked_bounds() to resolve them into -- see that
+    // function's comment in src/parse_core.c). resolve_param_checked_bounds()
+    // (src/parse_checked.c) resolves them ONCE, lazily, on first call, into a
+    // TEMPLATE expression pinned to file scope: each reference to a sibling
+    // parameter resolves to a placeholder Obj (Obj.checked_self_param_idx)
+    // rather than a real value, and clone_param_bounds_node() substitutes
+    // each placeholder with a clone of that call's actual argument
+    // expression at every call site (mirrors Member.checked_bounds_lo/hi's
+    // own placeholder-template convention, see Obj.checked_self_member).
+    // Only meaningful on a PARAMETER's Type (one per entry in a TY_FUNC's
+    // ->params list); checked_param_tmpl_done lives on the TY_FUNC type
+    // itself and marks the whole parameter list as already resolved, so
+    // resolve_param_checked_bounds() only walks ->params once per distinct
+    // function type no matter how many call sites reference it. NULL/NULL
+    // (and checked_param_tmpl_done left false) for CB_NONE/CB_UNKNOWN or an
+    // unnamed parameter, same as the ordinary declaration/member paths above.
+    // Appended at the very end for the same positional-initializer reason as
+    // decl_align/pack_align/checked_cast_kind/checked_array_extent above.
+    struct Node *checked_param_bounds_lo;
+    struct Node *checked_param_bounds_hi;
+    bool         checked_param_tmpl_done;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -2651,6 +2677,18 @@ struct Obj {
     // definition, so its `__cv = (T *)q` initializer must never be treated
     // as an assignment needing implication-checked.
     CheckedCastKind checked_cast_kind;
+
+    // #488: non-zero (1-based) marks this Obj as a throwaway placeholder
+    // standing in for a function PARAMETER during
+    // resolve_param_checked_bounds()'s scope-based re-parse of a parameter's
+    // bounds expression -- the exact analogue of checked_self_member above,
+    // one level up (parameter, not struct member). A placeholder is
+    // arena-allocated, pinned to file scope, never joins vm->compiler.locals
+    // or ->globals, and must never survive into a real call site: every
+    // ND_VAR referencing one is substituted by clone_param_bounds_node()
+    // with a clone of that call's actual argument expression before the
+    // result is used.
+    int checked_self_param_idx;
 };
 
 /*!

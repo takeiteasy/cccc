@@ -1533,8 +1533,10 @@ just like `count(i++)` — but a *pure* ternary is accepted, including GNU
 elvis (`count(n ?: 8)`, which desugars without a compiler temp specifically
 so a pure elvis bounds expression stays side-effect-free). A
 prototype-only declaration (`void f(int * [[cccc::array, cccc::count(n)]]
-p, int n);`, no body) leaves its bounds unresolved — there is nothing to
-check at the declaration site, and caller-side checking is future work — this is correct, not an error.
+p, int n);`, no body) leaves its bounds unresolved at the DECLARATION site —
+there is nothing to check there, and this is correct, not an error — but its
+bounds are still consumed at every CALL site: see "Bounds-safe interfaces"
+below.
 
 **Struct/union member bounds**. A bounds expression on a member may
 reference a *sibling* member — in either textual order, the same "may name a
@@ -1840,6 +1842,100 @@ cccc config(checked_pointers = true)` is resolved during preprocessing, a
 pass that runs to completion for the whole file before parsing begins, so
 the flag is already set by the time any declaration is parsed regardless of
 where in the file the pragma appears.
+
+**Bounds-safe interfaces (#488)**. An annotated pointer parameter is itself
+the bounds-safe interface Checked C calls an `itype` — no separate marker is
+needed, because a checked attribute already imposes zero restriction on an
+unchecked caller:
+
+```c
+void sink(int * [[cccc::array, cccc::count(n)]] p, int n);   // the interface
+```
+
+A prototype-only declaration's bounds token span is never resolved into a
+real `Obj`-rooted expression (there is no body scope to resolve it into —
+see the "Bounds declarations" paragraph above), but it is not dead: the
+first time any call to this callee is compiled, `resolve_param_checked_
+bounds()` (src/parse_core.c) resolves the same token span, separately, into
+a reusable **template** — a synthetic scope of placeholder `Obj`s, one per
+named parameter (`Obj.checked_self_param_idx`), pinned to **file scope**
+specifically so a bound naming a global always resolves against the
+declaration's own visible globals, never a call site's. Cached on the
+callee's function type, so this runs once no matter how many calls follow.
+
+At each call site, `rewrite_checked_call_args()` (src/parse_checked.c)
+substitutes every placeholder in the template with a clone of that call's
+own actual argument expression, and rewrites the qualifying argument from
+`arg` into `(__ca = arg, __ca)` — `__ca` a fresh, ordinary declared-checked
+local carrying the substituted template as its own bounds. No new opcode
+and no new codegen: this is deliberately the same `(__cv = ..., __cv)` shape
+`checked_cast_desugar()` uses for `[[cccc::assume]]`/`[[cccc::dynamic]]`
+above, so the *existing* `verify_checked_assign_bounds()` pass discovers the
+resulting `__ca = arg` assignment on its own ordinary post-parse walk and
+emits the same `CHKAB` pair a hand-written assignment would get — the
+call-argument case needed no dedicated enforcement mechanism of its own.
+
+```c
+void sink(int * [[cccc::array, cccc::count(n)]] p, int n);
+
+int * [[cccc::array, cccc::count(2)]] small = ...;
+sink(small, 8);   // traps: small's own bounds (2) don't imply the call's
+                  // own claimed count(8)
+```
+
+A call gets no check at all unless **both** hold:
+
+- The argument is itself a **directly declared-checked** source
+  (`find_checked_base()` + `checked_base_is_declared()` — #944's own "kind
+  1", not a propagated local, which can hold the OPT sentinel range `CHKAB`
+  has no sentinel-aware variant for). An ordinary unchecked `int *raw`
+  argument gets no check — unchecked-to-unchecked interop is unaffected.
+- Every OTHER parameter the bounds expression references (e.g. `n` in
+  `count(n)`) is fed, **at this call**, by a side-effect-free argument —
+  checked with `node_has_side_effects()`, the same predicate ordinary bounds
+  resolution already uses for the identical "this is re-evaluated, so it
+  must have no side effects" reason. `sink(small, 8)` (a literal) and
+  `sink(small, len)` (a plain variable) both qualify; `sink(small, f())` and
+  `sink(small, i++)` are silently declined — exactly the same trade-off
+  `man/SAFETY.md`'s member-bounds section already makes for `f()->p[i]`: an
+  extra evaluation of a side-effecting expression is not an acceptable
+  price for a check.
+
+`[[cccc::single]]`'s implicit `[p, p + sizeof(T))` needs no parameter
+substitution at all and still gets a real caller-side check. A `#487`
+`_Checked[N]` array argument decays into an ordinary declared-checked
+pointer before this rewrite ever runs, so it is covered with no special
+casing. A prototype and a later definition declaring **different** bounds
+for the same parameter is accepted silently in v1 — whichever declaration
+was parsed first is the `Type` every call site's template resolves
+against — a disagreement diagnostic is a filed follow-up.
+
+Gated on `--checked-pointers` at parse time exactly like `verify_checked_
+assign_bounds()` itself; with the flag off, `rewrite_checked_call_args()`
+never runs, so `-m`/`-c=native`/`-c=generated` output is unaffected — no new
+attribute, no new type spelling, nothing new for the serializer to strip.
+
+An annotated **same-TU** function's own body stays `CHKR`-checked against
+its own declared bounds, unchanged from #482–#484 — this can newly trap
+code that was never touched by an unchecked caller, since the callee is
+violating its own declared contract regardless of who calls it. This is a
+stated v1 decision, not gated off: the callee's checks use its *own*
+declared bound, not the caller's real storage, so an unchecked caller
+passing a genuinely too-short buffer still does not trap there — closing
+that gap at the call boundary is the entire point of this feature.
+
+Out of scope for v1, filed as follow-ups: return-position bounds
+(`int * [[cccc::array, cccc::count(4)]] f(void);` parses today and is
+entirely unconsumed); non-trivial-argument coverage via pre-call hoisting;
+a warning when a check is silently declined; a prototype/definition
+bounds-disagreement diagnostic; a `#941`-propagated argument (excluded for
+the same sentinel reason `verify_checked_assign_bounds()` excludes one);
+struct-field bounds interfaces; and an annotated libc/POSIX bounds table
+(cross-referencing #429/#430) as the adoption path that would make this
+useful for `memcpy`/`fread`/etc. out of the box. The checked-region
+call-boundary ban this ticket's own text sketched is **#1336**'s, not
+this feature's — with no ban existing, an annotated prototype was already
+callable from a checked region; #488 only adds the enforcement.
 
 **Bounds casts**. Every mechanism above assumes a pointer is *already*
 declared checked — none of them explain how an unchecked pointer gets into
@@ -2221,7 +2317,10 @@ bounds form (`count`/`byte_count`/`bounds`) stays legal-but-unchecked, the
 same as outside a region — `bounds(unknown)` remains the explicit trust
 escape hatch; address-of and array-to-pointer decay producing a bare `T *`;
 and calling into a function whose prototype is unchecked (this covers all
-of libc — checked/unchecked interop is a known v1 gap, not yet addressed).
+of libc — there is no *ban* on this call-boundary, a known v1 gap tracked
+as #1336; an annotated prototype's own declared bounds ARE enforced at
+such a call under `--checked-pointers`, see "Bounds-safe interfaces" above,
+which is orthogonal to whether the call itself is ever diagnosed).
 A checked function pointer is meaningless (no bounds form applies to it),
 so `TY_FUNC`-pointee pointers are exempt from both rules.
 
