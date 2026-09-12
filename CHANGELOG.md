@@ -7,6 +7,24 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Checked-pointer bounds casts: `[[cccc::assume]]`/`[[cccc::dynamic]]`, the
+  entry point for converting an unchecked pointer into a checked one.
+  Attach in a cast's type-name alongside the claimed checked kind/bounds
+  form (cast-only — a compile error on a declarator). `assume` takes the
+  claim on trust with no runtime check; `dynamic` verifies it against the
+  source's own declared-checked bounds via the existing `CHKAB` opcode,
+  with a compile error when the source has no verifiable bounds. Both
+  desugar to a compiler-generated declared-checked local, so every existing
+  checked-pointer pass (`CHKR`, propagation, `CHKAB`) sees an ordinary
+  checked variable with no new resolution machinery. The sanctioned
+  unchecked→checked conversion inside a checked region, exempt from its
+  cast ban. Also new: `dynamic_check(cond)` /
+  `__builtin_cccc_dynamic_check(cond)` (with `_Dynamic_check(cond)` as a
+  Checked-C-compat alias, recognized only when no symbol of that name is in
+  scope) — a programmer bounds assertion that traps via the new `CHKDC`
+  opcode when `cond` is false, under `--checked-pointers`; a no-op
+  otherwise. See `man/SAFETY.md`'s "Checked Pointers" § "Bounds casts" and
+  § "`dynamic_check`".
 - Checked regions: `[[cccc::checked]]`/`[[cccc::unchecked]]` on a function
   definition or compound statement, `#pragma cccc checked/unchecked
   begin/end`, and the Checked C keyword spellings `_Checked { ... }` /

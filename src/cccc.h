@@ -557,8 +557,7 @@ extern "C" {
                     for a partially-rooted candidate. Gated on                       \
                     CCCC_CHECKED_BOUNDS, same as CHKR. */                            \
     X(CHKAB, 3)  /* Checked-pointer assignment-time bounds implication               \
-                    (#944, Checked C's _Assume_bounds_cast direction): traps         \
-                    unless slo <= val && val <= shi.                                 \
+                    (#944): traps unless slo <= val && val <= shi.                   \
                     Format: [CHKAB][rs_val:8|rs_slo:8|rs_shi:8|unused:8]             \
                     [is_hi:i64] (RRR operand word + i64 immediate; is_hi is          \
                     only a diagnostic-wording selector, not part of the              \
@@ -697,7 +696,19 @@ extern "C" {
                   push/pop) -- the next HREL at a shallower depth, or the            \
                   frame's own LEV3, truncates the orphaned entry. A missed           \
                   HREL only forfeits reclamation for that one exit path, it          \
-                  can never over-reclaim. */
+                  can never over-reclaim. */                                         \
+    /* #486: appended (never interleaved -- see the rule stated above CHKR)          \
+       so no existing opcode renumbers. */                                           \
+    X(CHKDC, 3) /* dynamic_check(cond) (#486, __builtin_cccc_dynamic_check /         \
+                   _Dynamic_check): traps unless regs[rs_val] != 0 -- a              \
+                   programmer bounds assertion the checked-pointer analysis          \
+                   may (in a later follow-up) use as a proven fact for               \
+                   CHKR elision, enforced here as a runtime check in the             \
+                   meantime. Format: [CHKDC][rs_val:8|unused:8][line:i64]            \
+                   (RR operand word + i64 immediate, same shape as CHKD --           \
+                   see emit_rri). The immediate carries the source line for          \
+                   the diagnostic banner only, it is not part of the test.           \
+                   Gated on CCCC_CHECKED_BOUNDS, same as CHKR/CHKAB. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -1391,6 +1402,22 @@ typedef enum {
     CB_UNKNOWN,    // bounds(unknown): checked type, no runtime check
 } CheckedBoundsForm;
 
+// #486: which bounds cast, if any, a checked-pointer TY_PTR was annotated
+// with -- only meaningful on the type-name of an explicit cast expression
+// (a declarator with a non-CC_NONE kind is a compile error, caught in
+// declarator()'s post-pointers() check, src/parse_types.c). Both are
+// the sanctioned way to move an unchecked pointer into the checked world;
+// see man/SAFETY.md's "Bounds casts" section for the full semantics.
+typedef enum {
+    CC_NONE = 0, // not a bounds cast (the ordinary case)
+    CC_ASSUME,   // [[cccc::assume]]  -- take the claimed bounds on trust,
+                 // no runtime check of the claim itself (accesses through
+                 // the result are still CHKR-checked against it)
+    CC_DYNAMIC,  // [[cccc::dynamic]] -- verify at runtime, via CHKAB, that
+                 // the claimed bounds are implied by the source's own
+                 // declared-checked bounds
+} CheckedCastKind;
+
 typedef struct Node             Node;
 typedef struct Obj              Obj;
 typedef struct Scope            Scope;
@@ -1607,6 +1634,14 @@ struct Type {
     // the struct for the same positional-initializer reason as decl_align
     // above.
     int pack_align;
+
+    // #486: [[cccc::assume]]/[[cccc::dynamic]] on this TY_PTR's checked
+    // qualifier -- only ever set on the type-name of an explicit cast
+    // expression (cast(), src/parse_expr.c), never on a declarator (a
+    // compile error, see declarator()'s post-pointers() check,
+    // src/parse_types.c). Appended at the very end for the same
+    // positional-initializer reason as decl_align/pack_align above.
+    CheckedCastKind checked_cast_kind;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -1771,6 +1806,14 @@ typedef enum {
             // serialize/codegen or the __builtin_ast_* re-emitter
             // (reflection.c dump_node_as_builder_calls-style switch) --
             // those raise "QuoteLazy fragment was never spliced".
+    ND_DYNAMIC_CHECK =
+        65, // __builtin_cccc_dynamic_check(cond) / _Dynamic_check(cond)
+            // (#486): a programmer bounds assertion, checked at runtime.
+            // lhs = cond (side-effect-free, checked at parse time); ty =
+            // void. Built only when CCCC_CHECKED_BOUNDS is set -- with the
+            // flag off, parsing yields plain ND_NULL_EXPR instead (same
+            // convention as __builtin_assume), so this kind is never
+            // reachable from -c=native/-m/-c=generated. Lowers to CHKDC.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.
@@ -2075,8 +2118,8 @@ struct Node {
     struct Node *checked_rmw_mirror;
 
     // #944: on an ND_ASSIGN whose lhs is itself a declared-checked target
-    // (Checked C's `_Assume_bounds_cast` direction) with a declared-checked
-    // rhs, set by verify_checked_assign_bounds() (src/parse.c) to the four
+    // with a declared-checked rhs, set by verify_checked_assign_bounds()
+    // (src/parse.c) to the four
     // expressions CHKAB needs: checked_assign_dst_lo/hi are the target's OWN
     // declared bounds, deliberately left as bare expressions re-evaluated
     // AFTER the store (they're self-referencing -- `[q, q + m*sizeof(T))` --
@@ -2576,6 +2619,16 @@ struct Obj {
     int64_t checked_prop_scan_nt_elem;
     bool    checked_prop_scan_saw_non_nt;
     bool    checked_prop_scan_nt_conflict;
+
+    // #486: non-CC_NONE only for the compiler-generated local a bounds
+    // cast's desugar declares (cast(), src/parse_expr.c) -- mirrors
+    // ty->checked_cast_kind the same way checked_kind/checked_bounds_form
+    // above mirror ty->checked_kind/checked_bounds_form. Read by
+    // verify_checked_assign_scan() (#944) to skip CHKAB emission for a
+    // CC_ASSUME temp -- an assume cast takes the claimed bounds on trust by
+    // definition, so its `__cv = (T *)q` initializer must never be treated
+    // as an assignment needing implication-checked.
+    CheckedCastKind checked_cast_kind;
 };
 
 /*!

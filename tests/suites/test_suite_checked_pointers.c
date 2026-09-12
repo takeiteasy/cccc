@@ -2046,17 +2046,17 @@ void test_opt_chknt_unrooted_path_no_trap(void) {
 }
 
 // ---------------------------------------------------------------------
-// #944 -- assignment-time bounds implication (Checked C's
-// _Assume_bounds_cast direction). Assigning a declared-checked source into a
-// TARGET that is itself declared checked now verifies the source's own
-// bounds imply the target's declared bounds, via the new CHKAB opcode. See
-// man/SAFETY.md's Checked Pointers section for the full writeup; the ticket
-// example (a wider count(10) target trusting a narrower count(4) source's
-// value) traps in tests/test_checked_pointers_assume_bounds_error.c.
+// #944 -- assignment-time bounds implication. Assigning a declared-checked
+// source into a TARGET that is itself declared checked now verifies the
+// source's own bounds imply the target's declared bounds, via the new CHKAB
+// opcode. See man/SAFETY.md's Checked Pointers section for the full
+// writeup; the ticket example (a wider count(10) target trusting a
+// narrower count(4) source's value) traps in
+// tests/test_checked_pointers_assign_implication_error.c.
 // ---------------------------------------------------------------------
 
 [[cccc::test]]
-void test_assume_bounds_equal_ok(void) {
+void test_assign_implication_equal_ok(void) {
     int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
     int *[[cccc::array, cccc::count(4)]] q;
     q = p; // equal bounds -- must not trap
@@ -2064,7 +2064,7 @@ void test_assume_bounds_equal_ok(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_narrower_target_ok(void) {
+void test_assign_implication_narrower_target_ok(void) {
     int *[[cccc::array, cccc::count(10)]] p =
         (int[10]){0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     int *[[cccc::array, cccc::count(4)]] q;
@@ -2073,7 +2073,7 @@ void test_assume_bounds_narrower_target_ok(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_byte_count_ok(void) {
+void test_assign_implication_byte_count_ok(void) {
     int *[[cccc::array, cccc::byte_count(16)]] p = (int[4]){1, 2, 3, 4};
     int *[[cccc::array, cccc::byte_count(16)]] q;
     q = p;
@@ -2081,7 +2081,7 @@ void test_assume_bounds_byte_count_ok(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_range_form_ok(void) {
+void test_assign_implication_range_form_ok(void) {
     int arr[4]                                         = {1, 2, 3, 4};
     int *[[cccc::array, cccc::bounds(arr, arr + 4)]] p = arr;
     int *[[cccc::array, cccc::bounds(arr, arr + 4)]] q;
@@ -2095,7 +2095,7 @@ void test_assume_bounds_range_form_ok(void) {
 // above, which can't distinguish a correct implication check from a broken
 // one that e.g. always passes or always compares the wrong endpoint.
 [[cccc::test]]
-void test_assume_bounds_range_form_narrower_target_ok(void) {
+void test_assign_implication_range_form_narrower_target_ok(void) {
     int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
     int *[[cccc::array, cccc::bounds(arr + 2, arr + 6)]] q;
     int *[[cccc::array, cccc::bounds(arr, arr + 8)]] p = arr;
@@ -2105,7 +2105,7 @@ void test_assume_bounds_range_form_narrower_target_ok(void) {
 }
 
 [[cccc::test(exit_code = 255)]]
-void test_assume_bounds_range_form_wider_target_error(void) {
+void test_assign_implication_range_form_wider_target_error(void) {
     int arr[8] = {0, 1, 2, 3, 4, 5, 6, 7};
     int *[[cccc::array, cccc::bounds(arr, arr + 8)]] q;
     int *[[cccc::array, cccc::bounds(arr + 2, arr + 6)]] p = arr + 2;
@@ -2113,7 +2113,7 @@ void test_assume_bounds_range_form_wider_target_error(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_single_target_ok(void) {
+void test_assign_implication_single_target_ok(void) {
     int x                   = 7;
     int *[[cccc::single]] p = &x;
     int *[[cccc::single]] q;
@@ -2122,7 +2122,7 @@ void test_assume_bounds_single_target_ok(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_member_target_ok(void) {
+void test_assign_implication_member_target_ok(void) {
     struct prop_member_s s = {4, (int[4]){1, 2, 3, 4}};
     struct prop_member_s t = {4, 0};
     t.p = s.p; // member LHS -- narrower-or-equal, must not trap
@@ -2136,7 +2136,7 @@ void test_assume_bounds_member_target_ok(void) {
 // src/cccc.h), rather than re-evaluating `k` once for dst_lo and again for
 // dst_hi.
 [[cccc::test]]
-void test_assume_bounds_runtime_index_target_ok(void) {
+void test_assign_implication_runtime_index_target_ok(void) {
     struct prop_member_s arr[2] = {{4, 0}, {2, 0}};
     struct prop_member_s s      = {4, (int[4]){1, 2, 3, 4}};
     volatile int         k      = 1;
@@ -2145,7 +2145,7 @@ void test_assume_bounds_runtime_index_target_ok(void) {
 }
 
 [[cccc::test(exit_code = 255)]]
-void test_assume_bounds_runtime_index_target_error(void) {
+void test_assign_implication_runtime_index_target_error(void) {
     struct prop_member_s arr[2] = {{4, 0}, {10, 0}};
     struct prop_member_s s      = {4, (int[4]){1, 2, 3, 4}};
     volatile int         k      = 1;
@@ -2158,7 +2158,7 @@ void test_assume_bounds_runtime_index_target_error(void) {
 // (checked_prop_source_bounds()'s `hoist_fn`) together in the same
 // rewrite.
 [[cccc::test]]
-void test_assume_bounds_runtime_index_both_ok(void) {
+void test_assign_implication_runtime_index_both_ok(void) {
     struct prop_member_s dst_arr[2] = {{4, 0}, {2, 0}};
     struct prop_member_s src_arr[2] = {
         {4, (int[4]){1, 2, 3, 4}},
@@ -2171,7 +2171,7 @@ void test_assume_bounds_runtime_index_both_ok(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_unknown_target_skipped(void) {
+void test_assign_implication_unknown_target_skipped(void) {
     int *[[cccc::array, cccc::count(4)]] p = (int[4]){1, 2, 3, 4};
     int *[[cccc::array, cccc::bounds(unknown)]] q;
     q = p; // CB_UNKNOWN target -- v1 skips the check entirely, never trap
@@ -2179,10 +2179,104 @@ void test_assume_bounds_unknown_target_skipped(void) {
 }
 
 [[cccc::test]]
-void test_assume_bounds_unchecked_source_skipped(void) {
+void test_assign_implication_unchecked_source_skipped(void) {
     int *[[cccc::array, cccc::count(4)]] q;
     q    = malloc(4 * sizeof(int)); // non-declared-checked rhs -- v1 skips
     q[0] = 5;
     AssertEq(q[0], 5);
     free(q);
+}
+
+// ---------------------------------------------------------------------
+// #486 -- checked-pointer bounds casts ([[cccc::assume]]/[[cccc::dynamic]])
+// and dynamic_check(). See man/SAFETY.md's "Bounds casts" section for the
+// full writeup; compile-error cases and the opt-in-by-default/serialize-
+// strip proofs live in standalone tests/test_checked_cast_*.c and
+// tests/test_dynamic_check_*.c files instead, same split as the rest of
+// this suite.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_cast_assume_from_bare_pointer(void) {
+    int  arr[5] = {1, 2, 3, 4, 5};
+    int *raw    = arr;
+    int  n      = 5;
+    int *[[cccc::array, cccc::count(n)]] p =
+        (int *[[cccc::array, cccc::count(n), cccc::assume]])raw;
+    AssertEq(p[0], 1);
+    AssertEq(p[4], 5);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_cast_assume_then_deref_oob(void) {
+    int  arr[5] = {1, 2, 3, 4, 5};
+    int *raw    = arr;
+    int  n      = 5;
+    int *[[cccc::array, cccc::count(n)]] p =
+        (int *[[cccc::array, cccc::count(n), cccc::assume]])raw;
+    volatile int i = 10;
+    int          x = p[i]; // out of the CLAIMED bounds -- CHKR traps
+    (void)x;
+}
+
+[[cccc::test]]
+void test_cast_assume_from_malloc(void) {
+    int *raw = malloc(3 * sizeof(int));
+    raw[0] = 7, raw[1] = 8, raw[2] = 9;
+    int n = 3;
+    int *[[cccc::array, cccc::count(n)]] p =
+        (int *[[cccc::array, cccc::count(n), cccc::assume]])raw;
+    AssertEq(p[1], 8);
+    free(raw);
+}
+
+[[cccc::test]]
+void test_cast_assume_ntarray_terminator_widening(void) {
+    char  buf[6] = "hello"; // 5 chars + NUL terminator
+    char *raw    = buf;
+    int   n      = 5;
+    char *[[cccc::ntarray, cccc::count(n)]] s =
+        (char *[[cccc::ntarray, cccc::count(n), cccc::assume]])raw;
+    // count(5) widens by one element for the terminator slot (#938) --
+    // s[5], the NUL, is in bounds; no CHKR trap.
+    AssertEq(s[5], '\0');
+}
+
+[[cccc::test]]
+void test_cast_dynamic_claim_implied_no_trap(void) {
+    int arr[10]                               = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int *[[cccc::array, cccc::count(10)]] src = arr;
+    int n                                     = 5;
+    int *[[cccc::array, cccc::count(n)]] p =
+        (int *[[cccc::array, cccc::count(n), cccc::dynamic]])src;
+    AssertEq(p[4], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_cast_dynamic_claim_wider_than_source_traps(void) {
+    int arr[3]                               = {1, 2, 3};
+    int *[[cccc::array, cccc::count(3)]] src = arr;
+    int n = 10; // wider than src's own count(3) -- CHKAB traps
+    int *[[cccc::array, cccc::count(n)]] p =
+        (int *[[cccc::array, cccc::count(n), cccc::dynamic]])src;
+    (void)p;
+}
+
+// Comma-carry: a direct dereference of the cast's own result (not stored
+// into another variable first) still finds the desugared temp's bounds via
+// find_checked_deref_base()'s narrow ND_COMMA unwrap (src/parse_checked.c).
+[[cccc::test(exit_code = 255)]]
+void test_cast_comma_carry_direct_deref_oob(void) {
+    int          arr[5] = {1, 2, 3, 4, 5};
+    int          n      = 5;
+    volatile int i      = 10;
+    int x = ((int *[[cccc::array, cccc::count(n), cccc::assume]])arr)[i];
+    (void)x;
+}
+
+[[cccc::test]]
+void test_dynamic_check_true_no_trap(void) {
+    int i = 3, n = 5;
+    __builtin_cccc_dynamic_check(i < n);
+    AssertEq(i, 3);
 }

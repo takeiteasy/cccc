@@ -189,6 +189,7 @@ void define_label(VirtualMachine *vm, char *name);
 void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
                 bool is_hi);
+void emit_chkdc(VirtualMachine *vm, int rs_val, long long line);
 void emit_chki(VirtualMachine *vm, long long offset);
 void emit_chkl(VirtualMachine *vm, long long offset);
 void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,

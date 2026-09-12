@@ -1,5 +1,5 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
-// #944: Checked C's `_Assume_bounds_cast` direction -- the propagation pass
+// #944: assignment-time bounds implication -- the propagation pass
 // (#919/#941/#942) only ever WIDENS trust into a previously-unchecked
 // target; it never verified that assigning a declared-checked source into a
 // target that is ITSELF declared checked actually satisfies the target's

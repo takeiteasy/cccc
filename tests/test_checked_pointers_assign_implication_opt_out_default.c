@@ -1,7 +1,7 @@
 // #944's CHKAB assignment-bounds-implication check is gated on the same
 // --checked-pointers flag as the rest of the checked-pointer machinery --
 // the exact assignment that traps in
-// test_checked_pointers_assume_bounds_error.c must run clean here and
+// test_checked_pointers_assign_implication_error.c must run clean here and
 // return 42 (the OOB read itself is also unchecked without the flag).
 
 int main(void) {

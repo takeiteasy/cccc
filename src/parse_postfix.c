@@ -2892,6 +2892,46 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
+    // __builtin_cccc_dynamic_check(cond) / _Dynamic_check(cond) (#486): a
+    // programmer bounds assertion, checked at runtime under
+    // --checked-pointers (lowers to the CHKDC opcode) and a no-op otherwise
+    // -- same "flag off -> ND_NULL_EXPR" convention as __builtin_assume
+    // above, so -c=native/-m/-c=generated never see ND_DYNAMIC_CHECK at
+    // all. `_Dynamic_check` is recognized positionally: an identifier NOT
+    // currently in scope, immediately followed by '('. Unlike #1331's
+    // `_Checked`/`{` lookahead, `IDENT` followed by `(` is exactly an
+    // ordinary call, so claiming it unconditionally would shadow any user
+    // function of that name -- the find_var() check below is what makes
+    // this only apply when no such symbol exists; a real `_Dynamic_check`
+    // function is called normally, ordinary function-call parsing
+    // untouched.
+    if (equal(tok, "__builtin_cccc_dynamic_check") ||
+        (equal(tok, "_Dynamic_check") && equal(tok->next, "(") &&
+         !find_var(vm, tok))) {
+        tok        = skip(vm, tok->next, "(");
+        Node *cond = assign(vm, &tok, tok);
+        *rest      = skip(vm, tok, ")");
+        add_type(vm, cond);
+        // The condition is re-evaluated at every access under
+        // --checked-pointers and (per a filed follow-up) may in future be
+        // consumed as a static-elision fact without ever being evaluated
+        // at all -- both require it to be pure, same rationale as a
+        // count()/byte_count()/bounds() expression.
+        if (node_has_side_effects(cond))
+            error_tok(vm, start,
+                      "dynamic_check() condition must not have side "
+                      "effects -- it is only evaluated under "
+                      "--checked-pointers");
+        if (!(vm->flags & CCCC_CHECKED_BOUNDS)) {
+            Node *node = new_node(vm, ND_NULL_EXPR, start);
+            node->ty   = ty_void;
+            return node;
+        }
+        Node *node = new_unary(vm, ND_DYNAMIC_CHECK, cond, start);
+        node->ty   = ty_void;
+        return node;
+    }
+
     // __builtin_constant_p(expr) -> 1 if compile-time constant, 0 otherwise
     if (equal(tok, "__builtin_constant_p")) {
         tok        = skip(vm, tok->next, "(");

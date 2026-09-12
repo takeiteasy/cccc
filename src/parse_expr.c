@@ -1526,8 +1526,14 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         // that is ultimately discarded. A function-pointer destination is
         // exempt, mirroring cc_check_checked_scope_decl()'s own exemption --
         // there is no bounds form that applies to it.
+        // #486: a bounds cast ([[cccc::assume]]/[[cccc::dynamic]]) IS the
+        // sanctioned way to change a pointer's checked kind inside a
+        // checked region -- it's the documented replacement for the launder
+        // cast #1332 flags, so it is exempt from both ban arms below rather
+        // than needing an [[cccc::unchecked]] { ... } escape too.
         if (!vm->compiler.in_type_lookahead &&
-            cc_checked_scope_at(vm, start) == CHECKED_SCOPE_ON) {
+            cc_checked_scope_at(vm, start) == CHECKED_SCOPE_ON &&
+            (!ty || ty->checked_cast_kind == CC_NONE)) {
             add_type(vm, expr);
             if (ty && ty->kind == TY_PTR && ty->checked_kind == CHECKED_NONE &&
                 !(ty->base && ty->base->kind == TY_FUNC)) {
@@ -1550,7 +1556,28 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         // type cast
         Node *node = new_cast(vm, expr, ty);
         node->tok  = start;
-        *rest      = tok;
+
+        // #486: assume/dynamic bounds casts. !in_type_lookahead guards both
+        // calls below for the same reason as the #485 ban arms above --
+        // is_typename()'s speculative probes must never fire a fatal
+        // error_tok() (or, for the desugar, allocate a stray local) for a
+        // cast that is ultimately discarded.
+        if (!vm->compiler.in_type_lookahead && ty &&
+            ty->checked_cast_kind != CC_NONE) {
+            // Always on, independent of --checked-pointers -- a 'dynamic'
+            // cast with no verifiable claim is a compile-time defect
+            // regardless of whether runtime enforcement is even built.
+            check_checked_cast_dynamic_source(vm, node, ty, start);
+            // The desugar itself is gated on CCCC_CHECKED_BOUNDS, same as
+            // #919/#944's own rewrites: with the flag off there is no
+            // runtime machinery for the temp to feed, so the cast stays a
+            // plain cast and -c=native/-m/-c=generated output is
+            // byte-identical to today's.
+            if (vm->flags & CCCC_CHECKED_BOUNDS)
+                node = checked_cast_desugar(vm, node, ty, start);
+        }
+
+        *rest = tok;
         return node;
     }
 

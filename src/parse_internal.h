@@ -301,6 +301,14 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
 CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok);
 void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what);
+// #486: desugars a checked-annotated cast into `(__cv = (T)expr, __cv)` --
+// see checked_cast_desugar()'s own comment (src/parse_checked.c).
+Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
+                           Token *tok);
+// #486: validates a [[cccc::dynamic]] cast's source has verifiable bounds --
+// see its own comment (src/parse_checked.c). No-op for CC_ASSUME/CC_NONE.
+void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
+                                       Type *ty, Token *tok);
 Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr);
 Token *asm_label(VirtualMachine *vm, Token *tok, char **label);
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok);

@@ -1841,6 +1841,115 @@ pass that runs to completion for the whole file before parsing begins, so
 the flag is already set by the time any declaration is parsed regardless of
 where in the file the pragma appears.
 
+**Bounds casts**. Every mechanism above assumes a pointer is *already*
+declared checked — none of them explain how an unchecked pointer gets into
+the checked world in the first place. `[[cccc::assume]]` and
+`[[cccc::dynamic]]` are that entry point, the two Checked C bounds-cast
+primitives, attached in a **cast's type-name** (not a declarator — a
+compile error otherwise) alongside the checked kind and bounds form being
+claimed:
+
+```c
+int *raw = ...;
+int n = 5;
+
+// assume: take the claim on trust, no check of it
+int * [[cccc::array, cccc::count(n)]] p =
+    (int * [[cccc::array, cccc::count(n), cccc::assume]])raw;
+
+// dynamic: verify the claim against the SOURCE's own declared bounds
+int * [[cccc::array, cccc::count(k)]] src = ...;
+p = (int * [[cccc::array, cccc::count(n), cccc::dynamic]])src;
+```
+
+Both require a checked kind; with `array`/`ntarray` a concrete bounds form
+is also required (`bounds(unknown)` is accepted for `assume` — there is
+nothing to verify either way — and rejected for `dynamic`, since it too has
+nothing to verify against). `assume` and `dynamic` are mutually exclusive.
+
+**Desugaring.** The cast rewrites to `(__cv = (T [[...]])expr, __cv)`,
+where `__cv` is a fresh, compiler-generated local declared with the cast's
+own checked kind and bounds — an ordinary declared-checked variable from
+every other pass's point of view. This is why `assume`/`dynamic` need no
+new resolution machinery: `CHKR` emission, the propagation pass, and
+`CHKAB` verification all already know how to handle a declared-checked
+local, so making `__cv` a real one (rather than teaching every consumer of
+`find_checked_base()` a new `ND_CAST`-rooted case) reuses the whole existing
+pipeline. A direct dereference of the cast's own result —
+`((T [[...]])q)[i]`, with no intervening assignment — still finds `__cv`'s
+bounds, via a narrow unwrap used only by the dereference-bounds attachment
+path (deliberately **not** exposed to the propagation/`CHKAB` passes: those
+snapshot a source's bounds into a temp *before* the enclosing statement's
+own store runs, an ordering `__cv`'s own store — itself a side effect of
+evaluating the very expression being snapshotted — would violate). Gated on
+`--checked-pointers` at parse time, same as the propagation and `CHKAB`
+rewrites: with the flag off, the cast stays a plain cast and
+`-c=native`/`-m`/`-c=generated` output is unaffected.
+
+**`dynamic` reuses `CHKAB` verbatim** — the desugar's own `__cv = (T)expr`
+is exactly the `q = E` shape `verify_checked_assign_bounds()` already
+recognises (a declared-checked target, a declared-checked source), so no
+new opcode was needed. The source must be a **directly declared-checked**
+base with a resolvable bounds form — not a propagated pointer (would need a
+sentinel-aware `CHKAB` variant, tracked as a follow-up) and not
+`bounds(unknown)` — or the cast is a **compile error**, always on
+regardless of `--checked-pointers`:
+
+```
+error: 'dynamic' cast source has no known bounds to verify against --
+  use 'assume' to take responsibility for this conversion, or give the
+  source a bounds declaration
+```
+
+This is deliberate, not an oversight: falling back to `--bounds-checks`'
+`CHKB`/`CHKD` would silently do nothing for a stack or global source — see
+"Why this exists" above. Assigning the cast's result into ANOTHER
+declared-checked variable (`p = (T [[..., dynamic]])q;`) can trigger a
+*second*, independent `CHKAB` pair from the ordinary assignment-scan pass
+(comparing `__cv`'s bounds against `p`'s own declared bounds) — harmless, a
+tighter restatement of the first, the same "one redundant check" shape the
+propagation pass already documents for a checked RMW.
+
+**`assume` never verifies its own claim.** The desugar's `__cv = (T)expr`
+assignment is explicitly skipped by the assignment-scan pass (`Obj.
+checked_cast_kind == CC_ASSUME` is checked before matching) — taking the
+claimed bounds on trust, with zero runtime check, is the entire point.
+Every access made *through* `__cv` afterward is an ordinary checked access
+and is still `CHKR`-checked against the claim, same as any other checked
+pointer — `assume` only skips checking the *conversion itself*, never
+anything downstream of it.
+
+**Inside a checked region** (`[[cccc::checked]]`/`#pragma cccc checked`,
+below), these two attributes are exempt from the region's own cast ban —
+they ARE the sanctioned way to change a pointer's checked kind there,
+replacing the informal "just cast it" pattern (tracked separately as a
+launder-cast hardening follow-up) with an explicit, auditable escape that
+needs no `[[cccc::unchecked]] { ... }` wrapper.
+
+v1 scope, all deliberate:
+
+- A cast expression only — a checked-annotated function argument or return
+  value is not covered (same boundary `CHKAB`/#944 itself has).
+- The cast must appear inside a function body; `vm->compiler.current_fn`
+  must be non-`NULL` for `__cv` to have somewhere to live (a compile error
+  at file scope, e.g. a global initializer).
+- `dynamic`'s source must be directly declared-checked, not chained through
+  `--checked-pointers`' own propagation.
+
+**`dynamic_check`**. A programmer bounds assertion — `dynamic_check(cond)`,
+spelled `__builtin_cccc_dynamic_check(cond)` or, for source compatibility,
+`_Dynamic_check(cond)` (recognized positionally, an identifier not already
+in scope immediately followed by `(`, so it never shadows a real function
+of that name) — traps via the new `CHKDC` opcode when `cond` is false,
+under `--checked-pointers`; a no-op otherwise (parses to a plain
+`ND_NULL_EXPR`, the same convention `__builtin_assume` uses, so it never
+reaches native/serialized output). `cond` must be side-effect-free, same
+rationale as a `count()`/`byte_count()`/`bounds()` expression: it is only
+evaluated under the flag today, and a planned static-elision analysis is
+expected to consume `dynamic_check` facts as proven truths without ever
+evaluating them at all — a pure condition is required for that to be
+sound.
+
 **Runtime enforcement is opt-in, off by default**: `--checked-pointers` /
 `#pragma cccc config(checked_pointers = true)`. Not part of any
 `-0`/`-1`/`-2`/`-3` preset. The compile-time rules (attribute parsing, type
@@ -2101,7 +2210,11 @@ int main(void) {
    `[[cccc::single/array/ntarray]]`) is a compile error.
 2. A cast to an unchecked pointer type, or a cast that changes an already-
    checked pointer's checked kind (`array` → `single`, etc.), is a compile
-   error.
+   error. `[[cccc::assume]]`/`[[cccc::dynamic]]` (see "Bounds casts" above)
+   are exempt from this rule — they ARE the sanctioned way to make exactly
+   this conversion inside a checked region, an explicit, auditable
+   replacement for reaching for `[[cccc::unchecked]] { ... }` just to
+   launder an unchecked pointer through a plain cast.
 
 **Explicitly not banned:** `[[cccc::array]]`/`[[cccc::ntarray]]` with no
 bounds form (`count`/`byte_count`/`bounds`) stays legal-but-unchecked, the

@@ -5083,8 +5083,7 @@ static inline int op_CHKNTZ_fn(VirtualMachine *vm) {
 }
 
 static inline int op_CHKAB_fn(VirtualMachine *vm) {
-    // Checked-pointer assignment-time bounds implication (#944, Checked C's
-    // _Assume_bounds_cast direction). Format:
+    // Checked-pointer assignment-time bounds implication (#944). Format:
     // [CHKAB] [rs_val:8|rs_slo:8|rs_shi:8|unused:8] (RRR operand word)
     //         [is_hi:i64]
     // Traps unless slo <= val && val <= shi -- see the X-macro comment in
@@ -5113,6 +5112,34 @@ static inline int op_CHKAB_fn(VirtualMachine *vm) {
         printf("PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
                (long long)vm->pc);
         printf("================================================\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+static inline int op_CHKDC_fn(VirtualMachine *vm) {
+    // dynamic_check(cond) (#486, __builtin_cccc_dynamic_check /
+    // _Dynamic_check): traps unless the already-evaluated condition is
+    // non-zero. Format:
+    // [CHKDC] [rs_val:8|unused:8] (RR operand word) [line:i64]
+    // `line` is carried through only for the diagnostic banner below, not
+    // part of the test.
+    long long operands = cc_read_word(vm);
+    int       rs_val, unused;
+    DECODE_RR(operands, rs_val, unused);
+    (void)unused;
+    long long line = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return 0;
+
+    if (vm->regs[rs_val] == 0) {
+        printf("\n========== DYNAMIC CHECK FAILED ==========\n");
+        printf("dynamic_check() assertion failed at line %lld\n", line);
+        printf("PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("===========================================\n");
         return -1;
     }
 

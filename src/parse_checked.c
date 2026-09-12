@@ -129,6 +129,45 @@ static CheckedBase find_checked_base(Node *n) {
     return (CheckedBase){0};
 }
 
+// #486: like find_checked_base(), but ALSO follows into a bounds cast's own
+// desugared shape -- `(__cv = (T [[...]])expr, __cv)`, ND_COMMA's rhs is
+// ND_VAR(__cv) -- so a dereference of the cast's result directly,
+// `((T [[...]])q)[i]`, finds __cv the same way a plain declared-checked
+// pointer would.
+//
+// Deliberately NOT folded into find_checked_base() itself: that function is
+// also called by checked_prop_source_bounds() (#919/#941/#942) and #944's
+// verify_checked_assign_scan(), both of which snapshot a SOURCE's bounds
+// into a compiler-generated temp BEFORE the enclosing statement's own store
+// executes (`(temp = source bounds), (q = E)`) -- sound when the source
+// already held a valid value before that statement began, unsound here,
+// since __cv's value is itself only established by a side effect of
+// evaluating this very same expression (the comma's own internal
+// assignment). Exposing this shape to those two passes would let them
+// snapshot __cv's bounds before __cv is ever assigned. A bare dereference
+// has no such hazard: by the time gen_addr's ND_DEREF case reads bounds off
+// its address expression, that address (the whole comma) has already been
+// fully evaluated, including its internal store -- ordinary C comma-operator
+// semantics. So this variant is used only by set_checked_deref_bounds()
+// below, never by the assignment/propagation machinery. The general
+// `(a, p)[i]` carry for an arbitrary (non-cast-desugar) comma is filed as a
+// follow-up.
+static CheckedBase find_checked_deref_base(Node *n) {
+    while (n) {
+        if (n->kind == ND_COMMA && n->rhs && n->rhs->kind == ND_VAR &&
+            n->rhs->var->checked_cast_kind != CC_NONE) {
+            n = n->rhs;
+            continue;
+        }
+        if (n->kind == ND_ADD || n->kind == ND_SUB || n->kind == ND_CAST) {
+            n = n->lhs;
+            continue;
+        }
+        return find_checked_base(n);
+    }
+    return (CheckedBase){0};
+}
+
 // True if `base` names a declared checked pointer (variable or member) --
 // i.e. find_checked_base() found a recognised root at all. Doesn't imply a
 // bounds *form* is present (CB_NONE/CB_UNKNOWN roots still count as
@@ -454,7 +493,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
 // propagate_checked_bounds() for the other caller of compute_checked_bounds().
 void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
                               Token *tok) {
-    CheckedBase base = find_checked_base(addr);
+    CheckedBase base = find_checked_deref_base(addr);
     if (!checked_base_is_declared(base))
         return;
     Type *pty                  = base.var ? base.var->ty : base.mem->ty;
@@ -1110,8 +1149,8 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
 // (#937, see checked_prop_attach_scan()'s comment above). A further kind of
 // follow-up, orthogonal to all of the above: this pass never verifies an
 // assignment INTO an already-declared-checked target against the source's
-// bounds (Checked C's _Assume_bounds_cast direction); it only ever widens
-// trust for a previously-unchecked target.
+// bounds (that's #944's verify_checked_assign_bounds(), a sibling pass); it
+// only ever widens trust for a previously-unchecked target.
 #define CHECKED_PROP_MAX_ROUNDS 32
 
 void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
@@ -1353,8 +1392,14 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
         if (node->kind == ND_ASSIGN && node->lhs &&
             (node->lhs->kind == ND_VAR || node->lhs->kind == ND_MEMBER)) {
             CheckedBase dst_base = find_checked_base(node->lhs);
+            // #486: never verify the store INTO an [[cccc::assume]] cast's
+            // own desugared temp -- taking the claimed bounds on trust
+            // without a runtime check is the entire point of `assume`; a
+            // CHKAB pair here would defeat it.
             if (checked_base_is_declared(dst_base) &&
-                !(dst_base.mem && node_has_side_effects(dst_base.obj))) {
+                !(dst_base.mem && node_has_side_effects(dst_base.obj)) &&
+                !(dst_base.var &&
+                  dst_base.var->checked_cast_kind == CC_ASSUME)) {
                 Type *dst_pty =
                     dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
                 Node *dst_lo, *dst_hi;
@@ -1413,9 +1458,9 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
     }
 }
 
-// #944: Checked C's `_Assume_bounds_cast` direction -- verifies, at
-// assignment time, that a declared-checked TARGET's own bounds are implied
-// by a declared-checked SOURCE's bounds, rather than trusting the target's
+// #944: assignment-time bounds implication -- verifies, at assignment time,
+// that a declared-checked TARGET's own bounds are implied by a
+// declared-checked SOURCE's bounds, rather than trusting the target's
 // declared bounds unconditionally the way every access through it otherwise
 // does. A sibling pass to propagate_checked_bounds(), not folded into it:
 // candidacy there requires `checked_kind == CHECKED_NONE` (an
@@ -1535,6 +1580,23 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
         return tok;
     }
 
+    // #486: assume / dynamic -- the two sanctioned bounds-cast forms.
+    // Consistency (mutual exclusion, cast-only position, kind/bounds-form
+    // requirements) is checked once per '*' in pointers()'s post-check,
+    // same as the bounds-form-requires-a-kind rule for count()/byte_count()/
+    // bounds() above.
+    if (!strcmp(name, "assume") || !strcmp(name, "dynamic")) {
+        if (equal(tok, "("))
+            error_tok(vm, name_tok, "'%s' takes no arguments", name);
+        CheckedCastKind kind = !strcmp(name, "assume") ? CC_ASSUME : CC_DYNAMIC;
+        if (ty->checked_cast_kind != CC_NONE && ty->checked_cast_kind != kind)
+            error_tok(vm, name_tok,
+                      "'assume' and 'dynamic' cannot both be used on the "
+                      "same cast");
+        ty->checked_cast_kind = kind;
+        return tok;
+    }
+
     // count / byte_count / bounds
     if (!equal(tok, "("))
         error_tok(vm, name_tok, "'%s' requires an argument list", name);
@@ -1562,6 +1624,90 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
         }
     }
     return after;
+}
+
+// #486: checks that a [[cccc::dynamic]] cast's SOURCE (`cast_node->lhs`,
+// the pre-cast expression) is rooted at a directly declared-checked base
+// (find_checked_base() + checked_base_is_declared(), kind 1 of
+// checked_prop_source_bounds() -- not a #919-propagated local, see the
+// follow-up filed for that) with a resolvable bounds form. Without that
+// there is nothing for #944's CHKAB to verify the claim against, and
+// falling back to CHKD/CHKB's allocation-derived bound would silently do
+// nothing for a stack or global source -- #770 documented they have no
+// upper bound at all for a non-heap base, the headline Checked C case.
+//
+// Deliberately independent of --checked-pointers/CCCC_CHECKED_BOUNDS (a
+// no-op for CC_ASSUME): called from cast() unconditionally, same footing as
+// the mutual-exclusion/cast-only/kind-requires-bounds-form rules in
+// pointers()'s post-check, so a `dynamic` cast with no verifiable claim is
+// caught even in a build that never enables runtime enforcement.
+void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
+                                       Type *ty, Token *tok) {
+    if (ty->checked_cast_kind != CC_DYNAMIC)
+        return;
+    add_type(vm, cast_node->lhs);
+    CheckedBase src_base = find_checked_base(cast_node->lhs);
+    Node       *src_lo = NULL, *src_hi = NULL;
+    bool        src_nt = false;
+    if (checked_base_is_declared(src_base)) {
+        Type *src_pty = src_base.var ? src_base.var->ty : src_base.mem->ty;
+        compute_checked_bounds(vm, src_base, src_pty, tok, &src_lo, &src_hi,
+                               &src_nt, NULL, NULL);
+    }
+    (void)src_nt;
+    if (!src_lo || !src_hi)
+        error_tok(vm, tok,
+                  "'dynamic' cast source has no known bounds to verify "
+                  "against -- use 'assume' to take responsibility for this "
+                  "conversion, or give the source a bounds declaration");
+}
+
+// #486: desugars a checked-annotated cast -- `(T [[cccc::array,
+// cccc::count(n), cccc::assume]])expr` -- into
+// `(__cv = (T [[...]])expr, __cv)`, where `__cv` is a fresh,
+// compiler-generated local declared with the cast's own checked kind and
+// bounds form. This is deliberately NOT a special ND_CAST-rooted case in
+// find_checked_base(): making `__cv` a REAL declared-checked local means
+// every existing pass -- CHKR emission (set_checked_deref_bounds()),
+// #919/#941/#942 propagation, #944's verify_checked_assign_scan() -- sees
+// exactly the shape it already knows how to handle, with no new resolution
+// path needed. `cast_node` is the already-built ND_CAST; `ty` is its
+// checked-annotated destination type (== cast_node->ty, passed separately
+// so the caller doesn't have to re-read a field it just set); `tok` is the
+// cast's start token, used for every diagnostic and node built here.
+//
+// Only called once check_checked_cast_dynamic_source() has already passed
+// and CCCC_CHECKED_BOUNDS is set (see the call site in cast(),
+// src/parse_expr.c) -- this function's own precondition:
+//  - Must be inside a function body. vm->compiler.current_fn is NULL at
+//    file scope (e.g. a global initializer), where new_lvar() has no
+//    enclosing local-variable list to attach to and a comma-with-assignment
+//    isn't a constant expression anyway.
+Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
+                           Token *tok) {
+    if (!vm->compiler.current_fn)
+        error_tok(vm, tok,
+                  "a checked bounds cast ('assume'/'dynamic') is only valid "
+                  "inside a function body");
+
+    // Anonymous temp: same "" name / new_lvar prepend pattern as every
+    // other compiler-generated checked-pointer temp (new_checked_prop_temp
+    // above), so it never collides with a real identifier and needs no
+    // uniqueness counter of its own.
+    Obj *var               = new_lvar(vm, "", 0, ty);
+    var->checked_cast_kind = ty->checked_cast_kind;
+    resolve_checked_bounds(vm, var);
+
+    Node *lhs = new_var_node(vm, var, tok);
+    add_type(vm, lhs);
+    Node *store = new_binary(vm, ND_ASSIGN, lhs, cast_node, tok);
+    add_type(vm, store);
+
+    Node *result = new_var_node(vm, var, tok);
+    add_type(vm, result);
+    Node *comma = new_binary(vm, ND_COMMA, store, result, tok);
+    add_type(vm, comma);
+    return comma;
 }
 
 // ---------------------------------------------------------------------

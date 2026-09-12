@@ -73,6 +73,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
 | `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](SAFETY.md#checked-pointers) |
 | `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [SAFETY.md](SAFETY.md#checked-pointers)) |
+| `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](SAFETY.md#checked-pointers) |
 | `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
@@ -681,8 +682,8 @@ Runtime enforcement (the `CHKR` opcode, plus `CHKNT`/`CHKNTZ` guarding a
 non-null/non-all-zero-bytes write into `ntarray`'s widened terminator slot,
 #923/#939 — including through a propagated pointer, #943 — and `CHKAB`
 verifying a checked-rooted assignment's source bounds imply an
-already-declared-checked target's own bounds, #944, Checked C's
-`_Assume_bounds_cast` direction) is gated behind `--checked-pointers` /
+already-declared-checked target's own bounds, #944) is gated behind
+`--checked-pointers` /
 `#pragma cccc config(checked_pointers = true)` —
 opt-in, not part of any `-0`/`-1`/`-2`/`-3` preset. Full reference, including
 the bounds-carry-within-an-expression semantics, the whole-function
@@ -697,6 +698,65 @@ always parsed, type-checked, and stripped from that output regardless (ABI-
 transparent, #482/#488) — see [SAFETY.md § Checked
 Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
 note.
+
+### `assume` / `dynamic` (CCCC-specific)
+
+The entry point into the checked-pointer world: converting an *unchecked*
+pointer into a checked one. Like the six attributes above, these attach in
+post-`*` qualifier position — but only on a cast's type-name, never on a
+declarator:
+
+```c
+int *raw = ...;
+int * [[cccc::array, cccc::count(n)]] p =
+    (int * [[cccc::array, cccc::count(n), cccc::assume]])raw;   // trust the claim
+p = (int * [[cccc::array, cccc::count(n), cccc::dynamic]])raw;  // verify it (CHKAB)
+```
+
+`assume` takes the claimed checked kind/bounds on trust, with no runtime
+check of the claim itself — the documented, deliberate escape hatch, and
+the direction `--checked-pointers`' rest of this document calls "always
+on regardless of the flag" does not cover: getting an unchecked pointer
+into the checked world at all necessarily has to be an unverified act
+somewhere. `dynamic` instead verifies, via the existing `CHKAB` opcode
+(#944, above), that the claim is implied by the SOURCE's own
+declared-checked bounds — a compile error if the source has no verifiable
+bounds to check against (`use 'assume' ... or give the source a bounds
+declaration`), rather than silently falling back to `--bounds-checks`,
+which has no upper bound at all for a stack or global source (see "Why
+this exists" in [SAFETY.md § Checked
+Pointers](SAFETY.md#checked-pointers)).
+
+Both require a checked kind (`single`/`array`/`ntarray`); with `array`/
+`ntarray` a bounds form is also required (`bounds(unknown)` is accepted for
+`assume`, rejected for `dynamic` — there is nothing to verify). Once
+converted, every access through the result is an ordinary checked access,
+`CHKR`-checked against the claim like any other declared-checked pointer.
+Inside a `[[cccc::checked]]`/`[[cccc::unchecked]]` region, these ARE the
+sanctioned unchecked→checked conversion — exempt from the region's own cast
+ban, no `[[cccc::unchecked]] { ... }` escape needed around them. Gated the
+same way as the rest of runtime enforcement: with `--checked-pointers` off,
+an annotated cast stays a plain cast. Full reference, including the
+compiler-generated-temp desugaring and the v1 scope (a cast expression
+only, not a function argument or return value): [SAFETY.md § Checked
+Pointers § Bounds casts](SAFETY.md#checked-pointers).
+
+### `dynamic_check` (CCCC-specific)
+
+```c
+__builtin_cccc_dynamic_check(i < n);
+_Dynamic_check(i < n);   // Checked-C-compat alias
+```
+
+A programmer bounds assertion: traps (via the `CHKDC` opcode) when the
+condition is false, under `--checked-pointers`; a no-op otherwise, same
+convention as `__builtin_assume`. The condition must be side-effect-free —
+it is only evaluated under the flag, and a future static-elision pass may
+consume it as a proven fact without evaluating it at all (tracked as a
+follow-up). `_Dynamic_check` is recognized positionally (an identifier not
+already in scope, immediately followed by `(`), so it never shadows a real
+function of that name. Full reference: [SAFETY.md § Checked Pointers §
+`dynamic_check`](SAFETY.md#checked-pointers).
 
 ### `checked` / `unchecked` (CCCC-specific)
 
@@ -777,7 +837,7 @@ the canonical attribute form before parsing:
 
 | Usage | Rewrites to | Example |
 |-------|-------------|---------|
-| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)`, `@checked`, `@unchecked` |
+| `@name` (CCCC-specific) | `[[cccc::name]]` | `@comptime`, `@test`, `@test_setup`, `@single`, `@array`, `@ntarray`, `@count(n)`, `@byte_count(n)`, `@bounds(lo,hi)`, `@assume`, `@dynamic`, `@checked`, `@unchecked` |
 | `@name` (standard C23) | `[[name]]` | `@nodiscard`, `@maybe_unused` |
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 | `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |

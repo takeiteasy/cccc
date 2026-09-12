@@ -1727,6 +1727,12 @@ static const AttrInfo known_attrs[] = {
     {"count", ATTR_CCCC, true, 1},
     {"byte_count", ATTR_CCCC, true, 1},
     {"bounds", ATTR_CCCC, true, 1},
+    // Checked-pointer bounds-cast attributes (#486): [[cccc::assume]] /
+    // [[cccc::dynamic]], cast-only (see declarator()'s post-pointers()
+    // check, src/parse_types.c). Listed here for the same @name-routing
+    // reason as the six above.
+    {"assume", ATTR_CCCC, true, 1},
+    {"dynamic", ATTR_CCCC, true, 1},
     // Checked-region attributes (#485). Unlike the six above these
     // appertain to a declaration or a compound statement, not to a TY_PTR
     // (see apply_checked_scope_attr(), src/parse_types.c); listed here so
@@ -1887,6 +1893,7 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_expect_with_probability",
         "__builtin_prefetch",
         "__builtin_assume",
+        "__builtin_cccc_dynamic_check",
         "__builtin_pc_function_name",
         "__builtin_pc_source_location",
         NULL,

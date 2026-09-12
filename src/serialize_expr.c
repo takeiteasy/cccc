@@ -2403,6 +2403,19 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, "__builtin_return_address(%lld)", (long long)node->val);
             break;
 
+        case ND_DYNAMIC_CHECK:
+            // dynamic_check(cond) (#486) is only ever built when
+            // CCCC_CHECKED_BOUNDS was set at parse time -- normally
+            // unreachable here, since -c=native drops the flag before
+            // parse. -m/-c=generated currently drop it only after parse
+            // (a pre-existing asymmetry, see the follow-up filed against
+            // src/main.c), so an explicitly-flagged run of either can still
+            // reach this case; strip to a no-op rather than emitting
+            // anything CHKDC-shaped, matching every other checked-pointer
+            // construct's native/serialized-output treatment.
+            fprintf(f, "((void)0)");
+            break;
+
         case ND_UNREACHABLE:
             // __builtin_unreachable, __builtin_trap and __builtin_debugtrap all
             // lower to the same BTRAP opcode, so the VM traps for all three and

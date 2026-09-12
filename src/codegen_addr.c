@@ -714,6 +714,14 @@ void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
     emit_rrrs_i(vm, CHKAB, rs_val, rs_slo, rs_shi, 0, is_hi ? 1 : 0);
 }
 
+// Emit CHKDC (dynamic_check(cond), #486). rs_val is the already-evaluated
+// condition; `line` is carried through only for the trap's diagnostic
+// banner, not part of the test. No-op at runtime unless CCCC_CHECKED_BOUNDS
+// is set, same as CHKR/CHKAB; caller gates emission on that flag.
+void emit_chkdc(VirtualMachine *vm, int rs_val, long long line) {
+    emit_rri(vm, CHKDC, rs_val, 0, line);
+}
+
 // ========== Address Generation ==========
 
 // Generate address of an lvalue into dest_reg

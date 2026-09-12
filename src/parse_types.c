@@ -915,6 +915,29 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
                           "object");
         }
 
+        // #486: assume/dynamic bounds-cast consistency, checked here for the
+        // same order-independence reason as the bounds-form check above.
+        if (ty->checked_cast_kind != CC_NONE) {
+            if (ty->checked_kind == CHECKED_NONE)
+                error_tok(vm, tok,
+                          "'assume'/'dynamic' require the pointer to also be "
+                          "declared [[cccc::single]], [[cccc::array]] or "
+                          "[[cccc::ntarray]]");
+            if ((ty->checked_kind == CHECKED_ARRAY ||
+                 ty->checked_kind == CHECKED_NTARRAY) &&
+                ty->checked_bounds_form == CB_NONE)
+                error_tok(vm, tok,
+                          "'assume'/'dynamic' on an [[cccc::array]]/"
+                          "[[cccc::ntarray]] pointer requires a bounds "
+                          "declaration (count/byte_count/bounds)");
+            if (ty->checked_cast_kind == CC_DYNAMIC &&
+                ty->checked_bounds_form == CB_UNKNOWN)
+                error_tok(vm, tok,
+                          "'dynamic' cannot be combined with "
+                          "bounds(unknown) -- there is nothing to verify; "
+                          "use 'assume' instead");
+        }
+
         // Handle const/volatile qualification on the pointer itself
         // Example: "int *const p" makes the pointer const, not the pointee
         // Example: "int *volatile p" makes the pointer volatile
@@ -979,6 +1002,17 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
+
+    // #486: assume/dynamic are cast-only -- declarator() (unlike
+    // abstract_declarator(), typename()'s helper for a cast/sizeof
+    // type-name) is reached only for a real declaration, so a checked_kind
+    // annotation ending up here means the attribute was written on a
+    // declarator instead of a cast's type-name.
+    if (ty->checked_cast_kind != CC_NONE)
+        error_tok(vm, tok,
+                  "'assume'/'dynamic' may only be used in a cast's "
+                  "type-name (e.g. (int * [[cccc::array, cccc::count(n), "
+                  "cccc::assume]])raw), not on a declaration");
 
     // A declarator name that was macro-expanded from a bundled host-accessor
     // macro (`optind`, `errno`, `stdin`, ...) lands here as the `(` of the
@@ -2163,14 +2197,17 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (is_attr_name(tok, "single") || is_attr_name(tok, "array") ||
                 is_attr_name(tok, "ntarray") || is_attr_name(tok, "count") ||
                 is_attr_name(tok, "byte_count") ||
-                is_attr_name(tok, "bounds")) {
+                is_attr_name(tok, "bounds") || is_attr_name(tok, "assume") ||
+                is_attr_name(tok, "dynamic")) {
                 const char *name = is_attr_name(tok, "single")    ? "single"
                                    : is_attr_name(tok, "array")   ? "array"
                                    : is_attr_name(tok, "ntarray") ? "ntarray"
                                    : is_attr_name(tok, "count")   ? "count"
                                    : is_attr_name(tok, "byte_count")
                                        ? "byte_count"
-                                       : "bounds";
+                                   : is_attr_name(tok, "bounds") ? "bounds"
+                                   : is_attr_name(tok, "assume") ? "assume"
+                                                                 : "dynamic";
                 tok = apply_checked_ptr_attr(vm, attr_tok, tok->next, ty, name);
                 continue;
             }
@@ -2701,7 +2738,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_checked_ptr_attr =
                 equal(name_tok, "single") || equal(name_tok, "array") ||
                 equal(name_tok, "ntarray") || equal(name_tok, "count") ||
-                equal(name_tok, "byte_count") || equal(name_tok, "bounds");
+                equal(name_tok, "byte_count") || equal(name_tok, "bounds") ||
+                equal(name_tok, "assume") || equal(name_tok, "dynamic");
             bool is_checked_scope_attr =
                 equal(name_tok, "checked") || equal(name_tok, "unchecked");
             tok = tok->next;
@@ -2718,7 +2756,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                                    : equal(name_tok, "count")   ? "count"
                                    : equal(name_tok, "byte_count")
                                        ? "byte_count"
-                                       : "bounds";
+                                   : equal(name_tok, "bounds") ? "bounds"
+                                   : equal(name_tok, "assume") ? "assume"
+                                                               : "dynamic";
                 tok = apply_checked_ptr_attr(vm, attr_tok, tok, ty, name);
                 continue;
             }

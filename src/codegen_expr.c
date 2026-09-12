@@ -445,6 +445,21 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit(vm, BTRAP);
             return;
 
+        case ND_DYNAMIC_CHECK: {
+            // dynamic_check(cond) (#486): only ever built when
+            // CCCC_CHECKED_BOUNDS was set at parse time (see parse_postfix.c
+            // -- the flag off case parses to plain ND_NULL_EXPR instead), so
+            // no runtime flag check is needed here, unlike CHKR/CHKAB's own
+            // opcodes which re-check the flag themselves for the
+            // -c=native/-m warn-and-drop path (this node never reaches that
+            // path at all).
+            int r_cond = alloc_temp_reg();
+            gen_expr(vm, node->lhs, r_cond);
+            emit_chkdc(vm, r_cond, (long long)node->tok->line_no);
+            free_temp_reg(r_cond);
+            return;
+        }
+
         case ND_DECIMAL_TO_CHARS: {
             // __builtin_decimal_to_chars(buf, n, decimal_val) (#402): lowers
             // directly to DFMT. buf(A0), n(A1), val(A2)=address, width(A3).
@@ -1712,9 +1727,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
             vm->compiler.in_union_member_access = lhs_saved_union_flag;
 
-            // #944: assignment-time bounds implication (Checked C's
-            // _Assume_bounds_cast direction) -- verify the value just stored
-            // into a declared-checked lhs actually satisfies the lhs's OWN
+            // #944: assignment-time bounds implication -- verify the value
+            // just stored into a declared-checked lhs actually satisfies
+            // the lhs's OWN
             // declared bounds, given a declared-checked rhs. Must run AFTER the
             // store above: checked_assign_dst_lo/hi are the lhs's own bounds
             // expressions, deliberately left unevaluated by
