@@ -1642,6 +1642,28 @@ struct Type {
     // src/parse_types.c). Appended at the very end for the same
     // positional-initializer reason as decl_align/pack_align above.
     CheckedCastKind checked_cast_kind;
+
+    // #487: Checked C-style checked ARRAY declaration (`int a _Checked[10]`
+    // / `char s _Nt_checked[11]`), parsed in declarator() (src/parse_types.c)
+    // once the array's extent is known. Reuses the exact same checked_kind/
+    // checked_bounds_form fields above (set to CHECKED_ARRAY/CHECKED_NTARRAY
+    // and CB_COUNT respectively) so find_checked_base()/compute_checked_
+    // bounds() treat a checked array as an ordinary declared-checked base --
+    // no new machinery. Unlike a checked POINTER's count(n), the count here
+    // is a compile-time constant (the array's own declared length), so
+    // there is no token span to defer/re-parse -- checked_bounds_arg1/arg2
+    // stay NULL for a checked array, and resolve_bounds_tokens()
+    // (src/parse_core.c) seeds *out_hi straight from this field instead.
+    // Holds the resolved element count (CHECKED_ARRAY) or one less than the
+    // declared length (CHECKED_NTARRAY, reserving the last element as the
+    // terminator slot the same way a checked pointer's ntarray widening
+    // does) -- 0 (CHECKED_NONE) otherwise. Also copied onto the adjusted
+    // TY_PTR a checked array parameter decays to (func_params(),
+    // src/parse_types.c), since the array's own TY_ARRAY extent
+    // (Type.array_len) is gone once the parameter adjustment runs.
+    // Appended at the very end for the same positional-initializer reason as
+    // decl_align/pack_align/checked_cast_kind above.
+    int checked_array_extent;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such

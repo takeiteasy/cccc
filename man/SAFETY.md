@@ -2246,6 +2246,56 @@ is accepted rather than rejected (the closing `end` always restores
 whichever state preceded its matching `begin`, regardless of which keyword
 it was spelled with).
 
+#### Checked Arrays
+
+Everything above is *pointer*-rooted — a checked pointer's bounds come from
+its own declaration, checked at every dereference. A checked array closes the
+one gap that leaves: an array declaration whose own extent becomes part of
+its checked type, so indexing it is `CHKR`-checked against that extent, and
+decaying it into a plain pointer carries those bounds along through the
+bounds-propagation pass above.
+
+```c
+int  a _Checked[10];     // 10 elements; a[10] traps under --checked-pointers
+char s _Nt_checked[11];  // 10 real elements + 1 terminator slot
+```
+
+Two keyword suffixes, recognized *positionally* — an identifier immediately
+followed by `[`, the same convention `_Checked { ... }`/`_Unchecked { ... }`
+(above) use for region blocks — so neither name is reserved and a variable or
+function actually named `_Checked`/`_Nt_checked` elsewhere is unaffected:
+
+| Spelling | Meaning |
+|---|---|
+| `_Checked[N]` | An `N`-element array; indexing is checked against `[a, a + N*sizeof(T))`, same as a checked pointer's `count(N)`. |
+| `_Nt_checked[N]` | Like `_Checked[N]`, but the last of the `N` declared elements is reserved as a null-terminator slot — the checked (non-terminator) range is `[a, a + (N-1)*sizeof(T))`, widened by one element for the terminator exactly as `[[cccc::ntarray]]` widens a checked pointer's range. Writing that slot is permitted only with a null value (`CHKNT`/`CHKNTZ`, same as a checked pointer). `_Nt_checked[0]` is a compile error — there is nothing left once the terminator slot is reserved. |
+
+Local, global, `static`-local, and struct/union member checked arrays are all
+supported, with the same member-relative resolution a checked pointer
+member has. A checked array **parameter** adjusts to a checked pointer at the
+same array-to-pointer parameter adjustment an ordinary array parameter goes
+through: `void f(int a _Checked[10])` is equivalent to
+`void f(int * [[cccc::array, cccc::count(10)]] a)`.
+
+**Decay carries bounds.** Assigning a checked array to a plain, unchecked
+pointer local is an ordinary declared-checked source for the bounds
+propagation pass described above: `int *q = a;` makes `q` a FULL propagation
+candidate rooted at `a`'s own declared extent, so `q[i]` stays checked
+exactly as if `q` had been assigned from a checked pointer.
+
+v1 scope, both deliberate, not residual gaps: a checked array's extent must
+be a compile-time constant (no VLA form — `_Checked[n]` for a non-constant
+`n` is a compile error, since there is no fixed extent to check against), and
+a checked array is single-dimension only (`_Checked[3][5]` is a compile
+error — a silently-unchecked checked array would be worse than refusing it
+outright). A checked region's ban list is unchanged by checked arrays — a
+plain, non-`_Checked` array declaration inside a checked region stays legal,
+same as it was before.
+
+Like every checked-pointer attribute, `_Checked[N]`/`_Nt_checked[N]` leave no
+trace in `-m`/`--dump-expanded`/`-c=native`/`-c=generated` output — a checked
+array serializes as an ordinary array declaration, ABI-transparent.
+
 ### VM Heap Allocator
 
 `malloc`/`free`/`calloc`/`realloc`/`aligned_alloc`/`posix_memalign` route through the VM heap

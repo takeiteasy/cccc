@@ -720,12 +720,28 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             bool saved_is_const    = ty2->is_const;
             bool saved_is_volatile = ty2->is_volatile;
             bool saved_is_restrict = ty2->is_restrict;
-            ty2                    = pointer_to(vm, ty2->base);
-            ty2->name              = name;
-            ty2->static_min        = saved_static_min;
-            ty2->is_const          = saved_is_const;
-            ty2->is_volatile       = saved_is_volatile;
-            ty2->is_restrict       = saved_is_restrict;
+            // #487: a checked array parameter (`void f(int a _Checked[10])`)
+            // carries its checked_kind/checked_bounds_form/checked_array_
+            // extent across this same adjustment, same as static_min/const/
+            // volatile/restrict above -- so it lands on the resulting TY_PTR
+            // as an ordinary declared-checked pointer (CHECKED_ARRAY/
+            // CHECKED_NTARRAY + CB_COUNT), and resolve_checked_bounds()
+            // (src/parse_core.c) seeds its bounds from checked_array_extent
+            // exactly like the array itself would have. A plain (non-
+            // checked) array parameter has checked_kind == CHECKED_NONE, so
+            // this is a no-op for every existing declaration.
+            CheckedKind       saved_checked_kind = ty2->checked_kind;
+            CheckedBoundsForm saved_bounds_form  = ty2->checked_bounds_form;
+            int               saved_array_extent = ty2->checked_array_extent;
+            ty2                                  = pointer_to(vm, ty2->base);
+            ty2->name                            = name;
+            ty2->static_min                      = saved_static_min;
+            ty2->is_const                        = saved_is_const;
+            ty2->is_volatile                     = saved_is_volatile;
+            ty2->is_restrict                     = saved_is_restrict;
+            ty2->checked_kind                    = saved_checked_kind;
+            ty2->checked_bounds_form             = saved_bounds_form;
+            ty2->checked_array_extent            = saved_array_extent;
         } else if (ty2->kind == TY_VLA) {
             // VLA parameters also adjust to pointer-to-element (C99
             // §6.7.6.3p7). Qualifiers from the brackets transfer to the
@@ -1073,9 +1089,70 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         tok  = tok->next;
     }
 
+    // #487: Checked C-style checked array declarator suffix -- `int a
+    // _Checked[10]` / `char s _Nt_checked[11]`. Recognized *positionally*
+    // (an identifier immediately followed by `[`), exactly the convention
+    // #1331 uses for `_Checked { ... }` region blocks -- so `_Checked`/
+    // `_Nt_checked` are never reserved words and stay ordinary identifiers
+    // everywhere else (a variable or function actually named `_Checked` is
+    // unaffected unless it happens to be followed by `[`, in which case the
+    // very next check below requires it to actually BE an array).
+    CheckedKind checked_array_kind = CHECKED_NONE;
+    Token      *checked_array_tok  = NULL;
+    if (tok->kind == TK_IDENT &&
+        (equal(tok, "_Checked") || equal(tok, "_Nt_checked"))) {
+        checked_array_tok = tok;
+        checked_array_kind =
+            equal(tok, "_Checked") ? CHECKED_ARRAY : CHECKED_NTARRAY;
+        if (!vm->compiler.in_type_lookahead && !equal(tok->next, "["))
+            error_tok(vm, tok,
+                      "'%.*s' must be followed by an array declarator, "
+                      "e.g. 'int a %.*s[10]'",
+                      tok->len, tok->loc, tok->len, tok->loc);
+        tok = tok->next;
+    }
+
     Type *inner_ty = ty;
     ty             = type_suffix(vm, rest, tok, ty);
     inherit_semantic_attrs(ty, inner_ty);
+
+    if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead) {
+        // v1 restrictions (#487) -- both deferred to follow-up tickets, not
+        // silently accepted as an unchecked array:
+        if (ty->kind == TY_VLA)
+            error_tok(vm, checked_array_tok,
+                      "a checked array must have a constant extent -- "
+                      "variable-length checked arrays are not supported");
+        if (ty->kind != TY_ARRAY)
+            error_tok(vm, checked_array_tok,
+                      "'%.*s' must be followed by an array declarator",
+                      checked_array_tok->len, checked_array_tok->loc);
+        if (ty->base &&
+            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_VLA))
+            error_tok(vm, checked_array_tok,
+                      "multidimensional checked arrays are not supported");
+        if (checked_array_kind == CHECKED_NTARRAY && ty->array_len < 1)
+            error_tok(vm, checked_array_tok,
+                      "an '_Nt_checked' array must declare at least 1 "
+                      "element -- the last element is reserved for the "
+                      "null-terminator slot");
+
+        // Mirrors the checked-pointer attribute path: this array's checked
+        // kind/bounds-form is a qualifier on its own type, exactly like
+        // const/volatile (see the CheckedKind/checked_bounds_form fields'
+        // comments in src/cccc.h) -- copy_type() so it never leaks onto a
+        // sibling declarator sharing this basety, the same reason
+        // declarator()'s gnu_align handling above copies. #919's
+        // propagation pass and #944's assignment-bounds-implication pass
+        // then treat this exactly like any other declared-checked base --
+        // no new machinery.
+        ty                       = copy_type(vm, ty);
+        ty->checked_kind         = checked_array_kind;
+        ty->checked_bounds_form  = CB_COUNT;
+        ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
+                                       ? ty->array_len - 1
+                                       : ty->array_len;
+    }
 
     // Propagate noreturn from prefix __attribute__ to function type
     if (prefix_attr.is_noreturn && ty->kind == TY_FUNC)

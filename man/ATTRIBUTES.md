@@ -699,6 +699,14 @@ transparent, #482/#488) — see [SAFETY.md § Checked
 Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
 note.
 
+**Checked arrays** (#487) extend the same layer to array declarations
+directly — `int a _Checked[10]` / `char s _Nt_checked[11]` — so an array's own
+extent is checked the same way a checked pointer's `count(n)` is, with no new
+opcode. These are keyword-positional suffixes (like `_Checked { ... }`/
+`_Unchecked { ... }` below), not attributes, so they have no `[[cccc::...]]`
+spelling. See [SAFETY.md § Checked Arrays](SAFETY.md#checked-arrays) for the
+full reference.
+
 ### `assume` / `dynamic` (CCCC-specific)
 
 The entry point into the checked-pointer world: converting an *unchecked*

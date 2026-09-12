@@ -881,6 +881,18 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
         ty->checked_bounds_form == CB_UNKNOWN)
         return;
 
+    // #487: a checked ARRAY's (or checked-array-adjusted parameter's) bounds
+    // form is CB_COUNT same as a checked pointer's count(n), but the count is
+    // the array's own compile-time extent, not a deferred token span to
+    // re-parse -- checked_bounds_arg1 is left NULL by declarator()/
+    // func_params() for this case, and checked_array_extent carries the
+    // already-resolved element count instead (see its comment in src/cccc.h).
+    // No side-effect check is needed: a plain integer literal can't have one.
+    if (!ty->checked_bounds_arg1 && ty->checked_array_extent > 0) {
+        *out_hi = new_long(vm, ty->checked_array_extent, ty->name);
+        return;
+    }
+
     Token *tok;
 
     if (ty->checked_bounds_form == CB_RANGE) {

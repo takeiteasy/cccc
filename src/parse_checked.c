@@ -198,18 +198,39 @@ static bool checked_base_is_declared(CheckedBase base) {
 // by Node.checked_bounds_obj_init. A trivial object expression (a bare
 // local, `s.a.b`) is left untouched and cloned directly, since re-cloning
 // it costs nothing (see checked_obj_is_trivial()).
+// #487: a checked ARRAY base (Type.checked_kind set on a TY_ARRAY, see the
+// checked_array_extent comment in src/cccc.h) types as TY_ARRAY, but every
+// caller of checked_base_self_expr() feeds the result straight into
+// new_binary(vm, ND_ADD, ...) + add_type() -- add_type(), unlike the parser's
+// own new_add() helper, does NOT perform array-to-pointer decay or pointer-
+// arithmetic scaling, so an un-decayed TY_ARRAY operand there would be wrong
+// (either untyped or scaled by the wrong factor). Explicitly decay it here:
+// `&a` deliberately does not itself decay (src/type.c, #973/#975) -- it
+// types as `T (*)[N]` -- so the cast to `T *` is the actual decay step,
+// exactly what an ordinary `a[i]` expression (desugared to `*(a+i)` in
+// postfix()) gets for free from new_add(). Purely additive: checked_kind can
+// only be set on a TY_PTR before #487, so this arm was unreachable until
+// checked arrays existed.
+static Node *checked_array_decay(VirtualMachine *vm, Node *e, Token *tok) {
+    if (!e->ty || e->ty->kind != TY_ARRAY)
+        return e;
+    Node *addr = new_unary(vm, ND_ADDR, e, tok);
+    add_type(vm, addr);
+    return new_cast(vm, addr, pointer_to(vm, e->ty->base));
+}
+
 static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base,
                                     Token *tok) {
     if (base.var) {
         Node *p = new_var_node(vm, base.var, tok);
         add_type(vm, p);
-        return p;
+        return checked_array_decay(vm, p, tok);
     }
     Node *member_node =
         new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
     member_node->member = base.mem;
     add_type(vm, member_node);
-    return member_node;
+    return checked_array_decay(vm, member_node, tok);
 }
 
 // #945: true if `n` (a member access's object expression, base.obj) is
