@@ -170,3 +170,126 @@ int unchecked_after_block(void) {
 void test_region_does_not_leak_across_block(void) {
     AssertEq(unchecked_after_block(), 42);
 }
+
+// ---------------------------------------------------------------------
+// #1331: Checked C keyword spellings `_Checked { ... }` / `_Unchecked
+// { ... }` -- a second spelling for the same region state, recognized
+// positionally (a name immediately followed by '{') rather than as a
+// reserved keyword.
+// ---------------------------------------------------------------------
+
+int underscore_checked_array_sum(void) {
+    int n = 4;
+    _Checked {
+        int *[[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
+        return a[0] + a[1] + a[2] + a[3];
+    }
+}
+
+[[cccc::test]]
+void test_underscore_checked_block(void) {
+    AssertEq(underscore_checked_array_sum(), 10);
+}
+
+[[cccc::checked]]
+int underscore_unchecked_escape_in_attr_function(void) {
+    int n                                  = 1;
+    int *[[cccc::array, cccc::count(n)]] a = (int[1]){41};
+    int result;
+    _Unchecked {
+        int *raw = (int *)a; // fine -- inside the escape hatch
+        result   = raw[0] + 1;
+    }
+    return result;
+}
+
+[[cccc::test]]
+void test_underscore_unchecked_escape_in_attr_function(void) {
+    AssertEq(underscore_unchecked_escape_in_attr_function(), 42);
+}
+
+int underscore_three_deep_alternating_nesting(void) {
+    int total = 0;
+    _Checked {
+        _Unchecked {
+            int *p = &total; // fine -- unchecked block
+            _Checked {
+                int *[[cccc::single]] q = p; // fine -- checked again
+                *q                      = 40;
+            }
+            *p += 2;
+        }
+    }
+    return total;
+}
+
+[[cccc::test]]
+void test_underscore_three_deep_alternating_nesting(void) {
+    AssertEq(underscore_three_deep_alternating_nesting(), 42);
+}
+
+// Mixed spellings: the attribute form and the keyword form nest freely
+// against each other -- innermost always wins regardless of which spelling
+// it used to get there.
+[[cccc::checked]]
+int mixed_spelling_attr_then_keyword(void) {
+    int n                                  = 1;
+    int *[[cccc::array, cccc::count(n)]] a = (int[1]){20};
+    int result;
+    _Unchecked {
+        int *raw = (int *)a;
+        result   = raw[0];
+    }
+    return result;
+}
+
+[[cccc::test]]
+void test_mixed_spelling_attr_then_keyword(void) {
+    AssertEq(mixed_spelling_attr_then_keyword(), 20);
+}
+
+int mixed_spelling_keyword_then_attr(void) {
+    int result = 0;
+    _Checked {
+        [[cccc::unchecked]] {
+            int *p = &result; // fine -- unchecked escape from a keyword region
+            *p     = 22;
+        }
+    }
+    return result;
+}
+
+[[cccc::test]]
+void test_mixed_spelling_keyword_then_attr(void) {
+    AssertEq(mixed_spelling_keyword_then_attr(), 22);
+}
+
+#pragma cccc unchecked begin
+// A keyword-form region overrides the surrounding pragma-introduced state
+// for its own lexical extent, the same as the attribute form already does.
+int underscore_checked_overrides_pragma(void) {
+    int n = 1;
+    _Checked {
+        int *[[cccc::array, cccc::count(n)]] a = (int[1]){42};
+        return a[0];
+    }
+}
+#pragma cccc unchecked end
+
+[[cccc::test]]
+void test_underscore_checked_overrides_pragma(void) {
+    AssertEq(underscore_checked_overrides_pragma(), 42);
+}
+
+// A plain identifier spelled `_Checked`/`_Unchecked` is never reclassified --
+// the recognition is purely positional (name immediately followed by '{').
+int _Checked_like_name_is_unaffected(void) {
+    int _Checked   = 20;
+    int _Unchecked = 22;
+    return _Checked + _Unchecked;
+}
+
+[[cccc::test]]
+void test_underscore_name_not_reclassified(void) {
+    AssertEq(_Checked_like_name_is_unaffected(), 42);
+}

@@ -2009,7 +2009,7 @@ unchecked pointer declaration or an unsafe pointer cast is a compile error,
 so the guarantee is local to the region rather than per-declaration, and a
 codebase can be migrated block-by-block.
 
-**Three ways to open a region**, all interchangeable:
+**Four ways to open a region**, all interchangeable:
 
 ```c
 [[cccc::checked]] void f(void) {
@@ -2028,6 +2028,17 @@ codebase can be migrated block-by-block.
 #pragma cccc checked end
 ```
 
+```c
+void g(void) {
+    _Checked {
+        int * [[cccc::array, cccc::count(n)]] a = ...; // fine
+        _Unchecked {
+            int *raw = (int *)a;                       // fine -- escape hatch
+        }
+    }
+}
+```
+
 `[[cccc::unchecked]]` is the mirror-image attribute — it opens an *unchecked*
 region, most often nested inside a checked one as the incremental-migration
 escape hatch for code that cannot yet be made safe. Both attributes accept
@@ -2035,12 +2046,28 @@ the GNU spelling (`__attribute__((checked))`, `__attribute__((unchecked))`,
 `__checked__`/`__unchecked__`) and the `@checked`/`@unchecked` short prefix,
 matching every other checked-pointer attribute.
 
+**The Checked C keyword spellings** `_Checked { ... }` / `_Unchecked { ... }`
+are a fourth, source-compat spelling for code written against Checked C —
+they push/pop exactly the same region state as the attribute form, with no
+separate representation. They are recognized *positionally*: a name
+immediately followed by `{`, in statement position, the same shape a real
+tokenizer keyword would occupy — but `_Checked`/`_Unchecked` are **not**
+reserved words, so a variable, function, or any other identifier spelled
+`_Checked` or `_Unchecked` elsewhere in a program is completely unaffected.
+The trade-off is that this form only opens a region as a standalone
+statement — `void f(void) _Checked { ... }` (declarator-suffix position) is
+not recognized this way; use `[[cccc::checked]]` on the function definition
+for that shape instead.
+
 **Nesting.** Regions nest to any depth and the innermost one always wins:
 `checked { unchecked { checked { ... } } }` is legal, and each level's
-declarations are checked against its own state, not an ancestor's. An
-attribute-introduced region (on a function definition or a compound
-statement) always overrides a surrounding `#pragma cccc checked/unchecked`
-region for its own lexical extent.
+declarations are checked against its own state, not an ancestor's — this
+holds across spellings too: an attribute region, a keyword region, and a
+pragma region freely nest against one another, and whichever one is
+innermost at a given point wins. An attribute- or keyword-introduced region
+(on a function definition or a compound statement) always overrides a
+surrounding `#pragma cccc checked/unchecked` region for its own lexical
+extent.
 
 **The pragma form** is a positional preprocessor directive, not a
 `config()` option — `#pragma cccc config(...)` is resolved for the whole
@@ -2089,14 +2116,14 @@ so `TY_FUNC`-pointee pointers are exempt from both rules.
 parse/type-check diagnostics — never gated behind `--checked-pointers`, and
 they fire in `-c=native`, `-m`/`--dump-expanded`, and `-c=generated` output
 too, the same footing as the single-pointer-arithmetic ban and the bounds
-side-effect rejection described above. The two region
-attributes themselves are stripped from all of those outputs, ABI-
-transparently, exactly like the six checked-pointer attributes.
+side-effect rejection described above. The two region attributes are
+stripped from all of those outputs, ABI-transparently, exactly like the six
+checked-pointer attributes; the `_Checked`/`_Unchecked` keyword form carries
+no state of its own either, so it likewise leaves nothing behind to strip.
 
-**Known v1 gaps**, deferred to follow-up tickets: `_Checked`/`_Unchecked`
-Checked-C-compat block-specifier keywords are not yet supported (use the
-attribute or pragma forms); checked/unchecked call-boundary diagnostics
-(interop) are not enforced; a C23 `auto`-deduced local (`auto p =
+**Known v1 gaps**, deferred to follow-up tickets: checked/unchecked
+call-boundary diagnostics (interop) are not enforced; a C23 `auto`-deduced
+local (`auto p =
 some_unchecked_pointer;`) is not caught by the declaration ban -- the type
 check runs against the placeholder `auto` type before the initializer's
 deduced type is known, so declare the pointer with an explicit unchecked

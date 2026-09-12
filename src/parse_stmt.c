@@ -738,6 +738,31 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
     }
 
+    // #1331: Checked C keyword spellings `_Checked { ... }` /
+    // `_Unchecked { ... }` -- a second spelling for the same region state as
+    // [[cccc::checked]] / [[cccc::unchecked]], recognized positionally (a
+    // name immediately followed by '{') rather than as a tokenizer keyword
+    // (see init_keyword_map(), src/tokenize.c) -- an existing identifier of
+    // either spelling is never reclassified this way, at the cost of not
+    // covering declarator-suffix position (`void f(void) _Checked { ... }`,
+    // already covered by [[cccc::checked]]) in this pass. See
+    // man/SAFETY.md's Checked Regions section.
+    if (tok->kind == TK_IDENT && equal(tok->next, "{") &&
+        (equal(tok, "_Checked") || equal(tok, "_Unchecked"))) {
+        CheckedScope want =
+            equal(tok, "_Checked") ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
+        if (label_attr.checked_scope != CHECKED_SCOPE_UNSET &&
+            label_attr.checked_scope != want)
+            error_tok(vm, tok,
+                      "'checked' and 'unchecked' cannot both apply to the "
+                      "same declaration");
+        CheckedScope saved              = vm->compiler.checked_scope_attr;
+        vm->compiler.checked_scope_attr = want;
+        Node *n = compound_stmt(vm, rest, tok->next->next, NULL);
+        vm->compiler.checked_scope_attr = saved;
+        return n;
+    }
+
     if (tok->kind == TK_IDENT && equal(tok->next, ":")) {
         // #485: a region attribute written before the label name itself
         // (`[[cccc::checked]] foo: ...;`) would otherwise be silently
