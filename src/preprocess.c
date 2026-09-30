@@ -78,6 +78,7 @@ struct Macro {
     char             *va_args_name;
     Token            *body;
     macro_handler_fn *handler;
+    bool              is_pp_operator; // __has_*: evaluated by eval_pp_operator
     int               use_count; // number of times this macro has been expanded
     Token *define_tok; // token at the #define site (the macro name token)
     bool   is_shared;  // #888: #define @shared NAME -- survives
@@ -1957,6 +1958,120 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
     return 0; /* __has_cpp_attribute */
 }
 
+// Evaluates one `__has_*` operator call starting at tok. Returns false if
+// tok is not one of them or is not followed by `(`; otherwise stores the value
+// in *out and the token after the call in *rest.
+static bool eval_pp_operator(VirtualMachine *vm, Token **rest, Token *tok,
+                             int *out) {
+    if (!equal(tok->next, "("))
+        return false;
+
+    if (equal(tok, "__has_include")) {
+        int result = eval_has_include(vm, &tok, tok);
+        *out       = result;
+        *rest      = tok;
+        return true;
+    }
+
+    if (equal(tok, "__has_feature") || equal(tok, "__has_extension") ||
+        equal(tok, "__has_attribute") || equal(tok, "__has_builtin") ||
+        equal(tok, "__has_c_attribute") || equal(tok, "__has_cpp_attribute") ||
+        equal(tok, "__has_declspec_attribute")) {
+        char *kind   = arena_strndup(vm, tok->loc, tok->len);
+        int   result = eval_has_name(vm, &tok, tok, kind);
+        *out         = result;
+        *rest        = tok;
+        return true;
+    }
+
+    // "__has_warning(\"-Wname\")" -- the argument is a string literal,
+    // not an identifier, so it can't go through eval_has_name()'s
+    // consume_pp_name(). No -W name is queryable this way today;
+    // conservatively 0, but recognised so real SDK headers (macOS SDK
+    // uses this) parse instead of corrupting into a bogus function
+    // call.
+    if (equal(tok, "__has_warning")) {
+        tok = skip(vm, tok->next, "(");
+        if (tok->kind != TK_STR)
+            error_tok(vm, tok, "expected a string literal");
+        tok   = tok->next;
+        tok   = skip(vm, tok, ")");
+        *out  = 0;
+        *rest = tok;
+        return true;
+    }
+
+    // "__has_include_next(<foo.h>)" / "\"foo.h\"" -- unlike
+    // __has_include, evaluating this for real would need
+    // vm->compiler.include_next_idx to reflect *this header's* own
+    // search-path position at the point the #if runs, but that global
+    // is mutated by ordinary #include resolution throughout the whole
+    // translation unit (see search_include_next()/resolve_include_
+    // paths()) -- a header that #includes anything before its own
+    // `#if __has_include_next(...)` may already have moved it
+    // elsewhere. A plausibly-wrong 1 is worse than an honest 0, so this
+    // is conservatively always 0 (real SDK usage of the operator is
+    // exactly 2 hits, neither load-bearing).
+    if (equal(tok, "__has_include_next")) {
+        tok = skip(vm, tok->next, "(");
+        bool is_dquote;
+        int  filename_len;
+        read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
+        tok   = skip(vm, tok, ")");
+        *out  = 0;
+        *rest = tok;
+        return true;
+    }
+
+    // "__has_embed(filename)" returns 0 (not found), 1 (non-empty), or 2
+    // (empty)
+    if (equal(tok, "__has_embed")) {
+        Token *start = tok;
+        tok          = skip(vm, tok->next, "(");
+
+        // Parse filename
+        bool  is_dquote;
+        int   filename_len;
+        char *filename =
+            read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
+
+        tok = skip(vm, tok, ")");
+
+        // Determine result: 0 = not found, 1 = non-empty, 2 = empty
+        int result = 0;
+
+        if (is_url(filename)) {
+            // Same URL policy as __has_include above: fetch into the
+            // shared cache and judge the cached copy, so both probes
+            // agree with each other and with a real `#embed`.
+#ifdef CCCC_HAS_CURL
+            char *cache_path = fetch_url_to_cache(vm, filename);
+            if (cache_path) {
+                struct stat st;
+                if (!stat(cache_path, &st))
+                    result = (st.st_size == 0) ? 2 : 1;
+            }
+#endif
+        } else {
+            char *path = resolve_include_probe(vm, start, filename,
+                                               filename_len, is_dquote);
+
+            if (path && file_exists(path)) {
+                size_t         file_size;
+                unsigned char *data = read_binary_file(vm, path, &file_size);
+                if (data) {
+                    result = (file_size == 0) ? 2 : 1;
+                }
+            }
+        }
+
+        *out  = result;
+        *rest = tok;
+        return true;
+    }
+    return false;
+}
+
 // Rewrite `defined(foo)` / `defined foo` / `__has_include(...)` /
 // `__has_feature(...)` / `__has_extension(...)` / `__has_attribute(...)` /
 // `__has_builtin(...)` / `__has_c_attribute(...)` / `__has_cpp_attribute(...)`
@@ -2012,108 +2127,10 @@ static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok) {
             continue;
         }
 
-        if (equal(tok, "__has_include")) {
-            Token *start  = tok;
-            int    result = eval_has_include(vm, &tok, tok);
-            cur = cur->next = new_num_token(vm, result, start);
-            continue;
-        }
-
-        if (equal(tok, "__has_feature") || equal(tok, "__has_extension") ||
-            equal(tok, "__has_attribute") || equal(tok, "__has_builtin") ||
-            equal(tok, "__has_c_attribute") ||
-            equal(tok, "__has_cpp_attribute") ||
-            equal(tok, "__has_declspec_attribute")) {
-            Token *start  = tok;
-            char  *kind   = arena_strndup(vm, tok->loc, tok->len);
-            int    result = eval_has_name(vm, &tok, tok, kind);
-            cur = cur->next = new_num_token(vm, result, start);
-            continue;
-        }
-
-        // "__has_warning(\"-Wname\")" -- the argument is a string literal,
-        // not an identifier, so it can't go through eval_has_name()'s
-        // consume_pp_name(). No -W name is queryable this way today;
-        // conservatively 0, but recognised so real SDK headers (macOS SDK
-        // uses this) parse instead of corrupting into a bogus function
-        // call.
-        if (equal(tok, "__has_warning")) {
-            Token *start = tok;
-            tok          = skip(vm, tok->next, "(");
-            if (tok->kind != TK_STR)
-                error_tok(vm, tok, "expected a string literal");
-            tok = tok->next;
-            tok = skip(vm, tok, ")");
-            cur = cur->next = new_num_token(vm, 0, start);
-            continue;
-        }
-
-        // "__has_include_next(<foo.h>)" / "\"foo.h\"" -- unlike
-        // __has_include, evaluating this for real would need
-        // vm->compiler.include_next_idx to reflect *this header's* own
-        // search-path position at the point the #if runs, but that global
-        // is mutated by ordinary #include resolution throughout the whole
-        // translation unit (see search_include_next()/resolve_include_
-        // paths()) -- a header that #includes anything before its own
-        // `#if __has_include_next(...)` may already have moved it
-        // elsewhere. A plausibly-wrong 1 is worse than an honest 0, so this
-        // is conservatively always 0 (real SDK usage of the operator is
-        // exactly 2 hits, neither load-bearing).
-        if (equal(tok, "__has_include_next")) {
-            Token *start = tok;
-            tok          = skip(vm, tok->next, "(");
-            bool is_dquote;
-            int  filename_len;
-            read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
-            tok = skip(vm, tok, ")");
-            cur = cur->next = new_num_token(vm, 0, start);
-            continue;
-        }
-
-        // "__has_embed(filename)" returns 0 (not found), 1 (non-empty), or 2
-        // (empty)
-        if (equal(tok, "__has_embed")) {
-            Token *start = tok;
-            tok          = skip(vm, tok->next, "(");
-
-            // Parse filename
-            bool  is_dquote;
-            int   filename_len;
-            char *filename =
-                read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
-
-            tok = skip(vm, tok, ")");
-
-            // Determine result: 0 = not found, 1 = non-empty, 2 = empty
-            int result = 0;
-
-            if (is_url(filename)) {
-                // Same URL policy as __has_include above: fetch into the
-                // shared cache and judge the cached copy, so both probes
-                // agree with each other and with a real `#embed`.
-#ifdef CCCC_HAS_CURL
-                char *cache_path = fetch_url_to_cache(vm, filename);
-                if (cache_path) {
-                    struct stat st;
-                    if (!stat(cache_path, &st))
-                        result = (st.st_size == 0) ? 2 : 1;
-                }
-#endif
-            } else {
-                char *path = resolve_include_probe(vm, start, filename,
-                                                   filename_len, is_dquote);
-
-                if (path && file_exists(path)) {
-                    size_t         file_size;
-                    unsigned char *data =
-                        read_binary_file(vm, path, &file_size);
-                    if (data) {
-                        result = (file_size == 0) ? 2 : 1;
-                    }
-                }
-            }
-
-            cur = cur->next = new_num_token(vm, result, start);
+        int    result;
+        Token *op_start = tok;
+        if (eval_pp_operator(vm, &tok, tok, &result)) {
+            cur = cur->next = new_num_token(vm, result, op_start);
             continue;
         }
 
@@ -2645,6 +2662,19 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
         return false;
 
     m->use_count++;
+
+    // __has_*(...) called outside #if; a bare name stays an identifier.
+    if (m->is_pp_operator) {
+        int result;
+        if (!eval_pp_operator(vm, rest, tok, &result))
+            return false;
+        Token *num     = new_num_token(vm, result, tok);
+        num->next      = *rest;
+        num->at_bol    = tok->at_bol;
+        num->has_space = tok->has_space;
+        *rest          = num;
+        return true;
+    }
 
     // Built-in dynamic macro application such as __LINE__
     if (m->handler) {
@@ -4146,9 +4176,9 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
 
     TestRetField *fields = NULL, **ftail = &fields;
     bool          parse_ok = true;
-    bool warned = false; // true once a specific diagnostic has been emitted,
-                         // so the generic "malformed compound literal"
-                         // fallback below doesn't double-warn
+    bool   warned = false; // true once a specific diagnostic has been emitted,
+                           // so the generic "malformed compound literal"
+                           // fallback below doesn't double-warn
     Token *close_brace = NULL;
 
     while (p && !equal(p, "}") && p->kind != TK_EOF) {
@@ -5971,14 +6001,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // (rewrite_pp_operators()) can turn them into 0/1 correctly -- same
         // as it would for a literal, pre-expansion `defined(FOO)`.
         if (vm->compiler.pp_const_expr_depth > 0) {
-            // #1323: __has_declspec_attribute/__has_warning/
-            // __has_include_next added alongside the three original
-            // operators. This list is deliberately NOT the same set as the
-            // macro fallbacks below (__has_embed is protected here with no
-            // fallback macro; "defined" is protected but isn't a macro at
-            // all) -- keep it that way rather than merging the two, or an
-            // operator gains behavior (e.g. an outside-#if macro fallback)
-            // nothing asked for.
+            // "defined" is listed although it is not a macro; every __has_*
+            // operator is also registered as an operator macro, which this
+            // guard keeps from expanding inside #if.
             static char *const pp_operand_protect[] = {
                 "defined",
                 "__has_include",
@@ -6958,6 +6983,10 @@ static Macro *add_builtin(VirtualMachine *vm, char *name,
     return m;
 }
 
+static void add_pp_operator(VirtualMachine *vm, char *name) {
+    add_macro(vm, name, strlen(name), true, NULL, NULL)->is_pp_operator = true;
+}
+
 static Token *file_macro(VirtualMachine *vm, Token *tmpl) {
     while (tmpl->origin)
         tmpl = tmpl->origin;
@@ -7283,18 +7312,15 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__CCCC_HAS_CURL__", "1");
 #endif
 
-    define_macro(vm, "__has_include(x)", "0");
-    define_macro(vm, "__has_feature(x)", "0");
-    define_macro(vm, "__has_extension(x)", "0");
-    define_macro(vm, "__has_attribute(x)", "0");
-    define_macro(vm, "__has_builtin(x)", "0");
-    define_macro(vm, "__has_c_attribute(x)", "0");
-    define_macro(vm, "__has_cpp_attribute(x)", "0");
-    // #1323: __has_declspec_attribute/__has_warning/__has_include_next are
-    // deliberately NOT given a fallback macro here, same as __has_embed
-    // (also absent from this list, also #if-only) -- outside-#if usage of
-    // any of these is essentially unheard of, and rewrite_pp_operators()'s
-    // #if handling already covers the real case.
+    static char *const pp_operators[] = {
+        "__has_include",       "__has_include_next",
+        "__has_embed",         "__has_feature",
+        "__has_extension",     "__has_attribute",
+        "__has_builtin",       "__has_c_attribute",
+        "__has_cpp_attribute", "__has_declspec_attribute",
+        "__has_warning"};
+    for (size_t i = 0; i < sizeof pp_operators / sizeof *pp_operators; i++)
+        add_pp_operator(vm, pp_operators[i]);
 
     // GCC compatibility macros for system headers
     // Claim GCC 4.2.1 compatibility (minimum version for modern headers)
@@ -7312,7 +7338,6 @@ void init_macros(VirtualMachine *vm) {
     // doesn't handle all attribute positions. Attributes are used for
     // optimization hints and documentation, not required for correct
     // compilation.
-    define_macro(vm, "__attribute__(x)", "");
 
     // GCC extension keyword — expands to nothing; silences pedantic warnings
     // in GCC-targeting headers that use __extension__ to suppress diagnostics.

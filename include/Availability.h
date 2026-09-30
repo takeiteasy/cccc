@@ -29,32 +29,6 @@
 #ifndef __AVAILABILITY__
 #define __AVAILABILITY__
 
-/*
- * __has_* feature testing macros are provided by CCCC's preprocessor.  The
- * guarded fallbacks below are only for non-CCCC preprocessing environments.
- */
-#ifndef __has_feature
-#define __has_feature(x) 0
-#endif
-#ifndef __has_extension
-#define __has_extension(x) 0
-#endif
-#ifndef __has_attribute
-#define __has_attribute(x) 0
-#endif
-#ifndef __has_include
-#define __has_include(x) 0
-#endif
-#ifndef __has_builtin
-#define __has_builtin(x) 0
-#endif
-#ifndef __has_c_attribute
-#define __has_c_attribute(x) 0
-#endif
-#ifndef __has_cpp_attribute
-#define __has_cpp_attribute(x) 0
-#endif
-
 /* Header inline macros (needed for sys/_types/_fd_def.h and others) */
 #ifndef __header_inline
 #define __header_inline static inline

@@ -11,6 +11,15 @@ CCCC provides the common `__has_*` operators in preprocessor conditionals:
 `__has_attribute`, `__has_builtin`, `__has_c_attribute`,
 `__has_cpp_attribute`, `__has_declspec_attribute`, and `__has_warning`.
 
+Each operator is visible to `defined`, `#ifdef` and `#ifndef`, and also
+evaluates outside `#if`:
+
+```c
+#ifdef __has_builtin
+int has_expect = __has_builtin(__builtin_expect); // 1
+#endif
+```
+
 `__has_feature` and `__has_extension` report selected-standard support for
 `c99`, `c11`, `c23`, `c_alignas`, `c_alignof`, `c_generic_selections`, and
 `c_static_assert`. Parsed-but-incomplete features such as `_Atomic` and
@@ -255,12 +264,19 @@ on `-c=native` output.
 Guard the attribute in code that other compilers also build:
 
 ```c
-#if __has_c_attribute(cccc::kernel)
-#define KERNEL_CHECK [[cccc::kernel]]
-#else
-#define KERNEL_CHECK
+#if defined(__has_c_attribute)
+#  if __has_c_attribute(cccc::kernel)
+#    define KERNEL_CHECK [[cccc::kernel]]
+#  endif
+#endif
+#ifndef KERNEL_CHECK
+#  define KERNEL_CHECK
 #endif
 ```
+
+The outer `defined` test keeps the header valid in C++ and Metal, where
+`__has_c_attribute` does not exist and a bare `#if __has_c_attribute(...)` is
+an error.
 
 **Limitations:**
 
