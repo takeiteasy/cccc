@@ -7,6 +7,28 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-30
+
+- Checked arrays: `int a _Checked[10]` / `char s _Nt_checked[11]` make the
+  declared extent part of the array's checked type, so indexing is
+  bounds-checked against it and decay to an unchecked pointer carries the
+  bounds along. Multidimensional and variable-length checked arrays are
+  compile errors. See `man/SAFETY.md`'s "Checked Arrays" section.
+- Bounds-safe interfaces: a call passing a checked pointer to a parameter
+  with declared bounds is verified at the call site (`CHKAB`) that the
+  argument's own bounds imply the parameter's. An annotated parameter needs
+  no extra attribute and places no restriction on an unchecked caller.
+- Fixed: the VM loaded a clobbered register when an operand of
+  `atomic_store*`, `atomic_exchange`, `atomic_compare_exchange_*` or
+  `ckd_add/sub/mul` contained a call (a store stored the byte offset; the
+  exchange and compare-exchange forms crashed).
+- Fixed: an assignment stored a wrong value when its lvalue's address
+  expression contained a block call, a wide `_BitInt` operation or a
+  statement-expression.
+- Fixed: `-c=native` emitted an invalid comparison between an `_Atomic`
+  scalar load and a constant (`(_Atomic unsigned)7`).
+
+
 - Checked-pointer bounds casts: `[[cccc::assume]]`/`[[cccc::dynamic]]`, the
   entry point for converting an unchecked pointer into a checked one.
   Attach in a cast's type-name alongside the claimed checked kind/bounds
