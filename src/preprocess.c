@@ -99,6 +99,7 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok);
+static char *search_include_next(VirtualMachine *vm, char *filename, int start);
 
 static bool is_hash(Token *tok) {
     return tok->at_bol && equal(tok, "#");
@@ -2001,24 +2002,21 @@ static bool eval_pp_operator(VirtualMachine *vm, Token **rest, Token *tok,
         return true;
     }
 
-    // "__has_include_next(<foo.h>)" / "\"foo.h\"" -- unlike
-    // __has_include, evaluating this for real would need
-    // vm->compiler.include_next_idx to reflect *this header's* own
-    // search-path position at the point the #if runs, but that global
-    // is mutated by ordinary #include resolution throughout the whole
-    // translation unit (see search_include_next()/resolve_include_
-    // paths()) -- a header that #includes anything before its own
-    // `#if __has_include_next(...)` may already have moved it
-    // elsewhere. A plausibly-wrong 1 is worse than an honest 0, so this
-    // is conservatively always 0 (real SDK usage of the operator is
-    // exactly 2 hits, neither load-bearing).
+    // "__has_include_next(<foo.h>)" searches from the directory after the
+    // one the current file was found in, like #include_next.
     if (equal(tok, "__has_include_next")) {
+        Token *op = tok;
+        while (op->origin)
+            op = op->origin;
         tok = skip(vm, tok->next, "(");
-        bool is_dquote;
-        int  filename_len;
-        read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
+        bool  is_dquote;
+        int   filename_len;
+        char *filename =
+            read_include_filename(vm, &tok, tok, &is_dquote, &filename_len);
         tok   = skip(vm, tok, ")");
-        *out  = 0;
+        *out  = search_include_next(vm, filename,
+                                    op->file ? op->file->include_next_start
+                                             : 0) != NULL;
         *rest = tok;
         return true;
     }
@@ -2932,8 +2930,6 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
             if (file_exists(path)) {
                 hashmap_put2(&vm->compiler.include_cache, filename,
                              filename_len, path);
-                vm->compiler.include_next_idx =
-                    vm->compiler.include_paths.len + i + 1;
                 return path;
             }
             free(path);
@@ -2952,7 +2948,6 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         if (file_exists(path)) {
             hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
                          path);
-            vm->compiler.include_next_idx = i + 1;
             // #1143: this -I entry just resolved one of CCCC's own bundled
             // std headers (e.g. a test harness's `-I./include`) -- record
             // it so run_native_backend() (main.c) forwards it demoted
@@ -2994,8 +2989,6 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         if (file_exists(path)) {
             hashmap_put2(&vm->compiler.include_cache, filename, filename_len,
                          path);
-            vm->compiler.include_next_idx =
-                vm->compiler.include_paths.len + i + 1;
             // #1143: same reasoning as the include_paths loop above, for a
             // user `-isystem` entry that happens to also hold one of
             // CCCC's own bundled std headers.
@@ -3157,29 +3150,48 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
     free(buf);
 }
 
-static char *search_include_next(VirtualMachine *vm, char *filename) {
-    // First search include_paths
-    for (; vm->compiler.include_next_idx < vm->compiler.include_paths.len;
-         vm->compiler.include_next_idx++) {
-        char *path = arena_format(
-            vm, "%s/%s",
-            vm->compiler.include_paths.data[vm->compiler.include_next_idx],
-            filename);
+// Searches include_paths then system_include_paths from index `start`
+// (system entries are numbered after the include_paths ones).
+static char *search_include_next(VirtualMachine *vm, char *filename,
+                                 int start) {
+    int npaths = vm->compiler.include_paths.len;
+    for (int i = start; i < npaths; i++) {
+        char *path = arena_format(vm, "%s/%s",
+                                  vm->compiler.include_paths.data[i], filename);
         if (file_exists(path))
             return path;
     }
-    // Then search system_include_paths (needed for #include_next from CCCC
-    // wrapper headers)
-    int sys_idx =
-        vm->compiler.include_next_idx - vm->compiler.include_paths.len;
-    for (; sys_idx < vm->compiler.system_include_paths.len; sys_idx++) {
+    for (int i = start > npaths ? start - npaths : 0;
+         i < vm->compiler.system_include_paths.len; i++) {
         char *path = arena_format(
-            vm, "%s/%s", vm->compiler.system_include_paths.data[sys_idx],
-            filename);
+            vm, "%s/%s", vm->compiler.system_include_paths.data[i], filename);
         if (file_exists(path))
             return path;
     }
     return NULL;
+}
+
+// Index just past the search directory `path` was found in for `filename`,
+// or 0 if it was not found through the search paths.
+static int include_next_start_for(VirtualMachine *vm, const char *path,
+                                  const char *filename) {
+    size_t plen = strlen(path), flen = strlen(filename);
+    if (plen <= flen + 1 || strcmp(path + plen - flen, filename) ||
+        path[plen - flen - 1] != '/')
+        return 0;
+    size_t dlen   = plen - flen - 1;
+    int    npaths = vm->compiler.include_paths.len;
+    for (int i = 0; i < npaths; i++) {
+        const char *d = vm->compiler.include_paths.data[i];
+        if (strlen(d) == dlen && !strncmp(d, path, dlen))
+            return i + 1;
+    }
+    for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
+        const char *d = vm->compiler.system_include_paths.data[i];
+        if (strlen(d) == dlen && !strncmp(d, path, dlen))
+            return npaths + i + 1;
+    }
+    return 0;
 }
 
 // Read an #include argument.
@@ -3375,6 +3387,9 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
                   strerror(errno));
     if (is_system && tok2->file)
         tok2->file->is_system_header = true;
+    if (tok2->file)
+        tok2->file->include_next_start =
+            include_next_start_for(vm, path, include_name);
 
     // Register stdlib functions for standard headers (header-based lazy
     // loading)
@@ -6781,7 +6796,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 char *filename = read_include_filename(vm, &tok, tok->next,
                                                        &ignore, &filename_len);
                 tok            = skip_line(vm, tok);
-                char *path     = search_include_next(vm, filename);
+                char *path     = search_include_next(
+                    vm, filename,
+                    start->file ? start->file->include_next_start : 0);
                 record_include_edge(vm, start->file ? start->file->name : NULL,
                                     path ? path : filename); // #896
                 tok = include_file(vm, tok, path ? path : filename,

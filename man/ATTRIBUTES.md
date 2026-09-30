@@ -41,10 +41,10 @@ unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
 `__has_declspec_attribute` and `__has_warning` are recognized (so headers
 using them parse instead of erroring) but always return `0` — CCCC supports
 no `__declspec` attributes and has no `-W`-name-keyed diagnostic registry.
-`__has_include_next` is likewise always `0`: unlike `__has_include`,
-answering it correctly would require knowing exactly where in the include
-search path the *current* header itself was found, which isn't reliably
-recoverable at an arbitrary `#if` site.
+`__has_include_next(<f.h>)` is `1` when a file named `f.h` exists in a search
+directory after the one the current file was found in, which is what
+`#include_next <f.h>` would open. In a file that was not found through the
+search paths, such as the main source file, it searches every directory.
 
 Any other `__has_*`-shaped operator CCCC doesn't recognize evaluates to `0`
 and emits a `-Wcpp` warning naming it, rather than the confusing "not a

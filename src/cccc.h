@@ -1111,6 +1111,8 @@ typedef struct File {
 
     bool  is_system_header; // true when included via <...> from system search
                             // paths
+    int include_next_start; // search-path index where #include_next and
+                            // __has_include_next begin; 0 searches all
 } File;
 
 /*!
@@ -3665,7 +3667,6 @@ typedef struct Compiler {
     HashMap included_headers;  // Track included headers for lazy stdlib loading
     HashMap include_guards;   // Header include guard cache (path -> guard name)
     HashMap guard_macros;     // Set of macro names used as include guards
-    int     include_next_idx; // Index for #include_next
 
     // Compile-time macro state
     MacroFn            *macro_fns; // Linked list of captured macro functions

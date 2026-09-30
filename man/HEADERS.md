@@ -100,7 +100,7 @@ needs help with:
   `#include <pthread.h>` under `--sysroot`/`--use-system-headers` resolves
   cleanly.
 - **An `__has_*`-shaped operator CCCC doesn't recognize** (real SDK headers
-  use `__has_declspec_attribute`/`__has_warning`/`__has_include_next` —
+  use `__has_declspec_attribute`/`__has_warning` —
   see [ATTRIBUTES.md](ATTRIBUTES.md#feature-test-preprocessor-operators))
   evaluates to `0` and emits a `-Wcpp` warning naming it, whether it's
   written literally or reached through a macro expansion, rather than the
