@@ -712,20 +712,6 @@ void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
     emit_load_ex(vm, ty, rd, rs_addr, true);
 }
 
-// Returns true if the expression subtree contains a function call.
-// Used to guard indexed addressing: calls clobber all temp registers
-// (caller-saved), so a base address held in r_base across a call in
-// the index expression will be corrupted at runtime.
-bool expr_has_call(Node *node) {
-    if (!node)
-        return false;
-    if (node->kind == ND_FUNCALL)
-        return true;
-    return expr_has_call(node->lhs) || expr_has_call(node->rhs) ||
-           expr_has_call(node->cond) || expr_has_call(node->then) ||
-           expr_has_call(node->els) || expr_has_call(node->body);
-}
-
 // Fused load from bp-relative local slot — replaces LEA3+LDR
 void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {

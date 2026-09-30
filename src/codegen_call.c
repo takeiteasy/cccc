@@ -69,6 +69,9 @@ bool contains_funcall(Node *node) {
 
     if (node->kind == ND_FUNCALL || node->kind == ND_BLOCK_CALL)
         return true;
+    // Statements inside reset the temp registers.
+    if (node->kind == ND_STMT_EXPR)
+        return true;
     if (is_wide_bitint_helper_op(node))
         return true;
     // ND_MEMZERO lowers to the MSET opcode, which clobbers REG_A0/REG_A2 (the

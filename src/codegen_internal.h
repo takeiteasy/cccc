@@ -126,7 +126,6 @@ bool cast_is_repr_noop(Type *to, Type *from);
 bool contains_funcall(Node *node);
 bool contains_self_call(Node *node, Obj *fn);
 bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs);
-bool expr_has_call(Node *node);
 bool is_extern_func_name(Node *node, const char *name);
 bool is_simple_local_scalar(VirtualMachine *vm, Node *node);
 bool is_u64_int(Type *ty);

@@ -755,4 +755,36 @@ int test_array_partial_init(void) {
     return result;
 }
 
+// The stored value must survive an index expression that clobbers the temp
+// registers (statement-expression, wide _BitInt op, block call).
+static int ident(int v) {
+    return v;
+}
+
+[[cccc::test(return = 42)]]
+int test_assign_index_clobbers_temps(void) {
+    int a[4] = {0, 0, 0, 0};
+
+    a[({
+        int t = ident(2);
+        t;
+    })]      = ident(0x55);
+    if (a[0] != 0 || a[1] != 0 || a[2] != 0x55)
+        return 1;
+
+    _BitInt(256) w          = 2;
+    a[(int)(w * w - w) - 1] = ident(7);
+    if (a[1] != 7)
+        return 2;
+
+    int (^blk)(int) = ^(int x) {
+      return x;
+    };
+    a[blk(3)] = blk(9);
+    if (a[3] != 9)
+        return 3;
+
+    return 42;
+}
+
 #pragma cccc suite end

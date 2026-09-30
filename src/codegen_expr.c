@@ -1499,7 +1499,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // the RHS address held in r_src (e.g. `arr[f()] =
                 // some_struct;`). Spill it across the address computation and
                 // reload afterwards. (#581)
-                bool      src_has_call = expr_has_call(node->lhs);
+                bool      src_has_call = contains_funcall(node->lhs);
                 long long r_src_spill  = 0;
                 if (src_has_call) {
                     r_src_spill = alloc_wide_bitint_temp(vm, 1);
@@ -1602,7 +1602,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // call's codegen mirrors this real clobber.) Spill r_val to a
             // one-word stack slot across the address computation and reload it
             // afterwards so the store sees the correct value. (#581)
-            bool      lhs_has_call = !lhs_fused && expr_has_call(node->lhs);
+            bool      lhs_has_call = !lhs_fused && contains_funcall(node->lhs);
             long long r_val_spill  = 0;
             if (lhs_has_call) {
                 r_val_spill = alloc_wide_bitint_temp(vm, 1);
