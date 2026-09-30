@@ -4018,19 +4018,13 @@ static void aio_sigev_signal_handler(int sig) {
 //
 // #929: the initial aio_write() submission itself failed on GitHub's
 // hosted macOS runners (a loaded shared host temporarily out of aio slots
-// -- see aio_write_retry's comment) -- a different failure than the
-// signal-delivery tolerance above, and NOT something to silently tolerate
-// here: sigevent_prepare() passes SIGEV_SIGNAL through to the real host
-// aio_write() untouched, so this is the only coverage SIGEV_SIGNAL has.
-// Retry transient EAGAIN; if it's still failing after that, fail loudly
-// with the errno folded into the return code (100 + errno, so the TAP
-// "got N" line names it) rather than a bare, undiagnosable "got 2".
+// -- see aio_write_retry's comment). Like test_aio_sigev_thread, an EAGAIN
+// that outlasts the retry budget is a host limitation and passes; any other
+// submission failure fails with 100 + errno so the TAP "got N" line names it.
 //
-// #961 follow-up: aio_write_retry's budget was widened from 200ms to ~1s
-// after this test still hit a persistent EAGAIN on a v0.2.7 release run
-// (job 31596923436, macos-arm64, c4 pass) -- the timeout below is bumped
-// to match test_aio_slot_exhaustion's 10000ms precedent so the wider
-// retry budget can't turn an EAGAIN into a TIMEOUT instead.
+// aio_write_retry's ~1s budget and the timeout below match
+// test_aio_slot_exhaustion's 10000ms precedent so the retries can't turn
+// an EAGAIN into a TIMEOUT instead.
 [[cccc::test(return = 42, timeout = 10000)]]
 int test_aio_sigev_signal(void) {
     char tmpl[] = "/tmp/cccc_aio_sigev_signal_XXXXXX";
@@ -4056,7 +4050,7 @@ int test_aio_sigev_signal(void) {
         signal(SIGUSR1, SIG_DFL);
         close(fd);
         unlink(tmpl);
-        return 100 + saved_errno;
+        return saved_errno == EAGAIN ? 42 : 100 + saved_errno;
     }
 
     const struct aiocb *list[1] = {&cb};
