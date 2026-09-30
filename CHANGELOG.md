@@ -7,6 +7,20 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-30
+
+- Fixed: `defined(__has_c_attribute)`, `#ifdef __has_builtin` and the same
+  test for every other `__has_*` operator were false. The operators are now
+  visible to `defined`, `#ifdef` and `#ifndef`, and evaluate outside `#if`
+  as well (`int n = __has_builtin(__builtin_expect);`).
+- Fixed: `#include_next` failed with "cannot open file" after the including
+  header had itself included another header. `#include_next` and
+  `__has_include_next` now search from the directory after the one the
+  current file was found in; `__has_include_next` no longer always returns
+  `0`.
+- Docs: the `[[cccc::kernel]]` guard in `man/ATTRIBUTES.md` uses a nested
+  `#if defined(__has_c_attribute)`, which is valid in C++ and Metal too.
+
 ## [0.3.0] - 2026-09-30
 
 - Checked arrays: `int a _Checked[10]` / `char s _Nt_checked[11]` make the
