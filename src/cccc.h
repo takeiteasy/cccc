@@ -1536,6 +1536,7 @@ struct Type {
     bool is_pure; // __attribute__((pure)): no side effects, may read globals
     bool is_func_const;   // __attribute__((const)): no side effects, no global
                           // reads
+    bool  is_kernel;      // [[cccc::kernel]]: GPU-safe subset
     char *deprecated_msg;
     char *nodiscard_msg;
     char *attr_error_msg; // __attribute__((error("msg"))): error if callee is
@@ -2270,6 +2271,7 @@ struct Obj {
     bool is_nodiscard;
     bool is_pure;
     bool is_func_const;
+    bool is_kernel;
     bool may_return_null; // #688: function has a provable null-returning path
                           // (whole-TU summary)
     bool always_returns_null; // #692: every reachable return in the function is

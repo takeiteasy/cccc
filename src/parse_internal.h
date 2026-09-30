@@ -97,6 +97,7 @@ typedef struct {
     bool           is_fallthrough;
     bool           is_pure;
     bool           is_func_const;
+    bool           is_kernel;
     char          *deprecated_msg;
     char          *nodiscard_msg;
     char          *attr_error_msg;   // __attribute__((error("msg")))
@@ -322,6 +323,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 Node *cast(VirtualMachine *vm, Token **rest, Token *tok);
 void check_may_return_null_summaries(VirtualMachine *vm);
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn);
+void check_kernel_subset(VirtualMachine *vm);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);
 Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,

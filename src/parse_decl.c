@@ -291,6 +291,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_noreturn     |= ty->is_noreturn;
         fn->is_pure         |= ty->is_pure;
         fn->is_func_const   |= ty->is_func_const;
+        fn->is_kernel       |= ty->is_kernel;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
@@ -555,6 +556,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_noreturn     |= ty->is_noreturn;
         fn->is_pure         |= ty->is_pure;
         fn->is_func_const   |= ty->is_func_const;
+        fn->is_kernel       |= ty->is_kernel;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
@@ -1735,6 +1737,7 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
         if (fn->is_function && fn->body)
             check_nonnull_flow(vm, fn);
+    check_kernel_subset(vm);
 
     return vm->compiler.globals;
 }

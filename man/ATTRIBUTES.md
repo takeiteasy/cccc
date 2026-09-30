@@ -75,6 +75,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [SAFETY.md](SAFETY.md#checked-pointers)) |
 | `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](SAFETY.md#checked-pointers) |
 | `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
+| `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -204,6 +205,70 @@ runtime source:
 #define @comptime CT_SEEN 1
 #endif @comptime
 ```
+
+## GPU Kernel Subset
+
+`[[cccc::kernel]]` checks that a function could run as a GPU kernel. The check
+runs on the normal CPU build, so kernel-shaped code is caught without a GPU
+toolchain. It does not generate GPU code.
+
+```c
+#include <stdatomic.h>
+
+static inline unsigned bump(_Atomic unsigned *p) {
+    return atomic_fetch_add_explicit(p, 1u, memory_order_relaxed);
+}
+
+[[cccc::kernel]] static void step(_Atomic unsigned *counters, unsigned i) {
+    bump(&counters[i]);
+}
+```
+
+Mark the entry function only. Every function it calls, directly or through
+other functions, is checked as well, so shared helpers need no mark. A
+violation is an error that names the call path:
+
+```
+error: calling 'puts', which has no definition in this file, is not allowed in kernel code (step -> log -> emit)
+```
+
+| Rejected | Example |
+|---|---|
+| Recursion, direct or mutual | `int f(int n) { return f(n - 1); }` |
+| Function pointers: calls through one, or taking a function's address | `int (*f)(int) = g;` |
+| A call to a function with no body in the file, which includes libc | `malloc(4)`, `puts("x")` |
+| Variadic functions, `va_start`, `va_arg` | `int f(int n, ...)` |
+| Variable-length arrays, `alloca` | `int a[n];` |
+| Inline assembly | `__asm__("nop")` |
+| `goto`, including computed goto | `goto out;` |
+| `double` and `long double` | `double d = 1.0;` |
+| Non-`const` global, static local, thread-local and string literal use | `static int n;` |
+| Blocks and nested functions | `^{ ... }` |
+
+Allowed: `float` and integer types, structs passed by value, local arrays,
+loops, `const` tables, enum and macro constants, and the `<stdatomic.h>`
+operations.
+
+Callees may be defined after the marked function. The attribute has no effect
+on `-c=native` output.
+
+Guard the attribute in code that other compilers also build:
+
+```c
+#if __has_c_attribute(cccc::kernel)
+#define KERNEL_CHECK [[cccc::kernel]]
+#else
+#define KERNEL_CHECK
+#endif
+```
+
+**Limitations:**
+
+- Callees must be defined in the same file; a call into another file is rejected.
+- One rule set covers both Metal and CUDA, so code valid on only one of them
+  (for example `double` on CUDA) is rejected.
+
+---
 
 ## Side-Effect Annotations
 

@@ -1739,6 +1739,7 @@ static const AttrInfo known_attrs[] = {
     // @checked/@unchecked route to [[cccc::...]] the same way.
     {"checked", ATTR_CCCC, true, 1},
     {"unchecked", ATTR_CCCC, true, 1},
+    {"kernel", ATTR_CCCC, true, 1},
     // Macro standard library attribute handlers (ticket #235)
     {"serialize", ATTR_CCCC, true, 1},
     {"deserialize", ATTR_CCCC, true, 1},

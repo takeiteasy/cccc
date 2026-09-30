@@ -701,6 +701,7 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->is_noreturn     = ty->is_noreturn;
     var->is_pure         = ty->is_pure;
     var->is_func_const   = ty->is_func_const;
+    var->is_kernel       = ty->is_kernel;
     var->deprecated_msg  = ty->deprecated_msg;
     var->is_constructor  = ty->is_constructor;
     var->is_destructor   = ty->is_destructor;
