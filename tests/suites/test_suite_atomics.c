@@ -172,4 +172,55 @@ int test_atomic_ops_functional_bounds_checked(void) {
     return test_atomic_ops_functional();
 }
 
+// A call inside an operand of an atomic store/exchange/CAS must not clobber
+// the other operand.
+static int call_id(int v) {
+    return v;
+}
+
+static int *call_ptr(int *p) {
+    return p;
+}
+
+static int call_idx(void) {
+    return 2;
+}
+
+[[cccc::test(return = 42)]]
+int test_atomic_operand_with_call(void) {
+    _Atomic int c[3];
+    for (int i = 0; i < 3; i++)
+        atomic_store(&c[i], 0);
+
+    atomic_store_explicit(&c[2], call_id(0x10000003), memory_order_relaxed);
+    if (atomic_load(&c[0]) != 0 || atomic_load(&c[1]) != 0 ||
+        atomic_load(&c[2]) != 0x10000003)
+        return 1;
+
+    atomic_store(&c[call_idx() - 1], call_id(7));
+    if (atomic_load(&c[1]) != 7)
+        return 2;
+
+    atomic_store(&c[call_idx()], call_id(9));
+    if (atomic_load(&c[2]) != 9)
+        return 3;
+
+    int old = atomic_exchange(&c[0], call_id(5));
+    if (old != 0 || atomic_load(&c[0]) != 5)
+        return 4;
+
+    int            x;
+    _Atomic(int *) p = 0;
+    atomic_exchange(&p, call_ptr(&x));
+    if (atomic_load(&p) != &x)
+        return 5;
+
+    int expected = 9;
+    if (!atomic_compare_exchange_strong(&c[2], &expected, call_id(11)) ||
+        atomic_load(&c[2]) != 11)
+        return 6;
+
+    return 42;
+}
+
 #pragma cccc suite end

@@ -391,6 +391,20 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
 // ========== Expression Generation ==========
 
+// Evaluates ops[i] into REG_A0+i, saving the earlier operands on the stack
+// around any operand containing a call (calls clobber REG_A0-A7).
+static void gen_operands_to_arg_regs(VirtualMachine *vm, Node **ops, int n) {
+    reset_temp_regs();
+    for (int i = 0; i < n; i++) {
+        bool has_call = i > 0 && contains_funcall(ops[i]);
+        for (int j = 0; has_call && j < i; j++)
+            emit_psh3(vm, REG_A0 + j);
+        gen_expr(vm, ops[i], REG_A0 + i);
+        for (int j = i - 1; has_call && j >= 0; j--)
+            emit_pop3(vm, REG_A0 + j);
+    }
+}
+
 // Generate code for expression, result in dest_reg (integer) or dest_freg
 // (float)
 void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
@@ -3573,10 +3587,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int kind_enc =
                 (result_ty->size << 1) | (result_ty->is_unsigned ? 1 : 0);
             long long packed = ((long long)node->val << 8) | kind_enc;
-            reset_temp_regs();
-            gen_expr(vm, node->lhs, REG_A0);
-            gen_expr(vm, node->rhs, REG_A1);
-            gen_expr(vm, node->cas_addr, REG_A2);
+            gen_operands_to_arg_regs(
+                vm, (Node *[]){node->lhs, node->rhs, node->cas_addr}, 3);
             emit_with_arg(vm, IOVFL, packed);
             if (dest_reg != REG_A0)
                 emit_mov3(vm, dest_reg, REG_A0);
@@ -3620,10 +3632,17 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // atomic_shadow. Falls back to plain emit_store for floats or
             // exotic sizes. Result is the stored value (C assignment
             // semantics).
-            int r_val  = alloc_temp_reg();
-            int r_addr = alloc_temp_reg();
+            int r_val = alloc_temp_reg();
             gen_expr(vm, node->rhs, r_val);
+            mark_temp_reg_used(r_val);
+            bool addr_has_call = contains_funcall(node->lhs);
+            if (addr_has_call)
+                emit_psh3(vm, r_val);
+            int r_addr = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_addr);
+            mark_temp_reg_used(r_addr);
+            if (addr_has_call)
+                emit_pop3(vm, r_val);
             Type *base_ty = node->lhs->ty->base;
             int   sz      = base_ty->size;
             if ((sz == 1 || sz == 2 || sz == 4 || sz == 8) &&
@@ -3676,9 +3695,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                           "1/2/4/8-byte integer or pointer)");
             long long width_enc =
                 ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
-            reset_temp_regs();
-            gen_expr(vm, node->lhs, REG_A0); // addr (obj pointer)
-            gen_expr(vm, node->rhs, REG_A1); // new value
+            gen_operands_to_arg_regs(vm, (Node *[]){node->lhs, node->rhs}, 2);
             // #985: CHKD ahead of AXCHG itself, same unconditional reasoning
             // as ALDR/ASTR above. This is a standalone CHKD instruction
             // emitted before AXCHG -- it never touches AXCHG's own operand
@@ -3706,12 +3723,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                           "1/2/4/8-byte integer or pointer)");
             long long width_enc =
                 ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
-            reset_temp_regs();
-            gen_expr(vm, node->cas_addr,
-                     REG_A0); // T* — pointer to atomic variable
-            gen_expr(vm, node->cas_old,
-                     REG_A1); // T* — pointer to expected value
-            gen_expr(vm, node->cas_new, REG_A2); // T  — desired value
+            gen_operands_to_arg_regs(
+                vm, (Node *[]){node->cas_addr, node->cas_old, node->cas_new},
+                3);
 
             // #937: an `_Atomic` [[cccc::ntarray]] element's `+=`/`++`/`--`
             // desugars (to_assign(), src/parse.c) into this ND_CAS rather than

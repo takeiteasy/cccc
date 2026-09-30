@@ -2355,4 +2355,19 @@ void test_c23_true_false_in_preprocessor(void) {
     AssertEq(false, 0);
 }
 
+// ckd_* operands containing calls must not clobber each other
+static unsigned ckd_call_id(unsigned v) {
+    return v;
+}
+
+[[cccc::test(return = 42)]]
+int test_ckd_add_operands_with_calls(void) {
+    unsigned r[3] = {0, 0, 0};
+    if (ckd_add(&r[2], ckd_call_id(0x50), ckd_call_id(5)))
+        return 1;
+    if (r[0] != 0 || r[1] != 0 || r[2] != 0x55)
+        return 2;
+    return 42;
+}
+
 #pragma cccc suite end
