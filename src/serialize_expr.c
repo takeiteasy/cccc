@@ -2046,7 +2046,15 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                         : NULL;
                 if (ptr_alias && ptr_alias->from_include)
                     fprintf(f, "%.*s *", ptr_alias->name_len, ptr_alias->name);
-                else
+                else if (dst && dst->is_atomic && dst->kind != TY_PTR) {
+                    // The value of a cast is an rvalue; clang keeps the
+                    // _Atomic on `(_Atomic T)e` and then rejects
+                    // `load != (_Atomic T)e`.
+                    Type unqualified      = *dst;
+                    unqualified.is_atomic = false;
+                    unqualified.origin    = NULL;
+                    serialize_type(f, ctx, &unqualified);
+                } else
                     serialize_type(f, ctx, node->ty);
                 fprintf(f, ")");
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);

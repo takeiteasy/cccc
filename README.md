@@ -1,7 +1,7 @@
 
 # cccc
 
-> **WARNING!** Work in progress.
+> **WARNING!** Work in progress. The interpreter and compile times are *long*. But it is able to fully compile itself
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
 
