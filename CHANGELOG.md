@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-01
+
 - Added: `-c=native` and `-m` run `cccc_launch`, the work-item builtins,
   barriers and `[[cccc::local]]` memory on CPU threads. Kernels without a
   barrier run their work-groups in parallel on the thread pool; kernels with a
