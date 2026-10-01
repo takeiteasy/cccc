@@ -3487,7 +3487,7 @@ static void init_builder_ctx(Builder *ctx, VirtualMachine *vm,
 
     *ctx            = (Builder){0};
     ctx->vm         = vm;
-    ctx->root       = cwd;
+    ctx->root       = xstrdup(cwd);
     ctx->out_dir    = xstrdup(opts->out_dir ? opts->out_dir : "build");
     ctx->host       = CCCC_BUILD_HOST;
     ctx->verbose    = opts->verbose || opts->build_verbose;
