@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-01
+
 - Fixed: `-c=generated` no longer copies `#pragma omp` lines, `#include <omp.h>`
   or its guard into the output. A region in macro-generated code runs on the
   thread pool, and the runtime is emitted only when generated code needs it.
