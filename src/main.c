@@ -881,6 +881,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                             to the host cc. LEVEL: 0..4.\n");
     printf("\t--trap-fp-divzero            Abort on float division by zero "
            "instead of IEEE +-Inf/NaN\n");
+    printf(
+        "\t-fopenmp, --openmp           Honour #pragma omp (regions run on one "
+        "thread in the VM)\n");
     printf("\t--posix-emulation            Enable lossy/approximate emulation "
            "of POSIX functions the\n");
     printf("\t                             host doesn't natively support (e.g. "
@@ -1555,6 +1558,7 @@ int main(int argc, const char *argv[]) {
         {"test-format", required_argument, 0, 1066},
         {"no-emit-tests", no_argument, 0, 1125}, // #1272
         {"kernel-max-group-size", required_argument, 0, 1126},
+        {"openmp", no_argument, 0, 1127},
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
         {"no-debug-on-crash", no_argument, 0, 1071},
@@ -1593,7 +1597,7 @@ int main(int argc, const char *argv[]) {
     }
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
     const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABw";
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABwf:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -2218,6 +2222,16 @@ int main(int argc, const char *argv[]) {
                 break;
             case 1125: // --no-emit-tests (#1272)
                 no_emit_tests = 1;
+                break;
+            case 1127: // --openmp
+                flags |= CCCC_OPENMP;
+                break;
+            case 'f':
+                if (strcmp(optarg, "openmp") != 0) {
+                    fprintf(stderr, "error: unknown option -f%s\n", optarg);
+                    usage(argv[0], 1);
+                }
+                flags |= CCCC_OPENMP;
                 break;
             case 1126: // --kernel-max-group-size=N
                 kernel_max_group = atoi(optarg);

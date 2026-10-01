@@ -5724,6 +5724,45 @@ static Token *handle_pragma_pack(VirtualMachine *vm, Token *tok) {
 // Dispatch the body of a #pragma directive or a _Pragma() operator.
 // tok is the first content token (after "#pragma" / after the destringized
 // string).
+// `#pragma omp <directive...>` reaches the parser as the ordinary token
+// sequence `__cccc_omp ( <directive...> )` spliced in place of the line, so
+// clause arguments macro-expand and the parser needs no pragma token kind.
+// Returns the new head; *tail is the closing ")" whose next is whatever
+// followed the line.
+static Token *splice_omp_pragma(VirtualMachine *vm, Token *omp, Token **tail) {
+    Token *last = omp;
+    while (last->next->kind != TK_EOF && !last->next->at_bol)
+        last = last->next;
+
+    Token *head  = copy_token(vm, omp);
+    head->kind   = TK_IDENT;
+    head->loc    = "__cccc_omp";
+    head->len    = 10;
+    head->at_bol = false;
+    Token *lp    = copy_token(vm, omp);
+    lp->kind     = TK_PUNCT;
+    lp->loc      = "(";
+    lp->len      = 1;
+    lp->at_bol   = false;
+    Token *rp    = copy_token(vm, omp);
+    rp->kind     = TK_PUNCT;
+    rp->loc      = ")";
+    rp->len      = 1;
+    rp->at_bol   = false;
+
+    Token *first = omp->next;
+    rp->next     = last->next;
+    if (last == omp) {
+        lp->next = rp;
+    } else {
+        lp->next   = first;
+        last->next = rp;
+    }
+    head->next = lp;
+    *tail      = rp;
+    return head;
+}
+
 static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "once")) {
         // Canonicalize identically to include_file()'s lookup key
@@ -5866,6 +5905,14 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
         return handle_gcc_diagnostic(vm, tok->next->next);
     } else if (equal(tok, "pack")) {
         return handle_pragma_pack(vm, tok);
+    } else if (equal(tok, "omp") && (vm->flags & CCCC_OPENMP)) {
+        Token *tail;
+        return splice_omp_pragma(vm, tok, &tail);
+    } else if (equal(tok, "omp")) {
+        do {
+            tok = tok->next;
+        } while (!tok->at_bol && tok->kind != TK_EOF);
+        return tok;
     } else {
         // Suppress "unknown pragma" noise from system headers. Real SDK
         // headers use #pragma GCC system_header, #pragma clang
@@ -6114,9 +6161,16 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 Token *pragma_toks =
                     tokenize(vm, new_file(vm, tok->file->name,
                                           tok->file->file_no, content));
-                handle_pragma_body(vm, pragma_toks);
                 tok = tok->next;
                 tok = skip(vm, tok, ")");
+                if (equal(pragma_toks, "omp") && (vm->flags & CCCC_OPENMP)) {
+                    Token *tail;
+                    Token *head = splice_omp_pragma(vm, pragma_toks, &tail);
+                    tail->next  = tok;
+                    tok         = head;
+                    continue;
+                }
+                handle_pragma_body(vm, pragma_toks);
                 continue;
             }
 
@@ -7327,6 +7381,9 @@ void init_macros(VirtualMachine *vm) {
     // what a native compiler on the same host would do (#824).
     if (vm->flags & CCCC_POSIX_EMULATION)
         define_macro(vm, "__CCCC_POSIX_EMULATION__", "1");
+
+    if (vm->flags & CCCC_OPENMP)
+        define_macro(vm, "_OPENMP", "201511");
 
     // Republish the host-side CCCC_HAS_NDBM build knob into the guest macro
     // namespace so include/ndbm.h can guard itself on Linux (#871).

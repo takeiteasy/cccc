@@ -847,6 +847,9 @@ typedef enum {
                    // type-level rules (e.g. no arithmetic on a
                    // [[cccc::single]] pointer) are a parse/type-check
                    // diagnostic and stay on unconditionally.
+    CCCC_OPENMP = (1 << 28), // 0x10000000 - Honour #pragma omp, define _OPENMP,
+                             // expose <omp.h> (-fopenmp). Opt-in, outside
+                             // CCCC_ALL_SAFETY.
 
     // Convenience flag combinations
     CCCC_POINTER_SANITIZER =
@@ -1891,6 +1894,48 @@ typedef struct CleanupChainNode {
         *parent; // enclosing cleanup scope (NULL at fn level)
 } CleanupChainNode;
 
+// #pragma omp directive attached to the ND_BLOCK its serial lowering is built
+// into (see parse_omp.c). Clause variables are listed by name and original Obj.
+typedef enum {
+    OMP_PARALLEL,
+    OMP_FOR,
+    OMP_PARALLEL_FOR,
+    OMP_CRITICAL,
+    OMP_ATOMIC,
+    OMP_BARRIER,
+    OMP_SINGLE,
+    OMP_MASTER,
+    OMP_MASKED,
+    OMP_SIMD,
+    OMP_ORDERED,
+} OmpKind;
+
+typedef enum {
+    OMP_CLAUSE_PRIVATE,
+    OMP_CLAUSE_FIRSTPRIVATE,
+    OMP_CLAUSE_SHARED,
+    OMP_CLAUSE_REDUCTION,
+} OmpClauseKind;
+
+typedef struct OmpClause OmpClause;
+struct OmpClause {
+    OmpClauseKind kind;
+    char         *name;
+    Obj          *orig;
+    char         *reduction_op; // "+", "-", "*", "&", "|", "^", "&&", "||",
+                                // "max", "min"; NULL for other clauses
+    OmpClause    *next;
+};
+
+typedef struct OmpDirective {
+    OmpKind    kind;
+    char      *critical_name; // critical(name); NULL when anonymous
+    OmpClause *clauses;
+    int        collapse;      // loop depth the directive covers (default 1)
+    bool       nowait;
+    bool       default_none;
+} OmpDirective;
+
 /*!
  @brief Represents a node in the parser's abstract syntax tree.
 */
@@ -1978,6 +2023,7 @@ struct Node {
     // can re-emit the assert for the host compiler to re-check when the
     // condition folds a host-owned layout. NULL for every ordinary
     // ND_BLOCK. See serialize_static_assert()/expr_has_host_owned_layout().
+    OmpDirective     *omp; // ND_BLOCK built for a #pragma omp directive
     Node             *static_assert_cond;
     char             *static_assert_msg;
     int               static_assert_msg_len;

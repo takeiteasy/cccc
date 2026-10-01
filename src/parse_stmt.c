@@ -210,6 +210,9 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
 //      | "{" compound-stmt
 //      | expr-stmt
 Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
+    if (equal(tok, "__cccc_omp"))
+        return omp_directive(vm, rest, tok);
+
     if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
         Node *cond    = NULL;
         char *msg     = NULL;

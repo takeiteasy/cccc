@@ -1548,6 +1548,10 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             continue;
         }
 
+        if (equal(tok, "__cccc_omp"))
+            error_tok(vm, tok,
+                      "OpenMP directive at file scope is not supported");
+
         // File-scope macro calls to non-inline macros are executed pre-parse
         // by cc_execute_inline_macros and their tokens are removed. If the
         // parser still sees one, it had arguments or was missed; skip it.

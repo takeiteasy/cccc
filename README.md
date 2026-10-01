@@ -117,6 +117,7 @@ Manuals live in [`man/`](man/):
 | [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
 | [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
 | [KERNELS.md](man/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items in the VM: `cccc_launch`, work-item builtins, local memory, barriers |
+| [OPENMP.md](man/OPENMP.md) | `-fopenmp`: `#pragma omp` directives and clauses, run on one thread in the VM, and `<omp.h>` |
 | [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
 | [TYPES.md](man/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |
 
@@ -329,6 +330,7 @@ Optimization:
 	                             Under -c=native it is forwarded verbatim as -O<n>
 	                             to the host cc. LEVEL: 0..4.
 	--trap-fp-divzero            Abort on float division by zero instead of IEEE +-Inf/NaN
+	-fopenmp, --openmp          Honour #pragma omp (regions run on one thread in the VM)
 	--posix-emulation            Enable lossy/approximate emulation of POSIX functions the
 	                             host doesn't natively support (e.g. ppoll() on macOS). Off
 	                             by default: such functions are undeclared/unregistered,

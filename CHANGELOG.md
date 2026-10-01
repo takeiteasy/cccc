@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `-fopenmp` parses `#pragma omp` (`parallel`, `for`, `parallel for`,
+  `critical`, `atomic`, `barrier`, `single`, `master`, with `private`,
+  `firstprivate`, `shared` and `reduction`) and the VM runs each region on one
+  thread. `<omp.h>` provides the runtime functions. See `man/OPENMP.md`.
+
 ## [0.4.1] - 2026-10-01
 
 - Fixed: the macOS release job failed on flaky tests. The SIGCHLD siginfo and
