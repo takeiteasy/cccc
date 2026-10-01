@@ -85,6 +85,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](SAFETY.md#checked-pointers) |
 | `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
 | `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
+| `global` / `local` / `constant` / `private` / `generic` | CCCC (declaration specifiers) | ✓ | Marks the address space a pointer refers to, or an object lives in, for `[[cccc::kernel]]` code; see [Address Spaces](#address-spaces) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -277,6 +278,66 @@ Guard the attribute in code that other compilers also build:
 The outer `defined` test keeps the header valid in C++ and Metal, where
 `__has_c_attribute` does not exist and a bare `#if __has_c_attribute(...)` is
 an error.
+
+### Address Spaces
+
+GPU dialects need to know which memory a pointer refers to. Mark the pointed-to
+type the way you would write `const`; CPU builds, the VM and C output ignore
+the mark, so the same source still builds with other compilers.
+
+```c
+[[cccc::kernel]] static void blur([[cccc::global]] float *out,
+                                  [[cccc::constant]] const float *taps,
+                                  [[cccc::local]] float *scratch) {
+    [[cccc::local]] float tile[64];
+    tile[0]    = taps[0];
+    scratch[0] = tile[0];
+    out[0]     = scratch[0];
+}
+```
+
+| Attribute | Memory | Pointer example |
+|---|---|---|
+| `global` | Device buffers | `[[cccc::global]] float *p` |
+| `local` | Workgroup-shared | `[[cccc::local]] float tile[64]` |
+| `constant` | Read-only | `[[cccc::constant]] const Params *p` |
+| `private` | Per work-item (the default) | `[[cccc::private]] float *p` |
+| `generic` | Any of global, local, private | `[[cccc::generic]] float *p` |
+
+Write the attribute in the declaration specifiers, before or after the type
+name. It qualifies the pointed-to type: `[[cccc::global]] int *p` is a pointer
+to global `int`. After the `*` it is an error.
+
+**Unmarked pointers.** An unmarked pointer parameter of a kernel entry points
+to global memory. An unmarked pointer parameter of a helper takes the space its
+callers pass, so `bump(&counters[i])` from an entry passes global memory and
+`bump` needs no mark. If callers pass different spaces, mark the parameter
+`[[cccc::generic]]` or split the helper. Every other unmarked pointer is
+private. Pointers inside a struct passed by value are not inferred; mark them.
+
+**Conversions.** Inside kernel code, assignment, initialisation, arguments,
+returns and casts must keep the space:
+
+| From | To | Allowed |
+|---|---|---|
+| Same space | Same space | Yes |
+| `global`, `local`, `private` | `generic` | Yes |
+| `constant` | `generic` | No |
+| `generic` | A named space | Only with an explicit cast |
+| Any other pair | | No |
+
+```
+error: converting a pointer from the global to the private address space is not allowed in kernel code (step)
+```
+
+**Other rules.**
+
+- Writing through a `constant` pointer, including an atomic update, is an error.
+- `local` objects (not pointers) are only allowed in a kernel entry's body.
+  `global`, `constant` and `generic` objects cannot live on the stack.
+- A file-scope object can be `constant`; any other file-scope object is
+  rejected as a global variable.
+- A kernel entry's pointer parameter cannot be `private` or `generic`.
 
 **Limitations:**
 

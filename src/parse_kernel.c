@@ -31,10 +31,13 @@ struct KernelFrame {
 
 typedef struct {
     VirtualMachine *vm;
-    HashMap         defs;    // function name -> definition
-    HashMap         visited; // function -> checked already
-    HashMap         on_path; // function -> currently being checked
-    HashMap         seen;    // nodes already walked
+    HashMap         defs;         // function name -> definition
+    HashMap         visited;      // function -> checked already
+    HashMap         on_path;      // function -> currently being checked
+    HashMap         seen;         // nodes already walked
+    HashMap         param_space;  // unmarked pointer param -> inferred space
+    HashMap         param_origin; // unmarked pointer param -> first caller
+    HashMap         arg_checked;  // call-argument casts checked in check_call
     KernelFrame    *top;
     bool            fn_reported_float;
     bool            stop;
@@ -65,11 +68,190 @@ static bool is_float_kind(Type *ty) {
 static bool is_const_object(Type *ty) {
     while (ty && ty->kind == TY_ARRAY)
         ty = ty->base;
-    return ty && ty->is_const;
+    return ty && (ty->is_const || ty->addr_space == AS_CONSTANT);
+}
+
+static const char *space_name(AddrSpace space) {
+    switch (space) {
+        case AS_GLOBAL:
+            return "global";
+        case AS_LOCAL:
+            return "local";
+        case AS_CONSTANT:
+            return "constant";
+        case AS_GENERIC:
+            return "generic";
+        default:
+            return "private";
+    }
+}
+
+static AddrSpace effective_space(AddrSpace space) {
+    return space == AS_NONE ? AS_PRIVATE : space;
+}
+
+static Type *strip_arrays(Type *ty) {
+    while (ty && ty->kind == TY_ARRAY)
+        ty = ty->base;
+    return ty;
+}
+
+static bool is_pointer_like(Type *ty) {
+    return ty && (ty->kind == TY_PTR || ty->kind == TY_ARRAY);
+}
+
+static AddrSpace pointee_space(Type *ty) {
+    Type *base = is_pointer_like(ty) ? strip_arrays(ty->base) : NULL;
+    return base ? base->addr_space : AS_NONE;
+}
+
+static Obj *find_param(Obj *fn, Type *param) {
+    if (!param->name)
+        return NULL;
+    for (Obj *local = fn->locals; local; local = local->next)
+        if (local->is_param && (int)strlen(local->name) == param->name->len &&
+            !memcmp(local->name, param->name->loc, param->name->len))
+            return local;
+    return NULL;
+}
+
+static AddrSpace inferred_param_space(KernelCtx *ctx, Obj *param) {
+    return (AddrSpace)(intptr_t)hashmap_get_int(&ctx->param_space,
+                                                (long long)(intptr_t)param);
+}
+
+static AddrSpace lvalue_space(KernelCtx *ctx, Node *node);
+
+static Node *strip_implicit_ptr_cast(Node *node) {
+    if (node->kind == ND_CAST && !node->is_explicit_cast &&
+        is_pointer_like(node->lhs->ty))
+        return node->lhs;
+    return node;
+}
+
+// Space of the memory a pointer-valued expression refers to.
+static AddrSpace ptr_space(KernelCtx *ctx, Node *node) {
+    if (!node)
+        return AS_PRIVATE;
+    if (node->ty && node->ty->kind == TY_ARRAY)
+        return effective_space(lvalue_space(ctx, node));
+    switch (node->kind) {
+        case ND_VAR:
+            if (pointee_space(node->var->ty) == AS_NONE) {
+                AddrSpace inferred = inferred_param_space(ctx, node->var);
+                if (inferred != AS_NONE)
+                    return inferred;
+            }
+            break;
+        case ND_ADD:
+        case ND_SUB:
+            return ptr_space(ctx, is_pointer_like(node->lhs->ty) ? node->lhs
+                                                                 : node->rhs);
+        case ND_COMMA:
+            return ptr_space(ctx, node->rhs);
+        case ND_COND:
+            return ptr_space(ctx, node->then);
+        case ND_ADDR:
+            return effective_space(lvalue_space(ctx, node->lhs));
+        case ND_CAST:
+            if (!is_pointer_like(node->lhs->ty))
+                break;
+            if (pointee_space(node->ty) != AS_NONE)
+                return pointee_space(node->ty);
+            return ptr_space(ctx, node->lhs);
+        default:
+            break;
+    }
+    return effective_space(pointee_space(node->ty));
+}
+
+// Space of the memory an lvalue lives in.
+static AddrSpace lvalue_space(KernelCtx *ctx, Node *node) {
+    switch (node->kind) {
+        case ND_DEREF:
+            return ptr_space(ctx, node->lhs);
+        case ND_MEMBER:
+            return lvalue_space(ctx, node->lhs);
+        case ND_VAR: {
+            AddrSpace declared = strip_arrays(node->var->ty)->addr_space;
+            if (declared != AS_NONE)
+                return declared;
+            if (!node->var->is_local && is_const_object(node->var->ty))
+                return AS_CONSTANT;
+            return AS_PRIVATE;
+        }
+        default:
+            return effective_space(strip_arrays(node->ty)->addr_space);
+    }
+}
+
+static bool space_conversion_ok(AddrSpace from, AddrSpace to,
+                                bool is_explicit) {
+    if (from == to)
+        return true;
+    if (to == AS_GENERIC)
+        return from != AS_CONSTANT;
+    return from == AS_GENERIC && is_explicit;
+}
+
+static void check_space_conversion(KernelCtx *ctx, Token *tok, AddrSpace from,
+                                   AddrSpace to, bool is_explicit) {
+    if (space_conversion_ok(from, to, is_explicit))
+        return;
+    char what[128];
+    snprintf(what, sizeof(what),
+             "converting a pointer from the %s to the %s address space",
+             space_name(from), space_name(to));
+    kernel_error(ctx, tok, what);
 }
 
 static void check_fn(KernelCtx *ctx, Obj *fn);
 static void walk(KernelCtx *ctx, Node *node);
+
+// An unmarked pointer parameter takes the space its callers pass; callers
+// that disagree need [[cccc::generic]] or separate helpers.
+static void bind_param_space(KernelCtx *ctx, Obj *def, Type *param, Token *tok,
+                             AddrSpace from) {
+    Obj *local = find_param(def, param);
+    if (!local)
+        return;
+    long long key  = (long long)(intptr_t)local;
+    AddrSpace prev = inferred_param_space(ctx, local);
+    if (prev == AS_NONE) {
+        hashmap_put_int(&ctx->param_space, key, (void *)(intptr_t)from);
+        hashmap_put_int(&ctx->param_origin, key, ctx->top->fn->name);
+        return;
+    }
+    if (prev == from)
+        return;
+    char what[384];
+    snprintf(what, sizeof(what),
+             "a call passing %s memory to parameter '%s' of '%s', which also "
+             "receives %s memory from '%s' (mark the parameter "
+             "[[cccc::generic]] or split the helper),",
+             space_name(from), local->name, def->name, space_name(prev),
+             (char *)hashmap_get_int(&ctx->param_origin, key));
+    kernel_error(ctx, tok, what);
+}
+
+static void check_call_args(KernelCtx *ctx, Node *call, Obj *def) {
+    Type *param = def->ty ? def->ty->params : NULL;
+    for (Node *arg = call->args; arg && param; arg = arg->next) {
+        Node *src = strip_implicit_ptr_cast(arg);
+        if (param->kind == TY_PTR && is_pointer_like(src->ty)) {
+            AddrSpace from = ptr_space(ctx, src);
+            AddrSpace to   = pointee_space(param);
+            if (src != arg)
+                hashmap_put_int(&ctx->arg_checked, (long long)(intptr_t)arg,
+                                arg);
+            if (to == AS_NONE)
+                bind_param_space(ctx, def, param, arg->tok, from);
+            else
+                check_space_conversion(ctx, arg->tok, from, to, false);
+        }
+        param = param->next;
+    }
+}
 
 static void check_call(KernelCtx *ctx, Node *call) {
     Node *callee = call->lhs;
@@ -104,6 +286,7 @@ static void check_call(KernelCtx *ctx, Node *call) {
         kernel_error(ctx, call->tok, what);
         return;
     }
+    check_call_args(ctx, call, def);
     check_fn(ctx, def);
 }
 
@@ -143,6 +326,52 @@ static void walk_node(KernelCtx *ctx, Node *node) {
             if (var->is_tls)
                 kernel_error(ctx, node->tok, "thread-local storage");
             return;
+        }
+        case ND_CAST:
+            if (node->ty && node->ty->kind == TY_PTR &&
+                is_pointer_like(node->lhs->ty) &&
+                (node->is_explicit_cast ||
+                 (node->lhs->ty->kind != TY_ARRAY &&
+                  pointee_space(node->ty) != AS_NONE &&
+                  !hashmap_get_int(&ctx->arg_checked,
+                                   (long long)(intptr_t)node))))
+                check_space_conversion(ctx, node->tok,
+                                       ptr_space(ctx, node->lhs),
+                                       effective_space(pointee_space(node->ty)),
+                                       node->is_explicit_cast);
+            break;
+        case ND_ASSIGN: {
+            if (lvalue_space(ctx, node->lhs) == AS_CONSTANT)
+                kernel_error(ctx, node->tok, "writing to constant memory");
+            Node *src = strip_implicit_ptr_cast(node->rhs);
+            if (node->lhs->ty && node->lhs->ty->kind == TY_PTR &&
+                is_pointer_like(src->ty)) {
+                AddrSpace from = ptr_space(ctx, src);
+                if (node->lhs->kind == ND_VAR && !node->lhs->var->name[0] &&
+                    pointee_space(node->lhs->ty) == AS_NONE)
+                    hashmap_put_int(&ctx->param_space,
+                                    (long long)(intptr_t)node->lhs->var,
+                                    (void *)(intptr_t)from);
+                else if (src != node->rhs &&
+                         pointee_space(node->rhs->ty) == AS_NONE)
+                    check_space_conversion(ctx, node->tok, from,
+                                           ptr_space(ctx, node->lhs), false);
+            }
+            break;
+        }
+        case ND_RETURN: {
+            Type *ret = ctx->top->fn->ty ? ctx->top->fn->ty->return_ty : NULL;
+            if (node->lhs && ret && ret->kind == TY_PTR &&
+                pointee_space(ret) != AS_NONE) {
+                Node *src = strip_implicit_ptr_cast(node->lhs);
+                if (src != node->lhs)
+                    hashmap_put_int(&ctx->arg_checked,
+                                    (long long)(intptr_t)node->lhs, node->lhs);
+                if (is_pointer_like(src->ty))
+                    check_space_conversion(ctx, node->tok, ptr_space(ctx, src),
+                                           pointee_space(ret), false);
+            }
+            break;
         }
         case ND_ASM:
             kernel_error(ctx, node->tok, "inline asm");
@@ -189,6 +418,49 @@ static void walk(KernelCtx *ctx, Node *node) {
         walk_node(ctx, node);
 }
 
+// A marked non-pointer object lives in that space, which only workgroup
+// memory in a kernel entry's body can do.
+static void check_object_space(KernelCtx *ctx, Obj *fn, Obj *local,
+                               Token *fn_tok) {
+    Type *obj = strip_arrays(local->ty);
+    if (!obj || obj->kind == TY_PTR || obj->addr_space == AS_NONE ||
+        obj->addr_space == AS_PRIVATE)
+        return;
+    Token *tok = local->tok ? local->tok : fn_tok;
+    if (obj->addr_space != AS_LOCAL) {
+        char what[128];
+        snprintf(what, sizeof(what), "a %s-memory object on the stack",
+                 space_name(obj->addr_space));
+        kernel_error(ctx, tok, what);
+    } else if (!fn->is_kernel || local->is_param) {
+        kernel_error(ctx, tok,
+                     "a local-memory object outside a kernel entry's body");
+    }
+}
+
+// An unmarked pointer parameter of a kernel entry is global memory.
+static void seed_entry_params(KernelCtx *ctx, Obj *fn) {
+    if (!fn->ty)
+        return;
+    for (Type *param = fn->ty->params; param; param = param->next) {
+        if (param->kind != TY_PTR)
+            continue;
+        AddrSpace space = pointee_space(param);
+        if (space == AS_PRIVATE || space == AS_GENERIC) {
+            char what[128];
+            snprintf(what, sizeof(what),
+                     "a %s pointer parameter on a kernel entry",
+                     space_name(space));
+            kernel_error(ctx, param->name ? param->name : fn->tok, what);
+        } else if (space == AS_NONE) {
+            Obj *local = find_param(fn, param);
+            if (local)
+                hashmap_put_int(&ctx->param_space, (long long)(intptr_t)local,
+                                (void *)(intptr_t)AS_GLOBAL);
+        }
+    }
+}
+
 static void check_fn(KernelCtx *ctx, Obj *fn) {
     if (hashmap_get(&ctx->visited, fn->name))
         return;
@@ -204,7 +476,10 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
 
     if (fn->ty && fn->ty->is_variadic)
         kernel_error(ctx, tok, "a variadic function");
+    if (fn->is_kernel && !frame.up)
+        seed_entry_params(ctx, fn);
     for (Obj *local = fn->locals; local; local = local->next) {
+        check_object_space(ctx, fn, local, tok);
         if (local->ty && local->ty->kind == TY_VLA)
             kernel_error(ctx, local->tok ? local->tok : tok,
                          "a variable-length array");
@@ -245,4 +520,7 @@ void check_kernel_subset(VirtualMachine *vm) {
     hashmap_deinit(&ctx.visited);
     hashmap_deinit(&ctx.on_path);
     hashmap_deinit(&ctx.seen);
+    hashmap_deinit(&ctx.param_space);
+    hashmap_deinit(&ctx.param_origin);
+    hashmap_deinit(&ctx.arg_checked);
 }

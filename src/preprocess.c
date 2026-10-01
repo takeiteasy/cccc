@@ -1742,6 +1742,11 @@ static const AttrInfo known_attrs[] = {
     {"checked", ATTR_CCCC, true, 1},
     {"unchecked", ATTR_CCCC, true, 1},
     {"kernel", ATTR_CCCC, true, 1},
+    {"global", ATTR_CCCC, true, 1},
+    {"local", ATTR_CCCC, true, 1},
+    {"constant", ATTR_CCCC, true, 1},
+    {"private", ATTR_CCCC, true, 1},
+    {"generic", ATTR_CCCC, true, 1},
     // Macro standard library attribute handlers (ticket #235)
     {"serialize", ATTR_CCCC, true, 1},
     {"deserialize", ATTR_CCCC, true, 1},

@@ -1554,8 +1554,9 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         // type cast
-        Node *node = new_cast(vm, expr, ty);
-        node->tok  = start;
+        Node *node             = new_cast(vm, expr, ty);
+        node->tok              = start;
+        node->is_explicit_cast = true;
 
         // #486: assume/dynamic bounds casts. !in_type_lookahead guards both
         // calls below for the same reason as the #485 ban arms above --

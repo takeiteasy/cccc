@@ -274,12 +274,13 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
         IMAGINARY = 1 << 20,
     };
 
-    Type *ty           = ty_int;
-    int   counter      = 0;
-    int   bitint_width = 0;
-    bool  is_atomic    = false;
-    bool  is_const     = false;
-    bool  is_volatile  = false;
+    Type     *ty           = ty_int;
+    int       counter      = 0;
+    int       bitint_width = 0;
+    bool      is_atomic    = false;
+    bool      is_const     = false;
+    bool      is_volatile  = false;
+    AddrSpace addr_space   = AS_NONE;
 
     // #1267: once a type specifier is already established (counter != 0), the
     // token being probed here can only be this declaration's own declarator
@@ -300,7 +301,10 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             continue;
         }
         if (equal(tok, "[") && equal(tok->next, "[")) {
+            AddrSpace *saved_sink        = vm->compiler.addr_space_sink;
+            vm->compiler.addr_space_sink = &addr_space;
             tok = c23_attribute_list(vm, tok, NULL, attr);
+            vm->compiler.addr_space_sink = saved_sink;
             continue;
         }
 
@@ -660,6 +664,11 @@ declspec_done:
     if (is_volatile) {
         ty              = copy_type(vm, ty);
         ty->is_volatile = true;
+    }
+
+    if (addr_space != AS_NONE) {
+        ty             = copy_type(vm, ty);
+        ty->addr_space = addr_space;
     }
 
     if (attr && attr->is_constexpr) {
@@ -2254,6 +2263,37 @@ static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
     return tok;
 }
 
+// [[cccc::global]] / local / constant / private / generic. Qualifies the
+// pointed-to type like const does, so it is collected by declspec() through
+// addr_space_sink and is an error anywhere else.
+static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
+                                    Token *tok, Type *ty) {
+    if (equal(tok, "("))
+        error_tok(vm, name_tok, "'%.*s' takes no arguments", name_tok->len,
+                  name_tok->loc);
+    if (ty && ty->kind == TY_PTR)
+        error_tok(vm, name_tok,
+                  "an address space qualifies the pointed-to type; write "
+                  "'%.*s' before the '*'",
+                  name_tok->len, name_tok->loc);
+    AddrSpace *sink = vm->compiler.addr_space_sink;
+    if (ty || !sink)
+        error_tok(vm, name_tok,
+                  "'%.*s' belongs in the declaration specifiers, e.g. "
+                  "[[cccc::%.*s]] int *p",
+                  name_tok->len, name_tok->loc, name_tok->len, name_tok->loc);
+    AddrSpace space = equal(name_tok, "global")     ? AS_GLOBAL
+                      : equal(name_tok, "local")    ? AS_LOCAL
+                      : equal(name_tok, "constant") ? AS_CONSTANT
+                      : equal(name_tok, "private")  ? AS_PRIVATE
+                                                    : AS_GENERIC;
+    if (*sink != AS_NONE && *sink != space)
+        error_tok(vm, name_tok,
+                  "conflicting address spaces on one declaration");
+    *sink = space;
+    return tok;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
@@ -2814,7 +2854,12 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_pure_attr       = equal(name_tok, "pure");
             bool is_func_const_attr = equal(name_tok, "const");
             bool is_kernel_attr     = cccc_scoped && equal(name_tok, "kernel");
-            bool is_optimize_attr   = equal(name_tok, "optimize");
+            bool is_addr_space_attr =
+                cccc_scoped &&
+                (equal(name_tok, "global") || equal(name_tok, "local") ||
+                 equal(name_tok, "constant") || equal(name_tok, "private") ||
+                 equal(name_tok, "generic"));
+            bool is_optimize_attr        = equal(name_tok, "optimize");
             bool is_designated_init_attr = equal(name_tok, "designated_init");
             bool is_checked_ptr_attr =
                 equal(name_tok, "single") || equal(name_tok, "array") ||
@@ -2850,6 +2895,11 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             if (is_checked_scope_attr) {
                 tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
                                                equal(name_tok, "checked"));
+                continue;
+            }
+
+            if (is_addr_space_attr) {
+                tok = apply_addr_space_attr(vm, name_tok, tok, ty);
                 continue;
             }
 

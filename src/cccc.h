@@ -764,8 +764,8 @@ typedef enum {
 typedef struct TypeShadowSeg {
     unsigned char **pages;
     size_t          page_count;
-    size_t cand[TYPE_SHADOW_CAND_MAX]; // page indices partially zeroed since
-                                       // last sweep
+    size_t    cand[TYPE_SHADOW_CAND_MAX]; // page indices partially zeroed since
+                                          // last sweep
     size_t    cand_count;
     long long next_sweep_cycle; // deadline; 0-init => first sweep is free
 } TypeShadowSeg;
@@ -818,25 +818,24 @@ typedef enum {
                    // are the default and are not UB, so this is opt-in and
                    // deliberately outside CCCC_ALL_SAFETY -- no -S0..-S3
                    // tier enables it.
-    CCCC_POSIX_EMULATION =
-        (1
-         << 26), // 0x04000000 - Enable lossy/approximate emulation of
-                 // POSIX functions the host doesn't natively support
-                 // (--posix-emulation). Off by default: such functions
-                 // are simply undeclared/unregistered, matching what a
-                 // native compiler on the same host would do. Also
-                 // restores raw ioctl() passthrough for request codes
-                 // outside wrap_ioctl's layout-verified allowlist (#795,
-                 // src/stdlib/posix_io.c) -- off by default there too, for
-                 // the same "don't risk an unverified host ABI without
-                 // being asked" reason. Honoured under -c=native too
-                 // (#1140): serialize_posix_compat_shims
-                 // (src/serialize_shims.c) ports the same ppoll/sched_*
-                 // emulation the VM uses into the emitted C on a host lacking
-                 // the real symbol. The ioctl-passthrough use above stays
-                 // VM-only -- the host ioctl() -c=native calls directly has no
-                 // allowlist either way, so there is nothing for the
-                 // flag to restore there.
+    CCCC_POSIX_EMULATION = (
+        1 << 26), // 0x04000000 - Enable lossy/approximate emulation of
+                  // POSIX functions the host doesn't natively support
+                  // (--posix-emulation). Off by default: such functions
+                  // are simply undeclared/unregistered, matching what a
+                  // native compiler on the same host would do. Also
+                  // restores raw ioctl() passthrough for request codes
+                  // outside wrap_ioctl's layout-verified allowlist (#795,
+                  // src/stdlib/posix_io.c) -- off by default there too, for
+                  // the same "don't risk an unverified host ABI without
+                  // being asked" reason. Honoured under -c=native too
+                  // (#1140): serialize_posix_compat_shims
+                  // (src/serialize_shims.c) ports the same ppoll/sched_*
+                  // emulation the VM uses into the emitted C on a host lacking
+                  // the real symbol. The ioctl-passthrough use above stays
+                  // VM-only -- the host ioctl() -c=native calls directly has no
+                  // allowlist either way, so there is nothing for the
+                  // flag to restore there.
     CCCC_CHECKED_BOUNDS =
         (1 << 27), // 0x08000000 - Enable runtime enforcement (CHKR) of
                    // Checked C-style checked-pointer declared bounds
@@ -859,11 +858,10 @@ typedef enum {
     CCCC_SAFETY_BASIC =
         (CCCC_STACK_CANARIES | CCCC_HEAP_CANARIES | CCCC_MEMORY_LEAK_DETECT |
          CCCC_OVERFLOW_CHECKS | CCCC_FORMAT_STR_CHECKS | CCCC_VM_HEAP),
-    CCCC_SAFETY_STANDARD =
-        (CCCC_POINTER_SANITIZER | CCCC_STACK_CANARIES | CCCC_HEAP_CANARIES |
-         CCCC_MEMORY_LEAK_DETECT | CCCC_OVERFLOW_CHECKS |
-         CCCC_UNINIT_DETECTION | CCCC_FORMAT_STR_CHECKS |
-         CCCC_MEMORY_POISONING | CCCC_VM_HEAP),
+    CCCC_SAFETY_STANDARD = (
+        CCCC_POINTER_SANITIZER | CCCC_STACK_CANARIES | CCCC_HEAP_CANARIES |
+        CCCC_MEMORY_LEAK_DETECT | CCCC_OVERFLOW_CHECKS | CCCC_UNINIT_DETECTION |
+        CCCC_FORMAT_STR_CHECKS | CCCC_MEMORY_POISONING | CCCC_VM_HEAP),
     CCCC_SAFETY_MAX =
         (CCCC_ALL_SAFETY | CCCC_RANDOM_CANARIES | CCCC_STACK_INSTR_ERRORS),
 
@@ -1050,11 +1048,9 @@ typedef enum {
     // Umbrella for all three conversion sub-types; -Wconversion enables this
     // group.
     CCCC_WARN_CONVERSION_GROUP = CCCC_WARN_CONVERSION |
-                                 CCCC_WARN_SIGN_CONVERSION |
-                                 CCCC_WARN_FLOAT_CONVERSION,
+        CCCC_WARN_SIGN_CONVERSION | CCCC_WARN_FLOAT_CONVERSION,
 
-    CCCC_WARN_ALL =
-        CCCC_WARN_UNUSED | CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
+    CCCC_WARN_ALL = CCCC_WARN_UNUSED | CCCC_WARN_IMPLICIT_FUNCTION_DECLARATION |
         CCCC_WARN_IMPLICIT_INT | CCCC_WARN_RETURN_TYPE | CCCC_WARN_SHADOW |
         CCCC_WARN_FORMAT | CCCC_WARN_CONVERSION | CCCC_WARN_SIGN_COMPARE |
         CCCC_WARN_POINTER_ARITH | CCCC_WARN_PEDANTIC | CCCC_WARN_DEPRECATED |
@@ -1072,10 +1068,9 @@ typedef enum {
         CCCC_WARN_INT_CONVERSION | CCCC_WARN_NATIVE_NAME_COLLISION |
         CCCC_WARN_EXCESS_INIT,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW | CCCC_WARN_SIGN_COMPARE |
-                      CCCC_WARN_CONVERSION | CCCC_WARN_POINTER_ARITH |
-                      CCCC_WARN_FALLTHROUGH | CCCC_WARN_STRICT_PROTOTYPES |
-                      CCCC_WARN_OLD_STYLE_DEFINITION |
-                      CCCC_WARN_REDUNDANT_DECLS | CCCC_WARN_COMPTIME_BLOCK_LEAK,
+        CCCC_WARN_CONVERSION | CCCC_WARN_POINTER_ARITH | CCCC_WARN_FALLTHROUGH |
+        CCCC_WARN_STRICT_PROTOTYPES | CCCC_WARN_OLD_STYLE_DEFINITION |
+        CCCC_WARN_REDUNDANT_DECLS | CCCC_WARN_COMPTIME_BLOCK_LEAK,
 } CCCCWarning;
 
 /*!
@@ -1109,10 +1104,10 @@ typedef struct File {
     char *display_name; /**< Optional name emitted by a `#line` directive. */
     int   line_delta;   /**< Line number delta applied for `#line` handling. */
 
-    bool  is_system_header; // true when included via <...> from system search
-                            // paths
-    int include_next_start; // search-path index where #include_next and
-                            // __has_include_next begin; 0 searches all
+    bool  is_system_header;   // true when included via <...> from system search
+                              // paths
+    int   include_next_start; // search-path index where #include_next and
+                              // __has_include_next begin; 0 searches all
 } File;
 
 /*!
@@ -1216,6 +1211,15 @@ typedef enum {
 
 typedef struct Type Type;
 
+typedef enum {
+    AS_NONE, // unmarked: inferred, else private
+    AS_PRIVATE,
+    AS_GLOBAL,
+    AS_LOCAL,
+    AS_CONSTANT,
+    AS_GENERIC,
+} AddrSpace;
+
 // Checked-region state (#485): whether [[cccc::checked]]/[[cccc::unchecked]]
 // or a #pragma cccc checked/unchecked begin/end region is in effect at a
 // given point. A tri-state, not a bool+depth: an unchecked region must be
@@ -1248,7 +1252,7 @@ typedef struct Token {
     char *str; /**< For string literals: pointer to the unescaped contents. */
     char *wide_digits; // wb/uwb _BitInt literal: full-precision digit text
                        // (no prefix/suffix/separators) when bit_width > 64
-    int wide_base;     // base (2/8/10/16) for wide_digits, else unused
+    int   wide_base;   // base (2/8/10/16) for wide_digits, else unused
 
     // C23 _Decimal32/64/128 literal (df/dd/dl suffix, #402): verbatim,
     // separator-stripped, suffix-stripped digit text. The literal must NOT
@@ -1538,9 +1542,11 @@ struct Type {
     bool is_pure; // __attribute__((pure)): no side effects, may read globals
     bool is_func_const;   // __attribute__((const)): no side effects, no global
                           // reads
-    bool  is_kernel;      // [[cccc::kernel]]: GPU-safe subset
-    char *deprecated_msg;
-    char *nodiscard_msg;
+    bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
+    AddrSpace addr_space; // [[cccc::global]] etc: space of the pointed-to or
+                          // declared object; ignored outside kernel checks
+    char     *deprecated_msg;
+    char     *nodiscard_msg;
     char *attr_error_msg; // __attribute__((error("msg"))): error if callee is
                           // called
     char *attr_warning_msg; // __attribute__((warning("msg"))): warn if callee
@@ -1562,7 +1568,7 @@ struct Type {
     bool     nonnull_all;  // bare nonnull: every pointer parameter is non-null
     uint64_t nonnull_mask; // 1-based arg indices marked non-null (bit i-1); >64
                            // args ignored
-    bool returns_nonnull;
+    bool     returns_nonnull;
 
     // NULL-terminated variadic argument check (__attribute__((sentinel[(N)])))
     bool is_sentinel; // true if the function requires a NULL sentinel arg
@@ -1920,7 +1926,7 @@ struct Node {
     bool         pass_by_stack;
     bool         has_splice_arg; // deferred arity/cast check needed after
                                  // quote_substitute
-    Obj *ret_buffer;
+    Obj         *ret_buffer;
     // #981: true only for the alloca(...) ND_FUNCALL synthesized by
     // new_alloca() to back a VLA declaration (parse.c's
     // ND_ASSIGN(ND_VLA_PTR, alloca(...)) lowering). False for every other
@@ -1933,6 +1939,7 @@ struct Node {
     // HREL) vs ALCA (ALLOC_KIND_ALLOCA, frame-scoped, swept only at LEV3)
     // without needing to inspect the call's syntactic origin.
     bool is_vla_alloca_call;
+    bool is_explicit_cast; // ND_CAST written as `(T)expr` in source
 
     // Goto or labeled statement, or labels-as-values
     char        *label;
@@ -1970,12 +1977,12 @@ struct Node {
     // can re-emit the assert for the host compiler to re-check when the
     // condition folds a host-owned layout. NULL for every ordinary
     // ND_BLOCK. See serialize_static_assert()/expr_has_host_owned_layout().
-    Node *static_assert_cond;
-    char *static_assert_msg;
-    int   static_assert_msg_len;
+    Node             *static_assert_cond;
+    char             *static_assert_msg;
+    int               static_assert_msg_len;
 
-    int   cleanup_target_depth;      // for ND_GOTO (break/continue):
-                                     // cleanup_scope_depth of target
+    int               cleanup_target_depth; // for ND_GOTO (break/continue):
+                                            // cleanup_scope_depth of target
     CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active
                                      // cleanup scope (NULL if none)
 
@@ -2278,7 +2285,7 @@ struct Obj {
                           // (whole-TU summary)
     bool always_returns_null; // #692: every reachable return in the function is
                               // provably null
-    bool  is_local_symbol;
+    bool is_local_symbol;
     char *deprecated_msg;
     char *nodiscard_msg;
     char *attr_error_msg;   // __attribute__((error("msg")))
@@ -2328,9 +2335,9 @@ struct Obj {
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see
     // resolve_objsize_queries.
-    int objsize_alloc;         // bytes from a const malloc-family initializer;
+    int   objsize_alloc;       // bytes from a const malloc-family initializer;
                                // meaningless when objsize_derived_from is set
-    bool objsize_has_alloc;    // true if this var is alloc-tracked, either
+    bool  objsize_has_alloc;   // true if this var is alloc-tracked, either
                                // directly (objsize_alloc) or derived
                                // (objsize_derived_from) (#642, #700)
     bool  objsize_unsafe;      // true if reassigned or address-taken in scope
@@ -2398,53 +2405,53 @@ struct Obj {
                       // orthogonal flavour of placeholder).
 
     // Global variable
-    bool is_tentative;
-    bool is_tls;
-    bool is_referenced; // #957: codegen materialized this global's storage
-                        // address (gen_addr's ND_VAR global branch). Distinct
-                        // from is_used, which the parser sets on any
-                        // identifier lookup including sizeof/typeof -- a
-                        // declaration-only extern global that is only ever
-                        // sizeof()'d must still compile, so "referenced" has
-                        // to mean "codegen actually emitted a load/store/
-                        // address-of", not "the parser saw the name".
-    bool is_compound_literal; // Anonymous global synthesized to hold a
-                              // compound literal's value (postfix's
-                              // compound-literal branch). GCC/clang extend
-                              // constant-initializer folding to a compound
-                              // literal's own (constant) elements but not to
-                              // an arbitrary global reference by value, so
-                              // write_gvar_data's #720 splice-in path gates
-                              // on this flag rather than merely having
-                              // init_data.
-    bool is_anon_synthesized; // True for any anonymous global the compiler
-                              // itself synthesized and renamed to a real C
-                              // identifier (rename_anon_globals(),
-                              // serialize_program.c) -- a compound-literal
-                              // backing store (postfix()) or a reflection-
-                              // API anon global (reflect_new_anon_gvar(),
-                              // reflection.c; that path does NOT set
-                              // is_compound_literal, so this flag is the
-                              // one both share). Such an object has no
-                              // source declaration of its own: whatever
-                              // file its ty->name token happens to point at
-                              // (often a header, if the *type* is header-
-                              // declared) is irrelevant provenance, and no
-                              // header can ever supply its definition
-                              // (#1286) -- global_is_header_supplied() must
-                              // never suppress it on that basis.
-    bool is_string_literal;   // Anonymous global synthesized by
-                              // new_string_literal() to hold a string
-                              // literal's bytes. new_anon_gvar()'s `.L..N`
-                              // name is shared by string literals, static
-                              // locals, and non-char-array compound literals
-                              // (#925) -- this flag is the only reliable way
-                              // to tell them apart; the serializer treats a
-                              // dotted name as "opaque string literal" only
-                              // when this is set (see src/serialize_decl.c).
-    char       *init_data;
+    bool  is_tentative;
+    bool  is_tls;
+    bool  is_referenced; // #957: codegen materialized this global's storage
+                         // address (gen_addr's ND_VAR global branch). Distinct
+                         // from is_used, which the parser sets on any
+                         // identifier lookup including sizeof/typeof -- a
+                         // declaration-only extern global that is only ever
+                         // sizeof()'d must still compile, so "referenced" has
+                         // to mean "codegen actually emitted a load/store/
+                         // address-of", not "the parser saw the name".
+    bool  is_compound_literal; // Anonymous global synthesized to hold a
+                               // compound literal's value (postfix's
+                               // compound-literal branch). GCC/clang extend
+                               // constant-initializer folding to a compound
+                               // literal's own (constant) elements but not to
+                               // an arbitrary global reference by value, so
+                               // write_gvar_data's #720 splice-in path gates
+                               // on this flag rather than merely having
+                               // init_data.
+    bool  is_anon_synthesized; // True for any anonymous global the compiler
+                               // itself synthesized and renamed to a real C
+                               // identifier (rename_anon_globals(),
+                               // serialize_program.c) -- a compound-literal
+                               // backing store (postfix()) or a reflection-
+                               // API anon global (reflect_new_anon_gvar(),
+                               // reflection.c; that path does NOT set
+                               // is_compound_literal, so this flag is the
+                               // one both share). Such an object has no
+                               // source declaration of its own: whatever
+                               // file its ty->name token happens to point at
+                               // (often a header, if the *type* is header-
+                               // declared) is irrelevant provenance, and no
+                               // header can ever supply its definition
+                               // (#1286) -- global_is_header_supplied() must
+                               // never suppress it on that basis.
+    bool  is_string_literal;   // Anonymous global synthesized by
+                               // new_string_literal() to hold a string
+                               // literal's bytes. new_anon_gvar()'s `.L..N`
+                               // name is shared by string literals, static
+                               // locals, and non-char-array compound literals
+                               // (#925) -- this flag is the only reliable way
+                               // to tell them apart; the serializer treats a
+                               // dotted name as "opaque string literal" only
+                               // when this is set (see src/serialize_decl.c).
+    char *init_data;
     Relocation *rel;
-    Node       *init_expr;    // For constexpr: AST of initializer expression
+    Node       *init_expr;     // For constexpr: AST of initializer expression
     void
         *constexpr_init; // For constexpr: private Initializer tree; also used
                          // temporarily for pending macro-init Initializer trees
@@ -2549,7 +2556,7 @@ struct Obj {
     CheckedBoundsForm checked_bounds_form;
     Node             *checked_bounds_lo; // resolved expression, or NULL if
                                          // unresolved/unneeded
-    Node *checked_bounds_hi;             // resolved expression, or NULL if
+    Node             *checked_bounds_hi; // resolved expression, or NULL if
                                          // unresolved/unneeded
 
     // #921: non-NULL marks this Obj as a throwaway placeholder standing in
@@ -2576,10 +2583,10 @@ struct Obj {
     Node *checked_prop_init_assign; // the initializer ND_ASSIGN node, or NULL
                                     // for an uninitialized #942 candidate (see
                                     // checked_prop_candidate)
-    bool checked_prop_unsafe;       // true once any non-checked-rooted store or
+    bool  checked_prop_unsafe;      // true once any non-checked-rooted store or
                                     // escape is seen
-    Obj *checked_prop_lo;
-    Obj *checked_prop_hi;
+    Obj  *checked_prop_lo;
+    Obj  *checked_prop_hi;
 
     // #942: true for any TY_PTR, CHECKED_NONE local registered as a
     // propagation candidate, whether or not it has an initializer --
@@ -2871,13 +2878,13 @@ struct TestFnRecord {
 // [[cccc::test_teardown]].
 typedef struct TestSetupRecord TestSetupRecord;
 struct TestSetupRecord {
-    char *fn_name;    // C function name (address lookup in prog)
-    char *name_pat;   // NULL = all tests; fnmatch glob on test display name
-    char *suite;      // NULL = all suites; exact suite name to match
-    bool  once;       // run once at suite boundary (suite) or first/last match
-                      // (name_pat)
-    bool once_fired;  // true after the once-hook has been executed
-    bool is_teardown; // false = setup, true = teardown
+    char *fn_name;     // C function name (address lookup in prog)
+    char *name_pat;    // NULL = all tests; fnmatch glob on test display name
+    char *suite;       // NULL = all suites; exact suite name to match
+    bool  once;        // run once at suite boundary (suite) or first/last match
+                       // (name_pat)
+    bool  once_fired;  // true after the once-hook has been executed
+    bool  is_teardown; // false = setup, true = teardown
     bool
         inherit; // if true, hook applies to sub-suites via suite_matches (#515)
     TestSetupRecord *next;
@@ -3187,9 +3194,9 @@ typedef struct ForeignFunc {
                         // are variable)
     uint64_t double_arg_mask; // Bitmask indicating which args are doubles (bit
                               // N = arg N)
-    int   is_dynamic_placeholder; // 1 for extern declarations awaiting dlsym
-    int   is_asm_passthru;        // 1 if generated by --asm-passthru
-    char *asm_src; // original asm string, NULL unless is_asm_passthru
+    int      is_dynamic_placeholder; // 1 for extern declarations awaiting dlsym
+    int      is_asm_passthru;        // 1 if generated by --asm-passthru
+    char    *asm_src; // original asm string, NULL unless is_asm_passthru
 } ForeignFunc;
 
 typedef struct DynamicLibrary {
@@ -3261,19 +3268,19 @@ typedef struct AllocHeader {
                          detection) */
     int generation;   /**< Generation counter incremented on each free (for UAF
                          detection) */
-    int creation_generation; // Generation when pointer was created (for
-                             // temporal safety)
-    AllocKind kind;          /**< What kind of storage this is -- see AllocKind.
-                                   Still tracked by sorted_allocs/CHKB/CHKBN/CHKP3/
-                                   DYNOBJSZ like any other allocation regardless of
-                                   kind; only leak detection (and, eventually,
-                                   #981's reclamation) distinguishes them. Placed
-                                   here (not after alloc_pc), same as the
-                                   `is_internal` bool it replaces, to fill this
-                                   struct's existing 4-byte tail pad instead of
-                                   growing sizeof(AllocHeader). */
+    int       creation_generation; // Generation when pointer was created (for
+                                   // temporal safety)
+    AllocKind kind; /**< What kind of storage this is -- see AllocKind.
+                          Still tracked by sorted_allocs/CHKB/CHKBN/CHKP3/
+                          DYNOBJSZ like any other allocation regardless of
+                          kind; only leak detection (and, eventually,
+                          #981's reclamation) distinguishes them. Placed
+                          here (not after alloc_pc), same as the
+                          `is_internal` bool it replaces, to fill this
+                          struct's existing 4-byte tail pad instead of
+                          growing sizeof(AllocHeader). */
     long long
-        alloc_pc; /**< Program counter at allocation site (for debugging) */
+        alloc_pc;   /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
     // in a byte-granular shadow (vm->type_shadow_pages) so member/interior
     // accesses can be checked too, not just the base pointer. See CHKT3
@@ -3665,8 +3672,8 @@ typedef struct Compiler {
     CondIncl *cond_incl;       // Conditional inclusion stack
     HashMap   pragma_once;     // #pragma once tracking
     HashMap included_headers;  // Track included headers for lazy stdlib loading
-    HashMap include_guards;   // Header include guard cache (path -> guard name)
-    HashMap guard_macros;     // Set of macro names used as include guards
+    HashMap include_guards; // Header include guard cache (path -> guard name)
+    HashMap guard_macros;   // Set of macro names used as include guards
 
     // Compile-time macro state
     MacroFn            *macro_fns; // Linked list of captured macro functions
@@ -3732,7 +3739,7 @@ typedef struct Compiler {
     // call hashmap_restore and clear the flag before returning.
     bool    has_macro_snapshot;
     HashMap macro_snapshot_backup;
-    bool    reflection_attrs_registered; // True after
+    bool reflection_attrs_registered; // True after
                                       // ensure_reflection_attrs_registered has
                                       // run (#235)
     bool no_comptime; // --no-comptime: skip entire comptime/macro phase (for
@@ -3743,8 +3750,8 @@ typedef struct Compiler {
                                 // include system headers
     HashMap *macro_scope_stack; // Snapshot stack for per-comptime-fn macro
                                 // isolation (#283)
-    int macro_scope_stack_len;
-    int macro_scope_stack_cap;
+    int      macro_scope_stack_len;
+    int      macro_scope_stack_cap;
     bool
         allow_comptime_pp_bleed; // --allow-comptime-pp-bleed: restore pre-#283
                                  // shared macro table across comptime fn bodies
@@ -3756,19 +3763,19 @@ typedef struct Compiler {
     // mistakes the fresh File for "the block's file has ended" and silently
     // auto-closes an open #pragma cccc comptime/emit block.
     int     pp_const_expr_depth;
-    HashMap cli_macro_snapshot;   // #888: -D/-U state snapshotted after CLI
-                                  // processing, before the primary file is
-                                  // preprocessed; re-applied after
-                                  // isolate_comptime_macros strips a same-named
-                                  // source #define that shadowed a -D value in
-                                  // the live table
-    bool has_cli_macro_snapshot;  // True once cli_macro_snapshot has been
-                                  // initialized
-    int    macro_recursion_limit; // 0 = unlimited, default = 256
-    Token *macro_call_tok;        // Active macro invocation token
+    HashMap cli_macro_snapshot; // #888: -D/-U state snapshotted after CLI
+                                // processing, before the primary file is
+                                // preprocessed; re-applied after
+                                // isolate_comptime_macros strips a same-named
+                                // source #define that shadowed a -D value in
+                                // the live table
+    bool    has_cli_macro_snapshot; // True once cli_macro_snapshot has been
+                                    // initialized
+    int     macro_recursion_limit;  // 0 = unlimited, default = 256
+    Token  *macro_call_tok;         // Active macro invocation token
     ExpansionFrame
-        *expansion_stack;         // Live comptime expansion backtrace (#966);
-                          // pushed/popped by execute_macro_fn (src/macros.c)
+          *expansion_stack;         // Live comptime expansion backtrace (#966);
+                            // pushed/popped by execute_macro_fn (src/macros.c)
     Node **macro_vararg_nodes;     // Active inline macro variadic AST args
     char **macro_vararg_strs;      // Active global macro variadic string args
     int    macro_vararg_count;     // Number of active variadic args
@@ -3791,10 +3798,10 @@ typedef struct Compiler {
     // src/macros.c's cc_comptime_index_* / cc_comptime_resolve_* functions).
     HashMap
         comptime_decl_index; // name (ordinary namespace) -> ComptimeDecl* chain
-    HashMap comptime_tag_index;   // name (tag namespace: struct/union/enum) ->
-                                  // ComptimeDecl* chain
-    bool has_comptime_decl_index; // True once the index above has been built
-                                  // for this compile
+    HashMap comptime_tag_index; // name (tag namespace: struct/union/enum) ->
+                                // ComptimeDecl* chain
+    bool    has_comptime_decl_index; // True once the index above has been built
+                                     // for this compile
     Scope *macro_file_scope; // #894: the comptime program's own file scope, so
                              // a demand-driven splice lands its declaration
                              // there rather than in whatever scope the comptime
@@ -3811,9 +3818,9 @@ typedef struct Compiler {
     // the #887 stale-global guard, and forcing it broadly during Quote()
     // was found (#894 testing) to wrongly route macro-to-macro calls
     // written inside a Quote() template through the ordinary-call path.
-    bool comptime_splice_active;
-    Obj *macro_globals; // Globals defined by inline macros (injected into
-                        // the final program before codegen)
+    bool       comptime_splice_active;
+    Obj       *macro_globals; // Globals defined by inline macros (injected into
+                              // the final program before codegen)
     EmitEvent *emit_events_head; // Ordered generated-output events
     EmitEvent *emit_events_tail;
     bool macro_emit_recording;   // True while a macro call records generated
@@ -3887,39 +3894,40 @@ typedef struct Compiler {
                           // tokenize_string (#181)
 
     // Parser state
-    Obj *locals;    // All local variable instances during parsing
-    Obj *globals;   // Global variables accumulated list
-    Obj  error_var; // Error placeholder variable for recovery (per-VM;
-                    // was a shared static Obj across all instances, #706).
-                    // .name/.ty set in cc_init_parser/parse().
-    Scope *scope;   // Current scope
-    Obj   *initializing_var; // Variable being initialized (for const
-                             // initialization)
-    bool in_const_gvar_init; // True while parsing a global/static variable's
-                             // initializer expression (see gvar_initializer);
-                             // forces a nested compound literal to resolve to
-                             // an anonymous constant global even when the
-                             // literal itself has no storage-class specifier
-                             // and lexical scope is not file scope (#720).
-    Obj *current_fn;         // Function being parsed
-    int  fn_nesting_depth;   // Current function nesting depth (0 = top-level)
-    bool in_type_lookahead;  // Parsing a declarator only to classify it
-    bool in_generic_assoc;   // Parsing the type-name of a _Generic
-                             // association: a C23 `enum E : T` underlying
-                             // type may not be spelled here -- the `:`
-                             // belongs to the association (#1223). Consulted
-                             // by enum_specifier(); saved/restored around
-                             // each association so nested _Generic composes.
-    int dead_code_depth;  // >0 while parsing a statically-dead branch (counter
-                          // so nesting composes: if(0){ if(1){ f(); } })
-    bool saw_diag_attr;   // true once any error/warning attribute is seen in
-                          // this TU; gates all deadness computation so normal
-                          // compiles pay no extra overhead
-    Node *gotos;          // Goto statements in current function
-    Node *labels;         // Labels in current function
+    Obj   *locals;    // All local variable instances during parsing
+    Obj   *globals;   // Global variables accumulated list
+    Obj    error_var; // Error placeholder variable for recovery (per-VM;
+                      // was a shared static Obj across all instances, #706).
+                      // .name/.ty set in cc_init_parser/parse().
+    Scope *scope;     // Current scope
+    Obj   *initializing_var;   // Variable being initialized (for const
+                               // initialization)
+    bool   in_const_gvar_init; // True while parsing a global/static variable's
+                               // initializer expression (see gvar_initializer);
+                               // forces a nested compound literal to resolve to
+                               // an anonymous constant global even when the
+                               // literal itself has no storage-class specifier
+                               // and lexical scope is not file scope (#720).
+    Obj   *current_fn;         // Function being parsed
+    int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)
+    bool   in_type_lookahead;  // Parsing a declarator only to classify it
+    AddrSpace *addr_space_sink; // declspec(): where [[cccc::global]] etc land
+    bool  in_generic_assoc;     // Parsing the type-name of a _Generic
+                                // association: a C23 `enum E : T` underlying
+                                // type may not be spelled here -- the `:`
+                                // belongs to the association (#1223). Consulted
+                                // by enum_specifier(); saved/restored around
+                                // each association so nested _Generic composes.
+    int   dead_code_depth; // >0 while parsing a statically-dead branch (counter
+                           // so nesting composes: if(0){ if(1){ f(); } })
+    bool  saw_diag_attr;   // true once any error/warning attribute is seen in
+                           // this TU; gates all deadness computation so normal
+                           // compiles pay no extra overhead
+    Node *gotos;           // Goto statements in current function
+    Node *labels;          // Labels in current function
     struct ObjSizeQuery
-        *objsize_queries; // Pending __builtin_object_size(ptr,...)
-                          // queries on malloc-tracked pointers in current
+        *objsize_queries;  // Pending __builtin_object_size(ptr,...)
+                           // queries on malloc-tracked pointers in current
     // function; resolved by resolve_objsize_queries (#642)
     char *brk_label;           // Current break jump target
     char *cont_label;          // Current continue jump target
@@ -3927,41 +3935,41 @@ typedef struct Compiler {
                                // cleanup vars)
     CleanupChainNode *cur_cleanup_chain; // innermost active cleanup scope
                                          // (ancestry for goto LCA)
-    int brk_cleanup_depth;   // cleanup_scope_depth when current brk_label was
-                             // established
-    int cont_cleanup_depth;  // cleanup_scope_depth when current cont_label was
-                             // established
-    Node *current_switch;    // Switch statement being parsed (NULL if none)
-    Obj  *builtin_alloca;    // Builtin alloca function
-    Obj  *builtin_strlen;    // Builtin strlen (forwarded to libc)
-    Obj  *builtin_strcmp;    // Builtin strcmp (forwarded to libc)
-    Obj  *builtin_memset;    // Builtin memset (forwarded to libc, #1144)
-    Obj  *builtin_memcpy;    // Builtin memcpy (forwarded to libc, #1144)
-    Obj  *builtin_memmove;   // Builtin memmove (forwarded to libc, #1144)
-    Obj  *builtin_memcmp;    // Builtin memcmp (forwarded to libc, #1144)
-    Obj  *builtin_setjmp;    // Builtin setjmp function
-    Obj  *builtin_longjmp;   // Builtin longjmp function
-    Obj  *builtin__setjmp;   // Builtin _setjmp (POSIX alias, same semantics as
-                             // setjmp)
-    Obj *builtin__longjmp;   // Builtin _longjmp (POSIX alias, same semantics as
+    int   brk_cleanup_depth;  // cleanup_scope_depth when current brk_label was
+                              // established
+    int   cont_cleanup_depth; // cleanup_scope_depth when current cont_label was
+                              // established
+    Node *current_switch;     // Switch statement being parsed (NULL if none)
+    Obj  *builtin_alloca;     // Builtin alloca function
+    Obj  *builtin_strlen;     // Builtin strlen (forwarded to libc)
+    Obj  *builtin_strcmp;     // Builtin strcmp (forwarded to libc)
+    Obj  *builtin_memset;     // Builtin memset (forwarded to libc, #1144)
+    Obj  *builtin_memcpy;     // Builtin memcpy (forwarded to libc, #1144)
+    Obj  *builtin_memmove;    // Builtin memmove (forwarded to libc, #1144)
+    Obj  *builtin_memcmp;     // Builtin memcmp (forwarded to libc, #1144)
+    Obj  *builtin_setjmp;     // Builtin setjmp function
+    Obj  *builtin_longjmp;    // Builtin longjmp function
+    Obj  *builtin__setjmp;    // Builtin _setjmp (POSIX alias, same semantics as
+                              // setjmp)
+    Obj  *builtin__longjmp;  // Builtin _longjmp (POSIX alias, same semantics as
                              // longjmp)
-    Obj *builtin_sigsetjmp;  // Builtin sigsetjmp (aliases SETJMP on the VM;
+    Obj  *builtin_sigsetjmp; // Builtin sigsetjmp (aliases SETJMP on the VM;
                              // savemask discarded -- real host sigsetjmp under
                              // -c=native)
-    Obj *builtin_siglongjmp; // Builtin siglongjmp (aliases LONGJMP on the VM)
-    Obj *builtin_signal;     // VM-managed signal() registration
-    Obj *builtin_raise;      // VM-managed raise() delivery
-    Obj *builtin_dlopen;     // VM-managed dlopen
-    Obj *builtin_dlsym;      // VM-managed dlsym
-    Obj *builtin_dlclose;    // VM-managed dlclose
-    Obj *builtin_dlerror;    // VM-managed dlerror
-    Obj *builtin_block_copy; // Block_copy() heap-duplication helper
-                             // (__cccc_block_copy_impl)
-    Obj *builtin_free; // free() prototype so Block_release always resolves
-                       // (#458)
-    Obj *builtin_pc_to_name;    // __builtin_pc_function_name: (void*) -> const
+    Obj  *builtin_siglongjmp; // Builtin siglongjmp (aliases LONGJMP on the VM)
+    Obj  *builtin_signal;     // VM-managed signal() registration
+    Obj  *builtin_raise;      // VM-managed raise() delivery
+    Obj  *builtin_dlopen;     // VM-managed dlopen
+    Obj  *builtin_dlsym;      // VM-managed dlsym
+    Obj  *builtin_dlclose;    // VM-managed dlclose
+    Obj  *builtin_dlerror;    // VM-managed dlerror
+    Obj  *builtin_block_copy; // Block_copy() heap-duplication helper
+                              // (__cccc_block_copy_impl)
+    Obj  *builtin_free; // free() prototype so Block_release always resolves
+                        // (#458)
+    Obj  *builtin_pc_to_name;   // __builtin_pc_function_name: (void*) -> const
                                 // char*
-    Obj *builtin_pc_to_source;  // __builtin_pc_source_location: (void*, const
+    Obj  *builtin_pc_to_source; // __builtin_pc_source_location: (void*, const
                                 // char**, int*) -> int
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -m
 
@@ -3974,11 +3982,11 @@ typedef struct Compiler {
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
     // URL include cache (only used when CCCC_HAS_CURL is enabled)
-    char  *url_cache_dir; // Directory for caching downloaded headers
-    int    url_timeout;   // curl fetch timeout in seconds (default 30)
-    size_t url_max_size;  // Cap on any fetched URL payload (default
-                          // 10MB), independent of the #embed limits
-    HashMap url_to_path;  // Maps URLs to cached file paths
+    char   *url_cache_dir; // Directory for caching downloaded headers
+    int     url_timeout;   // curl fetch timeout in seconds (default 30)
+    size_t  url_max_size;  // Cap on any fetched URL payload (default
+                           // 10MB), independent of the #embed limits
+    HashMap url_to_path;   // Maps URLs to cached file paths
     // #1324: true once any URL #include/#embed has been mirrored into
     // <url_cache_dir> under a URL-shaped path (fetch_url_to_cache(),
     // src/url_fetch.c) -- lets a directive reached only through an ordinary
@@ -4004,9 +4012,9 @@ typedef struct Compiler {
                                     // canonical-path dedup (serialize_
                                     // program.c, #1306) to resolve any index
                                     // to its owning TU.
-    int emit_directives_tu_starts_count;
-    int emit_strict; // --emit-only: suppress auto-capture; only explicitly
-                     // tagged content appears in -c=generated output
+    int  emit_directives_tu_starts_count;
+    int  emit_strict; // --emit-only: suppress auto-capture; only explicitly
+                      // tagged content appears in -c=generated output
     bool emit_generated_only; // -c=generated (not -m alone): narrows
                               // auto-capture so only the primary input's own
                               // unrouted directives are replayed. Additional
@@ -4230,13 +4238,13 @@ typedef struct Compiler {
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask; // CCCCFlags bits explicitly set on the CLI; these
                              // win over `#pragma cccc config(...)` (#357)
-    bool native_mode;        // True when compile_format == COMPILE_NATIVE;
+    bool     native_mode;    // True when compile_format == COMPILE_NATIVE;
                              // config()'s flag effects are skipped
 
     // Inlining context (used during codegen when expanding inline bodies)
-    char *inline_exit_name; // Exit label name for inlined returns (NULL = not
-                            // inlining)
-    int inline_result_reg;  // Register for inlined return values
+    char *inline_exit_name;  // Exit label name for inlined returns (NULL = not
+                             // inlining)
+    int   inline_result_reg; // Register for inlined return values
 
     // Tail-call context (used during codegen for return f(args) TCO)
     bool tail_calls;          // Emit CALLT for eligible return f(args). Always
@@ -4344,10 +4352,10 @@ typedef struct {
     long long **bps;    // parallel array: bp identifying the owning frame
     int        *depths; // parallel array: -1 == the frame's own ENT3 entry;
                         // >= 0 == a block's nesting depth (HMRK's operand)
-    char **marks;       // parallel array: heap_ptr at the moment this entry
+    char      **marks;  // parallel array: heap_ptr at the moment this entry
                         // was pushed
-    int count;
-    int capacity;
+    int         count;
+    int         capacity;
 } HeapMarks;
 
 /*!
@@ -4364,7 +4372,7 @@ struct VirtualMachine {
     FReg      fregs[32]; // Flat-double floating-point register file
     VReg      vregs[32]; // Up-to-512-bit SIMD vector register file (see tracker
                          // #72/#463/#722)
-    Pc         pc;       // Program counter (instruction index)
+    Pc        pc;        // Program counter (instruction index)
     long long *bp;       // Base pointer (frame pointer)
     long long *sp;       // Stack pointer
     long long  cycle;    // Instruction cycle counter
@@ -4384,15 +4392,15 @@ struct VirtualMachine {
     char      *data_seg;     // Data segment (global variables/constants)
     char      *data_ptr;     // Current write position in data segment
     // Thread-local storage
-    char *tls_template; // Canonical init image for TLS variables (written by
-                        // gen())
+    char  *tls_template; // Canonical init image for TLS variables (written by
+                         // gen())
     size_t tls_template_size; // Byte length of tls_template
     size_t tls_template_cap;  // Allocated capacity of tls_template
     char  *current_tls_seg;   // Active thread's private TLS copy (updated on
                               // context switch)
-    char      *heap_seg;      // Heap segment (for VM malloc/free)
-    char      *heap_ptr;      // Current allocation pointer (bump allocator)
-    char      *heap_end;      // End of heap segment
+    char  *heap_seg;          // Heap segment (for VM malloc/free)
+    char  *heap_ptr;          // Current allocation pointer (bump allocator)
+    char  *heap_end;          // End of heap segment
     FreeBlock *free_list;     // Head of free blocks list (for memory reuse)
 
     // Byte-granular subobject type shadow for CHKT3 (#653), one instance
@@ -4561,10 +4569,10 @@ struct VirtualMachine {
     long long *shadow_sp;    // Shadow stack pointer
 
     // Stack instrumentation state
-    int current_scope_id;          // Incremented for each scope entry
-    int current_function_scope_id; // Scope ID of current function being
-                                   // generated
-    long long stack_high_water;    // Maximum stack usage tracking
+    int       current_scope_id;          // Incremented for each scope entry
+    int       current_function_scope_id; // Scope ID of current function being
+                                         // generated
+    long long stack_high_water;          // Maximum stack usage tracking
 
     // #981: codegen-time nesting counter for HMRK/HREL depth immediates.
     // Incremented immediately before recursing into a VLA-declaring
@@ -4589,8 +4597,8 @@ struct VirtualMachine {
 
     // Struct return buffer runtime state (runtime rotation for clean chained
     // calls)
-    int runtime_return_buffer_index; // Runtime rotating index for return
-                                     // buffers
+    int    runtime_return_buffer_index; // Runtime rotating index for return
+                                        // buffers
 
     char **ffi_allow_list;
     int    ffi_allow_count;
