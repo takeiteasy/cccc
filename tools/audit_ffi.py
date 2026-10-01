@@ -176,6 +176,9 @@ COMPILER_LOWERED_HEADERS = {
     # stdc_leading_zeros_ui and friends are C23 <stdbit.h> builtins lowered
     # in codegen, not FFI calls.
     "stdbit.h",
+    # Every omp_* function is `static inline` in the header for the VM, and a
+    # shim emitted into the output (src/shims/omp.c) under -c=native/-m.
+    "omp.h",
 }
 
 # Namespace-collision check (#1280): a `__cccc_*` name declared in a bundled

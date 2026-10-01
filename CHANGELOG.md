@@ -11,6 +11,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `critical`, `atomic`, `barrier`, `single`, `master`, with `private`,
   `firstprivate`, `shared` and `reduction`) and the VM runs each region on one
   thread. `<omp.h>` provides the runtime functions. See `man/OPENMP.md`.
+- Added: `lastprivate` on `for` and `parallel for`, and `copyprivate` on
+  `single`.
+- Added: `-c=native` and `-m` run OpenMP regions on real threads from a thread
+  pool emitted into the output; `num_threads`, `if`, `critical`, `atomic`,
+  `barrier`, `single`, `reduction` and the `omp_*` runtime work as in OpenMP.
+- Fixed: the compare-and-swap loop behind `__atomic_fetch_<op>` started with a
+  plain read that raced with other threads' updates.
 
 ## [0.4.1] - 2026-10-01
 

@@ -64,7 +64,7 @@ def _run_testing_suite(idx, test_file, test_name, cccc, script_dir, cccc_args,
     testing_flags = [
         f for f in per_test_flags
         if f != "--testing"
-        and not f.startswith("-f")
+        and (f == "-fopenmp" or not f.startswith("-f"))
     ]
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -180,9 +180,10 @@ def run_native_roundtrip(idx, test_file, test_name, cccc, script_dir, cccc_args,
     # own -f stripping (matrix.py:48-63). -O<n>/-O/--optimize[=n], by
     # contrast, is no longer stripped here (#1159): -c=native now forwards it
     # verbatim to the host cc instead of rejecting it.
+    # -fopenmp is the exception: -c=native lowers OpenMP onto real threads.
     native_flags = [
         f for f in per_test_flags
-        if not f.startswith("-f")
+        if f == "-fopenmp" or not f.startswith("-f")
     ]
 
     compile_only = is_negative_test or expects_runtime_error or is_diagnostic_test

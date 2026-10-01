@@ -1714,3 +1714,56 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
     fprintf(f, "%s", CCCC_SHIM_wide_bitint_reinterpret);
     fprintf(f, "\n");
 }
+
+// #1368: the OpenMP runtime (thread pool, barrier, critical sections, omp_*
+// API). Emitted when a directive was lowered or the program references an
+// omp.h function.
+static void omp_lock_usage(VirtualMachine *vm, Obj *prog, bool *any_lock,
+                           bool *any_nest) {
+    static const char *const lock_fns[] = {"omp_init_lock", "omp_destroy_lock",
+                                           "omp_set_lock", "omp_unset_lock",
+                                           "omp_test_lock"};
+    static const char *const nest_fns[] = {
+        "omp_init_nest_lock", "omp_destroy_nest_lock", "omp_set_nest_lock",
+        "omp_unset_nest_lock", "omp_test_nest_lock"};
+    *any_lock = *any_nest = false;
+    for (size_t i = 0; i < sizeof(lock_fns) / sizeof(*lock_fns); i++) {
+        *any_lock |= shim_fn_is_used(vm, prog, lock_fns[i], "omp.h");
+        *any_nest |= shim_fn_is_used(vm, prog, nest_fns[i], "omp.h");
+    }
+}
+
+void serialize_omp_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (!vm->compiler.omp_threaded || vm->compiler.emit_cccc)
+        return;
+
+    bool any_lock, any_nest, any_api = false;
+    omp_lock_usage(vm, prog, &any_lock, &any_nest);
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->is_used && !obj->body &&
+            !strncmp(obj->name, "omp_", 4))
+            any_api = true;
+
+    if (!vm->compiler.omp_used && !any_api && !any_lock && !any_nest)
+        return;
+
+    fprintf(f, "%s", CCCC_SHIM_omp_includes);
+    fprintf(f, "%s", CCCC_SHIM_omp_runtime);
+    fprintf(f, "%s", CCCC_SHIM_omp_api);
+}
+
+// The lock functions take omp_lock_t, which the serializer emits next to the
+// first function that uses it, so their definitions come after every
+// function.
+void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (!vm->compiler.omp_threaded || vm->compiler.emit_cccc)
+        return;
+    bool any_lock, any_nest;
+    omp_lock_usage(vm, prog, &any_lock, &any_nest);
+    if (any_lock || any_nest)
+        fprintf(f, "%s", CCCC_SHIM_omp_lock_core);
+    if (any_lock)
+        fprintf(f, "%s", CCCC_SHIM_omp_locks);
+    if (any_nest)
+        fprintf(f, "%s", CCCC_SHIM_omp_nest_locks);
+}

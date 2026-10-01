@@ -8,6 +8,46 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __CCCC_OMP_THREADED__
+
+/* -c=native, -m and -c=generated run parallel regions on real threads; the
+   runtime is emitted into the output. */
+
+typedef struct {
+    void *__impl;
+} omp_lock_t;
+
+typedef struct {
+    void *__impl;
+    int   __reserved; /* keeps it a distinct type from omp_lock_t */
+} omp_nest_lock_t;
+
+int    omp_get_num_threads(void);
+int    omp_get_max_threads(void);
+int    omp_get_thread_num(void);
+int    omp_get_thread_limit(void);
+int    omp_in_parallel(void);
+int    omp_get_num_procs(void);
+void   omp_set_num_threads(int n);
+void   omp_set_dynamic(int on);
+int    omp_get_dynamic(void);
+double omp_get_wtime(void);
+double omp_get_wtick(void);
+
+void omp_init_lock(omp_lock_t *lock);
+void omp_destroy_lock(omp_lock_t *lock);
+void omp_set_lock(omp_lock_t *lock);
+void omp_unset_lock(omp_lock_t *lock);
+int  omp_test_lock(omp_lock_t *lock);
+
+void omp_init_nest_lock(omp_nest_lock_t *lock);
+void omp_destroy_nest_lock(omp_nest_lock_t *lock);
+void omp_set_nest_lock(omp_nest_lock_t *lock);
+void omp_unset_nest_lock(omp_nest_lock_t *lock);
+int  omp_test_nest_lock(omp_nest_lock_t *lock);
+
+#else
+
 typedef struct {
     int held;
 } omp_lock_t;
@@ -67,5 +107,7 @@ static inline void omp_unset_nest_lock(omp_nest_lock_t *lock) {
 static inline int omp_test_nest_lock(omp_nest_lock_t *lock) {
     return ++lock->depth;
 }
+
+#endif /* __CCCC_OMP_THREADED__ */
 
 #endif

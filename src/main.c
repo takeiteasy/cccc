@@ -882,8 +882,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t--trap-fp-divzero            Abort on float division by zero "
            "instead of IEEE +-Inf/NaN\n");
     printf(
-        "\t-fopenmp, --openmp           Honour #pragma omp (regions run on one "
-        "thread in the VM)\n");
+        "\t-fopenmp, --openmp           Honour #pragma omp (one thread in the "
+        "VM, real threads with -c=native)\n");
     printf("\t--posix-emulation            Enable lossy/approximate emulation "
            "of POSIX functions the\n");
     printf("\t                             host doesn't natively support (e.g. "
@@ -2492,6 +2492,15 @@ int main(int argc, const char *argv[]) {
     vm.compiler.cli_flags_mask          = cli_flags_mask;
     vm.kernel_max_group                 = kernel_max_group;
     vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);
+    // --testing[=vm] runs the program in the VM, which has no thread pool;
+    // -c=generated re-emits only macro-generated code, with no runtime.
+    vm.compiler.omp_threaded =
+        (flags & CCCC_OPENMP) &&
+        (compile_format == COMPILE_NATIVE ||
+         (dump_expanded_only && !emit_generated_only)) &&
+        !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
+    if (vm.compiler.omp_threaded)
+        define_macro(&vm, "__CCCC_OMP_THREADED__", "1");
     vm.compiler.compile_only            = compile_only;
     vm.compiler.asm_passthru            = asm_passthru;
     vm.compiler.no_comptime             = no_comptime;

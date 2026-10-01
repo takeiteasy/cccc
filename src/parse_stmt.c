@@ -229,6 +229,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "return")) {
+        if (vm->compiler.current_fn && vm->compiler.current_fn->is_omp_region)
+            error_tok(vm, tok,
+                      "'return' is not allowed inside an OpenMP parallel "
+                      "region");
         Node *node = new_node(vm, ND_RETURN, tok);
 
         // Warn if this is a noreturn function attempting to return

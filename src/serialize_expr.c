@@ -2274,6 +2274,12 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // setjmp/longjmp's remap just above.
             if (is_extern_func_name(node->lhs, "reallocarray")) {
                 fprintf(f, "__cccc_reallocarray(");
+            } else if (node->lhs && node->lhs->kind == ND_VAR &&
+                       node->lhs->var && node->lhs->var->is_omp_region) {
+                // #1368: the call to an outlined parallel region forks the
+                // thread pool; the env pointer below is its argument.
+                fprintf(f, "__cccc_pool_run((void (*)(void *))%s, ",
+                        node->lhs->var->name);
             } else {
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, "(");
@@ -2313,7 +2319,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // -- mirror codegen_expr.c's identical fallback rather than
                     // emit nothing.
                     fprintf(f, "&__cccc_nenv");
-                if (node->args)
+                if (node->lhs->var->is_omp_region)
+                    fprintf(f, ", %s", node->lhs->var->omp_nt_var->name);
+                else if (node->args)
                     fprintf(f, ", ");
             }
             {

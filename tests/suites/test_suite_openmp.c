@@ -1,8 +1,9 @@
 // CCCC_NATIVE_SKIP: OpenMP runs in the VM only
 // CCCC_FLAGS: --testing -fopenmp
 // Suite: #pragma omp under -fopenmp runs every region on one thread with
-// OpenMP's data-sharing semantics. Negative cases live in
-// tests/test_openmp_*_error.c.
+// OpenMP's data-sharing semantics. It asserts the one-thread results, so it
+// is VM-only; test_suite_openmp_threads.c covers a real team. Negative cases
+// live in tests/test_openmp_*_error.c.
 
 #include <omp.h>
 

@@ -1936,6 +1936,10 @@ typedef struct OmpDirective {
     int        collapse;      // loop depth the directive covers (default 1)
     bool       nowait;
     bool       default_none;
+    int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
+    char      *num_threads_text; // threaded lowering: clause expressions
+    char      *if_text;
+    Obj       *region_fn; // threaded parallel: the outlined region function
 } OmpDirective;
 
 /*!
@@ -2524,6 +2528,11 @@ struct Obj {
     // Nested function support (GNU C extension)
     struct Obj *parent_fn;           // Enclosing function (NULL if top-level)
     bool        is_nested;           // True if defined inside another function
+    bool        is_omp_region;       // Outlined #pragma omp parallel body; a
+                                     // call to it serializes as a thread-pool
+                                     // fork (see parse_omp.c)
+    struct Obj *omp_nt_var;          // is_omp_region: local holding the team
+                                     // size passed to the fork
     int         nesting_depth;       // 0 = top-level, 1 = one level deep, etc.
     struct Obj *nested_children;     // #1081: linked list (via
                                      // next_nested_sibling below) of every
@@ -4294,6 +4303,9 @@ typedef struct Compiler {
                              // win over `#pragma cccc config(...)` (#357)
     bool     native_mode;    // True when compile_format == COMPILE_NATIVE;
                              // config()'s flag effects are skipped
+    bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
+                             // regions are outlined onto the thread pool
+    bool     omp_used;       // a threaded OpenMP directive was lowered
 
     // Inlining context (used during codegen when expanding inline bodies)
     char *inline_exit_name;  // Exit label name for inlined returns (NULL = not

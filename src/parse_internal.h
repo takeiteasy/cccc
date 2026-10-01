@@ -328,7 +328,6 @@ void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok);
 bool is_kernel_builtin(const char *name);
 void reject_kernel_runtime_in_native(VirtualMachine *vm, Token *tok);
 Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok);
-void reject_omp_in_native(VirtualMachine *vm, Token *tok);
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);

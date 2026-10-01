@@ -2870,7 +2870,7 @@ bool is_compiler_owned_header(const char *name) {
 static bool is_cccc_supplied_only_header(const char *name) {
     static const char *cccc_only[] = {
         "stdbit.h",       "stdckdint.h",    "threads.h", "uchar.h",
-        "Availability.h", "decimal_math.h", NULL,
+        "Availability.h", "decimal_math.h", "omp.h",     NULL,
     };
     for (int i = 0; cccc_only[i]; i++)
         if (!strcmp(name, cccc_only[i]))

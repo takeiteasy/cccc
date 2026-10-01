@@ -1634,7 +1634,7 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
 // pointer expression, not a checked-pointer lvalue, exactly like every other
 // __atomic_*/__builtin_atomic_* builtin beside this one.
 //
-//   ({ T *addr = (obj); T val = (valexpr); T old = *addr; T new;
+//   ({ T *addr = (obj); T val = (valexpr); T old = atomic_load(addr); T new;
 //      do { new = is_nand ? ~(old & val) : (old op_kind val); }
 //      while (!__atomic_compare_exchange_n(addr, &old, new, ...));
 //      want_old ? old : new;
@@ -1667,11 +1667,13 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
         vm, ND_EXPR_STMT,
         new_binary(vm, ND_ASSIGN, new_var_node(vm, val, tok), valexpr, tok),
         tok);
+    // The first read must itself be atomic: a plain read races with another
+    // thread's CAS.
+    Node *first_load = new_node(vm, ND_ALOAD, tok);
+    first_load->lhs  = new_var_node(vm, addr, tok);
     cur = cur->next = new_unary(
         vm, ND_EXPR_STMT,
-        new_binary(vm, ND_ASSIGN, new_var_node(vm, old, tok),
-                   new_unary(vm, ND_DEREF, new_var_node(vm, addr, tok), tok),
-                   tok),
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, old, tok), first_load, tok),
         tok);
 
     Node *loop       = new_node(vm, ND_DO, tok);
