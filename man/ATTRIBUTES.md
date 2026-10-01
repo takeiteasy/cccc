@@ -220,7 +220,8 @@ runtime source:
 
 `[[cccc::kernel]]` checks that a function could run as a GPU kernel. The check
 runs on the normal CPU build, so kernel-shaped code is caught without a GPU
-toolchain. It does not generate GPU code.
+toolchain. It does not generate GPU code. To run a kernel over a grid of
+work-items in the VM, see [KERNELS.md](KERNELS.md).
 
 ```c
 #include <stdatomic.h>

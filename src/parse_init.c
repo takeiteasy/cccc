@@ -284,6 +284,10 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         // #1160: also honor GNU aligned(N), not just _Alignas. attr can be
         // NULL at this call site; effective_decl_align() tolerates that.
         var->align = effective_decl_align(vm, ty->name, ty, attr);
+        claim_kernel_local(vm, var, ty->name);
+        if (var->is_kernel_local_obj && equal(tok, "="))
+            error_tok(vm, tok,
+                      "a [[cccc::local]] object cannot have an initializer");
         if (attr && attr->is_block_var)
             var->is_block_var = true;
         // Note: cleanup_fn is transferred from attr → Type → Obj via

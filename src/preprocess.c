@@ -3292,6 +3292,12 @@ static void register_stdlib_for_header(VirtualMachine *vm,
         return;
     hashmap_put(&vm->compiler.included_headers, header_name, (void *)1);
 
+    // Public cccc/ headers are disk-only, so they have no embedded-table entry.
+    if (!strcmp(header_name, "cccc/kernel.h")) {
+        register_kernel_functions(vm);
+        return;
+    }
+
     const char *fn_name = get_stdlib_reg_fn_name(header_name);
     if (!fn_name)
         return;

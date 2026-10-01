@@ -69,6 +69,10 @@ struct ThreadRecord {
     int    held_locks_cap;
     // Per-thread TLS segment (copy of vm->tls_template made at thread creation)
     char *tls_seg;
+    // Kernel work-item this thread runs (cccc_launch), and the hook called
+    // once its start function returns; see cccc_run_kernel_threads below.
+    void *kernel_item;
+    void (*kernel_exit)(void *item);
     // Set when THIS thread called pthread_exit()/thrd_exit() itself (as
     // opposed to just returning from its start function). Only meaningful
     // for the main thread's record today: cc_run (vm.c) checks it after
@@ -311,9 +315,14 @@ static void *vm_thread_start(void *arg) {
     // Stack canaries stay enabled in threads: the frame-layout shift is baked
     // into stack offsets at compile time, so the flag must match what codegen
     // assumed (#445).
-    rec->vm_rc  = vm_eval(vm);
+    // vm_eval's value is the start function's own return (REG_A0) on a clean
+    // return; only reaching the sentinel pc says the thread did not trap.
+    int rc      = vm_eval(vm);
+    rec->vm_rc  = vm->pc == CCCC_INVALID_PC ? 0 : (rc ? rc : -1);
     rec->retval = (void *)vm->regs[REG_A0];
     rec->exited = 1;
+    if (rec->kernel_exit)
+        rec->kernel_exit(rec->kernel_item);
     // Run TSS destructors here, before anything below unwinds this thread's
     // VM context -- this is the only point where active_thread == rec,
     // current_tls_seg == rec->tls_seg, and sp/bp are still the worker's, all
@@ -1377,6 +1386,98 @@ static long long wrap_call_once(long long flagp, long long func) {
         cccc_call_guest_callback(vm, func, NULL, 0, &ignored);
     }
     return 0;
+}
+
+// Kernel support (stdlib/kernel.c) ------------------------------------------
+
+void *cccc_thread_kernel_item(VirtualMachine *vm) {
+    return vm->active_thread ? vm->active_thread->kernel_item : NULL;
+}
+
+void cccc_without_gil(VirtualMachine *vm, void (*fn)(void *), void *ctx) {
+    GilPause caller_state;
+    save_and_release_gil(vm, &caller_state);
+    fn(ctx);
+    acquire_and_restore_gil(vm, &caller_state);
+}
+
+// Runs `count` guest threads of the function `fn_value`, thread i with
+// items[i] as its kernel item, and joins them all. Every thread gets the same
+// integer/float argument registers. Returns 0 if every thread ran to
+// completion.
+int cccc_run_kernel_threads(VirtualMachine *vm, long long fn_value,
+                            const long long *iargs, int nint,
+                            const double *fargs, int nfargs, void **items,
+                            int count, void (*on_exit)(void *item)) {
+    Pc entry = cc_byte_offset_to_pc(fn_value);
+    if (entry == CCCC_INVALID_PC || entry > vm->text_ptr || count <= 0)
+        return -1;
+
+    enable_pthread_runtime(vm);
+    ThreadRecord **recs = calloc((size_t)count, sizeof(*recs));
+    if (!recs)
+        return -1;
+
+    int rc = 0;
+    for (int i = 0; i < count && rc == 0; i++) {
+        ThreadRecord *rec = calloc(1, sizeof(*rec));
+        if (!rec) {
+            rc = -1;
+            break;
+        }
+        rec->vm = vm;
+        if (cccc_exec_state_alloc_stack(vm, &rec->exec) != 0) {
+            free(rec);
+            rc = -1;
+            break;
+        }
+        if (vm->tls_template_size > 0) {
+            if (posix_memalign((void **)&rec->tls_seg, CCCC_MAX_DATA_ALIGN,
+                               vm->tls_template_size) != 0) {
+                rec->tls_seg = NULL;
+                cccc_exec_state_release_stack(vm, &rec->exec);
+                free(rec);
+                rc = -1;
+                break;
+            }
+            memcpy(rec->tls_seg, vm->tls_template, vm->tls_template_size);
+        }
+        cccc_exec_state_prepare_call(vm, &rec->exec, entry, 0);
+        for (int j = 0; j < nint; j++)
+            rec->exec.regs[REG_A0 + j] = iargs[j];
+        for (int j = 0; j < nfargs; j++)
+            rec->exec.fregs[FREG_A0 + j].f64 = fargs[j];
+        rec->kernel_item = items[i];
+        rec->kernel_exit = on_exit;
+        link_thread(vm, rec);
+        recs[i] = rec;
+    }
+
+    int started = 0;
+    if (rc == 0) {
+        GilPause caller_state;
+        save_and_release_gil(vm, &caller_state);
+        for (; started < count; started++)
+            if (pthread_create(&recs[started]->host_thread, NULL,
+                               vm_thread_start, recs[started]) != 0) {
+                rc = -1;
+                break;
+            }
+        for (int i = 0; i < started; i++)
+            pthread_join(recs[i]->host_thread, NULL);
+        acquire_and_restore_gil(vm, &caller_state);
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (!recs[i])
+            continue;
+        if (i < started && recs[i]->vm_rc != 0)
+            rc = -1;
+        unlink_thread(vm, recs[i]);
+        free_thread_record(recs[i]);
+    }
+    free(recs);
+    return rc;
 }
 
 void register_threads_functions(VirtualMachine *vm) {

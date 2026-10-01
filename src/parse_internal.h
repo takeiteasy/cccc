@@ -324,6 +324,10 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok);
 void check_may_return_null_summaries(VirtualMachine *vm);
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn);
 void check_kernel_subset(VirtualMachine *vm);
+void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok);
+bool is_kernel_builtin(const char *name);
+void reject_kernel_runtime_in_native(VirtualMachine *vm, Token *tok);
+Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);
 Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,

@@ -547,6 +547,10 @@ void gen(VirtualMachine *vm, Obj *prog) {
         for (Obj *fn = prog; fn; fn = fn->next) {
             if (!fn->is_function)
                 continue;
+            if (fn->is_kernel && fn->body)
+                cccc_kernel_register_meta(
+                    vm, cc_pc_to_byte_offset((Pc)fn->code_addr),
+                    fn->kernel_uses_barrier, fn->kernel_local_bytes);
             if (fn->is_constructor) {
                 PATCH_GROW(vm, ctor_list, ctor_count, ctor_capacity);
                 CCCCInitEntry *e =

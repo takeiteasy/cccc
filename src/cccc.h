@@ -1940,6 +1940,7 @@ struct Node {
     // without needing to inspect the call's syntactic origin.
     bool is_vla_alloca_call;
     bool is_explicit_cast; // ND_CAST written as `(T)expr` in source
+    bool is_kernel_local_arg; // CCCC_LOCAL(n) argument of cccc_launch
 
     // Goto or labeled statement, or labels-as-values
     char        *label;
@@ -2281,6 +2282,11 @@ struct Obj {
     bool is_pure;
     bool is_func_const;
     bool is_kernel;
+    bool is_kernel_local_obj; // [[cccc::local]] object in a kernel entry's body,
+                              // stored in work-group memory at kernel_local_off
+    int  kernel_local_off;
+    bool kernel_uses_barrier; // kernel entry (or a callee) calls cccc_barrier
+    int  kernel_local_bytes;  // size of the entry's [[cccc::local]] objects
     bool may_return_null; // #688: function has a provable null-returning path
                           // (whole-TU summary)
     bool always_returns_null; // #692: every reachable return in the function is
@@ -4303,6 +4309,9 @@ typedef struct Compiler {
     // entry's code_addr indexes vm->text_seg once codegen completes.
     // Populated by gen(); consumed by cc_run() in vm.c.
     CCCCInitEntry *ctor_list;
+    int            kernel_launch_depth; // inside cccc_launch arguments
+    HashMap        kernel_direct_local; // [[cccc::local]] storage for kernels called outside cccc_launch
+    HashMap        kernel_meta; // kernel byte offset -> KernelMeta* (stdlib/kernel.c)
     int            ctor_count;
     int            ctor_capacity;
     CCCCInitEntry *dtor_list;
@@ -4693,6 +4702,8 @@ struct VirtualMachine {
     // types.
     void             *gil_mutex;
     int               gil_initialized;
+    void *kernel_loop_item;  // work-item of a barrier-free cccc_launch loop
+    int   kernel_max_group;  // --kernel-max-group-size (0 = default 256)
     ThreadRecord     *active_thread;
     ThreadRecord     *thread_records;
     PthreadKeyRecord *pthread_keys;

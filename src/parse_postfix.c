@@ -939,6 +939,9 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
         error_tok(vm, fn->tok, "not a function");
 
+    if (fn->kind == ND_VAR && fn->var && is_kernel_builtin(fn->var->name))
+        reject_kernel_runtime_in_native(vm, fn->tok);
+
     Type *ty              = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
     Type *param_ty        = ty->params;
 
@@ -1091,6 +1094,178 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         node->ret_buffer->is_ret_buffer = true;
     }
     return node;
+}
+
+// __builtin_kernel_launch(kernel, global, local, args...) (cccc_launch in
+// <cccc/kernel.h>). The trailing arguments are checked and converted by
+// funcall() against the kernel's parameters; each is then packed into an
+// integer or float slot and handed to the __cccc_launch host function
+// (stdlib/kernel.c), which sets the argument registers for every work-item.
+// TODO: struct/union/vector arguments and more than 8 integer or 8 float
+// arguments need a generated per-launch thunk instead of register packing.
+// Copies a range into a temporary ahead of the call (struct copies clobber the
+// argument registers) and returns the temporary's address.
+static Node *kernel_launch_range(VirtualMachine *vm, Node *range, Token *tok,
+                                 const char *what, Node **seq) {
+    add_type(vm, range);
+    if (range->ty->kind != TY_STRUCT || range->ty->size != 32)
+        error_tok(vm, tok,
+                  "cccc_launch: %s range must be a cccc_range (include "
+                  "<cccc/kernel.h>)",
+                  what);
+    Obj  *tmp = new_lvar(vm, "", 0, range->ty);
+    Node *save =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, tok), range, tok);
+    *seq = *seq ? new_binary(vm, ND_COMMA, *seq, save, tok) : save;
+    return new_cast(vm, new_unary(vm, ND_ADDR, new_var_node(vm, tmp, tok), tok),
+                    ty_long);
+}
+
+static Node *kernel_launch_slot(VirtualMachine *vm, Obj *slots, int index,
+                                Node *value, Token *tok) {
+    Node *dst = new_unary(
+        vm, ND_DEREF,
+        new_add(vm, new_var_node(vm, slots, tok), new_num(vm, index, tok), tok),
+        tok);
+    return new_binary(vm, ND_ASSIGN, dst, value, tok);
+}
+
+static Node *find_kernel_local_marker(Node *node) {
+    for (; node && node->kind == ND_CAST; node = node->lhs)
+        if (node->is_kernel_local_arg)
+            return node;
+    return NULL;
+}
+
+static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
+    Token *start = tok;
+    reject_kernel_runtime_in_native(vm, start);
+    tok          = skip(vm, tok->next, "(");
+
+    Node *kernel = assign(vm, &tok, tok);
+    add_type(vm, kernel);
+    // A named function must be a kernel. A function pointer's type does not
+    // carry [[cccc::kernel]], so the launcher checks the target at run time.
+    Type *kernel_ty = kernel->ty;
+    while (kernel_ty->kind == TY_PTR)
+        kernel_ty = kernel_ty->base;
+    Node *named = kernel;
+    while (named->kind == ND_ADDR || named->kind == ND_CAST)
+        named = named->lhs;
+    bool named_non_kernel = named->kind == ND_VAR && named->var->is_function &&
+                            !named->var->is_kernel;
+    if (kernel_ty->kind != TY_FUNC || named_non_kernel)
+        error_tok(vm, start,
+                  "cccc_launch requires a [[cccc::kernel]] function");
+    // `&kernel` is typed as a pointer to a pointer; funcall() wants one level.
+    if (kernel->ty->kind == TY_PTR && kernel->ty->base->kind != TY_FUNC)
+        kernel = new_cast(vm, kernel, pointer_to(vm, kernel_ty));
+
+    tok          = skip(vm, tok, ",");
+    Node *global = assign(vm, &tok, tok);
+    tok          = skip(vm, tok, ",");
+    Node *local  = assign(vm, &tok, tok);
+    if (!equal(tok, ")"))
+        tok = skip(vm, tok, ",");
+
+    vm->compiler.kernel_launch_depth++;
+    Node *call = funcall(vm, rest, tok, kernel);
+    vm->compiler.kernel_launch_depth--;
+
+    Obj  *islots = new_lvar(vm, "", 0, array_of(vm, ty_long, 8));
+    Obj  *fslots = new_lvar(vm, "", 0, array_of(vm, ty_double, 8));
+    Node *seq    = NULL;
+    int   nint = 0, nflt = 0;
+    long  local_mask = 0;
+
+    Type *param      = kernel_ty->params;
+    for (Node *arg = call->args; arg; arg = arg->next, param = param->next) {
+        Node *store;
+        Node *local_marker = find_kernel_local_marker(arg);
+        if (local_marker) {
+            if (!param || param->kind != TY_PTR ||
+                param->base->addr_space != AS_LOCAL)
+                error_tok(vm, arg->tok,
+                          "CCCC_LOCAL is only valid for a [[cccc::local]] "
+                          "pointer parameter");
+            local_mask |= 1L << nint;
+            store = kernel_launch_slot(vm, islots, nint++, local_marker->lhs,
+                                       start);
+        } else if (param && param->kind == TY_PTR &&
+                   param->base->addr_space == AS_LOCAL) {
+            error_tok(vm, arg->tok,
+                      "a [[cccc::local]] pointer parameter needs a "
+                      "CCCC_LOCAL(bytes) argument");
+        } else if (is_flonum(arg->ty) && arg->ty->kind != TY_LDOUBLE) {
+            if (nflt == 8)
+                error_tok(vm, arg->tok,
+                          "cccc_launch takes at most 8 float arguments");
+            store = kernel_launch_slot(vm, fslots, nflt++,
+                                       new_cast(vm, arg, ty_double), start);
+        } else if (is_integer(arg->ty) || arg->ty->kind == TY_PTR ||
+                   arg->ty->kind == TY_BOOL || arg->ty->kind == TY_ENUM) {
+            if (nint == 8)
+                error_tok(vm, arg->tok,
+                          "cccc_launch takes at most 8 integer or pointer "
+                          "arguments");
+            store = kernel_launch_slot(vm, islots, nint++,
+                                       new_cast(vm, arg, ty_long), start);
+        } else {
+            error_tok(vm, arg->tok,
+                      "cccc_launch does not support this kernel argument "
+                      "type");
+        }
+        seq = seq ? new_binary(vm, ND_COMMA, seq, store, start) : store;
+    }
+
+    Type  *launch_ty = func_type(vm, ty_long);
+    Type **tail      = &launch_ty->params;
+    for (int i = 0; i < 8; i++) {
+        *tail = copy_type(vm, ty_long);
+        tail  = &(*tail)->next;
+    }
+    Obj  *launch_fn = new_private_func_obj(vm, "__cccc_launch", launch_ty);
+
+    Node  head      = {};
+    Node *cur       = &head;
+    Node *fn_value =
+        new_cast(vm, new_cast(vm, kernel, pointer_to(vm, ty_void)), ty_long);
+    cur = cur->next = fn_value;
+    cur = cur->next = kernel_launch_range(vm, global, start, "global", &seq);
+    cur = cur->next = kernel_launch_range(vm, local, start, "local", &seq);
+    cur = cur->next = new_cast(vm, new_var_node(vm, islots, start), ty_long);
+    cur = cur->next = new_cast(vm, new_var_node(vm, fslots, start), ty_long);
+    cur = cur->next = new_num(vm, nint, start);
+    cur = cur->next = new_num(vm, nflt, start);
+    cur->next       = new_num(vm, local_mask, start);
+
+    for (Node *arg = head.next; arg; arg = arg->next)
+        add_type(vm, arg);
+    Node *launch =
+        new_unary(vm, ND_FUNCALL, new_var_node(vm, launch_fn, start), start);
+    launch->func_ty = launch_ty;
+    launch->ty      = launch_ty->return_ty;
+    launch->args    = head.next;
+    Node *result = seq ? new_binary(vm, ND_COMMA, seq, launch, start) : launch;
+    add_type(vm, result);
+    return result;
+}
+
+// __builtin_kernel_local(bytes) (CCCC_LOCAL): the size of a [[cccc::local]]
+// pointer parameter's memory, only meaningful as a cccc_launch argument.
+static Node *kernel_local_arg(VirtualMachine *vm, Token **rest, Token *tok) {
+    Token *start = tok;
+    if (!vm->compiler.kernel_launch_depth)
+        error_tok(vm, start,
+                  "CCCC_LOCAL is only valid as a cccc_launch "
+                  "argument");
+    tok         = skip(vm, tok->next, "(");
+    Node *bytes = assign(vm, &tok, tok);
+    *rest       = skip(vm, tok, ")");
+    Node *ptr =
+        new_cast(vm, new_cast(vm, bytes, ty_long), pointer_to(vm, ty_void));
+    ptr->is_kernel_local_arg = true;
+    return ptr;
 }
 
 // #1224: whether two _Generic association type-names collide under C23
@@ -1658,6 +1833,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // typeclass.h where a matching CCCC type exists; TY_VECTOR has no gcc
     // counterpart so it gets a CCCC-specific code (used by <stdarg.h>'s
     // va_arg to detect a by-pointer variadic vector argument, ticket #721).
+    if (equal(tok, "__builtin_kernel_launch"))
+        return kernel_launch(vm, rest, tok);
+    if (equal(tok, "__builtin_kernel_local"))
+        return kernel_local_arg(vm, rest, tok);
+
     if (equal(tok, "__builtin_classify_type")) {
         tok           = skip(vm, tok->next, "(");
         Node *operand = assign(vm, &tok, tok);
@@ -3446,6 +3626,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (sc->var->lazy_quote)
                     return cc_quote_expand_lazy(vm, sc->var->lazy_quote,
                                                 /*want_stmt=*/false);
+                if (sc->var->is_kernel_local_obj)
+                    return kernel_local_ref(vm, sc->var, tok);
                 return new_var_node(vm, sc->var, tok);
             }
             if (sc->enum_ty) {

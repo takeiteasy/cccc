@@ -116,6 +116,7 @@ Manuals live in [`man/`](man/):
 | [WARNINGS.md](man/WARNINGS.md) | `-W` warning categories, `-Werror`, pragma suppression, machine-readable output |
 | [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
 | [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
+| [KERNELS.md](man/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items in the VM: `cccc_launch`, work-item builtins, local memory, barriers |
 | [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
 | [TYPES.md](man/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |
 
@@ -214,6 +215,10 @@ Testing Options:
 	   --test-format=FMT     Output format for test results: tap (default), plain, json
 	   --no-emit-tests       -c=native/-c=generated: drop [[cccc::test]] bodies from the
 	                         output instead of emitting them inert
+
+Kernel Options:
+	   --kernel-max-group-size=N
+	                         Largest work-group cccc_launch accepts (default 256)
 
 Build Options:
 	-b/--build               Run the input as a build script (declares native targets)

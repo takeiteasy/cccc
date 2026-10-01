@@ -208,6 +208,33 @@ static void check_space_conversion(KernelCtx *ctx, Token *tok, AddrSpace from,
 static void check_fn(KernelCtx *ctx, Obj *fn);
 static void walk(KernelCtx *ctx, Node *node);
 
+// Work-item builtins declared by <cccc/kernel.h>; the only body-less
+// functions kernel code may call.
+bool is_kernel_builtin(const char *name) {
+    static const char *const names[] = {
+        "cccc_global_id",   "cccc_local_id",   "cccc_group_id",
+        "cccc_global_size", "cccc_local_size", "cccc_num_groups",
+        "cccc_work_dim",    "cccc_barrier",    "__cccc_local_base"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (!strcmp(name, names[i]))
+            return true;
+    return false;
+}
+
+// TODO: -c=native has no kernel runtime yet; a host loop (and a pthread
+// barrier for kernels that use one) would replace the VM launcher.
+void reject_kernel_runtime_in_native(VirtualMachine *vm, Token *tok) {
+    if (vm->compiler.native_mode)
+        error_tok(vm, tok,
+                  "the kernel launch and work-item builtins are not "
+                  "supported with -c=native");
+}
+
+static void mark_path_uses_barrier(KernelCtx *ctx) {
+    for (KernelFrame *frame = ctx->top; frame; frame = frame->up)
+        frame->fn->kernel_uses_barrier = true;
+}
+
 // An unmarked pointer parameter takes the space its callers pass; callers
 // that disagree need [[cccc::generic]] or separate helpers.
 static void bind_param_space(KernelCtx *ctx, Obj *def, Type *param, Token *tok,
@@ -267,6 +294,16 @@ static void check_call(KernelCtx *ctx, Node *call) {
         return;
     }
 
+    if (is_kernel_builtin(var->name)) {
+        if (!strcmp(var->name, "cccc_barrier"))
+            mark_path_uses_barrier(ctx);
+        return;
+    }
+    if (!strcmp(var->name, "__cccc_launch")) {
+        kernel_error(ctx, call->tok, "cccc_launch");
+        return;
+    }
+
     Obj *def = hashmap_get(&ctx->defs, var->name);
     if (!def) {
         char what[256];
@@ -286,8 +323,19 @@ static void check_call(KernelCtx *ctx, Node *call) {
         kernel_error(ctx, call->tok, what);
         return;
     }
+    if (def->is_kernel && def->kernel_local_bytes > 0) {
+        char what[256];
+        snprintf(what, sizeof(what),
+                 "calling kernel entry '%s', which declares local-memory "
+                 "objects,",
+                 def->name);
+        kernel_error(ctx, call->tok, what);
+        return;
+    }
     check_call_args(ctx, call, def);
     check_fn(ctx, def);
+    if (def->kernel_uses_barrier)
+        mark_path_uses_barrier(ctx);
 }
 
 static void walk_node(KernelCtx *ctx, Node *node) {
@@ -498,6 +546,46 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
     ctx->fn_reported_float = saved_float;
     ctx->top               = frame.up;
     hashmap_delete(&ctx->on_path, fn->name);
+}
+
+// A [[cccc::local]] object in a kernel entry's body lives in work-group
+// memory, so each use is rewritten to `*(T (*)[N])__cccc_local_base(...)`.
+// TODO: every access is a host call; a dedicated opcode would make local
+// memory as cheap as a stack slot.
+void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok) {
+    Obj  *fn  = vm->compiler.current_fn;
+    Type *obj = strip_arrays(var->ty);
+    if (vm->compiler.native_mode || !fn || !fn->is_kernel || !obj ||
+        obj->kind == TY_PTR || obj->addr_space != AS_LOCAL)
+        return;
+    if (var->ty->kind == TY_VLA)
+        return;
+    int align = var->align > 0 ? var->align : 16;
+    int off   = (fn->kernel_local_bytes + align - 1) / align * align;
+    var->kernel_local_off    = off;
+    fn->kernel_local_bytes   = off + (int)var->ty->size;
+    var->is_kernel_local_obj = true;
+    (void)tok;
+}
+
+Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok) {
+    Type *ptr_ty              = pointer_to(vm, var->ty);
+    Type *fn_ty               = func_type(vm, ptr_ty);
+    fn_ty->params             = copy_type(vm, ty_long);
+    fn_ty->params->next       = copy_type(vm, ty_long);
+    fn_ty->params->next->next = copy_type(vm, ty_long);
+    Obj  *fn      = new_private_func_obj(vm, "__cccc_local_base", fn_ty);
+    Node *call    = new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, tok), tok);
+    call->func_ty = fn_ty;
+    call->ty      = ptr_ty;
+    call->args    = new_num(vm, var->kernel_local_off, tok);
+    call->args->next       = new_num(vm, var->ty->size, tok);
+    call->args->next->next = new_long(vm, (int64_t)(intptr_t)var, tok);
+    for (Node *arg = call->args; arg; arg = arg->next)
+        add_type(vm, arg);
+    Node *ref = new_unary(vm, ND_DEREF, call, tok);
+    ref->ty   = var->ty;
+    return ref;
 }
 
 void check_kernel_subset(VirtualMachine *vm) {

@@ -2195,6 +2195,7 @@ void cc_load_stdlib(VirtualMachine *vm) {
     register_time_functions(vm);
     register_wide_functions(vm);
     register_wide_bitint_functions(vm);
+    register_kernel_functions(vm);
 
     // Mark all headers as included
     for (int i = 0;; i++) {
@@ -2420,7 +2421,15 @@ int cc_run_at1(VirtualMachine *vm, Pc entry, void *arg) {
 int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
                              const long long *args, int nargs,
                              long long *out_ival) {
-    if (!vm || nargs < 0 || nargs > 8)
+    return cccc_call_guest_callback_ex(vm, fn_value, args, nargs, NULL, 0,
+                                       out_ival);
+}
+
+int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
+                                const long long *args, int nargs,
+                                const double *fargs, int nfargs,
+                                long long *out_ival) {
+    if (!vm || nargs < 0 || nargs > 8 || nfargs < 0 || nfargs > 8)
         return -1;
 
     if (fn_value <= CCCC_FFI_TOKEN_BASE) {
@@ -2476,6 +2485,8 @@ int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
 
     for (int i = 0; i < nargs; i++)
         vm->regs[REG_A0 + i] = args[i];
+    for (int i = 0; i < nfargs; i++)
+        vm->fregs[FREG_A0 + i].f64 = fargs[i];
 
     if (vm->flags & CCCC_CFI)
         *--vm->shadow_sp = 0;

@@ -959,6 +959,26 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                               int returns_float, int is_variadic,
                               int num_fixed_args);
 VirtualMachine *cccc_current_ffi_vm(void);
+
+// Kernel launch support (stdlib/pthread.c, used by stdlib/kernel.c).
+// The work-item the current guest thread runs, or NULL.
+void *cccc_thread_kernel_item(VirtualMachine *vm);
+// Runs fn(ctx) with the GIL released, then restores this thread's VM context.
+void cccc_without_gil(VirtualMachine *vm, void (*fn)(void *), void *ctx);
+// Runs `count` guest threads of the guest function `fn_value` to completion,
+// thread i carrying items[i]; on_exit(item) runs as each thread finishes.
+int cccc_run_kernel_threads(VirtualMachine *vm, long long fn_value,
+                            const long long *iargs, int nint,
+                            const double *fargs, int nfargs, void **items,
+                            int count, void (*on_exit)(void *item));
+
+typedef struct {
+    bool uses_barrier;
+    int  local_bytes;
+} KernelMeta;
+void cccc_kernel_register_meta(VirtualMachine *vm, long long fn_value,
+                               bool uses_barrier, int local_bytes);
+void register_kernel_functions(VirtualMachine *vm);
 // Returns the number of mutexes currently held by the active VM thread.
 // Used by race detection in ops.c; implemented in stdlib/pthread.c.
 int cccc_thread_held_lock_count(VirtualMachine *vm);
@@ -990,6 +1010,13 @@ int cccc_thread_held_lock_count(VirtualMachine *vm);
 int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
                              const long long *args, int nargs,
                              long long *out_ival);
+
+// As above, plus up to 8 float/double arguments in FREG_A0.. (a float is
+// passed as the double it widens to). Used by the kernel launcher.
+int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
+                                const long long *args, int nargs,
+                                const double *fargs, int nfargs,
+                                long long *out_ival);
 
 // Runs `entry` as a complete, non-nested top-level VM execution cycle (same
 // machinery as cc_run_at) with a single pointer argument in REG_A0 --

@@ -696,6 +696,10 @@ static void usage(const char *argv0, int exit_code) {
            "[[cccc::test]] bodies from the\n");
     printf("\t                         output instead of emitting them "
            "inert\n");
+    printf("\nKernel Options:\n");
+    printf("\t   --kernel-max-group-size=N\n");
+    printf("\t                         Largest work-group cccc_launch accepts "
+           "(default 256)\n");
     printf("\nBuild Options:\n");
     printf("\t-b/--build               Run the input as a build script "
            "(declares native targets)\n");
@@ -1441,6 +1445,7 @@ int main(int argc, const char *argv[]) {
     int          test_timeout  = 0;               // --test-timeout=N
     CcTestFormat test_format   = TEST_FORMAT_TAP; // --test-format=FORMAT
     int          no_emit_tests = 0;               // --no-emit-tests (#1272)
+    int          kernel_max_group = 0; // --kernel-max-group-size=N
     int          build_mode    = 0;               // --build
     const char  *build_entry   = NULL;            // --build-entry=NAME
     const char  *build_target  = NULL;            // --build-target=NAME
@@ -1549,6 +1554,7 @@ int main(int argc, const char *argv[]) {
         {"test-timeout", required_argument, 0, 1065},
         {"test-format", required_argument, 0, 1066},
         {"no-emit-tests", no_argument, 0, 1125}, // #1272
+        {"kernel-max-group-size", required_argument, 0, 1126},
         {"emit-only", no_argument, 0, 1067},
         {"attr-target", required_argument, 0, 1069},
         {"no-debug-on-crash", no_argument, 0, 1071},
@@ -2213,6 +2219,14 @@ int main(int argc, const char *argv[]) {
             case 1125: // --no-emit-tests (#1272)
                 no_emit_tests = 1;
                 break;
+            case 1126: // --kernel-max-group-size=N
+                kernel_max_group = atoi(optarg);
+                if (kernel_max_group < 1) {
+                    fprintf(stderr, "error: --kernel-max-group-size must be a "
+                                    "positive integer\n");
+                    return 1;
+                }
+                break;
             case 'J':
                 output_ffi_decls = 1;
                 break;
@@ -2462,6 +2476,7 @@ int main(int argc, const char *argv[]) {
     if (auto_debug_on_crash)
         vm.dbg.crash_debug_auto = true;
     vm.compiler.cli_flags_mask          = cli_flags_mask;
+    vm.kernel_max_group                 = kernel_max_group;
     vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);
     vm.compiler.compile_only            = compile_only;
     vm.compiler.asm_passthru            = asm_passthru;

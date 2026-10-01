@@ -317,3 +317,7 @@ internal lookup function can find them — an ordinary
 `#include <reflection.h>` in user code deliberately does **not** resolve to
 them; the public spelling, if you ever need it directly, is
 `#include <cccc/reflection.h>`.
+
+`include/cccc/kernel.h` is a public header, included as
+`#include <cccc/kernel.h>`: it declares the work-item builtins and `cccc_launch`
+described in [KERNELS.md](KERNELS.md).
