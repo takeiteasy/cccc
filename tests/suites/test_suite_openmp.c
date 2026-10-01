@@ -91,6 +91,33 @@ int test_openmp_clauses_evaluated_once(void) {
     return calls == 2 ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_openmp_lastprivate(void) {
+    int i, last = 0, both = 3, arr[2] = {0, 0};
+#pragma omp parallel for lastprivate(i, last) firstprivate(both) lastprivate(both)
+    for (i = 0; i < 10; i++) {
+        last = i * 2;
+        both += 1;
+    }
+#pragma omp parallel for lastprivate(arr)
+    for (int j = 0; j < 4; j++)
+        arr[j & 1] = j;
+    return i == 10 && last == 18 && both == 13 && arr[0] == 2 && arr[1] == 3
+               ? 42
+               : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_openmp_single_copyprivate(void) {
+    int x = 1;
+#pragma omp parallel private(x)
+    {
+#pragma omp single copyprivate(x)
+        { x = 9; }
+    }
+    return x == 1 ? 42 : 1;
+}
+
 #define PAR_FOR _Pragma("omp parallel for reduction(+ : total)")
 
 [[cccc::test(return = 42)]]

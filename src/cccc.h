@@ -1915,6 +1915,8 @@ typedef enum {
     OMP_CLAUSE_FIRSTPRIVATE,
     OMP_CLAUSE_SHARED,
     OMP_CLAUSE_REDUCTION,
+    OMP_CLAUSE_LASTPRIVATE,
+    OMP_CLAUSE_COPYPRIVATE,
 } OmpClauseKind;
 
 typedef struct OmpClause OmpClause;

@@ -19,9 +19,10 @@
 
 // `#pragma omp` under -fopenmp. The preprocessor hands the directive over as
 // `__cccc_omp ( <directive tokens> )` (splice_omp_pragma, preprocess.c); the
-// parser lowers it to the one-thread form OpenMP allows: private, firstprivate
-// and reduction variables become shadow locals declared by re-tokenised
-// snippets, and the directive rides on the resulting ND_BLOCK as Node.omp.
+// parser lowers it to the one-thread form OpenMP allows: private, firstprivate,
+// lastprivate and reduction variables become shadow locals declared by
+// re-tokenised snippets, and the directive rides on the resulting ND_BLOCK as
+// Node.omp.
 
 #include "./parse_internal.h"
 #include <stdarg.h>
@@ -133,6 +134,8 @@ typedef enum {
     CL_NOWAIT   = 1 << 3,
     CL_SIMD     = 1 << 4, // simdlen/safelen
     CL_FIRSTPRIVATE_ONLY = 1 << 5, // single: private/firstprivate only
+    CL_LASTPRIVATE       = 1 << 6,
+    CL_COPYPRIVATE       = 1 << 7,
 } ClauseSet;
 
 static int clauses_allowed(OmpKind kind) {
@@ -140,11 +143,11 @@ static int clauses_allowed(OmpKind kind) {
         case OMP_PARALLEL:
             return CL_DATA | CL_PARALLEL;
         case OMP_FOR:
-            return CL_DATA | CL_LOOP | CL_NOWAIT;
+            return CL_DATA | CL_LOOP | CL_NOWAIT | CL_LASTPRIVATE;
         case OMP_PARALLEL_FOR:
-            return CL_DATA | CL_PARALLEL | CL_LOOP;
+            return CL_DATA | CL_PARALLEL | CL_LOOP | CL_LASTPRIVATE;
         case OMP_SINGLE:
-            return CL_FIRSTPRIVATE_ONLY | CL_NOWAIT;
+            return CL_FIRSTPRIVATE_ONLY | CL_NOWAIT | CL_COPYPRIVATE;
         case OMP_SIMD:
             return CL_SIMD | CL_LOOP;
         default:
@@ -225,6 +228,26 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
     return tok;
 }
 
+// True when d has a clause of `kind`, on the variable `name` if non-NULL.
+static bool has_clause(OmpDirective *d, const char *name, OmpClauseKind kind) {
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == kind && (!name || !strcmp(c->name, name)))
+            return true;
+    return false;
+}
+
+// firstprivate and lastprivate on one variable share a single shadow, owned by
+// whichever of the two is listed first.
+static bool owns_shadow(OmpDirective *d, OmpClause *c) {
+    if (c->kind != OMP_CLAUSE_FIRSTPRIVATE && c->kind != OMP_CLAUSE_LASTPRIVATE)
+        return true;
+    for (OmpClause *p = d->clauses; p != c; p = p->next)
+        if (!strcmp(p->name, c->name) && (p->kind == OMP_CLAUSE_FIRSTPRIVATE ||
+                                          p->kind == OMP_CLAUSE_LASTPRIVATE))
+            return false;
+    return true;
+}
+
 // Parses the clauses up to the wrapper's closing ")" and appends the
 // expressions that must still be evaluated once (num_threads, if) to body.
 static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -296,8 +319,15 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         } else if ((is_word(name, "simdlen") || is_word(name, "safelen")) &&
                    (allowed & CL_SIMD)) {
             tok = skip_balanced_parens(vm, tok);
-        } else if (is_word(name, "lastprivate") || is_word(name, "copyin") ||
-                   is_word(name, "copyprivate") || is_word(name, "linear")) {
+        } else if (is_word(name, "lastprivate") && (allowed & CL_LASTPRIVATE)) {
+            tok = skip(vm, tok, "(");
+            tok = var_list(vm, d, OMP_CLAUSE_LASTPRIVATE, "lastprivate", NULL,
+                           tok);
+        } else if (is_word(name, "copyprivate") && (allowed & CL_COPYPRIVATE)) {
+            tok = skip(vm, tok, "(");
+            tok = var_list(vm, d, OMP_CLAUSE_COPYPRIVATE, "copyprivate", NULL,
+                           tok);
+        } else if (is_word(name, "copyin") || is_word(name, "linear")) {
             error_tok(vm, name, "unsupported OpenMP clause '%.*s'", name->len,
                       name->loc);
         } else {
@@ -306,6 +336,8 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         }
         consume(vm, &tok, tok, ",");
     }
+    if (d->nowait && has_clause(d, NULL, OMP_CLAUSE_COPYPRIVATE))
+        error_tok(vm, tok, "'copyprivate' cannot be combined with 'nowait'");
     return tok;
 }
 
@@ -323,7 +355,8 @@ static const char *identity(VirtualMachine *vm, const char *op,
 static int shadows(VirtualMachine *vm, OmpDirective *d, OmpBody *body) {
     int id = vm->compiler.unique_name_counter++;
     for (OmpClause *c = d->clauses; c; c = c->next) {
-        if (c->kind == OMP_CLAUSE_SHARED || c->kind == OMP_CLAUSE_PRIVATE)
+        if (c->kind == OMP_CLAUSE_SHARED || c->kind == OMP_CLAUSE_PRIVATE ||
+            c->kind == OMP_CLAUSE_COPYPRIVATE || !owns_shadow(d, c))
             continue;
         body_push(vm, body,
                   snippet(vm, "typeof_unqual(%s) *__omp_%d_%s = &%s;", c->name,
@@ -332,6 +365,20 @@ static int shadows(VirtualMachine *vm, OmpDirective *d, OmpBody *body) {
     for (OmpClause *c = d->clauses; c; c = c->next) {
         switch (c->kind) {
             case OMP_CLAUSE_SHARED:
+            case OMP_CLAUSE_COPYPRIVATE:
+                break;
+            case OMP_CLAUSE_LASTPRIVATE:
+                if (!owns_shadow(d, c))
+                    break;
+                body_push(
+                    vm, body,
+                    snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
+                if (has_clause(d, c->name, OMP_CLAUSE_FIRSTPRIVATE))
+                    body_push(vm, body,
+                              snippet(vm,
+                                      "__builtin_memcpy(&%s, __omp_%d_%s, "
+                                      "sizeof(%s));",
+                                      c->name, id, c->name, c->name));
                 break;
             case OMP_CLAUSE_PRIVATE:
                 body_push(
@@ -339,6 +386,8 @@ static int shadows(VirtualMachine *vm, OmpDirective *d, OmpBody *body) {
                     snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
                 break;
             case OMP_CLAUSE_FIRSTPRIVATE:
+                if (!owns_shadow(d, c))
+                    break;
                 body_push(
                     vm, body,
                     snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
@@ -368,6 +417,13 @@ static int shadows(VirtualMachine *vm, OmpDirective *d, OmpBody *body) {
 
 static void merges(VirtualMachine *vm, OmpDirective *d, OmpBody *body, int id) {
     for (OmpClause *c = d->clauses; c; c = c->next) {
+        if (c->kind == OMP_CLAUSE_LASTPRIVATE) {
+            body_push(vm, body,
+                      snippet(vm,
+                              "__builtin_memcpy(__omp_%d_%s, &%s, sizeof(%s));",
+                              id, c->name, c->name, c->name));
+            continue;
+        }
         if (c->kind != OMP_CLAUSE_REDUCTION)
             continue;
         const char *op = c->reduction_op;

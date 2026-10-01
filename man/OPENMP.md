@@ -45,6 +45,8 @@ spelling.
 | `private(x)` | The region gets its own uninitialised `x` |
 | `firstprivate(x)` | The region gets its own `x`, copied from the original; arrays are copied whole |
 | `shared(x)`, `default(shared)` | No change |
+| `lastprivate(x)` | On `for` and `parallel for`: like `private`, then the final value is copied back to the original; combines with `firstprivate` on the same variable |
+| `copyprivate(x)` | On `single`: accepted; with one thread there is nothing to broadcast. Not allowed with `nowait` |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
 | `num_threads(n)`, `if(c)` | Evaluated once, then ignored |
 | `schedule(...)`, `proc_bind(...)`, `nowait` | Parsed and ignored |
@@ -59,7 +61,7 @@ int p = 5;
 // p is still 5 here
 ```
 
-`lastprivate`, `copyin`, `copyprivate` and `linear` are errors.
+`copyin` and `linear` are errors.
 
 ## Runtime functions
 
@@ -89,8 +91,7 @@ compiler.
 
 - The VM only: `-c=native`, `-m` and `-c=generated` reject OpenMP
   ([#1368](https://todo.sr.ht/~takeiteasy/cccc/1368)).
-- `lastprivate`, `copyin` and `copyprivate`
-  ([#1397](https://todo.sr.ht/~takeiteasy/cccc/1397)).
+- `copyin`, `linear` and `threadprivate` ([#1400](https://todo.sr.ht/~takeiteasy/cccc/1400)).
 - `default(none)` is parsed but not enforced
   ([#1398](https://todo.sr.ht/~takeiteasy/cccc/1398)).
 - `task`, `taskwait` and `sections`
