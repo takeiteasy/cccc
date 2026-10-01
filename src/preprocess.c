@@ -7656,6 +7656,23 @@ void isolate_comptime_macros(VirtualMachine *vm) {
                         reapply_cli_define_iter, &vm->compiler.macros);
 }
 
+static int drop_system_fn_macro_iter(char *key, int keylen, void *val,
+                                     void *user_data) {
+    Macro *m = (Macro *)val;
+    if (!m->is_objlike && !m->handler && !m->is_shared && m->define_tok &&
+        m->define_tok->file && m->define_tok->file->is_system_header)
+        hashmap_delete2((HashMap *)user_data, key, keylen);
+    return 0;
+}
+
+// Drops function-like macros defined by system headers. The comptime pass
+// re-scans tokens it already preprocessed, so a header's own redeclaration of
+// `strchr (...)` would otherwise expand the macro defined further down it.
+void drop_system_function_macros(VirtualMachine *vm) {
+    hashmap_foreach(&vm->compiler.macros, drop_system_fn_macro_iter,
+                    &vm->compiler.macros);
+}
+
 // Entry point function of the preprocessor.
 static int warn_unused_macro_cb(char *key, int keylen, void *val,
                                 void *user_data) {

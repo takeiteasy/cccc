@@ -2225,6 +2225,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.num_func_addr_patches = 0;
 
     Token *reflection_tokens           = implicit_reflection_tokens(vm);
+    drop_system_function_macros(vm);
     Token *tokens =
         build_combined_macro_tokens(vm, reflection_tokens, macros, count);
 
