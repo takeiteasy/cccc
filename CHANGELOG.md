@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-01
+
 - Added: OpenCL C 1.2 kernels. A `.cl` file, or `-x cl`, is read as OpenCL C:
   `__kernel`/`__global`/`__local`/`__constant`/`__private`, the `get_*_id` and
   size functions, `barrier`, `mem_fence`, the 1.2 atomics (including
