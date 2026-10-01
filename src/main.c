@@ -2528,12 +2528,10 @@ int main(int argc, const char *argv[]) {
     vm.compiler.cli_flags_mask          = cli_flags_mask;
     vm.kernel_max_group                 = kernel_max_group;
     vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);
-    // --testing[=vm] runs the program in the VM, which has no thread pool;
-    // -c=generated re-emits only macro-generated code, with no runtime.
+    // --testing[=vm] runs the program in the VM, which has no thread pool.
     vm.compiler.omp_threaded =
         (flags & CCCC_OPENMP) &&
-        (compile_format == COMPILE_NATIVE ||
-         (dump_expanded_only && !emit_generated_only)) &&
+        (compile_format == COMPILE_NATIVE || dump_expanded_only) &&
         !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
     if (vm.compiler.omp_threaded)
         define_macro(&vm, "__CCCC_OMP_THREADED__", "1");

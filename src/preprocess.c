@@ -938,6 +938,13 @@ static bool is_pragma_pack(Token *hash) {
     return tok && equal(tok, "pragma") && equal(tok->next, "pack");
 }
 
+// Returns true for `#pragma omp ...`. It is either lowered in place or
+// ignored, so replaying it at file scope is never right.
+static bool is_pragma_omp(Token *hash) {
+    Token *tok = hash->next;
+    return tok && equal(tok, "pragma") && equal(tok->next, "omp");
+}
+
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
     *t       = *tok;
@@ -5786,6 +5793,41 @@ static Token *splice_omp_pragma(VirtualMachine *vm, Token *omp, Token **tail) {
     return head;
 }
 
+// Rewrites each `_Pragma("omp ...")` in a Quote() template into the token
+// sequence `#pragma omp` produces, or drops it without -fopenmp.
+Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks) {
+    Token  head = {};
+    Token *prev = &head;
+    head.next   = toks;
+    while (prev->next->kind != TK_EOF) {
+        Token *tok = prev->next;
+        if (!equal(tok, "_Pragma") || !equal(tok->next, "(")) {
+            prev = tok;
+            continue;
+        }
+        Token *str = tok->next->next;
+        if (str->kind != TK_STR || !equal(str->next, ")"))
+            error_tok(vm, tok, "_Pragma requires a string literal");
+        Token *after = str->next->next;
+        Token *body  = tokenize(
+            vm, new_file(vm, str->file->name, str->file->file_no,
+                         arena_format(vm, "%s\n", str->str)));
+        if (!equal(body, "omp"))
+            error_tok(vm, tok,
+                      "only _Pragma(\"omp ...\") is supported in a Quote "
+                      "template");
+        if (vm->flags & CCCC_OPENMP) {
+            Token *tail;
+            prev->next = splice_omp_pragma(vm, body, &tail);
+            tail->next = after;
+            prev       = tail;
+        } else {
+            prev->next = after;
+        }
+    }
+    return head.next;
+}
+
 static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     if (equal(tok, "once")) {
         // Canonicalize identically to include_file()'s lookup key
@@ -6493,7 +6535,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&
-                !is_pragma_pack(start)) {
+                !is_pragma_pack(start) && !is_pragma_omp(start)) {
                 char *_ac_line = (directive_route == INCLUDE_ROUTE_SHARED ||
                                   directive_route == INCLUDE_ROUTE_BUILD ||
                                   directive_route == INCLUDE_ROUTE_TEST)
@@ -6502,7 +6544,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                                      : copy_raw_directive_line(vm, start);
                 push_emit_directive(vm, _ac_line,
                                     pp_directive(tok) == PP_INCLUDE);
-                cc_record_emit_source(vm, _ac_line);
+                // A cccc-only header's own guard and #defines mean nothing to
+                // the host; only its #includes are replayed there.
+                if (!(vm->compiler.emit_generated_only &&
+                      !cc_file_is_command_line_input(vm, start->file->name) &&
+                      pp_directive(tok) != PP_INCLUDE))
+                    cc_record_emit_source(vm, _ac_line);
                 if (pp_directive(tok) == PP_INCLUDE)
                     ac_include_line = _ac_line;
             } else if (!vm->compiler.emit_strict &&

@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-c=generated` no longer copies `#pragma omp` lines, `#include <omp.h>`
+  or its guard into the output. A region in macro-generated code runs on the
+  thread pool, and the runtime is emitted only when generated code needs it.
+  `-m` and `-c=native` no longer replay `#pragma omp` at file scope.
+- Added: `_Pragma("omp ...")` in a `Quote()` template builds an OpenMP region.
 - Fixed: `-Wlogical-op` and `-Wtautological-compare` no longer fire inside
   `#if`/`#elif` expressions, such as those in the bundled `<stddef.h>`.
 

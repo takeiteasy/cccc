@@ -4026,6 +4026,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
     if (!toks)
         return NULL;
     convert_pp_tokens(vm, toks);
+    toks = cc_rewrite_pragma_operators(vm, toks);
 
     // 1b. #955: a template with more than one top-level statement used to
     // silently drop everything after the first one unless the caller wrapped
@@ -4042,6 +4043,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
         if (!toks)
             return NULL;
         convert_pp_tokens(vm, toks);
+        toks = cc_rewrite_pragma_operators(vm, toks);
     }
 
     // 2. Scan, validate mixing, rewrite $$ / $@ / $@N

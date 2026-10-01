@@ -1715,11 +1715,48 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
     fprintf(f, "\n");
 }
 
-// #1368: the OpenMP runtime (thread pool, barrier, critical sections, omp_*
-// API). Emitted when a directive was lowered or the program references an
-// omp.h function.
-static void omp_lock_usage(VirtualMachine *vm, Obj *prog, bool *any_lock,
-                           bool *any_nest) {
+// Whether `node` (or anything it links to) calls a function named `name`, or
+// whose name starts with it when `prefix` is set.
+static bool node_calls(Node *node, const char *name, bool prefix) {
+    for (; node; node = node->next) {
+        if (node->kind == ND_FUNCALL && node->lhs &&
+            node->lhs->kind == ND_VAR && node->lhs->var) {
+            const char *callee = node->lhs->var->name;
+            if (prefix ? !strncmp(callee, name, strlen(name))
+                       : !strcmp(callee, name))
+                return true;
+        }
+        if (node_calls(node->lhs, name, prefix) ||
+            node_calls(node->rhs, name, prefix) ||
+            node_calls(node->cond, name, prefix) ||
+            node_calls(node->then, name, prefix) ||
+            node_calls(node->els, name, prefix) ||
+            node_calls(node->init, name, prefix) ||
+            node_calls(node->inc, name, prefix) ||
+            node_calls(node->body, name, prefix) ||
+            node_calls(node->args, name, prefix))
+            return true;
+    }
+    return false;
+}
+
+// -c=generated emits only macro-generated code, so only its calls count there.
+static bool generated_code_calls(Obj *prog, const char *name, bool prefix) {
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->is_macro_generated &&
+            node_calls(obj->body, name, prefix))
+            return true;
+    return false;
+}
+
+static bool omp_fn_used(VirtualMachine *vm, Obj *prog, const char *name,
+                        bool generated_only) {
+    return generated_only ? generated_code_calls(prog, name, false)
+                          : shim_fn_is_used(vm, prog, name, "omp.h");
+}
+
+static void omp_lock_usage(VirtualMachine *vm, Obj *prog, bool generated_only,
+                           bool *any_lock, bool *any_nest) {
     static const char *const lock_fns[] = {"omp_init_lock", "omp_destroy_lock",
                                            "omp_set_lock", "omp_unset_lock",
                                            "omp_test_lock"};
@@ -1728,17 +1765,33 @@ static void omp_lock_usage(VirtualMachine *vm, Obj *prog, bool *any_lock,
         "omp_unset_nest_lock", "omp_test_nest_lock"};
     *any_lock = *any_nest = false;
     for (size_t i = 0; i < sizeof(lock_fns) / sizeof(*lock_fns); i++) {
-        *any_lock |= shim_fn_is_used(vm, prog, lock_fns[i], "omp.h");
-        *any_nest |= shim_fn_is_used(vm, prog, nest_fns[i], "omp.h");
+        *any_lock |= omp_fn_used(vm, prog, lock_fns[i], generated_only);
+        *any_nest |= omp_fn_used(vm, prog, nest_fns[i], generated_only);
     }
 }
 
-static bool omp_shims_needed(VirtualMachine *vm, Obj *prog) {
+static bool omp_region_generated(Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_omp_region && obj->is_macro_generated)
+            return true;
+    return false;
+}
+
+// #1368: the OpenMP runtime (thread pool, barrier, critical sections, omp_*
+// API). Emitted when a directive was lowered or the program references an
+// omp.h function.
+static bool omp_shims_needed(VirtualMachine *vm, Obj *prog,
+                             bool generated_only) {
     if (!vm->compiler.omp_threaded || vm->compiler.emit_cccc)
         return false;
     bool any_lock, any_nest;
-    omp_lock_usage(vm, prog, &any_lock, &any_nest);
-    if (vm->compiler.omp_used || any_lock || any_nest)
+    omp_lock_usage(vm, prog, generated_only, &any_lock, &any_nest);
+    if (any_lock || any_nest)
+        return true;
+    if (generated_only)
+        return omp_region_generated(prog) ||
+               generated_code_calls(prog, "omp_", true);
+    if (vm->compiler.omp_used)
         return true;
     for (Obj *obj = prog; obj; obj = obj->next)
         if (obj->is_function && obj->is_used && !obj->body &&
@@ -1762,8 +1815,9 @@ static bool kernel_shims_needed(VirtualMachine *vm, Obj *prog) {
 }
 
 // The OpenMP and kernel runtimes share one pool, emitted once.
-void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
-    bool omp    = omp_shims_needed(vm, prog);
+void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
+                              bool generated_only) {
+    bool omp    = omp_shims_needed(vm, prog, generated_only);
     bool kernel = kernel_shims_needed(vm, prog);
     if (!omp && !kernel)
         return;
@@ -1808,11 +1862,12 @@ void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog) {
 // The lock functions take omp_lock_t, which the serializer emits next to the
 // first function that uses it, so their definitions come after every
 // function.
-void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
-    if (!vm->compiler.omp_threaded || vm->compiler.emit_cccc)
+void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog,
+                              bool generated_only) {
+    if (!omp_shims_needed(vm, prog, generated_only))
         return;
     bool any_lock, any_nest;
-    omp_lock_usage(vm, prog, &any_lock, &any_nest);
+    omp_lock_usage(vm, prog, generated_only, &any_lock, &any_nest);
     if (any_lock || any_nest)
         fprintf(f, "%s", CCCC_SHIM_omp_lock_core);
     if (any_lock)

@@ -636,6 +636,7 @@ OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
     fn->is_static                  = true;
     fn->is_root                    = true;
     fn->is_nested                  = true;
+    fn->is_macro_generated         = r.parent->is_macro_generated;
     fn->tok                        = tok;
     fn->parent_fn                  = r.parent;
     fn->nesting_depth              = r.saved_depth + 1;

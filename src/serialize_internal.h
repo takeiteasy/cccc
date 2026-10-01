@@ -411,9 +411,11 @@ void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
                               SerializeContext *ctx, Node *node, int indent);
 void serialize_string_n(FILE *f, const char *str, int len);
 void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog);
-void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog);
+void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
+                              bool generated_only);
 void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog);
-void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog);
+void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog,
+                              bool generated_only);
 void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 // #1283: dumps same_type_or_origin() call-cost counters to stderr when
 // CCCC_TYPE_STATS is set; no-op otherwise. Called once at the end of

@@ -631,6 +631,16 @@ static bool any_real_include_replayed(VirtualMachine *vm) {
     return false;
 }
 
+// A captured `#include` of a cccc-only header (omp.h, stdbit.h, ...) names a
+// file the host compiler cannot find, so -c=generated never replays it.
+static bool replay_is_cccc_only_include(VirtualMachine *vm,
+                                        const char     *source) {
+    if (vm->compiler.emit_cccc)
+        return false;
+    char *resolved = hashmap_get(&vm->compiler.emit_include_paths, source);
+    return resolved && cc_file_is_cccc_only(vm, resolved);
+}
+
 static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
                                           SerializeContext *ctx) {
     HashMap anchors = {0}; // name -> the non-static Obj* that owns it
@@ -4644,6 +4654,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // duplicate #include here cannot leave an empty #ifdef branch.
             // Non-#include directives are left alone -- they may legitimately
             // repeat around macro calls.
+            if (replay_is_cccc_only_include(vm, ev->source)) {
+                replay_start = ev->next;
+                continue;
+            }
             if (line_is_include_directive(ev->source)) {
                 bool dup = false;
                 for (EmitEvent *prev  = vm->compiler.emit_events_head;
@@ -4667,6 +4681,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             fprintf(f, "\n");
 
         serialize_type_defs_for_owner(f, &ctx, NULL);
+        serialize_threaded_shims(f, vm, prog, true); // #1368, #1394
         serialize_block_preamble(f, vm, &ctx, prog);
         serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
         hoist_compiler_temp_anon_types(f, vm, &ctx, prog); // #1186
@@ -4772,6 +4787,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                         continue;
                     }
                 }
+                if (replay_is_cccc_only_include(vm, ev->source))
+                    continue;
                 if (!emit_url_include_rewrite(f, vm, ev->source))
                     fprintf(f, "%s\n", ev->source);
                 continue;
@@ -4808,9 +4825,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 serialize_global_var(f, vm, &ctx, obj);
             }
         }
-        serialize_type_stats_report(&ctx); // #1283
-        serialize_type_index_reset();      // #1283
-        same_type_memo_end();              // #1283
+        serialize_omp_lock_shims(f, vm, prog, true); // #1368
+        serialize_type_stats_report(&ctx);           // #1283
+        serialize_type_index_reset();                // #1283
+        same_type_memo_end();                        // #1283
         free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
@@ -5305,7 +5323,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // neighbours; also skips --emit-cccc internally (see its own comment).
     if (!generated_only)
         serialize_threads_shims(f, vm, prog);
-    serialize_threaded_shims(f, vm, prog); // #1368, #1394
+    serialize_threaded_shims(f, vm, prog, false); // #1368, #1394
 
     // #1141: real definitions for <uchar.h>'s mbrtoc16/c16rtomb/mbrtoc32/
     // c32rtomb/mbrtoc8/c8rtomb -- same placement rationale (and the same
@@ -5614,7 +5632,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             serialize_function(f, vm, &ctx, obj);
     }
 
-    serialize_omp_lock_shims(f, vm, prog); // #1368
+    serialize_omp_lock_shims(f, vm, prog, false); // #1368
     serialize_kernel_meta(f, vm, prog);    // #1394
 
     serialize_type_stats_report(

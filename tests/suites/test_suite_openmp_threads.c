@@ -226,4 +226,22 @@ int test_omp_threads_locks(void) {
     return n == team_size() * 500 ? 42 : 1;
 }
 
+[[cccc::comptime]]
+void gen_quote_omp_sum(void) {
+    Obj *fn = MakeFunction("quote_omp_sum", GetType("int"));
+    WithFn(fn) {
+        FunctionSetBody(
+            fn, Quote("int sum = 0;"
+                      "_Pragma(\"omp parallel for reduction(+:sum)\")"
+                      "for (int i = 0; i < 10; i++) sum += i;"
+                      "return sum;"));
+    }
+}
+gen_quote_omp_sum();
+
+[[cccc::test(return = 42)]]
+int test_omp_quote_pragma_operator(void) {
+    return quote_omp_sum() == 45 ? 42 : 1;
+}
+
 #pragma cccc suite end

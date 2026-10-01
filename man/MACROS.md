@@ -133,6 +133,9 @@ The same rule applies to `QuoteLazy()`/`QuoteLazyN()` fragments spliced in
 expression position — see
 [Deferred templates with `QuoteLazy`](#deferred-templates-with-quotelazy).
 
+A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
+[OpenMP](OPENMP.md#generated-code).
+
 ## Execution Model
 
 CCCC supports two macro execution forms:

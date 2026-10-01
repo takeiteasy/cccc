@@ -3,6 +3,7 @@
 `-fopenmp` makes `#pragma omp` take effect. In the VM every parallel region
 runs on one thread, which OpenMP allows. With `-c=native` and `-m` the regions
 run on real threads.
+`-c=generated` does too, for the regions in macro-generated code.
 
 ```c
 #include <omp.h>
@@ -112,6 +113,32 @@ int p = 5;
 Setting a simple lock the calling thread already holds stops the program with
 a trap, because nothing could release it.
 
+## Generated code
+
+`-c=generated` emits only macro-generated code. A region in a `Quote()`
+template is written with `_Pragma`, and the output carries the thread pool and
+runtime the region needs:
+
+```c
+[[cccc::comptime]]
+void gen(void) {
+    Obj *fn = MakeFunction("psum", GetType("int"));
+    WithFn(fn) {
+        FunctionSetBody(
+            fn, Quote("int sum = 0;"
+                      "_Pragma(\"omp parallel for reduction(+:sum)\")"
+                      "for (int i = 0; i < 10; i++) sum += i;"
+                      "return sum;"));
+    }
+}
+gen();
+```
+
+Hand-written `#pragma omp` lines and `#include <omp.h>` are never copied into
+the output, and a region only in hand-written code adds no runtime. Without
+`-fopenmp` the `_Pragma` is dropped. Any other `_Pragma` in a template is an
+error.
+
 ## Races
 
 Every region runs on one thread in the VM, so a data race in the source does
@@ -130,8 +157,8 @@ or another OpenMP compiler. Building the native output with
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement
   ([#1404](https://todo.sr.ht/~takeiteasy/cccc/1404)).
-- `-c=generated` replays `#pragma omp` lines and `#include <omp.h>` as written
-  ([#1405](https://todo.sr.ht/~takeiteasy/cccc/1405)).
+- `#pragma omp` inside a `#pragma cccc emit` block is rejected
+  ([#1415](https://todo.sr.ht/~takeiteasy/cccc/1415)).
 - `copyin`, `linear` and `threadprivate`
   ([#1400](https://todo.sr.ht/~takeiteasy/cccc/1400)).
 - `default(none)` is parsed but not enforced
