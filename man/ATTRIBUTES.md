@@ -86,6 +86,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
 | `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
 | `global` / `local` / `constant` / `private` / `generic` | CCCC (declaration specifiers) | ✓ | Marks the address space a pointer refers to, or an object lives in, for `[[cccc::kernel]]` code; see [Address Spaces](#address-spaces) |
+| `cccc_visible_lanes(N)` | GNU (vector typedef) | ✓ | Lets a `vector_size` vector expose fewer lanes than it stores, for OpenCL's `float3`; see [Visible Lanes](#visible-lanes) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
 `__has_attribute` returns `1` for `error`, `warning`, `warn_unused_result`, and
@@ -310,6 +311,11 @@ Write the attribute in the declaration specifiers, before or after the type
 name. It qualifies the pointed-to type: `[[cccc::global]] int *p` is a pointer
 to global `int`. After the `*` it is an error.
 
+`kernel`, `global`, `local`, `constant`, `private` and `generic` also accept the
+spelling `__name__`, as in `[[cccc::__global__]]`. The two mean the same; the
+underscored one cannot be rewritten by a macro called `global`, which is what
+[OpenCL C](OPENCL.md) defines.
+
 **Unmarked pointers.** An unmarked pointer parameter of a kernel entry points
 to global memory. An unmarked pointer parameter of a helper takes the space its
 callers pass, so `bump(&counters[i])` from an entry passes global memory and
@@ -346,6 +352,22 @@ error: converting a pointer from the global to the private address space is not 
 - Callees must be defined in the same file; a call into another file is rejected.
 - One rule set covers both Metal and CUDA, so code valid on only one of them
   (for example `double` on CUDA) is rejected.
+
+### Visible Lanes
+
+`__attribute__((cccc_visible_lanes(N)))` on a `vector_size` typedef makes the
+vector store all its lanes but expose only the first `N` to swizzles and
+vector literals. Both exist only in an [OpenCL C](OPENCL.md) input, so the
+attribute has no visible effect in plain C. `N` must be less than the lane
+count, or it is ignored. OpenCL C uses it for the three-lane types:
+
+```c
+typedef float float3 __attribute__((vector_size(16), cccc_visible_lanes(3)));
+
+// sizeof(float3) == 16; a literal takes three components; .w is an error
+```
+
+Arithmetic still runs on every stored lane.
 
 ---
 
