@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-01
+
+- Fixed: a call to a single-return `static inline` function evaluated its
+  arguments more than once, could report a spurious "not an lvalue", and could
+  clobber the caller's locals. Such calls are now ordinary calls.
+
 ## [0.7.0] - 2026-10-01
 
 - Added: OpenCL C 1.2 kernels. A `.cl` file, or `-x cl`, is read as OpenCL C:
