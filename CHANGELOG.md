@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-01
+
 - Added: `-fopenmp` parses `#pragma omp` (`parallel`, `for`, `parallel for`,
   `critical`, `atomic`, `barrier`, `single`, `master`, with `private`,
   `firstprivate`, `shared` and `reduction`) and the VM runs each region on one
@@ -18,6 +20,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `barrier`, `single`, `reduction` and the `omp_*` runtime work as in OpenMP.
 - Fixed: the compare-and-swap loop behind `__atomic_fetch_<op>` started with a
   plain read that raced with other threads' updates.
+- Limitation: native OpenMP has no `ordered`, `dynamic`/`guided` schedules,
+  pointer loop variables, `atomic capture` blocks or Windows support;
+  `copyin`, `linear` and `threadprivate` are not supported.
 
 ## [0.4.1] - 2026-10-01
 
