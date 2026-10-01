@@ -467,9 +467,10 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
         Node *cur  = &head;
 
         Obj  *addr = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->ty));
+        Type *held = without_addr_space(vm, binary->lhs->ty);
         Obj  *val  = new_lvar(vm, "", 0, binary->rhs->ty);
-        Obj  *old  = new_lvar(vm, "", 0, binary->lhs->ty);
-        Obj  *new  = new_lvar(vm, "", 0, binary->lhs->ty);
+        Obj  *old  = new_lvar(vm, "", 0, held);
+        Obj  *new  = new_lvar(vm, "", 0, held);
 
         cur        = cur->next =
             new_unary(vm, ND_EXPR_STMT,
@@ -635,8 +636,28 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
 // assign    = conditional (assign-op assign)?
 // assign-op = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 //           | "<<=" | ">>="
+static bool is_compound_assign(Token *tok) {
+    static const char *const ops[] = {
+        "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="};
+    for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); i++)
+        if (equal(tok, ops[i]))
+            return true;
+    return false;
+}
+
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, &tok, tok);
+
+    if (node->swizzle_store) {
+        if (equal(tok, "="))
+            return opencl_swizzle_assign(vm, node, assign(vm, rest, tok->next),
+                                         tok);
+        // TODO: only '=' stores through a swizzle; #1412
+        if (is_compound_assign(tok))
+            error_tok(vm, tok,
+                      "a compound assignment to a multi-lane swizzle is not "
+                      "supported; write v.lo = v.lo + x");
+    }
 
     if (equal(tok, "="))
         return new_binary(vm, ND_ASSIGN, node, assign(vm, rest, tok->next),
@@ -1450,6 +1471,10 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         Token *start = tok;
         Type  *ty    = typename(vm, &tok, tok->next);
         tok          = skip(vm, tok, ")");
+
+        if (vm->compiler.opencl && ty && ty->kind == TY_VECTOR &&
+            equal(tok, "(") && !vm->compiler.in_type_lookahead)
+            return opencl_vector_literal(vm, rest, tok, ty, start);
 
         Node *expr   = cast(vm, &tok, tok);
 

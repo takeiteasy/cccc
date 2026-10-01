@@ -24,6 +24,8 @@ Sub-suites:
                         link regression under a real gcc (ticket #1199);
                         skips when no real (non-clang) gcc is on PATH
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
+  opencl_cli_smoke    — OpenCL C dialect selection (.cl extension, -x, -cl-std) and
+                        keyword isolation between inputs
   url_mirror_smoke    — URL #include mirror path-join + nested-project-header
                         repro (ticket #1324); case 2 skips on a non-curl build
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
@@ -444,6 +446,31 @@ def _run_cli_exit_code_suite():
         spec.loader.exec_module(mod)
 
         rc = mod.main()
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_opencl_cli_suite(cccc):
+    """Run the OpenCL C dialect-selection smoke tests.
+
+    Covers what a single test_*.c file cannot: dialect choice by file
+    extension or -x, and several inputs in one invocation.
+    Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "opencl_cli_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("opencl_cli_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(["--binary", str(cccc)])
         if rc == 0:
             return "passed", True
         return "FAILED", False
@@ -1114,6 +1141,14 @@ def main():
     cli_ec_status, ok_cli_ec = _run_cli_exit_code_suite()
     print(f"  {cli_ec_status}")
     suite_results["cli_exit_code_smoke"] = ok_cli_ec
+
+    # --- OpenCL C dialect selection smoke ---
+    print()
+    print("[ opencl_cli_smoke ]")
+    wedge.arm("opencl_cli_smoke", scalar_phase_timeout)
+    opencl_cli_status, ok_opencl_cli = _run_opencl_cli_suite(cccc)
+    print(f"  {opencl_cli_status}")
+    suite_results["opencl_cli_smoke"] = ok_opencl_cli
 
     # --- URL #include mirror smoke (#1324) ---
     print()

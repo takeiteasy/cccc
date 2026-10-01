@@ -1505,6 +1505,9 @@ struct Type {
     // GNU vector_size vector (TY_VECTOR): lane count. `base` is the element
     // type, `size` is the total byte size (element size * vec_len).
     int vec_len;
+    // Lanes a program may name (swizzles, literals) when fewer than vec_len: an
+    // OpenCL float3 is stored as four lanes. 0 means all of them.
+    int vec_visible;
 
     // Variable-length array
     Node *vla_len;  // # of elements
@@ -1942,6 +1945,8 @@ typedef struct OmpDirective {
     Obj       *region_fn; // threaded parallel: the outlined region function
 } OmpDirective;
 
+typedef struct SwizzleStore SwizzleStore;
+
 /*!
  @brief Represents a node in the parser's abstract syntax tree.
 */
@@ -1993,6 +1998,8 @@ struct Node {
     bool is_explicit_cast; // ND_CAST written as `(T)expr` in source
     bool is_kernel_local_arg; // CCCC_LOCAL(n) argument of cccc_launch, or the
                               // cast typing a [[cccc::local]] object's address
+    SwizzleStore *swizzle_store; // OpenCL multi-lane swizzle that can be
+                                 // assigned to (parse_opencl.c)
 
     // Goto or labeled statement, or labels-as-values
     char        *label;
@@ -4312,6 +4319,7 @@ typedef struct Compiler {
     bool     omp_used;       // a threaded OpenMP directive was lowered
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
     bool     kernel_used;    // a native kernel launch or builtin was lowered
+    bool     opencl;         // the translation unit in flight is OpenCL C
     bool     kernel_test_run;  // --test-run: its VM smoke phase cannot run a
                                // native-lowered launch
     int      kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
@@ -5098,6 +5106,13 @@ int cc_load_libc(VirtualMachine *vm);
  @return Head of the token stream (linked Token list). Caller owns tokens.
 */
 Token *cc_preprocess(VirtualMachine *vm, const char *path);
+
+/*!
+ @brief Like cc_preprocess(), for a source in the given dialect.
+ @param opencl True to read the file as OpenCL C: the OpenCL prelude is
+        prepended and the OpenCL pragmas and attributes are accepted.
+*/
+Token *cc_preprocess_ex(VirtualMachine *vm, const char *path, bool opencl);
 
 /*!
  @brief Parse a preprocessed token stream into an AST and produce

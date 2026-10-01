@@ -1755,10 +1755,9 @@ static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest,
     Type *ty = typeof_specifier(vm, rest, tok);
     // Copy the type to avoid mutating the original
     ty = copy_type(vm, ty);
-    // Remove all qualifiers
     ty->is_const    = false;
     ty->is_volatile = false;
-    return ty;
+    return without_addr_space(vm, ty);
 }
 
 // C23 auto type inference: given an initializer expression type, return the
@@ -1773,7 +1772,7 @@ Type *auto_deduced_type(VirtualMachine *vm, Type *ty) {
         ty->is_volatile = false;
         ty->is_restrict = false;
     }
-    return ty;
+    return without_addr_space(vm, ty);
 }
 
 // Walk the declarator result type down to the ty_auto sentinel counting TY_PTR
@@ -2043,7 +2042,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
          !attr->attr_error_msg && !attr->attr_warning_msg &&
          !attr->nonnull_all && !attr->nonnull_mask && !attr->returns_nonnull &&
          !attr->is_constructor && !attr->is_destructor && !attr->is_sentinel &&
-         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size))
+         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size &&
+         !attr->vec_visible))
         return ty;
 
     // __attribute__((vector_size(N))) rewrites the whole type (base scalar
@@ -2068,8 +2068,11 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
                       "64-byte (128/256/512-bit) vectors are currently "
                       "supported",
                       bytes);
-        else
+        else {
             ty = vector_of(vm, ty, bytes);
+            if (attr->vec_visible > 0 && attr->vec_visible < ty->vec_len)
+                ty->vec_visible = attr->vec_visible;
+        }
     }
 
     ty = copy_type(vm, ty);
@@ -2266,6 +2269,23 @@ static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
 // [[cccc::global]] / local / constant / private / generic. Qualifies the
 // pointed-to type like const does, so it is collected by declspec() through
 // addr_space_sink and is an error anywhere else.
+// Work-group hints that OpenCL sources carry; nothing here uses them.
+static bool is_opencl_hint_attr(VirtualMachine *vm, Token *tok) {
+    return vm->compiler.opencl &&
+           (equal(tok, "reqd_work_group_size") ||
+            equal(tok, "work_group_size_hint") || equal(tok, "vec_type_hint"));
+}
+
+// `name` or `__name__`: the underscored spelling cannot be rewritten by a
+// macro of the same name, which OpenCL's bare `global` and `local` are.
+static bool attr_is(Token *tok, const char *name) {
+    size_t n = strlen(name);
+    if (tok->len == (int)n)
+        return !memcmp(tok->loc, name, n);
+    return tok->len == (int)n + 4 && !memcmp(tok->loc, "__", 2) &&
+           !memcmp(tok->loc + 2, name, n) && !memcmp(tok->loc + 2 + n, "__", 2);
+}
+
 static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
                                     Token *tok, Type *ty) {
     if (equal(tok, "("))
@@ -2282,11 +2302,11 @@ static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
                   "'%.*s' belongs in the declaration specifiers, e.g. "
                   "[[cccc::%.*s]] int *p",
                   name_tok->len, name_tok->loc, name_tok->len, name_tok->loc);
-    AddrSpace space = equal(name_tok, "global")     ? AS_GLOBAL
-                      : equal(name_tok, "local")    ? AS_LOCAL
-                      : equal(name_tok, "constant") ? AS_CONSTANT
-                      : equal(name_tok, "private")  ? AS_PRIVATE
-                                                    : AS_GENERIC;
+    AddrSpace space = attr_is(name_tok, "global")     ? AS_GLOBAL
+                      : attr_is(name_tok, "local")    ? AS_LOCAL
+                      : attr_is(name_tok, "constant") ? AS_CONSTANT
+                      : attr_is(name_tok, "private")  ? AS_PRIVATE
+                                                      : AS_GENERIC;
     if (*sink != AS_NONE && *sink != space)
         error_tok(vm, name_tok,
                   "conflicting address spaces on one declaration");
@@ -2365,6 +2385,14 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             // VarAttr -> apply_var_attrs_to_type (ty is NULL here); there is no
             // meaningful struct/union-body use, so the `ty`-direct path is
             // intentionally not handled.
+            if (consume(vm, &tok, tok, "cccc_visible_lanes")) {
+                tok       = skip(vm, tok, "(");
+                int lanes = const_expr(vm, &tok, tok);
+                tok       = skip(vm, tok, ")");
+                if (attr)
+                    attr->vec_visible = lanes;
+                continue;
+            }
             if (consume(vm, &tok, tok, "vector_size")) {
                 tok       = skip(vm, tok, "(");
                 int bytes = const_expr(vm, &tok, tok);
@@ -2764,9 +2792,10 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
                 tok             = tok->next;
-                warn_tok(vm, name_tok, CCCC_WARN_ATTRIBUTES,
-                         "unknown attribute '%.*s' ignored", name_tok->len,
-                         name_tok->loc);
+                if (!is_opencl_hint_attr(vm, name_tok))
+                    warn_tok(vm, name_tok, CCCC_WARN_ATTRIBUTES,
+                             "unknown attribute '%.*s' ignored", name_tok->len,
+                             name_tok->loc);
 
                 // Handle attributes with parameters: attr(args...)
                 if (equal(tok, "(")) {
@@ -2853,12 +2882,12 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 equal(name_tok, "no_unique_address");
             bool is_pure_attr       = equal(name_tok, "pure");
             bool is_func_const_attr = equal(name_tok, "const");
-            bool is_kernel_attr     = cccc_scoped && equal(name_tok, "kernel");
+            bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
             bool is_addr_space_attr =
                 cccc_scoped &&
-                (equal(name_tok, "global") || equal(name_tok, "local") ||
-                 equal(name_tok, "constant") || equal(name_tok, "private") ||
-                 equal(name_tok, "generic"));
+                (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
+                 attr_is(name_tok, "constant") ||
+                 attr_is(name_tok, "private") || attr_is(name_tok, "generic"));
             bool is_optimize_attr        = equal(name_tok, "optimize");
             bool is_designated_init_attr = equal(name_tok, "designated_init");
             bool is_checked_ptr_attr =

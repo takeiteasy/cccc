@@ -7,6 +7,20 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: OpenCL C 1.2 kernels. A `.cl` file, or `-x cl`, is read as OpenCL C:
+  `__kernel`/`__global`/`__local`/`__constant`/`__private`, the `get_*_id` and
+  size functions, `barrier`, `mem_fence`, the 1.2 atomics (including
+  `atomic_xchg` on `float`), vector types of 16, 32 and 64 bytes with
+  swizzles and vector literals, and `-cl-std=CL1.2`. See `man/OPENCL.md`.
+- Added: `<cccc/kernel.h>` and `<cccc/opencl.h>` are embedded in the compiler,
+  so they resolve from any directory without `-I`.
+- Fixed: `auto`, `typeof_unqual`, `__atomic_fetch_*` and `_Atomic` compound
+  assignment on a `[[cccc::global]]`, `[[cccc::local]]` or
+  `[[cccc::constant]]` object gave the compiler's temporary that address space,
+  and kernel code rejected it as "a global-memory object on the stack".
+- Limitation: no vectors under 16 bytes (`float2`, `int2`, ...), no 128-byte
+  vectors, no OpenCL built-in function library, no `half`.
+
 ## [0.6.0] - 2026-10-01
 
 - Added: `-c=native` and `-m` run `cccc_launch`, the work-item builtins,

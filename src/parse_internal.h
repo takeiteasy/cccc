@@ -141,6 +141,7 @@ typedef struct {
     bool   has_vector_size;
     int    vector_size_bytes;
     Token *vector_size_tok; // for diagnostics
+    int    vec_visible;     // __attribute__((cccc_visible_lanes(N)))
 
     // [[cccc::checked]] / [[cccc::unchecked]] (#485): the checked-region this
     // attribute introduces for a function definition or compound statement.
@@ -476,6 +477,17 @@ void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                             Node *args);
 Node *vector_lane_ref(VirtualMachine *vm, Node *vec_expr, Type *elem_ty,
                       Node *index, Token *tok);
+// OpenCL C vector swizzle `vec.sel` and literal `(vty)(...)` (parse_opencl.c)
+struct SwizzleStore {
+    Node *stores;  // v[lane_i] = value[i], reading the swizzle's own temporary
+    bool  repeats; // a lane is named twice, which cannot be assigned to
+    bool  read_only; // the vector is const or in constant memory
+};
+Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel);
+Node *opencl_swizzle_assign(VirtualMachine *vm, Node *lhs, Node *rhs,
+                            Token *tok);
+Node *opencl_vector_literal(VirtualMachine *vm, Token **rest, Token *tok,
+                            Type *vty, Token *start);
 void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn);
 void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
                          char *message);

@@ -38,7 +38,12 @@ static Token *append_tokens(Token *tok1, Token *tok2) {
 }
 
 Token *cc_preprocess(VirtualMachine *vm, const char *path) {
+    return cc_preprocess_ex(vm, path, false);
+}
+
+Token *cc_preprocess_ex(VirtualMachine *vm, const char *path, bool opencl) {
     Token *tok = NULL;
+    vm->compiler.opencl = opencl;
 
     // Process -include option
     // for (int i = 0; i < opt_include.len; i++) {
@@ -61,6 +66,9 @@ Token *cc_preprocess(VirtualMachine *vm, const char *path) {
     Token *tok2 = must_tokenize_file(vm, (char *)path);
     if (!vm->compiler.primary_file && tok2)
         vm->compiler.primary_file = tok2->file;
+    if (opencl && tok2)
+        tok = tokenize_string(vm, "<opencl-prelude>",
+                              "#include <cccc/opencl.h>\n");
     tok = append_tokens(tok, tok2);
     if (!vm->compiler.skip_preprocess) {
         tok = preprocess(vm, tok);

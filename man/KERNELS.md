@@ -24,7 +24,8 @@ int main(void) {
 
 The function body is checked as described in
 [GPU Kernel Subset](ATTRIBUTES.md#gpu-kernel-subset); this guide covers
-running it.
+running it. Kernels written in OpenCL C run the same way; see
+[OPENCL.md](OPENCL.md).
 
 ## Launching
 

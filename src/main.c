@@ -526,6 +526,11 @@ static void print_version(void) {
     printf("\n");
 }
 
+static bool path_has_suffix(const char *path, const char *suffix) {
+    size_t len = strlen(path), n = strlen(suffix);
+    return len >= n && !strcmp(path + len - n, suffix);
+}
+
 static void usage(const char *argv0, int exit_code) {
     printf("CCCC: Comprehensive C Compensation Compiler\n");
     printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
@@ -534,6 +539,9 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-h/--help                Show this message\n");
     printf("\t   --version             Print version, git describe, host "
            "triple, and enabled features\n");
+    printf(
+        "\t-x <lang>               Read every input as <lang>: cl (OpenCL C) "
+        "or c; default is by extension (.cl is OpenCL C)\n");
     printf("\t-I/--include <path>      Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
@@ -1345,6 +1353,7 @@ int main(int argc, const char *argv[]) {
     int          input_files_count   = 0;
     Obj **volatile input_progs       = NULL;
     Token **volatile input_tokens    = NULL;
+    bool *volatile input_opencl      = NULL;
     const char **inc_paths           = NULL; // -I
     int          inc_paths_count     = 0;
     const char **sys_inc_paths       = NULL; // -isystem
@@ -1377,6 +1386,7 @@ int main(int argc, const char *argv[]) {
     int   emit_generated_only = 0;    // -c=generated
     int   emit_only           = 0;    // --emit-only
     int   skip_preprocess     = 0;    // -X
+    const char *input_lang          = NULL; // -x
     int   skip_stdlib         = 0;    // -S
     int   output_json         = 0;    // -j (general "emit JSON" flag)
     int   output_ffi_decls    = 0;    // -J/--ffi-decls
@@ -1595,9 +1605,26 @@ int main(int argc, const char *argv[]) {
             break;
         }
     }
+    // -cl-std=CLx.y selects an OpenCL version; getopt would read it as -c with
+    // the argument "l-std=...". Only CL1.2 exists, so it is dropped here.
+    int kept  = 1;
+    int limit = dashdash >= 0 ? dashdash : argc;
+    for (int i = 1; i < argc; i++) {
+        if (i < limit && strncmp(argv[i], "-cl-std=", 8) == 0) {
+            if (strcmp(argv[i] + 8, "CL1.2") != 0)
+                fprintf(stderr, "warning: %s: only OpenCL C 1.2 is supported\n",
+                        argv[i]);
+            if (dashdash >= 0)
+                dashdash--;
+            continue;
+        }
+        argv[kept++] = argv[i];
+    }
+    argv[kept]              = NULL;
+    argc                    = kept;
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
     const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABwf:";
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABwf:x:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -1819,6 +1846,15 @@ int main(int argc, const char *argv[]) {
                 break;
             case 'X':
                 skip_preprocess = 1;
+                break;
+            case 'x':
+                if (strcmp(optarg, "cl") && strcmp(optarg, "c")) {
+                    fprintf(stderr,
+                            "error: -x: unknown language '%s' (use cl or c)\n",
+                            optarg);
+                    usage(argv[0], 1);
+                }
+                input_lang = optarg;
                 break;
             case 'S':
                 skip_stdlib = 1;
@@ -2763,6 +2799,7 @@ int main(int argc, const char *argv[]) {
                              (void *)(intptr_t)1);
 
     input_tokens = calloc(input_files_count, sizeof(Token *));
+    input_opencl = calloc(input_files_count, sizeof(bool));
     // #1305/#1306: one entry per TU, recording where its own captured
     // directives begin in emit_directives -- see that field's own comment
     // (cccc.h) for who reads it.
@@ -2825,7 +2862,10 @@ int main(int argc, const char *argv[]) {
             }
         }
 
-        input_tokens[i] = cc_preprocess(&vm, input_files[i]);
+        input_opencl[i] = input_lang ? !strcmp(input_lang, "cl")
+                                     : path_has_suffix(input_files[i], ".cl");
+        input_tokens[i] =
+            cc_preprocess_ex(&vm, input_files[i], input_opencl[i]);
         if (!input_tokens[i]) {
             fprintf(stderr, "error: failed to preprocess %s\n", input_files[i]);
             exit_code = 1;
@@ -2910,7 +2950,8 @@ int main(int argc, const char *argv[]) {
         // (parse.c) for the full reasoning.
         if (i > 0)
             cc_leave_top_file_scope(&vm);
-        input_progs[i] = cc_parse(&vm, input_tokens[i]);
+        vm.compiler.opencl = input_opencl[i];
+        input_progs[i]     = cc_parse(&vm, input_tokens[i]);
         // #999: parse() returning NULL is not on its own a failure -- its
         // own comment says outright it "returns NULL when no new globals
         // were created", which is the ordinary, successful outcome for a
@@ -3439,6 +3480,7 @@ BAIL:
     cc_destroy(&vm);
     if (input_tokens)
         free(input_tokens);
+    free(input_opencl);
     if (input_progs) {
         // Don't free individual Obj* - they're arena-allocated and freed by
         // cc_destroy()

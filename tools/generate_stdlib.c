@@ -82,6 +82,14 @@ void sort_headers(char **headers, int count) {
     }
 }
 
+// The kernel headers are public: user source includes them as <cccc/...>, and
+// an OpenCL input includes opencl.h implicitly, so both must resolve with no
+// include path.
+static int is_embedded_cccc_header(const char *name) {
+    return strcmp(name, "cccc/kernel.h") == 0 ||
+           strcmp(name, "cccc/opencl.h") == 0;
+}
+
 char **discover_headers(void) {
     glob_t g;
     memset(&g, 0, sizeof(g));
@@ -100,7 +108,8 @@ char **discover_headers(void) {
     int public_count = 0;
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         const char *name = copy_header_name(g.gl_pathv[i]);
-        int         skip = (strncmp(name, "cccc/", 5) == 0);
+        int         skip =
+            (strncmp(name, "cccc/", 5) == 0) && !is_embedded_cccc_header(name);
         free((void *)name);
         if (!skip)
             public_count++;
@@ -114,7 +123,7 @@ char **discover_headers(void) {
     headers[n++]   = copy_header_name("building.h");
     for (int i = 0; i < (int)g.gl_pathc; i++) {
         char *name = copy_header_name(g.gl_pathv[i]);
-        if (strncmp(name, "cccc/", 5) == 0) {
+        if (strncmp(name, "cccc/", 5) == 0 && !is_embedded_cccc_header(name)) {
             free(name);
             continue;
         }

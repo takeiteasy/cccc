@@ -466,6 +466,18 @@ Type *copy_type(VirtualMachine *vm, Type *ty) {
     return ret;
 }
 
+int vector_lanes(Type *ty) {
+    return ty->vec_visible ? ty->vec_visible : ty->vec_len;
+}
+
+Type *without_addr_space(VirtualMachine *vm, Type *ty) {
+    if (ty->addr_space == AS_NONE)
+        return ty;
+    ty             = copy_type(vm, ty);
+    ty->addr_space = AS_NONE;
+    return ty;
+}
+
 Type *pointer_to(VirtualMachine *vm, Type *base) {
     Type *ty        = new_type(vm, TY_PTR, 8, 8);
     ty->base        = base;

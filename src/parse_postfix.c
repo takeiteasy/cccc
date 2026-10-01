@@ -375,8 +375,12 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok, ".")) {
-            node = struct_ref(vm, node, tok->next);
-            tok  = tok->next->next;
+            add_type(vm, node);
+            if (vm->compiler.opencl && node->ty && is_vector(node->ty))
+                node = opencl_swizzle(vm, node, tok->next);
+            else
+                node = struct_ref(vm, node, tok->next);
+            tok = tok->next->next;
             continue;
         }
 
@@ -1777,7 +1781,7 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     add_type(vm, obj);
     if (!obj->ty || obj->ty->kind != TY_PTR)
         error_tok(vm, tok, "atomic builtin: first argument must be a pointer");
-    Type *pointee = obj->ty->base;
+    Type *pointee = without_addr_space(vm, obj->ty->base);
 
     Node  head    = {};
     Node *cur     = &head;

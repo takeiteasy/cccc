@@ -831,6 +831,11 @@ bool is_compatible(Type *t1, Type *t2);
 bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family);
 bool is_compatible_qualified_strict(Type *t1, Type *t2);
 Type *copy_type(VirtualMachine *vm, Type *ty);
+// `ty` without its address space: the type of a private temporary that holds a
+// value read from global/local/constant memory.
+Type *without_addr_space(VirtualMachine *vm, Type *ty);
+// Lanes of a vector type that a program may name (see Type.vec_visible).
+int vector_lanes(Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
 Type *func_type(VirtualMachine *vm, Type *return_ty);
 Type *array_of(VirtualMachine *vm, Type *base, int size);

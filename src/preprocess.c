@@ -2867,6 +2867,16 @@ bool is_compiler_owned_header(const char *name) {
 // neither necessary nor sufficient here (stdckdint.h is owned and header-only,
 // so suppressing its replay alone is enough; stdbit.h is not owned but still
 // needs this).
+// <cccc/opencl.h>'s #defines are OpenCL spellings that only mean something to
+// cccc: replayed into -c=native output they rewrite the shim's own `global` and
+// `local` members. Its types are still re-derived like any cccc-only header's.
+static bool is_opencl_prelude_file(const char *name) {
+    static const char suffix[] = "cccc/opencl.h";
+    size_t            len      = name ? strlen(name) : 0;
+    return len >= sizeof(suffix) - 1 &&
+           !strcmp(name + len - (sizeof(suffix) - 1), suffix);
+}
+
 static bool is_cccc_supplied_only_header(const char *name) {
     static const char *cccc_only[] = {
         "stdbit.h", "stdckdint.h",    "threads.h",
@@ -5909,7 +5919,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     } else if (equal(tok, "omp") && (vm->flags & CCCC_OPENMP)) {
         Token *tail;
         return splice_omp_pragma(vm, tok, &tail);
-    } else if (equal(tok, "omp")) {
+    } else if (equal(tok, "omp") ||
+               (equal(tok, "OPENCL") && vm->compiler.opencl)) {
         do {
             tok = tok->next;
         } while (!tok->at_bol && tok->kind != TK_EOF);
@@ -6466,7 +6477,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 brace_depth > 0 && pp_directive(tok) == PP_INCLUDE;
             if (!vm->compiler.emit_strict && !vm->compiler.in_macro_mode &&
                 !_ac_generated_nonprimary && !_ac_in_function_include &&
-                start->file &&
+                start->file && !is_opencl_prelude_file(start->file->name) &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&

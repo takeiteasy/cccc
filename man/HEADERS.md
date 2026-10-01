@@ -320,4 +320,6 @@ them; the public spelling, if you ever need it directly, is
 
 `include/cccc/kernel.h` is a public header, included as
 `#include <cccc/kernel.h>`: it declares the work-item builtins and `cccc_launch`
-described in [KERNELS.md](KERNELS.md).
+described in [KERNELS.md](KERNELS.md). `include/cccc/opencl.h` maps OpenCL C
+onto it and is included automatically before an OpenCL input
+([OPENCL.md](OPENCL.md)). Both are embedded, so they resolve with no `-I`.

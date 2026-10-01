@@ -117,6 +117,7 @@ Manuals live in [`man/`](man/):
 | [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
 | [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
 | [KERNELS.md](man/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items, in the VM or on CPU threads with `-c=native`: `cccc_launch`, work-item builtins, local memory, barriers |
+| [OPENCL.md](man/OPENCL.md) | Reading OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model: qualifiers, work-item functions, atomics, vector types, swizzles and vector literals |
 | [OPENMP.md](man/OPENMP.md) | `-fopenmp`: `#pragma omp` directives and clauses, run on one thread in the VM or on real threads with `-c=native`, and `<omp.h>` |
 | [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
 | [TYPES.md](man/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |
@@ -132,6 +133,7 @@ Usage: ./build/cccc [options] file...
 Options:
 	-h/--help                Show this message
 	   --version             Print version, git describe, host triple, and enabled features
+	-x <lang>               Read every input as <lang>: cl (OpenCL C) or c; default is by extension (.cl is OpenCL C)
 	-I/--include <path>      Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
 	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
