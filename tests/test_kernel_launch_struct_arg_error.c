@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: does not support this kernel argument type
 #include <cccc/kernel.h>

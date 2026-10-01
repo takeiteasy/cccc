@@ -116,7 +116,7 @@ Manuals live in [`man/`](man/):
 | [WARNINGS.md](man/WARNINGS.md) | `-W` warning categories, `-Werror`, pragma suppression, machine-readable output |
 | [COVERAGE.md](man/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
 | [ATTRIBUTES.md](man/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
-| [KERNELS.md](man/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items in the VM: `cccc_launch`, work-item builtins, local memory, barriers |
+| [KERNELS.md](man/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items, in the VM or on CPU threads with `-c=native`: `cccc_launch`, work-item builtins, local memory, barriers |
 | [OPENMP.md](man/OPENMP.md) | `-fopenmp`: `#pragma omp` directives and clauses, run on one thread in the VM or on real threads with `-c=native`, and `<omp.h>` |
 | [STDLIB.md](man/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
 | [TYPES.md](man/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |

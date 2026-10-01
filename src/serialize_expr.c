@@ -2280,6 +2280,12 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // thread pool; the env pointer below is its argument.
                 fprintf(f, "__cccc_pool_run((void (*)(void *))%s, ",
                         node->lhs->var->name);
+            } else if (node->lhs && node->lhs->kind == ND_VAR &&
+                       node->lhs->var && node->lhs->var->is_kernel_thunk) {
+                // #1394: a cccc_launch runs its outlined thunk once per
+                // work-item; the env pointer and launch arguments follow.
+                fprintf(f, "__cccc_kernel_launch((void (*)(void *))%s, ",
+                        node->lhs->var->name);
             } else {
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, "(");

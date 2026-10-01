@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: global range must be a cccc_range
 #include <cccc/kernel.h>

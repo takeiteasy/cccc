@@ -979,6 +979,7 @@ typedef struct {
 void cccc_kernel_register_meta(VirtualMachine *vm, long long fn_value,
                                bool uses_barrier, int local_bytes);
 void register_kernel_functions(VirtualMachine *vm);
+bool is_kernel_builtin(const char *name);
 // Returns the number of mutexes currently held by the active VM thread.
 // Used by race detection in ops.c; implemented in stdlib/pthread.c.
 int cccc_thread_held_lock_count(VirtualMachine *vm);

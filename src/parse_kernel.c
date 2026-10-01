@@ -221,15 +221,6 @@ bool is_kernel_builtin(const char *name) {
     return false;
 }
 
-// TODO: -c=native has no kernel runtime yet; a host loop (and a pthread
-// barrier for kernels that use one) would replace the VM launcher.
-void reject_kernel_runtime_in_native(VirtualMachine *vm, Token *tok) {
-    if (vm->compiler.native_mode)
-        error_tok(vm, tok,
-                  "the kernel launch and work-item builtins are not "
-                  "supported with -c=native");
-}
-
 static void mark_path_uses_barrier(KernelCtx *ctx) {
     for (KernelFrame *frame = ctx->top; frame; frame = frame->up)
         frame->fn->kernel_uses_barrier = true;
@@ -299,7 +290,7 @@ static void check_call(KernelCtx *ctx, Node *call) {
             mark_path_uses_barrier(ctx);
         return;
     }
-    if (!strcmp(var->name, "__cccc_launch")) {
+    if (var->is_kernel_thunk || !strcmp(var->name, "__cccc_launch")) {
         kernel_error(ctx, call->tok, "cccc_launch");
         return;
     }
@@ -376,8 +367,8 @@ static void walk_node(KernelCtx *ctx, Node *node) {
             return;
         }
         case ND_CAST:
-            if (node->ty && node->ty->kind == TY_PTR &&
-                is_pointer_like(node->lhs->ty) &&
+            if (!node->is_kernel_local_arg && node->ty &&
+                node->ty->kind == TY_PTR && is_pointer_like(node->lhs->ty) &&
                 (node->is_explicit_cast ||
                  (node->lhs->ty->kind != TY_ARRAY &&
                   pointee_space(node->ty) != AS_NONE &&
@@ -555,14 +546,15 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
 void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok) {
     Obj  *fn  = vm->compiler.current_fn;
     Type *obj = strip_arrays(var->ty);
-    if (vm->compiler.native_mode || !fn || !fn->is_kernel || !obj ||
-        obj->kind == TY_PTR || obj->addr_space != AS_LOCAL)
+    if (!fn || !fn->is_kernel || !obj || obj->kind == TY_PTR ||
+        obj->addr_space != AS_LOCAL)
         return;
     if (var->ty->kind == TY_VLA)
         return;
     int align = var->align > 0 ? var->align : 16;
     int off   = (fn->kernel_local_bytes + align - 1) / align * align;
     var->kernel_local_off    = off;
+    var->kernel_local_id     = ++vm->compiler.kernel_local_ids;
     fn->kernel_local_bytes   = off + (int)var->ty->size;
     var->is_kernel_local_obj = true;
     (void)tok;
@@ -570,20 +562,32 @@ void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok) {
 
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok) {
     Type *ptr_ty              = pointer_to(vm, var->ty);
-    Type *fn_ty               = func_type(vm, ptr_ty);
-    fn_ty->params             = copy_type(vm, ty_long);
-    fn_ty->params->next       = copy_type(vm, ty_long);
-    fn_ty->params->next->next = copy_type(vm, ty_long);
-    Obj  *fn      = new_private_func_obj(vm, "__cccc_local_base", fn_ty);
+    Type *void_ptr            = pointer_to(vm, ty_void);
+    Type *fn_ty;
+    Obj  *fn;
+    if (vm->compiler.kernel_native) {
+        fn = declare_runtime_fn(vm, "__cccc_local_base",
+                                "void *__cccc_local_base(long, long, long);");
+        fn_ty                    = fn->ty;
+        vm->compiler.kernel_used = true;
+    } else {
+        fn_ty                     = func_type(vm, void_ptr);
+        fn_ty->params             = copy_type(vm, ty_long);
+        fn_ty->params->next       = copy_type(vm, ty_long);
+        fn_ty->params->next->next = copy_type(vm, ty_long);
+        fn = new_private_func_obj(vm, "__cccc_local_base", fn_ty);
+    }
     Node *call    = new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, tok), tok);
     call->func_ty = fn_ty;
-    call->ty      = ptr_ty;
+    call->ty      = void_ptr;
     call->args    = new_num(vm, var->kernel_local_off, tok);
     call->args->next       = new_num(vm, var->ty->size, tok);
-    call->args->next->next = new_long(vm, (int64_t)(intptr_t)var, tok);
+    call->args->next->next = new_num(vm, var->kernel_local_id, tok);
     for (Node *arg = call->args; arg; arg = arg->next)
         add_type(vm, arg);
-    Node *ref = new_unary(vm, ND_DEREF, call, tok);
+    Node *typed                = new_cast(vm, call, ptr_ty);
+    typed->is_kernel_local_arg = true;
+    Node *ref                  = new_unary(vm, ND_DEREF, typed, tok);
     ref->ty   = var->ty;
     return ref;
 }

@@ -560,6 +560,32 @@ static void check_atomic(VirtualMachine *vm, Node *stmt, Token *tok) {
 // which is OpenMP's `shared`. Worksharing, single, critical and atomic are
 // lowered in place onto the runtime in src/shims/omp.c.
 
+// Declares a runtime function, or re-binds the Obj an earlier declaration
+// created: a block-scope declaration dies with its scope.
+Obj *declare_runtime_fn(VirtualMachine *vm, const char *name,
+                        const char *proto) {
+    Obj *existing = NULL;
+    for (Obj *o = vm->compiler.globals; o && !existing; o = o->next)
+        if (o->is_function && !strcmp(o->name, name))
+            existing = o;
+    if (existing) {
+        push_scope(vm, (char *)name, strlen(name))->var = existing;
+        return existing;
+    }
+    Token  *tok  = tokenize_string(vm, "<runtime>", (char *)proto);
+    VarAttr attr = {};
+    convert_pp_tokens(vm, tok);
+    Type *base        = declspec(vm, &tok, tok, &attr);
+    Type *ty          = declarator(vm, &tok, tok, base);
+    Obj  *fn          = new_gvar(vm, (char *)name, strlen(name), ty);
+    fn->is_function   = true;
+    fn->is_definition = false;
+    fn->is_static     = false;
+    fn->is_root       = true;
+    push_scope(vm, fn->name, strlen(fn->name))->var = fn;
+    return fn;
+}
+
 // Declares the runtime entry points. A block-scope declaration dies with its
 // scope, so a later directive re-binds the Obj the first one created instead
 // of declaring a second function of the same name.
@@ -583,45 +609,13 @@ static void runtime_decls(VirtualMachine *vm) {
         {"__cccc_omp_critical_exit",
          "void __cccc_omp_critical_exit(const char *);"},
     };
-    for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++) {
-        Obj *existing = NULL;
-        for (Obj *o = vm->compiler.globals; o && !existing; o = o->next)
-            if (o->is_function && !strcmp(o->name, rt[i].name))
-                existing = o;
-        if (existing)
-            push_scope(vm, (char *)rt[i].name, strlen(rt[i].name))->var =
-                existing;
-        else {
-            Token  *tok  = tokenize_string(vm, "<omp>", (char *)rt[i].proto);
-            VarAttr attr = {};
-            convert_pp_tokens(vm, tok);
-            Type *base = declspec(vm, &tok, tok, &attr);
-            Type *ty   = declarator(vm, &tok, tok, base);
-            Obj  *fn = new_gvar(vm, (char *)rt[i].name, strlen(rt[i].name), ty);
-            fn->is_function                                 = true;
-            fn->is_definition                               = false;
-            fn->is_static                                   = false;
-            fn->is_root                                     = true;
-            push_scope(vm, fn->name, strlen(fn->name))->var = fn;
-        }
-    }
+    for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++)
+        declare_runtime_fn(vm, rt[i].name, rt[i].proto);
     vm->compiler.omp_used = true;
 }
 
-typedef struct {
-    Obj                 *fn, *parent;
-    Obj                 *saved_locals;
-    int                  saved_depth;
-    struct ObjSizeQuery *saved_queries;
-    char                *saved_brk, *saved_cont;
-    Node                *saved_switch, *saved_gotos, *saved_labels;
-    CleanupChainNode    *saved_chain;
-    CheckedScope         saved_checked;
-} OmpRegion;
-
-static OmpRegion region_begin(VirtualMachine *vm, Token *tok, int id,
-                              Obj *nt_var) {
-    OmpRegion r = {};
+OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
+    OutlineRegion r = {};
     r.parent    = vm->compiler.current_fn;
     if (!r.parent)
         error_tok(vm, tok, "'#pragma omp' must be inside a function");
@@ -636,15 +630,12 @@ static OmpRegion region_begin(VirtualMachine *vm, Token *tok, int id,
     r.saved_chain   = vm->compiler.cur_cleanup_chain;
     r.saved_checked = vm->compiler.checked_scope_attr;
 
-    char *name      = arena_format(vm, "__omp_region_%d", id);
-    Obj  *fn        = new_gvar(vm, name, strlen(name), func_type(vm, ty_void));
+    Obj *fn = new_gvar(vm, (char *)name, strlen(name), func_type(vm, ty_void));
     fn->is_function = true;
     fn->is_definition              = true;
     fn->is_static                  = true;
     fn->is_root                    = true;
     fn->is_nested                  = true;
-    fn->is_omp_region              = true;
-    fn->omp_nt_var                 = nt_var;
     fn->tok                        = tok;
     fn->parent_fn                  = r.parent;
     fn->nesting_depth              = r.saved_depth + 1;
@@ -669,7 +660,7 @@ static OmpRegion region_begin(VirtualMachine *vm, Token *tok, int id,
     return r;
 }
 
-static void region_end(VirtualMachine *vm, OmpRegion *r, Node *body) {
+void outline_end(VirtualMachine *vm, OutlineRegion *r, Node *body) {
     Obj *fn    = r->fn;
     fn->body   = body;
     fn->locals = vm->compiler.locals;
@@ -693,6 +684,15 @@ static void region_end(VirtualMachine *vm, OmpRegion *r, Node *body) {
     vm->compiler.current_switch     = r->saved_switch;
     vm->compiler.cur_cleanup_chain  = r->saved_chain;
     vm->compiler.checked_scope_attr = r->saved_checked;
+}
+
+static OutlineRegion region_begin(VirtualMachine *vm, Token *tok, int id,
+                                  Obj *nt_var) {
+    OutlineRegion r =
+        outline_begin(vm, tok, arena_format(vm, "__omp_region_%d", id));
+    r.fn->is_omp_region = true;
+    r.fn->omp_nt_var    = nt_var;
+    return r;
 }
 
 typedef struct {
@@ -1211,7 +1211,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                     ->var;
             capture_pointers(vm, d, body, id);
 
-            OmpRegion r     = region_begin(vm, start, id, nt);
+            OutlineRegion r     = region_begin(vm, start, id, nt);
             Node      rhead = {};
             OmpBody   rbody = {&rhead, &rhead};
             shadow_decls(vm, d, &rbody, id);
@@ -1224,7 +1224,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             merges(vm, d, &rbody, id);
             Node *region_body = new_node(vm, ND_BLOCK, start);
             region_body->body = rhead.next;
-            region_end(vm, &r, region_body);
+            outline_end(vm, &r, region_body);
             d->region_fn = r.fn;
             body_push(vm, body, snippet(vm, "%s();", r.fn->name));
             *rest = tok;

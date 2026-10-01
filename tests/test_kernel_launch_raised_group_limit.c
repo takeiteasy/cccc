@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // CCCC_FLAGS: --kernel-max-group-size=512
 #include <cccc/kernel.h>
 [[cccc::kernel]] static void k([[cccc::global]] int *p) {

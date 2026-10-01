@@ -939,9 +939,6 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
         (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
         error_tok(vm, fn->tok, "not a function");
 
-    if (fn->kind == ND_VAR && fn->var && is_kernel_builtin(fn->var->name))
-        reject_kernel_runtime_in_native(vm, fn->tok);
-
     Type *ty              = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
     Type *param_ty        = ty->params;
 
@@ -1101,6 +1098,9 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 // funcall() against the kernel's parameters; each is then packed into an
 // integer or float slot and handed to the __cccc_launch host function
 // (stdlib/kernel.c), which sets the argument registers for every work-item.
+// Under -c=native and -m the arguments go into temporaries instead and the
+// launch is outlined into a thunk that calls the kernel, which the C runtime
+// in src/shims/kernel.c runs once per work-item.
 // TODO: struct/union/vector arguments and more than 8 integer or 8 float
 // arguments need a generated per-launch thunk instead of register packing.
 // Copies a range into a temporary ahead of the call (struct copies clobber the
@@ -1137,9 +1137,110 @@ static Node *find_kernel_local_marker(Node *node) {
     return NULL;
 }
 
+// -c=native/-m: stores a converted argument in a temporary of its own type, so
+// the thunk can pass it on without the register packing the VM launcher uses.
+static Node *kernel_launch_arg_tmp(VirtualMachine *vm, Node *arg, Obj **tmp,
+                                   Token *tok) {
+    Type *ty        = copy_type(vm, arg->ty);
+    ty->is_const    = false;
+    ty->is_volatile = false;
+    *tmp            = new_lvar(vm, "", 0, ty);
+    return new_binary(vm, ND_ASSIGN, new_var_node(vm, *tmp, tok), arg, tok);
+}
+
+static Node *kernel_runtime_call(VirtualMachine *vm, const char *name,
+                                 const char *proto, Node *args, Type *ret,
+                                 Token *tok) {
+    Obj  *fn      = declare_runtime_fn(vm, name, proto);
+    Node *call    = new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, tok), tok);
+    call->func_ty = fn->ty;
+    call->ty      = ret;
+    call->args    = args;
+    for (Node *arg = args; arg; arg = arg->next)
+        add_type(vm, arg);
+    return call;
+}
+
+// Outlines the launch into a nested function that calls the kernel with the
+// saved arguments. A call to it serializes as __cccc_kernel_launch(), which
+// runs it once per work-item.
+static Node *kernel_launch_thunk(VirtualMachine *vm, Token *start, Node *kernel,
+                                 Type *kernel_ty, Node *call, Obj **arg_tmp,
+                                 int *local_index, int nlocal, Obj *sizes,
+                                 Node *global, Node *local, Node *seq) {
+    Type *kernel_ptr = pointer_to(vm, kernel_ty);
+    Obj  *ktmp       = new_lvar(vm, "", 0, kernel_ptr);
+    Node *save_k     = new_binary(vm, ND_ASSIGN, new_var_node(vm, ktmp, start),
+                                  new_cast(vm, kernel, kernel_ptr), start);
+    seq = seq ? new_binary(vm, ND_COMMA, save_k, seq, start) : save_k;
+    Node         *gptr = kernel_launch_range(vm, global, start, "global", &seq);
+    Node         *lptr = kernel_launch_range(vm, local, start, "local", &seq);
+
+    OutlineRegion r =
+        outline_begin(vm, start,
+                      arena_format(vm, "__kernel_launch_%d",
+                                   vm->compiler.unique_name_counter++));
+    r.fn->is_kernel_thunk = true;
+    Node  head            = {};
+    Node *cur             = &head;
+    int   i               = 0;
+    for (Node *arg = call->args; arg; arg = arg->next, i++) {
+        Node *value;
+        if (local_index[i] >= 0) {
+            Node *idx = new_num(vm, local_index[i], start);
+            Node *ptr =
+                kernel_runtime_call(vm, "__cccc_kernel_local_arg",
+                                    "void *__cccc_kernel_local_arg(long);", idx,
+                                    pointer_to(vm, ty_void), start);
+            value = new_cast(vm, ptr, arg->ty);
+        } else {
+            value = new_var_node(vm, arg_tmp[i], start);
+        }
+        cur = cur->next = value;
+    }
+    Node *invoke =
+        new_unary(vm, ND_FUNCALL, new_var_node(vm, ktmp, start), start);
+    invoke->func_ty = kernel_ty;
+    invoke->ty      = kernel_ty->return_ty;
+    invoke->args    = head.next;
+    add_type(vm, invoke->lhs);
+    for (Node *arg = invoke->args; arg; arg = arg->next)
+        add_type(vm, arg);
+    Node *body = new_node(vm, ND_BLOCK, start);
+    body->body = new_unary(vm, ND_EXPR_STMT, invoke, start);
+    outline_end(vm, &r, body);
+
+    Type  *thunk_ty = func_type(vm, ty_void);
+    Type  *void_ptr = pointer_to(vm, ty_void);
+    Type **tail     = &thunk_ty->params;
+    for (int k = 0; k < 5; k++) {
+        *tail = copy_type(vm, k == 3 ? ty_long : void_ptr);
+        tail  = &(*tail)->next;
+    }
+    Node args = {};
+    cur       = &args;
+    cur = cur->next = new_cast(vm, new_var_node(vm, ktmp, start), void_ptr);
+    cur = cur->next = new_cast(vm, gptr, void_ptr);
+    cur = cur->next = new_cast(vm, lptr, void_ptr);
+    cur = cur->next = new_num(vm, nlocal, start);
+    cur->next       = new_cast(vm, new_var_node(vm, sizes, start), void_ptr);
+    for (Node *arg = args.next; arg; arg = arg->next)
+        add_type(vm, arg);
+    Node *launch =
+        new_unary(vm, ND_FUNCALL, new_var_node(vm, r.fn, start), start);
+    launch->func_ty          = thunk_ty;
+    launch->ty               = ty_void;
+    launch->args             = args.next;
+    vm->compiler.kernel_used = true;
+    Node *result             = new_binary(vm, ND_COMMA, seq, launch, start);
+    add_type(vm, result);
+    return result;
+}
+
 static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    reject_kernel_runtime_in_native(vm, start);
+    if (vm->compiler.kernel_test_run && vm->compiler.kernel_native)
+        error_tok(vm, start, "cccc_launch is not supported with --test-run");
     tok          = skip(vm, tok->next, "(");
 
     Node *kernel = assign(vm, &tok, tok);
@@ -1172,16 +1273,21 @@ static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *call = funcall(vm, rest, tok, kernel);
     vm->compiler.kernel_launch_depth--;
 
-    Obj  *islots = new_lvar(vm, "", 0, array_of(vm, ty_long, 8));
-    Obj  *fslots = new_lvar(vm, "", 0, array_of(vm, ty_double, 8));
+    bool native = vm->compiler.kernel_native;
+    Obj *islots = new_lvar(vm, "", 0, array_of(vm, ty_long, 8));
+    Obj *fslots =
+        native ? NULL : new_lvar(vm, "", 0, array_of(vm, ty_double, 8));
+    Obj  *arg_tmp[16] = {};
+    int   local_index[16];
     Node *seq    = NULL;
-    int   nint = 0, nflt = 0;
+    int   nint = 0, nflt = 0, nlocal = 0, nargs = 0;
     long  local_mask = 0;
 
     Type *param      = kernel_ty->params;
     for (Node *arg = call->args; arg; arg = arg->next, param = param->next) {
         Node *store;
         Node *local_marker = find_kernel_local_marker(arg);
+        local_index[nargs] = -1;
         if (local_marker) {
             if (!param || param->kind != TY_PTR ||
                 param->base->addr_space != AS_LOCAL)
@@ -1189,8 +1295,15 @@ static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
                           "CCCC_LOCAL is only valid for a [[cccc::local]] "
                           "pointer parameter");
             local_mask |= 1L << nint;
-            store = kernel_launch_slot(vm, islots, nint++, local_marker->lhs,
-                                       start);
+            if (native) {
+                local_index[nargs] = nlocal;
+                store = kernel_launch_slot(vm, islots, nlocal++,
+                                           local_marker->lhs, start);
+                nint++;
+            } else {
+                store = kernel_launch_slot(vm, islots, nint++,
+                                           local_marker->lhs, start);
+            }
         } else if (param && param->kind == TY_PTR &&
                    param->base->addr_space == AS_LOCAL) {
             error_tok(vm, arg->tok,
@@ -1200,23 +1313,37 @@ static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
             if (nflt == 8)
                 error_tok(vm, arg->tok,
                           "cccc_launch takes at most 8 float arguments");
-            store = kernel_launch_slot(vm, fslots, nflt++,
-                                       new_cast(vm, arg, ty_double), start);
+            if (native)
+                store = kernel_launch_arg_tmp(vm, arg, &arg_tmp[nargs], start),
+                nflt++;
+            else
+                store = kernel_launch_slot(vm, fslots, nflt++,
+                                           new_cast(vm, arg, ty_double), start);
         } else if (is_integer(arg->ty) || arg->ty->kind == TY_PTR ||
                    arg->ty->kind == TY_BOOL || arg->ty->kind == TY_ENUM) {
             if (nint == 8)
                 error_tok(vm, arg->tok,
                           "cccc_launch takes at most 8 integer or pointer "
                           "arguments");
-            store = kernel_launch_slot(vm, islots, nint++,
-                                       new_cast(vm, arg, ty_long), start);
+            if (native)
+                store = kernel_launch_arg_tmp(vm, arg, &arg_tmp[nargs], start),
+                nint++;
+            else
+                store = kernel_launch_slot(vm, islots, nint++,
+                                           new_cast(vm, arg, ty_long), start);
         } else {
             error_tok(vm, arg->tok,
                       "cccc_launch does not support this kernel argument "
                       "type");
         }
         seq = seq ? new_binary(vm, ND_COMMA, seq, store, start) : store;
+        nargs++;
     }
+
+    if (native)
+        return kernel_launch_thunk(vm, start, kernel, kernel_ty, call, arg_tmp,
+                                   local_index, nlocal, islots, global, local,
+                                   seq);
 
     Type  *launch_ty = func_type(vm, ty_long);
     Type **tail      = &launch_ty->params;

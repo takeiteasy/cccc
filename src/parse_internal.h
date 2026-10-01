@@ -325,8 +325,23 @@ void check_may_return_null_summaries(VirtualMachine *vm);
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn);
 void check_kernel_subset(VirtualMachine *vm);
 void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok);
-bool is_kernel_builtin(const char *name);
-void reject_kernel_runtime_in_native(VirtualMachine *vm, Token *tok);
+// A nested function a directive or builtin outlines its body into: the
+// enclosing function's locals are captured by reference through the env.
+typedef struct {
+    Obj                 *fn, *parent;
+    Obj                 *saved_locals;
+    int                  saved_depth;
+    struct ObjSizeQuery *saved_queries;
+    char                *saved_brk, *saved_cont;
+    Node                *saved_switch, *saved_gotos, *saved_labels;
+    CleanupChainNode    *saved_chain;
+    CheckedScope         saved_checked;
+} OutlineRegion;
+OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name);
+void outline_end(VirtualMachine *vm, OutlineRegion *r, Node *body);
+Obj *declare_runtime_fn(VirtualMachine *vm, const char *name,
+                        const char *proto);
+
 Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok);
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);

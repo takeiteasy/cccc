@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // EXPECT_RUNTIME_ERROR
 // CCCC_EXPECT_STDERR: exceeds the limit of 256
 #include <cccc/kernel.h>

@@ -7,6 +7,15 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `-c=native` and `-m` run `cccc_launch`, the work-item builtins,
+  barriers and `[[cccc::local]]` memory on CPU threads. Kernels without a
+  barrier run their work-groups in parallel on the thread pool; kernels with a
+  barrier run a thread per work-item. See `man/KERNELS.md`.
+- Fixed: `-m` emitted a call to an undefined `__cccc_launch` for a kernel
+  launch.
+- Limitation: `--test-run` and `-c=generated` do not support `cccc_launch`; a
+  native barrier kernel starts a thread per work-item for every group.
+
 ## [0.5.0] - 2026-10-01
 
 - Added: `-fopenmp` parses `#pragma omp` (`parallel`, `for`, `parallel for`,

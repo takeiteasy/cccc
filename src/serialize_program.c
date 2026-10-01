@@ -5305,7 +5305,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // neighbours; also skips --emit-cccc internally (see its own comment).
     if (!generated_only)
         serialize_threads_shims(f, vm, prog);
-    serialize_omp_shims(f, vm, prog); // #1368
+    serialize_threaded_shims(f, vm, prog); // #1368, #1394
 
     // #1141: real definitions for <uchar.h>'s mbrtoc16/c16rtomb/mbrtoc32/
     // c32rtomb/mbrtoc8/c8rtomb -- same placement rationale (and the same
@@ -5615,6 +5615,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     }
 
     serialize_omp_lock_shims(f, vm, prog); // #1368
+    serialize_kernel_meta(f, vm, prog);    // #1394
 
     serialize_type_stats_report(
         &ctx);                    // #1283: no-op unless CCCC_TYPE_STATS set

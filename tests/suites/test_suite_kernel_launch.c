@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // CCCC_FLAGS: --testing
 // Suite: cccc_launch and the work-item builtins from <cccc/kernel.h>. Negative
 // cases live in tests/test_kernel_launch_*_error.c.
@@ -225,6 +224,79 @@ int test_range_from_expression(void) {
     cccc_range g      = CCCC_RANGE(n);
     cccc_launch(bump, g, ((cccc_range){1, {2}}), out);
     return out[0] == 1 && out[3] == 1 ? 42 : 1;
+}
+
+[[cccc::kernel]] static void late_kernel([[cccc::global]] int *out);
+
+[[cccc::test(return = 42)]]
+int test_kernel_defined_after_the_launch(void) {
+    int out[4] = {0};
+    cccc_launch(late_kernel, CCCC_RANGE(4), CCCC_RANGE(2), out);
+    return out[0] == 10 && out[3] == 13 ? 42 : 1;
+}
+
+[[cccc::kernel]] static void late_kernel([[cccc::global]] int *out) {
+    out[cccc_global_id(0)] = 10 + (int)cccc_global_id(0);
+}
+
+[[cccc::test(return = 42)]]
+int test_launches_in_a_loop(void) {
+    int out[4] = {0};
+    for (int i = 0; i < 5; i++)
+        cccc_launch(bump, CCCC_RANGE(4), CCCC_RANGE(2), out);
+    return out[0] == 5 && out[3] == 5 ? 42 : 1;
+}
+
+[[cccc::kernel]] static void zeroed_local([[cccc::global]] int *out) {
+    [[cccc::local]] int seen[2];
+    size_t              l         = cccc_local_id(0);
+    out[cccc_group_id(0) * 2 + l] = seen[l];
+    seen[l]                       = 99;
+}
+
+[[cccc::test(return = 42)]]
+int test_local_memory_starts_zeroed_in_every_group(void) {
+    int out[64] = {0};
+    for (int i = 0; i < 64; i++)
+        out[i] = -1;
+    cccc_launch(zeroed_local, CCCC_RANGE(64), CCCC_RANGE(2), out);
+    for (int i = 0; i < 64; i++)
+        if (out[i] != 0)
+            return 1;
+    return 42;
+}
+
+[[cccc::kernel]] static void both_locals([[cccc::global]] int *out,
+                                         [[cccc::local]] int  *scratch) {
+    [[cccc::local]] int fixed[4];
+    size_t              l = cccc_local_id(0), n = cccc_local_size(0);
+    fixed[l]   = (int)l;
+    scratch[l] = (int)(l * 10);
+    cccc_barrier(CCCC_LOCAL_FENCE);
+    out[cccc_global_id(0)] = fixed[n - 1 - l] + scratch[n - 1 - l];
+}
+
+[[cccc::test(return = 42)]]
+int test_object_and_parameter_local_memory_do_not_overlap(void) {
+    int out[8] = {0};
+    cccc_launch(both_locals, CCCC_RANGE(8), CCCC_RANGE(4), out,
+                CCCC_LOCAL(4 * sizeof(int)));
+    return out[0] == 33 && out[3] == 0 && out[4] == 33 && out[7] == 0 ? 42 : 1;
+}
+
+[[cccc::kernel]] static void second_barrier_group([[cccc::global]] int *out) {
+    [[cccc::local]] int shared;
+    if (cccc_local_id(0) == 0)
+        shared = (int)cccc_group_id(0) + 1;
+    cccc_barrier(CCCC_LOCAL_FENCE);
+    out[cccc_global_id(0)] = shared;
+}
+
+[[cccc::test(return = 42)]]
+int test_every_barrier_group_gets_its_own_local_memory(void) {
+    int out[12] = {0};
+    cccc_launch(second_barrier_group, CCCC_RANGE(12), CCCC_RANGE(3), out);
+    return out[0] == 1 && out[3] == 2 && out[6] == 3 && out[11] == 4 ? 42 : 1;
 }
 
 #pragma cccc suite end

@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // EXPECT_RUNTIME_ERROR
 // CCCC_EXPECT_STDERR: global range has 2 dimension\(s\), local range has 1
 #include <cccc/kernel.h>

@@ -1991,7 +1991,8 @@ struct Node {
     // without needing to inspect the call's syntactic origin.
     bool is_vla_alloca_call;
     bool is_explicit_cast; // ND_CAST written as `(T)expr` in source
-    bool is_kernel_local_arg; // CCCC_LOCAL(n) argument of cccc_launch
+    bool is_kernel_local_arg; // CCCC_LOCAL(n) argument of cccc_launch, or the
+                              // cast typing a [[cccc::local]] object's address
 
     // Goto or labeled statement, or labels-as-values
     char        *label;
@@ -2334,9 +2335,12 @@ struct Obj {
     bool is_pure;
     bool is_func_const;
     bool is_kernel;
+    bool is_kernel_thunk; // outlined cccc_launch body; a call to it serializes
+                          // as __cccc_kernel_launch (see parse_postfix.c)
     bool is_kernel_local_obj; // [[cccc::local]] object in a kernel entry's body,
                               // stored in work-group memory at kernel_local_off
     int  kernel_local_off;
+    int  kernel_local_id;     // per-TU number of the [[cccc::local]] object
     bool kernel_uses_barrier; // kernel entry (or a callee) calls cccc_barrier
     int  kernel_local_bytes;  // size of the entry's [[cccc::local]] objects
     bool may_return_null; // #688: function has a provable null-returning path
@@ -4306,6 +4310,11 @@ typedef struct Compiler {
     bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
                              // regions are outlined onto the thread pool
     bool     omp_used;       // a threaded OpenMP directive was lowered
+    bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
+    bool     kernel_used;    // a native kernel launch or builtin was lowered
+    bool     kernel_test_run;  // --test-run: its VM smoke phase cannot run a
+                               // native-lowered launch
+    int      kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
 
     // Inlining context (used during codegen when expanding inline bodies)
     char *inline_exit_name;  // Exit label name for inlined returns (NULL = not

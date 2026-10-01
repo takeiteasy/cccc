@@ -2501,6 +2501,11 @@ int main(int argc, const char *argv[]) {
         !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
     if (vm.compiler.omp_threaded)
         define_macro(&vm, "__CCCC_OMP_THREADED__", "1");
+    vm.compiler.kernel_native =
+        (compile_format == COMPILE_NATIVE ||
+         (dump_expanded_only && !emit_generated_only)) &&
+        !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
+    vm.compiler.kernel_test_run         = test_run_mode;
     vm.compiler.compile_only            = compile_only;
     vm.compiler.asm_passthru            = asm_passthru;
     vm.compiler.no_comptime             = no_comptime;

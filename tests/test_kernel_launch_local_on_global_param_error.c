@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: kernel launch runs in the VM only
 // EXPECT_COMPILE_ERROR
 // CCCC_EXPECT_STDERR: CCCC_LOCAL is only valid for a \[\[cccc::local\]\] pointer parameter
 #include <cccc/kernel.h>

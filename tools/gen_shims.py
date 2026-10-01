@@ -41,7 +41,7 @@ OUT_INC = REPO_ROOT / "src" / "shims.inc"
 GROUPS = [
     "native_accessor", "reallocarray", "threads", "uchar",
     "posix_compat", "canonical_const", "dlfcn", "c23_fromfp",
-    "wide_bitint", "omp",
+    "wide_bitint", "pool", "omp", "kernel",
 ]
 
 # #1123: most groups' source of truth is the untouched-by-any-compiler

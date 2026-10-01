@@ -1733,23 +1733,76 @@ static void omp_lock_usage(VirtualMachine *vm, Obj *prog, bool *any_lock,
     }
 }
 
-void serialize_omp_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+static bool omp_shims_needed(VirtualMachine *vm, Obj *prog) {
     if (!vm->compiler.omp_threaded || vm->compiler.emit_cccc)
-        return;
-
-    bool any_lock, any_nest, any_api = false;
+        return false;
+    bool any_lock, any_nest;
     omp_lock_usage(vm, prog, &any_lock, &any_nest);
+    if (vm->compiler.omp_used || any_lock || any_nest)
+        return true;
     for (Obj *obj = prog; obj; obj = obj->next)
         if (obj->is_function && obj->is_used && !obj->body &&
             !strncmp(obj->name, "omp_", 4))
-            any_api = true;
+            return true;
+    return false;
+}
 
-    if (!vm->compiler.omp_used && !any_api && !any_lock && !any_nest)
+// #1394: a launch or local object was lowered, or the program calls a
+// work-item builtin.
+static bool kernel_shims_needed(VirtualMachine *vm, Obj *prog) {
+    if (!vm->compiler.kernel_native || vm->compiler.emit_cccc)
+        return false;
+    if (vm->compiler.kernel_used)
+        return true;
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->is_used && !obj->body &&
+            is_kernel_builtin(obj->name))
+            return true;
+    return false;
+}
+
+// The OpenMP and kernel runtimes share one pool, emitted once.
+void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    bool omp    = omp_shims_needed(vm, prog);
+    bool kernel = kernel_shims_needed(vm, prog);
+    if (!omp && !kernel)
         return;
 
-    fprintf(f, "%s", CCCC_SHIM_omp_includes);
-    fprintf(f, "%s", CCCC_SHIM_omp_runtime);
-    fprintf(f, "%s", CCCC_SHIM_omp_api);
+    fprintf(f, "%s", CCCC_SHIM_pool_includes);
+    fprintf(f, "%s", CCCC_SHIM_pool_runtime);
+    if (omp) {
+        fprintf(f, "%s", CCCC_SHIM_omp_includes);
+        fprintf(f, "%s", CCCC_SHIM_omp_runtime);
+        fprintf(f, "%s", CCCC_SHIM_omp_api);
+    }
+    if (kernel) {
+        int max_group = vm->kernel_max_group > 0 ? vm->kernel_max_group : 256;
+        fprintf(f, "%s", CCCC_SHIM_kernel_includes);
+        fprintf(f, "#define __CCCC_KERNEL_MAX_GROUP %d\n", max_group);
+        fprintf(f, "%s", CCCC_SHIM_kernel_runtime);
+    }
+}
+
+// The kernel launcher finds a launched function's barrier use and local-memory
+// size here, which also tells it whether the function is a kernel at all. It
+// comes after every function so each kernel is declared.
+void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (!kernel_shims_needed(vm, prog))
+        return;
+    fprintf(f,
+            "static int __cccc_kernel_meta_find(void *fn, int *uses_barrier, "
+            "int *local_bytes) {\n");
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->is_kernel && obj->body)
+            fprintf(f,
+                    "    if (fn == (void *)%s) {\n"
+                    "        *uses_barrier = %d;\n"
+                    "        *local_bytes = %d;\n"
+                    "        return 1;\n"
+                    "    }\n",
+                    obj->name, obj->kernel_uses_barrier ? 1 : 0,
+                    obj->kernel_local_bytes);
+    fprintf(f, "    return 0;\n}\n");
 }
 
 // The lock functions take omp_lock_t, which the serializer emits next to the

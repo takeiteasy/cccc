@@ -1,8 +1,9 @@
 # Kernels
 
-Run a `[[cccc::kernel]]` function over a grid of work-items in the VM, the way
-a GPU runs it. The kernel sees ids, work-group local memory and barriers; the
-launch goes through the VM's bounds and safety checks.
+Run a `[[cccc::kernel]]` function over a grid of work-items, the way a GPU
+runs it. The kernel sees ids, work-group local memory and barriers. In the VM
+the launch goes through the bounds and safety checks; under `-c=native` and
+`-m` it runs on CPU threads with no GPU or vendor library.
 
 ```c
 #include <cccc/kernel.h>
@@ -40,9 +41,10 @@ and returns when every work-item has finished.
 Each global size must be a multiple of the matching local size. A launch with
 a bad range stops the program with an `error: cccc_launch:` message.
 
-Work-groups run one at a time, in order. A group's work-items are the only ones
-that run concurrently, and only when the kernel uses a barrier (see
-[Barriers](#barriers)).
+In the VM, work-groups run one at a time, in order. A group's work-items are
+the only ones that run concurrently, and only when the kernel uses a barrier
+(see [Barriers](#barriers)). [Native builds](#native-builds) run groups
+differently.
 
 A kernel called like an ordinary function, outside a launch, runs as a single
 work-item: every id is 0, every size is 1, and a barrier does nothing.
@@ -127,12 +129,36 @@ barrier does not hang.
 ## Group size
 
 A work-group may hold at most 256 work-items. Raise the limit with
-`--kernel-max-group-size=N`.
+`--kernel-max-group-size=N`; native builds bake the limit in at compile time.
+
+## Native builds
+
+`-c=native` and `-m` lower the launch and the builtins to plain C, so the same
+source runs on CPU threads. A program gives the same results as in the VM.
+
+| Kernel | How a native build runs it |
+|---|---|
+| No barrier | Work-groups run in parallel on the OpenMP thread pool; each pool thread loops over the work-items of a group |
+| Barrier | Work-groups run one at a time; each work-item of a group is its own thread |
+
+The pool has one thread per core. `OMP_NUM_THREADS` sets its size, as it does
+for [OpenMP](OPENMP.md). A launch from inside a `#pragma omp parallel` region
+runs its barrier-free groups on the calling thread.
+
+Arguments, ranges and group limits are checked as in the VM. A launch that
+breaks a range rule stops the program with the same `error: cccc_launch:`
+message and exit status 255.
+
+`--test-run` rejects `cccc_launch`; launch from a program built with
+`-c=native` or run under the VM instead.[^testrun]
 
 ## Limitations
 
-- The VM only: `-c=native`, `-m` and `-c=generated` reject launches and the
-  builtins ([#1394](https://todo.sr.ht/~takeiteasy/cccc/1394)).
+- `--test-run` rejects `cccc_launch`, because its VM smoke phase cannot run
+  the native lowering ([#1406](https://todo.sr.ht/~takeiteasy/cccc/1406)).
+- `-c=generated` has no kernel runtime.
+- A native barrier kernel creates and joins a thread per work-item for every
+  group ([#1385](https://todo.sr.ht/~takeiteasy/cccc/1385)).
 - Structs, unions and vectors as kernel arguments, and more than 8 integer or
   8 float arguments ([#1395](https://todo.sr.ht/~takeiteasy/cccc/1395)).
 - Id queries and local-memory accesses are host calls, and a barrier kernel
@@ -147,3 +173,7 @@ A work-group may hold at most 256 work-items. Raise the limit with
 
 [^threads]: The threads are ordinary VM threads under the global interpreter
     lock; the barrier releases the lock while a work-item waits.
+
+[^testrun]: `--test-run` runs the program in the VM and then compiles it
+    natively from the same parse. The native lowering of a launch is a call the
+    VM does not know how to run.
