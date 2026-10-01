@@ -7,6 +7,21 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-01
+
+- Added: `<cccc/kernel.h>` runs `[[cccc::kernel]]` functions over a grid of
+  work-items in the VM. `cccc_launch(kernel, CCCC_RANGE(...), CCCC_RANGE(...),
+  args...)` takes a kernel function or function pointer, and checks the
+  arguments like a call. See `man/KERNELS.md`.
+- Added: work-item builtins (`cccc_global_id`, `cccc_local_id`,
+  `cccc_group_id`, the size queries, `cccc_work_dim`) and `cccc_barrier`.
+- Added: `[[cccc::local]]` objects in a kernel body and `CCCC_LOCAL(bytes)`
+  parameters live in per-work-group memory, under the VM's bounds checks.
+- Added: `--kernel-max-group-size=N` (default 256).
+- Fixed: a thread that faulted was not reported by the thread runner.
+- Limitation: `-c=native` rejects the launch and builtins; kernel arguments
+  must be integers, pointers or floats (up to 8 of each kind).
+
 ## [0.3.2] - 2026-10-01
 
 - Fixed: `--sysroot` and `--use-system-headers` failed with "expected ','" on
