@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-01
+
+- Fixed: `--sysroot` and `--use-system-headers` failed with "expected ','" on
+  glibc 2.43 and newer.
+- Fixed: `BuildRoot()` returned a dangling pointer, so `DirExists` and
+  `FileExists` on it failed intermittently.
+
 ## [0.3.1] - 2026-09-30
 
 - Fixed: `defined(__has_c_attribute)`, `#ifdef __has_builtin` and the same
