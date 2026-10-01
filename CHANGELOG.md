@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-Wlogical-op` and `-Wtautological-compare` no longer fire inside
+  `#if`/`#elif` expressions, such as those in the bundled `<stddef.h>`.
+
 ## [0.7.1] - 2026-10-01
 
 - Fixed: a call to a single-return `static inline` function evaluated its

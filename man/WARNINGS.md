@@ -136,6 +136,8 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `shift-overflow` — warns when the shift amount equals or exceeds the promoted type's bit-width
 - `logical-op` — warns when a constant expression appears as an operand of `&&` or `||`
 - `tautological-compare` — warns on self-comparisons and unsigned range checks that are always true or false
+
+  Neither fires inside a preprocessor `#if`/`#elif` expression.
 - `sizeof-pointer-memaccess` — warns when `sizeof(pointer)` is passed as the size argument to `memset`, `memcpy`, `memmove`, or `memcmp`
 - `incompatible-pointer-types` — warns on implicit pointer assignments or argument passing where the pointee types are incompatible (excluding `void *`); part of `-Wall`
 - `cast-qual` — warns when an explicit cast removes `const`, `volatile`, or `restrict` from the pointed-to type

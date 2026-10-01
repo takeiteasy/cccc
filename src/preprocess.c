@@ -98,6 +98,7 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
+static long pp_const_expr(VirtualMachine *vm, Token **rest, Token *expr);
 static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok);
 static char *search_include_next(VirtualMachine *vm, char *filename, int start);
 
@@ -2238,9 +2239,20 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     convert_pp_tokens(vm, expr);
 
     Token *rest2;
-    long   val = const_expr(vm, &rest2, expr);
+    long   val = pp_const_expr(vm, &rest2, expr);
     if (rest2->kind != TK_EOF)
         error_tok(vm, rest2, "extra tokens after #if expression");
+    return val;
+}
+
+// The C semantic warnings (-Wlogical-op, -Wtautological-compare, ...) have
+// nothing to say about a preprocessor expression, whose operands are macro
+// values already expanded to constants.
+static long pp_const_expr(VirtualMachine *vm, Token **rest, Token *expr) {
+    uint64_t saved        = vm->compiler.warnings;
+    vm->compiler.warnings = 0;
+    long val              = const_expr(vm, rest, expr);
+    vm->compiler.warnings = saved;
     return val;
 }
 
@@ -3571,7 +3583,7 @@ static long eval_embed_limit_expr(VirtualMachine *vm, Token *start, Token *expr,
     convert_pp_tokens(vm, expr);
 
     Token *rest;
-    long   val = const_expr(vm, &rest, expr);
+    long   val = pp_const_expr(vm, &rest, expr);
     if (rest->kind != TK_EOF)
         error_tok(vm, rest, "extra tokens after #if expression");
     return val;
