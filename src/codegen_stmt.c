@@ -165,28 +165,11 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
         case ND_RETURN:
             reset_temp_regs();
-            if (vm->compiler.inline_exit_name) {
-                // Inlining mode: store result to the inline result register,
-                // then jump to the shared exit label. Skip LEV3.
-                if (node->lhs) {
-                    if (is_flonum(node->lhs->ty)) {
-                        gen_expr(vm, node->lhs, FREG_A0);
-                        emit_fmov3(vm, vm->compiler.inline_result_reg, FREG_A0);
-                    } else {
-                        gen_expr(vm, node->lhs, vm->compiler.inline_result_reg);
-                    }
-                }
-                emit(vm, JMP);
-                add_label_patch(vm->compiler.inline_exit_name,
-                                emit_word_ptr(vm), false);
-                return;
-            }
-
             // Tail-call optimisation: return f(args) → CALLT instead of
-            // CALL+LEV3. Guards: vm->compiler.tail_calls, not inlining,
+            // CALL+LEV3. Guards: vm->compiler.tail_calls,
             // predicate checks FFI/variadic/nested/etc. After gen_expr,
             // pending_tail_callee is set only if CALL was reached;
-            // inlining/builtins leave it NULL and we fall through to the
+            // builtins leave it NULL and we fall through to the
             // LEV3 path. expr_already_eval prevents re-evaluating node->lhs
             // in the LEV3 path below.
             //
@@ -235,7 +218,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                     vm->compiler.num_call_patches++;
                     return;
                 }
-                // Inlining/builtin handled the call; result already in
+                // A builtin handled the call; result already in
                 // tco_dest. Fall through to flush/restore/LEV3, but skip
                 // re-evaluating node->lhs.
                 expr_already_eval = true;

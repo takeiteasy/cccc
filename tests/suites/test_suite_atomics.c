@@ -221,4 +221,24 @@ int test_atomic_operand_with_call(void) {
     return 42;
 }
 
+// A static inline atomic helper must not clobber the caller's frame.
+static inline unsigned inline_bump(_Atomic unsigned *p) {
+    return atomic_fetch_add_explicit(p, 1u, memory_order_relaxed);
+}
+
+static void inline_bump_step(_Atomic unsigned *counters, int *out, unsigned i) {
+    inline_bump(&counters[i]);
+    out[i] = 7;
+}
+
+[[cccc::test(return = 42)]]
+int test_inline_atomic_helper_keeps_caller_frame(void) {
+    _Atomic unsigned counters[2] = {0, 0};
+    int              out[2]      = {0, 0};
+    inline_bump_step(counters, out, 1);
+    if (out[1] != 7 || atomic_load(&counters[1]) != 1)
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end

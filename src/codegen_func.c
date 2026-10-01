@@ -32,8 +32,6 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Reset cleanup scope stack for this function
     g_cleanup_scope = NULL;
 
-    // Reset inlining context for this function
-    vm->compiler.inline_exit_name = NULL;
     vm->compiler.ent3_extra_stack = 0;
 
     // Reset lazy frame-epoch tracking for this function (#703).
@@ -206,7 +204,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Generate function body
     gen_stmt(vm, fn->body);
 
-    // Patch ENT3 stack size if inlining added local variables
+    // Patch ENT3 stack size if scratch temporaries were allocated
     if (vm->compiler.ent3_extra_stack > 0) {
         int new_stack =
             vm->compiler.ent3_base_stack + vm->compiler.ent3_extra_stack;

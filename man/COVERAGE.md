@@ -123,7 +123,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | Flexible array members (`struct { int n; int arr[]; }`) | ✓ | |
 | Designated initialisers — structs and arrays | ✓ | |
 | Compound literals | ✓ | Postfix tails bind directly to the literal — `(struct P){30, 12}.x`, `(int[]){1,2,3}[0]`, and `((struct T *){p})->m` all parse (C99 6.5.2p5); `&` of a member through a literal serializes with the & bound inside the literal's initializer chain (#1102) | |
-| `inline` functions | ✓ | Dead-function elimination + single-return inlining of `static inline` callees (both unconditional). The VM has no optimiser, so there is no size-thresholded multi-statement inliner |
+| `inline` functions | ✓ | Unreferenced `static inline` functions are dropped; calls to the rest are ordinary calls. The VM has no inliner |
 | `restrict` pointers | ✓ | Parsed and stored on `Type`. The VM has no optimiser, so the non-aliasing property drives no codegen exploitation (the register deref cache and restrict memcpy-loop lowering were removed with the optimiser, #1214). Under `-c=native` the qualifier is serialized verbatim and the host cc acts on it |
 | Type qualifiers in array-parameter indices (`void f(int a[const static 10])`) | ✓ | `static` enforces minimum-size, emitting `-Wstatic-array-size` when a constant-size argument is too small (best-effort: bare pointer args not checked). `const`/`volatile`/`restrict` inside `[...]` are applied to the decayed pointer (e.g. `[const N]` → `int *const`); VLA-form qualifiers (`[const n]`) not yet adjusted. |
 | `__func__` predefined identifier | ✓ | |

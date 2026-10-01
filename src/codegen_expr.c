@@ -2888,31 +2888,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
 
-            // Static inline inlining opportunity
-            if (node->lhs->kind == ND_VAR && node->lhs->var->is_function) {
-                Obj *callee = node->lhs->var;
-                if (callee->is_inline && callee->is_static && callee->body &&
-                    callee->body->kind == ND_BLOCK) {
-                    Node *body_stmt = callee->body->body;
-
-                    // Fast path: single-return inlining (no exit label)
-                    if (body_stmt && !body_stmt->next &&
-                        body_stmt->kind == ND_RETURN && body_stmt->lhs &&
-                        !contains_self_call(body_stmt->lhs, callee)) {
-                        Type *ret_ty = body_stmt->lhs->ty;
-                        if (!(ret_ty && (ret_ty->kind == TY_STRUCT ||
-                                         ret_ty->kind == TY_UNION ||
-                                         is_wide_bitint(ret_ty)))) {
-                            reset_temp_regs();
-                            Node *inlined = clone_subst(
-                                vm, body_stmt->lhs, callee->params, node->args);
-                            gen_expr(vm, inlined, dest_reg);
-                            return;
-                        }
-                    }
-                }
-            }
-
             // Internal function call: evaluate arguments
             // For variadic functions, varargs (including doubles) go to integer
             // registers so ENT3 can spill them to stack for va_arg to read
@@ -3066,10 +3041,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // CRITICAL: If arg[i] contains a function call, it will clobber
             // REG_A0-A7. We must save any previous args before evaluating such
             // an arg. For nested function calls, reserve A0 for static link
-            int int_arg_idx = static_link_offset; // Start at 1 if calling
-                                                  // nested (A0 = static_link)
+            int  int_arg_idx = static_link_offset; // Start at 1 if calling
+                                                   // nested (A0 = static_link)
             int  float_arg_idx       = 0;
-            int  saved_int_count     = 0;         // How many int regs we saved
+            int  saved_int_count     = 0;          // How many int regs we saved
             int  saved_float_count   = 0; // How many float regs we saved
             bool float_arg_is_f32[8] = {0};
 

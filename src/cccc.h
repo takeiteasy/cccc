@@ -4324,11 +4324,6 @@ typedef struct Compiler {
                                // native-lowered launch
     int      kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
 
-    // Inlining context (used during codegen when expanding inline bodies)
-    char *inline_exit_name;  // Exit label name for inlined returns (NULL = not
-                             // inlining)
-    int   inline_result_reg; // Register for inlined return values
-
     // Tail-call context (used during codegen for return f(args) TCO)
     bool tail_calls;          // Emit CALLT for eligible return f(args). Always
                               // true after cc_init; deep-recursion correctness
@@ -4341,7 +4336,7 @@ typedef struct Compiler {
     // ENT3 stack patching for inlined locals
     Pc  ent3_stack_loc;   // PC of ENT3 stack_size low word (for patching)
     int ent3_base_stack;  // Original stack_size before inlining additions
-    int ent3_extra_stack; // Additional stack slots from inlined locals
+    int ent3_extra_stack; // Additional scratch stack slots
 
     // ENT3 masks patching for lazy frame-epoch activation (#703). Tracked
     // while generating one function's body: set by emit_lea3_var whenever it

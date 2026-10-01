@@ -697,4 +697,60 @@ int test_static_assert(void) {
     return 42; // Success
 }
 
+// [from #1393] single-return static inline callees pass arguments by value
+static inline int inline_sq(int x) {
+    return x * x;
+}
+
+static inline int inline_deref_inc(int *p) {
+    return *p + 1;
+}
+
+static inline int inline_addr_of_param(int x) {
+    return inline_deref_inc(&x);
+}
+
+static inline int inline_assign_param(int x) {
+    return (x = x + 1) * 2;
+}
+
+static inline int inline_stmt_expr_local(int a) {
+    return ({
+        int t = a * 2;
+        t;
+    });
+}
+
+[[cccc::test(return = 42)]]
+int test_inline_arg_evaluated_once(void) {
+    int i = 3;
+    int r = inline_sq(i++);
+    return (r == 9 && i == 4) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_inline_address_of_param(void) {
+    return inline_addr_of_param(41);
+}
+
+[[cccc::test(return = 42)]]
+int test_inline_assign_to_param(void) {
+    int y = 20;
+    int r = inline_assign_param(y);
+    return (y == 20 && r == 42) ? 42 : 1;
+}
+
+static void inline_stmt_expr_caller(int *o, int k, int *r) {
+    *r   = inline_stmt_expr_local(k);
+    o[k] = 7;
+}
+
+[[cccc::test(return = 42)]]
+int test_inline_stmt_expr_local_keeps_caller_frame(void) {
+    int o[3] = {0, 0, 0};
+    int r    = 0;
+    inline_stmt_expr_caller(o, 2, &r);
+    return (o[2] == 7 && r == 4) ? 42 : 1;
+}
+
 #pragma cccc suite end

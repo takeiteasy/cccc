@@ -124,7 +124,6 @@ bool block_capture_needs_mcpy(Type *ty);
 bool can_emit_tail_call(VirtualMachine *vm, Node *expr);
 bool cast_is_repr_noop(Type *to, Type *from);
 bool contains_funcall(Node *node);
-bool contains_self_call(Node *node, Obj *fn);
 bool emit_wide_helper(VirtualMachine *vm, const char *name, int nargs);
 bool is_extern_func_name(Node *node, const char *name);
 bool is_simple_local_scalar(VirtualMachine *vm, Node *node);
@@ -142,10 +141,8 @@ int fop_for_type(Type *ty, int f64_op);
 int gen_checked_nt_hi(VirtualMachine *vm, Node *deref);
 int gen_flonum_arg_to_scratch(VirtualMachine *vm, Node *arg);
 int temp_regs_free(void);
-int var_stack_slots(Obj *var);
 long long alloc_decimal_temp(VirtualMachine *vm, int bytes);
 long long alloc_wide_bitint_temp(VirtualMachine *vm, int words);
-Node *clone_subst(VirtualMachine *vm, Node *src, Obj *params, Node *args);
 Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target);
 Obj *find_static_link_var(Obj *fn);
 int static_link_hop_bytes(VirtualMachine *vm);
@@ -249,7 +246,6 @@ void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
 void gen_zero_size_arg(VirtualMachine *vm, Node *arg, int dest_reg);
 void mark_temp_reg_used(int reg);
 void patch_labels(VirtualMachine *vm);
-void replace_locals_in_ast(Node *node, Obj **orig, Obj **map, int count);
 void reset_labels(void);
 void reset_temp_regs(void);
 
