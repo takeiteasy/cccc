@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-01
+
+- Fixed: the macOS release job failed on flaky tests. The SIGCHLD siginfo and
+  aio submission tests in `test_suite_posix.c` are skipped on macOS.
+
 ## [0.4.0] - 2026-10-01
 
 - Added: `<cccc/kernel.h>` runs `[[cccc::kernel]]` functions over a grid of
