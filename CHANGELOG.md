@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-02
+
+- Fixed: a `#pragma omp` inside a function body in an emit block no longer
+  fails to compile. It now builds an OpenMP region, as it would in ordinary
+  source, and is still kept in the emitted output.
 - Fixed: `-Wunused` no longer reports a function label as unused when its only
   `goto` is spliced in from a `Quote()`/`QuoteLazy()` template.
 
