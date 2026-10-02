@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-Wunused` no longer reports a function label as unused when its only
+  `goto` is spliced in from a `Quote()`/`QuoteLazy()` template.
+
 ## [0.7.2] - 2026-10-01
 
 - Fixed: `-c=generated` no longer copies `#pragma omp` lines, `#include <omp.h>`

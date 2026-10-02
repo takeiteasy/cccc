@@ -192,18 +192,57 @@ bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
 // We cannot resolve gotos as we parse a function because gotos
 // can refer a label that appears later in the function.
 // So, we need to do this after we parse the entire function.
-static void resolve_goto_labels(VirtualMachine *vm) {
+//
+// #1255: a label whose only goto comes from a Quote()/QuoteLazy() template is
+// not bound until cc_resolve_body_label_refs() runs after macro expansion, so
+// when comptime macros exist (`defer_unused`) the "unused label" warning is
+// queued for cc_flush_deferred_unused_labels() instead of emitted here.
+struct DeferredUnusedLabel {
+    Node                       *label;
+    struct DeferredUnusedLabel *next;
+};
+
+static void resolve_goto_labels(VirtualMachine *vm, bool defer_unused) {
     cc_match_goto_labels(vm, vm->compiler.gotos, NULL, vm->compiler.labels,
                          NULL,
                          /*set_cleanup_depth=*/true,
                          /*diagnose_undeclared=*/true);
 
-    for (Node *label = vm->compiler.labels; label; label = label->goto_next)
-        if (!label->label_used && !label->label_maybe_unused)
-            warn_tok(vm, label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
-                     label->label);
+    for (Node *label = vm->compiler.labels; label; label = label->goto_next) {
+        if (label->label_used || label->label_maybe_unused)
+            continue;
+        if (defer_unused) {
+            struct DeferredUnusedLabel *d =
+                arena_alloc(&vm->compiler.parser_arena,
+                            sizeof(struct DeferredUnusedLabel));
+            d->label = label;
+            d->next  = vm->compiler.deferred_unused_labels;
+            vm->compiler.deferred_unused_labels = d;
+            continue;
+        }
+        warn_tok(vm, label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
+                 label->label);
+    }
 
     vm->compiler.gotos = vm->compiler.labels = NULL;
+}
+
+void cc_flush_deferred_unused_labels(VirtualMachine *vm) {
+    // The list is newest-first; reverse it so warnings come out in source
+    // order, as they would have at parse time.
+    struct DeferredUnusedLabel *rev = NULL;
+    for (struct DeferredUnusedLabel *d = vm->compiler.deferred_unused_labels,
+                                    *next;
+         d; d = next) {
+        next    = d->next;
+        d->next = rev;
+        rev     = d;
+    }
+    vm->compiler.deferred_unused_labels = NULL;
+    for (struct DeferredUnusedLabel *d = rev; d; d = d->next)
+        if (!d->label->label_used)
+            warn_tok(vm, d->label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
+                     d->label->label);
 }
 
 static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
@@ -829,7 +868,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                                    close_brace ? close_brace : ty->name);
             fn->locals = vm->compiler.locals;
             leave_scope(vm);
-            resolve_goto_labels(vm);
+            // Diagnostics here are rolled back below; nothing to defer.
+            resolve_goto_labels(vm, /*defer_unused=*/false);
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body);
             propagate_checked_bounds(vm, fn);
@@ -932,7 +972,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
         fn->locals = vm->compiler.locals;
         leave_scope(vm);
-        resolve_goto_labels(vm);
+        resolve_goto_labels(vm, vm->compiler.macro_fns != NULL);
         resolve_objsize_queries(vm, fn->body);
         mark_addr_escapes(fn->body);
         // #919: any nested function textually inside `fn` has already run

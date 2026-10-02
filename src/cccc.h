@@ -3999,6 +3999,9 @@ typedef struct Compiler {
                            // compiles pay no extra overhead
     Node *gotos;           // Goto statements in current function
     Node *labels;          // Labels in current function
+    struct DeferredUnusedLabel
+        *deferred_unused_labels; // #1255: "unused label" candidates held
+                                 // until cc_flush_deferred_unused_labels()
     struct ObjSizeQuery
         *objsize_queries;  // Pending __builtin_object_size(ptr,...)
                            // queries on malloc-tracked pointers in current
@@ -5181,6 +5184,17 @@ bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
              ref is a hard "use of undeclared label" error. Idempotent.
 */
 void cc_resolve_body_label_refs(VirtualMachine *vm, Obj *fn);
+
+/*!
+ @brief Emit the -Wunused "unused label" warnings deferred by
+             resolve_goto_labels() (#1255).
+ @details When comptime macros are present, a host label's only goto may be
+             spliced in from a Quote()/QuoteLazy() template and bound by
+             cc_resolve_body_label_refs() after parsing. Call this once every
+             such binding has run (end of cc_expand_macros); it warns only for
+             labels still unused, then clears the list.
+*/
+void cc_flush_deferred_unused_labels(VirtualMachine *vm);
 
 int64_t cc_eval(VirtualMachine *vm, Node *node);
 double cc_eval_double(VirtualMachine *vm, Node *node);

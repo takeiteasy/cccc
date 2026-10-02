@@ -1805,9 +1805,9 @@ labels are **hygienic** — private to that template:
 A still-unresolved label reference reaching code generation is an internal
 error, not silently-wrong code.
 
-`-Wunused` runs before templates are expanded, so a function label whose only
-`goto` comes from a spliced template is reported as unused; annotate it
-(`done: __attribute__((unused));`) if you compile with that warning on.
+A function label whose only `goto` comes from a spliced template counts as
+used: `-Wunused` decides "unused label" only after templates are expanded and
+their free references bound.
 
 ## Type And Symbol Reflection
 
