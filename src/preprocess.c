@@ -6084,6 +6084,32 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     tok = handle_pragma_body(vm, tok->next->next);
                     continue;
                 }
+                // A `#pragma omp` inside a function body is a statement,
+                // not a file-scope directive: splice it to `__cccc_omp(...)`
+                // (or drop it without -fopenmp) exactly as in ordinary
+                // source, rather than hoisting it as an emit marker that
+                // would land a __builtin_emit_line__ call in the body. The
+                // raw line is still recorded so serialized output keeps it.
+                if (brace_depth > 0 && is_pragma_omp(start)) {
+                    cc_record_emit_source(vm,
+                                          copy_raw_directive_line(vm, start));
+                    Token *after = start->next->next;
+                    while (after->kind != TK_EOF && !after->at_bol)
+                        after = after->next;
+                    tok          = handle_pragma_body(vm, start->next->next);
+                    while (tok != after) {
+                        tok->line_delta    = tok->file->line_delta;
+                        tok->filename      = tok->file->display_name;
+                        tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
+                        tok->diag_werror =
+                            (1ULL << 63) | vm->compiler.warning_errors;
+                        tok->pack_align    = vm->compiler.pack_cur;
+                        tok->checked_scope = checked_scope_for_stamp(vm, tok);
+                        cur = cur->next = tok;
+                        tok             = tok->next;
+                    }
+                    continue;
+                }
                 {
                     Token *route_start = start->next->next;
                     Token *route_after = route_start;
