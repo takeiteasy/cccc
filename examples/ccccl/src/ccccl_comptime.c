@@ -18,7 +18,7 @@
  *       -o build/append.gen.c
  *
  * `-D` rather than a source `#define` for the input path: comptime bodies
- * do not see ordinary source `#define`s (see man/MACROS.md's
+ * do not see ordinary source `#define`s (see docs/MACROS.md's
  * include-scoping section).
  *
  * `examples/NAME_main.c` (with `main()`) is never passed to cccc at all:

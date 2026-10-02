@@ -5,7 +5,7 @@
 // always parsed before MakeWhile ever runs and assigns the loop's labels.
 // WithLoop(loop) { LoopSetBody(loop, Quote(...)); } instead builds the
 // (bodyless) loop node first, pushes its labels, and only then parses the
-// eager Quote() -- see man/MACROS.md, "Deferred templates with QuoteLazy".
+// eager Quote() -- see docs/MACROS.md, "Deferred templates with QuoteLazy".
 
 [[cccc::comptime]]
 void gen(void) {

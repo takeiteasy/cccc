@@ -20,7 +20,7 @@
 /*!
  * @file kernel.h
  * @brief Work-item builtins and the launch builtin for [[cccc::kernel]]
- * functions. See man/KERNELS.md.
+ * functions. See docs/KERNELS.md.
  */
 
 #ifndef CCCC_KERNEL_H

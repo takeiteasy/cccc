@@ -2530,7 +2530,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
                 // to which runtime helper a use of this type calls
                 // (serialize_expr.c). #1121 previously hard-errored here
                 // ("exceeds 128 bits, which has no native/-m lowering"); see
-                // man/NATIVE.md for the divergence from clang's/gcc's own
+                // docs/NATIVE.md for the divergence from clang's/gcc's own
                 // native _BitInt(N>128), which is unsupported at all widths
                 // this large by clang and layout-incompatible (align 16 vs
                 // this project's align 8, #1135) even where gcc accepts it.
@@ -3079,7 +3079,7 @@ TypeName *find_generated_uncaptured_typedef(SerializeContext *ctx, Type *ty) {
 // output either). stdarg.h's va_list and setjmp.h's jmp_buf specifically
 // use the *opposite* strategy from an ordinary from_include type: CCCC's
 // own layout is deliberately widened to cover every supported host's real
-// one (see their own man/NATIVE.md entries), so the *guest-folded*
+// one (see their own docs/NATIVE.md entries), so the *guest-folded*
 // sizeof/_Alignof is already a safe, correct-by-construction upper bound
 // on purpose -- re-materializing the operator would replace that safe
 // padded literal with whatever the real host's own (possibly smaller, via
@@ -3279,7 +3279,7 @@ static bool type_contains_compiler_owned_layout(SerializeContext *ctx, Type *ty,
 //     (include/sys/stat.h, signal.h, fts.h, aio.h, mqueue.h, ndbm.h --
 //     same trap serialize_static_assert()'s own doc comment warns about);
 //     re-deriving a second, unconditional guard here would duplicate or
-//     conflict with those. Documented residual, man/NATIVE.md.
+//     conflict with those. Documented residual, docs/NATIVE.md.
 //   - No name to write the assert with at all (neither tag nor alias).
 //   - type_layout_is_host_owned(): `ty` defers to the host's own real
 //     layout already (an ordinary from_include struct/union/enum) -- no

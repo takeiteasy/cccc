@@ -192,7 +192,7 @@ def object_has_watched_symbol(obj: Path):
 
 
 # build.c's own add_cccc_flags_opt() hardcodes -std=c23, but that's only
-# ever exercised under CCCC_BUILD_CC=clang on Linux CI (man/TESTING.md) --
+# ever exercised under CCCC_BUILD_CC=clang on Linux CI (docs/TESTING.md) --
 # this script runs standalone against whatever real gcc happens to be on
 # PATH, including older ones (e.g. Ubuntu 24.04's gcc-13) that reject
 # -std=c23 outright and need the pre-c23 spelling instead. The inline

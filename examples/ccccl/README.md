@@ -124,7 +124,7 @@ cccc -c=generated src/ccccl_comptime.c src/ccccl_ir.c src/ccccl_form.c \
 ```
 
 - `-D` rather than a source `#define` for the input path: comptime function
-  bodies do not see ordinary source `#define`s (see `man/MACROS.md`'s
+  bodies do not see ordinary source `#define`s (see `docs/MACROS.md`'s
   include-scoping section).
 - `examples/append_main.c` (with `main()`) is never passed to `cccc` at
   all — `-c=generated` only serializes macro-touched content. It is
@@ -252,7 +252,7 @@ A **non**-self-tail call — `append` calling itself inside `cons`, or
 `evenp`/`oddp` calling each other in `examples/mutual.lisp` — still compiles
 to an ordinary recursive C call. cccc's own native-backend tail-call
 elimination (`CALLT`) may or may not kick in there depending on the host
-compiler's optimization level (see `man/NATIVE.md`'s serialized-output
+compiler's optimization level (see `docs/NATIVE.md`'s serialized-output
 divergences); `ccccl`'s own TCO above is unconditional and guaranteed only
 for the direct self-tail case.
 

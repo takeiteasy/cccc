@@ -27,7 +27,7 @@
 // guest-side against CCCC's own ~56-byte projection and stay that way in
 // -c=native's emitted C, so the malloc() below undersized the buffer for
 // the real host statfs()/fstatfs() (~2100 bytes on macOS) -- this test's
-// own canary is what caught it (see man/HEADERS.md's writeup for the
+// own canary is what caught it (see docs/HEADERS.md's writeup for the
 // general fix: type_layout_is_host_owned()/serialize_expr's ND_NUM case,
 // src/serialize.c). include/sys/mount.h also needed a real
 // #ifdef __CCCC__ / #include_next hand-off to the real host header

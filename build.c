@@ -1067,7 +1067,7 @@ BuildTarget *linux_aarch64_test(Builder *ctx) {
 
 // MSan build + full in-container test run (Makefile:523-526). Expected to
 // report failures: an uninstrumented libc/libffi MSan blind spot
-// (documented in man/TESTING.md, #844) accounts for ~262/700 of them --
+// (documented in docs/TESTING.md, #844) accounts for ~262/700 of them --
 // not a regression on its own, compare against that documented baseline.
 [[cccc::build_target]]
 BuildTarget *linux_amd64_msan_test(Builder *ctx) {

@@ -36,7 +36,7 @@
 // #1143 regression, found while adding native-corpus coverage for #1129/
 // #1130: this fix's own -idirafter demotion swept in two headers that were
 // never meant to hand off at all -- math.h/float.h (zero #include_next in
-// either, documented in man/HEADERS.md as complete, self-contained
+// either, documented in docs/HEADERS.md as complete, self-contained
 // polyfills) and unistd.h (also zero #include_next; its own bundled copy
 // declares mkstemp as a same-directory convenience, matching macOS/BSD,
 // but real glibc puts mkstemp in <stdlib.h> instead). Both regressed to

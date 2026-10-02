@@ -407,7 +407,7 @@ static inline bool is_name_char(wchar_t c) {
  * command's `&&`/`||`/`;` structure is even parsed. Unlike a real shell,
  * `false && $(cmd)` still runs `cmd`. This matches how $VAR already
  * expands unconditionally and keeps the change small; documented as a
- * known limitation in man/BUILD_MODE.md. */
+ * known limitation in docs/BUILD_MODE.md. */
 static bool expand_cmd_subst(shell_lexer_t *l, word_buf_t *out) {
     advance(l); /* consume '(' */
 
@@ -540,7 +540,7 @@ static bool expand_var(shell_lexer_t *l, word_buf_t *out) {
 
 /* Reads one shell word, performing quote removal, backslash escaping and
  * $VAR/${VAR} expansion as it goes (see the module-level RunCustom grammar
- * notes in man/BUILD_MODE.md). Unlike the old raw-slice reader, the decoded
+ * notes in docs/BUILD_MODE.md). Unlike the old raw-slice reader, the decoded
  * content can differ in length from the source text, so the returned token
  * always owns a heap buffer (`owned = true`). */
 static shell_token_t read_word(shell_lexer_t *l) {

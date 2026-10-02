@@ -66,7 +66,7 @@
 
 #define PP_1319_HAS_ATTR(a) __has_attribute(a)
 // unused/deprecated is portable enough to be a reliable "supported" probe
-// across every compiler CCCC's own __has_attribute table backs (man/
+// across every compiler CCCC's own __has_attribute table backs (docs/
 // ATTRIBUTES.md); this file only needs *a* case that reaches 1, not this
 // exact one.
 #if PP_1319_HAS_ATTR(unused)

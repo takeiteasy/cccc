@@ -18,36 +18,7 @@ surface is lowered (or refused) under `-c=native` lives in
 
 ## Runtime Threading
 
-POSIX `<pthread.h>` is partially supported on POSIX hosts through VM-managed
-pthread handles backed by host pthreads. VM bytecode execution is serialized by
-a recursive global interpreter lock, while blocking pthread calls such as
-`pthread_join`, `pthread_mutex_lock`, and `pthread_cond_wait` release the GIL.
-This provides pthread correctness and blocking/wakeup semantics, not parallel
-bytecode execution.
-
-C11 `<threads.h>` and language thread-local storage are fully implemented.
-Real atomic operations via `<stdatomic.h>` macros use atomic-tagged opcodes and
-runtime mixed-access detection, tracked separately from the POSIX pthread layer.
-
-`<pthread.h>` also round-trips under `-c=native`/`-m`/`-c=generated`: `include/
-pthread.h` hands off to the real host `<pthread.h>` (#1022), so the compiled
-binary calls real host pthread functions directly with no VM/FFI layer in
-between — see [Serialized-output divergences](NATIVE.md#serialized-output-divergences)
-and [man/HEADERS.md](HEADERS.md) for the header-hand-off mechanics.
-Thread-local storage (`_Thread_local`/`__thread`) is also emitted correctly
-in serialized output. `<threads.h>` (C11 `thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/
-`call_once`) round-trips under `-c=native` too (#1088) — unlike `<pthread.h>`,
-this is *not* a `#include_next` hand-off onto a real host `<threads.h>`:
-CCCC's own `thrd_error`/`thrd_timedout`/`thrd_busy`/`thrd_nomem` encoding
-doesn't match glibc's, and Darwin has no `<threads.h>` at all. Instead a
-self-contained shim (`serialize_threads_shims`, `src/serialize_shims.c`) defines
-`thrd_*`/`mtx_*`/`cnd_*`/`tss_*`/`call_once` directly over the real host
-`<pthread.h>` that's already replayed — the host's own `<threads.h>` is
-never consulted on either platform, so both macOS and Linux round-trip from
-one change. `call_once` is a real function on both back ends now, not the
-guest-side macro it used to be (safe only under the VM's own GIL) — see
-[Serialized-output divergences](NATIVE.md#serialized-output-divergences) for the
-shim's shape and its residual gaps.
+See [THREADING.md](THREADING.md). Per-feature rows are below and in [STDLIB.md](STDLIB.md).
 
 ---
 

@@ -27,7 +27,7 @@ def detect_native_cc_family(cc=None):
 
     #1186: the axis that decides whether a NATIVE_SKIP_TESTS entry is stale
     turned out to be compiler *family*, not GCC version or host platform --
-    see man/TESTING.md's "Native round-trip mode" section. `cc -dM -E -`
+    see docs/TESTING.md's "Native round-trip mode" section. `cc -dM -E -`
     (an empty translation unit, just dumping predefined macros) is the
     standard portable way to ask a compiler what it is: clang defines
     __clang__, plain gcc does not. Cached per `cc` value -- this runs once

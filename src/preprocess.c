@@ -767,7 +767,7 @@ bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm, const char *dir) {
 // copy) -- but it demotes the *whole* -I/-isystem entry the instant it
 // resolves ANY std header from it, sweeping in headers that were never
 // meant to hand off at all (math.h/float.h: zero #include_next in either
-// file, documented in man/HEADERS.md as complete, self-contained
+// file, documented in docs/HEADERS.md as complete, self-contained
 // polyfills). Once demoted, a replayed `#include <math.h>` reaches the
 // real host's math.h instead, which doesn't declare the C23 IEEE family
 // (fmaximum/setpayload/etc) the way CCCC's bundled copy unconditionally
@@ -2284,7 +2284,7 @@ static Macro *find_macro(VirtualMachine *vm, Token *tok) {
 // to tell a genuinely undefined identifier apart from one that's only
 // invisible because isolate_comptime_macros stripped it before the comptime
 // preprocess/parse (source-file #defines are never forwarded into comptime
-// bodies -- see man/MACROS.md). Looks the name up in the pre-isolation
+// bodies -- see docs/MACROS.md). Looks the name up in the pre-isolation
 // snapshot taken by compile_macro_program (macro_snapshot_backup), which
 // stays populated for the lifetime of that compile. define_tok is non-NULL
 // only for a #define with a real source site (NULL for CCCC builtins and
@@ -2848,7 +2848,7 @@ static char *resolve_embedded_relative_header(VirtualMachine *vm,
 // deliberately use the opposite strategy from an ordinary from_include
 // type (widen CCCC's own layout to cover every supported host's real one,
 // so the *guest-folded* constant stays a safe upper bound on purpose --
-// see their own man/NATIVE.md entries) -- re-materializing the operator
+// see their own docs/NATIVE.md entries) -- re-materializing the operator
 // for them would defeat that, replacing the safe padded literal with
 // whatever the real host's own (possibly smaller, via the header's own
 // #include_next hand-off) va_list/jmp_buf size happens to be.
@@ -2872,7 +2872,7 @@ bool is_compiler_owned_header(const char *name) {
 // with no standard name to collide with in the first place (decimal_math.h,
 // gated on CCCC_HAS_DECIMAL and declaring VM-only __cccc_dec_* symbols).
 // `-c=native`/`-m`/`-c=generated` auto-capture a plain #include and replay
-// it verbatim into the generated C (see man/HEADERS.md) -- correct for a
+// it verbatim into the generated C (see docs/HEADERS.md) -- correct for a
 // header the host is expected to have, but for one of these it produces an
 // unresolvable "file not found" from the downstream compiler even though
 // CCCC itself compiled the program fine. The PP_INCLUDE handler below marks
@@ -2910,7 +2910,7 @@ static bool is_cccc_supplied_only_header(const char *name) {
 
 // Whether CCCC's own copy of a standard header — the embedded src/std.c
 // table (tried by the PP_INCLUDE handler before ever calling this function;
-// see man/HEADERS.md) or the on-disk builtin_include_dir fallback below —
+// see docs/HEADERS.md) or the on-disk builtin_include_dir fallback below —
 // should be considered at all for this header name: always for owned
 // headers (no valid SDK substitute exists for them), and for other known-std
 // headers unless --no-builtin-includes was passed (which asks to fail
@@ -2999,7 +2999,7 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
     // CCCC's own bundled headers, on disk. This is a fallback only — the
     // PP_INCLUDE handler tries the embedded src/std.c table first, which
     // covers standard headers without touching the filesystem at all (see
-    // man/HEADERS.md). This path still matters for: a stage0 build linked
+    // docs/HEADERS.md). This path still matters for: a stage0 build linked
     // against src/std_stub.c (embeds nothing, so the embedded lookup always
     // misses); the three private headers (reflection.h/testing.h/building.h,
     // via tokenize_private_header) on a stage0 build; and as a safety net if
@@ -5933,7 +5933,7 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             // #485: #pragma cccc checked/unchecked begin|end -- a positional
             // TU default, deliberately NOT a `config()` option: config() is
             // resolved for the whole file before parsing begins (see
-            // man/SAFETY.md's checked_pointers section), so it has no
+            // docs/SAFETY.md's checked_pointers section), so it has no
             // lexical position and could never express a region. Modelled
             // on the `suite begin`/`suite end` shape just above.
             bool   is_checked = equal(sub, "checked");
@@ -6082,6 +6082,32 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (is_hash(start)) {
                 if (is_pragma_cccc(start)) {
                     tok = handle_pragma_body(vm, tok->next->next);
+                    continue;
+                }
+                // A `#pragma omp` inside a function body is a statement,
+                // not a file-scope directive: splice it to `__cccc_omp(...)`
+                // (or drop it without -fopenmp) exactly as in ordinary
+                // source, rather than hoisting it as an emit marker that
+                // would land a __builtin_emit_line__ call in the body. The
+                // raw line is still recorded so serialized output keeps it.
+                if (brace_depth > 0 && is_pragma_omp(start)) {
+                    cc_record_emit_source(vm,
+                                          copy_raw_directive_line(vm, start));
+                    Token *after = start->next->next;
+                    while (after->kind != TK_EOF && !after->at_bol)
+                        after = after->next;
+                    tok          = handle_pragma_body(vm, start->next->next);
+                    while (tok != after) {
+                        tok->line_delta    = tok->file->line_delta;
+                        tok->filename      = tok->file->display_name;
+                        tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
+                        tok->diag_werror =
+                            (1ULL << 63) | vm->compiler.warning_errors;
+                        tok->pack_align    = vm->compiler.pack_cur;
+                        tok->checked_scope = checked_scope_for_stamp(vm, tok);
+                        cur = cur->next = tok;
+                        tok             = tok->next;
+                    }
                     continue;
                 }
                 {
@@ -6461,7 +6487,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
         // own, now-per-TU (#1001) macro state; the replayed text exists only to
         // bring types/library declarations into scope for the host compiler, so
         // a colliding #define is at worst a host redefinition warning, not a
-        // semantic change. See man/HEADERS.md.
+        // semantic change. See docs/HEADERS.md.
         char *ac_include_line = NULL; // #896: set below when this directive
                                       // is a captured #include that got
                                       // auto-captured, so the PP_INCLUDE

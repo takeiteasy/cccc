@@ -13,7 +13,7 @@
  * tokenizer parses `__attribute__` as a builtin construct itself, so the
  * macro only matters for the user's own system-header text. Under
  * -c=native, run_native_backend() forwards -I./include to the real host cc
- * verbatim (like any other non-owned header, see man/HEADERS.md), and a
+ * verbatim (like any other non-owned header, see docs/HEADERS.md), and a
  * *real* preprocessor -- unlike CCCC's own tokenizer -- keeps that empty
  * macro live for the rest of the translation unit: once a real SDK header
  * chain (e.g. <stdio.h> -> sys/cdefs.h -> this file) pulls it in, every

@@ -673,7 +673,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // Accepted cost: a genuinely-uninitialized address-taken
                     // local is no longer caught here. Deliberately does not
                     // affect CHKL/MARKR above/below (CCCC_STACK_INSTR is an
-                    // unrelated feature). See man/SAFETY.md.
+                    // unrelated feature). See docs/SAFETY.md.
                     if ((vm->flags & CCCC_UNINIT_DETECTION) &&
                         !node->var->addr_taken && !node->var->is_captured &&
                         !node->var->is_block_var)
