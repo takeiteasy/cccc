@@ -3870,6 +3870,10 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         fn->locals = vm->compiler.locals;
     }
 
+    // #1255: every template-spliced `goto host_label` is bound now, so the
+    // "unused label" warnings resolve_goto_labels() deferred can be decided.
+    cc_flush_deferred_unused_labels(vm);
+
     // Clear locals so a stray new_lvar in a global-init comptime context
     // cannot silently attach to the last function's frame.
     vm->compiler.locals     = NULL;
