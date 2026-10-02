@@ -10,7 +10,7 @@
 /* #1152: see include/errno.h's matching comment -- this exact file is also
  * what a native/generated re-emission's replayed `#include <dlfcn.h>`
  * resolves to when a caller passes `-I` at CCCC's own bundled include dir
- * (tools/testing/native.py does exactly this; see man/HEADERS.md's "Passing
+ * (tools/testing/native.py does exactly this; see docs/HEADERS.md's "Passing
  * -I at CCCC's own bundled headers" section), but a real host compiler
  * reprocessing the CCCC-flavored content below has never heard of the
  * __CCCC_RTLD_*__ macros init_dlfcn_macros() (src/preprocess.c) injects.
@@ -41,7 +41,7 @@
  * RTLD_SELF/RTLD_MAIN_ONLY). cccc_rt_dlsym (src/vm.c) resolves its handle
  * argument through the VM's own dynamic-library registry, not a raw host
  * handle, so a pseudo-handle would behave differently between the VM and
- * -c=native -- see man/STDLIB.md's <dlfcn.h> entry. */
+ * -c=native -- see docs/STDLIB.md's <dlfcn.h> entry. */
 #define RTLD_LAZY   __CCCC_RTLD_LAZY__
 #define RTLD_NOW    __CCCC_RTLD_NOW__
 #define RTLD_LOCAL  __CCCC_RTLD_LOCAL__

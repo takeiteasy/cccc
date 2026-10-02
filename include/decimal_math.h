@@ -183,7 +183,7 @@ extern long long __cccc_dec_mathp(long long op, long long w, long long dst,
  * its address is a valid outp for the shared long-long-typed entry point.
  * That means the write only ever touches e's low 4 bytes, and `(int)e`
  * below only ever reads them back -- correct on the little-endian targets
- * this project builds for (aarch64/x86_64, per man/COVERAGE.md), not
+ * this project builds for (aarch64/x86_64, per docs/COVERAGE.md), not
  * portable to a big-endian host without widening the write. */
 #define __CCCC_DECM_FREXP(FN, TY, W)                                           \
     static inline TY FN(TY x, int *exp) {                                      \

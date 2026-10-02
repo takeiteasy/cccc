@@ -4,7 +4,7 @@
 // call's actual argument for `n` is not side-effect-free, the caller-side
 // check is silently declined rather than emitted -- emitting it would
 // re-evaluate a side-effecting expression an extra time, which
-// man/SAFETY.md already establishes is unacceptable for the identical
+// docs/SAFETY.md already establishes is unacceptable for the identical
 // reason on the member-bounds side (f()->p[i]). Uses
 // node_has_side_effects(), not checked_obj_is_trivial() (which has no
 // ND_NUM arm and would wrongly decline a bare integer literal -- see

@@ -757,7 +757,7 @@ Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
 
 // Side-effect check for a checked-pointer bounds expression (#770/#483):
 // bounds are re-evaluated at every checked access a checked pointer
-// participates in (see the design note in man/SAFETY.md), so an expression
+// participates in (see the design note in docs/SAFETY.md), so an expression
 // with side effects would run once per access rather than once -- e.g.
 // count(i++) would increment i on every dereference, not once. Recurses
 // through every expression-level node kind reachable from assign()'s

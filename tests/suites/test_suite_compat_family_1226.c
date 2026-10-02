@@ -11,7 +11,7 @@
 // readings directly.
 //
 // Every value here was measured against gcc-16 and clang (macOS aarch64,
-// -std=c11). See man/TYPES.md.
+// -std=c11). See docs/TYPES.md.
 
 typedef _Atomic int ai_t;
 typedef volatile int vf_ret_t(void);

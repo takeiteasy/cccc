@@ -5,7 +5,7 @@
 // `_Atomic`, an array element's `_Atomic`, and a function type's own
 // return-type cvr qualifiers as significant -- the numbers a stock clang
 // install produces. Every value verified against clang (macOS aarch64,
-// -std=c11). See man/TYPES.md.
+// -std=c11). See docs/TYPES.md.
 
 typedef volatile int vf_ret_t(void);
 typedef int plain_ret_t(void);

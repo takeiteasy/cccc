@@ -1149,7 +1149,7 @@ int test_fp_minimal(void) {
 // member address into dest_reg and then loads through the same register.
 // For a flonum member dest_reg is a float register, and FREG_A0-A7 alias
 // REG_A0-A7 by raw index -- these guard the refactor that routes the
-// address through a separate temp register (see man/VM.md's calling
+// address through a separate temp register (see docs/VM.md's calling
 // convention section and ND_VAR's flonum branch in src/codegen.c).
 struct FM_Point {
     double x, y;

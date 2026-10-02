@@ -420,7 +420,7 @@ void test_ntarray_long_double_terminator_not_guarded(void) {
 // CHKNTZ only ever sees a whole-object store through the pointer itself
 // (an ND_DEREF lvalue); a member-wise write into the same slot stores
 // through an ND_MEMBER lvalue instead, which checked_nt_terminator is never
-// attached to -- so this does NOT trap. Known gap, see man/SAFETY.md's
+// attached to -- so this does NOT trap. Known gap, see docs/SAFETY.md's
 // "Known coverage gaps" -- pinned here rather than left implicit so a
 // future fix updates this test deliberately instead of silently.
 [[cccc::test]]
@@ -1238,7 +1238,7 @@ void test_member_bounds_unknown_no_check(void) {
 // #919 -- bounds propagation across assignment. `q = p + k;` (or a plain
 // `q = p;`) checks against a SNAPSHOT of `p`'s own absolute bounds taken at
 // the assignment, not `q`'s own (nonexistent) declared bounds -- see
-// propagate_checked_bounds() in src/parse.c and man/SAFETY.md's "Bounds
+// propagate_checked_bounds() in src/parse.c and docs/SAFETY.md's "Bounds
 // propagation across assignment" section for the whole-function
 // "propagatable" rule this implements: a local `q` propagates iff it is
 // unchecked, its declaration itself has a checked-rooted initializer, and
@@ -1606,7 +1606,7 @@ void test_prop_chknt_chain_propagates(void) {
 // #919 poison scan to a fixpoint (Obj.checked_prop_chain_src), seeded from
 // declared-checked sources only and growing round over round, so trust
 // flows down an arbitrarily long derivation chain -- see
-// man/SAFETY.md's "Bounds propagation across assignment" section.
+// docs/SAFETY.md's "Bounds propagation across assignment" section.
 // ---------------------------------------------------------------------
 
 [[cccc::test]]
@@ -2049,7 +2049,7 @@ void test_opt_chknt_unrooted_path_no_trap(void) {
 // #944 -- assignment-time bounds implication. Assigning a declared-checked
 // source into a TARGET that is itself declared checked now verifies the
 // source's own bounds imply the target's declared bounds, via the new CHKAB
-// opcode. See man/SAFETY.md's Checked Pointers section for the full
+// opcode. See docs/SAFETY.md's Checked Pointers section for the full
 // writeup; the ticket example (a wider count(10) target trusting a
 // narrower count(4) source's value) traps in
 // tests/test_checked_pointers_assign_implication_error.c.
@@ -2189,7 +2189,7 @@ void test_assign_implication_unchecked_source_skipped(void) {
 
 // ---------------------------------------------------------------------
 // #486 -- checked-pointer bounds casts ([[cccc::assume]]/[[cccc::dynamic]])
-// and dynamic_check(). See man/SAFETY.md's "Bounds casts" section for the
+// and dynamic_check(). See docs/SAFETY.md's "Bounds casts" section for the
 // full writeup; compile-error cases and the opt-in-by-default/serialize-
 // strip proofs live in standalone tests/test_checked_cast_*.c and
 // tests/test_dynamic_check_*.c files instead, same split as the rest of

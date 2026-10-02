@@ -647,7 +647,7 @@ union FwVal {
 
 // Nested/aggregate return= fields (ticket #489, follow-up to #353): a
 // struct/union field that is itself a struct, union, or array, plus
-// anonymous struct members. See man/TESTING.md's Struct/union section.
+// anonymous struct members. See docs/TESTING.md's Struct/union section.
 struct FwInner {
     int a;
     int b;

@@ -7,7 +7,7 @@ Exit code is non-zero if any sub-suite fails.
 Sub-suites:
   source              — main test suite (tools/testing/ package)
   native              — -c=native serializer round-trip (ticket #1157; on by
-                        default, --no-native opts out -- see man/TESTING.md's
+                        default, --no-native opts out -- see docs/TESTING.md's
                         "Native round-trip mode" section)
   native_skip_audit   — behavioural staleness audit of NATIVE_SKIP_TESTS/
                         NATIVE_SKIP_TESTS_MACOS/NATIVE_SKIP_TESTS_LINUX/
@@ -150,7 +150,7 @@ def _run_native_suite(cccc, n_jobs, quiet, process_timeout):
     """Run the -c=native serializer round-trip suite (#1157). Returns
     (r_dict, ok). detect_platform() is threaded through native_skip_reason
     (via run_single_test's own platform-detection call) exactly as it is
-    for a plain `tools/tests.py --native` invocation -- see man/TESTING.md's
+    for a plain `tools/tests.py --native` invocation -- see docs/TESTING.md's
     "Native round-trip mode" section for the three tiers this drives and
     NATIVE_SKIP_TESTS/NATIVE_SKIP_TESTS_MACOS (tools/testing/__init__.py)
     for the known, tracked divergences it skips.
@@ -218,14 +218,14 @@ def _run_native_skip_audit_suite(cccc, n_jobs, process_timeout=None):
                      None)
         if start is None:
             tail = "\n".join(lines[-40:])
-            return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+            return f"stale skip entries found (see docs/TESTING.md):\n{tail}", False
         end = start + 1
         while end < len(lines) and not (
                 lines[end].startswith(("PASSES here", "KEPT,", "STILL FAILING"))
                 or lines[end].startswith("====")):
             end += 1
         stale_section = "\n".join(lines[start:end])
-        return f"stale skip entries found (see man/TESTING.md):\n{stale_section}", False
+        return f"stale skip entries found (see docs/TESTING.md):\n{stale_section}", False
     # Any other nonzero exit (binary missing, harness crash, import error,
     # incompatible flags) is NOT a staleness finding -- report it as such so
     # a future maintainer doesn't go hunting a skip table that's fine.
@@ -597,12 +597,12 @@ def _run_smoke_skip_audit_suite(process_timeout=None):
         start = next((i for i, l in enumerate(lines) if l.startswith("STALE (")), None)
         if start is None:
             tail = "\n".join(lines[-40:])
-            return f"stale skip entries found (see man/TESTING.md):\n{tail}", False
+            return f"stale skip entries found (see docs/TESTING.md):\n{tail}", False
         end = start + 1
         while end < len(lines) and not lines[end].startswith(("KEPT,", "====")):
             end += 1
         stale_section = "\n".join(lines[start:end])
-        return f"stale skip entries found (see man/TESTING.md):\n{stale_section}", False
+        return f"stale skip entries found (see docs/TESTING.md):\n{stale_section}", False
     tail = "\n".join((result.stdout + result.stderr).splitlines()[-40:])
     return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
 
@@ -995,7 +995,7 @@ def main():
     parser.add_argument(
         "--no-native", action="store_true",
         help="Skip the -c=native serializer round-trip suite (#1157; on by default -- "
-             "see man/TESTING.md's 'Native round-trip mode' section)"
+             "see docs/TESTING.md's 'Native round-trip mode' section)"
     )
     parser.add_argument(
         "--bench", action="store_true",
@@ -1322,7 +1322,7 @@ def main():
                         if not ok and n in _ADVISORY_SUITES]
     if advisory_failed:
         print(f"ADVISORY (not blocking): {', '.join(advisory_failed)} "
-              f"-- see #1186, man/TESTING.md")
+              f"-- see #1186, docs/TESTING.md")
 
     sys.exit(0 if all_ok else 1)
 

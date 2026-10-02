@@ -66,7 +66,7 @@ static void store128(void *dst, BID_UINT128 v) {
 // sqrtd64() still reaches this file directly, so it depends entirely on
 // src/parse.c's eval_decimal fenv barrier (around comptime VM execution) to
 // avoid leaving the host FP environment dirty after compilation -- see
-// man/VM.md's "<fenv.h> rounding and exception flags" subsection.
+// docs/VM.md's "<fenv.h> rounding and exception flags" subsection.
 //
 // dm_host_rounding()/dm_raise_flags() duplicate src/stdlib/decimal.c's
 // cccc_dec_host_rounding()/cccc_dec_raise_flags() rather than sharing them --

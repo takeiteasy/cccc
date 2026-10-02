@@ -78,7 +78,7 @@ def build_parser():
              "then run the resulting binary and check its exit code. EXPECT_COMPILE_ERROR tests "
              "assert compile failure; EXPECT_RUNTIME_ERROR and diagnostic tests assert compile "
              "success only. --build, --testing, and VM-only-safety-flag tests are skipped -- see "
-             "man/TESTING.md's 'Native round-trip mode' section."
+             "docs/TESTING.md's 'Native round-trip mode' section."
     )
     parser.add_argument(
         "--native-audit-skips", action="store_true",
@@ -87,7 +87,7 @@ def build_parser():
              "bypasses all three tables (the --build/-c/-o/frontend-mode/VM-only-flag "
              "skip checks still apply), and restricts the corpus to just the files "
              "those tables name. A file that now passes has a stale skip entry to "
-             "delete; man/TESTING.md's 'Native round-trip mode' section has the full "
+             "delete; docs/TESTING.md's 'Native round-trip mode' section has the full "
              "writeup."
     )
     parser.add_argument(
@@ -176,7 +176,7 @@ def main(argv=None):
         # included even off their platform/family: a stale platform- or
         # family-only entry is still worth reporting (it just can't be
         # deleted here without also confirming the other platform/family,
-        # see man/TESTING.md) -- and #1186 needs the *other* direction here
+        # see docs/TESTING.md) -- and #1186 needs the *other* direction here
         # too: a foreign-axis entry that passes here is expected, not stale
         # (see _print_native_skip_audit's off_axis bucket below).
         audited_names = (
@@ -266,7 +266,7 @@ def main(argv=None):
 
 
 # #1182: the v1 --testing exclusions (test_setup/teardown hooks, negative
-# error=/expect_compile_error= tests -- man/TESTING.md's "Native round-trip
+# error=/expect_compile_error= tests -- docs/TESTING.md's "Native round-trip
 # mode" section) are enforced only by their NATIVE_SKIP_TESTS entry, so
 # bypassing the table under --native-audit-skips routes them into an actual
 # -c=native compile, which the compiler itself refuses with a clear

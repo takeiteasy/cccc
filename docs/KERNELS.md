@@ -173,7 +173,8 @@ message and exit status 255.
     aggregates are not accepted.
 
 [^threads]: The threads are ordinary VM threads under the global interpreter
-    lock; the barrier releases the lock while a work-item waits.
+    lock; the barrier releases the lock while a work-item waits. See
+    [THREADING.md](THREADING.md).
 
 [^testrun]: `--test-run` runs the program in the VM and then compiles it
     natively from the same parse. The native lowering of a launch is a call the

@@ -2,7 +2,7 @@
 // CCCC_EXPECT_STDERR: undefined variable 'gy'
 //
 // Current limitation (see "Pre-parse macro declaration context",
-// man/MACROS.md): a Quote() template inside a file-scope-called comptime
+// docs/MACROS.md): a Quote() template inside a file-scope-called comptime
 // function can name a type, tag, enum constant, or function through the
 // #894 demand-driven declaration index -- but not a plain file-scope
 // *variable*. An object is real storage; the comptime program's data

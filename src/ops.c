@@ -4991,7 +4991,7 @@ static inline int op_CHKNT_fn(VirtualMachine *vm) {
     // checked addr against, so no range check is repeated here); val is the
     // value that was stored. This does NOT verify a null terminator is
     // actually present anywhere -- that is unsound to check from the
-    // declaration alone (see man/SAFETY.md's Checked Pointers section and
+    // declaration alone (see docs/SAFETY.md's Checked Pointers section and
     // the CHKNT comment in src/cccc.h).
     long long operands = cc_read_word(vm);
     int       rs_addr, rs_hi, rs_val;

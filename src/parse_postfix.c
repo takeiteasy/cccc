@@ -1464,7 +1464,7 @@ static Node *generic_selection(VirtualMachine *vm, Token **rest, Token *tok) {
     // strips `_Atomic` from a non-lvalue cast like `(_Atomic int)0`; clang
     // keeps it there. CCCC has no general lvalue predicate and that cast
     // shape is pathological -- strip unconditionally, i.e. follow gcc; see
-    // man/TYPES.md and #1271.) origin is deliberately kept: it is the only link
+    // docs/TYPES.md and #1271.) origin is deliberately kept: it is the only link
     // back to the original Type*, so an association naming a tagged type
     // (`struct S`, `enum G`) still matches its own controlling expression by
     // identity (#1223).
@@ -1952,7 +1952,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // qualifiers, matching gcc/clang. Top-level `_Atomic`, a function
         // return type's own cvr, and an array element's `_Atomic` are where
         // gcc and clang genuinely disagree; --compiler-family picks the
-        // reading (see man/TYPES.md).
+        // reading (see docs/TYPES.md).
         return new_num(
             vm, is_compatible_qualified(t1, t2, vm->compiler.compiler_family),
             start);

@@ -126,7 +126,7 @@ bool type_is_cccc_va_list(Type *ty) {
 // passing a va_list-typed argument gets its own va_copy'd statement
 // expression there instead, which covers this case too (and, since it's
 // not narrowed to bodiless callees, indirect calls through a function
-// pointer as well). See man/STDLIB.md's <stdarg.h> row for the full
+// pointer as well). See docs/STDLIB.md's <stdarg.h> row for the full
 // writeup.
 static const char *va_list_shim_param_name(char *buf, size_t bufsz,
                                            const char *orig) {
@@ -202,7 +202,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     // the same name (macOS's own getc_unlocked/putchar_unlocked family,
     // and the _FORTIFY_SOURCE snprintf/sprintf/vsnprintf ->
     // __builtin___*_chk rewrite) without giving up the prototype -- see
-    // man/HEADERS.md's auto-captured-includes section. A definition's own
+    // docs/HEADERS.md's auto-captured-includes section. A definition's own
     // declarator is never parenthesized: GCC/clang both reject `(name)
     // (params) { ... }` as a function *definition* the same way they
     // reject a trailing asm-label on one (see with_asm_label's own comment

@@ -3,7 +3,7 @@
 // definition or compound statement, and #pragma cccc checked/unchecked
 // begin/end. These are pure parse/type-check diagnostics -- always on,
 // independent of --checked-pointers (deliberately not passed here) -- see
-// man/SAFETY.md's "Checked Regions" section. Positive cases live here
+// docs/SAFETY.md's "Checked Regions" section. Positive cases live here
 // (single compiling file); compile-error cases cannot share a compiling
 // file with these (--testing=native doesn't support in-suite negative
 // tests, #1033 v1) and live in standalone tests/test_checked_scope_*.c

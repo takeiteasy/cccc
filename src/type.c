@@ -439,7 +439,7 @@ bool is_compatible(Type *t1, Type *t2) {
 // top-level cvr qualifiers ignored -- the rule __builtin_types_compatible_p
 // follows. `family` selects whether top-level `_Atomic` (and array-element
 // `_Atomic`, and a function's return-type cvr) is significant: gcc drops it,
-// clang keeps it (--compiler-family, see man/TYPES.md). The _Generic
+// clang keeps it (--compiler-family, see docs/TYPES.md). The _Generic
 // collision path passes gcc explicitly -- that construct is not
 // policy-sensitive.
 bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family) {

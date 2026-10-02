@@ -203,7 +203,7 @@ int run_argv_quiet(char *const argv[]) {
 //
 // CCCC's own frontend is uniformly permissive across every C standard it
 // parses, and the -c=native serializer emits a fixed GNU C11 floor no matter
-// what --std= was passed (see man/NATIVE.md) -- so a strict ISO `c<NN>`
+// what --std= was passed (see docs/NATIVE.md) -- so a strict ISO `c<NN>`
 // spelling forwarded to the host compiler is a promise the rest of CCCC does
 // not keep. A real host GCC's strict `-std=c89` rejects constructs (`//`
 // comments, mixed declarations, VLAs, compound literals, designated

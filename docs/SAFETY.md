@@ -890,7 +890,7 @@ $ echo $?
 
 ### Threading Safety
 
-The POSIX `<pthread.h>` VM runtime serializes bytecode execution with the VM GIL. The following threading-aware features are available:
+The VM runs one guest thread at a time under a global lock; see [THREADING.md](THREADING.md). The following threading-aware features are available:
 
 **GIL release around blocking POSIX calls**
 
@@ -1897,7 +1897,7 @@ A call gets no check at all unless **both** hold:
   must have no side effects" reason. `sink(small, 8)` (a literal) and
   `sink(small, len)` (a plain variable) both qualify; `sink(small, f())` and
   `sink(small, i++)` are silently declined — exactly the same trade-off
-  `man/SAFETY.md`'s member-bounds section already makes for `f()->p[i]`: an
+  `docs/SAFETY.md`'s member-bounds section already makes for `f()->p[i]`: an
   extra evaluation of a side-effecting expression is not an acceptable
   price for a check.
 
@@ -2082,7 +2082,7 @@ a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
 ```
 
 **Terminator invariant**. `ntarray`'s bounds widening
-(`man/SAFETY.md`'s `ntarray` row above) makes a one-element terminator slot
+(`docs/SAFETY.md`'s `ntarray` row above) makes a one-element terminator slot
 writable at the end of the declared range, but it says nothing about what
 may legally be written there. Two opcodes close the soundly-checkable part
 of that gap: `CHKNT` traps a store of a **non-zero** value into the widened

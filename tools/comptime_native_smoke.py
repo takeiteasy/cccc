@@ -167,7 +167,7 @@ Pass --audit-skips (#1197) to run the SMOKE_CASE_SKIPS_GCC_MACOS staleness
 audit instead of the normal suite: forces every case actually governed by an
 entry on this platform+compiler-family to run with its skip bypassed, and
 exits 1 iff any of them now passes (a stale entry). See audit_skips() below
-and man/TESTING.md's "Skips" section. Unknown args (including this one, when
+and docs/TESTING.md's "Skips" section. Unknown args (including this one, when
 absent) are otherwise ignored -- this script always targets the repo-root
 ./cccc.
 """
@@ -6687,7 +6687,7 @@ def case_layout_const_sites_native_round_trip(cccc: Path, tmp: str) -> bool:
           "same 'leave the inconsistent case folded' rule as the "
           "initialized-global exclusion). Bitfield widths and an "
           "initialized global's byte image remain open (#1099, WONT_FIX "
-          "-- see man/NATIVE.md's own entry for why those two are "
+          "-- see docs/NATIVE.md's own entry for why those two are "
           "actively unsound to fix the same way, not merely deferred); "
           "_Static_assert re-emission is #1098, a separate case below. "
           "Asserts -m output prints "
@@ -7840,7 +7840,7 @@ struct lg1172_with_ts {
 struct lg1172_with_ts g_ts;
 
 // A truly tagless, alias-less aggregate has no name to write the assert
-// with at all -- documented residual, man/NATIVE.md. Used only via a
+// with at all -- documented residual, docs/NATIVE.md. Used only via a
 // pointer here so it still needs a real (inline, unnamed) definition.
 struct lg1172_holds_anon {
     struct { int x; int y; } *p;

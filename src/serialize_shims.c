@@ -567,7 +567,7 @@ void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         // timespec *);` rather than reach a real declaration via #include:
         // <time.h> is NOT on this function's own #include list above (nor
         // was it usable if it were -- same #1054-class hazard as <sched.h>/
-        // <string.h>, documented in man/HEADERS.md's own pthread_native_1022
+        // <string.h>, documented in docs/HEADERS.md's own pthread_native_1022
         // writeup as the reason CCCC never gave <time.h> itself a full
         // #include_next hand-off: the cascade has no clean stopping point).
         // That local extern was itself wrong on macOS (clockid_t is a real
@@ -897,7 +897,7 @@ void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // (src/stdlib/posix_poll.c). Not atomic like the real syscall -- a
     // signal delivered between the mask swap and poll()'s wait is not
     // guaranteed to interrupt it -- exactly the same accepted, documented
-    // limitation as the VM's own emulation (see man/NATIVE.md's
+    // limitation as the VM's own emulation (see docs/NATIVE.md's
     // <poll.h> entry). Unlike before #1146, this now DOES translate
     // pollfd.events/revents through the same
     // __cccc_native_poll_marshal_in/out helpers plain poll() uses just

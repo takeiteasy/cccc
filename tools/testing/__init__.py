@@ -292,34 +292,34 @@ NATIVE_SKIP_TESTS = {
     # itself with the same reason (main.c) -- listed here too so the
     # runner skips them instead of recording a spurious native_compile_failed.
     "test_suite_attributes.c": "#1033 v1: uses [[cccc::test_setup]] -- no "
-                 "fork-safe native equivalent, see man/TESTING.md",
+                 "fork-safe native equivalent, see docs/TESTING.md",
     "test_suite_testing_framework.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] and negative "
                  "(expect_compile_error=) tests -- neither supported "
-                 "natively, see man/TESTING.md",
+                 "natively, see docs/TESTING.md",
     "test_hook_inherit_per_test.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] -- no fork-safe native "
-                 "equivalent, see man/TESTING.md",
+                 "equivalent, see docs/TESTING.md",
     "test_hook_inherit_stacked_once.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] -- no fork-safe native "
-                 "equivalent, see man/TESTING.md",
+                 "equivalent, see docs/TESTING.md",
     "test_hook_inherit_reentry.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] -- no fork-safe native "
-                 "equivalent, see man/TESTING.md",
+                 "equivalent, see docs/TESTING.md",
     "test_hook_inherit_prefix_guard.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] -- no fork-safe native "
-                 "equivalent, see man/TESTING.md",
+                 "equivalent, see docs/TESTING.md",
     "test_hook_inherit_once.c": "#1033 v1: uses "
                  "[[cccc::test_setup/teardown]] -- no fork-safe native "
-                 "equivalent, see man/TESTING.md",
+                 "equivalent, see docs/TESTING.md",
     "test_suite_compile_errors.c": "#1033 v1: negative "
                  "(error=/expect_compile_error=) tests -- the parser's "
                  "error-recovery AST is not safe to hand to a real host "
-                 "compiler, see man/TESTING.md",
+                 "compiler, see docs/TESTING.md",
     "test_suite_stack_safety.c": "#1033 v1: contains a negative "
-                 "(expect_compile_error=) test, see man/TESTING.md",
+                 "(expect_compile_error=) test, see docs/TESTING.md",
     "test_suite_std_c17.c": "#1033 v1: contains a negative "
-                 "(expect_compile_error=) test, see man/TESTING.md",
+                 "(expect_compile_error=) test, see docs/TESTING.md",
 
     # --- pre-existing -c=native serializer gaps, surfaced by #1033's
     # corpus run (tests/suites/ was never exercised under --native before).
@@ -482,7 +482,7 @@ NATIVE_SKIP_TESTS = {
     # enforce. Fixed by serialize_dlfcn_shims() (src/serialize_shims.c): a
     # registry shim reproducing the VM's own dynamic-library bookkeeping
     # (cccc_rt_dlopen/dlsym/dlclose/dlerror, src/vm.c) instead of forwarding
-    # straight to libdl -- see man/STDLIB.md's <dlfcn.h> entry for the
+    # straight to libdl -- see docs/STDLIB.md's <dlfcn.h> entry for the
     # shape and its residuals. A second, unrelated blocker found while
     # verifying this (#1151, RESOLVED): the #999 reloc-forward-declare loop
     # emitted a conflicting prototype for a libc function only referenced
@@ -781,7 +781,7 @@ NATIVE_SKIP_TESTS_GCC_MACOS = {
                  "a permanent gcc/Darwin gap, so #1172's own "
                  "_Static_assert layout guard genuinely hard-fails under "
                  "CCCC_NATIVE_CC=gcc-16 (confirmed: passes under clang, "
-                 "the default host cc), see man/NATIVE.md's layout-"
+                 "the default host cc), see docs/NATIVE.md's layout-"
                  "guards entry",
     "test_suite_attributes_layout_1129.c": "#1172's layout guard emits "
                  "a live _Static_assert(sizeof(struct "
@@ -945,7 +945,7 @@ def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
         # #1186: the axis that actually explains sr.ht's "unreproducible"
         # native divergences is -c=native's own host compiler *family*
         # (clang vs. gcc), not GCC version or host platform -- see
-        # man/TESTING.md. detect_native_cc_family() probes the same
+        # docs/TESTING.md. detect_native_cc_family() probes the same
         # CCCC_NATIVE_CC/"cc" cccc_find_native_cc() (src/vm.c) resolves, so
         # this always matches whichever compiler the compile step below
         # actually shells out to.

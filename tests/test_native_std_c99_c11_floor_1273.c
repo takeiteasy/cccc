@@ -5,7 +5,7 @@
 // `--std=c99` that meant `-std=gnu99`/`-std=c99` was handed to the host --
 // even though the -c=native serializer emits a fixed GNU C11 floor
 // unconditionally (_Static_assert/_Alignof layout guards for every struct
-// definition, among others -- see man/NATIVE.md), regardless of --std=. A
+// definition, among others -- see docs/NATIVE.md), regardless of --std=. A
 // plain struct is enough to trigger those guards, no explicit C11 construct
 // needed in the source at all, so a real host (`-std=gnu99` on GCC, or a
 // strict `-std=c99`) rejected the emitted file even though the identical

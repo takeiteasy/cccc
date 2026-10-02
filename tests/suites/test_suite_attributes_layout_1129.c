@@ -3,7 +3,7 @@
 // _Alignas(N) were retained on Type (is_packed, align)/Member (align) but
 // never re-emitted by -c=native/-m, so a struct's native layout silently
 // diverged from the VM's -- see the admissibility-rule discussion in
-// man/NATIVE.md. Every assertion here is sizeof/offsetof/_Alignof, so the
+// docs/NATIVE.md. Every assertion here is sizeof/offsetof/_Alignof, so the
 // same numbers a real GCC/clang would compute for the emitted C are checked
 // directly, not just VM-internal consistency.
 //
@@ -217,7 +217,7 @@ int test_member_aligned_never_lowers_layout(void) {
 }
 
 // Bare __attribute__((aligned)) (no argument) requests maximum useful
-// alignment -- man/COVERAGE.md already documented this as supported, but
+// alignment -- docs/COVERAGE.md already documented this as supported, but
 // the declarator-suffix path silently dropped it like every other
 // declarator-position aligned(N) request.
 struct MemberBareAligned1160 {

@@ -463,7 +463,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             // n[*elem_size]. #938: ntarray widens by one element for the
             // terminator slot -- the elem_size bytes beginning at the declared
             // end of the range -- under all three bounds forms (#483 originally
-            // shipped this for count(n) only; man/SAFETY.md documents the
+            // shipped this for count(n) only; docs/SAFETY.md documents the
             // unified rule).
             *out_lo = checked_base_self_expr(vm, base, tok);
             Node *n = base.mem
@@ -528,7 +528,7 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
 // #919/#941: bounds propagation across assignment for an unchecked pointer
 // local whose value is snapshotted from a checked-rooted source. See the
 // design note at propagate_checked_bounds() below for the whole-function
-// fixpoint this implements, and man/SAFETY.md's "Bounds propagation across
+// fixpoint this implements, and docs/SAFETY.md's "Bounds propagation across
 // assignment" section for the user-facing writeup.
 //
 // True if `base` (the result of find_checked_base() on an assignment's rhs
@@ -1078,7 +1078,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
 // an uninitialized OPT candidate (`int *q;`), a loop back-edge that hasn't
 // looped yet, or a `goto` past `q`'s own declaration would otherwise leave
 // checked_prop_lo/hi holding whatever garbage the stack slot last had. For
-// a FULL candidate that's the pre-existing #919-era residual (man/
+// a FULL candidate that's the pre-existing #919-era residual (docs/
 // SAFETY.md): `q` itself is equally indeterminate at that point, so a
 // direct unchecked deref through `q` would already be undefined behavior,
 // and this pass doesn't newly introduce a check reading garbage -- FULL
@@ -1493,7 +1493,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
 // this emits cost real stack slots and stores per checked assignment, only
 // worth paying when something might enforce them.
 //
-// v1 scope, all deliberate (see man/SAFETY.md for the user-facing writeup):
+// v1 scope, all deliberate (see docs/SAFETY.md for the user-facing writeup):
 //  - Source must be a directly DECLARED-checked base (find_checked_base() +
 //    checked_base_is_declared()), i.e. kind 1 of checked_prop_source_bounds()
 //    -- not a #941-propagated local, which can hold the OPT sentinel and

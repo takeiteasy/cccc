@@ -3728,7 +3728,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     // Executable()/StaticLib()/...) and then build everything, same as
     // BuildAll(ctx) would from inside an explicit entry. This is what makes
     // `cccc --build demo.c` work on a file whose only build recipe is an
-    // inline `@build_target` next to main() -- see man/BUILD_MODE.md.
+    // inline `@build_target` next to main() -- see docs/BUILD_MODE.md.
     if (!opts->entry_name && !vm->compiler.build_fns && factory_count > 0 &&
         !find_fn(prog, "build_main")) {
         Builder ctx;

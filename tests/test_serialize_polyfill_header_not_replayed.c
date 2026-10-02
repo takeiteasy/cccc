@@ -6,7 +6,7 @@
 // #1003: <stdbit.h> is a cccc-owned polyfill with no guaranteed real system
 // counterpart -- verified missing from this host's SDK, and structurally
 // unreachable to a downstream compiler regardless of host, since CCCC's
-// bundled include/ directory is never forwarded to it (see man/HEADERS.md).
+// bundled include/ directory is never forwarded to it (see docs/HEADERS.md).
 // -c=native/-m used to replay `#include <stdbit.h>` verbatim (the same
 // treatment every ordinary standard header gets) and drop the header's own
 // static inline definitions (from_include), so a downstream compile failed

@@ -11,7 +11,7 @@
 // chaining onto the runtime scope during comptime execution) and write it,
 // leaving the real runtime `gx` untouched with no diagnostic at all. It is
 // now a clear "undefined variable" error instead, exactly as if the probe
-// line were never there -- see man/MACROS.md's comptime-vs-runtime global
+// line were never there -- see docs/MACROS.md's comptime-vs-runtime global
 // visibility section.
 
 int gx = 1;

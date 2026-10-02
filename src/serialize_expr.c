@@ -1485,7 +1485,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // dimensions, case labels, and enum values now share this
                 // exact helper (see their own call sites). Bitfield widths,
                 // _Static_assert, and a global initializer's byte image
-                // remain -- see man/NATIVE.md's own entry for why those
+                // remain -- see docs/NATIVE.md's own entry for why those
                 // three are not merely deferred.
             } else if (node->ty && node->ty->kind == TY_BITINT &&
                        node->ty->bit_width > 64 && node->wide_digits) {

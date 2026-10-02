@@ -66,7 +66,7 @@ void check_data_capacity(VirtualMachine *vm, long long needed) {
 // CCCC_MAX_DATA_ALIGN (64), the widest alignment any *type* requests today
 // (64-byte vectors, #722). An explicit _Alignas(N) with N > 64 is accepted
 // by the parser but only gets 64-byte placement from this allocator, not
-// the full N -- a documented limitation (see man/VM.md), not a silent
+// the full N -- a documented limitation (see docs/VM.md), not a silent
 // truncation bug: the object is still more correctly placed than the
 // pre-#1136 hardcoded 8-byte rounding.
 int cc_effective_align(int obj_align, int ty_align) {
@@ -204,7 +204,7 @@ Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
 // LEA3: rd = bp + offset. `skip_record` sets LEA3_NO_RECORD (#676), telling
 // op_LEA3_fn to skip its vm->stack_ptr_epochs write for this address -- pass
 // true only when the result is proven never to escape its creating frame
-// (see man/SAFETY.md and the mark_addr_escapes pass in parse.c).
+// (see docs/SAFETY.md and the mark_addr_escapes pass in parse.c).
 static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset,
                        bool skip_record) {
     emit_word(vm, LEA3);
@@ -218,7 +218,7 @@ Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
 }
 
 // STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch,
-// for interior dangling-pointer resolution (#675). See man/SAFETY.md.
+// for interior dangling-pointer resolution (#675). See docs/SAFETY.md.
 Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
     emit_word(vm, STKTAG);
     emit_word(vm, 0); // unused (no register operand)
