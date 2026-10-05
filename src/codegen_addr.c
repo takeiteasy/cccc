@@ -42,6 +42,11 @@ static void emit_local_addr(VirtualMachine *vm, Obj *var, int dest_reg) {
 static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
     int r_addr = alloc_temp_reg();
     emit_local_addr(vm, cv->var, r_addr);
+    // TODO(#1444): a __block var's slot holds the heap box pointer too.
+    // A VLA's slot holds the alloca pointer; the cleanup gets the array's own
+    // address.
+    if (cv->var->ty->kind == TY_VLA)
+        emit_rr(vm, LDR_D, r_addr, r_addr);
     emit_mov3(vm, REG_A0, r_addr);
     free_temp_reg(r_addr);
     emit(vm, CALL);

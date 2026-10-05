@@ -109,6 +109,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 
         case ND_EXPR_STMT:
             if (node_is_cleanup_decl(node)) {
+                // Declared at its deferred initializer below.
+                if (node->var->deferred_vla_ptr_init)
+                    break;
                 print_indent_level(f, indent);
                 serialize_hoisted_local_decl(f, vm, ctx, node->var);
                 serialize_cleanup_attr(f, vm, ctx, node->var);
@@ -148,6 +151,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 Obj *var = node->lhs->lhs->var;
                 print_indent_level(f, indent);
                 serialize_type_decl(f, ctx, var->ty, var->name);
+                serialize_cleanup_attr(f, vm, ctx, var);
                 fprintf(f, " = ");
                 // #1042(b): this `=` is printed manually, outside
                 // serialize_expr's own ND_ASSIGN case (which already protects

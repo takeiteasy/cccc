@@ -231,8 +231,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // Variable length arrays (VLAs) are translated to alloca() calls.
             // For example, `int x[n+2]` is translated to `tmp = n + 2,
             // x = alloca(tmp)`.
-            // TODO(#1436): a cleanup attribute is never claimed for a VLA.
             Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+            claim_cleanup(vm, var, attr);
             Token *tok_local = ty->name;
             Node  *expr      = new_binary(
                 vm, ND_ASSIGN, new_vla_ptr(vm, var, tok_local),

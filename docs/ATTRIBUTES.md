@@ -475,6 +475,7 @@ __attribute__((cleanup(rel))) int a, b;  // rel(&b), rel(&a)
 int c __attribute__((cleanup(rel))), d;  // rel(&c) only
 int *__attribute__((cleanup(rel))) p;    // rel(&p): after `*` it names p
 __typeof__(c) e;                         // no cleanup: not inherited
+int v[n] __attribute__((cleanup(rel)));  // VLA: rel(&v), a pointer to the array
 ```
 
 As in GCC, the attribute is ignored on a typedef, struct member, parameter,
