@@ -514,7 +514,15 @@ Type *array_of(VirtualMachine *vm, Type *base, int len) {
 // The caller is expected to have already validated divisibility/size/width
 // via the vector_size attribute check in parse.c.
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
-    Type *ty    = new_type(vm, TY_VECTOR, bytes, bytes);
+    // Alignment follows the host ABI so -c=native, struct layout and FFI
+    // agree with the VM: aarch64 and macOS cap vector_size alignment at 16,
+    // Linux x86_64 aligns to the full width.
+#if defined(__aarch64__) || defined(__APPLE__)
+    int align = bytes < 16 ? bytes : 16;
+#else
+    int align = bytes;
+#endif
+    Type *ty    = new_type(vm, TY_VECTOR, bytes, align);
     ty->base    = base;
     ty->vec_len = bytes / base->size;
     return ty;

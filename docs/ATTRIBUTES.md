@@ -379,6 +379,16 @@ int mk(void) VS;            // function returning a vector
 int n = sizeof((VS int){0});  // 16
 ```
 
+Vector alignment follows the host ABI, so locals, struct members and
+`-c=native` output agree with the host compiler:
+
+| Host | `_Alignof` of a 32- or 64-byte vector |
+|---|---|
+| aarch64 (macOS, Linux), macOS x86_64 | 16 |
+| Linux x86_64 | the vector's size |
+
+Use `_Alignof(type)` rather than the vector's size when checking alignment.
+
 ### Visible Lanes
 
 `__attribute__((cccc_visible_lanes(N)))` on a `vector_size` typedef makes the

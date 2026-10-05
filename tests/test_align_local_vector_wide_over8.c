@@ -1,6 +1,7 @@
-// CCCC_NATIVE_SKIP: the host caps vector_size(32/64) alignment at 16 on AArch64 while cccc folds _Alignof to the full width
-// #1137: 32- and 64-byte vector locals/params (natural alignment = their size,
-// #722) get an address aligned to it under the VM, at every bp parity.
+// #1137/#1448: 32- and 64-byte vector locals/params get an address aligned to
+// _Alignof (the host ABI's vector alignment) under the VM and -c=native, at
+// every bp parity, and struct layout agrees with it.
+#include <stddef.h>
 typedef float v8f32 __attribute__((vector_size(32)));
 typedef float v16f32 __attribute__((vector_size(64)));
 
@@ -13,17 +14,17 @@ static int locals(int n) {
     v8f32  v32     = {1, 2, 3, 4, 5, 6, 7, 8};
     char   pad2[3] = {1, 2, 3};
     v16f32 v64     = {1};
-    if (misaligned(&v32, 32))
+    if (misaligned(&v32, _Alignof(v8f32)))
         return 1;
-    if (misaligned(&v64, 64))
+    if (misaligned(&v64, _Alignof(v16f32)))
         return 2;
     return v32[7] == 8 && v64[0] == 1 && pad == (char)n && pad2[2] == 3 ? 0 : 3;
 }
 
 static int param(int a, v8f32 w, v16f32 x) {
-    if (misaligned(&w, 32))
+    if (misaligned(&w, _Alignof(v8f32)))
         return 1;
-    if (misaligned(&x, 64))
+    if (misaligned(&x, _Alignof(v16f32)))
         return 2;
     return w[7] == 8 && x[0] == 1 ? 0 : 3;
 }
@@ -43,8 +44,16 @@ static int param_wrap(int a, int b, int c, int d, int e, int f, int g, int h,
     return param(a + b + c + d + e + f + g + h + i, w, x);
 }
 
+struct padded {
+    char  c;
+    v8f32 v;
+};
+
 int main(void) {
     int    r;
+    if (offsetof(struct padded, v) % _Alignof(v8f32) != 0 ||
+        _Alignof(struct padded) != _Alignof(v8f32))
+        return 5;
     v8f32  w = {1, 2, 3, 4, 5, 6, 7, 8};
     v16f32 x = {1};
     if ((r = locals(1)))
