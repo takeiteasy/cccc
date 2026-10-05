@@ -24,6 +24,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: `[[__gnu__::name]]` is accepted as `[[gnu::name]]`, reserved
   `__name__` spellings work inside `[[...]]`, and `__has_c_attribute(gnu::x)`
   reports recognized GNU attributes.
+- Fixed: `-c=native` runs `cleanup` attributes instead of dropping them.
+- Fixed: a `break`, `continue`, `return` or `goto` that leaves a scope before a
+  cleanup variable's declaration no longer runs that variable's cleanup.
+- Fixed: cleanup variables declared in a `for` header or inside a statement
+  expression `({ ... })` are cleaned up.
 - Added: `--vm-profile` reports comptime execution in its own section, and
   works with `-c=native`, `-c=generated` and `-m`. With `--json`, the comptime
   profile is a nested `"comptime"` object.

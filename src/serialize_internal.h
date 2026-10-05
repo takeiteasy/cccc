@@ -435,6 +435,8 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                    const char *name);
+void serialize_hoisted_local_decl(FILE *f, VirtualMachine *vm,
+                                  SerializeContext *ctx, Obj *var);
 bool serialize_aliased_ptr_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                      const char *name);
 void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,

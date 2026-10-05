@@ -433,6 +433,7 @@ Node *new_unary(VirtualMachine *vm, NodeKind kind, Node *expr, Token *tok);
 char *new_unique_name(VirtualMachine *vm);
 Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty);
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok);
+Node *new_cleanup_decl(VirtualMachine *vm, Obj *var, Token *tok);
 Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok);
 bool node_has_side_effects(Node *n);
 bool nodes_structurally_equal(Node *a, Node *b);

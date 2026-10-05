@@ -320,7 +320,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                                 cur_fn->cleanup_fp_retval_offset);
                     }
                 }
-                emit_cleanups_to_depth(vm, 0);
+                emit_cleanups_to_depth(vm, 0, node->cleanup_seq_limit);
                 if (!is_void_ret) {
                     if (!is_float_ret) {
                         emit_pop3(vm, REG_A0);
@@ -593,7 +593,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                           "internal error: unresolved goto to label '%s'",
                           node->label ? node->label : "?");
             if (g_cleanup_scope)
-                emit_cleanups_to_depth(vm, node->cleanup_target_depth);
+                emit_cleanups_to_depth(vm, node->cleanup_target_depth,
+                                       node->cleanup_seq_limit);
             emit(vm, JMP);
             Pc patch            = emit_word_ptr(vm);
             vm->text_seg[patch] = 0;

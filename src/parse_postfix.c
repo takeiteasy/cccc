@@ -1840,6 +1840,39 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     return node;
 }
 
+// A statement expression whose block declares cleanup vars keeps that block,
+// so its cleanups run, and takes its value from a temporary assigned inside it:
+// `({ s; e; })` becomes `({ { s; tmp = e; } tmp; })`, which copies the value
+// before the cleanups run, as gcc does.
+static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
+    Node *last = blk->body;
+    while (last && last->next)
+        last = last->next;
+    if (!blk->cleanup_vars || !last || last->kind != ND_EXPR_STMT)
+        return blk->body;
+
+    add_type(vm, last->lhs);
+    Type *ty = last->lhs->ty;
+    Node *value;
+    if (ty->kind == TY_VOID) {
+        value = new_cast(vm, new_num(vm, 0, last->tok), ty_void);
+    } else {
+        if (ty->kind == TY_ARRAY)
+            ty = pointer_to(vm, ty->base);
+        else if (ty->kind == TY_FUNC)
+            ty = pointer_to(vm, ty);
+        // The value's type may be a cleanup var's, which carries cleanup_fn.
+        ty             = copy_type(vm, ty);
+        ty->cleanup_fn = NULL;
+        Obj *tmp       = new_lvar(vm, "", 0, ty);
+        last->lhs = new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, last->tok),
+                               new_cast(vm, last->lhs, ty), last->tok);
+        value     = new_var_node(vm, tmp, last->tok);
+    }
+    blk->next = new_unary(vm, ND_EXPR_STMT, value, last->tok);
+    return blk;
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -1873,7 +1906,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "(") && equal(tok->next, "{")) {
         // This is a GNU statement expresssion.
         Node *node = new_node(vm, ND_STMT_EXPR, tok);
-        node->body = compound_stmt(vm, &tok, tok->next->next, NULL)->body;
+        node->body =
+            stmt_expr_body(vm, compound_stmt(vm, &tok, tok->next->next, NULL));
         *rest      = skip(vm, tok, ")");
         return node;
     }

@@ -192,7 +192,8 @@ void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
                 long long elem_size);
 void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
                  long long elem_size);
-void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth);
+void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
+                            int seq_limit);
 void emit_fmov3(VirtualMachine *vm, int rd, int rs);
 void emit_fround_f32(VirtualMachine *vm, int rd, int rs);
 void emit_frr(VirtualMachine *vm, int op, int rd, int rs1);

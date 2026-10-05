@@ -491,6 +491,14 @@ Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
     return node;
 }
 
+// See node_is_cleanup_decl().
+Node *new_cleanup_decl(VirtualMachine *vm, Obj *var, Token *tok) {
+    Node *node =
+        new_unary(vm, ND_EXPR_STMT, new_node(vm, ND_NULL_EXPR, tok), tok);
+    node->var = var;
+    return node;
+}
+
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node = new_node(vm, ND_VAR, tok);
     node->var  = var;
@@ -697,7 +705,8 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
         var->is_root = true;
     }
     if (ty->cleanup_fn) {
-        var->cleanup_fn = ty->cleanup_fn;
+        var->cleanup_fn  = ty->cleanup_fn;
+        var->cleanup_seq = ++vm->compiler.cleanup_seq;
         // Mark cleanup fn as reachable so the liveness pass keeps it.
         ty->cleanup_fn->is_live = true;
         ty->cleanup_fn->is_root = true;

@@ -2046,6 +2046,9 @@ struct Node {
                                             // cleanup_scope_depth of target
     CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active
                                      // cleanup scope (NULL if none)
+    // ND_GOTO/ND_RETURN: only cleanup vars with cleanup_seq below this were
+    // declared before the jump; 0 means no limit.
+    int cleanup_seq_limit;
 
     // ND_BLOCK: cleanup vars declared in this scope (declaration order);
     // codegen emits LIFO
@@ -2368,6 +2371,7 @@ struct Obj {
                       // hints)
     struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit
                                   // (__attribute__((cleanup)))
+    int cleanup_seq;              // declaration order among cleanup vars
     int cleanup_fp_retval_offset; // stack offset for float retval save slot
                                   // (set by assign_stack_offsets)
 
@@ -4013,6 +4017,7 @@ typedef struct Compiler {
                                // cleanup vars)
     CleanupChainNode *cur_cleanup_chain; // innermost active cleanup scope
                                          // (ancestry for goto LCA)
+    int   cleanup_seq;        // cleanup vars declared so far (Obj.cleanup_seq)
     int   brk_cleanup_depth;  // cleanup_scope_depth when current brk_label was
                               // established
     int   cont_cleanup_depth; // cleanup_scope_depth when current cont_label was

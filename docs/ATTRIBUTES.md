@@ -446,7 +446,16 @@ void example(void) {
 ```
 
 **Call order:** LIFO — the last-declared variable is cleaned up first within a
-scope.
+scope. A jump out of a scope cleans up only the variables whose declaration it
+has already passed:
+
+```c
+for (int i = 0; i < n; i++) {
+    if (skip(i))
+        break;  // buf not declared yet: no cleanup
+    int *buf __attribute__((cleanup(cleanup_free))) = malloc(64);
+}
+```
 
 **Scope exit paths covered:**
 
@@ -457,12 +466,18 @@ scope.
 | `break` | ✓ |
 | `continue` | ✓ |
 | Named `goto` out of scope | ✓ |
+| End of a `for` loop declaring the variable (`for (T v CLEANUP = ...; ...)`) | ✓ |
+| End of a statement expression `({ ... })` (its value is copied first) | ✓ |
 | `longjmp` | ✗ (matches GCC C-mode behavior) |
 
 **Return value preservation:** when a non-void return is combined with cleanup
 calls, the return value is preserved across cleanup invocations. For integer or
 pointer returns, the value is saved via a stack push; for float/double returns,
 a dedicated stack slot is used.
+
+Under `-c=native`, `-m` and `-c=generated`, a cleanup variable is declared
+where it appears in the source with the host compiler's own `cleanup`
+attribute, so the native program runs the same cleanups.
 
 **Static inline cleanup functions** referenced only through the attribute are
 kept alive (not dead-stripped) by the liveness pass.

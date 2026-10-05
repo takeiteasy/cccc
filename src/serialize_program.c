@@ -2480,15 +2480,16 @@ static int add_nested_upvar(Obj ***upvars_out, int *len, int *cap, Obj *var) {
 }
 
 // #1209: true when `var`'s own address can't exist until its in-place
-// declaration runs -- a VLA local, or a pointer-to-VLA local whose own
-// declarator reads a runtime variable (Obj.deferred_vla_ptr_init, cccc.h).
+// declaration runs -- a VLA local, a pointer-to-VLA local whose own
+// declarator reads a runtime variable (Obj.deferred_vla_ptr_init, cccc.h), or
+// a cleanup var (declared in place so its cleanup runs at scope exit).
 // Such an upvar's env field is filled at its declaration site
 // (serialize_stmt.c's node_is_vla_ptr_assign/node_is_deferred_vla_ptr_init
 // cases) instead of serialize_function's usual top-of-function loop
 // (serialize_decl.c) -- see record_nested_upvar()'s #1209 comment for why.
 bool nested_upvar_is_deferred(Obj *var) {
     return (var->ty && var->ty->kind == TY_VLA) ||
-           var->deferred_vla_ptr_init != NULL;
+           var->deferred_vla_ptr_init != NULL || var->cleanup_fn;
 }
 
 // #1209: the env-struct field type for upvar `var`. A VLA (or pointer-to-

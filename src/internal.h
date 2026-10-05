@@ -523,6 +523,13 @@ static inline bool node_is_deferred_vla_ptr_init(Node *n) {
 // missed detection only forfeits reclamation for that block (its VLA
 // storage is still swept, just later, at frame exit), it never
 // miscompiles anything, so under-detecting here is always safe.
+// The no-op statement declaration() leaves where a cleanup var is declared, so
+// -c=native can declare it there with the host's cleanup attribute.
+static inline bool node_is_cleanup_decl(Node *n) {
+    return n && n->kind == ND_EXPR_STMT && n->var && n->var->cleanup_fn &&
+           n->lhs && n->lhs->kind == ND_NULL_EXPR;
+}
+
 static inline bool block_defines_vla(Node *blk) {
     if (!blk || blk->kind != ND_BLOCK)
         return false;

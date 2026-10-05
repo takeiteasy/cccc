@@ -58,6 +58,19 @@
 // the same reason -- a nested function that cannot see `var` in its own
 // lexical scope can never reach a call that would read this field, either
 // before it's first assigned or after `var`'s scope ends.
+static void serialize_cleanup_attr(FILE *f, VirtualMachine *vm,
+                                   SerializeContext *ctx, Obj *var) {
+    if (!var->cleanup_fn)
+        return;
+    Node fn = {.kind = ND_VAR,
+               .var  = var->cleanup_fn,
+               .ty   = var->cleanup_fn->ty,
+               .tok  = var->tok};
+    fprintf(f, " __attribute__((cleanup(");
+    serialize_expr(f, vm, ctx, &fn, 0);
+    fprintf(f, ")))");
+}
+
 static void emit_deferred_nested_upvar_store(FILE *f, VirtualMachine *vm,
                                              SerializeContext *ctx, int indent,
                                              Obj *var) {
@@ -95,6 +108,14 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             break;
 
         case ND_EXPR_STMT:
+            if (node_is_cleanup_decl(node)) {
+                print_indent_level(f, indent);
+                serialize_hoisted_local_decl(f, vm, ctx, node->var);
+                serialize_cleanup_attr(f, vm, ctx, node->var);
+                fprintf(f, ";\n");
+                emit_deferred_nested_upvar_store(f, vm, ctx, indent, node->var);
+                break;
+            }
             if (is_noop_expr(node->lhs))
                 break;
             // #964: `v = alloca(tmp)` is declaration()'s lowering of a VLA
@@ -110,6 +131,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 Obj *var = node->lhs->lhs->var;
                 print_indent_level(f, indent);
                 serialize_type_decl(f, ctx, var->ty, var->name);
+                serialize_cleanup_attr(f, vm, ctx, var);
                 fprintf(f, ";\n");
                 emit_deferred_nested_upvar_store(f, vm, ctx, indent, var);
                 break;
@@ -482,9 +504,20 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 // Only called from statement-list positions -- never the direct body of an
 // if/else/loop/switch, where a declaration can't legally sit anyway (cccc
 // itself already rejects e.g. `if (n) int v[n];`).
+static bool block_declares_cleanup_var(Node *blk) {
+    for (Node *s = blk->body; s; s = s->next)
+        if (node_is_cleanup_decl(s))
+            return true;
+    return false;
+}
+
+// A declaration group that declares a VLA or cleanup var in place is emitted
+// unbraced, so the declaration stays in scope for the statements after it.
 void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
                               SerializeContext *ctx, Node *node, int indent) {
-    if (node && node->kind == ND_BLOCK && block_defines_vla(node)) {
+    if (node && node->kind == ND_BLOCK &&
+        (block_defines_vla(node) ||
+         (node->is_decl_group && block_declares_cleanup_var(node)))) {
         for (Node *s = node->body; s; s = s->next)
             serialize_stmt(f, vm, ctx, s, indent);
         return;

@@ -128,6 +128,68 @@ void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
     }
 }
 
+static bool declared_cleanup_var(VirtualMachine *vm,
+                                 VarScopeNode   *vars_before) {
+    for (VarScopeNode *sv = vm->compiler.scope->vars; sv != vars_before;
+         sv               = sv->next)
+        if (sv->var && sv->var->cleanup_fn)
+            return true;
+    return false;
+}
+
+// Push a cleanup scope with an ancestry node so gotos/labels can compute the
+// LCA of their cleanup scopes. Arena-allocated because resolve_goto_labels
+// reads it after the scope is closed.
+static void open_cleanup_scope(VirtualMachine *vm) {
+    vm->compiler.cleanup_scope_depth++;
+    CleanupChainNode *cn =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupChainNode));
+    cn->depth                      = vm->compiler.cleanup_scope_depth;
+    cn->parent                     = vm->compiler.cur_cleanup_chain;
+    vm->compiler.cur_cleanup_chain = cn;
+}
+
+// Record the current scope's cleanup vars on `blk` in LIFO order (scope->vars
+// is prepend-ordered) and pop the cleanup scope.
+static void close_cleanup_scope(VirtualMachine *vm, Node *blk) {
+    blk->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
+    CleanupVar **cv_tail     = &blk->cleanup_vars;
+    for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
+        if (sv->var && sv->var->cleanup_fn) {
+            CleanupVar *cv =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
+            cv->var        = sv->var;
+            cv->cleanup_fn = sv->var->cleanup_fn;
+            *cv_tail       = cv;
+            cv_tail        = &cv->next;
+        }
+    }
+    vm->compiler.cleanup_scope_depth--;
+    if (vm->compiler.cur_cleanup_chain)
+        vm->compiler.cur_cleanup_chain = vm->compiler.cur_cleanup_chain->parent;
+}
+
+// `for (T v CLEANUP = x; ...)` becomes `{ <decl v>; for (v = x; ...) }`: the
+// cleanup-decl markers move out of the init so it stays an expression list.
+static Node *wrap_for_cleanup_scope(VirtualMachine *vm, Node *loop) {
+    Node *blk  = new_node(vm, ND_BLOCK, loop->tok);
+    Node  head = {};
+    Node *decl = &head;
+    for (Node **p = &loop->init->body; *p;) {
+        if (node_is_cleanup_decl(*p)) {
+            decl = decl->next = *p;
+            *p                = (*p)->next;
+        } else {
+            p = &(*p)->next;
+        }
+    }
+    decl->next = loop;
+    loop->next = NULL;
+    blk->body  = head.next;
+    close_cleanup_scope(vm, blk);
+    return blk;
+}
+
 // C23 §6.8.1: a label may precede a declaration at block scope.
 // Pre-C23 bare declarations after labels are a hard error.
 // Limitation: only handles object declarations; typedef/function-def after a
@@ -233,7 +295,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok(vm, tok,
                       "'return' is not allowed inside an OpenMP parallel "
                       "region");
-        Node *node = new_node(vm, ND_RETURN, tok);
+        Node *node              = new_node(vm, ND_RETURN, tok);
+        node->cleanup_seq_limit = vm->compiler.cleanup_seq + 1;
 
         // Warn if this is a noreturn function attempting to return
         if (vm->compiler.current_fn && vm->compiler.current_fn->is_noreturn)
@@ -541,17 +604,25 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         char *cont             = vm->compiler.cont_label;
         vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
         vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
-        int saved_brk_cld_for           = vm->compiler.brk_cleanup_depth;
-        int saved_cont_cld_for          = vm->compiler.cont_cleanup_depth;
-        vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
-        vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
+        int saved_brk_cld_for  = vm->compiler.brk_cleanup_depth;
+        int saved_cont_cld_for = vm->compiler.cont_cleanup_depth;
 
+        // A cleanup var declared here lives until the loop ends, so the loop
+        // is wrapped in a block that owns its cleanup scope; break/continue
+        // stay inside that scope.
+        bool init_has_cleanup = false;
         if (is_decl_start(vm, tok)) {
-            Type *basety = declspec(vm, &tok, tok, NULL);
-            node->init   = declaration(vm, &tok, tok, basety, NULL);
+            VarScopeNode *vars_before = vm->compiler.scope->vars;
+            Type         *basety      = declspec(vm, &tok, tok, NULL);
+            node->init       = declaration(vm, &tok, tok, basety, NULL);
+            init_has_cleanup = declared_cleanup_var(vm, vars_before);
+            if (init_has_cleanup)
+                open_cleanup_scope(vm);
         } else {
             node->init = expr_stmt(vm, &tok, tok);
         }
+        vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
+        vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         if (!equal(tok, ";"))
             node->cond = expr(vm, &tok, tok);
@@ -577,6 +648,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         if (for_cond_dead)
             vm->compiler.dead_code_depth--;
 
+        if (init_has_cleanup)
+            node = wrap_for_cleanup_scope(vm, node);
         leave_scope(vm);
         vm->compiler.brk_label          = brk;
         vm->compiler.cont_label         = cont;
@@ -659,9 +732,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return node;
         }
 
-        Node *node          = new_node(vm, ND_GOTO, tok);
-        node->label         = get_ident(vm, tok->next);
-        node->cleanup_chain = vm->compiler.cur_cleanup_chain;
+        Node *node              = new_node(vm, ND_GOTO, tok);
+        node->label             = get_ident(vm, tok->next);
+        node->cleanup_chain     = vm->compiler.cur_cleanup_chain;
+        node->cleanup_seq_limit = vm->compiler.cleanup_seq + 1;
         node->goto_next     = vm->compiler.gotos;
         vm->compiler.gotos  = node;
         *rest               = skip(vm, tok->next->next, ";");
@@ -699,6 +773,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node                 = new_node(vm, ND_GOTO, tok);
         node->unique_label         = vm->compiler.brk_label;
         node->cleanup_target_depth = vm->compiler.brk_cleanup_depth;
+        node->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
         *rest                      = skip(vm, tok->next, ";");
         return node;
     }
@@ -728,6 +803,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node                 = new_node(vm, ND_GOTO, tok);
         node->unique_label         = vm->compiler.cont_label;
         node->cleanup_target_depth = vm->compiler.cont_cleanup_depth;
+        node->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
         *rest                      = skip(vm, tok->next, ";");
         return node;
     }
@@ -879,29 +955,11 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
             // cleanup vars.
             VarScopeNode *vars_before = vm->compiler.scope->vars;
             cur = cur->next = declaration(vm, &tok, tok, basety, &attr);
-            // If any newly declared var has cleanup_fn, push a cleanup scope
-            // depth. This must happen immediately (not deferred) so that
-            // break/continue nodes parsed after this see the updated
-            // brk/cont_cleanup_depth.
-            if (!scope_has_cleanup) {
-                for (VarScopeNode *sv      = vm->compiler.scope->vars;
-                     sv != vars_before; sv = sv->next) {
-                    if (sv->var && sv->var->cleanup_fn) {
-                        scope_has_cleanup = true;
-                        vm->compiler.cleanup_scope_depth++;
-                        // Push an ancestry node so gotos/labels can compute the
-                        // LCA of their cleanup scopes. Arena-allocated because
-                        // resolve_goto_labels reads it after compound_stmt
-                        // returns.
-                        CleanupChainNode *cn =
-                            arena_alloc(&vm->compiler.parser_arena,
-                                        sizeof(CleanupChainNode));
-                        cn->depth  = vm->compiler.cleanup_scope_depth;
-                        cn->parent = vm->compiler.cur_cleanup_chain;
-                        vm->compiler.cur_cleanup_chain = cn;
-                        break;
-                    }
-                }
+            // Opened immediately (not deferred) so that break/continue
+            // nodes parsed after this see the updated brk/cont_cleanup_depth.
+            if (!scope_has_cleanup && declared_cleanup_var(vm, vars_before)) {
+                scope_has_cleanup = true;
+                open_cleanup_scope(vm);
             }
         } else {
             // Clear initializing_var when we start parsing statements
@@ -917,30 +975,8 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
     // Also clear at end in case there are no statements after declarations
     vm->compiler.initializing_var = NULL;
 
-    // Build CleanupVar list for this block (LIFO order = most-recently-declared
-    // first). scope->vars uses prepend so its head is the most recently
-    // declared var, which is exactly the right order for LIFO cleanup emission.
-    if (scope_has_cleanup) {
-        node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
-        CleanupVar  *cv_list      = NULL;
-        CleanupVar **cv_tail      = &cv_list;
-        for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
-            if (sv->var && sv->var->cleanup_fn) {
-                CleanupVar *cv =
-                    arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
-                cv->var        = sv->var;
-                cv->cleanup_fn = sv->var->cleanup_fn;
-                cv->next       = NULL;
-                *cv_tail       = cv;
-                cv_tail        = &cv->next;
-            }
-        }
-        node->cleanup_vars = cv_list; // LIFO order: codegen iterates directly
-        vm->compiler.cleanup_scope_depth--;
-        if (vm->compiler.cur_cleanup_chain)
-            vm->compiler.cur_cleanup_chain =
-                vm->compiler.cur_cleanup_chain->parent;
-    }
+    if (scope_has_cleanup)
+        close_cleanup_scope(vm, node);
 
     leave_scope(vm);
 

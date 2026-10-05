@@ -62,11 +62,14 @@ void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope) {
 }
 
 // Emit cleanup calls for all active scopes with depth > target_depth (innermost
-// first).
-void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth) {
+// first), skipping vars a jump with this seq_limit precedes (0: no limit).
+void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
+                            int seq_limit) {
     for (CleanupScopeEntry *s = g_cleanup_scope; s && s->depth > target_depth;
          s                    = s->outer)
-        emit_scope_cleanups(vm, s);
+        for (CleanupVar *cv = s->vars; cv; cv = cv->next)
+            if (!seq_limit || cv->var->cleanup_seq < seq_limit)
+                emit_one_cleanup(vm, cv);
 }
 
 // ========== Forward Declarations ==========

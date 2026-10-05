@@ -393,6 +393,48 @@ static Type *hoist_mutable_type(VirtualMachine *vm, Type *ty) {
     return cpy;
 }
 
+// A local's declarator with no initializer, as serialize_function's hoist
+// prints it (also used for a cleanup var declared in place).
+void serialize_hoisted_local_decl(FILE *f, VirtualMachine *vm,
+                                  SerializeContext *ctx, Obj *var) {
+    // #1029: serialize_function hoists every local to a flat
+    // declaration here, with any initializer lowered to a separate
+    // assignment statement in the body below (const-qualified or
+    // not -- the split itself is unconditional). A `const`-typed
+    // local (`const long long max_spins = 2000000;`) would
+    // therefore emit as `const long long max_spins;` here and
+    // `max_spins = 2000000;` in the body -- an assignment to a
+    // const object, which real C rejects outright even though the
+    // VM (which never actually re-derives or enforces this split)
+    // has no problem with the original, un-hoisted source. Strip
+    // only the *top-level* const on the hoisted declarator; a
+    // pointer-level const on the pointee (`const char *p`) lives on
+    // the base type, one step down `var->ty->base`, and is
+    // untouched by this.
+    // #1095: a hoisted local has no byte-image initializer here --
+    // any initializer was already split into a separate assignment
+    // statement in the body (see #1029's own comment just above)
+    // -- so re-materializing a host-owned sizeof/_Alignof array
+    // dimension can't disagree with anything else emitted for this
+    // object. See SerializeContext.allow_layout_dims's own comment.
+    ctx->allow_layout_dims = true;
+    // #1136: see serialize_alignas_if_needed's own comment.
+    serialize_alignas_if_needed(f, var);
+    // #1029: strip the top-level const on the hoisted declarator;
+    // #1102: and any qualifier spelled on an aggregate's *element*
+    // type (`const int a[3]`, arbitrarily deep for multi-dimensional
+    // arrays) -- see hoist_mutable_type(), which returns the type
+    // untouched when there is nothing to strip. A pointer-level
+    // const on a pointee (`const char *p`) is untouched by both.
+    // #1145: serialize_local_var_type_decl, not the plain
+    // serialize_type_decl every other declarator site in this file
+    // uses -- see its own comment for why the alias-preserving
+    // check it adds is confined to exactly this one call site.
+    serialize_local_var_type_decl(f, ctx, hoist_mutable_type(vm, var->ty),
+                                  var->name);
+    ctx->allow_layout_dims = false;
+}
+
 // #1302: lazily populate ctx->global_names (name -> Obj*) from
 // vm->compiler.globals. A plain serialize_find_global() linear scan here
 // would be O(locals x globals x functions) across a whole program -- the
@@ -478,8 +520,6 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 
         // Function-local typedefs/tags are emitted at the top of the function,
         // matching the serializer's existing local declaration hoisting.
-        // TODO(#1431): hoisting drops a local's cleanup attribute, so its
-        // scope-exit calls never run natively; lower them explicitly.
         serialize_type_defs_for_owner(f, ctx, fn);
 
         // #1062: for each va_list parameter, pair the shim-named parameter
@@ -712,6 +752,16 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             if (var->deferred_vla_ptr_init)
                 continue;
 
+            // Declared in place instead (serialize_cleanup_decl), so the
+            // host's cleanup runs at the end of the variable's own scope.
+            if (var->cleanup_fn) {
+                if (var->is_block_var)
+                    error_tok(vm, var->tok,
+                              "a __block variable with a cleanup attribute "
+                              "is not supported under -c=native");
+                continue;
+            }
+
             // #965: a block literal's descriptor local (Node.block_desc_var)
             // is typed `long[N]` at parse time only so it gets frame space --
             // its real C type is the paired block function's env struct
@@ -744,42 +794,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             }
 
             print_indent_level(f, 1);
-            // #1029: serialize_function hoists every local to a flat
-            // declaration here, with any initializer lowered to a separate
-            // assignment statement in the body below (const-qualified or
-            // not -- the split itself is unconditional). A `const`-typed
-            // local (`const long long max_spins = 2000000;`) would
-            // therefore emit as `const long long max_spins;` here and
-            // `max_spins = 2000000;` in the body -- an assignment to a
-            // const object, which real C rejects outright even though the
-            // VM (which never actually re-derives or enforces this split)
-            // has no problem with the original, un-hoisted source. Strip
-            // only the *top-level* const on the hoisted declarator; a
-            // pointer-level const on the pointee (`const char *p`) lives on
-            // the base type, one step down `var->ty->base`, and is
-            // untouched by this.
-            // #1095: a hoisted local has no byte-image initializer here --
-            // any initializer was already split into a separate assignment
-            // statement in the body (see #1029's own comment just above)
-            // -- so re-materializing a host-owned sizeof/_Alignof array
-            // dimension can't disagree with anything else emitted for this
-            // object. See SerializeContext.allow_layout_dims's own comment.
-            ctx->allow_layout_dims = true;
-            // #1136: see serialize_alignas_if_needed's own comment.
-            serialize_alignas_if_needed(f, var);
-            // #1029: strip the top-level const on the hoisted declarator;
-            // #1102: and any qualifier spelled on an aggregate's *element*
-            // type (`const int a[3]`, arbitrarily deep for multi-dimensional
-            // arrays) -- see hoist_mutable_type(), which returns the type
-            // untouched when there is nothing to strip. A pointer-level
-            // const on a pointee (`const char *p`) is untouched by both.
-            // #1145: serialize_local_var_type_decl, not the plain
-            // serialize_type_decl every other declarator site in this file
-            // uses -- see its own comment for why the alias-preserving
-            // check it adds is confined to exactly this one call site.
-            serialize_local_var_type_decl(
-                f, ctx, hoist_mutable_type(vm, var->ty), var->name);
-            ctx->allow_layout_dims = false;
+            serialize_hoisted_local_decl(f, vm, ctx, var);
             fprintf(f, ";\n");
         }
         free(referenced_globals.refs); // #1302: no-op if never built

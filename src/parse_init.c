@@ -292,6 +292,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->is_block_var = true;
         // Note: cleanup_fn is transferred from attr → Type → Obj via
         // apply_var_attrs_to_type() + new_var(), no manual copy needed here.
+        if (var->cleanup_fn)
+            cur = cur->next = new_cleanup_decl(vm, var, ty->name);
         // Resolve checked-pointer bounds (#770/#483) now that this local is
         // itself in scope, so a bound may reference any prior sibling local.
         if (var->checked_kind != CHECKED_NONE)
