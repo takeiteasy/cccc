@@ -546,19 +546,19 @@ Token *preprocess(VirtualMachine *vm, Token *tok);
 // tokenize.c
 //
 
-noreturn void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
+noreturn void error(char *fmt, ...) __attribute__((cold, format(printf, 1, 2)));
 uint64_t cccc_warning_mask_for_name(const char *name);
 bool cccc_warning_is_group_name(const char *name);
 void error_at(VirtualMachine *vm, char *loc, char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+    __attribute__((cold, format(printf, 3, 4)));
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+    __attribute__((cold, format(printf, 3, 4)));
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+    __attribute__((cold, format(printf, 3, 4)));
 void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
-             ...) __attribute__((format(printf, 4, 5)));
+             ...) __attribute__((cold, format(printf, 4, 5)));
 void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
-              ...) __attribute__((format(printf, 4, 5)));
+              ...) __attribute__((cold, format(printf, 4, 5)));
 const char *cccc_warning_name(CCCCWarning warning);
 bool node_is_stmt_kind(Node *n);
 bool equal(Token *tok, char *op);
