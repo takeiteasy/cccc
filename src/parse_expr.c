@@ -929,6 +929,8 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              "comparing floating-point values with == is "
                              "unreliable");
             }
+            // TODO(#1433): distinct operands that fold to the same constant
+            // (`sizeof(T) == 8`) compare structurally equal and warn.
             if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
                 nodes_structurally_equal(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,

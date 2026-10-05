@@ -478,6 +478,8 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 
         // Function-local typedefs/tags are emitted at the top of the function,
         // matching the serializer's existing local declaration hoisting.
+        // TODO(#1431): hoisting drops a local's cleanup attribute, so its
+        // scope-exit calls never run natively; lower them explicitly.
         serialize_type_defs_for_owner(f, ctx, fn);
 
         // #1062: for each va_list parameter, pair the shim-named parameter
