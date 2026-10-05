@@ -1478,31 +1478,19 @@ void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 // bites. Marking a Type as seen the first time it's reached turns the walk
 // linear in the number of distinct Type nodes and, as a side effect, is a
 // strictly stronger cycle-breaker than the depth cap (kept below anyway, as
-// a second line of defence). Grown on demand; freed by the caller that owns
-// it (serialize_wide_bitint_preamble).
+// a second line of defence). Keyed by Type pointer; freed by the caller that
+// owns it.
 typedef struct {
-    Type **seen;
-    int    n, cap;
+    HashMap map;
 } WideBitintSeen;
 
 // Returns true iff `ty` was already marked seen (caller should not
-// re-descend into it); otherwise marks it and returns false. Best-effort on
-// allocation failure: falls back to "not seen" rather than crash, so a
-// pathological program at worst reverts to the depth-capped behaviour
-// instead of aborting the compile.
+// re-descend into it); otherwise marks it and returns false.
 static bool wide_bitint_seen_mark(WideBitintSeen *seen, Type *ty) {
-    for (int i = 0; i < seen->n; i++)
-        if (seen->seen[i] == ty)
-            return true;
-    if (seen->n == seen->cap) {
-        int    new_cap = seen->cap ? seen->cap * 2 : 256;
-        Type **grown   = realloc(seen->seen, sizeof(Type *) * new_cap);
-        if (!grown)
-            return false;
-        seen->seen = grown;
-        seen->cap  = new_cap;
-    }
-    seen->seen[seen->n++] = ty;
+    long long key = (long long)(intptr_t)ty;
+    if (hashmap_get_int(&seen->map, key))
+        return true;
+    hashmap_put_int(&seen->map, key, ty);
     return false;
 }
 
@@ -1542,7 +1530,7 @@ static bool type_has_wide_bitint_depth(Type *ty, WideBitintSeen *seen,
 bool type_has_wide_bitint(Type *ty) {
     WideBitintSeen seen = {0};
     bool           ret  = type_has_wide_bitint_depth(ty, &seen, 0);
-    free(seen.seen);
+    hashmap_deinit_borrowed(&seen.map);
     return ret;
 }
 
@@ -1663,7 +1651,7 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
                 wide_bitint_scan_node(obj->body, &need, &seen);
         }
     }
-    free(seen.seen);
+    hashmap_deinit_borrowed(&seen.map);
     if (!need.any)
         return;
 
