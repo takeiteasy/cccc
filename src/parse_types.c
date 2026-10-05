@@ -2891,10 +2891,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 equal(tok->next->next, ":") && tok->next->next->next &&
                 (tok->next->next->next->kind == TK_IDENT ||
                  tok->next->next->next->kind == TK_KEYWORD)) {
-                // TODO(#1430): accept the reserved `__gnu__` scope too.
                 if (equal(tok, "cccc")) {
                     cccc_scoped = true;
-                } else if (equal(tok, "gnu")) {
+                } else if (equal(tok, "gnu") || equal(tok, "__gnu__")) {
                     gnu_scoped = true;
                 }
                 if (cccc_scoped || gnu_scoped) {
@@ -2903,15 +2902,15 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 }
             }
 
-            bool unused              = equal(name_tok, "maybe_unused");
-            bool deprecated          = equal(name_tok, "deprecated");
-            bool is_noreturn_attr    = equal(name_tok, "noreturn");
-            bool is_nodiscard_attr   = equal(name_tok, "nodiscard");
-            bool is_fallthrough_attr = equal(name_tok, "fallthrough");
+            bool unused              = attr_is(name_tok, "maybe_unused");
+            bool deprecated          = attr_is(name_tok, "deprecated");
+            bool is_noreturn_attr    = attr_is(name_tok, "noreturn");
+            bool is_nodiscard_attr   = attr_is(name_tok, "nodiscard");
+            bool is_fallthrough_attr = attr_is(name_tok, "fallthrough");
             bool is_no_unique_address_attr =
-                equal(name_tok, "no_unique_address");
-            bool is_pure_attr       = equal(name_tok, "pure");
-            bool is_func_const_attr = equal(name_tok, "const");
+                attr_is(name_tok, "no_unique_address");
+            bool is_pure_attr       = attr_is(name_tok, "pure");
+            bool is_func_const_attr = attr_is(name_tok, "const");
             bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
             bool is_addr_space_attr =
                 cccc_scoped &&
@@ -2975,7 +2974,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[gnu::cleanup(fn)]] — scope-exit callback
-            if (gnu_scoped && equal(name_tok, "cleanup")) {
+            if (gnu_scoped && attr_is(name_tok, "cleanup")) {
                 tok = skip(vm, tok, "(");
                 if (tok->kind != TK_IDENT)
                     error_tok(vm, tok,
@@ -2998,7 +2997,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // [[gnu::packed]] (#1160) -- C23 spelling of
             // __attribute__((packed)); see attribute_list()'s "packed" case
             // for the ty->is_packed semantics this mirrors.
-            if (gnu_scoped && equal(name_tok, "packed")) {
+            if (gnu_scoped && attr_is(name_tok, "packed")) {
                 if (ty && allow_ty_align)
                     ty->is_packed = true;
                 continue;
@@ -3009,7 +3008,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // "aligned" case for the ty/attr->gnu_align split this mirrors,
             // and c23_attribute_list_ex()'s own comment for why
             // `allow_ty_align` exists.
-            if (gnu_scoped && equal(name_tok, "aligned")) {
+            if (gnu_scoped && attr_is(name_tok, "aligned")) {
                 int align = 16; // bare form: maximum useful alignment
                 if (equal(tok, "(")) {
                     tok   = skip(vm, tok, "(");
@@ -3107,7 +3106,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // [[gnu::vector_size(N)]] (tracker #72) -- same semantics as the
             // GNU-syntax handler in attribute_list(); only meaningful in
             // declarator-suffix position (attr non-NULL).
-            if (gnu_scoped && equal(name_tok, "vector_size")) {
+            if (gnu_scoped && attr_is(name_tok, "vector_size")) {
                 tok       = skip(vm, tok, "(");
                 int bytes = const_expr(vm, &tok, tok);
                 tok       = skip(vm, tok, ")");
@@ -3134,9 +3133,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             // [[gnu::constructor]] / [[gnu::constructor(101)]]
             // [[gnu::destructor]] / [[gnu::destructor(101)]]
-            if (gnu_scoped && (equal(name_tok, "constructor") ||
-                               equal(name_tok, "destructor"))) {
-                bool is_ctor  = equal(name_tok, "constructor");
+            if (gnu_scoped && (attr_is(name_tok, "constructor") ||
+                               attr_is(name_tok, "destructor"))) {
+                bool is_ctor  = attr_is(name_tok, "constructor");
                 int  priority = CCCC_NO_INIT_PRIORITY;
                 if (equal(tok, "(")) {
                     tok      = skip(vm, tok, "(");

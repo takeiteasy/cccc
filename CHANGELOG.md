@@ -21,6 +21,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `int (*fp)(void) __attribute__((aligned(16)))`, is accepted instead of
   failing with "expected ','". Function attributes such as `format` and
   `nonnull` on a function pointer apply to calls through it.
+- Fixed: `[[__gnu__::name]]` is accepted as `[[gnu::name]]`, reserved
+  `__name__` spellings work inside `[[...]]`, and `__has_c_attribute(gnu::x)`
+  reports recognized GNU attributes.
 - Added: `--vm-profile` reports comptime execution in its own section, and
   works with `-c=native`, `-c=generated` and `-m`. With `--json`, the comptime
   profile is a nested `"comptime"` object.

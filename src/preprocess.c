@@ -1934,6 +1934,8 @@ static long is_has_c_attribute_supported(char *vendor, char *name) {
         return (a->cat == ATTR_STD) ? a->date : 0;
     if (!strcmp(vendor, "cccc"))
         return (a->cat == ATTR_CCCC) ? a->date : 0;
+    if (!strcmp(vendor, "gnu") || !strcmp(vendor, "__gnu__"))
+        return a->has_attr;
     return 0;
 }
 

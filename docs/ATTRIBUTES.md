@@ -35,8 +35,10 @@ optimizer, no machine-mode type system — see
 name, matching real GCC/Clang so headers that feature-test on them don't
 diverge; genuinely unrecognized attributes return `0`.
 `__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
-attributes (C23 N3220 §6.10.10.2) and `1` for CCCC vendor attributes;
-unsupported or unknown attributes return `0`. `__has_cpp_attribute` returns `0`.
+attributes (C23 N3220 §6.10.10.2), `1` for CCCC vendor attributes, and `1`
+for any attribute `__has_attribute` recognizes when it is written in the `gnu`
+or `__gnu__` scope (`__has_c_attribute(gnu::cold)`); unsupported or unknown
+attributes return `0`. `__has_cpp_attribute` returns `0`.
 
 `__has_declspec_attribute` and `__has_warning` are recognized (so headers
 using them parse instead of erroring) but always return `0` — CCCC supports
@@ -1127,6 +1129,17 @@ log_fn("%d", "x");  // -Wformat warning under --format-string-checks
 This covers `format`, `nonnull`, `returns_nonnull`, `sentinel`, `noreturn`,
 `warn_unused_result`/`nodiscard`, `pure`, `const`, `malloc`, `alloc_size`,
 `error` and `warning`, in either the GNU or the `[[gnu::...]]` spelling.
+
+### Scope and name spellings
+
+`[[__gnu__::name]]` is the same as `[[gnu::name]]`, and every GNU or standard
+attribute name may be written in its reserved `__name__` form, as headers do
+to stay safe from user macros:
+
+```c
+int buf[4] [[__gnu__::__aligned__(16)]];  // same as [[gnu::aligned(16)]]
+[[__nodiscard__]] int parse(void);        // same as [[nodiscard]]
+```
 
 ## GNU `asm("symbol")` Labels
 
