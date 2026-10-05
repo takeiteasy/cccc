@@ -7,6 +7,32 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+- Added: GNU `__auto_type` declares a variable typed from its initializer.
+- Added: `-Wauto-declarator`, part of `-Wall`, flags an `auto` or `__auto_type`
+  declaration that gcc rejects (a pointer declarator such as `auto *p = &x;`,
+  or several declarators) under `--compiler-family=gcc`, the default. cccc
+  accepts the declarations.
+- Fixed: a declarator attribute after a C23 `auto` name
+  (`auto t __attribute__((unused)) = a;`) is accepted.
+- Fixed: a `cleanup` attribute on a variable-length array runs at scope exit
+  and receives a pointer to the array, in the VM and under `-c=native`. A
+  pointer-to-VLA local with both a `cleanup` and an initializer compiles under
+  `-c=native` instead of failing with "redefinition".
+- Fixed: the `cleanup` function of a `__block` variable receives the
+  variable's own address in the VM.
+- Fixed: a VLA declared in a `for` initializer (`for (int n = 3, v[n], i = 0;
+  ...)`) compiles under `-c=native`, `-m` and `-c=generated` instead of
+  failing with "cannot be serialized to C".
+- Fixed: `-Wattributes` warns that `cleanup` does not apply to types in a cast,
+  `sizeof` or `__typeof__` type-name, as gcc does.
+- Fixed: `__alignof__(v)` and `_Alignof(v)` on a variable or struct member
+  report its declared `aligned(N)` / `_Alignas(N)` alignment, not just its
+  type's.
+- Fixed: `-Wtautological-compare` no longer reports a self-comparison for
+  operands that fold to a constant, such as `sizeof(struct P) == 8`.
+
 - Fixed: subscripting a vector rvalue (`(a + b)[0]`, `f()[3]`) is accepted
   instead of failing with "not an lvalue". Assigning to such a lane is still
   an error.
@@ -19,8 +45,6 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   (`[[gnu::vector_size(16)]] int v;`, `int __attribute__((vector_size(16))) v;`)
   now makes a vector, as in gcc. It was a parse error in declarations, and
   silently ignored in cast, compound-literal and `sizeof` type-names.
-
-## [0.7.4] - 2026-10-05
 
 - Fixed: compile time no longer grows quadratically with the number of
   globals. A 54,000-line file with 6,000 functions compiles in 0.5 s instead
