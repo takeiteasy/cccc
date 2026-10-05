@@ -1138,7 +1138,7 @@ int vm_eval(VirtualMachine *vm);
 int cccc_vm_eval_dispatch(VirtualMachine *vm, volatile Pc *current_pc);
 #define CCCC_HOST_SIGNAL_RC (-4096)
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action);
-void cc_vm_profile_reset(VirtualMachine *vm);
+void cc_vm_profile_enable(VirtualMachine *vm);
 // #1041: reset the host's process-global getopt() state (optind/opterr/
 // optopt, and optreset where available) right before guest code starts
 // running -- cccc's own CLI parsing (main.c) shares that same state via

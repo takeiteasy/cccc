@@ -17,6 +17,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   of warning "unknown attribute" under `-Wattributes`.
 - Fixed: an unknown attribute after a function declarator warns once instead
   of three times.
+- Added: `--vm-profile` reports comptime execution in its own section, and
+  works with `-c=native`, `-c=generated` and `-m`. With `--json`, the comptime
+  profile is a nested `"comptime"` object.
+- Fixed: `--vm-profile` no longer drops `main`'s counts when the program
+  registers an `atexit` handler. The report no longer has a `cycles` line or
+  JSON key; it counted only the last VM entry, so use `total_opcodes`.
 
 ## [0.7.3] - 2026-10-02
 

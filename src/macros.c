@@ -1615,10 +1615,13 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->debug_vm          = 0;
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
-    cccc_reset_getopt_state();    // #1041
-    vm->runtime_fault    = false; // no stale fault from an earlier vm_eval
-    vm->runtime_fault_op = NULL;
-    int eval_rc          = vm_eval(vm);
+    cccc_reset_getopt_state();      // #1041
+    vm->runtime_fault      = false; // no stale fault from an earlier vm_eval
+    vm->runtime_fault_op   = NULL;
+    bool saved_in_comptime = vm->vm_profile_in_comptime;
+    vm->vm_profile_in_comptime = vm->vm_profile_comptime != NULL;
+    int eval_rc                = vm_eval(vm);
+    vm->vm_profile_in_comptime = saved_in_comptime;
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm         = saved_debug;
 
@@ -2573,9 +2576,12 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
     cccc_reset_getopt_state();    // #1041
-    vm->runtime_fault    = false; // no stale fault from an earlier vm_eval
-    vm->runtime_fault_op = NULL;
-    int eval_rc          = vm_eval(vm);
+    vm->runtime_fault      = false; // no stale fault from an earlier vm_eval
+    vm->runtime_fault_op   = NULL;
+    bool saved_in_comptime = vm->vm_profile_in_comptime;
+    vm->vm_profile_in_comptime = vm->vm_profile_comptime != NULL;
+    int eval_rc                = vm_eval(vm);
+    vm->vm_profile_in_comptime = saved_in_comptime;
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;
 

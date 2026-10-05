@@ -4443,6 +4443,22 @@ typedef struct {
     int         capacity;
 } HeapMarks;
 
+// Opcode counts for one profiled phase (program run or comptime).
+typedef struct {
+    uint64_t counts[OP_COUNT];
+    uint64_t total;
+    // Transitions, indexed as bigram_counts[prev * OP_COUNT + cur].
+    uint64_t bigram_counts[OP_COUNT * OP_COUNT];
+    uint64_t bigram_total;
+    int      prev_op;
+    bool     bigram_started;
+    // Heap-allocated OP_COUNT^3 array; NULL when allocation failed.
+    uint64_t *trigram_counts;
+    uint64_t  trigram_total;
+    int       prev2_op;
+    bool      trigram_started;
+} VmProfileCounts;
+
 /*!
  @brief Encapsulates all state for the CCCC compiler and virtual
            machine. Instances are independent and support embedding.
@@ -4695,24 +4711,12 @@ struct VirtualMachine {
     int    ffi_errors_fatal;
     int    enable_ffi_type_checking;
 
-    // VM opcode execution profiling
-    bool     vm_profile_enabled;
-    uint64_t vm_profile_counts[OP_COUNT];
-    uint64_t vm_profile_total;
-    // Dynamic opcode bigram (transition) profile. Indexed as
-    // bigram_counts[prev * OP_COUNT + cur]. vm_profile_bigram_total counts the
-    // number of recorded transitions (== total opcodes - 1 when the profile
-    // spans the entire run).
-    uint64_t vm_profile_bigram_counts[OP_COUNT * OP_COUNT];
-    uint64_t vm_profile_bigram_total;
-    int      vm_profile_prev_op;
-    bool     vm_profile_bigram_started;
-    // Dynamic opcode trigram profile. Heap-allocated OP_COUNT^3 array (too
-    // large for inline storage). NULL until profiling is enabled.
-    uint64_t *vm_profile_trigram_counts;
-    uint64_t  vm_profile_trigram_total;
-    int       vm_profile_prev2_op;
-    bool      vm_profile_trigram_started;
+    // VM opcode execution profiling (--vm-profile). Comptime execution is
+    // counted in vm_profile_comptime while vm_profile_in_comptime is set.
+    bool             vm_profile_enabled;
+    bool             vm_profile_in_comptime;
+    VmProfileCounts  vm_profile_run;
+    VmProfileCounts *vm_profile_comptime;
 
     // Debugger state (enable via CCCC_ENABLE_DEBUGGER flag)
     Debugger        dbg;
@@ -5678,9 +5682,9 @@ int cc_rehydrate_asm_passthru(VirtualMachine *vm);
 void init_mode_macros(VirtualMachine *vm);
 
 // vm.c
-void cc_vm_profile_print(VirtualMachine *vm, FILE *f);
+void cc_vm_profile_print(VirtualMachine *vm, FILE *f, bool include_run);
 int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
-                             const char *input_name);
+                             const char *input_name, bool include_run);
 long long generate_random_canary(void);
 
 // host_backtrace.c

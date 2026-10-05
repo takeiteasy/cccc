@@ -131,8 +131,10 @@ That spelling is chosen by probing the host `cc`:
 
 VM-only options have no meaning once a host compiler takes over and are
 rejected: bytecode output, the disassembler (`-d`), the debugger (`-g`), the
-profiler (`--vm-profile`), the REPL (`-r`), and the `-0`…`-3` safety levels.
-Run those against the default VM build.
+REPL (`-r`), and the `-0`…`-3` safety levels. Run those against the default
+VM build. `--vm-profile` is accepted and reports only the comptime code that
+ran during the build — see
+[Profiling comptime code](MACROS.md#profiling-comptime-code).
 
 Plain runtime `#include <stdio.h>` and other real system headers work here —
 see [HEADERS.md](HEADERS.md) for how header resolution and host-header

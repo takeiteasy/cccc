@@ -265,22 +265,16 @@ long long cccc_rt_dlerror(VirtualMachine *vm) {
 
 #include "ops.c"
 
-void cc_vm_profile_reset(VirtualMachine *vm) {
-    if (!vm)
-        return;
-    memset(vm->vm_profile_counts, 0, sizeof(vm->vm_profile_counts));
-    vm->vm_profile_total = 0;
-    memset(vm->vm_profile_bigram_counts, 0,
-           sizeof(vm->vm_profile_bigram_counts));
-    vm->vm_profile_bigram_total   = 0;
-    vm->vm_profile_prev_op        = -1;
-    vm->vm_profile_bigram_started = false;
-    if (vm->vm_profile_trigram_counts)
-        memset(vm->vm_profile_trigram_counts, 0,
-               (size_t)OP_COUNT * OP_COUNT * OP_COUNT * sizeof(uint64_t));
-    vm->vm_profile_trigram_total   = 0;
-    vm->vm_profile_prev2_op        = -1;
-    vm->vm_profile_trigram_started = false;
+// Trigram tables are OP_COUNT^3 counters; an allocation failure only drops
+// the trigram section.
+void cc_vm_profile_enable(VirtualMachine *vm) {
+    vm->vm_profile_enabled = true;
+    vm->vm_profile_run.trigram_counts =
+        calloc((size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
+    vm->vm_profile_comptime = calloc(1, sizeof(VmProfileCounts));
+    if (vm->vm_profile_comptime)
+        vm->vm_profile_comptime->trigram_counts =
+            calloc((size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
 }
 
 // #767: number of currently-allocated (non-NULL) CHKT3 shadow pages across
@@ -300,74 +294,83 @@ static size_t type_shadow_pages_live(VirtualMachine *vm) {
     return live;
 }
 
-void cc_vm_profile_print(VirtualMachine *vm, FILE *f) {
-    if (!vm || !f || !vm->vm_profile_enabled)
-        return;
-
-    fprintf(f, "\nVM opcode profile\n");
-    fprintf(f, "total_opcodes: %llu\n",
-            (unsigned long long)vm->vm_profile_total);
-    fprintf(f, "cycles:        %lld\n", vm->cycle);
-    fprintf(f, "shadow_sweeps: %llu\n",
-            (unsigned long long)vm->type_shadow_sweeps);
-    fprintf(f, "shadow_pages_swept: %llu\n",
-            (unsigned long long)vm->type_shadow_pages_swept);
-    fprintf(f, "shadow_pages_live: %llu\n",
-            (unsigned long long)type_shadow_pages_live(vm));
-    if (vm->vm_profile_total == 0)
+static void print_profile_counts(FILE *f, const VmProfileCounts *p) {
+    if (p->total == 0)
         return;
 
     bool printed[OP_COUNT] = {0};
     for (;;) {
         int best = -1;
         for (int op = 0; op < OP_COUNT; op++) {
-            if (printed[op] || vm->vm_profile_counts[op] == 0)
+            if (printed[op] || p->counts[op] == 0)
                 continue;
-            if (best < 0 ||
-                vm->vm_profile_counts[op] > vm->vm_profile_counts[best])
+            if (best < 0 || p->counts[op] > p->counts[best])
                 best = op;
         }
-        if (best < 0 || vm->vm_profile_counts[best] == 0)
+        if (best < 0)
             break;
         printed[best]    = true;
 
         const char *name = cc_opcode_name(best);
-        double      pct  = (double)vm->vm_profile_counts[best] * 100.0 /
-                           (double)vm->vm_profile_total;
+        double      pct  = (double)p->counts[best] * 100.0 / (double)p->total;
         fprintf(f, "%-12s %12llu %6.2f%%\n", name ? name : "UNKNOWN",
-                (unsigned long long)vm->vm_profile_counts[best], pct);
+                (unsigned long long)p->counts[best], pct);
     }
 
     fprintf(f, "\nVM opcode bigram profile (top 25)\n");
     fprintf(f, "total_transitions: %llu\n",
-            (unsigned long long)vm->vm_profile_bigram_total);
-    if (vm->vm_profile_bigram_total == 0)
+            (unsigned long long)p->bigram_total);
+    if (p->bigram_total == 0)
         return;
 
     bool bg_printed[OP_COUNT * OP_COUNT] = {0};
     for (int shown = 0; shown < 25; shown++) {
         int best = -1;
         for (int i = 0; i < OP_COUNT * OP_COUNT; i++) {
-            if (bg_printed[i] || vm->vm_profile_bigram_counts[i] == 0)
+            if (bg_printed[i] || p->bigram_counts[i] == 0)
                 continue;
-            if (best < 0 || vm->vm_profile_bigram_counts[i] >
-                                vm->vm_profile_bigram_counts[best])
+            if (best < 0 || p->bigram_counts[i] > p->bigram_counts[best])
                 best = i;
         }
-        if (best < 0 || vm->vm_profile_bigram_counts[best] == 0)
+        if (best < 0)
             break;
         bg_printed[best] = true;
 
-        int         prev = best / OP_COUNT;
-        int         cur  = best % OP_COUNT;
-        const char *pn   = cc_opcode_name(prev);
-        const char *cn   = cc_opcode_name(cur);
-        double      bpct = (double)vm->vm_profile_bigram_counts[best] * 100.0 /
-                           (double)vm->vm_profile_bigram_total;
+        const char *pn   = cc_opcode_name(best / OP_COUNT);
+        const char *cn   = cc_opcode_name(best % OP_COUNT);
+        double      bpct =
+            (double)p->bigram_counts[best] * 100.0 / (double)p->bigram_total;
         fprintf(f, "%-12s %-12s %12llu %6.2f%%\n", pn ? pn : "UNKNOWN",
-                cn ? cn : "UNKNOWN",
-                (unsigned long long)vm->vm_profile_bigram_counts[best], bpct);
+                cn ? cn : "UNKNOWN", (unsigned long long)p->bigram_counts[best],
+                bpct);
     }
+}
+
+// The comptime section is printed when comptime ran or when there is no run
+// section, so a no-run mode never prints an empty report.
+void cc_vm_profile_print(VirtualMachine *vm, FILE *f, bool include_run) {
+    if (!vm || !f || !vm->vm_profile_enabled)
+        return;
+
+    const VmProfileCounts *ct = vm->vm_profile_comptime;
+    if (ct && (ct->total > 0 || !include_run)) {
+        fprintf(f, "\nVM comptime opcode profile\n");
+        fprintf(f, "total_opcodes: %llu\n", (unsigned long long)ct->total);
+        print_profile_counts(f, ct);
+    }
+    if (!include_run)
+        return;
+
+    fprintf(f, "\nVM opcode profile\n");
+    fprintf(f, "total_opcodes: %llu\n",
+            (unsigned long long)vm->vm_profile_run.total);
+    fprintf(f, "shadow_sweeps: %llu\n",
+            (unsigned long long)vm->type_shadow_sweeps);
+    fprintf(f, "shadow_pages_swept: %llu\n",
+            (unsigned long long)vm->type_shadow_pages_swept);
+    fprintf(f, "shadow_pages_live: %llu\n",
+            (unsigned long long)type_shadow_pages_live(vm));
+    print_profile_counts(f, &vm->vm_profile_run);
 }
 
 static void json_escape(FILE *f, const char *s) {
@@ -399,8 +402,113 @@ static void json_escape(FILE *f, const char *s) {
     }
 }
 
+// Writes "total_opcodes" through "trigrams" as members of an already-open
+// JSON object, each line prefixed with `ind`; no trailing comma.
+static void write_profile_counts_json(FILE *f, const VmProfileCounts *p,
+                                      const char *ind) {
+    fprintf(f, "%s\"total_opcodes\": %llu,\n", ind,
+            (unsigned long long)p->total);
+    fprintf(f, "%s\"opcodes\": [", ind);
+    bool first = true;
+    for (int op = 0; op < OP_COUNT; op++) {
+        uint64_t count = p->counts[op];
+        if (count == 0)
+            continue;
+        const char *name = cc_opcode_name(op);
+        double pct = p->total ? (double)count * 100.0 / (double)p->total : 0.0;
+        fprintf(f, "%s\n%s  {\"opcode\": \"", first ? "" : ",", ind);
+        json_escape(f, name ? name : "UNKNOWN");
+        fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                (unsigned long long)count, pct);
+        first = false;
+    }
+    fprintf(f, "%s%s],\n", first ? "" : "\n", first ? "" : ind);
+
+    fprintf(f, "%s\"total_bigrams\": %llu,\n", ind,
+            (unsigned long long)p->bigram_total);
+    fprintf(f, "%s\"bigrams\": [", ind);
+    first = true;
+    for (int prev = 0; prev < OP_COUNT; prev++) {
+        for (int cur = 0; cur < OP_COUNT; cur++) {
+            uint64_t count = p->bigram_counts[prev * OP_COUNT + cur];
+            if (count == 0)
+                continue;
+            const char *pn = cc_opcode_name(prev);
+            const char *cn = cc_opcode_name(cur);
+            double bpct = p->bigram_total
+                              ? (double)count * 100.0 / (double)p->bigram_total
+                              : 0.0;
+            fprintf(f, "%s\n%s  {\"from\": \"", first ? "" : ",", ind);
+            json_escape(f, pn ? pn : "UNKNOWN");
+            fprintf(f, "\", \"to\": \"");
+            json_escape(f, cn ? cn : "UNKNOWN");
+            fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                    (unsigned long long)count, bpct);
+            first = false;
+        }
+    }
+    fprintf(f, "%s%s]", first ? "" : "\n", first ? "" : ind);
+
+    if (!p->trigram_counts || p->trigram_total == 0)
+        return;
+
+    typedef struct {
+        int      a, b, c;
+        uint64_t count;
+    } TG;
+    enum { TOP_TRIGRAMS = 25 };
+    TG top[TOP_TRIGRAMS] = {0};
+    for (int a = 0; a < OP_COUNT; a++) {
+        for (int b = 0; b < OP_COUNT; b++) {
+            for (int c = 0; c < OP_COUNT; c++) {
+                uint64_t cnt =
+                    p->trigram_counts[((size_t)a * OP_COUNT + b) * OP_COUNT +
+                                      c];
+                if (cnt == 0)
+                    continue;
+                int min_idx = 0;
+                for (int k = 1; k < TOP_TRIGRAMS; k++)
+                    if (top[k].count < top[min_idx].count)
+                        min_idx = k;
+                if (cnt > top[min_idx].count)
+                    top[min_idx] = (TG){a, b, c, cnt};
+            }
+        }
+    }
+    for (int i = 0; i < TOP_TRIGRAMS - 1; i++)
+        for (int j = i + 1; j < TOP_TRIGRAMS; j++)
+            if (top[j].count > top[i].count) {
+                TG tmp = top[i];
+                top[i] = top[j];
+                top[j] = tmp;
+            }
+
+    fprintf(f, ",\n%s\"total_trigrams\": %llu,\n", ind,
+            (unsigned long long)p->trigram_total);
+    fprintf(f, "%s\"trigrams\": [", ind);
+    first = true;
+    for (int i = 0; i < TOP_TRIGRAMS && top[i].count; i++) {
+        const char *an = cc_opcode_name(top[i].a);
+        const char *bn = cc_opcode_name(top[i].b);
+        const char *cn = cc_opcode_name(top[i].c);
+        double tpct = (double)top[i].count * 100.0 / (double)p->trigram_total;
+        fprintf(f, "%s\n%s  {\"a\": \"", first ? "" : ",", ind);
+        json_escape(f, an ? an : "UNKNOWN");
+        fprintf(f, "\", \"b\": \"");
+        json_escape(f, bn ? bn : "UNKNOWN");
+        fprintf(f, "\", \"c\": \"");
+        json_escape(f, cn ? cn : "UNKNOWN");
+        fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
+                (unsigned long long)top[i].count, tpct);
+        first = false;
+    }
+    fprintf(f, "\n%s]", ind);
+}
+
+// The run profile is written at the top level (when include_run) and the
+// comptime profile as a nested "comptime" object.
 int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
-                             const char *input_name) {
+                             const char *input_name, bool include_run) {
     if (!vm || !f)
         return -1;
 
@@ -412,128 +520,21 @@ int cc_vm_profile_write_json(VirtualMachine *vm, FILE *f, const char *mode,
     fprintf(f, "\",\n");
     fprintf(f, "  \"input\": \"");
     json_escape(f, input_name ? input_name : "");
-    fprintf(f, "\",\n");
-    fprintf(f, "  \"cycles\": %lld,\n", vm->cycle);
-    fprintf(f, "  \"shadow_sweeps\": %llu,\n",
-            (unsigned long long)vm->type_shadow_sweeps);
-    fprintf(f, "  \"shadow_pages_swept\": %llu,\n",
-            (unsigned long long)vm->type_shadow_pages_swept);
-    fprintf(f, "  \"shadow_pages_live\": %llu,\n",
-            (unsigned long long)type_shadow_pages_live(vm));
-    fprintf(f, "  \"total_opcodes\": %llu,\n",
-            (unsigned long long)vm->vm_profile_total);
-    fprintf(f, "  \"opcodes\": [\n");
-
-    bool first = true;
-    for (int op = 0; op < OP_COUNT; op++) {
-        uint64_t count = vm->vm_profile_counts[op];
-        if (count == 0)
-            continue;
-        const char *name = cc_opcode_name(op);
-        double pct = vm->vm_profile_total
-                         ? (double)count * 100.0 / (double)vm->vm_profile_total
-                         : 0.0;
-        if (!first)
-            fprintf(f, ",\n");
-        first = false;
-        fprintf(f, "    {\"opcode\": \"");
-        json_escape(f, name ? name : "UNKNOWN");
-        fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
-                (unsigned long long)count, pct);
+    fprintf(f, "\"");
+    if (include_run) {
+        fprintf(f, ",\n  \"shadow_sweeps\": %llu,\n",
+                (unsigned long long)vm->type_shadow_sweeps);
+        fprintf(f, "  \"shadow_pages_swept\": %llu,\n",
+                (unsigned long long)vm->type_shadow_pages_swept);
+        fprintf(f, "  \"shadow_pages_live\": %llu,\n",
+                (unsigned long long)type_shadow_pages_live(vm));
+        write_profile_counts_json(f, &vm->vm_profile_run, "  ");
     }
-
-    fprintf(f, "\n  ],\n");
-    fprintf(f, "  \"total_bigrams\": %llu,\n",
-            (unsigned long long)vm->vm_profile_bigram_total);
-    fprintf(f, "  \"bigrams\": [");
-    bool first_bg = true;
-    for (int prev = 0; prev < OP_COUNT; prev++) {
-        for (int cur = 0; cur < OP_COUNT; cur++) {
-            uint64_t count =
-                vm->vm_profile_bigram_counts[prev * OP_COUNT + cur];
-            if (count == 0)
-                continue;
-            const char *pn   = cc_opcode_name(prev);
-            const char *cn   = cc_opcode_name(cur);
-            double      bpct = vm->vm_profile_bigram_total
-                                   ? (double)count * 100.0 /
-                                         (double)vm->vm_profile_bigram_total
-                                   : 0.0;
-            fprintf(f, "%s\n    {\"from\": \"", first_bg ? "" : ",");
-            json_escape(f, pn ? pn : "UNKNOWN");
-            fprintf(f, "\", \"to\": \"");
-            json_escape(f, cn ? cn : "UNKNOWN");
-            fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
-                    (unsigned long long)count, bpct);
-            first_bg = false;
-        }
+    if (vm->vm_profile_comptime) {
+        fprintf(f, ",\n  \"comptime\": {\n");
+        write_profile_counts_json(f, vm->vm_profile_comptime, "    ");
+        fprintf(f, "\n  }");
     }
-    fprintf(f, "%s\n  ]", first_bg ? "" : "\n  ");
-
-    // Trigram section (only when tracking was enabled and data exists)
-    if (vm->vm_profile_trigram_counts && vm->vm_profile_trigram_total > 0) {
-        // Collect top-25 trigrams by count
-        typedef struct {
-            int      a, b, c;
-            uint64_t count;
-        } TG;
-        int cap = 25;
-        TG *top = calloc(cap, sizeof(TG));
-        if (top) {
-            for (int a = 0; a < OP_COUNT; a++) {
-                for (int b = 0; b < OP_COUNT; b++) {
-                    for (int c = 0; c < OP_COUNT; c++) {
-                        uint64_t cnt =
-                            vm->vm_profile_trigram_counts
-                                [((size_t)a * OP_COUNT + b) * OP_COUNT + c];
-                        if (cnt == 0)
-                            continue;
-                        // Insert into top[] if larger than minimum
-                        int min_idx = 0;
-                        for (int k = 1; k < cap; k++)
-                            if (top[k].count < top[min_idx].count)
-                                min_idx = k;
-                        if (cnt > top[min_idx].count)
-                            top[min_idx] = (TG){a, b, c, cnt};
-                    }
-                }
-            }
-            // Sort descending by count (simple selection sort for 25 elements)
-            for (int i = 0; i < cap - 1; i++)
-                for (int j = i + 1; j < cap; j++)
-                    if (top[j].count > top[i].count) {
-                        TG tmp = top[i];
-                        top[i] = top[j];
-                        top[j] = tmp;
-                    }
-
-            fprintf(f, ",\n  \"total_trigrams\": %llu,\n",
-                    (unsigned long long)vm->vm_profile_trigram_total);
-            fprintf(f, "  \"trigrams\": [");
-            bool first_tg = true;
-            for (int i = 0; i < cap; i++) {
-                if (top[i].count == 0)
-                    break;
-                const char *an   = cc_opcode_name(top[i].a);
-                const char *bn   = cc_opcode_name(top[i].b);
-                const char *cn   = cc_opcode_name(top[i].c);
-                double      tpct = (double)top[i].count * 100.0 /
-                                   (double)vm->vm_profile_trigram_total;
-                fprintf(f, "%s\n    {\"a\": \"", first_tg ? "" : ",");
-                json_escape(f, an ? an : "UNKNOWN");
-                fprintf(f, "\", \"b\": \"");
-                json_escape(f, bn ? bn : "UNKNOWN");
-                fprintf(f, "\", \"c\": \"");
-                json_escape(f, cn ? cn : "UNKNOWN");
-                fprintf(f, "\", \"count\": %llu, \"percent\": %.6f}",
-                        (unsigned long long)top[i].count, tpct);
-                first_tg = false;
-            }
-            fprintf(f, "\n  ]");
-            free(top);
-        }
-    }
-
     fprintf(f, "\n}\n");
     return ferror(f) ? -1 : 0;
 }
@@ -750,27 +751,30 @@ dispatch:
             VM_TRAP_OR_RETURN(-1);
         }
         if (__builtin_expect(vm->vm_profile_enabled, 0)) {
-            vm->vm_profile_counts[op]++;
-            vm->vm_profile_total++;
-            if (vm->vm_profile_bigram_started) {
-                int prev = vm->vm_profile_prev_op;
-                vm->vm_profile_bigram_counts[prev * OP_COUNT + op]++;
-                vm->vm_profile_bigram_total++;
-                if (vm->vm_profile_trigram_counts) {
-                    if (vm->vm_profile_trigram_started) {
-                        int prev2 = vm->vm_profile_prev2_op;
-                        vm->vm_profile_trigram_counts
-                            [((size_t)prev2 * OP_COUNT + prev) * OP_COUNT +
-                             op]++;
-                        vm->vm_profile_trigram_total++;
+            VmProfileCounts *p = vm->vm_profile_in_comptime
+                                     ? vm->vm_profile_comptime
+                                     : &vm->vm_profile_run;
+            p->counts[op]++;
+            p->total++;
+            if (p->bigram_started) {
+                int prev = p->prev_op;
+                p->bigram_counts[prev * OP_COUNT + op]++;
+                p->bigram_total++;
+                if (p->trigram_counts) {
+                    if (p->trigram_started) {
+                        p->trigram_counts[((size_t)p->prev2_op * OP_COUNT +
+                                           prev) *
+                                              OP_COUNT +
+                                          op]++;
+                        p->trigram_total++;
                     }
-                    vm->vm_profile_prev2_op        = prev;
-                    vm->vm_profile_trigram_started = true;
+                    p->prev2_op        = prev;
+                    p->trigram_started = true;
                 }
             } else {
-                vm->vm_profile_bigram_started = true;
+                p->bigram_started = true;
             }
-            vm->vm_profile_prev_op = op;
+            p->prev_op = op;
         }
         if (vm->debug_vm) {
             const char *name = cc_opcode_name(op);
@@ -1421,9 +1425,12 @@ void cc_destroy(VirtualMachine *vm) {
     free(vm->current_tls_seg);
     vm->current_tls_seg = NULL;
     // return_buffer is part of data_seg, no need to free separately
-    if (vm->vm_profile_trigram_counts) {
-        free(vm->vm_profile_trigram_counts);
-        vm->vm_profile_trigram_counts = NULL;
+    free(vm->vm_profile_run.trigram_counts);
+    vm->vm_profile_run.trigram_counts = NULL;
+    if (vm->vm_profile_comptime) {
+        free(vm->vm_profile_comptime->trigram_counts);
+        free(vm->vm_profile_comptime);
+        vm->vm_profile_comptime = NULL;
     }
     // #877: async-delivery register-snapshot save area, lazily malloc'd on
     // first use -- see AsyncRegSave in src/cccc.h.
@@ -2267,7 +2274,6 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
         cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present;
     cc_running_vm = vm;
     cccc_gil_acquire(vm);
-    cc_vm_profile_reset(vm);
     vm->dbg.host_fault_signal = 0;
     // #1013: clear the previous run's fault marker so each cc_run_at cycle
     // starts clean -- otherwise a fault from an earlier call (e.g. a prior

@@ -668,10 +668,12 @@ static void usage(const char *argv0, int exit_code) {
            "loop (no input file)\n");
     printf("\t-e/--entry <name>        Set the entry-point function (default: "
            "main)\n");
-    printf("\t   --vm-profile          Count executed VM opcodes and print a "
-           "report\n");
+    printf("\t   --vm-profile          Count executed VM opcodes, comptime "
+           "included, and print a report\n");
     printf("\t                         Combine with --json to also dump the "
            "profile as JSON to stdout\n");
+    printf("\t                         (stderr under -c=native, "
+           "-c=generated, -m)\n");
     printf("\nTesting Options:\n");
     printf("\t-t/--testing[=vm|native]\n");
     printf("\t                         Discover and run [[cccc::test]] "
@@ -1431,8 +1433,6 @@ int main(int argc, const char *argv[]) {
     int          enable_ffi_type_checking = 0;
     int          vm_profile               = 0;
     int          vm_profile_text          = 0;
-    const char  *vm_profile_mode          = NULL;
-    const char  *vm_profile_input         = NULL;
     int          vm_profile_ran           = 0;
     const char  *entry_name               = NULL; // -e / --entry
     enum {
@@ -2475,9 +2475,9 @@ int main(int argc, const char *argv[]) {
         }
         // #1159: -O<n> under -c=native does not mean "optimise CCCC's own
         // bytecode" (there is none) -- run_native_backend() forwards it to the
-        // host cc as the level to build with. -d/--entry/--vm-profile stay
-        // rejected: they only make sense against the VM's own pipeline.
-        if (disassemble || entry_name || vm_profile) {
+        // host cc as the level to build with. -d/--entry stay rejected: they
+        // only make sense against the VM's own pipeline.
+        if (disassemble || entry_name) {
             fprintf(stderr, "error: -c=native cannot be combined with VM "
                             "bytecode options\n");
             usage(argv[0], 1);
@@ -2565,12 +2565,8 @@ int main(int argc, const char *argv[]) {
     vm.disable_all_ffi          = disable_all_ffi;
     vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
-    vm.vm_profile_enabled       = vm_profile;
-    if (vm_profile) {
-        vm.vm_profile_trigram_counts =
-            calloc((size_t)OP_COUNT * OP_COUNT * OP_COUNT, sizeof(uint64_t));
-        // Failure is non-fatal: trigram section will be skipped in JSON output
-    }
+    if (vm_profile)
+        cc_vm_profile_enable(&vm);
     for (int i = 0; i < ffi_allow_args_count; i++)
         configure_ffi_name_list(&vm, ffi_allow_args[i], cc_ffi_allow);
     for (int i = 0; i < ffi_deny_args_count; i++)
@@ -3456,21 +3452,31 @@ int main(int argc, const char *argv[]) {
     int    prog_argc = 0;
     char **prog_argv =
         build_source_argv(&prog_argc, argc, argv, optind, dashdash);
-    exit_code        = cc_run(&vm, prog_argc, prog_argv);
-    vm_profile_mode  = "source";
-    vm_profile_input = input_files_count == 1 ? input_files[0] : "multiple";
-    vm_profile_ran   = 1;
+    exit_code      = cc_run(&vm, prog_argc, prog_argv);
+    vm_profile_ran = 1;
     free(prog_argv);
 
 BAIL:
-    if (vm_profile && vm_profile_ran) {
-        if (vm_profile_text)
-            cc_vm_profile_print(&vm, stderr);
+    // Modes that never run the program report the comptime profile only, and
+    // write its JSON (in place of the text report) to stderr so it can't mix
+    // with C written to stdout.
+    if (vm_profile && (vm_profile_ran || ((compile_format == COMPILE_NATIVE ||
+                                           dump_expanded_only) &&
+                                          exit_code == 0))) {
+        const char *vm_profile_mode =
+            compile_format == COMPILE_NATIVE      ? "native"
+            : compile_format == COMPILE_GENERATED ? "generated"
+            : dump_expanded_only                  ? "expand"
+                                                  : "source";
+        const char *vm_profile_input =
+            input_files_count == 1 ? input_files[0] : "multiple";
+        if (vm_profile_text && (vm_profile_ran || !output_json))
+            cc_vm_profile_print(&vm, stderr, vm_profile_ran);
         if (output_json &&
-            cc_vm_profile_write_json(&vm, stdout, vm_profile_mode,
-                                     vm_profile_input) != 0) {
-            fprintf(stderr,
-                    "error: failed to write VM profile JSON to stdout\n");
+            cc_vm_profile_write_json(&vm, vm_profile_ran ? stdout : stderr,
+                                     vm_profile_mode, vm_profile_input,
+                                     vm_profile_ran) != 0) {
+            fprintf(stderr, "error: failed to write VM profile JSON\n");
             if (exit_code == 0 || exit_code == 42)
                 exit_code = 1;
         }

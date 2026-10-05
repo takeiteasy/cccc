@@ -2436,6 +2436,38 @@ returned unchanged.
 Underlying functions: `__builtin_macroexpand_1(Node *node)` and
 `__builtin_macroexpand(Node *node)`.
 
+### Profiling comptime code
+
+`--vm-profile` counts the VM opcodes that comptime code executes and prints
+them as a separate section before the program's own profile. It works in
+every compile mode:
+
+| Mode | Report |
+|------|--------|
+| Default (compile and run) | Comptime section, then the run section |
+| `-c=native`, `-c=generated`, `-m` | Comptime section only |
+
+```sh
+cccc --vm-profile -c=native -o app app.c
+```
+
+```text
+VM comptime opcode profile
+total_opcodes: 7
+LDR_LOCAL_D             2  28.57%
+ZX4                     1  14.29%
+CALLF                   1  14.29%
+...
+```
+
+With `--json`, the comptime profile is a nested `"comptime"` object.[^profile-json]
+
+[^profile-json]: In the default mode the JSON goes to stdout, with the run
+profile's keys at the top level. Under `-c=native`, `-c=generated` and `-m`,
+which may write C to stdout, the JSON replaces the text report on stderr and
+holds only `"comptime"`. `--json` also prints diagnostics as JSON on stderr, so
+a compile with warnings puts more than one document there.
+
 ## API Reference
 
 ### Type APIs

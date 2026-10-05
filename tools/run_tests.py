@@ -30,6 +30,8 @@ Sub-suites:
                         repro (ticket #1324); case 2 skips on a non-curl build
   compile_scale_smoke — compile time must grow linearly with the number of
                         functions in a TU (ticket #1426)
+  vm_profile_smoke    — --vm-profile comptime section in every compile mode,
+                        and JSON routing under -m/-c=generated/-c=native
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
                         own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
                         "nothing to audit" on any platform/family other than
@@ -492,6 +494,26 @@ def _run_compile_scale_suite(cccc):
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("compile_scale_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(["--binary", str(cccc)])
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_vm_profile_suite(cccc):
+    """Run the --vm-profile smoke tests. Returns (status_str, ok)."""
+    script = _TOOLS_DIR / "vm_profile_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("vm_profile_smoke", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -1190,6 +1212,13 @@ def main():
     compile_scale_status, ok_compile_scale = _run_compile_scale_suite(cccc)
     print(f"  {compile_scale_status}")
     suite_results["compile_scale_smoke"] = ok_compile_scale
+
+    print()
+    print("[ vm_profile_smoke ]")
+    wedge.arm("vm_profile_smoke", scalar_phase_timeout)
+    vm_profile_status, ok_vm_profile = _run_vm_profile_suite(cccc)
+    print(f"  {vm_profile_status}")
+    suite_results["vm_profile_smoke"] = ok_vm_profile
 
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()
