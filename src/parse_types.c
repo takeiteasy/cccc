@@ -679,6 +679,9 @@ declspec_done:
         vs_attr->vec_visible     = 0;
     }
 
+    if (!attr && type_name_attr.cleanup_fn)
+        cleanup_on_type(vm, type_name_attr.cleanup_tok);
+
     if (attr && (attr->is_maybe_unused || attr->is_deprecated)) {
         ty                  = copy_type(vm, ty);
         ty->is_maybe_unused = attr->is_maybe_unused;

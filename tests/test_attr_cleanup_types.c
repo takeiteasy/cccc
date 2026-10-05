@@ -1,5 +1,5 @@
 // CCCC_FLAGS: -Wattributes
-// CCCC_EXPECT_STDERR: 'cleanup' attribute does not apply to types
+// CCCC_EXPECT_STDERR: (?=(?:[\s\S]*?does not apply to types){5})(?=(?:[\s\S]*?attribute ignored){4})
 //
 // cleanup applies only to the automatic variable that names it. In a
 // type-name (cast, compound literal, sizeof, typeof) it warns and does
@@ -28,7 +28,8 @@ int main(void) {
         __typeof__((int *__attribute__((cleanup(rel))))a) b = a;
         int s = sizeof(int __attribute__((cleanup(rel))));
         int c = (int [[gnu::cleanup(rel)]])1;
-        (void)lit, (void)b, (void)s, (void)c;
+        int d = (int __attribute__((cleanup(rel))))1;
+        (void)lit, (void)b, (void)s, (void)c, (void)d;
     }
     if (n)
         return 1;
