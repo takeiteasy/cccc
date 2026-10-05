@@ -28,6 +28,8 @@ Sub-suites:
                         keyword isolation between inputs
   url_mirror_smoke    — URL #include mirror path-join + nested-project-header
                         repro (ticket #1324); case 2 skips on a non-curl build
+  compile_scale_smoke — compile time must grow linearly with the number of
+                        functions in a TU (ticket #1426)
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
                         own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
                         "nothing to audit" on any platform/family other than
@@ -467,6 +469,29 @@ def _run_opencl_cli_suite(cccc):
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("opencl_cli_smoke", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rc = mod.main(["--binary", str(cccc)])
+        if rc == 0:
+            return "passed", True
+        return "FAILED", False
+    except Exception as e:
+        return f"FAILED ({e})", False
+
+
+def _run_compile_scale_suite(cccc):
+    """Run the compile-time scaling smoke test (#1426).
+
+    Returns (status_str, ok).
+    """
+    script = _TOOLS_DIR / "compile_scale_smoke.py"
+    if not script.exists():
+        return "skipped (script not found)", True
+
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("compile_scale_smoke", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -1157,6 +1182,14 @@ def main():
     url_mirror_status, ok_url_mirror = _run_url_mirror_smoke_suite()
     print(f"  {url_mirror_status}")
     suite_results["url_mirror_smoke"] = ok_url_mirror
+
+    # --- Compile-time scaling smoke (#1426) ---
+    print()
+    print("[ compile_scale_smoke ]")
+    wedge.arm("compile_scale_smoke", scalar_phase_timeout)
+    compile_scale_status, ok_compile_scale = _run_compile_scale_suite(cccc)
+    print(f"  {compile_scale_status}")
+    suite_results["compile_scale_smoke"] = ok_compile_scale
 
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()
