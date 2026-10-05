@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: compile time no longer grows quadratically with the number of
+  globals. A 54,000-line file with 6,000 functions compiles in 0.5 s instead
+  of 5.5 s.
+- Fixed: computing token columns no longer costs about 0.2 s on every compile
+  that uses comptime.
+
 ## [0.7.3] - 2026-10-02
 
 - Fixed: a `#pragma omp` inside a function body in an emit block no longer
