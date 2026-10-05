@@ -310,8 +310,7 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             // After a type specifier, a C23 attribute appertains to the type.
             if (counter && attr && attr->cleanup_fn != saved_cleanup) {
                 attr->cleanup_fn = saved_cleanup;
-                warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
-                         "'cleanup' attribute does not apply to types");
+                cleanup_on_type(vm, attr_tok);
             }
             continue;
         }
@@ -717,10 +716,12 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             break;
         }
 
-        VarAttr attr = {};
-        Type   *ty2  = declspec(vm, &tok, tok, &attr);
-        ty2          = declarator(vm, &tok, tok, ty2);
-        ty2          = apply_var_attrs_to_type(vm, ty2, &attr);
+        VarAttr attr      = {};
+        Token  *param_tok = tok;
+        Type   *ty2       = declspec(vm, &tok, tok, &attr);
+        ty2               = declarator(vm, &tok, tok, ty2);
+        ty2               = apply_var_attrs_to_type(vm, ty2, &attr);
+        drop_cleanup_attr(vm, ty2, &attr, ty2->name ? ty2->name : param_tok);
         if (has_custom_attrs(ty2, &attr))
             error_tok(vm, ty2->name ? ty2->name : tok,
                       "custom attributes are only supported on file-scope "
@@ -914,7 +915,10 @@ Token *asm_label(VirtualMachine *vm, Token *tok, char **label) {
 
 // pointers = ("*" ("const" | "volatile" | "restrict" |
 //                   checked-pointer-attribute)*)*
-static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
+// A GNU cleanup after a `*` is the declared variable's, handed back through
+// `cleanup_fn` (NULL for a type-name, where it warns instead).
+static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
+                      Obj **cleanup_fn) {
     while (consume(vm, &tok, tok, "*")) {
         ty = pointer_to(vm, ty);
 
@@ -927,8 +931,11 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         // recognized names are only handled here since this is the only
         // call site that passes a TY_PTR ty, and apply_checked_ptr_attr()
         // errors on any other position.
-        tok = attribute_list(vm, tok, ty, NULL);
+        VarAttr ptr_attr = {};
+        tok = attribute_list(vm, tok, ty, cleanup_fn ? &ptr_attr : NULL);
         tok = c23_attribute_list(vm, tok, ty, NULL);
+        if (ptr_attr.cleanup_fn)
+            *cleanup_fn = ptr_attr.cleanup_fn;
 
         // A bounds form (count/byte_count/bounds) only makes sense paired
         // with a checked kind (array/ntarray); checked here rather than in
@@ -1107,7 +1114,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     prefix_attr.cleanup_fn = NULL;
     ty                     = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
-    ty = pointers(vm, &tok, tok, ty);
+    ty                     = pointers(vm, &tok, tok, ty, &cleanup_fn);
 
     // #486: assume/dynamic are cast-only -- declarator() (unlike
     // abstract_declarator(), typename()'s helper for a cast/sizeof
@@ -1283,9 +1290,13 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
     VarAttr prefix_attr = {};
     tok                 = attribute_list(vm, tok, NULL, &prefix_attr);
     tok                 = c23_attribute_list(vm, tok, NULL, &prefix_attr);
-    ty                  = apply_var_attrs_to_type(vm, ty, &prefix_attr);
+    if (prefix_attr.cleanup_fn) {
+        cleanup_on_type(vm, prefix_attr.cleanup_tok);
+        prefix_attr.cleanup_fn = NULL;
+    }
+    ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
-    ty                  = pointers(vm, &tok, tok, ty);
+    ty = pointers(vm, &tok, tok, ty, NULL);
 
     // Handle block type: int (^)(params) in abstract declarators (for casts)
     if (equal(tok, "(") && equal(tok->next, "^")) {
@@ -1312,6 +1323,7 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
 }
 
 // type-name = declspec abstract-declarator
+// TODO(#1440): a leading __attribute__ is not accepted in a type-name.
 Type *typename(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = declspec(vm, &tok, tok, NULL);
     return abstract_declarator(vm, rest, tok, ty);
@@ -2773,6 +2785,8 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 Token *fn_tok = tok;
                 tok           = tok->next;
                 tok           = skip(vm, tok, ")");
+                if (!vm->compiler.in_type_lookahead && !attr)
+                    cleanup_on_type(vm, fn_tok);
                 if (!vm->compiler.in_type_lookahead && attr) {
                     VarScope *sc = find_var(vm, fn_tok);
                     if (!sc || !sc->var || !sc->var->is_function)
@@ -3006,6 +3020,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 Token *fn_tok = tok;
                 tok           = tok->next;
                 tok           = skip(vm, tok, ")");
+                if (!vm->compiler.in_type_lookahead && !attr)
+                    cleanup_on_type(vm, fn_tok);
                 if (!vm->compiler.in_type_lookahead && attr) {
                     VarScope *sc = find_var(vm, fn_tok);
                     if (!sc || !sc->var || !sc->var->is_function)

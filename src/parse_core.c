@@ -754,6 +754,11 @@ void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
         warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES, "'cleanup' attribute ignored");
 }
 
+void cleanup_on_type(VirtualMachine *vm, Token *tok) {
+    warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES,
+             "'cleanup' attribute does not apply to types");
+}
+
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     drop_cleanup_attr(vm, ty, NULL, ty->name);
     Obj *var           = new_var(vm, name, name_len, ty);

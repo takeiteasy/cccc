@@ -197,6 +197,10 @@ static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     Type *ty = declspec(vm, &tok, tok, attr);
+    if (attr->cleanup_fn) {
+        cleanup_on_type(vm, attr->cleanup_tok);
+        attr->cleanup_fn = NULL;
+    }
 
     if (saw_auto || attr->is_typedef || attr->is_extern || attr->is_inline ||
         attr->is_block_var)

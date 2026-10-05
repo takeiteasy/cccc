@@ -451,13 +451,15 @@ that variable; at the start of a declaration it covers every declarator:
 ```c
 __attribute__((cleanup(rel))) int a, b;  // rel(&b), rel(&a)
 int c __attribute__((cleanup(rel))), d;  // rel(&c) only
+int *__attribute__((cleanup(rel))) p;    // rel(&p): after `*` it names p
 __typeof__(c) e;                         // no cleanup: not inherited
 ```
 
 As in GCC, the attribute is ignored on a typedef, struct member, parameter,
 function, global or `static` local (`-Wattributes` warns `'cleanup' attribute
-ignored`), and a C23 `[[gnu::cleanup(fn)]]` placed after the type specifier
-applies to the type and is ignored.
+ignored`). In a type-name (cast, compound literal, `sizeof`, `typeof`), or as
+a C23 `[[gnu::cleanup(fn)]]` after the type specifier or a `*`, it applies to
+the type and is ignored (`'cleanup' attribute does not apply to types`).
 
 **Call order:** LIFO — the last-declared variable is cleaned up first within a
 scope. A jump out of a scope cleans up only the variables whose declaration it

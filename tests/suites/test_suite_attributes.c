@@ -630,6 +630,17 @@ static void test_cleanup_ignored_on_non_automatic(void) {
     AssertEq(g_cleanup_log_n, 0);
 }
 
+[[cccc::test]]
+static void test_cleanup_after_pointer_star_applies_to_variable(void) {
+    cleanup_ptr_hits = 0;
+    int x            = 0;
+    {
+        int *__attribute__((cleanup(cleanup_ptr))) p = &x;
+        (void)p;
+    }
+    AssertEq(cleanup_ptr_hits, 1);
+}
+
 #pragma cccc suite end
 
 // [from test_attribute_test_gnu.c]

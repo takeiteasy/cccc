@@ -421,6 +421,7 @@ Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
 void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr);
 void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr, Token *tok);
+void cleanup_on_type(VirtualMachine *vm, Token *tok);
 Obj *new_implicit_function(VirtualMachine *vm, Token *tok);
 Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible);
 Node *new_long(VirtualMachine *vm, int64_t val, Token *tok);
