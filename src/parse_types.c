@@ -1016,6 +1016,67 @@ static bool tok_is_host_accessor_macro_name(Token *tok) {
     return false;
 }
 
+// A function attribute on a pointer-to-function declarator describes the
+// pointee, which is the type funcall() checks a call through the pointer
+// against.
+static void forward_fn_attrs_to_pointee(VirtualMachine *vm, Type *ty,
+                                        VarAttr *attr) {
+    if (ty->kind != TY_PTR || !ty->base || ty->base->kind != TY_FUNC)
+        return;
+    VarAttr fn = {
+        .is_noreturn          = attr->is_noreturn,
+        .is_nodiscard         = attr->is_nodiscard,
+        .nodiscard_msg        = attr->nodiscard_msg,
+        .is_pure              = attr->is_pure,
+        .is_func_const        = attr->is_func_const,
+        .attr_error_msg       = attr->attr_error_msg,
+        .attr_warning_msg     = attr->attr_warning_msg,
+        .attribute_tok        = attr->attribute_tok,
+        .format_style         = attr->format_style,
+        .format_string_index  = attr->format_string_index,
+        .format_fmt_first_arg = attr->format_fmt_first_arg,
+        .nonnull_all          = attr->nonnull_all,
+        .nonnull_mask         = attr->nonnull_mask,
+        .returns_nonnull      = attr->returns_nonnull,
+        .is_sentinel          = attr->is_sentinel,
+        .sentinel_pos         = attr->sentinel_pos,
+        .alloc_size_idx       = attr->alloc_size_idx,
+        .alloc_size_idx2      = attr->alloc_size_idx2,
+        .is_malloc            = attr->is_malloc,
+    };
+    ty->base = apply_var_attrs_to_type(vm, ty->base, &fn);
+}
+
+// The attribute-lists and asm-label after a declarator. GNU C allows them in
+// either order (glibc's __REDIRECT_NTH puts the asm-label first), so loop
+// until a pass consumes nothing.
+static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
+                               Type *ty) {
+    for (;;) {
+        Token  *before      = tok;
+        VarAttr suffix_attr = {};
+        tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
+        tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+        append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
+        ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
+        forward_fn_attrs_to_pointee(vm, ty, &suffix_attr);
+
+        // copy_type() keeps the alignment off a sibling declarator sharing
+        // this basety (`int b __attribute__((aligned(16))), c;`).
+        if (suffix_attr.gnu_align) {
+            ty = copy_type(vm, ty);
+            if (suffix_attr.gnu_align > ty->decl_align)
+                ty->decl_align = suffix_attr.gnu_align;
+        }
+
+        tok = asm_label(vm, tok, &ty->asm_label);
+        if (tok == before)
+            break;
+    }
+    *rest = tok;
+    return ty;
+}
+
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
@@ -1080,17 +1141,23 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         return block_ty;
     }
 
-    // TODO(#1429): a trailing attribute-list after the parenthesised
-    // declarator (`int (*fp)(void) __attribute__((x))`) is not consumed
-    // here and fails with "expected ','"; run the suffix loop below.
     if (equal(tok, "(")) {
         Token *start = tok;
         Type   dummy = {};
         declarator(vm, &tok, start->next, &dummy);
-        tok   = skip(vm, tok, ")");
-        ty    = type_suffix(vm, rest, tok, ty);
-        *rest = asm_label(vm, *rest, &ty->asm_label);
-        return declarator(vm, &tok, start->next, ty);
+        tok = skip(vm, tok, ")");
+        ty  = type_suffix(vm, rest, tok, ty);
+
+        // A C23 attribute directly after the type-suffix appertains to that
+        // type (gcc ignores `int (*fp)(void) [[gnu::aligned(16)]]`); the rest
+        // of the suffix belongs to the declared entity.
+        VarAttr type_attr = {};
+        Token  *after     = c23_attribute_list(vm, *rest, NULL, &type_attr);
+        append_custom_attr_list(&ty->custom_attrs, type_attr.custom_attrs);
+        ty = apply_var_attrs_to_type(vm, ty, &type_attr);
+
+        ty = declarator(vm, &tok, start->next, ty);
+        return declarator_suffix(vm, rest, after, ty);
     }
 
     Token *name     = NULL;
@@ -1177,50 +1244,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
             ty->nodiscard_msg = prefix_attr.nodiscard_msg;
     }
 
-    // Handle __attribute__ and an asm-label after the declarator. GNU C
-    // allows these in either order, and real glibc headers rely on both:
-    // __REDIRECT_NTH's expansion produces `name proto __asm__ ("realname")
-    // __THROW` (asm-label BEFORE any trailing __attribute__, e.g.
-    // sys/cdefs.h's strerror_r), the opposite order from the common
-    // `__attribute__((...))` -only case this loop used to assume. A single
-    // one-shot "attributes, then asm_label" pass (the pre-fix shape) missed
-    // an attribute-list that follows an asm-label instead of preceding it --
-    // "extern int foo(void) __asm__("bar") __attribute__((__nothrow__));"
-    // errored "expected '{'", confirmed against real glibc's <string.h>
-    // under --use-system-headers (found while verifying #1329's Linux CI
-    // fix: __REDIRECT_NTH is reached via sched.h/string.h's strerror_r).
-    // Loop until a pass consumes nothing, so any interleaving -- multiple
-    // attribute-lists and an asm-label in any order -- is accepted.
-    // Seeded from *rest (type_suffix()'s own out-param), not the local
-    // `tok`, which type_suffix() leaves stale (pointing before the
-    // parameter list it consumed) -- the original one-shot code below read
-    // *rest for exactly this reason; the loop must too, on its first pass.
-    tok = *rest;
-    for (;;) {
-        Token  *before      = tok;
-        VarAttr suffix_attr = {};
-        tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
-        tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
-        append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
-        ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
-
-        // #1160: __attribute__((aligned(N))) / [[gnu::aligned(N)]] in
-        // declarator-suffix position (`int b __attribute__((aligned(16)));`)
-        // -- apply_var_attrs_to_type() above doesn't know about gnu_align, so
-        // apply it here. copy_type() is what stops it from leaking onto a
-        // sibling declarator sharing this basety (`int b
-        // __attribute__((aligned(16))), c;` -- gcc-16 verified `c` stays at
-        // its natural offset).
-        if (suffix_attr.gnu_align) {
-            ty = copy_type(vm, ty);
-            if (suffix_attr.gnu_align > ty->decl_align)
-                ty->decl_align = suffix_attr.gnu_align;
-        }
-
-        tok = asm_label(vm, tok, &ty->asm_label);
-        if (tok == before)
-            break;
-    }
+    ty           = declarator_suffix(vm, &tok, *rest, ty);
 
     ty->name     = name;
     ty->name_pos = name_pos;

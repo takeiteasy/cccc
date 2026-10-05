@@ -17,6 +17,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   of warning "unknown attribute" under `-Wattributes`.
 - Fixed: an unknown attribute after a function declarator warns once instead
   of three times.
+- Fixed: an attribute after a parenthesised declarator, as in
+  `int (*fp)(void) __attribute__((aligned(16)))`, is accepted instead of
+  failing with "expected ','". Function attributes such as `format` and
+  `nonnull` on a function pointer apply to calls through it.
 - Added: `--vm-profile` reports comptime execution in its own section, and
   works with `-c=native`, `-c=generated` and `-m`. With `--json`, the comptime
   profile is a nested `"comptime"` object.

@@ -1103,7 +1103,30 @@ Attributes are accepted at these positions in the grammar:
 | Struct/union — after body | ✓ | ✓ |
 | Enum specifier | ✓ | ✓ |
 | Labels | ✓ | ✓ |
+| After a parenthesised declarator | ✓ | ✓ (applies to the type) |
 | Statement level | ✗ | ✗ |
+
+An attribute after a parenthesised declarator applies to the declared entity:
+
+```c
+int (*handler)(void) __attribute__((aligned(16)));  // the pointer is aligned
+int (*rows)[4] __attribute__((aligned(32)));
+```
+
+A C23 attribute in that position appertains to the type just before it, as in
+GCC, so `int (*fp)(void) [[gnu::aligned(16)]]` leaves `fp` unaligned.
+
+A function attribute on a function-pointer declarator applies to the function
+it points to, so calls through the pointer are checked like direct calls:
+
+```c
+void (*log_fn)(const char *, ...) __attribute__((format(printf, 1, 2)));
+log_fn("%d", "x");  // -Wformat warning under --format-string-checks
+```
+
+This covers `format`, `nonnull`, `returns_nonnull`, `sentinel`, `noreturn`,
+`warn_unused_result`/`nodiscard`, `pure`, `const`, `malloc`, `alloc_size`,
+`error` and `warning`, in either the GNU or the `[[gnu::...]]` spelling.
 
 ## GNU `asm("symbol")` Labels
 
