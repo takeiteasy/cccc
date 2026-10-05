@@ -1978,13 +1978,20 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "_Alignof")) {
-        // TODO(#1432): a variable operand should report its own declared
-        // alignment (aligned(N)), not just its type's.
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
-        Node *sn            = new_ulong(vm, node->ty->align, tok);
-        sn->layout_ty       = node->ty; // #1031
-        sn->layout_is_align = true;
+        int align = node->ty->align;
+        if (node->kind == ND_VAR && node->var && node->var->align > align)
+            align = node->var->align;
+        else if (node->kind == ND_MEMBER && node->member &&
+                 node->member->align > align)
+            align = node->member->align;
+        Node *sn = new_ulong(vm, align, tok);
+        // Only a type's own alignment can be re-materialized from the host.
+        if (align == node->ty->align) {
+            sn->layout_ty       = node->ty; // #1031
+            sn->layout_is_align = true;
+        }
         return sn;
     }
 
