@@ -791,11 +791,16 @@ static const char *digraph_canonical(char *loc, int len) {
 bool equal(Token *tok, char *op) {
     if (!tok)
         return false;
-    int         oplen = strlen(op);
-    const char *canon = digraph_canonical(tok->loc, tok->len);
-    if (canon)
-        return oplen == (int)strlen(canon) && memcmp(canon, op, oplen) == 0;
-    return oplen == tok->len && memcmp(tok->loc, op, tok->len) == 0;
+    char c = tok->len ? tok->loc[0] : '\0';
+    if (c == '<' || c == '%' || c == ':') {
+        const char *canon = digraph_canonical(tok->loc, tok->len);
+        if (canon)
+            return strcmp(canon, op) == 0;
+    }
+    for (int i = 0; i < tok->len; i++)
+        if (!op[i] || tok->loc[i] != op[i])
+            return false;
+    return op[tok->len] == '\0';
 }
 
 // Ensure that the current token is `op`.
@@ -1596,11 +1601,15 @@ void convert_pp_tokens(VirtualMachine *vm, Token *tok) {
     }
 }
 
-// Initialize line info for all tokens.
+// Initialize line info for all tokens. Columns are measured from the previous
+// token on the same line, so a line costs O(length) rather than O(length x
+// tokens).
 static void add_line_numbers(VirtualMachine *vm, Token *tok) {
     char *p          = vm->compiler.current_file->contents;
     char *line_start = p;
     int   n          = 1;
+    char *col_from   = p;
+    int   col        = 1;
 
     for (Token *t = tok;; t = t->next) {
         while (p < t->loc) {
@@ -1610,8 +1619,14 @@ static void add_line_numbers(VirtualMachine *vm, Token *tok) {
             }
             p++;
         }
-        t->line_no = n;
-        t->col_no  = display_width(vm, line_start, t->loc - line_start) + 1;
+        if (col_from < line_start || col_from > t->loc) {
+            col_from = line_start;
+            col      = 1;
+        }
+        col        += display_width(vm, col_from, t->loc - col_from);
+        col_from    = t->loc;
+        t->line_no  = n;
+        t->col_no   = col;
         if (t->kind == TK_EOF)
             break;
     }
