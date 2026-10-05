@@ -3816,6 +3816,7 @@ typedef struct Compiler {
     bool reflection_attrs_registered; // True after
                                       // ensure_reflection_attrs_registered has
                                       // run (#235)
+    bool any_block_type; // Set by block_type(); never cleared
     bool no_comptime; // --no-comptime: skip entire comptime/macro phase (for
                       // TUs that don't use comptime)
     bool comptime_include_all;  // --comptime-include-all: forward all #define

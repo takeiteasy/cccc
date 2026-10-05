@@ -581,6 +581,7 @@ Type *union_type(VirtualMachine *vm) {
 Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params) {
     Type *ty      = new_type(vm, TY_BLOCK, 8, 8); // Block pointers are 8 bytes
     ty->return_ty = return_ty;
+    vm->compiler.any_block_type = true;
     ty->params    = params;
     return ty;
 }

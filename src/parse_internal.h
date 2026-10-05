@@ -385,6 +385,7 @@ Type *find_tag(VirtualMachine *vm, Token *tok);
 Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok);
 Type *find_typedef(VirtualMachine *vm, Token *tok);
 VarScope *find_var(VirtualMachine *vm, Token *tok);
+VarScope *scope_find_var(Scope *sc, char *name, int name_len);
 VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name,
                                     int name_len);
 Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr);

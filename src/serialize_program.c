@@ -2911,7 +2911,7 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm,
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (obj->is_function && obj->is_block)
             any_block = true;
-        if (obj_uses_block_type(obj))
+        if (vm->compiler.any_block_type && obj_uses_block_type(obj))
             uses_block_type = true;
         if (any_block && uses_block_type)
             break;

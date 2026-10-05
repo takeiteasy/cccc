@@ -98,20 +98,21 @@ void leave_scope(VirtualMachine *vm) {
     vm->compiler.scope = vm->compiler.scope->next;
 }
 
-// Find a variable by name.
+VarScope *scope_find_var(Scope *sc, char *name, int name_len) {
+    if (sc->var_map.buckets)
+        return hashmap_get2(&sc->var_map, name, name_len);
+    for (VarScopeNode *node = sc->vars; node; node = node->next)
+        if (node->name_len == name_len &&
+            strncmp(node->name, name, name_len) == 0)
+            return (VarScope *)node;
+    return NULL;
+}
+
 VarScope *find_var(VirtualMachine *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        if (sc->var_map.buckets) {
-            VarScopeNode *node = hashmap_get2(&sc->var_map, tok->loc, tok->len);
-            if (node)
-                return (VarScope *)node;
-        } else {
-            for (VarScopeNode *node = sc->vars; node; node = node->next) {
-                if (node->name_len == tok->len &&
-                    strncmp(node->name, tok->loc, tok->len) == 0)
-                    return (VarScope *)node;
-            }
-        }
+        VarScope *vs = scope_find_var(sc, tok->loc, tok->len);
+        if (vs)
+            return vs;
     }
     return NULL;
 }
@@ -121,15 +122,7 @@ void warn_if_shadowing(VirtualMachine *vm, Token *tok) {
         return;
 
     for (Scope *sc = vm->compiler.scope->next; sc; sc = sc->next) {
-        VarScopeNode *node =
-            sc->var_map.buckets ? hashmap_get2(&sc->var_map, tok->loc, tok->len)
-                                : NULL;
-        if (!node) {
-            for (node = sc->vars; node; node = node->next)
-                if (node->name_len == tok->len &&
-                    !strncmp(node->name, tok->loc, tok->len))
-                    break;
-        }
+        VarScope *node = scope_find_var(sc, tok->loc, tok->len);
         if (!node)
             continue;
         if (node->var && !node->var->is_function)
@@ -443,17 +436,7 @@ Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok) {
 VarScope *find_var_in_current_scope(VirtualMachine *vm, char *name,
                                     int name_len) {
     Scope *sc = vm->compiler.scope;
-    if (!sc)
-        return NULL;
-    if (sc->var_map.buckets) {
-        VarScopeNode *node = hashmap_get2(&sc->var_map, name, name_len);
-        return node ? (VarScope *)node : NULL;
-    }
-    for (VarScopeNode *node = sc->vars; node; node = node->next)
-        if (node->name_len == name_len &&
-            strncmp(node->name, name, name_len) == 0)
-            return (VarScope *)node;
-    return NULL;
+    return sc ? scope_find_var(sc, name, name_len) : NULL;
 }
 
 Node *new_node(VirtualMachine *vm, NodeKind kind, Token *tok) {

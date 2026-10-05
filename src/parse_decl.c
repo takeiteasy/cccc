@@ -247,35 +247,17 @@ void cc_flush_deferred_unused_labels(VirtualMachine *vm) {
 
 static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        for (VarScopeNode *node = sc->vars; node; node = node->next) {
-            if (node->name_len == name_len &&
-                strncmp(node->name, name, name_len) == 0) {
-                VarScope *sc2 = (VarScope *)node;
-                if (sc2->var && sc2->var->is_function)
-                    return sc2->var;
-                return NULL;
-            }
-        }
+        VarScope *vs = scope_find_var(sc, name, name_len);
+        if (vs)
+            return vs->var && vs->var->is_function ? vs->var : NULL;
     }
     return NULL;
 }
 
 static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name,
                                        int name_len) {
-    Scope *sc = vm->compiler.scope;
-    if (!sc)
-        return NULL;
-
-    for (VarScopeNode *node = sc->vars; node; node = node->next) {
-        if (node->name_len == name_len &&
-            strncmp(node->name, name, name_len) == 0) {
-            VarScope *sc2 = (VarScope *)node;
-            if (sc2->var && sc2->var->is_function)
-                return sc2->var;
-            return NULL;
-        }
-    }
-    return NULL;
+    VarScope *vs = find_var_in_current_scope(vm, name, name_len);
+    return vs && vs->var && vs->var->is_function ? vs->var : NULL;
 }
 
 // #696: __attribute__((sentinel)) / [[gnu::sentinel]] only makes sense on a
@@ -1326,33 +1308,51 @@ static void scan_globals(VirtualMachine *vm) {
     vm->compiler.globals = head.next;
 }
 
+typedef struct {
+    Obj *first;
+    bool any_used;
+} GlobalNameInfo;
+
+// An unused static is not reported when a same-named declaration of the same
+// kind appears earlier in vm->compiler.globals or is itself used.
 static void warn_unused_globals(VirtualMachine *vm) {
+    int n = 0;
+    for (Obj *var = vm->compiler.globals; var; var = var->next)
+        n++;
+    GlobalNameInfo *infos      = calloc(n, sizeof(GlobalNameInfo));
+    HashMap         by_name[2] = {};
+    int             used       = 0;
+    for (Obj *var = vm->compiler.globals; var; var = var->next) {
+        HashMap        *map  = &by_name[var->is_function];
+        int             len  = strlen(var->name);
+        GlobalNameInfo *info = hashmap_get2(map, var->name, len);
+        if (!info) {
+            info        = &infos[used++];
+            info->first = var;
+            hashmap_put2_borrowed(map, var->name, len, info);
+        }
+        if (var->is_used || var->is_maybe_unused)
+            info->any_used = true;
+    }
+
     for (Obj *var = vm->compiler.globals; var; var = var->next) {
         if (!var->is_static || !var->is_definition || var->is_local_symbol ||
             var->is_macro_generated || !var->tok || var->is_used ||
             var->is_maybe_unused)
             continue;
-
-        bool already_checked    = false;
-        bool redeclaration_used = false;
-        for (Obj *other = vm->compiler.globals; other; other = other->next) {
-            if (other == var)
-                already_checked = true;
-            if (other == var || other->is_function != var->is_function ||
-                strcmp(other->name, var->name) != 0)
-                continue;
-            if (!already_checked)
-                redeclaration_used = true;
-            if (other->is_used || other->is_maybe_unused)
-                redeclaration_used = true;
-        }
-        if (redeclaration_used)
+        GlobalNameInfo *info = hashmap_get2(&by_name[var->is_function],
+                                            var->name, strlen(var->name));
+        if (info->first != var || info->any_used)
             continue;
 
         warn_tok(vm, var->tok, CCCC_WARN_UNUSED, "unused %s '%s'",
                  var->is_function ? "function" : "variable",
                  obj_display_name(var));
     }
+
+    hashmap_deinit_borrowed(&by_name[0]);
+    hashmap_deinit_borrowed(&by_name[1]);
+    free(infos);
 }
 
 static void declare_builtin_functions(VirtualMachine *vm) {
