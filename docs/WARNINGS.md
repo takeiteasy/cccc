@@ -112,7 +112,7 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `cccc-macro`
 - `comptime-block-leak` — warns when a `#pragma cccc comptime begin` block in an included header is left unclosed at EOF and is auto-closed (part of `-Wextra`)
 - `ignored-features`
-- `attributes` — general attribute-usage diagnostics, e.g. `sentinel`/`[[gnu::sentinel]]` applied to a non-variadic function ("sentinel attribute only applies to variadic functions")
+- `attributes` — general attribute-usage diagnostics: unknown attribute names (attributes that `__has_attribute` recognizes are accepted silently), and misuse such as `sentinel`/`[[gnu::sentinel]]` applied to a non-variadic function ("sentinel attribute only applies to variadic functions")
 - `nodiscard`
 - `fallthrough`
 - `strict-prototypes`

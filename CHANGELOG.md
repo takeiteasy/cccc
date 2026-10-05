@@ -12,6 +12,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   of 5.5 s.
 - Fixed: computing token columns no longer costs about 0.2 s on every compile
   that uses comptime.
+- Fixed: GNU attributes that `__has_attribute` reports as recognized, such as
+  `cold`, `hot`, `noinline` and `always_inline`, are accepted silently instead
+  of warning "unknown attribute" under `-Wattributes`.
+- Fixed: an unknown attribute after a function declarator warns once instead
+  of three times.
 
 ## [0.7.3] - 2026-10-02
 

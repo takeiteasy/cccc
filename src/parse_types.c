@@ -1080,6 +1080,9 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         return block_ty;
     }
 
+    // TODO(#1429): a trailing attribute-list after the parenthesised
+    // declarator (`int (*fp)(void) __attribute__((x))`) is not consumed
+    // here and fails with "expected ','"; run the suffix loop below.
     if (equal(tok, "(")) {
         Token *start = tok;
         Type   dummy = {};
@@ -2401,7 +2404,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     attr->has_vector_size   = true;
                     attr->vector_size_bytes = bytes;
                     attr->vector_size_tok   = attr_tok;
-                } else if (ty) {
+                } else if (ty && !vm->compiler.in_type_lookahead) {
                     warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                              "'vector_size' ignored in this context");
                 }
@@ -2792,7 +2795,9 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
                 tok             = tok->next;
-                if (!is_opencl_hint_attr(vm, name_tok))
+                if (!vm->compiler.in_type_lookahead &&
+                    !is_opencl_hint_attr(vm, name_tok) &&
+                    !cc_has_attribute(name_tok->loc, name_tok->len))
                     warn_tok(vm, name_tok, CCCC_WARN_ATTRIBUTES,
                              "unknown attribute '%.*s' ignored", name_tok->len,
                              name_tok->loc);
@@ -2862,6 +2867,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 equal(tok->next->next, ":") && tok->next->next->next &&
                 (tok->next->next->next->kind == TK_IDENT ||
                  tok->next->next->next->kind == TK_KEYWORD)) {
+                // TODO(#1430): accept the reserved `__gnu__` scope too.
                 if (equal(tok, "cccc")) {
                     cccc_scoped = true;
                 } else if (equal(tok, "gnu")) {
@@ -3085,7 +3091,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     attr->has_vector_size   = true;
                     attr->vector_size_bytes = bytes;
                     attr->vector_size_tok   = attr_tok;
-                } else if (ty) {
+                } else if (ty && !vm->compiler.in_type_lookahead) {
                     warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                              "'vector_size' ignored in this context");
                 }
@@ -3217,7 +3223,10 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             } else if (is_designated_init_attr) {
                 if (ty)
                     ty->designated_init = true;
-            } else if (!unused && !deprecated) {
+            } else if (!unused && !deprecated &&
+                       !vm->compiler.in_type_lookahead &&
+                       !(gnu_scoped &&
+                         cc_has_attribute(name_tok->loc, name_tok->len))) {
                 warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          (cccc_scoped || gnu_scoped) ? name_tok->len

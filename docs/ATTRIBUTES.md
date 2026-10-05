@@ -984,9 +984,15 @@ Regions](SAFETY.md#checked-regions).
 
 ## Parsed but Ignored
 
-Any GNU `__attribute__` identifier that is not explicitly handled (i.e., not `packed`, `aligned`, `unused`/`__unused__`, `deprecated`/`__deprecated__`, or `warn_unused_result`/`__warn_unused_result__`) is **consumed and emits a `-Wattributes` warning**. The parser skips the attribute name and any parenthesised argument list, then continues.
+Any GNU `__attribute__` identifier without compiler semantics is consumed: the parser skips the name and any parenthesised argument list, then continues. What happens next depends on whether `__has_attribute` recognizes the name:
 
-Similarly, any C23 `[[...]]` attribute other than `maybe_unused`, `deprecated`, `nodiscard`, `fallthrough`, or `noreturn` is **consumed and emits a `-Wattributes` warning**.
+| Attribute | Example | Result |
+|-----------|---------|--------|
+| Recognized by `__has_attribute` | `__attribute__((cold))`, `[[gnu::noinline]]` | Accepted silently |
+| Unknown name | `__attribute__((bogus))`, `[[gnu::bogus]]` | `-Wattributes` warning |
+| Unscoped non-standard C23 name | `[[cold]]` | `-Wattributes` warning |
+
+This matches GCC and Clang: a header that checks `__has_attribute(cold)` before using it compiles cleanly under `-Wall -Werror`.
 
 Ignored attributes include (but are not limited to):
 
@@ -1005,7 +1011,7 @@ Ignored attributes include (but are not limited to):
 | `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
 | `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `alloc_align` | GNU | Recognized by `__has_attribute` (no alignment-fact propagation) |
+| `alloc_align` | GNU | |
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
 | `reproducible` | C23 | |

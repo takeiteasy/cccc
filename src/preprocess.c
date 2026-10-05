@@ -1794,9 +1794,9 @@ static const AttrInfo known_attrs[] = {
     // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
     // output, no linker, no per-function ISA codegen, no inliner, no
     // branch-temperature layout, no symbol-level DCE, no strict-aliasing
-    // optimizer, no machine-mode type system. Parsed and ignored via the
-    // generic attribute fallback (src/parse.c), but reported as
-    // recognized so __has_attribute matches real GCC/Clang.
+    // optimizer, no machine-mode type system. Accepted silently by the
+    // attribute parsers' generic fallback (src/parse_types.c) and reported
+    // as recognized so __has_attribute matches real GCC/Clang.
     {"visibility", ATTR_GNU, true, 0},
     {"section", ATTR_GNU, true, 0},
     {"weak", ATTR_GNU, true, 0},
@@ -1839,8 +1839,13 @@ static const AttrInfo *find_attr_info(char *name) {
     return NULL;
 }
 
-static bool is_has_attribute_supported(char *name) {
-    const AttrInfo *a = find_attr_info(name);
+bool cc_has_attribute(const char *name, int len) {
+    char buf[64];
+    if (len <= 0 || len >= (int)sizeof(buf))
+        return false;
+    memcpy(buf, name, (size_t)len);
+    buf[len]          = '\0';
+    const AttrInfo *a = find_attr_info(buf);
     return a && a->has_attr;
 }
 
@@ -1957,7 +1962,7 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
     if (!strcmp(kind, "__has_feature") || !strcmp(kind, "__has_extension"))
         return is_has_feature_supported(vm, name);
     if (!strcmp(kind, "__has_attribute"))
-        return is_has_attribute_supported(name);
+        return cc_has_attribute(name, (int)strlen(name));
     if (!strcmp(kind, "__has_builtin"))
         return is_has_builtin_supported(name);
     if (!strcmp(kind, "__has_c_attribute"))

@@ -608,6 +608,8 @@ void isolate_comptime_macros(VirtualMachine *vm);
 void drop_system_function_macros(VirtualMachine *vm);
 bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             bool emit_scan);
+// True when __has_attribute(name) reports the GNU attribute as recognized.
+bool cc_has_attribute(const char *name, int len);
 
 //
 // parse.c
