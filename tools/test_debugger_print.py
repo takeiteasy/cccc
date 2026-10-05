@@ -121,12 +121,12 @@ def debugger():
 
 
 def at_return_line():
-    """Break at the `return ok ? 42 : 1;` line (30), where every local in
+    """Break at the `return ok ? 42 : 1;` line (32), where every local in
     the fixture is fully initialized, and let the program run to
     completion afterward (proving `continue` still works post-inspection)."""
     child = debugger()
     child.expect(PROMPT)
-    child.send("break 30")
+    child.send("break 32")
     child.expect(PROMPT)
     child.send("continue")
     child.expect(b"Breakpoint hit")
@@ -195,6 +195,31 @@ def test_print_scalar_int():
     finish(child)
 
 
+def test_print_overaligned_local():
+    # #1137: an _Alignas(32) local lives at its aligned address, not at the
+    # raw bp-relative slot; print must read it from there.
+    child = at_return_line()
+    child.send("print aligned32")
+    child.expect(b"aligned32 = (int) 77")
+    finish(child)
+
+
+def test_condition_on_overaligned_local():
+    # #1137: a conditional breakpoint's rewritten local reference must also
+    # reach the aligned address (debugger_rewrite_locals), not the raw slot.
+    for cond, hits in (("aligned32 == 77", True), ("aligned32 == 78", False)):
+        child = debugger()
+        child.expect(PROMPT)
+        child.send(f"break 32 if {cond}")
+        child.expect(PROMPT)
+        child.send("continue")
+        if hits:
+            child.expect(b"debugger_print.c:32")
+            child.expect(PROMPT)
+            child.send("continue")
+        child.wait()
+
+
 def test_print_data_segment_global():
     # global_counter lives in the data segment, not the stack -- exercises
     # the other branch of cc_is_valid_vm_address, unaffected by the
@@ -219,6 +244,8 @@ TESTS = [
     test_print_char_pointer_as_string,
     test_print_pointer_to_local,
     test_print_scalar_int,
+    test_print_overaligned_local,
+    test_condition_on_overaligned_local,
     test_print_data_segment_global,
     test_print_unknown_symbol_errors_gracefully,
 ]

@@ -3472,6 +3472,8 @@ typedef struct DebugSymbol {
     int is_local; /**< True if local variable (BP-relative), false if global. */
     int scope_depth; /**< Scope depth (for handling shadowing). */
     Obj *owner_fn;   // Owning function for locals, NULL for globals
+    int  align_log;  /**< Local's address is rounded up to 8<<align_log (0 = no
+                        rounding, #1137). */
 } DebugSymbol;
 
 typedef struct TypeNameRecord {

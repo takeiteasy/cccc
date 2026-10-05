@@ -188,6 +188,16 @@
 // when codegen has proven the address never escapes its creating frame.
 #define LEA3_NO_RECORD ((InstrWord)(1 << 8))
 
+// LEA3/STKTAG alignment field (#1137): log2(A/8) of the alignment the address
+// is rounded up to (0 = none, 1..3 = 16/32/64). Lives above LEA3_NO_RECORD in
+// LEA3's operand word and in STKTAG's otherwise-unused first word.
+#define LEA3_ALIGN_SHIFT 9
+#define LEA3_ALIGN_MASK  7
+
+static inline long long cc_align_up_ll(long long v, long long a) {
+    return (v + a - 1) & ~(a - 1);
+}
+
 // ENT3 masks-word flags (#703): float_param_mask/f32_param_mask only ever
 // set bits 0-7 (register params are capped at 8, see gen_function), so bit
 // 31 of each half is free. Set by codegen (patched post-body, mirroring the

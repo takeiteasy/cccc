@@ -33,7 +33,7 @@ CleanupScopeEntry *g_cleanup_scope = NULL;
 
 // Emit address-of a local variable into dest_reg.
 static void emit_local_addr(VirtualMachine *vm, Obj *var, int dest_reg) {
-    emit_lea3(vm, dest_reg, var->offset);
+    emit_lea3_var_plain(vm, dest_reg, var);
 }
 
 // Call cv->cleanup_fn(&cv->var). The cleanup fn returns void so REG_A0 is
@@ -443,6 +443,15 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
     // dest_reg now holds owner_fn's bp; add the variable's offset. Variable
     // offsets are in slots, so multiply by 8 bytes.
     emit_addi3(vm, dest_reg, dest_reg, var->offset * 8);
+    int align_log = local_align_log(var);
+    if (align_log) {
+        long long align  = 8LL << align_log;
+        int       r_mask = alloc_temp_reg();
+        emit_addi3(vm, dest_reg, dest_reg, align - 1);
+        emit_li3(vm, r_mask, -align);
+        emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
+        free_temp_reg(r_mask);
+    }
 }
 
 // Returns true when a ND_VAR node can be loaded/stored with a fused
@@ -452,6 +461,10 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
     if (!node->var->is_local)
         return false;
     if (node->var->is_block_var)
+        return false;
+    // Over-aligned locals (#1137) need LEA3's align-up; the fused ops address
+    // bp+offset directly.
+    if (local_align_log(node->var))
         return false;
     // A variable captured by the enclosing block lives in the block descriptor
     // (reached via __static_link), not at its own frame offset.  It must go

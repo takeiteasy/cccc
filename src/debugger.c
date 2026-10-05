@@ -119,7 +119,11 @@ static void *debugger_symbol_address(VirtualMachine *vm, DebugSymbol *sym) {
     if (sym->is_local) {
         // The canary one-slot shift is already baked into sym->offset by
         // assign_stack_offsets (#445), so no extra adjustment is needed here.
-        return (void *)(vm->bp + sym->offset);
+        void *addr = (void *)(vm->bp + sym->offset);
+        if (sym->align_log)
+            addr =
+                (void *)cc_align_up_ll((long long)addr, 8LL << sym->align_log);
+        return addr;
     }
     return (void *)(vm->data_seg + sym->offset);
 }
@@ -1073,6 +1077,8 @@ extern Obj *__builtin_ast_global_var(const char *name, Type *ty);
 extern Node *__builtin_ast_var_ref(const char *name);
 extern Node *__builtin_ast_cast(Node *expr, Type *target_type);
 extern Node *__builtin_ast_unary(NodeKind op, Node *operand);
+extern Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right);
+extern int local_align_log(Obj *var); // codegen_emit.c (#1137)
 extern Node *__builtin_ast_subscript(Node *arr, Node *idx);
 extern Node *__builtin_ast_int_literal(int64_t value);
 
@@ -1146,6 +1152,20 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
                         // its operand for us (unlike parse.c's new_cast), and
                         // once typed_ptr wraps addr in a CAST, add_type would
                         // never reach it again (see the node->ty note below).
+        // #1137: an over-aligned local lives at the slot address rounded up
+        // to its alignment, mirroring LEA3's align field.
+        int align_log = local_align_log(var);
+        if (align_log) {
+            int64_t align  = (int64_t)8 << align_log;
+            Node   *as_int = __builtin_ast_cast(addr, ty_llong);
+            Node   *sum    = __builtin_ast_binary(
+                ND_ADD, as_int, __builtin_ast_int_literal(align - 1));
+            add_type(vm, sum);
+            Node *masked = __builtin_ast_binary(
+                ND_BITAND, sum, __builtin_ast_int_literal(-align));
+            add_type(vm, masked);
+            addr = masked;
+        }
         Node *typed_ptr = __builtin_ast_cast(addr, pointer_to(vm, var->ty));
 
         node->kind      = ND_DEREF;

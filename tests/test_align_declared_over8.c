@@ -28,11 +28,9 @@ _Thread_local __int128 t_int128;
 // Returns a vector by value (#714), exercising the RETBUF pool's own
 // alignment (alloc_return_buffer_pool, src/codegen_func.c) -- the
 // FFI-visible case #1136 is most concerned about. Not independently
-// assertable from here: the returned value's *local* address (`&rv` at the
-// call site) is a stack slot, and >8-byte local alignment is the deferred
-// half of #1136 (see the ticket's own follow-up) -- so this only smoke-
-// tests that the call still works, it doesn't assert RETBUF's own base
-// alignment.
+// assertable from here: RETBUF's base is internal;
+// tests/test_align_local_over8.c covers the locals this value is stored into
+// (#1137).
 static v8f32 make_vector(void) {
     v8f32 v = {0};
     return v;

@@ -24,8 +24,10 @@ int main(void) {
     char        *s      = "hi";
     int          local  = 42;
     int         *pl     = &local;
+    _Alignas(32) int aligned32 = 77; // #1137: printed at its aligned address
 
-    int          ok = local == 42 && p.x == 3 && ln.b.y == 4 && arr[2] == 30 &&
-                      s[0] == 'h' && *pl == 42 && global_counter == 7;
+    int ok = local == 42 && p.x == 3 && ln.b.y == 4 && arr[2] == 30 &&
+             s[0] == 'h' && *pl == 42 && global_counter == 7 &&
+             aligned32 == 77 && (unsigned long long)&aligned32 % 32 == 0;
     return ok ? 42 : 1;
 }

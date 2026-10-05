@@ -3401,8 +3401,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                    node->var->offset); // &stack slot
                 emit_rr(vm, LDR_D, REG_A0, REG_A0);    // heap ptr -> A0
             } else {
-                emit_lea3_internal(vm, REG_A0,
-                                   node->var->offset); // bp + offset -> A0
+                emit_lea3_var_internal(vm, REG_A0, node->var); // storage -> A0
             }
             if (node->rhs) {
                 reset_temp_regs();
@@ -3907,7 +3906,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         emit_static_chain_var_addr(vm, enc_fn, outer_owner, cap,
                                                    r_val);
                     else
-                        emit_lea3_internal(vm, r_val, cap->offset);
+                        emit_lea3_var_internal(vm, r_val, cap);
                     emit_rr(vm, LDR_D, r_val, r_val);
                 } else if (cap->is_local) {
                     // Regular local: copy value. Either directly in the
@@ -3919,7 +3918,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         emit_static_chain_var_addr(vm, enc_fn, outer_owner, cap,
                                                    r_val);
                     else
-                        emit_lea3_internal(vm, r_val, cap->offset);
+                        emit_lea3_var_internal(vm, r_val, cap);
                     // #994: a struct/union/vector/wide-_BitInt/_Decimal
                     // *parameter*'s frame slot holds a pointer to the value,
                     // not the value's own bytes -- same ABI fact gen_addr's

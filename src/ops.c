@@ -1664,10 +1664,13 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
     int       rd;
     DECODE_R(operands, rd);
     bool      no_record = (operands & LEA3_NO_RECORD) != 0;
+    int align_log = (int)((operands >> LEA3_ALIGN_SHIFT) & LEA3_ALIGN_MASK);
     long long offset    = cc_read_i64(vm);
 
     if (rd != REG_ZERO) {
         long long addr = (long long)(vm->bp + offset);
+        if (align_log)
+            addr = cc_align_up_ll(addr, 8LL << align_log);
         vm->regs[rd]   = addr;
 
         // Tag this &local with the current frame's liveness epoch (#673),
@@ -1683,6 +1686,8 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
             vm->frame_epochs.count > 0) {
             unsigned long long epoch =
                 vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
+            // BUG: entries are never retired on frame exit, so a later frame
+            // reusing this address can trip a false dangling report (#1447).
             hashmap_put_int(&vm->stack_ptr_epochs, addr,
                             (void *)(intptr_t)epoch);
         }
@@ -1789,12 +1794,15 @@ static inline int op_STKTAG_fn(VirtualMachine *vm) {
     // with the current frame's epoch, for interior dangling-pointer
     // resolution (#675) and DYNOBJSZ stack-buffer sizing (#648).
     // Format: [STKTAG] [unused:32] [offset:i64] [size:i64]
-    cc_read_word(vm); // unused first word (no register operand)
+    long long operands = cc_read_word(vm); // align field only (#1137)
+    int align_log    = (int)((operands >> LEA3_ALIGN_SHIFT) & LEA3_ALIGN_MASK);
     long long offset = cc_read_i64(vm);
     long long size   = cc_read_i64(vm);
 
     if (stack_extents_enabled(vm) && vm->frame_epochs.count > 0) {
         long long          lo = (long long)(vm->bp + offset);
+        if (align_log)
+            lo = cc_align_up_ll(lo, 8LL << align_log);
         unsigned long long epoch =
             vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
         stack_interval_insert(vm, lo, lo + size, epoch);

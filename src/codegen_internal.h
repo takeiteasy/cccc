@@ -154,6 +154,18 @@ Pc emit_lda3(VirtualMachine *vm, int rd, long long offset);
 Pc emit_ldtls3(VirtualMachine *vm, int rd, long long offset);
 Pc emit_lea3_internal(VirtualMachine *vm, int rd, long long offset);
 Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var);
+// LEA3 for a user local's own storage that honours its over-alignment (#1137),
+// unlike emit_lea3_internal(var->offset). _plain records the address (it is
+// handed to user code, e.g. a cleanup function); _internal never records.
+Pc emit_lea3_var_plain(VirtualMachine *vm, int rd, Obj *var);
+Pc emit_lea3_var_internal(VirtualMachine *vm, int rd, Obj *var);
+// LEA3 at a scratch-pool offset rounded up to 8<<align_log (#1137).
+Pc emit_lea3_aligned(VirtualMachine *vm, int rd, long long offset,
+                     int align_log, bool record);
+long long alloc_aligned_temp(VirtualMachine *vm, int bytes, int align_log);
+int local_align_log(Obj *var);
+bool param_slot_holds_pointer(Type *ty);
+int align_log_of(int align);
 Pc emit_lea3(VirtualMachine *vm, int rd, long long offset);
 Pc emit_li3(VirtualMachine *vm, int rd, long long imm);
 Pc emit_lta3(VirtualMachine *vm, int rd, long long offset);
@@ -164,7 +176,8 @@ Pc emit_rrrs_i(VirtualMachine *vm, int op, int rd, int base, int index,
 // STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch
 // (#675/#1078). See emit_lea3_var's own comment for the escaping-aggregate
 // rationale; codegen_func.c's struct/union-by-value param copy shares it.
-Pc emit_stktag(VirtualMachine *vm, long long offset, long long size);
+Pc emit_stktag(VirtualMachine *vm, long long offset, long long size,
+               int align_log);
 Pc emit_word_ptr(VirtualMachine *vm);
 SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
                                       long *min_case, long *max_case,
@@ -172,7 +185,7 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
 SwitchCasePatch *find_switch_case(SwitchCasePatch *cases, int num_cases,
                                   Node *node);
 void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
-                      Type *ty, int is_local, Obj *owner_fn);
+                      Type *ty, int is_local, Obj *owner_fn, int align_log);
 void add_label_patch(char *name, Pc patch_location, bool text_relative);
 void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
                         Type *ty, int scope_id);

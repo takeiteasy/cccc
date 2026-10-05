@@ -206,22 +206,51 @@ Pc emit_lta3(VirtualMachine *vm, int rd, long long offset) {
 // true only when the result is proven never to escape its creating frame
 // (see docs/SAFETY.md and the mark_addr_escapes pass in parse.c).
 static Pc emit_lea3_ex(VirtualMachine *vm, int rd, long long offset,
-                       bool skip_record) {
+                       bool skip_record, int align_log) {
     emit_word(vm, LEA3);
-    emit_word(vm, ENCODE_R(rd) | (skip_record ? LEA3_NO_RECORD : 0));
+    emit_word(vm, ENCODE_R(rd) | (skip_record ? LEA3_NO_RECORD : 0) |
+                      ((InstrWord)align_log << LEA3_ALIGN_SHIFT));
     return emit_i64(vm, offset);
+}
+
+// log2(align/8) for an alignment already normalised by cc_effective_align.
+int align_log_of(int align) {
+    int log = 0;
+    for (int n = align / 8; n > 1; n >>= 1)
+        log++;
+    return log;
+}
+
+// True when a param's frame slot holds a pointer to the value rather than the
+// value itself (see gen_addr's by-pointer param arm).
+bool param_slot_holds_pointer(Type *ty) {
+    return ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
+           ty->kind == TY_VECTOR || is_wide_bitint(ty) || is_decimal(ty);
+}
+
+// Alignment field for a user local's address (#1137); 0 when 8-byte slots
+// already suffice. By-pointer params are excluded (their pointee is aligned
+// via the prologue copy); a slot-resident over-aligned scalar param gets a
+// padded slot that gen_function's prologue copies the spilled value into.
+int local_align_log(Obj *var) {
+    if (var->is_block_var || var->ty->kind == TY_VLA)
+        return 0;
+    if (var->is_param && param_slot_holds_pointer(var->ty))
+        return 0;
+    return align_log_of(cc_effective_align(var->align, var->ty->align));
 }
 
 // LEA3: rd = bp + offset. Default: recorded (safe) -- see emit_lea3_ex.
 Pc emit_lea3(VirtualMachine *vm, int rd, long long offset) {
-    return emit_lea3_ex(vm, rd, offset, false);
+    return emit_lea3_ex(vm, rd, offset, false, 0);
 }
 
 // STKTAG: tag [bp+offset, bp+offset+size) with the current frame's epoch,
 // for interior dangling-pointer resolution (#675). See docs/SAFETY.md.
-Pc emit_stktag(VirtualMachine *vm, long long offset, long long size) {
+Pc emit_stktag(VirtualMachine *vm, long long offset, long long size,
+               int align_log) {
     emit_word(vm, STKTAG);
-    emit_word(vm, 0); // unused (no register operand)
+    emit_word(vm, (InstrWord)align_log << LEA3_ALIGN_SHIFT); // align field only
     emit_i64(vm, offset);
     return emit_i64(vm, size);
 }
@@ -279,9 +308,10 @@ Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
     // -- which layer 3 resolves soundly via prefer-live -- is enough to
     // cover every offset of this vector, including offset 0.
     bool vector_agg = var->ty->kind == TY_VECTOR;
-    Pc   pc         = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes);
+    int  align_log  = local_align_log(var);
+    Pc   pc = emit_lea3_ex(vm, rd, var->offset, !var->addr_escapes, align_log);
     if (escaping_agg || vector_agg) {
-        emit_stktag(vm, var->offset, var->ty->size);
+        emit_stktag(vm, var->offset, var->ty->size, align_log);
         vm->compiler.frame_has_esc_agg = true;
     } else if (var->addr_escapes) {
         vm->compiler.frame_has_esc_scalar = true;
@@ -294,7 +324,20 @@ Pc emit_lea3_var(VirtualMachine *vm, int rd, Obj *var) {
 // correspond to a user-visible `&local` and are proven, by construction,
 // never to escape their creating frame -- always skip recording (#676).
 Pc emit_lea3_internal(VirtualMachine *vm, int rd, long long offset) {
-    return emit_lea3_ex(vm, rd, offset, true);
+    return emit_lea3_ex(vm, rd, offset, true, 0);
+}
+
+Pc emit_lea3_var_plain(VirtualMachine *vm, int rd, Obj *var) {
+    return emit_lea3_ex(vm, rd, var->offset, false, local_align_log(var));
+}
+
+Pc emit_lea3_var_internal(VirtualMachine *vm, int rd, Obj *var) {
+    return emit_lea3_ex(vm, rd, var->offset, true, local_align_log(var));
+}
+
+Pc emit_lea3_aligned(VirtualMachine *vm, int rd, long long offset,
+                     int align_log, bool record) {
+    return emit_lea3_ex(vm, rd, offset, !record, align_log);
 }
 
 // ADDI3: rd = rs + immediate
@@ -460,6 +503,14 @@ long long alloc_wide_bitint_temp(VirtualMachine *vm, int words) {
                         vm->compiler.ent3_extra_stack);
 }
 
+// Scratch slot whose address is rounded up to 8<<align_log (#1137): pads by
+// the worst-case shift. Reach it with emit_lea3_aligned (+ emit_stktag) using
+// the same align_log.
+long long alloc_aligned_temp(VirtualMachine *vm, int bytes, int align_log) {
+    int words = (bytes + 7) / 8 + ((8 << align_log) - 8) / 8;
+    return alloc_wide_bitint_temp(vm, words);
+}
+
 // Allocate a fresh stack slot for a _Decimal32/64/128 intermediate result
 // (#402). Reuses alloc_wide_bitint_temp's per-function scratch pool,
 // rounding up to whole 64-bit words (4 bytes for _Decimal32 still costs a
@@ -485,9 +536,11 @@ void gen_vector_arg_ptr(VirtualMachine *vm, Node *arg, int addr_reg) {
     int v = alloc_temp_reg();
     gen_expr(vm, arg, v); // vector value -> vregs[v]
     mark_temp_reg_used(v);
-    int       bytes = arg->ty->size;
-    long long off   = alloc_wide_bitint_temp(vm, bytes / 8);
-    emit_lea3(vm, addr_reg, off); // address escapes to the callee -- record it
+    int       bytes     = arg->ty->size;
+    int       align_log = align_log_of(cc_effective_align(0, arg->ty->align));
+    long long off       = alloc_aligned_temp(vm, bytes, align_log);
+    // address escapes to the callee -- record it
+    emit_lea3_aligned(vm, addr_reg, off, align_log, true);
     if (vm->flags & CCCC_POINTER_CHECKS)
         emit_rr(vm, CHKP3, addr_reg, 0);
     emit_rrs(vm, VSTR, v, addr_reg, bytes);

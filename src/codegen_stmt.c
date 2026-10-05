@@ -700,6 +700,15 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
         // Skip builtin variables (va_area and alloca_bottom) and params.
         bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
 
+        // #1137: an over-aligned slot-resident scalar param keeps its
+        // positional ENT3 spill slot; the prologue copies it into a padded,
+        // alignable slot allocated here.
+        if (is_param && local_align_log(var)) {
+            int slots    = (var->ty->size + 7) / 8;
+            slots       += ((8 << local_align_log(var)) - 8) / 8;
+            stack_size  += slots;
+            var->offset  = -stack_size;
+        }
         if (!is_param && !is_builtin) {
             // Calculate how many slots this variable needs
             int var_size = 1;
@@ -717,6 +726,11 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
                 // fit the default 1-word slot, same as float/double do.
                 var_size = (var->ty->size + 7) / 8;
             }
+            // #1137: over-aligned locals carry up to A-8 bytes of slack so
+            // the address rounded up from bp+offset stays inside the slot.
+            int align_log = local_align_log(var);
+            if (align_log)
+                var_size += ((8 << align_log) - 8) / 8;
             stack_size  += var_size;
             var->offset  = -stack_size;
         }

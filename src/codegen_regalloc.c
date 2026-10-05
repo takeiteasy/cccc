@@ -218,7 +218,7 @@ Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
 }
 
 void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
-                      Type *ty, int is_local, Obj *owner_fn) {
+                      Type *ty, int is_local, Obj *owner_fn, int align_log) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name || !*name)
         return;
     if (vm->dbg.num_debug_symbols >= MAX_DEBUG_SYMBOLS)
@@ -231,6 +231,7 @@ void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
     sym->is_local    = is_local;
     sym->scope_depth = 0;
     sym->owner_fn    = owner_fn;
+    sym->align_log   = align_log;
 }
 // ========== Register Allocator ==========
 // Simple bitmap allocator for temporary registers T0-T10

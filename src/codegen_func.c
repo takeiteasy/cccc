@@ -81,7 +81,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     for (Obj *param = fn->params; param; param = param->next) {
         add_stack_var_meta(vm, param->name, param->offset, param->ty,
                            fn_scope_id);
-        add_debug_symbol(vm, param->name, param->offset, param->ty, 1, fn);
+        add_debug_symbol(vm, param->name, param->offset, param->ty, 1, fn,
+                         local_align_log(param));
     }
     for (Obj *var = fn->locals; var; var = var->next) {
         bool is_param = false;
@@ -94,7 +95,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         if (!is_param && !is_builtin) {
             add_stack_var_meta(vm, var->name, var->offset, var->ty,
                                fn_scope_id);
-            add_debug_symbol(vm, var->name, var->offset, var->ty, 1, fn);
+            add_debug_symbol(vm, var->name, var->offset, var->ty, 1, fn,
+                             local_align_log(var));
         }
     }
 
@@ -144,6 +146,26 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         }
     }
 
+    // #1137: a slot-resident over-aligned scalar param (e.g. a 16-aligned
+    // long double) lives at its positional ENT3 spill slot, which is only
+    // 8-aligned. assign_stack_offsets gave it a padded slot (param->offset);
+    // copy the spilled value there so &param is correctly aligned.
+    {
+        int spill_off = -1 - ((vm->flags & CCCC_STACK_CANARIES) ? 1 : 0);
+        for (Obj *param = fn->params; param; param = param->next, spill_off--) {
+            if (!local_align_log(param))
+                continue;
+            int r_val = alloc_temp_reg();
+            int r_dst = alloc_temp_reg();
+            emit_lea3_internal(vm, r_val, spill_off);
+            emit_rr(vm, LDR_D, r_val, r_val);
+            emit_lea3_var_internal(vm, r_dst, param);
+            emit_rr(vm, STR_D, r_val, r_dst);
+            free_temp_reg(r_dst);
+            free_temp_reg(r_val);
+        }
+    }
+
     // #1078: a struct/union-by-value parameter's slot holds a pointer to
     // the CALLER's own addressable storage (gen_addr's by-pointer aggregate
     // param branch, codegen_addr.c) -- nothing ever copied it, so a write
@@ -161,16 +183,27 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // frame. Safe to clobber A0-A2 for the MCPY here: ENT3 has already
     // spilled every argument register into its own slot by this point.
     for (Obj *param = fn->params; param; param = param->next) {
-        if ((param->ty->kind != TY_STRUCT && param->ty->kind != TY_UNION) ||
+        // #1137: a wide _BitInt/decimal param is by-pointer too, but into the
+        // caller's (unaligned) scratch temp; only worth the copy when the
+        // param's address is observable and its type wants > 8 alignment.
+        bool wants_aligned_copy =
+            (is_wide_bitint(param->ty) || is_decimal(param->ty)) &&
+            (param->addr_taken || param->addr_escapes) &&
+            cc_effective_align(param->align, param->ty->align) > 8;
+        if ((param->ty->kind != TY_STRUCT && param->ty->kind != TY_UNION &&
+             !wants_aligned_copy) ||
             param->ty->size <= 0)
             continue;
+        int copy_align_log =
+            align_log_of(cc_effective_align(param->align, param->ty->align));
         long long copy_off =
-            alloc_wide_bitint_temp(vm, (param->ty->size + 7) / 8);
+            alloc_aligned_temp(vm, param->ty->size, copy_align_log);
         int r_src = alloc_temp_reg();
         // Slot address only feeds the immediate pointer load below (#676).
         emit_lea3_internal(vm, r_src, param->offset);
         emit_rr(vm, LDR_D, r_src, r_src);         // caller's object address
-        emit_lea3_internal(vm, REG_A0, copy_off); // copy dest
+        emit_lea3_aligned(vm, REG_A0, copy_off, copy_align_log,
+                          false);                 // copy dest
         emit_mov3(vm, REG_A1, r_src);             // copy src
         emit_li3(vm, REG_A2, param->ty->size);    // copy count
         emit(vm, MCPY);                           // clobbers A0-A2
@@ -186,14 +219,14 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         // is invisible to stack_interval_stab even though &param now points
         // squarely inside it.
         if (param->addr_escapes) {
-            emit_stktag(vm, copy_off, param->ty->size);
+            emit_stktag(vm, copy_off, param->ty->size, copy_align_log);
             vm->compiler.frame_has_esc_agg = true;
         }
         // Rebind the param's slot to point at the copy, not the caller's
         // object. emit_lea3_internal(copy_off) is recomputed since MCPY
         // clobbered A0.
         int r_dst = alloc_temp_reg();
-        emit_lea3_internal(vm, r_dst, copy_off);
+        emit_lea3_aligned(vm, r_dst, copy_off, copy_align_log, false);
         int r_slot = alloc_temp_reg();
         emit_lea3_internal(vm, r_slot, param->offset);
         emit_rr(vm, STR_D, r_dst, r_slot);
@@ -376,7 +409,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
                 // Store the offset in the variable
                 var->offset = vm->data_ptr - vm->data_seg;
-                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
+                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL,
+                                 0);
 
                 // Copy init_data if present
                 if (var->init_data) {
@@ -672,7 +706,8 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 check_data_capacity(vm, offset + var->ty->size);
                 vm->data_ptr = vm->data_seg + offset;
                 var->offset  = vm->data_ptr - vm->data_seg;
-                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL);
+                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL,
+                                 0);
                 if (var->init_data)
                     memcpy(vm->data_ptr, var->init_data, var->ty->size);
                 vm->data_ptr += var->ty->size;
