@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: subscripting a vector rvalue (`(a + b)[0]`, `f()[3]`) is accepted
+  instead of failing with "not an lvalue". Assigning to such a lane is still
+  an error.
+
 - Fixed: `vector_size` after a pointer, array or function declarator
   (`int *q VS;`, `int b[2] VS;`, `int f(void) VS;`) vectorizes the innermost
   scalar, as in gcc. It was rejected as not a scalar type.

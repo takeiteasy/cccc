@@ -361,10 +361,27 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node);
             if (node->ty && is_vector(node->ty)) {
                 Type *elem_ty = node->ty->base;
-                Node *addr    = new_unary(vm, ND_ADDR, node, start);
-                addr          = new_cast(vm, addr, pointer_to(vm, elem_ty));
+                // An rvalue vector (`(a + b)[0]`, `f()[3]`) has no address:
+                // spill it to a hidden local first, as `tmp = v, tmp[i]`.
+                Node *spill = NULL;
+                if (node->kind != ND_VAR && node->kind != ND_DEREF &&
+                    node->kind != ND_MEMBER) {
+                    Obj *tmp = new_lvar(vm, "", 0, node->ty);
+                    spill =
+                        new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, start),
+                                   node, start);
+                    node = new_var_node(vm, tmp, start);
+                }
+                Node *addr = new_unary(vm, ND_ADDR, node, start);
+                addr       = new_cast(vm, addr, pointer_to(vm, elem_ty));
                 node = new_unary(vm, ND_DEREF, new_add(vm, addr, idx, start),
                                  start);
+                // The cast keeps the lane an rvalue, so assigning to it or
+                // taking its address is rejected as in gcc.
+                if (spill)
+                    node = new_cast(
+                        vm, new_binary(vm, ND_COMMA, spill, node, start),
+                        elem_ty);
                 continue;
             }
 
