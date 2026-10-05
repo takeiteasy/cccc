@@ -910,6 +910,16 @@ static Node *bitand(VirtualMachine *vm, Token **rest, Token *tok) {
     return node;
 }
 
+// A constant operand (`sizeof(T) == 8`, `E == E`, `(long)8`) has folded to a
+// bare number, so two distinct constants can compare equal without being a
+// self-comparison.
+static bool is_self_comparison(Node *a, Node *b) {
+    Node *operand = a;
+    while (operand->kind == ND_CAST)
+        operand = operand->lhs;
+    return operand->kind != ND_NUM && nodes_structurally_equal(a, b);
+}
+
 static Node *relational(VirtualMachine *vm, Token **rest, Token *tok);
 
 // equality = relational ("==" relational | "!=" relational)*
@@ -929,10 +939,8 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              "comparing floating-point values with == is "
                              "unreliable");
             }
-            // TODO(#1433): distinct operands that fold to the same constant
-            // (`sizeof(T) == 8`) compare structurally equal and warn.
             if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
-                nodes_structurally_equal(node, rhs))
+                is_self_comparison(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to true");
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
@@ -962,7 +970,7 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              "unreliable");
             }
             if ((vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) &&
-                nodes_structurally_equal(node, rhs))
+                is_self_comparison(node, rhs))
                 warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                          "self-comparison always evaluates to false");
             if (vm->compiler.warnings & CCCC_WARN_ENUM_COMPARE) {
@@ -1000,7 +1008,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
-                if (nodes_structurally_equal(node, rhs))
+                if (is_self_comparison(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to false");
                 else if (is_integer(node->ty) && node->ty->is_unsigned &&
@@ -1030,7 +1038,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
-                if (nodes_structurally_equal(node, rhs))
+                if (is_self_comparison(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to true");
             }
@@ -1055,7 +1063,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
-                if (nodes_structurally_equal(node, rhs))
+                if (is_self_comparison(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to false");
                 else if (is_integer(rhs->ty) && rhs->ty->is_unsigned &&
@@ -1086,7 +1094,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
-                if (nodes_structurally_equal(node, rhs))
+                if (is_self_comparison(node, rhs))
                     warn_tok(vm, start, CCCC_WARN_TAUTOLOGICAL_COMPARE,
                              "self-comparison always evaluates to true");
                 else if (is_integer(node->ty) && node->ty->is_unsigned &&
