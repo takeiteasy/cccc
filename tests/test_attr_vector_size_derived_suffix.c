@@ -40,8 +40,7 @@ int main(void) {
         return 5;
     if (sizeof *q != 16 || sizeof b != 32 || sizeof **pp != 16)
         return 6;
-    VS int r = mk();
-    if (sizeof(fp()) != 16 || sizeof(mk()) != 16 || r[0] != 40)
+    if (sizeof(fp()) != 16 || sizeof(mk()) != 16 || mk()[0] != 40 || fp()[1] != 2)
         return 7;
 
     b[1] = x;

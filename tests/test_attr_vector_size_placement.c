@@ -39,11 +39,9 @@ int main(void) {
     if (sizeof b != 16 || sizeof c != 16 || sizeof d != 16 || sizeof e != 16 ||
         sizeof f != 16 || sizeof k != 16)
         return 5;
-    VS int cd = c + d, ef = e + f;
-    if (k[3] != 9 || cd[0] != 6 || ef[2] != 3)
+    if (k[3] != 9 || (c + d)[0] != 6 || (e + f)[2] != 3)
         return 6;
-    VS int pb = pass(b);
-    if (sizeof(pass(a)) != 16 || pb[3] != 4)
+    if (sizeof(pass(a)) != 16 || pass(b)[3] != 4)
         return 7;
 
     if (sizeof(VS int) != 16 ||
