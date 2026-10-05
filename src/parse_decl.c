@@ -75,6 +75,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
             ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
+        drop_cleanup_attr(vm, ty, attr, ty->name);
         char     *name     = get_ident(vm, ty->name);
         VarScope *sc       = push_scope(vm, name, ty->name->len);
         sc->type_def       = ty;
@@ -97,6 +98,7 @@ static void create_param_lvars(VirtualMachine *vm, Type *param) {
         // function's own attribute by the time create_param_lvars() runs
         // (function(), src/parse_decl.c).
         cc_check_checked_scope_decl(vm, param, param->name, "parameter");
+        drop_cleanup_attr(vm, param, NULL, param->name);
         Obj *var =
             new_lvar(vm, get_ident(vm, param->name), param->name->len, param);
         var->is_param = true;
@@ -1100,6 +1102,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
 
         // #485: reject an unchecked pointer global in a checked region.
         cc_check_checked_scope_decl(vm, ty, ty->name, "global variable");
+        drop_cleanup_attr(vm, ty, attr, attr->is_extern ? NULL : ty->name);
 
         if (type_has_vla(ty))
             error_tok(vm, ty->name, "variably modified '%s' at file scope",

@@ -554,6 +554,82 @@ static void test_cross_sibling_goto_label_before_decl(void) {
     AssertEq(g_cleanup_log[1], 8);
 }
 
+[[cccc::test]]
+static void test_cleanup_not_inherited_through_typeof(void) {
+    cleanup_log_reset();
+    {
+        int a __attribute__((cleanup(cleanup_int))) = 1, b = 2;
+        {
+            __typeof__(a)         c = 3;
+            typeof(a + 0)         d = 4;
+            typedef __typeof__(a) T;
+            T                     e = 5;
+            int                   f = ({ a; });
+            (void)b, (void)c, (void)d, (void)e, (void)f;
+        }
+        AssertEq(g_cleanup_log_n, 0);
+    }
+    AssertEq(g_cleanup_log_n, 1);
+    AssertEq(g_cleanup_log[0], 1);
+}
+
+static int cleanup_ptr_hits;
+static void cleanup_ptr(int **p) {
+    (void)p;
+    cleanup_ptr_hits++;
+}
+
+[[cccc::test]]
+static void test_cleanup_leading_attribute_applies_to_each_declarator(void) {
+    cleanup_log_reset();
+    cleanup_ptr_hits = 0;
+    {
+        __attribute__((cleanup(cleanup_int))) int a = 1, b = 2;
+        [[gnu::cleanup(cleanup_int)]] int         c  = 3;
+        int [[gnu::cleanup(cleanup_int)]] ignored    = 4;
+        int x                                        = 0;
+        int __attribute__((cleanup(cleanup_ptr))) *p = &x;
+        int y = 0, __attribute__((cleanup(cleanup_ptr))) *q = &y;
+        {
+            __typeof__(*p) d = 5;
+            __typeof__(*q) e = 6;
+            (void)d, (void)e;
+        }
+        AssertEq(g_cleanup_log_n, 0);
+        (void)a, (void)b, (void)c, (void)ignored, (void)p, (void)q;
+    }
+    AssertEq(cleanup_ptr_hits, 2);
+    AssertEq(g_cleanup_log_n, 3);
+    AssertEq(g_cleanup_log[0], 3);
+    AssertEq(g_cleanup_log[1], 2);
+    AssertEq(g_cleanup_log[2], 1);
+}
+
+typedef int cleanup_ignored_t __attribute__((cleanup(cleanup_int)));
+struct cleanup_ignored_s {
+    int x __attribute__((cleanup(cleanup_int)));
+};
+static int cleanup_ignored_g __attribute__((cleanup(cleanup_int)));
+
+static void cleanup_ignored_param(int p __attribute__((cleanup(cleanup_int)))) {
+    (void)p;
+}
+
+[[cccc::test]]
+static void test_cleanup_ignored_on_non_automatic(void) {
+    cleanup_log_reset();
+    {
+        cleanup_ignored_t             t                     = 1;
+        struct cleanup_ignored_s      s                     = {2};
+        __typeof__(s.x)               m                     = 3;
+        __typeof__(cleanup_ignored_g) g                     = 4;
+        static int st __attribute__((cleanup(cleanup_int))) = 5;
+        cleanup_ignored_param(6);
+        (void)t, (void)m, (void)g, (void)st;
+    }
+    AssertEq(g_cleanup_log_n, 0);
+}
+
 #pragma cccc suite end
 
 // [from test_attribute_test_gnu.c]

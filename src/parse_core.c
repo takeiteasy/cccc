@@ -704,15 +704,8 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
         var->is_live = true;
         var->is_root = true;
     }
-    if (ty->cleanup_fn) {
-        var->cleanup_fn  = ty->cleanup_fn;
-        var->cleanup_seq = ++vm->compiler.cleanup_seq;
-        // Mark cleanup fn as reachable so the liveness pass keeps it.
-        ty->cleanup_fn->is_live = true;
-        ty->cleanup_fn->is_root = true;
-    }
-    // Checked C-style checked-pointer transport (#770/#482-484), same
-    // pattern as cleanup_fn above. The bounds expression itself (if any) is
+    // Checked C-style checked-pointer transport (#770/#482-484). The bounds
+    // expression itself (if any) is
     // resolved later by resolve_checked_bounds() -- it reads the still-
     // unresolved token spans straight off var->ty->checked_bounds_arg1/arg2
     // rather than needing its own copy here.
@@ -732,7 +725,37 @@ Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     return var;
 }
 
+// A declarator's cleanup rides on its own Type copy (see
+// apply_var_attrs_to_type); a leading one (`__attribute__((cleanup(f))) int a,
+// b;`) stays on the declaration's attr and applies to every declarator.
+// Clearing the Type keeps it from spreading to `__typeof__(v) t`.
+void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr) {
+    Obj *fn = var->ty->cleanup_fn;
+    if (!fn && attr)
+        fn = attr->cleanup_fn;
+    if (!fn)
+        return;
+    var->ty->cleanup_fn = NULL;
+    var->cleanup_fn     = fn;
+    var->cleanup_seq    = ++vm->compiler.cleanup_seq;
+    fn->is_live         = true;
+    fn->is_root         = true;
+}
+
+// Only automatic variables have a scope to clean up; gcc ignores the
+// attribute everywhere else. A NULL tok drops it silently, as gcc does for an
+// extern declaration.
+void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
+                       Token *tok) {
+    if (!ty->cleanup_fn && !(attr && attr->cleanup_fn))
+        return;
+    ty->cleanup_fn = NULL;
+    if (tok)
+        warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES, "'cleanup' attribute ignored");
+}
+
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+    drop_cleanup_attr(vm, ty, NULL, ty->name);
     Obj *var           = new_var(vm, name, name_len, ty);
     var->next          = vm->compiler.globals;
     var->is_static     = true;

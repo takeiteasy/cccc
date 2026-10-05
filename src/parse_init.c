@@ -127,6 +127,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 "constexpr object may not have variable length array type");
 
         // C23 auto type inference
+        // TODO(#1438): a trailing declarator attribute is rejected here.
         if (attr && attr->is_auto) {
             Token *name_tok   = ty->name;
             int    decl_depth = count_auto_ptr_depth(ty);
@@ -196,6 +197,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         if (attr && attr->is_static) {
             // static local variable
             warn_if_shadowing(vm, ty->name);
+            drop_cleanup_attr(vm, ty, attr, ty->name);
             Obj *var             = new_anon_gvar(vm, ty);
             var->tok             = ty->name;
             var->display_name    = get_ident(vm, ty->name);
@@ -225,6 +227,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // Variable length arrays (VLAs) are translated to alloca() calls.
             // For example, `int x[n+2]` is translated to `tmp = n + 2,
             // x = alloca(tmp)`.
+            // TODO(#1436): a cleanup attribute is never claimed for a VLA.
             Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
             Token *tok_local = ty->name;
             Node  *expr      = new_binary(
@@ -290,8 +293,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                       "a [[cccc::local]] object cannot have an initializer");
         if (attr && attr->is_block_var)
             var->is_block_var = true;
-        // Note: cleanup_fn is transferred from attr → Type → Obj via
-        // apply_var_attrs_to_type() + new_var(), no manual copy needed here.
+        claim_cleanup(vm, var, attr);
         if (var->cleanup_fn)
             cur = cur->next = new_cleanup_decl(vm, var, ty->name);
         // Resolve checked-pointer bounds (#770/#483) now that this local is

@@ -326,6 +326,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     for (int i = param_count - 1; i >= 0; i--) {
         Type *p = param_array[i];
         if (p->name) {
+            drop_cleanup_attr(vm, p, NULL, p->name);
             Obj *param = new_lvar(vm, get_ident(vm, p->name), p->name->len, p);
             param->is_param = true;
         }

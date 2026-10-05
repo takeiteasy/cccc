@@ -1861,10 +1861,7 @@ static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
             ty = pointer_to(vm, ty->base);
         else if (ty->kind == TY_FUNC)
             ty = pointer_to(vm, ty);
-        // The value's type may be a cleanup var's, which carries cleanup_fn.
-        ty             = copy_type(vm, ty);
-        ty->cleanup_fn = NULL;
-        Obj *tmp       = new_lvar(vm, "", 0, ty);
+        Obj *tmp  = new_lvar(vm, "", 0, ty);
         last->lhs = new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, last->tok),
                                new_cast(vm, last->lhs, ty), last->tok);
         value     = new_var_node(vm, tmp, last->tok);

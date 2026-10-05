@@ -1558,8 +1558,8 @@ struct Type {
     char *attr_warning_msg; // __attribute__((warning("msg"))): warn if callee
                             // is called
     struct CustomAttrUse *custom_attrs;
-    struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); copied
-                            // to Obj by new_var()
+    struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); moved
+                            // to Obj by claim_cleanup()
 
     // _BitInt(N): bit width for TY_BITINT types
     int bit_width;

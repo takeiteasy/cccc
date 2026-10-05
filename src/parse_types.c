@@ -303,8 +303,16 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
         if (equal(tok, "[") && equal(tok->next, "[")) {
             AddrSpace *saved_sink        = vm->compiler.addr_space_sink;
             vm->compiler.addr_space_sink = &addr_space;
+            Obj   *saved_cleanup         = attr ? attr->cleanup_fn : NULL;
+            Token *attr_tok              = tok;
             tok = c23_attribute_list(vm, tok, NULL, attr);
             vm->compiler.addr_space_sink = saved_sink;
+            // After a type specifier, a C23 attribute appertains to the type.
+            if (counter && attr && attr->cleanup_fn != saved_cleanup) {
+                attr->cleanup_fn = saved_cleanup;
+                warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
+                         "'cleanup' attribute does not apply to types");
+            }
             continue;
         }
 
@@ -1077,6 +1085,14 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
     return ty;
 }
 
+static Type *with_cleanup(VirtualMachine *vm, Type *ty, Obj *cleanup_fn) {
+    if (!cleanup_fn)
+        return ty;
+    ty             = copy_type(vm, ty);
+    ty->cleanup_fn = cleanup_fn;
+    return ty;
+}
+
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
@@ -1085,7 +1101,11 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     tok                 = attribute_list(vm, tok, NULL, &prefix_attr);
     tok                 = c23_attribute_list(vm, tok, NULL, &prefix_attr);
     append_custom_attr_list(&ty->custom_attrs, prefix_attr.custom_attrs);
-    ty = apply_var_attrs_to_type(vm, ty, &prefix_attr);
+    // The cleanup belongs to the declared variable, not to the base type that
+    // `*`/`[]` wrap (`int a, __attribute__((cleanup(f))) *p;`).
+    Obj *cleanup_fn        = prefix_attr.cleanup_fn;
+    prefix_attr.cleanup_fn = NULL;
+    ty                     = apply_var_attrs_to_type(vm, ty, &prefix_attr);
 
     ty = pointers(vm, &tok, tok, ty);
 
@@ -1135,8 +1155,9 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         inherit_semantic_attrs(block_ty, ty);
-        block_ty->name     = name;
-        block_ty->name_pos = name_pos;
+        block_ty->name       = name;
+        block_ty->name_pos   = name_pos;
+        block_ty->cleanup_fn = cleanup_fn;
 
         return block_ty;
     }
@@ -1157,7 +1178,8 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         ty = apply_var_attrs_to_type(vm, ty, &type_attr);
 
         ty = declarator(vm, &tok, start->next, ty);
-        return declarator_suffix(vm, rest, after, ty);
+        ty = declarator_suffix(vm, rest, after, ty);
+        return with_cleanup(vm, ty, cleanup_fn);
     }
 
     Token *name     = NULL;
@@ -1245,6 +1267,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     }
 
     ty           = declarator_suffix(vm, &tok, *rest, ty);
+    ty           = with_cleanup(vm, ty, cleanup_fn);
 
     ty->name     = name;
     ty->name_pos = name_pos;
@@ -2011,6 +2034,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                                         bf_attr.custom_attrs);
                 mem->ty = apply_var_attrs_to_type(vm, mem->ty, &bf_attr);
             }
+            drop_cleanup_attr(vm, mem->ty, &attr, mem->name);
 
             cur = cur->next = mem;
         }
