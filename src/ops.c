@@ -1682,14 +1682,17 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
         // *correctness*, i.e. whether to flag a dangling deref at all; here
         // it only ever prunes a redundant hashmap write, never the epoch
         // check itself, so under-pruning costs perf, never correctness).
-        if (!no_record && (vm->flags & CCCC_DANGLING_DETECT) &&
-            vm->frame_epochs.count > 0) {
-            unsigned long long epoch =
-                vm->frame_epochs.epochs[vm->frame_epochs.count - 1];
-            // BUG: entries are never retired on frame exit, so a later frame
-            // reusing this address can trip a false dangling report (#1447).
-            hashmap_put_int(&vm->stack_ptr_epochs, addr,
-                            (void *)(intptr_t)epoch);
+        if (vm->flags & CCCC_DANGLING_DETECT) {
+            if (!no_record) {
+                if (vm->frame_epochs.count > 0)
+                    hashmap_put_int(&vm->stack_ptr_epochs, addr,
+                                    (void *)(intptr_t)vm->frame_epochs
+                                        .epochs[vm->frame_epochs.count - 1]);
+            } else if (vm->stack_ptr_epochs.used > 0) {
+                // A live frame owns addr now, so a tag left by a dead frame
+                // there is stale (#1447). Interior hits are not cleared.
+                hashmap_delete_int(&vm->stack_ptr_epochs, addr);
+            }
         }
     }
     return 0;
