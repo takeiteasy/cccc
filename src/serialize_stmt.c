@@ -219,7 +219,17 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             }
             break;
 
-        case ND_FOR:
+        case ND_FOR: {
+            // A VLA is a real declaration, which an init clause of
+            // comma-joined expressions can't hold: emit the whole init in
+            // order inside a block that scopes the VLA to the loop.
+            bool vla_init = node->init && block_defines_vla(node->init);
+            if (vla_init) {
+                print_indent_level(f, indent++);
+                fprintf(f, "{\n");
+                for (Node *s = node->init->body; s; s = s->next)
+                    serialize_stmt(f, vm, ctx, s, indent);
+            }
             print_indent_level(f, indent);
             fprintf(f, "for (");
             // #927: a declaration-form init (`for (int i = 0; ...)`) parses as
@@ -241,21 +251,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
             // parse.c) and serializes the same way.
             if (node->init) {
-                // #964: a VLA declared in a for-loop initializer (`for (int i =
-                // 0, v[n]; ...)`) parses and runs in the VM, but this init
-                // clause is serialized as comma-joined *assignments* below --
-                // C forbids mixing a declaration with expressions there, and
-                // hoisting the declaration out ahead of the loop would change
-                // its scope/lifetime (and can read a variable the init clause
-                // itself assigns). Rejected with a diagnostic rather than
-                // emitted as broken C; doing this properly is tracked as a
-                // follow-up.
-                if (node->init->kind == ND_BLOCK &&
-                    block_defines_vla(node->init))
-                    error_tok(vm, node->tok,
-                              "a variable-length array declared in a for-loop "
-                              "initializer cannot be serialized to C");
-                if (node->init->kind == ND_BLOCK) {
+                if (vla_init) {
+                    // Already emitted above.
+                } else if (node->init->kind == ND_BLOCK) {
                     bool first_init = true;
                     for (Node *s = node->init->body; s; s = s->next) {
                         if (s->kind != ND_EXPR_STMT || is_noop_expr(s->lhs))
@@ -297,7 +295,12 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 serialize_stmt(f, vm, ctx, node->then, indent + 1);
                 ctx->jumps = frame.parent;
             }
+            if (vla_init) {
+                print_indent_level(f, --indent);
+                fprintf(f, "}\n");
+            }
             break;
+        }
 
         case ND_DO:
             print_indent_level(f, indent);

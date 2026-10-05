@@ -156,7 +156,6 @@ divergent C. The main cases:
   (non-bitfield) object or value of the same width lowers fine; see below.
 - `__builtin_decimal_to_chars` and `#include <decimal_math.h>`; any decimal
   construct at all in a `CCCC_HAS_DECIMAL=0` build.
-- A VLA declared in a `for`-loop initializer (`for (int i = 0, v[n]; …)`).
 - The VM-only source-map builtins `__builtin_pc_function_name` /
   `__builtin_pc_source_location`.
 
