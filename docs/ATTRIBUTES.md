@@ -88,6 +88,7 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
 | `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
 | `global` / `local` / `constant` / `private` / `generic` | CCCC (declaration specifiers) | ✓ | Marks the address space a pointer refers to, or an object lives in, for `[[cccc::kernel]]` code; see [Address Spaces](#address-spaces) |
+| `vector_size(N)` | GNU | ✓ | Makes the declared scalar type an `N`-byte vector (16, 32 or 64); see [Vector Size](#vector-size) |
 | `cccc_visible_lanes(N)` | GNU (vector typedef) | ✓ | Lets a `vector_size` vector expose fewer lanes than it stores, for OpenCL's `float3`; see [Visible Lanes](#visible-lanes) |
 | *all others* | Both | ~ | Parsed and silently ignored — see [Parsed but Ignored](#parsed-but-ignored) |
 
@@ -354,6 +355,23 @@ error: converting a pointer from the global to the private address space is not 
 - Callees must be defined in the same file; a call into another file is rejected.
 - One rule set covers both Metal and CUDA, so code valid on only one of them
   (for example `double` on CUDA) is rejected.
+
+### Vector Size
+
+`__attribute__((vector_size(N)))` or `[[gnu::vector_size(N)]]` turns an integer
+or floating-point scalar into an `N`-byte vector. It works before the type, after
+the type specifier, after the declarator, and in cast, compound-literal and
+`sizeof` type-names. Before or after the specifier, it applies to the base type
+of every declarator:
+
+```c
+#define VS __attribute__((vector_size(16)))
+
+VS int a, *p;               // a: vector; p: pointer to a vector
+int [[gnu::vector_size(16)]] b = {1, 2, 3, 4};
+int c VS = {1, 2, 3, 4};    // after the declarator (scalar types only)
+int n = sizeof((VS int){0});  // 16
+```
 
 ### Visible Lanes
 

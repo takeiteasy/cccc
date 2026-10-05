@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `vector_size` written before the type or after the type specifier
+  (`[[gnu::vector_size(16)]] int v;`, `int __attribute__((vector_size(16))) v;`)
+  now makes a vector, as in gcc. It was a parse error in declarations, and
+  silently ignored in cast, compound-literal and `sizeof` type-names.
+
 ## [0.7.4] - 2026-10-05
 
 - Fixed: compile time no longer grows quadratically with the number of

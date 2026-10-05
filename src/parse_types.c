@@ -251,8 +251,13 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok);
 // while keeping the "current" type object that the typenames up
 // until that point represent. When we reach a non-typename token,
 // we returns the current type object.
+static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr);
+
 Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
     Token *start = tok;
+    // A type-name has no VarAttr, but its vector_size still applies.
+    VarAttr  type_name_attr = {};
+    VarAttr *vs_attr        = attr ? attr : &type_name_attr;
 
     // We use a single integer as counters for all typenames.
     // For example, bits 0 and 1 represents how many times we saw the
@@ -297,7 +302,7 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
            equal(tok, "__attribute__") ||
            (equal(tok, "[") && equal(tok->next, "["))) {
         if (equal(tok, "__attribute__")) {
-            tok = attribute_list(vm, tok, NULL, attr);
+            tok = attribute_list(vm, tok, NULL, vs_attr);
             continue;
         }
         if (equal(tok, "[") && equal(tok->next, "[")) {
@@ -305,7 +310,7 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             vm->compiler.addr_space_sink = &addr_space;
             Obj   *saved_cleanup         = attr ? attr->cleanup_fn : NULL;
             Token *attr_tok              = tok;
-            tok = c23_attribute_list(vm, tok, NULL, attr);
+            tok = c23_attribute_list(vm, tok, NULL, vs_attr);
             vm->compiler.addr_space_sink = saved_sink;
             // After a type specifier, a C23 attribute appertains to the type.
             if (counter && attr && attr->cleanup_fn != saved_cleanup) {
@@ -650,6 +655,13 @@ declspec_done:
     if ((counter & (COMPLEX | IMAGINARY)) && (counter & LONG) &&
         !(counter & DOUBLE))
         error_tok(vm, start, "invalid type");
+
+    // Before the qualifiers below, so `const VS int` is a const vector.
+    if (vs_attr->has_vector_size) {
+        ty                       = apply_vector_size(vm, ty, vs_attr);
+        vs_attr->has_vector_size = false;
+        vs_attr->vec_visible     = 0;
+    }
 
     if (attr && (attr->is_maybe_unused || attr->is_deprecated)) {
         ty                  = copy_type(vm, ty);
@@ -2096,6 +2108,36 @@ static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
     }
 }
 
+// __attribute__((vector_size(N))) rewrites the whole type (base scalar ->
+// TY_VECTOR), so it runs before any copy_type()+field-merge that assumes `ty`
+// keeps its original kind.
+static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr) {
+    int  bytes = attr->vector_size_bytes;
+    bool elem_size_ok =
+        ty->size == 1 || ty->size == 2 || ty->size == 4 || ty->size == 8;
+    if ((!is_integer(ty) && !is_flonum(ty)) || !elem_size_ok)
+        error_tok(vm, attr->vector_size_tok,
+                  "'vector_size' attribute applies only to 1/2/4/8-byte "
+                  "integer or floating-point scalar types");
+    else if (bytes <= 0 || bytes % ty->size != 0)
+        error_tok(vm, attr->vector_size_tok,
+                  "vector_size %d is not a positive multiple of the "
+                  "element size (%d)",
+                  bytes, ty->size);
+    else if (bytes != 16 && bytes != 32 && bytes != 64)
+        error_tok(vm, attr->vector_size_tok,
+                  "vector_size %d is not supported: only 16-, 32-, or "
+                  "64-byte (128/256/512-bit) vectors are currently "
+                  "supported",
+                  bytes);
+    else {
+        ty = vector_of(vm, ty, bytes);
+        if (attr->vec_visible > 0 && attr->vec_visible < ty->vec_len)
+            ty->vec_visible = attr->vec_visible;
+    }
+    return ty;
+}
+
 Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
@@ -2108,34 +2150,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
          !attr->vec_visible))
         return ty;
 
-    // __attribute__((vector_size(N))) rewrites the whole type (base scalar
-    // -> TY_VECTOR), so handle it before the generic copy_type()+field-merge
-    // below, which assumes `ty` keeps its original kind.
-    if (attr->has_vector_size) {
-        int  bytes = attr->vector_size_bytes;
-        bool elem_size_ok =
-            ty->size == 1 || ty->size == 2 || ty->size == 4 || ty->size == 8;
-        if ((!is_integer(ty) && !is_flonum(ty)) || !elem_size_ok)
-            error_tok(vm, attr->vector_size_tok,
-                      "'vector_size' attribute applies only to 1/2/4/8-byte "
-                      "integer or floating-point scalar types");
-        else if (bytes <= 0 || bytes % ty->size != 0)
-            error_tok(vm, attr->vector_size_tok,
-                      "vector_size %d is not a positive multiple of the "
-                      "element size (%d)",
-                      bytes, ty->size);
-        else if (bytes != 16 && bytes != 32 && bytes != 64)
-            error_tok(vm, attr->vector_size_tok,
-                      "vector_size %d is not supported: only 16-, 32-, or "
-                      "64-byte (128/256/512-bit) vectors are currently "
-                      "supported",
-                      bytes);
-        else {
-            ty = vector_of(vm, ty, bytes);
-            if (attr->vec_visible > 0 && attr->vec_visible < ty->vec_len)
-                ty->vec_visible = attr->vec_visible;
-        }
-    }
+    if (attr->has_vector_size)
+        ty = apply_vector_size(vm, ty, attr);
 
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
@@ -2439,14 +2455,9 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
-            // Handle vector_size attribute: __attribute__((vector_size(N)))
-            // rewrites the base scalar type into a TY_VECTOR of N bytes
-            // (tracker #72). This only makes sense in declarator-suffix
-            // position (e.g. `typedef float v4sf
-            // __attribute__((vector_size(16)))`), which routes types through
-            // VarAttr -> apply_var_attrs_to_type (ty is NULL here); there is no
-            // meaningful struct/union-body use, so the `ty`-direct path is
-            // intentionally not handled.
+            // vector_size(N) is recorded on `attr` and applied to the base
+            // type by declspec(), or to the declarator's type by
+            // apply_var_attrs_to_type() when written after the declarator.
             if (consume(vm, &tok, tok, "cccc_visible_lanes")) {
                 tok       = skip(vm, tok, "(");
                 int lanes = const_expr(vm, &tok, tok);
