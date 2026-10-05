@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-10-05
+
 - Fixed: compile time no longer grows quadratically with the number of
   globals. A 54,000-line file with 6,000 functions compiles in 0.5 s instead
   of 5.5 s.
@@ -29,6 +31,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   cleanup variable's declaration no longer runs that variable's cleanup.
 - Fixed: cleanup variables declared in a `for` header or inside a statement
   expression `({ ... })` are cleaned up.
+- Fixed: a `cleanup` attribute applies only to the automatic variable that
+  names it. A declaration typed from that variable (`__typeof__(v) t`) no
+  longer inherits it.
+- Fixed: a `cleanup` attribute at the start of a declaration
+  (`__attribute__((cleanup(f))) int a, b;`, `[[gnu::cleanup(f)]] int a;`,
+  `int __attribute__((cleanup(f))) *p;`) applies to every declarator instead
+  of being dropped, and `int a, __attribute__((cleanup(f))) *p;` applies it to
+  `p`.
+- Changed: as in GCC, `cleanup` is ignored on a typedef, struct member,
+  parameter, function, global or `static` local, with a `-Wattributes`
+  warning. Static locals and variables of such a typedef no longer run it. A
+  C23 `[[gnu::cleanup(f)]]` after the type specifier is ignored.
 - Added: `--vm-profile` reports comptime execution in its own section, and
   works with `-c=native`, `-c=generated` and `-m`. With `--json`, the comptime
   profile is a nested `"comptime"` object.
