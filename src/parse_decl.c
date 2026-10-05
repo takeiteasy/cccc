@@ -1089,6 +1089,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
+        bool is_extra_declarator = !first;
         if (!first)
             tok = skip(vm, tok, ",");
         first    = false;
@@ -1112,15 +1113,14 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         if (attr->is_auto) {
             if (attr->is_extern)
                 error_tok(vm, ty->name, "cannot use 'auto' with 'extern'");
-            int decl_depth = count_auto_ptr_depth(ty);
-            if (decl_depth < 0)
-                error_tok(
-                    vm, ty->name,
-                    "cannot use 'auto' with array or function declarator");
+            int decl_depth = check_auto_declarator(vm, attr, ty, is_extra_declarator);
             if (!equal(tok, "="))
                 error_tok(vm, ty->name,
-                          "declaration of variable '%.*s' with deduced type "
-                          "'auto' requires an initializer",
+                          attr->is_gnu_auto_type
+                              ? "'__auto_type' requires an initialized data "
+                                "declaration"
+                              : "declaration of variable '%.*s' with deduced "
+                                "type 'auto' requires an initializer",
                           (int)ty->name->len, ty->name->loc);
             if (equal(tok->next, "{"))
                 error_tok(vm, tok->next, "cannot use 'auto' with array in C");
@@ -1130,7 +1130,8 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
             Token *probe_tok = tok->next;
             Node  *probe     = assign(vm, &probe_tok, probe_tok);
             add_type(vm, probe);
-            Type *deduced = auto_deduced_type(vm, probe->ty);
+            Type *deduced =
+                auto_declared_type(vm, ty, auto_deduced_type(vm, probe->ty));
 
             if (count_ptr_depth(deduced) != decl_depth) {
                 char stars[16] = "";

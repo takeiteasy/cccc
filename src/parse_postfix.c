@@ -192,7 +192,7 @@ static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
         DeclKw dk = declspec_kw(p);
         if (dk == DK_REGISTER)
             saw_register = true;
-        else if (dk == DK_AUTO)
+        else if (dk == DK_AUTO || dk == DK_AUTO_TYPE)
             saw_auto = true;
     }
 

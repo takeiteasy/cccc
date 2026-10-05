@@ -584,9 +584,10 @@ static void usage(const char *argv0, int exit_code) {
     printf(
         "\t   --compiler-family=FAM  Host family CCCC's front end models "
         "where gcc/clang\n"
-        "\t                         disagree (__builtin_types_compatible_p): "
-        "gcc (default),\n"
-        "\t                         clang, auto (probe CCCC_NATIVE_CC)\n");
+        "\t                         disagree (__builtin_types_compatible_p, "
+        "auto/__auto_type\n"
+        "\t                         declarators): gcc (default), clang, auto "
+        "(probe CCCC_NATIVE_CC)\n");
     printf("\t   --emit-cccc           Preserve CCCC dialect syntax "
            "([[cccc::...]], @-attrs, "
            "checked-pointer\n");

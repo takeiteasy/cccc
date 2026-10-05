@@ -90,6 +90,7 @@ typedef struct {
     bool           is_constexpr;
     bool           is_block_var; // __block storage qualifier (Apple blocks)
     bool           is_auto; // C23 type inference (auto without explicit type)
+    bool           is_gnu_auto_type; // spelled __auto_type (implies is_auto)
     bool           is_maybe_unused;
     bool           is_deprecated;
     bool           is_noreturn;
@@ -245,6 +246,7 @@ typedef enum {
     DK_VOLATILE,
     // Ignored
     DK_AUTO,
+    DK_AUTO_TYPE,
     DK_REGISTER,
     DK_RESTRICT,
     DK_NORETURN,
@@ -316,6 +318,9 @@ Token *asm_label(VirtualMachine *vm, Token *tok, char **label);
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok);
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr);
 Type *auto_deduced_type(VirtualMachine *vm, Type *ty);
+int check_auto_declarator(VirtualMachine *vm, VarAttr *attr, Type *ty,
+                          bool is_extra_declarator);
+Type *auto_declared_type(VirtualMachine *vm, Type *decl, Type *deduced);
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok);
 Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
                           VarAttr *attr);

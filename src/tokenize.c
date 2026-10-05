@@ -924,6 +924,7 @@ static void init_keyword_map(void) {
         "const",
         "volatile",
         "auto",
+        "__auto_type",
         "register",
         "restrict",
         "__restrict",

@@ -126,19 +126,18 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 vm, ty->name,
                 "constexpr object may not have variable length array type");
 
-        // C23 auto type inference
-        // TODO(#1438): a trailing declarator attribute is rejected here.
+        // C23 auto / GNU __auto_type inference
         if (attr && attr->is_auto) {
-            Token *name_tok   = ty->name;
-            int    decl_depth = count_auto_ptr_depth(ty);
-            if (decl_depth < 0)
-                error_tok(
-                    vm, name_tok,
-                    "cannot use 'auto' with array or function declarator");
+            Token *name_tok = ty->name;
+            int    decl_depth =
+                check_auto_declarator(vm, attr, ty, /*is_extra_declarator=*/i > 1);
             if (!equal(tok, "="))
                 error_tok(vm, name_tok,
-                          "declaration of variable '%.*s' with deduced type "
-                          "'auto' requires an initializer",
+                          attr->is_gnu_auto_type
+                              ? "'__auto_type' requires an initialized data "
+                                "declaration"
+                              : "declaration of variable '%.*s' with deduced "
+                                "type 'auto' requires an initializer",
                           (int)name_tok->len, name_tok->loc);
             if (equal(tok->next, "{"))
                 error_tok(vm, tok->next, "cannot use 'auto' with array in C");
@@ -147,7 +146,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             Token *eq_tok    = tok;
             Node  *init_expr = assign(vm, &tok, tok->next);
             add_type(vm, init_expr);
-            Type *deduced = auto_deduced_type(vm, init_expr->ty);
+            Type *deduced =
+                auto_declared_type(vm, ty, auto_deduced_type(vm, init_expr->ty));
 
             // Validate pointer depth: declarator stars must not exceed inferred
             // type depth
@@ -164,6 +164,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
             if (attr->is_static) {
                 warn_if_shadowing(vm, name_tok);
+                drop_cleanup_attr(vm, deduced, attr, name_tok);
                 Obj *var             = new_anon_gvar(vm, deduced);
                 var->tok             = name_tok;
                 var->display_name    = get_ident(vm, name_tok);
@@ -184,6 +185,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->align = effective_decl_align(vm, name_tok, deduced, attr);
             if (attr->is_block_var)
                 var->is_block_var = true;
+            claim_cleanup(vm, var, attr);
+            if (var->cleanup_fn)
+                cur = cur->next = new_cleanup_decl(vm, var, name_tok);
 
             vm->compiler.initializing_var = var;
             Node *lhs                     = new_var_node(vm, var, name_tok);
@@ -1950,7 +1954,7 @@ void init_typename_map(void) {
         "typedef",       "enum",         "static",        "extern",
         "_Alignas",      "signed",       "unsigned",      "const",
         "volatile",      "auto",         "register",      "restrict",
-        "__restrict",    "__restrict__", "_Noreturn",     "float",
+        "__auto_type",   "__restrict",    "__restrict__", "_Noreturn",     "float",
         "double",        "typeof",       "typeof_unqual", "inline",
         "_Thread_local", "__thread",     "_Atomic",       "constexpr",
         "__block",       "_Complex",     "_Imaginary",    "_BitInt",

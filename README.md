@@ -155,8 +155,8 @@ Options:
 	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
 	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
-	                         disagree (__builtin_types_compatible_p): gcc (default),
-	                         clang, auto (probe CCCC_NATIVE_CC)
+	                         disagree (__builtin_types_compatible_p, auto/__auto_type
+	                         declarators): gcc (default), clang, auto (probe CCCC_NATIVE_CC)
 	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
 	                         qualifiers, cccc-only #includes) in -E/-m/-c=native/-c=generated output
 	                         instead of stripping it to portable C. With -c=native, the usual
@@ -197,8 +197,9 @@ Options:
 	   --no-debug-on-crash   Disable auto-drop into debugger on crash (for test harnesses)
 	-r/--repl                Start an interactive read-eval-print loop (no input file)
 	-e/--entry <name>        Set the entry-point function (default: main)
-	   --vm-profile          Count executed VM opcodes and print a report
+	   --vm-profile          Count executed VM opcodes, comptime included, and print a report
 	                         Combine with --json to also dump the profile as JSON to stdout
+	                         (stderr under -c=native, -c=generated, -m)
 
 Testing Options:
 	-t/--testing[=vm|native]

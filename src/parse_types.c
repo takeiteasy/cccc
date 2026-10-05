@@ -194,7 +194,9 @@ DeclKw declspec_kw(Token *tok) {
                     return DK_INT128;
             }
             break;
-        case 11: // _Decimal128, __uint128_t
+        case 11: // _Decimal128, __uint128_t, __auto_type
+            if (memcmp(s, "__auto_type", 11) == 0)
+                return DK_AUTO_TYPE;
             if (s[0] == '_' && s[1] == 'D' &&
                 memcmp(s + 2, "ecimal128", 9) == 0)
                 return DK_DECIMAL128;
@@ -388,6 +390,20 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                     counter = OTHER;
                 }
                 tok = tok->next;
+                continue;
+            case DK_AUTO_TYPE:
+                if (counter != 0)
+                    error_tok(
+                        vm, tok,
+                        "cannot combine '__auto_type' with other type "
+                        "specifiers");
+                if (attr) {
+                    attr->is_auto          = true;
+                    attr->is_gnu_auto_type = true;
+                }
+                ty      = ty_auto;
+                counter = OTHER;
+                tok     = tok->next;
                 continue;
             case DK_REGISTER:
             case DK_RESTRICT:
@@ -1074,6 +1090,17 @@ static void forward_fn_attrs_to_pointee(VirtualMachine *vm, Type *ty,
     ty->base = apply_var_attrs_to_type(vm, ty->base, &fn);
 }
 
+// The TY_AUTO sentinel is a shared singleton: attributes land on a copy.
+static Type *with_custom_attrs(VirtualMachine *vm, Type *ty,
+                               CustomAttrUse *list) {
+    if (!list)
+        return ty;
+    if (ty == ty_auto)
+        ty = copy_type(vm, ty);
+    append_custom_attr_list(&ty->custom_attrs, list);
+    return ty;
+}
+
 // The attribute-lists and asm-label after a declarator. GNU C allows them in
 // either order (glibc's __REDIRECT_NTH puts the asm-label first), so loop
 // until a pass consumes nothing.
@@ -1084,7 +1111,7 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
         VarAttr suffix_attr = {};
         tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
         tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
-        append_custom_attr_list(&ty->custom_attrs, suffix_attr.custom_attrs);
+        ty = with_custom_attrs(vm, ty, suffix_attr.custom_attrs);
         ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
         forward_fn_attrs_to_pointee(vm, ty, &suffix_attr);
 
@@ -1119,7 +1146,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     VarAttr prefix_attr = {};
     tok                 = attribute_list(vm, tok, NULL, &prefix_attr);
     tok                 = c23_attribute_list(vm, tok, NULL, &prefix_attr);
-    append_custom_attr_list(&ty->custom_attrs, prefix_attr.custom_attrs);
+    ty                  = with_custom_attrs(vm, ty, prefix_attr.custom_attrs);
     // The cleanup belongs to the declared variable, not to the base type that
     // `*`/`[]` wrap (`int a, __attribute__((cleanup(f))) *p;`).
     Obj *cleanup_fn        = prefix_attr.cleanup_fn;
@@ -1193,7 +1220,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         // of the suffix belongs to the declared entity.
         VarAttr type_attr = {};
         Token  *after     = c23_attribute_list(vm, *rest, NULL, &type_attr);
-        append_custom_attr_list(&ty->custom_attrs, type_attr.custom_attrs);
+        ty = with_custom_attrs(vm, ty, type_attr.custom_attrs);
         ty = apply_var_attrs_to_type(vm, ty, &type_attr);
 
         ty = declarator(vm, &tok, start->next, ty);
@@ -1848,17 +1875,63 @@ Type *auto_deduced_type(VirtualMachine *vm, Type *ty) {
     return without_addr_space(vm, ty);
 }
 
-// Walk the declarator result type down to the ty_auto sentinel counting TY_PTR
+// The deduced type of an `auto` declarator, carrying the variable-level
+// attributes parsed onto its declarator (`decl`) the way they ride on a
+// declared type.
+Type *auto_declared_type(VirtualMachine *vm, Type *decl, Type *deduced) {
+    if (!decl->is_maybe_unused && !decl->is_deprecated && !decl->decl_align &&
+        !decl->cleanup_fn && !decl->custom_attrs && !decl->asm_label)
+        return deduced;
+    deduced                 = copy_type(vm, deduced);
+    deduced->name           = decl->name;
+    deduced->name_pos       = decl->name_pos;
+    deduced->is_maybe_unused = decl->is_maybe_unused;
+    deduced->is_deprecated  = decl->is_deprecated;
+    deduced->deprecated_msg = decl->deprecated_msg;
+    deduced->decl_align     = decl->decl_align;
+    deduced->cleanup_fn     = decl->cleanup_fn;
+    deduced->custom_attrs   = decl->custom_attrs;
+    deduced->asm_label      = decl->asm_label;
+    return deduced;
+}
+
+// Walk the declarator result type down to the TY_AUTO sentinel counting TY_PTR
 // hops.  Returns the depth (0 for plain `auto x`), or -1 if a non-PTR type
-// other than ty_auto is encountered (e.g. array declarator).
+// other than TY_AUTO is encountered (e.g. array declarator). Matches on kind:
+// a declarator attribute copy_type()s the sentinel.
 int count_auto_ptr_depth(Type *ty) {
     int depth = 0;
-    while (ty != ty_auto) {
+    while (ty->kind != TY_AUTO) {
         if (ty->kind != TY_PTR)
             return -1;
         depth++;
         ty = ty->base;
     }
+    return depth;
+}
+
+// Validates an inferred (`auto`/`__auto_type`) declarator and returns its
+// pointer depth. gcc takes a plain identifier and a single declarator; clang
+// also takes `auto *p` and `auto a = 1, b = 2.0`.
+int check_auto_declarator(VirtualMachine *vm, VarAttr *attr, Type *ty,
+                          bool is_extra_declarator) {
+    const char *spelling = attr->is_gnu_auto_type ? "__auto_type" : "auto";
+    bool        gcc = vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC;
+    int         depth = count_auto_ptr_depth(ty);
+    if (gcc && is_extra_declarator)
+        error_tok(vm, ty->name, "'%s' may only be used with a single declarator",
+                  spelling);
+    if (gcc && depth != 0)
+        error_tok(vm, ty->name,
+                  attr->is_gnu_auto_type
+                      ? "'__auto_type' requires a plain identifier as "
+                        "declarator"
+                      : "'auto' requires a plain identifier, possibly with "
+                        "attributes, as declarator");
+    if (depth < 0)
+        error_tok(vm, ty->name,
+                  "cannot use '%s' with array or function declarator",
+                  spelling);
     return depth;
 }
 
