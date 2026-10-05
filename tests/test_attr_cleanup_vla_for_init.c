@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: the native serializer rejects a VLA declared in a for-loop initializer
+// CCCC_NATIVE_SKIP: the native serializer rejects a VLA declared in a for-loop initializer (#1445)
 //
 // A cleanup VLA declared in a for-loop initializer is cleaned up when the loop
 // ends, not at the end of each iteration.
