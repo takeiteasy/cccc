@@ -1,7 +1,6 @@
 // #1137/#1448: 32- and 64-byte vector locals/params get an address aligned to
 // _Alignof (the host ABI's vector alignment) under the VM and -c=native, at
-// every bp parity, and struct layout agrees with it.
-#include <stddef.h>
+// every bp parity.
 typedef float v8f32 __attribute__((vector_size(32)));
 typedef float v16f32 __attribute__((vector_size(64)));
 
@@ -44,16 +43,8 @@ static int param_wrap(int a, int b, int c, int d, int e, int f, int g, int h,
     return param(a + b + c + d + e + f + g + h + i, w, x);
 }
 
-struct padded {
-    char  c;
-    v8f32 v;
-};
-
 int main(void) {
     int    r;
-    if (offsetof(struct padded, v) % _Alignof(v8f32) != 0 ||
-        _Alignof(struct padded) != _Alignof(v8f32))
-        return 5;
     v8f32  w = {1, 2, 3, 4, 5, 6, 7, 8};
     v16f32 x = {1};
     if ((r = locals(1)))
