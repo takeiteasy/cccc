@@ -403,6 +403,7 @@ bool is_attr_name(Token *tok, char *name);
 bool is_compound_literal_head(VirtualMachine *vm, Token *tok);
 bool is_const_expr(VirtualMachine *vm, Node *node);
 bool is_decl_start(VirtualMachine *vm, Token *tok);
+bool is_type_name_start(VirtualMachine *vm, Token *tok);
 bool is_end(Token *tok);
 bool is_function(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);

@@ -231,6 +231,19 @@ bool is_decl_start(VirtualMachine *vm, Token *tok) {
     }
 }
 
+// A type-name may open with GNU attributes: `(__attribute__((x)) int)v`.
+bool is_type_name_start(VirtualMachine *vm, Token *tok) {
+    while (equal(tok, "__attribute__")) {
+        Token *p = tok->next;
+        if (!p || !equal(p, "(") || !p->next || !equal(p->next, "("))
+            return false;
+        tok = skip_paren_group(vm, p);
+        if (!tok)
+            return false;
+    }
+    return is_typename(vm, tok);
+}
+
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
                               int *arg_count) {
     *args      = NULL;

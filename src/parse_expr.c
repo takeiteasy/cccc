@@ -1469,7 +1469,7 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_compound_literal_head(vm, tok))
         return unary(vm, rest, tok);
 
-    if (equal(tok, "(") && is_typename(vm, tok->next)) {
+    if (equal(tok, "(") && is_type_name_start(vm, tok->next)) {
         Token *start = tok;
         Type  *ty    = typename(vm, &tok, tok->next);
         tok          = skip(vm, tok, ")");

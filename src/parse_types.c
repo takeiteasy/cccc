@@ -1323,7 +1323,6 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
 }
 
 // type-name = declspec abstract-declarator
-// TODO(#1440): a leading __attribute__ is not accepted in a type-name.
 Type *typename(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *ty = declspec(vm, &tok, tok, NULL);
     return abstract_declarator(vm, rest, tok, ty);

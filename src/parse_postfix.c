@@ -220,7 +220,7 @@ static Type *compound_literal_type(VirtualMachine *vm, Token **rest, Token *tok,
 }
 
 bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
-    if (!equal(tok, "(") || !is_typename(vm, tok->next))
+    if (!equal(tok, "(") || !is_type_name_start(vm, tok->next))
         return false;
 
     int depth = 1;
@@ -1920,7 +1920,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "sizeof") && equal(tok->next, "(") &&
-        is_typename(vm, tok->next->next)) {
+        is_type_name_start(vm, tok->next->next)) {
         Type *ty = typename(vm, &tok, tok->next->next);
         *rest    = skip(vm, tok, ")");
 
@@ -1951,7 +1951,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "_Alignof") && equal(tok->next, "(") &&
-        is_typename(vm, tok->next->next)) {
+        is_type_name_start(vm, tok->next->next)) {
         Type *ty            = typename(vm, &tok, tok->next->next);
         *rest               = skip(vm, tok, ")");
         Node *sn            = new_ulong(vm, ty->align, tok);
