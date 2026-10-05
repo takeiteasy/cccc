@@ -427,10 +427,31 @@ int test_c23_auto(void) {
     if (fn != void_fn)
         return 9;
 
+    // Pointer declarator: auto *q = &i -> int *
+    int   x = 99;
+    auto *q = &x;
+    if (*q != 99)
+        return 10;
+    *q = 100;
+    if (x != 100)
+        return 11;
+
+    // Double pointer
+    auto **pp = &q;
+    if (**pp != 100)
+        return 12;
+
     // Struct via compound literal
     auto pt = (Point){3, 7};
     if (pt.x != 3 || pt.y != 7)
         return 13;
+
+    // Multiple declarators on one line, each with own type
+    auto ai = 1, bd = 2.0;
+    if (sizeof(ai) != sizeof(int))
+        return 14;
+    if (sizeof(bd) != sizeof(double))
+        return 15;
 
     // Declarator attributes (leading, between specifier and name, trailing)
     int pa = 1;
@@ -439,7 +460,7 @@ int test_c23_auto(void) {
     __attribute__((unused)) auto t3 = pa;
     auto __attribute__((unused)) t4 = pa;
     if (t1 + t2 + t3 + t4 != 4 || sizeof(t1) != sizeof(int))
-        return 14;
+        return 19;
 
     // File-scope globals
     if (global_i != 42)

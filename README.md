@@ -155,8 +155,8 @@ Options:
 	   --emit-only           With -c=generated: only emit explicitly tagged content ([[cccc::emit]])
 	   --attr-target=TARGET  Attribute spelling in generated output: auto, c23, gnu, msvc, strip
 	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
-	                         disagree (__builtin_types_compatible_p, auto/__auto_type
-	                         declarators): gcc (default), clang, auto (probe CCCC_NATIVE_CC)
+	                         disagree (__builtin_types_compatible_p, -Wauto-declarator):
+	                         gcc (default), clang, auto (probe CCCC_NATIVE_CC)
 	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
 	                         qualifiers, cccc-only #includes) in -E/-m/-c=native/-c=generated output
 	                         instead of stripping it to portable C. With -c=native, the usual

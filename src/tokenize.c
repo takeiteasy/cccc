@@ -111,6 +111,7 @@ static const WarningInfo warning_infos[] = {
     {"int-conversion", CCCC_WARN_INT_CONVERSION, false},
     {"native-name-collision", CCCC_WARN_NATIVE_NAME_COLLISION, false},
     {"excess-init", CCCC_WARN_EXCESS_INIT, false},
+    {"auto-declarator", CCCC_WARN_AUTO_DECLARATOR, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

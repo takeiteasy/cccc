@@ -1911,27 +1911,31 @@ int count_auto_ptr_depth(Type *ty) {
 }
 
 // Validates an inferred (`auto`/`__auto_type`) declarator and returns its
-// pointer depth. gcc takes a plain identifier and a single declarator; clang
-// also takes `auto *p` and `auto a = 1, b = 2.0`.
+// pointer depth. The standard leaves a pointer declarator and several
+// declarators undefined; both are accepted, each declarator inferring its own
+// type. gcc rejects them, so -Wauto-declarator flags them unless
+// --compiler-family=clang.
 int check_auto_declarator(VirtualMachine *vm, VarAttr *attr, Type *ty,
                           bool is_extra_declarator) {
     const char *spelling = attr->is_gnu_auto_type ? "__auto_type" : "auto";
-    bool        gcc = vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC;
-    int         depth = count_auto_ptr_depth(ty);
-    if (gcc && is_extra_declarator)
-        error_tok(vm, ty->name, "'%s' may only be used with a single declarator",
-                  spelling);
-    if (gcc && depth != 0)
-        error_tok(vm, ty->name,
-                  attr->is_gnu_auto_type
-                      ? "'__auto_type' requires a plain identifier as "
-                        "declarator"
-                      : "'auto' requires a plain identifier, possibly with "
-                        "attributes, as declarator");
+    int         depth    = count_auto_ptr_depth(ty);
     if (depth < 0)
         error_tok(vm, ty->name,
                   "cannot use '%s' with array or function declarator",
                   spelling);
+    if (vm->compiler.compiler_family != CCCC_COMPILER_FAMILY_GCC)
+        return depth;
+    if (is_extra_declarator)
+        warn_tok(vm, ty->name, CCCC_WARN_AUTO_DECLARATOR,
+                 "'%s' may only be used with a single declarator in gcc",
+                 spelling);
+    if (depth > 0)
+        warn_tok(vm, ty->name, CCCC_WARN_AUTO_DECLARATOR,
+                 attr->is_gnu_auto_type
+                     ? "'__auto_type' requires a plain identifier as "
+                       "declarator in gcc"
+                     : "'auto' requires a plain identifier, possibly with "
+                       "attributes, as declarator in gcc");
     return depth;
 }
 

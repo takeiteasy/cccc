@@ -581,13 +581,12 @@ static void usage(const char *argv0, int exit_code) {
            "content ([[cccc::emit]])\n");
     printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
            "auto, c23, gnu, msvc, strip\n");
-    printf(
-        "\t   --compiler-family=FAM  Host family CCCC's front end models "
-        "where gcc/clang\n"
-        "\t                         disagree (__builtin_types_compatible_p, "
-        "auto/__auto_type\n"
-        "\t                         declarators): gcc (default), clang, auto "
-        "(probe CCCC_NATIVE_CC)\n");
+    printf("\t   --compiler-family=FAM  Host family CCCC's front end models "
+           "where gcc/clang\n"
+           "\t                         disagree (__builtin_types_compatible_p, "
+           "-Wauto-declarator):\n"
+           "\t                         gcc (default), clang, auto (probe "
+           "CCCC_NATIVE_CC)\n");
     printf("\t   --emit-cccc           Preserve CCCC dialect syntax "
            "([[cccc::...]], @-attrs, "
            "checked-pointer\n");

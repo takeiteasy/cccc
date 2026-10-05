@@ -1039,7 +1039,7 @@ typedef enum {
                       // serializer's rename passes but can't be renamed (e.g. a
                       // header-exposed enumerator vs. a file-scope identifier,
                       // #1017)
-    // Bit 62 is the last free bit below here: bit 63 is reserved as the
+    // Bits 61 and 62 are the last warning bits: bit 63 is reserved as the
     // #pragma GCC diagnostic "explicit state" sentinel stamped onto
     // Token.diag_warnings/diag_werror (see preprocess.c and warn_tok()'s
     // masking of it in tokenize.c), not a warning category itself.
@@ -1047,6 +1047,11 @@ typedef enum {
         (1ULL << 61), // brace initializer supplies more elements than the
                       // fixed-size array/struct/vector holds, or an
                       // over-long string initializer; part of -Wall (#1222)
+
+    CCCC_WARN_AUTO_DECLARATOR =
+        (1ULL << 62), // `auto`/`__auto_type` with a pointer declarator or
+                      // several declarators: accepted, but gcc rejects it;
+                      // silent under --compiler-family=clang; part of -Wall
 
     // Umbrella for all three conversion sub-types; -Wconversion enables this
     // group.
@@ -1069,7 +1074,7 @@ typedef enum {
         CCCC_WARN_ENUM_COMPARE | CCCC_WARN_INCOMPATIBLE_POINTER_TYPES |
         CCCC_WARN_OVERRIDE_INIT | CCCC_WARN_NONNULL | CCCC_WARN_SENTINEL |
         CCCC_WARN_INT_CONVERSION | CCCC_WARN_NATIVE_NAME_COLLISION |
-        CCCC_WARN_EXCESS_INIT,
+        CCCC_WARN_EXCESS_INIT | CCCC_WARN_AUTO_DECLARATOR,
     CCCC_WARN_EXTRA = CCCC_WARN_SHADOW | CCCC_WARN_SIGN_COMPARE |
         CCCC_WARN_CONVERSION | CCCC_WARN_POINTER_ARITH | CCCC_WARN_FALLTHROUGH |
         CCCC_WARN_STRICT_PROTOTYPES | CCCC_WARN_OLD_STYLE_DEFINITION |

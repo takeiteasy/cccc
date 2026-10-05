@@ -92,15 +92,20 @@ behaviour is the one both families already agree on.
 ### Inferred declarations
 
 `auto` (C23) and GNU `__auto_type` infer a variable's type from its
-initializer. gcc and clang also disagree on which declarators they accept, so
-the family selects the rule for both spellings:
+initializer. ISO C leaves a pointer declarator and several declarators in one
+declaration undefined, gcc rejects both, and clang accepts both. CCCC accepts
+them, each declarator inferring its own type, and the family decides whether
+`-Wauto-declarator` (part of `-Wall`) flags the gcc-rejected forms:
 
 | declaration | `gcc` | `clang` |
 |---|---|---|
 | `auto x = 1;` / `__auto_type x = 1;` | ✓ | ✓ |
 | `auto x __attribute__((unused)) = 1;` | ✓ | ✓ |
-| `auto *p = &x;` / `__auto_type *p = &x;` | error | ✓ |
-| `auto a = 1, b = 2.0;` | error | ✓ (each declarator has its own type) |
+| `auto *p = &x;` / `__auto_type *p = &x;` | warns | ✓ |
+| `auto a = 1, b = 2.0;` | warns | ✓ |
+
+`-Werror=auto-declarator` turns the warning into an error, for code that must
+also build with gcc.
 
 `__auto_type` is a keyword in every `--std`; `auto` inference needs
 `--std=c23` or later. Both need an initializer, and declarator attributes

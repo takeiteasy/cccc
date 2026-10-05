@@ -1,7 +1,7 @@
-// CCCC_FLAGS: --compiler-family=clang
+// CCCC_FLAGS: --compiler-family=clang -Werror=auto-declarator
 //
-// clang accepts a pointer declarator and several declarators on one `auto`
-// or `__auto_type` declaration; gcc rejects both.
+// A pointer declarator and several declarators on one `auto` or `__auto_type`
+// declaration draw no -Wauto-declarator warning when modelling clang.
 
 int main(void) {
     int   x = 99;
