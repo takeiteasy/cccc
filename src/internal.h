@@ -561,7 +561,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
               ...) __attribute__((cold, format(printf, 4, 5)));
 const char *cccc_warning_name(CCCCWarning warning);
 bool node_is_stmt_kind(Node *n);
-bool equal(Token *tok, char *op);
+bool equal(Token *tok, const char *op);
 Token *skip(VirtualMachine *vm, Token *tok, char *op);
 bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str);
 void convert_pp_tokens(VirtualMachine *vm, Token *tok);

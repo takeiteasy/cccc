@@ -210,7 +210,7 @@ Node *opencl_vector_literal(VirtualMachine *vm, Token **rest, Token *tok,
 
     tok           = skip(vm, tok, "(");
     Node *first   = NULL;
-    for (int count = 0;; count++) {
+    for (;;) {
         Node *comp = assign(vm, &tok, tok);
         add_type(vm, comp);
         if (!first)

@@ -788,7 +788,7 @@ static const char *digraph_canonical(char *loc, int len) {
 }
 
 // Consumes the current token if it matches `op`.
-bool equal(Token *tok, char *op) {
+bool equal(Token *tok, const char *op) {
     if (!tok)
         return false;
     char c = tok->len ? tok->loc[0] : '\0';
