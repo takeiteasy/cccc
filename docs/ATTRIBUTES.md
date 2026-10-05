@@ -362,14 +362,18 @@ error: converting a pointer from the global to the private address space is not 
 or floating-point scalar into an `N`-byte vector. It works before the type, after
 the type specifier, after the declarator, and in cast, compound-literal and
 `sizeof` type-names. Before or after the specifier, it applies to the base type
-of every declarator:
+of every declarator. After a declarator, it applies to the innermost scalar,
+through pointers, arrays and function return types:
 
 ```c
 #define VS __attribute__((vector_size(16)))
 
 VS int a, *p;               // a: vector; p: pointer to a vector
 int [[gnu::vector_size(16)]] b = {1, 2, 3, 4};
-int c VS = {1, 2, 3, 4};    // after the declarator (scalar types only)
+int c VS = {1, 2, 3, 4};    // after the declarator
+int *q VS;                  // pointer to a vector
+int arr[2] VS;              // array of two vectors
+int mk(void) VS;            // function returning a vector
 int n = sizeof((VS int){0});  // 16
 ```
 

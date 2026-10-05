@@ -2138,6 +2138,32 @@ static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     return ty;
 }
 
+// A vector_size after a declarator vectorizes the innermost scalar, as in gcc:
+// `int *q VS` is a pointer to a vector, `int b[2] VS` an array of vectors and
+// `int f(void) VS` a function returning one. Each derived level is copied so
+// siblings sharing the base type are untouched.
+static Type *vectorize_innermost(VirtualMachine *vm, Type *ty, VarAttr *attr) {
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_VLA:
+            ty       = copy_type(vm, ty);
+            ty->base = vectorize_innermost(vm, ty->base, attr);
+            return ty;
+        case TY_ARRAY:
+            ty        = copy_type(vm, ty);
+            ty->base  = vectorize_innermost(vm, ty->base, attr);
+            ty->size  = ty->base->size * ty->array_len;
+            ty->align = ty->base->align;
+            return ty;
+        case TY_FUNC:
+            ty            = copy_type(vm, ty);
+            ty->return_ty = vectorize_innermost(vm, ty->return_ty, attr);
+            return ty;
+        default:
+            return apply_vector_size(vm, ty, attr);
+    }
+}
+
 Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
@@ -2151,7 +2177,7 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         return ty;
 
     if (attr->has_vector_size)
-        ty = apply_vector_size(vm, ty, attr);
+        ty = vectorize_innermost(vm, ty, attr);
 
     ty = copy_type(vm, ty);
     apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,

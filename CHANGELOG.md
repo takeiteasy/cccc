@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `vector_size` after a pointer, array or function declarator
+  (`int *q VS;`, `int b[2] VS;`, `int f(void) VS;`) vectorizes the innermost
+  scalar, as in gcc. It was rejected as not a scalar type.
+
 - Fixed: `vector_size` written before the type or after the type specifier
   (`[[gnu::vector_size(16)]] int v;`, `int __attribute__((vector_size(16))) v;`)
   now makes a vector, as in gcc. It was a parse error in declarations, and
