@@ -389,6 +389,13 @@ Vector alignment follows the host ABI, so locals, struct members and
 
 Use `_Alignof(type)` rather than the vector's size when checking alignment.
 
+**Limitations:**
+
+- On Linux x86_64, cccc's `_Alignof` of a 32- or 64-byte vector is the vector's
+  size, but gcc without `-mavx` reports 16 for it (`__alignof__` and struct layout
+  still use the size). Layout and `-c=native` agree either way. See
+  [#1454](https://todo.sr.ht/~takeiteasy/cccc/1454).
+
 ### Visible Lanes
 
 `__attribute__((cccc_visible_lanes(N)))` on a `vector_size` typedef makes the

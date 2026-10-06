@@ -3250,6 +3250,20 @@ static bool type_contains_compiler_owned_layout(SerializeContext *ctx, Type *ty,
     return false;
 }
 
+static bool type_contains_vector(Type *ty, int depth) {
+    if (!ty || depth > 32)
+        return false;
+    if (ty->kind == TY_VECTOR)
+        return true;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        return type_contains_vector(ty->base, depth + 1);
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            if (type_contains_vector(m->ty, depth + 1))
+                return true;
+    return false;
+}
+
 // #1172: emits `_Static_assert(sizeof(<spelling>) == N, ...)`,
 // `_Static_assert(_Alignof(<spelling>) == N, ...)`, and (for a struct/union,
 // one per named non-bitfield member) `_Static_assert(__builtin_offsetof(
@@ -3325,7 +3339,10 @@ static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
     fprintf(f, ");\n");
 
     print_indent_level(f, indent);
-    fprintf(f, "_Static_assert(_Alignof(%s) == %lld, ", spelling,
+    // gcc caps C11 _Alignof of a wide vector at the non-AVX maximum, but
+    // lays members out at __alignof__.
+    fprintf(f, "_Static_assert(%s(%s) == %lld, ",
+            type_contains_vector(ty, 0) ? "__alignof__" : "_Alignof", spelling,
             (long long)ty->align);
     serialize_string_n(f, msg, (int)strlen(msg));
     fprintf(f, ");\n");
