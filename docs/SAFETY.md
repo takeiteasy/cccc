@@ -38,7 +38,7 @@ CCCC provides preset safety levels that make it easy to choose the right combina
 - Format string validation
 - VM heap mode (required for heap safety features)
 
-**Detects:** Stack buffer overflows, heap buffer overflows, memory leaks, integer overflow/underflow, format string bugs
+**Detects:** Stack overruns that reach the canary or return address (reported when the function returns), heap buffer overflows, memory leaks, integer overflow/underflow, format string bugs
 
 ---
 
@@ -189,7 +189,7 @@ All features listed below can be enabled individually or through the safety leve
 - Reserves the slot just below the saved base pointer (`bp[-1]`) for a canary value (0xDEADBEEFCAFEBABE); parameters and locals are placed from `bp[-2]` downward
 - The one-slot shift is baked into stack offsets at compile time (`assign_stack_offsets`), so it stays consistent across threads
 - Validates canary on function return (LEV instruction)
-- Detects stack buffer overflows with detailed error reporting including PC offset
+- Detects a stack overrun that reaches the canary or saved return address, reported when the function returns with the PC offset; an overrun that stays inside the frame is not detected
 - Works with functions that take parameters and with threading (`pthread`)
 
 #### Deep Recursion
