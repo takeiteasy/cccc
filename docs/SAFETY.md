@@ -1055,11 +1055,9 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   reported as dangling, even when a returned frame's tag sits inside the
   array. A stale tag at the array's *base* is cleared when the live frame
   takes that address.
-- **Limitation:** an access through a pointer *value* is checked by address
-  alone, so a live non-escaping array reached through an alias
-  (`char *q = buf; q[i]`) or an `&buf[i]` handed to a callee can still be
-  reported as dangling when a returned frame's tag sits inside the array.
-  Tracked in [#1451](https://todo.sr.ht/~takeiteasy/cccc/1451).
+- **Pointer access:** an array whose address is taken (`char *q = buf`,
+  `&buf[i]`, passed to a callee, held in a struct) has its extent tagged live,
+  so access through the pointer is not reported as dangling either.
 - **Second consumer:** the epoch/interval bookkeeping above
   (`frame_epochs`, `live_epochs`, `stack_intervals`) is not exclusive to
   `--dangling-pointers` — `__builtin_dynamic_object_size` also stabs
