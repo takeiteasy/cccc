@@ -4829,24 +4829,9 @@ static inline int chkb_common(VirtualMachine *vm, int rs1, int rs2,
         return 0;
     }
 
-    // Non-heap or untracked base (stack/global arrays): no upper bound is
-    // known here. For CHKB's ADD form, a literal negative scaled_offset
-    // (e.g. `a[-1]`) is unconditionally invalid, since `base` is itself the
-    // subscripted array's own base. CHKBN's SUB form (`p - n`) instead
-    // modifies an arbitrary interior pointer, not necessarily an array's
-    // own start, so the equivalent lower-bound check isn't available here
-    // -- this is the same "no upper bound known for non-heap bases"
-    // limitation CHKB already has, just facing the other direction.
-    if (!is_sub && scaled_offset < 0) {
-        printf("\n========== ARRAY BOUNDS ERROR ==========\n");
-        printf("Negative array index (scaled offset: %lld)\n", scaled_offset);
-        printf("Base address: 0x%llx\n", base);
-        printf("PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
-               (long long)vm->pc);
-        printf("=========================================\n");
-        return -1;
-    }
-
+    // Non-heap or untracked base: no bound is known here. A subscript
+    // directly over a fixed-size array is checked statically by CHKBS (#1452);
+    // a negative offset from an arbitrary interior pointer is legal (`p--`).
     return 0;
 }
 
@@ -5155,6 +5140,31 @@ static inline int op_CHKDC_fn(VirtualMachine *vm) {
         return -1;
     }
 
+    return 0;
+}
+
+static inline int op_CHKBS_fn(VirtualMachine *vm) {
+    // Format: [CHKBS] [rs_off:8|unused:8] (RR operand word) [limit:i64]
+    long long operands = cc_read_word(vm);
+    int       rs_off, unused;
+    DECODE_RR(operands, rs_off, unused);
+    (void)unused;
+    long long limit = cc_read_i64(vm);
+
+    if (!(vm->flags & CCCC_BOUNDS_CHECKS))
+        return 0;
+
+    long long off = vm->regs[rs_off];
+    if (off < 0 || off > limit) {
+        printf("\n========== ARRAY BOUNDS ERROR ==========\n");
+        printf("Array index out of bounds\n");
+        printf("Scaled offset: %lld bytes\n", off);
+        printf("Largest valid offset: %lld bytes\n", limit);
+        printf("PC: 0x%llx (offset: %lld)\n", (long long)vm->pc,
+               (long long)vm->pc);
+        printf("=========================================\n");
+        return -1;
+    }
     return 0;
 }
 

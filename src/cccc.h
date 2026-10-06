@@ -513,7 +513,7 @@ extern "C" {
                     free declaration; scanning [lo,hi) would false-positive          \
                     on it, and finding the *real* terminator requires                \
                     reading past hi, the exact unbounded read this feature           \
-                    exists to prevent). See docs/SAFETY.md's Checked Pointers         \
+                    exists to prevent). See docs/SAFETY.md's Checked Pointers        \
                     section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */          \
     X(CHKNTZ, 3) /* Checked-pointer null-terminator guard for the                    \
                    memcpy-lowered [[cccc::ntarray]] pointees CHKNT cannot            \
@@ -577,7 +577,7 @@ extern "C" {
                     now-updated, value) -- the inverse ordering from CHKR's          \
                     snapshot-before-store propagation temps. Only emitted            \
                     for a declared-checked (not #941-propagated) rhs; see            \
-                    docs/SAFETY.md's Checked Pointers section for the v1              \
+                    docs/SAFETY.md's Checked Pointers section for the v1             \
                     scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */            \
     /* #982: appended (never interleaved -- see the rule stated above CHKR)          \
        so no existing opcode renumbers. */                                           \
@@ -708,7 +708,19 @@ extern "C" {
                    (RR operand word + i64 immediate, same shape as CHKD --           \
                    see emit_rri). The immediate carries the source line for          \
                    the diagnostic banner only, it is not part of the test.           \
-                   Gated on CCCC_CHECKED_BOUNDS, same as CHKR/CHKAB. */
+                   Gated on CCCC_CHECKED_BOUNDS, same as CHKR/CHKAB. */              \
+    /* #1452: appended (never interleaved -- see the rule stated above CHKR)         \
+       so no existing opcode renumbers. */                                           \
+    X(CHKBS, 3) /* Static-size array bounds check: traps unless                      \
+                   0 <= regs[rs_off] <= limit. limit is known at compile             \
+                   time from the fixed-size array the pointer is formed              \
+                   over (its byte size, less the bytes accessed when the             \
+                   result is dereferenced at once), so no allocation                 \
+                   lookup is needed -- CHKB/CHKD cannot resolve stack or             \
+                   global storage.                                                   \
+                   Format: [CHKBS][rs_off:8|unused:8][limit:i64] (RR operand         \
+                   word + i64 immediate, same shape as CHKD -- see emit_rri).        \
+                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -2291,6 +2303,13 @@ struct Node {
     // of `A.x`), so addr_is_local_frame() can classify the access by what the
     // user wrote rather than by the opaque temp.
     struct Node *rmw_lvalue;
+
+    // Codegen annotations for the static array bounds check (#1452). An
+    // ND_DEREF under `&` only forms an address (no_deref_access); otherwise
+    // its pointer-add records the bytes accessed (deref_bytes) so the check
+    // can reject the one-past-the-end element, not just one-past formation.
+    bool no_deref_access;
+    int  deref_bytes;
 
     // #1235: marks the outer ND_CAST that new_inc_dec() (src/parse_postfix.c)
     // wraps around a postfix `A++`/`A--` desugar

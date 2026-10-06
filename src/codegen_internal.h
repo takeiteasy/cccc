@@ -220,6 +220,7 @@ void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset);
 void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
                       long long offset);
 void emit_marki(VirtualMachine *vm, long long offset);
+long long static_array_bound(Node *ptr);
 void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
                 size_t size);
 void emit_markr(VirtualMachine *vm, long long offset);

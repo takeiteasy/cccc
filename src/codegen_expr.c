@@ -759,6 +759,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 gen_expr(vm, node->lhs, dest_reg);
                 return;
             }
+            if (node->lhs->kind == ND_DEREF && !node->is_rmw_temp_addr)
+                node->lhs->no_deref_access = true;
             gen_addr(vm, node->lhs, dest_reg);
             // Track explicit address-of a local var for provenance.
             // Dangling-pointer detection no longer needs address-taken tracking
@@ -1384,6 +1386,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     (vm->flags & CCCC_BOUNDS_CHECKS))
                     emit_rr(vm, node->kind == ND_SUB ? CHKBN : CHKB, r_lhs_op,
                             r_rhs_op);
+                // #1452: a fixed-size array has a compile-time bound, which
+                // CHKB cannot resolve for stack/global storage.
+                long long array_bound = (is_ptr_arith && node->kind == ND_ADD &&
+                                         (vm->flags & CCCC_BOUNDS_CHECKS))
+                                            ? static_array_bound(node->lhs)
+                                            : -1;
+                if (array_bound >= node->deref_bytes && array_bound > 0)
+                    emit_rri(vm, CHKBS, r_rhs_op, 0,
+                             array_bound - node->deref_bytes);
 
                 // Unsigned 64-bit comparison: use dedicated ULT3/ULE3 opcodes.
                 // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit

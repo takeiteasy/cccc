@@ -407,6 +407,13 @@ Generation: 1
   all, `a[i]` desugaring to `*(a+i)`). `CHKD` is the separate
   dereference-time check that still traps on `a[size]` itself, so
   forming the pointer and dereferencing it are no longer conflated.
+- **Fixed-size arrays**: a subscript directly over a local or global array
+  (`buf[k]`, `m[i][j]`, `s.arr[k]`) is checked against the array's size at
+  compile time, so a stack or global overrun is reported at the access, not
+  later at function return. `a[size]` is rejected, `&a[size]` and `a + size`
+  are not. An array reached through a pointer (`char *q = buf; q[k]`) or
+  passed as a parameter is not checked, and a struct's trailing array
+  (`char data[1]`) is treated as flexible.
 - **Atomic ops**: `CHKD` is also emitted ahead of the four atomic
   opcodes — `ALDR`/`ASTR`/`AXCHG`/`ACAS` — so a one-past-the-end atomic
   dereference traps the same as any other. `ACAS` gets two `CHKD`s (the

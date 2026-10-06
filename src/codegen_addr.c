@@ -662,6 +662,23 @@ void emit_markw(VirtualMachine *vm, long long offset) {
     emit_i64(vm, offset);
 }
 
+// Byte size of the fixed-size array a pointer-add is being formed over (the
+// pointer operand is the array object itself, decayed), or -1 when no static
+// bound applies: pointer values, unsized arrays, and a struct's trailing
+// array, which doubles as the flexible-array idiom (`char data[1]`).
+long long static_array_bound(Node *ptr) {
+    while (ptr && ptr->kind == ND_CAST && ptr->ty && ptr->ty->kind == TY_PTR)
+        ptr = ptr->lhs;
+    if (!ptr || !ptr->ty || ptr->ty->kind != TY_ARRAY || ptr->ty->size <= 0)
+        return -1;
+    if (ptr->kind == ND_MEMBER) {
+        if (!ptr->member || !ptr->member->next)
+            return -1;
+    } else if (ptr->kind != ND_VAR && ptr->kind != ND_DEREF)
+        return -1;
+    return ptr->ty->size;
+}
+
 // Emit MARKP (mark provenance).
 // rs_ptr and rs_base hold the pointer and its allocation base.
 void emit_markp(VirtualMachine *vm, int rs_ptr, int rs_base, int origin_type,
@@ -873,6 +890,10 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
 
         case ND_DEREF:
             // Address of *ptr is just ptr
+            if (node->lhs->kind == ND_ADD && !node->no_deref_access &&
+                node->ty->kind != TY_ARRAY && node->ty->kind != TY_VLA &&
+                node->ty->kind != TY_FUNC)
+                node->lhs->deref_bytes = node->ty->size;
             gen_expr(vm, node->lhs, dest_reg);
             // Checked-pointer bounds check (#770/#484). Runs on both the load
             // and the store path -- both reach the accessed address through
