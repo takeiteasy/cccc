@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 16; i++)
         garr[i] = 1;
 
-    int k  = 7 + argc - 2; // last element, via a runtime index
+    int k  = argc > 100 ? 0 : 7; // last element, via a runtime index
     a[k]  += 1;
     a[k]++;
     m[3][3]         = a[k];

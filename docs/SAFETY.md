@@ -410,7 +410,8 @@ Generation: 1
 - **Fixed-size arrays**: a subscript directly over a local or global array
   (`buf[k]`, `m[i][j]`, `s.arr[k]`) is checked against the array's size at
   compile time, so a stack or global overrun is reported at the access, not
-  later at function return. `a[size]` is rejected, `&a[size]` and `a + size`
+  later at function return, including a row that does not exist (`m[rows][0]`).
+  `a[size]` is rejected, `&a[size]` and `a + size`
   are not. An array reached through a pointer (`char *q = buf; q[k]`) or
   passed as a parameter is not checked, and a struct's trailing array
   (`char data[1]`) is treated as flexible.

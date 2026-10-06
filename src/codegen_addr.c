@@ -662,13 +662,28 @@ void emit_markw(VirtualMachine *vm, long long offset) {
     emit_i64(vm, offset);
 }
 
+static Node *peel_ptr_casts(Node *n) {
+    while (n && n->kind == ND_CAST && n->ty && n->ty->kind == TY_PTR)
+        n = n->lhs;
+    return n;
+}
+
+// Accessing an element through `m[i][j]` also requires row `m[i]` to exist, so
+// each enclosing row subscript is an access of the whole row (#1452).
+static void mark_row_accesses(Node *add) {
+    for (Node *row = peel_ptr_casts(add->lhs);
+         row && row->kind == ND_DEREF && row->ty && row->ty->kind == TY_ARRAY &&
+         row->lhs && row->lhs->kind == ND_ADD;
+         row = peel_ptr_casts(row->lhs->lhs))
+        row->lhs->deref_bytes = row->ty->size;
+}
+
 // Byte size of the fixed-size array a pointer-add is being formed over (the
 // pointer operand is the array object itself, decayed), or -1 when no static
 // bound applies: pointer values, unsized arrays, and a struct's trailing
 // array, which doubles as the flexible-array idiom (`char data[1]`).
 long long static_array_bound(Node *ptr) {
-    while (ptr && ptr->kind == ND_CAST && ptr->ty && ptr->ty->kind == TY_PTR)
-        ptr = ptr->lhs;
+    ptr = peel_ptr_casts(ptr);
     if (!ptr || !ptr->ty || ptr->ty->kind != TY_ARRAY || ptr->ty->size <= 0)
         return -1;
     if (ptr->kind == ND_MEMBER) {
@@ -892,8 +907,10 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Address of *ptr is just ptr
             if (node->lhs->kind == ND_ADD && !node->no_deref_access &&
                 node->ty->kind != TY_ARRAY && node->ty->kind != TY_VLA &&
-                node->ty->kind != TY_FUNC)
+                node->ty->kind != TY_FUNC) {
                 node->lhs->deref_bytes = node->ty->size;
+                mark_row_accesses(node->lhs);
+            }
             gen_expr(vm, node->lhs, dest_reg);
             // Checked-pointer bounds check (#770/#484). Runs on both the load
             // and the store path -- both reach the accessed address through
