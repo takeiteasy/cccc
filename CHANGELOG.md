@@ -7,6 +7,22 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: under `-2` and `-3`, a subscript directly over a fixed-size local or
+  global array (`buf[k]`, `m[i][j]`, `s.arr[k]`) is bounds-checked at the
+  access. `a[size]` and negative indices are reported; `&a[size]` and
+  `a + size` stay legal. A struct's trailing array is treated as flexible.
+- Fixed: `p++`, `p--` and `p[-1]` on a pointer into stack or global memory no
+  longer report "Negative array index" under `-2` and `-3`.
+- Fixed: `--dangling-pointers` no longer reports a live frame's own array
+  access (`buf[i]`, `m[i][j]`, `s.arr[i]`, including `+=` and `++`) as
+  dangling when a returned frame's local once occupied that address.
+- Fixed: locals and parameters with alignment above 8 (`_Alignas(N)`,
+  `__int128`, wide `_BitInt`, wide vectors) have correctly aligned addresses
+  in the VM, and `--dangling-pointers` tracks the aligned address.
+- Fixed: `vector_size` types are aligned as the host ABI aligns them (capped
+  at 16 on aarch64 and macOS), so locals, struct layout and `-c=native`
+  agree.
+
 ## [0.8.0] - 2026-10-05
 
 - Added: GNU `__auto_type` declares a variable typed from its initializer.
