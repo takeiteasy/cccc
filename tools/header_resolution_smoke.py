@@ -107,6 +107,10 @@ Cases:
      `(*host_buf).f_bsize`, not a folded byte offset) rather than resolved
      against CCCC's own bundled projections.
 
+  18. `-x cl -c=native` with zero flags: `<cccc/opencl.h>` resolves from the
+     embedded table, so its typedefs (`float4`, `uint`, ...) must still be
+     re-derived into the native output rather than assumed host-supplied.
+
 Exit codes: 0 = all cases pass, 1 = any failure.
 """
 
@@ -603,6 +607,30 @@ def case_native_type_shadow_1317(cccc: Path, tmp: str) -> bool:
     return True
 
 
+def case_native_opencl_typedefs(cccc: Path, tmp: str) -> bool:
+    print("  18: -x cl -c=native with zero flags (embedded opencl.h typedefs)")
+    src = Path(tmp) / "native_opencl.cl"
+    out = Path(tmp) / "native_opencl_out"
+    write(src, (
+        "int main(void) {\n"
+        "    float4 v = {1, 2, 3, 4};\n"
+        "    uint n = 37;\n"
+        "    return (int)(v.x + v.w) + n;\n"
+        "}\n"
+    ))
+    result = run([str(cccc), "-x", "cl", "-c=native", "-o", out.name, src.name],
+                 cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: compile exited {result.returncode}\n    {result.stderr}")
+        return False
+    run_result = run([f"./{out.name}"], cwd=tmp)
+    if run_result.returncode != 42:
+        print(f"    FAIL: exit {run_result.returncode}")
+        return False
+    print("    ok")
+    return True
+
+
 def sysroot() -> str:
     # xcrun is macOS-only; on any other platform (e.g. the Linux CI
     # container) it doesn't exist at all, and subprocess.run() raises
@@ -645,6 +673,7 @@ def main() -> int:
             case_sysroot_pthread,
             case_native_unistd_stdint,
             case_native_type_shadow_1317,
+            case_native_opencl_typedefs,
         ]
         results = [case(cccc, tmp) for case in cases]
 

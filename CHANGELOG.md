@@ -11,6 +11,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   global array (`buf[k]`, `m[i][j]`, `s.arr[k]`) is bounds-checked at the
   access. `a[size]` and negative indices are reported; `&a[size]` and
   `a + size` stay legal. A struct's trailing array is treated as flexible.
+- Fixed: `-x cl -m`/`-c=native` run outside the repo (no `-I`) no longer drops
+  the OpenCL typedefs (`float4`, `uint`, ...) from the output.
 - Fixed: `-c=native` no longer fails the layout assertion for a struct holding a
   32- or 64-byte vector under x86_64 gcc.
 - Fixed: `p++`, `p--` and `p[-1]` on a pointer into stack or global memory no
