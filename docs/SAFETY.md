@@ -1050,12 +1050,16 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   `tests/test_dangling_variadic_stack_spilled.c` (the stack-spilled
   `after8`/`wide` shapes from the ticket) plus manual probes of local
   array-indexing collisions
-- **Limitation:** a live frame's *non-escaping* aggregate (array, struct) is
-  not STKTAG'd, so a dead frame's stale exact tag that lands in the *interior*
-  of it (e.g. `buf[i]` at an offset another frame's `&scalar` once occupied)
-  is still reported as dangling. A stale tag at the aggregate's *base* is
-  cleared when the live frame takes that address. Tracked in
-  [#1449](https://todo.sr.ht/~takeiteasy/cccc/1449).
+- **Own-array access:** a frame's access to its own local array (`buf[i]`,
+  `m[i][j]`, `s.arr[i]`, `arr[i].f`, including `+=` and `++`) is never
+  reported as dangling, even when a returned frame's tag sits inside the
+  array. A stale tag at the array's *base* is cleared when the live frame
+  takes that address.
+- **Limitation:** an access through a pointer *value* is checked by address
+  alone, so a live non-escaping array reached through an alias
+  (`char *q = buf; q[i]`) or an `&buf[i]` handed to a callee can still be
+  reported as dangling when a returned frame's tag sits inside the array.
+  Tracked in [#1451](https://todo.sr.ht/~takeiteasy/cccc/1451).
 - **Second consumer:** the epoch/interval bookkeeping above
   (`frame_epochs`, `live_epochs`, `stack_intervals`) is not exclusive to
   `--dangling-pointers` — `__builtin_dynamic_object_size` also stabs

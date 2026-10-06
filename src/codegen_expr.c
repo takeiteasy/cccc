@@ -732,7 +732,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 node->ty->kind != TY_UNION && node->ty->kind != TY_FUNC &&
                 node->ty->kind != TY_VLA && !is_wide_bitint(node->ty) &&
                 !is_decimal(node->ty)) {
-                emit_load(vm, node->ty, dest_reg, dest_reg);
+                emit_load_ex(vm, node->ty, dest_reg, dest_reg,
+                             !addr_is_local_frame(vm, node));
             }
             return;
 

@@ -1690,7 +1690,8 @@ static inline int op_LEA3_fn(VirtualMachine *vm) {
                                         .epochs[vm->frame_epochs.count - 1]);
             } else if (vm->stack_ptr_epochs.used > 0) {
                 // A live frame owns addr now, so a tag left by a dead frame
-                // there is stale (#1447). Interior hits are not cleared.
+                // there is stale (#1447). Interior hits are skipped at
+                // codegen instead (addr_is_local_frame, #1449).
                 hashmap_delete_int(&vm->stack_ptr_epochs, addr);
             }
         }

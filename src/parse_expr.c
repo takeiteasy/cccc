@@ -439,12 +439,14 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
         Node *expr2 = new_unary(
             vm, ND_MEMBER,
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
-        expr2->member = binary->lhs->member;
+        expr2->member          = binary->lhs->member;
+        expr2->lhs->rmw_lvalue = binary->lhs->lhs;
 
-        Node *expr3   = new_unary(
+        Node *expr3            = new_unary(
             vm, ND_MEMBER,
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
-        expr3->member = binary->lhs->member;
+        expr3->member          = binary->lhs->member;
+        expr3->lhs->rmw_lvalue = binary->lhs->lhs;
 
         Node *expr4   = new_binary(
             vm, ND_ASSIGN, expr2,
@@ -576,6 +578,7 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
 
     Node *store_deref =
         new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
+    store_deref->rmw_lvalue = binary->lhs;
 
     // #937: `binary->lhs` (the original `*p`/`p[i]`/`p->x` deref, e.g. `s[n]`
     // in `s[n] += 1`) already carries checked-pointer bounds if
@@ -623,12 +626,12 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
     if (binary->lhs->kind == ND_DEREF)
         binary->lhs->checked_rmw_mirror = store_deref;
 
-    Node *expr2 = new_binary(
+    Node *load_deref = new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
+    load_deref->rmw_lvalue = binary->lhs;
+
+    Node *expr2            = new_binary(
         vm, ND_ASSIGN, store_deref,
-        new_binary(vm, binary->kind,
-                   new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok),
-                   binary->rhs, tok),
-        tok);
+        new_binary(vm, binary->kind, load_deref, binary->rhs, tok), tok);
 
     return new_binary(vm, ND_COMMA, expr1, expr2, tok);
 }

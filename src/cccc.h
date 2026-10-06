@@ -2286,6 +2286,12 @@ struct Node {
     // flag's purpose.
     bool is_rmw_temp_addr;
 
+    // On the synthesized `*tmp` derefs of to_assign()'s RMW desugar: the
+    // original lvalue `tmp` was assigned the address of (`A`, or the object
+    // of `A.x`), so addr_is_local_frame() can classify the access by what the
+    // user wrote rather than by the opaque temp.
+    struct Node *rmw_lvalue;
+
     // #1235: marks the outer ND_CAST that new_inc_dec() (src/parse_postfix.c)
     // wraps around a postfix `A++`/`A--` desugar
     // (`(typeof A)((A += 1) + -1)`). Pure annotation, read only by the

@@ -515,11 +515,11 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
 // #740 ticket's va_arg-specific diagnosis was actually one instance of this
 // more general bug, not a vector/variadic-specific mechanism.
 //
-// Scoped to struct/union member chains only, not array/vector indexing
-// (arr[i] on a local array reaches the same unchecked emit_load/store surface
-// under -3 -- but distinguishing an array/vector-decay base from a
-// pointer-variable base in that ND_ADD indexing chain needs its own
-// classifier and has no known reproducer yet; tracked separately).
+// #1449: indexing a local array (`buf[i]`, `m[i][j]`, `s.arr[i]`) is also
+// frame-local: the ND_DEREF's pointer is an ND_ADD/ND_SUB chain whose base is
+// an array object of the current frame (decay leaves the TY_ARRAY node in
+// place). A pointer-typed base (`p[i]`, `char *q = buf; q[i]`) stays checked,
+// since only its runtime value says whose frame it points into.
 // Is `node` a member access directly on a union expression (`u.m`, not a
 // struct nested inside a union or vice versa -- only the immediate parent
 // matters, since that's the object whose bytes might legally carry more
@@ -528,6 +528,17 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
 bool is_union_member_access(Node *node) {
     return node && node->kind == ND_MEMBER && node->lhs && node->lhs->ty &&
            node->lhs->ty->kind == TY_UNION;
+}
+
+static bool ptr_is_local_array_rooted(VirtualMachine *vm, Node *ptr) {
+    while (ptr &&
+           (ptr->kind == ND_ADD || ptr->kind == ND_SUB ||
+            (ptr->kind == ND_CAST && ptr->ty && ptr->ty->kind == TY_PTR)))
+        ptr = ptr->lhs;
+    return ptr && ptr->ty && ptr->ty->kind == TY_ARRAY &&
+           (ptr->kind == ND_VAR || ptr->kind == ND_MEMBER ||
+            ptr->kind == ND_DEREF) &&
+           addr_is_local_frame(vm, ptr);
 }
 
 bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
@@ -558,9 +569,11 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
             return addr_is_local_frame(vm, node->lhs);
         case ND_COMMA:
             return addr_is_local_frame(vm, node->rhs);
+        case ND_DEREF:
+            return node->rmw_lvalue ? addr_is_local_frame(vm, node->rmw_lvalue)
+                                    : ptr_is_local_array_rooted(vm, node->lhs);
         default:
-            return false; // ND_DEREF (pointer value) and everything else: keep
-                          // checked
+            return false; // everything else: keep checked
     }
 }
 
