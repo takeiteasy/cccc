@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-06
+
 - Added: under `-2` and `-3`, a subscript directly over a fixed-size local or
   global array (`buf[k]`, `m[i][j]`, `s.arr[k]`) is bounds-checked at the
   access. `a[size]` and negative indices are reported; `&a[size]` and
