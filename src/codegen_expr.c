@@ -2013,12 +2013,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         gen_expr(vm, node->lhs, REG_A1);     // narrow int value
                         emit_li3(vm, REG_A2, dst->size / 8); // words
                         emit_li3(vm, REG_A3, dst->bit_width);
-                        // TODO(#1467): an unsigned source takes the sign-
-                        // extending path when dst is signed; it should
-                        // zero-extend.
-                        const char *fn = (!dst->is_unsigned || src->is_unsigned)
-                                             ? "__cccc_bitint_from_i64"
-                                             : "__cccc_bitint_from_u64";
+                        bool        zero_extend = src->is_unsigned ||
+                                                  src->kind == TY_BOOL ||
+                                                  src->kind == TY_PTR;
+                        const char *fn = zero_extend ? "__cccc_bitint_from_u64"
+                                                     : "__cccc_bitint_from_i64";
                         emit_wide_helper(vm, fn, 4);
                     }
                     emit_lea3(vm, dest_reg, dst_offset);
