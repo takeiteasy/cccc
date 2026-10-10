@@ -347,7 +347,7 @@ Host C crash (SIGSEGV):
 
 The handler is installed early in `main()` for SIGSEGV, SIGBUS, SIGFPE, and
 SIGILL. It uses [libbacktrace](https://github.com/ianlancetaylor/libbacktrace)
-(vendored in `src/backtrace/`, BSD-licensed) and is on by default.
+(git submodule at `vendor/libbacktrace`, BSD-licensed) and is on by default.
 
 After printing the trace the process dies with the original signal and exit
 code, so the test runner's exit-code semantics and negative-test failures are

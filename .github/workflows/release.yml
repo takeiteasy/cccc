@@ -53,6 +53,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+          submodules: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -88,6 +89,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+          submodules: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -118,6 +120,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+          submodules: true
       - name: Install dependencies
         run: brew install libffi pkg-config
       - name: Bootstrap (stage0 -> regen std.c -> rebuild)
@@ -153,6 +156,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+          submodules: true
       - uses: actions/download-artifact@v4
         with:
           path: dist

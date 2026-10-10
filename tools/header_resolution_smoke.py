@@ -359,7 +359,7 @@ def case_unbundled_header_audit(cccc: Path, tmp: str) -> bool:
         for f in d.rglob("*"):
             if f.suffix not in (".c", ".h") or f.name in ("std.c",):
                 continue
-            # src/backtrace is a vendored libbacktrace copy, built as its
+            # src/backtrace holds libbacktrace's hand-written config headers, built as its
             # own separate library (Makefile's build/lib/libbacktrace) and
             # never part of the self-hosting spike's `src/*.c` file set
             # (a bare glob, not recursive) -- its own platform-probing

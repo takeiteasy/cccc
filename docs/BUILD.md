@@ -15,7 +15,7 @@ Everything else is optional and probed at build time:
 | Optional dependency | Enables | Notes |
 |---|---|---|
 | GNU **readline** | line editing/history in the REPL | probed via `pkg-config`; Homebrew fallback on macOS |
-| **libbacktrace** | symbolic host C stack traces on a crash | vendored in `src/backtrace/`, **on by default** |
+| **libbacktrace** | symbolic host C stack traces on a crash | git submodule at `vendor/libbacktrace`, **on by default** when the submodule is initialised |
 | **libcurl** | URL `#include`/`#embed` and URL-aware `__has_include`/`__has_embed` | off by default |
 | **doxygen** (+ graphviz) | the HTML API docs (`docs` target) | off by default, never part of a normal build |
 | Intel **BID** library | `_Decimal32/64/128` decimal floating-point | never vendored; fetch first (see below) |
@@ -40,6 +40,10 @@ before trusting the standalone smoke scripts, which hardcode the repo-root
 make                       # stage0 ./cccc
 ./cccc --build build.c     # full build system takes over from here
 ```
+
+Clone with `--recurse-submodules` (or run `git submodule update --init`) to
+get libbacktrace. Without it the full build prints a note and builds without
+libbacktrace.
 
 On a **fresh clone** the embedded stdlib table `src/std.c` does not exist yet,
 so bootstrap once:

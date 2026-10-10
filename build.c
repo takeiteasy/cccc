@@ -136,9 +136,12 @@ static void maybe_add_ndbm(Builder *ctx, BuildTarget *t) {
         AddLib(t, "gdbm_compat");
 }
 
-// ---- Vendored libbacktrace (src/backtrace/) -------------------------------
+// ---- libbacktrace (vendor/libbacktrace submodule + src/backtrace/ overlay) --
 // Compiled with distinct flags: no -std=c23 (sources are C99/C11), separate
-// warning suppressions, and platform-specific format reader.
+// warning suppressions, and platform-specific format reader. The hand-written
+// config.h/backtrace-supported.h live in src/backtrace/; everything else comes
+// from the submodule. An uninitialised submodule builds without libbacktrace,
+// like CCCC_HAS_BACKTRACE=0.
 //
 // CCCC_HAS_BACKTRACE=0 opt-out (#850): returns NULL instead of declaring the
 // "backtrace" target at all. add_cccc_flags() already treats a NULL `bt` as
@@ -147,6 +150,8 @@ static void maybe_add_ndbm(Builder *ctx, BuildTarget *t) {
 // through was already written against that contract from #842 onward, so
 // this opt-out needed no changes anywhere else.
 
+#define LIBBACKTRACE_DIR "vendor/libbacktrace"
+
 // Named variant (#850): lets a graph that needs two libbacktrace archives at
 // once avoid the duplicate-target-name check (#842 Step 1).
 // make_libbacktrace(ctx) below is the common case: same body, fixed name.
@@ -154,6 +159,15 @@ static BuildTarget *make_libbacktrace_named(Builder *ctx, const char *name) {
     const char *has_bt = GetEnv(ctx, "CCCC_HAS_BACKTRACE");
     if (has_bt && strcmp(has_bt, "0") == 0)
         return NULL;
+    if (!FileExists(ctx, LIBBACKTRACE_DIR "/backtrace.c")) {
+        static bool warned;
+        if (!warned)
+            fprintf(stderr,
+                    "note: building without libbacktrace; run `git submodule "
+                    "update --init` to enable it\n");
+        warned = true;
+        return NULL;
+    }
     BuildTarget *bt = StaticLib(ctx, name);
     AddCFlag(bt, "-O2");
     AddCFlag(bt, "-g");
@@ -173,23 +187,24 @@ static BuildTarget *make_libbacktrace_named(Builder *ctx, const char *name) {
         // exercised a Linux build).
         AddDefine(bt, "_GNU_SOURCE", (const char *)0);
     AddInclude(bt, "src/backtrace");
+    AddInclude(bt, LIBBACKTRACE_DIR);
     // Common sources (platform-independent)
-    AddSource(bt, "src/backtrace/backtrace.c");
-    AddSource(bt, "src/backtrace/atomic.c");
-    AddSource(bt, "src/backtrace/dwarf.c");
-    AddSource(bt, "src/backtrace/fileline.c");
-    AddSource(bt, "src/backtrace/mmap.c");
-    AddSource(bt, "src/backtrace/mmapio.c");
-    AddSource(bt, "src/backtrace/posix.c");
-    AddSource(bt, "src/backtrace/print.c");
-    AddSource(bt, "src/backtrace/simple.c");
-    AddSource(bt, "src/backtrace/sort.c");
-    AddSource(bt, "src/backtrace/state.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/backtrace.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/atomic.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/dwarf.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/fileline.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/mmap.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/mmapio.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/posix.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/print.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/simple.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/sort.c");
+    AddSource(bt, LIBBACKTRACE_DIR "/state.c");
     // Platform-specific debug format reader
     if (strcmp(BuildHost(ctx), "darwin") == 0)
-        AddSource(bt, "src/backtrace/macho.c");
+        AddSource(bt, LIBBACKTRACE_DIR "/macho.c");
     else
-        AddSource(bt, "src/backtrace/elf.c");
+        AddSource(bt, LIBBACKTRACE_DIR "/elf.c");
     return bt;
 }
 
@@ -262,6 +277,7 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
     if (bt) {
         AddDefine(t, "CCCC_HAS_BACKTRACE", "1");
         AddInclude(t, "src/backtrace");
+        AddInclude(t, LIBBACKTRACE_DIR);
         LinkWith(t, bt);
     }
     // Git describe stamping for --version (#883). Absent in release

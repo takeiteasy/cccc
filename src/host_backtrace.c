@@ -5,7 +5,7 @@
  * before re-raising the original fault signal.  This catches crashes during
  * *any* CCCC phase (parse, codegen, VM dispatch) — not just inside vm_eval.
  *
- * The handler uses libbacktrace (vendored in src/backtrace/) with the mmap
+ * The handler uses libbacktrace (submodule at vendor/libbacktrace) with the mmap
  * allocator so it never calls malloc and is therefore safe to invoke from a
  * signal handler after the initial warm-up call.
  *

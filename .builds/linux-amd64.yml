@@ -43,6 +43,7 @@ tasks:
       # already matches disk) and stays that way for the rest of the job.
       cd cccc
       set -e
+      git submodule update --init
       make bootstrap
   - build: |
       # Two-pass build (#571/#842): regenerates src/std.c from
