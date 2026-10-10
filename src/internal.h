@@ -639,9 +639,9 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 // from_include-type provenance (Node.layout_ty/layout_is_align, #1031) to
 // the caller instead of discarding it with the node -- see
 // node_layout_const()/const_expr_layout()'s own comments (parse_analysis.c).
-bool node_layout_const(Node *node, Type **out_ty, bool *out_align);
+bool node_layout_const(Node *node, Type **out_ty, LayoutOp *out_align);
 int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
-                          Type **out_ty, bool *out_align);
+                          Type **out_ty, LayoutOp *out_align);
 // #815/#816: shared duplicate/overlapping case-label check -- used by the
 // switch-statement epilogue here and by the comptime reflection switch
 // builders in reflection.c.
@@ -859,6 +859,7 @@ Type *pointer_to(VirtualMachine *vm, Type *base);
 Type *func_type(VirtualMachine *vm, Type *return_ty);
 Type *array_of(VirtualMachine *vm, Type *base, int size);
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes);
+int c11_alignof(VirtualMachine *vm, Type *ty);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
 // #973 follow-up: true if ty is TY_VLA, or a chain of TY_PTR/TY_ARRAY whose

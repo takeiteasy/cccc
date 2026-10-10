@@ -313,7 +313,7 @@ bool path_is_captured(SerializeContext *ctx, const char *path);
 bool same_type_strong(Type *a, Type *b);
 bool serialize_flonum_special(FILE *f, long double v, const char *suf);
 bool serialize_layout_const(FILE *f, SerializeContext *ctx, Type *layout_ty,
-                            bool is_align);
+                            LayoutOp is_align);
 bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn);
 bool type_is_cccc_va_list(Type *ty);
 bool type_is_complete_tagged(Type *ty);

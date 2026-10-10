@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: on Linux x86_64 under `--compiler-family=gcc`, C11 `_Alignof(type)`
+  and `_Alignas(type)` of a 32- or 64-byte vector (or a struct, union or array
+  holding one) report gcc's 16 instead of the vector's size. `__alignof__`,
+  `_Alignof expr` and `-c=native` constants are unchanged.
+- Added: `__alignof__` and `__alignof` are keywords available before C11.
+
 ## [0.8.1] - 2026-10-06
 
 - Added: under `-2` and `-3`, a subscript directly over a fixed-size local or

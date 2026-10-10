@@ -20,14 +20,14 @@ struct nested {
 };
 
 int main(void) {
-    if (offsetof(struct padded32, v) % _Alignof(v8f32) != 0 ||
-        _Alignof(struct padded32) != _Alignof(v8f32))
+    if (offsetof(struct padded32, v) % __alignof__(v8f32) != 0 ||
+        __alignof__(struct padded32) != __alignof__(v8f32))
         return 1;
-    if (offsetof(struct padded64, v) % _Alignof(v16f32) != 0 ||
-        _Alignof(struct padded64) != _Alignof(v16f32))
+    if (offsetof(struct padded64, v) % __alignof__(v16f32) != 0 ||
+        __alignof__(struct padded64) != __alignof__(v16f32))
         return 2;
-    if (offsetof(struct nested, arr) % _Alignof(v8f32) != 0 ||
-        _Alignof(struct nested) != _Alignof(v8f32))
+    if (offsetof(struct nested, arr) % __alignof__(v8f32) != 0 ||
+        __alignof__(struct nested) != __alignof__(v8f32))
         return 3;
     return 42;
 }

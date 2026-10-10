@@ -1184,6 +1184,15 @@ typedef struct SynthLibcDeclArray {
 /*!
  @brief Represents an enumerator constant within an enum type.
 */
+// #1031: which operator a folded layout constant re-materializes as.
+// LAYOUT_ALIGN is C11 `_Alignof(type)`; LAYOUT_ALIGN_GNU is `__alignof__`
+// and `_Alignof expr`, which gcc never caps (see c11_alignof(), type.c).
+typedef enum {
+    LAYOUT_SIZEOF,
+    LAYOUT_ALIGN,
+    LAYOUT_ALIGN_GNU,
+} LayoutOp;
+
 typedef struct EnumConstant {
     char   *name;  /**< Name of the enumerator. */
     int64_t value; /**< Integer value of the enumerator (int64_t to support C23
@@ -1199,7 +1208,7 @@ typedef struct EnumConstant {
     // `struct Type *`, not the `Type` typedef -- that typedef isn't in
     // scope yet this early in the file (Type itself is defined below).
     struct Type *layout_ty;
-    bool         layout_is_align;
+    LayoutOp     layout_is_align;
 } EnumConstant;
 
 /*!
@@ -1517,7 +1526,7 @@ struct Type {
     // (locals, and globals with no byte-image initializer -- see
     // SerializeContext.allow_layout_dims's own comment).
     Type *array_len_layout_ty;
-    bool  array_len_layout_is_align;
+    LayoutOp array_len_layout_is_align;
 
     // GNU vector_size vector (TY_VECTOR): lane count. `base` is the element
     // type, `size` is the total byte size (element size * vec_len).
@@ -1722,6 +1731,12 @@ struct Type {
     struct Node *checked_param_bounds_lo;
     struct Node *checked_param_bounds_hi;
     bool         checked_param_tmpl_done;
+
+    // aligned(N) written on this type itself (struct/union tag or typedef'd
+    // vector), as opposed to an alignment that is merely the natural one. See
+    // c11_alignof() (type.c). Appended at the end for the same
+    // positional-initializer reason as decl_align above.
+    bool user_align;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -2045,7 +2060,7 @@ struct Node {
     // etc). See serialize_expr.c's ND_NUM integer arm and serialize_type.c's
     // type_layout_is_host_owned().
     Type *layout_ty;
-    bool  layout_is_align; // layout_ty came from _Alignof, not sizeof
+    LayoutOp layout_is_align; // layout_ty came from _Alignof, not sizeof
 
     // #1098: a block-scope `_Static_assert`/`static_assert` parses to an
     // otherwise-empty ND_BLOCK (see static_assert_decl(), src/parse_stmt.c) --
@@ -2109,8 +2124,8 @@ struct Node {
     // reads those, never these.
     Type *case_begin_layout_ty;
     Type *case_end_layout_ty;
-    bool  case_begin_layout_is_align;
-    bool  case_end_layout_is_align;
+    LayoutOp case_begin_layout_is_align;
+    LayoutOp case_end_layout_is_align;
 
     // "asm" string literal
     char *asm_str;
@@ -3115,7 +3130,7 @@ typedef struct VarScopeNode {
     // #1095/#1155: mirrors VarScope.enum_layout_ty/enum_layout_is_align
     // exactly -- see this struct's own doc comment above.
     Type *enum_layout_ty;
-    bool  enum_layout_is_align;
+    LayoutOp enum_layout_is_align;
     // Additional fields for linked list
     char                *name;     /**< Variable or typedef name. */
     int                  name_len; /**< Length of name. */

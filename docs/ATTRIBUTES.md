@@ -382,19 +382,30 @@ int n = sizeof((VS int){0});  // 16
 Vector alignment follows the host ABI, so locals, struct members and
 `-c=native` output agree with the host compiler:
 
-| Host | `_Alignof` of a 32- or 64-byte vector |
+| Host | alignment of a 32- or 64-byte vector (layout, `__alignof__`) |
 |---|---|
 | aarch64 (macOS, Linux), macOS x86_64 | 16 |
 | Linux x86_64 | the vector's size |
 
-Use `_Alignof(type)` rather than the vector's size when checking alignment.
+C11 `_Alignof(type)` and `_Alignas(type)` differ from that on Linux x86_64
+under `--compiler-family=gcc`: gcc caps them at 16 for a wide vector, or for a
+struct, union or array holding one, unless the type carries `aligned(N)`.
+`__alignof__`, `_Alignof expr` and `--compiler-family=clang` always give the
+vector's size.
+
+```c
+typedef float v8f32 __attribute__((vector_size(32)));
+_Alignof(v8f32);      // 16 (gcc, Linux x86_64)
+__alignof__(v8f32);   // 32
+```
+
+Use `__alignof__(type)` when checking where a vector-bearing member lands.
 
 **Limitations:**
 
-- On Linux x86_64, cccc's `_Alignof` of a 32- or 64-byte vector is the vector's
-  size, but gcc without `-mavx` reports 16 for it (`__alignof__` and struct layout
-  still use the size). Layout and `-c=native` agree either way. See
-  [#1454](https://todo.sr.ht/~takeiteasy/cccc/1454).
+- The `_Alignof` cap is fixed at 16, the gcc default without `-mavx`. Under
+  `-mavx` or `-mavx512f` gcc caps at 32 or 64. See
+  [#1458](https://todo.sr.ht/~takeiteasy/cccc/1458).
 
 ### Visible Lanes
 

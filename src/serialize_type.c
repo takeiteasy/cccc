@@ -3401,11 +3401,14 @@ static bool type_has_printable_name(SerializeContext *ctx, Type *ty) {
 // prints nothing and returns false otherwise, so every call site's own
 // fallback -- the plain folded literal -- still applies unchanged.
 bool serialize_layout_const(FILE *f, SerializeContext *ctx, Type *layout_ty,
-                            bool is_align) {
+                            LayoutOp is_align) {
     if (!layout_ty || !type_layout_is_host_owned(ctx, layout_ty, 0) ||
         !type_has_printable_name(ctx, layout_ty))
         return false;
-    fprintf(f, "%s(", is_align ? "_Alignof" : "sizeof");
+    fprintf(f, "%s(",
+            is_align == LAYOUT_ALIGN_GNU ? "__alignof__"
+            : is_align                   ? "_Alignof"
+                                         : "sizeof");
     serialize_type(f, ctx, layout_ty);
     fprintf(f, ")");
     return true;
@@ -3438,8 +3441,8 @@ static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
                                        int depth) {
     if (!node || depth > 32)
         return false;
-    Type *layout_ty    = NULL;
-    bool  layout_align = false;
+    Type    *layout_ty    = NULL;
+    LayoutOp layout_align = LAYOUT_SIZEOF;
     if (node_layout_const(node, &layout_ty, &layout_align)) {
         Type *base_ty = layout_ty;
         while (base_ty &&

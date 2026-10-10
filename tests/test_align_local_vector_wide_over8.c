@@ -13,17 +13,17 @@ static int locals(int n) {
     v8f32  v32     = {1, 2, 3, 4, 5, 6, 7, 8};
     char   pad2[3] = {1, 2, 3};
     v16f32 v64     = {1};
-    if (misaligned(&v32, _Alignof(v8f32)))
+    if (misaligned(&v32, __alignof__(v8f32)))
         return 1;
-    if (misaligned(&v64, _Alignof(v16f32)))
+    if (misaligned(&v64, __alignof__(v16f32)))
         return 2;
     return v32[7] == 8 && v64[0] == 1 && pad == (char)n && pad2[2] == 3 ? 0 : 3;
 }
 
 static int param(int a, v8f32 w, v16f32 x) {
-    if (misaligned(&w, _Alignof(v8f32)))
+    if (misaligned(&w, __alignof__(v8f32)))
         return 1;
-    if (misaligned(&x, _Alignof(v16f32)))
+    if (misaligned(&x, __alignof__(v16f32)))
         return 2;
     return w[7] == 8 && x[0] == 1 ? 0 : 3;
 }

@@ -683,7 +683,7 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 // the const_expr()/eval() consumers this feeds (array dimensions, case
 // labels, enum values -- see const_expr_layout() below) inherit it rather
 // than attempting anything broader.
-bool node_layout_const(Node *node, Type **out_ty, bool *out_align) {
+bool node_layout_const(Node *node, Type **out_ty, LayoutOp *out_align) {
     while (node && node->kind == ND_CAST)
         node = node->lhs;
     if (!node || node->kind != ND_NUM || !node->layout_ty)
@@ -701,7 +701,7 @@ bool node_layout_const(Node *node, Type **out_ty, bool *out_align) {
 // sizeof/_Alignof of a from_include type (array dimensions, case labels,
 // enum values) needs this instead of a plain const_expr() call.
 int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
-                          Type **out_ty, bool *out_align) {
+                          Type **out_ty, LayoutOp *out_align) {
     Node *node = conditional(vm, rest, tok);
     node_layout_const(node, out_ty, out_align);
     return eval(vm, node);

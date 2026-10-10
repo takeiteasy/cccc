@@ -535,12 +535,12 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         Node *node                  = new_node(vm, ND_CASE, tok);
         Type *begin_layout_ty       = NULL;
-        bool  begin_layout_is_align = false;
+        LayoutOp begin_layout_is_align = LAYOUT_SIZEOF;
         int   begin = const_expr_layout(vm, &tok, tok->next, &begin_layout_ty,
                                         &begin_layout_is_align);
         int   end;
         Type *end_layout_ty       = begin_layout_ty;
-        bool  end_layout_is_align = begin_layout_is_align;
+        LayoutOp end_layout_is_align = begin_layout_is_align;
 
         if (equal(tok, "...")) {
             // [GNU] Case ranges, e.g. "case 1 ... 5:"

@@ -22,6 +22,12 @@
 
 #include "./internal.h"
 
+#if defined(__aarch64__) || defined(__APPLE__)
+#define CCCC_HOST_FULL_WIDTH_VECTORS 0
+#else
+#define CCCC_HOST_FULL_WIDTH_VECTORS 1
+#endif
+
 // Type sizes now match standard C sizes with proper VM instruction support:
 // char=1, short=2, int=4, long=8
 Type *ty_void      = &(Type){TY_VOID, 1, 1};
@@ -517,15 +523,50 @@ Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
     // Alignment follows the host ABI so -c=native, struct layout and FFI
     // agree with the VM: aarch64 and macOS cap vector_size alignment at 16,
     // Linux x86_64 aligns to the full width.
-#if defined(__aarch64__) || defined(__APPLE__)
-    int align = bytes < 16 ? bytes : 16;
-#else
+#if CCCC_HOST_FULL_WIDTH_VECTORS
     int align = bytes;
+#else
+    int align = bytes < 16 ? bytes : 16;
 #endif
     Type *ty    = new_type(vm, TY_VECTOR, bytes, align);
     ty->base    = base;
     ty->vec_len = bytes / base->size;
     return ty;
+}
+
+#if CCCC_HOST_FULL_WIDTH_VECTORS
+// True if `ty`, or something it holds by value, carries an aligned(N) /
+// _Alignas(N) request rather than only a natural alignment.
+static bool type_has_user_align(Type *ty, int depth) {
+    if (!ty || depth > 32)
+        return false;
+    if (ty->user_align || ty->decl_align)
+        return true;
+    if (ty->kind == TY_ARRAY)
+        return type_has_user_align(ty->base, depth + 1);
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (Member *m = ty->members; m; m = m->next)
+            if (m->explicit_align || type_has_user_align(m->ty, depth + 1))
+                return true;
+    return false;
+}
+#endif
+
+// The value of C11 `_Alignof(type)` / `_Alignas(type)`. gcc on x86_64
+// without -mavx caps it at 16 for a wide vector (and anything holding one)
+// unless the alignment was user-specified; layout, `__alignof__` and
+// `_Alignof expr` keep the uncapped Type.align. clang never caps.
+// TODO(#1458): honour -mavx/-mavx512f, which raise the cap to 32/64.
+int c11_alignof(VirtualMachine *vm, Type *ty) {
+#if CCCC_HOST_FULL_WIDTH_VECTORS
+    if (ty->align > 16 &&
+        vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC &&
+        !type_has_user_align(ty, 0))
+        return 16;
+#else
+    (void)vm;
+#endif
+    return ty->align;
 }
 
 // GNU vector comparison result type (tracker #715): same lane count/total

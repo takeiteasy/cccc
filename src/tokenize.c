@@ -919,6 +919,8 @@ static void init_keyword_map(void) {
         "extern",
         "_Alignof",
         "_Alignas",
+        "__alignof__",
+        "__alignof",
         "do",
         "signed",
         "unsigned",

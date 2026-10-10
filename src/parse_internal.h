@@ -73,7 +73,7 @@ typedef struct {
     // ticket warns about, just between the body and its uses instead of
     // between a declaration and its initializer.
     Type *enum_layout_ty;
-    bool  enum_layout_is_align;
+    LayoutOp enum_layout_is_align;
     // #1155: every field above must appear in VarScopeNode (cccc.h), same
     // order, as a leading prefix -- push_scope() (parse_core.c) allocates a
     // VarScopeNode and callers cast it to VarScope*. See VarScopeNode's own

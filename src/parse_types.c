@@ -431,7 +431,7 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                               "_Alignas is not allowed in this context");
                 tok = skip(vm, tok->next, "(");
                 if (is_typename(vm, tok))
-                    attr->align = typename(vm, &tok, tok)->align;
+                    attr->align = c11_alignof(vm, typename(vm, &tok, tok));
                 else
                     attr->align = const_expr(vm, &tok, tok);
                 tok = skip(vm, tok, ")");
@@ -896,7 +896,7 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
     // node_layout_const()'s own comment (parse_analysis.c). Serialization-
     // only: arr->array_len below is still the plain folded int, unchanged.
     Type *layout_ty       = NULL;
-    bool  layout_is_align = false;
+    LayoutOp layout_is_align = LAYOUT_SIZEOF;
     node_layout_const(expr, &layout_ty, &layout_is_align);
     Type *arr                      = array_of(vm, ty, eval(vm, expr));
     arr->array_len_layout_ty       = layout_ty;
@@ -1693,7 +1693,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         // enumerator's `=` may have set.
         bool  had_eq              = equal(tok, "=");
         Type *val_layout_ty       = NULL;
-        bool  val_layout_is_align = false;
+        LayoutOp val_layout_is_align = LAYOUT_SIZEOF;
         if (had_eq)
             val = const_expr_layout(vm, &tok, tok->next, &val_layout_ty,
                                     &val_layout_is_align);
@@ -1713,10 +1713,10 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         // EnumConstant (the body) and its VarScope (every USE) must agree.
         if (!had_eq && enum_tail && enum_tail->layout_ty) {
             enum_tail->layout_ty       = NULL;
-            enum_tail->layout_is_align = false;
+            enum_tail->layout_is_align = LAYOUT_SIZEOF;
             if (prev_sc) {
                 prev_sc->enum_layout_ty       = NULL;
-                prev_sc->enum_layout_is_align = false;
+                prev_sc->enum_layout_is_align = LAYOUT_SIZEOF;
             }
         }
 
@@ -1975,7 +1975,7 @@ int explicit_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
                         VarAttr *attr) {
     int align = 0;
     if (attr && attr->align) {
-        if (attr->align < ty->align)
+        if (attr->align < c11_alignof(vm, ty))
             error_tok(vm, tok,
                       "requested alignment is less than minimum alignment "
                       "of %d for type",
@@ -2604,8 +2604,10 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     align = const_expr(vm, &tok, tok);
                     tok   = skip(vm, tok, ")");
                 }
-                if (ty)
-                    ty->align = align;
+                if (ty) {
+                    ty->align      = align;
+                    ty->user_align = true;
+                }
                 if (attr && align > attr->gnu_align)
                     attr->gnu_align = align;
                 continue;
@@ -3171,8 +3173,10 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     align = const_expr(vm, &tok, tok);
                     tok   = skip(vm, tok, ")");
                 }
-                if (ty && allow_ty_align)
-                    ty->align = align;
+                if (ty && allow_ty_align) {
+                    ty->align      = align;
+                    ty->user_align = true;
+                }
                 if (attr && align > attr->gnu_align)
                     attr->gnu_align = align;
                 continue;

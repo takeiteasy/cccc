@@ -1967,17 +1967,21 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return sn;
     }
 
-    if (equal(tok, "_Alignof") && equal(tok->next, "(") &&
+    // `__alignof__` is the GNU spelling: gcc never caps it at the non-AVX
+    // maximum the way it does C11 `_Alignof(type)` (see c11_alignof()).
+    bool is_gnu_alignof = equal(tok, "__alignof__") || equal(tok, "__alignof");
+    if ((equal(tok, "_Alignof") || is_gnu_alignof) && equal(tok->next, "(") &&
         is_type_name_start(vm, tok->next->next)) {
-        Type *ty            = typename(vm, &tok, tok->next->next);
-        *rest               = skip(vm, tok, ")");
-        Node *sn            = new_ulong(vm, ty->align, tok);
+        Type *ty = typename(vm, &tok, tok->next->next);
+        *rest    = skip(vm, tok, ")");
+        Node *sn = new_ulong(
+            vm, is_gnu_alignof ? ty->align : c11_alignof(vm, ty), tok);
         sn->layout_ty       = ty; // #1031
-        sn->layout_is_align = true;
+        sn->layout_is_align = is_gnu_alignof ? LAYOUT_ALIGN_GNU : LAYOUT_ALIGN;
         return sn;
     }
 
-    if (equal(tok, "_Alignof")) {
+    if (equal(tok, "_Alignof") || is_gnu_alignof) {
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
         int align = node->ty->align;
@@ -1988,9 +1992,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             align = node->member->align;
         Node *sn = new_ulong(vm, align, tok);
         // Only a type's own alignment can be re-materialized from the host.
+        // The operand is an expression, so gcc does not cap it.
         if (align == node->ty->align) {
             sn->layout_ty       = node->ty; // #1031
-            sn->layout_is_align = true;
+            sn->layout_is_align = LAYOUT_ALIGN_GNU;
         }
         return sn;
     }

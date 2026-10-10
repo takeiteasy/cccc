@@ -86,6 +86,11 @@ offsets, and `_Static_assert` constants that the VM and both native
 backends must all agree on. There is no "VM assumes gcc, native emits
 clang" split.
 
+One more family-dependent answer is not a `__builtin_types_compatible_p` one:
+on Linux x86_64, C11 `_Alignof(type)` and `_Alignas(type)` of a 32- or
+64-byte vector cap at 16 under `gcc` and give the vector's size under
+`clang` (see [ATTRIBUTES.md](ATTRIBUTES.md#vector-size)).
+
 `_Generic` arm selection is **not** affected by `--compiler-family` — its
 behaviour is the one both families already agree on.
 

@@ -45,7 +45,7 @@ static int check_globals(void) {
         return 2;
     if (misaligned(&g_int128, 16))
         return 3;
-    if (misaligned(&g_vector32, _Alignof(v8f32)))
+    if (misaligned(&g_vector32, __alignof__(v8f32)))
         return 4;
     if (misaligned(&g_align16, 16))
         return 5;
