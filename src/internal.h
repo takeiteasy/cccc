@@ -859,6 +859,7 @@ Type *pointer_to(VirtualMachine *vm, Type *base);
 Type *func_type(VirtualMachine *vm, Type *return_ty);
 Type *array_of(VirtualMachine *vm, Type *base, int size);
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes);
+int type_alignof(Type *ty);
 int c11_alignof(VirtualMachine *vm, Type *ty);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);

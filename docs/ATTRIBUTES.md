@@ -390,22 +390,19 @@ Vector alignment follows the host ABI, so locals, struct members and
 C11 `_Alignof(type)` and `_Alignas(type)` differ from that on Linux x86_64
 under `--compiler-family=gcc`: gcc caps them at 16 for a wide vector, or for a
 struct, union or array holding one, unless the type carries `aligned(N)`.
-`__alignof__`, `_Alignof expr` and `--compiler-family=clang` always give the
-vector's size.
+`-mavx` and `-mavx2` raise the cap to 32, `-mavx512f` to 64; CCCC accepts the
+three flags (x86_64 only; elsewhere they warn and are ignored), defines
+`__AVX__`, `__AVX2__` and `__AVX512F__` to match, and forwards them to the
+`-c=native` compiler. `__alignof__`, `_Alignof expr` and
+`--compiler-family=clang` always give the vector's size.
 
 ```c
 typedef float v8f32 __attribute__((vector_size(32)));
-_Alignof(v8f32);      // 16 (gcc, Linux x86_64)
+_Alignof(v8f32);      // 16 (gcc, Linux x86_64); 32 with -mavx
 __alignof__(v8f32);   // 32
 ```
 
 Use `__alignof__(type)` when checking where a vector-bearing member lands.
-
-**Limitations:**
-
-- The `_Alignof` cap is fixed at 16, the gcc default without `-mavx`. Under
-  `-mavx` or `-mavx512f` gcc caps at 32 or 64. See
-  [#1458](https://todo.sr.ht/~takeiteasy/cccc/1458).
 
 ### Visible Lanes
 

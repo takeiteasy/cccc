@@ -4423,6 +4423,10 @@ typedef struct Compiler {
                                         // reading of front-end type-compat
                                         // divergences (never AUTO here --
                                         // resolved in main.c). Default gcc.
+    // -mavx/-mavx2/-mavx512f on x86_64 (0 = none, else 1/2/3 in that order).
+    // Defines __AVX__ et al, is forwarded to -c=native's cc, and sets gcc's
+    // cap on C11 _Alignof(type) of a wide vector (see c11_alignof()).
+    int  x86_isa;
     bool emit_cccc;        // --emit-cccc: preserve CCCC dialect syntax in
                            // -E/-m/-c=generated/-c=native output
     bool no_layout_guards; // --no-layout-guards: suppress the _Static_assert

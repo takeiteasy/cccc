@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `-mavx`, `-mavx2` and `-mavx512f` on x86_64. They define `__AVX__`,
+  `__AVX2__` and `__AVX512F__`, raise gcc's cap on C11 `_Alignof(type)` of a
+  wide vector to 32 or 64, and are forwarded to `-c=native`'s compiler.
+- Fixed: `_Alignof(type)` and `__alignof__(type)` of a typedef with
+  `aligned(N)` report `N` instead of the underlying type's alignment.
+
 - Fixed: on Linux x86_64 under `--compiler-family=gcc`, C11 `_Alignof(type)`
   and `_Alignas(type)` of a 32- or 64-byte vector (or a struct, union or array
   holding one) report gcc's 16 instead of the vector's size. `__alignof__`,

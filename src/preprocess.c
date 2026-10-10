@@ -7676,6 +7676,12 @@ void init_mode_macros(VirtualMachine *vm) {
     define_macro(
         vm, "__CCCC_COMPILER_FAMILY__",
         vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_CLANG ? "1" : "0");
+    if (vm->compiler.x86_isa >= 1)
+        define_macro(vm, "__AVX__", "1");
+    if (vm->compiler.x86_isa >= 2)
+        define_macro(vm, "__AVX2__", "1");
+    if (vm->compiler.x86_isa >= 3)
+        define_macro(vm, "__AVX512F__", "1");
 }
 
 typedef enum {

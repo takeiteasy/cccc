@@ -157,6 +157,8 @@ Options:
 	   --compiler-family=FAM  Host family CCCC's front end models where gcc/clang
 	                         disagree (__builtin_types_compatible_p, -Wauto-declarator):
 	                         gcc (default), clang, auto (probe CCCC_NATIVE_CC)
+	   -mavx, -mavx2, -mavx512f  x86_64 only: define __AVX__ et al, raise gcc's C11
+	                         _Alignof(vector) cap to 32/64, forward to -c=native's cc
 	   --emit-cccc           Preserve CCCC dialect syntax ([[cccc::...]], @-attrs, checked-pointer
 	                         qualifiers, cccc-only #includes) in -E/-m/-c=native/-c=generated output
 	                         instead of stripping it to portable C. With -c=native, the usual

@@ -978,6 +978,8 @@ def native_skip_reason(filename, per_test_flags, cccc_args, platform=None):
             # here also swallowed --compiler-family=... (harmless in effect,
             # but the wrong skip reason).
             return "test drives -c/-o itself"
+        if f in ("-mavx", "-mavx2", "-mavx512f"):
+            continue  # x86 ISA flags, forwarded to the native cc
         for p in _NATIVE_FRONTEND_PREFIXES:
             if f == p or f.startswith(p):
                 return "frontend output mode"

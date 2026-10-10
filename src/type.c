@@ -552,21 +552,30 @@ static bool type_has_user_align(Type *ty, int depth) {
 }
 #endif
 
-// The value of C11 `_Alignof(type)` / `_Alignas(type)`. gcc on x86_64
-// without -mavx caps it at 16 for a wide vector (and anything holding one)
-// unless the alignment was user-specified; layout, `__alignof__` and
-// `_Alignof expr` keep the uncapped Type.align. clang never caps.
-// TODO(#1458): honour -mavx/-mavx512f, which raise the cap to 32/64.
+// `_Alignof`/`__alignof__` of a type: its natural alignment, raised by an
+// aligned(N) written on the type itself (`typedef int i64 aligned(64)`).
+int type_alignof(Type *ty) {
+    return ty->decl_align > ty->align ? ty->decl_align : ty->align;
+}
+
+// The value of C11 `_Alignof(type)` / `_Alignas(type)`. gcc on x86_64 caps it
+// at 16 for a wide vector (and anything holding one) unless the alignment was
+// user-specified; -mavx / -mavx512f raise the cap to 32 / 64. Layout,
+// `__alignof__` and `_Alignof expr` keep the uncapped value. clang never caps.
 int c11_alignof(VirtualMachine *vm, Type *ty) {
+    int align = type_alignof(ty);
 #if CCCC_HOST_FULL_WIDTH_VECTORS
-    if (ty->align > 16 &&
+    int cap = vm->compiler.x86_isa >= 3   ? 64
+              : vm->compiler.x86_isa >= 1 ? 32
+                                          : 16;
+    if (align > cap &&
         vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC &&
         !type_has_user_align(ty, 0))
-        return 16;
+        return cap;
 #else
     (void)vm;
 #endif
-    return ty->align;
+    return align;
 }
 
 // GNU vector comparison result type (tracker #715): same lane count/total

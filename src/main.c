@@ -335,6 +335,10 @@ static int run_native_backend(
         NATIVE_STD_PROBE_FLAGS | (std_arg ? CCCC_STD_PROBE_EXPLICIT : 0));
     if (resolved_std)
         push_owned_flag(&cc_args, &owned, "-std=", resolved_std);
+    static const char *const x86_isa_flags[] = {NULL, "-mavx", "-mavx2",
+                                                "-mavx512f"};
+    if (vm->compiler.x86_isa)
+        argv_push(&cc_args, (char *)x86_isa_flags[vm->compiler.x86_isa]);
     // #891/#1006: cccc auto-captures each command-line input file's own
     // #include directives (preprocess.c) and re-emits them verbatim into
     // source_path, which lives in a temp directory -- so a quoted
@@ -587,6 +591,10 @@ static void usage(const char *argv0, int exit_code) {
            "-Wauto-declarator):\n"
            "\t                         gcc (default), clang, auto (probe "
            "CCCC_NATIVE_CC)\n");
+    printf("\t   -mavx, -mavx2, -mavx512f  x86_64 only: define __AVX__ et al, "
+           "raise gcc's C11\n"
+           "\t                         _Alignof(vector) cap to 32/64, forward "
+           "to -c=native's cc\n");
     printf("\t   --emit-cccc           Preserve CCCC dialect syntax "
            "([[cccc::...]], @-attrs, "
            "checked-pointer\n");
@@ -1402,6 +1410,7 @@ int main(int argc, const char *argv[]) {
     CCCCAttrTarget     attr_target = CCCC_ATTR_TARGET_AUTO; // --attr-target
     CCCCCompilerFamily compiler_family =
         CCCC_COMPILER_FAMILY_GCC;                           // --compiler-family
+    int      x86_isa               = 0; // -mavx / -mavx2 / -mavx512f (1/2/3)
     int      emit_cccc_mode        = 0;                     // --emit-cccc
     int      no_layout_guards_mode = 0; // --no-layout-guards (#1172)
     int      test_run_mode         = 0; // --test-run[=LEVEL]
@@ -1617,6 +1626,26 @@ int main(int argc, const char *argv[]) {
             if (dashdash >= 0)
                 dashdash--;
             continue;
+        }
+        if (i < limit) {
+            int isa = !strcmp(argv[i], "-mavx")       ? 1
+                      : !strcmp(argv[i], "-mavx2")    ? 2
+                      : !strcmp(argv[i], "-mavx512f") ? 3
+                                                      : 0;
+            if (isa) {
+#if defined(__aarch64__) || defined(__APPLE__)
+                fprintf(stderr,
+                        "warning: %s is only meaningful on Linux "
+                        "x86_64; ignored\n",
+                        argv[i]);
+#else
+                if (isa > x86_isa)
+                    x86_isa = isa;
+#endif
+                if (dashdash >= 0)
+                    dashdash--;
+                continue;
+            }
         }
         argv[kept++] = argv[i];
     }
@@ -2555,6 +2584,7 @@ int main(int argc, const char *argv[]) {
     vm.compiler.compiler_family  = compiler_family == CCCC_COMPILER_FAMILY_AUTO
                                        ? cccc_detect_native_cc_family()
                                        : compiler_family;
+    vm.compiler.x86_isa          = x86_isa;
     vm.compiler.emit_cccc        = (bool)emit_cccc_mode;
     vm.compiler.no_layout_guards = (bool)no_layout_guards_mode;
     vm.compiler.entry_name       = (char *)entry_name;

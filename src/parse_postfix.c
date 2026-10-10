@@ -1975,7 +1975,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Type *ty = typename(vm, &tok, tok->next->next);
         *rest    = skip(vm, tok, ")");
         Node *sn = new_ulong(
-            vm, is_gnu_alignof ? ty->align : c11_alignof(vm, ty), tok);
+            vm, is_gnu_alignof ? type_alignof(ty) : c11_alignof(vm, ty), tok);
         sn->layout_ty       = ty; // #1031
         sn->layout_is_align = is_gnu_alignof ? LAYOUT_ALIGN_GNU : LAYOUT_ALIGN;
         return sn;
@@ -1984,6 +1984,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Alignof") || is_gnu_alignof) {
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
+        // TODO(#1460): honour a typedef's aligned(N) for lvalues like *p.
         int align = node->ty->align;
         if (node->kind == ND_VAR && node->var && node->var->align > align)
             align = node->var->align;
