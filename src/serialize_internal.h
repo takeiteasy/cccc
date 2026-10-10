@@ -434,6 +434,11 @@ void same_type_memo_end(void);
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 bool type_needs_opaque_storage(Type *ty);
+typedef struct {
+    int *off;
+    int  n;
+} OpaqueSlots;
+OpaqueSlots opaque_pointer_slots(Type *ty);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                    const char *name);
 void serialize_hoisted_local_decl(FILE *f, VirtualMachine *vm,

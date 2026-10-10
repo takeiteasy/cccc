@@ -2091,14 +2091,83 @@ bool type_needs_opaque_storage(Type *ty) {
     return false;
 }
 
-// The byte array is never named by an access, so each gets a unique name: two
-// anonymous opaque members of one aggregate share its scope.
+static bool collect_pointer_slots(Type *ty, int base, OpaqueSlots *out,
+                                  int *cap) {
+    switch (ty->kind) {
+        case TY_PTR:
+            if (base % 8)
+                return false;
+            if (out->n == *cap) {
+                *cap     = *cap ? *cap * 2 : 8;
+                out->off = realloc(out->off, *cap * sizeof(int));
+            }
+            out->off[out->n++] = base;
+            return true;
+        case TY_ARRAY:
+            for (int i = 0; i < ty->array_len; i++)
+                if (!collect_pointer_slots(ty->base, base + i * ty->base->size,
+                                           out, cap))
+                    return false;
+            return true;
+        case TY_STRUCT:
+            for (Member *m = ty->members; m; m = m->next)
+                if (!m->is_bitfield &&
+                    !collect_pointer_slots(m->ty, base + m->offset, out, cap))
+                    return false;
+            return true;
+        case TY_UNION: {
+            OpaqueSlots inner = {0};
+            int         icap  = 0;
+            bool        ok    = true;
+            for (Member *m = ty->members; ok && m; m = m->next)
+                if (!m->is_bitfield)
+                    ok = collect_pointer_slots(m->ty, 0, &inner, &icap);
+            free(inner.off);
+            return ok && !inner.n;
+        }
+        default:
+            return true;
+    }
+}
+
+// Offsets of the pointers in an opaque-storage struct, each emitted as a real
+// `void *` so a global initializer can hold a relocation. Empty when there is
+// none, or when one can't be placed: a misaligned (packed) pointer, or one in
+// a union. The caller frees `.off`.
+OpaqueSlots opaque_pointer_slots(Type *ty) {
+    OpaqueSlots out = {0};
+    int         cap = 0;
+    if (ty->kind != TY_STRUCT || !collect_pointer_slots(ty, 0, &out, &cap)) {
+        free(out.off);
+        out = (OpaqueSlots){0};
+    }
+    return out;
+}
+
+// The byte arrays are never named by an access, so each gets a unique name:
+// two anonymous opaque members of one aggregate share its scope. Pointer slots
+// split the bytes into runs; the first member carries the alignment.
 static void serialize_opaque_members(FILE *f, Type *ty) {
-    static int seq;
-    fprintf(f, "    unsigned char __cccc_bf%d[%d]", seq++, (int)ty->size);
+    static int  seq;
+    OpaqueSlots slots    = opaque_pointer_slots(ty);
+    char        attr[64] = "";
     if (ty->align > 1)
-        fprintf(f, " __attribute__((aligned(%d)))", ty->align);
-    fprintf(f, ";\n");
+        snprintf(attr, sizeof attr, " __attribute__((aligned(%d)))", ty->align);
+    int cur = 0;
+    for (int i = 0; i <= slots.n; i++) {
+        int end = i < slots.n ? slots.off[i] : (int)ty->size;
+        if (end > cur) {
+            fprintf(f, "    unsigned char __cccc_bf%d[%d]%s;\n", seq++,
+                    end - cur, attr);
+            attr[0] = '\0';
+        }
+        if (i < slots.n) {
+            fprintf(f, "    void *__cccc_bp%d%s;\n", seq++, attr);
+            attr[0] = '\0';
+        }
+        cur = end + 8;
+    }
+    free(slots.off);
 }
 
 // #1129/#1163: packed/aligned(N) were retained on Type (is_packed, align)

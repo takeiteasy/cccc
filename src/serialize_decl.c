@@ -1173,22 +1173,54 @@ static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
     }
 }
 
-// An opaque-storage aggregate (type_needs_opaque_storage) is a single
-// byte array, so its initializer is the object's byte image. A pointer inside
-// it is a relocation, which has no integer spelling.
-static void serialize_opaque_init(FILE *f, Obj *var, Type *ty, int offset) {
-    // TODO(#1469): patch pointer slots in a constructor instead of refusing.
-    for (Relocation *r = var->rel; r; r = r->next)
-        if (r->offset >= offset && r->offset < offset + ty->size)
+// An opaque-storage aggregate (type_needs_opaque_storage) is a byte image,
+// split around its pointer slots (opaque_pointer_slots) so a pointer can carry
+// its relocation. A relocation anywhere else has no spelling.
+// TODO(#1472): a pointer in a union or at a misaligned (packed) offset.
+static void serialize_opaque_init(FILE *f, VirtualMachine *vm,
+                                  SerializeContext *ctx, Obj *var, Type *ty,
+                                  int offset) {
+    OpaqueSlots slots = opaque_pointer_slots(ty);
+    for (Relocation *r = var->rel; r; r = r->next) {
+        if (r->offset < offset || r->offset >= offset + ty->size)
+            continue;
+        bool at_slot = false;
+        for (int i = 0; i < slots.n; i++)
+            at_slot |= r->offset == offset + slots.off[i];
+        if (!at_slot)
             error("cccc: cannot serialize initializer for global '%s' in "
-                  "native mode: a pointer inside a struct/union with a "
-                  "_BitInt(N>128) bit-field\n\n1 error generated.",
+                  "native mode: a pointer in a union or at a misaligned "
+                  "offset inside a struct/union with a _BitInt(N>128) "
+                  "bit-field\n\n1 error generated.",
                   var->name);
-    fprintf(f, "{ { ");
-    for (int i = 0; i < ty->size; i++)
-        fprintf(f, "%s0x%02x", i ? ", " : "",
-                (unsigned char)var->init_data[offset + i]);
-    fprintf(f, " } }");
+    }
+    Type *void_ptr = pointer_to(vm, ty_void);
+    fprintf(f, "{ ");
+    int cur = 0;
+    for (int i = 0; i <= slots.n; i++) {
+        int end = i < slots.n ? slots.off[i] : ty->size;
+        if (end > cur) {
+            fprintf(f, "{ ");
+            for (int b = cur; b < end; b++)
+                fprintf(f, "%s0x%02x", b > cur ? ", " : "",
+                        (unsigned char)var->init_data[offset + b]);
+            fprintf(f, " }%s", i < slots.n ? ", " : "");
+        }
+        if (i < slots.n) {
+            Relocation *rel = serialize_find_reloc(var, offset + end);
+            if (rel)
+                serialize_reloc_init(f, vm, ctx, var, void_ptr, rel);
+            else {
+                unsigned long long bits;
+                memcpy(&bits, var->init_data + offset + end, sizeof bits);
+                fprintf(f, "(void *)0x%llxULL", bits);
+            }
+            fprintf(f, "%s", end + 8 < ty->size ? ", " : "");
+        }
+        cur = end + 8;
+    }
+    fprintf(f, " }");
+    free(slots.off);
 }
 
 // Reconstruct a global variable's initializer from its raw `init_data`
@@ -1213,7 +1245,7 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
     }
 
     if (type_needs_opaque_storage(ty)) {
-        serialize_opaque_init(f, var, ty, offset);
+        serialize_opaque_init(f, vm, ctx, var, ty, offset);
         return;
     }
 
