@@ -113,8 +113,8 @@ Notes on the formatting rules:
   grows the VM's text/data segments. This does not affect
   declarations, which compile once and are never touched again.
 - Redefining an already-defined function or variable within a session (hot
-  reload) is not supported -- this is explicitly out of scope for the
-  initial REPL and is tracked separately.
+  reload) is not supported
+  ([#1455](https://todo.sr.ht/~takeiteasy/cccc/1455)).
 - Certain internal compiler errors outside of parsing/type-checking (for
   example calling a forward-declared-but-never-defined function, or hitting
   a hard resource limit like data-segment overflow) still terminate the
