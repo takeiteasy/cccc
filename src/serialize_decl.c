@@ -1589,7 +1589,8 @@ void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     // A global that *does* have an initializer still needs both lines (the
     // forward declaration, then the real `T name = ...;` definition), so
     // this only skips the no-initializer case.
-    if (!var->init_data && (var->is_static || !var->is_definition))
+    if (!var->init_data && !global_is_static_tls(var) &&
+        (var->is_static || !var->is_definition))
         return;
 
     if (var->is_static)

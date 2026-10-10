@@ -304,6 +304,11 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj);
 bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                Obj *obj);
+// gcc has no tentative TLS definitions, so a `static _Thread_local` global is
+// emitted once, as its definition, with no forward declaration.
+static inline bool global_is_static_tls(Obj *obj) {
+    return obj->is_static && obj->is_tls;
+}
 bool is_noop_expr(Node *node);
 bool nested_upvar_is_deferred(Obj *var);
 bool nested_var_is_own(Obj *fn, Obj *var);

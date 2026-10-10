@@ -1592,7 +1592,19 @@ static bool build_deferred_init_splice(VirtualMachine *vm, Initializer *init,
 
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
+    Type        *declared_ty    = var->ty;
     Initializer *init   = initializer(vm, rest, tok, var->ty, &var->ty);
+
+    if (declared_ty != var->ty &&
+        (declared_ty->kind == TY_STRUCT || declared_ty->kind == TY_UNION) &&
+        declared_ty->is_flexible) {
+        Member *tail = var->ty->members;
+        while (tail->next)
+            tail = tail->next;
+        if (tail->ty->kind == TY_ARRAY && tail->ty->array_len > 0)
+            error_tok(vm, tok,
+                      "non-static initialization of a flexible array member");
+    }
 
     if (var->is_constexpr)
         validate_constexpr_initializer(vm, var, init, tok);

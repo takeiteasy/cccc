@@ -241,9 +241,6 @@ use the same byte-granular path.
 - A global initializer holding a pointer inside a union, or at a misaligned
   (`packed`) offset, is refused
   ([#1472](https://todo.sr.ht/~takeiteasy/cccc/1472)).
-- A global initializer that fills a flexible array member fails the layout
-  guard, with or without a wide bit-field
-  ([#1471](https://todo.sr.ht/~takeiteasy/cccc/1471)).
 
 ## See also
 

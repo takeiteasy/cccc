@@ -1341,6 +1341,22 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     collect_node_types(ctx, node->next);
 }
 
+// A flexible struct initialised by a global/static is realized as a clone whose
+// last member has a concrete length (parse_init.c's initializer()); the host
+// needs the declared `T tail[]` type, not that clone.
+static Type *flexible_declared_type(Type *ty) {
+    while (ty->origin && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+           ty->is_flexible) {
+        Member *last = ty->members;
+        while (last && last->next)
+            last = last->next;
+        if (!last || last->ty->kind != TY_ARRAY || last->ty->array_len <= 0)
+            break;
+        ty = ty->origin;
+    }
+    return ty;
+}
+
 static void collect_type(SerializeContext *ctx, Type *ty) {
     if (!ty) {
         return;
@@ -1382,6 +1398,8 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
 
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return;
+
+    ty = flexible_declared_type(ty);
 
     // #1091: type_vec_find_nominal() (not the plain, purely-structural
     // type_vec_find()) so a tagless typedef that's structurally identical
@@ -2233,7 +2251,13 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         } else {
             if (emit_align)
                 fprintf(f, "_Alignas(%d) ", emit_align);
-            serialize_type_decl(f, ctx, m->ty, name);
+            if (ty->is_flexible && !m->next && m->ty->kind == TY_ARRAY &&
+                m->ty->array_len == 0) {
+                strncat(name, "[]", sizeof(name) - strlen(name) - 1);
+                serialize_type_decl(f, ctx, m->ty->base, name);
+            } else {
+                serialize_type_decl(f, ctx, m->ty, name);
+            }
         }
         fprintf(f, ";\n");
     }
@@ -2660,6 +2684,8 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return;
+
+    ty              = flexible_declared_type(ty);
 
     TypeName *tag   = find_tag_name(ctx, ty);
     TypeName *alias = find_typedef_name(ctx, ty);
@@ -3396,8 +3422,6 @@ static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
 
     char msg[384];
     print_indent_level(f, indent);
-    // TODO(#1471): a realized flexible-array struct's size isn't rounded to its
-    // alignment, so this guard fails on the host's rounded sizeof.
     snprintf(msg, sizeof(msg), "cccc/host layout disagreement: %s", spelling);
     fprintf(f, "_Static_assert(sizeof(%s) == %lld, ", spelling,
             (long long)ty->size);

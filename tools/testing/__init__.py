@@ -326,9 +326,8 @@ NATIVE_SKIP_TESTS = {
     # Each is its own ticket; the file goes back on the corpus once fixed.
     "test_suite_c23.c": "its wide-bitfield test (test_c23_bitint_wide_"
                  "bitfield_over128) now round-trips (see tests/test_native_"
-                 "wide_bitfield_opaque.c); still blocked by a "
-                 "`thread_local` compound literal that gcc rejects as a "
-                 "redefinition (#1468), the _Decimal32/64/128 gap on clang "
+                 "wide_bitfield_opaque.c); still blocked by the "
+                 "_Decimal32/64/128 gap on clang "
                  "(see NATIVE_SKIP_TESTS_CLANG) and C23 libc functions "
                  "(memset_explicit, free_sized, exp10, sinpi, ...) absent "
                  "on macOS",

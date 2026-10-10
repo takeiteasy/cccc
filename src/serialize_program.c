@@ -4713,6 +4713,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // collect_deferred_static_labels()'s own comment.
             if (var_is_deferred_label_static(&ctx, obj))
                 continue;
+            if (global_is_static_tls(obj))
+                continue;
             // #1241: this global's own type is a header typedef that
             // nothing in the generated output ever declares (the header
             // was reached only via a route -- @comptime/@build/@test --
@@ -5415,9 +5417,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // comment.
         if (global_is_header_supplied(vm, &ctx, obj))
             continue;
+        if (global_is_static_tls(obj))
+            continue;
         fprintf(f, obj->is_static ? "static " : "extern ");
-        // TODO(#1468): a `static _Thread_local` forward declaration followed by
-        // its initialized definition is a redefinition error under gcc.
         if (obj->is_tls) // #1022: see serialize_global_var's own comment
             fprintf(f, "_Thread_local ");
         // #1136: see serialize_alignas_if_needed's own comment.
