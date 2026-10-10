@@ -782,6 +782,11 @@ NATIVE_SKIP_TESTS_GCC_MACOS = {
                  "only asserts offsetof (both compilers agree on that), "
                  "so it stays otherwise green; see test_bitfield_unnamed_"
                  "aligned_1165.c's own comment for the full table",
+    "test_align_local_params_over8.c": "gcc-16 on Darwin/arm64 does not "
+                 "realign the by-value copy of an _Alignas(32) struct "
+                 "argument (reproduces with plain gcc-16 on the test source, "
+                 "no cccc involved); clang passes -- permanent gcc/Darwin "
+                 "codegen gap",
     "test_bitfield_unnamed_aligned_1165.c": "the VM-only pin (see this "
                  "file's own header comment) of the same permanent gcc/"
                  "Darwin gap as suites/test_suite_attributes_layout_1129.c "

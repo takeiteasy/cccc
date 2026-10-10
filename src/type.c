@@ -1087,6 +1087,19 @@ static bool lhs_targets_initializing_var(Node *node, Obj *var) {
     }
 }
 
+Type *flexible_declared_type(Type *ty) {
+    while (ty->origin && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+           ty->is_flexible) {
+        Member *last = ty->members;
+        while (last && last->next)
+            last = last->next;
+        if (!last || last->ty->kind != TY_ARRAY || last->ty->array_len <= 0)
+            break;
+        ty = ty->origin;
+    }
+    return ty;
+}
+
 void add_type(VirtualMachine *vm, Node *node) {
     if (!node || (node->ty && node->kind != ND_COMPLEX))
         return;
@@ -1300,7 +1313,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         case ND_VAR:
         case ND_VLA_PTR:
-            node->ty = node->var->ty;
+            node->ty = flexible_declared_type(node->var->ty);
             // Function-to-pointer decay: when a function name is used as a
             // value, it decays to a pointer to that function
             if (node->var->ty->kind == TY_FUNC) {

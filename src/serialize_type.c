@@ -1341,22 +1341,6 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     collect_node_types(ctx, node->next);
 }
 
-// A flexible struct initialised by a global/static is realized as a clone whose
-// last member has a concrete length (parse_init.c's initializer()); the host
-// needs the declared `T tail[]` type, not that clone.
-static Type *flexible_declared_type(Type *ty) {
-    while (ty->origin && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
-           ty->is_flexible) {
-        Member *last = ty->members;
-        while (last && last->next)
-            last = last->next;
-        if (!last || last->ty->kind != TY_ARRAY || last->ty->array_len <= 0)
-            break;
-        ty = ty->origin;
-    }
-    return ty;
-}
-
 static void collect_type(SerializeContext *ctx, Type *ty) {
     if (!ty) {
         return;

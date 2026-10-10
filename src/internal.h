@@ -856,6 +856,9 @@ Type *without_addr_space(VirtualMachine *vm, Type *ty);
 // The type of an rvalue: `ty` without const/volatile/restrict/_Atomic or an
 // address space. NULL, error and array types come back unchanged.
 Type *unqualified(VirtualMachine *vm, Type *ty);
+// A flexible struct initialised by a global/static is realized as a clone whose
+// tail has a concrete length; this returns the declared `T tail[]` type.
+Type *flexible_declared_type(Type *ty);
 // Lanes of a vector type that a program may name (see Type.vec_visible).
 int vector_lanes(Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
