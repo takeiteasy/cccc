@@ -1173,7 +1173,7 @@ static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
     }
 }
 
-// #1268: an opaque-storage aggregate (type_needs_opaque_storage) is a single
+// An opaque-storage aggregate (type_needs_opaque_storage) is a single
 // byte array, so its initializer is the object's byte image. A pointer inside
 // it is a relocation, which has no integer spelling.
 static void serialize_opaque_init(FILE *f, Obj *var, Type *ty, int offset) {

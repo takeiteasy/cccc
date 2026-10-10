@@ -2075,11 +2075,12 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
            !find_anonymous_typedef_name(ctx, ty);
 }
 
-// #1268: a bit-field whose declared type is a _BitInt wider than 128 bits has
+// A bit-field whose declared type is a _BitInt wider than 128 bits has
 // no legal host spelling (a bit-field's type must be an integer type, and
 // __cccc_biK is a struct). Its struct/union is emitted as opaque bytes in
 // CCCC's own layout and every member access is rewritten to offset-based
-// loads and stores (serialize_expr.c).
+// loads and stores (serialize_expr.c). Scans the members on every member
+// access; cache the answer on the Type if that shows up in a profile.
 bool type_needs_opaque_storage(Type *ty) {
     if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
         return false;

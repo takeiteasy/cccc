@@ -5416,6 +5416,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         if (global_is_header_supplied(vm, &ctx, obj))
             continue;
         fprintf(f, obj->is_static ? "static " : "extern ");
+        // TODO(#1468): a `static _Thread_local` forward declaration followed by
+        // its initialized definition is a redefinition error under gcc.
         if (obj->is_tls) // #1022: see serialize_global_var's own comment
             fprintf(f, "_Thread_local ");
         // #1136: see serialize_alignas_if_needed's own comment.

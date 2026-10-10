@@ -241,7 +241,8 @@ struct. Narrow bit-fields in the same struct use the same byte-granular path.
   is refused ([#1470](https://todo.sr.ht/~takeiteasy/cccc/1470)).
 - A global initializer with a pointer inside such a struct is refused
   ([#1469](https://todo.sr.ht/~takeiteasy/cccc/1469)).
-- `&(struct S){...}.member` on a block-scope compound literal is refused.
+- `&(struct S){...}.member` on a block-scope compound literal is refused
+  ([#1470](https://todo.sr.ht/~takeiteasy/cccc/1470)).
 
 ## See also
 

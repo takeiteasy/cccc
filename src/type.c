@@ -685,6 +685,8 @@ static Type *integer_promotion(Type *ty) {
 
 // Integer promotion of a unary/shift operand whose type carries a typedef's
 // aligned(N): the promoted result is plain `int`, so the request is dropped.
+// TODO(#1466): promote every sub-int operand of unary +, ~ and <<, not only
+// aligned ones.
 Node *promote_aligned_operand(VirtualMachine *vm, Node *n) {
     add_type(vm, n);
     if (!n->ty->decl_align || !is_integer(n->ty))
@@ -821,6 +823,7 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // to step 6).
     if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
         (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width)) {
+        // TODO(#1465): ty1's const/volatile leaks into this rvalue result.
         if (ty1->decl_align == ty2->decl_align)
             return ty1;
         // Two aligned(N) variants of one type: gcc takes the right operand's
@@ -1255,6 +1258,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = ty_int;
             return;
         case ND_BITNOT:
+            // TODO(#1466): ~ and << don't promote a sub-int operand.
             // GNU vector_size vectors (tracker #715): ~v is supported on
             // integer-lane vectors only (matches & | ^).
             if (is_vector(node->lhs->ty) && !is_integer(node->lhs->ty->base))

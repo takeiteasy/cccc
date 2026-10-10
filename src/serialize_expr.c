@@ -782,7 +782,7 @@ static Node *addr_comma_base(Node *shell) {
     return n && n->kind == ND_COMMA ? n : NULL;
 }
 
-static bool opaque_member_access(Node *node); // #1268
+static bool opaque_member_access(Node *node);
 
 // #1102 followup: spell a MEMBER/DEREF shell exactly as serialize_expr()
 // would, except that the comma chain at its bottom -- already emitted
@@ -805,6 +805,7 @@ static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
     if (need_parens)
         fprintf(f, "(");
     if (n->kind == ND_MEMBER) {
+        // TODO(#1470): take the member's address inside the comma chain.
         if (opaque_member_access(n))
             error("cccc: cannot serialize the address of a member of a "
                   "compound literal in native mode: a struct/union with a "
@@ -1299,7 +1300,7 @@ static void serialize_shift_operand(FILE *f, VirtualMachine *vm,
     serialize_expr(f, vm, ctx, node, parent_prec);
 }
 
-// ---------- #1268: members of opaque-storage aggregates ----------
+// ---------- members of opaque-storage aggregates ----------
 //
 // A struct/union with a _BitInt(N>128) bit-field is emitted as a byte array
 // (type_needs_opaque_storage, serialize_type.c), so its members don't exist
@@ -1588,7 +1589,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
     if (serialize_wide_bitint_expr(f, vm, ctx, node))
         return;
 
-    // #1268: members of an opaque-storage aggregate.
+    // Members of an opaque-storage aggregate.
     if (opaque_member_access(node)) {
         if (node->member->is_bitfield)
             serialize_opaque_bitfield_read(f, vm, ctx, node);
@@ -3267,7 +3268,7 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         serialize_opaque_bitfield_write(f, vm, ctx, node, true);
         return;
     }
-    // #1268: `s.f += 1` lowers to (tmp = &s, s.f = ...): the chain's value is
+    // `s.f += 1` lowers to (tmp = &s, s.f = ...): the chain's value is
     // dropped too, so its trailing bit-field store skips the re-extract.
     if (node && node->kind == ND_COMMA && !is_noop_expr(node->lhs) &&
         !is_noop_expr(node->rhs)) {

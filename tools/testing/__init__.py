@@ -449,7 +449,7 @@ NATIVE_SKIP_TESTS = {
     # applies no _BitInt value-semantics masking at any width outside
     # bitfields (#1124). _BitInt(N>128) now has a real multi-word native
     # lowering (#1123, RESOLVED), including a bitfield whose declared type is
-    # itself wide (#1268, RESOLVED).
+    # itself wide.
     # --- #1117: RESOLVED. Was: spelled complex accessors surviving into the
     # generated text as ordinary identifiers (fabs/carg/... via tgmath,
     # creal/cimag/conj via complex.h) were expanded by the HOST compiler
