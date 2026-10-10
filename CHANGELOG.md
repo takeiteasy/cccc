@@ -7,6 +7,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-10
+
+- Fixed: casting an unsigned (or `_Bool`/pointer) scalar to a `_BitInt` wider
+  than 64 bits zero-extends in the VM; it used to sign-extend, so
+  `(_BitInt(256))0xffffffffffffffffull` came out as -1.
+- Fixed: unary `+`, `~`, `<<` and `>>` promote a `char`/`short`/`_Bool`/enum
+  operand to `int`, so `sizeof(~c)` is 4 as in gcc and clang.
+- Added: `-c=native`/`-m` lower anonymous struct/union members, flexible array
+  members and `&(struct S){...}.member` in a struct or union with a
+  `_BitInt(N>128)` bit-field, and a global initializer keeps the pointers
+  inside such a struct. A pointer in a union or at a `packed` offset is still
+  refused.
+
 ## [0.8.2] - 2026-10-10
 
 - Added: `-c=native`/`-m` lower a struct or union with a bit-field whose
