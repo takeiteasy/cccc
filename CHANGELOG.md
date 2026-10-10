@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-10
+
 - Added: `-c=native`/`-m` lower a struct or union with a bit-field whose
   declared type is a `_BitInt` wider than 128 bits, by emitting it as opaque
   bytes in CCCC's own layout. Anonymous and flexible array members in such a
