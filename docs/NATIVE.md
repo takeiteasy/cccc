@@ -149,11 +149,10 @@ Where a construct has genuine VM-specific semantics with no faithful host
 translation, CCCC emits a diagnosed compile error rather than silently
 divergent C. The main cases:
 
-- A bitfield whose *declared type* is itself a `_BitInt` wider than 128 bits
-  (e.g. `_BitInt(256) f : 193;`) -- a bit-field's type has no legal C
-  spelling once it needs the multi-word container below (that container is a
-  `struct`, and `struct T f : 193;` is as illegal as it looks). A plain
-  (non-bitfield) object or value of the same width lowers fine; see below.
+- A struct or union with a `_BitInt(N>128)` bit-field that also has an
+  anonymous struct/union member, a flexible array member, or a global
+  initializer holding a pointer; see
+  [Wide `_BitInt` bit-fields](#wide-_bitint-bit-fields).
 - `__builtin_decimal_to_chars` and `#include <decimal_math.h>`; any decimal
   construct at all in a `CCCC_HAS_DECIMAL=0` build.
 - The VM-only source-map builtins `__builtin_pc_function_name` /
@@ -215,10 +214,34 @@ statement expression calling into it. `sizeof`/`_Alignof` match the VM
 exactly (the container is size- and alignment-identical to CCCC's own
 `_BitInt(N>128)` representation, unlike clang's or gcc's own native
 `_BitInt`, which neither accepts this width range on every target this
-project supports nor agrees with CCCC's layout where it does). The one
-residual is the bitfield case above — a bitfield's own declared type still
-has no lowering, since the container is a `struct` and a bit-field's type
-must be a plain integer type.
+project supports nor agrees with CCCC's layout where it does).
+
+### Wide `_BitInt` bit-fields
+
+A bit-field whose declared type is a `_BitInt` wider than 128 bits has no C
+spelling (`struct T f : 193;` is as illegal as it looks), so a struct or union
+holding one is emitted as a byte array in CCCC's own layout, and every member
+of it is read and written at its CCCC offset:
+
+```c
+struct S { int tag; _BitInt(256) f : 193; };
+struct S s;
+s.f = 3;   // __cccc_bitfield_insert(...) on the bytes of s
+s.tag = 7; // (*(int *)((unsigned char *)&s + 0)) = 7
+```
+
+`sizeof`, `_Alignof` and member offsets match the VM, including under
+`packed`. `&s.tag`, struct copies, by-value arguments and returns, nested
+structs, and global initializers (as a byte image) work as for any other
+struct. Narrow bit-fields in the same struct use the same byte-granular path.
+
+**Limitations:**
+
+- An anonymous struct/union member or a flexible array member in such a struct
+  is refused ([#1470](https://todo.sr.ht/~takeiteasy/cccc/1470)).
+- A global initializer with a pointer inside such a struct is refused
+  ([#1469](https://todo.sr.ht/~takeiteasy/cccc/1469)).
+- `&(struct S){...}.member` on a block-scope compound literal is refused.
 
 ## See also
 

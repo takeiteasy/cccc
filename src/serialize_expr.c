@@ -782,6 +782,8 @@ static Node *addr_comma_base(Node *shell) {
     return n && n->kind == ND_COMMA ? n : NULL;
 }
 
+static bool opaque_member_access(Node *node); // #1268
+
 // #1102 followup: spell a MEMBER/DEREF shell exactly as serialize_expr()
 // would, except that the comma chain at its bottom -- already emitted
 // earlier in the surrounding `(chain..., ...)` sequence -- is replaced by
@@ -803,6 +805,11 @@ static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
     if (need_parens)
         fprintf(f, "(");
     if (n->kind == ND_MEMBER) {
+        if (opaque_member_access(n))
+            error("cccc: cannot serialize the address of a member of a "
+                  "compound literal in native mode: a struct/union with a "
+                  "_BitInt(N>128) bit-field is emitted as opaque "
+                  "storage\n\n1 error generated.");
         serialize_addr_shell(f, vm, ctx, n->lhs, base, tail, node_prec);
         if (n->member && n->member->name)
             fprintf(f, ".%.*s", n->member->name->len, n->member->name->loc);
@@ -1292,6 +1299,203 @@ static void serialize_shift_operand(FILE *f, VirtualMachine *vm,
     serialize_expr(f, vm, ctx, node, parent_prec);
 }
 
+// ---------- #1268: members of opaque-storage aggregates ----------
+//
+// A struct/union with a _BitInt(N>128) bit-field is emitted as a byte array
+// (type_needs_opaque_storage, serialize_type.c), so its members don't exist
+// in the host C. Every access is rewritten against CCCC's own layout:
+//   plain member   (*(T *)((unsigned char *)&base + offset)), spelled through
+//                  a may_alias typedef so serialize_type_decl() writes T
+//   bit-field      __cccc_bitfield_extract / __cccc_bitfield_insert, the
+//                  runtime the VM already uses (src/stdlib/wide_bitint.c)
+// An rvalue base (`f().x`) is copied into a temporary first.
+
+static bool opaque_member_access(Node *node) {
+    return node && node->kind == ND_MEMBER && node->member && node->lhs &&
+           type_needs_opaque_storage(node->lhs->ty);
+}
+
+static bool opaque_base_is_lvalue(Node *n) {
+    switch (n->kind) {
+        case ND_VAR:
+        case ND_VLA_PTR:
+        case ND_DEREF:
+            return true;
+        case ND_MEMBER:
+            return n->lhs && opaque_base_is_lvalue(n->lhs);
+        default:
+            return false;
+    }
+}
+
+typedef struct {
+    Node *base;
+    int   seq;
+    bool  staged;
+} OpaqueBase;
+
+static void opaque_base_begin(FILE *f, VirtualMachine *vm,
+                              SerializeContext *ctx, OpaqueBase *ob,
+                              Node *base) {
+    ob->base   = base;
+    ob->seq    = ctx->wide_bitint_seq++;
+    ob->staged = !opaque_base_is_lvalue(base);
+    if (!ob->staged)
+        return;
+    fprintf(f, "({ __typeof__(");
+    serialize_expr(f, vm, ctx, base, 0);
+    fprintf(f, ") __cccc_ob%d = (", ob->seq);
+    serialize_expr(f, vm, ctx, base, 0);
+    fprintf(f, "); ");
+}
+
+static void opaque_base_end(FILE *f, OpaqueBase *ob) {
+    if (ob->staged)
+        fprintf(f, "; })");
+}
+
+// Address of the member's storage as `unsigned char *`.
+static void opaque_member_addr(FILE *f, VirtualMachine *vm,
+                               SerializeContext *ctx, OpaqueBase *ob,
+                               Member *m) {
+    fprintf(f, "((unsigned char *)&");
+    if (ob->staged)
+        fprintf(f, "__cccc_ob%d", ob->seq);
+    else {
+        fprintf(f, "(");
+        serialize_expr(f, vm, ctx, ob->base, 0);
+        fprintf(f, ")");
+    }
+    fprintf(f, " + %d)", m->offset);
+}
+
+// gcc ignores (and warns about) attributes on a typedef of a struct.
+static bool opaque_type_takes_attrs(Type *ty) {
+    while (ty->kind == TY_ARRAY)
+        ty = ty->base;
+    return ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
+           !(ty->kind == TY_BITINT && ty->size > 16);
+}
+
+static void serialize_opaque_plain_member(FILE *f, VirtualMachine *vm,
+                                          SerializeContext *ctx, Node *node) {
+    Member    *m = node->member;
+    OpaqueBase ob;
+    opaque_base_begin(f, vm, ctx, &ob, node->lhs);
+    char name[32];
+    snprintf(name, sizeof name, "__cccc_m%d", ob.seq);
+    fprintf(f, "(*({ typedef ");
+    serialize_type_decl(f, ctx, m->ty, name);
+    if (opaque_type_takes_attrs(m->ty)) {
+        bool unaligned =
+            m->ty->align > 1 && (m->offset % m->ty->align != 0 ||
+                                 node->lhs->ty->align < m->ty->align);
+        fprintf(f, " __attribute__((may_alias%s))",
+                unaligned ? ", aligned(1)" : "");
+    }
+    fprintf(f, "; (%s *)", name);
+    opaque_member_addr(f, vm, ctx, &ob, m);
+    fprintf(f, "; }))");
+    opaque_base_end(f, &ob);
+}
+
+// Declares `__cccc_bfr<seq>` holding the extracted field value, then yields
+// it as a value of the declared type.
+static void opaque_bitfield_extract(FILE *f, SerializeContext *ctx, Member *m,
+                                    const char *addr, int seq) {
+    Type *ty    = m->ty;
+    int   words = ty->size > 16 ? ty->size / 8 : (ty->size > 8 ? 2 : 1);
+    if (ty->size > 16)
+        fprintf(f, "__cccc_bi%d __cccc_bfr%d; ", words, seq);
+    else
+        fprintf(f, "uint64_t __cccc_bfr%d[2]; ", seq);
+    fprintf(f, "__cccc_bitfield_extract(__cccc_bfr%d%s, %s, %d, %d, %d, %d); ",
+            seq, ty->size > 16 ? ".w" : "", addr, m->bit_offset, m->bit_width,
+            words, ty->is_unsigned ? 0 : 1);
+    if (ty->size > 16)
+        fprintf(f, "__cccc_bfr%d", seq);
+    else {
+        fprintf(f, "(");
+        serialize_type(f, ctx, ty);
+        if (ty->size > 8)
+            fprintf(f,
+                    ")(((unsigned __int128)__cccc_bfr%d[1] << 64) | "
+                    "__cccc_bfr%d[0])",
+                    seq, seq);
+        else
+            fprintf(f, ")__cccc_bfr%d[0]", seq);
+    }
+}
+
+static void serialize_opaque_bitfield_read(FILE *f, VirtualMachine *vm,
+                                           SerializeContext *ctx, Node *node) {
+    OpaqueBase ob;
+    opaque_base_begin(f, vm, ctx, &ob, node->lhs);
+    fprintf(f, "({ unsigned char *__cccc_bfb%d = ", ob.seq);
+    opaque_member_addr(f, vm, ctx, &ob, node->member);
+    fprintf(f, "; ");
+    char addr[32];
+    snprintf(addr, sizeof addr, "__cccc_bfb%d", ob.seq);
+    opaque_bitfield_extract(f, ctx, node->member, addr, ob.seq);
+    fprintf(f, "; })");
+    opaque_base_end(f, &ob);
+}
+
+// `base.f = rhs` on a bit-field: store the low bit_width bits, yield the
+// stored (truncated) field value.
+static void serialize_opaque_bitfield_write(FILE *f, VirtualMachine *vm,
+                                            SerializeContext *ctx, Node *node,
+                                            bool discard) {
+    Node   *lhs = node->lhs;
+    Member *m   = lhs->member;
+    Type   *ty  = m->ty;
+    int     seq = ctx->wide_bitint_seq++;
+    if (!opaque_base_is_lvalue(lhs->lhs))
+        error("cccc: cannot serialize an assignment to a bit-field of a "
+              "non-lvalue in native mode\n\n1 error generated.");
+    OpaqueBase ob = {lhs->lhs, seq, false};
+    fprintf(f, "({ ");
+    if (ty->size > 16)
+        fprintf(f, "__cccc_bi%d __cccc_bfv%d = (", (int)(ty->size / 8), seq);
+    else {
+        serialize_type(f, ctx, ty);
+        fprintf(f, " __cccc_bfv%d = (", seq);
+    }
+    serialize_expr(f, vm, ctx, node->rhs, 0);
+    fprintf(f, "); ");
+    if (ty->size > 16)
+        ; // __cccc_bfv<seq>.w is the source buffer
+    else if (ty->size > 8)
+        fprintf(f,
+                "uint64_t __cccc_bfw%d[2] = { (uint64_t)__cccc_bfv%d, "
+                "(uint64_t)((unsigned __int128)__cccc_bfv%d >> 64) }; ",
+                seq, seq, seq);
+    else
+        fprintf(f, "uint64_t __cccc_bfw%d[2] = { (uint64_t)__cccc_bfv%d, 0 }; ",
+                seq, seq);
+    fprintf(f, "unsigned char *__cccc_bfb%d = ", seq);
+    opaque_member_addr(f, vm, ctx, &ob, m);
+    fprintf(f, "; __cccc_bitfield_insert(__cccc_bfb%d, ", seq);
+    if (ty->size > 16)
+        fprintf(f, "__cccc_bfv%d.w", seq);
+    else
+        fprintf(f, "__cccc_bfw%d", seq);
+    fprintf(f, ", %d, %d);", m->bit_offset, m->bit_width);
+    if (!discard) {
+        char addr[32];
+        snprintf(addr, sizeof addr, "__cccc_bfb%d", seq);
+        fprintf(f, " ");
+        opaque_bitfield_extract(f, ctx, m, addr, seq);
+        fprintf(f, ";");
+    }
+    fprintf(f, " })");
+}
+
+static bool opaque_bitfield_assign(Node *node) {
+    return node && node->kind == ND_ASSIGN && opaque_member_access(node->lhs) &&
+           node->lhs->member->is_bitfield;
+}
+
 // Serialize an expression
 static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Node *node,
@@ -1383,6 +1587,19 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
     // literal) -- see serialize_wide_bitint_expr's own comment.
     if (serialize_wide_bitint_expr(f, vm, ctx, node))
         return;
+
+    // #1268: members of an opaque-storage aggregate.
+    if (opaque_member_access(node)) {
+        if (node->member->is_bitfield)
+            serialize_opaque_bitfield_read(f, vm, ctx, node);
+        else
+            serialize_opaque_plain_member(f, vm, ctx, node);
+        return;
+    }
+    if (opaque_bitfield_assign(node)) {
+        serialize_opaque_bitfield_write(f, vm, ctx, node, false);
+        return;
+    }
 
     int  node_prec   = get_precedence(node->kind);
     bool need_parens = (node_prec < parent_prec);
@@ -1494,9 +1711,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // node->val alone is truncated to 64 bits by the tokenizer
                 // (tokenize.c). Only the VM path previously consumed
                 // wide_digits (codegen_expr.c); this arm is the -m/-c=native
-                // counterpart. bit_width > 128 already can't reach here: the
-                // enclosing type would have hard-errored out of
-                // serialize_type() (case TY_BITINT above) first.
+                // counterpart. bit_width > 128 doesn't reach here:
+                // serialize_wide_bitint_expr() handles it first.
                 unsigned __int128 v =
                     decode_wide_digits(node->wide_digits, node->wide_base);
                 fprintf(f,
@@ -1776,7 +1992,11 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             } else if (is_noop_expr(node->rhs)) {
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
             } else {
-                serialize_expr(f, vm, ctx, node->lhs, node_prec);
+                if (opaque_bitfield_assign(node->lhs)) // value is discarded
+                    serialize_opaque_bitfield_write(f, vm, ctx, node->lhs,
+                                                    true);
+                else
+                    serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, " , ");
                 serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
             }
@@ -3039,7 +3259,31 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             rmw = rmw->lhs;
             while (rmw && rmw->kind == ND_CAST && rmw->lhs)
                 rmw = rmw->lhs;
-            serialize_expr(f, vm, ctx, rmw, parent_prec);
+            serialize_discard_expr(f, vm, ctx, rmw, parent_prec);
+            return;
+        }
+    }
+    if (opaque_bitfield_assign(node)) {
+        serialize_opaque_bitfield_write(f, vm, ctx, node, true);
+        return;
+    }
+    // #1268: `s.f += 1` lowers to (tmp = &s, s.f = ...): the chain's value is
+    // dropped too, so its trailing bit-field store skips the re-extract.
+    if (node && node->kind == ND_COMMA && !is_noop_expr(node->lhs) &&
+        !is_noop_expr(node->rhs)) {
+        Node *tail = node->rhs;
+        while (tail->kind == ND_COMMA && !is_noop_expr(tail->rhs))
+            tail = tail->rhs;
+        if (opaque_bitfield_assign(tail)) {
+            bool parens = parent_prec > get_precedence(ND_COMMA);
+            if (parens)
+                fprintf(f, "(");
+            serialize_expr(f, vm, ctx, node->lhs, get_precedence(ND_COMMA));
+            fprintf(f, " , ");
+            serialize_discard_expr(f, vm, ctx, node->rhs,
+                                   get_precedence(ND_COMMA) + 1);
+            if (parens)
+                fprintf(f, ")");
             return;
         }
     }

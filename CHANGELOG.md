@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `-c=native`/`-m` lower a struct or union with a bit-field whose
+  declared type is a `_BitInt` wider than 128 bits, by emitting it as opaque
+  bytes in CCCC's own layout. Anonymous and flexible array members in such a
+  struct, and pointers in its global initializer, are still refused.
 - Fixed: `_Alignof(expr)` and `__alignof__(expr)` report a typedef's
   `aligned(N)` when the expression's type is that typedef (`*p`, `p[1]`,
   `-g`, `g + g`), and the plain type's alignment when the result is another

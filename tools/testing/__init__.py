@@ -324,24 +324,14 @@ NATIVE_SKIP_TESTS = {
     # --- pre-existing -c=native serializer gaps, surfaced by #1033's
     # corpus run (tests/suites/ was never exercised under --native before).
     # Each is its own ticket; the file goes back on the corpus once fixed.
-    "test_suite_c23.c": "test_c23_bitint_wide_bitfield_over128 declares a "
-                 "_BitInt(256) bitfield member, which still has no "
-                 "native/-m lowering -- a bitfield's type has no legal C "
-                 "spelling once it needs the #1123 __cccc_biK container, "
-                 "closing that gap needs the whole enclosing aggregate "
-                 "rewritten to opaque byte storage (every member access, "
-                 "not just the wide one), tracked as its own follow-up. "
-                 "This is the file's only remaining native blocker: "
-                 "#1113's _Decimal32/64/128 gap is gcc-specific-clean (see "
-                 "test_suite_decimal.c, NATIVE_SKIP_TESTS_CLANG below) and "
-                 "#1123 itself now gives every OTHER _BitInt(N>128) "
-                 "construct in this file (arithmetic, casts, the plain "
-                 "N>128 global) a real multi-word lowering -- see "
-                 "tests/test_native_wide_bitint_1123.c for that coverage, "
-                 "kept as its own standalone file rather than un-skipping "
-                 "this one, since a single failing bitfield in a shared "
-                 "--testing binary would fail the whole file to compile, "
-                 "not just skip one subtest",
+    "test_suite_c23.c": "its wide-bitfield test (test_c23_bitint_wide_"
+                 "bitfield_over128) now round-trips (see tests/test_native_"
+                 "wide_bitfield_opaque.c); still blocked by a "
+                 "`thread_local` compound literal that gcc rejects as a "
+                 "redefinition (#1468), the _Decimal32/64/128 gap on clang "
+                 "(see NATIVE_SKIP_TESTS_CLANG) and C23 libc functions "
+                 "(memset_explicit, free_sized, exp10, sinpi, ...) absent "
+                 "on macOS",
     # test_suite_posix.c: RESOLVED, back on the corpus (was skipped since
     # #1103, most recently for #1145). #1103's own two bugs (rename-
     # collision dbm_* dup names, mbstate_t's __opaque layout mismatch),
@@ -453,14 +443,13 @@ NATIVE_SKIP_TESTS = {
     # initializers now have their own coverage in
     # test_suite_typesystem.c's test_wide_global_init (N<=128, native
     # corpus) and test_suite_c23.c's test_c23_bitint_wide_global_init
-    # (N>128, native-skipped). test_suite_typesystem.c is back on the
+    # (N>128). test_suite_typesystem.c is back on the
     # native corpus; see git history for the resolved skip entry. Also
     # found in the same audit but out of #1121's scope: the serializer
     # applies no _BitInt value-semantics masking at any width outside
     # bitfields (#1124). _BitInt(N>128) now has a real multi-word native
-    # lowering (#1123, RESOLVED) for every construct except a bitfield whose
-    # declared type is itself wide -- see this file's own skip entry above
-    # for that residual.
+    # lowering (#1123, RESOLVED), including a bitfield whose declared type is
+    # itself wide (#1268, RESOLVED).
     # --- #1117: RESOLVED. Was: spelled complex accessors surviving into the
     # generated text as ordinary identifiers (fabs/carg/... via tgmath,
     # creal/cimag/conj via complex.h) were expanded by the HOST compiler

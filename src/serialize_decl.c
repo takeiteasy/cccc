@@ -1173,6 +1173,24 @@ static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
     }
 }
 
+// #1268: an opaque-storage aggregate (type_needs_opaque_storage) is a single
+// byte array, so its initializer is the object's byte image. A pointer inside
+// it is a relocation, which has no integer spelling.
+static void serialize_opaque_init(FILE *f, Obj *var, Type *ty, int offset) {
+    // TODO(#1469): patch pointer slots in a constructor instead of refusing.
+    for (Relocation *r = var->rel; r; r = r->next)
+        if (r->offset >= offset && r->offset < offset + ty->size)
+            error("cccc: cannot serialize initializer for global '%s' in "
+                  "native mode: a pointer inside a struct/union with a "
+                  "_BitInt(N>128) bit-field\n\n1 error generated.",
+                  var->name);
+    fprintf(f, "{ { ");
+    for (int i = 0; i < ty->size; i++)
+        fprintf(f, "%s0x%02x", i ? ", " : "",
+                (unsigned char)var->init_data[offset + i]);
+    fprintf(f, " } }");
+}
+
 // Reconstruct a global variable's initializer from its raw `init_data`
 // bytes (plus any Relocations) as C source text, recursing through
 // arrays/vectors/structs/unions. Replaces the old scalar-only dispatch that
@@ -1192,6 +1210,11 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
             serialize_reloc_init(f, vm, ctx, var, ty, rel);
             return;
         }
+    }
+
+    if (type_needs_opaque_storage(ty)) {
+        serialize_opaque_init(f, var, ty, offset);
+        return;
     }
 
     switch (ty->kind) {

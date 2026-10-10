@@ -2075,6 +2075,44 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
            !find_anonymous_typedef_name(ctx, ty);
 }
 
+// #1268: a bit-field whose declared type is a _BitInt wider than 128 bits has
+// no legal host spelling (a bit-field's type must be an integer type, and
+// __cccc_biK is a struct). Its struct/union is emitted as opaque bytes in
+// CCCC's own layout and every member access is rewritten to offset-based
+// loads and stores (serialize_expr.c).
+bool type_needs_opaque_storage(Type *ty) {
+    if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
+        return false;
+    for (Member *m = ty->members; m; m = m->next)
+        if (m->is_bitfield && m->ty && m->ty->kind == TY_BITINT &&
+            m->ty->size > 16)
+            return true;
+    return false;
+}
+
+// Plain error(), not error_tok(): error_tok segfaults when reached from this
+// file's aggregate-body printing. The trailer is what tools/testing/runner.py
+// scans for in a compile-error test.
+static void opaque_storage_unsupported(const char *what) {
+    error("cccc: cannot serialize %s in native mode: a struct/union with a "
+          "_BitInt(N>128) bit-field is emitted as opaque storage\n\n1 error "
+          "generated.",
+          what);
+}
+
+static void serialize_opaque_members(FILE *f, Type *ty) {
+    // TODO(#1470): flexible array and anonymous members.
+    if (ty->is_flexible)
+        opaque_storage_unsupported("a flexible array member");
+    for (Member *m = ty->members; m; m = m->next)
+        if (!m->name && !m->is_bitfield)
+            opaque_storage_unsupported("an anonymous struct/union member");
+    fprintf(f, "    unsigned char __cccc_bf[%d]", (int)ty->size);
+    if (ty->align > 1)
+        fprintf(f, " __attribute__((aligned(%d)))", ty->align);
+    fprintf(f, ";\n");
+}
+
 // #1129/#1163: packed/aligned(N) were retained on Type (is_packed, align)
 // but never re-emitted, so a struct's native layout silently diverged from
 // the VM's -- see the admissibility-rule discussion in NATIVE.md. Shared
@@ -2105,7 +2143,13 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
 // re-emitted the same way, after the `: width` instead of before the type.
 static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
                                         Type *ty) {
+    if (type_needs_opaque_storage(ty)) {
+        serialize_opaque_members(f, ty);
+        return;
+    }
     for (Member *m = ty->members; m; m = m->next) {
+        if (!m->name && !m->is_bitfield && type_needs_opaque_storage(m->ty))
+            opaque_storage_unsupported("an anonymous struct/union member");
         fprintf(f, "    ");
         char name[256] = "";
         if (m->name) {
@@ -2127,43 +2171,6 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         // Re-emit it the same way, as a trailing GNU attribute after the
         // width instead of a declspec prefix.
         if (m->is_bitfield) {
-            // #1123: a bitfield whose *declared* type is a wide (>128-bit)
-            // _BitInt has no legal C spelling at all -- a bit-field's type
-            // must be an integer type, and the __cccc_biK container
-            // serialize_type() now emits for a bare wide _BitInt object is a
-            // struct, so `__cccc_bi4 f : 193;` is exactly as illegal as
-            // `struct S f : 193;` would be (confirmed: gcc/clang both reject
-            // it, "bit-field 'f' has invalid type"). #1123's own value-level
-            // lowering (a statement-expression per operation, an emitted
-            // __cccc_biK container) does not by itself cover this -- it
-            // would need every member access on the *whole enclosing
-            // aggregate* rewritten to opaque byte storage (m->offset-based
-            // extract/insert for every member, not just this one), a
-            // separate, larger piece of work than the value-level case this
-            // ticket closes. Refuse loudly here rather than let this fall
-            // through to the __cccc_biK spelling above, which a host
-            // compiler rejects with a confusing diagnostic that doesn't
-            // name CCCC or this member at all.
-            //
-            // Plain error(), not error_tok(ctx->vm, m->tok, ...): m->tok
-            // does exist here, but routing through error_tok crashed
-            // (SIGSEGV) reached from an ND_ASSIGN into this exact member --
-            // this file's aggregate-body printing is apparently not a safe
-            // place to re-enter error_tok's longjmp path. serialize_decl.c's
-            // own bitfield-initializer refusal (the sibling #1123 note this
-            // mirrors, "bitfield wider than 128 bits") uses plain error()
-            // too. Neither goes through the batched cc_print_all_errors()
-            // summary path this way, so the trailer below is appended by
-            // hand to match the "N error(s) generated." phrasing the test
-            // harness's compile-error heuristic (tools/testing/runner.py)
-            // already scans for -- same reason serialize_type()'s own
-            // TY_BITINT case (just above) needed one.
-            if (m->ty && m->ty->kind == TY_BITINT && m->ty->size > 16)
-                error("cccc: cannot serialize a bitfield whose declared "
-                      "type is _BitInt(%d) in native mode: no bitfield wider "
-                      "than 128 bits has a native/-m lowering yet\n\n1 error "
-                      "generated.",
-                      m->ty->bit_width);
             serialize_type_decl(f, ctx, m->ty, name);
             fprintf(f, " : %d", m->bit_width);
             if (m->explicit_align > 1)
@@ -2191,6 +2198,8 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
 // already contributed" test, without duplicating struct_decl's offset
 // bookkeeping: emit aligned(N) iff ty->align exceeds it, packed or not.
 static void serialize_aggregate_attrs(FILE *f, Type *ty) {
+    if (type_needs_opaque_storage(ty))
+        return; // serialize_opaque_members carries the alignment
     int natural = 1;
     for (Member *m = ty->members; m; m = m->next) {
         int contributed = ty->is_packed ? m->explicit_align : m->align;
@@ -3348,6 +3357,9 @@ static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
     fprintf(f, ");\n");
 
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return;
+    // The named members don't exist in the emitted type.
+    if (type_needs_opaque_storage(ty))
         return;
     for (Member *m = ty->members; m; m = m->next) {
         if (m->is_bitfield || !m->name)

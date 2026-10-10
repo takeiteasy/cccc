@@ -659,12 +659,13 @@ void __cccc_bitint_from_str(uint64_t *dst, const char *str, int base, int words,
 // enclosing struct/union exactly like any other bitfield -- packed at
 // `bit_off` bits into the byte at `base`, with no guarantee that the full
 // sizeof(declared type) bytes are even present (cccc lays bitfields out
-// compactly, so e.g. `_BitInt(256) f : 193;` lives in a 25-byte struct even
-// though _BitInt(256) itself is 32 bytes). The scalar-register shift/mask
-// idiom src/codegen_expr.c uses for narrow bitfields cannot represent such a
-// value at all, and reading/writing the full declared-type width would run
-// past the object. These helpers instead walk the exact
-// ceil((bit_off%8 + width)/8) bytes the field occupies, one byte at a time.
+// compactly, so e.g. `_BitInt(256) f : 193;` occupies 25 bytes of its struct
+// even though _BitInt(256) itself is 32 -- a `packed` struct is exactly 25).
+// The scalar-register shift/mask idiom src/codegen_expr.c uses for narrow
+// bitfields cannot represent such a value at all, and reading/writing the full
+// declared-type width would run past the object. These helpers instead walk the
+// exact ceil((bit_off%8 + width)/8) bytes the field occupies, one byte at a
+// time.
 
 // Read `width` bits starting at bit `bit_off` (relative to `base`) into the
 // low bits of the `words`-word buffer at `dst`, then sign- or zero-extend

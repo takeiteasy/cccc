@@ -797,15 +797,14 @@ int test_c23_bitint_wide(void) {
     return 42;
 }
 
-// #1125: a bitfield whose declared type is a wide _BitInt(N > 128) --
-// beyond even the __int128 native/-m serializer container (#1121/#1123),
-// so this stays VM-only, same as this file's own N>128 coverage elsewhere.
-// The container read/write codegen (src/codegen_expr.c) and the parse-time
-// global-init RMW (src/parse_init.c) used to assume the storage unit fit a
-// single 64-bit register or one whole-container word array respectively;
-// neither holds once mem->ty->size > 8 and > 16. This is the ticket's own
-// literal repro (`_BitInt(256) f : 193;`), plus the unsigned counterpart
-// and a nonzero-bit_offset variant.
+// A bitfield whose declared type is a wide _BitInt(N > 128) --
+// beyond even the __int128 native/-m serializer container. The container
+// read/write codegen (src/codegen_expr.c) and the parse-time global-init RMW
+// (src/parse_init.c) used to assume the storage unit fit a single 64-bit
+// register or one whole-container word array respectively; neither holds once
+// mem->ty->size > 8 and > 16. This is the ticket's own literal repro
+// (`_BitInt(256) f : 193;`), plus the unsigned counterpart and a
+// nonzero-bit_offset variant.
 struct WideBitfield256_1125 {
     _BitInt(256) f : 193;
 };
@@ -841,10 +840,7 @@ int test_c23_bitint_wide_bitfield_over128(void) {
     if (v != -3)
         return 3;
 
-    // Nonzero bit_offset, local and global -- this file is VM-only
-    // regardless (>128-bit container, past serialize_type's own TY_BITINT
-    // refusal, #1123), so #1126's now-fixed global-initializer-
-    // serialization gap was never reachable from here anyway.
+    // Nonzero bit_offset, local and global.
     struct WideBitfield256Offset1125 lo;
     lo.a = -5;
     lo.b = ((_BitInt(256))1 << 200) + 11;
