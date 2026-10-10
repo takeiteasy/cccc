@@ -683,6 +683,16 @@ static Type *integer_promotion(Type *ty) {
     return ty;
 }
 
+// Integer promotion of a unary/shift operand whose type carries a typedef's
+// aligned(N): the promoted result is plain `int`, so the request is dropped.
+Node *promote_aligned_operand(VirtualMachine *vm, Node *n) {
+    add_type(vm, n);
+    if (!n->ty->decl_align || !is_integer(n->ty))
+        return n;
+    Type *promoted = integer_promotion(n->ty);
+    return promoted == n->ty ? n : new_cast(vm, n, promoted);
+}
+
 // Integer conversion rank (C99 6.3.1.1): long > int > short > char
 // Approximation for C23 _BitInt: rank = bit_width, sufficient for N<=64.
 static int get_integer_rank(Type *ty) {
@@ -706,6 +716,27 @@ static int get_integer_rank(Type *ty) {
         default:
             return -1;
     }
+}
+
+// A typedef's aligned(N) rides on its Type (Type.decl_align). The common type
+// keeps it only when an operand's own type is the common type; two operands of
+// the same type with different requests yield the plain type, as in gcc/clang.
+// A fresh copy, so the operand's qualifiers don't leak into the result.
+static Type *common_keeping_align(VirtualMachine *vm, Type *plain, Type *a,
+                                  Type *b) {
+    bool ma = a->kind == plain->kind, mb = b->kind == plain->kind;
+    int  align = 0;
+    if (ma && mb)
+        align = a->decl_align == b->decl_align ? a->decl_align : 0;
+    else if (ma)
+        align = a->decl_align;
+    else if (mb)
+        align = b->decl_align;
+    if (!align)
+        return plain;
+    Type *ty       = copy_type(vm, plain);
+    ty->decl_align = align;
+    return ty;
 }
 
 // Usual arithmetic conversions (C99 6.3.1.8)
@@ -769,17 +800,17 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // Step 1: If either operand has type long double, the other is converted to
     // long double
     if (ty1->kind == TY_LDOUBLE || ty2->kind == TY_LDOUBLE)
-        return ty_ldouble;
+        return common_keeping_align(vm, ty_ldouble, ty1, ty2);
 
     // Step 2: Otherwise, if either operand has type double, the other is
     // converted to double
     if (ty1->kind == TY_DOUBLE || ty2->kind == TY_DOUBLE)
-        return ty_double;
+        return common_keeping_align(vm, ty_double, ty1, ty2);
 
     // Step 3: Otherwise, if either operand has type float, the other is
     // converted to float
     if (ty1->kind == TY_FLOAT || ty2->kind == TY_FLOAT)
-        return ty_float;
+        return common_keeping_align(vm, ty_float, ty1, ty2);
 
     // Step 4: Otherwise, integer promotions are performed on both operands
     ty1 = integer_promotion(ty1);
@@ -789,8 +820,17 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // needed. For _BitInt, also require matching bit_width (different widths go
     // to step 6).
     if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
-        (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width))
-        return ty1;
+        (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width)) {
+        if (ty1->decl_align == ty2->decl_align)
+            return ty1;
+        // Two aligned(N) variants of one type: gcc takes the right operand's
+        // request, clang drops both.
+        Type *ty       = copy_type(vm, ty1);
+        ty->decl_align = vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC
+                             ? ty2->decl_align
+                             : 0;
+        return ty;
+    }
 
     // Step 6: If both operands have signed integer types or both have unsigned
     // integer types, the operand with lesser integer conversion rank is
@@ -820,6 +860,7 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // type corresponding to the type of the operand with signed integer type
     Type *result        = copy_type(vm, signed_ty);
     result->is_unsigned = true;
+    result->decl_align  = 0;
     return result;
 }
 
@@ -1100,7 +1141,9 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = node->lhs->ty;
             return;
         case ND_NEG: {
-            Type *ty  = get_common_type(vm, ty_int, node->lhs->ty);
+            Type *ty = get_common_type(vm, ty_int, node->lhs->ty);
+            if (node->lhs->ty->decl_align)
+                ty = get_common_type(vm, node->lhs->ty, node->lhs->ty);
             node->lhs = new_cast(vm, node->lhs, ty);
             node->ty  = ty;
             return;
@@ -1218,11 +1261,13 @@ void add_type(VirtualMachine *vm, Node *node) {
                 error_tok(
                     vm, node->tok,
                     "'~' is not supported on floating-point vector types");
-            node->ty = node->lhs->ty;
+            node->lhs = promote_aligned_operand(vm, node->lhs);
+            node->ty  = node->lhs->ty;
             return;
         case ND_SHL:
         case ND_SHR:
-            node->ty = node->lhs->ty;
+            node->lhs = promote_aligned_operand(vm, node->lhs);
+            node->ty  = node->lhs->ty;
             return;
         case ND_VAR:
         case ND_VLA_PTR:

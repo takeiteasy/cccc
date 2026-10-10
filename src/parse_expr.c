@@ -1595,6 +1595,10 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node             = new_cast(vm, expr, ty);
         node->tok              = start;
         node->is_explicit_cast = true;
+        // gcc's cast result is the plain type; clang's keeps a typedef's
+        // aligned(N) (visible to _Alignof(expr)).
+        if (vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC)
+            node->ty->decl_align = 0;
 
         // #486: assume/dynamic bounds casts. !in_type_lookahead guards both
         // calls below for the same reason as the #485 ban arms above --

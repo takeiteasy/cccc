@@ -104,7 +104,7 @@ Sets minimum alignment for a type, variable, or struct/union member. The argumen
 
 A type-level `aligned(N)` (on the struct/union itself) and a member's own explicit alignment (`_Alignas(N)` or `aligned(N)`, including on a bit-field) both survive `-c=native`/`-m`/`-c=generated` (#1129/#1160/#1165) — re-emitted only when they actually widen the layout beyond what the members alone would produce, so ordinary structs carry no extra attribute noise. A bit-field's own alignment is always re-emitted as a trailing GNU attribute after its width, never as an `_Alignas(N)` prefix (which GCC rejects on a bit-field). An object's own `_Alignas(N)` (`Obj.align`) was already covered separately (#1136).
 
-`__alignof__(v)` / `_Alignof(v)` on a variable or struct member names its declared alignment (`__alignof__(cache_line) == 64` below); any other expression reports its type's.
+`__alignof__(v)` / `_Alignof(v)` on a variable or struct member names its declared alignment (`__alignof__(cache_line) == 64` below); any other expression reports its type's alignment, including a typedef's `aligned(N)` (`typedef int i64 __attribute__((aligned(64)));` gives `__alignof__(*p) == 64` for `i64 *p`). An operation whose result is a different type reports that type: `__alignof__(g + 1) == 4`, and `__alignof__(g + g) == 64`.
 
 ```c
 struct __attribute__((aligned(16))) vec4 { float x, y, z, w; };

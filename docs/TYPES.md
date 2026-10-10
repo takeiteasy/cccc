@@ -91,6 +91,11 @@ on Linux x86_64, C11 `_Alignof(type)` and `_Alignas(type)` of a 32- or
 64-byte vector cap at 16 under `gcc` and give the vector's size under
 `clang` (see [ATTRIBUTES.md](ATTRIBUTES.md#vector-size)).
 
+A cast to a typedef with `aligned(N)` is the other: `_Alignof((i64)x)` is the
+plain type's alignment under `gcc` and `N` under `clang`.
+Likewise `x + g` for `int x` and an aligned `i64 g` is `N` under `gcc` (the
+right operand's type wins) and plain under `clang`.
+
 `_Generic` arm selection is **not** affected by `--compiler-family` — its
 behaviour is the one both families already agree on.
 

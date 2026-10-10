@@ -39,7 +39,7 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "+"))
-        return cast(vm, rest, tok->next);
+        return promote_aligned_operand(vm, cast(vm, rest, tok->next));
 
     if (equal(tok, "-"))
         return new_unary(vm, ND_NEG, cast(vm, rest, tok->next), tok);
@@ -1984,8 +1984,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "_Alignof") || is_gnu_alignof) {
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
-        // TODO(#1460): honour a typedef's aligned(N) for lvalues like *p.
-        int align = node->ty->align;
+        int align = type_alignof(node->ty);
         if (node->kind == ND_VAR && node->var && node->var->align > align)
             align = node->var->align;
         else if (node->kind == ND_MEMBER && node->member &&

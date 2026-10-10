@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `_Alignof(expr)` and `__alignof__(expr)` report a typedef's
+  `aligned(N)` when the expression's type is that typedef (`*p`, `p[1]`,
+  `-g`, `g + g`), and the plain type's alignment when the result is another
+  type (`g + 1`). Under `--compiler-family=clang` a cast keeps the typedef's
+  alignment too.
 - Added: `-mavx`, `-mavx2` and `-mavx512f` on x86_64. They define `__AVX__`,
   `__AVX2__` and `__AVX512F__`, raise gcc's cap on C11 `_Alignof(type)` of a
   wide vector to 32 or 64, and are forwarded to `-c=native`'s compiler.
