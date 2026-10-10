@@ -85,6 +85,138 @@ void test_const_ptr(void) {
     (void)p;
 }
 
+// --- Const-correctness and rvalue targets ---
+
+[[cccc::test(expect_compile_error = true,
+             error = "cannot assign to const-qualified variable")]]
+void test_const_compound_assign(void) {
+    const int x  = 1;
+    x           += 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error = "cannot assign to const-qualified variable")]]
+void test_const_post_increment(void) {
+    const int x = 1;
+    x++;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error = "cannot assign to const-qualified variable")]]
+void test_const_pre_increment(void) {
+    const int x = 1;
+    ++x;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error = "cannot assign to const-qualified variable")]]
+void test_const_struct_member_compound(void) {
+    struct S {
+        int m;
+    };
+    const struct S s  = {1};
+    s.m              += 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error = "cannot assign to const-qualified variable")]]
+void test_const_deref_cast_assign(void) {
+    int v            = 0;
+    *(const int *)&v = 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_comma_assign(void) {
+    int x  = 0;
+    (0, x) = 5;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_comma_compound(void) {
+    int x   = 0;
+    (0, x) += 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_comma_postinc(void) {
+    int x = 0;
+    (0, x)++;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_unary_plus_assign(void) {
+    int x = 0;
+    +x    = 5;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_unary_plus_postinc(void) {
+    int x = 0;
+    (+x)++;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_call_member_assign(void) {
+    struct S {
+        int m;
+    };
+    struct S (*f)(void) = 0;
+    f().m               = 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_call_member_preinc(void) {
+    struct S {
+        int m;
+    };
+    struct S (*f)(void) = 0;
+    ++f().m;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "expression is not assignable")]]
+void test_rvalue_const_call_member_assign(void) {
+    struct S {
+        int m;
+    };
+    const struct S (*f)(void) = 0;
+    f().m                     = 1;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "cannot take the address of an rvalue")]]
+void test_rvalue_comma_address(void) {
+    int  x = 0;
+    int *p = &(0, x);
+    (void)p;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "cannot take the address of an rvalue")]]
+void test_rvalue_unary_plus_address(void) {
+    int  x = 0;
+    int *p = &+x;
+    (void)p;
+}
+
+[[cccc::test(expect_compile_error = true,
+             error                = "cannot take the address of an rvalue")]]
+void test_rvalue_call_member_address(void) {
+    struct S {
+        int m;
+    };
+    struct S (*f)(void) = 0;
+    int *p              = &f().m;
+    (void)p;
+}
+
 // --- Constexpr divide/mod by zero ---
 
 [[cccc::test(expect_compile_error = true)]]

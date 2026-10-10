@@ -484,6 +484,19 @@ Type *without_addr_space(VirtualMachine *vm, Type *ty) {
     return ty;
 }
 
+Type *unqualified(VirtualMachine *vm, Type *ty) {
+    if (!ty || ty->kind == TY_ERROR || ty->kind == TY_ARRAY)
+        return ty;
+    if (ty->is_const || ty->is_volatile || ty->is_restrict || ty->is_atomic) {
+        ty              = copy_type(vm, ty);
+        ty->is_const    = false;
+        ty->is_volatile = false;
+        ty->is_restrict = false;
+        ty->is_atomic   = false;
+    }
+    return without_addr_space(vm, ty);
+}
+
 Type *pointer_to(VirtualMachine *vm, Type *base) {
     Type *ty        = new_type(vm, TY_PTR, 8, 8);
     ty->base        = base;
@@ -683,14 +696,23 @@ static Type *integer_promotion(Type *ty) {
     return ty;
 }
 
-// Integer promotion of a unary +, ~ or shift operand. A typedef's aligned(N)
-// is dropped too: the promoted result is plain `int`.
+// Integer promotion of a unary +, ~ or shift operand. Qualifiers and a
+// typedef's aligned(N) are dropped too: the promoted result is plain `int`.
 Node *promote_operand(VirtualMachine *vm, Node *n) {
     add_type(vm, n);
     if (!is_integer(n->ty))
         return n;
-    Type *promoted = integer_promotion(n->ty);
+    Type *promoted = unqualified(vm, integer_promotion(n->ty));
     return promoted == n->ty ? n : new_cast(vm, n, promoted);
+}
+
+void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {
+    Node *root = n;
+    while (root->kind == ND_MEMBER && root->lhs)
+        root = root->lhs;
+    if ((root->kind == ND_COMMA && root->is_user_comma) ||
+        root->kind == ND_FUNCALL || root->kind == ND_CAST)
+        error_tok(vm, n->tok, "%s", msg);
 }
 
 // Integer conversion rank (C99 6.3.1.1): long > int > short > char
@@ -739,8 +761,15 @@ static Type *common_keeping_align(VirtualMachine *vm, Type *plain, Type *a,
     return ty;
 }
 
-// Usual arithmetic conversions (C99 6.3.1.8)
+static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2);
+
+// Usual arithmetic conversions (C99 6.3.1.8). The result is an rvalue type, so
+// it carries no qualifiers.
 static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
+    return unqualified(vm, arith_common_type(vm, ty1, ty2));
+}
+
+static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // Handle error types - propagate error
     if (!ty1 || !ty2 || ty1->kind == TY_ERROR || ty2->kind == TY_ERROR)
         return ty_error;
@@ -821,7 +850,6 @@ static Type *get_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // to step 6).
     if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
         (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width)) {
-        // TODO(#1465): ty1's const/volatile leaks into this rvalue result.
         if (ty1->decl_align == ty2->decl_align)
             return ty1;
         // Two aligned(N) variants of one type: gcc takes the right operand's
@@ -1204,7 +1232,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                                          node->lhs->tok);
                 node->rhs = new_cast(vm, node->rhs, node->lhs->ty);
             }
-            node->ty = node->lhs->ty;
+            node->ty = unqualified(vm, node->lhs->ty);
             return;
         case ND_EQ:
         case ND_NE:
@@ -1248,7 +1276,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = ty_int;
             return;
         case ND_FUNCALL:
-            node->ty = node->func_ty->return_ty;
+            node->ty = unqualified(vm, node->func_ty->return_ty);
             return;
         case ND_NOT:
         case ND_LOGOR:
@@ -1263,12 +1291,12 @@ void add_type(VirtualMachine *vm, Node *node) {
                     vm, node->tok,
                     "'~' is not supported on floating-point vector types");
             node->lhs = promote_operand(vm, node->lhs);
-            node->ty  = node->lhs->ty;
+            node->ty  = unqualified(vm, node->lhs->ty);
             return;
         case ND_SHL:
         case ND_SHR:
             node->lhs = promote_operand(vm, node->lhs);
-            node->ty  = node->lhs->ty;
+            node->ty  = unqualified(vm, node->lhs->ty);
             return;
         case ND_VAR:
         case ND_VLA_PTR:
@@ -1310,7 +1338,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                                   "result (e.g. the result of a comparison on "
                                   "the same vector type)");
                 }
-                node->ty = t;
+                node->ty = unqualified(vm, t);
                 return;
             }
             bool t_ptr = (t->base != NULL) || t->kind == TY_FUNC;
@@ -1338,6 +1366,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                                                                     : tp;
                 else
                     pty = tp ? tp : ep;
+                pty        = unqualified(vm, pty);
                 node->then = new_cast(vm, node->then, pty);
                 node->els  = new_cast(vm, node->els, pty);
                 node->ty   = pty;
@@ -1348,7 +1377,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             return;
         }
         case ND_COMMA:
-            node->ty = node->rhs->ty;
+            node->ty = unqualified(vm, node->rhs->ty);
             return;
         case ND_MEMBER:
             node->ty = node->member->ty;
@@ -1407,7 +1436,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                 while (stmt->next)
                     stmt = stmt->next;
                 if (stmt->kind == ND_EXPR_STMT) {
-                    node->ty = stmt->lhs->ty;
+                    node->ty = unqualified(vm, stmt->lhs->ty);
                     return;
                 }
             }

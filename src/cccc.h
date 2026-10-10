@@ -2337,6 +2337,10 @@ struct Node {
     // are unchanged.
     bool is_inc_dec_result;
 
+    // ND_COMMA written as `a, b` in source (not a compiler desugar such as a
+    // compound literal): its value is an rvalue, never an assignment target.
+    bool is_user_comma;
+
     // #1018: which <stdarg.h> macro (if any) this node is the parsed
     // __builtin_va_*() wrapper for. The node itself is always the
     // *existing* VM-ABI impl expression, parsed and returned completely

@@ -1860,6 +1860,8 @@ static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest,
     ty = copy_type(vm, ty);
     ty->is_const    = false;
     ty->is_volatile = false;
+    ty->is_restrict = false;
+    ty->is_atomic   = false;
     return without_addr_space(vm, ty);
 }
 
@@ -1869,13 +1871,7 @@ static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest,
 Type *auto_deduced_type(VirtualMachine *vm, Type *ty) {
     if (ty->kind == TY_ARRAY)
         ty = pointer_to(vm, ty->base);
-    if (ty->is_const || ty->is_volatile || ty->is_restrict) {
-        ty              = copy_type(vm, ty);
-        ty->is_const    = false;
-        ty->is_volatile = false;
-        ty->is_restrict = false;
-    }
-    return without_addr_space(vm, ty);
+    return unqualified(vm, ty);
 }
 
 // The deduced type of an `auto` declarator, carrying the variable-level

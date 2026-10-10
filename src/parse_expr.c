@@ -28,8 +28,12 @@
 Node *expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = assign(vm, &tok, tok);
 
-    if (equal(tok, ","))
-        return new_binary(vm, ND_COMMA, node, expr(vm, rest, tok->next), tok);
+    if (equal(tok, ",")) {
+        Node *comma =
+            new_binary(vm, ND_COMMA, node, expr(vm, rest, tok->next), tok);
+        comma->is_user_comma = true;
+        return comma;
+    }
 
     *rest = tok;
     return node;
@@ -661,6 +665,9 @@ Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
                       "a compound assignment to a multi-lane swizzle is not "
                       "supported; write v.lo = v.lo + x");
     }
+
+    if (equal(tok, "=") || is_compound_assign(tok))
+        reject_rvalue(vm, node, "expression is not assignable");
 
     if (equal(tok, "="))
         return new_binary(vm, ND_ASSIGN, node, assign(vm, rest, tok->next),
@@ -1592,7 +1599,7 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         // type cast
-        Node *node             = new_cast(vm, expr, ty);
+        Node *node             = new_cast(vm, expr, unqualified(vm, ty));
         node->tok              = start;
         node->is_explicit_cast = true;
         // gcc's cast result is the plain type; clang's keeps a typedef's

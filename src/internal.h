@@ -853,6 +853,9 @@ Type *copy_type(VirtualMachine *vm, Type *ty);
 // `ty` without its address space: the type of a private temporary that holds a
 // value read from global/local/constant memory.
 Type *without_addr_space(VirtualMachine *vm, Type *ty);
+// The type of an rvalue: `ty` without const/volatile/restrict/_Atomic or an
+// address space. NULL, error and array types come back unchanged.
+Type *unqualified(VirtualMachine *vm, Type *ty);
 // Lanes of a vector type that a program may name (see Type.vec_visible).
 int vector_lanes(Type *ty);
 Type *pointer_to(VirtualMachine *vm, Type *base);
@@ -861,6 +864,9 @@ Type *array_of(VirtualMachine *vm, Type *base, int size);
 Type *vector_of(VirtualMachine *vm, Type *base, int bytes);
 int type_alignof(Type *ty);
 Node *promote_operand(VirtualMachine *vm, Node *n);
+// Reports `msg` at `n` when it is a source-level comma, a call result or a cast
+// (or a member of one): a value, not an lvalue.
+void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg);
 int c11_alignof(VirtualMachine *vm, Type *ty);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);

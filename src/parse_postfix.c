@@ -38,8 +38,15 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         return block_literal(vm, rest, tok);
     }
 
-    if (equal(tok, "+"))
-        return promote_operand(vm, cast(vm, rest, tok->next));
+    if (equal(tok, "+")) {
+        Node *operand  = cast(vm, rest, tok->next);
+        Node *promoted = promote_operand(vm, operand);
+        // The result is a value, never an lvalue, even when no promotion
+        // applies.
+        if (promoted != operand || is_error_type(promoted->ty))
+            return promoted;
+        return new_cast(vm, promoted, unqualified(vm, promoted->ty));
+    }
 
     if (equal(tok, "-"))
         return new_unary(vm, ND_NEG, cast(vm, rest, tok->next), tok);
@@ -47,6 +54,7 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "&")) {
         Node *lhs = cast(vm, rest, tok->next);
         add_type(vm, lhs);
+        reject_rvalue(vm, lhs, "cannot take the address of an rvalue");
         if (lhs->kind == ND_MEMBER && !is_error_type(lhs->ty) && lhs->member &&
             lhs->member->is_bitfield) {
             if (vm->collect_errors &&
@@ -79,15 +87,15 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "~"))
         return new_unary(vm, ND_BITNOT, cast(vm, rest, tok->next), tok);
 
-    // Read ++i as i+=1
-    if (equal(tok, "++"))
-        return to_assign(vm, new_add(vm, unary(vm, rest, tok->next),
-                                     new_num(vm, 1, tok), tok));
-
-    // Read --i as i-=1
-    if (equal(tok, "--"))
-        return to_assign(vm, new_sub(vm, unary(vm, rest, tok->next),
-                                     new_num(vm, 1, tok), tok));
+    // Read ++i as i+=1, --i as i-=1
+    if (equal(tok, "++") || equal(tok, "--")) {
+        int   addend = equal(tok, "++") ? 1 : -1;
+        Node *lhs    = unary(vm, rest, tok->next);
+        reject_rvalue(vm, lhs, "expression is not assignable");
+        Node *one = new_num(vm, 1, tok);
+        return to_assign(vm, addend == 1 ? new_add(vm, lhs, one, tok)
+                                         : new_sub(vm, lhs, one, tok));
+    }
 
     // [GNU] labels-as-values
     if (equal(tok, "&&")) {
@@ -172,12 +180,13 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
 static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
                          int addend) {
     add_type(vm, node);
+    reject_rvalue(vm, node, "expression is not assignable");
     Node *cast = new_cast(
         vm,
         new_add(vm,
                 to_assign(vm, new_add(vm, node, new_num(vm, addend, tok), tok)),
                 new_num(vm, -addend, tok), tok),
-        node->ty);
+        unqualified(vm, node->ty));
     // #1235: let the -c=native serializer recognise this shape and drop the
     // dead `+ -addend` value-reconstruction term in a discard context.
     cast->is_inc_dec_result = true;
@@ -322,7 +331,9 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                 Node *call = new_node(vm, ND_BLOCK_CALL, start);
                 call->lhs  = node;
                 call->args = head.next;
-                call->ty = node->ty->return_ty ? node->ty->return_ty : ty_void;
+                call->ty   = node->ty->return_ty
+                                 ? unqualified(vm, node->ty->return_ty)
+                                 : ty_void;
                 node     = call;
             } else {
                 node = funcall(vm, &tok, tok->next, node);
@@ -1105,7 +1116,7 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 
     Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
     node->func_ty        = ty;
-    node->ty             = ty->return_ty;
+    node->ty             = unqualified(vm, ty->return_ty);
     node->args           = head.next;
     node->has_splice_arg = deferred_splice;
 
