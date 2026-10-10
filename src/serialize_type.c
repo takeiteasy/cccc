@@ -2091,24 +2091,11 @@ bool type_needs_opaque_storage(Type *ty) {
     return false;
 }
 
-// Plain error(), not error_tok(): error_tok segfaults when reached from this
-// file's aggregate-body printing. The trailer is what tools/testing/runner.py
-// scans for in a compile-error test.
-static void opaque_storage_unsupported(const char *what) {
-    error("cccc: cannot serialize %s in native mode: a struct/union with a "
-          "_BitInt(N>128) bit-field is emitted as opaque storage\n\n1 error "
-          "generated.",
-          what);
-}
-
+// The byte array is never named by an access, so each gets a unique name: two
+// anonymous opaque members of one aggregate share its scope.
 static void serialize_opaque_members(FILE *f, Type *ty) {
-    // TODO(#1470): flexible array and anonymous members.
-    if (ty->is_flexible)
-        opaque_storage_unsupported("a flexible array member");
-    for (Member *m = ty->members; m; m = m->next)
-        if (!m->name && !m->is_bitfield)
-            opaque_storage_unsupported("an anonymous struct/union member");
-    fprintf(f, "    unsigned char __cccc_bf[%d]", (int)ty->size);
+    static int seq;
+    fprintf(f, "    unsigned char __cccc_bf%d[%d]", seq++, (int)ty->size);
     if (ty->align > 1)
         fprintf(f, " __attribute__((aligned(%d)))", ty->align);
     fprintf(f, ";\n");
@@ -2149,8 +2136,6 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         return;
     }
     for (Member *m = ty->members; m; m = m->next) {
-        if (!m->name && !m->is_bitfield && type_needs_opaque_storage(m->ty))
-            opaque_storage_unsupported("an anonymous struct/union member");
         fprintf(f, "    ");
         char name[256] = "";
         if (m->name) {
@@ -3342,6 +3327,8 @@ static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
 
     char msg[384];
     print_indent_level(f, indent);
+    // TODO(#1471): a realized flexible-array struct's size isn't rounded to its
+    // alignment, so this guard fails on the host's rounded sizeof.
     snprintf(msg, sizeof(msg), "cccc/host layout disagreement: %s", spelling);
     fprintf(f, "_Static_assert(sizeof(%s) == %lld, ", spelling,
             (long long)ty->size);

@@ -149,8 +149,7 @@ Where a construct has genuine VM-specific semantics with no faithful host
 translation, CCCC emits a diagnosed compile error rather than silently
 divergent C. The main cases:
 
-- A struct or union with a `_BitInt(N>128)` bit-field that also has an
-  anonymous struct/union member, a flexible array member, or a global
+- A struct or union with a `_BitInt(N>128)` bit-field that also has a global
   initializer holding a pointer; see
   [Wide `_BitInt` bit-fields](#wide-_bitint-bit-fields).
 - `__builtin_decimal_to_chars` and `#include <decimal_math.h>`; any decimal
@@ -231,18 +230,19 @@ s.tag = 7; // (*(int *)((unsigned char *)&s + 0)) = 7
 ```
 
 `sizeof`, `_Alignof` and member offsets match the VM, including under
-`packed`. `&s.tag`, struct copies, by-value arguments and returns, nested
-structs, and global initializers (as a byte image) work as for any other
-struct. Narrow bit-fields in the same struct use the same byte-granular path.
+`packed`. `&s.tag` (including on a block-scope compound literal), struct
+copies, by-value arguments and returns, nested structs, anonymous
+struct/union members, flexible array members, and global initializers (as a
+byte image) work as for any other struct. Narrow bit-fields in the same struct
+use the same byte-granular path.
 
 **Limitations:**
 
-- An anonymous struct/union member or a flexible array member in such a struct
-  is refused ([#1470](https://todo.sr.ht/~takeiteasy/cccc/1470)).
 - A global initializer with a pointer inside such a struct is refused
   ([#1469](https://todo.sr.ht/~takeiteasy/cccc/1469)).
-- `&(struct S){...}.member` on a block-scope compound literal is refused
-  ([#1470](https://todo.sr.ht/~takeiteasy/cccc/1470)).
+- A global initializer that fills a flexible array member fails the layout
+  guard, with or without a wide bit-field
+  ([#1471](https://todo.sr.ht/~takeiteasy/cccc/1471)).
 
 ## See also
 

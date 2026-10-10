@@ -793,6 +793,16 @@ static bool opaque_member_access(Node *node);
 // bookkeeping mirrors serialize_expr's own (MEMBER 15 / DEREF 14), so a
 // deref under a member access keeps its parentheses -- `->` lowers to
 // MEMBER(DEREF(base)), which must come out `(*t).m`, not `*t.m`.
+static Node *shell_reroot(Node *n, Node *base, Node *tail, Node *copies,
+                          int *used) {
+    if (n == base)
+        return tail;
+    Node *c = &copies[(*used)++];
+    *c      = *n;
+    c->lhs  = shell_reroot(n->lhs, base, tail, copies, used);
+    return c;
+}
+
 static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Node *n, Node *base,
                                  Node *tail, int parent_prec) {
@@ -805,12 +815,21 @@ static void serialize_addr_shell(FILE *f, VirtualMachine *vm,
     if (need_parens)
         fprintf(f, "(");
     if (n->kind == ND_MEMBER) {
-        // TODO(#1470): take the member's address inside the comma chain.
-        if (opaque_member_access(n))
-            error("cccc: cannot serialize the address of a member of a "
-                  "compound literal in native mode: a struct/union with a "
-                  "_BitInt(N>128) bit-field is emitted as opaque "
-                  "storage\n\n1 error generated.");
+        if (opaque_member_access(n)) {
+            // The member has no name to spell: re-root the shell on the
+            // chain's tail and let the offset-based access print the lvalue.
+            int depth = 0;
+            for (Node *p = n; p != base; p = p->lhs)
+                depth++;
+            Node copies[depth];
+            int  used = 0;
+            serialize_expr(f, vm, ctx,
+                           shell_reroot(n, base, tail, copies, &used),
+                           parent_prec);
+            if (need_parens)
+                fprintf(f, ")");
+            return;
+        }
         serialize_addr_shell(f, vm, ctx, n->lhs, base, tail, node_prec);
         if (n->member && n->member->name)
             fprintf(f, ".%.*s", n->member->name->len, n->member->name->loc);
@@ -1355,6 +1374,19 @@ static void opaque_base_end(FILE *f, OpaqueBase *ob) {
         fprintf(f, "; })");
 }
 
+// Offset of the unnamed members the base access passes through: an anonymous
+// struct/union member of an ordinary aggregate is transparent in the emitted C,
+// so its own offset has to be added by hand. One of an opaque aggregate is
+// already addressed by its offset.
+static int opaque_anon_offset(Node *base) {
+    int off = 0;
+    for (; base && base->kind == ND_MEMBER && base->member &&
+           !base->member->name && !opaque_member_access(base);
+         base = base->lhs)
+        off += base->member->offset;
+    return off;
+}
+
 // Address of the member's storage as `unsigned char *`.
 static void opaque_member_addr(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, OpaqueBase *ob,
@@ -1367,7 +1399,7 @@ static void opaque_member_addr(FILE *f, VirtualMachine *vm,
         serialize_expr(f, vm, ctx, ob->base, 0);
         fprintf(f, ")");
     }
-    fprintf(f, " + %d)", m->offset);
+    fprintf(f, " + %d)", m->offset + opaque_anon_offset(ob->base));
 }
 
 // gcc ignores (and warns about) attributes on a typedef of a struct.
