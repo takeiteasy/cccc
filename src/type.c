@@ -683,13 +683,11 @@ static Type *integer_promotion(Type *ty) {
     return ty;
 }
 
-// Integer promotion of a unary/shift operand whose type carries a typedef's
-// aligned(N): the promoted result is plain `int`, so the request is dropped.
-// TODO(#1466): promote every sub-int operand of unary +, ~ and <<, not only
-// aligned ones.
-Node *promote_aligned_operand(VirtualMachine *vm, Node *n) {
+// Integer promotion of a unary +, ~ or shift operand. A typedef's aligned(N)
+// is dropped too: the promoted result is plain `int`.
+Node *promote_operand(VirtualMachine *vm, Node *n) {
     add_type(vm, n);
-    if (!n->ty->decl_align || !is_integer(n->ty))
+    if (!is_integer(n->ty))
         return n;
     Type *promoted = integer_promotion(n->ty);
     return promoted == n->ty ? n : new_cast(vm, n, promoted);
@@ -1258,19 +1256,18 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = ty_int;
             return;
         case ND_BITNOT:
-            // TODO(#1466): ~ and << don't promote a sub-int operand.
             // GNU vector_size vectors (tracker #715): ~v is supported on
             // integer-lane vectors only (matches & | ^).
             if (is_vector(node->lhs->ty) && !is_integer(node->lhs->ty->base))
                 error_tok(
                     vm, node->tok,
                     "'~' is not supported on floating-point vector types");
-            node->lhs = promote_aligned_operand(vm, node->lhs);
+            node->lhs = promote_operand(vm, node->lhs);
             node->ty  = node->lhs->ty;
             return;
         case ND_SHL:
         case ND_SHR:
-            node->lhs = promote_aligned_operand(vm, node->lhs);
+            node->lhs = promote_operand(vm, node->lhs);
             node->ty  = node->lhs->ty;
             return;
         case ND_VAR:

@@ -38,9 +38,8 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         return block_literal(vm, rest, tok);
     }
 
-    // TODO(#1466): unary + does not promote a sub-int operand.
     if (equal(tok, "+"))
-        return promote_aligned_operand(vm, cast(vm, rest, tok->next));
+        return promote_operand(vm, cast(vm, rest, tok->next));
 
     if (equal(tok, "-"))
         return new_unary(vm, ND_NEG, cast(vm, rest, tok->next), tok);
