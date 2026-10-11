@@ -241,4 +241,21 @@ int test_inline_atomic_helper_keeps_caller_frame(void) {
     return 42;
 }
 
+// Discarded and value-position `_Atomic` increments agree.
+[[cccc::test(return = 42)]]
+int test_atomic_incdec_discarded_and_value(void) {
+    _Atomic int  ai = 0;
+    _Atomic int *pa = &ai;
+    ai++;
+    ++ai;
+    ai--;
+    --ai;
+    ai += 3;
+    (*pa)++;
+    int j = ai++;
+    if (j != 4 || ai != 5)
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end

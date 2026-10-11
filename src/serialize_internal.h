@@ -361,7 +361,8 @@ void serialize_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 // new_inc_dec() tags with is_inc_dec_result, emits only the underlying
 // `(tmp = &A, *tmp = *tmp + 1)` store -- dropping the cast and the dead
 // `+ -addend` term that otherwise trips -Wunused-value. Any other node is
-// forwarded to serialize_expr() unchanged.
+// forwarded to serialize_expr() unchanged. A discarded `_Atomic`
+// read-modify-write loses its trailing value read the same way.
 void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                             Node *node, int parent_prec);
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,

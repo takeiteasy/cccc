@@ -1529,6 +1529,31 @@ static bool opaque_bitfield_assign(Node *node) {
            node->lhs->member->is_bitfield;
 }
 
+// A comma yields an rvalue in C, so a block-scope compound literal (lowered to
+// `(init..., tmp)`) is not assignable as spelled. Re-root the target on
+// `*(init..., &tmp)`, keeping any `.member` shell outside the `&`.
+static void serialize_assign_target(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Node *lhs,
+                                    int parent_prec) {
+    Node *base = lhs;
+    while (base && base->kind == ND_MEMBER)
+        base = base->lhs;
+    if (!base || base->kind != ND_COMMA || is_noop_expr(base->lhs) ||
+        is_noop_expr(base->rhs) || !addr_comma_tail_is_lvalue(base)) {
+        serialize_expr(f, vm, ctx, lhs, parent_prec);
+        return;
+    }
+    Node addr = {.kind = ND_ADDR, .lhs = base, .ty = pointer_to(vm, base->ty)};
+    Node deref = {.kind = ND_DEREF, .lhs = &addr, .ty = base->ty};
+    int  depth = 0;
+    for (Node *p = lhs; p != base; p = p->lhs)
+        depth++;
+    Node copies[depth ? depth : 1];
+    int  used = 0;
+    serialize_expr(f, vm, ctx, shell_reroot(lhs, base, &deref, copies, &used),
+                   parent_prec);
+}
+
 // Serialize an expression
 static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Node *node,
@@ -1996,8 +2021,13 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
         case ND_LE:
         case ND_LOGAND:
         case ND_LOGOR:
-        case ND_ASSIGN:
             serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            fprintf(f, " %s ", get_binary_op_str(node->kind));
+            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            break;
+
+        case ND_ASSIGN:
+            serialize_assign_target(f, vm, ctx, node->lhs, node_prec);
             fprintf(f, " %s ", get_binary_op_str(node->kind));
             serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
             break;
@@ -3295,6 +3325,14 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             serialize_discard_expr(f, vm, ctx, rmw, parent_prec);
             return;
         }
+    }
+    if (node && node->kind == ND_STMT_EXPR && node->is_atomic_rmw) {
+        // The trailing statement only reads the new value back.
+        fprintf(f, "({\n");
+        for (Node *s = node->body; s && s->next; s = s->next)
+            serialize_stmt(f, vm, ctx, s, 1);
+        fprintf(f, "})");
+        return;
     }
     if (opaque_bitfield_assign(node)) {
         serialize_opaque_bitfield_write(f, vm, ctx, node, true);

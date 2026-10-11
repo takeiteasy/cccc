@@ -8550,6 +8550,46 @@ def case_inc_dec_discard_no_unused_value_1235(cccc: Path, tmp: str) -> bool:
     print("    ok")
     return True
 
+LITERAL_STORE_ATOMIC_DISCARD_TU = (
+    "struct B { int a : 3; int c; };\n"
+    "int main(void) {\n"
+    "    int r = 0;\n"
+    "    (int){3} = 4;\n"
+    "    r += ((int){3} += 1);\n"
+    "    (struct B){0}.c = 5;\n"
+    "    (struct B){0}.a = 1;\n"
+    "    _Atomic int ai = 0;\n"
+    "    _Atomic int *pa = &ai;\n"
+    "    ai++; ++ai; ai--; --ai; ai += 3; (*pa)++;\n"
+    "    int j = ai++;\n"
+    "    return (r == 4 && j == 4 && ai == 5) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_literal_store_atomic_discard_native(cccc: Path, tmp: str) -> bool:
+    print("  -c=native, assigning to a compound literal (or its member) "
+          "compiles on the host, and a discarded `_Atomic` ++/--/+= emits no "
+          "unused-value statement (host cc under -Wunused-value -Werror)")
+    src = Path(tmp) / "literal_store_atomic_discard.c"
+    write(src, LITERAL_STORE_ATOMIC_DISCARD_TU)
+
+    m_result = run([str(cccc), "-m", src.name], cwd=tmp)
+    gen_c = Path(tmp) / "literal_store_atomic_discard_gen.c"
+    gen_c.write_text(m_result.stdout)
+    real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if real_cc:
+        werror = run(
+            [real_cc, "-std=gnu11", "-Wunused-value", "-Werror",
+             "-Wno-unused-variable", "-c", gen_c.name, "-o", "/dev/null"],
+            cwd=tmp)
+        if werror.returncode != 0:
+            print(f"    FAIL: host cc rejected the output\n"
+                  f"    {werror.stderr}")
+            return False
+    return _native_run_case(cccc, tmp, "literal_store_atomic_discard",
+                            LITERAL_STORE_ATOMIC_DISCARD_TU)
+
 
 ANON_TYPEDEF_SIGNATURE_18_TU = (
     "typedef struct { int a; int b; } Pair;\n"
@@ -9727,6 +9767,7 @@ CASES = [
     case_comptime_generated_main_is_entry_point,
     case_long_long_header_prototype_1234,
     case_inc_dec_discard_no_unused_value_1235,
+    case_literal_store_atomic_discard_native,
     case_anon_typedef_signature_18,
     case_ret_buffer_unused_local_19,
     case_generated_shared_typedef_global_1241,

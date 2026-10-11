@@ -562,8 +562,9 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
         cur             = cur->next =
             new_unary(vm, ND_EXPR_STMT, new_var_node(vm, new, tok), tok);
 
-        Node *node = new_node(vm, ND_STMT_EXPR, tok);
-        node->body = head.next;
+        Node *node          = new_node(vm, ND_STMT_EXPR, tok);
+        node->body          = head.next;
+        node->is_atomic_rmw = true;
         return node;
     }
 

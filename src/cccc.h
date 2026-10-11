@@ -2357,6 +2357,11 @@ struct Node {
     // are unchanged.
     bool is_inc_dec_result;
 
+    // ND_STMT_EXPR that to_assign() builds for an `_Atomic` read-modify-write
+    // (CAS loop, then a trailing read of the new value). Serializer-only: a
+    // discard context drops that trailing read.
+    bool is_atomic_rmw;
+
     // ND_COMMA written as `a, b` in source (not a compiler desugar such as a
     // compound literal): its value is an rvalue, never an assignment target.
     bool is_user_comma;
