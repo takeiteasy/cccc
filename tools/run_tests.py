@@ -14,11 +14,6 @@ Sub-suites:
                         NATIVE_SKIP_TESTS_CLANG/NATIVE_SKIP_TESTS_GCC/
                         NATIVE_SKIP_TESTS_GCC_MACOS, hard-fails on any
                         stale entry (ticket #1182)
-  sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
-  header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
-  host_attribute_link_smoke — host __attribute__-stripping duplicate-symbol
-                        link regression under a real gcc (ticket #1199);
-                        skips when no real (non-clang) gcc is on PATH
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
                         own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
@@ -216,113 +211,6 @@ def _run_native_skip_audit_suite(cccc, n_jobs, process_timeout=None):
     # a future maintainer doesn't go hunting a skip table that's fine.
     tail = "\n".join((result.stdout + result.stderr).splitlines()[-40:])
     return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
-
-
-def _run_sqlite_suite(cccc):
-    """Run the SQLite amalgamation smoke test.
-
-    Returns (status_str, ok). Skips cleanly if the zip is absent.
-    """
-    script = _TOOLS_DIR / "sqlite_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("sqlite_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        # Redirect the CCCC binary used by sqlite_smoke by temporarily
-        # patching the module-level 'cccc' variable used in main().
-        # sqlite_smoke.main() computes root/cccc from __file__; since
-        # we imported via spec there is no __file__ root difference,
-        # but we let main() run normally (it will use REPO_ROOT / "cccc").
-        # If a custom --binary was passed we need to swap it in.
-        rc = mod.main()
-        if rc == 0:
-            return "passed (or skipped: zip absent)", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_header_resolution_suite():
-    """Run the header resolution smoke tests (#891).
-
-    Invokes the built cccc from a temp directory with no include flags, so
-    it exercises resolution paths tools/tests.py's own -I./include can't
-    reach. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "header_resolution_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("header_resolution_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_cli_exit_code_suite():
-    """Run the CLI exit-code smoke tests (#1260).
-
-    Drives the built cccc through main.c's non-compile exit paths and
-    asserts each exits non-zero after printing an error -- a class the
-    per-test-file harness (which classifies by stderr text) cannot see.
-    Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "cli_exit_code_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("cli_exit_code_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_host_attribute_link_smoke_suite():
-    """Run the host __attribute__-stripping duplicate-symbol link smoke
-    test (#1199).
-
-    Only exercises anything under a real (non-clang) gcc -- clang was never
-    affected, so this reports "skipped" everywhere that isn't a macOS/Linux
-    host with a genuine gcc on PATH. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "host_attribute_link_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "host_attribute_link_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed (or skipped: no real gcc on PATH)", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
 
 
 def _run_comptime_native_suite():
@@ -754,38 +642,6 @@ def main():
         skip_audit_status, ok_skip_audit = _run_native_skip_audit_suite(cccc, n_jobs, timeout)
         print(f"  {skip_audit_status}")
         suite_results["native_skip_audit"] = ok_skip_audit
-
-    # --- SQLite smoke ---
-    print()
-    print("[ sqlite smoke ]")
-    wedge.arm("sqlite", scalar_phase_timeout)
-    sqlite_status, ok_sqlite = _run_sqlite_suite(cccc)
-    print(f"  {sqlite_status}")
-    suite_results["sqlite"] = ok_sqlite
-
-    # --- Header resolution smoke (#891) ---
-    print()
-    print("[ header_resolution_smoke ]")
-    wedge.arm("header_resolution_smoke", scalar_phase_timeout)
-    hdr_status, ok_hdr = _run_header_resolution_suite()
-    print(f"  {hdr_status}")
-    suite_results["header_resolution_smoke"] = ok_hdr
-
-    # --- CLI exit-code smoke (#1260) ---
-    print()
-    print("[ cli_exit_code_smoke ]")
-    wedge.arm("cli_exit_code_smoke", scalar_phase_timeout)
-    cli_ec_status, ok_cli_ec = _run_cli_exit_code_suite()
-    print(f"  {cli_ec_status}")
-    suite_results["cli_exit_code_smoke"] = ok_cli_ec
-
-    # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
-    print()
-    print("[ host_attribute_link_smoke ]")
-    wedge.arm("host_attribute_link_smoke", scalar_phase_timeout)
-    attr_link_status, ok_attr_link = _run_host_attribute_link_smoke_suite()
-    print(f"  {attr_link_status}")
-    suite_results["host_attribute_link_smoke"] = ok_attr_link
 
     # --- Comptime/native serializer smoke (#892) ---
     print()

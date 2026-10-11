@@ -6,8 +6,7 @@ src/serialize.c -- the serializer that reconstructs a runtime translation
 unit only runs under `-m`/`-c=generated`/`-c=native`. Despite the module name (kept
 for history: it started as a comptime-specific regression test), this
 script now covers native-backend serializer bugs in general -- anything a
-VM-only test structurally cannot catch -- in the same spirit as
-tools/header_resolution_smoke.py.
+VM-only test structurally cannot catch -- 
 
 Cases:
   1. `-c=native` end-to-end: a `@shared` header declaring two distinct
@@ -241,10 +240,9 @@ PRIMARY_FILE_PROGRAM = (
 # route it through run() rather than calling subprocess.run directly.
 def run(cmd, cwd, input=None, env=None):
     # #1202: this local helper used to inherit the harness's own stdin with
-    # no timeout -- the same class of hazard #1201 fixed in the sibling
-    # host_attribute_link_smoke.py (an unguarded `-x c -`-style call blocks
-    # forever on a non-interactive CI runner's open, never-EOF stdin) and
-    # tools/testing/proc.py's run_capture() (#1185) chokepoint fixes for the
+    # no timeout -- the same class of hazard as an unguarded `-x c -`-style
+    # call blocking forever on a non-interactive CI runner's open, never-EOF
+    # stdin, which tools/testing/proc.py's run_capture() (#1185) chokepoint fixes for the
     # main per-test-file suite, which this standalone script bypasses since
     # it runs in-process via importlib, not as a per-test spawn.
     #

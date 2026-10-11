@@ -23,9 +23,7 @@ inside the `fork()` call itself, which is exactly the shape of the stale
 `futex(..., FUTEX_LOCK_PI_PRIVATE, NULL)`, 7 unreaped zombie children) --
 blocks there before any per-subprocess timeout is even armed. Several other
 sub-suites in tools/run_tests.py also run in-process via `importlib` with no
-timeout at all (`_run_repl_suite`, `_run_sqlite_suite`,
-`_run_header_resolution_suite`, `_run_comptime_native_suite`,
-`_run_host_attribute_link_smoke_suite`). None of these gaps are reachable
+timeout at all (`_run_comptime_native_suite`). None of these gaps are reachable
 from a per-`subprocess.Popen` fix -- they need a watchdog external to any
 single subprocess call, which is what this module provides.
 

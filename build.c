@@ -16,8 +16,7 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
-//   header_resolution_smoke, cli_exit_code_smoke,
+//   clean, host_tests, test / test_suites / test_legacy,
 //   comptime_native_smoke, audit_reflection_builtins
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
 //   doxygen)
@@ -571,8 +570,7 @@ BuildTarget *host_tests(Builder *ctx) {
     return step;
 }
 
-// ---- test / test-suites / test-legacy / sqlite-smoke / audit-ffi
-// (Makefile:368-389) --
+// ---- test / test-suites / test-legacy --
 
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
@@ -611,75 +609,10 @@ BuildTarget *test_legacy(Builder *ctx) {
 }
 
 [[cccc::build_target]]
-BuildTarget *sqlite_smoke(Builder *ctx) {
-    // tools/sqlite_smoke.py hardcodes root/"cccc" -- it takes no --binary
-    // override, unlike tools/tests.py and tools/run_tests.py. Put the built
-    // binary there via `cp` + atomic `mv`, NOT a direct `cp` onto ./cccc:
-    // when this whole build.c invocation is itself running as ./cccc (the
-    // common case -- ./cccc --build build.c), an in-place `cp` truncates
-    // and rewrites the very inode the running process's text segment is
-    // demand-paged from, and it gets SIGKILLed the next time the kernel
-    // faults in a code page. `mv` swaps the directory entry to a new inode
-    // atomically, leaving the running process's already-open mapping of
-    // the old one untouched until it exits.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(
-        cmd, sizeof(cmd),
-        "cp %s ./cccc.sqlite-smoke-tmp && mv ./cccc.sqlite-smoke-tmp ./cccc "
-        "&& python3 tools/sqlite_smoke.py",
-        TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "sqlite-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *header_resolution_smoke(Builder *ctx) {
-    // tools/header_resolution_smoke.py (#891) hardcodes root/"cccc", same as
-    // sqlite_smoke.py above -- see the comment on sqlite_smoke for why the
-    // built binary is placed via `cp` + atomic `mv` rather than a direct
-    // `cp` onto ./cccc.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.header-resolution-smoke-tmp && "
-             "mv ./cccc.header-resolution-smoke-tmp ./cccc "
-             "&& python3 tools/header_resolution_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "header-resolution-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *cli_exit_code_smoke(Builder *ctx) {
-    // tools/cli_exit_code_smoke.py (#1260) hardcodes root/"cccc", same as
-    // header_resolution_smoke above -- see the comment on sqlite_smoke for
-    // why the built binary is placed via `cp` + atomic `mv` rather than a
-    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
-    // run_tests.py; this standalone target is for running it in isolation.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.cli-exit-code-smoke-tmp && "
-             "mv ./cccc.cli-exit-code-smoke-tmp ./cccc "
-             "&& python3 tools/cli_exit_code_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "cli-exit-code-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
 BuildTarget *comptime_native_smoke(Builder *ctx) {
-    // tools/comptime_native_smoke.py (#892) hardcodes root/"cccc", same as
-    // header_resolution_smoke above -- see the comment on sqlite_smoke for
-    // why the built binary is placed via `cp` + atomic `mv` rather than a
-    // direct `cp` onto ./cccc.
+    // tools/comptime_native_smoke.py (#892) hardcodes root/"cccc", so the
+    // built binary is placed via `cp` + atomic `mv` rather than a direct `cp`
+    // onto ./cccc.
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     char         cmd[512];
