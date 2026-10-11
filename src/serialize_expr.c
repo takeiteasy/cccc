@@ -975,6 +975,7 @@ static bool ty_is_super_wide_bitint(Type *ty) {
     return ty && ty->kind == TY_BITINT && ty->size > 16;
 }
 
+// TODO: by-value call arguments are not routed through here; see #1492.
 void serialize_value_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                           Node *node, int prec) {
     Node *src = node;
