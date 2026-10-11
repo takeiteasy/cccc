@@ -442,8 +442,7 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "creat", (void *)wrap_creat, 2, 0);
     cc_register_variadic_cfunc(vm, "fcntl", (void *)fcntl, 2, 0);
     // flock/ioctl: declared in include/ but never registered anywhere --
-    // same "undefined function" gap class as #783, surfaced by widening
-    // tools/audit_ffi.py's header scan for #784/#792.
+    // same "undefined function" gap class as #783.
     cc_register_cfunc(vm, "flock", (void *)flock, 2, 0);
     // ioctl (#795): request-code allowlist, not a raw passthrough -- see
     // wrap_ioctl's own comment above for why.

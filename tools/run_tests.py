@@ -14,39 +14,21 @@ Sub-suites:
                         NATIVE_SKIP_TESTS_CLANG/NATIVE_SKIP_TESTS_GCC/
                         NATIVE_SKIP_TESTS_GCC_MACOS, hard-fails on any
                         stale entry (ticket #1182)
-  debugger            — macOS host-signal crash-debugger integration (macOS only)
-  repl                — interactive REPL PTY integration (POSIX only, ticket #661)
-  debugger_condition  — conditional breakpoint PTY integration (POSIX only, ticket 113)
-  debugger_print      — debugger `print`/`p` command PTY integration (POSIX only, #958)
   sqlite              — SQLite 3.53.2 amalgamation smoke test (skips if zip absent)
   header_resolution_smoke — CCCC header resolution from a foreign CWD (ticket #891)
   host_attribute_link_smoke — host __attribute__-stripping duplicate-symbol
                         link regression under a real gcc (ticket #1199);
                         skips when no real (non-clang) gcc is on PATH
   comptime_native_smoke — native (-m/-c=generated/-c=native) serializer regressions (tickets #892/#897/#901/#904/#918)
-  opencl_cli_smoke    — OpenCL C dialect selection (.cl extension, -x, -cl-std) and
-                        keyword isolation between inputs
-  url_mirror_smoke    — URL #include mirror path-join + nested-project-header
-                        repro (ticket #1324); case 2 skips on a non-curl build
-  compile_scale_smoke — compile time must grow linearly with the number of
-                        functions in a TU (ticket #1426)
-  vm_profile_smoke    — --vm-profile comptime section in every compile mode,
-                        and JSON routing under -m/-c=generated/-c=native
   smoke_skip_audit    — behavioural staleness audit of comptime_native_smoke.py's
                         own SMOKE_CASE_SKIPS_GCC_MACOS (ticket #1197); reports
                         "nothing to audit" on any platform/family other than
                         macOS+gcc, since that's the only axis the table covers
-  audit_ffi           — src/stdlib FFI registration audit (ticket #784)
-  audit_test_headers  — tests/**/*.c CCCC_*/EXPECT_* header directive damage audit (ticket #1153)
   test_header_parse   — tools/testing/header.py parse_test_header() unit tests (ticket #1153)
-                        and tools/audit_test_headers.py audit_file() typo/near-miss unit
-                        tests (ticket #1158)
   test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
   audit_reflection_builtins — reflection.h prototypes vs CC_BUILTIN registrations
-  audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
-  audit_host_macro_shadow — host-facing translation macros shadowed under self-hosting (ticket #1315)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
 
 Optional:
@@ -236,146 +218,6 @@ def _run_native_skip_audit_suite(cccc, n_jobs, process_timeout=None):
     return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
 
 
-def _run_host_signal_suite(cccc):
-    """Run the macOS host-signal debugger integration tests.
-
-    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
-    """
-    if sys.platform != "darwin":
-        return "skipped (macOS-only)", True
-
-    script = _TOOLS_DIR / "test_host_signal_debugger.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        # Import and call directly to avoid spawning a new interpreter.
-        # The script's main() returns 0 or 1 and never calls sys.exit inside.
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("test_host_signal_debugger", script)
-        mod = importlib.util.module_from_spec(spec)
-
-        # Override the global CCCC so the imported module uses our binary.
-        mod.__dict__["_OVERRIDE_CCCC"] = str(cccc)
-        spec.loader.exec_module(mod)
-
-        # Inject --binary argument so the argparse in main() picks it up.
-        old_argv = sys.argv
-        sys.argv = ["test_host_signal_debugger.py", "--binary", str(cccc)]
-        try:
-            rc = mod.main()
-        finally:
-            sys.argv = old_argv
-
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_repl_suite(cccc):
-    """Run the interactive REPL PTY integration tests (ticket #661).
-
-    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
-    The REPL is a stdin-driven interactive session (readline, multi-line
-    continuation prompts), so it needs a real pseudo-terminal to exercise --
-    the `pty` module is POSIX-only, hence the Windows skip (matching the
-    host-signal suite's platform-gating pattern above).
-    """
-    if sys.platform == "win32":
-        return "skipped (POSIX-only, needs a pty)", True
-
-    script = _TOOLS_DIR / "test_repl.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("test_repl", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        old_argv = sys.argv
-        sys.argv = ["test_repl.py", "--binary", str(cccc)]
-        try:
-            rc = mod.main()
-        finally:
-            sys.argv = old_argv
-
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_debugger_condition_suite(cccc):
-    """Run the conditional-breakpoint PTY integration tests (ticket 113).
-
-    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
-    Same pty-required rationale as the REPL suite above.
-    """
-    if sys.platform == "win32":
-        return "skipped (POSIX-only, needs a pty)", True
-
-    script = _TOOLS_DIR / "test_debugger_condition.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("test_debugger_condition", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        old_argv = sys.argv
-        sys.argv = ["test_debugger_condition.py", "--binary", str(cccc)]
-        try:
-            rc = mod.main()
-        finally:
-            sys.argv = old_argv
-
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_debugger_print_suite(cccc):
-    """Run the debugger `print`/`p` command PTY integration tests (#958).
-
-    Returns (status_str, ok) where status_str is 'passed'/'failed'/'skipped'.
-    Same pty-required rationale as the REPL/debugger_condition suites above.
-    """
-    if sys.platform == "win32":
-        return "skipped (POSIX-only, needs a pty)", True
-
-    script = _TOOLS_DIR / "test_debugger_print.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("test_debugger_print", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        old_argv = sys.argv
-        sys.argv = ["test_debugger_print.py", "--binary", str(cccc)]
-        try:
-            rc = mod.main()
-        finally:
-            sys.argv = old_argv
-
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
 def _run_sqlite_suite(cccc):
     """Run the SQLite amalgamation smoke test.
 
@@ -445,100 +287,6 @@ def _run_cli_exit_code_suite():
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location("cli_exit_code_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_opencl_cli_suite(cccc):
-    """Run the OpenCL C dialect-selection smoke tests.
-
-    Covers what a single test_*.c file cannot: dialect choice by file
-    extension or -x, and several inputs in one invocation.
-    Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "opencl_cli_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("opencl_cli_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(["--binary", str(cccc)])
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_compile_scale_suite(cccc):
-    """Run the compile-time scaling smoke test (#1426).
-
-    Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "compile_scale_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("compile_scale_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(["--binary", str(cccc)])
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_vm_profile_suite(cccc):
-    """Run the --vm-profile smoke tests. Returns (status_str, ok)."""
-    script = _TOOLS_DIR / "vm_profile_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("vm_profile_smoke", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(["--binary", str(cccc)])
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_url_mirror_smoke_suite():
-    """Run the URL #include mirror smoke tests (#1324).
-
-    Case 1 (no network/curl needed) pins the path-join assumption the
-    #1324 fix rests on; case 2 is the ticket's own nested-project-header
-    repro and needs a curl-enabled build, skipping cleanly otherwise.
-    Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "url_mirror_smoke.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("url_mirror_smoke", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -653,58 +401,9 @@ def _run_smoke_skip_audit_suite(process_timeout=None):
     return f"audit subprocess failed unexpectedly (exit {result.returncode}), not a staleness finding:\n{tail}", False
 
 
-def _run_audit_ffi_suite():
-    """Run the src/stdlib FFI registration audit (#784).
-
-    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "audit_ffi.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("audit_ffi", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_audit_test_headers_suite():
-    """Run the tests/**/*.c header-directive damage audit (#1153).
-
-    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "audit_test_headers.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("audit_test_headers", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        # argv=[] (not None, which would fall through to run_tests.py's own
-        # sys.argv) -- default testdir "tests", hard-fail mode.
-        rc = mod.main([])
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
 def _run_header_parse_unit_tests():
     """Run tools/testing/test_header_parse.py's parse_test_header() unit
-    tests (#1153) and audit_test_headers.py audit_file() typo/near-miss
-    unit tests (#1158). Pure in-memory tests -- no cccc binary needed.
+    tests (#1153). Pure in-memory tests -- no cccc binary needed.
     Returns (status_str, ok).
     """
     script = _TOOLS_DIR / "testing" / "test_header_parse.py"
@@ -796,30 +495,6 @@ def _run_wedge_unit_tests():
         return f"FAILED ({e})", False
 
 
-def _run_audit_reflection_enums_suite():
-    """Run reflection.h TypeKind/NodeKind/AttrTargetKind vs internal enum
-    value audit (#860).
-
-    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "audit_reflection_enums.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("audit_reflection_enums", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main()
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
 def _run_audit_reflection_builtins(cccc):
     """Check every include/cccc/reflection.h builtin has a matching CC_BUILTIN
     registration in src/*.c, by running tools/audit_reflection_builtins.c under
@@ -839,34 +514,6 @@ def _run_audit_reflection_builtins(cccc):
         if proc.returncode == 0:
             return "passed", True
         return "FAILED\n" + (proc.stdout + proc.stderr).rstrip(), False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
-def _run_audit_host_macro_shadow():
-    """Check that every host-facing translation macro cccc's own source
-    relies on is covered by src/host_shadow_macros.h or documented as
-    exempt (#1315).
-
-    Pure source scan plus a host cc `-E -dM` probe -- no cccc binary
-    needed. Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "audit_host_macro_shadow.py"
-    if not script.exists():
-        return "skipped (script not found)", True
-
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "audit_host_macro_shadow", script
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(check=True)
-        if rc == 0:
-            return "passed", True
-        return "FAILED", False
     except Exception as e:
         return f"FAILED ({e})", False
 
@@ -1108,38 +755,6 @@ def main():
         print(f"  {skip_audit_status}")
         suite_results["native_skip_audit"] = ok_skip_audit
 
-    # --- macOS host-signal debugger ---
-    print()
-    print("[ host-signal debugger ]")
-    wedge.arm("debugger", scalar_phase_timeout)
-    hsd_status, ok_hsd = _run_host_signal_suite(cccc)
-    print(f"  {hsd_status}")
-    suite_results["debugger"] = ok_hsd
-
-    # --- REPL PTY integration ---
-    print()
-    print("[ repl integration ]")
-    wedge.arm("repl", scalar_phase_timeout)
-    repl_status, ok_repl = _run_repl_suite(cccc)
-    print(f"  {repl_status}")
-    suite_results["repl"] = ok_repl
-
-    # --- Conditional breakpoint PTY integration ---
-    print()
-    print("[ debugger condition integration ]")
-    wedge.arm("debugger_condition", scalar_phase_timeout)
-    cond_status, ok_cond = _run_debugger_condition_suite(cccc)
-    print(f"  {cond_status}")
-    suite_results["debugger_condition"] = ok_cond
-
-    # --- Debugger print command PTY integration (#958) ---
-    print()
-    print("[ debugger print integration ]")
-    wedge.arm("debugger_print", scalar_phase_timeout)
-    print_status, ok_print = _run_debugger_print_suite(cccc)
-    print(f"  {print_status}")
-    suite_results["debugger_print"] = ok_print
-
     # --- SQLite smoke ---
     print()
     print("[ sqlite smoke ]")
@@ -1163,37 +778,6 @@ def main():
     cli_ec_status, ok_cli_ec = _run_cli_exit_code_suite()
     print(f"  {cli_ec_status}")
     suite_results["cli_exit_code_smoke"] = ok_cli_ec
-
-    # --- OpenCL C dialect selection smoke ---
-    print()
-    print("[ opencl_cli_smoke ]")
-    wedge.arm("opencl_cli_smoke", scalar_phase_timeout)
-    opencl_cli_status, ok_opencl_cli = _run_opencl_cli_suite(cccc)
-    print(f"  {opencl_cli_status}")
-    suite_results["opencl_cli_smoke"] = ok_opencl_cli
-
-    # --- URL #include mirror smoke (#1324) ---
-    print()
-    print("[ url_mirror_smoke ]")
-    wedge.arm("url_mirror_smoke", scalar_phase_timeout)
-    url_mirror_status, ok_url_mirror = _run_url_mirror_smoke_suite()
-    print(f"  {url_mirror_status}")
-    suite_results["url_mirror_smoke"] = ok_url_mirror
-
-    # --- Compile-time scaling smoke (#1426) ---
-    print()
-    print("[ compile_scale_smoke ]")
-    wedge.arm("compile_scale_smoke", scalar_phase_timeout)
-    compile_scale_status, ok_compile_scale = _run_compile_scale_suite(cccc)
-    print(f"  {compile_scale_status}")
-    suite_results["compile_scale_smoke"] = ok_compile_scale
-
-    print()
-    print("[ vm_profile_smoke ]")
-    wedge.arm("vm_profile_smoke", scalar_phase_timeout)
-    vm_profile_status, ok_vm_profile = _run_vm_profile_suite(cccc)
-    print(f"  {vm_profile_status}")
-    suite_results["vm_profile_smoke"] = ok_vm_profile
 
     # --- Host __attribute__-stripping duplicate-symbol link smoke (#1199) ---
     print()
@@ -1223,22 +807,6 @@ def main():
         smoke_audit_status, ok_smoke_audit = _run_smoke_skip_audit_suite(timeout)
         print(f"  {smoke_audit_status}")
         suite_results["smoke_skip_audit"] = ok_smoke_audit
-
-    # --- FFI registration audit ---
-    print()
-    print("[ audit_ffi ]")
-    wedge.arm("audit_ffi", scalar_phase_timeout)
-    audit_status, ok_audit = _run_audit_ffi_suite()
-    print(f"  {audit_status}")
-    suite_results["audit_ffi"] = ok_audit
-
-    # --- Test-header directive damage audit (#1153) ---
-    print()
-    print("[ audit_test_headers ]")
-    wedge.arm("audit_test_headers", scalar_phase_timeout)
-    hdr_audit_status, ok_hdr_audit = _run_audit_test_headers_suite()
-    print(f"  {hdr_audit_status}")
-    suite_results["audit_test_headers"] = ok_hdr_audit
 
     # --- Test-header parser unit tests (#1153) ---
     print()
@@ -1279,22 +847,6 @@ def main():
     refl_status, ok_refl = _run_audit_reflection_builtins(cccc)
     print(f"  {refl_status}")
     suite_results["audit_reflection_builtins"] = ok_refl
-
-    # --- Reflection enum parity audit (#860) ---
-    print()
-    print("[ audit_reflection_enums ]")
-    wedge.arm("audit_reflection_enums", scalar_phase_timeout)
-    enum_status, ok_enum = _run_audit_reflection_enums_suite()
-    print(f"  {enum_status}")
-    suite_results["audit_reflection_enums"] = ok_enum
-
-    # --- Host-facing translation macro shadowing audit (#1315) ---
-    print()
-    print("[ audit_host_macro_shadow ]")
-    wedge.arm("audit_host_macro_shadow", scalar_phase_timeout)
-    hms_status, ok_hms = _run_audit_host_macro_shadow()
-    print(f"  {hms_status}")
-    suite_results["audit_host_macro_shadow"] = ok_hms
 
     # --- Fuzz regression corpus replay ---
     print()

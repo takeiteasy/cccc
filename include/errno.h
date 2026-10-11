@@ -20,11 +20,7 @@
  * `(*__cccc_errno_ptr())` macro, and __cccc_errno_ptr's own body (already
  * emitted unconditionally by native_accessor_shims whenever it's used)
  * reads that real, host-declared `errno` correctly, with no leftover
- * `extern` from this file for it to conflict with.
- * Spelled `#ifdef __CCCC__` (not `#if !defined(__CCCC__) ... #else`) so
- * tools/audit_ffi.py's guard-presence check sees a plain, nameable
- * condition it can whitelist (GUEST_ONLY_DECL_GUARDS), the same way it
- * already does for __STDC_IEC_60559_DFP__. */
+ * `extern` from this file for it to conflict with. */
 #ifdef __CCCC__
 
 #ifdef _WIN32

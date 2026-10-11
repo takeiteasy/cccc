@@ -37,8 +37,7 @@
 // guard. Also not covered: _SC_PAGE_SIZE, a pure alias of _SC_PAGESIZE
 // (include/unistd.h) -- restoring _SC_PAGESIZE below is sufficient.
 // Also not covered: PATH_MAX, _XOPEN_VERSION -- deliberately-divergent
-// VM-model constants, not part of any translation table (see
-// tools/audit_host_macro_shadow.py's allowlist).
+// VM-model constants, not part of any translation table ).
 
 #ifndef CCCC_HOST_SHADOW_MACROS_H
 #define CCCC_HOST_SHADOW_MACROS_H

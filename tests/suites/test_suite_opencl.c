@@ -1,8 +1,7 @@
 // CCCC_FLAGS: --testing -x cl
 // Suite: OpenCL C kernels (qualifiers, work-item builtins, barriers, __local
 // memory) launched from host code with cccc_launch. Vectors and atomics are in
-// test_suite_opencl_vectors.c and test_suite_opencl_atomics.c; dialect
-// selection is in tools/opencl_cli_smoke.py.
+// test_suite_opencl_vectors.c and test_suite_opencl_atomics.c.
 
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 #pragma OPENCL FP_CONTRACT ON

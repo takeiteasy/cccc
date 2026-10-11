@@ -35,9 +35,8 @@ tasks:
       git submodule update --init
       make
   - test: |
-      # Aggregate driver: source suite, native round-trip,
-      # audit_ffi, and sqlite_smoke (skips cleanly -- the amalgamation
-      # zip is not committed to the repo) all in one run.
+      # Aggregate driver: source suite, native round-trip, smokes and fuzz
+      # replay in one run.
       cd cccc
       set -e
       python3 tools/run_tests.py --binary ./cccc -j 8

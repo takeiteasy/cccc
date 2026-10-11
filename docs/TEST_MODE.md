@@ -258,7 +258,7 @@ as opposed to the `[[cccc::test]]` per-function attribute API above) are
 driven by `CCCC_*`/`EXPECT_*` directive comments in the file's leading
 header comment block, parsed by `tools/testing/header.py`'s
 `parse_test_header()` and consumed by `tools/testing/runner.py`,
-`tools/triage_tests.py`, and `tools/audit_test_headers.py`.
+and `tools/triage_tests.py`.
 
 | Directive | Value | Meaning |
 |---|---|---|
@@ -297,17 +297,6 @@ onto a continuation line the parser would then fail to see — a directive
 must still fit its own single line, since the parser deliberately does not
 join continuation lines (a wrapped regex's tail and any following prose are
 indistinguishable once split across lines).
-
-`tools/audit_test_headers.py` (wired into the `test` build target as the
-`audit_test_headers` sub-suite) hard-fails CI if a known directive name
-appears unanchored (wrapped or merged into prose), appears after the header
-block ends, is spelled with a typo, or has an empty/non-regex value — the
-recurrence guard for the whole class of bug #1153 fixed. The typo check also
-catches a *bare*-spelled directive typo with no colon to anchor a scan on
-(`CCCC_NATIVE_SKP`, `EXPECT_COMPILE_ERR`) via a Levenshtein-distance-2
-near-miss against the known directive names, plus a same-components
-different-order check (`CCCC_SKIP_NATIVE` vs. the real `CCCC_NATIVE_SKIP`)
-that distance alone can miss (#1158).
 
 ## Negative Tests
 

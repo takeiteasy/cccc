@@ -20,13 +20,7 @@
  * before the system dirs), this file's own #include_next continues the
  * search *after* that directory and lands on the host's real,
  * self-contained <fenv.h> -- exactly the header CCCC's own guest-side
- * parser has no access to and this file exists to stand in for.
- * Spelled `#ifdef __CCCC__` (not `#if !defined(__CCCC__) ... #else`) so
- * tools/audit_ffi.py's guard-presence check sees a plain, nameable
- * condition it can whitelist (GUEST_ONLY_DECL_GUARDS) the same way it
- * already does for __STDC_IEC_60559_DFP__ -- src/stdlib/fenv.c's
- * registrations are unconditional, so a `!(!defined(__CCCC__))`-shaped
- * guard here would misreport as a mismatch. */
+ * parser has no access to and this file exists to stand in for. */
 #ifdef __CCCC__
 
 /* fexcept_t/fenv_t are sized from the real host <fenv.h> that

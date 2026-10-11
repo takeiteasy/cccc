@@ -20,11 +20,7 @@
  * The RTLD_* values below are already baked into the AST as plain integer
  * literals by the time any of this runs (CCCC's own guest-side parsing
  * constant-folds every use), so skipping their (re)definition here costs
- * nothing.
- * Spelled `#ifdef __CCCC__` (not `#if !defined(__CCCC__) ... #else`) so
- * tools/audit_ffi.py's guard-presence check sees a plain, nameable
- * condition it can whitelist (GUEST_ONLY_DECL_GUARDS), the same way it
- * already does for errno.h. */
+ * nothing. */
 #ifdef __CCCC__
 
 /* RTLD_LAZY/RTLD_NOW/RTLD_LOCAL/RTLD_GLOBAL, and any of RTLD_NOLOAD/

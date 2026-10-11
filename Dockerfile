@@ -27,8 +27,7 @@ RUN make
 
 FROM build AS test
 
-# Aggregate driver: source suite, .c4 bytecode round-trip, audit_ffi, and
-# sqlite_smoke (skips cleanly -- the amalgamation zip isn't committed) all in
+# Aggregate driver: source suite, native round-trip, smokes and fuzz replay in
 # one run -- mirrors .builds/linux-amd64.yml's `test` step.
 RUN python3 tools/run_tests.py --binary ./cccc -j 8
 

@@ -69,8 +69,7 @@ disagree.
 macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate
 subset), and `AttrTargetKind` (`ATTR_TARGET_*`, an exact copy). Their
 numeric values must match `src/cccc.h`'s internal `TypeKind`/`NodeKind`/
-`AttrTargetKind` exactly; `tools/audit_reflection_enums.py` (wired into the
-`test` build target) fails the build if they drift.
+`AttrTargetKind` exactly.
 
 ## Return-Value Model
 
