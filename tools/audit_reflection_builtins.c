@@ -6,10 +6,99 @@
 //
 // Usage:
 //     ./cccc tools/audit_reflection_builtins.c --
-#include "lib/args.c"
-#include "lib/fs.c"
-#include "lib/str.c"
 #include <ctype.h>
+#include <glob.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    char **v;
+    size_t n;
+} StrList;
+
+static void die(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fputs("audit_reflection_builtins: ", stderr);
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    va_end(ap);
+    exit(1);
+}
+
+static void *xmalloc(size_t n) {
+    void *p = malloc(n ? n : 1);
+    if (!p)
+        die("out of memory");
+    return p;
+}
+
+static void *xrealloc(void *p, size_t n) {
+    p = realloc(p, n ? n : 1);
+    if (!p)
+        die("out of memory");
+    return p;
+}
+
+static char *strip_dup(const char *s) {
+    while (*s && isspace((unsigned char)*s))
+        s++;
+    size_t n = strlen(s);
+    while (n && isspace((unsigned char)s[n - 1]))
+        n--;
+    char *out = xmalloc(n + 1);
+    memcpy(out, s, n);
+    out[n] = '\0';
+    return out;
+}
+
+static void strlist_push(StrList *l, const char *s) {
+    l->v         = xrealloc(l->v, (l->n + 1) * sizeof(char *));
+    l->v[l->n++] = strip_dup(s);
+}
+
+static int cmp_str(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+static char *path_join(const char *a, const char *b) {
+    size_t n   = strlen(a) + strlen(b) + 2;
+    char  *out = xmalloc(n);
+    snprintf(out, n, "%s/%s", a, b);
+    return out;
+}
+
+static char *read_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        die("cannot open %s", path);
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    rewind(f);
+    char *buf = xmalloc((size_t)n + 1);
+    if (fread(buf, 1, (size_t)n, f) != (size_t)n)
+        die("cannot read %s", path);
+    buf[n] = '\0';
+    fclose(f);
+    return buf;
+}
+
+// <root>/tools/x.c -> <root>
+static char *repo_root(const char *tool_file) {
+    char resolved[PATH_MAX];
+    if (!realpath(tool_file, resolved))
+        die("cannot resolve %s", tool_file);
+    for (int i = 0; i < 2; i++) {
+        char *slash = strrchr(resolved, '/');
+        if (!slash || slash == resolved)
+            die("unexpected tool path %s", tool_file);
+        *slash = '\0';
+    }
+    return strip_dup(resolved);
+}
 
 typedef struct {
     char *ret, *name, *params, *attr;
@@ -30,16 +119,16 @@ static int in_ret_class(int c) {
 }
 
 static size_t skip_ws_at(const char *t, size_t p) {
-    while (t[p] && str_is_space((unsigned char)t[p]))
+    while (t[p] && isspace((unsigned char)t[p]))
         p++;
     return p;
 }
 
 static char *dup_stripped(const char *t, size_t a, size_t b) {
-    char *raw = tool_xmalloc(b - a + 1);
+    char *raw = xmalloc(b - a + 1);
     memcpy(raw, t + a, b - a);
     raw[b - a] = '\0';
-    char *out  = str_strip_dup(raw);
+    char *out  = strip_dup(raw);
     free(raw);
     return out;
 }
@@ -49,7 +138,7 @@ static char *dup_stripped(const char *t, size_t a, size_t b) {
 // line -- not string-literal aware.
 static char *strip_comments(const char *text) {
     size_t len = strlen(text);
-    char  *s   = tool_xmalloc(len + 1);
+    char  *s   = xmalloc(len + 1);
     memcpy(s, text, len + 1);
     for (size_t i = 0; i + 1 < len;) {
         if (s[i] == '/' && s[i + 1] == '*') {
@@ -196,10 +285,10 @@ static ProtoList parse_prototypes(const char *text, StrList *unmatched) {
         }
         char *name = dup_stripped(t, m.name_start, m.name_end);
         if (!has_name(&protos, name)) {
-            protos.v  = tool_xrealloc(protos.v, (protos.n + 1) * sizeof(Proto));
-            Proto *pr = &protos.v[protos.n++];
-            pr->ret   = dup_stripped(t, s, m.name_start);
-            pr->name  = name;
+            protos.v   = xrealloc(protos.v, (protos.n + 1) * sizeof(Proto));
+            Proto *pr  = &protos.v[protos.n++];
+            pr->ret    = dup_stripped(t, s, m.name_start);
+            pr->name   = name;
             pr->params = dup_stripped(t, m.params_start, m.params_end);
             pr->attr   = dup_stripped(t, m.attr_start, m.attr_end);
         }
@@ -254,7 +343,7 @@ static int param_list_arity(const char *params, int *variadic) {
         if (*p == ',')
             n++;
     const char *last = strrchr(params, ',');
-    char       *tail = str_strip_dup(last ? last + 1 : params);
+    char       *tail = strip_dup(last ? last + 1 : params);
     if (strcmp(tail, "...") == 0) {
         *variadic = 1;
         n--;
@@ -296,13 +385,13 @@ static void scan_sites(const char *file, const char *text, Site **sites,
             const char *comma = strchr(p, ',');
             const char *end   = strchr(p, ')');
             if (!comma || !end || comma > end)
-                tool_die("audit_reflection_builtins: malformed %s in %s",
-                         KINDS[k].macro, file);
-            *sites      = tool_xrealloc(*sites, (*nsites + 1) * sizeof(Site));
-            Site *s     = &(*sites)[(*nsites)++];
-            s->name     = dup_stripped(p, 0, (size_t)(comma - p));
-            s->nargs    = atoi(comma + 1);
-            s->variadic = KINDS[k].variadic;
+                die("malformed %s in %s",
+                    KINDS[k].macro, file);
+            *sites            = xrealloc(*sites, (*nsites + 1) * sizeof(Site));
+            Site *s           = &(*sites)[(*nsites)++];
+            s->name           = dup_stripped(p, 0, (size_t)(comma - p));
+            s->nargs          = atoi(comma + 1);
+            s->variadic       = KINDS[k].variadic;
             s->returns_double = KINDS[k].returns_double;
             s->file           = (char *)file;
             break;
@@ -320,33 +409,36 @@ static const Proto *find_proto(const ProtoList *l, const char *name) {
 }
 
 int main(int argc, char **argv) {
-    ArgResult r = args_parse(argc, argv, NULL, 0, "audit_reflection_builtins");
-    if (r.npos)
-        tool_die("unexpected argument '%s'", r.pos[0]);
+    if (argc > 1)
+        die("unexpected argument '%s'", argv[1]);
 
-    char *root = tool_repo_root(__FILE__);
-    char *text =
-        fs_read_file_or_die(path_join(root, "include/cccc/reflection.h"), NULL);
+    char     *root = repo_root(__FILE__);
+    char     *text = read_file(path_join(root, "include/cccc/reflection.h"));
 
     StrList   unmatched = {0};
     ProtoList protos    = parse_prototypes(text, &unmatched);
     if (unmatched.n) {
-        strlist_sort(&unmatched);
-        StrBuf names = {0};
+        qsort(unmatched.v, unmatched.n, sizeof(char *), cmp_str);
+        fputs("audit_reflection_builtins: __builtin_* declaration(s) in "
+              "reflection.h the prototype scanner failed to parse -- fix the "
+              "scanner:",
+              stderr);
         for (size_t i = 0; i < unmatched.n; i++)
-            sb_appendf(&names, "%s%s", i ? ", " : "", unmatched.v[i]);
-        tool_die("audit_reflection_builtins: __builtin_* declaration(s) in "
-                 "reflection.h the prototype scanner failed to parse -- fix "
-                 "the scanner: %s",
-                 names.data);
+            fprintf(stderr, "%s%s", i ? ", " : " ", unmatched.v[i]);
+        fputc('\n', stderr);
+        return 1;
     }
 
-    Site   *sites  = NULL;
-    size_t  nsites = 0;
-    StrList files  = fs_glob(path_join(root, "src/*.c"));
-    for (size_t i = 0; i < files.n; i++)
-        scan_sites(files.v[i], fs_read_file_or_die(files.v[i], NULL), &sites,
+    Site  *sites  = NULL;
+    size_t nsites = 0;
+    glob_t files;
+    memset(&files, 0, sizeof(files));
+    if (glob(path_join(root, "src/*.c"), 0, NULL, &files) != 0)
+        die("no source files under src/");
+    for (size_t i = 0; i < files.gl_pathc; i++)
+        scan_sites(files.gl_pathv[i], read_file(files.gl_pathv[i]), &sites,
                    &nsites);
+    globfree(&files);
 
     int bad = 0;
     for (size_t i = 0; i < nsites; i++) {
