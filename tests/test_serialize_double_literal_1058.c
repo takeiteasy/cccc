@@ -17,7 +17,7 @@
 // CCCC-implemented variadic function -- this exercises the call-site
 // argument-marshalling path independently of #1018's stdarg.h/va_list
 // translation (a separate, not-yet-fixed gap), isolating this ticket's own
-// defect. Found while root-causing #1018 (tests/repro_varargs.c).
+// defect. Found while root-causing #1018.
 //
 // Confirmed against the pre-fix binary: -c=native on this exact file
 // mis-prints "55.0"/"100.0"/etc as bare "55"/"100", snprintf reads a

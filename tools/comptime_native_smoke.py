@@ -4953,7 +4953,7 @@ def case_double_literal_native_round_trip(cccc: Path, tmp: str) -> bool:
           "call site, where the argument expression's own printed type "
           "(not its C-level static type) decides which register/slot the "
           "host compiler places it in -- found while root-causing #1018 "
-          "(tests/repro_varargs.c). Fixed by routing the TY_DOUBLE arm "
+          "Fixed by routing the TY_DOUBLE arm "
           "through the same fixup format_float_literal/"
           "format_ldouble_literal already use (#1058). Asserts -m output "
           "prints '55.0' (not bare '55') for a folded integral double "

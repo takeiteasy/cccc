@@ -89,18 +89,6 @@ NATIVE_SKIP_TESTS = {
     # already requires the user's own `#include <stdarg.h>` in the TU,
     # auto-captured and replayed like any ordinary header.
     #
-    # The repro_*.c entries below are dead weight for --native specifically
-    # (discover_tests only globs "test_*.c", so repro_*.c is never part of
-    # any tools/tests.py corpus, --native included) -- kept here anyway as a
-    # record of what #1018's sweep found, since deleting them would lose
-    # that trail. Harmless either way: a key discover_tests never produces
-    # is never looked up. All but repro_debug.c now round-trip VM->native
-    # correctly (confirmed by hand, not through this dict, since none of
-    # them are ever looked up); repro_debug.c reads CCCC's own internal
-    # va_list.reg_count member directly from user source (not through the
-    # va_start/va_arg macros), which has no host equivalent by construction
-    # -- expected to keep diverging, not a bug.
-    #
     # test_c4_argv.c was retagged here by #967's original corpus sweep
     # despite not using variadic functions at all -- re-triaged and
     # retagged to its own ticket, #1060 (argv[0] naming-convention

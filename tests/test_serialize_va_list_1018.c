@@ -56,8 +56,7 @@ static int sum_ints(int count, ...) {
 }
 
 // A variadic function called from inside another variadic function's own
-// va_arg loop -- #1018's own "nested" repro shape (tests/repro_nested2.c
-// etc): each has its own independent va_start/va_end, not a shared or
+// va_arg loop -- #1018's own "nested" repro shape: each has its own independent va_start/va_end, not a shared or
 // forwarded va_list.
 static int outer_vararg(int count, ...) {
     va_list args;
