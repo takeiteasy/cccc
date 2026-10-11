@@ -1,7 +1,7 @@
 // -c=native C11 <threads.h> shims (#1088): thrd_*/mtx_*/cnd_*/tss_*/
 // call_once, ported from src/stdlib/pthread.c minus the GIL bookkeeping.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating and rationale live in the
 // matching serialize_*_shims() in src/serialize_shims.c.
 

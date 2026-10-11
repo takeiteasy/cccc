@@ -23,7 +23,7 @@
 
 // -c=native support-shim text: one `static const char
 // CCCC_SHIM_<group>_<name>[]` per chunk, generated from src/shims/*.c by
-// tools/gen_shims.py. Gating and rationale for each shim stay here, next to the
+// tools/gen_shims.c. Gating and rationale for each shim stay here, next to the
 // code that selects it.
 #include "shims.inc"
 
@@ -1210,7 +1210,7 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         // _PC_* -- pathconf() and fpathconf() share one 9-way canonical->host
         // _PC_* switch, differing only in how the host is asked (path vs fd).
         // src/shims/canonical_const.c holds that switch inlined in both
-        // sections; tools/gen_shims.py's pathconf_drift_check() fails the build
+        // sections; tools/gen_shims.c's pathconf_drift_check() fails the build
         // if their _PC_* sets or case counts diverge.
         if (use_pathconf)
             fprintf(f, "%s", CCCC_SHIM_canonical_const_pathconf);
@@ -1619,7 +1619,7 @@ static void wide_bitint_scan_node(Node *node, WideBitintNeed *need,
 //   - one `typedef struct { unsigned long long w[K]; } __cccc_biK;` per
 //     distinct word count K a wide _BitInt container is used at, and
 //   - the full wide-_BitInt runtime (src/stdlib/wide_bitint.c, extracted
-//     verbatim by tools/gen_shims.py's `wide_bitint` GROUP_SOURCE_OVERRIDE --
+//     verbatim by tools/gen_shims.c's `wide_bitint` group_source_override() --
 //     see that file's own top comment).
 //
 // Unlike the libc-replacement shims elsewhere in this file, every helper is

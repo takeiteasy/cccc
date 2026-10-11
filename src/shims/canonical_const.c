@@ -3,7 +3,7 @@
 // fpathconf/confstr. Each wrapper translates CCCC's canonical numbering
 // to the host's real values before calling the real libc function.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating and rationale live in the
 // matching serialize_*_shims() in src/serialize_shims.c.
 

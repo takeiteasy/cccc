@@ -6,7 +6,7 @@
 // enforce the exact bit width (mask the top word).
 //
 // #1123: this file is compiled into the VM *and* is the source of truth
-// tools/gen_shims.py extracts into src/shims.inc (a `wide_bitint` GROUPS
+// tools/gen_shims.c extracts into src/shims.inc (a `wide_bitint` GROUPS
 // entry with a path override onto this file, rather than a separate
 // src/shims/wide_bitint.c transcription) -- VM and `-c=native`/`-m`/
 // `-c=generated` agree on wide-_BitInt arithmetic by construction instead of

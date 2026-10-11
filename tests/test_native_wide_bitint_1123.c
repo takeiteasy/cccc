@@ -7,7 +7,7 @@
 // now retargeted to a positive round-trip instead. This file exercises the
 // lowering itself: the emitted __cccc_biK container (serialize_type.c),
 // the runtime it shares with the VM (src/stdlib/wide_bitint.c, extracted by
-// tools/gen_shims.py into src/shims.inc), and the statement-expression
+// tools/gen_shims.c into src/shims.inc), and the statement-expression
 // codegen for every whitelisted node kind (serialize_expr.c). Every
 // assertion here is checked identically under the VM and under
 // -c=native/-m -- a mismatch between the two would mean the native lowering

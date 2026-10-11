@@ -53,8 +53,8 @@ static const char *group_source_override(const char *group) {
 
 static const char BANNER[] =
     "/* GENERATED FILE -- DO NOT EDIT.\n"
-    " * Produced by tools/gen_shims.py from the src/shims/ directory.\n"
-    " * Regenerate with: python3 tools/gen_shims.py\n"
+    " * Produced by tools/gen_shims.c from the src/shims/ directory.\n"
+    " * Regenerate with: ./cccc --build build.c\n"
     " */\n";
 
 typedef struct {

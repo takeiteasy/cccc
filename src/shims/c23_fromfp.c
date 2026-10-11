@@ -2,7 +2,7 @@
 // self-contained ports of src/stdlib/math.c, immune to the glibc 2.43
 // fromfp ABI signature split.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating and rationale live in the
 // matching serialize_*_shims() in src/serialize_shims.c.
 

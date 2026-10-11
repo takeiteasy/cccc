@@ -2,7 +2,7 @@
 // c32rtomb/mbrtoc8/c8rtomb, ported from src/stdlib/wide.c. Each block is
 // wrapped in the same __GLIBC_PREREQ feature test wide.c uses.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating and rationale live in the
 // matching serialize_*_shims() in src/serialize_shims.c.
 

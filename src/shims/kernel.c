@@ -2,7 +2,7 @@
 // launcher behind cccc_launch, the C counterpart of src/stdlib/kernel.c. Runs
 // on the pool and barrier in pool.c.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating lives in serialize_threaded_shims() in
 // src/serialize_shims.c; the kernel table the launcher looks up is emitted
 // after every function by serialize_kernel_meta().

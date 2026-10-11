@@ -1,7 +1,7 @@
 // Thread pool and barrier shared by the OpenMP runtime (omp.c) and the kernel
 // runtime (kernel.c), emitted once when either is used (#1368, #1394).
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating lives in serialize_threaded_shims() in
 // src/serialize_shims.c.
 

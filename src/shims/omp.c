@@ -1,7 +1,7 @@
 // -c=native/-m/-c=generated OpenMP runtime (#1368): named critical sections,
 // worksharing helpers and the omp_* API, on the pool in pool.c.
 //
-// Source of truth for the text tools/gen_shims.py embeds into
+// Source of truth for the text tools/gen_shims.c embeds into
 // src/shims.inc. NOT COMPILED. Gating lives in serialize_threaded_shims() in
 // src/serialize_shims.c.
 

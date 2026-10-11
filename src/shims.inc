@@ -1,6 +1,6 @@
 /* GENERATED FILE -- DO NOT EDIT.
- * Produced by tools/gen_shims.py from the src/shims/ directory.
- * Regenerate with: python3 tools/gen_shims.py
+ * Produced by tools/gen_shims.c from the src/shims/ directory.
+ * Regenerate with: ./cccc --build build.c
  */
 
 /* ---- src/shims/native_accessor.c ------------------------------------------- */
