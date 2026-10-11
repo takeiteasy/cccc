@@ -14,11 +14,10 @@
 // "internal.h" (src/arena.c and others), "./internal.h" (most of
 // src/*.c, including src/macros.c and src/reflection.c, both of which
 // need internal.h's Node/Type/Obj/Token typedefs before their own
-// #include of reflection_ffi_protos.inc, a captured-and-replayed .inc
-// carrying real code), and "../internal.h" (every src/stdlib/*.c file,
-// processed only after ALL of src/*.c). The old dedup always preferred
-// the LAST spelling encountered -- the stdlib one -- moving internal.h's
-// replayed #include to AFTER reflection_ffi_protos.inc's own need for it:
+// #include of include/cccc/reflection.h), and "../internal.h" (every
+// src/stdlib/*.c file, processed only after ALL of src/*.c). The old dedup
+// always preferred the LAST spelling encountered -- the stdlib one -- moving
+// internal.h's replayed #include to AFTER reflection.h's own need for it:
 // "unknown type name 'Node'"/'Type'/'Obj'/'Token' under -c=native (253 of
 // this round's 263 real errors, once clang's default 20-error cap was
 // lifted to see the full picture).

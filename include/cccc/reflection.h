@@ -137,6 +137,7 @@ typedef struct Token Token;
  *           @c \@comptime(attribute("...")). */
 typedef struct AttrTarget AttrTarget;
 
+#ifndef CCCC_REFLECTION_PROTOTYPES_ONLY
 /*! @brief Discriminates the kind of a Type: primitive, pointer, array,
  *           function, struct/union, or enum.
  * @details Mirrors the subset of cccc.h's internal @c TypeKind relevant to
@@ -218,6 +219,7 @@ typedef enum {
     ATTR_TARGET_FUNCTION = 3,
     ATTR_TARGET_GLOBAL   = 4,
 } AttrTargetKind;
+#endif // CCCC_REFLECTION_PROTOTYPES_ONLY
 
 /*! @brief Generate a unique identifier string for macro-created symbols.
  * @param prefix Prefix for the generated name.
@@ -2574,6 +2576,7 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
     for (int _cccc_enum_ctx_              = (__builtin_ast_push_enum((ty)), 1); \
          _cccc_enum_ctx_; _cccc_enum_ctx_ = (__builtin_ast_pop_enum(), 0))
 
+#ifndef CCCC_REFLECTION_PROTOTYPES_ONLY
 // ============================================================================
 // Macro Standard Library Attributes (ticket #235)
 // ============================================================================
@@ -2820,6 +2823,7 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 
     __builtin_generate_constructor(ty, tname);
 }
+#endif // CCCC_REFLECTION_PROTOTYPES_ONLY
 
 // Ticket #235: GenerateSum/GenerateMap/GenerateReduce/GenerateFilter
 // -- FP-style array generators. Each publishes a single function named after

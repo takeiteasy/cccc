@@ -44,7 +44,7 @@ Sub-suites:
   test_native_skip_audit — native_skip_reason() fall-through-invariant unit tests (ticket #1182)
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
-  reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
+  audit_reflection_builtins — reflection.h prototypes vs CC_BUILTIN registrations
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   audit_host_macro_shadow — host-facing translation macros shadowed under self-hosting (ticket #1315)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -820,20 +820,20 @@ def _run_audit_reflection_enums_suite():
         return f"FAILED ({e})", False
 
 
-def _run_reflection_ffi_check(cccc):
-    """Check src/reflection_ffi_{protos,register}.inc are up to date with
-    include/cccc/reflection.h by running the C generator
-    tools/gen_reflection_ffi.c in --check mode under the given cccc.
+def _run_audit_reflection_builtins(cccc):
+    """Check every include/cccc/reflection.h builtin has a matching CC_BUILTIN
+    registration in src/*.c, by running tools/audit_reflection_builtins.c under
+    the given cccc.
 
     Returns (status_str, ok).
     """
-    script = _TOOLS_DIR / "gen_reflection_ffi.c"
+    script = _TOOLS_DIR / "audit_reflection_builtins.c"
     if not script.exists():
-        return "FAILED (tools/gen_reflection_ffi.c not found)", False
+        return "FAILED (tools/audit_reflection_builtins.c not found)", False
 
     try:
         proc = subprocess.run(
-            [str(cccc), str(script), "--", "--check"],
+            [str(cccc), str(script), "--"],
             capture_output=True, text=True, timeout=120,
         )
         if proc.returncode == 0:
@@ -1272,13 +1272,13 @@ def main():
     print(f"  {wedge_unit_status}")
     suite_results["test_wedge"] = ok_wedge_unit
 
-    # --- Reflection FFI generation check (#859) ---
+    # --- Reflection builtin registration audit ---
     print()
-    print("[ reflection_ffi_check ]")
-    wedge.arm("reflection_ffi_check", scalar_phase_timeout)
-    refl_status, ok_refl = _run_reflection_ffi_check(cccc)
+    print("[ audit_reflection_builtins ]")
+    wedge.arm("audit_reflection_builtins", scalar_phase_timeout)
+    refl_status, ok_refl = _run_audit_reflection_builtins(cccc)
     print(f"  {refl_status}")
-    suite_results["reflection_ffi_check"] = ok_refl
+    suite_results["audit_reflection_builtins"] = ok_refl
 
     # --- Reflection enum parity audit (#860) ---
     print()

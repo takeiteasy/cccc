@@ -2756,7 +2756,7 @@ def case_spelling_dedup_unrelated_define_1306(cccc: Path, tmp: str) -> bool:
           "after all of src/*.c), always preferred the LAST (stdlib) "
           "spelling -- moving internal.h's #include past src/macros.c's "
           "and src/reflection.c's own need for its Node/Type/Obj/Token "
-          "typedefs before their #include of reflection_ffi_protos.inc "
+          "typedefs before their #include of reflection.h "
           "('unknown type name' errors under -c=native). Fixed by resetting "
           "the watermark at every TU boundary (emit_directives_tu_starts, "
           "shared with #1305's fix) -- only a #define/#undef the CURRENT "
@@ -8945,8 +8945,7 @@ def case_infunc_include_not_hoisted_1287(cccc: Path, tmp: str) -> bool:
           "fragment's own tokens were separately (and correctly) parsed "
           "into the enclosing function. Fixed by tracking brace depth over "
           "ordinary tokens in preprocess2() and excluding a PP_INCLUDE seen "
-          "at depth > 0 from the auto-capture gate. Reproduced directly "
-          "against src/macros.c's register_reflection_ffi().")
+          "at depth > 0 from the auto-capture gate.")
     write(Path(tmp) / "infunc_include_1287.inc", INFUNC_INCLUDE_1287_FRAGMENT)
     src = Path(tmp) / "infunc_include_1287.c"
     write(src, INFUNC_INCLUDE_1287_PROGRAM)

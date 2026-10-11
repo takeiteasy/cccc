@@ -4972,9 +4972,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // captured LAST overall -- for internal.h that's the stdlib spelling,
     // captured only after all of src/*.c (including src/macros.c and
     // src/reflection.c, both of which need internal.h's Node/Type/Obj/
-    // Token typedefs before their own #include of reflection_ffi_protos.inc)
+    // Token typedefs before their own #include of reflection.h)
     // has already been processed. The result: internal.h's replayed
-    // #include landed AFTER reflection_ffi_protos.inc's own need for it --
+    // #include landed AFTER reflection.h's own need for it --
     // "unknown type name 'Node'"/'Type'/'Obj'/'Token' under -c=native.
     //
     // #1307: scoping the check to the current occurrence's own TU (as

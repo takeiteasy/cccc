@@ -1552,3 +1552,29 @@ void register_string_functions(VirtualMachine *vm);
 void register_time_functions(VirtualMachine *vm);
 void register_wide_functions(VirtualMachine *vm);
 void register_wide_bitint_functions(VirtualMachine *vm);
+
+// Comptime reflection builtins: CC_BUILTIN(fn, nargs) goes directly above the
+// definition (prototype comes from include/cccc/reflection.h) and registers it
+// as an FFI function. nargs counts fixed arguments for _VARIADIC.
+typedef struct CcBuiltin CcBuiltin;
+struct CcBuiltin {
+    const char *name;
+    void       *fn;
+    int         nargs;
+    bool        variadic;
+    int         returns_double; // 0 = integer/pointer, 1 = double, 2 = float
+    CcBuiltin  *next;
+};
+extern CcBuiltin *cc_builtins;
+
+#define CC_BUILTIN_EX(fn, nargs, variadic, returns_double)                     \
+    static CcBuiltin cc_builtin_##fn = {#fn,      (void *)fn,     nargs,       \
+                                        variadic, returns_double, NULL};       \
+    __attribute__((constructor)) static void cc_builtin_register_##fn(void) {  \
+        cc_builtin_##fn.next = cc_builtins;                                    \
+        cc_builtins          = &cc_builtin_##fn;                               \
+    }                                                                          \
+    extern CcBuiltin *cc_builtins
+#define CC_BUILTIN(fn, nargs)          CC_BUILTIN_EX(fn, nargs, false, 0)
+#define CC_BUILTIN_VARIADIC(fn, nargs) CC_BUILTIN_EX(fn, nargs, true, 0)
+#define CC_BUILTIN_DOUBLE(fn, nargs)   CC_BUILTIN_EX(fn, nargs, false, 1)

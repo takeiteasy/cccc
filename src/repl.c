@@ -62,18 +62,10 @@
 #include <readline/readline.h>
 #endif
 
-// AST-builder / gensym entry points, implemented in src/reflection.c. The
-// public prototypes live in include/cccc/reflection.h, which is the header
-// injected into *user* [[cccc::comptime]] programs; compiler-internal
-// callers instead use local extern declarations, the same pattern
-// src/macros.c uses for the same functions. Both read __builtin_current_vm
-// internally now rather than taking a VirtualMachine* parameter; that global
-// is seeded by cc_init for the whole compile (see src/vm.c), so it is valid
-// here even though this call happens outside a macro-execution window.
-extern const char *__builtin_gensym(const char *prefix);
-extern Obj *__builtin_ast_function(const char *name, Type *return_type);
-extern Node *__builtin_ast_return(Node *expr);
-extern void __builtin_ast_function_set_body(Obj *fn, Node *body);
+// AST-builder / gensym entry points (src/reflection.c). They read
+// __builtin_current_vm, which cc_init seeds for the whole compile.
+#define CCCC_REFLECTION_PROTOTYPES_ONLY
+#include "../include/cccc/reflection.h"
 
 #define REPL_PROMPT      "cccc> "
 #define REPL_CONT_PROMPT "  ... "

@@ -1,43 +1,15 @@
-// Generate src/reflection_ffi_protos.inc and src/reflection_ffi_register.inc,
-// the comptime-builtin FFI block of src/macros.c / src/reflection.c, from
-// include/cccc/reflection.h.
-//
-// reflection.h is the canonical signature for every comptime builtin. This
-// tool parses every file-scope `RET __builtin_NAME(params);` prototype out of
-// it (in header order) and emits two generated, committed files:
-//
-//   src/reflection_ffi_protos.inc    one `extern` per builtin, copied verbatim
-//                                    from the header's return type / params /
-//                                    attribute.
-//   src/reflection_ffi_register.inc  the register_reflection_ffi() body: one
-//                                    cc_register_cfunc() /
-//                                    cc_register_variadic_cfunc() call per
-//                                    builtin, with a generated arity.
-//
-// Both are #include'd by src/macros.c and src/reflection.c, so drift between
-// reflection.h's prototype and reflection.c's definition is a compile error,
-// not just an unregistered or mismatched-arity builtin.
-//
-// The .inc files are committed so plain `make` needs no python3. `./cccc
-// --build build.c`'s default build regenerates them via the
-// `reflection_ffi_gen` step; `--check` (wired into the `test` build target)
-// fails if the committed files are stale.
+// Audit that every comptime builtin prototyped in include/cccc/reflection.h is
+// registered with CC_BUILTIN / CC_BUILTIN_VARIADIC / CC_BUILTIN_DOUBLE above
+// its definition in src/*.c, with the arity, variadic flag and return kind the
+// prototype implies, and that nothing is registered twice or without a
+// prototype.
 //
 // Usage:
-//     ./cccc tools/gen_reflection_ffi.c --         # write/refresh the .inc
-//     files
-//     ./cccc tools/gen_reflection_ffi.c -- --check # verify they're up to date
+//     ./cccc tools/audit_reflection_builtins.c --
 #include "lib/args.c"
 #include "lib/fs.c"
 #include "lib/str.c"
 #include <ctype.h>
-
-static const char BANNER[] =
-    "/* GENERATED FILE -- DO NOT EDIT.\n"
-    " * Produced by tools/gen_reflection_ffi.c from "
-    "include/cccc/reflection.h.\n"
-    " * Regenerate with: ./cccc --build build.c\n"
-    " */\n";
 
 typedef struct {
     char *ret, *name, *params, *attr;
@@ -300,50 +272,61 @@ static int return_kind(const char *ret) {
     return 0;
 }
 
-static char *render_protos_inc(const ProtoList *protos, size_t *len) {
-    StrBuf sb = {0};
-    sb_append(&sb, BANNER);
-    sb_append(&sb, "\n\n");
-    for (size_t i = 0; i < protos->n; i++) {
-        const Proto *p = &protos->v[i];
-        sb_appendf(&sb, "extern %s %s(%s)", p->ret, p->name,
-                   p->params[0] ? p->params : "void");
-        if (p->attr[0])
-            sb_appendf(&sb, "\n    %s", p->attr);
-        sb_append(&sb, ";\n");
+typedef struct {
+    char *name;
+    int   nargs, variadic, returns_double;
+    char *file;
+} Site;
+
+// CC_BUILTIN{,_VARIADIC,_DOUBLE}(name, n); at the start of a line
+static void scan_sites(const char *file, const char *text, Site **sites,
+                       size_t *nsites) {
+    static const struct {
+        const char *macro;
+        int         variadic, returns_double;
+    } KINDS[] = {{"CC_BUILTIN_VARIADIC(", 1, 0},
+                 {"CC_BUILTIN_DOUBLE(", 0, 1},
+                 {"CC_BUILTIN(", 0, 0}};
+    for (const char *line = text; line && *line;) {
+        for (size_t k = 0; k < sizeof KINDS / sizeof *KINDS; k++) {
+            size_t ml = strlen(KINDS[k].macro);
+            if (strncmp(line, KINDS[k].macro, ml) != 0)
+                continue;
+            const char *p     = line + ml;
+            const char *comma = strchr(p, ',');
+            const char *end   = strchr(p, ')');
+            if (!comma || !end || comma > end)
+                tool_die("audit_reflection_builtins: malformed %s in %s",
+                         KINDS[k].macro, file);
+            *sites      = tool_xrealloc(*sites, (*nsites + 1) * sizeof(Site));
+            Site *s     = &(*sites)[(*nsites)++];
+            s->name     = dup_stripped(p, 0, (size_t)(comma - p));
+            s->nargs    = atoi(comma + 1);
+            s->variadic = KINDS[k].variadic;
+            s->returns_double = KINDS[k].returns_double;
+            s->file           = (char *)file;
+            break;
+        }
+        const char *nl = strchr(line, '\n');
+        line           = nl ? nl + 1 : NULL;
     }
-    *len = sb.len;
-    return sb.data;
 }
 
-static char *render_register_inc(const ProtoList *protos, size_t *len) {
-    StrBuf sb = {0};
-    sb_append(&sb, BANNER);
-    sb_append(&sb, "\n\n");
-    for (size_t i = 0; i < protos->n; i++) {
-        const Proto *p = &protos->v[i];
-        int          variadic;
-        int          n = param_list_arity(p->params, &variadic);
-        sb_appendf(&sb, "%s(vm, \"%s\", (void *)%s, %d, %d);\n",
-                   variadic ? "cc_register_variadic_cfunc"
-                            : "cc_register_cfunc",
-                   p->name, p->name, n, return_kind(p->ret));
-    }
-    *len = sb.len;
-    return sb.data;
+static const Proto *find_proto(const ProtoList *l, const char *name) {
+    for (size_t i = 0; i < l->n; i++)
+        if (strcmp(l->v[i].name, name) == 0)
+            return &l->v[i];
+    return NULL;
 }
 
 int main(int argc, char **argv) {
-    int       check   = 0;
-    ArgSpec   specs[] = {{"--check", NULL, 0, &check, NULL}};
-    ArgResult r =
-        args_parse(argc, argv, specs, 1, "gen_reflection_ffi [--check]");
+    ArgResult r = args_parse(argc, argv, NULL, 0, "audit_reflection_builtins");
     if (r.npos)
         tool_die("unexpected argument '%s'", r.pos[0]);
 
     char *root = tool_repo_root(__FILE__);
     char *text =
-        fs_read_text_or_die(path_join(root, "include/cccc/reflection.h"), NULL);
+        fs_read_file_or_die(path_join(root, "include/cccc/reflection.h"), NULL);
 
     StrList   unmatched = {0};
     ProtoList protos    = parse_prototypes(text, &unmatched);
@@ -352,55 +335,61 @@ int main(int argc, char **argv) {
         StrBuf names = {0};
         for (size_t i = 0; i < unmatched.n; i++)
             sb_appendf(&names, "%s%s", i ? ", " : "", unmatched.v[i]);
-        tool_die("gen_reflection_ffi: found __builtin_* declaration(s) in "
-                 "reflection.h that the prototype scanner failed to parse -- "
-                 "fix the scanner, don't silently drop a builtin from the FFI "
-                 "table: %s",
+        tool_die("audit_reflection_builtins: __builtin_* declaration(s) in "
+                 "reflection.h the prototype scanner failed to parse -- fix "
+                 "the scanner: %s",
                  names.data);
     }
 
-    static const char *const REL[2] = {"src/reflection_ffi_protos.inc",
-                                       "src/reflection_ffi_register.inc"};
-    char                    *content[2];
-    size_t                   clen[2];
-    content[0] = render_protos_inc(&protos, &clen[0]);
-    content[1] = render_register_inc(&protos, &clen[1]);
+    Site   *sites  = NULL;
+    size_t  nsites = 0;
+    StrList files  = fs_glob(path_join(root, "src/*.c"));
+    for (size_t i = 0; i < files.n; i++)
+        scan_sites(files.v[i], fs_read_file_or_die(files.v[i], NULL), &sites,
+                   &nsites);
 
-    if (check) {
-        int stale = 0;
-        for (int i = 0; i < 2; i++) {
-            char *path = path_join(root, REL[i]);
-            if (!fs_file_equals(path, content[i], clen[i])) {
-                if (!stale)
-                    printf("gen_reflection_ffi: stale/missing generated "
-                           "file(s):\n");
-                printf("  %s\n", REL[i]);
-                stale = 1;
+    int bad = 0;
+    for (size_t i = 0; i < nsites; i++) {
+        const Site  *s  = &sites[i];
+        const Proto *pr = find_proto(&protos, s->name);
+        if (!pr) {
+            printf(
+                "%s: %s is registered but has no prototype in reflection.h\n",
+                s->file, s->name);
+            bad = 1;
+            continue;
+        }
+        for (size_t j = 0; j < i; j++)
+            if (strcmp(sites[j].name, s->name) == 0) {
+                printf("%s: %s is registered more than once\n", s->file,
+                       s->name);
+                bad = 1;
             }
+        int variadic;
+        int n  = param_list_arity(pr->params, &variadic);
+        int rk = return_kind(pr->ret);
+        if (n != s->nargs || variadic != s->variadic ||
+            rk != s->returns_double) {
+            printf("%s: %s registered as (%d args%s, return kind %d) but "
+                   "reflection.h implies (%d args%s, return kind %d)\n",
+                   s->file, s->name, s->nargs, s->variadic ? ", variadic" : "",
+                   s->returns_double, n, variadic ? ", variadic" : "", rk);
+            bad = 1;
         }
-        if (stale) {
-            printf("Run: ./cccc tools/gen_reflection_ffi.c --\n");
-            return 1;
+    }
+    for (size_t i = 0; i < protos.n; i++) {
+        int found = 0;
+        for (size_t j = 0; j < nsites; j++)
+            found |= strcmp(sites[j].name, protos.v[i].name) == 0;
+        if (!found) {
+            printf("%s is declared in reflection.h but has no CC_BUILTIN "
+                   "registration in src/\n",
+                   protos.v[i].name);
+            bad = 1;
         }
-        printf("gen_reflection_ffi: up to date (%zu builtins)\n", protos.n);
-        return 0;
     }
-
-    int changed[2], nchanged = 0;
-    for (int i = 0; i < 2; i++) {
-        char *path  = path_join(root, REL[i]);
-        changed[i]  = fs_write_if_changed(path, content[i], clen[i]);
-        nchanged   += changed[i];
-    }
-    if (nchanged) {
-        printf("gen_reflection_ffi: regenerated %d file(s) (%zu builtins):\n",
-               nchanged, protos.n);
-        for (int i = 0; i < 2; i++)
-            if (changed[i])
-                printf("  %s\n", REL[i]);
-    } else {
-        printf("gen_reflection_ffi: already up to date (%zu builtins)\n",
-               protos.n);
-    }
+    if (bad)
+        return 1;
+    printf("audit_reflection_builtins: ok (%zu builtins)\n", protos.n);
     return 0;
 }

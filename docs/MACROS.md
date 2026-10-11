@@ -41,16 +41,29 @@ can use the `$*`, `Quote*`, `MacroErrorAt`, `Gensym`, and `$dump_*`
 convenience macros directly.
 
 `include/cccc/reflection.h` is the single source of truth for every comptime
-builtin's C signature and FFI registration: `src/reflection_ffi_protos.inc`
-(the `extern` prototypes) and `src/reflection_ffi_register.inc` (the
-`cc_register_cfunc`/`cc_register_variadic_cfunc` calls, including their
-arity) are generated from it by `tools/gen_reflection_ffi.c` and
-`#include`'d by both `src/macros.c` and `src/reflection.c`. Adding a new
-builtin means editing `reflection.h` and writing its definition in
-`src/reflection.c` (or `src/macros.c`, for the handful that need direct
-compiler state) — nothing else; the FFI table picks it up on the next
-build. See [BUILD.md](BUILD.md) for the generated-file/regeneration
-details.
+builtin's C signature. `src/reflection.c` and `src/macros.c` include its
+prototypes (`CCCC_REFLECTION_PROTOTYPES_ONLY` hides the macro-program-only
+parts), so a definition that drifts from its prototype is a compile error.
+
+A builtin is registered by one line above its definition:
+
+```c
+CC_BUILTIN(__builtin_ast_type_size, 1);
+int __builtin_ast_type_size(Type *ty) { ... }
+```
+
+| Macro | Use |
+|---|---|
+| `CC_BUILTIN(fn, n)` | `n` arguments, integer or pointer return |
+| `CC_BUILTIN_VARIADIC(fn, n)` | `n` fixed arguments before `...` |
+| `CC_BUILTIN_DOUBLE(fn, n)` | `n` arguments, `double` return |
+
+Adding a builtin means a prototype in `reflection.h`, the definition in
+`src/reflection.c` (or `src/macros.c`, for the few that need direct compiler
+state), and its `CC_BUILTIN` line. `tools/audit_reflection_builtins.c` (run by
+the `test` build target) fails if a prototype has no registration, a
+registration has no prototype, or the arity, variadic flag or return kind
+disagree.
 
 `reflection.h` also hand-copies three of the compiler's internal enums for
 macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate

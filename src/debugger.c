@@ -1062,25 +1062,11 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 // wrapper. See debugger_rewrite_locals for the rewrite itself.
 // ============================================================================
 
-// AST-builder / gensym entry points, implemented in src/reflection.c. Same
-// local-extern pattern src/macros.c and src/repl.c use for the same
-// functions (see the comment at the top of src/repl.c) -- the public
-// prototypes in include/cccc/reflection.h are meant for *user* comptime
-// macro programs, not compiler-internal callers. Both read
-// __builtin_current_vm internally now (seeded by cc_init for the whole
-// compile) rather than taking a VirtualMachine* parameter.
-extern const char *__builtin_gensym(const char *prefix);
-extern Obj *__builtin_ast_function(const char *name, Type *return_type);
-extern Node *__builtin_ast_return(Node *expr);
-extern void __builtin_ast_function_set_body(Obj *fn, Node *body);
-extern Obj *__builtin_ast_global_var(const char *name, Type *ty);
-extern Node *__builtin_ast_var_ref(const char *name);
-extern Node *__builtin_ast_cast(Node *expr, Type *target_type);
-extern Node *__builtin_ast_unary(NodeKind op, Node *operand);
-extern Node *__builtin_ast_binary(NodeKind op, Node *left, Node *right);
+// AST-builder / gensym entry points (src/reflection.c). They read
+// __builtin_current_vm, which cc_init seeds for the whole compile.
+#define CCCC_REFLECTION_PROTOTYPES_ONLY
+#include "../include/cccc/reflection.h"
 extern int local_align_log(Obj *var); // codegen_emit.c (#1137)
-extern Node *__builtin_ast_subscript(Node *arr, Node *idx);
-extern Node *__builtin_ast_int_literal(int64_t value);
 
 static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     if (!var || !var->name || !*var->name)

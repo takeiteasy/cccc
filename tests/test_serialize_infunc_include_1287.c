@@ -8,9 +8,7 @@
 // fragment's own tokens were separately (and correctly) parsed into the
 // enclosing function and serialized in place there. The file-scope copy
 // is not even a legal top-level declaration on its own, so a real host
-// compiler rejected it outright. Reproduced directly against
-// src/macros.c's `register_reflection_ffi()`, which does exactly this
-// with `reflection_ffi_register.inc`.
+// compiler rejected it outright.
 //
 // Fixed by tracking brace depth over ordinary tokens in preprocess2() and
 // excluding a PP_INCLUDE seen at depth > 0 from the auto-capture gate.

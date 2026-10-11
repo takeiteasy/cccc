@@ -518,9 +518,8 @@ static long long impl_set_output(long long t, long long path) {
 // command can write anywhere (e.g. a generator writing into the repo's
 // src/, not under out_dir). So a CUSTOM target's output is the *first*
 // path DeclareOutput() recorded (call order, not last-wins — #851 lets
-// DeclareOutput be called more than once, e.g. reflection_ffi_gen's two
-// generated .inc files), returned verbatim (not joined onto out_dir); "" if
-// DeclareOutput() was never called.
+// DeclareOutput be called more than once), returned verbatim (not joined onto
+// out_dir); "" if DeclareOutput() was never called.
 static long long impl_target_output(long long t) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (!s_ctx)
@@ -537,14 +536,13 @@ static long long impl_target_output(long long t) {
 // verbatim (see TargetOutput() above; not joined onto out_dir) — so
 // downstream DependsOn consumers are known to depend on it, and so AddInput
 // (#851, below) has something to check freshness against. May be called
-// more than once (e.g. reflection_ffi_gen's two generated .inc files); each
-// call appends rather than replacing.
+// more than once; each call appends rather than replacing.
 //
 // On its own (no AddInput calls) this is still invalidation metadata only —
 // it does not give the step a "skip if output exists" staleness check. A
 // CUSTOM target has no `sources`, so "output exists" would be the only test
 // available, and a committed generated output (e.g.
-// src/reflection_ffi_protos.inc) always exists; treating that as "up to date"
+// generated header) always exists; treating that as "up to date"
 // would silently stop the generator from ever running again. Real skip
 // semantics need declared *inputs* too — see AddInput below.
 static long long impl_declare_output(long long t, long long path) {
@@ -1903,8 +1901,8 @@ static int ofile_is_current(const BuildTarget *t, const char *ofile,
 // a target with neither (today's default) always runs, as before. Every
 // output must exist and be at least as new as every input (>=, matching
 // ofile_is_current(): a fresh checkout gives inputs and committed outputs
-// near-identical mtimes, and a strict > would make a target like
-// reflection_ffi_gen re-run on every build).
+// near-identical mtimes, and a strict > would make a generator target
+// re-run on every build).
 static int custom_target_is_current(const BuildTarget *t) {
     if (t->inputs.len == 0 || t->outputs.len == 0)
         return 0;

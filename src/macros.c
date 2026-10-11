@@ -57,9 +57,9 @@ static void fenv_barrier_end(int saved_round) {
     fesetround(saved_round);
 }
 
-// Forward declarations for reflection API functions (to register as FFI).
-// Generated from include/cccc/reflection.h -- see tools/gen_reflection_ffi.c.
-#include "reflection_ffi_protos.inc"
+// Prototypes for the comptime builtins registered below (CC_BUILTIN).
+#define CCCC_REFLECTION_PROTOTYPES_ONLY
+#include "../include/cccc/reflection.h"
 
 // NOTE: unlike cc_record_emit_object below, this does NOT dedup -- the
 // emit-event list is deliberately ordered and order-preserving, and a
@@ -100,11 +100,13 @@ void cc_record_emit_object(VirtualMachine *vm, Obj *obj) {
     vm->compiler.emit_events_tail = ev;
 }
 
+CC_BUILTIN(__builtin_ast_vararg_count, 0);
 int __builtin_ast_vararg_count(void) {
     VirtualMachine *vm = __builtin_current_vm;
     return vm ? vm->compiler.macro_vararg_count : 0;
 }
 
+CC_BUILTIN(__builtin_ast_vararg_at, 1);
 Node *__builtin_ast_vararg_at(int index) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
@@ -119,6 +121,7 @@ Node *__builtin_ast_vararg_at(int index) {
     return vm->compiler.macro_vararg_nodes[index];
 }
 
+CC_BUILTIN(__builtin_ast_varargs_as_array, 0);
 Node **__builtin_ast_varargs_as_array(void) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
@@ -131,6 +134,7 @@ Node **__builtin_ast_varargs_as_array(void) {
     return vm->compiler.macro_vararg_nodes;
 }
 
+CC_BUILTIN(__builtin_ast_vararg_str_at, 1);
 const char *__builtin_ast_vararg_str_at(int index) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
@@ -146,11 +150,17 @@ const char *__builtin_ast_vararg_str_at(int index) {
     return vm->compiler.macro_vararg_strs[index];
 }
 
+CcBuiltin *cc_builtins;
+
 // Register reflection API functions as FFI
 static void register_reflection_ffi(VirtualMachine *vm) {
-    // Generated from include/cccc/reflection.h -- see
-    // tools/gen_reflection_ffi.c.
-#include "reflection_ffi_register.inc"
+    for (CcBuiltin *b = cc_builtins; b; b = b->next) {
+        if (b->variadic)
+            cc_register_variadic_cfunc(vm, b->name, b->fn, b->nargs,
+                                       b->returns_double);
+        else
+            cc_register_cfunc(vm, b->name, b->fn, b->nargs, b->returns_double);
+    }
 }
 
 static void init_vm_segments_for_macros(VirtualMachine *vm);
@@ -2751,6 +2761,7 @@ static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
 
 // Ticket #277: Lisp-style single-step macro expansion (macroexpand-1).
 // Expands the outermost ND_MACRO_CALL exactly once; identity for anything else.
+CC_BUILTIN(__builtin_macroexpand_1, 1);
 Node *__builtin_macroexpand_1(Node *node) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !node)
@@ -2773,6 +2784,7 @@ Node *__builtin_macroexpand_1(Node *node) {
 // Repeatedly expands the outermost node via macroexpand_1 until it is no
 // longer an ND_MACRO_CALL (i.e. until the form is stable at the top level).
 // Does not recurse into child nodes — only the top-level call is expanded.
+CC_BUILTIN(__builtin_macroexpand, 1);
 Node *__builtin_macroexpand(Node *node) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !node)

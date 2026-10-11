@@ -20,7 +20,7 @@
 //   header_resolution_smoke, cli_exit_code_smoke, url_mirror_smoke,
 //   comptime_native_smoke,
 //   audit_ffi,
-//   audit_reflection_enums, reflection_ffi_gen / _check
+//   audit_reflection_enums, audit_reflection_builtins
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
 //   doxygen)
 //   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
@@ -428,22 +428,10 @@ BuildTarget *libcccc(Builder *ctx) {
 // cccc-release (not cccc) so it never collides with a debug build sitting in
 // the same out_dir.
 
-// #1144: forward declaration -- release() below calls reflection_ffi_gen()
-// (defined further down, line ~678) before its own definition is in scope.
-// This used to compile via implicit function declaration, silently
-// tolerated at every standard; that leniency is now a hard error at C99+
-// (CCCC's own default), so an explicit prototype is required like any
-// other forward reference.
-BuildTarget *reflection_ffi_gen(Builder *ctx);
-
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
-    BuildTarget *bt             = make_libbacktrace(ctx);
-    BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *final =
-        make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
-    DependsOn(final, reflection_gen);
-    return final;
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
 }
 
 // ---- opt_test_O1 / O2 / O3 (#883) ------------------------------------------
@@ -744,39 +732,14 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
                      "python3 tools/audit_reflection_enums.py");
 }
 
-// src/reflection_ffi_protos.inc / src/reflection_ffi_register.inc are
-// generated from include/cccc/reflection.h by tools/gen_reflection_ffi.c (run
-// through the cccc that is driving this build) and #include'd by both
-// src/macros.c and src/reflection.c. They're committed so
-// plain `make` needs no python3; this step keeps them fresh on every default
-// build, and reflection_ffi_check below (wired into the test target) catches
-// staleness for any build that skips it.
-//
-// AddInput (#851) declares the real dependency (the source header, the
-// generator and its tools/lib/ sources) so build_target() can skip re-running
-// the generator when none has changed since the .inc files were last written.
 [[cccc::build_target]]
-BuildTarget *reflection_ffi_gen(Builder *ctx) {
+BuildTarget *audit_reflection_builtins(Builder *ctx) {
+    // include/cccc/reflection.h prototypes vs the CC_BUILTIN registrations
+    // in src/*.c, run through the cccc driving this build.
     char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_reflection_ffi.c --",
+    snprintf(cmd, sizeof(cmd), "\"%s\" tools/audit_reflection_builtins.c --",
              CcccPath(ctx));
-    BuildTarget *gen = RunCustom(ctx, "reflection-ffi-gen", cmd);
-    DeclareOutput(gen, "src/reflection_ffi_protos.inc");
-    DeclareOutput(gen, "src/reflection_ffi_register.inc");
-    AddInput(gen, "include/cccc/reflection.h");
-    AddInput(gen, "tools/gen_reflection_ffi.c");
-    const char **lib = GlobFiles(ctx, "tools/lib/*");
-    for (int i = 0; lib && lib[i]; i++)
-        AddInput(gen, lib[i]);
-    return gen;
-}
-
-[[cccc::build_target]]
-BuildTarget *reflection_ffi_check(Builder *ctx) {
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_reflection_ffi.c -- --check",
-             CcccPath(ctx));
-    return RunCustom(ctx, "reflection-ffi-check", cmd);
+    return RunCustom(ctx, "audit-reflection-builtins", cmd);
 }
 
 // Doxygen HTML API docs for the three public headers.
@@ -1107,15 +1070,12 @@ BuildTarget *bench(Builder *ctx) {
 }
 
 // ---- Default build entry -------------------------------------------------
-// Builds: libbacktrace (vendored), the reflection FFI regen, and the
-// final build/cccc executable. All other targets
-// are available via --build-target=NAME.
+// Builds: libbacktrace (vendored) and the final build/cccc executable. All
+// other targets are available via --build-target=NAME.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    BuildTarget *bt             = make_libbacktrace(ctx);
-    BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
-    DependsOn(final, reflection_gen);
+    BuildTarget *bt = make_libbacktrace(ctx);
+    make_cccc_exe_named(ctx, bt, "cccc");
     return BuildAll(ctx);
 }

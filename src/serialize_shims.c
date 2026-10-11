@@ -675,9 +675,8 @@ void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 // cccc_c32rtomb/cccc_mbrtoc8/cccc_c8rtomb) -- the two copies have no
 // shared source (one is compiled into CCCC itself, the other is emitted
 // text compiled by the host cc as part of the guest program) and must be
-// kept in sync by hand; folding them into one generated .inc (the
-// reflection_ffi_*.inc precedent) is a real follow-up, filed separately
-// rather than attempted here.
+// kept in sync by hand; folding them into one is a real follow-up, filed
+// separately rather than attempted here.
 //
 // Like serialize_threads_shims above, deliberately does NOT #include
 // <string.h>/<stdint.h> (same #1054-class shadowing hazard as sched.h/
