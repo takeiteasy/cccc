@@ -384,9 +384,10 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
             pos = 4096;
 
         int indent     = strlen(filename) + snprintf(NULL, 0, ":%d: ", line_no);
-        int col_offset = display_width(vm, line, loc - line) + indent;
-        pos +=
-            snprintf(msg + pos, 4096 - pos, "%*s^ %s: ", col_offset, "", kind);
+        char pad[1024];
+        caret_padding(vm, line, (int)(loc - line), pad, sizeof(pad));
+        pos += snprintf(msg + pos, 4096 - pos, "%*s%s^ %s: ", indent, "", pad,
+                        kind);
 
         va_list ap_copy;
         va_copy(ap_copy, ap);
@@ -418,10 +419,9 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
     fprintf(stderr, "%.*s\n", (int)(end - line), line);
 
     // Show the error message.
-    int pos = display_width(vm, line, loc - line) + indent;
-
-    fprintf(stderr, "%*s", pos, ""); // print pos spaces.
-    fprintf(stderr, "^ %s: ", kind);
+    char pad[1024];
+    caret_padding(vm, line, (int)(loc - line), pad, sizeof(pad));
+    fprintf(stderr, "%*s%s^ %s: ", indent, "", pad, kind);
     vfprintf(stderr, fmt, ap);
     if (warn_name)
         fprintf(stderr, " [-W%s]", warn_name);

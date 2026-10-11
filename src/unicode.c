@@ -212,3 +212,19 @@ int display_width(VirtualMachine *vm, char *p, int len) {
     }
     return w;
 }
+
+// Fills buf with padding that lines a caret up under the end of line[0..len):
+// tabs stay tabs, every other character becomes spaces of its display width.
+// Returns the number of bytes written (always < cap).
+int caret_padding(VirtualMachine *vm, char *line, int len, char *buf, int cap) {
+    char *p = line;
+    int   n = 0;
+    while (p - line < len) {
+        uint32_t c = decode_utf8(vm, &p, p);
+        int      w = c == '\t' ? 1 : char_width(c);
+        for (int i = 0; i < w && n < cap - 1; i++)
+            buf[n++] = c == '\t' ? '\t' : ' ';
+    }
+    buf[n] = '\0';
+    return n;
+}
