@@ -977,19 +977,19 @@ static bool ty_is_super_wide_bitint(Type *ty) {
 
 void serialize_value_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                           Node *node, int prec) {
-    if (node && node->kind == ND_CAST && node->lhs &&
-        node->lhs->kind == ND_VAR && node->lhs->ty &&
-        node->lhs->ty->kind == node->ty->kind &&
-        node->lhs->ty->size == node->ty->size)
-        node = node->lhs;
+    Node *src = node;
+    if (src && src->kind == ND_CAST && src->lhs)
+        src = src->lhs; // same-type cast around the global
     bool realized =
-        node && node->kind == ND_VAR && node->var && node->ty &&
-        (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) &&
-        node->var->ty != node->ty;
+        src && src->kind == ND_VAR && src->var && src->ty &&
+        (src->ty->kind == TY_STRUCT || src->ty->kind == TY_UNION) &&
+        node->ty && node->ty->kind == src->ty->kind &&
+        src->var->ty != src->ty;
     if (!realized) {
         serialize_expr(f, vm, ctx, node, prec);
         return;
     }
+    node = src;
     fprintf(f, "__extension__ ({ ");
     serialize_type(f, ctx, node->ty);
     fprintf(f, " __cccc_flex_t; __builtin_memcpy(&__cccc_flex_t, &");
