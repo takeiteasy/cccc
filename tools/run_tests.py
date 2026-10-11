@@ -821,26 +821,25 @@ def _run_audit_reflection_enums_suite():
         return f"FAILED ({e})", False
 
 
-def _run_reflection_ffi_check():
+def _run_reflection_ffi_check(cccc):
     """Check src/reflection_ffi_{protos,register}.inc are up to date with
-    include/cccc/reflection.h (#859).
+    include/cccc/reflection.h by running the C generator
+    tools/gen_reflection_ffi.c in --check mode under the given cccc.
 
-    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    Returns (status_str, ok).
     """
-    script = _TOOLS_DIR / "gen_reflection_ffi.py"
+    script = _TOOLS_DIR / "gen_reflection_ffi.c"
     if not script.exists():
-        return "skipped (script not found)", True
+        return "FAILED (tools/gen_reflection_ffi.c not found)", False
 
     try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("gen_reflection_ffi", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(check=True)
-        if rc == 0:
+        proc = subprocess.run(
+            [str(cccc), str(script), "--", "--check"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if proc.returncode == 0:
             return "passed", True
-        return "FAILED", False
+        return "FAILED\n" + (proc.stdout + proc.stderr).rstrip(), False
     except Exception as e:
         return f"FAILED ({e})", False
 
@@ -1300,7 +1299,7 @@ def main():
     print()
     print("[ reflection_ffi_check ]")
     wedge.arm("reflection_ffi_check", scalar_phase_timeout)
-    refl_status, ok_refl = _run_reflection_ffi_check()
+    refl_status, ok_refl = _run_reflection_ffi_check(cccc)
     print(f"  {refl_status}")
     suite_results["reflection_ffi_check"] = ok_refl
 

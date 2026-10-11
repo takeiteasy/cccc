@@ -734,31 +734,38 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
 }
 
 // src/reflection_ffi_protos.inc / src/reflection_ffi_register.inc are
-// generated from include/cccc/reflection.h by tools/gen_reflection_ffi.py
-// and #include'd by both src/macros.c and src/reflection.c. Unlike
-// src/std.c, they're committed (see the header of gen_reflection_ffi.py for
-// why) so this step -- pure Python, no cccc binary needed -- keeps them
-// fresh on every default build; reflection_ffi_check below (wired into the
-// test target) catches staleness for any build that skips it.
+// generated from include/cccc/reflection.h by tools/gen_reflection_ffi.c (run
+// through the cccc that is driving this build) and #include'd by both
+// src/macros.c and src/reflection.c. Unlike src/std.c, they're committed so
+// plain `make` needs no python3; this step keeps them fresh on every default
+// build, and reflection_ffi_check below (wired into the test target) catches
+// staleness for any build that skips it.
 //
-// AddInput (#851) declares the real dependency (the source header + the
-// generator script itself) so build_target() can skip re-running the
-// generator when neither has changed since the .inc files were last written.
+// AddInput (#851) declares the real dependency (the source header, the
+// generator and its tools/lib/ sources) so build_target() can skip re-running
+// the generator when none has changed since the .inc files were last written.
 [[cccc::build_target]]
 BuildTarget *reflection_ffi_gen(Builder *ctx) {
-    BuildTarget *gen = RunCustom(ctx, "reflection-ffi-gen",
-                                 "python3 tools/gen_reflection_ffi.py");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_reflection_ffi.c --",
+             CcccPath(ctx));
+    BuildTarget *gen = RunCustom(ctx, "reflection-ffi-gen", cmd);
     DeclareOutput(gen, "src/reflection_ffi_protos.inc");
     DeclareOutput(gen, "src/reflection_ffi_register.inc");
     AddInput(gen, "include/cccc/reflection.h");
-    AddInput(gen, "tools/gen_reflection_ffi.py");
+    AddInput(gen, "tools/gen_reflection_ffi.c");
+    const char **lib = GlobFiles(ctx, "tools/lib/*");
+    for (int i = 0; lib && lib[i]; i++)
+        AddInput(gen, lib[i]);
     return gen;
 }
 
 [[cccc::build_target]]
 BuildTarget *reflection_ffi_check(Builder *ctx) {
-    return RunCustom(ctx, "reflection-ffi-check",
-                     "python3 tools/gen_reflection_ffi.py --check");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_reflection_ffi.c -- --check",
+             CcccPath(ctx));
+    return RunCustom(ctx, "reflection-ffi-check", cmd);
 }
 
 // src/shims.inc is the -c=native support-shim text table, generated from the
