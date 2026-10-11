@@ -27,9 +27,10 @@ make                       # one pass: ./cccc
 ./cccc --build build.c --build-list-targets
 ```
 
-`make` is the only thing that builds `./cccc`. Targets in `build.c` that run
-the compiler (`test`, the smokes, `bench`) use `./cccc` as it is, so run `make`
-after changing C sources. `make MODE=release` optimizes it.
+`make` is the main build and produces `./cccc`; `make MODE=release` optimizes
+it. `build.c` is the same build expressed through cccc's own `--build` API: its
+default target produces `build/cccc`, and it drives the extra targets below
+(`test` builds its own `build/cccc` and tests that).
 
 `make` detects the optional features itself: libbacktrace, readline, and the
 `CCCC_HAS_*` opt-ins below. Clone with `--recurse-submodules` (or run
@@ -87,7 +88,8 @@ target.
 
 | Target | What it does |
 |---|---|
-| `test` | run the whole test suite against `./cccc` (run `make` first) |
+| `test` | build `build/cccc`, run the whole test suite |
+| `cccc` | full `build/cccc` |
 | `docs` | Doxygen HTML for the three public headers into `build/docs/html/` (needs `doxygen` + `graphviz`) |
 | `cccc_asan` / `cccc_ubsan` / `cccc_tsan` / `cccc_msan` / `sanitizers` | sanitizer builds |
 | `afl` / `afl_asan` / `fuzz_harness` | fuzzing binaries |

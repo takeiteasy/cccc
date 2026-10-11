@@ -1,9 +1,10 @@
 // build.c — self-hosting build script for CCCC.
 //
-// `make` builds ./cccc (see Makefile); this script drives everything else:
-//   ./cccc --build build.c --build-target=NAME
-// The default build lists the targets. Targets that run the compiler (test,
-// the smokes, bench, ...) use ./cccc as it is: run `make` first.
+// The main build is `make` (see Makefile), which produces ./cccc. This script
+// is the same build expressed through cccc's own --build API, and drives the
+// extra targets (tests, sanitizers, fuzzing, ...):
+//   ./cccc --build build.c [--build-target=NAME]
+// The default build produces build/cccc.
 //
 // Selective builds via --build-target=NAME:
 //   cccc_asan          AddressSanitizer + UBSan build  → cccc-asan
@@ -80,7 +81,7 @@ static void maybe_add_curl(Builder *ctx, BuildTarget *t) {
 
 // ---- Intel BID decimal FP library (optional; controlled by CCCC_HAS_DECIMAL)
 // -- Never vendored (see tools/fetch_intel_bid.sh); fetched/built on demand
-// into a gitignored prefix. Mirrors Makefile.backup's CCCC_HAS_DECIMAL block,
+// into a gitignored prefix. Mirrors the Makefile's CCCC_HAS_DECIMAL block,
 // one difference: a missing libbid.a here degrades to a non-decimal build with
 // a diagnostic rather than aborting the whole graph (add_cccc_flags(), which
 // calls this, has no way to fail its caller's target outright).
@@ -585,47 +586,141 @@ BuildTarget *host_tests(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
-    return RunCustom(ctx, "test", "python3 tools/run_tests.py --binary ./cccc");
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "test", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *test_suites(Builder *ctx) {
-    return RunCustom(ctx, "test-suites", "python3 tools/tests.py --suites --binary ./cccc");
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --suites --binary %s",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "test-suites", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *test_legacy(Builder *ctx) {
-    return RunCustom(ctx, "test-legacy", "python3 tools/tests.py --legacy --binary ./cccc");
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --legacy --binary %s",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "test-legacy", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *sqlite_smoke(Builder *ctx) {
-    // Runs against ./cccc as it is.
-    return RunCustom(ctx, "sqlite-smoke", "python3 tools/sqlite_smoke.py");
+    // tools/sqlite_smoke.py hardcodes root/"cccc" -- it takes no --binary
+    // override, unlike tools/tests.py and tools/run_tests.py. Put the built
+    // binary there via `cp` + atomic `mv`, NOT a direct `cp` onto ./cccc:
+    // when this whole build.c invocation is itself running as ./cccc (the
+    // common case -- ./cccc --build build.c), an in-place `cp` truncates
+    // and rewrites the very inode the running process's text segment is
+    // demand-paged from, and it gets SIGKILLed the next time the kernel
+    // faults in a code page. `mv` swaps the directory entry to a new inode
+    // atomically, leaving the running process's already-open mapping of
+    // the old one untouched until it exits.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(
+        cmd, sizeof(cmd),
+        "cp %s ./cccc.sqlite-smoke-tmp && mv ./cccc.sqlite-smoke-tmp ./cccc "
+        "&& python3 tools/sqlite_smoke.py",
+        TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "sqlite-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *header_resolution_smoke(Builder *ctx) {
-    // Runs against ./cccc as it is.
-    return RunCustom(ctx, "header-resolution-smoke", "python3 tools/header_resolution_smoke.py");
+    // tools/header_resolution_smoke.py (#891) hardcodes root/"cccc", same as
+    // sqlite_smoke.py above -- see the comment on sqlite_smoke for why the
+    // built binary is placed via `cp` + atomic `mv` rather than a direct
+    // `cp` onto ./cccc.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cp %s ./cccc.header-resolution-smoke-tmp && "
+             "mv ./cccc.header-resolution-smoke-tmp ./cccc "
+             "&& python3 tools/header_resolution_smoke.py",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "header-resolution-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *cli_exit_code_smoke(Builder *ctx) {
-    // Runs against ./cccc as it is.
-    return RunCustom(ctx, "cli-exit-code-smoke", "python3 tools/cli_exit_code_smoke.py");
+    // tools/cli_exit_code_smoke.py (#1260) hardcodes root/"cccc", same as
+    // header_resolution_smoke above -- see the comment on sqlite_smoke for
+    // why the built binary is placed via `cp` + atomic `mv` rather than a
+    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
+    // run_tests.py; this standalone target is for running it in isolation.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cp %s ./cccc.cli-exit-code-smoke-tmp && "
+             "mv ./cccc.cli-exit-code-smoke-tmp ./cccc "
+             "&& python3 tools/cli_exit_code_smoke.py",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "cli-exit-code-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *url_mirror_smoke(Builder *ctx) {
-    // Runs against ./cccc as it is.
-    return RunCustom(ctx, "url-mirror-smoke", "python3 tools/url_mirror_smoke.py");
+    // tools/url_mirror_smoke.py (#1324) hardcodes root/"cccc", same as
+    // header_resolution_smoke above -- see the comment on sqlite_smoke for
+    // why the built binary is placed via `cp` + atomic `mv` rather than a
+    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
+    // run_tests.py; this standalone target is for running it in isolation.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cp %s ./cccc.url-mirror-smoke-tmp && "
+             "mv ./cccc.url-mirror-smoke-tmp ./cccc "
+             "&& python3 tools/url_mirror_smoke.py",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "url-mirror-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *comptime_native_smoke(Builder *ctx) {
-    // Runs against ./cccc as it is.
-    return RunCustom(ctx, "comptime-native-smoke", "python3 tools/comptime_native_smoke.py");
+    // tools/comptime_native_smoke.py (#892) hardcodes root/"cccc", same as
+    // header_resolution_smoke above -- see the comment on sqlite_smoke for
+    // why the built binary is placed via `cp` + atomic `mv` rather than a
+    // direct `cp` onto ./cccc.
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "cp %s ./cccc.comptime-native-smoke-tmp && "
+             "mv ./cccc.comptime-native-smoke-tmp ./cccc "
+             "&& python3 tools/comptime_native_smoke.py",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
@@ -648,7 +743,7 @@ BuildTarget *audit_reflection_enums(Builder *ctx) {
 // src/reflection_ffi_protos.inc / src/reflection_ffi_register.inc are
 // generated from include/cccc/reflection.h by tools/gen_reflection_ffi.c (run
 // through the cccc that is driving this build) and #include'd by both
-// src/macros.c and src/reflection.c. Unlike src/std.c, they're committed so
+// src/macros.c and src/reflection.c. They're committed so
 // plain `make` needs no python3; this step keeps them fresh on every default
 // build, and reflection_ffi_check below (wired into the test target) catches
 // staleness for any build that skips it.
@@ -683,7 +778,7 @@ BuildTarget *reflection_ffi_check(Builder *ctx) {
 // src/shims.inc is the -c=native support-shim text table, generated from the
 // ordinary C under src/shims/ by tools/gen_shims.c (run through the cccc that
 // is driving this build) and #include'd by src/serialize_shims.c. Committed
-// (like reflection_ffi_*.inc, unlike src/std.c) so plain `make` needs no
+// (like reflection_ffi_*.inc) so plain `make` needs no
 // python3; this step keeps it fresh on every default build, shims_check below
 // (wired into the test target) catches staleness for any build that skips it.
 // AddInput declares the real dependency -- every src/shims/*.c, the generator
@@ -743,9 +838,13 @@ BuildTarget *docs(Builder *ctx) {
 
 static BuildTarget *make_bench_compare(Builder *ctx, const char *name,
                                        const char *pyflags) {
-    char cmd[512];
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
     snprintf(cmd, sizeof(cmd), "python3 tools/bench.py %s", pyflags);
-    return RunCustom(ctx, name, cmd);
+    BuildTarget *step = RunCustom(ctx, name, cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 [[cccc::build_target]]
@@ -793,26 +892,44 @@ BuildTarget *profile_cpu(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *profile_mem(Builder *ctx) {
-    const char *cmd =
-        strcmp(BuildHost(ctx), "darwin") == 0
-            ? "mkdir -p profile && leaks -atExit -- ./cccc -I./include "
-              "tests/benchmarks/mandelbrot.c "
-              "> profile/mem-leaks.txt 2>&1 || true"
-            : "mkdir -p profile && valgrind --tool=massif "
-              "--massif-out-file=profile/mem.massif "
-              "./cccc -I./include tests/benchmarks/mandelbrot.c || true";
-    return RunCustom(ctx, "profile-mem", cmd);
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    if (strcmp(BuildHost(ctx), "darwin") == 0)
+        snprintf(cmd, sizeof(cmd),
+                 "mkdir -p profile && leaks -atExit -- %s -I./include "
+                 "tests/benchmarks/mandelbrot.c "
+                 "> profile/mem-leaks.txt 2>&1 || true",
+                 TargetOutput(cccc));
+    else
+        snprintf(cmd, sizeof(cmd),
+                 "mkdir -p profile && valgrind --tool=massif "
+                 "--massif-out-file=profile/mem.massif "
+                 "%s -I./include tests/benchmarks/mandelbrot.c || true",
+                 TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "profile-mem", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 // ---- dsym (Makefile:608-617, macOS-only) -----------------------------------
 
 [[cccc::build_target]]
 BuildTarget *dsym(Builder *ctx) {
-    if (strcmp(BuildHost(ctx), "darwin") == 0)
-        return RunCustom(ctx, "dsym", "dsymutil ./cccc");
-    return RunCustom(ctx, "dsym",
-                     "echo 'dsym: no-op on this platform (DWARF is already "
-                     "in the ELF)'");
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    BuildTarget *step;
+    if (strcmp(BuildHost(ctx), "darwin") == 0) {
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd), "dsymutil %s", TargetOutput(cccc));
+        step = RunCustom(ctx, "dsym", cmd);
+    } else {
+        step = RunCustom(ctx, "dsym",
+                         "echo 'dsym: no-op on this platform (DWARF is already "
+                         "in the ELF)'");
+    }
+    DependsOn(step, cccc);
+    return step;
 }
 
 // ---- afl / afl-asan (Makefile:229-252) -------------------------------------
@@ -869,7 +986,8 @@ BuildTarget *afl_asan(Builder *ctx) {
 // tests/test_build_cache.c into a shared --build-cache dir three times --
 // default compiler, same compiler again (must cache-hit), then
 // --build-cc=<other family> (must NOT cache-hit, i.e. must actually
-// recompile) -- via the repo-root ./cccc. Skips cleanly (not a failure)
+// recompile) -- via a single freshly-built "cccc" so the smoke isn't at the
+// mercy of a possibly-stale repo-root ./cccc. Skips cleanly (not a failure)
 // if only one compiler family is reachable on PATH.
 [[cccc::build_target]]
 BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
@@ -883,6 +1001,9 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
                         "one compiler family on PATH)\n");
         return RunCustom(ctx, "build-cache-toolchain-smoke", "true");
     }
+
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
 
     // The vendored RunCustom shell (build_shell.c) has no `!`/`$?` -- so
     // "did NOT cache-hit" is checked positively instead: a real recompile
@@ -903,8 +1024,11 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
              "--build-cc=%s tests/test_build_cache.c | grep -q -- '%s' && "
              "rm -rf build/build_cache_toolchain_smoke && "
              "echo 'build-cache-toolchain-smoke: OK'",
-             "./cccc", "./cccc", "./cccc", other_cc, other_cc);
-    return RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
+             TargetOutput(cccc), TargetOutput(cccc), TargetOutput(cccc),
+             other_cc, other_cc);
+    BuildTarget *step = RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 // ---- Linux via Colima (Makefile:458-556) -----------------------------------
@@ -993,24 +1117,37 @@ BuildTarget *linux_amd64_msan_test(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *bench(Builder *ctx) {
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     if (!HaveTool(ctx, "hyperfine")) {
         fprintf(stderr, "build: bench requires hyperfine (not found in PATH) — "
                         "install it (e.g. brew install hyperfine / apt install "
                         "hyperfine)\n");
         return RunCustom(ctx, "bench", "false");
     }
-    return RunCustom(ctx, "bench",
-                     "mkdir -p profile && hyperfine --warmup 3 "
-                     "--ignore-failure --export-json profile/bench.json "
-                     "'./cccc -I./include tests/benchmarks/mandelbrot.c'");
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
+             "--export-json profile/bench.json '%s -I./include "
+             "tests/benchmarks/mandelbrot.c'",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "bench", cmd);
+    DependsOn(step, cccc);
+    return step;
 }
 
 // ---- Default build entry -------------------------------------------------
-// ./cccc comes from `make`; with no --build-target this lists what is available.
+// Builds: libbacktrace (vendored), the reflection FFI and shims regen, and the
+// final build/cccc executable. All other targets
+// are available via --build-target=NAME.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    printf("./cccc is built by `make`. Choose a target with "
-           "--build-target=NAME; list them with --build-list-targets.\n");
-    return 0;
+    BuildTarget *bt             = make_libbacktrace(ctx);
+    BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
+    BuildTarget *shims_gen_step = shims_gen(ctx);
+    BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
+    DependsOn(final, reflection_gen);
+    DependsOn(final, shims_gen_step);
+    return BuildAll(ctx);
 }
