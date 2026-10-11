@@ -9551,6 +9551,28 @@ def case_compiler_family_auto_resolves_1226(cccc: Path, tmp: str) -> bool:
 # module scope (#1197) so both main() and audit_skips() below share one
 # source of truth -- previously this was a local inside main()'s
 # `with tempfile.TemporaryDirectory()` block.
+EXTENDED_ASM_PROGRAM = r"""
+int main(void) {
+    int x = 40, y;
+#if defined(__aarch64__)
+    __asm__ volatile("add %w0, %w1, #2" : "=r"(y) : "r"(x));
+#elif defined(__x86_64__)
+    __asm__ volatile("leal 2(%1), %0" : "=r"(y) : "r"(x));
+#else
+    y = 42;
+#endif
+    return y;
+}
+"""
+
+
+def case_extended_asm_native_executes(cccc: Path, tmp: str) -> bool:
+    print("  extended asm: -c=native hands operands to the host assembler, "
+          "so an unseeded output holds the asm's result (the VM never runs it)")
+    return _native_run_case(cccc, tmp, "extended_asm_native",
+                            EXTENDED_ASM_PROGRAM)
+
+
 CASES = [
     case_native_end_to_end,
     case_dump_expanded_no_attrtarget,
@@ -9737,6 +9759,7 @@ CASES = [
     case_third_includer_unrelated_define_1307,
     case_vendored_macro_defined_outside_1308,
     case_widening_cast_shift_1312,
+    case_extended_asm_native_executes,
 ]
 
 

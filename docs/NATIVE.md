@@ -187,6 +187,7 @@ left to be discovered:
 | Construct | Under the VM | Under `-c=native` |
 |---|---|---|
 | `asm(...)` | no-op by default; `--asm-passthru` compiles + calls via FFI | emitted verbatim and executed by the host binary |
+| extended `asm(... : outputs : inputs : clobbers : labels)` | no-op: outputs keep their value, `asm goto` never jumps; `--asm-passthru` rejects operands | emitted verbatim with its qualifiers (`volatile`, `inline`, `goto`), operands, clobbers and labels; executed by the host binary |
 | `__builtin_return_address(n)` | a VM bytecode offset cast to `void*` | a real host return address — same meaning, unrelated numeric value |
 | `__builtin_dynamic_object_size` | reads the VM allocation header, always exact | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown" |
 | `__builtin_unreachable` / `__builtin_trap` / `__builtin_debugtrap` | all trap | all emit `__builtin_trap()` |

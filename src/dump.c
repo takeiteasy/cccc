@@ -512,10 +512,13 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
         case ND_MEMZERO:
         case ND_FRAME_ADDR:
         case ND_RETURN_ADDR:
+        case ND_ASM:
+            dump_node_list(f, "operands", node->args, depth + 1, verbose);
+            break;
+
         case ND_NULL_EXPR:
         case ND_NUM:
         case ND_VAR:
-        case ND_ASM:
         case ND_GOTO:
         case ND_LABEL_VAL:
         case ND_MACRO_CALL:
@@ -1379,6 +1382,40 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
         case ND_ASM:
             JSON_FIELD(f, d, first, "asm_str");
             print_escaped_string(f, node->asm_str);
+            JSON_FIELD(f, d, first, "asm_flags");
+            fprintf(f, "%d", node->asm_flags);
+            if (node->args) {
+                JSON_FIELD(f, d, first, "operands");
+                dump_ast_json_node_list(f, node->args, d);
+                JSON_FIELD(f, d, first, "constraints");
+                fprintf(f, "[");
+                for (int i = 0; i < node->asm_n_outputs + node->asm_n_inputs;
+                     i++) {
+                    fprintf(f, i ? ", " : "");
+                    print_escaped_string(f, node->asm_ops[i].constraint);
+                }
+                fprintf(f, "]");
+                JSON_FIELD(f, d, first, "n_outputs");
+                fprintf(f, "%d", node->asm_n_outputs);
+            }
+            if (node->asm_n_clobbers) {
+                JSON_FIELD(f, d, first, "clobbers");
+                fprintf(f, "[");
+                for (int i = 0; i < node->asm_n_clobbers; i++) {
+                    fprintf(f, i ? ", " : "");
+                    print_escaped_string(f, node->asm_clobbers[i]);
+                }
+                fprintf(f, "]");
+            }
+            if (node->asm_labels) {
+                JSON_FIELD(f, d, first, "labels");
+                fprintf(f, "[");
+                for (Node *l = node->asm_labels; l; l = l->next) {
+                    fprintf(f, l == node->asm_labels ? "" : ", ");
+                    print_escaped_string(f, l->label);
+                }
+                fprintf(f, "]");
+            }
             break;
 
         case ND_MACRO_CALL:

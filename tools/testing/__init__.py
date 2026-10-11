@@ -316,6 +316,9 @@ NATIVE_SKIP_TESTS = {
                  "(error=/expect_compile_error=) tests -- the parser's "
                  "error-recovery AST is not safe to hand to a real host "
                  "compiler, see docs/TESTING.md",
+    "test_suite_asm_extended_errors.c": "negative (error=) tests -- the "
+                 "parser's error-recovery AST is not safe to hand to a real "
+                 "host compiler, see docs/TESTING.md",
     "test_suite_stack_safety.c": "#1033 v1: contains a negative "
                  "(expect_compile_error=) test, see docs/TESTING.md",
     "test_suite_std_c17.c": "#1033 v1: contains a negative "

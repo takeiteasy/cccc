@@ -1051,6 +1051,19 @@ static void objsize_poison_scan(Node *node) {
                     node->lhs->var->objsize_has_alloc)
                     node->lhs->var->objsize_unsafe = true;
                 break;
+            case ND_ASM: {
+                // Outputs and "m" operands may be rewritten by the asm.
+                Node *a = node->args;
+                for (int i = 0;
+                     a && i < node->asm_n_outputs + node->asm_n_inputs;
+                     i++, a = a->next)
+                    if ((i < node->asm_n_outputs ||
+                         strchr(node->asm_ops[i].constraint, 'm')) &&
+                        a->kind == ND_VAR && a->var &&
+                        a->var->objsize_has_alloc)
+                        a->var->objsize_unsafe = true;
+                break;
+            }
             default:
                 break;
         }
@@ -1436,6 +1449,7 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
         bind_free_label_refs(vm, node->va_ap, map);
         bind_free_label_refs(vm, node->va_last, map);
         bind_free_label_refs(vm, node->va_src, map);
+        bind_free_label_refs(vm, node->asm_labels, map);
         for (Node *a = node->args; a; a = a->next)
             bind_free_label_refs(vm, a, map);
         for (Node *c = node->case_next; c; c = c->case_next)

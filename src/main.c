@@ -2564,6 +2564,9 @@ int main(int argc, const char *argv[]) {
         !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
     if (vm.compiler.omp_threaded)
         define_macro(&vm, "__CCCC_OMP_THREADED__", "1");
+    vm.compiler.serializes_output =
+        (compile_format == COMPILE_NATIVE || dump_expanded_only) &&
+        !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
     vm.compiler.kernel_native =
         (compile_format == COMPILE_NATIVE ||
          (dump_expanded_only && !emit_generated_only)) &&

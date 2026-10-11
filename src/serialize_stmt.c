@@ -474,12 +474,63 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // matching the __typeof__/__extension__ spellings used
             // elsewhere in this file.
             print_indent_level(f, indent);
-            fprintf(f, "__asm__(");
+            fprintf(f, "__asm__");
+            if (node->asm_flags & ASM_VOLATILE)
+                fprintf(f, " __volatile__");
+            if (node->asm_flags & ASM_INLINE)
+                fprintf(f, " __inline__");
+            if (node->asm_flags & ASM_GOTO)
+                fprintf(f, " goto");
+            fprintf(f, node->asm_flags & (ASM_VOLATILE | ASM_INLINE | ASM_GOTO)
+                           ? " ("
+                           : "(");
             if (node->asm_str)
                 serialize_string_n(f, node->asm_str,
                                    (int)strlen(node->asm_str));
             else
                 fprintf(f, "\"\"");
+            if (node->asm_flags & ASM_EXTENDED) {
+                int   n_out = node->asm_n_outputs;
+                int   n_ops = n_out + node->asm_n_inputs;
+                Node *arg   = node->args;
+                // Both operand sections are always emitted, even if empty.
+                for (int section = 0; section < 2; section++) {
+                    fprintf(f, " :");
+                    int lo = section ? n_out : 0;
+                    int hi = section ? n_ops : n_out;
+                    for (int i = lo; i < hi; i++, arg = arg->next) {
+                        if (!arg)
+                            error_tok(vm, node->tok,
+                                      "internal error: asm operand count "
+                                      "mismatch");
+                        if (i > lo)
+                            fprintf(f, ",");
+                        if (node->asm_ops[i].name)
+                            fprintf(f, " [%s]", node->asm_ops[i].name);
+                        fprintf(f, " ");
+                        serialize_string_n(
+                            f, node->asm_ops[i].constraint,
+                            (int)strlen(node->asm_ops[i].constraint));
+                        fprintf(f, " (");
+                        serialize_expr(f, vm, ctx, arg, 2);
+                        fprintf(f, ")");
+                    }
+                }
+                if (node->asm_n_clobbers || node->asm_labels) {
+                    fprintf(f, " :");
+                    for (int i = 0; i < node->asm_n_clobbers; i++) {
+                        fprintf(f, i ? ", " : " ");
+                        serialize_string_n(f, node->asm_clobbers[i],
+                                           (int)strlen(node->asm_clobbers[i]));
+                    }
+                }
+                if (node->asm_labels) {
+                    fprintf(f, " :");
+                    for (Node *l = node->asm_labels; l; l = l->next)
+                        fprintf(f, "%s %s", l == node->asm_labels ? "" : ",",
+                                l->label);
+                }
+            }
             fprintf(f, ");\n");
             break;
 

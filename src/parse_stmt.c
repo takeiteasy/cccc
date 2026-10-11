@@ -62,21 +62,242 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
     return is_typename_ex(vm, tok, /*allow_splice=*/true);
 }
 
-// asm-stmt = ("asm" | "__asm__" | "__asm") ("volatile" | "inline")* "("
-//            string-literal ")" ";"
+#define ASM_MAX_OPERANDS 30
+
+static char *asm_string_literal(VirtualMachine *vm, Token *tok,
+                                const char *what) {
+    if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
+        error_tok(vm, tok, "expected %s string literal, found '%.*s'", what,
+                  tok->len, tok->loc);
+    return tok->str;
+}
+
+// An output must name modifiable storage; gen_addr's own check never runs
+// under -c=native, so reject here.
+static void asm_check_output(VirtualMachine *vm, Node *e, Token *tok) {
+    add_type(vm, e);
+    reject_rvalue(vm, e, "asm output operand is not an lvalue");
+    bool storage =
+        e->kind == ND_VAR || e->kind == ND_DEREF || e->kind == ND_MEMBER;
+    if (!storage || e->ty->kind == TY_ARRAY)
+        error_tok(vm, tok, "asm output operand is not an lvalue");
+    if (e->ty->is_const)
+        error_tok(vm, tok, "asm output operand is const-qualified");
+}
+
+// Parses `[name] "constraint" (expr)`; the expression is stored untouched
+// (no promotion) so the host sees the operand's real type.
+static Node *asm_operand(VirtualMachine *vm, Token **rest, Token *tok,
+                         AsmOperand *op, bool is_output) {
+    op->name = NULL;
+    if (equal(tok, "[")) {
+        op->name = get_ident(vm, tok->next);
+        tok      = skip(vm, tok->next->next, "]");
+    }
+    Token *ctok    = tok;
+    op->constraint = asm_string_literal(vm, tok, "constraint");
+    if (is_output && op->constraint[0] != '=' && op->constraint[0] != '+')
+        error_tok(vm, ctok, "asm output constraint must start with '=' or '+'");
+    tok         = skip(vm, tok->next, "(");
+    Token *etok = tok;
+    Node  *e    = expr(vm, &tok, tok);
+    if (is_output)
+        asm_check_output(vm, e, etok);
+    else
+        add_type(vm, e);
+    *rest = skip(vm, tok, ")");
+    return e;
+}
+
+static bool asm_section_end(Token *tok) {
+    return equal(tok, ":") || equal(tok, ")");
+}
+
+// Checks %N / %[name] / %lN references in an extended-asm template.
+// Target-specific punctuation after '%' is left to the host assembler.
+static void asm_check_template(VirtualMachine *vm, Token *tok, Node *node,
+                               char **label_names, int n_labels) {
+    int total = node->asm_n_outputs + node->asm_n_inputs;
+    for (const char *p = node->asm_str; *p; p++) {
+        if (*p != '%')
+            continue;
+        p++;
+        if (!*p)
+            break;
+        if (strchr("%={|}", *p))
+            continue;
+        if (isalpha((unsigned char)*p) &&
+            (isdigit((unsigned char)p[1]) || p[1] == '['))
+            p++;
+        if (isdigit((unsigned char)*p)) {
+            long n = 0;
+            for (; isdigit((unsigned char)*p); p++)
+                n = n * 10 + (*p - '0');
+            p--;
+            if (n >= total + n_labels)
+                error_tok(vm, tok,
+                          "invalid operand number %%%ld in asm template (only "
+                          "%d operand(s))",
+                          n, total + n_labels);
+        } else if (*p == '[') {
+            const char *close = strchr(p, ']');
+            if (!close)
+                error_tok(vm, tok, "unterminated %%[name] in asm template");
+            int  len   = (int)(close - p - 1);
+            bool found = false;
+            for (int i = 0; i < total && !found; i++)
+                found = node->asm_ops[i].name &&
+                        (int)strlen(node->asm_ops[i].name) == len &&
+                        !strncmp(node->asm_ops[i].name, p + 1, len);
+            for (int i = 0; i < n_labels && !found; i++)
+                found = (int)strlen(label_names[i]) == len &&
+                        !strncmp(label_names[i], p + 1, len);
+            if (!found)
+                error_tok(vm, tok, "undefined named operand '%.*s' in asm", len,
+                          p + 1);
+            p = close;
+        }
+    }
+}
+
+// asm-stmt = ("asm" | "__asm__" | "__asm") ("volatile" | "inline" | "goto")*
+//            "(" template [":" outputs [":" inputs [":" clobbers
+//            [":" goto-labels]]]] ")" ";"
 static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = new_node(vm, ND_ASM, tok);
     tok        = tok->next;
 
-    while (equal(tok, "volatile") || equal(tok, "inline"))
-        tok = tok->next;
+    for (;; tok = tok->next) {
+        if (equal(tok, "volatile") || equal(tok, "__volatile"))
+            node->asm_flags |= ASM_VOLATILE;
+        else if (equal(tok, "inline"))
+            node->asm_flags |= ASM_INLINE;
+        else if (equal(tok, "goto"))
+            node->asm_flags |= ASM_GOTO;
+        else
+            break;
+    }
 
-    tok = skip(vm, tok, "(");
-    if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
-        error_tok(vm, tok, "expected string literal, found '%.*s'", tok->len,
-                  tok->loc);
-    node->asm_str = tok->str;
-    tok           = skip(vm, tok->next, ")");
+    tok            = skip(vm, tok, "(");
+    Token *tpl_tok = tok;
+    node->asm_str  = asm_string_literal(vm, tok, "template");
+    tok            = tok->next;
+
+    AsmOperand ops[ASM_MAX_OPERANDS];
+    Node       head  = {0};
+    Node      *cur   = &head;
+    int        n_ops = 0, n_plus = 0;
+    char     **label_names = NULL;
+    int        n_labels    = 0;
+
+    if (equal(tok, ":")) {
+        node->asm_flags |= ASM_EXTENDED;
+        for (int section = 0; section < 2; section++) {
+            tok = skip(vm, tok, ":");
+            while (!asm_section_end(tok)) {
+                if (n_ops == ASM_MAX_OPERANDS)
+                    error_tok(vm, tok, "more than %d operands in asm",
+                              ASM_MAX_OPERANDS);
+                bool   is_output = section == 0;
+                Token *op_tok    = tok;
+                cur->next = asm_operand(vm, &tok, tok, &ops[n_ops], is_output);
+                cur       = cur->next;
+                for (int i = 0; ops[n_ops].name && i < n_ops; i++)
+                    if (ops[i].name && !strcmp(ops[i].name, ops[n_ops].name))
+                        error_tok(vm, op_tok, "duplicate asm operand name '%s'",
+                                  ops[n_ops].name);
+                if (is_output) {
+                    node->asm_n_outputs++;
+                    n_plus += ops[n_ops].constraint[0] == '+';
+                } else {
+                    node->asm_n_inputs++;
+                }
+                n_ops++;
+                if (!equal(tok, ","))
+                    break;
+                tok = tok->next;
+            }
+            if (!equal(tok, ":"))
+                break;
+        }
+
+        // Clobbers.
+        if (equal(tok, ":")) {
+            tok     = tok->next;
+            int cnt = 0;
+            for (Token *t = tok; !asm_section_end(t); t = t->next)
+                cnt += t->kind == TK_STR;
+            node->asm_clobbers = arena_alloc(&vm->compiler.parser_arena,
+                                             sizeof(char *) * (cnt + 1));
+            while (!asm_section_end(tok)) {
+                node->asm_clobbers[node->asm_n_clobbers++] =
+                    asm_string_literal(vm, tok, "clobber");
+                tok = tok->next;
+                if (!equal(tok, ","))
+                    break;
+                tok = tok->next;
+            }
+        }
+
+        // Goto labels.
+        if (equal(tok, ":")) {
+            if (!(node->asm_flags & ASM_GOTO))
+                error_tok(vm, tok,
+                          "asm goto labels require the 'goto' qualifier");
+            Token *prev = tok;
+            tok         = tok->next;
+            int cnt     = 0;
+            for (Token *t = tok; !equal(t, ")") && t->kind != TK_EOF;
+                 t        = t->next)
+                cnt += t->kind == TK_IDENT;
+            label_names = arena_alloc(&vm->compiler.parser_arena,
+                                      sizeof(char *) * (cnt + 1));
+            Node *lcur  = NULL;
+            while (!equal(tok, ")")) {
+                // cc_match_goto_labels() blames tok->next, i.e. the label.
+                Node *g                 = new_node(vm, ND_GOTO, prev);
+                g->label                = get_ident(vm, tok);
+                label_names[n_labels++] = g->label;
+                g->cleanup_chain        = vm->compiler.cur_cleanup_chain;
+                g->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
+                g->goto_next            = vm->compiler.gotos;
+                vm->compiler.gotos      = g;
+                if (lcur)
+                    lcur->next = g;
+                else
+                    node->asm_labels = g;
+                lcur = g;
+                tok  = tok->next;
+                if (!equal(tok, ","))
+                    break;
+                prev = tok;
+                tok  = tok->next;
+            }
+        }
+    }
+
+    if (n_ops + n_plus + n_labels > ASM_MAX_OPERANDS)
+        error_tok(vm, tpl_tok, "more than %d operands in asm",
+                  ASM_MAX_OPERANDS);
+    if (n_ops) {
+        node->asm_ops =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(AsmOperand) * n_ops);
+        memcpy(node->asm_ops, ops, sizeof(AsmOperand) * n_ops);
+        node->args = head.next;
+    }
+    if (node->asm_flags & ASM_EXTENDED)
+        asm_check_template(vm, tpl_tok, node, label_names, n_labels);
+
+    // Reported here, not in codegen: diagnostics queued after parsing are
+    // never flushed.
+    if ((node->asm_n_outputs || node->asm_labels) &&
+        !vm->compiler.serializes_output && !vm->compiler.asm_passthru &&
+        !vm->compiler.asm_callback)
+        warn_tok(vm, node->tok, CCCC_WARN_IGNORED_FEATURES,
+                 "extended asm is not executed by the VM; outputs keep "
+                 "their value and asm goto never jumps");
+
+    tok = skip(vm, tok, ")");
     // The trailing ';' is part of the statement. In a block it was previously
     // left for the body loop to consume as an empty statement; consuming it
     // here also lets `Quote("asm(\"...\");")` parse cleanly (quote_core rejects

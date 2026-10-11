@@ -279,6 +279,7 @@ _NATIVE_AUDIT_REFUSED_BY_DESIGN = frozenset({
     "test_hook_inherit_reentry.c", "test_hook_inherit_prefix_guard.c",
     "test_hook_inherit_once.c", "test_suite_attributes.c",
     "test_suite_testing_framework.c", "test_suite_compile_errors.c",
+    "test_suite_asm_extended_errors.c",
     "test_suite_stack_safety.c", "test_suite_std_c17.c",
 })
 

@@ -1979,6 +1979,19 @@ typedef struct OmpDirective {
 
 typedef struct SwizzleStore SwizzleStore;
 
+/*! @brief One operand of a GNU extended asm statement. */
+typedef struct AsmOperand {
+    char *constraint;
+    char *name; // symbolic `[name]`, NULL if absent
+} AsmOperand;
+
+enum {
+    ASM_VOLATILE = 1 << 0,
+    ASM_INLINE   = 1 << 1,
+    ASM_GOTO     = 1 << 2,
+    ASM_EXTENDED = 1 << 3, // a ':' followed the template
+};
+
 /*!
  @brief Represents a node in the parser's abstract syntax tree.
 */
@@ -2127,8 +2140,15 @@ struct Node {
     LayoutOp case_begin_layout_is_align;
     LayoutOp case_end_layout_is_align;
 
-    // "asm" string literal
-    char *asm_str;
+    // "asm" string literal; extended-asm operand expressions live in `args`
+    // (outputs then inputs), parallel to asm_ops.
+    char        *asm_str;
+    AsmOperand  *asm_ops;
+    int          asm_n_outputs, asm_n_inputs;
+    char       **asm_clobbers;
+    int          asm_n_clobbers;
+    struct Node *asm_labels; // ND_GOTO refs chained by ->next
+    uint8_t      asm_flags;
 
     // Atomic compare-and-swap
     struct Node *cas_addr;
@@ -4374,6 +4394,8 @@ typedef struct Compiler {
                              // win over `#pragma cccc config(...)` (#357)
     bool     native_mode;    // True when compile_format == COMPILE_NATIVE;
                              // config()'s flag effects are skipped
+    bool     serializes_output; // -c=native, -m or -c=generated: the AST is
+                                // emitted as C, not run by the VM
     bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
                              // regions are outlined onto the thread pool
     bool     omp_used;       // a threaded OpenMP directive was lowered
