@@ -1,0 +1,2 @@
+# Chunk files are emitted verbatim into -c=native output; leave them as written.
+DisableFormat: true

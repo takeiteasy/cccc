@@ -170,7 +170,7 @@ int main(void) {
     // sequence, or anything > 56) must short-circuit to "" rather than
     // forwarding a bogus value to the host -- verified through the
     // -c=native shim (__cccc_native_guest_to_host_nl_item,
-    // src/shims/canonical_const.c) here, and through the VM's own
+    // src/shims/canonical_const/) here, and through the VM's own
     // guest_to_host_nl_item (src/stdlib/posix_lang.c) in
     // tests/suites/test_suite_posix.c.
     char *hole = nl_langinfo((nl_item)45);

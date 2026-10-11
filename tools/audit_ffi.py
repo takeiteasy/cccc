@@ -176,7 +176,7 @@ COMPILER_LOWERED_HEADERS = {
     # in codegen, not FFI calls.
     "stdbit.h",
     # Every omp_* function is `static inline` in the header for the VM, and a
-    # shim emitted into the output (src/shims/omp.c) under -c=native/-m.
+    # shim emitted into the output (src/shims/omp/) under -c=native/-m.
     "omp.h",
 }
 

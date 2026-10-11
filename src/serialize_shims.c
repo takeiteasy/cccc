@@ -21,11 +21,10 @@
 // canonical-const accessor shims for -c=native output (#1150).
 #include "./serialize_internal.h"
 
-// -c=native support-shim text: one `static const char
-// CCCC_SHIM_<group>_<name>[]` per chunk, generated from src/shims/*.c by
-// tools/gen_shims.c. Gating and rationale for each shim stay here, next to the
-// code that selects it.
-#include "shims.inc"
+// -c=native support-shim text: one `CCCC_SHIM_<group>_<name>` string per chunk
+// file under src/shims/, embedded by src/shim_table.c. Gating and rationale for
+// each shim stay here, next to the code that selects it.
+#include "shims.h"
 
 // Public API: Serialize entire program to C source
 // #904: CCCC's own polyfill headers (stdio.h/errno.h/getopt.h in src/std_table.c)
@@ -1099,6 +1098,9 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
                                                   "langinfo.h"))
             use_nl_langinfo_l = true;
 
+        // Rejects an unrecognized item (negatives, the 45-49/54/55 holes, > 56)
+        // like guest_to_host_nl_item (src/stdlib/posix_lang.c) instead of
+        // forwarding it to the host raw.
         fprintf(f, "%s", CCCC_SHIM_canonical_const_nl_item_xlate);
         if (use_nl_langinfo)
             fprintf(f, "%s", CCCC_SHIM_canonical_const_nl_langinfo);
@@ -1207,11 +1209,11 @@ void serialize_canonical_const_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
             // arbitrary guest integer as some unrelated host _SC_ number.
             fprintf(f, "%s", CCCC_SHIM_canonical_const_sysconf);
 
-        // _PC_* -- pathconf() and fpathconf() share one 9-way canonical->host
-        // _PC_* switch, differing only in how the host is asked (path vs fd).
-        // src/shims/canonical_const.c holds that switch inlined in both
-        // sections; tools/gen_shims.c's pathconf_drift_check() fails the build
-        // if their _PC_* sets or case counts diverge.
+        // _PC_* -- pathconf() and fpathconf() share one canonical->host _PC_*
+        // mapping (pc_map), differing only in how the host is asked (path vs
+        // fd).
+        if (use_pathconf || use_fpathconf)
+            fprintf(f, "%s", CCCC_SHIM_canonical_const_pc_map);
         if (use_pathconf)
             fprintf(f, "%s", CCCC_SHIM_canonical_const_pathconf);
         if (use_fpathconf)
@@ -1618,9 +1620,8 @@ static void wide_bitint_scan_node(Node *node, WideBitintNeed *need,
 // Emits, at most once per translation unit and only when actually needed:
 //   - one `typedef struct { unsigned long long w[K]; } __cccc_biK;` per
 //     distinct word count K a wide _BitInt container is used at, and
-//   - the full wide-_BitInt runtime (src/stdlib/wide_bitint.c, extracted
-//     verbatim by tools/gen_shims.c's `wide_bitint` group_source_override() --
-//     see that file's own top comment).
+//   - the full wide-_BitInt runtime (src/stdlib/wide_bitint/runtime.c, the
+//     same file the VM compiles).
 //
 // Unlike the libc-replacement shims elsewhere in this file, every helper is
 // width-generic (words/width are runtime int arguments, not baked into the
@@ -1657,8 +1658,8 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
 
     fprintf(f, "/* #1123: multi-word _BitInt(N>128) containers + runtime */\n");
     // The word array must be spelled `uint64_t`, not `unsigned long long`:
-    // every wide-_BitInt runtime helper (src/stdlib/wide_bitint.c) takes
-    // `uint64_t *`, and on LP64 glibc `uint64_t` is `unsigned long`, a
+    // every wide-_BitInt runtime helper (src/stdlib/wide_bitint/runtime.c)
+    // takes `uint64_t *`, and on LP64 glibc `uint64_t` is `unsigned long`, a
     // distinct type from `unsigned long long` -- passing `container.w` to a
     // helper then trips -Wincompatible-pointer-types (fatal in the native
     // build). Emit the <stdint.h> the spelling needs up front, before the
@@ -1669,37 +1670,7 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
                 need.ks[i], need.ks[i]);
     fprintf(f, "\n");
 
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_impl);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_trunc);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_add);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sub);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_mul);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_udivmod_impl);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_udiv);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_umod);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sdivmod_impl);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sdiv);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_smod);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_shl);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_ushr);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_sshr);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_cmp);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_i64);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_u64);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_extend);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_to_i64);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_to_double);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_double);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_and);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_or);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_xor);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_not);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_neg);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_nonzero);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_from_str);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_bitfield_extract);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_bitfield_insert);
-    fprintf(f, "%s", CCCC_SHIM_wide_bitint_reinterpret);
+    fprintf(f, "%s", CCCC_SHIM_wide_bitint_runtime);
     fprintf(f, "\n");
 }
 
@@ -1810,10 +1781,14 @@ void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
     if (!omp && !kernel)
         return;
 
+    // The pool and barrier serve both runtimes; OMP_NUM_THREADS also sizes the
+    // pool a kernel launch runs on.
     fprintf(f, "%s", CCCC_SHIM_pool_includes);
     fprintf(f, "%s", CCCC_SHIM_pool_runtime);
     if (omp) {
         fprintf(f, "%s", CCCC_SHIM_omp_includes);
+        // TODO: critical-section names are looked up linearly, a hash table if
+        // programs use many names (#1403).
         fprintf(f, "%s", CCCC_SHIM_omp_runtime);
         fprintf(f, "%s", CCCC_SHIM_omp_api);
     }
@@ -1821,6 +1796,9 @@ void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
         int max_group = vm->kernel_max_group > 0 ? vm->kernel_max_group : 256;
         fprintf(f, "%s", CCCC_SHIM_kernel_includes);
         fprintf(f, "#define __CCCC_KERNEL_MAX_GROUP %d\n", max_group);
+        // TODO: a thread per work-item, created and joined for every group;
+        // split the kernel at its barriers into work-item loops instead
+        // (#1385).
         fprintf(f, "%s", CCCC_SHIM_kernel_runtime);
     }
 }

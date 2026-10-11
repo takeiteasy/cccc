@@ -45,7 +45,6 @@ Sub-suites:
   test_proc_wedge     — run_capture() timeout/group-kill/stdin-closing unit tests (ticket #1185)
   test_wedge          — wedge.py deadline-watchdog/SIGUSR1-dump/progress-log unit tests (ticket #1202)
   reflection_ffi_check — reflection.h FFI table generation freshness (ticket #859)
-  shims_check          — src/shims.inc freshness vs src/shims/*.c
   audit_reflection_enums — reflection.h enum values vs internal enums (ticket #860)
   audit_host_macro_shadow — host-facing translation macros shadowed under self-hosting (ticket #1315)
   fuzz                — fuzz regression corpus replay, compile-only (ticket #625)
@@ -844,28 +843,6 @@ def _run_reflection_ffi_check(cccc):
         return f"FAILED ({e})", False
 
 
-def _run_shims_check(cccc):
-    """Check src/shims.inc is up to date with src/shims/*.c by running the
-    C generator tools/gen_shims.c in --check mode under the given cccc.
-
-    Returns (status_str, ok).
-    """
-    script = _TOOLS_DIR / "gen_shims.c"
-    if not script.exists():
-        return "FAILED (tools/gen_shims.c not found)", False
-
-    try:
-        proc = subprocess.run(
-            [str(cccc), str(script), "--", "--check"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if proc.returncode == 0:
-            return "passed", True
-        return "FAILED\n" + (proc.stdout + proc.stderr).rstrip(), False
-    except Exception as e:
-        return f"FAILED ({e})", False
-
-
 def _run_audit_host_macro_shadow():
     """Check that every host-facing translation macro cccc's own source
     relies on is covered by src/host_shadow_macros.h or documented as
@@ -1302,14 +1279,6 @@ def main():
     refl_status, ok_refl = _run_reflection_ffi_check(cccc)
     print(f"  {refl_status}")
     suite_results["reflection_ffi_check"] = ok_refl
-
-    # --- -c=native shim text generation check ---
-    print()
-    print("[ shims_check ]")
-    wedge.arm("shims_check", scalar_phase_timeout)
-    shims_status, ok_shims = _run_shims_check(cccc)
-    print(f"  {shims_status}")
-    suite_results["shims_check"] = ok_shims
 
     # --- Reflection enum parity audit (#860) ---
     print()

@@ -221,11 +221,12 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
 // packaging time (see tools/release.sh), not compile time, so a release
 // binary a user hands back a crash report from is still debuggable.
 
-// src/std_table.c embeds every bundled header with `.incbin`, which the host
-// compiler's depfile never reports, so it gets a library of its own whose
-// inputs are those headers: editing one recompiles only this file.
-static bool         building_std_table;
-static BuildTarget *std_table_lib(Builder *ctx, BuildTarget *bt);
+// src/std_table.c and src/shim_table.c embed every bundled header and -c=native
+// shim chunk with `.incbin`, which the host compiler's depfile never reports,
+// so they get a library of their own whose inputs are those files: editing one
+// recompiles only these two files.
+static bool building_embed_lib;
+static BuildTarget *embed_lib(Builder *ctx, BuildTarget *bt);
 
 static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
                                const char *opt_flag) {
@@ -275,8 +276,8 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
         AddInclude(t, LIBBACKTRACE_DIR);
         LinkWith(t, bt);
     }
-    if (!building_std_table)
-        LinkWith(t, std_table_lib(ctx, bt));
+    if (!building_embed_lib)
+        LinkWith(t, embed_lib(ctx, bt));
     // Git describe stamping for --version (#883). Absent in release
     // tarballs (no .git) -- CCCC_GIT_DESC then falls back to "" (see
     // src/internal.h) and --version shows CCCC_RELEASE_VERSION alone.
@@ -296,22 +297,27 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
     add_cccc_flags_opt(ctx, t, bt, "-O0");
 }
 
-static BuildTarget *std_table_lib(Builder *ctx, BuildTarget *bt) {
+static BuildTarget *embed_lib(Builder *ctx, BuildTarget *bt) {
     static BuildTarget *lib;
     if (lib)
         return lib;
-    lib = StaticLib(ctx, "std_table");
+    lib = StaticLib(ctx, "embedded");
     AddSource(lib, "src/std_table.c");
+    AddSource(lib, "src/shim_table.c");
     AddCFlag(lib, "-fPIC");
-    building_std_table = true;
+    building_embed_lib = true;
     add_cccc_flags(ctx, lib, bt);
-    building_std_table = false;
+    building_embed_lib   = false;
     const char **headers = GlobFiles(ctx, "include/*.h");
     for (int i = 0; headers[i]; i++)
         AddInput(lib, headers[i]);
     headers = GlobFiles(ctx, "include/*/*.h");
     for (int i = 0; headers[i]; i++)
         AddInput(lib, headers[i]);
+    const char **shims = GlobFiles(ctx, "src/shims/*/*.c");
+    for (int i = 0; shims[i]; i++)
+        AddInput(lib, shims[i]);
+    AddInput(lib, "src/stdlib/wide_bitint/runtime.c");
     return lib;
 }
 
@@ -321,7 +327,8 @@ static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
     AddSourcesGlob(t, "src/*.c");
     AddSourcesGlob(t, "src/stdlib/*.c");
     ExcludeSource(t, "src/ops.c");
-    ExcludeSource(t, "src/std_table.c"); // linked via std_table_lib()
+    ExcludeSource(t, "src/std_table.c"); // linked via embed_lib()
+    ExcludeSource(t, "src/shim_table.c");
 }
 
 // ---- Reusable cccc executable factory ------------------------------------
@@ -428,17 +435,14 @@ BuildTarget *libcccc(Builder *ctx) {
 // (CCCC's own default), so an explicit prototype is required like any
 // other forward reference.
 BuildTarget *reflection_ffi_gen(Builder *ctx);
-BuildTarget *shims_gen(Builder *ctx); // same forward-reference reason as above
 
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *shims_gen_step = shims_gen(ctx);
     BuildTarget *final =
         make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
     DependsOn(final, reflection_gen);
-    DependsOn(final, shims_gen_step);
     return final;
 }
 
@@ -775,40 +779,6 @@ BuildTarget *reflection_ffi_check(Builder *ctx) {
     return RunCustom(ctx, "reflection-ffi-check", cmd);
 }
 
-// src/shims.inc is the -c=native support-shim text table, generated from the
-// ordinary C under src/shims/ by tools/gen_shims.c (run through the cccc that
-// is driving this build) and #include'd by src/serialize_shims.c. Committed
-// (like reflection_ffi_*.inc) so plain `make` needs no
-// python3; this step keeps it fresh on every default build, shims_check below
-// (wired into the test target) catches staleness for any build that skips it.
-// AddInput declares the real dependency -- every src/shims/*.c, the generator
-// and its tools/lib/ sources, plus src/stdlib/wide_bitint.c, whose text doubles
-// as the "wide_bitint" group's source.
-[[cccc::build_target]]
-BuildTarget *shims_gen(Builder *ctx) {
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_shims.c --", CcccPath(ctx));
-    BuildTarget *gen = RunCustom(ctx, "shims-gen", cmd);
-    DeclareOutput(gen, "src/shims.inc");
-    AddInput(gen, "tools/gen_shims.c");
-    const char **lib = GlobFiles(ctx, "tools/lib/*");
-    for (int i = 0; lib && lib[i]; i++)
-        AddInput(gen, lib[i]);
-    AddInput(gen, "src/stdlib/wide_bitint.c");
-    const char **shims = GlobFiles(ctx, "src/shims/*.c");
-    for (int i = 0; shims && shims[i]; i++)
-        AddInput(gen, shims[i]);
-    return gen;
-}
-
-[[cccc::build_target]]
-BuildTarget *shims_check(Builder *ctx) {
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_shims.c -- --check",
-             CcccPath(ctx));
-    return RunCustom(ctx, "shims-check", cmd);
-}
-
 // Doxygen HTML API docs for the three public headers.
 // Pure source scan -- no cccc binary needed, same reasoning as audit_ffi
 // above -- but doxygen is an external dependency, so it's guarded with
@@ -1137,7 +1107,7 @@ BuildTarget *bench(Builder *ctx) {
 }
 
 // ---- Default build entry -------------------------------------------------
-// Builds: libbacktrace (vendored), the reflection FFI and shims regen, and the
+// Builds: libbacktrace (vendored), the reflection FFI regen, and the
 // final build/cccc executable. All other targets
 // are available via --build-target=NAME.
 
@@ -1145,9 +1115,7 @@ BuildTarget *bench(Builder *ctx) {
 int build_main(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *shims_gen_step = shims_gen(ctx);
     BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
     DependsOn(final, reflection_gen);
-    DependsOn(final, shims_gen_step);
     return BuildAll(ctx);
 }

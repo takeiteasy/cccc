@@ -23,7 +23,7 @@
 // lastprivate and reduction variables become shadow locals declared by
 // re-tokenised snippets, and the directive rides on the resulting ND_BLOCK as
 // Node.omp. With omp_threaded (-c=native, -m) the directives are lowered onto
-// the runtime in src/shims/omp.c instead ("Threaded lowering" below).
+// the runtime in src/shims/omp/ instead ("Threaded lowering" below).
 
 #include "./parse_internal.h"
 #include <ctype.h>
@@ -558,7 +558,7 @@ static void check_atomic(VirtualMachine *vm, Node *stmt, Token *tok) {
 // serializer turns the call to it into a __cccc_pool_run() fork and captures
 // the enclosing locals by reference through the nested-function environment,
 // which is OpenMP's `shared`. Worksharing, single, critical and atomic are
-// lowered in place onto the runtime in src/shims/omp.c.
+// lowered in place onto the runtime in src/shims/omp/.
 
 // Declares a runtime function, or re-binds the Obj an earlier declaration
 // created: a block-scope declaration dies with its scope.

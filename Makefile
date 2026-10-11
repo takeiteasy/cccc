@@ -23,9 +23,10 @@ ifeq ($(OS),Windows_NT)
 endif
 UNAME_S := $(shell uname -s)
 
-# Every bundled header is embedded into the binary (src/std_table.c), so an
-# edit to any of them relinks.
+# Every bundled header and -c=native shim chunk is embedded into the binary
+# (src/std_table.c, src/shim_table.c), so an edit to any of them relinks.
 HEADERS := $(wildcard include/*.h include/*/*.h)
+SHIMS := $(wildcard src/shims/*/*.c src/stdlib/wide_bitint/*.c)
 SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
 
 # MODE=release optimizes the binary itself (mirrors build.c's release target).
@@ -138,7 +139,7 @@ endif
 .PHONY: default
 default: cccc$(EXE)
 
-cccc$(EXE): $(SRCS) $(HEADERS) $(BT_LIB)
+cccc$(EXE): $(SRCS) $(HEADERS) $(SHIMS) $(BT_LIB)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(BT_LIB) $(LDFLAGS)
 
 $(BT_OUT)/%.o: $(BT_DIR)/%.c

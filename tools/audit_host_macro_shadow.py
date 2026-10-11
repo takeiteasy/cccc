@@ -21,7 +21,7 @@ Method, two checks:
    `#define`d by the real system headers src/stdlib/posix_util.h pulls in
    (via the host cc's `-E -dM`) with a *different* value, AND is
    referenced by cccc's own source (src/**/*.c, src/**/*.h, excluding the
-   text-only src/shims/*.c). Any such name
+   text-only src/shims/ chunks). Any such name
    must appear in src/host_shadow_macros.h's table -- otherwise it's a
    silent, untested shadowing hazard exactly like #1315's original three.
 2. Any src/stdlib/*.c file that references a name the shim covers must
@@ -136,7 +136,7 @@ def referenced_identifiers():
     ids = set()
     for pat in ("*.c", "*.h"):
         for p in SRC_DIR.rglob(pat):
-            if "shims" in p.relative_to(SRC_DIR).parts[:-1] and p.parent.name == "shims":
+            if "shims" in p.relative_to(SRC_DIR).parts[:1]:
                 continue
             ids.update(IDENT_RE.findall(p.read_text(errors="ignore")))
     return ids

@@ -543,10 +543,10 @@ static long long impl_target_output(long long t) {
 // On its own (no AddInput calls) this is still invalidation metadata only —
 // it does not give the step a "skip if output exists" staleness check. A
 // CUSTOM target has no `sources`, so "output exists" would be the only test
-// available, and a committed generated output (e.g. src/shims.inc) always
-// exists; treating that as "up to date" would silently stop the generator
-// from ever running again. Real skip semantics need declared
-// *inputs* too — see AddInput below.
+// available, and a committed generated output (e.g.
+// src/reflection_ffi_protos.inc) always exists; treating that as "up to date"
+// would silently stop the generator from ever running again. Real skip
+// semantics need declared *inputs* too — see AddInput below.
 static long long impl_declare_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
     if (tgt->kind != CCCC_TGT_CUSTOM) {

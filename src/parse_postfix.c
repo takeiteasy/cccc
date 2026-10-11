@@ -1136,7 +1136,7 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
 // (stdlib/kernel.c), which sets the argument registers for every work-item.
 // Under -c=native and -m the arguments go into temporaries instead and the
 // launch is outlined into a thunk that calls the kernel, which the C runtime
-// in src/shims/kernel.c runs once per work-item.
+// in src/shims/kernel/ runs once per work-item.
 // TODO: struct/union/vector arguments and more than 8 integer or 8 float
 // arguments need a generated per-launch thunk instead of register packing.
 // Copies a range into a temporary ahead of the call (struct copies clobber the
