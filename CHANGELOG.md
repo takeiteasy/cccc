@@ -7,6 +7,30 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-10-11
+
+- Added: GNU extended `asm` parses with operands, clobbers and `goto` labels
+  and is emitted verbatim under `-c=native`/`-m`. The VM leaves outputs
+  untouched; `--asm-passthru` passes the operands to one batched host thunk
+  build.
+- Fixed: rvalue expressions (arithmetic, shifts, `?:`, comma, casts, calls,
+  assignment and `++`/`--` results, statement expressions) drop
+  `const`/`volatile`/`restrict`/`_Atomic`. Assigning to or taking the address
+  of a comma, call or cast result is a compile error.
+- Fixed: `-c=native` assigns through a compound literal or one of its members
+  (`(int){3} = 4`, `(struct P){1,2}.x = 5`).
+- Fixed: `-c=native` emits no `-Wunused-value` noise for a discarded
+  `_Atomic` `++`/`--`/`op=` or a discarded comma operand.
+- Fixed: postfix `++`/`--` on an `_Atomic` operand yields the CAS loop's
+  old value, and `int a = ++ai;` on an `_Atomic int` builds under Apple clang.
+- Fixed: an initialised flexible-array-member global keeps its declared
+  struct type in expressions (`sizeof`, `typeof`, `&g + 1`, struct copy); a
+  non-empty flexible initializer on an automatic object is a compile error.
+- Fixed: a `static _Thread_local` global is declared once under gcc.
+- Fixed: a diagnostic caret mirrors tabs on tab-indented source lines.
+- Changed: libbacktrace is a git submodule (`vendor/libbacktrace`); an
+  uninitialised submodule builds without it.
+
 ## [0.8.3] - 2026-10-10
 
 - Fixed: casting an unsigned (or `_Bool`/pointer) scalar to a `_BitInt` wider
