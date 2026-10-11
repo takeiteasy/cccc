@@ -845,25 +845,24 @@ def _run_reflection_ffi_check():
         return f"FAILED ({e})", False
 
 
-def _run_shims_check():
-    """Check src/shims.inc is up to date with src/shims/*.c.
+def _run_shims_check(cccc):
+    """Check src/shims.inc is up to date with src/shims/*.c by running the
+    C generator tools/gen_shims.c in --check mode under the given cccc.
 
-    Pure source scan -- no cccc binary needed. Returns (status_str, ok).
+    Returns (status_str, ok).
     """
-    script = _TOOLS_DIR / "gen_shims.py"
+    script = _TOOLS_DIR / "gen_shims.c"
     if not script.exists():
-        return "skipped (script not found)", True
+        return "FAILED (tools/gen_shims.c not found)", False
 
     try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("gen_shims", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rc = mod.main(check=True)
-        if rc == 0:
+        proc = subprocess.run(
+            [str(cccc), str(script), "--", "--check"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if proc.returncode == 0:
             return "passed", True
-        return "FAILED", False
+        return "FAILED\n" + (proc.stdout + proc.stderr).rstrip(), False
     except Exception as e:
         return f"FAILED ({e})", False
 
@@ -1309,7 +1308,7 @@ def main():
     print()
     print("[ shims_check ]")
     wedge.arm("shims_check", scalar_phase_timeout)
-    shims_status, ok_shims = _run_shims_check()
+    shims_status, ok_shims = _run_shims_check(cccc)
     print(f"  {shims_status}")
     suite_results["shims_check"] = ok_shims
 

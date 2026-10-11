@@ -762,20 +762,24 @@ BuildTarget *reflection_ffi_check(Builder *ctx) {
 }
 
 // src/shims.inc is the -c=native support-shim text table, generated from the
-// ordinary C under src/shims/ by tools/gen_shims.py and #include'd by
-// src/serialize_shims.c. Committed (like reflection_ffi_*.inc, unlike
-// src/std.c) so plain `make` needs no python3; this step keeps it fresh on
-// every default build, shims_check below (wired into the test target)
-// catches staleness for any build that skips it. AddInput declares the real
-// dependency -- every src/shims/*.c plus the generator itself, plus (#1123)
-// src/stdlib/wide_bitint.c, whose text doubles as the "wide_bitint" group's
-// source via gen_shims.py's GROUP_SOURCE_OVERRIDE.
+// ordinary C under src/shims/ by tools/gen_shims.c (run through the cccc that
+// is driving this build) and #include'd by src/serialize_shims.c. Committed
+// (like reflection_ffi_*.inc, unlike src/std.c) so plain `make` needs no
+// python3; this step keeps it fresh on every default build, shims_check below
+// (wired into the test target) catches staleness for any build that skips it.
+// AddInput declares the real dependency -- every src/shims/*.c, the generator
+// and its tools/lib/ sources, plus src/stdlib/wide_bitint.c, whose text doubles
+// as the "wide_bitint" group's source.
 [[cccc::build_target]]
 BuildTarget *shims_gen(Builder *ctx) {
-    BuildTarget *gen =
-        RunCustom(ctx, "shims-gen", "python3 tools/gen_shims.py");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_shims.c --", CcccPath(ctx));
+    BuildTarget *gen = RunCustom(ctx, "shims-gen", cmd);
     DeclareOutput(gen, "src/shims.inc");
-    AddInput(gen, "tools/gen_shims.py");
+    AddInput(gen, "tools/gen_shims.c");
+    const char **lib = GlobFiles(ctx, "tools/lib/*");
+    for (int i = 0; lib && lib[i]; i++)
+        AddInput(gen, lib[i]);
     AddInput(gen, "src/stdlib/wide_bitint.c");
     const char **shims = GlobFiles(ctx, "src/shims/*.c");
     for (int i = 0; shims && shims[i]; i++)
@@ -785,7 +789,10 @@ BuildTarget *shims_gen(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *shims_check(Builder *ctx) {
-    return RunCustom(ctx, "shims-check", "python3 tools/gen_shims.py --check");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "\"%s\" tools/gen_shims.c -- --check",
+             CcccPath(ctx));
+    return RunCustom(ctx, "shims-check", cmd);
 }
 
 // Doxygen HTML API docs for the three public headers.
