@@ -479,6 +479,7 @@ Token *static_assert_decl(VirtualMachine *vm, Token *tok, Node **out_cond,
 int static_branch_value(VirtualMachine *vm, Node *cond);
 Node *stmt(VirtualMachine *vm, Token **rest, Token *tok);
 Node *to_assign(VirtualMachine *vm, Node *binary);
+Node *to_assign_post(VirtualMachine *vm, Node *binary);
 Type *type_after_deprecated_use(VirtualMachine *vm, Type *ty);
 bool type_has_restrict(Type *ty);
 Type *typename(VirtualMachine *vm, Token **rest, Token *tok);

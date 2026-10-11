@@ -181,12 +181,12 @@ static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
                          int addend) {
     add_type(vm, node);
     reject_rvalue(vm, node, "expression is not assignable");
-    Node *cast = new_cast(
-        vm,
-        new_add(vm,
-                to_assign(vm, new_add(vm, node, new_num(vm, addend, tok), tok)),
-                new_num(vm, -addend, tok), tok),
-        unqualified(vm, node->ty));
+    Node *rmw =
+        to_assign_post(vm, new_add(vm, node, new_num(vm, addend, tok), tok));
+    if (rmw->kind == ND_STMT_EXPR && rmw->is_atomic_rmw)
+        return rmw;
+    Node *cast = new_cast(vm, new_add(vm, rmw, new_num(vm, -addend, tok), tok),
+                          unqualified(vm, node->ty));
     // #1235: let the -c=native serializer recognise this shape and drop the
     // dead `+ -addend` value-reconstruction term in a discard context.
     cast->is_inc_dec_result = true;

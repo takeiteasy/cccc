@@ -8566,7 +8566,10 @@ LITERAL_STORE_ATOMIC_DISCARD_TU = (
     "    ai++, ai++;\n"
     "    i++, i++;\n"
     "    for (i = 0; i < 2; i++, k++) ;\n"
-    "    return (r == 4 && j == 4 && ai == 7 && i == 2 && k == 2) ? 42 : 1;\n"
+    "    int v = ai++;\n"
+    "    int w = ++ai;\n"
+    "    return (r == 4 && j == 4 && ai == 9 && i == 2 && k == 2 && v == 7 &&\n"
+    "            w == 9) ? 42 : 1;\n"
     "}\n"
 )
 
@@ -8581,6 +8584,9 @@ def case_literal_store_atomic_discard_native(cccc: Path, tmp: str) -> bool:
     m_result = run([str(cccc), "-m", src.name], cwd=tmp)
     gen_c = Path(tmp) / "literal_store_atomic_discard_gen.c"
     gen_c.write_text(m_result.stdout)
+    if "+ -1" in m_result.stdout:
+        print("    FAIL: an _Atomic postfix ++ kept the `+ -1` reconstruction")
+        return False
     real_cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
     if real_cc:
         werror = run(

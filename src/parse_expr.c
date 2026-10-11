@@ -411,7 +411,7 @@ void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out) {
 // However, if a given expression is of form `A.x op= C`, the input is
 // converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
 // to bitfields.
-Node *to_assign(VirtualMachine *vm, Node *binary) {
+static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     add_type(vm, binary->lhs);
     add_type(vm, binary->rhs);
     Token *tok = binary->tok;
@@ -559,8 +559,17 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
             binary->lhs->checked_rmw_mirror = cas;
 
         cur = cur->next = loop;
-        cur             = cur->next =
-            new_unary(vm, ND_EXPR_STMT, new_var_node(vm, new, tok), tok);
+        // The result goes through a plain-typed temporary: Apple clang
+        // rejects assigning an `_Atomic T` statement-expression result to a
+        // plain T. A successful CAS leaves `old` holding the replaced value.
+        Obj *res = new_lvar(vm, "", 0, unqualified(vm, held));
+        cur = cur->next = new_unary(
+            vm, ND_EXPR_STMT,
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, res, tok),
+                       new_var_node(vm, yield_old ? old : new, tok), tok),
+            tok);
+        cur = cur->next =
+            new_unary(vm, ND_EXPR_STMT, new_var_node(vm, res, tok), tok);
 
         Node *node          = new_node(vm, ND_STMT_EXPR, tok);
         node->body          = head.next;
@@ -639,6 +648,17 @@ Node *to_assign(VirtualMachine *vm, Node *binary) {
         new_binary(vm, binary->kind, load_deref, binary->rhs, tok), tok);
 
     return new_binary(vm, ND_COMMA, expr1, expr2, tok);
+}
+
+Node *to_assign(VirtualMachine *vm, Node *binary) {
+    return to_assign_impl(vm, binary, false);
+}
+
+// For a postfix `A++`/`A--`: an `_Atomic` operand yields the value it
+// replaced (the result is then a ND_STMT_EXPR with is_atomic_rmw), anything
+// else is the plain desugar and the caller reconstructs the old value.
+Node *to_assign_post(VirtualMachine *vm, Node *binary) {
+    return to_assign_impl(vm, binary, true);
 }
 
 // assign    = conditional (assign-op assign)?

@@ -261,4 +261,25 @@ int test_atomic_incdec_discarded_and_value(void) {
     return 42;
 }
 
+// Value-position `_Atomic` ++/-- yield the right operand value for every
+// operand shape.
+[[cccc::test(return = 42)]]
+int test_atomic_incdec_value_forms(void) {
+    _Atomic int           ai     = 5;
+    _Atomic unsigned char uc     = 255;
+    int                   arr[3] = {1, 2, 3};
+    _Atomic(int *)        ap     = arr;
+    int                   a      = ai++;
+    int                   b      = ai--;
+    int                   c      = ai++ + ai++;
+    int                   d      = ++ai;
+    unsigned char         u      = uc++;
+    int                  *q      = ap++;
+    if (a != 5 || b != 6 || c != 11 || d != 8 || ai != 8)
+        return 1;
+    if (u != 255 || uc != 0 || q != arr || ap != arr + 1)
+        return 2;
+    return 42;
+}
+
 #pragma cccc suite end

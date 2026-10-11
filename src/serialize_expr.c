@@ -3327,9 +3327,9 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         }
     }
     if (node && node->kind == ND_STMT_EXPR && node->is_atomic_rmw) {
-        // The trailing statement only reads the new value back.
+        // The last two statements only copy out and read back the result.
         fprintf(f, "({\n");
-        for (Node *s = node->body; s && s->next; s = s->next)
+        for (Node *s = node->body; s && s->next && s->next->next; s = s->next)
             serialize_stmt(f, vm, ctx, s, 1);
         fprintf(f, "})");
         return;
