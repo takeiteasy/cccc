@@ -23,7 +23,7 @@
 #include "./internal.h"
 
 // Prototypes generated from include/cccc/reflection.h (see
-// tools/gen_reflection_ffi.py). Including them here -- not just in
+// tools/gen_reflection_ffi.c). Including them here -- not just in
 // macros.c, where they're used to take function addresses for FFI
 // registration -- turns any drift between a reflection.h prototype and this
 // file's definition into a compile error (conflicting declaration),

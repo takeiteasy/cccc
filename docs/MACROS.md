@@ -44,7 +44,7 @@ convenience macros directly.
 builtin's C signature and FFI registration: `src/reflection_ffi_protos.inc`
 (the `extern` prototypes) and `src/reflection_ffi_register.inc` (the
 `cc_register_cfunc`/`cc_register_variadic_cfunc` calls, including their
-arity) are generated from it by `tools/gen_reflection_ffi.py` and
+arity) are generated from it by `tools/gen_reflection_ffi.c` and
 `#include`'d by both `src/macros.c` and `src/reflection.c`. Adding a new
 builtin means editing `reflection.h` and writing its definition in
 `src/reflection.c` (or `src/macros.c`, for the handful that need direct

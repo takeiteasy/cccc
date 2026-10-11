@@ -58,7 +58,7 @@ static void fenv_barrier_end(int saved_round) {
 }
 
 // Forward declarations for reflection API functions (to register as FFI).
-// Generated from include/cccc/reflection.h -- see tools/gen_reflection_ffi.py.
+// Generated from include/cccc/reflection.h -- see tools/gen_reflection_ffi.c.
 #include "reflection_ffi_protos.inc"
 
 // NOTE: unlike cc_record_emit_object below, this does NOT dedup -- the
@@ -149,7 +149,7 @@ const char *__builtin_ast_vararg_str_at(int index) {
 // Register reflection API functions as FFI
 static void register_reflection_ffi(VirtualMachine *vm) {
     // Generated from include/cccc/reflection.h -- see
-    // tools/gen_reflection_ffi.py.
+    // tools/gen_reflection_ffi.c.
 #include "reflection_ffi_register.inc"
 }
 

@@ -1,6 +1,6 @@
 /* GENERATED FILE -- DO NOT EDIT.
- * Produced by tools/gen_reflection_ffi.py from include/cccc/reflection.h.
- * Regenerate with: python3 tools/gen_reflection_ffi.py
+ * Produced by tools/gen_reflection_ffi.c from include/cccc/reflection.h.
+ * Regenerate with: ./cccc --build build.c
  */
 
 

@@ -5,7 +5,7 @@
 // reflection.c both correctly said int64_t) -- a conflicting-declaration
 // signature drift that would truncate any constant beyond INT32_MAX.
 // src/reflection_ffi_protos.inc (generated from reflection.h by
-// tools/gen_reflection_ffi.py) is now #include'd by both src/macros.c and
+// tools/gen_reflection_ffi.c) is now #include'd by both src/macros.c and
 // src/reflection.c, so that class of drift is a compile error instead.
 
 enum BigVal : long long {

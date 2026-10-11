@@ -34,9 +34,9 @@
 
 static const char BANNER[] =
     "/* GENERATED FILE -- DO NOT EDIT.\n"
-    " * Produced by tools/gen_reflection_ffi.py from "
+    " * Produced by tools/gen_reflection_ffi.c from "
     "include/cccc/reflection.h.\n"
-    " * Regenerate with: python3 tools/gen_reflection_ffi.py\n"
+    " * Regenerate with: ./cccc --build build.c\n"
     " */\n";
 
 typedef struct {
