@@ -8562,14 +8562,18 @@ LITERAL_STORE_ATOMIC_DISCARD_TU = (
     "    _Atomic int *pa = &ai;\n"
     "    ai++; ++ai; ai--; --ai; ai += 3; (*pa)++;\n"
     "    int j = ai++;\n"
-    "    return (r == 4 && j == 4 && ai == 5) ? 42 : 1;\n"
+    "    int i = 0, k = 0;\n"
+    "    ai++, ai++;\n"
+    "    i++, i++;\n"
+    "    for (i = 0; i < 2; i++, k++) ;\n"
+    "    return (r == 4 && j == 4 && ai == 7 && i == 2 && k == 2) ? 42 : 1;\n"
     "}\n"
 )
 
 
 def case_literal_store_atomic_discard_native(cccc: Path, tmp: str) -> bool:
     print("  -c=native, assigning to a compound literal (or its member) "
-          "compiles on the host, and a discarded `_Atomic` ++/--/+= emits no "
+          "compiles on the host, and a discarded `_Atomic` ++/--/+= or comma operand emits no "
           "unused-value statement (host cc under -Wunused-value -Werror)")
     src = Path(tmp) / "literal_store_atomic_discard.c"
     write(src, LITERAL_STORE_ATOMIC_DISCARD_TU)

@@ -253,7 +253,10 @@ int test_atomic_incdec_discarded_and_value(void) {
     ai += 3;
     (*pa)++;
     int j = ai++;
-    if (j != 4 || ai != 5)
+    int i = 0;
+    ai++, ai++;
+    i++, i++;
+    if (j != 4 || ai != 7 || i != 2)
         return 1;
     return 42;
 }

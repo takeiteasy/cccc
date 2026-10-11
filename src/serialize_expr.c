@@ -3338,6 +3338,20 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         serialize_opaque_bitfield_write(f, vm, ctx, node, true);
         return;
     }
+    // Both operands of a source-level `a, b` are discarded here.
+    if (node && node->kind == ND_COMMA && node->is_user_comma &&
+        !is_noop_expr(node->lhs) && !is_noop_expr(node->rhs)) {
+        bool parens = parent_prec > get_precedence(ND_COMMA);
+        if (parens)
+            fprintf(f, "(");
+        serialize_discard_expr(f, vm, ctx, node->lhs, get_precedence(ND_COMMA));
+        fprintf(f, " , ");
+        serialize_discard_expr(f, vm, ctx, node->rhs,
+                               get_precedence(ND_COMMA) + 1);
+        if (parens)
+            fprintf(f, ")");
+        return;
+    }
     // `s.f += 1` lowers to (tmp = &s, s.f = ...): the chain's value is
     // dropped too, so its trailing bit-field store skips the re-extract.
     if (node && node->kind == ND_COMMA && !is_noop_expr(node->lhs) &&
