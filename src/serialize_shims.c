@@ -28,7 +28,7 @@
 #include "shims.inc"
 
 // Public API: Serialize entire program to C source
-// #904: CCCC's own polyfill headers (stdio.h/errno.h/getopt.h in src/std.c)
+// #904: CCCC's own polyfill headers (stdio.h/errno.h/getopt.h in src/std_table.c)
 // define stdout/stderr/stdin/errno/optarg/optind/opterr/optopt as macros
 // that expand to a call into an internal accessor shim (__cccc_stdout(),
 // etc -- see src/stdlib/stdio.c and src/stdlib/posix_io.c) so they reflect

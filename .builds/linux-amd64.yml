@@ -28,39 +28,19 @@ environment:
   # stay covered instead of being flattened to one.
   CC: clang
 tasks:
-  - bootstrap: |
-      # Stage0 invariant (#842): a plain `make` with only a system cc and
-      # libffi must produce a working compiler. On a fresh clone (no
-      # src/std.c, gitignored) it links against src/std_stub.c instead --
-      # a stand-in whose embedded-header table is empty; the private headers
-      # (reflection.h/testing.h/building.h) it needs are found on disk via
-      # -I./include instead. `make bootstrap` (#857) finishes the
-      # bootstrap: regenerate the real src/std.c, then unconditionally
-      # relink against it (a plain second `make cccc` is subject to an
-      # mtime race and can silently skip the relink -- see the Makefile's
-      # `bootstrap` target for the full explanation). From this point on,
-      # ./cccc --build build.c's own two-pass regen is a no-op (src/std.c
-      # already matches disk) and stays that way for the rest of the job.
+  - build: |
+      # One pass: `make` builds ./cccc, the only compiler binary.
       cd cccc
       set -e
       git submodule update --init
-      make bootstrap
-  - build: |
-      # Two-pass build (#571/#842): regenerates src/std.c from
-      # tools/generate_stdlib.c, then rebuilds the real cccc against it.
-      # This is also the enforcement point for "developers never run
-      # `make stdlib`" -- CI always does the regen itself.
-      cd cccc
-      set -e
-      ./cccc --build build.c
+      make
   - test: |
       # Aggregate driver: source suite, native round-trip,
       # audit_ffi, and sqlite_smoke (skips cleanly -- the amalgamation
-      # zip is not committed to the repo) all in one run, against the
-      # build.c-produced (not the stage0 bootstrap) binary.
+      # zip is not committed to the repo) all in one run.
       cd cccc
       set -e
-      python3 tools/run_tests.py --binary build/cccc -j 8
+      python3 tools/run_tests.py --binary ./cccc -j 8
       # No `docs` task here (dropped): sr.ht's ubuntu/lts image
       # started shipping a doxygen version that hangs -- not just warns --
       # when graphviz's `dot` binary is absent (never installed here; it's

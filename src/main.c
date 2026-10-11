@@ -2739,7 +2739,7 @@ int main(int argc, const char *argv[]) {
 
     // CCCC's standard library header directory is no longer pushed as an
     // -I entry here: search_include_paths() resolves standard headers from
-    // the embedded src/std.c table first, with vm->compiler.builtin_include_dir
+    // the embedded src/std_table.c table first, with vm->compiler.builtin_include_dir
     // (set in cc_init) as an on-disk fallback. See docs/HEADERS.md.
 
     // Add user-specified include paths (these take precedence via search order)

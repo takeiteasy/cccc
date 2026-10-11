@@ -767,13 +767,16 @@ int __builtin_build_run_default(Builder *ctx);
 #define AddSourceStr(t, n, c) __builtin_build_add_source_str(t, n, c)
 
 /*! @def AddInput
- * @brief Record a file path a @c RunCustom or @c CcccExecutable target reads
- *          but does not list as a source.
+ * @brief Record a file path a target reads but does not list as a source.
  * @details On a @c RunCustom target, with @c DeclareOutput, this drives the
  *            "up to date" skip check. On a @c CcccExecutable target it is the
  *            only way to make a header — or a comptime data file read via
  *            @c -D, which has no @c \#include for a depfile to see — invalidate
- *            the target's cache; its contents fold into the cache key.
+ *            the target's cache; its contents fold into the cache key. On an
+ *            @c Executable, @c StaticLib or @c DynamicLib target it names a
+ *            file the host compiler's depfile never reports (such as an
+ *            assembler @c .incbin); every object of the target recompiles when
+ *            it changes.
  * @param t Target to record against.
  * @param p Input path the target reads. */
 #define AddInput(t, p) __builtin_build_add_input(t, p)

@@ -85,8 +85,7 @@ STDLIB_GLOB = str(REPO_ROOT / "src" / "stdlib" / "*.c")
 # include/cccc/*.h are compiler-internal builtin headers (reflection.h,
 # testing.h, building.h) whose declarations are consumed directly by the
 # compiler's comptime/testing/build machinery, not registered as FFI calls
-# at all -- discover_headers() in tools/generate_stdlib.c skips them the
-# same way (they're added to the stdlib.tsv scan manually, by name).
+# at all.
 SKIP_HEADER_DIRS = ("cccc/",)
 
 DECL_RE = re.compile(

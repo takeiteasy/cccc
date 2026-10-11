@@ -2217,7 +2217,7 @@ TIME_H_COMPTIME_PROGRAM = (
 
 def case_generated_embedded_header_no_duplicate(cccc: Path, tmp: str) -> bool:
     print("  66: -c=generated output for a standard header served from the "
-          "embedded src/std.c table (no on-disk ./include, since this runs "
+          "embedded src/std_table.c table (no on-disk ./include, since this runs "
           "from a temp cwd) has no duplicate struct tm when the header is "
           "both @comptime-routed and plainly #included (#998)")
     src = Path(tmp) / "time_h_998a.c"
@@ -2278,7 +2278,7 @@ def case_generated_embedded_header_comptime_only_still_derives(cccc: Path, tmp: 
 
 def case_native_embedded_header_include_not_suppressed(cccc: Path, tmp: str) -> bool:
     print("  68: a plain #include <stdio.h> resolved from the embedded "
-          "src/std.c table still appears in -m output and still builds/runs "
+          "src/std_table.c table still appears in -m output and still builds/runs "
           "under -c=native (#998 regression guard: the new emit_include_paths "
           "registration for an embedded header must not feed "
           "cc_file_is_cccc_only and suppress a legitimate #include)")
@@ -2379,7 +2379,7 @@ def case_dandy_vtable_pattern_multi_tu(cccc: Path, tmp: str) -> bool:
 def case_polyfill_header_embedded_round_trip(cccc: Path, tmp: str) -> bool:
     print("  70: -c=native, #include <stdbit.h> (a cccc-owned polyfill with "
           "no guaranteed real system counterpart) resolved from the "
-          "embedded src/std.c table -- since this runs from a temp cwd, "
+          "embedded src/std_table.c table -- since this runs from a temp cwd, "
           "there is no on-disk ./include -- rounds trip VM 42 -> native 42 "
           "instead of the host compiler failing with 'stdbit.h' file not "
           "found (#1003). tests/test_serialize_polyfill_header_not_"
@@ -6602,7 +6602,7 @@ def case_bundled_header_bodiless_decl_no_include_dir(cccc: Path, tmp: str) -> bo
           "'use of undeclared identifier close' (#1096). This case runs "
           "with no -I./include (unlike this file's own default cccc, "
           "which always has a repo ./include alongside it) so the "
-          "embedded src/std.c header table resolves fcntl.h, exactly the "
+          "embedded src/std_table.c header table resolves fcntl.h, exactly the "
           "invocation shape a copied binary with no include/ directory "
           "hits -- the test harness's own tools/testing/native.py:87 "
           "always passes -I./include, which is what let this ship "

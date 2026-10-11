@@ -515,8 +515,8 @@ static long long impl_set_output(long long t, long long path) {
 // always written under the build output directory.
 //
 // For CCCC_TGT_CUSTOM targets there is no such convention: a RunCustom
-// command can write anywhere (e.g. the stdlib regen writes to the repo's
-// src/std.c, not under out_dir). So a CUSTOM target's output is the *first*
+// command can write anywhere (e.g. a generator writing into the repo's
+// src/, not under out_dir). So a CUSTOM target's output is the *first*
 // path DeclareOutput() recorded (call order, not last-wins — #851 lets
 // DeclareOutput be called more than once, e.g. reflection_ffi_gen's two
 // generated .inc files), returned verbatim (not joined onto out_dir); "" if
@@ -543,9 +543,9 @@ static long long impl_target_output(long long t) {
 // On its own (no AddInput calls) this is still invalidation metadata only —
 // it does not give the step a "skip if output exists" staleness check. A
 // CUSTOM target has no `sources`, so "output exists" would be the only test
-// available, and for the stdlib regen specifically the output (src/std.c)
-// always exists once committed; treating that as "up to date" would silently
-// stop the regen from ever running again. Real skip semantics need declared
+// available, and a committed generated output (e.g. src/shims.inc) always
+// exists; treating that as "up to date" would silently stop the generator
+// from ever running again. Real skip semantics need declared
 // *inputs* too — see AddInput below.
 static long long impl_declare_output(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
@@ -571,16 +571,13 @@ static long long impl_declare_output(long long t, long long path) {
 // comptime data file read via -D, which no depfile could ever see (there is no
 // -MMD under `--compile=native`) — invalidate the target's cache. Its contents
 // fold into the per-target cache key.
+//
+// On a host-cc Executable/StaticLib/DynamicLib target it names files an object
+// depends on that -MMD never reports, such as an assembler `.incbin`. Every
+// object of the target recompiles when one changes, so keep such files on a
+// target of their own.
 static long long impl_add_input(long long t, long long path) {
     BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
-    if (tgt->kind != CCCC_TGT_CUSTOM && tgt->kind != CCCC_TGT_NATIVE_CCCC) {
-        fprintf(
-            stderr,
-            "build: AddInput is only valid on a RunCustom or CcccExecutable "
-            "target ('%s' is neither)\n",
-            tgt->name);
-        return 0;
-    }
     strarray_push(&tgt->inputs, xstrdup((const char *)path));
     return 0;
 }
@@ -1858,13 +1855,25 @@ static int read_dep_prereqs(const char *dfile, StringArray *out) {
     return 1;
 }
 
+// read_dep_prereqs() plus the target's AddInput() paths: files an object
+// depends on that the compiler's -MMD never lists (e.g. an assembler
+// `.incbin`). Same return contract as read_dep_prereqs().
+static int read_obj_prereqs(const BuildTarget *t, const char *dfile,
+                            StringArray *out) {
+    if (!read_dep_prereqs(dfile, out))
+        return 0;
+    for (int i = 0; i < t->inputs.len; i++)
+        strarray_push(out, xstrdup(t->inputs.data[i]));
+    return 1;
+}
+
 // Returns 1 if the existing ofile is at least as new as src AND at least as
 // new as every header prerequisite recorded in dfile (#851). No .d on disk
 // => not current: a first build, or an objdir compiled before this .d
 // tracking existed, must not be trusted by mtime alone once header tracking
 // is available -- this self-heals a stale objdir on its next build.
-static int ofile_is_current(const char *ofile, const char *src,
-                            const char *dfile) {
+static int ofile_is_current(const BuildTarget *t, const char *ofile,
+                            const char *src, const char *dfile) {
     struct stat o_st, s_st;
     if (stat(ofile, &o_st) != 0 || stat(src, &s_st) != 0)
         return 0;
@@ -1872,7 +1881,7 @@ static int ofile_is_current(const char *ofile, const char *src,
         return 0;
 
     StringArray prereqs = {0};
-    if (!read_dep_prereqs(dfile, &prereqs)) {
+    if (!read_obj_prereqs(t, dfile, &prereqs)) {
         free_strarray(&prereqs);
         return 0;
     }
@@ -2577,7 +2586,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
                         // header-less key) if somehow no .d resulted.
                         if (ctx->cache_dir) {
                             StringArray post = {0};
-                            if (read_dep_prereqs(pool[j].dfile, &post)) {
+                            if (read_obj_prereqs(t, pool[j].dfile, &post)) {
                                 StringArray o2 = {0};
                                 ArgVec      a2 = {0};
                                 build_compile_argv(&a2, &o2, ctx, cc, t,
@@ -2622,7 +2631,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
             // Level 1: mtime check — skip recompile when ofile (and every
             // header prerequisite recorded in dfile) is up to date.
             if (ctx->cache_dir && toolchain_ok &&
-                ofile_is_current(ofile, src, dfile)) {
+                ofile_is_current(t, ofile, src, dfile)) {
                 if (!ctx->quiet || ctx->verbose)
                     printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
                 else
@@ -2643,7 +2652,7 @@ static int compile_sources(Builder *ctx, const char *cc, BuildTarget *t,
             StringArray prereqs    = {0};
             int         have_dfile = 0;
             if (ctx->cache_dir) {
-                have_dfile = read_dep_prereqs(dfile, &prereqs);
+                have_dfile = read_obj_prereqs(t, dfile, &prereqs);
                 if (have_dfile &&
                     cache_lookup(
                         ctx->cache_dir,
@@ -2723,7 +2732,7 @@ serial_fallback:;
         // Level 1: mtime check — skip recompile when ofile (and every header
         // prerequisite recorded in dfile) is up to date.
         if (ctx->cache_dir && !ctx->dry_run && toolchain_ok &&
-            ofile_is_current(ofile, src, dfile)) {
+            ofile_is_current(t, ofile, src, dfile)) {
             if (!ctx->quiet || ctx->verbose)
                 printf("[%d/%d] (cached) %s\n", ++(*step), total, src);
             else
@@ -2742,7 +2751,7 @@ serial_fallback:;
         StringArray prereqs    = {0};
         int         have_dfile = 0;
         if (ctx->cache_dir && !ctx->dry_run) {
-            have_dfile = read_dep_prereqs(dfile, &prereqs);
+            have_dfile = read_obj_prereqs(t, dfile, &prereqs);
             if (have_dfile &&
                 cache_lookup(
                     ctx->cache_dir,
@@ -2769,7 +2778,7 @@ serial_fallback:;
             // no .d resulted (e.g. dry-run never reaches here since rc
             // short-circuits to 0 above without invoking the compiler).
             StringArray post = {0};
-            if (read_dep_prereqs(dfile, &post))
+            if (read_obj_prereqs(t, dfile, &post))
                 cache_store(ctx->cache_dir,
                             source_cache_key(src, (char *const *)a.data, &post),
                             ofile, ".o");
@@ -3030,9 +3039,26 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         }
         for (int i = 0; i < t->ldflags.len; i++)
             argv_push(&a, t->ldflags.data[i]);
+        // A LinkWith'd static library rebuilt since the last link also
+        // forces a relink (its objects are not in `objs`).
+        int    deps_stale = 0;
+        struct stat out_st;
+        if (stat(out_abs, &out_st) == 0) {
+            for (int i = 0; i < t->deps_count; i++) {
+                if (!t->deps_link[i])
+                    continue;
+                char *dep_lib =
+                    format("%s/lib%s.a", libdir, t->deps[i]->name);
+                struct stat dep_st;
+                if (stat(dep_lib, &dep_st) == 0 &&
+                    dep_st.st_mtime > out_st.st_mtime)
+                    deps_stale = 1;
+                free(dep_lib);
+            }
+        }
         // Link-step staleness check (#851): skip relinking when out_abs is
         // already newer than every .o and the link argv is unchanged.
-        if (ctx->cache_dir && !ctx->dry_run &&
+        if (ctx->cache_dir && !ctx->dry_run && !deps_stale &&
             link_output_is_current(out_abs, objs.data, n_real_objs,
                                    (char *const *)a.data, tobjdir)) {
             if (!ctx->quiet || ctx->verbose)

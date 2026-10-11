@@ -1,23 +1,18 @@
-# Makefile -- bare-minimum bootstrap (#842 Step 4).
+# Makefile -- builds ./cccc, the one compiler binary.
 #
-# This builds just enough of a `cccc` to run `./cccc --build build.c`, which
-# is the real build system from here on:
-#
-#   make                       # produce ./cccc
+#   make                       # produce ./cccc (one pass, no generators)
 #   ./cccc --build build.c     # everything else: test, clean, sanitizers,
-#                               # afl, bench, profile-*, the Linux Colima
-#                               # targets, ...
+#                              # afl, bench, profile-*, the Linux Colima
+#                              # targets, ...
 #   ./cccc --build build.c --build-list-targets
 #
-# No libbacktrace (nicer crash traces) and no readline (REPL line editing)
-# here -- both are optional features, gated behind their own #ifdefs, not
-# needed to run build.c. build.c's own targets link both properly; this file
-# only has to satisfy the stage0 invariant: a fresh clone with nothing but a
-# system `cc` (and libffi) can always produce a working compiler.
-#
-# `make -f tools/Makefile.backup <target>` is the pre-cut, full-featured
-# Makefile, kept as an escape hatch for when there is no working cccc yet
-# (e.g. bisecting a bootstrap regression) -- see that file's header.
+# Optional features are detected here:
+#   libbacktrace   vendor/libbacktrace submodule (CCCC_HAS_BACKTRACE=0 opts out)
+#   readline       REPL line editing (pkg-config, then Homebrew keg paths)
+#   curl, decimal, ndbm   opt-in: CCCC_HAS_CURL=1, CCCC_HAS_DECIMAL=1,
+#                         CCCC_HAS_NDBM=1 (same variables as build.c)
+# A fresh clone with a system `cc` and libffi always produces a working
+# compiler.
 
 CC ?= cc
 PKG_CONFIG ?= pkg-config
@@ -28,25 +23,12 @@ ifeq ($(OS),Windows_NT)
 endif
 UNAME_S := $(shell uname -s)
 
-# std.c is the generated embedded-stdlib table (see build.c's default
-# two-pass build). A fresh clone has no src/std.c until a build has run
-# once; src/std_stub.c is a small committed stand-in whose accessors return
-# nothing, used only to bootstrap the comptime machinery
-# tools/generate_stdlib.c needs to produce the real src/std.c (the private
-# headers it needs are found on disk via -I./include instead). Once std.c
-# exists on disk it always wins (self-correcting: no explicit step needed to
-# switch back). See docs/BUILD.md.
-ifeq ($(wildcard src/std.c),)
-STDLIB_SRC := src/std_stub.c
-else
-STDLIB_SRC := src/std.c
-endif
-SRCS := $(filter-out src/ops.c src/std.c src/std_stub.c, $(wildcard src/*.c src/stdlib/*.c)) $(STDLIB_SRC)
+# Every bundled header is embedded into the binary (src/std_table.c), so an
+# edit to any of them relinks.
+HEADERS := $(wildcard include/*.h include/*/*.h)
+SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
 
-# MODE=release optimizes the stage0 binary itself (mirrors build.c's release
-# target, #883); does not affect the optimization level of any binary stage0
-# goes on to produce via `./cccc --build build.c`, which is compiled by the
-# host cc directly through build.c's own target flags.
+# MODE=release optimizes the binary itself (mirrors build.c's release target).
 MODE ?= debug
 ifeq ($(MODE),release)
 CFLAGS := -Wall -O2 -g -DNDEBUG -std=c23 -Wno-deprecated-declarations -Wno-switch -pthread
@@ -56,18 +38,10 @@ endif
 LDFLAGS := -pthread
 
 ifeq ($(UNAME_S),Darwin)
-	# iconv() is declared in libSystem's <iconv.h> but the symbols only
-	# resolve at link time via libiconv (verified: link fails without it,
-	# succeeds with it). glibc ships iconv in libc itself, so no extra flag
-	# is needed on Linux.
+	# iconv() symbols resolve at link time via libiconv on macOS; glibc ships
+	# iconv in libc itself.
 	LDFLAGS += -liconv
 else
-	# Clang -O1/-O2/-O3 miscompiles glibc's extern-inline pthread.h/wchar.h
-	# functions (pthread_equal, btowc, wctob, mbrlen) as strong symbols
-	# instead of discardable ones, causing "multiple definition" link errors
-	# -- see build.c's add_cccc_flags_opt() for the full writeup (#883).
-	# Only matters for MODE=release here (stage0 debug is always -O0), but
-	# harmless to always pass.
 	CFLAGS += -fgnu89-inline -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
 	LDFLAGS += -lm
 endif
@@ -87,28 +61,89 @@ endif
 CFLAGS += $(LIBFFI_CFLAGS)
 LDFLAGS += $(LIBFFI_LDFLAGS)
 
+# Optional readline for the REPL (-r); falls back to plain fgets when absent.
+# readline is keg-only on Homebrew (macOS ships libedit under the same name).
+READLINE_CFLAGS := $(shell $(PKG_CONFIG) --cflags readline 2>/dev/null)
+READLINE_LDFLAGS := $(shell $(PKG_CONFIG) --libs readline 2>/dev/null)
+ifeq ($(READLINE_LDFLAGS),)
+	ifeq ($(UNAME_S),Darwin)
+		READLINE_PROBE_CFLAGS := -I/opt/homebrew/opt/readline/include -I/usr/local/opt/readline/include
+		READLINE_PROBE_LDFLAGS := -L/opt/homebrew/opt/readline/lib -L/usr/local/opt/readline/lib -lreadline
+	else
+		READLINE_PROBE_CFLAGS := -I/usr/include -I/usr/local/include
+		READLINE_PROBE_LDFLAGS := -L/usr/lib -L/usr/local/lib -lreadline
+	endif
+	ifneq ($(shell printf '\#include <stdio.h>\n\#include <readline/readline.h>\nint main(void){return 0;}\n' | $(CC) -x c - $(READLINE_PROBE_CFLAGS) $(READLINE_PROBE_LDFLAGS) -o /dev/null 2>/dev/null && echo ok),)
+		READLINE_CFLAGS := $(READLINE_PROBE_CFLAGS)
+		READLINE_LDFLAGS := $(READLINE_PROBE_LDFLAGS)
+	endif
+endif
+ifneq ($(READLINE_LDFLAGS),)
+	CFLAGS += -DHAVE_READLINE $(READLINE_CFLAGS)
+	LDFLAGS += $(READLINE_LDFLAGS)
+endif
+
+# Opt-in libcurl (URL includes).
+ifneq ($(filter-out 0,$(CCCC_HAS_CURL)),)
+	CFLAGS += -DCCCC_HAS_CURL=1 $(shell $(PKG_CONFIG) --cflags libcurl 2>/dev/null)
+	LDFLAGS += $(or $(shell $(PKG_CONFIG) --libs libcurl 2>/dev/null),-lcurl)
+endif
+
+# Opt-in Intel BID decimal FP (tools/fetch_intel_bid.sh builds it).
+ifneq ($(filter-out 0,$(CCCC_HAS_DECIMAL)),)
+	CCCC_BID_PREFIX ?= build/intel-bid
+	ifneq ($(wildcard $(CCCC_BID_PREFIX)/lib/libbid.a),)
+		CFLAGS += -DCCCC_HAS_DECIMAL=1 -I$(CCCC_BID_PREFIX)/src
+		LDFLAGS += $(CCCC_BID_PREFIX)/lib/libbid.a
+	else
+		$(warning CCCC_HAS_DECIMAL=1 but $(CCCC_BID_PREFIX)/lib/libbid.a is missing; run tools/fetch_intel_bid.sh. Building without decimal FP.)
+	endif
+endif
+
+# Opt-in ndbm on Linux (libgdbm-compat); macOS ships ndbm in libc.
+ifneq ($(filter-out 0,$(CCCC_HAS_NDBM)),)
+	CFLAGS += -DCCCC_HAS_NDBM=1
+	ifneq ($(UNAME_S),Darwin)
+		LDFLAGS += -lgdbm_compat
+	endif
+endif
+
+# --version stamp; absent in release tarballs (no .git).
+GIT_DESC := $(shell git describe --tags --always --dirty 2>/dev/null)
+ifneq ($(GIT_DESC),)
+	CFLAGS += -DCCCC_GIT_DESC='"$(GIT_DESC)"'
+endif
+
+# libbacktrace (nicer crash traces): vendor/libbacktrace plus the hand-written
+# config in src/backtrace/. Built into build/libbacktrace.a.
+BT_DIR := vendor/libbacktrace
+BT_OUT := build/libbacktrace
+ifneq ($(CCCC_HAS_BACKTRACE),0)
+ifneq ($(wildcard $(BT_DIR)/backtrace.c),)
+BT_FMT := $(if $(filter Darwin,$(UNAME_S)),macho,elf)
+BT_SRCS := $(addsuffix .c,$(addprefix $(BT_DIR)/,backtrace atomic dwarf fileline mmap mmapio posix print simple sort state $(BT_FMT)))
+BT_OBJS := $(patsubst $(BT_DIR)/%.c,$(BT_OUT)/%.o,$(BT_SRCS))
+BT_CFLAGS := -O2 -g -std=c11 -Wno-unused-parameter -Wno-unused-variable \
+	-Wno-missing-field-initializers -Wno-shift-count-overflow \
+	-Wno-implicit-function-declaration -Wno-deprecated-declarations \
+	-Isrc/backtrace -I$(BT_DIR)
+ifneq ($(UNAME_S),Darwin)
+	BT_CFLAGS += -D_GNU_SOURCE
+endif
+CFLAGS += -DCCCC_HAS_BACKTRACE=1 -Isrc/backtrace -I$(BT_DIR)
+BT_LIB := $(BT_OUT)/libbacktrace.a
+endif
+endif
+
 .PHONY: default
 default: cccc$(EXE)
 
-cccc$(EXE): $(SRCS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+cccc$(EXE): $(SRCS) $(HEADERS) $(BT_LIB)
+	$(CC) $(CFLAGS) -o $@ $(SRCS) $(BT_LIB) $(LDFLAGS)
 
-# bootstrap (#857): the full stage0 dance in one target -- link against
-# src/std_stub.c, regenerate the real src/std.c, then relink against it.
-# Needs a *recursive* $(MAKE), not three lines run back to back: STDLIB_SRC
-# above is chosen by $(wildcard src/std.c) at make-parse time, so switching
-# from the stub to the real stdlib only takes effect in a fresh make
-# invocation. The `rm -f` between the two links is required, not cosmetic:
-# make's prerequisite check treats an *equal* mtime as up to date (not
-# stale), and regen_stdlib.sh's mv() can land src/std.c's mtime in the same
-# clock tick as the just-linked cccc binary on a fast filesystem/CI runner --
-# observed intermittently as "make: `cccc' is up to date." even though
-# src/std.c had just switched from the stub to the real stdlib, leaving the
-# stage0 binary permanently linked against std_stub.c. Removing the binary
-# first forces an unconditional relink regardless of mtime comparison.
-.PHONY: bootstrap
-bootstrap:
-	$(MAKE) cccc$(EXE)
-	sh tools/regen_stdlib.sh ./cccc$(EXE)
-	rm -f cccc$(EXE)
-	$(MAKE) cccc$(EXE)
+$(BT_OUT)/%.o: $(BT_DIR)/%.c
+	@mkdir -p $(BT_OUT)
+	$(CC) $(BT_CFLAGS) -c -o $@ $<
+
+$(BT_OUT)/libbacktrace.a: $(BT_OBJS)
+	$(AR) rcs $@ $^

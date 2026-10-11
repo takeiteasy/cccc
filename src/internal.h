@@ -586,7 +586,7 @@ File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents);
 Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety);
 Token *tokenize(VirtualMachine *vm, File *file);
 Token *tokenize_file(VirtualMachine *vm, char *filename, bool allow_shebang);
-Token *tokenize_string(VirtualMachine *vm, char *name, char *contents);
+Token *tokenize_string(VirtualMachine *vm, char *name, const char *contents);
 unsigned char *read_binary_file(VirtualMachine *vm, char *path,
                                 size_t *out_size);
 
@@ -606,7 +606,7 @@ CCCCCompilerFamily cccc_detect_native_cc_family(void);
 char *cccc_find_build_cc(
     void); // #1198: --build's own compiler, separate from -c=native's
 void define_std_macros(VirtualMachine *vm);
-char *get_std_header(char *filename);
+const char *get_std_header(const char *filename);
 const char *get_stdlib_reg_fn_name(const char *header);
 const char *get_std_header_name(int i);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
@@ -905,6 +905,7 @@ uint32_t decode_utf8(VirtualMachine *vm, char **new_pos, char *p);
 bool is_ident1(uint32_t c);
 bool is_ident2(uint32_t c);
 void cc_asm_passthru_flush(VirtualMachine *vm);
+void cc_asm_passthru_add_file_asm(VirtualMachine *vm, const char *text);
 int display_width(VirtualMachine *vm, char *p, int len);
 int caret_padding(VirtualMachine *vm, char *line, int len, char *buf, int cap);
 
@@ -1397,7 +1398,7 @@ void register_locale_functions(VirtualMachine *vm);
 void register_math_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
 // Per-domain POSIX registrars (#946 split of posix.c), called directly by
-// register_posix_functions() and also mapped 1:1 from tools/stdlib.tsv for
+// register_posix_functions() and also mapped 1:1 from src/std_table.c for
 // a header whose registered functions live in exactly one domain (#1012) --
 // see get_stdlib_reg_fn_name()/register_stdlib_for_header() in preprocess.c.
 // A header that spans more than one domain (unistd.h, strings.h,

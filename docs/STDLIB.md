@@ -8,7 +8,7 @@ under `-c=native`.
 
 ---
 
-CCCC provides a built-in standard library (embedded via `src/std.c`) and
+CCCC provides a built-in standard library (embedded via `src/std_table.c`) and
 a subset of GCC's `__builtin_*` functions. The standard library headers
 in `include/` are compiled into the binary; the builtins are lowered directly
 in the compiler and do not require any header include or host libc linkage.

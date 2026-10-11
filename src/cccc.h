@@ -3081,6 +3081,15 @@ struct StaticAssertRecord {
     StaticAssertRecord *next;
 };
 
+// A file-scope `asm("...");` (basic asm outside any function). It has no Node
+// to hang off, so it lives on Compiler::file_asms in source order for the
+// serializer to re-emit verbatim for the host compiler.
+typedef struct FileAsmRecord FileAsmRecord;
+struct FileAsmRecord {
+    char          *text;
+    FileAsmRecord *next;
+};
+
 // A factory function registered via [[cccc::build_target]] (or with
 // kind=native). When --build-target=NAME matches a factory name the runner
 // calls the factory directly (skipping build_main) and builds its returned
@@ -3834,6 +3843,8 @@ typedef struct Compiler {
                                         // [[cccc::comptime]] decls (#884)
     StaticAssertRecord *static_asserts; // #1098: file-scope _Static_assert
                                         // records, for native re-emission
+    FileAsmRecord *file_asms;      // file-scope asm("..."), in source order
+    FileAsmRecord *file_asms_tail; // append point for file_asms
     ComptimeVar
         *comptime_vars;     // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns; // Linked list of [[cccc::test]] function names

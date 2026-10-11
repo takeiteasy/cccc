@@ -289,7 +289,38 @@ static void *compile_passthru_so(const char *src, size_t len) {
         passthru_fail("--asm-passthru: dlopen failed: %s", dlerror());
     return handle;
 }
+
+static void passthru_append(VirtualMachine *vm, const char *buf, size_t blen) {
+    size_t need  = vm->compiler.asm_passthru_len + blen + 1;
+    char  *grown = realloc(vm->compiler.asm_passthru_src, need);
+    if (!grown)
+        passthru_fail("--asm-passthru: out of memory");
+    memcpy(grown + vm->compiler.asm_passthru_len, buf, blen + 1);
+    vm->compiler.asm_passthru_src = grown;
+    vm->compiler.asm_passthru_len += blen;
+}
 #endif // !_WIN32
+
+// A file-scope asm("...") joins the thunk batch verbatim, so the host shared
+// library defines whatever symbols it declares.
+void cc_asm_passthru_add_file_asm(VirtualMachine *vm, const char *text) {
+#if !defined(_WIN32)
+    char  *buf  = NULL;
+    size_t blen = 0;
+    FILE  *f    = open_memstream(&buf, &blen);
+    if (!f)
+        passthru_fail("--asm-passthru: out of memory");
+    fprintf(f, "__asm__(");
+    serialize_string_n(f, text, (int)strlen(text));
+    fprintf(f, ");\n");
+    fclose(f);
+    passthru_append(vm, buf, blen);
+    free(buf);
+#else
+    (void)vm;
+    (void)text;
+#endif
+}
 
 void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
 #if !defined(_WIN32)
@@ -327,13 +358,7 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
     fprintf(f, ";\n}\n");
     fclose(f);
 
-    size_t need = vm->compiler.asm_passthru_len + blen + 1;
-    char  *grown = realloc(vm->compiler.asm_passthru_src, need);
-    if (!grown)
-        passthru_fail("--asm-passthru: out of memory");
-    memcpy(grown + vm->compiler.asm_passthru_len, buf, blen + 1);
-    vm->compiler.asm_passthru_src = grown;
-    vm->compiler.asm_passthru_len += blen;
+    passthru_append(vm, buf, blen);
     free(buf);
 
     int ffi_idx = cc_register_asm_passthru_slot(vm, sym_name);

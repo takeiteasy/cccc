@@ -496,7 +496,7 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
 // never re-emitted at all -- it reaches the output solely via the replayed
 // #include, still under its original name -- producing a call to an
 // undeclared symbol. realpath() failing (a synthetic/embedded path with no
-// real file, e.g. the src/std.c embedded-header table's own paths) falls
+// real file, e.g. the src/std_table.c embedded-header table's own paths) falls
 // back to the exact-string comparison this replaces, matching prior
 // behavior for anything that was never a real difference anyway.
 static bool files_are_same(const char *a, const char *b) {
@@ -5502,6 +5502,12 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // re-emits macro-generated additions layered onto the original
     // source) skips this pass entirely, the same reasoning the
     // global-variable loop just below applies per-Obj via is_macro_generated.
+    if (!generated_only)
+        for (FileAsmRecord *fa = vm->compiler.file_asms; fa; fa = fa->next) {
+            fprintf(f, "__asm__(");
+            serialize_string_n(f, fa->text, (int)strlen(fa->text));
+            fprintf(f, ");\n");
+        }
     if (!generated_only)
         for (StaticAssertRecord *sa = vm->compiler.static_asserts; sa;
              sa                     = sa->next)

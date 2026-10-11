@@ -9,6 +9,25 @@ Inline `asm` is a no-op in the VM unless you pass `--asm-passthru`. Under
 | VM + `--asm-passthru` | runs on the host CPU | runs on the host CPU, reading and writing VM variables |
 | `-c=native`, `-m`, `-c=generated` | emitted verbatim | emitted verbatim |
 
+## File-scope asm
+
+`asm("...");` outside any function emits assembler text into the output, for
+example to define a symbol or embed a file with `.incbin`.
+
+```c
+__asm__(".globl answer\nanswer: .byte 42\n");
+```
+
+| Mode | Behaviour |
+|---|---|
+| VM (default) | skipped (`-Wignored-features`) |
+| VM + `--asm-passthru` | assembled into the host library; the VM cannot reference its symbols |
+| `-c=native`, `-m` | emitted verbatim as `__asm__("...");` |
+| `-c=generated` | not emitted; the original source already carries it |
+
+Only a single string literal is accepted; operands and qualifiers are
+function-scope only.
+
 ## Running asm in the VM
 
 `--asm-passthru` (`-A`) compiles each asm statement with the host C compiler

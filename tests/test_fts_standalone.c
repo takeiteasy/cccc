@@ -1,8 +1,8 @@
-// Regression test for #811: proves the tools/stdlib.tsv wiring for fts.h
+// Regression test for #811: proves the src/std_table.c wiring for fts.h
 // works when that header is included on its own, without any of the
 // other dirent.h-family headers pulled in first -- the #792 bug class (a
 // header declaring functions but registering none because
-// tools/stdlib.tsv was never updated for it).
+// src/std_table.c was never updated for it).
 #include <fts.h>
 #include <stdio.h>
 #include <string.h>

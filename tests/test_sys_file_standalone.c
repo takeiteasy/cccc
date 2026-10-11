@@ -3,7 +3,7 @@
 // calling it failed with "undefined function: flock" -- even though
 // sys/file.h already reaches register_posix_functions transitively via its
 // own `#include "fcntl.h"`. Fixed by registering flock in
-// register_posix_functions (src/stdlib/posix.c); the tools/stdlib.tsv row
+// register_posix_functions (src/stdlib/posix.c); the src/std_table.c row
 // added alongside it is defensive (sys/file.h already worked via fcntl.h).
 //
 // Includes ONLY <sys/file.h> (which pulls in fcntl.h/unistd.h itself) to

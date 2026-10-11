@@ -2916,7 +2916,7 @@ static bool is_cccc_supplied_only_header(const char *name) {
     return false;
 }
 
-// Whether CCCC's own copy of a standard header — the embedded src/std.c
+// Whether CCCC's own copy of a standard header — the embedded src/std_table.c
 // table (tried by the PP_INCLUDE handler before ever calling this function;
 // see docs/HEADERS.md) or the on-disk builtin_include_dir fallback below —
 // should be considered at all for this header name: always for owned
@@ -3004,14 +3004,10 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
         free(path);
     }
 
-    // CCCC's own bundled headers, on disk. This is a fallback only — the
-    // PP_INCLUDE handler tries the embedded src/std.c table first, which
-    // covers standard headers without touching the filesystem at all (see
-    // docs/HEADERS.md). This path still matters for: a stage0 build linked
-    // against src/std_stub.c (embeds nothing, so the embedded lookup always
-    // misses); the three private headers (reflection.h/testing.h/building.h,
-    // via tokenize_private_header) on a stage0 build; and as a safety net if
-    // a build's embedded table is stale or partial.
+    // CCCC's own bundled headers, on disk. This is a fallback only: the
+    // PP_INCLUDE handler tries the embedded src/std_table.c table first,
+    // which covers standard headers without touching the filesystem (see
+    // docs/HEADERS.md).
     if (try_builtin && vm->compiler.builtin_include_dir) {
         char *path =
             format("%s/%s", vm->compiler.builtin_include_dir, filename);
@@ -3048,26 +3044,14 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
 
 // Tokenize one of CCCC's private headers (include/cccc/reflection.h,
 // testing.h, building.h) for internal injection (implicit_reflection_tokens,
-// cc_inject_test_header, cc_inject_build_header). Prefers the embedded std
-// table; falls back to resolving "cccc/<name>" on disk via the normal -I
-// include search path, so a stage0 compiler linked against src/std_stub.c
-// (which embeds nothing) can still find these via `-I./include`.
+// cc_inject_test_header, cc_inject_build_header) from the embedded std table.
 Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag) {
-    char *src = get_std_header(name);
+    const char *src = get_std_header(name);
     if (src)
         return tokenize_string(vm, tag, src);
 
-    char *rel  = format("cccc/%s", name);
-    char *path = search_include_paths(vm, rel, (int)strlen(rel), false);
-    if (!path)
-        error("cannot find cccc/%s -- run `make bootstrap` (or pass "
-              "-I<repo>/include) to make it resolvable",
-              name);
-
-    Token *toks = tokenize_file(vm, path, false);
-    if (!toks)
-        error("cannot open %s", path);
-    return toks;
+    error("missing embedded header %s", name);
+    return NULL;
 }
 
 // #1272: cheap pre-parse scan deciding whether a TU that did NOT ask for
@@ -3466,7 +3450,7 @@ static bool is_private_embedded_header(const char *name) {
            !strcmp(name, "building.h");
 }
 
-// #891: the embedded src/std.c table's fallback for a standard header not
+// #891: the embedded src/std_table.c table's fallback for a standard header not
 // found on disk (foreign CWD with no ./include alongside the cccc binary,
 // or a copied binary with no repo at all). Only tried once
 // search_include_paths() has already come up empty (both the -I search and the
@@ -3474,10 +3458,11 @@ static bool is_private_embedded_header(const char *name) {
 // one is reachable. Returns NULL for anything not a known *public* standard
 // header, or when wants_builtin_header() says CCCC's own copy shouldn't be
 // considered here (--no-builtin-includes on a non-owned header).
-static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
+static const char *try_embedded_std_header(VirtualMachine *vm,
+                                           char          *filename) {
     if (is_private_embedded_header(filename))
         return NULL;
-    char *src = get_std_header(filename);
+    const char *src = get_std_header(filename);
     if (!src)
         return NULL;
     bool owned = is_compiler_owned_header(filename);
@@ -3487,7 +3472,7 @@ static char *try_embedded_std_header(VirtualMachine *vm, char *filename) {
 }
 
 // #998: the synthetic path an embedded standard header (served from the
-// src/std.c table, no real file on disk) is keyed and recorded under --
+// src/std_table.c table, no real file on disk) is keyed and recorded under --
 // shared between include_embedded_header()'s own #pragma once/include-guard
 // bookkeeping and the PP_INCLUDE handler's emit_include_paths registration,
 // so the two can't drift apart. Also what TypeName.file_path ends up
@@ -3502,7 +3487,7 @@ static char *embedded_header_key(VirtualMachine *vm, const char *filename) {
 // by a synthetic "<embedded>/name" string since there is no real path on
 // disk to key on.
 static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
-                                      char *filename, char *src,
+                                      char *filename, const char *src,
                                       Token *filename_tok) {
     char       *key      = embedded_header_key(vm, filename);
     const char *once_key = pragma_once_key(vm, key);
@@ -6806,7 +6791,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     char *resolved = resolve_embedded_relative_header(
                         vm, start->file ? start->file->name : NULL, filename);
                     if (resolved) {
-                        char *embedded_src =
+                        const char *embedded_src =
                             try_embedded_std_header(vm, resolved);
                         if (embedded_src) {
                             if (ac_include_line) {
@@ -6852,12 +6837,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     // e.g. cccc running from a CWD that isn't its own repo, or
                     // a copied binary with no include/ alongside it). Fall back
                     // to the header text embedded in the binary itself
-                    // (src/std.c), the same table tokenize_private_header()
+                    // (src/std_table.c), the same table tokenize_private_header()
                     // already uses for reflection.h et al. This is what makes
                     // standard headers resolve with zero configuration
                     // regardless of process CWD
                     // (#891).
-                    char *embedded_src = try_embedded_std_header(vm, filename);
+                    const char *embedded_src = try_embedded_std_header(vm, filename);
                     if (embedded_src) {
                         // #998: register this include's provenance BEFORE the
                         // splice below -- the same header may already have been
@@ -7229,8 +7214,8 @@ static char *format_time(VirtualMachine *vm, struct tm *tm) {
 // wrap_fe*() functions pass FE_* straight through to the real host libc, so
 // the guest header's constants MUST match whatever <fenv.h> this binary was
 // actually compiled against on this machine -- they cannot be baked into
-// src/std.c at stdlib-regen time (`make bootstrap`) on one dev's machine
-// and expected to be correct on another platform (#771).
+// the bundled include/fenv.h and expected to be correct on every platform
+// (#771).
 static void init_fenv_macros(VirtualMachine *vm) {
     define_macro(vm, "__CCCC_FE_INVALID__", arena_format(vm, "%d", FE_INVALID));
     define_macro(vm, "__CCCC_FE_DIVBYZERO__",
@@ -7893,7 +7878,7 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
         if (ci_tok->file && ci_tok->file->name &&
             strstr(ci_tok->file->name, "implicit-reflection.h"))
             hint = "\n  hint: embedded reflection.h may be truncated — run "
-                   "`make bootstrap` to regenerate src/std.c";
+                   "`make` to rebuild ./cccc";
         error_tok(vm, ci_tok,
                   "unterminated conditional directive (started with #%.*s)%s",
                   ci_tok->len, ci_tok->loc, hint);

@@ -1097,7 +1097,7 @@ static long long wrap_thrd_yield(void) {
     // below, mutex/cond wait, thrd_join). sched_yield() only yields the
     // *host* OS thread's CPU slot -- it says nothing about the VM's GIL,
     // which is held for a thread's entire vm_eval run and released only at
-    // these explicit points (see std.c's stdatomic.h ATOMIC_FLAG_INIT
+    // these explicit points (see include/stdatomic.h's ATOMIC_FLAG_INIT
     // comment for the same invariant stated from the guest side). A thread
     // spinning `while (!atomic_load(&flag)) thrd_yield();` that wins the
     // GIL acquisition race against the thread that would set `flag` used

@@ -104,7 +104,7 @@ Manuals live in [`docs/`](docs/):
 
 | Guide | Covers |
 |---|---|
-| [BUILD.md](docs/BUILD.md) | Building `cccc` itself — `make` stage0 vs the `--build` full build, `CCCC_HAS_*` feature knobs |
+| [BUILD.md](docs/BUILD.md) | Building `cccc` itself — `make`, the `build.c` targets, `CCCC_HAS_*` feature knobs |
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
@@ -130,7 +130,7 @@ Manuals live in [`docs/`](docs/):
 CCCC: Comprehensive C Compensation Compiler
 https://git.sr.ht/~takeiteasy/cccc
 
-Usage: ./build/cccc [options] file...
+Usage: ./cccc [options] file...
 
 Options:
 	-h/--help                Show this message
@@ -350,9 +350,9 @@ Inline Assembly:
 	                    and execute them via FFI (default: no-op)
 
 Example:
-	./build/cccc -o hello hello.c
-	./build/cccc -I ./include -D DEBUG -o prog prog.c
-	echo 'int main() { return 42; }' | ./build/cccc -
+	./cccc -o hello hello.c
+	./cccc -I ./include -D DEBUG -o prog prog.c
+	echo 'int main() { return 42; }' | ./cccc -
 ```
 
 ## Credits

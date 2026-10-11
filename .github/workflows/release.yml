@@ -4,7 +4,7 @@ name: Release
 # platform quadrants on every `v*` tag push (#883). ci.yml's linux-aarch64/
 # macos-arm64 jobs (and this workflow's linux-amd64 job, which
 # ci.yml deliberately omits -- sr.ht already covers amd64 per-push CI)
-# share the same bootstrap->build shape; this workflow
+# share the same build shape; this workflow
 # additionally builds the `release` target (build.c, host -O2 -g -DNDEBUG)
 # instead of the debug default, and runs the full test suite against that
 # exact release binary before packaging it -- an artifact that skipped the
@@ -56,8 +56,8 @@ jobs:
           submodules: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: make bootstrap
+      - name: Build ./cccc
+        run: make
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
@@ -92,8 +92,8 @@ jobs:
           submodules: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: make bootstrap
+      - name: Build ./cccc
+        run: make
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
@@ -123,8 +123,8 @@ jobs:
           submodules: true
       - name: Install dependencies
         run: brew install libffi pkg-config
-      - name: Bootstrap (stage0 -> regen std.c -> rebuild)
-        run: make bootstrap
+      - name: Build ./cccc
+        run: make
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary

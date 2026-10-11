@@ -34,6 +34,7 @@ if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
 fi
 
 # 4. Full test suite must pass before anything is tagged.
+make
 ./cccc --build build.c --build-target=test
 
 # 5. Extract the CHANGELOG section for this version as the tag message.

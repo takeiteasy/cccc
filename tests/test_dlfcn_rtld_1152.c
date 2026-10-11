@@ -10,7 +10,7 @@
 //
 // This test pins the host's real numbers per platform, which is what
 // actually catches broken wiring (injection missing, header alias stale,
-// src/std.c not regenerated) now that the values themselves are no longer
+// bundled header out of date) now that the values themselves are no longer
 // hand-transcribed. Deliberately no bare #else arm on the platform split:
 // CCCC also predefines __FreeBSD__/__NetBSD__/__sun for guests
 // (src/preprocess.c), and a fallback arm here would just reintroduce, in

@@ -1,15 +1,9 @@
 // build.c — self-hosting build script for CCCC.
 //
-// Bootstrap: the first build still requires the Makefile (make cccc), which
-// produces a *bootstrap* compiler good enough to run this script. Subsequent
-// rebuilds: ./cccc --build build.c
-//
-// Default build (./cccc --build build.c) is a two-pass build (#571/#842):
-//   1. "cccc-pass1" is built against the current src/std.c.
-//   2. cccc-pass1 regenerates src/std.c from tools/generate_stdlib.c
-//      (tools/regen_stdlib.sh — atomic, a no-op if nothing changed).
-//   3. "cccc" is (re)compiled against the regenerated src/std.c.
-// src/std.c can therefore never go stale; `make stdlib` is never needed.
+// `make` builds ./cccc (see Makefile); this script drives everything else:
+//   ./cccc --build build.c --build-target=NAME
+// The default build lists the targets. Targets that run the compiler (test,
+// the smokes, bench, ...) use ./cccc as it is: run `make` first.
 //
 // Selective builds via --build-target=NAME:
 //   cccc_asan          AddressSanitizer + UBSan build  → cccc-asan
@@ -19,7 +13,6 @@
 //   sanitizers         all of the above in one graph
 //   fuzz_harness       libFuzzer + ASan harness         → fuzz_harness
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
-//   stdlib_gen         two-pass regenerate src/std.c only (no final rebuild)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
 //   clean, host_tests, test / test_suites / test_legacy, sqlite_smoke,
@@ -38,16 +31,11 @@
 //   5-way sharded) linux_amd64_msan_test                      + cccc-msan build
 //   + full suite (#844 known-noise)
 //
-// Not covered here — use tools/Makefile.backup for:
-//   Cross-compiling for a 4th Colima profile / other architectures not listed
-//   above.
+// Not covered here: cross-compiling for a 4th Colima profile or other
+// architectures not listed above.
 
 #include <stdio.h>
 #include <string.h>
-
-// Forward declaration: defined near stdlib_gen() below, used earlier by
-// release() (#883) to regenerate src/std.c before the release build.
-static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt);
 
 // ---- libffi probing -------------------------------------------------------
 
@@ -232,6 +220,12 @@ static BuildTarget *make_libbacktrace(Builder *ctx) {
 // packaging time (see tools/release.sh), not compile time, so a release
 // binary a user hands back a crash report from is still debuggable.
 
+// src/std_table.c embeds every bundled header with `.incbin`, which the host
+// compiler's depfile never reports, so it gets a library of its own whose
+// inputs are those headers: editing one recompiles only this file.
+static bool         building_std_table;
+static BuildTarget *std_table_lib(Builder *ctx, BuildTarget *bt);
+
 static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
                                const char *opt_flag) {
     AddCFlag(t, "-Wall");
@@ -280,6 +274,8 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
         AddInclude(t, LIBBACKTRACE_DIR);
         LinkWith(t, bt);
     }
+    if (!building_std_table)
+        LinkWith(t, std_table_lib(ctx, bt));
     // Git describe stamping for --version (#883). Absent in release
     // tarballs (no .git) -- CCCC_GIT_DESC then falls back to "" (see
     // src/internal.h) and --version shows CCCC_RELEASE_VERSION alone.
@@ -299,20 +295,32 @@ static void add_cccc_flags(Builder *ctx, BuildTarget *t, BuildTarget *bt) {
     add_cccc_flags_opt(ctx, t, bt, "-O0");
 }
 
+static BuildTarget *std_table_lib(Builder *ctx, BuildTarget *bt) {
+    static BuildTarget *lib;
+    if (lib)
+        return lib;
+    lib = StaticLib(ctx, "std_table");
+    AddSource(lib, "src/std_table.c");
+    AddCFlag(lib, "-fPIC");
+    building_std_table = true;
+    add_cccc_flags(ctx, lib, bt);
+    building_std_table = false;
+    const char **headers = GlobFiles(ctx, "include/*.h");
+    for (int i = 0; headers[i]; i++)
+        AddInput(lib, headers[i]);
+    headers = GlobFiles(ctx, "include/*/*.h");
+    for (int i = 0; headers[i]; i++)
+        AddInput(lib, headers[i]);
+    return lib;
+}
+
 // ---- Source glob shared by all cccc executable targets -------------------
 
 static void add_cccc_sources(Builder *ctx, BuildTarget *t) {
     AddSourcesGlob(t, "src/*.c");
     AddSourcesGlob(t, "src/stdlib/*.c");
     ExcludeSource(t, "src/ops.c");
-    // src/std.c (generated) and src/std_stub.c (committed stage0 stand-in)
-    // both define get_std_header/get_stdlib_reg_fn_name/get_std_header_name
-    // -- never compile both into the same target. std.c wins whenever it
-    // exists on disk; same self-correcting rule the Makefile's SRCS uses.
-    if (FileExists(ctx, "src/std.c"))
-        ExcludeSource(t, "src/std_stub.c");
-    else
-        ExcludeSource(t, "src/std.c"); // no-op when absent; harmless
+    ExcludeSource(t, "src/std_table.c"); // linked via std_table_lib()
 }
 
 // ---- Reusable cccc executable factory ------------------------------------
@@ -424,12 +432,10 @@ BuildTarget *shims_gen(Builder *ctx); // same forward-reference reason as above
 [[cccc::build_target]]
 BuildTarget *release(Builder *ctx) {
     BuildTarget *bt             = make_libbacktrace(ctx);
-    BuildTarget *gen            = stdlib_regen_step(ctx, bt);
     BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
     BuildTarget *shims_gen_step = shims_gen(ctx);
     BuildTarget *final =
         make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
-    DependsOn(final, gen);
     DependsOn(final, reflection_gen);
     DependsOn(final, shims_gen_step);
     return final;
@@ -579,141 +585,47 @@ BuildTarget *host_tests(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return RunCustom(ctx, "test", "python3 tools/run_tests.py --binary ./cccc");
 }
 
 [[cccc::build_target]]
 BuildTarget *test_suites(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --suites --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test-suites", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return RunCustom(ctx, "test-suites", "python3 tools/tests.py --suites --binary ./cccc");
 }
 
 [[cccc::build_target]]
 BuildTarget *test_legacy(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --legacy --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test-legacy", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return RunCustom(ctx, "test-legacy", "python3 tools/tests.py --legacy --binary ./cccc");
 }
 
 [[cccc::build_target]]
 BuildTarget *sqlite_smoke(Builder *ctx) {
-    // tools/sqlite_smoke.py hardcodes root/"cccc" -- it takes no --binary
-    // override, unlike tools/tests.py and tools/run_tests.py. Put the built
-    // binary there via `cp` + atomic `mv`, NOT a direct `cp` onto ./cccc:
-    // when this whole build.c invocation is itself running as ./cccc (the
-    // common case -- ./cccc --build build.c), an in-place `cp` truncates
-    // and rewrites the very inode the running process's text segment is
-    // demand-paged from, and it gets SIGKILLed the next time the kernel
-    // faults in a code page. `mv` swaps the directory entry to a new inode
-    // atomically, leaving the running process's already-open mapping of
-    // the old one untouched until it exits.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(
-        cmd, sizeof(cmd),
-        "cp %s ./cccc.sqlite-smoke-tmp && mv ./cccc.sqlite-smoke-tmp ./cccc "
-        "&& python3 tools/sqlite_smoke.py",
-        TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "sqlite-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+    // Runs against ./cccc as it is.
+    return RunCustom(ctx, "sqlite-smoke", "python3 tools/sqlite_smoke.py");
 }
 
 [[cccc::build_target]]
 BuildTarget *header_resolution_smoke(Builder *ctx) {
-    // tools/header_resolution_smoke.py (#891) hardcodes root/"cccc", same as
-    // sqlite_smoke.py above -- see the comment on sqlite_smoke for why the
-    // built binary is placed via `cp` + atomic `mv` rather than a direct
-    // `cp` onto ./cccc.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.header-resolution-smoke-tmp && "
-             "mv ./cccc.header-resolution-smoke-tmp ./cccc "
-             "&& python3 tools/header_resolution_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "header-resolution-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+    // Runs against ./cccc as it is.
+    return RunCustom(ctx, "header-resolution-smoke", "python3 tools/header_resolution_smoke.py");
 }
 
 [[cccc::build_target]]
 BuildTarget *cli_exit_code_smoke(Builder *ctx) {
-    // tools/cli_exit_code_smoke.py (#1260) hardcodes root/"cccc", same as
-    // header_resolution_smoke above -- see the comment on sqlite_smoke for
-    // why the built binary is placed via `cp` + atomic `mv` rather than a
-    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
-    // run_tests.py; this standalone target is for running it in isolation.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.cli-exit-code-smoke-tmp && "
-             "mv ./cccc.cli-exit-code-smoke-tmp ./cccc "
-             "&& python3 tools/cli_exit_code_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "cli-exit-code-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+    // Runs against ./cccc as it is.
+    return RunCustom(ctx, "cli-exit-code-smoke", "python3 tools/cli_exit_code_smoke.py");
 }
 
 [[cccc::build_target]]
 BuildTarget *url_mirror_smoke(Builder *ctx) {
-    // tools/url_mirror_smoke.py (#1324) hardcodes root/"cccc", same as
-    // header_resolution_smoke above -- see the comment on sqlite_smoke for
-    // why the built binary is placed via `cp` + atomic `mv` rather than a
-    // direct `cp` onto ./cccc. Also run inside the unified `test` target via
-    // run_tests.py; this standalone target is for running it in isolation.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.url-mirror-smoke-tmp && "
-             "mv ./cccc.url-mirror-smoke-tmp ./cccc "
-             "&& python3 tools/url_mirror_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "url-mirror-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+    // Runs against ./cccc as it is.
+    return RunCustom(ctx, "url-mirror-smoke", "python3 tools/url_mirror_smoke.py");
 }
 
 [[cccc::build_target]]
 BuildTarget *comptime_native_smoke(Builder *ctx) {
-    // tools/comptime_native_smoke.py (#892) hardcodes root/"cccc", same as
-    // header_resolution_smoke above -- see the comment on sqlite_smoke for
-    // why the built binary is placed via `cp` + atomic `mv` rather than a
-    // direct `cp` onto ./cccc.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.comptime-native-smoke-tmp && "
-             "mv ./cccc.comptime-native-smoke-tmp ./cccc "
-             "&& python3 tools/comptime_native_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+    // Runs against ./cccc as it is.
+    return RunCustom(ctx, "comptime-native-smoke", "python3 tools/comptime_native_smoke.py");
 }
 
 [[cccc::build_target]]
@@ -831,13 +743,9 @@ BuildTarget *docs(Builder *ctx) {
 
 static BuildTarget *make_bench_compare(Builder *ctx, const char *name,
                                        const char *pyflags) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
+    char cmd[512];
     snprintf(cmd, sizeof(cmd), "python3 tools/bench.py %s", pyflags);
-    BuildTarget *step = RunCustom(ctx, name, cmd);
-    DependsOn(step, cccc);
-    return step;
+    return RunCustom(ctx, name, cmd);
 }
 
 [[cccc::build_target]]
@@ -885,44 +793,26 @@ BuildTarget *profile_cpu(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *profile_mem(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    if (strcmp(BuildHost(ctx), "darwin") == 0)
-        snprintf(cmd, sizeof(cmd),
-                 "mkdir -p profile && leaks -atExit -- %s -I./include "
-                 "tests/benchmarks/mandelbrot.c "
-                 "> profile/mem-leaks.txt 2>&1 || true",
-                 TargetOutput(cccc));
-    else
-        snprintf(cmd, sizeof(cmd),
-                 "mkdir -p profile && valgrind --tool=massif "
-                 "--massif-out-file=profile/mem.massif "
-                 "%s -I./include tests/benchmarks/mandelbrot.c || true",
-                 TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "profile-mem", cmd);
-    DependsOn(step, cccc);
-    return step;
+    const char *cmd =
+        strcmp(BuildHost(ctx), "darwin") == 0
+            ? "mkdir -p profile && leaks -atExit -- ./cccc -I./include "
+              "tests/benchmarks/mandelbrot.c "
+              "> profile/mem-leaks.txt 2>&1 || true"
+            : "mkdir -p profile && valgrind --tool=massif "
+              "--massif-out-file=profile/mem.massif "
+              "./cccc -I./include tests/benchmarks/mandelbrot.c || true";
+    return RunCustom(ctx, "profile-mem", cmd);
 }
 
 // ---- dsym (Makefile:608-617, macOS-only) -----------------------------------
 
 [[cccc::build_target]]
 BuildTarget *dsym(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    BuildTarget *step;
-    if (strcmp(BuildHost(ctx), "darwin") == 0) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "dsymutil %s", TargetOutput(cccc));
-        step = RunCustom(ctx, "dsym", cmd);
-    } else {
-        step = RunCustom(ctx, "dsym",
-                         "echo 'dsym: no-op on this platform (DWARF is already "
-                         "in the ELF)'");
-    }
-    DependsOn(step, cccc);
-    return step;
+    if (strcmp(BuildHost(ctx), "darwin") == 0)
+        return RunCustom(ctx, "dsym", "dsymutil ./cccc");
+    return RunCustom(ctx, "dsym",
+                     "echo 'dsym: no-op on this platform (DWARF is already "
+                     "in the ELF)'");
 }
 
 // ---- afl / afl-asan (Makefile:229-252) -------------------------------------
@@ -979,8 +869,7 @@ BuildTarget *afl_asan(Builder *ctx) {
 // tests/test_build_cache.c into a shared --build-cache dir three times --
 // default compiler, same compiler again (must cache-hit), then
 // --build-cc=<other family> (must NOT cache-hit, i.e. must actually
-// recompile) -- via a single freshly-built "cccc" so the smoke isn't at the
-// mercy of a possibly-stale repo-root ./cccc. Skips cleanly (not a failure)
+// recompile) -- via the repo-root ./cccc. Skips cleanly (not a failure)
 // if only one compiler family is reachable on PATH.
 [[cccc::build_target]]
 BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
@@ -994,9 +883,6 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
                         "one compiler family on PATH)\n");
         return RunCustom(ctx, "build-cache-toolchain-smoke", "true");
     }
-
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
 
     // The vendored RunCustom shell (build_shell.c) has no `!`/`$?` -- so
     // "did NOT cache-hit" is checked positively instead: a real recompile
@@ -1017,11 +903,8 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
              "--build-cc=%s tests/test_build_cache.c | grep -q -- '%s' && "
              "rm -rf build/build_cache_toolchain_smoke && "
              "echo 'build-cache-toolchain-smoke: OK'",
-             TargetOutput(cccc), TargetOutput(cccc), TargetOutput(cccc),
-             other_cc, other_cc);
-    BuildTarget *step = RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+             "./cccc", "./cccc", "./cccc", other_cc, other_cc);
+    return RunCustom(ctx, "build-cache-toolchain-smoke", cmd);
 }
 
 // ---- Linux via Colima (Makefile:458-556) -----------------------------------
@@ -1108,94 +991,26 @@ BuildTarget *linux_amd64_msan_test(Builder *ctx) {
     return step;
 }
 
-// ---- Two-pass stdlib regeneration (#571/#842) ------------------------------
-//
-// Pass 1 builds "cccc-pass1" against whatever src/std.c is currently on
-// disk. That compiler regenerates src/std.c from tools/generate_stdlib.c via
-// tools/regen_stdlib.sh's atomic mktemp+cmp+mv recipe (a literal `> file`
-// shell redirect would truncate the committed 406 KB src/std.c the instant
-// the shell opens it, before the generator writes a single byte). The
-// script also skips the mv entirely when the regenerated content is
-// unchanged, so an already-up-to-date src/std.c keeps its mtime.
-//
-// Pass 2 (the caller's job — see build_main below) then (re)compiles the
-// real "cccc" against the regenerated src/std.c. With no --build-cache
-// enabled for this graph, every source recompiles unconditionally
-// (src/build.c's incremental checks are gated on ctx->cache_dir), so pass 2
-// genuinely picks up whatever pass 1 wrote.
-//
-// AddInput (#851) declares the generator's real inputs -- generate_stdlib.c
-// itself, the regen script, and every embedded header -- so build_target()
-// can report this step "up to date" and skip it when none of them changed.
-// Two things this does NOT buy, worth being honest about: the step still
-// DependsOn(gen, pass1), a full compiler build that recompiles
-// unconditionally without --build-cache, so on the default build skipping
-// the (already fast) regen script itself saves little -- reflection_ffi_gen
-// above is where AddInput's win actually shows up. And regen_stdlib.sh
-// deliberately preserves src/std.c's mtime on a no-change regen, so merely
-// touching a header (without changing its content) makes this step re-run
-// every build until the generated content actually differs -- intended, not
-// a bug in either regen_stdlib.sh or this up-to-date check.
-static BuildTarget *stdlib_regen_step(Builder *ctx, BuildTarget *bt) {
-    BuildTarget *pass1 = make_cccc_exe_named(ctx, bt, "cccc-pass1");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "sh tools/regen_stdlib.sh %s",
-             TargetOutput(pass1));
-    BuildTarget *gen = RunCustom(ctx, "stdlib-regen", cmd);
-    DeclareOutput(gen, "src/std.c");
-    DependsOn(gen, pass1);
-    AddInput(gen, "tools/generate_stdlib.c");
-    AddInput(gen, "tools/regen_stdlib.sh");
-    const char **hdrs1 = GlobFiles(ctx, "include/*.h");
-    for (int i = 0; hdrs1 && hdrs1[i]; i++)
-        AddInput(gen, hdrs1[i]);
-    const char **hdrs2 = GlobFiles(ctx, "include/*/*.h");
-    for (int i = 0; hdrs2 && hdrs2[i]; i++)
-        AddInput(gen, hdrs2[i]);
-    return gen;
-}
-
-[[cccc::build_target]]
-BuildTarget *stdlib_gen(Builder *ctx) {
-    BuildTarget *bt = make_libbacktrace(ctx);
-    return stdlib_regen_step(ctx, bt);
-}
-
 [[cccc::build_target]]
 BuildTarget *bench(Builder *ctx) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     if (!HaveTool(ctx, "hyperfine")) {
         fprintf(stderr, "build: bench requires hyperfine (not found in PATH) — "
                         "install it (e.g. brew install hyperfine / apt install "
                         "hyperfine)\n");
         return RunCustom(ctx, "bench", "false");
     }
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "mkdir -p profile && hyperfine --warmup 3 --ignore-failure "
-             "--export-json profile/bench.json '%s -I./include "
-             "tests/benchmarks/mandelbrot.c'",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "bench", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return RunCustom(ctx, "bench",
+                     "mkdir -p profile && hyperfine --warmup 3 "
+                     "--ignore-failure --export-json profile/bench.json "
+                     "'./cccc -I./include tests/benchmarks/mandelbrot.c'");
 }
 
 // ---- Default build entry -------------------------------------------------
-// Builds: libbacktrace (vendored), the two-pass stdlib regen, the
-// reflection FFI regen, and the final cccc executable. All other targets
-// are available via --build-target=NAME.
+// ./cccc comes from `make`; with no --build-target this lists what is available.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {
-    BuildTarget *bt             = make_libbacktrace(ctx);
-    BuildTarget *gen            = stdlib_regen_step(ctx, bt);
-    BuildTarget *reflection_gen = reflection_ffi_gen(ctx);
-    BuildTarget *shims_gen_step = shims_gen(ctx);
-    BuildTarget *final          = make_cccc_exe_named(ctx, bt, "cccc");
-    DependsOn(final, gen);
-    DependsOn(final, reflection_gen);
-    DependsOn(final, shims_gen_step);
-    return BuildAll(ctx);
+    printf("./cccc is built by `make`. Choose a target with "
+           "--build-target=NAME; list them with --build-list-targets.\n");
+    return 0;
 }

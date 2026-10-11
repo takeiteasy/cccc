@@ -2,8 +2,7 @@
 # linux_amd64_test.sh [colima-profile] [image] [jobs]
 #
 # 5-way sharded test run inside the Linux amd64 Colima container, each shard
-# under a 300s timeout (#850, mirrors tools/Makefile.backup's
-# linux-x86_64-test recipe). Runs every shard even if an earlier one fails,
+# under a 300s timeout. Runs every shard even if an earlier one fails,
 # then reports overall failure at the end -- the vendored build shell
 # (src/build_shell.c) has no loop construct or variables to express the
 # sharding or accumulate a fail flag the way this script's `for` loop does,

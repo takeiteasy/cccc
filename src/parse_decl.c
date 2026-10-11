@@ -1569,6 +1569,39 @@ static void declare_builtin_functions(VirtualMachine *vm) {
 // is the shared unit of work behind parse()'s top-level loop, REPL top-level
 // declarations (cc_parse_repl_unit), and demand-driven comptime declaration
 // splicing (splice_comptime_decl, #894).
+// A file-scope `asm("...")` is basic asm outside any function; `asm("sym")`
+// after a declarator is a label and is handled by the declarator, not here.
+static bool is_file_scope_asm(Token *tok) {
+    return (equal(tok, "asm") || equal(tok, "__asm") ||
+            equal(tok, "__asm__")) &&
+           equal(tok->next, "(");
+}
+
+// file-scope-asm = ("asm" | "__asm__" | "__asm") "(" string-literal ")" ";"
+static Token *file_scope_asm(VirtualMachine *vm, Token *tok) {
+    Token *kw = tok;
+    tok       = skip(vm, tok->next, "(");
+    if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
+        error_tok(vm, tok, "expected asm string literal, found '%.*s'",
+                  tok->len, tok->loc);
+    FileAsmRecord *rec = calloc(1, sizeof(FileAsmRecord));
+    rec->text          = tok->str;
+    if (vm->compiler.file_asms_tail)
+        vm->compiler.file_asms_tail->next = rec;
+    else
+        vm->compiler.file_asms = rec;
+    vm->compiler.file_asms_tail = rec;
+
+    if (vm->compiler.asm_passthru)
+        cc_asm_passthru_add_file_asm(vm, rec->text);
+    else if (!vm->compiler.serializes_output && !vm->compiler.asm_callback)
+        warn_tok(vm, kw, CCCC_WARN_IGNORED_FEATURES,
+                 "file-scope asm is not executed by the VM");
+
+    tok = skip(vm, tok->next, ")");
+    return skip(vm, tok, ";");
+}
+
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         // _Static_assert or static_assert (C23) - check before declspec
@@ -1595,6 +1628,11 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         if (equal(tok, "__cccc_omp"))
             error_tok(vm, tok,
                       "OpenMP directive at file scope is not supported");
+
+        if (is_file_scope_asm(tok)) {
+            tok = file_scope_asm(vm, tok);
+            continue;
+        }
 
         // File-scope macro calls to non-inline macros are executed pre-parse
         // by cc_execute_inline_macros and their tokens are removed. If the

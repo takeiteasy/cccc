@@ -1,8 +1,8 @@
-// Regression test for #812: proves the tools/stdlib.tsv wiring for
+// Regression test for #812: proves the src/std_table.c wiring for
 // sys/shm.h works when that header is included on its own, without any of
 // the other sys/ipc.h siblings (sys/sem.h, sys/msg.h) or sys/socket.h/
 // sys/un.h pulled in first -- the #792 bug class (a header declaring
-// functions but registering none because tools/stdlib.tsv was never
+// functions but registering none because src/std_table.c was never
 // updated for it).
 #include <sys/shm.h>
 

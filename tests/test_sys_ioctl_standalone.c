@@ -3,7 +3,7 @@
 // including ONLY <sys/ioctl.h> (no unistd.h/sys/socket.h to trigger
 // register_posix_functions some other way) got "undefined function: ioctl".
 // Fixed by registering ioctl (variadic) in register_posix_functions and
-// adding the sys/ioctl.h row to tools/stdlib.tsv.
+// adding the sys/ioctl.h row to src/std_table.c.
 //
 // Also covers #795's request-code allowlist (wrap_ioctl in
 // src/stdlib/posix.c): deliberately runs *without* --posix-emulation (no

@@ -1,7 +1,7 @@
 // Regression test for #792: unlike sys/file.h and sys/ioctl.h, sys/un.h
 // already worked before this fix -- it `#include "sys/socket.h"` itself,
-// which is already mapped in tools/stdlib.tsv to register_posix_functions.
-// The tools/stdlib.tsv row added for sys/un.h in this change is defensive
+// which is already mapped in src/std_table.c to register_posix_functions.
+// The src/std_table.c row added for sys/un.h in this change is defensive
 // (guards against a future refactor of sys/un.h's own includes), not a
 // functional fix. This test is a straight regression guard that the
 // AF_UNIX + struct sockaddr_un path keeps working when only <sys/un.h> is

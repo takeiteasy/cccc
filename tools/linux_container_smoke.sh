@@ -3,10 +3,8 @@
 #
 # Smoke test inside a Linux container: verify the container's own `uname -m`
 # matches <uname-arch>, verify ./cccc matches <file-grep-pattern> under
-# `file`, and run a trivial exit-42 program (#850, mirrors
-# tools/Makefile.backup's linux-{x86_64,aarch64}-smoke recipes). Shared by
-# both architectures rather than duplicated, since the two Makefile recipes
-# differed only in these five values. Delegated to a real shell script (not
+# `file`, and run a trivial exit-42 program. Shared by both architectures,
+# which differ only in these five values. Delegated to a real shell script (not
 # inlined into a RunCustom command string) because it needs $(...) command
 # substitution and $? exit-code capture, which the vendored build shell
 # (src/build_shell.c) doesn't support.

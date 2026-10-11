@@ -28,18 +28,15 @@ order:
    own bundled copy — this is what lets a developer point at an edited
    `include/*.h` without rebuilding (`tools/tests.py`'s runner always passes
    `-I./include` for exactly this reason).
-2. **The embedded `src/std.c` table.** Every standard header's full text is
-   compiled into the `cccc` binary itself, regenerated fresh on every build
-   (`tools/regen_stdlib.sh`, from `tools/generate_stdlib.c`). This is tried
+2. **The embedded table (`src/std_table.c`).** Every standard header's full
+   text is linked into the `cccc` binary itself (one row per header). This is tried
    with **no filesystem access at all** — no CWD dependency, no need for a
    `./include` directory to exist anywhere. This is what makes
    `#include <stdbool.h>` (and, via `<implicit-reflection.h>`'s own
    `#include <stdbool.h>`, every `[[cccc::comptime]]`-using file) resolve
    from any process CWD with zero flags.
 3. **`./include` on disk**, CCCC's own bundled header directory, as a
-   fallback. This only matters for a stage0 build (linked against
-   `src/std_stub.c`, which embeds nothing — see `make bootstrap` in
-   `BUILD.md`) and as a safety net if a build's embedded table is stale.
+   fallback for a header the table has no row for.
 4. **System include paths** (`-i`/`--isystem`, `--sysroot`), gated by the
    rules below.
 

@@ -2133,7 +2133,7 @@ Token *tokenize_file(VirtualMachine *vm, char *path, bool allow_shebang) {
 }
 
 // Tokenize an in-memory string (for embedded headers)
-Token *tokenize_string(VirtualMachine *vm, char *name, char *contents) {
+Token *tokenize_string(VirtualMachine *vm, char *name, const char *contents) {
     // Duplicate contents because tokenize may modify it
     char *p = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
     strcpy(p, contents);

@@ -357,7 +357,7 @@ def case_unbundled_header_audit(cccc: Path, tmp: str) -> bool:
     bad = []
     for d in src_dirs:
         for f in d.rglob("*"):
-            if f.suffix not in (".c", ".h") or f.name in ("std.c",):
+            if f.suffix not in (".c", ".h"):
                 continue
             # src/backtrace holds libbacktrace's hand-written config headers, built as its
             # own separate library (Makefile's build/lib/libbacktrace) and

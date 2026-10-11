@@ -542,8 +542,8 @@ whatever **`DeclareOutput(t, path)`** recorded — verbatim, not joined onto
 may be called more than once on the same target (e.g. a codegen step that
 produces two files); `TargetOutput()` returns the **first** one recorded.
 
-**`AddInput(t, path)`** records a file a `RunCustom` (or `CcccExecutable`)
-step reads. On a `RunCustom` target, combined with `DeclareOutput`, this
+**`AddInput(t, path)`** records a file a target reads but does not list as a
+source. On a `RunCustom` target, combined with `DeclareOutput`, this
 gives `build_target()` a real "up to date" skip check: if the target has at least one declared input and one
 declared output, and every output exists and is at least as new as every
 input, the command is skipped — printed as `(up to date)` rather than
@@ -563,7 +563,18 @@ Without `AddInput`, `DeclareOutput()` alone is invalidation metadata only —
 it just lets `TargetOutput()` resolve a path for downstream consumers; the
 step still runs every build.
 
-`AddInput` is also accepted on a **`CcccExecutable`** target, where it means
+On an **`Executable`**, **`StaticLib`** or **`DynamicLib`** target it names a
+file the host compiler's `-MMD` depfile never reports, such as an assembler
+`.incbin`. Every object of the target recompiles when one changes, so give such
+files a target of their own:
+
+```c
+BuildTarget *table = StaticLib(ctx, "std_table");
+AddSource(table, "src/std_table.c");
+AddInput(table, "include/stdio.h");   // embedded via .incbin
+```
+
+`AddInput` on a **`CcccExecutable`** target means
 something different: the declared paths' contents fold into the target's
 cache key. Headers the target `#include`s are tracked **automatically** under
 `--build-cache` — `cccc --compile=native` writes the set of files its front
@@ -671,9 +682,7 @@ source `#include`s — not just the `.c`/`.cpp` file itself:
   unconditionally every build even when nothing changed.
 
 All of this is gated on `ctx->cache_dir` (i.e. `--build-cache` must be
-passed) — without it, every step rebuilds unconditionally, which the
-two-pass stdlib regeneration in `build.c` explicitly relies on (see its
-`stdlib_regen_step` comment).
+passed) — without it, every step rebuilds unconditionally.
 
 A **`CcccExecutable`** target has no per-source `.o` and no host `cc` to
 pass `-MMD` to, so under `--build-cache` the builder instead passes
@@ -1139,9 +1148,9 @@ if (triple && strstr(triple, "aarch64"))
 
 ## Bootstrapping
 
-`--build` is also how CCCC builds itself. That path — the stage0 `make`
-compiler, the two-pass `src/std.c` regen, and the full target list `build.c`
-exposes — is covered in [BUILD.md](BUILD.md).
+`make` builds `./cccc`; `--build` then drives everything else for CCCC itself.
+That path and the full target list `build.c` exposes are covered in
+[BUILD.md](BUILD.md).
 
 ## Tool allowlist (`--build-tool-allow`)
 
@@ -1157,13 +1166,6 @@ cccc --build build.c --build-tool-allow=pkg-config --build-tool-allow=python3
 
 The native build-runtime tools (`cc`/`ar`/`ld`) are invoked directly by the
 host runner via `fork`+`execvp` and are never affected by this list.
-
-> **Bootstrap caveat:** the two-pass stdlib regen (`stdlib_gen`, and the
-> default build's own regen step) invokes the freshly-built `cccc` binary
-> through `RunCustom` (`sh tools/regen_stdlib.sh <cccc-path>`). Under
-> `--build-tool-allow`, `sh` must be in the allowlist or the bootstrap
-> silently breaks with a permission diagnostic instead of regenerating
-> `src/std.c`.
 
 ## FFI policy
 
@@ -1188,7 +1190,7 @@ are not redistributed between a parallel target build and its children (see
 
 ## See also
 
-- [BUILD.md](BUILD.md) — building `cccc` itself (`make` stage0 vs `--build`).
+- [BUILD.md](BUILD.md) — building `cccc` itself (`make` and the `build.c` targets).
 - [TEST_MODE.md](TEST_MODE.md) — `--testing` mode, the working analog this mode mirrors.
 - [MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
 - [COVERAGE.md](COVERAGE.md) — the C surface a build script can use.

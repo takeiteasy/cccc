@@ -1280,9 +1280,8 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->dyn_error       = NULL;
 
     // CCCC's own header directory, used only as an on-disk fallback for
-    // standard headers (search_include_paths tries the embedded src/std.c
-    // table first) and for the stage0 std_stub.c build, where the embedded
-    // table is empty. Deliberately not pushed into include_paths or
+    // standard headers (search_include_paths tries the embedded
+    // src/std_table.c table first). Deliberately not pushed into include_paths or
     // system_include_paths: standard headers no longer need a search-path
     // entry to resolve (see docs/HEADERS.md), and keeping this out of both
     // lists means a user -I always wins, and -c=native never forwards
