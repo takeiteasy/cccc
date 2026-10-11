@@ -209,33 +209,44 @@ static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
     }
 }
 
+// error() plus the "N error generated." trailer the test runner (and users)
+// recognise as a compile failure; gcc, unlike clang, prints none of its own.
+static _Noreturn void passthru_fail(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n\n1 error generated.\n");
+    exit(1);
+}
+
 // Runs cc once over `src`, dlopens the result and unlinks it. Errors out
 // (host compiler diagnostics reach stderr unchanged) on failure.
 static void *compile_passthru_so(const char *src, size_t len) {
     char src_template[] = "/tmp/cccc-asm-XXXXXX";
     int  src_fd         = mkstemp(src_template);
     if (src_fd < 0)
-        error("--asm-passthru: failed to create temp source file");
+        passthru_fail("--asm-passthru: failed to create temp source file");
     close(src_fd);
     char src_path[sizeof(src_template) + 3];
     snprintf(src_path, sizeof(src_path), "%s.c", src_template);
     if (rename(src_template, src_path) != 0) {
         unlink(src_template);
-        error("--asm-passthru: failed to rename temp source file");
+        passthru_fail("--asm-passthru: failed to rename temp source file");
     }
     FILE *f = fopen(src_path, "w");
     if (!f || fwrite(src, 1, len, f) != len) {
         if (f)
             fclose(f);
         unlink(src_path);
-        error("--asm-passthru: failed to write temp source file");
+        passthru_fail("--asm-passthru: failed to write temp source file");
     }
     fclose(f);
 
     char *cc = cccc_find_native_cc();
     if (!cc) {
         unlink(src_path);
-        error("--asm-passthru: no native C compiler found");
+        passthru_fail("--asm-passthru: no native C compiler found");
     }
 
     char so_template[] = "/tmp/cccc-asm-XXXXXX";
@@ -243,7 +254,7 @@ static void *compile_passthru_so(const char *src, size_t len) {
     if (so_fd < 0) {
         unlink(src_path);
         free(cc);
-        error("--asm-passthru: failed to create temp output file");
+        passthru_fail("--asm-passthru: failed to create temp output file");
     }
     close(so_fd);
 
@@ -252,7 +263,7 @@ static void *compile_passthru_so(const char *src, size_t len) {
         unlink(src_path);
         unlink(so_template);
         free(cc);
-        error("--asm-passthru: fork failed");
+        passthru_fail("--asm-passthru: fork failed");
     }
     if (pid == 0) {
 #if defined(__APPLE__)
@@ -269,13 +280,13 @@ static void *compile_passthru_so(const char *src, size_t len) {
     free(cc);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         unlink(so_template);
-        error("--asm-passthru: native compilation failed");
+        passthru_fail("--asm-passthru: native compilation failed");
     }
 
     void *handle = dlopen(so_template, RTLD_NOW | RTLD_LOCAL);
     unlink(so_template);
     if (!handle)
-        error("--asm-passthru: dlopen failed: %s", dlerror());
+        passthru_fail("--asm-passthru: dlopen failed: %s", dlerror());
     return handle;
 }
 #endif // !_WIN32
@@ -306,12 +317,12 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
     size_t blen = 0;
     FILE  *f   = open_memstream(&buf, &blen);
     if (!f)
-        error("--asm-passthru: out of memory");
+        passthru_fail("--asm-passthru: out of memory");
+    fprintf(f, "void %s(%s) {\n", sym_name, n_ops ? "void **ops" : "void");
     fprintf(f, "#line %d ", node->tok->line_no);
     serialize_string_n(f, node->tok->file->name,
                        (int)strlen(node->tok->file->name));
-    fprintf(f, "\n");
-    fprintf(f, "void %s(%s) {\n    ", sym_name, n_ops ? "void **ops" : "void");
+    fprintf(f, "\n    ");
     serialize_asm_stmt(f, vm, NULL, node, passthru_write_operand, &ops);
     fprintf(f, ";\n}\n");
     fclose(f);
@@ -319,7 +330,7 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
     size_t need = vm->compiler.asm_passthru_len + blen + 1;
     char  *grown = realloc(vm->compiler.asm_passthru_src, need);
     if (!grown)
-        error("--asm-passthru: out of memory");
+        passthru_fail("--asm-passthru: out of memory");
     memcpy(grown + vm->compiler.asm_passthru_len, buf, blen + 1);
     vm->compiler.asm_passthru_src = grown;
     vm->compiler.asm_passthru_len += blen;

@@ -1,6 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_FLAGS: --asm-passthru
-// CCCC_EXPECT_STDERR: native compilation failed
+// CCCC_EXPECT_STDERR: test_asm_passthru_host_error\.c:9:[\s\S]*native compilation failed
 //
 // The host compiler rejects the constraint; its diagnostics reach stderr.
 

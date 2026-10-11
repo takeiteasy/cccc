@@ -975,6 +975,28 @@ static bool ty_is_super_wide_bitint(Type *ty) {
     return ty && ty->kind == TY_BITINT && ty->size > 16;
 }
 
+void serialize_value_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                          Node *node, int prec) {
+    if (node && node->kind == ND_CAST && node->lhs &&
+        node->lhs->kind == ND_VAR && node->lhs->ty &&
+        node->lhs->ty->kind == node->ty->kind &&
+        node->lhs->ty->size == node->ty->size)
+        node = node->lhs;
+    bool realized =
+        node && node->kind == ND_VAR && node->var && node->ty &&
+        (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) &&
+        node->var->ty != node->ty;
+    if (!realized) {
+        serialize_expr(f, vm, ctx, node, prec);
+        return;
+    }
+    fprintf(f, "__extension__ ({ ");
+    serialize_type(f, ctx, node->ty);
+    fprintf(f, " __cccc_flex_t; __builtin_memcpy(&__cccc_flex_t, &");
+    serialize_expr(f, vm, ctx, node, 15);
+    fprintf(f, ", sizeof __cccc_flex_t); __cccc_flex_t; })");
+}
+
 // #1123: wraps a wide-_BitInt-typed `node` with __cccc_bitint_nonzero()
 // wherever C expects a scalar truth value (if/while/for conditions, `!`,
 // `&&`/`||` operands, a `?:` condition) -- a raw __cccc_biK struct value
@@ -2029,7 +2051,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
         case ND_ASSIGN:
             serialize_assign_target(f, vm, ctx, node->lhs, node_prec);
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            serialize_value_expr(f, vm, ctx, node->rhs, node_prec + 1);
             break;
 
         case ND_COMMA:
@@ -2051,7 +2073,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             if (is_noop_expr(node->lhs) && is_noop_expr(node->rhs))
                 break;
             if (is_noop_expr(node->lhs)) {
-                serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+                serialize_value_expr(f, vm, ctx, node->rhs, node_prec + 1);
             } else if (is_noop_expr(node->rhs)) {
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
             } else {
@@ -2061,7 +2083,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 else
                     serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, " , ");
-                serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+                serialize_value_expr(f, vm, ctx, node->rhs, node_prec + 1);
             }
             break;
 
@@ -2409,9 +2431,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 serialize_expr(f, vm, ctx, node->cond,
                                get_precedence(ND_COND) + 1);
             fprintf(f, " ? ");
-            serialize_expr(f, vm, ctx, node->then, 0);
+            serialize_value_expr(f, vm, ctx, node->then, 0);
             fprintf(f, " : ");
-            serialize_expr(f, vm, ctx, node->els, get_precedence(ND_COND));
+            serialize_value_expr(f, vm, ctx, node->els,
+                                 get_precedence(ND_COND));
             break;
 
         case ND_FUNCALL:

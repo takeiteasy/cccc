@@ -170,7 +170,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             fprintf(f, "return");
             if (node->lhs) {
                 fprintf(f, " ");
-                serialize_expr(f, vm, ctx, node->lhs, 0);
+                serialize_value_expr(f, vm, ctx, node->lhs, 0);
             }
             fprintf(f, ";\n");
             break;

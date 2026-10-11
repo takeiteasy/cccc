@@ -408,6 +408,11 @@ bool type_has_wide_bitint(Type *ty);
 // do-while/for condition sites.
 bool serialize_wide_bitint_truth(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Node *node);
+// serialize_expr() for a struct/union value read: a flexible-struct global
+// whose storage is the initialised clone is copied through a temporary of the
+// declared size, since gcc copies the whole object otherwise.
+void serialize_value_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                          Node *node, int prec);
 void serialize_static_assert(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                              Node *cond, const char *msg, int msg_len,
                              Token *tok, int indent);
