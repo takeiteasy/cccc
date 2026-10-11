@@ -459,6 +459,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
             gen_function(vm, fn);
         }
     }
+    cc_asm_passthru_flush(vm);
 
     // Free per-function local_set hash tables built lazily by
     // belongs_to_outer_function during the pass above. (#165)
@@ -736,6 +737,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 continue;
             gen_function(vm, fn);
         }
+        cc_asm_passthru_flush(vm);
 
         // A newly-compiled function may call any previously-compiled function,
         // so build the patch-resolution map over the full globals list.

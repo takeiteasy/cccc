@@ -415,6 +415,10 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 void serialize_stmt_list_item(FILE *f, VirtualMachine *vm,
                               SerializeContext *ctx, Node *node, int indent);
 void serialize_string_n(FILE *f, const char *str, int len);
+
+typedef void (*AsmOperandWriter)(FILE *f, Node *arg, int idx, void *ud);
+void serialize_asm_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                        Node *node, AsmOperandWriter writer, void *ud);
 void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
                               bool generated_only);

@@ -1599,10 +1599,10 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->compiler.ffi_table) {
         for (int i = 0; i < vm->compiler.ffi_count; i++) {
             free(vm->compiler.ffi_table[i].name);
-            free(vm->compiler.ffi_table[i].asm_src);
         }
         free(vm->compiler.ffi_table);
     }
+    free(vm->compiler.asm_passthru_src);
 
     for (int i = 0; i < vm->dynlib_count; i++) {
         DynamicLibrary *lib = &vm->dynlibs[i];
@@ -1967,6 +1967,19 @@ void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr,
                       .double_arg_mask = double_arg_mask};
 }
 
+// Reserves an FFI slot for an --asm-passthru thunk; cc_asm_passthru_flush
+// fills in func_ptr once the batch is compiled.
+int cc_register_asm_passthru_slot(VirtualMachine *vm, const char *name) {
+    ensure_ffi_capacity(vm, "cc_register_asm_passthru_slot");
+    int idx                     = vm->compiler.ffi_count++;
+    vm->compiler.ffi_table[idx] = (ForeignFunc){.name            = strdup(name),
+                                                .name_len        = strlen(name),
+                                                .num_args        = 1,
+                                                .num_fixed_args  = 1,
+                                                .is_asm_passthru = 1};
+    return idx;
+}
+
 void cc_register_variadic_cfunc(VirtualMachine *vm, const char *name,
                                 void *func_ptr, int num_fixed_args,
                                 int returns_double) {
@@ -2068,6 +2081,12 @@ int cc_dlopen(VirtualMachine *vm, const char *lib_path) {
     // Try to resolve each FFI function
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
+
+        // Thunks are resolved by cc_asm_passthru_flush, not from a library.
+        if (ff->is_asm_passthru) {
+            total_count--;
+            continue;
+        }
 
 #ifdef _WIN32
         // Look up the symbol

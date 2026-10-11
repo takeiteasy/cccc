@@ -616,16 +616,11 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
         case ND_ASM: {
             // The callback sees only the template, never the operands.
-            bool has_operands = node->args || node->asm_labels;
             if (vm->compiler.asm_callback) {
                 vm->compiler.asm_callback(vm, node->asm_str,
                                           vm->compiler.asm_user_data);
             } else if (vm->compiler.asm_passthru) {
-                if (has_operands)
-                    error_tok(vm, node->tok,
-                              "extended asm operands are not supported with "
-                              "--asm-passthru");
-                cccc_default_asm_passthru(vm, node->asm_str);
+                cccc_default_asm_passthru(vm, node);
             }
             // else: no-op (default behavior)
             return;

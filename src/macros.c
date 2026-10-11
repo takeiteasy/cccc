@@ -2326,6 +2326,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
         if (fn->is_function && fn->body)
             gen_function(vm, fn);
     }
+    cc_asm_passthru_flush(vm);
 
     // Step 3: apply global relocations now that every macro function has a
     //         code_addr, so static initializer tables can reference comptime

@@ -1255,6 +1255,12 @@ void mark_addr_escapes(Node *node) {
                 if (node->lhs)
                     mark_root_var(node->lhs, false);
                 break;
+            case ND_ASM:
+                // --asm-passthru hands the host the address of each operand
+                // lvalue, and the host's writes bypass MARKI tracking.
+                for (Node *a = node->args; a; a = a->next)
+                    mark_root_var(a, true);
+                break;
             default:
                 break;
         }

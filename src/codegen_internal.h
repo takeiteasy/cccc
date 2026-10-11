@@ -190,7 +190,8 @@ void add_label_patch(char *name, Pc patch_location, bool text_relative);
 void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
                         Type *ty, int scope_id);
 void apply_global_relocations(VirtualMachine *vm, Obj *prog);
-void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str);
+void cccc_default_asm_passthru(VirtualMachine *vm, Node *node);
+int cc_register_asm_passthru_slot(VirtualMachine *vm, const char *name);
 void check_data_capacity(VirtualMachine *vm, long long needed);
 void check_tls_capacity(VirtualMachine *vm, size_t needed);
 int cc_effective_align(int obj_align, int ty_align);

@@ -107,6 +107,7 @@ Manuals live in [`docs/`](docs/):
 | [BUILD.md](docs/BUILD.md) | Building `cccc` itself — `make` stage0 vs the `--build` full build, `CCCC_HAS_*` feature knobs |
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
+| [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
 | [NATIVE.md](docs/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
 | [HEADERS.md](docs/HEADERS.md) | `#include` resolution: CCCC's bundled headers, project headers, `--use-system-headers`, host-header hand-off |
 | [SAFETY.md](docs/SAFETY.md) | The runtime memory-safety suite — safety levels `-0`…`-3` and the individual detectors |

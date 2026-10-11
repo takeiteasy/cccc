@@ -18,6 +18,8 @@
 */
 
 #include "./codegen_internal.h"
+#include "./parse_internal.h"
+#include "./serialize_internal.h"
 #if !defined(_WIN32)
 #include <sys/wait.h>
 #endif
@@ -80,105 +82,183 @@ void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
 
 // ========== Inline Assembly Passthru ==========
 
-// Compile `asm_str` into a shared library exporting `sym_name` and return the
-// resolved function pointer.  The .so file is unlinked immediately after
-// dlopen so the library lives only in memory.  Calls error() on failure.
+// Each asm statement becomes a host-C thunk taking its operands by address:
+//   void __cccc_asm_passthru_N(void **ops) { __asm__(... : "=r"(*(int *)ops[0])
+//   ...); }
+// Thunks accumulate in vm->compiler.asm_passthru_src and are compiled into one
+// shared library by cc_asm_passthru_flush at the end of each codegen pass.
+
+#define PASSTHRU_MAX_OPS 32
+
+typedef struct {
+    bool  is_const[PASSTHRU_MAX_OPS];
+    long long val[PASSTHRU_MAX_OPS];
+    char  type[PASSTHRU_MAX_OPS][48]; // host spelling of the operand's type
+    bool  is_input[PASSTHRU_MAX_OPS];
+} PassthruOps;
+
 #if !defined(_WIN32)
-static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
-    // Create temp source file path (use mkstemp + rename to get .c extension)
+
+// True for `m`, `o`, `Q`...: constraints the host satisfies from an address.
+static bool constraint_is_memory_only(const char *c) {
+    c += strspn(c, "=+&%*#?!");
+    return *c && strspn(c, "moVQ<>") == strlen(c);
+}
+
+// Writes the host spelling of a scalar operand type into `out`.
+static bool passthru_scalar_type(Type *ty, char *out, size_t cap) {
+    switch (ty->kind) {
+        case TY_BOOL:
+            snprintf(out, cap, "_Bool");
+            return true;
+        case TY_PTR:
+            snprintf(out, cap, "void *");
+            return true;
+        case TY_FLOAT:
+            snprintf(out, cap, "float");
+            return true;
+        case TY_DOUBLE:
+            snprintf(out, cap, "double");
+            return true;
+        case TY_CHAR:
+        case TY_SHORT:
+        case TY_INT:
+        case TY_LONG:
+        case TY_ENUM: {
+            const char *base = ty->size == 1   ? "char"
+                               : ty->size == 2 ? "short"
+                               : ty->size == 4 ? "int"
+                               : ty->size == 8 ? "long long"
+                                               : NULL;
+            if (!base)
+                return false;
+            snprintf(out, cap, "%s %s", ty->is_unsigned ? "unsigned" : "signed",
+                     base);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool passthru_is_lvalue(Node *n) {
+    if (n->kind == ND_MEMBER)
+        return !n->member->is_bitfield;
+    return n->kind == ND_VAR || n->kind == ND_DEREF;
+}
+
+static void passthru_write_operand(FILE *f, Node *arg, int idx, void *ud) {
+    (void)arg;
+    PassthruOps *ops = ud;
+    if (ops->is_const[idx])
+        fprintf(f, "(%s)%lldLL", ops->type[idx], ops->val[idx]);
+    else if (strchr(ops->type[idx], '['))
+        fprintf(f, "*(%sunsigned char (*)%s)ops[%d]",
+                ops->is_input[idx] ? "const " : "",
+                strchr(ops->type[idx], '['), idx);
+    else
+        fprintf(f, "*(%s%s *)ops[%d]", ops->is_input[idx] ? "const " : "",
+                ops->type[idx], idx);
+}
+
+// Classifies every operand, rejecting what the host thunk cannot express.
+// Aggregates keep their address only; arrays fed to a register constraint
+// decay to a pointer.
+static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
+                              PassthruOps *ops) {
+    int n_out = node->asm_n_outputs;
+    int n_ops = n_out + node->asm_n_inputs;
+    for (int i = 0; i < n_ops; i++) {
+        Node *a   = args[i];
+        Type *ty  = a->ty;
+        bool  out = i < n_out;
+        ops->is_input[i] = !out;
+        bool aggregate = ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
+                         ty->kind == TY_ARRAY;
+        bool mem_only = constraint_is_memory_only(node->asm_ops[i].constraint);
+
+        if (!out && !aggregate && is_integer(ty) && is_const_expr(vm, a) &&
+            passthru_scalar_type(ty, ops->type[i], sizeof(ops->type[i]))) {
+            ops->is_const[i] = true;
+            ops->val[i]      = cc_eval(vm, a);
+            continue;
+        }
+        if (aggregate && (mem_only || ty->kind != TY_ARRAY)) {
+            if (!mem_only)
+                error_tok(vm, a->tok,
+                          "aggregate asm operand needs a memory constraint "
+                          "with --asm-passthru");
+            if (!passthru_is_lvalue(a))
+                error_tok(vm, a->tok,
+                          "asm memory operand is not addressable with "
+                          "--asm-passthru");
+            snprintf(ops->type[i], sizeof(ops->type[i]), "unsigned char[%d]",
+                     ty->size);
+            continue;
+        }
+        if (aggregate) // array decaying to a pointer
+            snprintf(ops->type[i], sizeof(ops->type[i]), "void *");
+        else if (!passthru_scalar_type(ty, ops->type[i],
+                                       sizeof(ops->type[i])))
+            error_tok(vm, a->tok,
+                      "asm operand type is not supported with --asm-passthru");
+        if (out && !passthru_is_lvalue(a))
+            error_tok(vm, a->tok,
+                      "asm output operand is not addressable with "
+                      "--asm-passthru (bit-field?)");
+    }
+}
+
+// Runs cc once over `src`, dlopens the result and unlinks it. Errors out
+// (host compiler diagnostics reach stderr unchanged) on failure.
+static void *compile_passthru_so(const char *src, size_t len) {
     char src_template[] = "/tmp/cccc-asm-XXXXXX";
     int  src_fd         = mkstemp(src_template);
     if (src_fd < 0)
         error("--asm-passthru: failed to create temp source file");
     close(src_fd);
-    size_t src_len  = strlen(src_template) + 3;
-    char  *src_path = malloc(src_len);
-    if (!src_path)
-        error("--asm-passthru: malloc failed");
-    snprintf(src_path, src_len, "%s.c", src_template);
+    char src_path[sizeof(src_template) + 3];
+    snprintf(src_path, sizeof(src_path), "%s.c", src_template);
     if (rename(src_template, src_path) != 0) {
         unlink(src_template);
-        free(src_path);
         error("--asm-passthru: failed to rename temp source file");
     }
-
-    // Write C wrapper file with escaped asm string
     FILE *f = fopen(src_path, "w");
-    if (!f) {
+    if (!f || fwrite(src, 1, len, f) != len) {
+        if (f)
+            fclose(f);
         unlink(src_path);
-        free(src_path);
         error("--asm-passthru: failed to write temp source file");
     }
-    fprintf(f, "void %s() { asm(\"", sym_name);
-    for (const char *p = asm_str; *p; p++) {
-        if (*p == '\\')
-            fputs("\\\\", f);
-        else if (*p == '"')
-            fputs("\\\"", f);
-        else if (*p == '\n')
-            fputs("\\n", f);
-        else
-            fputc(*p, f);
-    }
-    fprintf(f, "\"); }\n");
     fclose(f);
 
-    // Find system C compiler
     char *cc = cccc_find_native_cc();
     if (!cc) {
         unlink(src_path);
-        free(src_path);
         error("--asm-passthru: no native C compiler found");
     }
 
-    // Create temp output path for shared library
     char so_template[] = "/tmp/cccc-asm-XXXXXX";
     int  so_fd         = mkstemp(so_template);
     if (so_fd < 0) {
         unlink(src_path);
-        free(src_path);
         free(cc);
         error("--asm-passthru: failed to create temp output file");
     }
     close(so_fd);
-    size_t so_len  = strlen(so_template) + 7;
-    char  *so_path = malloc(so_len);
-    if (!so_path) {
-        unlink(src_path);
-        free(src_path);
-        free(cc);
-        unlink(so_template);
-        error("--asm-passthru: malloc failed");
-    }
-#if defined(__APPLE__)
-    snprintf(so_path, so_len, "%s.dylib", so_template);
-#else
-    snprintf(so_path, so_len, "%s.so", so_template);
-#endif
-    if (rename(so_template, so_path) != 0) {
-        unlink(src_path);
-        unlink(so_template);
-        free(src_path);
-        free(so_path);
-        free(cc);
-        error("--asm-passthru: failed to rename temp output file");
-    }
 
-    // Compile source to shared library
     pid_t pid = fork();
     if (pid < 0) {
         unlink(src_path);
-        unlink(so_path);
-        free(src_path);
-        free(so_path);
+        unlink(so_template);
         free(cc);
         error("--asm-passthru: fork failed");
     }
     if (pid == 0) {
 #if defined(__APPLE__)
-        execlp(cc, cc, "-shared", "-o", so_path, src_path, (char *)NULL);
+        execlp(cc, cc, "-shared", "-o", so_template, src_path, (char *)NULL);
 #else
-        execlp(cc, cc, "-shared", "-fPIC", "-o", so_path, src_path,
+        execlp(cc, cc, "-shared", "-fPIC", "-o", so_template, src_path,
                (char *)NULL);
 #endif
         _exit(127);
@@ -186,112 +266,142 @@ static void *compile_asm_to_funcptr(const char *sym_name, const char *asm_str) {
     int status;
     waitpid(pid, &status, 0);
     unlink(src_path);
-    free(src_path);
     free(cc);
-
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        unlink(so_path);
-        free(so_path);
+        unlink(so_template);
         error("--asm-passthru: native compilation failed");
     }
 
-    // dlopen the shared library
-    void *handle = dlopen(so_path, RTLD_NOW | RTLD_LOCAL);
-    if (!handle) {
-        unlink(so_path);
-        free(so_path);
+    void *handle = dlopen(so_template, RTLD_NOW | RTLD_LOCAL);
+    unlink(so_template);
+    if (!handle)
         error("--asm-passthru: dlopen failed: %s", dlerror());
-    }
-
-    // dlsym the function
-    void *func_ptr = dlsym(handle, sym_name);
-    if (!func_ptr) {
-        dlclose(handle);
-        unlink(so_path);
-        free(so_path);
-        error("--asm-passthru: dlsym failed: %s", dlerror());
-    }
-
-    // Unlink the .so now that it's loaded in memory
-    unlink(so_path);
-    free(so_path);
-    return func_ptr;
+    return handle;
 }
 #endif // !_WIN32
 
-void cccc_default_asm_passthru(VirtualMachine *vm, const char *asm_str) {
+void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
 #if !defined(_WIN32)
-    static int asm_counter = 0;
-    char       sym_name[128];
-    int        n = asm_counter++;
-    snprintf(sym_name, sizeof(sym_name), "__cccc_asm_passthru_%d", n);
+    int n_out = node->asm_n_outputs;
+    int n_ops = n_out + node->asm_n_inputs;
+    if (node->asm_flags & ASM_GOTO)
+        error_tok(vm, node->tok, "asm goto is not supported with "
+                                 "--asm-passthru");
+    if (n_ops > PASSTHRU_MAX_OPS)
+        error_tok(vm, node->tok, "too many asm operands for --asm-passthru");
 
-    void *func_ptr = compile_asm_to_funcptr(sym_name, asm_str);
+    Node       *args[PASSTHRU_MAX_OPS];
+    PassthruOps ops = {0};
+    int         k   = 0;
+    for (Node *a = node->args; a && k < n_ops; a = a->next)
+        args[k++] = a;
+    passthru_classify(vm, node, args, &ops);
 
-    // Register as FFI function (0 args, no double return)
-    cc_register_cfunc(vm, sym_name, func_ptr, 0, 0);
+    char sym_name[64];
+    snprintf(sym_name, sizeof(sym_name), "__cccc_asm_passthru_%d",
+             vm->compiler.asm_passthru_count++);
 
-    // Find FFI index and annotate for .c4 rehydration
-    int ffi_idx = find_ffi_function(vm, sym_name);
-    if (ffi_idx < 0)
-        error("--asm-passthru: FFI registration failed");
-    vm->compiler.ffi_table[ffi_idx].is_asm_passthru = 1;
-    vm->compiler.ffi_table[ffi_idx].asm_src         = strdup(asm_str);
+    // Thunk source, appended to the pending batch.
+    char  *buf = NULL;
+    size_t blen = 0;
+    FILE  *f   = open_memstream(&buf, &blen);
+    if (!f)
+        error("--asm-passthru: out of memory");
+    fprintf(f, "#line %d ", node->tok->line_no);
+    serialize_string_n(f, node->tok->file->name,
+                       (int)strlen(node->tok->file->name));
+    fprintf(f, "\n");
+    fprintf(f, "void %s(%s) {\n    ", sym_name, n_ops ? "void **ops" : "void");
+    serialize_asm_stmt(f, vm, NULL, node, passthru_write_operand, &ops);
+    fprintf(f, ";\n}\n");
+    fclose(f);
 
-    // Emit CALLF with 0 args
+    size_t need = vm->compiler.asm_passthru_len + blen + 1;
+    char  *grown = realloc(vm->compiler.asm_passthru_src, need);
+    if (!grown)
+        error("--asm-passthru: out of memory");
+    memcpy(grown + vm->compiler.asm_passthru_len, buf, blen + 1);
+    vm->compiler.asm_passthru_src = grown;
+    vm->compiler.asm_passthru_len += blen;
+    free(buf);
+
+    int ffi_idx = cc_register_asm_passthru_slot(vm, sym_name);
+
+    if (n_ops) {
+        long long base = alloc_wide_bitint_temp(vm, 2 * n_ops);
+        int       r_arr = alloc_temp_reg();
+        for (int i = 0; i < n_ops; i++) {
+            if (ops.is_const[i])
+                continue;
+            Node *a    = args[i];
+            int   r_p  = alloc_temp_reg();
+            bool  rval = !(passthru_is_lvalue(a) &&
+                           (!(a->ty->kind == TY_ARRAY) ||
+                            constraint_is_memory_only(
+                                node->asm_ops[i].constraint)));
+            if (!rval) {
+                gen_addr(vm, a, r_p);
+            } else {
+                // Value operand: materialize into a scratch slot.
+                long long slot = base + n_ops + i;
+                int       r_v  = alloc_temp_reg();
+                if (a->ty->kind == TY_ARRAY) {
+                    gen_addr(vm, a, r_v);
+                    emit_lea3_aligned(vm, r_p, slot, 0, true);
+                    emit_store(vm, ty_ulong, r_v, r_p);
+                } else if (is_flonum(a->ty)) {
+                    int fs = gen_flonum_arg_to_scratch(vm, a);
+                    emit_lea3_aligned(vm, r_p, slot, 0, true);
+                    emit_store(vm, a->ty, fs, r_p);
+                    free_temp_reg(fs);
+                } else {
+                    gen_expr(vm, a, r_v);
+                    emit_lea3_aligned(vm, r_p, slot, 0, true);
+                    emit_store(vm, a->ty, r_v, r_p);
+                }
+                free_temp_reg(r_v);
+            }
+            emit_lea3_aligned(vm, r_arr, base + i, 0, true);
+            emit_store(vm, ty_ulong, r_p, r_arr);
+            free_temp_reg(r_p);
+        }
+        emit_lea3_aligned(vm, REG_A0, base, 0, true);
+        free_temp_reg(r_arr);
+    }
+
     emit(vm, CALLF);
     emit_word(vm, ffi_idx);
-    emit_word(vm, 0);
+    emit_word(vm, n_ops ? 1 : 0);
     emit_i64(vm, 0);
     emit_i64(vm, 0);
+    reset_temp_regs();
 #else
-    (void)asm_str;
+    (void)node;
     error("--asm-passthru is not supported on Windows");
 #endif
 }
 
-// Recompile any asm-passthru FFI entries whose func_ptr was lost during .c4
-// serialization.  Called from the .c4 load path after stdlib/library
-// resolution. Respects the FFI allow/deny policy; denied entries are left with
-// func_ptr=NULL (CALLF will emit the "not resolved" error at execution time).
-// Returns 0 on success, -1 on hard failure.
-int cc_rehydrate_asm_passthru(VirtualMachine *vm) {
+// Compiles every pending thunk into one shared library and binds the FFI
+// slots. Called at the end of each codegen pass, before anything can run.
+void cc_asm_passthru_flush(VirtualMachine *vm) {
 #if !defined(_WIN32)
+    if (!vm->compiler.asm_passthru_len)
+        return;
+    void *handle = compile_passthru_so(vm->compiler.asm_passthru_src,
+                                       vm->compiler.asm_passthru_len);
     for (int i = 0; i < vm->compiler.ffi_count; i++) {
         ForeignFunc *ff = &vm->compiler.ffi_table[i];
         if (!ff->is_asm_passthru || ff->func_ptr)
             continue;
-
-        // Respect disable_all_ffi
-        if (vm->disable_all_ffi)
-            continue;
-
-        // Respect allow list: if set, symbol must appear in it
-        if (vm->ffi_allow_count > 0 &&
-            !cccc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count,
-                                   ff->name))
-            continue;
-
-        // Respect deny list: if no allow list and symbol is denied, skip
-        if (vm->ffi_allow_count == 0 &&
-            cccc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count,
-                                  ff->name))
-            continue;
-
-        if (!ff->asm_src) {
-            fprintf(stderr,
-                    "error: asm-passthru FFI entry '%s' has no source to "
-                    "rehydrate\n",
-                    ff->name ? ff->name : "(null)");
-            return -1;
-        }
-
-        ff->func_ptr = compile_asm_to_funcptr(ff->name, ff->asm_src);
+        ff->func_ptr = dlsym(handle, ff->name);
+        if (!ff->func_ptr)
+            error("--asm-passthru: dlsym failed: %s", dlerror());
     }
-    return 0;
+    vm->compiler.asm_passthru_len = 0;
+    if (vm->compiler.asm_passthru_src)
+        vm->compiler.asm_passthru_src[0] = '\0';
 #else
     (void)vm;
-    return 0;
 #endif
 }
 

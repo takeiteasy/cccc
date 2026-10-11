@@ -904,6 +904,7 @@ int encode_utf8(char *buf, uint32_t c);
 uint32_t decode_utf8(VirtualMachine *vm, char **new_pos, char *p);
 bool is_ident1(uint32_t c);
 bool is_ident2(uint32_t c);
+void cc_asm_passthru_flush(VirtualMachine *vm);
 int display_width(VirtualMachine *vm, char *p, int len);
 int caret_padding(VirtualMachine *vm, char *line, int len, char *buf, int cap);
 
