@@ -633,22 +633,22 @@ int test_union_multi_designator_962(void) {
 }
 
 struct tc_literal_store_Bits {
-    int          a : 3;
-    unsigned     b : 5;
-    int          c;
+    int      a : 3;
+    unsigned b : 5;
+    int      c;
 };
 
 // A compound literal is an lvalue: storing through it and through its
 // members is valid (and must also survive the native backend).
 [[cccc::test(return = 42)]]
 int test_compound_literal_is_assignable(void) {
-    int r = 0;
-    (int){3} = 4;
-    r += ((int){3} += 1);
-    r += ++(int){3};
-    (struct tc_literal_store_Bits){0}.c = 5;
-    (struct tc_literal_store_Bits){0}.a = 1;
-    (struct tc_compound_assign_comprehensive_Point){1, 2}.x = 5;
+    int r                                                    = 0;
+    (int){3}                                                 = 4;
+    r                                                       += ((int){3} += 1);
+    r                                                       += ++(int){3};
+    (struct tc_literal_store_Bits){0}.c                      = 5;
+    (struct tc_literal_store_Bits){0}.a                      = 1;
+    (struct tc_compound_assign_comprehensive_Point){1, 2}.x  = 5;
     if (r != 8)
         return 1;
     return 42;

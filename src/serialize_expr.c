@@ -1543,7 +1543,7 @@ static void serialize_assign_target(FILE *f, VirtualMachine *vm,
         serialize_expr(f, vm, ctx, lhs, parent_prec);
         return;
     }
-    Node addr = {.kind = ND_ADDR, .lhs = base, .ty = pointer_to(vm, base->ty)};
+    Node addr  = {.kind = ND_ADDR, .lhs = base, .ty = pointer_to(vm, base->ty)};
     Node deref = {.kind = ND_DEREF, .lhs = &addr, .ty = base->ty};
     int  depth = 0;
     for (Node *p = lhs; p != base; p = p->lhs)
