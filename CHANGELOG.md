@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-12
+
 - Added: `--asm-passthru` accepts bit-field output operands (`=r`, `+r`); a
   bit-field with a memory constraint is a compile error.
 - Changed: tests run through `build.c` targets. `test` runs the `[[cccc::test]]`
