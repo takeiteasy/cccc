@@ -60,10 +60,7 @@ int __builtin_ast_type_size(Type *ty) { ... }
 
 Adding a builtin means a prototype in `reflection.h`, the definition in
 `src/reflection.c` (or `src/macros.c`, for the few that need direct compiler
-state), and its `CC_BUILTIN` line. `tools/audit_reflection_builtins.c` (run by
-the `test` build target) fails if a prototype has no registration, a
-registration has no prototype, or the arity, variadic flag or return kind
-disagree.
+state), and its `CC_BUILTIN` line.
 
 `reflection.h` also hand-copies three of the compiler's internal enums for
 macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate

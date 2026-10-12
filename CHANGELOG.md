@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: tests run through `build.c` targets. `test` runs the `[[cccc::test]]`
+  suites in VM and `-c=native` mode; `test_warnings`, `test_serialize`,
+  `test_build_mode`, `test_safety`, `test_parallel`, `test_macros` and
+  `test_misc` (all: `test_extra`) run the single-file tests. The Python
+  runner (`tools/run_tests.py`, `tools/tests.py`, `tools/testing/`) is gone.
+
 ## [0.8.4] - 2026-10-11
 
 - Added: GNU extended `asm` parses with operands, clobbers and `goto` labels
