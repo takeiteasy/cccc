@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --ffi-deny=strlen
+// CCCC_NATIVE_SKIP: VM-only FFI enforcement
 // Consolidated suite: FFI deny-list and fatal-error behaviour
 // Source tests: test_ffi_deny_zero, test_ffi_deny_dlfcn_zero,
 // test_c4_ffi_rehydrate, test_ffi_fatal_error

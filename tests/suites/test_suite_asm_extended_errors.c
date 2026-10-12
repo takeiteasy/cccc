@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: negative (error=) tests
 // Consolidated suite: malformed GNU extended asm is rejected at parse time.
 
 #pragma cccc suite begin "asm_extended_errors"

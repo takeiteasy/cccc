@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --build
+// CCCC_NATIVE_SKIP: --build mode
 // Consolidated suite: composable --testing --build pipeline (ticket #608).
 // Source tests: test_mode_compose, test_comptime_compose_mode.
 

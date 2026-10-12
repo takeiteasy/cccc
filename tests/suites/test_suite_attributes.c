@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: uses [[cccc::test_setup]]
 // Consolidated suite: attributes: [[nodiscard]], [[noreturn]], fallthrough,
 // format, pragma,
 //   __has_attribute/__has_builtin/__has_c_attribute, format spelling aliases

@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: inline asm: the VM no-ops it, native feeds it to the host assembler
 // Consolidated suite: inline assembly
 // Source tests: test_asm (moved here from test_suite_misc.c)
 //

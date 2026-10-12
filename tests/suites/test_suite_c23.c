@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: _Decimal on clang, C23 libc functions absent on macOS
 // Consolidated suite: C23: _BitInt, auto, nullptr, constexpr, char8_t, embed,
 // literals Source tests: test_c23_attributes, test_c23_auto, test_c23_bitint,
 // test_c23_bitint_wide,

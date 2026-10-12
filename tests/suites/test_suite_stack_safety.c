@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: negative (error=) test
 // Consolidated suite: stack canaries, CFI, deep expressions, multi-VM
 // isolation,
 //   heap canaries, memory leak detection, memory poisoning, memory tagging,

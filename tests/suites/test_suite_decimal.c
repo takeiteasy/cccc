@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: _Decimal64 has no -c=native lowering under clang
 // C23 _Decimal32/64/128 (tracker #402): real IEEE-754-2008 decimal
 // arithmetic via the Intel BID library, opt-in with CCCC_HAS_DECIMAL=1.
 //

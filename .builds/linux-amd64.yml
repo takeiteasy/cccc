@@ -15,7 +15,7 @@ environment:
   # `./cccc --build`'s own two internal compiler probes -- CCCC_BUILD_CC
   # (compiles/links --build targets, i.e. this job's own `./cccc --build
   # build.c` below) and CCCC_NATIVE_CC (the SEPARATE probe -c=native hands
-  # its generated C to, exercised by run_tests.py's native round-trip
+  # its generated C to, exercised by the native test pass
   # suite) -- split into two env vars by #1198, previously one conflated
   # CCCC_NATIVE_CC. Both are deliberately left unpinned here rather than
   # set to match CC: this image's `cc` resolves to distro gcc, and gcc's
@@ -35,11 +35,10 @@ tasks:
       git submodule update --init
       make
   - test: |
-      # Aggregate driver: source suite, native round-trip, smokes and fuzz
-      # replay in one run.
+      # Every suite in VM and -c=native mode, as one build graph
       cd cccc
       set -e
-      python3 tools/run_tests.py --binary ./cccc -j 8
+      ./cccc --build build.c --build-target=test --build-jobs=8 --build-keep-going
       # No `docs` task here (dropped): sr.ht's ubuntu/lts image
       # started shipping a doxygen version that hangs -- not just warns --
       # when graphviz's `dot` binary is absent (never installed here; it's

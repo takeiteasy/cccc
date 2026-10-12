@@ -26,7 +26,7 @@ order:
 
 1. **User `-I` paths.** An explicit `-I` always wins, including over CCCC's
    own bundled copy — this is what lets a developer point at an edited
-   `include/*.h` without rebuilding (`tools/tests.py`'s runner always passes
+   `include/*.h` without rebuilding (the test target always passes
    `-I./include` for exactly this reason).
 2. **The embedded table (`src/std_table.c`).** Every standard header's full
    text is linked into the `cccc` binary itself (one row per header). This is tried

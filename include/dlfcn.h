@@ -10,7 +10,7 @@
 /* #1152: see include/errno.h's matching comment -- this exact file is also
  * what a native/generated re-emission's replayed `#include <dlfcn.h>`
  * resolves to when a caller passes `-I` at CCCC's own bundled include dir
- * (tools/testing/native.py does exactly this; see docs/HEADERS.md's "Passing
+ * (a native round-trip test does exactly this; see docs/HEADERS.md's "Passing
  * -I at CCCC's own bundled headers" section), but a real host compiler
  * reprocessing the CCCC-flavored content below has never heard of the
  * __CCCC_RTLD_*__ macros init_dlfcn_macros() (src/preprocess.c) injects.

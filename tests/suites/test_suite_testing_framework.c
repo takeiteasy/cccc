@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: uses test_setup/teardown and negative (error=) tests
 // Consolidated suite: [[cccc::test]] framework self-tests.
 // Source tests: test_framework, test_error_count_ops, test_exit_code,
 //   test_include_route_test, test_return_assertion, test_return_epsilon,

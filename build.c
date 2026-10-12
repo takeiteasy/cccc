@@ -16,8 +16,8 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests, test / test_suites / test_legacy,
-//   comptime_native_smoke, audit_reflection_builtins
+//   clean, host_tests, test / test_vm / test_native / test_release /
+//   test_msan
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
 //   doxygen)
 //   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
@@ -25,9 +25,9 @@
 //   compiler family is on PATH) linux_amd64_build /
 //   linux_aarch64_build    build the Colima container image linux_amd64_smoke /
 //   linux_aarch64_smoke    + container arch/exit-42 sanity check
-//   linux_amd64_test / linux_aarch64_test      + full test suite (amd64 is
-//   5-way sharded) linux_amd64_msan_test                      + cccc-msan build
-//   + full suite (#844 known-noise)
+//   linux_amd64_test / linux_aarch64_test      + the suites
+//   linux_amd64_msan_test                      + cccc-msan build + the suites
+//   (#844 known-noise)
 //
 // Not covered here: cross-compiling for a 4th Colima profile or other
 // architectures not listed above.
@@ -431,6 +431,96 @@ BuildTarget *release(Builder *ctx) {
     return make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true);
 }
 
+// ---- suite tests -----------------------------------------------------------
+// One RunCustom per tests/suites/test_*.c, so `--build-jobs=N` runs suites in
+// parallel and `--build-keep-going` reports every failing suite. A suite's
+// flags come from a `// CCCC_FLAGS:` line in its leading comment block
+// (default `--testing`); `// CCCC_NATIVE_SKIP: <reason>` leaves it out of the
+// -c=native pass.
+
+static int suite_header_value(const char *path, const char *key, char *out,
+                              size_t cap) {
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return 0;
+    char   line[512];
+    size_t klen  = strlen(key);
+    int    found = 0;
+    for (int i = 0; i < 40 && !found && fgets(line, sizeof(line), f); i++) {
+        const char *p = line;
+        if (strncmp(p, "//", 2) != 0)
+            continue;
+        p += 2;
+        while (*p == ' ')
+            p++;
+        if (strncmp(p, key, klen) != 0 || p[klen] != ':')
+            continue;
+        p += klen + 1;
+        while (*p == ' ')
+            p++;
+        snprintf(out, cap, "%s", p);
+        out[strcspn(out, "\n")] = '\0';
+        found                   = 1;
+    }
+    fclose(f);
+    return found;
+}
+
+// `--testing` becomes `--testing=native` when native is set.
+static void suite_command(char *cmd, size_t cap, const char *cccc_path,
+                          const char *flags, const char *file, int native) {
+    int  n = snprintf(cmd, cap, "\"%s\" -I./include", cccc_path);
+    char copy[512];
+    snprintf(copy, sizeof(copy), "%s", flags);
+    for (char *tok = strtok(copy, " \t"); tok; tok = strtok(NULL, " \t")) {
+        const char *t  = (native && strcmp(tok, "--testing") == 0)
+                             ? "--testing=native"
+                             : tok;
+        n             += snprintf(cmd + n, cap - n, " %s", t);
+    }
+    snprintf(cmd + n, cap - n, " %s", file);
+}
+
+static BuildTarget *suite_tests(Builder *ctx, BuildTarget *cccc,
+                                const char *prefix, int native) {
+    char agg_name[64];
+    snprintf(agg_name, sizeof(agg_name), "%s", prefix);
+    BuildTarget *agg   = RunCustom(ctx, agg_name, "true");
+    const char **files = GlobFiles(ctx, "tests/suites/test_*.c");
+    for (int i = 0; files[i]; i++) {
+        const char *base = strrchr(files[i], '/');
+        base             = base ? base + 1 : files[i];
+        char reason[256], flags[256];
+        if (native && suite_header_value(files[i], "CCCC_NATIVE_SKIP", reason,
+                                         sizeof(reason)))
+            continue;
+        if (!suite_header_value(files[i], "CCCC_FLAGS", flags, sizeof(flags)))
+            snprintf(flags, sizeof(flags), "--testing");
+        char cmd[1024], name[160];
+        suite_command(cmd, sizeof(cmd), TargetOutput(cccc), flags, files[i],
+                      native);
+        snprintf(name, sizeof(name), "%s-%s", prefix, base);
+        BuildTarget *step = RunCustom(ctx, name, cmd);
+        DependsOn(step, cccc);
+        DependsOn(agg, step);
+    }
+    return agg;
+}
+
+// Both passes.
+static BuildTarget *make_test_step(Builder *ctx, BuildTarget *cccc,
+                                   const char *prefix) {
+    char name[64];
+    snprintf(name, sizeof(name), "%s-vm", prefix);
+    BuildTarget *vm = suite_tests(ctx, cccc, name, 0);
+    snprintf(name, sizeof(name), "%s-native", prefix);
+    BuildTarget *nat = suite_tests(ctx, cccc, name, 1);
+    BuildTarget *all = RunCustom(ctx, prefix, "true");
+    DependsOn(all, vm);
+    DependsOn(all, nat);
+    return all;
+}
+
 // ---- opt_test_O1 / O2 / O3 (#883) ------------------------------------------
 // Build cccc at a given host optimization level and run the full suite
 // against it. Not shipped -- these exist purely to catch UB the interpreter
@@ -444,14 +534,9 @@ static BuildTarget *make_opt_test(Builder *ctx, const char *level,
     snprintf(exe_name, sizeof(exe_name), "cccc-opt-%s", level);
     BuildTarget *cccc =
         make_cccc_exe_named_opt(ctx, bt, exe_name, opt_flag, false);
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
-             TargetOutput(cccc));
     char step_name[32];
     snprintf(step_name, sizeof(step_name), "opt-test-%s", level);
-    BuildTarget *step = RunCustom(ctx, step_name, cmd);
-    DependsOn(step, cccc);
-    return step;
+    return make_test_step(ctx, cccc, step_name);
 }
 
 [[cccc::build_target]]
@@ -519,7 +604,7 @@ BuildTarget *clean(Builder *ctx) {
 
 // ---- host-tests (Makefile:261-279, #707) -----------------------------------
 // Links the compiler sources directly into each tests/host/test_*.c,
-// bypassing tools/tests.py's guest-.c/exit-42 protocol, for tests that need
+// bypassing the guest-.c suites, for tests that need
 // multiple VirtualMachines or threads in one host process.
 //
 // Simplification vs the Makefile recipe: the binaries are run as a single
@@ -570,70 +655,45 @@ BuildTarget *host_tests(Builder *ctx) {
     return step;
 }
 
-// ---- test / test-suites / test-legacy --
+// ---- test / test-vm / test-native --
 
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/run_tests.py --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return make_test_step(ctx, cccc, "test");
+}
+
+// The suites against the -O2 release binary, and against the MSan build
+// (Linux + clang only).
+[[cccc::build_target]]
+BuildTarget *test_release(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_test_step(
+        ctx, make_cccc_exe_named_opt(ctx, bt, "cccc-release", "-O2", true),
+        "test-release");
 }
 
 [[cccc::build_target]]
-BuildTarget *test_suites(Builder *ctx) {
+BuildTarget *test_msan(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_test_step(
+        ctx, make_sanitizer_variant(ctx, bt, "cccc-msan", "-fsanitize=memory"),
+        "test-msan");
+}
+
+[[cccc::build_target]]
+BuildTarget *test_vm(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --suites --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test-suites", cmd);
-    DependsOn(step, cccc);
-    return step;
+    return suite_tests(ctx, cccc, "test-vm", 0);
 }
 
 [[cccc::build_target]]
-BuildTarget *test_legacy(Builder *ctx) {
+BuildTarget *test_native(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/tests.py --legacy --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "test-legacy", cmd);
-    DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *comptime_native_smoke(Builder *ctx) {
-    // tools/comptime_native_smoke.py (#892) hardcodes root/"cccc", so the
-    // built binary is placed via `cp` + atomic `mv` rather than a direct `cp`
-    // onto ./cccc.
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    char         cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "cp %s ./cccc.comptime-native-smoke-tmp && "
-             "mv ./cccc.comptime-native-smoke-tmp ./cccc "
-             "&& python3 tools/comptime_native_smoke.py",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
-}
-
-[[cccc::build_target]]
-BuildTarget *audit_reflection_builtins(Builder *ctx) {
-    // include/cccc/reflection.h prototypes vs the CC_BUILTIN registrations
-    // in src/*.c, run through the cccc driving this build.
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "\"%s\" tools/audit_reflection_builtins.c --",
-             CcccPath(ctx));
-    return RunCustom(ctx, "audit-reflection-builtins", cmd);
+    return suite_tests(ctx, cccc, "test-native", 1);
 }
 
 // Doxygen HTML API docs for the three public headers.
@@ -862,14 +922,12 @@ BuildTarget *build_cache_toolchain_smoke(Builder *ctx) {
 // the host (these do not build anything themselves -- the container image
 // already has its own toolchain, built from the repo's own Dockerfile).
 // #850 splits the previous single-shot linux_amd64_test/linux_aarch64_test
-// into the Makefile's staged -build/-smoke/-test workflow, plus the
-// amd64-only 5-way sharded test run and the MSan in-container test target.
-// The smoke/sharded-test recipes need $(...) substitution, $? capture, and
-// (for the sharded test) a `for` loop with a fail-flag accumulator -- none
-// of which the vendored build shell supports -- so they're delegated to
-// real shell scripts (tools/linux_container_smoke.sh,
-// tools/linux_amd64_test.sh, tools/linux_amd64_msan_test.sh) rather than
-// inlined into RunCustom strings.
+// into the Makefile's staged -build/-smoke/-test workflow, plus the MSan
+// in-container test target. The smoke recipe needs $(...) substitution and
+// $? capture, which the vendored build shell doesn't support, so the
+// container recipes are delegated to real shell scripts
+// (tools/linux_container_smoke.sh, tools/linux_amd64_test.sh,
+// tools/linux_amd64_msan_test.sh) rather than inlined into RunCustom strings.
 
 [[cccc::build_target]]
 BuildTarget *linux_amd64_build(Builder *ctx) {
@@ -918,12 +976,11 @@ BuildTarget *linux_amd64_test(Builder *ctx) {
 
 [[cccc::build_target]]
 BuildTarget *linux_aarch64_test(Builder *ctx) {
-    // No 5-way sharding on this side (Makefile:552-555 was always
-    // single-shot here too -- only the x86_64/amd64 side shards).
     BuildTarget *step = RunCustom(
         ctx, "linux-aarch64-test",
         "colima -p cccc-linux-arm64 nerdctl -- run --rm --platform linux/arm64 "
-        "cccc-linux-arm64 timeout 600 python3 tools/run_tests.py -j 8");
+        "cccc-linux-arm64 timeout 600 ./cccc --build build.c "
+        "--build-target=test --build-jobs=8 --build-keep-going");
     DependsOn(step, linux_aarch64_smoke(ctx));
     return step;
 }

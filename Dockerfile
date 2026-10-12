@@ -27,10 +27,10 @@ RUN make
 
 FROM build AS test
 
-# Aggregate driver: source suite, native round-trip, smokes and fuzz replay in
+# Suites in VM and -c=native mode in
 # one run -- mirrors .builds/linux-amd64.yml's `test` step.
-RUN python3 tools/run_tests.py --binary ./cccc -j 8
+RUN ./cccc --build build.c --build-target=test --build-jobs=8 --build-keep-going
 
 FROM build AS runtime
 
-CMD ["python3", "tools/run_tests.py", "--binary", "./cccc", "-j", "8"]
+CMD ["./cccc", "--build", "build.c", "--build-target=test", "--build-jobs=8"]

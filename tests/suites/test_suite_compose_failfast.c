@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --build --fail-fast
+// CCCC_NATIVE_SKIP: --build mode
 // Suite: --fail-fast with passing tests still allows build entry to run (ticket
 // #608). Source test: test_mode_compose_failfast.
 

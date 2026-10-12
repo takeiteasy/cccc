@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_NATIVE_SKIP: negative (error=) tests
 // Consolidated suite: compile-error tests (parse-time, inside function bodies).
 // Ticket #615.
 #include <complex.h>

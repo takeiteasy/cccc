@@ -42,7 +42,7 @@ jobs:
       # (cccc_find_build_cc(), src/vm.c) that compiles/links --build targets
       # (including cccc's own release build below), and CCCC_NATIVE_CC for
       # the SEPARATE probe (cccc_find_native_cc()) -c=native hands its
-      # generated C to, which run_tests.py's native round-trip suite
+      # generated C to, which the native test pass
       # exercises. All three ignore each other entirely and otherwise try
       # {cc, clang, gcc} on PATH in that order (#1198 split CCCC_BUILD_CC
       # out of what CCCC_NATIVE_CC used to also cover).
@@ -61,7 +61,7 @@ jobs:
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
-        run: python3 tools/run_tests.py --binary build/cccc-release -j 4
+        run: ./cccc --build build.c --build-target=test_release --build-jobs=4
       - name: Package
         run: |
           set -e
@@ -97,7 +97,7 @@ jobs:
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
-        run: python3 tools/run_tests.py --binary build/cccc-release -j 4
+        run: ./cccc --build build.c --build-target=test_release --build-jobs=4
       - name: Package
         run: |
           set -e
@@ -128,7 +128,7 @@ jobs:
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
-        run: python3 tools/run_tests.py --binary build/cccc-release -j 4
+        run: ./cccc --build build.c --build-target=test_release --build-jobs=4
       - name: Package
         run: |
           set -e

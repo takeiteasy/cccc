@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --disable-ffi
+// CCCC_NATIVE_SKIP: VM-only FFI enforcement
 // Consolidated suite: FFI completely disabled
 // Source tests: test_ffi_disable_dlfcn_zero
 

@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing --std=c17
+// CCCC_NATIVE_SKIP: negative (error=) test
 // Consolidated suite: C17 features
 // Source tests: test_c17_empty_params_variadic, test_c17_label_decl_braces_ok,
 //               test_c17_label_decl_null_stmt_ok, test_c17_recursive_main,
