@@ -405,6 +405,64 @@ static void gen_operands_to_arg_regs(VirtualMachine *vm, Node **ops, int n) {
     }
 }
 
+// #1122: `1ULL << 64` is UB (and, observed on this host, evaluates to 0), so a
+// `T f : 64` bit-field would read and write as if it were `f : 0`.
+static long long bitfield_mask(const Member *mem) {
+    return mem->bit_width >= 64 ? -1LL
+                                : (long long)((1ULL << mem->bit_width) - 1);
+}
+
+// Loads the bit-field at the container address in r_addr into dest, sign- or
+// zero-extended per the declared type. Narrow (<= 64-bit) fields only.
+void emit_bitfield_load(VirtualMachine *vm, Member *mem, int dest, int r_addr,
+                        bool dangling_check) {
+    emit_load_ex(vm, mem->ty, dest, r_addr, dangling_check);
+
+    int r_shift = alloc_temp_reg();
+    if (mem->ty->is_unsigned) {
+        if (mem->bit_offset > 0) {
+            emit_li3(vm, r_shift, mem->bit_offset);
+            emit_rrr(vm, SHR3, dest, dest, r_shift);
+        }
+        emit_li3(vm, r_shift, bitfield_mask(mem));
+        emit_rrr(vm, AND3, dest, dest, r_shift);
+    } else {
+        emit_li3(vm, r_shift, 64 - mem->bit_width - mem->bit_offset);
+        emit_rrr(vm, SHL3, dest, dest, r_shift);
+        emit_li3(vm, r_shift, 64 - mem->bit_width);
+        emit_rrr(vm, SHR3, dest, dest, r_shift); // arithmetic: keeps the sign
+    }
+    free_temp_reg(r_shift);
+}
+
+// Read-modify-write of the bit-field at the container address in r_addr with
+// the low bit_width bits of r_val. Narrow (<= 64-bit) fields only.
+void emit_bitfield_store(VirtualMachine *vm, Member *mem, int r_val,
+                         int r_addr, bool dangling_check) {
+    int       r_container = alloc_temp_reg();
+    int       r_mask      = alloc_temp_reg();
+    int       r_new       = alloc_temp_reg();
+    long long mask        = bitfield_mask(mem);
+
+    emit_load_ex(vm, mem->ty, r_container, r_addr, dangling_check);
+    emit_li3(vm, r_mask, ~(mask << mem->bit_offset));
+    emit_rrr(vm, AND3, r_container, r_container, r_mask);
+
+    emit_mov3(vm, r_new, r_val);
+    emit_li3(vm, r_mask, mask);
+    emit_rrr(vm, AND3, r_new, r_new, r_mask);
+    if (mem->bit_offset > 0) {
+        emit_li3(vm, r_mask, mem->bit_offset);
+        emit_rrr(vm, SHL3, r_new, r_new, r_mask);
+    }
+    emit_rrr(vm, OR3, r_container, r_container, r_new);
+    emit_store_ex(vm, mem->ty, r_container, r_addr, dangling_check);
+
+    free_temp_reg(r_new);
+    free_temp_reg(r_mask);
+    free_temp_reg(r_container);
+}
+
 // Generate code for expression, result in dest_reg (integer) or dest_freg
 // (float)
 void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
@@ -1700,50 +1758,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Handle Bitfields specially (Read-Modify-Write)
             if (node->lhs->kind == ND_MEMBER &&
                 node->lhs->member->is_bitfield) {
-                Member *mem             = node->lhs->member;
-                int     r_container     = alloc_temp_reg();
-                bool    lhs_local_frame = addr_is_local_frame(vm, node->lhs);
-
-                // Load container value
-                emit_load_ex(vm, mem->ty, r_container, r_addr,
-                             !lhs_local_frame); // Use member type (container)
-
-                // Clear the bitfield bits: container &= ~(mask << bit_offset)
-                int r_mask = alloc_temp_reg();
-                // #1122: `1ULL << 64` is UB (and, observed on this host,
-                // evaluates to 0, silently discarding the whole bitfield --
-                // a `T f : 64` bitfield writes as if it were `f : 0`).
-                long long mask =
-                    mem->bit_width >= 64
-                        ? -1LL
-                        : (long long)((1ULL << mem->bit_width) - 1);
-                emit_li3(vm, r_mask, ~(mask << mem->bit_offset));
-                emit_rrr(vm, AND3, r_container, r_container, r_mask);
-
-                // Prepare new value: (val & mask) << bit_offset
-                int r_new = alloc_temp_reg();
-                emit_mov3(vm, r_new, r_val);
-                emit_li3(vm, r_mask, mask); // Reuse r_mask for positive mask
-                emit_rrr(vm, AND3, r_new, r_new,
-                         r_mask);           // Truncate val to width
-                // Shift new value into position
-                if (mem->bit_offset > 0) {
-                    int r_shift = alloc_temp_reg();
-                    emit_li3(vm, r_shift, mem->bit_offset);
-                    emit_rrr(vm, SHL3, r_new, r_new, r_shift);
-                    free_temp_reg(r_shift);
-                }
-
-                // OR new value into container
-                emit_rrr(vm, OR3, r_container, r_container, r_new);
-
-                // Store back
-                emit_store_ex(vm, mem->ty, r_container, r_addr,
-                              !lhs_local_frame); // Use member type (container)
-
-                free_temp_reg(r_new);
-                free_temp_reg(r_mask);
-                free_temp_reg(r_container);
+                emit_bitfield_store(vm, node->lhs->member, r_val, r_addr,
+                                    !addr_is_local_frame(vm, node->lhs));
             } else if (lhs_fused) {
                 emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
             } else {
@@ -1920,43 +1936,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_wide_helper(vm, "__cccc_bitfield_extract", 6);
                     emit_lea3(vm, dest_reg, dst_offset);
                 } else {
-                    // Load container value
-                    emit_load_ex(vm, mem->ty, dest_reg, r_addr, !local_frame);
-
-                    if (mem->ty->is_unsigned) {
-                        // Unsigned: (val >> bit_offset) & mask
-                        if (mem->bit_offset > 0) {
-                            int r_shift = alloc_temp_reg();
-                            emit_li3(vm, r_shift, mem->bit_offset);
-                            emit_rrr(vm, SHR3, dest_reg, dest_reg,
-                                     r_shift); // Logical shift right
-                            free_temp_reg(r_shift);
-                        }
-                        // #1122: see the RMW-store arm's comment above -- same
-                        // `1ULL << 64` UB for a `T f : 64` unsigned bitfield.
-                        long long mask =
-                            mem->bit_width >= 64
-                                ? -1LL
-                                : (long long)((1ULL << mem->bit_width) - 1);
-                        int r_mask = alloc_temp_reg();
-                        emit_li3(vm, r_mask, mask);
-                        emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
-                        free_temp_reg(r_mask);
-                    } else {
-                        // Signed: (val << (64 - width - offset)) >> (64 -
-                        // width)
-                        int r_shift     = alloc_temp_reg();
-                        int left_shift  = 64 - mem->bit_width - mem->bit_offset;
-                        int right_shift = 64 - mem->bit_width;
-
-                        emit_li3(vm, r_shift, left_shift);
-                        emit_rrr(vm, SHL3, dest_reg, dest_reg, r_shift);
-
-                        emit_li3(vm, r_shift, right_shift);
-                        emit_rrr(vm, SHR3, dest_reg, dest_reg,
-                                 r_shift); // Arithmetic shift preserves sign
-                        free_temp_reg(r_shift);
-                    }
+                    emit_bitfield_load(vm, mem, dest_reg, r_addr, !local_frame);
                 }
             } else {
                 // Standard member

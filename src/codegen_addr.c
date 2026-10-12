@@ -141,6 +141,10 @@ static bool passthru_scalar_type(Type *ty, char *out, size_t cap) {
     }
 }
 
+static bool passthru_is_bitfield(Node *n) {
+    return n->kind == ND_MEMBER && n->member->is_bitfield;
+}
+
 static bool passthru_is_lvalue(Node *n) {
     if (n->kind == ND_MEMBER)
         return !n->member->is_bitfield;
@@ -177,7 +181,9 @@ static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
                          ty->kind == TY_ARRAY;
         bool mem_only = constraint_is_memory_only(node->asm_ops[i].constraint);
 
-        if (!out && !aggregate && is_integer(ty) && is_const_expr(vm, a) &&
+        if (mem_only && passthru_is_bitfield(a))
+            error_tok(vm, a->tok, "asm memory operand cannot be a bit-field");
+        if (!out &&!aggregate && is_integer(ty) && is_const_expr(vm, a) &&
             passthru_scalar_type(ty, ops->type[i], sizeof(ops->type[i]))) {
             ops->is_const[i] = true;
             ops->val[i]      = cc_eval(vm, a);
@@ -202,10 +208,9 @@ static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
                                        sizeof(ops->type[i])))
             error_tok(vm, a->tok,
                       "asm operand type is not supported with --asm-passthru");
-        if (out && !passthru_is_lvalue(a))
-            error_tok(vm, a->tok,
-                      "asm output operand is not addressable with "
-                      "--asm-passthru (bit-field?)");
+        if (out && !passthru_is_lvalue(a) && !passthru_is_bitfield(a))
+            error_tok(vm, a->tok, "asm output operand is not addressable with "
+                                  "--asm-passthru");
     }
 }
 
@@ -363,9 +368,11 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
 
     int ffi_idx = cc_register_asm_passthru_slot(vm, sym_name);
 
+    // Scratch layout: operand pointers, value slots, then the container
+    // address of each bit-field output (needed again after the call).
+    long long base = n_ops ? alloc_wide_bitint_temp(vm, 3 * n_ops) : 0;
     if (n_ops) {
-        long long base = alloc_wide_bitint_temp(vm, 2 * n_ops);
-        int       r_arr = alloc_temp_reg();
+        int r_arr = alloc_temp_reg();
         for (int i = 0; i < n_ops; i++) {
             if (ops.is_const[i])
                 continue;
@@ -375,7 +382,23 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
                            (!(a->ty->kind == TY_ARRAY) ||
                             constraint_is_memory_only(
                                 node->asm_ops[i].constraint)));
-            if (!rval) {
+            if (i < n_out && passthru_is_bitfield(a)) {
+                long long slot = base + n_ops + i;
+                int       r_t  = alloc_temp_reg();
+                gen_addr(vm, a, r_p);
+                emit_lea3_aligned(vm, r_t, base + 2 * n_ops + i, 0, true);
+                emit_store(vm, ty_ulong, r_p, r_t);
+                if (node->asm_ops[i].constraint[0] == '+') {
+                    int r_v = alloc_temp_reg();
+                    emit_bitfield_load(vm, a->member, r_v, r_p,
+                                       !addr_is_local_frame(vm, a));
+                    emit_lea3_aligned(vm, r_t, slot, 0, true);
+                    emit_store(vm, a->ty, r_v, r_t);
+                    free_temp_reg(r_v);
+                }
+                emit_lea3_aligned(vm, r_p, slot, 0, true);
+                free_temp_reg(r_t);
+            } else if (!rval) {
                 gen_addr(vm, a, r_p);
             } else {
                 // Value operand: materialize into a scratch slot.
@@ -410,6 +433,24 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
     emit_word(vm, n_ops ? 1 : 0);
     emit_i64(vm, 0);
     emit_i64(vm, 0);
+
+    for (int i = 0; i < n_out; i++) {
+        Node *a = args[i];
+        if (!passthru_is_bitfield(a))
+            continue;
+        int r_t = alloc_temp_reg();
+        int r_p = alloc_temp_reg();
+        int r_v = alloc_temp_reg();
+        emit_lea3_aligned(vm, r_t, base + 2 * n_ops + i, 0, true);
+        emit_load(vm, ty_ulong, r_p, r_t);
+        emit_lea3_aligned(vm, r_t, base + n_ops + i, 0, true);
+        emit_load(vm, a->ty, r_v, r_t);
+        emit_bitfield_store(vm, a->member, r_v, r_p,
+                            !addr_is_local_frame(vm, a));
+        free_temp_reg(r_v);
+        free_temp_reg(r_p);
+        free_temp_reg(r_t);
+    }
     reset_temp_regs();
 #else
     (void)node;

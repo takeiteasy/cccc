@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `--asm-passthru` accepts bit-field output operands (`=r`, `+r`); a
+  bit-field with a memory constraint is a compile error.
 - Changed: tests run through `build.c` targets. `test` runs the `[[cccc::test]]`
   suites in VM and `-c=native` mode; `test_warnings`, `test_serialize`,
   `test_build_mode`, `test_safety`, `test_parallel`, `test_macros` and

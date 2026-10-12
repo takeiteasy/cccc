@@ -60,6 +60,8 @@ file and line, followed by `native compilation failed`.
 | Other scalar input (`"r"(x + 2)`) | by value, from a temporary |
 | Array input with a register constraint (`"r"(arr)`) | as a pointer to the first element |
 | Struct, union or array with a memory constraint (`"m"(s)`) | by address |
+| Bit-field output (`"=r"(s.f)`, `"+r"(s.f)`) | through a temporary: seeded for `+`, stored back into the bit-field after the asm |
+| Bit-field input (`"r"(s.f)`) | by value |
 
 Supported scalar types are integers, `_Bool`, enums, pointers, `float` and
 `double`. Everything else is rejected with an error:
@@ -69,7 +71,7 @@ Supported scalar types are integers, `_Bool`, enums, pointers, `float` and
 | `asm goto` | control cannot jump from host code back into the VM |
 | `long double`, `_Complex`, vectors, `_BitInt`, `_Decimal`, 128-bit integers | no host spelling for the VM's value |
 | Struct or union with a register constraint | the value would be a copy; use a memory constraint |
-| Bit-field operand | a bit-field has no address |
+| Bit-field with a memory constraint (`"m"(s.f)`) | a bit-field has no address |
 
 The `"memory"` clobber holds as written: the VM keeps every variable in memory
 and never caches a value across statements.

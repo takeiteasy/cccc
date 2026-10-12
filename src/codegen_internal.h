@@ -208,6 +208,10 @@ void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
                  long long elem_size);
 void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
                             int seq_limit);
+void emit_bitfield_load(VirtualMachine *vm, Member *mem, int dest, int r_addr,
+                        bool dangling_check);
+void emit_bitfield_store(VirtualMachine *vm, Member *mem, int r_val,
+                         int r_addr, bool dangling_check);
 void emit_fmov3(VirtualMachine *vm, int rd, int rs);
 void emit_fround_f32(VirtualMachine *vm, int rd, int rs);
 void emit_frr(VirtualMachine *vm, int op, int rd, int rs1);
