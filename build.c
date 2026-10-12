@@ -16,8 +16,9 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests, test / test_vm / test_native / test_release /
-//   test_msan
+//   clean, host_tests, fuzz_replay, test / test_vm / test_native / test_release
+//   / test_msan; test_extra (the loose tests) = test_warnings / test_serialize
+//   / test_build_mode / test_safety / test_parallel / test_macros / test_misc
 //   docs                Doxygen HTML API docs for include/cccc/*.h (needs
 //   doxygen)
 //   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
@@ -694,6 +695,141 @@ BuildTarget *test_native(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     return suite_tests(ctx, cccc, "test-native", 1);
+}
+
+// ---- fuzz_replay -----------------------------------------------------------
+// Replays tests/fuzz/corpus/*.c through the built cccc (compile-only).
+
+[[cccc::build_target]]
+BuildTarget *fuzz_replay(Builder *ctx) {
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    char         cmd[512];
+    snprintf(cmd, sizeof(cmd), "python3 tools/fuzz_replay.py --binary %s",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "fuzz-replay", cmd);
+    DependsOn(step, cccc);
+    return step;
+}
+
+// ---- area tests ------------------------------------------------------------
+// The loose tests (tests/test_*.c, tests/macros/test_*.c) are secondary to the
+// suites: grouped by filename prefix, and run when work touches that area.
+// Each file's leading comment block says how it is checked; see
+// tools/testcheck.c. `test_extra` runs every group.
+
+typedef struct {
+    const char *target;
+    const char *prefixes; // space-separated filename prefixes
+} Area;
+
+static const Area AREAS[] = {
+    {"test_warnings", "test_warning_"},
+    {"test_serialize", "test_serialize_ test_native_"},
+    {"test_build_mode", "test_build_"},
+    {"test_safety", "test_checked_ test_dangling_ test_heap_"},
+    {"test_parallel", "test_kernel_ test_opencl_ test_openmp_"},
+    {"test_macros", NULL}, // tests/macros/
+    {"test_misc", NULL},   // everything else
+};
+#define NAREAS ((int)(sizeof(AREAS) / sizeof(AREAS[0])))
+
+static int area_of(const char *path) {
+    if (strstr(path, "tests/macros/"))
+        return NAREAS - 2;
+    const char *base = strrchr(path, '/');
+    base             = base ? base + 1 : path;
+    for (int i = 0; i < NAREAS - 2; i++) {
+        char copy[256];
+        snprintf(copy, sizeof(copy), "%s", AREAS[i].prefixes);
+        for (char *p = strtok(copy, " "); p; p = strtok(NULL, " "))
+            if (strncmp(base, p, strlen(p)) == 0)
+                return i;
+    }
+    return NAREAS - 1;
+}
+
+static BuildTarget *make_testcheck(Builder *ctx) {
+    BuildTarget *t = Executable(ctx, "testcheck");
+    SetOutput(t, "testcheck");
+    AddSource(t, "tools/testcheck.c");
+    return t;
+}
+
+static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
+                                    BuildTarget *check, int area) {
+    BuildTarget *agg     = RunCustom(ctx, AREAS[area].target, "true");
+    const char  *globs[] = {"tests/test_*.c", "tests/macros/test_*.c"};
+    for (int g = 0; g < 2; g++) {
+        const char **files = GlobFiles(ctx, globs[g]);
+        for (int i = 0; files[i]; i++) {
+            if (area_of(files[i]) != area)
+                continue;
+            const char *base = strrchr(files[i], '/');
+            base             = base ? base + 1 : files[i];
+            char cmd[1024], name[192];
+            snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" %s", TargetOutput(check),
+                     TargetOutput(cccc), files[i]);
+            snprintf(name, sizeof(name), "%s-%s", AREAS[area].target, base);
+            BuildTarget *step = RunCustom(ctx, name, cmd);
+            DependsOn(step, cccc);
+            DependsOn(step, check);
+            DependsOn(agg, step);
+        }
+    }
+    return agg;
+}
+
+static BuildTarget *area_tests(Builder *ctx, int area) {
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    return area_tests_with(ctx, cccc, make_testcheck(ctx), area);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_warnings(Builder *ctx) {
+    return area_tests(ctx, 0);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_serialize(Builder *ctx) {
+    return area_tests(ctx, 1);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_build_mode(Builder *ctx) {
+    return area_tests(ctx, 2);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_safety(Builder *ctx) {
+    return area_tests(ctx, 3);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_parallel(Builder *ctx) {
+    return area_tests(ctx, 4);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_macros(Builder *ctx) {
+    return area_tests(ctx, 5);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_misc(Builder *ctx) {
+    return area_tests(ctx, 6);
+}
+
+[[cccc::build_target]]
+BuildTarget *test_extra(Builder *ctx) {
+    BuildTarget *bt    = make_libbacktrace(ctx);
+    BuildTarget *cccc  = make_cccc_exe_named(ctx, bt, "cccc");
+    BuildTarget *check = make_testcheck(ctx);
+    BuildTarget *all   = RunCustom(ctx, "test-extra", "true");
+    for (int i = 0; i < NAREAS; i++)
+        DependsOn(all, area_tests_with(ctx, cccc, check, i));
+    return all;
 }
 
 // Doxygen HTML API docs for the three public headers.

@@ -1,5 +1,7 @@
 // CCCC_FLAGS: -c=generated -o /dev/stdout
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*static const unsigned char my_bytes_1265\[4\];)(?=[\s\S]*long long get_ll_1265\(void\))(?=[\s\S]*unsigned int get_ui_1265\(void\))
+// CCCC_EXPECT_STDOUT: static const unsigned char my_bytes_1265\[4\];
+// CCCC_EXPECT_STDOUT: long long get_ll_1265\(void\)
+// CCCC_EXPECT_STDOUT: unsigned int get_ui_1265\(void\)
 //
 // Ticket #1265: GetType() resolved single-keyword base types from a small
 // table but returned NULL for any multi-word spelling ("unsigned char",

@@ -1,5 +1,10 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*__builtin_strlen\()(?=[\s\S]*__builtin_strcmp\()(?=[\s\S]*__builtin_memset\()(?=[\s\S]*__builtin_memcpy\()(?=[\s\S]*__builtin_memmove\()(?=[\s\S]*__builtin_memcmp\()
+// CCCC_EXPECT_STDOUT: __builtin_strlen\(
+// CCCC_EXPECT_STDOUT: __builtin_strcmp\(
+// CCCC_EXPECT_STDOUT: __builtin_memset\(
+// CCCC_EXPECT_STDOUT: __builtin_memcpy\(
+// CCCC_EXPECT_STDOUT: __builtin_memmove\(
+// CCCC_EXPECT_STDOUT: __builtin_memcmp\(
 // CCCC_REJECT_STDOUT: [^_]strlen\(|[^_]strcmp\(|[^_]memset\(|[^_]memcpy\(|[^_]memmove\(|[^_]memcmp\(
 //
 // #1154: __builtin_strlen/__builtin_strcmp/__builtin_mem{set,cpy,move,cmp}

@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/dup_enum_1015_typedef_a.c tests/fixtures/dup_enum_1015_typedef_b.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*typedef enum \{\n    AA1015TD = 1,)(?=[\s\S]*typedef enum \{\n    AA1015TD__cccc_dup[0-9]+ = 5,)
+// CCCC_EXPECT_STDOUT: typedef enum \{\n    AA1015TD = 1,
+// CCCC_EXPECT_STDOUT: typedef enum \{\n    AA1015TD__cccc_dup[0-9]+ = 5,
 // CCCC_REJECT_STDOUT: ^    AA1015TD = 5,$
 //
 // #1015 widening: a tagless typedef'd enum (`typedef enum { ... } T1015A;`)

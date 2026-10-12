@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --build --build-cache=build/test_cccc_cache_cache --build-out-dir=build/test_cccc_cache_out
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*\(up to date\) cccc_cache_app)(?=[\s\S]*cccc_cache_ok)
+// CCCC_EXPECT_STDOUT: \(up to date\) cccc_cache_app
+// CCCC_EXPECT_STDOUT: cccc_cache_ok
 //
 // #1133: a CcccExecutable target caches per target (there is no per-source
 // .o). Two Build() calls on the same target within one build_main: the

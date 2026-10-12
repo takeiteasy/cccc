@@ -1,5 +1,8 @@
 // CCCC_FLAGS: -c=generated -o /dev/stdout
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*#ifndef LIVE_1263)(?=[\s\S]*#define LIVE_1263 "on")(?=[\s\S]*#endif)(?=[\s\S]*int live_shell_answer_1263\(void\))
+// CCCC_EXPECT_STDOUT: #ifndef LIVE_1263
+// CCCC_EXPECT_STDOUT: #define LIVE_1263 "on"
+// CCCC_EXPECT_STDOUT: #endif
+// CCCC_EXPECT_STDOUT: int live_shell_answer_1263\(void\)
 //
 // Ticket #1263 guard: the empty-conditional-shell drop must not touch a
 // conditional whose body actually survives. Here no `-D LIVE_1263` is

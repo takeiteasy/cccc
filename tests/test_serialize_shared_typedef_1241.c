@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -c=generated -o /dev/stdout
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*#include "test_serialize_shared_typedef_1241\.h"[\s\S]*static const MyByte1241 my_table_1241\[4\];)(?=[\s\S]*#include "test_serialize_shared_typedef_1241\.h"[\s\S]*static const struct MyPair1241 my_pairs_1241\[2\];)
+// CCCC_EXPECT_STDOUT: #include "test_serialize_shared_typedef_1241\.h"[\s\S]*static const MyByte1241 my_table_1241\[4\];
+// CCCC_EXPECT_STDOUT: #include "test_serialize_shared_typedef_1241\.h"[\s\S]*static const struct MyPair1241 my_pairs_1241\[2\];
 // CCCC_REJECT_STDOUT: static const (MyByte1241 my_table_1241|struct MyPair1241 my_pairs_1241)\[[0-9]\][\s\S]*#include "test_serialize_shared_typedef_1241\.h"
 //
 // Ticket #1241: `cccc -c=generated` exited 0 and wrote C that does not

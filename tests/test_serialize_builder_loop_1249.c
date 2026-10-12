@@ -1,5 +1,7 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*for \(; 1LL; \))(?=[\s\S]*if \(i == 3\))(?=[\s\S]*break;)
+// CCCC_EXPECT_STDOUT: for \(; 1LL; \)
+// CCCC_EXPECT_STDOUT: if \(i == 3\)
+// CCCC_EXPECT_STDOUT: break;
 //
 // Ticket #1249: a builder-built loop (MakeWhile, not a parser-built for/
 // while) with a QuoteLazy() body containing `break` must survive the

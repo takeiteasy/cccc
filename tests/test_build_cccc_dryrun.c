@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --build --build-dry-run
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*--compile=native)(?=[\s\S]*build succeeded \(1 target, 0 errors\))
+// CCCC_EXPECT_STDOUT: --compile=native
+// CCCC_EXPECT_STDOUT: build succeeded \(1 target, 0 errors\)
 // CCCC_REJECT_STDOUT: -MMD
 //
 // #1133: a CcccExecutable target lowers to a single `cccc --compile=native`

@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/dup_enum_1015_difftag_a.c tests/fixtures/dup_enum_1015_difftag_b.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*enum E1015DTA \{\n    AA1015DT = 1,)(?=[\s\S]*enum E1015DTB \{\n    AA1015DT__cccc_dup[0-9]+ = 5,)
+// CCCC_EXPECT_STDOUT: enum E1015DTA \{\n    AA1015DT = 1,
+// CCCC_EXPECT_STDOUT: enum E1015DTB \{\n    AA1015DT__cccc_dup[0-9]+ = 5,
 // CCCC_REJECT_STDOUT: enum E1015DTB \{\n    AA1015DT =
 //
 // #1015 widening: two enums with *different* tags (so #1014's tag-rename

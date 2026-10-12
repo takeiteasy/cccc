@@ -62,6 +62,8 @@ jobs:
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
         run: ./cccc --build build.c --build-target=test_release --build-jobs=4
+      - name: Test loose tests
+        run: ./cccc --build build.c --build-target=test_extra --build-jobs=4 --build-keep-going
       - name: Package
         run: |
           set -e
@@ -98,6 +100,8 @@ jobs:
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
         run: ./cccc --build build.c --build-target=test_release --build-jobs=4
+      - name: Test loose tests
+        run: ./cccc --build build.c --build-target=test_extra --build-jobs=4 --build-keep-going
       - name: Package
         run: |
           set -e
@@ -129,6 +133,8 @@ jobs:
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
         run: ./cccc --build build.c --build-target=test_release --build-jobs=4
+      - name: Test loose tests
+        run: ./cccc --build build.c --build-target=test_extra --build-jobs=4 --build-keep-going
       - name: Package
         run: |
           set -e

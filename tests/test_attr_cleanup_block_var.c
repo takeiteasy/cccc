@@ -1,4 +1,5 @@
-// CCCC_NATIVE_SKIP: -c=native rejects a __block variable with a cleanup attribute
+// Not run natively: -c=native rejects a __block variable with a cleanup
+// attribute
 //
 // The cleanup of a __block variable receives the address of its storage, so it
 // sees (and can change) the variable's value.

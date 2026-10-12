@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing --list-tests --test-suite=outer
-// CCCC_EXPECT_STDOUT: (?s)suite: outer.*suite: outer/inner
+// CCCC_EXPECT_STDOUT: suite: outer.*suite: outer/inner
 // CCCC_REJECT_STDOUT: suite: unrelated
 //
 // Ticket #344: verify --test-suite= hierarchical filtering for nested

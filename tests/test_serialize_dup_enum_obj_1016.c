@@ -1,5 +1,10 @@
 // CCCC_FLAGS: tests/fixtures/dup_enum_obj_1016_a.c tests/fixtures/dup_enum_obj_1016_b.c -m -Wall
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*AA1016__cccc_dup[0-9]+ = 100,)(?=[\s\S]*BB1016__cccc_dup[0-9]+ = 101,)(?=[\s\S]*CC1016__cccc_dup[0-9]+ = 102)(?=[\s\S]*static int AA1016;)(?=[\s\S]*extern int BB1016;)(?=[\s\S]*int CC1016\(void\);)
+// CCCC_EXPECT_STDOUT: AA1016__cccc_dup[0-9]+ = 100,
+// CCCC_EXPECT_STDOUT: BB1016__cccc_dup[0-9]+ = 101,
+// CCCC_EXPECT_STDOUT: CC1016__cccc_dup[0-9]+ = 102
+// CCCC_EXPECT_STDOUT: static int AA1016;
+// CCCC_EXPECT_STDOUT: extern int BB1016;
+// CCCC_EXPECT_STDOUT: int CC1016\(void\);
 // CCCC_REJECT_STDOUT: static int AA1016__cccc_dup|extern int BB1016__cccc_dup|int CC1016__cccc_dup
 // CCCC_REJECT_STDERR: native-name-collision
 // #1017: -Wall added -- false-positive

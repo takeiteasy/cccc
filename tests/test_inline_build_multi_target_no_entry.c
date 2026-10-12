@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --build --build-dry-run
-// CCCC_EXPECT_STDOUT: (?=.*mt_a)(?=.*mt_b)
+// CCCC_EXPECT_STDOUT: mt_a
+// CCCC_EXPECT_STDOUT: mt_b
 //
 // #1272: two @build_target factories, no [[cccc::build]] entry and no
 // build_main -- the entry-less fallback runs every factory (equivalent to

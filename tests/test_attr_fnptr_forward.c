@@ -1,7 +1,10 @@
 // Function attributes on a function-pointer declarator apply to the pointee,
 // so calls through the pointer are checked like direct calls.
 // CCCC_FLAGS: --format-string-checks -Wnonnull -Wnodiscard
-// CCCC_EXPECT_STDERR: (?s)\A(?=(?:.*?warning: format argument){2})(?=.*?warning: null passed)(?=.*?warning: ignoring return value).*^4 warnings generated
+// CCCC_EXPECT_STDERR: ((.|\n)*warning: format argument){2}
+// CCCC_EXPECT_STDERR: warning: null passed
+// CCCC_EXPECT_STDERR: warning: ignoring return value
+// CCCC_EXPECT_STDERR: ^4 warnings generated
 #include <stddef.h>
 
 static void log_fn(const char *fmt, ...) {

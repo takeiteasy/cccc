@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --build --build-cache=build/test_cccc_hdrdep_cache --build-out-dir=build/test_cccc_hdrdep_out
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*\(up to date\) cccc_hdrdep_app)(?=[\s\S]*hdrdep_ok)
+// CCCC_EXPECT_STDOUT: \(up to date\) cccc_hdrdep_app
+// CCCC_EXPECT_STDOUT: hdrdep_ok
 //
 // #1308: a CcccExecutable target now tracks the headers its sources #include
 // automatically, via `cccc --compile=native --deps-file=...`, so a header

@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/serialize_generated_secondary_1262.c -c=generated -o /dev/stdout
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*#include <wctype\.h>)(?=[\s\S]*int answer_1262\(void\))
+// CCCC_EXPECT_STDOUT: #include <wctype\.h>
+// CCCC_EXPECT_STDOUT: int answer_1262\(void\)
 // CCCC_REJECT_STDOUT: (?:#include <iso646\.h>|#define CCCC_1262_SECONDARY_LEAK)
 //
 // Ticket #1262: `cccc -c=generated` auto-captured every command-line

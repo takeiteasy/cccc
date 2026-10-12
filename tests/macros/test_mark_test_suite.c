@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_EXPECT_STDOUT: suite_test_fn
+// CCCC_EXPECT_STDOUT: Suite: generated_suite
 // CCCC_EXPECT_STDOUT: custom display name
 // AddAttribute with test args expresses suite, display name, and timeout in the
 // attribute string — equivalent to the old

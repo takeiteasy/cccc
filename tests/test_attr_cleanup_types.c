@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -Wattributes
-// CCCC_EXPECT_STDERR: (?=(?:[\s\S]*?does not apply to types){5})(?=(?:[\s\S]*?attribute ignored){4})
+// CCCC_EXPECT_STDERR: ((.|\n)*does not apply to types){5}
+// CCCC_EXPECT_STDERR: ((.|\n)*attribute ignored){4}
 //
 // cleanup applies only to the automatic variable that names it. In a
 // type-name (cast, compound literal, sizeof, typeof) it warns and does

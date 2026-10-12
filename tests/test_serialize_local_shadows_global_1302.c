@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*int local_shadows_global_1302_helper__cccc_\d+;)(?=[\s\S]*int local_shadows_global_1302_g__cccc_\d+;)
+// CCCC_EXPECT_STDOUT: int local_shadows_global_1302_helper__cccc_\d+;
+// CCCC_EXPECT_STDOUT: int local_shadows_global_1302_g__cccc_\d+;
 // CCCC_REJECT_STDOUT: \n {4}int local_shadows_global_1302_helper;\n
 //
 // #1302: `-c=native`/`-m` flattens every local of a function to one

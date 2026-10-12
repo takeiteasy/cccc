@@ -1,5 +1,7 @@
 // CCCC_FLAGS: tests/fixtures/dup_tag_1014_impl.c tests/fixtures/dup_tag_1014_pureuse.c tests/fixtures/dup_tag_1014_private.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*struct DyGC1014 \{[\s\S]*int v;)(?=[\s\S]*struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;)(?=[\s\S]*struct DyGC1014 \*gc_open_1014\(void\))
+// CCCC_EXPECT_STDOUT: struct DyGC1014 \{[\s\S]*int v;
+// CCCC_EXPECT_STDOUT: struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;
+// CCCC_EXPECT_STDOUT: struct DyGC1014 \*gc_open_1014\(void\)
 // CCCC_REJECT_STDOUT: DyGC1014__cccc_dup[0-9]+ \*g|struct DyGC1014 \{[\s\S]*\};\n\nstruct DyGC1014 \{
 //
 // #1014's third TU shape: fixtures/dup_tag_1014_pureuse.c includes the

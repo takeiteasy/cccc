@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --build --build-out-dir=build/test_cccc_pragma_link_out
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*cccc_pragma_link_ran: 3)(?=[\s\S]*build succeeded)
+// CCCC_EXPECT_STDOUT: cccc_pragma_link_ran: 3
+// CCCC_EXPECT_STDOUT: build succeeded
 //
 // #1133 / #1149: a source that queues a library via `#pragma cccc link(...)`
 // must still work when it reaches cccc through a CcccExecutable target.

@@ -1,5 +1,7 @@
 // CCCC_FLAGS: --build --build-out-dir=build/test_cccc_target_out
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*--compile=native)(?=[\s\S]*cccc_target_ran: sum = 10)(?=[\s\S]*build succeeded)
+// CCCC_EXPECT_STDOUT: --compile=native
+// CCCC_EXPECT_STDOUT: cccc_target_ran: sum = 10
+// CCCC_EXPECT_STDOUT: build succeeded
 //
 // #1133: a CcccExecutable target is compiled by the running cccc itself with
 // one whole-program `cccc --compile=native` invocation (no host cc -c, no

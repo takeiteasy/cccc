@@ -1,6 +1,7 @@
 // CCCC_FLAGS: --build --build-out-dir=build/test_parkg_out --build-jobs=2 --build-keep-going
 // CCCC_EXPECT_STDERR: target 'badbuild' failed, continuing
-// CCCC_EXPECT_STDOUT: (?=.*build failed \(1 error\))(?=.*skipped:)
+// CCCC_EXPECT_STDOUT: build failed \(1 error\)
+// CCCC_EXPECT_STDOUT: skipped:
 //
 // Verify parallel keep-going behaviour (#557): a failed target's dependent is
 // skipped (not attempted) and reported in the summary as "skipped:", while an

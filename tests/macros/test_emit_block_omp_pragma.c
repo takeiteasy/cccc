@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: OpenMP runs in the VM only
+// Not run natively: OpenMP runs in the VM only
 // CCCC_FLAGS: -fopenmp
 // A #pragma omp inside a function body in a `#pragma cccc emit` block is a
 // statement: it must be spliced to `__cccc_omp(...)` as in ordinary source,

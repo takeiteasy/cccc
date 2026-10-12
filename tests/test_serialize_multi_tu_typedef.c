@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/multi_tu_typedef_1006_a.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*#include <stdlib\.h>)(?=[\s\S]*typedef enum \{)
+// CCCC_EXPECT_STDOUT: #include <stdlib\.h>
+// CCCC_EXPECT_STDOUT: typedef enum \{
 // CCCC_REJECT_STDOUT: unsupported expr kind
 //
 // #1006: a typedef/struct/enum written *in* a non-primary translation unit

@@ -1,5 +1,7 @@
 // CCCC_FLAGS: --build --build-out-dir=build/test_cccc_target_env_out
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*saw CCCC_NATIVE_CC wrapper)(?=[\s\S]*cccc_target_env_ok)(?=[\s\S]*build succeeded)
+// CCCC_EXPECT_STDOUT: saw CCCC_NATIVE_CC wrapper
+// CCCC_EXPECT_STDOUT: cccc_target_env_ok
+// CCCC_EXPECT_STDOUT: build succeeded
 //
 // #1133: SetTargetEnv on a CcccExecutable target reaches the child process,
 // which IS cccc — so SetTargetEnv(t, "CCCC_NATIVE_CC", ...) picks the host

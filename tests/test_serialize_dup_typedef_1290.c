@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/dup_typedef_1290_a.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*#include "dup_typedef_1290\.h")(?=[\s\S]*int dup_typedef_1290_sum\(DupTypedef1290 v\))
+// CCCC_EXPECT_STDOUT: #include "dup_typedef_1290\.h"
+// CCCC_EXPECT_STDOUT: int dup_typedef_1290_sum\(DupTypedef1290 v\)
 // CCCC_REJECT_STDOUT: \} DupTypedef1290;
 //
 // #1290: this TU (input_files[1], non-primary -- fixtures/dup_typedef_1290_a.c

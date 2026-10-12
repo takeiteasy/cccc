@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: uses __builtin_pc_function_name, which resolves a VM
+// Not run natively: uses __builtin_pc_function_name, which resolves a VM
 // bytecode offset via the VM's own symbol table and has no native
 // equivalent (#969)
 // Tests for __builtin_return_address interaction with tail calls

@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/enum_obj_no_collision_1016_a.c tests/fixtures/enum_obj_no_collision_1016_b.c -m -Wall
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*DD1016 = 1,)(?=[\s\S]*int unrelated_global_1016 = 5;)
+// CCCC_EXPECT_STDOUT: DD1016 = 1,
+// CCCC_EXPECT_STDOUT: int unrelated_global_1016 = 5;
 // CCCC_REJECT_STDOUT: __cccc_dup
 // #1017: -Wall added -- false-positive canary for -Wnative-name-collision.
 // Nothing here collides with anything, so the warning must never appear.

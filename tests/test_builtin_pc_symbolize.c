@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: __builtin_pc_function_name/__builtin_pc_source_location
+// Not run natively: __builtin_pc_function_name/__builtin_pc_source_location
 // resolve a VM bytecode offset via the VM's own symbol table, which does not
 // exist natively; the serializer rejects them outright (#969)
 // Tests for __builtin_pc_function_name and __builtin_pc_source_location.

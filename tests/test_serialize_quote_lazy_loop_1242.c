@@ -1,5 +1,7 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*for \(i = 0; i < 10;)(?=[\s\S]*if \(i == 3\))(?=[\s\S]*break;)
+// CCCC_EXPECT_STDOUT: for \(i = 0; i < 10;
+// CCCC_EXPECT_STDOUT: if \(i == 3\)
+// CCCC_EXPECT_STDOUT: break;
 //
 // Ticket #1242: a QuoteLazy() loop body (with `break`) composed into an
 // outer Quote()-built for loop must survive the -c=generated/-m serializer

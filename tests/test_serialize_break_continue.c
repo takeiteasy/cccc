@@ -1,5 +1,6 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*\bbreak;)(?=[\s\S]*\bcontinue;)
+// CCCC_EXPECT_STDOUT: [^[:alnum:]_]break;
+// CCCC_EXPECT_STDOUT: [^[:alnum:]_]continue;
 // CCCC_REJECT_STDOUT: goto \(null\)|goto \.L
 //
 // #1005: break/continue lower to an ND_GOTO node that sets only

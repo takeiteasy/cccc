@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/dup_enum_1015_a.c tests/fixtures/dup_enum_1015_b.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*enum E1015 \{\n    AA1015 = 1,)(?=[\s\S]*enum E1015__cccc_dup[0-9]+ \{\n    AA1015__cccc_dup[0-9]+ = 5,)
+// CCCC_EXPECT_STDOUT: enum E1015 \{\n    AA1015 = 1,
+// CCCC_EXPECT_STDOUT: enum E1015__cccc_dup[0-9]+ \{\n    AA1015__cccc_dup[0-9]+ = 5,
 // CCCC_REJECT_STDOUT: AA1015 = 1,\n    BB1015 = 2\n\};\n\nenum E1015__cccc_dup[0-9]+ \{\n    AA1015 =
 //
 // #1015: follow-up to #1014's rename_colliding_type_tags() (src/serialize.c),

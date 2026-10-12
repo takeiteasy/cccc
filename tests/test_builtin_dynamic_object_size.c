@@ -1,7 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_LEAKS_KEEP_VM_HEAP: DYNOBJSZ needs AllocHeader; degrades to (size_t)-1
-// without it
-// CCCC_NATIVE_SKIP: __builtin_dynamic_object_size lowers to clang's own
+// Not run natively: __builtin_dynamic_object_size lowers to clang's own
 // builtin natively, which lacks CCCC's VM-level frame-epoch/AllocHeader
 // tracking (escaping-aggregate-param and cross-longjmp liveness); found
 // while fixing #1155, tracked separately, not fixable by that ticket's

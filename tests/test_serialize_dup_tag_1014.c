@@ -1,5 +1,6 @@
 // CCCC_FLAGS: tests/fixtures/dup_tag_1014_impl.c tests/fixtures/dup_tag_1014_private.c -m
-// CCCC_EXPECT_STDOUT: (?=[\s\S]*struct DyGC1014 \{[\s\S]*int v;)(?=[\s\S]*struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;)
+// CCCC_EXPECT_STDOUT: struct DyGC1014 \{[\s\S]*int v;
+// CCCC_EXPECT_STDOUT: struct DyGC1014__cccc_dup[0-9]+ \{[\s\S]*double d;
 // CCCC_REJECT_STDOUT: struct DyGC1014 \{[\s\S]*\};\n\nstruct DyGC1014 \{
 //
 // #1014: two translation units each independently completing a same-named
