@@ -2797,8 +2797,8 @@ char *cccc_find_native_cc(void) {
     return find_cc_via_env_or_path("CCCC_NATIVE_CC", getenv("CCCC_NATIVE_CC"));
 }
 
-// C-side mirror of tools/testing/platform.py's detect_native_cc_family(): ask
-// the compiler -c=native would use what it is, via its own predefined macros.
+// Ask the compiler -c=native would use what family it is, via its own
+// predefined macros.
 // `cc -dM -E -` on an empty translation unit is the portable way -- clang
 // defines __clang__, plain gcc defines __GNUC__ without it. Only reached when
 // --compiler-family=auto is passed explicitly (src/main.c); the default path

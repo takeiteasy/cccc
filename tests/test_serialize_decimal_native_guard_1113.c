@@ -9,8 +9,7 @@
 // _Decimal32/64/128 outright ("GNU decimal type extension not supported"),
 // but gcc does implement it (confirmed on both macOS gcc-16 and Linux gcc
 // 15.2, both predefining __DEC64_MAX__) -- test_suite_decimal.c already
-// passes -c=native under CCCC_NATIVE_CC=gcc (NATIVE_SKIP_TESTS_CLANG,
-// tools/testing/__init__.py, #1186). So the serializer can't hard-refuse
+// passes -c=native under CCCC_NATIVE_CC=gcc (#1186). So the serializer can't hard-refuse
 // _Decimal unconditionally the way __builtin_decimal_to_chars/
 // <decimal_math.h> do (serialize_expr.c, serialize_program.c) -- that would
 // regress the working gcc configuration. Instead it emits a guarded

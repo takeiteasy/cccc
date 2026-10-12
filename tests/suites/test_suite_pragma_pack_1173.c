@@ -17,7 +17,7 @@
 // against gcc-16 and clang while writing these tests, not just VM-internal
 // consistency -- see #1129's test suite for the same discipline. Deliberately
 // its own file for the same reason as test_suite_attributes_layout_1129.c:
-// needs to round-trip cleanly through `tools/tests.py --native`.
+// needs to round-trip cleanly through the `test_native` pass.
 
 #include "stddef.h"
 

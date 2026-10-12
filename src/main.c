@@ -351,8 +351,8 @@ static int run_native_backend(
     hashmap_foreach(&vm->compiler.command_line_inputs, push_input_dir_i,
                     &incdir_ctx);
     // #1143: a user -I/-isystem entry that also happens to hold CCCC's own
-    // bundled std headers (this repo's own test harness's `-I./include` is
-    // exactly that -- tools/testing/native.py) must not shadow the real
+    // bundled std headers (this repo's own test targets' `-I./include` is
+    // exactly that) must not shadow the real
     // host headers the rest of this function relies on being reachable
     // (pthread.h's own #include_next hand-off, #1022, and everything it
     // transitively reaches) -- confirmed to otherwise collide (struct

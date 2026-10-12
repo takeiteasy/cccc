@@ -6,7 +6,7 @@
 // The fix emits the __-wrapped __asm__ spelling everywhere, and the parser
 // now accepts asm/__asm__/__asm as statement-position spellings too.
 //
-// Unlike tests/suites/test_suite_asm.c (a permanent NATIVE_SKIP_TESTS entry,
+// Unlike tests/suites/test_suite_asm.c (permanently CCCC_NATIVE_SKIP,
 // #1119: fake mnemonics that only the VM can "run"), every string here is
 // the empty asm(""), which every host assembler accepts -- this file IS
 // natively compilable, and must round-trip clean under `--native` on both

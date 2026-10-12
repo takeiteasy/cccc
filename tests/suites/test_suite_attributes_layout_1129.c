@@ -11,7 +11,7 @@
 // suite also declares __attribute__((test_setup))/((test_teardown)) hooks
 // elsewhere in the same file, which makes the *whole file* native-skipped
 // (#1033 v1: no fork-safe native equivalent for a `once` setup hook) --
-// these tests need to actually round-trip through `tools/tests.py --native`
+// these tests need to actually round-trip through the `test_native` pass
 // to be worth anything, so they can't share a file with that gate.
 
 #include "stddef.h"
@@ -547,7 +547,7 @@ int test_bitfield_suffix_aligned_1165(void) {
 // bit-field's explicit aligned(N) (see test_bitfield_unnamed_aligned_1165
 // in tests/ for the sizeof/_Alignof pin, gcc's numbers) -- only the
 // portable offsetof (both compilers agree) is asserted here, so this file
-// stays green under `tools/tests.py --native` regardless of which host
+// stays green under the `test_native` pass regardless of which host
 // compiler `-c=native` shells out to.
 struct UnnamedSuffixAlignedBitfield1165 {
     char a;

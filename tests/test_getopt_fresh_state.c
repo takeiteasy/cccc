@@ -4,8 +4,7 @@
 // process globals, not a guest-private copy (include/getopt.h's macros
 // resolve to accessor shims returning pointers straight into that state,
 // #736/#1040). Confirmed with the ticket's own repro: `./cccc -I./include
-// dbg.c` (the harness's normal invocation shape, tools/testing/runner.py
-// always passes -I./include) left optind/opterr wherever cccc's own
+// dbg.c` (the test targets' normal invocation shape) left optind/opterr wherever cccc's own
 // argument parsing had left them, not fresh.
 //
 // Deliberately does NOT reset optind/opterr itself (unlike

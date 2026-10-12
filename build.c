@@ -16,14 +16,13 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests, fuzz_replay, test / test_vm / test_native / test_release
-//   / test_msan; test_extra (the loose tests) = test_warnings / test_serialize
-//   / test_build_mode / test_safety / test_parallel / test_macros / test_misc
-//   docs                Doxygen HTML API docs for include/cccc/*.h (needs
-//   doxygen)
-//   build_cache_toolchain_smoke   #1198 regression guard (same-arch,
-//   different-compiler-family --build-cache reuse; skips if only one
-//   compiler family is on PATH) linux_amd64_build /
+//   clean, host_tests, fuzz_replay, comptime_native_smoke, test / test_vm /
+//   test_native / test_release / test_msan; test_extra (the loose tests) =
+//   test_warnings / test_serialize / test_build_mode / test_safety /
+//   test_parallel / test_macros / test_misc docs                Doxygen HTML
+//   API docs for include/cccc/*.h (needs doxygen) build_cache_toolchain_smoke
+//   #1198 regression guard (same-arch, different-compiler-family --build-cache
+//   reuse; skips if only one compiler family is on PATH) linux_amd64_build /
 //   linux_aarch64_build    build the Colima container image linux_amd64_smoke /
 //   linux_aarch64_smoke    + container arch/exit-42 sanity check
 //   linux_amd64_test / linux_aarch64_test      + the suites
@@ -712,6 +711,26 @@ BuildTarget *fuzz_replay(Builder *ctx) {
     return step;
 }
 
+// ---- comptime_native_smoke -------------------------------------------------
+// -m / -c=generated / -c=native serializer regressions (tools/
+// comptime_native_smoke.py).
+
+static BuildTarget *make_native_smoke(Builder *ctx, BuildTarget *cccc) {
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "python3 tools/comptime_native_smoke.py --binary %s",
+             TargetOutput(cccc));
+    BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
+    DependsOn(step, cccc);
+    return step;
+}
+
+[[cccc::build_target]]
+BuildTarget *comptime_native_smoke(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_native_smoke(ctx, make_cccc_exe_named(ctx, bt, "cccc"));
+}
+
 // ---- area tests ------------------------------------------------------------
 // The loose tests (tests/test_*.c, tests/macros/test_*.c) are secondary to the
 // suites: grouped by filename prefix, and run when work touches that area.
@@ -829,6 +848,7 @@ BuildTarget *test_extra(Builder *ctx) {
     BuildTarget *all   = RunCustom(ctx, "test-extra", "true");
     for (int i = 0; i < NAREAS; i++)
         DependsOn(all, area_tests_with(ctx, cccc, check, i));
+    DependsOn(all, make_native_smoke(ctx, cccc));
     return all;
 }
 

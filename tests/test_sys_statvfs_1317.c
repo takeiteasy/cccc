@@ -4,7 +4,7 @@
 // `struct statvfs` projection is 88 bytes with wide (unsigned long)
 // counters, versus the real host layout (64 bytes/32-bit counters on macOS,
 // 112 bytes/64-bit counters on Linux). Without the hand-off, a `-I./include`
-// invocation (the test harness's own tools/testing/native.py) shadows the
+// invocation (the standard test invocation) shadows the
 // real <sys/statvfs.h> under -c=native, so `sizeof(struct statvfs)` folds
 // against CCCC's 88-byte projection while the real host statvfs()/
 // fstatvfs() write their own, differently-sized layout -- same canary shape

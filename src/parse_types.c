@@ -3520,8 +3520,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
 // 8/4 and 4/4 too -- gcc simply never implemented Apple's AAPCS64
 // deviation there (`targetm.align_anon_bitfields()` is unconditionally
 // true for the whole AArch64 target in gcc, Darwin included), so it is
-// the one WONT_FIX outlier, not a second axis (tools/testing/__init__.py's
-// NATIVE_SKIP_TESTS_GCC_MACOS quarantines it). Since -c=native shells out
+// the one WONT_FIX outlier, not a second axis. Since -c=native shells out
 // to the real host `cc` (clang on Darwin, gcc-or-clang elsewhere) and this
 // project's own reference target is that host, follow the true ABI rather
 // than either compiler family uniformly. A *named* bit-field of any width

@@ -2,8 +2,8 @@
 // #1033: exercises --testing=native's generated harness -- return-value
 // assertions (int/float/string), exit_code=, and a flags= test to confirm
 // it's individually SKIPped rather than breaking the whole file. Run
-// through both --testing (VM) and, via tools/tests.py --native, through
-// --testing=native; both backends must agree.
+// through both --testing (VM) and --testing=native; both backends must
+// agree.
 
 #include <stdlib.h>
 

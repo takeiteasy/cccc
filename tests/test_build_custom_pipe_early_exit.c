@@ -9,7 +9,7 @@
 //
 // Payload (200000 bytes) is decisively larger than one pipe buffer on both
 // platforms (~16KB macOS, ~64KB Linux). A regression makes this step hang
-// rather than fail, which run_tests.py's per-subprocess timeout catches.
+// rather than fail, which testcheck's timeout catches.
 
 [[cccc::build]]
 int build_main(Builder *ctx) {

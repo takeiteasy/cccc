@@ -3,8 +3,7 @@
 // Source tests: test_printf_binary, test_scanf_binary, test_vprintf_binary
 //   (moved here from test_suite_misc.c, #1120)
 //
-// Skipped by the --native corpus on every platform (NATIVE_SKIP_TESTS in
-// tools/testing/__init__.py). CCCC's VM formats through its own C23
+// Skipped by the native pass on every platform (CCCC_NATIVE_SKIP). CCCC's VM formats through its own C23
 // formatter (src/stdlib/format_printf.c/format_scanf.c), so these pass
 // there; -c=native output calls real host libc. macOS 15 libc implements
 // neither the C23 %b nor %B conversion in printf or scanf -- printf emits

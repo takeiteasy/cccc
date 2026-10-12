@@ -16,8 +16,8 @@
 // can legally reference a name the host rejects anyway.
 //
 // This is a serializer-only fix -- nothing changes on the plain VM path --
-// so this file only keeps exiting 42 there while giving the --native suite
-// (tools/tests.py --native) a standing regression guard for the shape: emoji
+// so this file only keeps exiting 42 there while giving
+// a standing regression guard for the shape: emoji
 // macro names defined AND undefined at file scope, used in between. The
 // block-scope variant lives on through tests/suites/test_suite_misc.c's
 // worm/snake test, which is back on the native corpus since this fix.

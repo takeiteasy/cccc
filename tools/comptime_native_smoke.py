@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968 regressions).
 
-`tools/tests.py` runs everything through the VM path, which never touches
+The `[[cccc::test]]` suites run through the VM path, which never touches
 src/serialize.c -- the serializer that reconstructs a runtime translation
 unit only runs under `-m`/`-c=generated`/`-c=native`. Despite the module name (kept
 for history: it started as a comptime-specific regression test), this
@@ -165,10 +165,8 @@ Exit codes: 0 = all cases pass, 1 = any failure.
 Pass --audit-skips (#1197) to run the SMOKE_CASE_SKIPS_GCC_MACOS staleness
 audit instead of the normal suite: forces every case actually governed by an
 entry on this platform+compiler-family to run with its skip bypassed, and
-exits 1 iff any of them now passes (a stale entry). See audit_skips() below
-and docs/TESTING.md's "Skips" section. Unknown args (including this one, when
-absent) are otherwise ignored -- this script always targets the repo-root
-./cccc.
+exits 1 iff any of them now passes (a stale entry). See audit_skips() below. Pass --binary PATH to test a cccc other than the repo-root ./cccc (the
+`comptime_native_smoke` build target passes build/cccc).
 """
 
 import os
@@ -179,17 +177,64 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Ensure tools/ is on sys.path so the 'testing' package is importable both
-# standalone and when run_tests.py loads this file via
-# importlib.util.spec_from_file_location (which does not add the script's
-# own directory to sys.path) -- mirrors tools/testing/test_native_skip_
-# audit.py's own explicit insert. run_tests.py's loader wraps the whole
-# module exec in `except Exception: return f"FAILED ({e})"`, so a path-
-# dependent ImportError here would otherwise surface as an opaque suite
-# failure instead of a normal skip.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from testing import smoke_case_skip_reason, smoke_entry_applies_here
-from testing.platform import detect_platform, detect_native_cc_family
+# Cases skipped when the native compiler is gcc on macOS (keyed by case
+# function name). CCCC_AUDIT_NATIVE_SKIPS=1 bypasses the table; --audit-skips
+# uses that to flag entries that no longer fail.
+SMOKE_CASE_SKIPS_GCC_MACOS = {
+    "case_ctor_dtor_native_round_trip": "gcc on Darwin rejects "
+                 "__attribute__((constructor(150))) priorities outright "
+                 "(\"constructor priorities are not supported\"); clang "
+                 "supports them and this passes there",
+}
+
+
+def detect_platform():
+    return {"Darwin": "macos", "Linux": "linux"}.get(os.uname().sysname, "unknown")
+
+
+_cc_family_cache = {}
+
+
+def detect_native_cc_family(cc=None):
+    """"clang", "gcc" or "unknown" for CCCC_NATIVE_CC (default "cc"), from the
+    macros its preprocessor predefines."""
+    cc = cc or os.environ.get("CCCC_NATIVE_CC") or "cc"
+    if cc not in _cc_family_cache:
+        family = "unknown"
+        try:
+            r = subprocess.run([cc, "-dM", "-E", "-"], input="",
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                family = ("clang" if "__clang__" in r.stdout
+                          else "gcc" if "__GNUC__" in r.stdout else "unknown")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _cc_family_cache[cc] = family
+    return _cc_family_cache[cc]
+
+
+def smoke_entry_applies_here(case_key, platform=None, family=None):
+    platform = platform or detect_platform()
+    family = family or detect_native_cc_family()
+    return (platform == "macos" and family == "gcc"
+            and case_key in SMOKE_CASE_SKIPS_GCC_MACOS)
+
+
+def smoke_case_skip_reason(case_key):
+    if os.environ.get("CCCC_AUDIT_NATIVE_SKIPS") == "1":
+        return None
+    if smoke_entry_applies_here(case_key):
+        return SMOKE_CASE_SKIPS_GCC_MACOS[case_key]
+    return None
+
+
+def cccc_binary():
+    """--binary PATH, default <repo>/cccc."""
+    args = sys.argv[1:]
+    if "--binary" in args:
+        return Path(args[args.index("--binary") + 1]).resolve()
+    return Path(__file__).parent.parent.resolve() / "cccc"
+
 
 SHARED_HEADER = (
     "typedef struct Alpha Alpha;\n"
@@ -242,9 +287,7 @@ def run(cmd, cwd, input=None, env=None):
     # #1202: this local helper used to inherit the harness's own stdin with
     # no timeout -- the same class of hazard as an unguarded `-x c -`-style
     # call blocking forever on a non-interactive CI runner's open, never-EOF
-    # stdin, which tools/testing/proc.py's run_capture() (#1185) chokepoint fixes for the
-    # main per-test-file suite, which this standalone script bypasses since
-    # it runs in-process via importlib, not as a per-test spawn.
+    # stdin; this helper closes it.
     #
     # subprocess.run() rejects passing both `input` and `stdin` -- when a
     # caller supplies source text on stdin (e.g. `cc -x c -c -`), that IS
@@ -2382,7 +2425,7 @@ def case_polyfill_header_embedded_round_trip(cccc: Path, tmp: str) -> bool:
           "instead of the host compiler failing with 'stdbit.h' file not "
           "found (#1003). tests/test_serialize_polyfill_header_not_"
           "replayed.c covers the -m shape and the on-disk resolution "
-          "branch (tools/tests.py always passes -I./include); this case "
+          "branch (the test targets always pass -I./include); this case "
           "is the one that actually exercises the embedded branch, per "
           "the #998 lesson that the two resolution paths need separate "
           "coverage")
@@ -3433,7 +3476,7 @@ def case_macro_declared_fn_bodyless_1303(cccc: Path, tmp: str) -> bool:
 def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool:
     print("  80: -c=native, a header-defined static inline function shared "
           "by two TUs, invoked with one input file as an absolute path and "
-          "the other relative (tools/testing/native.py's own invocation "
+          "the other relative (a native round-trip's own invocation "
           "shape) -- rename_colliding_static_names() compared File.name by "
           "raw strcmp, so the two TUs' own #include resolution of the "
           "identical on-disk header (dirname(including-file) + the quoted "
@@ -3471,9 +3514,8 @@ def case_header_static_fn_mixed_path_spelling_1032(cccc: Path, tmp: str) -> bool
 
     out_bin = Path(tmp) / "static_1032_out"
     # Deliberately mixed path styles: a_src absolute, b_src relative --
-    # exactly what tripped the bug (tools/testing/native.py passes the
-    # discovered test file absolute and its CCCC_FLAGS-named sibling
-    # relative).
+    # exactly what tripped the bug (a native round-trip passes the
+    # test file absolute and its sibling relative).
     compile_result = run(
         [str(cccc), "-c=native", "-o", out_bin.name, str(a_src), b_src.name],
         cwd=tmp)
@@ -5960,11 +6002,9 @@ def case_ctor_dtor_native_round_trip(cccc: Path, tmp: str) -> bool:
           "keeps relearning). Asserts -m output has "
           "__attribute__((constructor)) and __attribute__((constructor(150))) "
           "as prefixes on their declarators, plus VM 42 -> native 42 (#1020). "
-          "Skipped under gcc on Darwin (SMOKE_CASE_SKIPS_GCC_MACOS, "
-          "tools/testing/__init__.py) -- Homebrew gcc rejects the "
+          "Skipped under gcc on Darwin (SMOKE_CASE_SKIPS_GCC_MACOS) -- Homebrew gcc rejects the "
           "constructor(150) priority form outright, the same permanent "
-          "WONT_FIX gap NATIVE_SKIP_TESTS_GCC_MACOS already quarantines for "
-          "test_ctor_dtor_native_1020.c (#1196, #1193).")
+          "WONT_FIX gap (#1196, #1193).")
     src = Path(tmp) / "ctor_dtor_native_1020.c"
     write(src, CTOR_DTOR_NATIVE_PROGRAM)
 
@@ -6602,8 +6642,8 @@ def case_bundled_header_bodiless_decl_no_include_dir(cccc: Path, tmp: str) -> bo
           "which always has a repo ./include alongside it) so the "
           "embedded src/std_table.c header table resolves fcntl.h, exactly the "
           "invocation shape a copied binary with no include/ directory "
-          "hits -- the test harness's own tools/testing/native.py:87 "
-          "always passes -I./include, which is what let this ship "
+          "hits -- the test targets "
+          "always pass -I./include, which is what let this ship "
           "unnoticed. Fixed via Compiler.cccc_bundled_files "
           "(cc_file_is_cccc_bundled()/mark_cccc_bundled_file(), "
           "src/preprocess.c): a declaration sourced from CCCC's own "
@@ -6840,8 +6880,7 @@ struct WrapStatfs1167 { struct statfs s; };
 // of whether serialize_layout_const() would ever re-materialize it,
 // forcing this struct's body into the output and hitting that hard error
 // even though nothing about it is host-owned (caught by
-// tests/suites/test_suite_structs.c's own `tc_bi1135_wide` under
-// `python3 tools/tests.py --native`).
+// tests/suites/test_suite_structs.c's own `tc_bi1135_wide`).
 struct WideBitintOnly1167 { char c; _BitInt(129) x; };
 
 // Site 5: _Static_assert, non-host-owned, both file- and block-scope.
@@ -9812,8 +9851,7 @@ CASES = [
 
 
 def main() -> int:
-    root = Path(__file__).parent.parent.resolve()
-    cccc = root / "cccc"
+    cccc = cccc_binary()
 
     print("Native-backend serializer smoke tests (#892/#897/#901/#904/#918/#925/#926/#927/#928/#952/#953/#956/#963/#964/#968/#971/#973/#976/#977/#982/#965/#989/#990/#993/#996/#995/#998/#999/#1002/#1003/#1005/#1006/#1010/#1011/#1014/#1015/#1016/#967/#1031/#1019/#1042/#1034/#1046/#1051/#1045/#1049/#1047/#1050/#1048/#1057/#1054/#1030/#1058/#1059/#1018/#1063/#1064/#1071/#1056/#1069/#1074/#1078/#1075/#1068/#1020/#1083/#1062/#1085/#1022/#1044/#1096/#1095/#1098/#1080/#1081/#1091/#1088/#1118/#1184/#1188/#1190/#1186/#1237/#1218/#1273/#1298/#1299/#1300/#1301/#1302/#1303/#1304)")
 
@@ -9849,8 +9887,6 @@ def main() -> int:
 
 def audit_skips() -> int:
     """Behavioural staleness audit for SMOKE_CASE_SKIPS_GCC_MACOS (#1197),
-    mirroring _print_native_skip_audit()'s STALE/KEPT contract
-    (tools/testing/cli.py) for the NATIVE_SKIP_TESTS* filename-keyed tables.
 
     Unlike a plain CCCC_AUDIT_NATIVE_SKIPS=1 run of main() -- which just
     un-skips every applicable case and inverts pass/fail into the ordinary
@@ -9858,17 +9894,14 @@ def audit_skips() -> int:
     governed by an entry on this platform+family as STALE (it now passes
     with the table bypassed; delete the entry) or justified (still fails;
     the entry is earning its keep), and exits nonzero only for the former.
-    That's the verdict tools/run_tests.py's smoke_skip_audit sub-suite
-    needs to hard-fail on real staleness the way native_skip_audit already
-    does for the other tables.
+    Exits 1 on real staleness.
 
     Restricts itself to cases smoke_entry_applies_here() says are actually
     governed here -- on any platform/family other than macOS+gcc that's
     every case, so this reports "nothing to audit" rather than a false
     all-clear.
     """
-    root = Path(__file__).parent.parent.resolve()
-    cccc = root / "cccc"
+    cccc = cccc_binary()
     if not cccc.exists():
         print(f"  FAIL: {cccc.name} not found — run 'make' first.")
         return 1

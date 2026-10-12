@@ -60,7 +60,7 @@
 // solely on this file, per this project's own established practice for
 // glibc-only behavior (see feedback_verify_libc_signatures_linux).
 //
-// Skipped in tools/testing/__init__.py's NATIVE_SKIP_TESTS -- a
+// Known gap -- a
 // pre-existing, unrelated header-resolution collision (same class as
 // #1143, confirmed to already break test_posix_native_shims_1140.c on
 // trunk with none of this ticket's changes applied) means the *test

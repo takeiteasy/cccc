@@ -1334,7 +1334,7 @@ void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 // directly in the cccc-linux-amd64 Colima container against real Ubuntu
 // 26.04/glibc 2.43). Darwin's libm exports none of this family at all,
 // unconditionally -- the permanent #1037 gap this shim does not attempt
-// to close (see NATIVE_SKIP_TESTS_MACOS, tools/testing/__init__.py); only
+// to close (see test_math_c23_ieee in tests/); only
 // #1195's own actual failure (fromfp/ufromfp/fromfpx/ufromfpx, the one
 // sub-family with a Linux round-trip bug, not the wider "Darwin has none
 // of this at all" gap) is shimmed here.

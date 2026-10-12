@@ -1,8 +1,8 @@
 // CCCC_FLAGS: --posix-emulation
 //
 // #1143: -c=native's run_native_backend() forwards every user -I verbatim
-// to the host compiler -- so tools/testing/native.py's own `-I./include`
-// (this repo's own test harness's standard invocation, needed for a quoted
+// to the host compiler -- so the test targets' own `-I./include`
+// (this repo's standard test invocation, needed for a quoted
 // `#include "local.h"` in some OTHER test to resolve) used to shadow the
 // real host headers with CCCC's own bundled, guest-side copies whenever a
 // TU's replayed #include line happened to name one CCCC also bundles.
@@ -52,7 +52,7 @@
 // math.h doesn't gate on -- exactly the family this regression made
 // "undeclared identifier" (a *compile*-time failure) rather than #1037's
 // link-time one. Linux-only check; macOS's own gap is covered separately
-// by tests/test_setpayload_zero_1079.c (NATIVE_SKIP_TESTS_MACOS).
+// by tests/test_setpayload_zero_1079.c.
 #ifdef __linux__
 static int check_c23_ieee_math(void) {
     double nan_val = NAN;

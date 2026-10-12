@@ -22,7 +22,7 @@
 //
 // This is a serializer-only fix -- nothing here changes on the plain VM
 // path, so this file's only job is to keep exiting 42 there while giving
-// the --native suite (tools/tests.py --native) a standing regression guard
+// a standing regression guard
 // for the shape: a taken #ifdef branch defining a macro a later #ifndef
 // depends on. See tools/comptime_native_smoke.py case 105 for the
 // -m-output-has-no-conditional-line assertion.

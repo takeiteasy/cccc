@@ -13,7 +13,7 @@
 //
 // This is the same Latin-1-to-UTF-8 round trip as test_posix_iconv
 // (tests/suites/test_suite_posix.c), given its own standalone file here
-// because that suite stays in NATIVE_SKIP_TESTS (tools/testing/__init__.py)
+// because that suite stays CCCC_NATIVE_SKIP
 // for the unrelated, still-open #1145 (14 subtests failing at native
 // runtime on Linux/glibc), so it never actually exercises -c=native's own
 // link step.

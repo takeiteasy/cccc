@@ -3,8 +3,8 @@
 // Consolidated suite: inline assembly
 // Source tests: test_asm (moved here from test_suite_misc.c)
 //
-// This suite deliberately never round-trips through -c=native (NATIVE_SKIP_
-// TESTS entry in tools/testing/__init__.py): the VM treats an ND_ASM
+// This suite deliberately never round-trips through -c=native (see CCCC_NATIVE_SKIP
+// above): the VM treats an ND_ASM
 // statement as a no-op by default (--asm-passthru/--asm_callback opt into VM
 // execution), while -c=native/-m serialize the string verbatim into plain
 // `asm("...")` for the host assembler (src/serialize.c). There is no way to

@@ -3,8 +3,7 @@
 // Source tests: test_edge_empty_union_varargs (moved here from
 //   test_suite_misc.c, #1120)
 //
-// Skipped by the --native corpus entirely (NATIVE_SKIP_TESTS in
-// tools/testing/__init__.py): passing a zero-sized union through varargs is
+// Skipped by the native pass entirely (CCCC_NATIVE_SKIP): passing a zero-sized union through varargs is
 // an inherent VM-vs-host divergence with no mergeable behaviour. The VM's
 // own varargs machinery consumes no argument slot for a 0-byte aggregate and
 // formats it as 0 ("Let's count: 3 0 2 1"); the host ABI passes the empty

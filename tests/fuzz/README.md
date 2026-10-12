@@ -9,10 +9,8 @@ pathological input worth keeping as a regression guard).
 - One `.c` file per reproducer, named `crash_NNNN.c` or `repro_<short-description>.c`.
 - Keep files minimal — trim to the smallest input that still reproduces the
   issue before committing.
-- Files are **never** discovered as tests by `tools/tests.py` (see the
-  `"fuzz" not in f.parts` guard in `tools/testing/discovery.py`) and are
-  **never executed** as guest programs — `tools/fuzz_replay.py` only
-  compiles them.
+- Files are **never** run as tests or executed as guest programs —
+  `./cccc --build build.c --build-target=fuzz_replay` only compiles them.
 
 ## Adding a new reproducer
 

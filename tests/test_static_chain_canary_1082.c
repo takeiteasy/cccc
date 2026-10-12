@@ -7,7 +7,7 @@
 // bp[-2] -- so a chain of depth >= 2 dereferenced the wrong slot and
 // SIGSEGV'd (exit 139) walking through garbage. A depth-1 chain (only the
 // first, canary-aware hop) was unaffected, which is why this went unnoticed:
-// tools/tests.py never runs with --stack-canaries/-3 at all.
+// the default test run never uses --stack-canaries/-3.
 //
 // Filed with a wrong root cause (CHKP3/dangling-pointer stack-liveness
 // bookkeeping) -- it's neither: --stack-canaries alone reproduces with every

@@ -2,7 +2,7 @@
 // `#define __attribute__(x)` (empty) unconditionally -- correct for CCCC's
 // own preprocessing (its tokenizer parses __attribute__ as a builtin
 // construct itself, never via macro expansion), but under -c=native
-// (tools/tests.py --native always passes -I./include) a real host
+// (with -I./include) a real host
 // preprocessor -- unlike CCCC's own tokenizer -- keeps that empty macro
 // live for the rest of the translation unit. Once <stdio.h> pulled in
 // sys/cdefs.h -> Availability.h, every later __attribute__(...) in the

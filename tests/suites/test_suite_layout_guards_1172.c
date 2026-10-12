@@ -16,7 +16,7 @@
 //
 // Deliberately its own file, same reason as test_suite_attributes_layout_
 // 1129.c and test_suite_pragma_pack_1173.c: needs to round-trip cleanly
-// through `tools/tests.py --native`, and every struct below is actually
+// through the `test_native` pass, and every struct below is actually
 // INSTANTIATED (a global variable) so the guard genuinely gets emitted --
 // see serialize_layout_guards()'s own doc comment for why an unreferenced
 // type gets no guard at all (and why test_suite_structs.c's own tc_bf1176_*
@@ -32,9 +32,7 @@
 // despite being Darwin. Since `-c=native`'s default host `cc` is clang on
 // Darwin, the guard for tc_layoutguard_zero_width below is a TRUE POSITIVE
 // there: the emitted C really is miscompiled under any target that doesn't
-// implement the AAPCS64 rule. This file is quarantined from the Darwin-gcc
-// native corpus for exactly that reason (see NATIVE_SKIP_TESTS_GCC_MACOS,
-// tools/testing/__init__.py) and compiles clean under real AAPCS64 targets
+// implement the AAPCS64 rule. This file compiles clean under real AAPCS64 targets
 // (Linux/aarch64, either compiler family) and under macOS/arm64 gcc-16.
 
 #include <setjmp.h>

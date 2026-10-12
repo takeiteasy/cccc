@@ -32,7 +32,7 @@
 // src/serialize.c). include/sys/mount.h also needed a real
 // #ifdef __CCCC__ / #include_next hand-off to the real host header
 // (same #1022-style shape as pthread.h) -- without it, -I./include (the
-// test harness's own tools/testing/native.py invocation) shadowed the
+// standard test invocation) shadowed the
 // real <sys/mount.h> with CCCC's own copy again, defeating the fix the
 // same way #1022 found for pthread.h.
 #include <sys/mount.h>

@@ -19,7 +19,7 @@
 
 // Host-side regression test (#707): links directly against the compiler
 // sources, like src/fuzzing.c does, instead of going through the guest
-// .c/exit-code-42 protocol used by tools/tests.py.
+// .c/exit-code-42 protocol used by the other tests.
 //
 // Regression test for #181: file_no / embedded_file_no used to be
 // function-local statics in tokenize.c, so they outlived any single

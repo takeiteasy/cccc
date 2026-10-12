@@ -6915,9 +6915,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 }
                 // #1003: same reasoning as the embedded branch above -- this is
                 // the branch a polyfill header resolves through when found on
-                // disk (e.g. under tools/tests.py's -I./include), which #1003's
-                // own investigation found is not merely the embedded-table
-                // case the ticket described.
+                // disk (e.g. under the test targets' -I./include), which
+                // #1003's own investigation found is not merely the
+                // embedded-table case the ticket described.
                 if (is_cccc_supplied_only_header(filename))
                     mark_cccc_only_file(vm, path ? path : filename);
                 // #1096: an on-disk hit (e.g. `-I./include`) for a name

@@ -1,9 +1,9 @@
 // CCCC_FLAGS: --testing --testing=native --no-emit-tests
 // CCCC_EXPECT_STDERR: --no-emit-tests is incompatible with --testing=native
 // Not run natively: already IS a --testing=native invocation (that's the
-// point of the test); tools/tests.py --native's own bare-"--testing" ->
-// "--testing=native" rewrite would just apply --testing=native a second
-// time, redundant with what this file already exercises directly.
+// point of the test); the native pass's bare "--testing" ->
+// "--testing=native" rewrite would be redundant with what this file
+// already exercises directly.
 //
 // Negative test: --no-emit-tests drops [[cccc::test]] bodies from
 // native/generated output, which would leave --testing=native's generated

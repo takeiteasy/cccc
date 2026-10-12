@@ -1,7 +1,7 @@
 // CCCC_FLAGS: --testing
 // CCCC_EXPECT_STDOUT: ok 1 - add_works
 // Not run natively: this file defines its own main(), which --testing=native
-// (the tools/tests.py --native round-trip for a --testing test) always
+// (the native pass for a --testing test) always
 // rejects -- the generated harness supplies its own main() (src/main.c);
 // unrelated to #1272, see test_inline_test_with_main.c's own native leg for
 // the assert-runtime-links coverage instead.

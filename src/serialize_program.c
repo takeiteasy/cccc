@@ -74,9 +74,8 @@ static void serialize_asm_prefix_preamble(FILE *f, Obj *prog) {
 // __DEC64_MAX__ (both macOS gcc-16 and Linux gcc 15.2); clang implements
 // neither, on either platform, and rejects the syntax outright ("GNU
 // decimal type extension not supported"). test_suite_decimal.c already
-// passes -c=native under CCCC_NATIVE_CC=gcc (NATIVE_SKIP_TESTS_CLANG,
-// tools/testing/__init__.py, #1186) -- an unconditional refusal here would
-// regress that working configuration.
+// passes -c=native under CCCC_NATIVE_CC=gcc -- an unconditional refusal here
+// would regress that working configuration.
 //
 // So refusal is deferred to the HOST preprocessor instead of cccc's own
 // error(): whichever compiler actually reads this file evaluates
@@ -484,7 +483,7 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
 // #1032: two File records can spell the identical on-disk header two
 // different ways -- one command-line input given as an absolute path and
 // another as a relative one (the ordinary shape when a build/test harness
-// mixes both, e.g. tools/testing/native.py's own compile_cmd) causes each
+// mixes both) causes each
 // TU's own #include resolution (dirname(including file) + the quoted
 // spelling) to record a differently-spelled-but-identical path for the same
 // shared header. A raw strcmp of File.name (the #1006 "no canonicalization,
@@ -4022,7 +4021,7 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "#include <stdlib.h>\n"
           "#include <errno.h>\n"
           // #1033: when -I./include is on the compile line (as
-          // tools/tests.py always passes it), CCCC's own bundled
+          // the test targets always pass it), CCCC's own bundled
           // signal.h/sys/wait.h -- polyfills for VM-internal use, see
           // docs/HEADERS.md -- shadow the real host headers. That's merely
           // inconvenient for the missing kill() prototype below, but

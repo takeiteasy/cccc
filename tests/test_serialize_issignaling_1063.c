@@ -1,7 +1,7 @@
 // Ticket #1063: found while verifying #1018's va_start/va_arg/va_copy/
 // va_end translation through the real cccc-linux-amd64 container -- the
 // first time this batch's verification had gone past macOS.
-// tools/tests.py --native always forwards -I./include to the native cc
+// A -I./include on the compile line is forwarded to the native cc
 // (same hazard #1054 documented for setjmp.h), so CCCC's own bundled
 // include/math.h wins the header search over the real host <math.h>.
 //
