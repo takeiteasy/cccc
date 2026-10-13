@@ -560,7 +560,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
         error("undefined global: %s", obj_external_name(var));
     }
 
-    apply_global_relocations(vm, prog);
+    apply_global_relocations(vm, prog, NULL);
 
     // Release the persistent label map; it is no longer needed after relocs are
     // applied.  Keeping this explicit rather than leaking it into the process
@@ -846,7 +846,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 redirect_function_entry(vm, farr[i]);
     }
 
-    // Idempotent per-variable: only touches globals that carry a ->rel list,
-    // safe to run over the whole (small, REPL-sized) globals list each time.
-    apply_global_relocations(vm, vm->compiler.globals);
+    // Only this unit's globals: re-applying an older initializer would
+    // overwrite whatever the program has stored there since.
+    apply_global_relocations(vm, vm->compiler.globals, old_head);
 }

@@ -116,6 +116,15 @@ static void test_function_pointers(void) {
     CHECK(eval("fp()") == 2, "pointer taken after the reload");
 }
 
+static void test_runtime_pointer_assignment(void) {
+    decl("int pa(void){ return 1; }");
+    decl("int pb(void){ return 2; }");
+    decl("int (*pg)(void) = pa;");
+    eval("pg = pb");
+    decl("int unrelated = 0;");
+    CHECK(eval("pg()") == 2, "a later unit does not reset the pointer");
+}
+
 static void test_ffi_callback(void) {
     decl("void qsort(void *, unsigned long, unsigned long, "
          "int (*)(const void *, const void *));");
@@ -179,6 +188,7 @@ int main(void) {
     test_prototype_then_definition();
     test_statics();
     test_function_pointers();
+    test_runtime_pointer_assignment();
     test_ffi_callback();
     test_rejections();
     test_static_inline();

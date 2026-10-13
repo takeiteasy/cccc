@@ -119,8 +119,8 @@ GlobalLabelEntry *global_label_map  = NULL;
 int               num_global_labels = 0;
 int               global_labels_cap = 0;
 
-void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
-    for (Obj *var = prog; var; var = var->next) {
+void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
+    for (Obj *var = prog; var != stop; var = var->next) {
         if (var->is_function)
             continue;
 

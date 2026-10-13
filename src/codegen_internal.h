@@ -192,7 +192,9 @@ void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
 void add_label_patch(char *name, Pc patch_location, bool text_relative);
 void add_stack_var_meta(VirtualMachine *vm, const char *name, long long offset,
                         Type *ty, int scope_id);
-void apply_global_relocations(VirtualMachine *vm, Obj *prog);
+// Relocates the globals from `prog` up to (not including) `stop`; targets are
+// looked up over the whole chain from `prog`.
+void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop);
 void cccc_default_asm_passthru(VirtualMachine *vm, Node *node);
 int cc_register_asm_passthru_slot(VirtualMachine *vm, const char *name);
 void check_data_capacity(VirtualMachine *vm, long long needed);
