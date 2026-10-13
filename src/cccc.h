@@ -3661,6 +3661,36 @@ typedef struct Breakpoint {
 } Breakpoint;
 
 /*!
+ @brief What one incremental compile (cc_repl_compile_new_marked) appended to
+        the VM, so a throw-away wrapper's code and data can be given back.
+ @details Start values are taken once the compile is under way; end values and
+          the counts only when it finished. See cc_code_release.
+*/
+typedef struct CcCodeMark {
+    bool  started, ended;
+    bool  text_done, data_done; // already given back (or never to be)
+    Pc    text_start, text_end;
+    char *data_start, *data_end;
+    int   call_patches, func_addr_patches, global_labels;
+    int   call_patches_end, func_addr_patches_end, global_labels_end;
+    int   source_map, source_map_end, debug_symbols, debug_symbols_end;
+    File *last_file;
+    int   last_line, last_col;
+    int   new_fns, new_vars;
+} CcCodeMark;
+
+/*!
+ @brief A compiled breakpoint condition shared by the breakpoints that use it.
+*/
+typedef struct DbgCond {
+    char       *text;
+    struct Obj *scope_fn;
+    struct Obj *wrapper;
+    CcCodeMark  mark;
+    int         refs;
+} DbgCond;
+
+/*!
  @brief Represents a compilation error or warning collected during
  compilation.
 */
@@ -3740,6 +3770,8 @@ typedef struct Debugger {
     // Breakpoints
     Breakpoint breakpoints[MAX_BREAKPOINTS];
     int        num_breakpoints;
+    DbgCond   *conds; // compiled conditions, oldest first
+    int        num_conds, conds_cap;
 
     // Frame control (`restart` / `return`)
     bool         frame_records_on; // ENT3 snapshots frames (explicit -g only)
@@ -4352,6 +4384,10 @@ typedef struct Compiler {
     }  *call_patches;
     int num_call_patches;
     int call_patches_cap;
+
+    // Discarded wrappers with later code above them (cc_code_discard).
+    CcCodeMark *dead_marks;
+    int         num_dead_marks, dead_marks_cap;
 
     // Function address patches for function pointers
     struct {
@@ -5564,6 +5600,32 @@ void cc_compile(VirtualMachine *vm, Obj *prog);
              still target any previously-compiled function.
 */
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
+
+/*!
+ @brief cc_repl_compile_new that records what it appended in `mark` (NULL:
+ none).
+*/
+void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
+                                CcCodeMark *mark);
+
+/*!
+ @brief Give back the code and data of a throw-away wrapper compile.
+ @details Each segment and table is rolled back only if nothing was appended
+          after the compile. Text is kept when the compile added any function
+          besides the wrapper or a global label (an address may have escaped);
+          data is kept when it added a global (a string literal, a static).
+          A compile that never finished (`!mark->ended`) rolls back whatever it
+          emitted.
+ @return 1 if the text was rolled back (or the compile emitted none), 0 if
+         code was compiled after it, -1 if the text must stay.
+*/
+int cc_code_release(VirtualMachine *vm, CcCodeMark *mark);
+
+/*!
+ @brief cc_code_release, and if code was compiled after the wrapper, remember
+        it and retry whenever a later release succeeds.
+*/
+void cc_code_discard(VirtualMachine *vm, CcCodeMark *mark);
 
 /*!
  @brief Allocate the RETBUF rotating pool (struct/union/vector/wide-_BitInt

@@ -163,10 +163,11 @@ VM-only.
 - The REPL does not run the full preprocessor: `#include`, `#define`, and
   other directives are not available at the prompt (only tokenization and
   semantic parsing/type-checking run on each line).
-- Every evaluated *expression* compiles a small one-shot wrapper function
-  whose bytecode is not reclaimed after use, so a very long session slowly
-  grows the VM's text/data segments. This does not affect
-  declarations, which compile once and are never touched again.
+- An evaluated *expression* compiles a one-shot wrapper whose code is given
+  back afterwards. Data stays when the expression creates a string literal or
+  other static storage, and code stays when the expression defines a label or
+  a block literal. Code compiled while the expression runs (a condition
+  breakpoint's first hit) keeps the wrapper below it until that code goes.
 - Only functions can be redefined; redefining a variable is an error (see
   [Redefining functions](#redefining-functions)).
 - Certain internal compiler errors outside of parsing/type-checking (for

@@ -38,8 +38,8 @@
 //     via the same __builtin_ast_* API [[cccc::comptime]] macros use to
 //     splice code, see src/reflection.c), compiled the same incremental
 //     way, executed once on the VM, and its typed result is printed. The
-//     wrapper Obj is then unlinked from vm->compiler.globals (its bytecode
-//     is not reclaimed -- known limitation, ticket #667).
+//     wrapper Obj is then unlinked from vm->compiler.globals and its code
+//     and data given back (cc_code_discard).
 //   - A failed parse rolls back the scope/globals list to a snapshot taken
 //     before the line was parsed, via vm->error_jmp_buf (see
 //     cc_expr_snapshot/cc_expr_snapshot_restore, declared in cccc.h).
@@ -518,6 +518,8 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
     Obj *saved_locals       = vm->compiler.locals;
     vm->compiler.current_fn = NULL;
     vm->compiler.locals     = NULL;
+    CcCodeMark    mark         = {0};
+    volatile bool is_expr_unit = false;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl>", (char *)text);
@@ -545,7 +547,8 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
                 Obj        *fn   = __builtin_ast_function(name, expr_node->ty);
                 Node       *ret  = __builtin_ast_return(expr_node);
                 __builtin_ast_function_set_body(fn, ret);
-                cc_repl_compile_new(vm, snap.globals_head);
+                is_expr_unit = true;
+                cc_repl_compile_new_marked(vm, snap.globals_head, &mark);
 
                 long long ival = 0;
                 double    fval = 0.0;
@@ -556,9 +559,9 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
                     repl_print_result(vm, expr_node->ty, ival, fval);
 
                 // One-shot wrapper: drop it from the persistent globals list so
-                // it is not recompiled by future units. Its bytecode/data stay
-                // in the segments -- known limitation, ticket #667.
+                // it is not recompiled by future units.
                 vm->compiler.globals = snap.globals_head;
+                cc_code_discard(vm, &mark);
                 break;
             }
         }
@@ -573,6 +576,8 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
     vm->compiler.current_fn = saved_fn;
     repl_print_pending_error(vm);
     cc_expr_snapshot_restore(vm, &snap);
+    if (is_expr_unit)
+        cc_code_discard(vm, &mark);
     return 1;
 }
 

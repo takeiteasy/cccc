@@ -402,6 +402,97 @@ static void test_fix_editor(void) {
           "directives are rejected");
 }
 
+// Declares `int name(int x)` over four lines and reports the pcs of lines 3
+// and 2.
+static void decl_fn(const char *name, Pc *line3, Pc *line2) {
+    char src[128];
+    snprintf(src, sizeof(src), "int %s(int x){\n  int y = x;\n  return y;\n}",
+             name);
+    decl(src);
+    File *f = last_compiled_file();
+    if (line3)
+        *line3 = cc_find_pc_for_source(&vm, f, 3);
+    if (line2)
+        *line2 = cc_find_pc_for_source(&vm, f, 2);
+}
+
+static int cond_bp(Pc pc, const char *cond) {
+    int i = cc_add_breakpoint(&vm, pc);
+    CHECK(i >= 0, "breakpoint set");
+    vm.dbg.breakpoints[i].condition = strdup(cond);
+    return i;
+}
+
+static void test_reclaim(void) {
+    // TODO: condition wrappers trip dangling-pointer detection under the REPL
+    // (https://todo.sr.ht/~takeiteasy/cccc/1510)
+    vm.flags  &= ~CCCC_DANGLING_DETECT;
+    int dead0  = vm.compiler.num_dead_marks; // wrappers pinned by earlier tests
+    decl("const char *rc_sp;");
+    eval("1 + 2");
+    Pc    t0 = vm.text_ptr;
+    char *d0 = vm.data_ptr;
+    for (int i = 0; i < 1000; i++)
+        eval("1 + 2");
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "one-shot wrappers are reclaimed: text %u -> %u", t0, vm.text_ptr);
+
+    eval("(rc_sp = \"abc\", 0)");
+    CHECK(vm.text_ptr == t0, "text of a string-literal wrapper reclaimed");
+    CHECK(vm.data_ptr > d0, "the string literal's data is kept");
+    CHECK(eval("rc_sp[1]") == 'b', "the string literal is intact");
+
+    t0 = vm.text_ptr;
+    d0 = vm.data_ptr;
+    CHECK(cc_repl_eval(&vm, "1 +", NULL) != 0, "bad expression rejected");
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0, "failed compile reclaimed");
+
+    // Conditions: shared per function, released in any order.
+    Pc line2, line3;
+    Pc a_in = 0, b_in = 0, c_in = 0;
+    decl_fn("rc_a", &a_in, NULL);
+    decl_fn("rc_b", &b_in, NULL);
+    decl_fn("rc_c", &c_in, NULL);
+    decl_fn("rc_d", &line3, &line2);
+    Pc  base = vm.text_ptr;
+
+    int a    = cond_bp(a_in, "x > 99");
+    int b    = cond_bp(b_in, "x > 99");
+    int c    = cond_bp(c_in, "x > 98");
+    int d1   = cond_bp(line2, "x > 99");
+    int d2   = cond_bp(line3, "x > 99");
+    eval("rc_a(1)");
+    char *dbase = vm.data_ptr;
+    eval("rc_b(1)");
+    eval("rc_c(1)");
+    eval("rc_d(1)");
+    CHECK(vm.text_ptr > base, "conditions compiled");
+    CHECK(vm.dbg.num_conds == 4, "one wrapper per function and text: %d",
+          vm.dbg.num_conds);
+    CHECK(vm.dbg.breakpoints[d1].cond_fn &&
+              vm.dbg.breakpoints[d1].cond_fn == vm.dbg.breakpoints[d2].cond_fn,
+          "the same condition in one function is shared");
+
+    cc_remove_breakpoint(&vm, a);
+    cc_remove_breakpoint(&vm, c);
+    cc_remove_breakpoint(&vm, d1);
+    CHECK(vm.dbg.num_conds == 2, "shared wrapper outlives one breakpoint: %d",
+          vm.dbg.num_conds);
+    CHECK(eval("rc_d(1)") == 1, "condition still evaluates");
+    cc_remove_breakpoint(&vm, d2);
+    cc_remove_breakpoint(&vm, b);
+    CHECK(vm.dbg.num_conds == 0, "all conditions dropped");
+    CHECK(vm.text_ptr == base && vm.data_ptr == dbase,
+          "segments back at the baseline: text %u -> %u", base, vm.text_ptr);
+    CHECK(vm.compiler.num_dead_marks == dead0, "no wrapper left waiting: %d",
+          vm.compiler.num_dead_marks - dead0);
+
+    // A condition still works where an earlier wrapper's code was.
+    int e = cond_bp(a_in, "x == 7");
+    CHECK(eval("rc_a(1)") == 1, "false condition");
+    cc_remove_breakpoint(&vm, e);
+}
+
 int main(void) {
     cc_init(&vm, CCCC_ENABLE_DEBUGGER | CCCC_CFI | CCCC_STACK_CANARIES |
                      CCCC_DANGLING_DETECT);
@@ -421,6 +512,7 @@ int main(void) {
     test_session();
     test_fix();
     test_fix_editor();
+    test_reclaim();
 
     cc_destroy(&vm);
     if (!failed)

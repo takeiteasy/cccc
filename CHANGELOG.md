@@ -17,6 +17,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   (explicit `-g`). Embedders use `cc_debug_return` and `cc_debug_restart`.
 - Added: debugger `fix <function>` replaces a function while paused (edit and
   continue with `restart`). Embedders use `cc_debug_fix`.
+- Fixed: long REPL and debugger sessions no longer grow the VM's text and data
+  segments: expression and `return <expr>` wrappers are given back after use,
+  and conditional breakpoints with the same condition in one function share
+  one compiled wrapper that is released when its breakpoints are deleted.
 - Added: `fix <function>` opens `$VISUAL`/`$EDITOR` on the function's current
   source when a terminal is attached, and offers to re-edit on a compile error.
   Macros of the last file expand in `fix` source.

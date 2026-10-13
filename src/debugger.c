@@ -263,6 +263,8 @@ void debugger_init(VirtualMachine *vm) {
     }
 }
 
+static void debugger_drop_condition(VirtualMachine *vm, Obj *wrapper);
+
 int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
     if (vm->dbg.num_breakpoints >= MAX_BREAKPOINTS) {
         printf("Error: Maximum number of breakpoints (%d) reached\n",
@@ -319,6 +321,7 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index) {
         free(vm->dbg.breakpoints[index].condition);
         vm->dbg.breakpoints[index].condition = NULL;
     }
+    debugger_drop_condition(vm, vm->dbg.breakpoints[index].cond_fn);
     vm->dbg.breakpoints[index].cond_fn             = NULL;
     vm->dbg.breakpoints[index].cond_compile_failed = false;
     free(vm->dbg.breakpoints[index].func);
@@ -1449,7 +1452,8 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
 // NULL after printing the diagnostic.
 static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
                                                 const char *src, Obj *scope_fn,
-                                                Type *result_ty) {
+                                                Type       *result_ty,
+                                                CcCodeMark *mark) {
     if (!debugger_frame_var(vm))
         return NULL;
 
@@ -1513,9 +1517,12 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
         Obj        *fn   = __builtin_ast_function(name, expr->ty);
         Node       *ret  = __builtin_ast_return(expr);
         __builtin_ast_function_set_body(fn, ret);
-        cc_repl_compile_new(vm, snap.globals_head);
+        cc_repl_compile_new_marked(vm, snap.globals_head, mark);
         vm->error_jmp_buf = saved_jmp_buf;
         cc_expr_snapshot_discard(&snap);
+        // The wrapper is not a program function: keep pc lookups and later
+        // compiles away from it.
+        vm->compiler.globals = snap.globals_head;
         return fn;
     }
 
@@ -1526,11 +1533,13 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
                                             : "failed to compile expression");
     vm->error_message = NULL;
     cc_expr_snapshot_restore(vm, &snap);
+    cc_code_discard(vm, mark);
     return NULL;
 }
 
 static Obj *debugger_compile_expr(VirtualMachine *vm, const char *src,
-                                  Obj *scope_fn, Type *result_ty) {
+                                  Obj *scope_fn, Type *result_ty,
+                                  CcCodeMark *mark) {
     // gen_function leaves current_fn set; the expression parses at file scope
     // (a compound literal would otherwise attach to the last compiled
     // function). Likewise compiler.locals still lists the last parsed
@@ -1539,27 +1548,72 @@ static Obj *debugger_compile_expr(VirtualMachine *vm, const char *src,
     Obj *saved_locals       = vm->compiler.locals;
     vm->compiler.current_fn = NULL;
     vm->compiler.locals     = NULL;
-    Obj *fn = debugger_compile_expr_at_file_scope(vm, src, scope_fn, result_ty);
+    Obj *fn =
+        debugger_compile_expr_at_file_scope(vm, src, scope_fn, result_ty, mark);
     vm->compiler.current_fn = saved_fn;
     vm->compiler.locals     = saved_locals;
     return fn;
 }
 
-// Compile a breakpoint's condition exactly once. On success bp->cond_fn is
-// set; on failure bp->cond_compile_failed is set (so later hits don't retry
-// and re-print the same diagnostic every time).
-//
-// LIMITATION: the compiled wrapper's bytecode (and any string-literal rodata
-// it needs) is appended to the VM's text/data segments and never reclaimed --
-// the same shape of issue as the REPL's per-expression wrapper accumulation
-// (ticket #667), just keyed per conditional breakpoint here. Low priority;
-// tracked as a follow-up: https://todo.sr.ht/~takeiteasy/cccc/702
+// Compile a breakpoint's condition exactly once, sharing the wrapper of an
+// identical condition in the same function. On success bp->cond_fn is set; on
+// failure bp->cond_compile_failed is set (so later hits don't retry and
+// re-print the same diagnostic every time).
 static bool debugger_compile_condition_once(VirtualMachine *vm,
                                             Breakpoint     *bp) {
-    bp->cond_fn = debugger_compile_expr(vm, bp->condition,
-                                        debugger_current_function(vm), NULL);
+    Obj *scope = debugger_current_function(vm);
+    for (int i = 0; i < vm->dbg.num_conds; i++) {
+        DbgCond *c = &vm->dbg.conds[i];
+        if (c->scope_fn == scope && !strcmp(c->text, bp->condition)) {
+            c->refs++;
+            bp->cond_fn             = c->wrapper;
+            bp->cond_compile_failed = false;
+            return true;
+        }
+    }
+
+    CcCodeMark mark = {0};
+    bp->cond_fn = debugger_compile_expr(vm, bp->condition, scope, NULL, &mark);
     bp->cond_compile_failed = !bp->cond_fn;
-    return bp->cond_fn != NULL;
+    if (!bp->cond_fn)
+        return false;
+
+    if (vm->dbg.num_conds == vm->dbg.conds_cap) {
+        vm->dbg.conds_cap = vm->dbg.conds_cap ? vm->dbg.conds_cap * 2 : 8;
+        vm->dbg.conds =
+            realloc(vm->dbg.conds, (size_t)vm->dbg.conds_cap * sizeof(DbgCond));
+        if (!vm->dbg.conds)
+            error("out of memory for breakpoint conditions");
+    }
+    vm->dbg.conds[vm->dbg.num_conds++] =
+        (DbgCond){.text     = strdup(bp->condition),
+                  .scope_fn = scope,
+                  .wrapper  = bp->cond_fn,
+                  .mark     = mark,
+                  .refs     = 1};
+    return true;
+}
+
+// A breakpoint stopped using its compiled condition. A wrapper nobody uses is
+// given back once the code compiled after it is gone, in any order.
+// TODO: a wrapper below code that stays (a declaration, a block literal in the
+// condition) is never reclaimed; a free-hole allocator needs relocatable text
+// (https://todo.sr.ht/~takeiteasy/cccc/1508)
+static void debugger_drop_condition(VirtualMachine *vm, Obj *wrapper) {
+    for (int i = 0; wrapper && i < vm->dbg.num_conds; i++) {
+        DbgCond *c = &vm->dbg.conds[i];
+        if (c->wrapper != wrapper)
+            continue;
+        if (--c->refs > 0)
+            return;
+        DbgCond dead = *c;
+        memmove(c, c + 1,
+                (size_t)(vm->dbg.num_conds - i - 1) * sizeof(DbgCond));
+        vm->dbg.num_conds--;
+        cc_code_discard(vm, &dead.mark);
+        free(dead.text);
+        return;
+    }
 }
 
 // Run a compiled expression wrapper once. Mirrors
@@ -1743,14 +1797,17 @@ int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
             fprintf(stderr, "error: %s returns void\n", f.fn->name);
             return -1;
         }
-        Obj *wrapper =
-            debugger_compile_expr(vm, blank, f.bp ? f.fn : NULL, ret_ty);
+        CcCodeMark mark = {0};
+        Obj       *wrapper =
+            debugger_compile_expr(vm, blank, f.bp ? f.fn : NULL, ret_ty, &mark);
         if (!wrapper)
             return -1;
         Obj *frame_var = vm->dbg.dbg_frame_var;
         *(void **)(vm->data_seg + frame_var->offset) =
             (void *)(f.bp ? f.bp : vm->bp);
-        if (debugger_run_wrapper(vm, wrapper, &ival, &fval) < 0) {
+        int run_rc = debugger_run_wrapper(vm, wrapper, &ival, &fval);
+        cc_code_discard(vm, &mark);
+        if (run_rc < 0) {
             fprintf(stderr, "error: evaluating the return value failed\n");
             return -1;
         }
@@ -1821,6 +1878,7 @@ static void debugger_reresolve_breakpoints(VirtualMachine *vm) {
             printf("Breakpoint #%d moved to PC %u\n", i, new_pc);
             bp->pc = new_pc;
             // Compiled against the old body's locals.
+            debugger_drop_condition(vm, bp->cond_fn);
             bp->cond_fn             = NULL;
             bp->cond_compile_failed = false;
         }

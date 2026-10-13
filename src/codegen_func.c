@@ -691,6 +691,11 @@ static void redirect_function_entry(VirtualMachine *vm, Obj *fn) {
 // mirrors the sequence compile_macro_program() uses to compile the separate
 // comptime program (macros.c), retargeted at the main globals list.
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
+    cc_repl_compile_new_marked(vm, old_head, NULL);
+}
+
+void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
+                                CcCodeMark *mark) {
     if (!vm->text_seg) {
         vm_alloc_segments(vm);
         vm->compiler.current_codegen_fn = NULL;
@@ -717,6 +722,21 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     // above) so it is correct regardless of whether this call or an earlier
     // whole-program gen() allocated the segments first. Idempotent.
     cc_alloc_return_buffer_pool(vm);
+
+    // After the RETBUF pool, which a later release must not take back.
+    if (mark)
+        *mark = (CcCodeMark){.started      = true,
+                             .text_start   = vm->text_ptr,
+                             .data_start   = vm->data_ptr,
+                             .call_patches = vm->compiler.num_call_patches,
+                             .func_addr_patches =
+                                 vm->compiler.num_func_addr_patches,
+                             .global_labels = num_global_labels,
+                             .source_map    = vm->dbg.source_map_count,
+                             .debug_symbols = vm->dbg.num_debug_symbols,
+                             .last_file     = vm->dbg.last_debug_file,
+                             .last_line     = vm->dbg.last_debug_line,
+                             .last_col      = vm->dbg.last_debug_col};
 
     // Count and collect the new non-function globals, oldest-first (the list
     // is built by prepending, so walking old_head..globals gives newest-first).
@@ -851,4 +871,123 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     apply_global_relocations(vm, vm->compiler.globals, old_head);
 
     cc_build_source_index(vm);
+
+    if (mark) {
+        mark->ended                 = true;
+        mark->text_end              = vm->text_ptr;
+        mark->data_end              = vm->data_ptr;
+        mark->call_patches_end      = vm->compiler.num_call_patches;
+        mark->func_addr_patches_end = vm->compiler.num_func_addr_patches;
+        mark->global_labels_end     = num_global_labels;
+        mark->source_map_end        = vm->dbg.source_map_count;
+        mark->debug_symbols_end     = vm->dbg.num_debug_symbols;
+        mark->new_fns               = num_new_fns;
+        mark->new_vars              = num_new_vars;
+    }
+}
+
+int cc_code_release(VirtualMachine *vm, CcCodeMark *m) {
+    if (!m->started)
+        return 0;
+
+    // Data first: it stays reachable through anything the text left behind.
+    if (!m->data_done) {
+        char *data_end = m->ended ? m->data_end : vm->data_ptr;
+        if (m->ended && m->new_vars > 0) {
+            m->data_done = true; // a string literal or static lives here
+        } else if (data_end == m->data_start) {
+            m->data_done = true;
+        } else if (vm->data_ptr == data_end) {
+            size_t len = (size_t)(data_end - m->data_start);
+            memset(m->data_start, 0, len);
+            cc_type_shadow_clear_range(vm, m->data_start, len);
+            vm->data_ptr = m->data_start;
+            m->data_done = true;
+        }
+    }
+
+    if (m->text_done)
+        return 1;
+    if (m->ended &&
+        (m->new_fns > 1 || m->global_labels_end != m->global_labels))
+        return -1;
+    Pc text_end = m->ended ? m->text_end : vm->text_ptr;
+    if (vm->text_ptr != text_end)
+        return 0;
+    m->text_done = true;
+    if (text_end == m->text_start)
+        return 1;
+
+    memset(&vm->text_seg[m->text_start + 1], 0,
+           (size_t)(text_end - m->text_start) * sizeof(vm->text_seg[0]));
+    vm->text_ptr = m->text_start;
+    if (!m->ended || vm->compiler.num_call_patches == m->call_patches_end)
+        vm->compiler.num_call_patches = m->call_patches;
+    if (!m->ended ||
+        vm->compiler.num_func_addr_patches == m->func_addr_patches_end)
+        vm->compiler.num_func_addr_patches = m->func_addr_patches;
+    if (!m->ended || num_global_labels == m->global_labels_end)
+        num_global_labels = m->global_labels;
+    if (!m->ended || vm->dbg.num_debug_symbols == m->debug_symbols_end)
+        vm->dbg.num_debug_symbols = m->debug_symbols;
+    if (vm->dbg.source_map &&
+        (!m->ended || vm->dbg.source_map_count == m->source_map_end)) {
+        vm->dbg.source_map_count = m->source_map;
+        vm->dbg.last_debug_file  = m->last_file;
+        vm->dbg.last_debug_line  = m->last_line;
+        vm->dbg.last_debug_col   = m->last_col;
+    }
+    if (vm->dynobjsz_scan_pc > (long long)m->text_start + 1)
+        vm->dynobjsz_scan_pc = (long long)m->text_start + 1;
+
+    // The index is sorted and keeps each line's lowest pc, so the entries
+    // pointing past the mark are exactly the wrapper's.
+    if (vm->dbg.source_index) {
+        int kept = 0;
+        for (int i = 0; i < vm->dbg.source_index_count; i++)
+            if (vm->dbg.source_index[i].first_pc <= m->text_start)
+                vm->dbg.source_index[kept++] = vm->dbg.source_index[i];
+        vm->dbg.source_index_count     = kept;
+        vm->dbg.source_index_built_for = vm->dbg.source_map_count;
+    }
+    return 1;
+}
+
+void cc_code_discard(VirtualMachine *vm, CcCodeMark *m) {
+    if (!m->started)
+        return;
+    int rc = cc_code_release(vm, m);
+    if (rc == 0) {
+        if (vm->compiler.num_dead_marks == vm->compiler.dead_marks_cap) {
+            vm->compiler.dead_marks_cap = vm->compiler.dead_marks_cap
+                                              ? vm->compiler.dead_marks_cap * 2
+                                              : 8;
+            vm->compiler.dead_marks     = realloc(
+                vm->compiler.dead_marks,
+                (size_t)vm->compiler.dead_marks_cap * sizeof(CcCodeMark));
+            if (!vm->compiler.dead_marks)
+                error("out of memory for discarded wrappers");
+        }
+        vm->compiler.dead_marks[vm->compiler.num_dead_marks++] = *m;
+        return;
+    }
+    if (rc < 0)
+        return;
+
+    // Rolling back may have uncovered an older wrapper's end.
+    for (bool again = true; again;) {
+        again = false;
+        for (int i = 0; i < vm->compiler.num_dead_marks; i++) {
+            int r = cc_code_release(vm, &vm->compiler.dead_marks[i]);
+            if (r == 0)
+                continue;
+            memmove(&vm->compiler.dead_marks[i],
+                    &vm->compiler.dead_marks[i + 1],
+                    (size_t)(vm->compiler.num_dead_marks - i - 1) *
+                        sizeof(CcCodeMark));
+            vm->compiler.num_dead_marks--;
+            again = r > 0;
+            break;
+        }
+    }
 }

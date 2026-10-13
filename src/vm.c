@@ -1722,7 +1722,11 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&vm->compiler.global_decl_map);
 
     // Free source map and index (debugger)
+    free(vm->compiler.dead_marks);
     free(vm->dbg.source_map);
+    for (int i = 0; i < vm->dbg.num_conds; i++)
+        free(vm->dbg.conds[i].text);
+    free(vm->dbg.conds);
     free(vm->dbg.source_index);
     free(vm->dbg.frame_records);
 
