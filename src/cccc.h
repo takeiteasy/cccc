@@ -2682,6 +2682,14 @@ struct Obj {
                                 address in the text segment. */
     long long code_end_addr; // Address after function code in text segment
 
+    // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
+    // whose reload_of is the Obj it replaces. The oldest Obj stays the
+    // canonical entry; its ENT3 is overwritten with a JMP to the newest body.
+    Obj *reload_of;
+    // Block-scope static local: the function whose body declared it, so a
+    // reload can keep the old storage.
+    Obj *static_owner;
+
     // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
     bool is_constructor;
     bool is_destructor;
@@ -4496,7 +4504,9 @@ typedef struct Compiler {
 
     // Fuzzing / compile-only mode
     bool compile_only; // If true, compile to bytecode but do not require main()
-                       // or execute (used by AFL++ and other fuzzers)
+    bool allow_fn_redefinition; // REPL/cc_redefine_function: a second function
+                                // definition reloads the first
+                                // or execute (used by AFL++ and other fuzzers)
 } Compiler;
 
 // Named (rather than anonymous) so ExecState (internal.h) can hold its own
@@ -5684,6 +5694,36 @@ void cc_debug_repl(VirtualMachine *vm);
              (:quit or EOF on stdin).
 */
 void cc_run_repl(VirtualMachine *vm);
+
+/*!
+ @brief Sets up a persistent REPL session on `vm` (global scope, segments,
+           stack) without reading any input, so an embedder can drive it with
+           cc_repl_eval() and cc_redefine_function().
+ @details Declared function definitions may be redefined for the rest of the
+             session.
+ */
+void cc_repl_init(VirtualMachine *vm);
+
+/*!
+ @brief Hot-reloads functions: compiles the declarations in `src`, where a
+           function that is already defined is replaced by the new definition.
+ @return 0 on success. Nonzero if `src` fails to parse or type-check, is not a
+           declaration, or redefines a function with a different signature; the
+           diagnostic is printed to stderr and the session is left unchanged.
+ @details VM-only. Later calls, function pointers taken earlier and FFI
+             callbacks reach the new body; frames already running the old body
+             finish in it. Block-scope statics keep their storage when the new
+             body declares one of the same name and type. Callable from inside
+             running guest code.
+ */
+int cc_redefine_function(VirtualMachine *vm, const char *src);
+
+/*!
+ @brief Evaluates one expression (or declaration) in a REPL session.
+ @param result Receives the integer value of an expression; may be NULL.
+ @return 0 on success, nonzero on a recoverable error (diagnostic printed).
+ */
+int cc_repl_eval(VirtualMachine *vm, const char *expr, long long *result);
 
 /*!
  @brief Add a watchpoint at a specific memory address.

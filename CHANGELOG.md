@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: the REPL redefines functions (hot reload). Direct calls, function
+  pointers and host callbacks reach the new body; block-scope statics keep
+  their storage. Embedders use `cc_repl_init`, `cc_redefine_function` and
+  `cc_repl_eval`.
+- Fixed: a REPL function defined after an earlier prototype line is compiled;
+  every REPL definition after the first is no longer parsed as a nested
+  function; a `static inline` function defined at the REPL is compiled.
+
 ## [0.8.5] - 2026-10-12
 
 - Added: `--asm-passthru` accepts bit-field output operands (`=r`, `+r`); a

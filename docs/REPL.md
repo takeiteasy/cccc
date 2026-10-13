@@ -103,6 +103,58 @@ Notes on the formatting rules:
   occur at the REPL's top level, since a variably modified type at file
   scope is a compile error (see below).
 
+## Redefining functions
+
+Define a function a second time and later calls run the new body, with no
+restart.
+
+```
+cccc> int f(int x) { return x + 1; }
+cccc> int (*p)(int) = f;
+cccc> f(1)
+(int) 2
+cccc> int f(int x) { return x + 100; }
+cccc> f(1)
+(int) 101
+cccc> p(1)
+(int) 101
+```
+
+| Case | Behavior |
+|---|---|
+| Direct call, earlier-compiled caller | Runs the new body. |
+| Function pointer taken before the redefinition | Runs the new body; `p == f` stays true. |
+| Callback handed to the host (`qsort`, `atexit`, `sigaction`) | Runs the new body. |
+| Frame already executing the old body | Finishes in the old body. |
+| Block-scope `static` local | Keeps its value when the new body declares one with the same name and type; others start at their initializer. |
+| Different return type, parameters, variadic-ness or `static` | Error; the existing definition is untouched. |
+| Variable | Error. |
+
+A failed redefinition (syntax error, type error, signature change) rolls the
+session back like any other failing line.
+
+Each call to a redefined function costs one extra jump.[^jump]
+
+### Embedding
+
+An embedder drives the same machinery from C:
+
+```c
+cc_repl_init(&vm);                       // session without a prompt loop
+cc_redefine_function(&vm, "int f(int x) { return x + 100; }");  // 0 on success
+long long v;
+cc_repl_eval(&vm, "f(1)", &v);           // v == 101
+```
+
+`cc_redefine_function` takes declarations only and may be called from inside
+running guest code, for example from a registered host function. It is
+VM-only.
+
+[^jump]: The original entry point of the first definition stays the address of
+    the function. It is overwritten with a jump to the newest body, which is
+    how pointers and host callbacks stored earlier follow the redefinition.
+    Old bodies stay in the text segment.
+
 ## Known limitations
 
 - The REPL does not run the full preprocessor: `#include`, `#define`, and
@@ -112,9 +164,8 @@ Notes on the formatting rules:
   whose bytecode is not reclaimed after use, so a very long session slowly
   grows the VM's text/data segments. This does not affect
   declarations, which compile once and are never touched again.
-- Redefining an already-defined function or variable within a session (hot
-  reload) is not supported
-  ([#1455](https://todo.sr.ht/~takeiteasy/cccc/1455)).
+- Only functions can be redefined; redefining a variable is an error (see
+  [Redefining functions](#redefining-functions)).
 - Certain internal compiler errors outside of parsing/type-checking (for
   example calling a forward-declared-but-never-defined function, or hitting
   a hard resource limit like data-segment overflow) still terminate the

@@ -622,6 +622,53 @@ void gen(VirtualMachine *vm, Obj *prog) {
         error("%s() function not found", entry);
 }
 
+// A function whose body this unit supplies. Besides the Objs prepended since
+// `old_head`, that includes an earlier prototype's Obj, which a later
+// definition reuses in place.
+static bool repl_fn_needs_compile(Obj *v, bool is_new) {
+    if (!v->is_function || !v->body)
+        return false;
+    return is_new || !v->code_addr;
+}
+
+// A block-scope static of a reloaded function body keeps the storage of the
+// same-named, same-typed static in the body it replaces. Earlier statics of the
+// new body (arr[0..i)) have already claimed theirs, so duplicate names pair up
+// in declaration order.
+static Obj *find_reloaded_static(VirtualMachine *vm, Obj *var, Obj **arr,
+                                 int i) {
+    if (!var->static_owner || !var->static_owner->reload_of)
+        return NULL;
+    Obj *prev  = var->static_owner->reload_of;
+    Obj *found = NULL;
+    for (Obj *c = vm->compiler.globals; c; c = c->next) {
+        if (c->is_function || c->static_owner != prev || c == var ||
+            !c->display_name || !var->display_name ||
+            strcmp(c->display_name, var->display_name) ||
+            c->ty->size != var->ty->size || !is_compatible(c->ty, var->ty))
+            continue;
+        bool claimed = false;
+        for (int j = 0; j < i && !claimed; j++)
+            claimed = arr[j]->offset == c->offset && !arr[j]->is_tls &&
+                      arr[j]->static_owner == var->static_owner;
+        if (!claimed)
+            found = c; // keep walking: the list is newest-first
+    }
+    return found;
+}
+
+// Reload: overwrite the replaced function's entry with a jump to the new body,
+// so every route in (direct CALL, function pointers, FFI callbacks) lands
+// there. Repatching the recorded direct CALL sites would skip the jump if it
+// ever shows up in profiles.
+static void redirect_function_entry(VirtualMachine *vm, Obj *fn) {
+    Obj *root = fn_canonical(fn);
+    if (!fn->code_addr || !root->code_addr)
+        error("cannot reload %s: no compiled body to redirect", fn->name);
+    vm->text_seg[root->code_addr + 1] = (Pc)fn->code_addr; // target before op
+    vm->text_seg[root->code_addr]     = JMP;
+}
+
 // ========== Incremental Code Generation (REPL support, ticket #661) ==========
 //
 // gen() above is a whole-program pass: it resets text_ptr/data_ptr to zero and
@@ -685,6 +732,8 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                 arr[idx--] = v;
         for (int i = 0; i < num_new_vars; i++) {
             Obj *var = arr[i];
+            Obj *prev =
+                var->is_tls ? NULL : find_reloaded_static(vm, var, arr, i);
             if (var->is_tls) {
                 // #1136: see gen()'s own comment on this same allocation
                 // shape above.
@@ -698,6 +747,10 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
                     memcpy(vm->tls_template + tls_offset, var->init_data,
                            (size_t)var->ty->size);
                 vm->tls_template_size = tls_offset + (size_t)var->ty->size;
+            } else if (prev) {
+                var->offset = prev->offset;
+                add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL,
+                                 0);
             } else {
                 // #1136: see gen()'s own comment on this same allocation
                 // shape above.
@@ -717,25 +770,30 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     }
 
     // Count and collect the new function definitions, oldest-first.
-    int num_new_fns = 0;
-    for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
-        if (v->is_function && v->body)
+    int  num_new_fns = 0;
+    bool is_new      = true;
+    for (Obj *v = vm->compiler.globals; v; v = v->next) {
+        is_new = is_new && v != old_head;
+        if (repl_fn_needs_compile(v, is_new))
             num_new_fns++;
+    }
     if (num_new_fns > 0) {
         Obj **farr = alloca((size_t)num_new_fns * sizeof(Obj *));
         int   idx  = num_new_fns - 1;
-        for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
-            if (v->is_function && v->body)
+        is_new     = true;
+        for (Obj *v = vm->compiler.globals; v; v = v->next) {
+            is_new = is_new && v != old_head;
+            if (repl_fn_needs_compile(v, is_new))
                 farr[idx--] = v;
+        }
 
         int call_patch_start = vm->compiler.num_call_patches;
         int addr_patch_start = vm->compiler.num_func_addr_patches;
 
         for (int i = 0; i < num_new_fns; i++) {
-            Obj *fn = farr[i];
-            if (fn->is_inline && fn->is_static && !fn->is_live)
-                continue;
-            gen_function(vm, fn);
+            // No liveness pass runs in a session, so a static inline body is
+            // compiled even though nothing has marked it live.
+            gen_function(vm, farr[i]);
         }
         cc_asm_passthru_flush(vm);
 
@@ -781,6 +839,11 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
         }
 
         hashmap_deinit(&fn_defs);
+
+        // Only now is each new body fully patched and safe to jump into.
+        for (int i = 0; i < num_new_fns; i++)
+            if (farr[i]->reload_of)
+                redirect_function_entry(vm, farr[i]);
     }
 
     // Idempotent per-variable: only touches globals that carry a ->rel list,

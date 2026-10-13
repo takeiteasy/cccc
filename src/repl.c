@@ -489,11 +489,19 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
 // Core: parse + classify + (compile and) evaluate one unit of input.
 // ---------------------------------------------------------------------
 
-static void repl_process_unit(VirtualMachine *vm, const char *text) {
+// Parses, compiles and runs one unit. Returns 0 on success, 1 on a recoverable
+// error (diagnostic printed, session state rolled back). A non-NULL `result`
+// receives an expression's integer value instead of it being printed; with
+// `decls_only`, an expression is an error.
+static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
+                         long long *result) {
     CcExprSnapshot snap = cc_expr_snapshot(vm);
     jmp_buf        jb;
     jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
     vm->error_jmp_buf            = &jb;
+    // gen_function leaves current_fn set; a unit parses at file scope.
+    Obj *saved_fn           = vm->compiler.current_fn;
+    vm->compiler.current_fn = NULL;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl>", (char *)text);
@@ -511,6 +519,9 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
                 break;
 
             case REPL_UNIT_EXPR: {
+                if (decls_only)
+                    error_tok(vm, tok,
+                              "expected a declaration, not an expression");
                 const char *name = __builtin_gensym("__repl_eval");
                 Obj        *fn   = __builtin_ast_function(name, expr_node->ty);
                 Node       *ret  = __builtin_ast_return(expr_node);
@@ -520,7 +531,10 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
                 long long ival = 0;
                 double    fval = 0.0;
                 cc_expr_exec_wrapper(vm, fn, &ival, &fval);
-                repl_print_result(vm, expr_node->ty, ival, fval);
+                if (result)
+                    *result = ival;
+                else
+                    repl_print_result(vm, expr_node->ty, ival, fval);
 
                 // One-shot wrapper: drop it from the persistent globals list so
                 // it is not recompiled by future units. Its bytecode/data stay
@@ -530,13 +544,36 @@ static void repl_process_unit(VirtualMachine *vm, const char *text) {
             }
         }
 
-        vm->error_jmp_buf = saved_jmp_buf;
+        vm->error_jmp_buf       = saved_jmp_buf;
+        vm->compiler.current_fn = saved_fn;
         cc_expr_snapshot_discard(&snap);
-    } else {
-        vm->error_jmp_buf = saved_jmp_buf;
-        repl_print_pending_error(vm);
-        cc_expr_snapshot_restore(vm, &snap);
+        return 0;
     }
+    vm->error_jmp_buf       = saved_jmp_buf;
+    vm->compiler.current_fn = saved_fn;
+    repl_print_pending_error(vm);
+    cc_expr_snapshot_restore(vm, &snap);
+    return 1;
+}
+
+static void repl_process_unit(VirtualMachine *vm, const char *text) {
+    repl_run_unit(vm, text, false, NULL);
+}
+
+int cc_redefine_function(VirtualMachine *vm, const char *src) {
+    if (vm->compiler.compile_only) {
+        fprintf(stderr, "error: hot reload is VM-only\n");
+        return 1;
+    }
+    bool saved                         = vm->compiler.allow_fn_redefinition;
+    vm->compiler.allow_fn_redefinition = true;
+    int rc                             = repl_run_unit(vm, src, true, NULL);
+    vm->compiler.allow_fn_redefinition = saved;
+    return rc;
+}
+
+int cc_repl_eval(VirtualMachine *vm, const char *expr, long long *result) {
+    return repl_run_unit(vm, expr, false, result);
 }
 
 // ---------------------------------------------------------------------
@@ -574,7 +611,7 @@ static void repl_init_stack(VirtualMachine *vm) {
     vm->initial_bp = vm->bp;
 }
 
-void cc_run_repl(VirtualMachine *vm) {
+void cc_repl_init(VirtualMachine *vm) {
     // One-time session setup: enter the persistent global scope and declare
     // builtins by calling parse() on an empty token stream (mirrors how a
     // normal compile bootstraps global scope, but nothing is ever parsed
@@ -594,6 +631,12 @@ void cc_run_repl(VirtualMachine *vm) {
     // statement (cc_expr_exec_wrapper below runs once per input line) --
     // same "once per program run" reasoning as cc_run()'s own call.
     cccc_reset_getopt_state();
+
+    vm->compiler.allow_fn_redefinition = true;
+}
+
+void cc_run_repl(VirtualMachine *vm) {
+    cc_repl_init(vm);
 
     printf("CCCC interactive REPL. Type :help for session commands, :quit to "
            "exit.\n");

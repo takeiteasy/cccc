@@ -177,8 +177,9 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
                     continue;
                 }
                 segment       = 1;
-                target_offset = cc_pc_to_byte_offset((Pc)target->code_addr);
-                value         = target_offset + rel->addend;
+                target_offset =
+                    cc_pc_to_byte_offset((Pc)fn_canonical(target)->code_addr);
+                value = target_offset + rel->addend;
             } else {
                 // #957: a static initializer taking &g needs the same
                 // defined-or-deferred check as an ordinary reference (see
@@ -210,11 +211,17 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog) {
     }
 }
 
-Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
-    if (target->is_static && target->body)
-        return target;
+Obj *fn_canonical(Obj *fn) {
+    while (fn->reload_of)
+        fn = fn->reload_of;
+    return fn;
+}
 
-    return hashmap_get(fn_defs, target->name);
+Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
+    Obj *def = (target->is_static && target->body)
+                   ? target
+                   : hashmap_get(fn_defs, target->name);
+    return def ? fn_canonical(def) : NULL;
 }
 
 void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,

@@ -206,6 +206,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->tok             = ty->name;
             var->display_name    = get_ident(vm, ty->name);
             var->is_local_symbol = true;
+            var->static_owner    = vm->compiler.current_fn;
             var->is_constexpr    = attr->is_constexpr;
             var->is_maybe_unused = ty->is_maybe_unused;
             var->is_deprecated   = ty->is_deprecated;

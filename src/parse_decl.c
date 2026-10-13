@@ -556,7 +556,29 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
              ? !fn->ty->is_variadic // C23: () == (void); non-variadic = full
                                     // proto
              : fn->ty->params != NULL); // pre-C23: need an explicit params list
-    if (fn) {
+    bool is_reload = fn && fn->is_function && fn->is_definition &&
+                     equal(tok, "{") && vm->compiler.allow_fn_redefinition &&
+                     !is_nested;
+    if (is_reload) {
+        bool new_static =
+            attr->is_static || (attr->is_inline && !attr->is_extern);
+        if (!is_compatible_qualified_strict(fn->ty, ty) ||
+            fn->ty->is_variadic != ty->is_variadic ||
+            fn->is_static != new_static)
+            error_tok(vm, ty->name,
+                      "redefinition of '%s' with a different signature",
+                      name_str);
+        Obj *replaced     = fn;
+        fn                = new_gvar(vm, name_str, ty->name->len, ty);
+        fn->is_function   = true;
+        fn->is_definition = true;
+        fn->is_static     = new_static;
+        fn->is_inline     = attr->is_inline;
+        fn->asm_label     = ty->asm_label;
+        // A never-compiled predecessor has no entry to redirect.
+        if (replaced->code_addr)
+            fn->reload_of = replaced;
+    } else if (fn) {
         // Redeclaration
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");

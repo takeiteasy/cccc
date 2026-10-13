@@ -144,6 +144,9 @@ int temp_regs_free(void);
 long long alloc_decimal_temp(VirtualMachine *vm, int bytes);
 long long alloc_wide_bitint_temp(VirtualMachine *vm, int words);
 Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target);
+// The oldest Obj of a hot-reload chain: the one whose entry address is
+// canonical for every call and function pointer.
+Obj *fn_canonical(Obj *fn);
 Obj *find_static_link_var(Obj *fn);
 int static_link_hop_bytes(VirtualMachine *vm);
 Pc emit_addi3(VirtualMachine *vm, int rd, int rs, long long imm);
