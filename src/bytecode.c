@@ -29,6 +29,77 @@ static int source_index_cmp(const void *a, const void *b) {
                                          : 0;
 }
 
+// True if `pc` lies in a function body that a later definition replaced
+// (hot reload): nothing reaches it any more except frames already running it.
+bool cc_pc_in_replaced_body(VirtualMachine *vm, Pc pc) {
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+        Obj *old = fn->reload_of;
+        if (old && (long long)pc >= old->code_addr &&
+            (long long)pc < old->code_end_addr)
+            return true;
+    }
+    return false;
+}
+
+// Rebuilds the (file, line) -> first pc index from the source map, leaving out
+// replaced bodies. Cheap to call repeatedly: it skips when nothing was added.
+void cc_build_source_index(VirtualMachine *vm) {
+    if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || vm->dbg.source_map_count == 0)
+        return;
+    if (vm->dbg.source_index &&
+        vm->dbg.source_index_built_for == vm->dbg.source_map_count)
+        return;
+
+    free(vm->dbg.source_index);
+    vm->dbg.source_index           = NULL;
+    vm->dbg.source_index_count     = 0;
+    vm->dbg.source_index_built_for = vm->dbg.source_map_count;
+
+    SourceIndex *index =
+        malloc((size_t)vm->dbg.source_map_count * sizeof(SourceIndex));
+    if (!index)
+        error("could not malloc for source index");
+
+    // First pc of each run of one (file, line); entries inside a replaced
+    // body are skipped.
+    int   count     = 0;
+    File *last_file = NULL;
+    int   last_line = -1;
+    for (int i = 0; i < vm->dbg.source_map_count; i++) {
+        SourceMap *m = &vm->dbg.source_map[i];
+        if (cc_pc_in_replaced_body(vm, (Pc)m->pc_offset))
+            continue;
+        if (m->file != last_file || m->line_no != last_line) {
+            index[count].file     = m->file;
+            index[count].line_no  = m->line_no;
+            index[count].first_pc = (Pc)m->pc_offset;
+            count++;
+            last_file = m->file;
+            last_line = m->line_no;
+        }
+    }
+
+    qsort(index, (size_t)count, sizeof(SourceIndex), source_index_cmp);
+
+    // After sorting, identical (file, line) pairs are adjacent; keep the
+    // lowest first_pc of each.
+    int dedup_count = 0;
+    for (int i = 0; i < count; i++) {
+        SourceIndex *cur = &index[i];
+        if (dedup_count > 0) {
+            SourceIndex *last = &index[dedup_count - 1];
+            if (last->file == cur->file && last->line_no == cur->line_no) {
+                if (cur->first_pc < last->first_pc)
+                    last->first_pc = cur->first_pc;
+                continue;
+            }
+        }
+        index[dedup_count++] = *cur;
+    }
+    vm->dbg.source_index       = index;
+    vm->dbg.source_index_count = dedup_count;
+}
+
 void cc_compile(VirtualMachine *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
@@ -68,63 +139,5 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
     // forwarded to the host cc (#1159).
     gen(vm, prog);
 
-    // Build source index for O(log n) line→PC lookups
-    if (vm->flags & CCCC_ENABLE_DEBUGGER && vm->dbg.source_map_count > 0) {
-        vm->dbg.source_index_count = 0;
-
-        // First pass: count unique (file, line) pairs
-        File *last_file = NULL;
-        int   last_line = -1;
-        for (int i = 0; i < vm->dbg.source_map_count; i++) {
-            SourceMap *m = &vm->dbg.source_map[i];
-            if (m->file != last_file || m->line_no != last_line) {
-                vm->dbg.source_index_count++;
-                last_file = m->file;
-                last_line = m->line_no;
-            }
-        }
-
-        vm->dbg.source_index =
-            malloc(vm->dbg.source_index_count * sizeof(SourceIndex));
-        if (!vm->dbg.source_index) {
-            error("could not malloc for source index");
-        }
-
-        // Fill with first PC for each unique (file, line)
-        int idx   = 0;
-        last_file = NULL;
-        last_line = -1;
-        for (int i = 0; i < vm->dbg.source_map_count; i++) {
-            SourceMap *m = &vm->dbg.source_map[i];
-            if (m->file != last_file || m->line_no != last_line) {
-                vm->dbg.source_index[idx].file     = m->file;
-                vm->dbg.source_index[idx].line_no  = m->line_no;
-                vm->dbg.source_index[idx].first_pc = (Pc)m->pc_offset;
-                idx++;
-                last_file = m->file;
-                last_line = m->line_no;
-            }
-        }
-
-        // Sort by (file, line_no) for binary search
-        qsort(vm->dbg.source_index, vm->dbg.source_index_count,
-              sizeof(SourceIndex), source_index_cmp);
-
-        // Dedup: after sorting, identical (file, line) pairs are adjacent.
-        // Keep only the entry with the lowest first_pc per pair.
-        int dedup_count = 0;
-        for (int i = 0; i < vm->dbg.source_index_count; i++) {
-            SourceIndex *cur = &vm->dbg.source_index[i];
-            if (dedup_count > 0) {
-                SourceIndex *last = &vm->dbg.source_index[dedup_count - 1];
-                if (last->file == cur->file && last->line_no == cur->line_no) {
-                    if (cur->first_pc < last->first_pc)
-                        last->first_pc = cur->first_pc;
-                    continue;
-                }
-            }
-            vm->dbg.source_index[dedup_count++] = *cur;
-        }
-        vm->dbg.source_index_count = dedup_count;
-    }
+    cc_build_source_index(vm);
 }

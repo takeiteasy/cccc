@@ -849,4 +849,6 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     // Only this unit's globals: re-applying an older initializer would
     // overwrite whatever the program has stored there since.
     apply_global_relocations(vm, vm->compiler.globals, old_head);
+
+    cc_build_source_index(vm);
 }

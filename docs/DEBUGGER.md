@@ -49,6 +49,7 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `up` / `down` | | Select the caller / callee frame. |
 | `return [expr]` | | Pop the selected frame as if it returned `expr`. |
 | `restart` | | Re-enter the selected frame's function from the start. |
+| `fix <function>` | | Replace a function with the definition typed next. |
 | `registers` | `r` | Print all register values. |
 | `stack [count]` | `st [count]` | Print the top `count` entries of the stack (default 10). |
 | `disasm` | `dis` | Disassemble the current instruction. |
@@ -110,6 +111,39 @@ Limits:
     trapping take no snapshots.
 [^cleanup]: Running them needs a table of the cleanups active at each pc:
     https://todo.sr.ht/~takeiteasy/cccc/1505
+
+## Edit and continue
+
+`fix <function>` replaces a function while the program is paused. Type the new
+definition on the lines that follow; the debugger takes it once the braces
+balance. New calls, function pointers taken earlier and host callbacks run the
+new body.
+
+```
+(cccc-dbg) break leaf
+(cccc-dbg) continue
+Breakpoint hit at PC 98
+(cccc-dbg) fix leaf
+  ... int leaf(int x) {
+  ...   return x * 3 + g;
+  ... }
+leaf replaced; new calls run the new body
+(cccc-dbg) restart
+(cccc-dbg) continue
+```
+
+A frame already running the old body finishes in it. `restart` re-enters the
+frame's function from the start, which runs the new body.
+
+| Rule | Detail |
+|---|---|
+| Signature | Return type, parameters and `static` must match the old definition. |
+| Scope | Functions of the last file only; the new source sees that file's declarations. |
+| Source lines | The new body belongs to the file `<repl>`: `break <repl>:2`. |
+| Breakpoints | A `break <function>` follows the new body. A `file:line` breakpoint inside the old body is removed with a message; set it again on `<repl>:line`. |
+| Statics | A block-scope `static` keeps its storage when the new body declares one of the same name and type. |
+
+Embedders call `cc_debug_fix(vm, name, source)`.
 
 ## `print` and live-stack address validation
 

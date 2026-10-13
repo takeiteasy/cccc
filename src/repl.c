@@ -485,6 +485,18 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
     fclose(f);
 }
 
+static char *repl_read_prompted_line(void *ctx, const char *unused) {
+    (void)unused;
+    return repl_read_stdin_line(NULL, (const char *)ctx);
+}
+
+// Reads one balanced unit (a function definition, say) from stdin for the
+// debugger's `fix`, prompting with `prompt` on every line.
+char *cc_repl_read_unit_stdin(const char *prompt) {
+    LineSource src = {repl_read_prompted_line, (void *)prompt};
+    return repl_read_unit(&src, false, false);
+}
+
 // ---------------------------------------------------------------------
 // Core: parse + classify + (compile and) evaluate one unit of input.
 // ---------------------------------------------------------------------

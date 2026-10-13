@@ -3651,6 +3651,12 @@ typedef struct Breakpoint {
     bool cond_compile_failed; /**< Set when compiling `condition` failed, so
                                  later hits don't retry and re-print the same
                                  diagnostic every time. */
+    struct File *src_file;    /**< `file:line` / `line` breakpoints: the source
+                                   location, re-resolved after a function is
+                                   redefined. */
+    int   src_line;
+    char *func; /**< `function` breakpoints: the name, re-resolved after a
+                     redefinition. */
 } Breakpoint;
 
 /*!
@@ -3771,6 +3777,7 @@ typedef struct Debugger {
     // Secondary source index for O(log n) line→PC lookups
     SourceIndex *source_index;       // Sorted by (file, line_no)
     int          source_index_count; // Number of entries in source_index
+    int source_index_built_for; // source_map_count the index was built from
 
     // Debug symbols for expression evaluation
     DebugSymbol debug_symbols[MAX_DEBUG_SYMBOLS];
@@ -4539,9 +4546,9 @@ typedef struct Compiler {
 
     // Fuzzing / compile-only mode
     bool compile_only; // If true, compile to bytecode but do not require main()
+                       // or execute (used by AFL++ and other fuzzers)
     bool allow_fn_redefinition; // REPL/cc_redefine_function: a second function
                                 // definition reloads the first
-                                // or execute (used by AFL++ and other fuzzers)
 } Compiler;
 
 // Named (rather than anonymous) so ExecState (internal.h) can hold its own
@@ -5749,6 +5756,21 @@ int cc_debug_return(VirtualMachine *vm, int frame, const char *expr);
            function (cc_redefine_function).
  */
 int cc_debug_restart(VirtualMachine *vm, int frame);
+
+/*!
+ @brief Replaces the function `name` with the definition in `src` while the
+           program is paused or running.
+ @return 0 on success, nonzero with a diagnostic on stderr if `name` is not a
+           function of the last file, `src` fails to compile or does not
+           define `name`, or after a host fault.
+ @details Wraps cc_redefine_function and moves breakpoints that pointed into
+             the replaced body onto the new one (dropping those whose line is
+             gone). Frames already running the old body finish in it; combine
+             with cc_debug_restart to run the new body from the start of the
+             current call. The new source's lines belong to the file
+             `<repl>`.
+ */
+int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src);
 
 /*!
  @brief Run an interactive top-level read-eval-print loop on a VM.

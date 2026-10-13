@@ -1230,6 +1230,9 @@ void debugger_disassemble_current(VirtualMachine *vm);
 void debugger_print_stack(VirtualMachine *vm, int count);
 int debugger_check_breakpoint(VirtualMachine *vm);
 Node *cc_ast_var_node(VirtualMachine *vm, Obj *var); // reflection.c
+char *cc_repl_read_unit_stdin(const char *prompt);
+bool cc_pc_in_replaced_body(VirtualMachine *vm, Pc pc);
+void cc_build_source_index(VirtualMachine *vm);
 FrameRecord *cc_find_frame_record(VirtualMachine *vm, long long *bp);
 void cc_apply_frame_op(VirtualMachine *vm);
 int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size,

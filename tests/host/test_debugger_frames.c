@@ -291,6 +291,77 @@ static void test_session(void) {
           session_calls);
 }
 
+static int fix_rc    = -1;
+static int fix_armed = 0;
+
+static long long fix_hook(void) {
+    if (fix_armed) {
+        fix_armed = 0;
+        fix_rc =
+            cc_debug_fix(&vm, "fixme", "int fixme(int x){ return x * 3; }");
+        if (fix_rc == 0)
+            cc_debug_restart(&vm, 0);
+    }
+    return 0;
+}
+
+static File *last_compiled_file(void) {
+    return vm.dbg.source_map[vm.dbg.source_map_count - 1].file;
+}
+
+static void test_fix(void) {
+    decl("int fix_hook(void);");
+    decl("int fixme(int x){ fix_hook(); return x + 1; }");
+    CHECK(eval("fixme(5) + 0") == 6, "unfixed call");
+
+    // Fix a function from inside its own running call, then re-enter it.
+    fix_armed = 1;
+    CHECK(eval("fixme(5) + 0") == 15, "restart runs the new body");
+    CHECK(fix_rc == 0, "fix succeeded");
+    CHECK(eval("fixme(2) + 0") == 6, "later calls run the new body");
+
+    // Source lines of REPL-compiled code are indexed.
+    decl("int bpf(int x){\n  int y = x + 1;\n  return y;\n}");
+    File *f     = last_compiled_file();
+    Pc    line3 = cc_find_pc_for_source(&vm, f, 3);
+    CHECK(line3 != CCCC_INVALID_PC, "line of REPL code found");
+    const char *name = cc_pc_to_name(&vm, line3);
+    CHECK(name && !strcmp(name, "bpf"), "line maps into bpf: %s",
+          name ? name : "(null)");
+
+    // Breakpoints follow a fix: a function breakpoint moves to the new body, a
+    // line breakpoint whose line is gone is dropped.
+    int line_bp                          = cc_add_breakpoint(&vm, line3);
+    vm.dbg.breakpoints[line_bp].src_file = f;
+    vm.dbg.breakpoints[line_bp].src_line = 3;
+    int fn_bp = cc_add_breakpoint(&vm, cc_find_function_entry(&vm, "bpf"));
+    vm.dbg.breakpoints[fn_bp].func = strdup("bpf");
+    Pc old_entry                   = vm.dbg.breakpoints[fn_bp].pc;
+
+    CHECK(cc_debug_fix(&vm, "bpf", "int bpf(int x){\n  return x;\n}") == 0,
+          "fix bpf");
+    CHECK(!vm.dbg.breakpoints[line_bp].enabled, "line breakpoint dropped");
+    CHECK(vm.dbg.breakpoints[fn_bp].enabled &&
+              vm.dbg.breakpoints[fn_bp].pc != old_entry &&
+              vm.dbg.breakpoints[fn_bp].pc ==
+                  cc_find_function_entry(&vm, "bpf"),
+          "function breakpoint moved to the new body");
+    cc_remove_breakpoint(&vm, fn_bp);
+    CHECK(cc_find_pc_for_source(&vm, f, 3) == CCCC_INVALID_PC,
+          "the replaced body's lines are no longer indexed");
+
+    CHECK(eval("bpf(7)") == 7, "fixed function runs");
+
+    CHECK(cc_debug_fix(&vm, "no_such_fn",
+                       "int no_such_fn(void){ return 1; }") != 0,
+          "fix of an unknown function rejected");
+    CHECK(cc_debug_fix(&vm, "bpf", "int other(void){ return 1; }") != 0,
+          "source that does not define the function rejected");
+    CHECK(cc_debug_fix(&vm, "bpf", "int bpf(int x){ return x +; }") != 0,
+          "syntax error rejected");
+    CHECK(eval("bpf(8)") == 8, "function intact after rejected fixes");
+}
+
 int main(void) {
     cc_init(&vm, CCCC_ENABLE_DEBUGGER | CCCC_CFI | CCCC_STACK_CANARIES |
                      CCCC_DANGLING_DETECT);
@@ -299,6 +370,7 @@ int main(void) {
     register_stdlib_functions(&vm);
     cc_register_cfunc(&vm, "hook", (void *)hook, 0, 0);
     cc_register_cfunc(&vm, "session_hook", (void *)session_hook, 0, 0);
+    cc_register_cfunc(&vm, "fix_hook", (void *)fix_hook, 0, 0);
     cc_repl_init(&vm);
 
     test_return();
@@ -307,6 +379,7 @@ int main(void) {
     test_restart();
     test_rejections();
     test_session();
+    test_fix();
 
     cc_destroy(&vm);
     if (!failed)

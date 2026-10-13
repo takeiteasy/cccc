@@ -287,6 +287,9 @@ int cc_add_breakpoint(VirtualMachine *vm, Pc pc) {
             vm->dbg.breakpoints[i].condition           = NULL;
             vm->dbg.breakpoints[i].cond_fn             = NULL;
             vm->dbg.breakpoints[i].cond_compile_failed = false;
+            vm->dbg.breakpoints[i].src_file            = NULL;
+            vm->dbg.breakpoints[i].src_line            = 0;
+            vm->dbg.breakpoints[i].func                = NULL;
             vm->dbg.num_breakpoints++;
 
             // Calculate offset from text_seg for display
@@ -318,6 +321,9 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index) {
     }
     vm->dbg.breakpoints[index].cond_fn             = NULL;
     vm->dbg.breakpoints[index].cond_compile_failed = false;
+    free(vm->dbg.breakpoints[index].func);
+    vm->dbg.breakpoints[index].func     = NULL;
+    vm->dbg.breakpoints[index].src_file = NULL;
     vm->dbg.num_breakpoints--;
 
     printf("Breakpoint #%d removed\n", index);
@@ -502,6 +508,8 @@ static void print_help(bool inspect_only) {
         printf("  restart            - Re-enter the selected frame's function "
                "with its\n");
         printf("                       original arguments (needs -g)\n");
+        printf("  fix <function>     - Replace a function with the definition "
+               "typed next\n");
     }
     printf("\nInspection:\n");
     printf("  backtrace/bt       - Print the call frames\n");
@@ -607,6 +615,74 @@ static void debugger_select_and_show(VirtualMachine *vm, int frame) {
     }
 }
 
+// The File whose name contains `name`: the program's input files first, then
+// units compiled at run time (REPL, fix), newest first.
+static File *debugger_find_file(VirtualMachine *vm, const char *name) {
+    for (int i = 0; vm->compiler.input_files && vm->compiler.input_files[i];
+         i++)
+        if (strstr(vm->compiler.input_files[i]->name, name))
+            return vm->compiler.input_files[i];
+    for (int i = vm->dbg.source_map_count - 1; i >= 0; i--) {
+        File *f = vm->dbg.source_map[i].file;
+        if (f && f->name && strstr(f->name, name))
+            return f;
+    }
+    return NULL;
+}
+
+// Resolves a `break` argument (`line`, `file:line`, `function` or a bytecode
+// offset) to a pc. For the first three, also reports what to re-resolve after
+// the function is redefined: a file and line, or a malloc'd function name.
+static Pc debugger_resolve_location(VirtualMachine *vm, char *arg,
+                                    File **out_file, int *out_line,
+                                    char **out_func) {
+    Pc    bp_pc = CCCC_INVALID_PC;
+    char *colon = strchr(arg, ':');
+    if (colon) {
+        *colon            = '\0';
+        char *filename    = arg;
+        int   line_num    = atoi(colon + 1);
+
+        File *target_file = debugger_find_file(vm, filename);
+        bp_pc             = cc_find_pc_for_source(vm, target_file, line_num);
+        if (bp_pc == CCCC_INVALID_PC) {
+            printf("Error: Could not find code for %s:%d\n", filename,
+                   line_num);
+        } else {
+            *out_file = target_file;
+            *out_line = line_num;
+        }
+    } else if (isdigit((unsigned char)arg[0])) {
+        long long num = atoll(arg);
+
+        // A small number is a line number in the current file.
+        if (num < 10000) {
+            File *current_file = NULL;
+            cc_get_source_location(vm, vm->pc, &current_file, NULL, NULL);
+            bp_pc = cc_find_pc_for_source(vm, current_file, (int)num);
+            if (bp_pc == CCCC_INVALID_PC) {
+                printf("Error: Could not find code for line %lld\n", num);
+            } else {
+                *out_file = current_file;
+                *out_line = (int)num;
+            }
+        } else {
+            // A large number is a bytecode instruction index.
+            bp_pc =
+                (num >= 0 && num <= vm->text_ptr) ? (Pc)num : CCCC_INVALID_PC;
+            if (bp_pc == CCCC_INVALID_PC)
+                printf("Error: Offset %lld is out of range\n", num);
+        }
+    } else {
+        bp_pc = cc_find_function_entry(vm, arg);
+        if (bp_pc == CCCC_INVALID_PC)
+            printf("Error: Function '%s' not found\n", arg);
+        else
+            *out_func = strdup(arg);
+    }
+    return bp_pc;
+}
+
 static void debug_repl(VirtualMachine *vm, bool inspect_only) {
     char line[256];
     char cmd[64];
@@ -655,7 +731,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                     STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s") ||
                     STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n") ||
                     STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f") ||
-                    STREQ_LIT(cmd, "return") || STREQ_LIT(cmd, "restart"))) {
+                    STREQ_LIT(cmd, "return") || STREQ_LIT(cmd, "restart") ||
+                    STREQ_LIT(cmd, "fix"))) {
             printf("Cannot resume after a host fault; use inspection commands "
                    "or quit.\n");
         }
@@ -724,6 +801,23 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                 break;
             }
         }
+        // Edit and continue
+        else if (STREQ_LIT(cmd, "fix")) {
+            char name[128];
+            if (sscanf(line, "%*s %127s", name) != 1) {
+                printf("Usage: fix <function>, then the new definition\n");
+            } else {
+                char *src = cc_repl_read_unit_stdin("  ... ");
+                if (!src) {
+                    printf("fix: no definition given\n");
+                } else {
+                    if (cc_debug_fix(vm, name, src) == 0)
+                        printf("%s replaced; new calls run the new body\n",
+                               name);
+                    free(src);
+                }
+            }
+        }
         // Print registers
         else if (STREQ_LIT(cmd, "registers") || STREQ_LIT(cmd, "r")) {
             debugger_print_registers(vm);
@@ -762,73 +856,29 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
 
             // Try to parse location argument
             if (sscanf(line, "%*s %127s", arg) == 1) {
-                // Check if it's file:line format
-                char *colon = strchr(arg, ':');
-                if (colon) {
-                    *colon         = '\0'; // Split at colon
-                    char *filename = arg;
-                    int   line_num = atoi(colon + 1);
-
-                    // Find file (simple match on filename, not full path)
-                    File *target_file = NULL;
-                    for (int i = 0; vm->compiler.input_files &&
-                                    vm->compiler.input_files[i];
-                         i++) {
-                        if (strstr(vm->compiler.input_files[i]->name,
-                                   filename)) {
-                            target_file = vm->compiler.input_files[i];
-                            break;
-                        }
-                    }
-
-                    bp_pc = cc_find_pc_for_source(vm, target_file, line_num);
-                    if (bp_pc == CCCC_INVALID_PC) {
-                        printf("Error: Could not find code for %s:%d\n",
-                               filename, line_num);
-                    }
-                }
-                // Check if it's a pure number (offset or line number)
-                else if (isdigit(arg[0])) {
-                    long long num = atoll(arg);
-
-                    // If it's a small number, treat as line number in current
-                    // file
-                    if (num < 10000) {
-                        File *current_file = NULL;
-                        cc_get_source_location(vm, vm->pc, &current_file, NULL,
-                                               NULL);
-                        bp_pc = cc_find_pc_for_source(vm, current_file, num);
-                        if (bp_pc == CCCC_INVALID_PC) {
-                            printf("Error: Could not find code for line %lld\n",
-                                   num);
-                        }
-                    } else {
-                        // Large number, treat as bytecode instruction index.
-                        bp_pc = (num >= 0 && num <= vm->text_ptr)
-                                    ? (Pc)num
-                                    : CCCC_INVALID_PC;
-                        if (bp_pc == CCCC_INVALID_PC) {
-                            printf("Error: Offset %lld is out of range\n", num);
-                        }
-                    }
-                }
-                // Otherwise treat as function name
-                else {
-                    bp_pc = cc_find_function_entry(vm, arg);
-                    if (bp_pc == CCCC_INVALID_PC) {
-                        printf("Error: Function '%s' not found\n", arg);
-                    }
-                }
-
+                File *spec_file = NULL;
+                int   spec_line = 0;
+                char *spec_func = NULL;
+                bp_pc = debugger_resolve_location(vm, arg, &spec_file,
+                                                  &spec_line, &spec_func);
                 if (bp_pc != CCCC_INVALID_PC) {
                     int bp_idx = cc_add_breakpoint(vm, bp_pc);
-                    // Set condition if provided
-                    if (bp_idx >= 0 && condition) {
-                        vm->dbg.breakpoints[bp_idx].condition = condition;
-                        printf("Condition: %s\n", condition);
-                        condition = NULL; // Prevent double-free
+                    if (bp_idx >= 0) {
+                        Breakpoint *bp = &vm->dbg.breakpoints[bp_idx];
+                        if (!bp->func && !bp->src_file) {
+                            bp->src_file = spec_file;
+                            bp->src_line = spec_line;
+                            bp->func     = spec_func;
+                            spec_func    = NULL;
+                        }
+                        if (condition) {
+                            bp->condition = condition;
+                            printf("Condition: %s\n", condition);
+                            condition = NULL; // Prevent double-free
+                        }
                     }
                 }
+                free(spec_func);
             } else {
                 printf("Usage: break <line> | <file:line> | <function> | "
                        "<offset> [if <condition>]\n");
@@ -1732,6 +1782,80 @@ int cc_debug_restart(VirtualMachine *vm, int frame) {
     vm->dbg.pending_op    = CC_FRAME_OP_RESTART;
     vm->dbg.pending_bp    = f.bp;
     vm->dbg.pending_entry = (Pc)fn_canonical(f.fn)->code_addr;
+    return 0;
+}
+
+// ============================================================================
+// Edit and continue: cc_debug_fix
+// ============================================================================
+
+// After a function is redefined, move breakpoints that pointed into the old
+// body onto the new one, or drop them if their line or function is gone.
+static void debugger_reresolve_breakpoints(VirtualMachine *vm) {
+    for (int i = 0; i < MAX_BREAKPOINTS; i++) {
+        Breakpoint *bp = &vm->dbg.breakpoints[i];
+        if (!bp->enabled)
+            continue;
+        if (!bp->func && !cc_pc_in_replaced_body(vm, bp->pc))
+            continue;
+
+        Pc new_pc = CCCC_INVALID_PC;
+        if (bp->func)
+            new_pc = cc_find_function_entry(vm, bp->func);
+        else if (bp->src_file)
+            new_pc = cc_find_pc_for_source(vm, bp->src_file, bp->src_line);
+
+        if (new_pc == CCCC_INVALID_PC) {
+            printf("Breakpoint #%d was in the replaced body and has no "
+                   "counterpart\n",
+                   i);
+            cc_remove_breakpoint(vm, i);
+        } else if (new_pc != bp->pc) {
+            printf("Breakpoint #%d moved to PC %u\n", i, new_pc);
+            bp->pc = new_pc;
+            // Compiled against the old body's locals.
+            bp->cond_fn             = NULL;
+            bp->cond_compile_failed = false;
+        }
+    }
+}
+
+// The function `name` as the parser would resolve it from the file scope that
+// is still open: the last file's, so a function of an earlier file is not
+// reachable.
+static Obj *debugger_find_reachable_function(VirtualMachine *vm,
+                                             const char     *name) {
+    size_t len = strlen(name);
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next)
+        for (VarScopeNode *n = sc->vars; n; n = n->next)
+            if (n->name_len == (int)len && !strncmp(n->name, name, len))
+                return n->var && n->var->is_function ? n->var : NULL;
+    return NULL;
+}
+
+int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src) {
+    if (!debugger_frame_op_allowed(vm, "fix")) // host fault: nothing resumes
+        return -1;
+    Obj *old = debugger_find_reachable_function(vm, name);
+    if (!old || !old->is_function || !old->is_definition) {
+        fprintf(stderr,
+                "error: %s is not a function defined in this file (fix "
+                "reaches the last file's functions)\n",
+                name);
+        return -1;
+    }
+    if (cc_redefine_function(vm, src))
+        return -1;
+
+    Obj *now = NULL;
+    for (Obj *fn = vm->compiler.globals; fn && !now; fn = fn->next)
+        if (fn->is_function && fn->body && fn->name && !strcmp(fn->name, name))
+            now = fn;
+    if (!now || now == old) {
+        fprintf(stderr, "error: the new source does not define %s\n", name);
+        return -1;
+    }
+    debugger_reresolve_breakpoints(vm);
     return 0;
 }
 

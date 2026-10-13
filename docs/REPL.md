@@ -135,6 +135,9 @@ session back like any other failing line.
 
 Each call to a redefined function costs one extra jump.[^jump]
 
+The debugger redefines functions of a program stopped under `-g` the same way:
+see [Edit and continue](DEBUGGER.md#edit-and-continue).
+
 ### Embedding
 
 An embedder drives the same machinery from C:
