@@ -1229,6 +1229,9 @@ void cc_debug_repl_host_fault(VirtualMachine *vm, int sig, void *fault_addr);
 void debugger_disassemble_current(VirtualMachine *vm);
 void debugger_print_stack(VirtualMachine *vm, int count);
 int debugger_check_breakpoint(VirtualMachine *vm);
+Node *cc_ast_var_node(VirtualMachine *vm, Obj *var); // reflection.c
+FrameRecord *cc_find_frame_record(VirtualMachine *vm, long long *bp);
+void cc_apply_frame_op(VirtualMachine *vm);
 int debugger_check_watchpoint(VirtualMachine *vm, void *addr, int size,
                               int access_type);
 void debugger_print_registers(VirtualMachine *vm);

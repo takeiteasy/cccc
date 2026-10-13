@@ -2552,8 +2552,10 @@ int main(int argc, const char *argv[]) {
 
     VirtualMachine vm;
     cc_init(&vm, flags);
-    if (auto_debug_on_crash)
+    if (auto_debug_on_crash) {
         vm.dbg.crash_debug_auto = true;
+        vm.dbg.frame_records_on = false; // restart/return need an explicit -g
+    }
     vm.compiler.cli_flags_mask          = cli_flags_mask;
     vm.kernel_max_group                 = kernel_max_group;
     vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);

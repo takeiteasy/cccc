@@ -97,13 +97,13 @@ static int __cccc_pc_to_source(void *pc, const char **out_file, int *out_line) {
                            out_line);
 }
 
-// Refactored helper — now delegates to the public API so there is no duplicated
-// globals-scan logic.
-static Obj *debugger_current_function(VirtualMachine *vm) {
-    if (!vm || vm->pc == CCCC_INVALID_PC)
-        return NULL;
+extern Obj *fn_canonical(Obj *fn); // codegen_regalloc.c
 
-    long long pc_offset = vm->pc;
+// The function whose body (current or replaced) contains `pc`.
+static Obj *debugger_function_at(VirtualMachine *vm, Pc pc) {
+    if (!vm || pc == CCCC_INVALID_PC)
+        return NULL;
+    long long pc_offset = pc;
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
         if (!fn->is_function || !fn->body)
             continue;
@@ -113,13 +113,96 @@ static Obj *debugger_current_function(VirtualMachine *vm) {
     return NULL;
 }
 
+static Obj *debugger_current_function(VirtualMachine *vm) {
+    return vm ? debugger_function_at(vm, vm->pc) : NULL;
+}
+
+// ---- Call frames (bt / frame / return / restart) ----
+
+#define DBG_MAX_FRAMES 1024
+
+typedef struct {
+    long long *bp;  // NULL: function paused at its entry, frame not created yet
+    Pc         pc;  // outer frames: the call instruction
+    Obj       *fn;
+    long long  ret; // return address (0 at the root of a vm_eval)
+} DbgFrame;
+
+// A frame is the root of its vm_eval when it returns to the sentinel 0 (main,
+// host callbacks) or was entered by a signal handler.
+static bool debugger_frame_is_root(VirtualMachine *vm, long long ret,
+                                   long long *ret_slot) {
+    if (ret == 0)
+        return true;
+    for (int i = 0; i < vm->sig_depth; i++)
+        if (vm->sig_frames[i].sp_at_entry == ret_slot)
+            return true;
+    return false;
+}
+
+static bool debugger_pc_is_entry(VirtualMachine *vm, Pc pc) {
+    for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
+        if (fn->is_function && fn->body && fn->code_addr == (long long)pc)
+            return true;
+    return false;
+}
+
+// Fills `out` innermost first; returns the frame count.
+static int debugger_collect_frames(VirtualMachine *vm, DbgFrame *out, int max) {
+    int        n  = 0;
+    long long *bp = vm->bp;
+    Pc         pc = vm->pc;
+    if (!vm->initial_sp || pc == CCCC_INVALID_PC)
+        return 0;
+
+    if (debugger_pc_is_entry(vm, pc)) {
+        long long ret = *vm->sp;
+        out[n++]      = (DbgFrame){NULL, pc, debugger_function_at(vm, pc), ret};
+        if (debugger_frame_is_root(vm, ret, vm->sp))
+            return n;
+        pc = (Pc)(ret - 1);
+    }
+    while (n < max && bp >= vm->sp && bp < vm->initial_sp) {
+        long long ret = bp[1];
+        out[n++]      = (DbgFrame){bp, pc, debugger_function_at(vm, pc), ret};
+        if (debugger_frame_is_root(vm, ret, bp + 1))
+            break;
+        bp = (long long *)bp[0];
+        pc = (Pc)(ret - 1);
+    }
+    return n;
+}
+
+// The frame `print` and symbol lookups read: the selected one. Either output
+// may be NULL.
+static void debugger_active_frame(VirtualMachine *vm, long long **bp,
+                                  Obj **fn) {
+    long long *active_bp = vm->bp;
+    Obj       *active_fn = debugger_current_function(vm);
+    if (vm->dbg.selected_frame > 0) {
+        DbgFrame frames[DBG_MAX_FRAMES];
+        int      n = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+        int      i = vm->dbg.selected_frame;
+        if (i < n && frames[i].bp) {
+            active_bp = frames[i].bp;
+            active_fn = frames[i].fn;
+        }
+    }
+    if (bp)
+        *bp = active_bp;
+    if (fn)
+        *fn = active_fn;
+}
+
 static void *debugger_symbol_address(VirtualMachine *vm, DebugSymbol *sym) {
     if (!sym)
         return NULL;
     if (sym->is_local) {
         // The canary one-slot shift is already baked into sym->offset by
         // assign_stack_offsets (#445), so no extra adjustment is needed here.
-        void *addr = (void *)(vm->bp + sym->offset);
+        long long *frame_bp;
+        debugger_active_frame(vm, &frame_bp, NULL);
+        void *addr = (void *)(frame_bp + sym->offset);
         if (sym->align_log)
             addr =
                 (void *)cc_align_up_ll((long long)addr, 8LL << sym->align_log);
@@ -409,7 +492,19 @@ static void print_help(bool inspect_only) {
         printf("  next/n             - Step over (skip function calls)\n");
         printf("  finish/f           - Step out (run until return)\n");
     }
+    if (!inspect_only) {
+        printf("\nFrames:\n");
+        printf("  frame/fr [n]       - Select frame n (default: show "
+               "selected)\n");
+        printf("  up / down          - Select the caller / callee frame\n");
+        printf("  return [expr]      - Pop the selected frame as if it "
+               "returned expr\n");
+        printf("  restart            - Re-enter the selected frame's function "
+               "with its\n");
+        printf("                       original arguments (needs -g)\n");
+    }
     printf("\nInspection:\n");
+    printf("  backtrace/bt       - Print the call frames\n");
     printf("  registers/r        - Print register values\n");
     printf("  stack/st [count]   - Print stack (default 10 entries)\n");
     printf("  disasm/dis         - Disassemble current instruction\n");
@@ -463,11 +558,61 @@ static void debugger_print_source_location(VirtualMachine *vm) {
     }
 }
 
+static void debugger_print_frame_line(VirtualMachine *vm, int idx,
+                                      const DbgFrame *f) {
+    File       *file = NULL;
+    int         line = 0;
+    const char *name = f->fn ? f->fn->name : NULL;
+    printf("%s#%-2d %s", idx == vm->dbg.selected_frame ? "*" : " ", idx,
+           name ? name : "??");
+    if (f->bp == NULL)
+        printf(" (at entry)");
+    if (cc_get_source_location(vm, f->pc, &file, &line, NULL) && file)
+        printf(" at %s:%d", file->name ? file->name : "<unknown>", line);
+    printf("\n");
+}
+
+static void debugger_print_backtrace(VirtualMachine *vm) {
+    DbgFrame frames[DBG_MAX_FRAMES];
+    int      n = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+    if (n == 0)
+        printf("No frames.\n");
+    for (int i = 0; i < n; i++)
+        debugger_print_frame_line(vm, i, &frames[i]);
+}
+
+// Text after the command word, trimmed.
+static const char *debugger_command_rest(const char *line) {
+    while (isspace((unsigned char)*line))
+        line++;
+    while (*line && !isspace((unsigned char)*line))
+        line++;
+    while (isspace((unsigned char)*line))
+        line++;
+    return line;
+}
+
+// Reopen the REPL at the pc the scheduled frame operation lands on.
+static void debugger_stop_after_frame_op(VirtualMachine *vm) {
+    vm->dbg.single_step = 1;
+    vm->dbg.step_over   = 0;
+    vm->dbg.step_out    = 0;
+}
+
+static void debugger_select_and_show(VirtualMachine *vm, int frame) {
+    if (cc_debug_select_frame(vm, frame) == 0) {
+        DbgFrame frames[DBG_MAX_FRAMES];
+        debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+        debugger_print_frame_line(vm, frame, &frames[frame]);
+    }
+}
+
 static void debug_repl(VirtualMachine *vm, bool inspect_only) {
     char line[256];
     char cmd[64];
 
     vm->dbg.debugger_attached = 1;
+    vm->dbg.selected_frame    = 0;
 
     printf("\n========================================\n");
     printf("    CCCC Debugger\n");
@@ -509,7 +654,8 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                    (STREQ_LIT(cmd, "continue") || STREQ_LIT(cmd, "c") ||
                     STREQ_LIT(cmd, "step") || STREQ_LIT(cmd, "s") ||
                     STREQ_LIT(cmd, "next") || STREQ_LIT(cmd, "n") ||
-                    STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f"))) {
+                    STREQ_LIT(cmd, "finish") || STREQ_LIT(cmd, "f") ||
+                    STREQ_LIT(cmd, "return") || STREQ_LIT(cmd, "restart"))) {
             printf("Cannot resume after a host fault; use inspection commands "
                    "or quit.\n");
         }
@@ -552,6 +698,31 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             vm->dbg.step_out    = 1;
             vm->dbg.step_out_bp = vm->bp;
             break;
+        }
+        // Frame control
+        else if (STREQ_LIT(cmd, "backtrace") || STREQ_LIT(cmd, "bt")) {
+            debugger_print_backtrace(vm);
+        } else if (STREQ_LIT(cmd, "frame") || STREQ_LIT(cmd, "fr")) {
+            int frame;
+            if (sscanf(line, "%*s %d", &frame) == 1)
+                debugger_select_and_show(vm, frame);
+            else
+                debugger_select_and_show(vm, vm->dbg.selected_frame);
+        } else if (STREQ_LIT(cmd, "up")) {
+            debugger_select_and_show(vm, vm->dbg.selected_frame + 1);
+        } else if (STREQ_LIT(cmd, "down")) {
+            debugger_select_and_show(vm, vm->dbg.selected_frame - 1);
+        } else if (STREQ_LIT(cmd, "return")) {
+            if (cc_debug_return(vm, vm->dbg.selected_frame,
+                                debugger_command_rest(line)) == 0) {
+                debugger_stop_after_frame_op(vm);
+                break;
+            }
+        } else if (STREQ_LIT(cmd, "restart")) {
+            if (cc_debug_restart(vm, vm->dbg.selected_frame) == 0) {
+                debugger_stop_after_frame_op(vm);
+                break;
+            }
         }
         // Print registers
         else if (STREQ_LIT(cmd, "registers") || STREQ_LIT(cmd, "r")) {
@@ -1014,7 +1185,8 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
         return NULL;
     }
 
-    Obj *current_fn = debugger_current_function(vm);
+    Obj *current_fn;
+    debugger_active_frame(vm, NULL, &current_fn);
 
     // Search locals in the current function first.
     for (int i = vm->dbg.num_debug_symbols - 1; i >= 0; i--) {
@@ -1127,7 +1299,10 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
         Obj  *var       = node->var;
-        Node *frame_ref = __builtin_ast_var_ref("__cccc_dbg_frame");
+        // Referenced by Obj, not by name: a REPL session drops globals created
+        // while a unit ran from its list, so a lookup could miss the variable
+        // though its storage lives on.
+        Node *frame_ref = cc_ast_var_node(vm, vm->dbg.dbg_frame_var);
         Node *char_ptr = __builtin_ast_cast(frame_ref, pointer_to(vm, ty_char));
         Node *idx      = __builtin_ast_int_literal((int64_t)var->offset *
                                                    (int64_t)sizeof(long long));
@@ -1210,9 +1385,112 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
     return NULL;
 }
 
-// Parse, rewrite, and compile a breakpoint's condition exactly once. On
-// success bp->cond_fn is set; on failure bp->cond_compile_failed is set (so
-// later hits don't retry and re-print the same diagnostic every time).
+// Parse `src` as an expression in the scope of `scope_fn` (NULL: globals only),
+// rewrite its locals to reach the frame at __cccc_dbg_frame, and compile it
+// into a zero-argument wrapper function. A non-NULL `result_ty` converts the
+// value to that type; otherwise the expression must have scalar type. Returns
+// NULL after printing the diagnostic.
+static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
+                                                const char *src, Obj *scope_fn,
+                                                Type *result_ty) {
+    if (!debugger_frame_var(vm))
+        return NULL;
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s\n", src);
+    File temp_file = {.name         = "<condition>",
+                      .file_no      = 0,
+                      .contents     = buf,
+                      .display_name = NULL,
+                      .line_delta   = 0};
+
+    // A parse or codegen error longjmps here instead of into the caller's
+    // handler (the REPL's, or the program's).
+    CcExprSnapshot snap = cc_expr_snapshot(vm);
+    jmp_buf        jb;
+    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
+    Scope         *saved_scope        = vm->compiler.scope;
+    VarScopeNode *volatile scope_vars = NULL;
+    vm->error_jmp_buf                 = &jb;
+
+    if (setjmp(jb) == 0) {
+        Token *tok = tokenize(vm, &temp_file);
+        if (!tok)
+            error("failed to tokenize the expression");
+        convert_pp_tokens(vm, tok);
+
+        Scope condition_scope = {0};
+        for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
+            debugger_add_condition_scope_var(&condition_scope.vars, obj);
+        if (scope_fn) {
+            for (Obj *obj = scope_fn->locals; obj; obj = obj->next)
+                debugger_add_condition_scope_var(&condition_scope.vars, obj);
+        }
+        // The parser may push (arena-allocated) entries in front of ours, such
+        // as a compound literal's anonymous variable; free only our chain.
+        scope_vars           = condition_scope.vars;
+        condition_scope.next = saved_scope;
+        vm->compiler.scope   = &condition_scope;
+        Token *rest          = NULL;
+        Node  *expr          = cc_parse_expr(vm, &rest, tok);
+        vm->compiler.scope   = saved_scope;
+        debugger_free_condition_scope(scope_vars);
+        scope_vars = NULL;
+        if (!expr)
+            error("failed to parse the expression");
+        add_type(vm, expr);
+
+        if (result_ty &&
+            (result_ty->kind == TY_STRUCT || result_ty->kind == TY_UNION)) {
+            if (!expr->ty || !is_compatible(expr->ty, result_ty))
+                error("value is not a compatible aggregate");
+        } else if (result_ty) {
+            expr = new_cast(vm, expr, result_ty);
+            add_type(vm, expr);
+        } else if (!debugger_type_is_valid_condition(expr->ty)) {
+            error("condition must have scalar type");
+        }
+
+        debugger_rewrite_locals(vm, scope_fn, expr);
+        const char *name = __builtin_gensym("__cccc_dbg_cond");
+        Obj        *fn   = __builtin_ast_function(name, expr->ty);
+        Node       *ret  = __builtin_ast_return(expr);
+        __builtin_ast_function_set_body(fn, ret);
+        cc_repl_compile_new(vm, snap.globals_head);
+        vm->error_jmp_buf = saved_jmp_buf;
+        cc_expr_snapshot_discard(&snap);
+        return fn;
+    }
+
+    vm->error_jmp_buf  = saved_jmp_buf;
+    vm->compiler.scope = saved_scope;
+    debugger_free_condition_scope(scope_vars);
+    printf("Error: %s\n", vm->error_message ? vm->error_message
+                                            : "failed to compile expression");
+    vm->error_message = NULL;
+    cc_expr_snapshot_restore(vm, &snap);
+    return NULL;
+}
+
+static Obj *debugger_compile_expr(VirtualMachine *vm, const char *src,
+                                  Obj *scope_fn, Type *result_ty) {
+    // gen_function leaves current_fn set; the expression parses at file scope
+    // (a compound literal would otherwise attach to the last compiled
+    // function). Likewise compiler.locals still lists the last parsed
+    // function's locals, which the wrapper would adopt and re-number.
+    Obj *saved_fn           = vm->compiler.current_fn;
+    Obj *saved_locals       = vm->compiler.locals;
+    vm->compiler.current_fn = NULL;
+    vm->compiler.locals     = NULL;
+    Obj *fn = debugger_compile_expr_at_file_scope(vm, src, scope_fn, result_ty);
+    vm->compiler.current_fn = saved_fn;
+    vm->compiler.locals     = saved_locals;
+    return fn;
+}
+
+// Compile a breakpoint's condition exactly once. On success bp->cond_fn is
+// set; on failure bp->cond_compile_failed is set (so later hits don't retry
+// and re-print the same diagnostic every time).
 //
 // LIMITATION: the compiled wrapper's bytecode (and any string-literal rodata
 // it needs) is appended to the VM's text/data segments and never reclaimed --
@@ -1221,84 +1499,13 @@ static Obj *debugger_frame_var(VirtualMachine *vm) {
 // tracked as a follow-up: https://todo.sr.ht/~takeiteasy/cccc/702
 static bool debugger_compile_condition_once(VirtualMachine *vm,
                                             Breakpoint     *bp) {
-    if (!debugger_frame_var(vm)) {
-        bp->cond_compile_failed = true;
-        return false;
-    }
-
-    char buf[512];
-    snprintf(buf, sizeof(buf), "%s\n", bp->condition);
-    File   temp_file = {.name         = "<condition>",
-                        .file_no      = 0,
-                        .contents     = buf,
-                        .display_name = NULL,
-                        .line_delta   = 0};
-    Token *tok       = tokenize(vm, &temp_file);
-    if (!tok) {
-        printf("Error: Failed to tokenize condition\n");
-        bp->cond_compile_failed = true;
-        return false;
-    }
-    convert_pp_tokens(vm, tok);
-
-    Obj  *current_fn      = debugger_current_function(vm);
-    Scope condition_scope = {0};
-    for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
-        debugger_add_condition_scope_var(&condition_scope.vars, obj);
-    if (current_fn) {
-        for (Obj *obj = current_fn->locals; obj; obj = obj->next)
-            debugger_add_condition_scope_var(&condition_scope.vars, obj);
-    }
-
-    Scope *saved_scope   = vm->compiler.scope;
-    condition_scope.next = saved_scope;
-    vm->compiler.scope   = &condition_scope;
-    Token *rest          = NULL;
-    Node  *expr          = cc_parse_expr(vm, &rest, tok);
-    vm->compiler.scope   = saved_scope;
-    debugger_free_condition_scope(condition_scope.vars);
-    if (!expr) {
-        printf("Error: Failed to parse condition expression\n");
-        bp->cond_compile_failed = true;
-        return false;
-    }
-    add_type(vm, expr);
-
-    if (!debugger_type_is_valid_condition(expr->ty)) {
-        printf("Error: condition must have scalar type\n");
-        bp->cond_compile_failed = true;
-        return false;
-    }
-    Type          *cond_ty = expr->ty;
-
-    CcExprSnapshot snap    = cc_expr_snapshot(vm);
-    jmp_buf        jb;
-    jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
-    vm->error_jmp_buf            = &jb;
-
-    if (setjmp(jb) == 0) {
-        debugger_rewrite_locals(vm, current_fn, expr);
-        const char *name = __builtin_gensym("__cccc_dbg_cond");
-        Obj        *fn   = __builtin_ast_function(name, cond_ty);
-        Node       *ret  = __builtin_ast_return(expr);
-        __builtin_ast_function_set_body(fn, ret);
-        cc_repl_compile_new(vm, snap.globals_head);
-        vm->error_jmp_buf = saved_jmp_buf;
-        cc_expr_snapshot_discard(&snap);
-        bp->cond_fn = fn;
-        return true;
-    }
-
-    vm->error_jmp_buf = saved_jmp_buf;
-    printf("Error: %s\n", vm->error_message ? vm->error_message
-                                            : "failed to compile condition");
-    vm->error_message = NULL;
-    cc_expr_snapshot_restore(vm, &snap);
-    bp->cond_compile_failed = true;
-    return false;
+    bp->cond_fn = debugger_compile_expr(vm, bp->condition,
+                                        debugger_current_function(vm), NULL);
+    bp->cond_compile_failed = !bp->cond_fn;
+    return bp->cond_fn != NULL;
 }
 
-// Run a compiled condition wrapper once and return its truthiness. Mirrors
+// Run a compiled expression wrapper once. Mirrors
 // the save/reset/run/restore pattern the old debugger_eval_direct_call used
 // for a direct CCCC call: unlike cc_expr_exec_wrapper (REPL's variant), this
 // does *not* reset vm->sp/vm->bp to vm->initial_sp/initial_bp -- those would
@@ -1306,8 +1513,8 @@ static bool debugger_compile_condition_once(VirtualMachine *vm,
 // that address range. Instead it keeps vm->bp (the wrapper establishes its
 // own frame on entry, same as any real call) and only pushes a fresh return
 // sentinel below the current vm->sp, exactly like a normal nested call.
-static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
-                                            Type *cond_ty) {
+static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
+                                double *fval) {
     long long saved_regs[NUM_REGS];
     FReg      saved_fregs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
@@ -1333,9 +1540,12 @@ static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
         *--vm->shadow_sp = 0;
     *--vm->sp      = 0; // sentinel return address
     vm->pc         = (Pc)fn->code_addr;
-    int       rc   = vm_eval(vm);
-    long long ival = vm->regs[REG_A0];
-    double    fval = vm->fregs[FREG_A0].f64;
+    // vm_eval returns the wrapper's value on success, so a negative value is
+    // indistinguishable from an error code; a completed run leaves pc invalid.
+    vm_eval(vm);
+    int rc = vm->pc == CCCC_INVALID_PC ? 0 : -1;
+    *ival  = vm->regs[REG_A0];
+    *fval  = vm->fregs[FREG_A0].f64;
 
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
@@ -1351,7 +1561,14 @@ static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
     vm->dbg.step_out_bp           = saved_step_out_bp;
     vm->dbg.debugger_attached     = saved_debugger_attached;
 
-    if (rc < 0) {
+    return rc;
+}
+
+static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
+                                            Type *cond_ty) {
+    long long ival;
+    double    fval;
+    if (debugger_run_wrapper(vm, fn, &ival, &fval) < 0) {
         printf("Error: Condition evaluation failed\n");
         return false;
     }
@@ -1377,6 +1594,145 @@ static int debugger_eval_condition(VirtualMachine *vm, Breakpoint *bp) {
 
     Type *cond_ty                                = bp->cond_fn->ty->return_ty;
     return debugger_exec_condition_wrapper(vm, bp->cond_fn, cond_ty);
+}
+
+// ============================================================================
+// Frame control: cc_debug_return / cc_debug_restart
+// ============================================================================
+
+static bool debugger_frame_op_allowed(VirtualMachine *vm, const char *what) {
+    if (vm->dbg.host_fault_signal) {
+        fprintf(stderr,
+                "error: cannot %s after a host fault; execution cannot "
+                "resume\n",
+                what);
+        return false;
+    }
+    return true;
+}
+
+static int debugger_frame_by_index(VirtualMachine *vm, int frame, DbgFrame *out,
+                                   int *shadow_pops) {
+    DbgFrame frames[DBG_MAX_FRAMES];
+    int      n = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+    if (frame < 0 || frame >= n) {
+        fprintf(stderr, "error: no frame %d (%d frames)\n", frame, n);
+        return -1;
+    }
+    *out = frames[frame];
+    if (shadow_pops) {
+        *shadow_pops = 0;
+        for (int i = 0; i <= frame; i++)
+            if (frames[i].ret != 0)
+                (*shadow_pops)++;
+    }
+    return 0;
+}
+
+// Popped frames skip their [[cleanup]] handlers; say which functions lose any.
+// TODO: run them; needs a pc -> active-cleanups table
+// (https://todo.sr.ht/~takeiteasy/cccc/1505)
+static void debugger_warn_skipped_cleanups(VirtualMachine *vm, int last_frame) {
+    DbgFrame frames[DBG_MAX_FRAMES];
+    int      n = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+    for (int i = 0; i <= last_frame && i < n; i++) {
+        if (!frames[i].fn || !frames[i].bp)
+            continue;
+        for (Obj *l = frames[i].fn->locals; l; l = l->next) {
+            if (l->cleanup_fn) {
+                fprintf(stderr, "warning: skipped [[cleanup]] handlers in %s\n",
+                        frames[i].fn->name);
+                break;
+            }
+        }
+    }
+}
+
+int cc_debug_frame_count(VirtualMachine *vm) {
+    DbgFrame frames[DBG_MAX_FRAMES];
+    return debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+}
+
+int cc_debug_select_frame(VirtualMachine *vm, int frame) {
+    DbgFrame f;
+    if (debugger_frame_by_index(vm, frame, &f, NULL))
+        return -1;
+    vm->dbg.selected_frame = frame;
+    return 0;
+}
+
+int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
+    if (!debugger_frame_op_allowed(vm, "return"))
+        return -1;
+    DbgFrame f;
+    int      pops;
+    if (debugger_frame_by_index(vm, frame, &f, &pops))
+        return -1;
+
+    bool        has_value = false;
+    long long   ival      = 0;
+    double      fval      = 0;
+    const char *blank     = expr;
+    while (blank && isspace((unsigned char)*blank))
+        blank++;
+    if (blank && *blank) {
+        Type *ret_ty = f.fn && f.fn->ty ? f.fn->ty->return_ty : NULL;
+        if (!ret_ty) {
+            fprintf(stderr, "error: frame %d has no known return type\n",
+                    frame);
+            return -1;
+        }
+        if (ret_ty->kind == TY_VOID) {
+            fprintf(stderr, "error: %s returns void\n", f.fn->name);
+            return -1;
+        }
+        Obj *wrapper =
+            debugger_compile_expr(vm, blank, f.bp ? f.fn : NULL, ret_ty);
+        if (!wrapper)
+            return -1;
+        Obj *frame_var = vm->dbg.dbg_frame_var;
+        *(void **)(vm->data_seg + frame_var->offset) =
+            (void *)(f.bp ? f.bp : vm->bp);
+        if (debugger_run_wrapper(vm, wrapper, &ival, &fval) < 0) {
+            fprintf(stderr, "error: evaluating the return value failed\n");
+            return -1;
+        }
+        has_value = true;
+    }
+
+    debugger_warn_skipped_cleanups(vm, frame);
+    vm->dbg.pending_op          = CC_FRAME_OP_RETURN;
+    vm->dbg.pending_bp          = f.bp;
+    vm->dbg.pending_shadow_pops = pops;
+    vm->dbg.pending_has_value   = has_value;
+    vm->dbg.pending_a0          = ival;
+    vm->dbg.pending_fa0         = fval;
+    return 0;
+}
+
+int cc_debug_restart(VirtualMachine *vm, int frame) {
+    if (!debugger_frame_op_allowed(vm, "restart"))
+        return -1;
+    DbgFrame f;
+    if (debugger_frame_by_index(vm, frame, &f, NULL))
+        return -1;
+    if (!f.fn) {
+        fprintf(stderr, "error: frame %d is not in a known function\n", frame);
+        return -1;
+    }
+    if (f.bp &&
+        (!vm->dbg.frame_records_on || !cc_find_frame_record(vm, f.bp))) {
+        fprintf(stderr,
+                "error: restart needs -g: frame %d has no entry snapshot\n",
+                frame);
+        return -1;
+    }
+
+    debugger_warn_skipped_cleanups(vm, frame);
+    vm->dbg.pending_op    = CC_FRAME_OP_RESTART;
+    vm->dbg.pending_bp    = f.bp;
+    vm->dbg.pending_entry = (Pc)fn_canonical(f.fn)->code_addr;
+    return 0;
 }
 
 // ============================================================================

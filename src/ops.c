@@ -772,6 +772,92 @@ static void heap_marks_truncate_to(VirtualMachine *vm, long long *new_bp) {
         heap_rewind_to(vm, target, HEAP_SWEEP_FRAME_AND_ALLOCA);
 }
 
+// ---- debugger frame control (restart / return) ----
+
+// Snapshot the frame ENT3 is creating. Records whose frames have died (bp at or
+// below the new one: the stack grows down) are dropped here, so LEV3, CALLT and
+// longjmp need no hook of their own.
+static void frame_record_push(VirtualMachine *vm) {
+    Debugger *d = &vm->dbg;
+    while (d->num_frame_records > 0 &&
+           d->frame_records[d->num_frame_records - 1].bp <= vm->bp)
+        d->num_frame_records--;
+    if (d->num_frame_records == d->frame_records_cap) {
+        int          cap = d->frame_records_cap ? d->frame_records_cap * 2 : 64;
+        FrameRecord *p   = realloc(d->frame_records, (size_t)cap * sizeof(*p));
+        if (!p)
+            return; // restart of this frame reports "no record"
+        d->frame_records     = p;
+        d->frame_records_cap = cap;
+    }
+    FrameRecord *r = &d->frame_records[d->num_frame_records++];
+    r->bp          = vm->bp;
+    r->shadow_sp   = vm->shadow_sp;
+    memcpy(r->regs, &vm->regs[REG_A0], sizeof(r->regs));
+    memcpy(r->fregs, &vm->fregs[FREG_A0], sizeof(r->fregs));
+}
+
+// Retire every per-frame record of frames below `new_bp`: liveness epochs and
+// heap watermarks (what longjmp does when it discards frames).
+static void vm_unwind_frames(VirtualMachine *vm, long long *new_bp) {
+    if (stack_extents_enabled(vm))
+        frame_epoch_truncate_to(vm, new_bp);
+    if (vm->heap_reclaim_enabled && !vm->thread_records)
+        heap_marks_truncate_to(vm, new_bp);
+}
+
+FrameRecord *cc_find_frame_record(VirtualMachine *vm, long long *bp) {
+    for (int i = vm->dbg.num_frame_records - 1; i >= 0; i--)
+        if (vm->dbg.frame_records[i].bp == bp)
+            return &vm->dbg.frame_records[i];
+    return NULL;
+}
+
+// Applies the frame operation the debugger scheduled. Runs at the top of
+// dispatch, never inside an instruction, so a handler that writes registers
+// after the REPL returns (VRAISE, watchpoint loads) cannot clobber the result.
+// The target is NULL when the function is paused at its entry, before ENT3.
+void cc_apply_frame_op(VirtualMachine *vm) {
+    Debugger  *d  = &vm->dbg;
+    FrameOp    op = d->pending_op;
+    long long *t  = d->pending_bp;
+    d->pending_op = CC_FRAME_OP_NONE;
+
+    if (op == CC_FRAME_OP_RESTART) {
+        FrameRecord *r = t ? cc_find_frame_record(vm, t) : NULL;
+        if (t && !r)
+            return;
+        if (t) {
+            vm->bp = (long long *)t[0];
+            vm->sp = t + 1;
+            vm_unwind_frames(vm, t + 1);
+            memcpy(&vm->regs[REG_A0], r->regs, sizeof(r->regs));
+            memcpy(&vm->fregs[FREG_A0], r->fregs, sizeof(r->fregs));
+            if (vm->flags & CCCC_CFI)
+                vm->shadow_sp = r->shadow_sp;
+        }
+        vm->pc = d->pending_entry;
+    } else if (op == CC_FRAME_OP_RETURN) {
+        long long ret = t ? t[1] : *vm->sp;
+        if (t) {
+            vm->bp = (long long *)t[0];
+            vm->sp = t + 2;
+            vm_unwind_frames(vm, vm->bp);
+        } else {
+            vm->sp++;
+        }
+        if (vm->flags & CCCC_CFI)
+            vm->shadow_sp += d->pending_shadow_pops;
+        if (d->pending_has_value) {
+            vm->regs[REG_A0]       = d->pending_a0;
+            vm->fregs[FREG_A0].f64 = d->pending_fa0;
+        }
+        vm->pc = ret == 0 ? CCCC_INVALID_PC : (Pc)ret;
+    } else {
+        return;
+    }
+}
+
 static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
@@ -803,6 +889,9 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
     vm->bp    = vm->sp;
+
+    if (__builtin_expect(vm->dbg.frame_records_on, 0))
+        frame_record_push(vm);
 
     // #981: record this frame's own heap-reclamation watermark (depth -1)
     // unconditionally -- unlike frame_epoch_push above, there's no #703-
@@ -5470,16 +5559,9 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     // longjmp can unwind several frames at once (#673, #648): retire every
     // activation's liveness epoch above the target frame. The target frame
     // itself (bp == vm->bp) keeps its epoch -- it's still live.
-    if (stack_extents_enabled(vm))
-        frame_epoch_truncate_to(vm, vm->bp);
-
-    // #981: reclaim every discarded frame's alloca/VLA storage the same
-    // way -- those frames never ran their own LEV3, so nothing else would
-    // ever rewind heap_ptr past them. Sweeps both VLA and bare-alloca
-    // storage (HEAP_SWEEP_FRAME_AND_ALLOCA), same as a normal LEV3, since
-    // whole frames are being discarded here, not just exiting one block.
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
-        heap_marks_truncate_to(vm, vm->bp);
+    // #981: also reclaims every discarded frame's alloca/VLA storage -- those
+    // frames never ran their own LEV3, so nothing else would rewind heap_ptr.
+    vm_unwind_frames(vm, vm->bp);
 
     if (vm->flags & CCCC_CFI) {
         long long saved_offset   = jmp_buf[3];

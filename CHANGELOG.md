@@ -11,6 +11,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   pointers and host callbacks reach the new body; block-scope statics keep
   their storage. Embedders use `cc_repl_init`, `cc_redefine_function` and
   `cc_repl_eval`.
+- Added: debugger frame control. `bt`, `frame`, `up` and `down` select a call
+  frame (`print` reads its locals); `return [expr]` pops it as if it returned
+  `expr`; `restart` re-enters it from the start with its original arguments
+  (explicit `-g`). Embedders use `cc_debug_return` and `cc_debug_restart`.
+- Fixed: a conditional breakpoint evaluating to a negative number counted as
+  an evaluation error; a parse error in a breakpoint condition no longer
+  unwinds into the program's error handler; a REPL expression unit no longer
+  renumbers the stack offsets of the function defined before it.
 - Fixed: a REPL function defined after an earlier prototype line is compiled;
   every REPL definition after the first is no longer parsed as a nested
   function; a `static inline` function defined at the REPL is compiled.

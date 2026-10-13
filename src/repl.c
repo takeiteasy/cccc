@@ -499,9 +499,13 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
     jmp_buf        jb;
     jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
     vm->error_jmp_buf            = &jb;
-    // gen_function leaves current_fn set; a unit parses at file scope.
+    // gen_function leaves current_fn set; a unit parses at file scope. The
+    // previous function's locals would otherwise be adopted (and renumbered)
+    // by an expression unit's wrapper.
     Obj *saved_fn           = vm->compiler.current_fn;
+    Obj *saved_locals       = vm->compiler.locals;
     vm->compiler.current_fn = NULL;
+    vm->compiler.locals     = NULL;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl>", (char *)text);
@@ -546,6 +550,7 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
 
         vm->error_jmp_buf       = saved_jmp_buf;
         vm->compiler.current_fn = saved_fn;
+        vm->compiler.locals     = saved_locals;
         cc_expr_snapshot_discard(&snap);
         return 0;
     }

@@ -3708,10 +3708,45 @@ typedef struct Arena {
 #ifndef MAX_DEBUG_SYMBOLS
 #define MAX_DEBUG_SYMBOLS 4096
 #endif
+/*!
+ @brief Entry snapshot of one call frame, taken by ENT3 under -g so the
+           debugger's `restart` can re-enter the function with its original
+           arguments.
+ */
+typedef struct FrameRecord {
+    long long *bp;        /**< The frame's bp (its saved-bp slot). */
+    long long  regs[8];   /**< REG_A0..A7 on entry. */
+    FReg       fregs[8];  /**< FREG_A0..A7 on entry. */
+    long long *shadow_sp; /**< CFI shadow stack top on entry (own return
+                               address already pushed). */
+} FrameRecord;
+
+/*! Frame operation scheduled by the debugger, applied at the next dispatch
+    safe point. */
+typedef enum {
+    CC_FRAME_OP_NONE,
+    CC_FRAME_OP_RETURN,
+    CC_FRAME_OP_RESTART,
+} FrameOp;
+
 typedef struct Debugger {
     // Breakpoints
     Breakpoint breakpoints[MAX_BREAKPOINTS];
     int        num_breakpoints;
+
+    // Frame control (`restart` / `return`)
+    bool         frame_records_on; // ENT3 snapshots frames (explicit -g only)
+    FrameRecord *frame_records;    // Outermost first; bp strictly decreasing
+    int          num_frame_records;
+    int          frame_records_cap;
+    int          selected_frame;   // Frame the REPL inspects; 0 = innermost
+    FrameOp      pending_op;
+    long long   *pending_bp;       // Target frame; NULL = paused at its entry
+    Pc           pending_entry;    // restart: canonical entry to re-enter
+    int          pending_shadow_pops; // return: CFI entries to drop
+    bool         pending_has_value;
+    long long    pending_a0;
+    double       pending_fa0;
 
     // Stepping control
     int        single_step; // Single-step mode (stop after each instruction)
@@ -5675,6 +5710,45 @@ void cc_remove_breakpoint(VirtualMachine *vm, int index);
              - help/h: Show help
 */
 void cc_debug_repl(VirtualMachine *vm);
+
+/*!
+ @brief Number of call frames the debugger can address, innermost first.
+ @details Frames end at the root of the current vm_eval (main, a host
+             callback or a signal handler). A function paused at its entry
+             counts as frame 0 before its frame exists.
+ */
+int cc_debug_frame_count(VirtualMachine *vm);
+
+/*!
+ @brief Selects the frame that `print` and `return` use; resets to 0 whenever
+           execution resumes.
+ @return 0 on success, nonzero if `frame` is out of range.
+ */
+int cc_debug_select_frame(VirtualMachine *vm, int frame);
+
+/*!
+ @brief Schedules popping `frame` as if it returned `expr`.
+ @param expr C expression converted to the function's return type, evaluated
+               in `frame`'s scope; NULL leaves the return registers as they
+               are. Struct results are returned through the callee's return
+               buffer.
+ @return 0 on success (applied when execution resumes), nonzero with a
+           diagnostic on stderr if rejected (after a host fault, outside the
+           frame range, or `expr` fails to compile).
+ @details Skips `[[cleanup]]` handlers of the popped frames and does not undo
+             their side effects.
+ */
+int cc_debug_return(VirtualMachine *vm, int frame, const char *expr);
+
+/*!
+ @brief Schedules re-entering `frame`'s function from the start with its
+           original arguments.
+ @return 0 on success (applied when execution resumes), nonzero with a
+           diagnostic on stderr if rejected. Needs an explicit -g: frames are
+           snapshotted at entry. Re-enters the newest body of a redefined
+           function (cc_redefine_function).
+ */
+int cc_debug_restart(VirtualMachine *vm, int frame);
 
 /*!
  @brief Run an interactive top-level read-eval-print loop on a VM.

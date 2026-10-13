@@ -44,6 +44,11 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `info watch` | | List all active watchpoints. |
 | `delete <num>` | `d <num>` | Delete a breakpoint by its number. |
 | `list` | `l` | List all breakpoints. |
+| `backtrace` | `bt` | List the call frames, innermost first. |
+| `frame [n]` | `fr [n]` | Select frame `n` (default: show the selected one). |
+| `up` / `down` | | Select the caller / callee frame. |
+| `return [expr]` | | Pop the selected frame as if it returned `expr`. |
+| `restart` | | Re-enter the selected frame's function from the start. |
 | `registers` | `r` | Print all register values. |
 | `stack [count]` | `st [count]` | Print the top `count` entries of the stack (default 10). |
 | `disasm` | `dis` | Disassemble the current instruction. |
@@ -51,6 +56,60 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `print <var>` | `p <var>` | Print a variable's value, recursively formatting structs/unions/arrays/vectors. `print <hex_addr>` also works for a raw address (like `memory`, but by expression). |
 | `help` | `h`, `?` | Show the help message. |
 | `quit` | `q` | Exit the debugger and terminate the program. |
+
+## Call frames
+
+`bt` lists the frames of the paused program; `frame n`, `up` and `down` select
+one, and `print` reads that frame's locals.
+
+```
+(cccc-dbg) bt
+*#0  leaf at dbg.c:6
+ #1  mid at dbg.c:10
+ #2  main at dbg.c:13
+(cccc-dbg) up
+*#1  mid at dbg.c:10
+(cccc-dbg) print t
+t = (int) 5
+```
+
+`return` and `restart` act on the selected frame, and the debugger stops again
+at the resulting pc.
+
+| Command | Effect |
+|---|---|
+| `return 7` | Pops the frame (and every frame inside it); its caller sees `7`, converted to the function's return type. `expr` is evaluated in the frame's scope. |
+| `return` | Pops the frame and leaves the return registers as they are. |
+| `restart` | Pops the frames inside the selected one and re-enters its function with the arguments it was called with. Needs an explicit `-g`.[^snapshot] |
+
+A function stopped at a `break <function>` has no frame yet: `restart` jumps to
+its entry again (the newest body, if it was redefined), and `return` returns
+from the call that is about to start.
+
+```
+(cccc-dbg) break leaf
+(cccc-dbg) continue
+(cccc-dbg) return 0       # leaf() yields 0 without running
+```
+
+Limits:
+
+- Side effects the popped frames already caused (output, heap and global
+  writes) stay.
+- `[[cleanup]]` handlers of popped frames do not run; a warning names the
+  functions that skip any.[^cleanup]
+- A frame that replaced its caller through a tail call appears once.
+- Frames stop at the root of the current run: `main`, a host callback or a
+  signal handler.
+- After a host signal the debugger is inspection-only and both commands are
+  rejected.
+
+[^snapshot]: Under `-g`, every function entry copies the argument registers
+    (about 200 bytes), so `restart` never depends on parameters the body has
+    since overwritten. Sessions that only enabled the debugger for crash
+    trapping take no snapshots.
+[^cleanup]: Running them needs a table of the cleanups active at each pc:
+    https://todo.sr.ht/~takeiteasy/cccc/1505
 
 ## `print` and live-stack address validation
 

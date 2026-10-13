@@ -722,19 +722,34 @@ dispatch:
     }
 
     if (vm->flags & CCCC_ENABLE_DEBUGGER) {
+        // A frame operation scheduled by an earlier REPL: an instruction
+        // that entered it (BTRAP, a watchpoint) has finished by now.
+        if (vm->dbg.pending_op) {
+            cc_apply_frame_op(vm);
+            goto dispatch;
+        }
         if (debugger_check_breakpoint(vm)) {
             printf("\nBreakpoint hit at PC %u\n", vm->pc);
             cc_debug_repl(vm);
+            if (vm->dbg.pending_op)
+                goto dispatch;
         }
-        if (vm->dbg.single_step)
+        if (vm->dbg.single_step) {
             cc_debug_repl(vm);
+            if (vm->dbg.pending_op)
+                goto dispatch;
+        }
         if (vm->dbg.step_over && vm->pc == vm->dbg.step_over_return_addr) {
             vm->dbg.step_over = 0;
             cc_debug_repl(vm);
+            if (vm->dbg.pending_op)
+                goto dispatch;
         }
         if (vm->dbg.step_out && vm->bp != vm->dbg.step_out_bp) {
             vm->dbg.step_out = 0;
             cc_debug_repl(vm);
+            if (vm->dbg.pending_op)
+                goto dispatch;
         }
     }
 
@@ -1124,6 +1139,10 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
 
     // Set runtime flags
     vm->flags = flags;
+
+    // restart/return need ENT3 frame snapshots, so they exist only when the
+    // debugger was asked for (main() clears this for crash-only debugging).
+    vm->dbg.frame_records_on = (flags & CCCC_ENABLE_DEBUGGER) != 0;
 
     // Set defaults
     vm->poolsize = 256 * 1024; // 256K elements initial commit
@@ -1705,6 +1724,7 @@ void cc_destroy(VirtualMachine *vm) {
     // Free source map and index (debugger)
     free(vm->dbg.source_map);
     free(vm->dbg.source_index);
+    free(vm->dbg.frame_records);
 
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {

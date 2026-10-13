@@ -871,6 +871,14 @@ static Node *alloc_node(VirtualMachine *vm, NodeKind kind) {
     return node;
 }
 
+// A reference to `var` that bypasses name lookup.
+Node *cc_ast_var_node(VirtualMachine *vm, Obj *var) {
+    Node *n = alloc_node(vm, ND_VAR);
+    n->var  = var;
+    n->ty   = var->ty;
+    return n;
+}
+
 // ============================================================================
 // AST Node Construction - Literals
 // ============================================================================
