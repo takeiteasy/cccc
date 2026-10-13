@@ -190,6 +190,11 @@ bool is_integer(Type *ty) {
            k == TY_LONG || k == TY_ENUM || k == TY_BITINT;
 }
 
+// A _Bool bit-field zero-extends even though ty_bool is not is_unsigned.
+bool bitfield_is_unsigned(Type *ty) {
+    return ty->is_unsigned || ty->kind == TY_BOOL;
+}
+
 bool is_flonum(Type *ty) {
     if (!ty)
         return false;

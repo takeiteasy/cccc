@@ -419,7 +419,7 @@ void emit_bitfield_load(VirtualMachine *vm, Member *mem, int dest, int r_addr,
     emit_load_ex(vm, mem->ty, dest, r_addr, dangling_check);
 
     int r_shift = alloc_temp_reg();
-    if (mem->ty->is_unsigned) {
+    if (bitfield_is_unsigned(mem->ty)) {
         if (mem->bit_offset > 0) {
             emit_li3(vm, r_shift, mem->bit_offset);
             emit_rrr(vm, SHR3, dest, dest, r_shift);

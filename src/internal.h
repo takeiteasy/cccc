@@ -706,6 +706,7 @@ extern Type *ty_auto; // C23 type-inference sentinel
 extern Type *ty_error;
 
 bool is_integer(Type *ty);
+bool bitfield_is_unsigned(Type *ty);
 bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_vector(Type *ty);

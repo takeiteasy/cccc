@@ -15,6 +15,7 @@ struct S {
     int      lo : 3;
     unsigned mid : 5;
     int      hi : 4;
+    _Bool    flag : 1;
 };
 
 static int calls;
@@ -54,10 +55,16 @@ int main(void) {
     if (out != -5)
         return 5;
 
+    // _Bool field.
+    int one = 1;
+    __asm__(MOVW : "=r"(s.flag) : "r"(one));
+    if (s.flag != 1 || s.hi != -5)
+        return 6;
+
     // The lvalue is evaluated once.
     __asm__(ADDI : "+r"(next(&s)->mid) : "i"(1));
     if (calls != 1 || s.mid != 0x16)
-        return 6;
+        return 7;
 
     return 42;
 }

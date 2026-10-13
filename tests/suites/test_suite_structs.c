@@ -589,6 +589,40 @@ int test_bitfields(void) {
     return 42;
 }
 
+struct tc_bool_bitfield {
+    int      x : 1;
+    _Bool    f : 1;
+    unsigned y : 1;
+};
+
+[[cccc::test(return = 42)]]
+int test_bool_bitfield(void) {
+    struct tc_bool_bitfield s = {0};
+    s.x                       = -1;
+    s.f                       = 1;
+    s.y                       = 1;
+    if (s.f != 1 || s.x != -1 || s.y != 1)
+        return 1;
+
+    s.f += 1; // _Bool saturates to 1
+    if (s.f != 1)
+        return 2;
+
+    s.f = 2;
+    if (s.f != 1)
+        return 3;
+
+    int c = s.f;
+    if (c != 1)
+        return 4;
+
+    s.f = 0;
+    if (s.f || !(!s.f) || s.x != -1 || s.y != 1)
+        return 5;
+
+    return 42;
+}
+
 // test_compound_struct_minimal
 [[cccc::test(return = 42)]]
 int test_compound_struct_minimal(void) {

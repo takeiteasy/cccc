@@ -2077,7 +2077,8 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                 mem->bit_width   = const_expr(vm, &tok, tok);
                 if (mem->bit_width < 0)
                     error_tok(vm, tok, "negative bit-field width");
-                if (mem->bit_width > mem->ty->size * CHAR_BIT)
+                if (mem->bit_width >
+                    (mem->ty->kind == TY_BOOL ? 1 : mem->ty->size * CHAR_BIT))
                     error_tok(vm, tok, "bit-field width exceeds its type");
 
                 // #1165: a trailing __attribute__(...) after the bit-width

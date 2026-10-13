@@ -741,7 +741,7 @@ static long long read_bitfield(const void *struct_addr, Member *m) {
     long long   word      = read_int_from_mem(container, m->ty->size, true);
     long long mask = (m->bit_width >= 64) ? ~0LL : ((1LL << m->bit_width) - 1);
     long long v    = (word >> m->bit_offset) & mask;
-    if (!m->ty->is_unsigned && m->bit_width < 64 &&
+    if (!bitfield_is_unsigned(m->ty) && m->bit_width < 64 &&
         (v & (1LL << (m->bit_width - 1))))
         v -= (1LL << m->bit_width);
     return v;
@@ -836,7 +836,9 @@ static void dump_value_at(FILE *f, VirtualMachine *vm, Type *ty,
                     fprintf(f, "%.*s = ", m->name->len, m->name->loc);
                 if (m->is_bitfield) {
                     long long v = read_bitfield(addr, m);
-                    if (m->ty->is_unsigned)
+                    if (m->ty->kind == TY_BOOL)
+                        fprintf(f, "%s", v ? "true" : "false");
+                    else if (m->ty->is_unsigned)
                         fprintf(f, "%llu", (unsigned long long)v);
                     else
                         fprintf(f, "%lld", v);

@@ -24,6 +24,14 @@ void test_bitfield_too_wide(void) {
     (void)(struct S){0};
 }
 
+[[cccc::test(expect_compile_error = true)]]
+void test_bitfield_bool_too_wide(void) {
+    struct S {
+        _Bool x : 2;
+    };
+    (void)(struct S){0};
+}
+
 // --- C23 auto ---
 
 [[cccc::test(expect_compile_error = true)]]
