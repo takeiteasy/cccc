@@ -1888,6 +1888,45 @@ void cc_leave_top_file_scope(VirtualMachine *vm) {
         leave_scope(vm);
 }
 
+// Parses a whole file into a fresh file scope of its own, adding its Objs in
+// front of the live globals list. The session's scope, declaration map and
+// current function are put back; the file's scope is returned for the caller
+// to inspect and to free with hashmap_deinit_borrowed.
+Scope *cc_parse_file_isolated(VirtualMachine *vm, Token *tok) {
+    Scope  *saved_scope  = vm->compiler.scope;
+    HashMap saved_decls  = hashmap_snapshot(&vm->compiler.global_decl_map);
+    Obj    *saved_fn     = vm->compiler.current_fn;
+    Obj    *saved_locals = vm->compiler.locals;
+
+    vm->compiler.scope   = NULL;
+    enter_scope(vm);
+    Scope *file_scope = vm->compiler.scope;
+    hashmap_deinit(&vm->compiler.global_decl_map);
+    memset(&vm->compiler.global_decl_map, 0,
+           sizeof(vm->compiler.global_decl_map));
+    vm->compiler.current_fn = NULL;
+    vm->compiler.locals     = NULL;
+
+    // A parse error puts the session state back before it propagates.
+    jmp_buf  jb;
+    jmp_buf *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+    bool failed       = setjmp(jb) != 0;
+    if (!failed) {
+        declare_builtin_functions(vm);
+        parse_file_scope_decls(vm, tok);
+    }
+    vm->error_jmp_buf = saved_jb;
+
+    hashmap_restore(&vm->compiler.global_decl_map, saved_decls);
+    vm->compiler.scope      = saved_scope;
+    vm->compiler.current_fn = saved_fn;
+    vm->compiler.locals     = saved_locals;
+    if (failed)
+        longjmp(*saved_jb, 1);
+    return file_scope;
+}
+
 // Exposed parsing functions for K's ast_parse API
 Node *cc_parse_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     return expr(vm, rest, tok);

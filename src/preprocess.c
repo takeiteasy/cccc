@@ -903,6 +903,52 @@ void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm) {
     vm->compiler.checked_scope_stack_len = 0;
 }
 
+static int drop_source_macro_iter(char *key, int keylen, void *val,
+                                  void *user_data) {
+    Macro *m = (Macro *)val;
+    if (m->define_tok)
+        hashmap_delete2((HashMap *)user_data, key, keylen);
+    return 0;
+}
+
+// Starts a clean preprocessor state for re-reading a file in a live session:
+// predefined and command-line macros stay, source #defines, include guards and
+// #pragma once state go. cc_preprocessor_end_reload puts the session's own
+// state back.
+CcPreprocessorState cc_preprocessor_begin_reload(VirtualMachine *vm) {
+    CcPreprocessorState saved = {
+        .macros           = hashmap_snapshot(&vm->compiler.macros),
+        .pragma_once      = hashmap_snapshot(&vm->compiler.pragma_once),
+        .include_guards   = hashmap_snapshot(&vm->compiler.include_guards),
+        .included_headers = hashmap_snapshot(&vm->compiler.included_headers),
+        .guard_macros     = hashmap_snapshot(&vm->compiler.guard_macros),
+        .cond_incl        = vm->compiler.cond_incl,
+    };
+    hashmap_foreach(&vm->compiler.macros, drop_source_macro_iter,
+                    &vm->compiler.macros);
+    hashmap_deinit(&vm->compiler.pragma_once);
+    memset(&vm->compiler.pragma_once, 0, sizeof(vm->compiler.pragma_once));
+    hashmap_deinit(&vm->compiler.include_guards);
+    memset(&vm->compiler.include_guards, 0,
+           sizeof(vm->compiler.include_guards));
+    hashmap_deinit(&vm->compiler.included_headers);
+    memset(&vm->compiler.included_headers, 0,
+           sizeof(vm->compiler.included_headers));
+    hashmap_deinit(&vm->compiler.guard_macros);
+    memset(&vm->compiler.guard_macros, 0, sizeof(vm->compiler.guard_macros));
+    vm->compiler.cond_incl = NULL;
+    return saved;
+}
+
+void cc_preprocessor_end_reload(VirtualMachine *vm, CcPreprocessorState saved) {
+    hashmap_restore(&vm->compiler.macros, saved.macros);
+    hashmap_restore(&vm->compiler.pragma_once, saved.pragma_once);
+    hashmap_restore(&vm->compiler.include_guards, saved.include_guards);
+    hashmap_restore(&vm->compiler.included_headers, saved.included_headers);
+    hashmap_restore(&vm->compiler.guard_macros, saved.guard_macros);
+    vm->compiler.cond_incl = saved.cond_incl;
+}
+
 static IncludeRoute read_include_route(Token **tok_ptr) {
     IncludeRoute route = INCLUDE_ROUTE_NORMAL;
     Token       *rest  = NULL;

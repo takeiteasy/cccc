@@ -648,6 +648,9 @@ int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
 void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c);
 bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to);
 Obj *parse(VirtualMachine *vm, Token *tok);
+Scope *cc_parse_file_isolated(VirtualMachine *vm, Token *tok);
+void debugger_reresolve_breakpoints(VirtualMachine *vm);
+Obj *reuse_root(Obj *obj); // codegen_regalloc.c
 void cc_leave_top_file_scope(
     VirtualMachine *vm); // #1001, parse.c -- see comment there
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
@@ -850,6 +853,7 @@ void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
 bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family);
 bool is_compatible_qualified_strict(Type *t1, Type *t2);
+bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 // `ty` without its address space: the type of a private temporary that holds a
 // value read from global/local/constant memory.

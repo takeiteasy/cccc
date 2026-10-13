@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: the debugger's `reload <file>` and the REPL's `:reload <file>` re-read
+  an edited source file and redefine the functions whose bodies changed;
+  globals and statics keep their values. Embedders use `cc_debug_reload` and
+  `cc_repl_load_file`.
 - Fixed: a conditional breakpoint (and `print`, `return <expr>`) no longer
   trips dangling-pointer detection (`-3`) when a returned frame left a
   `&local` tag on the slot being read.

@@ -121,7 +121,7 @@ int               global_labels_cap = 0;
 
 void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
     for (Obj *var = prog; var != stop; var = var->next) {
-        if (var->is_function)
+        if (var->is_function || var->reuse_of)
             continue;
 
         for (Relocation *rel = var->rel; rel; rel = rel->next) {
@@ -133,6 +133,8 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
             int       segment;
 
             Obj      *target = find_global_obj(prog, *rel->label);
+            if (target && target->reuse_of)
+                target = reuse_root(target);
             if (!target) {
                 // Not a global object — try the persistent label map.  This
                 // handles &&label stored in a static/global initialiser, where
@@ -217,7 +219,15 @@ Obj *fn_canonical(Obj *fn) {
     return fn;
 }
 
+Obj *reuse_root(Obj *obj) {
+    while (obj->reuse_of)
+        obj = obj->reuse_of;
+    return obj;
+}
+
 Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
+    if (target->reuse_of)
+        return fn_canonical(reuse_root(target));
     Obj *def = (target->is_static && target->body)
                    ? target
                    : hashmap_get(fn_defs, target->name);

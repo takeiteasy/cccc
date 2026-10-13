@@ -469,6 +469,73 @@ bool is_compatible_qualified_strict(Type *t1, Type *t2) {
     return compat_nested(t1, t2, true, CCCC_COMPILER_FAMILY_GCC);
 }
 
+static bool token_text_equal(const Token *a, const Token *b) {
+    if (!a || !b)
+        return a == b;
+    return a->len == b->len && !memcmp(a->loc, b->loc, (size_t)a->len);
+}
+
+// Layout equality of two types that may come from different parses: a struct
+// is never `==` across them, so members are compared by name, offset and type.
+// A pointer compares its pointee's tag only, so recursive types terminate.
+bool types_same_layout(Type *a, Type *b) {
+    if (a == b)
+        return true;
+    if (!a || !b || a->kind != b->kind || a->size != b->size ||
+        a->align != b->align || a->is_unsigned != b->is_unsigned)
+        return false;
+    switch (a->kind) {
+        case TY_PTR: {
+            Type *pa = a->base, *pb = b->base;
+            if (pa && pb && pa->kind == pb->kind &&
+                (pa->kind == TY_STRUCT || pa->kind == TY_UNION))
+                return token_text_equal(pa->struct_tag, pb->struct_tag);
+            return types_same_layout(pa, pb);
+        }
+        case TY_ARRAY:
+        case TY_VECTOR:
+            return a->array_len == b->array_len && a->vec_len == b->vec_len &&
+                   types_same_layout(a->base, b->base);
+        case TY_FUNC: {
+            if (a->is_variadic != b->is_variadic ||
+                !types_same_layout(a->return_ty, b->return_ty))
+                return false;
+            Type *pa = a->params, *pb = b->params;
+            for (; pa && pb; pa = pa->next, pb = pb->next)
+                if (!types_same_layout(pa, pb))
+                    return false;
+            return !pa && !pb;
+        }
+        case TY_STRUCT:
+        case TY_UNION: {
+            if (!token_text_equal(a->struct_tag, b->struct_tag) ||
+                a->is_flexible != b->is_flexible ||
+                a->is_packed != b->is_packed)
+                return false;
+            Member *ma = a->members, *mb = b->members;
+            for (; ma && mb; ma = ma->next, mb = mb->next) {
+                if (!token_text_equal(ma->name, mb->name) ||
+                    ma->offset != mb->offset ||
+                    ma->is_bitfield != mb->is_bitfield ||
+                    ma->bit_offset != mb->bit_offset ||
+                    ma->bit_width != mb->bit_width ||
+                    !types_same_layout(ma->ty, mb->ty))
+                    return false;
+            }
+            return !ma && !mb;
+        }
+        case TY_ENUM: {
+            EnumConstant *ea = a->enum_constants, *eb = b->enum_constants;
+            for (; ea && eb; ea = ea->next, eb = eb->next)
+                if (strcmp(ea->name, eb->name) || ea->value != eb->value)
+                    return false;
+            return !ea && !eb;
+        }
+        default:
+            return true;
+    }
+}
+
 Type *copy_type(VirtualMachine *vm, Type *ty) {
     Type *ret   = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     *ret        = *ty;

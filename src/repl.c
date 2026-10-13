@@ -423,6 +423,8 @@ static void repl_print_help(void) {
         "  :help            show this message\n"
         "  :type <expr>     print the type of <expr> without evaluating it\n"
         "  :load <file>     read declarations/expressions from <file>\n"
+        "  :reload <file>   re-read <file>, redefining the functions that "
+        "changed\n"
         "  :quit            exit the REPL\n");
 }
 
@@ -459,21 +461,31 @@ static void repl_cmd_type(VirtualMachine *vm, char *arg) {
 
 static void repl_process_unit(VirtualMachine *vm, const char *text);
 
-static void repl_cmd_load(VirtualMachine *vm, char *arg) {
+// Name the units being compiled carry: the file under :load, so :reload finds
+// what it defined.
+static const char *repl_unit_name = "<repl>";
+
+static void repl_cmd_reload(VirtualMachine *vm, char *arg) {
     while (*arg == ' ' || *arg == '\t')
         arg++;
     if (!*arg) {
-        fprintf(stderr, "usage: :load <file>\n");
+        fprintf(stderr, "usage: :reload <file>\n");
         return;
     }
-    FILE *f = fopen(arg, "r");
+    cc_debug_reload(vm, arg);
+}
+
+int cc_repl_load_file(VirtualMachine *vm, const char *path) {
+    FILE *f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "error: could not open '%s': %s\n", arg,
+        fprintf(stderr, "error: could not open '%s': %s\n", path,
                 strerror(errno));
-        return;
+        return 1;
     }
 
     LineSource src = {.next = repl_read_file_line, .ctx = f};
+    // Files keep the name for the life of the session.
+    repl_unit_name = strdup(path);
     for (;;) {
         char *unit = repl_read_unit(&src, /*interactive=*/false,
                                     /*allow_commands=*/false);
@@ -482,7 +494,19 @@ static void repl_cmd_load(VirtualMachine *vm, char *arg) {
         repl_process_unit(vm, unit);
         free(unit);
     }
+    repl_unit_name = "<repl>";
     fclose(f);
+    return 0;
+}
+
+static void repl_cmd_load(VirtualMachine *vm, char *arg) {
+    while (*arg == ' ' || *arg == '\t')
+        arg++;
+    if (!*arg) {
+        fprintf(stderr, "usage: :load <file>\n");
+        return;
+    }
+    cc_repl_load_file(vm, arg);
 }
 
 static char *repl_read_prompted_line(void *ctx, const char *unused) {
@@ -522,7 +546,7 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
     volatile bool is_expr_unit = false;
 
     if (setjmp(jb) == 0) {
-        Token *tok = tokenize_string(vm, "<repl>", (char *)text);
+        Token *tok = tokenize_string(vm, repl_unit_name, (char *)text);
         if (expand_macros)
             tok = cc_expand_macros_only(vm, tok);
         else
@@ -692,6 +716,8 @@ void cc_run_repl(VirtualMachine *vm) {
                 repl_cmd_type(vm, arg);
             } else if (cmd_len == 4 && strncmp(cmd, "load", 4) == 0) {
                 repl_cmd_load(vm, arg);
+            } else if (cmd_len == 6 && strncmp(cmd, "reload", 6) == 0) {
+                repl_cmd_reload(vm, arg);
             } else {
                 fprintf(stderr, "unknown command: :%.*s (try :help)\n",
                         (int)cmd_len, cmd);

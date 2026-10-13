@@ -50,6 +50,7 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `return [expr]` | | Pop the selected frame as if it returned `expr`. |
 | `restart` | | Re-enter the selected frame's function from the start. |
 | `fix <function>` | | Replace a function with the definition typed next, or edited in `$EDITOR`. |
+| `reload <file>` | | Re-read a source file, redefining the functions whose bodies changed. |
 | `registers` | `r` | Print all register values. |
 | `stack [count]` | `st [count]` | Print the top `count` entries of the stack (default 10). |
 | `disasm` | `dis` | Disassemble the current instruction. |
@@ -152,6 +153,44 @@ frame's function from the start, which runs the new body.
 | Statics | A block-scope `static` keeps its storage when the new body declares one of the same name and type. |
 
 Embedders call `cc_debug_fix(vm, name, source)`.
+
+## Reloading a file
+
+`reload <file>` re-reads a source file of the paused program after it was
+edited, and redefines every function whose body changed. It works across the
+whole file, headers included.
+
+```
+(cccc-dbg) break step
+(cccc-dbg) reload prog.c
+Breakpoint #0 moved to PC 258
+reloaded prog.c: 2 changed, 1 unchanged, 0 new
+(cccc-dbg) continue
+```
+
+| Part of the file | After a reload |
+|---|---|
+| Changed function | Replaced as by `fix`: new calls run the new body; a frame already in the old body finishes in it. |
+| Unchanged function | Not compiled again. Its code, breakpoints and line numbers stay as they were. |
+| New function or global | Added, and callable by name; a global runs its initializer. |
+| Global, file-scope `static`, block-scope `static` | Keep their storage and current value. An edited initializer is ignored. |
+| Definition removed from the file | Stays, with a note. |
+
+A function counts as changed when its expanded tokens differ, so editing a
+macro or header it uses changes it too. Macros and `#include` guards are read
+afresh from the file; the macros of the session are unaffected.
+
+The reload is refused, with nothing changed, if the file
+
+- does not parse, or is not a file of the program;
+- changes a function's signature (return type, parameters, `static`);
+- changes the layout of a struct, union, enum or typedef it defines, or the
+  type of a global;
+- changes the value of a `constexpr` object.
+
+Comptime macros in the file are not expanded again
+(https://todo.sr.ht/~takeiteasy/cccc/1511), and like `fix` the command
+reaches the last file's scope. Embedders call `cc_debug_reload(vm, path)`.
 
 ## `print` and live-stack address validation
 

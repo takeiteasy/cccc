@@ -626,7 +626,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 // `old_head`, that includes an earlier prototype's Obj, which a later
 // definition reuses in place.
 static bool repl_fn_needs_compile(Obj *v, bool is_new) {
-    if (!v->is_function || !v->body)
+    if (!v->is_function || !v->body || v->reuse_of)
         return false;
     return is_new || !v->code_addr;
 }
@@ -637,9 +637,10 @@ static bool repl_fn_needs_compile(Obj *v, bool is_new) {
 // in declaration order.
 static Obj *find_reloaded_static(VirtualMachine *vm, Obj *var, Obj **arr,
                                  int i) {
-    if (!var->static_owner || !var->static_owner->reload_of)
+    Obj *owner = var->static_owner;
+    if (!owner || !(owner->reload_of || owner->reuse_of))
         return NULL;
-    Obj *prev  = var->static_owner->reload_of;
+    Obj *prev  = owner->reload_of ? owner->reload_of : owner->reuse_of;
     Obj *found = NULL;
     for (Obj *c = vm->compiler.globals; c; c = c->next) {
         if (c->is_function || c->static_owner != prev || c == var ||
@@ -752,6 +753,10 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                 arr[idx--] = v;
         for (int i = 0; i < num_new_vars; i++) {
             Obj *var = arr[i];
+            if (var->reuse_of) {
+                var->offset = reuse_root(var)->offset;
+                continue;
+            }
             Obj *prev =
                 var->is_tls ? NULL : find_reloaded_static(vm, var, arr, i);
             if (var->is_tls) {

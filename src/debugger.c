@@ -513,6 +513,9 @@ static void print_help(bool inspect_only) {
         printf("                       original arguments (needs -g)\n");
         printf("  fix <function>     - Replace a function with the definition "
                "typed next\n");
+        printf("  reload <file>      - Re-read a source file, redefining the "
+               "functions\n");
+        printf("                       that changed\n");
     }
     printf("\nInspection:\n");
     printf("  backtrace/bt       - Print the call frames\n");
@@ -827,6 +830,12 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
                 if (ok)
                     printf("%s replaced; new calls run the new body\n", name);
             }
+        } else if (STREQ_LIT(cmd, "reload")) {
+            char path[1024];
+            if (sscanf(line, "%*s %1023s", path) != 1)
+                printf("Usage: reload <file>\n");
+            else
+                cc_debug_reload(vm, path);
         }
         // Print registers
         else if (STREQ_LIT(cmd, "registers") || STREQ_LIT(cmd, "r")) {
@@ -1862,7 +1871,7 @@ int cc_debug_restart(VirtualMachine *vm, int frame) {
 
 // After a function is redefined, move breakpoints that pointed into the old
 // body onto the new one, or drop them if their line or function is gone.
-static void debugger_reresolve_breakpoints(VirtualMachine *vm) {
+void debugger_reresolve_breakpoints(VirtualMachine *vm) {
     for (int i = 0; i < MAX_BREAKPOINTS; i++) {
         Breakpoint *bp = &vm->dbg.breakpoints[i];
         if (!bp->enabled)

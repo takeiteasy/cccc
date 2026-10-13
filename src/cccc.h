@@ -2692,6 +2692,10 @@ struct Obj {
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
     // canonical entry; its ENT3 is overwritten with a JMP to the newest body.
     Obj *reload_of;
+    // Reload of a whole file: this Obj repeats an unchanged function body or a
+    // kept global of the Obj it names. It is not compiled; calls, addresses and
+    // storage resolve to the named Obj.
+    Obj *reuse_of;
     // Block-scope static local: the function whose body declared it, so a
     // reload can keep the old storage.
     Obj *static_owner;
@@ -5472,6 +5476,14 @@ Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks);
 // canonicalization -- see this function's own doc comment in preprocess.c.
 const char *cc_canonical_path_key(VirtualMachine *vm, const char *path);
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
+
+// The preprocessor state a file reload swaps out.
+typedef struct CcPreprocessorState {
+    HashMap macros, pragma_once, include_guards, included_headers, guard_macros;
+    CondIncl *cond_incl;
+} CcPreprocessorState;
+CcPreprocessorState cc_preprocessor_begin_reload(VirtualMachine *vm);
+void cc_preprocessor_end_reload(VirtualMachine *vm, CcPreprocessorState saved);
 Token *cc_expand_macros_only(VirtualMachine *vm, Token *tok);
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
@@ -5884,11 +5896,33 @@ void cc_repl_init(VirtualMachine *vm);
 int cc_redefine_function(VirtualMachine *vm, const char *src);
 
 /*!
+ @brief Reloads a source file of the running program: re-reads it, redefines
+           the functions whose bodies changed and adds its new definitions.
+ @return 0 on success. Nonzero if the file cannot be read, does not parse, is
+           not a file of the program, or changes a function signature, a type's
+           layout or a global's type; the diagnostic is printed to stderr and
+           the session is left unchanged.
+ @details VM-only. Unchanged functions are not compiled again, and globals and
+             file-scope statics keep their storage and values without running
+             their initializers again. Definitions removed from the file stay.
+             Frames already running an old body finish in it.
+ */
+int cc_debug_reload(VirtualMachine *vm, const char *path);
+
+/*!
  @brief Evaluates one expression (or declaration) in a REPL session.
  @param result Receives the integer value of an expression; may be NULL.
  @return 0 on success, nonzero on a recoverable error (diagnostic printed).
  */
 int cc_repl_eval(VirtualMachine *vm, const char *expr, long long *result);
+
+/*!
+ @brief Reads the declarations and expressions of a file into a REPL session
+           (the `:load` command). Its definitions belong to that file, so
+           cc_debug_reload() can reload it.
+ @return 0 if the file was read, nonzero if it could not be opened.
+ */
+int cc_repl_load_file(VirtualMachine *vm, const char *path);
 
 /*!
  @brief Add a watchpoint at a specific memory address.

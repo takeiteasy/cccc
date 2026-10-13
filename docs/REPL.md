@@ -57,6 +57,7 @@ session:
 | `:help` | Show session commands. |
 | `:type <expr>` | Print the type of `<expr>` without evaluating it. |
 | `:load <file>` | Read declarations/expressions from `<file>`, one logical unit at a time. |
+| `:reload <file>` | Re-read a file loaded with `:load` after editing it, redefining the functions that changed. Rules as in [Reloading a file](DEBUGGER.md#reloading-a-file). |
 | `:quit` | Exit the REPL. |
 
 ## Result formatting
