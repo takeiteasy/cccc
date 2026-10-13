@@ -757,6 +757,8 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
         case ND_COMMA:
             return addr_is_local_frame(vm, node->rhs);
         case ND_DEREF:
+            if (node->dbg_frame_local)
+                return true;
             return node->rmw_lvalue ? addr_is_local_frame(vm, node->rmw_lvalue)
                                     : ptr_is_local_array_rooted(vm, node->lhs);
         default:

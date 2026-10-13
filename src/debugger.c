@@ -1392,6 +1392,13 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
         node->kind      = ND_DEREF;
         node->lhs       = typed_ptr;
         node->var       = NULL;
+        // By-pointer aggregate params hold a pointer in the frame slot, so
+        // their access stays checked (as in addr_is_local_frame's ND_VAR).
+        node->dbg_frame_local =
+            !(var->is_param &&
+              (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
+               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
+               is_decimal(var->ty)));
         // Type-preserving rewrite: *(T*)&frame[off] has exactly the same type
         // T as the original variable, so set it directly instead of clearing
         // it for add_type to recompute. That matters beyond saving a call:

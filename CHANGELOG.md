@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a conditional breakpoint (and `print`, `return <expr>`) no longer
+  trips dangling-pointer detection (`-3`) when a returned frame left a
+  `&local` tag on the slot being read.
 - Added: the REPL redefines functions (hot reload). Direct calls, function
   pointers and host callbacks reach the new body; block-scope statics keep
   their storage. Embedders use `cc_repl_init`, `cc_redefine_function` and

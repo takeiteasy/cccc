@@ -2339,6 +2339,11 @@ struct Node {
     // user wrote rather than by the opaque temp.
     struct Node *rmw_lvalue;
 
+    // On the ND_DEREF the debugger builds in place of a paused-frame local: it
+    // reads the live frame, so addr_is_local_frame() skips the dangling check
+    // a stale tag from a returned frame would otherwise trip.
+    bool dbg_frame_local;
+
     // Codegen annotations for the static array bounds check (#1452). An
     // ND_DEREF under `&` only forms an address (no_deref_access); otherwise
     // its pointer-add records the bytes accessed (deref_bytes) so the check

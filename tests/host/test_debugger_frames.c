@@ -424,10 +424,7 @@ static int cond_bp(Pc pc, const char *cond) {
 }
 
 static void test_reclaim(void) {
-    // TODO: condition wrappers trip dangling-pointer detection under the REPL
-    // (https://todo.sr.ht/~takeiteasy/cccc/1510)
-    vm.flags  &= ~CCCC_DANGLING_DETECT;
-    int dead0  = vm.compiler.num_dead_marks; // wrappers pinned by earlier tests
+    int dead0 = vm.compiler.num_dead_marks; // wrappers pinned by earlier tests
     decl("const char *rc_sp;");
     eval("1 + 2");
     Pc    t0 = vm.text_ptr;
@@ -493,6 +490,28 @@ static void test_reclaim(void) {
     cc_remove_breakpoint(&vm, e);
 }
 
+// A returned frame's &local tag must not make a condition on a later frame at
+// the same stack depth look dangling.
+static void test_condition_stale_tag(void) {
+    decl("int st_g(int x){\n  int *p = &x;\n  return *p;\n}");
+    decl("int st_f(int x){\n  int a[4] = {1, 2, 3, 4};\n  int y = a[x];\n"
+         "  return y;\n}");
+    File *f     = last_compiled_file();
+    Pc    line3 = cc_find_pc_for_source(&vm, f, 3);
+    Pc    line4 = cc_find_pc_for_source(&vm, f, 4);
+
+    int   hit   = cond_bp(line3, "x == 2 && a[x] == 3");
+    int   miss  = cond_bp(line4, "x == 3");
+    eval("st_g(2)");
+    CHECK(eval("st_f(2)") == 3, "st_f(2)");
+    CHECK(vm.dbg.breakpoints[hit].hit_count == 1,
+          "true condition fires after a stale tag: %d",
+          vm.dbg.breakpoints[hit].hit_count);
+    CHECK(vm.dbg.breakpoints[miss].hit_count == 0, "false condition is silent");
+    cc_remove_breakpoint(&vm, hit);
+    cc_remove_breakpoint(&vm, miss);
+}
+
 int main(void) {
     cc_init(&vm, CCCC_ENABLE_DEBUGGER | CCCC_CFI | CCCC_STACK_CANARIES |
                      CCCC_DANGLING_DETECT);
@@ -513,6 +532,7 @@ int main(void) {
     test_fix();
     test_fix_editor();
     test_reclaim();
+    test_condition_stale_tag();
 
     cc_destroy(&vm);
     if (!failed)
