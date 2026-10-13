@@ -362,6 +362,46 @@ static void test_fix(void) {
     CHECK(eval("bpf(8)") == 8, "function intact after rejected fixes");
 }
 
+static Obj *find_fn(const char *name) {
+    for (Obj *o = vm.compiler.globals; o; o = o->next)
+        if (o->is_function && o->body && o->name && !strcmp(o->name, name))
+            return o;
+    return NULL;
+}
+
+static void test_fix_editor(void) {
+    decl("int src_a(int x){ return x + 1; }");
+
+    size_t      len = 0;
+    const char *src = cc_function_source(find_fn("src_a"), &len);
+    CHECK(src && len == strlen("int src_a(int x){ return x + 1; }") &&
+              !strncmp(src, "int src_a(int x){ return x + 1; }", len),
+          "the definition's source text is recorded");
+
+    CHECK(cc_debug_fix_edit(&vm, "src_a", "sed -i.bak -e 's/+ 1/+ 7/'") == 0,
+          "edit through an editor command");
+    CHECK(eval("src_a(1)") == 8, "the edited body runs");
+    src = cc_function_source(find_fn("src_a"), &len);
+    CHECK(src && !strncmp(src, "int src_a(int x){ return x + 7; }", len),
+          "an edited function keeps its source");
+
+    CHECK(cc_debug_fix_edit(&vm, "src_a", "true") != 0,
+          "an unchanged file does nothing");
+    CHECK(cc_debug_fix_edit(&vm, "src_a", "sed -i.bak -e 's/+ 7/+/'") != 0,
+          "a body that does not compile is rejected");
+    CHECK(cc_debug_fix_edit(&vm, "src_a", "false") != 0,
+          "a failing editor cancels");
+    CHECK(eval("src_a(1)") == 8, "function intact after rejected edits");
+
+    CHECK(cc_debug_fix(&vm, "src_a",
+                       "int src_a(int x){ return x + __STDC__; }") == 0,
+          "macros expand in fix source");
+    CHECK(eval("src_a(41)") == 42, "expanded macro value");
+    CHECK(cc_debug_fix(&vm, "src_a",
+                       "#define Q 1\nint src_a(int x){ return x; }") != 0,
+          "directives are rejected");
+}
+
 int main(void) {
     cc_init(&vm, CCCC_ENABLE_DEBUGGER | CCCC_CFI | CCCC_STACK_CANARIES |
                      CCCC_DANGLING_DETECT);
@@ -380,6 +420,7 @@ int main(void) {
     test_rejections();
     test_session();
     test_fix();
+    test_fix_editor();
 
     cc_destroy(&vm);
     if (!failed)

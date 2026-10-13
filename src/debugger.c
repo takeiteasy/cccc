@@ -807,15 +807,22 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
             if (sscanf(line, "%*s %127s", name) != 1) {
                 printf("Usage: fix <function>, then the new definition\n");
             } else {
-                char *src = cc_repl_read_unit_stdin("  ... ");
-                if (!src) {
-                    printf("fix: no definition given\n");
+                const char *editor = getenv("VISUAL");
+                if (!editor || !*editor)
+                    editor = getenv("EDITOR");
+                bool ok = false;
+                if (editor && *editor && isatty(0) && isatty(1)) {
+                    ok = cc_debug_fix_edit(vm, name, editor) == 0;
                 } else {
-                    if (cc_debug_fix(vm, name, src) == 0)
-                        printf("%s replaced; new calls run the new body\n",
-                               name);
+                    char *src = cc_repl_read_unit_stdin("  ... ");
+                    if (!src)
+                        printf("fix: no definition given\n");
+                    else
+                        ok = cc_debug_fix(vm, name, src) == 0;
                     free(src);
                 }
+                if (ok)
+                    printf("%s replaced; new calls run the new body\n", name);
             }
         }
         // Print registers
@@ -1833,17 +1840,39 @@ static Obj *debugger_find_reachable_function(VirtualMachine *vm,
     return NULL;
 }
 
-int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src) {
-    if (!debugger_frame_op_allowed(vm, "fix")) // host fault: nothing resumes
-        return -1;
+// The file-scope definition `name` that `fix` may replace, or NULL after
+// printing why not.
+static Obj *debugger_fix_target(VirtualMachine *vm, const char *name) {
     Obj *old = debugger_find_reachable_function(vm, name);
     if (!old || !old->is_function || !old->is_definition) {
         fprintf(stderr,
                 "error: %s is not a function defined in this file (fix "
                 "reaches the last file's functions)\n",
                 name);
-        return -1;
+        return NULL;
     }
+    return old;
+}
+
+const char *cc_function_source(const Obj *fn, size_t *len) {
+    const Token *b = fn->def_begin, *e = fn->def_end;
+    if (!b || !e || b->origin || e->origin || !b->file || b->file != e->file ||
+        !b->file->contents)
+        return NULL;
+    const char *begin = b->loc, *end = e->loc + e->len;
+    const char *base = b->file->contents;
+    if (begin < base || end < begin || end > base + strlen(base))
+        return NULL;
+    *len = (size_t)(end - begin);
+    return begin;
+}
+
+int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src) {
+    if (!debugger_frame_op_allowed(vm, "fix")) // host fault: nothing resumes
+        return -1;
+    Obj *old = debugger_fix_target(vm, name);
+    if (!old)
+        return -1;
     if (cc_redefine_function(vm, src))
         return -1;
 
@@ -1857,6 +1886,115 @@ int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src) {
     }
     debugger_reresolve_breakpoints(vm);
     return 0;
+}
+
+static char *debugger_slurp(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    rewind(f);
+    char *buf = malloc((size_t)n + 1);
+    if (buf && fread(buf, 1, (size_t)n, f) != (size_t)n) {
+        free(buf);
+        buf = NULL;
+    }
+    if (buf)
+        buf[n] = '\0';
+    fclose(f);
+    return buf;
+}
+
+static bool debugger_blank(const char *s) {
+    while (*s && isspace((unsigned char)*s))
+        s++;
+    return !*s;
+}
+
+int cc_debug_fix_edit(VirtualMachine *vm, const char *name,
+                      const char *editor) {
+    if (!debugger_frame_op_allowed(vm, "fix"))
+        return -1;
+    Obj *old = debugger_fix_target(vm, name);
+    if (!old)
+        return -1;
+
+    size_t      span_len = 0;
+    const char *span     = cc_function_source(old, &span_len);
+    char       *prefill  = NULL;
+    if (span) {
+        prefill = strndup(span, span_len);
+    } else {
+        size_t n = strlen(name) + 64;
+        prefill  = malloc(n);
+        snprintf(prefill, n,
+                 "/* source unavailable: write a definition of %s */\n", name);
+    }
+
+    const char *tmpdir = getenv("TMPDIR");
+    char        path[1024];
+    snprintf(path, sizeof(path), "%s/cccc-fix-XXXXXX.c",
+             tmpdir && *tmpdir ? tmpdir : "/tmp");
+    int fd = mkstemps(path, 2);
+    if (fd < 0) {
+        fprintf(stderr, "error: could not create a temporary file\n");
+        free(prefill);
+        return -1;
+    }
+    FILE *f = fdopen(fd, "w");
+    fputs(prefill, f);
+    fputc('\n', f);
+    fclose(f);
+
+    int   result = -1;
+    char *last   = NULL;
+    for (;;) {
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "%s '%s'", editor, path);
+        if (system(cmd) != 0) {
+            fprintf(stderr, "error: editor failed; fix cancelled\n");
+            break;
+        }
+        char *text = debugger_slurp(path);
+        if (!text)
+            break;
+        char  *trim_prefill = strdup(prefill);
+        size_t pl           = strlen(trim_prefill);
+        while (pl && isspace((unsigned char)trim_prefill[pl - 1]))
+            trim_prefill[--pl] = '\0';
+        size_t tl = strlen(text);
+        while (tl && isspace((unsigned char)text[tl - 1]))
+            text[--tl] = '\0';
+        bool unchanged = debugger_blank(text) || !strcmp(text, trim_prefill) ||
+                         (last && !strcmp(text, last));
+        free(trim_prefill);
+        if (unchanged) {
+            printf("fix: unchanged, nothing done\n");
+            free(text);
+            break;
+        }
+        int rc = cc_debug_fix(vm, name, text);
+        if (rc == 0) {
+            free(text);
+            result = 0;
+            break;
+        }
+        free(last);
+        last = text;
+        if (!isatty(0))
+            break;
+        printf("re-edit? [Y/n] ");
+        fflush(stdout);
+        char answer[16];
+        if (!fgets(answer, sizeof(answer), stdin) || answer[0] == 'n' ||
+            answer[0] == 'N')
+            break;
+    }
+    free(last);
+    free(prefill);
+    unlink(path);
+    return result;
 }
 
 // ============================================================================

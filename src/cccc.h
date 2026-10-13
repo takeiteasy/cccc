@@ -2681,6 +2681,7 @@ struct Obj {
     long long code_addr;     /**< For functions compiled to VM bytecode: start
                                 address in the text segment. */
     long long code_end_addr; // Address after function code in text segment
+    Token    *def_begin, *def_end; // source span of a file-scope definition
 
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
@@ -5430,6 +5431,7 @@ Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks);
 // canonicalization -- see this function's own doc comment in preprocess.c.
 const char *cc_canonical_path_key(VirtualMachine *vm, const char *path);
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
+Token *cc_expand_macros_only(VirtualMachine *vm, Token *tok);
 void cc_record_emit_source(VirtualMachine *vm, const char *source);
 void cc_record_emit_object(VirtualMachine *vm, Obj *obj);
 

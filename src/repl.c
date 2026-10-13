@@ -506,7 +506,7 @@ char *cc_repl_read_unit_stdin(const char *prompt) {
 // receives an expression's integer value instead of it being printed; with
 // `decls_only`, an expression is an error.
 static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
-                         long long *result) {
+                         bool expand_macros, long long *result) {
     CcExprSnapshot snap = cc_expr_snapshot(vm);
     jmp_buf        jb;
     jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
@@ -521,7 +521,10 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, "<repl>", (char *)text);
-        convert_pp_tokens(vm, tok);
+        if (expand_macros)
+            tok = cc_expand_macros_only(vm, tok);
+        else
+            convert_pp_tokens(vm, tok);
 
         Node        *expr_node = NULL;
         ReplUnitKind kind      = cc_parse_repl_unit(vm, tok, &expr_node);
@@ -574,7 +577,7 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
 }
 
 static void repl_process_unit(VirtualMachine *vm, const char *text) {
-    repl_run_unit(vm, text, false, NULL);
+    repl_run_unit(vm, text, false, false, NULL);
 }
 
 int cc_redefine_function(VirtualMachine *vm, const char *src) {
@@ -584,13 +587,13 @@ int cc_redefine_function(VirtualMachine *vm, const char *src) {
     }
     bool saved                         = vm->compiler.allow_fn_redefinition;
     vm->compiler.allow_fn_redefinition = true;
-    int rc                             = repl_run_unit(vm, src, true, NULL);
+    int rc = repl_run_unit(vm, src, true, true, NULL);
     vm->compiler.allow_fn_redefinition = saved;
     return rc;
 }
 
 int cc_repl_eval(VirtualMachine *vm, const char *expr, long long *result) {
-    return repl_run_unit(vm, expr, false, result);
+    return repl_run_unit(vm, expr, false, false, result);
 }
 
 // ---------------------------------------------------------------------

@@ -150,6 +150,8 @@ typedef struct {
     // cc_checked_scope_at() (src/parse_checked.c) for how this composes with
     // a #pragma cccc checked/unchecked region.
     CheckedScope checked_scope;
+
+    Token *decl_start; // first token of the declaration (function source span)
 } VarAttr;
 
 struct CustomAttrUse {

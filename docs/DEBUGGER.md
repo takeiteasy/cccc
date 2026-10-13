@@ -49,7 +49,7 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `up` / `down` | | Select the caller / callee frame. |
 | `return [expr]` | | Pop the selected frame as if it returned `expr`. |
 | `restart` | | Re-enter the selected frame's function from the start. |
-| `fix <function>` | | Replace a function with the definition typed next. |
+| `fix <function>` | | Replace a function with the definition typed next, or edited in `$EDITOR`. |
 | `registers` | `r` | Print all register values. |
 | `stack [count]` | `st [count]` | Print the top `count` entries of the stack (default 10). |
 | `disasm` | `dis` | Disassemble the current instruction. |
@@ -132,6 +132,13 @@ leaf replaced; new calls run the new body
 (cccc-dbg) continue
 ```
 
+With `$VISUAL` or `$EDITOR` set and a terminal on stdin and stdout, `fix`
+opens the editor on a temporary file holding the function's current source and
+compiles it when the editor exits. After a compile error it asks `re-edit?
+[Y/n]` and reopens the file with the edits kept. Saving an empty or unchanged
+file cancels. Without an editor or terminal, `fix` reads the definition from
+the lines that follow.
+
 A frame already running the old body finishes in it. `restart` re-enters the
 frame's function from the start, which runs the new body.
 
@@ -141,6 +148,7 @@ frame's function from the start, which runs the new body.
 | Scope | Functions of the last file only; the new source sees that file's declarations. |
 | Source lines | The new body belongs to the file `<repl>`: `break <repl>:2`. |
 | Breakpoints | A `break <function>` follows the new body. A `file:line` breakpoint inside the old body is removed with a message; set it again on `<repl>:line`. |
+| Macros | The last file's macros expand in the new source. `#` directives are rejected, and a macro the file `#undef`s later is not available. |
 | Statics | A block-scope `static` keeps its storage when the new body declares one of the same name and type. |
 
 Embedders call `cc_debug_fix(vm, name, source)`.

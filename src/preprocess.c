@@ -7894,6 +7894,20 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
     return tok;
 }
 
+// Expands object- and function-like macros of the live macro table in `tok`
+// (the debugger's `fix` text). Directives are rejected.
+Token *cc_expand_macros_only(VirtualMachine *vm, Token *tok) {
+    for (Token *t = tok; t && t->kind != TK_EOF; t = t->next)
+        if (is_hash(t))
+            error_tok(vm, t, "directives are not supported here");
+    tok = preprocess2(vm, tok);
+    convert_pp_tokens(vm, tok);
+    join_adjacent_string_literals(vm, tok);
+    for (Token *t = tok; t; t = t->next)
+        t->line_no += t->line_delta;
+    return tok;
+}
+
 // ---------------------------------------------------------------------------
 // cc_parse_test_flags — parse a whitespace-separated CLI-flag string from
 // [[cccc::test(flags = "...")]] into a CcTestFlagsDelta for per-test

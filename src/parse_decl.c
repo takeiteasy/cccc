@@ -976,6 +976,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     } else {
         fn->body = compound_stmt(vm, &tok, tok, &close_brace);
         append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
+        if (!is_nested) {
+            fn->def_begin = attr->decl_start;
+            fn->def_end   = close_brace;
+        }
         fn->locals = vm->compiler.locals;
         leave_scope(vm);
         resolve_goto_labels(vm, vm->compiler.macro_fns != NULL);
@@ -1685,6 +1689,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         }
 
         VarAttr attr   = {};
+        attr.decl_start = tok;
         Type   *basety = declspec(vm, &tok, tok, &attr);
 
         // Typedef
