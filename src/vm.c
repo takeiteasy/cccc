@@ -1674,6 +1674,14 @@ void cc_destroy(VirtualMachine *vm) {
         free(vm->compiler.system_include_paths.data);
     }
 
+    StringArray *framework_dirs[] = {&vm->compiler.framework_paths,
+                                     &vm->compiler.system_framework_paths};
+    for (int k = 0; k < 2; k++) {
+        for (int i = 0; i < framework_dirs[k]->len; i++)
+            free(framework_dirs[k]->data[i]);
+        free(framework_dirs[k]->data);
+    }
+
     // Free input files array
     if (vm->compiler.input_files)
         free(vm->compiler.input_files);
@@ -1859,6 +1867,14 @@ void cc_include(VirtualMachine *vm, const char *path) {
 
 void cc_system_include(VirtualMachine *vm, const char *path) {
     strarray_push(&vm->compiler.system_include_paths, strdup(path));
+}
+
+void cc_framework_path(VirtualMachine *vm, const char *path) {
+    strarray_push(&vm->compiler.framework_paths, strdup(path));
+}
+
+void cc_system_framework_path(VirtualMachine *vm, const char *path) {
+    strarray_push(&vm->compiler.system_framework_paths, strdup(path));
 }
 
 void cc_define(VirtualMachine *vm, char *name, char *buf) {

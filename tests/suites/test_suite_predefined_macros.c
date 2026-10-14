@@ -7,7 +7,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#define SA(x) _Static_assert(x, #x)
+#define SA(x)           _Static_assert(x, #x)
 #define SAME_TYPE(a, b) _Generic((a), typeof(b): 1, default: 0)
 
 SA(__CHAR_BIT__ == CHAR_BIT);
@@ -111,7 +111,7 @@ SA(__ORDER_BIG_ENDIAN__ == 4321);
 
 [[cccc::test(return = 42)]]
 int test_byte_order(void) {
-    uint32_t one = 1;
+    uint32_t      one = 1;
     unsigned char first;
     memcpy(&first, &one, 1);
     if ((__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) != (first == 1))

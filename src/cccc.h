@@ -4300,6 +4300,8 @@ typedef struct Compiler {
 
     StringArray include_paths;        // Quote include search paths
     StringArray system_include_paths; // System header search paths for <...>
+    StringArray framework_paths; // -F: <Name/X.h> -> Name.framework/Headers
+    StringArray system_framework_paths; // --iframework, --sysroot: as above
     HashMap     include_cache;        // Cache for search_include_paths
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
@@ -5193,6 +5195,25 @@ void cc_include(VirtualMachine *vm, const char *path);
  @param path Filesystem path to add to system include search.
 */
 void cc_system_include(VirtualMachine *vm, const char *path);
+
+/*!
+ @brief Add a directory searched for macOS framework headers.
+ @details `<Name/X.h>` resolves to `<path>/Name.framework/Headers/X.h`, then
+             `Name.framework/PrivateHeaders/X.h`. Searched after the regular
+             include paths.
+ @param vm The CCCC instance.
+ @param path Directory holding `*.framework` bundles.
+*/
+void cc_framework_path(VirtualMachine *vm, const char *path);
+
+/*!
+ @brief Add a directory searched for system framework headers.
+ @details Like cc_framework_path(), searched after the system include paths;
+             headers found here are treated as system headers.
+ @param vm The CCCC instance.
+ @param path Directory holding `*.framework` bundles.
+*/
+void cc_system_framework_path(VirtualMachine *vm, const char *path);
 
 /*!
  @brief Define or override a preprocessor macro for the given VM.

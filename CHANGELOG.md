@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: framework header lookup. `-F`/`--framework-path` and `--iframework`
+  resolve `<Name/X.h>` to `Name.framework/Headers/X.h`, and `--sysroot` adds
+  `<sdk>/System/Library/Frameworks`. See `docs/HEADERS.md`.
+- Changed: `-F` is `--framework-path`; `--disable-ffi` has no short form.
+- Fixed: a byte that is not valid UTF-8 inside a comment is no longer a
+  compile error.
+
 ## [0.10.1] - 2026-10-14
 
 - Added: `--repl --watch` reloads the files `:load` read when they are saved,

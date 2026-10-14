@@ -79,7 +79,7 @@ automatic header-dependency tracking.
 
 ### Flags forwarded to the host compiler
 
-`-I`, `-i`/`--isystem`, `-D`, `-U`, `-L`, `-l`, `--std=`, and `-O<n>` are
+`-I`, `-i`/`--isystem`, `-F`, `--iframework`, `-D`, `-U`, `-L`, `-l`, `--std=`, and `-O<n>` are
 passed through the front end to the host `cc`. `-c=native` additionally always
 adds `-lm`, `-pthread`, and `-fsigned-char` (CCCC models `char` as signed on
 every target, so the host build must match).

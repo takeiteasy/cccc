@@ -98,7 +98,7 @@ The trailing summary line (`N warnings generated.`) is suppressed in JSON mode.
 - `implicit-int`
 - `return-type`
 - `shadow`
-- `format` (see also `-F` / `--format-string-checks`)
+- `format` (see also `--format-string-checks`)
 - `conversion` (umbrella; enables `sign-conversion` and `float-conversion` too)
 - `sign-conversion`
 - `float-conversion`

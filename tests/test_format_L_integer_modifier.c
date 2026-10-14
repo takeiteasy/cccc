@@ -3,7 +3,7 @@
 // CCCC_EXPECT_STDERR: expected type 'unsigned long'
 /*
  * #1228: `L` on an integer conversion (%Ld/%Li/%Lu/%Lo/%Lx) is the GNU
- * pre-C99 spelling of `ll` and the -F checker treats it as `long` /
+ * pre-C99 spelling of `ll` and the format-string checker treats it as `long` /
  * `unsigned long`, matching gcc/clang -Wformat.
  *
  * Kept in its own file rather than folded into

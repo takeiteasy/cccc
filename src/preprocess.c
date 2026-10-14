@@ -97,6 +97,8 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
+static char *search_framework_paths(VirtualMachine *vm, const char *filename,
+                                    const char *includer);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 static long pp_const_expr(VirtualMachine *vm, Token **rest, Token *expr);
 static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok);
@@ -1698,6 +1700,10 @@ static char *resolve_include_probe(VirtualMachine *vm, Token *start,
     if (!path && is_dquote)
         path = search_include_paths(vm, filename, filename_len, true);
 
+    if (!path)
+        path = search_framework_paths(vm, filename,
+                                      start->file ? start->file->name : NULL);
+
     return path;
 }
 
@@ -2971,6 +2977,61 @@ static bool is_cccc_supplied_only_header(const char *name) {
 // outright, rather than silently fall back, once the SDK copy is missing).
 static bool wants_builtin_header(VirtualMachine *vm, bool is_std, bool owned) {
     return owned || (is_std && !vm->compiler.no_builtin_includes);
+}
+
+static char *probe_framework_dir(const char *dir, const char *name,
+                                 int name_len, const char *rest) {
+    static const char *const subdirs[] = {"Headers", "PrivateHeaders"};
+    for (int i = 0; i < 2; i++) {
+        char *path = format("%s/%.*s.framework/%s/%s", dir, name_len, name,
+                            subdirs[i], rest);
+        if (file_exists(path))
+            return path;
+        free(path);
+    }
+    return NULL;
+}
+
+// Resolves `Name/rest` to `<dir>/Name.framework/{Headers,PrivateHeaders}/rest`
+// for each -F then --iframework directory. A header inside a framework also
+// sees that framework's bundled sub-frameworks
+// (`X.framework/Frameworks/Name.framework`), which is how CoreServices.h
+// reaches CarbonCore, AE, FSEvents and the rest. The result depends on
+// `includer`, so it is not memoised in include_cache.
+// TODO: #include_next never continues into framework directories (#1553).
+static char *search_framework_paths(VirtualMachine *vm, const char *filename,
+                                    const char *includer) {
+    const char *slash = strchr(filename, '/');
+    if (filename[0] == '/' || !slash || slash == filename)
+        return NULL;
+    int         name_len = slash - filename;
+    const char *rest     = slash + 1;
+
+    if (includer) {
+        static const char suffix[] = ".framework";
+        for (const char *p = strstr(includer, ".framework/"); p;
+             p             = strstr(p + 1, ".framework/")) {
+            char *dir =
+                format("%.*s/Frameworks",
+                       (int)(p - includer) + (int)sizeof(suffix) - 1, includer);
+            char *path = probe_framework_dir(dir, filename, name_len, rest);
+            free(dir);
+            if (path)
+                return path;
+        }
+    }
+
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    for (int k = 0; k < 2; k++) {
+        for (int i = 0; i < lists[k]->len; i++) {
+            char *path = probe_framework_dir(lists[k]->data[i], filename,
+                                             name_len, rest);
+            if (path)
+                return path;
+        }
+    }
+    return NULL;
 }
 
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
@@ -6158,6 +6219,9 @@ static char *resolve_comptime_include_path(VirtualMachine *vm, Token *start_tok,
         resolved = search_include_paths(vm, filename, filename_len, !is_dquote);
     if (!resolved && is_dquote)
         resolved = search_include_paths(vm, filename, filename_len, true);
+    if (!resolved)
+        resolved = search_framework_paths(
+            vm, filename, start_tok->file ? start_tok->file->name : NULL);
     return resolved;
 }
 
@@ -6958,6 +7022,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         search_include_paths(vm, filename, filename_len, true);
                     found_in_sys = (path != NULL);
                 }
+
+                if (!path)
+                    path = search_framework_paths(
+                        vm, filename, start->file ? start->file->name : NULL);
 
                 if (!path) {
                     // Nothing on disk (no -I hit, no CCCC ./include fallback —

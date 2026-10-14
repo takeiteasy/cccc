@@ -379,6 +379,14 @@ static int run_native_backend(
         argv_push(&cc_args, bundled ? "-idirafter" : "-isystem");
         argv_push(&cc_args, sys_inc_paths[i]);
     }
+    for (int i = 0; i < vm->compiler.framework_paths.len; i++) {
+        argv_push(&cc_args, "-F");
+        argv_push(&cc_args, vm->compiler.framework_paths.data[i]);
+    }
+    for (int i = 0; i < vm->compiler.system_framework_paths.len; i++) {
+        argv_push(&cc_args, "-iframework");
+        argv_push(&cc_args, vm->compiler.system_framework_paths.data[i]);
+    }
     // #1324: a URL #include reached only through an ordinary project header
     // (not a command-line input, not one of CCCC's own bundled/cccc-only
     // headers) is never auto-captured, so #1313's emit_include_paths rewrite
@@ -550,6 +558,10 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-I/--include <path>      Add <path> to include search paths\n");
     printf("\t-i/--isystem <path>      Add <path> to system include paths (for "
            "non-standard headers)\n");
+    printf("\t-F/--framework-path <path> Add <path> to framework search paths "
+           "(<Name/X.h> -> Name.framework/Headers/X.h)\n");
+    printf("\t   --iframework <path>   Add <path> to system framework search "
+           "paths\n");
     printf(
         "\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
         "non-owned standard headers\n");
@@ -558,7 +570,8 @@ static void usage(const char *argv0, int exit_code) {
            "--use-system-headers)\n");
     printf(
         "\t   --sysroot <path>      Set SDK root; adds <path>/usr/include to "
-        "system include paths and implies --use-system-headers\n");
+        "system include paths (and <path>/System/Library/Frameworks to "
+        "system framework paths) and implies --use-system-headers\n");
     printf("\t-L/--library-path <path> Add <path> to dynamic library search "
            "paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
@@ -860,7 +873,7 @@ static void usage(const char *argv0, int exit_code) {
            "function names\n");
     printf("\t   --ffi-deny=list        Deny comma-separated native function "
            "names\n");
-    printf("\t-F/--disable-ffi          Block all registered and dynamic "
+    printf("\t   --disable-ffi         Block all registered and dynamic "
            "native calls\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
            "violations\n");
@@ -1408,6 +1421,10 @@ int main(int argc, const char *argv[]) {
     int          inc_paths_count     = 0;
     const char **sys_inc_paths       = NULL; // -isystem
     int          sys_inc_paths_count = 0;
+    const char **fw_paths            = NULL; // -F
+    int          fw_paths_count      = 0;
+    const char **sys_fw_paths        = NULL; // --iframework
+    int          sys_fw_paths_count  = 0;
     const char **lib_paths           = NULL; // -L / --library-path
     int          lib_paths_count     = 0;
     const char **libs                = NULL; // --library
@@ -1608,7 +1625,9 @@ int main(int argc, const char *argv[]) {
         {"std", required_argument, 0, 's'},
         {"ffi-allow", required_argument, 0, 1052},
         {"ffi-deny", required_argument, 0, 1053},
-        {"disable-ffi", no_argument, 0, 'F'},
+        {"disable-ffi", no_argument, 0, 1134},
+        {"framework-path", required_argument, 0, 'F'},
+        {"iframework", required_argument, 0, 1135},
         {"ffi-errors-fatal", no_argument, 0, 1055},
         {"ffi-type-checking", no_argument, 0, 1024},
         {"vm-profile", no_argument, 0, 1056},
@@ -1707,7 +1726,7 @@ int main(int argc, const char *argv[]) {
     argc                    = kept;
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
     const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::Fbt::Tmpn:rs:ABwf:x:";
+        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::F:bt::Tmpn:rs:ABwf:x:";
     int opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
@@ -2086,8 +2105,19 @@ int main(int argc, const char *argv[]) {
                             sizeof(*ffi_deny_args) * (ffi_deny_args_count + 1));
                 ffi_deny_args[ffi_deny_args_count++] = strdup(optarg);
                 break;
-            case 'F':  // --disable-ffi
+            case 1134: // --disable-ffi
                 disable_all_ffi = 1;
+                break;
+            case 'F':  // --framework-path
+                fw_paths =
+                    realloc(fw_paths, sizeof(*fw_paths) * (fw_paths_count + 1));
+                fw_paths[fw_paths_count++] = strdup(optarg);
+                break;
+            case 1135: // --iframework
+                sys_fw_paths =
+                    realloc(sys_fw_paths,
+                            sizeof(*sys_fw_paths) * (sys_fw_paths_count + 1));
+                sys_fw_paths[sys_fw_paths_count++] = strdup(optarg);
                 break;
             case 1055: // --ffi-errors-fatal
                 ffi_errors_fatal  = 1;
@@ -2893,6 +2923,11 @@ int main(int argc, const char *argv[]) {
     for (int i = 0; i < sys_inc_paths_count; i++)
         cc_system_include(&vm, sys_inc_paths[i]);
 
+    for (int i = 0; i < fw_paths_count; i++)
+        cc_framework_path(&vm, fw_paths[i]);
+    for (int i = 0; i < sys_fw_paths_count; i++)
+        cc_system_framework_path(&vm, sys_fw_paths[i]);
+
     // --sysroot: auto-configure system include paths from the SDK root.
     // Implies --use-system-headers.
     //
@@ -2932,6 +2967,12 @@ int main(int argc, const char *argv[]) {
                  "%s/usr/local/include", sysroot);
         if (!stat(sysroot_local_inc, &_st))
             cc_system_include(&vm, sysroot_local_inc);
+
+        char sysroot_frameworks[4096];
+        snprintf(sysroot_frameworks, sizeof(sysroot_frameworks),
+                 "%s/System/Library/Frameworks", sysroot);
+        if (!stat(sysroot_frameworks, &_st))
+            cc_system_framework_path(&vm, sysroot_frameworks);
     }
 
     // Propagate system-header mode flags to the compiler state.
