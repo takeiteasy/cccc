@@ -22,6 +22,7 @@
 // build/cccc, else ./cccc; the test is skipped when none exists.
 
 #include <errno.h>
+#include <fcntl.h>
 #include <dirent.h>
 #include <limits.h>
 #include <poll.h>
@@ -30,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -52,6 +54,7 @@ static char root[PATH_MAX];
 typedef struct {
     pid_t  pid;
     int    fd;
+    int    in; // where input goes: a pipe, or the pty master (== fd)
     char   buf[1 << 16];
     size_t len;
 } Child;
@@ -231,6 +234,74 @@ static void test_header_reload(const char *dir) {
     reap(&c);
 }
 
+// Runs `cccc` with stdin and stdout on a pipe, or on a pty (a terminal, so
+// the REPL line editor is in use).
+static void spawn_repl(Child *c, const char *dir, char *const argv[],
+                       bool pty) {
+    int in[2], out[2];
+    int master = -1;
+    if (pty) {
+        master = posix_openpt(O_RDWR | O_NOCTTY);
+        if (master < 0 || grantpt(master) || unlockpt(master))
+            exit(2);
+    } else if (pipe(in) != 0 || pipe(out) != 0)
+        exit(2);
+    c->pid = fork();
+    if (c->pid == 0) {
+        if (chdir(dir) != 0)
+            _exit(127);
+        if (pty) {
+            setsid();
+            int slave = open(ptsname(master), O_RDWR);
+            if (slave < 0)
+                _exit(127);
+            ioctl(slave, TIOCSCTTY, 0);
+            dup2(slave, STDIN_FILENO);
+            dup2(slave, STDOUT_FILENO);
+            dup2(slave, STDERR_FILENO);
+        } else {
+            dup2(in[0], STDIN_FILENO);
+            dup2(out[1], STDOUT_FILENO);
+            dup2(out[1], STDERR_FILENO);
+        }
+        execv(cccc, argv);
+        _exit(127);
+    }
+    if (pty) {
+        c->fd = c->in = master;
+    } else {
+        close(in[0]);
+        close(out[1]);
+        c->in = in[1];
+        c->fd = out[0];
+    }
+    c->len = 0;
+}
+
+static void send_line(Child *c, const char *line) {
+    if (write(c->in, line, strlen(line)) < 0)
+        perror("write");
+}
+
+// `:load` a file, edit it, and see the reload without typing anything.
+static void test_repl_watch(const char *dir, bool pty) {
+    const char *what = pty ? "repl watch (pty)" : "repl watch (pipe)";
+    write_file(dir, "rw.c", "int f(void) { return 41; }\n");
+    char *argv[] = {cccc, "--repl", "--watch", NULL};
+    Child c;
+    spawn_repl(&c, dir, argv, pty);
+    send_line(&c, ":load rw.c\n");
+    send_line(&c, "f()\n");
+    long at = EXPECT(&c, "(int) 41", 0, what);
+    write_file(dir, "rw.c", "int f(void) { return 42; }\n");
+    at = EXPECT(&c, "reloaded rw.c: 1 changed", (size_t)at, what);
+    send_line(&c, "f()\n");
+    EXPECT(&c, "(int) 42", (size_t)at, what);
+    if (c.in != c.fd)
+        close(c.in);
+    reap(&c);
+}
+
 static void test_restart(const char *dir) {
     write_file(dir, "s.c",
                "#include <stdio.h>\n#include <unistd.h>\n"
@@ -357,6 +428,8 @@ int main(void) {
     test_hot_reload(root);
     test_refused_reload(root);
     test_header_reload(root);
+    test_repl_watch(root, false);
+    test_repl_watch(root, true);
     test_restart(root);
     test_exit_waits(root);
     test_build(root);

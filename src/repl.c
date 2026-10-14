@@ -47,6 +47,7 @@
 //     cc_expr_snapshot/cc_expr_snapshot_restore, declared in cccc.h).
 
 #include "./internal.h"
+#include "./watch.h"
 #include <setjmp.h>
 
 #if defined(_WIN32)
@@ -54,6 +55,7 @@
 #define CCCC_ISATTY _isatty
 #define CCCC_FILENO _fileno
 #else
+#include <poll.h>
 #include <unistd.h>
 #define CCCC_ISATTY isatty
 #define CCCC_FILENO fileno
@@ -83,8 +85,51 @@ typedef struct {
     void *ctx;
 } LineSource;
 
+// --watch: saves to :load-ed files are applied while the prompt waits.
+static VirtualMachine *repl_watch_vm;
+
+static void repl_apply_watch(void) {
+    if (repl_watch_vm && _cccc_watch_pending) {
+        _cccc_watch_pending = 0;
+        cc_watch_apply(repl_watch_vm);
+    }
+}
+
+#ifdef HAVE_READLINE
+// Called by readline while it waits for a key; the half-typed line is
+// redrawn below the message.
+static int repl_readline_hook(void) {
+    if (_cccc_watch_pending) {
+        fputs("\n", rl_outstream);
+        repl_apply_watch();
+        rl_on_new_line();
+        rl_redisplay();
+    }
+    return 0;
+}
+#endif
+
+#ifndef _WIN32
+// Waits for input on stdin, applying saves meanwhile. stdin is unbuffered
+// under --watch so poll() sees every byte fgets would.
+static void repl_wait_stdin(const char *prompt) {
+    for (;;) {
+        struct pollfd p = {.fd = CCCC_FILENO(stdin), .events = POLLIN};
+        if (poll(&p, 1, 100) != 0)
+            return;
+        if (_cccc_watch_pending) {
+            fputs("\n", stdout);
+            repl_apply_watch();
+            fputs(prompt, stdout);
+            fflush(stdout);
+        }
+    }
+}
+#endif
+
 static char *repl_read_stdin_line(void *ctx, const char *prompt) {
     (void)ctx;
+    repl_apply_watch();
 #ifdef HAVE_READLINE
     // Only hand input to readline when stdin is a real terminal -- on a
     // pipe/redirect it has no line-editing to offer and, worse, echoes back
@@ -99,6 +144,10 @@ static char *repl_read_stdin_line(void *ctx, const char *prompt) {
 #endif
     fputs(prompt, stdout);
     fflush(stdout);
+#ifndef _WIN32
+    if (repl_watch_vm)
+        repl_wait_stdin(prompt);
+#endif
     char buf[65536];
     if (!fgets(buf, sizeof(buf), stdin))
         return NULL;
@@ -505,6 +554,10 @@ int cc_repl_load_file(VirtualMachine *vm, const char *path) {
     }
     repl_unit_name = "<repl>";
     fclose(f);
+    if (cc_watch_active()) {
+        cc_watch_add(path);
+        cc_watch_arm();
+    }
     return 0;
 }
 
@@ -708,6 +761,14 @@ void cc_run_repl(VirtualMachine *vm) {
 
     LineSource src         = {.next = repl_read_stdin_line, .ctx = NULL};
     bool       interactive = CCCC_ISATTY(CCCC_FILENO(stdin));
+
+    if (cc_watch_active()) {
+        repl_watch_vm = vm;
+        setvbuf(stdin, NULL, _IONBF, 0);
+#ifdef HAVE_READLINE
+        rl_event_hook = repl_readline_hook;
+#endif
+    }
 
     for (;;) {
         char *unit = repl_read_unit(&src, interactive, /*allow_commands=*/true);

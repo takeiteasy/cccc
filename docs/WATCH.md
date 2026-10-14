@@ -48,6 +48,25 @@ count=20
 Use `--watch-restart` when a change is outside what a reload accepts, or when
 the program should start fresh each time.
 
+## In the REPL
+
+`cccc --repl --watch` reloads each file `:load` read when it is saved, as
+`:reload` would. The message appears at the prompt without pressing Enter, and a
+half-typed line is redrawn below it.
+
+```
+$ cccc --repl --watch
+cccc> :load f.c
+cccc> f()
+(int) 41
+reloaded f.c: 1 changed, 0 unchanged, 0 new
+cccc> f()
+(int) 42
+```
+
+A file with statements at file scope cannot be reloaded, as with `:reload`.
+`--watch-restart` does not apply to the REPL, and `--watch-clear` does nothing.
+
 ## Building
 
 With `--build`, the build runs again from scratch on every save. Each run is a
@@ -107,8 +126,8 @@ These calls do nothing without `--watch`.
 
 ## Limits
 
-`--watch` cannot be combined with `--repl`, `--testing`, `--test-run`, `-c`, `-d`,
-`-E`, `-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
+`--watch` cannot be combined with `--testing`, `--test-run`, `-c`, `-d`, `-E`,
+`-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
 
 A reload follows the rules in [DEBUGGER.md](DEBUGGER.md#reloading-a-file): no
 layout changes, and functions that call `[[cccc::comptime]]` code are not
