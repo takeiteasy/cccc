@@ -532,8 +532,14 @@ Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok) {
     return node;
 }
 
+void error_float16_unsupported(VirtualMachine *vm, Token *tok) {
+    error_tok(vm, tok, "_Float16 values are not supported");
+}
+
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
+    if (is_float16(expr->ty) || is_float16(ty))
+        error_float16_unsupported(vm, expr->tok);
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = ND_CAST;

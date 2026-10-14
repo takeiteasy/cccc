@@ -105,8 +105,8 @@ Each one equals its bundled-header counterpart (`__INT_MAX__ == INT_MAX`,
 them.
 
 Identity and feature macros stay undefined because CCCC does not implement
-what they advertise: `__clang__`, `__BLOCKS__`, `__ARM_NEON`, `_Float16`
-(`__FLT16_*`), the `__GCC_ATOMIC_*` family, `__STDC_NO_THREADS__`. They are
+what they advertise: `__clang__`, `__BLOCKS__`, `__ARM_NEON`, the
+`__FLT16_*` macros (`_Float16` is storage-only), the `__GCC_ATOMIC_*` family, `__STDC_NO_THREADS__`. They are
 not affected by `--compiler-family`.
 
 Other constructs:
@@ -187,11 +187,13 @@ cccc -F ./vendor/Frameworks app.c                         # ./vendor/Frameworks/
 Framework paths are searched after `-I` and `--isystem`. A header inside a
 framework also finds that framework's bundled sub-frameworks
 (`X.framework/Frameworks/Name.framework`), so `<CoreServices/CoreServices.h>`
-reaches `<CarbonCore/CarbonCore.h>` and friends. Under `-c=native` the flags
-are forwarded to the host compiler as `-F` and `-iframework`.[^fw]
+reaches `<CarbonCore/CarbonCore.h>` and friends. `#include_next` and
+`__has_include_next` continue in that same order, so an `-I` header can hand
+off to a framework header and a framework header to the same framework in a
+later directory. Under `-c=native` the flags are forwarded to the host
+compiler as `-F` and `-iframework`.[^fw]
 
-[^fw]: `#include_next` does not continue into framework directories, and
-    `-framework NAME` at link time is a separate option.
+[^fw]: `-framework NAME` at link time is a separate option.
 
 ## `-c=native` and auto-captured includes
 

@@ -214,6 +214,8 @@ bool __builtin_ast_type_exists(const char *name) {
 // that error_tok()s on invalid combinations, warns on the empty spelling,
 // and can *define* struct/enum tags as a side effect.
 static Type *base_type_from_spelling(const char *name) {
+    if (strcmp(name, "_Float16") == 0)
+        return ty_float16;
     if (strcmp(name, "_Decimal32") == 0)
         return ty_decimal32;
     if (strcmp(name, "_Decimal64") == 0)
@@ -524,6 +526,9 @@ const char *__builtin_ast_type_c_name(Type *ty) {
             break;
         case TY_LDOUBLE:
             base = "ldouble";
+            break;
+        case TY_FLOAT16:
+            base = "_Float16";
             break;
         case TY_DECIMAL32:
             base = "_Decimal32";

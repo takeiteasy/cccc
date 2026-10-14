@@ -653,6 +653,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         return tok;
     }
 
+    if (is_float16(fn->ty->return_ty))
+        error_float16_unsupported(vm, ty->name);
+    for (Type *p = fn->ty->params; p; p = p->next)
+        if (is_float16(p))
+            error_float16_unsupported(vm, p->name ? p->name : ty->name);
+
     // #1056: nested-function tracking must only apply when a body actually
     // follows (checked above, via the early "no body" return) -- not to a
     // bare block-scope declaration/prototype. A block-scope function
@@ -1385,6 +1391,39 @@ static void warn_unused_globals(VirtualMachine *vm) {
     free(infos);
 }
 
+static const struct {
+    const char *base;
+    int         arity;
+} libm_builtins[CCCC_LIBM_BUILTINS] = {
+    {"fabs", 1},  {"sqrt", 1},     {"floor", 1}, {"ceil", 1}, {"trunc", 1},
+    {"round", 1}, {"copysign", 2}, {"fmin", 2},  {"fmax", 2}, {"fma", 3},
+};
+
+int libm_builtin_lookup(const char *name, int len, int *row, int *variant) {
+    static const char prefix[] = "__builtin_";
+    const int         plen     = sizeof(prefix) - 1;
+    if (len <= plen || memcmp(name, prefix, plen))
+        return 0;
+    name += plen;
+    len  -= plen;
+    for (int i = 0; i < CCCC_LIBM_BUILTINS; i++) {
+        int blen = (int)strlen(libm_builtins[i].base);
+        if (len < blen || len > blen + 1 ||
+            memcmp(name, libm_builtins[i].base, blen))
+            continue;
+        int v = len == blen         ? 0
+                : name[blen] == 'f' ? 1
+                : name[blen] == 'l' ? 2
+                                    : -1;
+        if (v < 0)
+            continue;
+        *row     = i;
+        *variant = v;
+        return libm_builtins[i].arity;
+    }
+    return 0;
+}
+
 static void declare_builtin_functions(VirtualMachine *vm) {
     // alloca(size) -> void*
     Type *ty                    = func_type(vm, pointer_to(vm, ty_void));
@@ -1455,6 +1494,28 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     memcmp_ty->params->next->base->is_const = true;
     memcmp_ty->params->next->next           = copy_type(vm, ty_long);
     vm->compiler.builtin_memcmp = new_private_func_obj(vm, "memcmp", memcmp_ty);
+
+    // __builtin_fabs/sqrt/... forward to the libm function of the same name
+    // (private stub, spelled __builtin_* by the serializer).
+    static const char suffix[3] = {'\0', 'f', 'l'};
+    Type *const       floats[3] = {ty_double, ty_float, ty_ldouble};
+    for (int i = 0; i < CCCC_LIBM_BUILTINS; i++) {
+        for (int v = 0; v < 3; v++) {
+            const char *base = libm_builtins[i].base;
+            Type       *fty  = func_type(vm, floats[v]);
+            Type      **tail = &fty->params;
+            for (int a = 0; a < libm_builtins[i].arity; a++) {
+                *tail = copy_type(vm, floats[v]);
+                tail  = &(*tail)->next;
+            }
+            Obj *stub = new_private_func_obj(
+                vm, arena_format(vm, "%s%.*s", base, v ? 1 : 0, &suffix[v]),
+                fty);
+            stub->builtin_spelling = arena_format(vm, "__builtin_%s%.*s", base,
+                                                  v ? 1 : 0, &suffix[v]);
+            vm->compiler.builtin_libm[i][v] = stub;
+        }
+    }
 
     // __cccc_pc_to_name(void *pc) -> const char*
     // Private stub for __builtin_pc_function_name — maps a VM bytecode offset

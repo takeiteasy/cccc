@@ -86,6 +86,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `//` single-line comments | ✓ | |
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
+| `_Float16` | ~ | Storage only: declarations, `sizeof`/`_Alignof` (2), struct layout, pointers, typedefs, `_Generic` and prototypes work, and `-c=native` spells it through. Reading or writing a value, arithmetic, conversions, calls and a non-zero initializer are rejected with "_Float16 values are not supported"; a zero initializer inside an aggregate or static storage is accepted. `__FLT16_*` stay undefined |
 | `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
@@ -171,7 +172,7 @@ language coverage figures apply.
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths; also accepts URLs in curl-enabled builds, probing the same shared cache a real fetch uses (non-curl builds report 0 for URLs) |
-| `__has_include_next` | ✓ | Searches from the directory after the one the current file was found in, like `#include_next` |
+| `__has_include_next` | ✓ | Searches from the directory after the one the current file was found in, like `#include_next`, continuing through framework directories |
 | `__has_declspec_attribute` | ✓ | Recognized and parses correctly; always returns `0` (CCCC supports no `__declspec` attributes) |
 | `__has_warning` | ✓ | Recognized and parses correctly; always returns `0` (no `-W`-name-keyed diagnostic registry) |
 | Unrecognized `__has_*`-shaped operator | ✓ | Evaluates to `0` and warns (`-Wcpp`) naming the operator, whether literal or reached through a macro expansion, instead of a "not a function" error |

@@ -139,6 +139,10 @@ DeclKw declspec_kw(Token *tok) {
                             if (memcmp(s + 2, "omplex", 6) == 0)
                                 return DK_COMPLEX;
                             break;
+                        case 'F':
+                            if (memcmp(s + 2, "loat16", 6) == 0)
+                                return DK_FLOAT16;
+                            break;
                         case '_':
                             if (memcmp(s + 2, "thread", 6) == 0)
                                 return DK_TLS;
@@ -476,7 +480,8 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             case DK_NONE:
             case DK_DECIMAL32:
             case DK_DECIMAL64:
-            case DK_DECIMAL128: {
+            case DK_DECIMAL128:
+            case DK_FLOAT16: {
                 Type *ty2 = (dk == DK_NONE) ? find_typedef(vm, tok) : NULL;
                 if (counter)
                     goto declspec_done;
@@ -500,6 +505,9 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                     tok = tok->next;
                 } else if (dk == DK_DECIMAL128) {
                     ty  = ty_decimal128;
+                    tok = tok->next;
+                } else if (dk == DK_FLOAT16) {
+                    ty  = ty_float16;
                     tok = tok->next;
                 } else {
                     VarScope *sc = find_var(vm, tok);

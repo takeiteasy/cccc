@@ -634,6 +634,9 @@ bool cc_has_attribute(const char *name, int len);
 
 bool is_flonum(Type *ty);
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
+// Matches __builtin_<libm name>[f|l]; sets *row (table index) and *variant
+// (0 double, 1 float, 2 long double), returns the argument count or 0.
+int libm_builtin_lookup(const char *name, int len, int *row, int *variant);
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 // #1095: const_expr()'s own body, but surfacing sizeof/_Alignof-of-a-
 // from_include-type provenance (Node.layout_ty/layout_is_align, #1031) to
@@ -702,6 +705,7 @@ extern Type *ty_fcomplex;
 extern Type *ty_dcomplex;
 extern Type *ty_ldcomplex;
 
+extern Type *ty_float16;
 extern Type *ty_decimal32;
 extern Type *ty_decimal64;
 extern Type *ty_decimal128;
@@ -715,6 +719,9 @@ bool bitfield_is_unsigned(Type *ty);
 bool is_complex(Type *ty);
 bool is_numeric(Type *ty);
 bool is_vector(Type *ty);
+bool is_float16(Type *ty);
+// Hard error for any _Float16 value use (see TY_FLOAT16).
+void error_float16_unsupported(VirtualMachine *vm, Token *tok);
 bool is_decimal(Type *ty);
 int dec_width_code(Type *ty);  // 0/1/2 for _Decimal32/64/128, else -1
 bool is_error_type(Type *ty);

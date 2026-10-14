@@ -2942,12 +2942,12 @@ static inline int op_CHKT3_fn(VirtualMachine *vm) {
         // silently fell to "unknown" for any vector-typed CHKT3 mismatch);
         // fixed in passing alongside appending the three decimal kinds.
         static const char *type_names[] = {
-            "void",       "bool",     "char",   "short",       "int",
-            "long",       "float",    "double", "long double", "enum",
-            "pointer",    "function", "array",  "vla",         "struct",
-            "union",      "error",    "block",  "complex",     "nullptr_t",
-            "_BitInt",    "auto",     "vector", "_Decimal32",  "_Decimal64",
-            "_Decimal128"};
+            "void",        "bool",     "char",   "short",       "int",
+            "long",        "float",    "double", "long double", "enum",
+            "pointer",     "function", "array",  "vla",         "struct",
+            "union",       "error",    "block",  "complex",     "nullptr_t",
+            "_BitInt",     "auto",     "vector", "_Decimal32",  "_Decimal64",
+            "_Decimal128", "_Float16"};
         const int n_type_names =
             (int)(sizeof(type_names) / sizeof(type_names[0]));
 

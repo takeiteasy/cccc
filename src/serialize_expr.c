@@ -1928,6 +1928,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     fprintf(f, "__builtin_memmove");
                 } else if (node->var == vm->compiler.builtin_memcmp) {
                     fprintf(f, "__builtin_memcmp");
+                } else if (node->var->builtin_spelling) {
+                    fprintf(f, "%s", node->var->builtin_spelling);
                 } else {
                     fprintf(f, "%s", node->var->name);
                 }

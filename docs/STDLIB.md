@@ -95,6 +95,19 @@ These are forwarded to libc via a private stub bound to the real libc name, not 
 | `__builtin_memmove(d, s, n)` | `void *` | Equivalent to `memmove(d, s, n)` |
 | `__builtin_memcmp(a, b, n)` | `int` | Equivalent to `memcmp(a, b, n)` |
 
+#### Math Builtins
+
+Each name below, and its `f` (float) and `l` (long double) form, forwards to the libm function of the same name. No `#include <math.h>` is needed, and a program's own `fabs` does not conflict. Arguments convert to the parameter type, so `__builtin_fabs(-42)` takes an `int`. Under `-c=native`/`-m`/`-c=generated` the serializer prints the literal `__builtin_` spelling. Calls are evaluated at run time, so they are not valid in constant expressions or static initializers.
+
+| Builtin | Arguments | Description |
+|---------|-----------|-------------|
+| `__builtin_fabs` | `x` | Absolute value |
+| `__builtin_sqrt` | `x` | Square root |
+| `__builtin_floor`, `__builtin_ceil`, `__builtin_trunc`, `__builtin_round` | `x` | Rounding |
+| `__builtin_copysign` | `x, y` | `x` with the sign of `y` |
+| `__builtin_fmin`, `__builtin_fmax` | `x, y` | Smaller / larger value |
+| `__builtin_fma` | `x, y, z` | `x * y + z` with a single rounding |
+
 #### Variadic Argument Macros (`__builtin_va_*`)
 
 When `<stdarg.h>` is included, the following macros are available as aliases for the standard `va_*` macros:

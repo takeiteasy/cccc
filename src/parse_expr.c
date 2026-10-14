@@ -1253,6 +1253,8 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
+    if (is_float16(lhs->ty) || is_float16(rhs->ty))
+        error_float16_unsupported(vm, tok);
 
     // Checked C-style checked-pointer arithmetic rule (#770/#482-484): a
     // [[cccc::single]] pointer represents exactly one object and rejects all
@@ -1330,6 +1332,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         node->ty   = ty_error;
         return node;
     }
+    if (is_float16(lhs->ty) || is_float16(rhs->ty))
+        error_float16_unsupported(vm, tok);
 
     // Checked-pointer arithmetic rule -- see the matching comment in
     // new_add() above.

@@ -283,6 +283,7 @@ typedef enum {
     DK_DECIMAL32,
     DK_DECIMAL64,
     DK_DECIMAL128,
+    DK_FLOAT16,
     // GNU 128-bit integers (mapped onto _BitInt(128))
     DK_INT128,
 } DeclKw;

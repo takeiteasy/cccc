@@ -469,6 +469,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
     if (!node) {
         error("codegen: null expression node");
     }
+    if (is_float16(node->ty))
+        error("_Float16 values are not supported");
 
     // A vector-returning ND_FUNCALL falls through to the main switch below
     // instead of gen_vector_expr (#714): the value comes back via the

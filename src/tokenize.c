@@ -957,6 +957,7 @@ static void init_keyword_map(void) {
         "_Decimal32",
         "_Decimal64",
         "_Decimal128", // C23 types
+        "_Float16",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)

@@ -2472,6 +2472,9 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         case TY_LDOUBLE:
             fprintf(f, "long double");
             break;
+        case TY_FLOAT16:
+            fprintf(f, "_Float16");
+            break;
         case TY_DECIMAL32:
             fprintf(f, "_Decimal32");
             break;

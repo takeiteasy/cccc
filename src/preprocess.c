@@ -1902,6 +1902,9 @@ bool cc_has_attribute(const char *name, int len) {
 }
 
 static bool is_has_builtin_supported(char *name) {
+    int libm_row, libm_variant;
+    if (libm_builtin_lookup(name, (int)strlen(name), &libm_row, &libm_variant))
+        return true;
     static const char *builtins[] = {
         "__builtin_types_compatible_p",
         "__builtin_classify_type",
@@ -2998,7 +3001,6 @@ static char *probe_framework_dir(const char *dir, const char *name,
 // (`X.framework/Frameworks/Name.framework`), which is how CoreServices.h
 // reaches CarbonCore, AE, FSEvents and the rest. The result depends on
 // `includer`, so it is not memoised in include_cache.
-// TODO: #include_next never continues into framework directories (#1553).
 static char *search_framework_paths(VirtualMachine *vm, const char *filename,
                                     const char *includer) {
     const char *slash = strchr(filename, '/');
@@ -3284,8 +3286,20 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
     free(buf);
 }
 
-// Searches include_paths then system_include_paths from index `start`
-// (system entries are numbered after the include_paths ones).
+// Splits `Name/rest` for framework lookup; false for any other spelling.
+static bool split_framework_name(const char *filename, int *name_len,
+                                 const char **rest) {
+    const char *slash = strchr(filename, '/');
+    if (filename[0] == '/' || !slash || slash == filename)
+        return false;
+    *name_len = (int)(slash - filename);
+    *rest     = slash + 1;
+    return true;
+}
+
+// Searches include_paths, system_include_paths, then the -F and --iframework
+// framework directories (#include's own order) from index `start`, the
+// entries being numbered consecutively across the four lists.
 static char *search_include_next(VirtualMachine *vm, char *filename,
                                  int start) {
     int npaths = vm->compiler.include_paths.len;
@@ -3302,6 +3316,23 @@ static char *search_include_next(VirtualMachine *vm, char *filename,
         if (file_exists(path))
             return path;
     }
+
+    int         name_len;
+    const char *rest;
+    if (!split_framework_name(filename, &name_len, &rest))
+        return NULL;
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    int          base    = npaths + vm->compiler.system_include_paths.len;
+    for (int k = 0; k < 2; k++) {
+        for (int i = start > base ? start - base : 0; i < lists[k]->len; i++) {
+            char *path = probe_framework_dir(lists[k]->data[i], filename,
+                                             name_len, rest);
+            if (path)
+                return path;
+        }
+        base += lists[k]->len;
+    }
     return NULL;
 }
 
@@ -3310,20 +3341,49 @@ static char *search_include_next(VirtualMachine *vm, char *filename,
 static int include_next_start_for(VirtualMachine *vm, const char *path,
                                   const char *filename) {
     size_t plen = strlen(path), flen = strlen(filename);
-    if (plen <= flen + 1 || strcmp(path + plen - flen, filename) ||
-        path[plen - flen - 1] != '/')
-        return 0;
-    size_t dlen   = plen - flen - 1;
     int    npaths = vm->compiler.include_paths.len;
-    for (int i = 0; i < npaths; i++) {
-        const char *d = vm->compiler.include_paths.data[i];
-        if (strlen(d) == dlen && !strncmp(d, path, dlen))
-            return i + 1;
+    int    nsys   = vm->compiler.system_include_paths.len;
+
+    if (plen > flen + 1 && !strcmp(path + plen - flen, filename) &&
+        path[plen - flen - 1] == '/') {
+        size_t dlen = plen - flen - 1;
+        for (int i = 0; i < npaths; i++) {
+            const char *d = vm->compiler.include_paths.data[i];
+            if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                return i + 1;
+        }
+        for (int i = 0; i < nsys; i++) {
+            const char *d = vm->compiler.system_include_paths.data[i];
+            if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                return npaths + i + 1;
+        }
     }
-    for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
-        const char *d = vm->compiler.system_include_paths.data[i];
-        if (strlen(d) == dlen && !strncmp(d, path, dlen))
-            return npaths + i + 1;
+
+    // `dir/Name.framework/{Headers,PrivateHeaders}/rest` for `Name/rest`.
+    int         name_len;
+    const char *rest;
+    if (!split_framework_name(filename, &name_len, &rest))
+        return 0;
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    for (int h = 0; h < 2; h++) {
+        char  *tail = format("/%.*s.framework/%s/%s", name_len, filename,
+                             h ? "PrivateHeaders" : "Headers", rest);
+        size_t tlen = strlen(tail);
+        bool   hit  = plen > tlen && !strcmp(path + plen - tlen, tail);
+        free(tail);
+        if (!hit)
+            continue;
+        size_t dlen = plen - tlen;
+        int    base = npaths + nsys;
+        for (int k = 0; k < 2; k++) {
+            for (int i = 0; i < lists[k]->len; i++) {
+                const char *d = lists[k]->data[i];
+                if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                    return base + i + 1;
+            }
+            base += lists[k]->len;
+        }
     }
     return 0;
 }

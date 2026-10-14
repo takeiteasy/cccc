@@ -7,6 +7,15 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `__builtin_fabs`, `sqrt`, `floor`, `ceil`, `trunc`, `round`,
+  `copysign`, `fmin`, `fmax` and `fma` (and their `f`/`l` forms) without
+  `<math.h>`. See `docs/STDLIB.md`.
+- Added: `_Float16` as a storage-only type: declarations, layout, pointers and
+  prototypes work; using a value is an error. See `docs/COVERAGE.md`.
+- Changed: `#include_next` and `__has_include_next` continue into framework
+  directories.
+- Fixed: attributes that SDK headers use (`availability`, `visibility`, ...)
+  no longer run the comptime pass on programs without comptime code.
 - Added: framework header lookup. `-F`/`--framework-path` and `--iframework`
   resolve `<Name/X.h>` to `Name.framework/Headers/X.h`, and `--sysroot` adds
   `<sdk>/System/Library/Frameworks`. See `docs/HEADERS.md`.
