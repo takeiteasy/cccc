@@ -1700,6 +1700,9 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
         hashmap_deinit_borrowed(&parse_scope.tag_map);
         if (!expr)
             error_tok(vm, tok, "failed to parse the expression");
+        if (rest->kind != TK_EOF)
+            error_tok(vm, rest, "unexpected token after expression: '%.*s'",
+                      rest->len, rest->loc);
         add_type(vm, expr);
 
         if (result_ty &&

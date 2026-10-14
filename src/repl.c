@@ -452,6 +452,9 @@ static void repl_cmd_type(VirtualMachine *vm, char *arg) {
         convert_pp_tokens(vm, tok);
         Token *rest;
         Node  *n = cc_parse_expr(vm, &rest, tok);
+        if (rest->kind != TK_EOF)
+            error_tok(vm, rest, "unexpected token after expression: '%.*s'",
+                      rest->len, rest->loc);
         add_type(vm, n);
         vm->error_jmp_buf = saved_jmp_buf;
         cc_expr_snapshot_discard(&snap);
