@@ -3702,6 +3702,11 @@ typedef struct TextHole {
     Pc start, end;
 } TextHole;
 
+/*! @brief A run of reclaimed data bytes, [start, end). */
+typedef struct DataHole {
+    char *start, *end;
+} DataHole;
+
 typedef struct CcCodeMark {
     bool  started, ended;
     bool  text_done, data_done; // already given back (or never to be)
@@ -3718,6 +3723,18 @@ typedef struct CcCodeMark {
     bool in_hole;
     Pc   saved_top;
     int  saved_source_map;
+
+    // Set by the caller once cc_wrapper_is_confined holds: no address the
+    // wrapper made (data, block, label) outlives its run, so all of it may be
+    // given back.
+    bool confined;
+
+    // Allocate the new globals in a data hole: set before the compile.
+    // data_in_hole is set when they were placed there.
+    char *data_hole_start, *data_hole_end;
+    bool  data_in_hole;
+    char *data_first; // the first new global, aligned: the data's packed extent
+                      // is [data_first, data_end)
 } CcCodeMark;
 
 /*!
@@ -4432,6 +4449,10 @@ typedef struct Compiler {
     TextHole *text_holes;
     int       num_text_holes, text_holes_cap;
     Pc text_limit; // 0, or the word emit may not reach (compile into a hole)
+
+    // Reclaimed data below live data, sorted, non-adjacent (cc_code_release).
+    DataHole *data_holes;
+    int       num_data_holes, data_holes_cap;
 
     // Function address patches for function pointers
     struct {
@@ -5664,10 +5685,10 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
  @brief Give back the code and data of a throw-away wrapper compile.
  @details Text at the top is rolled back; text below later code becomes a
           hole (filled with HOLE words) that cc_text_hole_find offers to the
-          next compile. Data is rolled back only if nothing was appended after
-          it. Text is kept when the compile added any function besides the
-          wrapper or a global label (an address may have escaped); data is
-          kept when it added a global (a string literal, a static). A compile
+          next compile, and data does the same (cc_data_hole_find). Text is
+          kept when the compile added any function besides the wrapper or a
+          global label, and data when it added a global (a string literal, a
+          static), unless `mark->confined` says no address escaped. A compile
           that never finished (`!mark->ended`) gives back whatever it emitted.
  @return 1 if the text was given back (or the compile emitted none), 0 if
          it must wait (condition wrappers are running), -1 if the text must
@@ -5686,6 +5707,24 @@ void cc_code_discard(VirtualMachine *vm, CcCodeMark *mark);
  @return true and its word range [*start, *end) if there is one.
 */
 bool cc_text_hole_find(VirtualMachine *vm, Pc words, Pc *start, Pc *end);
+
+/*!
+ @brief Find the smallest reclaimed data hole of at least `bytes` bytes.
+ @return true and its range [*start, *end) if there is one.
+*/
+bool cc_data_hole_find(VirtualMachine *vm, size_t bytes, char **start,
+                       char **end);
+
+/*!
+ @brief Can no address `wrapper` makes outlive its run?
+ @details True when the wrapper (and the block literals in it) store only to
+          its own locals, call no user function, pass pointers or blocks only
+          to FFI functions that keep none, and either return a non-pointer or
+          `result_dropped`. Run it on the wrapper after the compile and set
+          CcCodeMark::confined from it.
+*/
+bool cc_wrapper_is_confined(VirtualMachine *vm, Obj *wrapper,
+                            bool result_dropped);
 
 /*! @brief Retry the discarded wrappers that were waiting on later code. */
 void cc_code_retry_dead(VirtualMachine *vm);

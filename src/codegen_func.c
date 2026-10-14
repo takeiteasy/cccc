@@ -758,6 +758,14 @@ static void forget_text_range(VirtualMachine *vm, Pc start, Pc end) {
     vm->compiler.num_func_addr_patches = kept;
 
     kept                               = 0;
+    for (int i = 0; i < num_global_labels; i++) {
+        Pc off = global_label_map[i].offset;
+        if (off < start || off >= end)
+            global_label_map[kept++] = global_label_map[i];
+    }
+    num_global_labels                  = kept;
+
+    kept                               = 0;
     for (int i = 0; i < vm->dbg.num_debug_symbols; i++) {
         DebugSymbol *sym = &vm->dbg.debug_symbols[i];
         bool         own = sym->is_local && sym->owner_fn &&
@@ -876,6 +884,120 @@ static void leave_text_hole(VirtualMachine *vm, CcCodeMark *m) {
     }
 }
 
+// ========== Reclaimed data (holes) ==========
+
+// Drop what refers to the data bytes [start, end) and zero them.
+static void forget_data_range(VirtualMachine *vm, char *start, char *end) {
+    long long lo = start - vm->data_seg, hi = end - vm->data_seg;
+    int       kept = 0;
+    for (int i = 0; i < vm->dbg.num_debug_symbols; i++) {
+        DebugSymbol *sym = &vm->dbg.debug_symbols[i];
+        if (sym->is_local || sym->offset < lo || sym->offset >= hi)
+            vm->dbg.debug_symbols[kept++] = *sym;
+    }
+    vm->dbg.num_debug_symbols = kept;
+
+    size_t len                = (size_t)(end - start);
+    memset(start, 0, len);
+    cc_type_shadow_clear_range(vm, start, len);
+}
+
+static void add_data_hole(VirtualMachine *vm, char *start, char *end) {
+    DataHole *h = vm->compiler.data_holes;
+    int       n = vm->compiler.num_data_holes;
+    int       i = 0;
+    while (i < n && h[i].start < start)
+        i++;
+    if (i > 0 && h[i - 1].end == start) {
+        h[i - 1].end = end;
+        i--;
+    } else {
+        if (n == vm->compiler.data_holes_cap) {
+            vm->compiler.data_holes_cap = vm->compiler.data_holes_cap
+                                              ? vm->compiler.data_holes_cap * 2
+                                              : 8;
+            h = realloc(vm->compiler.data_holes,
+                        (size_t)vm->compiler.data_holes_cap * sizeof(DataHole));
+            if (!h)
+                error("out of memory for reclaimed data");
+            vm->compiler.data_holes = h;
+        }
+        memmove(&h[i + 1], &h[i], (size_t)(n - i) * sizeof(DataHole));
+        h[i].start = start;
+        h[i].end   = end;
+        vm->compiler.num_data_holes++;
+    }
+    if (i + 1 < vm->compiler.num_data_holes && h[i].end == h[i + 1].start) {
+        h[i].end = h[i + 1].end;
+        memmove(&h[i + 1], &h[i + 2],
+                (size_t)(vm->compiler.num_data_holes - i - 2) *
+                    sizeof(DataHole));
+        vm->compiler.num_data_holes--;
+    }
+}
+
+// The top has moved down onto a hole: take the hole back into the top.
+static void absorb_data_holes(VirtualMachine *vm) {
+    while (vm->compiler.num_data_holes > 0) {
+        DataHole *h = &vm->compiler.data_holes[vm->compiler.num_data_holes - 1];
+        if (h->end != vm->data_ptr)
+            break;
+        vm->data_ptr = h->start;
+        vm->compiler.num_data_holes--;
+    }
+}
+
+// TODO: linear scan; fine for the few holes a debugging session leaves
+bool cc_data_hole_find(VirtualMachine *vm, size_t bytes, char **start,
+                       char **end) {
+    bool found = false;
+    for (int i = 0; i < vm->compiler.num_data_holes; i++) {
+        char *hs = vm->compiler.data_holes[i].start;
+        char *he = vm->compiler.data_holes[i].end;
+        if ((size_t)(he - hs) < bytes || (found && he - hs >= *end - *start))
+            continue;
+        *start = hs;
+        *end   = he;
+        found  = true;
+    }
+    return found;
+}
+
+// The new globals took [vm->data_seg + hole_start, cursor) of a hole: what is
+// left of it stays one.
+static void shrink_data_hole(VirtualMachine *vm, char *hole_start,
+                             char *cursor) {
+    for (int i = 0; i < vm->compiler.num_data_holes; i++) {
+        DataHole *h = &vm->compiler.data_holes[i];
+        if (h->start != hole_start)
+            continue;
+        h->start = cursor;
+        if (h->start >= h->end) {
+            memmove(h, h + 1,
+                    (size_t)(vm->compiler.num_data_holes - i - 1) *
+                        sizeof(DataHole));
+            vm->compiler.num_data_holes--;
+        }
+        return;
+    }
+}
+
+// Where `n` globals would end if placed from data offset `off`: the same
+// alignment and skips as the allocation loop in cc_repl_compile_new_marked.
+static long long new_vars_data_end(VirtualMachine *vm, Obj **arr, int n,
+                                   long long off) {
+    for (int i = 0; i < n; i++) {
+        Obj *var = arr[i];
+        if (var->reuse_of || var->is_tls ||
+            find_reloaded_static(vm, var, arr, i))
+            continue;
+        int align  = cc_effective_align(var->align, var->ty->align);
+        off        = (off + (align - 1)) & ~(long long)(align - 1);
+        off       += var->ty->size;
+    }
+    return off;
+}
+
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     cc_repl_compile_new_marked(vm, old_head, NULL);
 }
@@ -912,6 +1034,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
     // After the RETBUF pool, which a later release must not take back.
     if (mark) {
         Pc hole_start = mark->hole_start, hole_end = mark->hole_end;
+        char *data_hole_start = mark->data_hole_start,
+             *data_hole_end   = mark->data_hole_end;
         *mark = (CcCodeMark){.started          = true,
                              .text_start       = vm->text_ptr,
                              .data_start       = vm->data_ptr,
@@ -921,6 +1045,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                              .last_col         = vm->dbg.last_debug_col,
                              .hole_start       = hole_start,
                              .hole_end         = hole_end,
+                             .data_hole_start  = data_hole_start,
+                             .data_hole_end    = data_hole_end,
                              .saved_top        = vm->text_ptr,
                              .saved_source_map = vm->dbg.source_map_count};
     }
@@ -937,6 +1063,15 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
         for (Obj *v = vm->compiler.globals; v != old_head; v = v->next)
             if (!v->is_function)
                 arr[idx--] = v;
+        // The new globals go in the requested data hole if they all fit.
+        char *hole_cursor = NULL;
+        if (mark && mark->data_hole_start &&
+            new_vars_data_end(vm, arr, num_new_vars,
+                              mark->data_hole_start - vm->data_seg) <=
+                mark->data_hole_end - vm->data_seg)
+            hole_cursor = mark->data_hole_start;
+        char **cursor = hole_cursor ? &hole_cursor : &vm->data_ptr;
+
         for (int i = 0; i < num_new_vars; i++) {
             Obj *var = arr[i];
             if (var->reuse_of) {
@@ -966,17 +1101,26 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                 // #1136: see gen()'s own comment on this same allocation
                 // shape above.
                 int align = cc_effective_align(var->align, var->ty->align);
-                long long offset = vm->data_ptr - vm->data_seg;
+                long long offset = *cursor - vm->data_seg;
                 offset = (offset + (align - 1)) & ~(long long)(align - 1);
-                check_data_capacity(vm, offset + var->ty->size);
-                vm->data_ptr = vm->data_seg + offset;
-                var->offset  = vm->data_ptr - vm->data_seg;
+                if (!hole_cursor)
+                    check_data_capacity(vm, offset + var->ty->size);
+                *cursor     = vm->data_seg + offset;
+                var->offset = *cursor - vm->data_seg;
+                if (mark && !mark->data_first)
+                    mark->data_first = *cursor;
                 add_debug_symbol(vm, var->name, var->offset, var->ty, 0, NULL,
                                  0);
                 if (var->init_data)
-                    memcpy(vm->data_ptr, var->init_data, var->ty->size);
-                vm->data_ptr += var->ty->size;
+                    memcpy(*cursor, var->init_data, var->ty->size);
+                *cursor += var->ty->size;
             }
+        }
+        if (hole_cursor) {
+            mark->data_in_hole = true;
+            mark->data_start   = mark->data_hole_start;
+            mark->data_end     = hole_cursor;
+            shrink_data_hole(vm, mark->data_hole_start, hole_cursor);
         }
     }
 
@@ -1080,7 +1224,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
         mark->ended                 = true;
         if (!mark->in_hole)
             mark->text_end = vm->text_ptr;
-        mark->data_end          = vm->data_ptr;
+        if (!mark->data_in_hole)
+            mark->data_end = vm->data_ptr;
         mark->global_labels_end = num_global_labels;
         mark->new_fns           = num_new_fns;
         mark->new_vars          = num_new_vars;
@@ -1100,23 +1245,27 @@ int cc_code_release(VirtualMachine *vm, CcCodeMark *m) {
 
     // Data first: it stays reachable through anything the text left behind.
     if (!m->data_done) {
-        char *data_end = m->ended ? m->data_end : vm->data_ptr;
-        if (m->ended && m->new_vars > 0) {
+        char *data_end =
+            m->ended || m->data_in_hole ? m->data_end : vm->data_ptr;
+        if (m->ended && m->new_vars > 0 && !m->confined) {
             m->data_done = true; // a string literal or static lives here
         } else if (data_end == m->data_start) {
             m->data_done = true;
         } else if (vm->data_ptr == data_end) {
-            size_t len = (size_t)(data_end - m->data_start);
-            memset(m->data_start, 0, len);
-            cc_type_shadow_clear_range(vm, m->data_start, len);
+            forget_data_range(vm, m->data_start, data_end);
             vm->data_ptr = m->data_start;
+            absorb_data_holes(vm);
+            m->data_done = true;
+        } else if (m->confined) {
+            forget_data_range(vm, m->data_start, data_end);
+            add_data_hole(vm, m->data_start, data_end);
             m->data_done = true;
         }
     }
 
     if (m->text_done)
         return 1;
-    if (m->ended &&
+    if (m->ended && !m->confined &&
         (m->new_fns > 1 || m->global_labels_end != m->global_labels))
         return -1;
 

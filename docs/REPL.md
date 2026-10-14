@@ -164,12 +164,13 @@ VM-only.
 - The REPL does not run the full preprocessor: `#include`, `#define`, and
   other directives are not available at the prompt (only tokenization and
   semantic parsing/type-checking run on each line).
-- An evaluated *expression* compiles a one-shot wrapper whose code is given
-  back afterwards. Data stays when the expression creates a string literal or
-  other static storage, and code stays when the expression defines a label or
-  a block literal. Code compiled while the expression runs (a condition
-  breakpoint's first hit) leaves the wrapper's code as free text below it,
-  which later conditions reuse.
+- An evaluated *expression* compiles a one-shot wrapper whose code and data
+  are given back afterwards, including its string literals, labels and block
+  literals, when it only reads program state. It keeps them when it stores
+  outside its own locals, calls a function compiled in the session, passes a
+  pointer or block to a C function not known to keep none, or returns a
+  pointer to the caller. Code and data freed below newer ones are reused by
+  later condition breakpoints.
 - Only functions can be redefined; redefining a variable is an error (see
   [Redefining functions](#redefining-functions)).
 - Certain internal compiler errors outside of parsing/type-checking (for

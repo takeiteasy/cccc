@@ -39,7 +39,9 @@
 //     splice code, see src/reflection.c), compiled the same incremental
 //     way, executed once on the VM, and its typed result is printed. The
 //     wrapper Obj is then unlinked from vm->compiler.globals and its code
-//     and data given back (cc_code_discard).
+//     and data given back (cc_code_discard); a wrapper that stores outside
+//     its own locals, calls a user function or returns a pointer to the
+//     caller keeps its string literals and blocks (cc_wrapper_is_confined).
 //   - A failed parse rolls back the scope/globals list to a snapshot taken
 //     before the line was parsed, via vm->error_jmp_buf (see
 //     cc_expr_snapshot/cc_expr_snapshot_restore, declared in cccc.h).
@@ -573,6 +575,7 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
                 __builtin_ast_function_set_body(fn, ret);
                 is_expr_unit = true;
                 cc_repl_compile_new_marked(vm, snap.globals_head, &mark);
+                mark.confined  = cc_wrapper_is_confined(vm, fn, result == NULL);
 
                 long long ival = 0;
                 double    fval = 0.0;

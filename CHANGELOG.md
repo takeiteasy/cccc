@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a debugger condition or REPL expression that only reads program
+  state gives back its string literals, block literals and labels too, and
+  data freed below newer data is reused by later conditions.
 - Fixed: `--dangling-pointers` no longer reports a variable-length array's
   pointer slot as dangling when an earlier call left a stale tag at that
   address.

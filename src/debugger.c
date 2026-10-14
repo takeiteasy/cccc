@@ -1589,28 +1589,43 @@ static Obj *debugger_compile_expr(VirtualMachine *vm, const char *src,
     return fn;
 }
 
-// A wrapper just compiled at the top is compiled again into a reclaimed hole
-// below live code, if one is big enough: the first compile only measures it.
+// A wrapper just compiled at the top is compiled again into reclaimed text and
+// data holes below live code, if they are big enough: the first compile only
+// measures it. Data can only move when `mark->confined` says nothing kept a
+// pointer into it.
 static void debugger_move_into_hole(VirtualMachine *vm, Breakpoint *bp,
                                     Obj *scope, CcCodeMark *mark) {
-    Pc hole_start, hole_end;
-    if (mark->new_vars || mark->data_end != mark->data_start ||
-        mark->text_end == mark->text_start ||
-        !cc_text_hole_find(vm, mark->text_end - mark->text_start, &hole_start,
-                           &hole_end))
+    size_t data_len =
+        mark->data_first ? (size_t)(mark->data_end - mark->data_first) : 0;
+    if (!mark->confined && (mark->new_vars || data_len))
+        return;
+
+    Pc    hole_start = 0, hole_end = 0;
+    char *data_hole_start = NULL, *data_hole_end = NULL;
+    bool  text_hole = mark->text_end != mark->text_start &&
+                      cc_text_hole_find(vm, mark->text_end - mark->text_start,
+                                        &hole_start, &hole_end);
+    bool  data_hole =
+        data_len &&
+        cc_data_hole_find(vm, data_len, &data_hole_start, &data_hole_end);
+    if (!text_hole && !data_hole)
         return;
 
     CcCodeMark top = *mark;
     if (cc_code_release(vm, &top) != 1)
         return;
-    CcCodeMark hole = {.hole_start = hole_start, .hole_end = hole_end};
+    CcCodeMark hole = {.hole_start      = hole_start,
+                       .hole_end        = hole_end,
+                       .data_hole_start = data_hole_start,
+                       .data_hole_end   = data_hole_end};
     Obj *fn = debugger_compile_expr(vm, bp->condition, scope, NULL, &hole);
     if (!fn) {
         hole = (CcCodeMark){0};
         fn   = debugger_compile_expr(vm, bp->condition, scope, NULL, &hole);
     }
-    bp->cond_fn = fn;
-    *mark       = hole;
+    bp->cond_fn   = fn;
+    hole.confined = mark->confined;
+    *mark         = hole;
 }
 
 // Compile a breakpoint's condition exactly once, sharing the wrapper of an
@@ -1632,8 +1647,10 @@ static bool debugger_compile_condition_once(VirtualMachine *vm,
 
     CcCodeMark mark = {0};
     bp->cond_fn = debugger_compile_expr(vm, bp->condition, scope, NULL, &mark);
-    if (bp->cond_fn)
+    if (bp->cond_fn) {
+        mark.confined = cc_wrapper_is_confined(vm, bp->cond_fn, true);
         debugger_move_into_hole(vm, bp, scope, &mark);
+    }
     bp->cond_compile_failed = !bp->cond_fn;
     if (!bp->cond_fn)
         return false;
@@ -1656,9 +1673,6 @@ static bool debugger_compile_condition_once(VirtualMachine *vm,
 
 // A breakpoint stopped using its compiled condition. A wrapper nobody uses is
 // given back: from the top, or as a hole that a later condition reuses.
-// TODO: a wrapper whose data holds a string literal or static, or that defines
-// a block literal or label, is never reclaimed
-// (https://todo.sr.ht/~takeiteasy/cccc/1513)
 static void debugger_drop_condition(VirtualMachine *vm, Obj *wrapper) {
     for (int i = 0; wrapper && i < vm->dbg.num_conds; i++) {
         DbgCond *c = &vm->dbg.conds[i];

@@ -684,6 +684,99 @@ static void test_condition_stale_tag(void) {
     cc_remove_breakpoint(&vm, miss);
 }
 
+// A wrapper that only reads program state gives back its string literals; one
+// that could leave an address behind keeps them.
+static void test_confined_data(void) {
+    decl("int strcmp(const char *, const char *);"
+         "unsigned long strlen(const char *);"
+         "long strtol(const char *, char **, int);");
+    decl("const char *cf_name = \"foo\";");
+    decl("int cf_id(const char *s){ return s[0]; }");
+    decl("int cf_g;");
+    eval("1 + 2");
+    Pc    t0 = vm.text_ptr;
+    char *d0 = vm.data_ptr;
+    for (int i = 0; i < 200; i++)
+        CHECK(eval("strcmp(cf_name, \"foo\")") == 0, "strcmp of a literal");
+    CHECK(eval("strlen(\"hello\")") == 5, "strlen of a literal");
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "read-only literal wrappers are reclaimed: data %td, text %u",
+          vm.data_ptr - d0, vm.text_ptr - t0);
+
+    eval("cf_id(\"zz\")");
+    CHECK(vm.data_ptr > d0, "a call to a user function keeps its data");
+    d0 = vm.data_ptr;
+    eval("(cf_g = strlen(\"abc\"), 0)");
+    CHECK(vm.data_ptr > d0, "a store outside the wrapper keeps its data");
+    eval("strtol(\"12\", 0, 10)");
+    CHECK(vm.data_ptr > d0, "a pointer given to an unlisted FFI call is kept");
+    d0               = vm.data_ptr;
+    const char *back = (const char *)eval("\"kept\"");
+    CHECK(vm.data_ptr > d0 && back && !strcmp(back, "kept"),
+          "a pointer result is kept");
+
+    // Conditions place their literals in holes and give them back.
+    Pc cf_in;
+    decl_fn("cf_fn", &cf_in, NULL);
+    t0 = vm.text_ptr;
+    d0 = vm.data_ptr;
+    for (int i = 0; i < 50; i++) {
+        int b = cond_bp(cf_in, "x == 1 && strcmp(\"foo\", \"bar\") != 0");
+        CHECK(eval("cf_fn(1)") == 1, "cf_fn");
+        CHECK(vm.dbg.breakpoints[b].hit_count == 1,
+              "condition with a literal is true: %d",
+              vm.dbg.breakpoints[b].hit_count);
+        cc_remove_breakpoint(&vm, b);
+    }
+    CHECK(vm.data_ptr == d0 && vm.text_ptr == t0,
+          "condition literals are reclaimed: data %td, text %u",
+          vm.data_ptr - d0, vm.text_ptr - t0);
+
+    // Live data above the wrapper's turns its range into a hole that the next
+    // condition reuses.
+    int b1 = cond_bp(cf_in, "strcmp(\"foo\", \"bar\") != 0");
+    eval("cf_fn(1)");
+    decl("int cf_live = 7;");
+    char *top = vm.data_ptr;
+    cc_remove_breakpoint(&vm, b1);
+    CHECK(vm.data_ptr == top && vm.compiler.num_data_holes >= 1,
+          "the literal's data is a hole: %d", vm.compiler.num_data_holes);
+    int holes = vm.compiler.num_data_holes;
+    int b2    = cond_bp(cf_in, "strcmp(\"foo\", \"baz\") != 0");
+    CHECK(eval("cf_fn(1)") == 1, "cf_fn with the hole");
+    CHECK(vm.data_ptr == top && vm.compiler.num_data_holes <= holes,
+          "the next literal reuses the hole: %td", vm.data_ptr - top);
+    CHECK(vm.dbg.breakpoints[b2].hit_count == 1, "condition true in the hole");
+    cc_remove_breakpoint(&vm, b2);
+    CHECK(eval("cf_live") == 7, "live data untouched");
+}
+
+// Block literals and labels in a wrapper do not pin its text.
+static void test_confined_text(void) {
+    Pc cb_in;
+    decl_fn("cb_fn", &cb_in, NULL);
+    eval("1 + 2");
+    Pc    t0 = vm.text_ptr;
+    char *d0 = vm.data_ptr;
+    int   b  = cond_bp(cb_in, "({ int r = 0; goto l; r = 5; l: ; r; }) == 0");
+    CHECK(eval("cb_fn(1)") == 1, "cb_fn");
+    CHECK(vm.dbg.breakpoints[b].hit_count == 1, "label condition is true: %d",
+          vm.dbg.breakpoints[b].hit_count);
+    cc_remove_breakpoint(&vm, b);
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "a wrapper with a label is reclaimed: text %u", vm.text_ptr - t0);
+
+    b = cond_bp(cb_in,
+                "({ int (^k)(int) = ^(int v){ return v == 1; }; k(1); })");
+    CHECK(eval("cb_fn(1)") == 1, "cb_fn with a block");
+    CHECK(vm.dbg.breakpoints[b].hit_count == 1, "block condition is true: %d",
+          vm.dbg.breakpoints[b].hit_count);
+    cc_remove_breakpoint(&vm, b);
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "a wrapper with a block literal is reclaimed: text %u",
+          vm.text_ptr - t0);
+}
+
 // Steps over the instructions in [from, to) and reports whether they end
 // exactly on `to`.
 static bool text_walk_aligned(Pc from, Pc to) {
@@ -810,6 +903,9 @@ int main(void) {
     cc_register_cfunc(&vm, "fix_hook", (void *)fix_hook, 0, 0);
     cc_register_cfunc(&vm, "cfix_hook", (void *)cfix_hook, 0, 0);
     cc_register_cfunc(&vm, "host_rec", (void *)host_rec, 1, 0);
+    cc_register_cfunc(&vm, "strcmp", (void *)strcmp, 2, 0);
+    cc_register_cfunc(&vm, "strlen", (void *)strlen, 1, 0);
+    cc_register_cfunc(&vm, "strtol", (void *)strtol, 3, 0);
     cc_repl_init(&vm);
 
     test_holes();
@@ -824,6 +920,8 @@ int main(void) {
     test_fix_editor();
     test_reclaim();
     test_condition_stale_tag();
+    test_confined_data();
+    test_confined_text();
     test_many_symbols();
 
     cc_destroy(&vm);
