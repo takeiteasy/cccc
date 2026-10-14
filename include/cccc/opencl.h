@@ -29,14 +29,19 @@
 
 #include <cccc/kernel.h>
 
+/*! @name Version
+ * @{ */
 #define __OPENCL_C_VERSION__ 120
 #define __OPENCL_VERSION__   120
 #define CL_VERSION_1_0       100
 #define CL_VERSION_1_1       110
 #define CL_VERSION_1_2       120
 #define __ENDIAN_LITTLE__    1
+/*! @} */
 
-// Qualifiers. The bare spellings are reserved words in OpenCL C, so they are
+/*! @name Qualifiers
+ * @{ */
+// The bare spellings are reserved words in OpenCL C, so they are
 // macros here and cannot be used as identifiers. The bodies use the
 // underscored attribute names so that the macros do not expand themselves.
 #define __kernel   [[cccc::__kernel__]]
@@ -49,11 +54,15 @@
 #define constant   [[cccc::__constant__]]
 #define __private  [[cccc::__private__]]
 #define private    [[cccc::__private__]]
+/*! @} */
 
+/*! @name Scalar typedefs
+ * @{ */
 typedef unsigned char  uchar;
 typedef unsigned short ushort;
 typedef unsigned int   uint;
 typedef unsigned long  ulong;
+/*! @} */
 
 // A cast's type-name cannot start with an address-space attribute
 typedef [[cccc::__generic__]] unsigned __cl_generic_uint;
@@ -93,6 +102,9 @@ __CL_VECTOR(float, float4, 16);
 __CL_VECTOR(float, float8, 32);
 __CL_VECTOR(float, float16, 64);
 
+/*! @name Work-item functions
+ * Map onto the cccc_* builtins of kernel.h.
+ * @{ */
 #define get_work_dim()     cccc_work_dim()
 #define get_global_id(d)   cccc_global_id(d)
 #define get_local_id(d)    cccc_local_id(d)
@@ -102,7 +114,10 @@ __CL_VECTOR(float, float16, 64);
 #define get_num_groups(d)  cccc_num_groups(d)
 // TODO: cccc_launch has no offset, so this is always 0; #1413
 #define get_global_offset(d)   ((size_t)0)
+/*! @} */
 
+/*! @name Barriers and fences
+ * @{ */
 #define CLK_LOCAL_MEM_FENCE    CCCC_LOCAL_FENCE
 #define CLK_GLOBAL_MEM_FENCE   CCCC_GLOBAL_FENCE
 
@@ -110,7 +125,12 @@ __CL_VECTOR(float, float16, 64);
 #define mem_fence(flags)       __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define read_mem_fence(flags)  __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define write_mem_fence(flags) __atomic_thread_fence(__ATOMIC_SEQ_CST)
+/*! @} */
 
+/*! @name Atomics
+ * Return the old value. Also available under the OpenCL 1.0 `atom_*`
+ * spellings.
+ * @{ */
 #define atomic_add(p, v)       __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST)
 #define atomic_sub(p, v)       __atomic_fetch_sub(p, v, __ATOMIC_SEQ_CST)
 #define atomic_and(p, v)       __atomic_fetch_and(p, v, __ATOMIC_SEQ_CST)
@@ -174,5 +194,6 @@ __CL_VECTOR(float, float16, 64);
 #define atom_cmpxchg atomic_cmpxchg
 #define atom_min     atomic_min
 #define atom_max     atomic_max
+/*! @} */
 
 #endif

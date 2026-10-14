@@ -1,14 +1,14 @@
 name: Docs
 
 # GitHub-side "regular push" CI is docs-only (see CLAUDE.md's Branching
-# notes): builds the Doxygen HTML for the three public headers under
+# notes): builds the Doxygen HTML for the public headers under
 # include/cccc/ and publishes it to GitHub Pages
 # (https://takeiteasy.github.io/cccc/) on every push to `trunk`. `trunk` is
 # pushed to both `origin` (sr.ht) and `github` on every push to keep them
 # in sync -- sr.ht's .builds/linux-amd64.yml is what actually
 # bootstraps/builds/tests the compiler on every push (Linux amd64,
 # canonical); this workflow doesn't need a working `cccc` binary at all,
-# since Doxyfile's INPUT is just the three headers and `doxygen Doxyfile`
+# since Doxyfile's INPUT is just the public headers and `doxygen Doxyfile`
 # runs standalone.
 #
 # The full build+test+package for the three supported quadrants (Linux

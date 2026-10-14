@@ -1,0 +1,38 @@
+/*!
+@mainpage CCCC
+
+CCCC (**C**omprehensive **C** **C**ompensation **C**ompiler) compiles C to
+bytecode and runs it in a built-in VM. It is a drop-in frontend for `cc`,
+`clang` and `gcc`: a compile-time pass between the preprocessor and the parser
+runs `[[cccc::comptime]]` functions and expands their results, and
+`-c=native` hands the result to a host compiler.
+
+This site documents the public headers. The user guides live in
+[docs/](https://github.com/takeiteasy/cccc/tree/trunk/docs).
+
+## Headers
+
+| Header | Use it to | Guide |
+|---|---|---|
+| @ref building.h "cccc/building.h" | Write `--build` scripts: targets, profiles, cross-compilation | [BUILD_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/BUILD_MODE.md) |
+| @ref reflection.h "cccc/reflection.h" | Write comptime macros: inspect, build and quote AST nodes | [MACROS](https://github.com/takeiteasy/cccc/blob/trunk/docs/MACROS.md) |
+| @ref testing.h "cccc/testing.h" | Write `[[cccc::test]]` tests with the `Assert*` macros | [TEST_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/TEST_MODE.md) |
+| @ref kernel.h "cccc/kernel.h" | Launch `[[cccc::kernel]]` functions over a grid of work-items | [KERNELS](https://github.com/takeiteasy/cccc/blob/trunk/docs/KERNELS.md) |
+| @ref opencl.h "cccc/opencl.h" | Read OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model | [OPENCL](https://github.com/takeiteasy/cccc/blob/trunk/docs/OPENCL.md) |
+
+`testing.h`, `building.h` and `opencl.h` are injected automatically in their
+modes. `reflection.h` is available to comptime code without an include.
+
+## Example
+
+```c
+@comptime Node *square(Node *x) { return Quote("($1) * ($1)", x); }
+
+int main(void) { return square(6); }   // 36, folded at compile time
+```
+
+```sh
+cccc demo.c                    # run in the VM
+cccc -c=native demo.c -o demo  # lower to C and build with the host compiler
+```
+*/
