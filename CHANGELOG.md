@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-14
+
 - Fixed: the debugger's `reload` and `fix` print their compile errors (they
   were silent under `-g`).
 - Fixed: a `reload` of a file with `[[cccc::comptime]]` functions leaves the
