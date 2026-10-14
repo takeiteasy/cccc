@@ -146,6 +146,7 @@ Options:
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths (and <path>/System/Library/Frameworks to system framework paths) and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
+	   --link-arg <arg>      With -c=native: pass <arg> verbatim to the host cc link line (repeatable; e.g. -framework X, a .o)
 	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
 	   --url-cache-clear     Clear the URL fetch cache and exit
 	   --url-timeout=SECONDS Set URL fetch timeout in seconds (default: 30)
