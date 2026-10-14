@@ -880,7 +880,7 @@ BuildTarget *test_extra(Builder *ctx) {
     return all;
 }
 
-// Doxygen HTML API docs for the three public headers.
+// Doxygen HTML API docs for the public headers.
 // Needs no cccc binary, but doxygen is an external dependency, so it's guarded with
 // HaveTool the way bench() guards on hyperfine. Output is gitignored
 // (build/docs/) and never committed; not part of build_main() so the

@@ -76,7 +76,7 @@ tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 make
 |---|---|
 | `test` | build `build/cccc`, run the whole test suite |
 | `cccc` | full `build/cccc` |
-| `docs` | Doxygen HTML for the three public headers into `build/docs/html/` (needs `doxygen` + `graphviz`) |
+| `docs` | Doxygen HTML for the public headers into `build/docs/html/` (needs `doxygen` + `graphviz`) |
 | `cccc_asan` / `cccc_ubsan` / `cccc_tsan` / `cccc_msan` / `sanitizers` | sanitizer builds |
 | `afl` / `afl_asan` / `fuzz_harness` | fuzzing binaries |
 | `libcccc` | shared/static library |

@@ -1,9 +1,10 @@
 # Doxyfile for CCCC's public API headers.
 #
-# Scope is intentionally narrow: only the three headers under include/cccc/
-# that CCCC injects into user code (--build, --testing, and the reflection/
-# macro FFI). The rest of include/ is ~90 libc/POSIX polyfill headers that
-# must not be swept into this documentation.
+# Scope is intentionally narrow: only the public headers under include/cccc/
+# (--build, --testing, the reflection/macro FFI, and the kernel/OpenCL model),
+# plus the front page in docs/doxygen/mainpage.dox. The rest of include/ is
+# ~90 libc/POSIX polyfill headers that must not be swept into this
+# documentation.
 #
 # Run via `./cccc --build build.c --build-target=docs` (see build.c's `docs`
 # target) or directly with `doxygen Doxyfile` from the repo root. Output is
@@ -15,7 +16,10 @@ PROJECT_BRIEF            = "C bytecode compiler + VM interpreter"
 
 INPUT                   = include/cccc/building.h \
                            include/cccc/reflection.h \
-                           include/cccc/testing.h
+                           include/cccc/testing.h \
+                           include/cccc/kernel.h \
+                           include/cccc/opencl.h \
+                           docs/doxygen/mainpage.dox
 
 OUTPUT_DIRECTORY        = build/docs
 
