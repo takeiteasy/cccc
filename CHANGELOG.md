@@ -7,6 +7,26 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-14
+
+- Added: `--link-arg=ARG` passes `ARG` to the host link line under `-c=native`;
+  `AddLdFlag` and `AddFramework` on `CcccExecutable` use it. See
+  `docs/NATIVE.md` and `docs/BUILD_MODE.md`.
+- Added: the `__sync_*` atomic builtins and the `__sincos*_stret` FFI functions.
+- Added: unchecked `format` archetypes (`CFString`, `NSString`, `os_trace`, ...)
+  are accepted; an unknown archetype warns.
+- Fixed: GNU `extern inline` bodies are inline-only definitions.
+- Fixed: `__inline`, `__restrict` and `__thread` spellings, and gnu89 `inline`,
+  are accepted before C99/C11.
+- Fixed: an SDK `Availability.h` no longer taints `<stdio.h>`; only a file
+  identical to cccc's own header is treated as its copy.
+- Fixed: `-c=native` declares input functions, types and transitive anchors
+  ahead of a replayed implementation-style header, and copies multi-line
+  directive comments whole.
+- Fixed: `-Wparentheses` parenthesizes operand pairs.
+- Fixed: a header that ends in a conditional after its include guard's `#endif`
+  (the stb two-include layout) is no longer skipped on a second `#include`.
+
 ## [0.10.2] - 2026-10-14
 
 - Added: `__builtin_fabs`, `sqrt`, `floor`, `ceil`, `trunc`, `round`,
