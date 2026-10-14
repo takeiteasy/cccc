@@ -5,9 +5,11 @@
 
 #if defined(__aarch64__)
 #define MOVW "mov %w0, %w1"
+#define MOVB MOVW
 #define ADDI "add %w0, %w0, %1"
 #elif defined(__x86_64__)
 #define MOVW "movl %1, %0"
+#define MOVB "movl %1, %k0"
 #define ADDI "addl %1, %0"
 #endif
 
@@ -57,7 +59,7 @@ int main(void) {
 
     // _Bool field.
     int one = 1;
-    __asm__(MOVW : "=r"(s.flag) : "r"(one));
+    __asm__(MOVB : "=r"(s.flag) : "r"(one));
     if (s.flag != 1 || s.hi != -5)
         return 6;
 
