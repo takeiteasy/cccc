@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-14
+
+- Added: `--repl --watch` reloads the files `:load` read when they are saved,
+  at the prompt without pressing Enter. See `docs/WATCH.md`.
+- Changed: `--watch` reloads only the files that include a changed header
+  instead of every file of the program, and watches a header a reload starts
+  to include.
+- Fixed: a long `--watch` session no longer grows the list of input files by a
+  duplicate on every reload.
+- Release tarballs include `THIRD_PARTY_NOTICES.md` (chibicc, stb_sprintf,
+  dmon, libbacktrace).
+
 ## [0.10.0] - 2026-10-14
 
 - Added: `--watch` hot-reloads a running program when a source file is saved
