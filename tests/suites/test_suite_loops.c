@@ -144,4 +144,50 @@ void test_do_while(void) {
     AssertEq(nested_do_while(), 6);
 }
 
+// ── for-init declarations: C23 auto, _Alignas, constexpr, storage classes ──
+static int for_init_static_calls(void) {
+    int r = 0;
+    for (static int s = 10; r < 1; r++)
+        s++;
+    for (static int s = 10; r < 2; r++)
+        s++;
+    int last = 0;
+    for (static int c = 0; last < 1; last++)
+        c++;
+    return r;
+}
+
+int for_init_global;
+
+[[cccc::test]]
+void test_for_init_declarations(void) {
+    int r = 0;
+    for (auto i = 0; i < 3; i++)
+        r += i;
+    AssertEq(r, 3);
+
+    for (_Alignas(16) int a = 0; a < 2; a++)
+        AssertEq((int)((unsigned long)&a % 16), 0);
+
+    for (constexpr int n = 5; r < n; r++) {
+    }
+    AssertEq(r, 5);
+    for (const int n = 6; r < n; r++) {
+    }
+    AssertEq(r, 6);
+
+    for (typedef struct { int x; } P; 0;) {
+    }
+    for (typedef int T; 0;) {
+    }
+
+    for (extern int for_init_global; for_init_global < 2; for_init_global++)
+        r++;
+    AssertEq(r, 8);
+
+    for ([[maybe_unused]] int u = 0; 0;) {
+    }
+    AssertEq(for_init_static_calls(), 2);
+}
+
 #pragma cccc suite end

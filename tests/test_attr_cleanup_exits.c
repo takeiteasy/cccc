@@ -104,6 +104,13 @@ static void for_init(void) {
     }
 }
 
+static void for_init_prefix(void) {
+    for (CL int i = 530; i < 532; i++) {
+    }
+    for ([[gnu::cleanup(rel)]] int i = 540; i < 542; i++) {
+    }
+}
+
 static int stmt_expr(void) {
     int x = 5;
     return x + ({
@@ -128,8 +135,9 @@ static int stmt_expr_struct(void) {
 }
 
 int main(void) {
-    static const int want[] = {8,   100, 101, 102, 201, 200, 301, 300, 310,
-                               400, 500, 501, 512, 511, 510, 522, 600, 610};
+    static const int want[] = {8,   100, 101, 102, 201, 200, 301,
+                               300, 310, 400, 500, 501, 512, 511,
+                               510, 522, 532, 542, 600, 610};
     if (ret_uses() != 80)
         return 1;
     early_break(1);
@@ -141,6 +149,7 @@ int main(void) {
     cont();
     back_goto();
     for_init();
+    for_init_prefix();
     if (stmt_expr() != 606 || stmt_expr_struct() != 610)
         return 2;
     if (n != (int)(sizeof(want) / sizeof(want[0])) ||

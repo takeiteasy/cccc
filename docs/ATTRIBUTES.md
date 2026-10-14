@@ -532,7 +532,7 @@ for (int i = 0; i < n; i++) {
 | `break` | ✓ |
 | `continue` | ✓ |
 | Named `goto` out of scope | ✓ |
-| End of a `for` loop declaring the variable (`for (T v CLEANUP = ...; ...)`) | ✓ |
+| End of a `for` loop declaring the variable (`for (CLEANUP T v = ...; ...)` or `for (T v CLEANUP = ...; ...)`) | ✓ |
 | End of a statement expression `({ ... })` (its value is copied first) | ✓ |
 | `longjmp` | ✗ (matches GCC C-mode behavior) |
 

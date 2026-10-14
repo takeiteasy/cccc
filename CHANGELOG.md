@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `[[cleanup]]` written before the type in a `for` initializer
+  (`for (__attribute__((cleanup(f))) int v = 0; ...)`) now runs its handler
+  when the loop ends.
+- Fixed: a `for` initializer accepts any declaration: C23 `auto`, `constexpr`,
+  `_Alignas`, `static`, `extern` and `typedef`. Before C23, the last three
+  warn under `-Wpedantic`; `_Thread_local` without `static`/`extern` is an
+  error. A `const` or `constexpr` initializer is no longer rejected as an
+  assignment.
 - Added: debugger `return` and `restart` run the `[[cleanup]]` handlers the
   popped frames still owe; `return -n` and `restart -n` skip them.
   `cc_debug_return` and `cc_debug_restart` take a `run_cleanups` argument.

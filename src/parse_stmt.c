@@ -390,6 +390,46 @@ static void close_cleanup_scope(VirtualMachine *vm, Node *blk) {
         vm->compiler.cur_cleanup_chain = vm->compiler.cur_cleanup_chain->parent;
 }
 
+// The init clause's declaration. Before C23 only auto/register objects are
+// allowed; gcc accepts the rest with a -Wpedantic warning, so do the same.
+static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
+                                 Type *basety, VarAttr *attr, Node *loop) {
+    Token *tok = *rest;
+    if (attr->is_tls && !attr->is_static && !attr->is_extern)
+        error_tok(vm, start,
+                  "'_Thread_local' variable in 'for' loop initial declaration "
+                  "must be static or extern");
+
+    bool is_fn = !attr->is_typedef && is_function(vm, tok, basety);
+    if (vm->compiler.c_std < CCCC_STD_C23) {
+        const char *what = attr->is_typedef || is_fn ? "non-variable"
+                           : attr->is_static         ? "static variable"
+                           : attr->is_extern         ? "'extern' variable"
+                                                     : NULL;
+        if (what)
+            warn_tok(vm, start, CCCC_WARN_PEDANTIC,
+                     "declaration of %s in 'for' loop initial declaration",
+                     what);
+    }
+
+    if (attr->is_typedef) {
+        if (has_custom_attrs(basety, attr))
+            error_tok(vm, tok,
+                      "custom attributes are only supported on file-scope "
+                      "declarations");
+        *rest      = parse_typedef(vm, tok, basety, attr);
+        loop->init = new_node(vm, ND_BLOCK, start);
+    } else if (attr->is_extern && !is_fn) {
+        *rest      = global_variable(vm, tok, basety, attr);
+        loop->init = new_node(vm, ND_BLOCK, start);
+    } else {
+        loop->init = declaration(vm, rest, tok, basety, attr);
+        // Type it while initializing_var is still set, or a const/constexpr
+        // initializer is later rejected as an assignment.
+        add_type(vm, loop->init);
+    }
+}
+
 // `for (T v CLEANUP = x; ...)` becomes `{ <decl v>; for (v = x; ...) }`: the
 // cleanup-decl markers move out of the init so it stays an expression list.
 static Node *wrap_for_cleanup_scope(VirtualMachine *vm, Node *loop) {
@@ -834,8 +874,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         bool init_has_cleanup = false;
         if (is_decl_start(vm, tok)) {
             VarScopeNode *vars_before = vm->compiler.scope->vars;
-            Type         *basety      = declspec(vm, &tok, tok, NULL);
-            node->init       = declaration(vm, &tok, tok, basety, NULL);
+            VarAttr       attr        = {};
+            Token        *decl_tok    = tok;
+            Type         *basety      = declspec(vm, &tok, tok, &attr);
+            for_init_declaration(vm, &tok, decl_tok, basety, &attr, node);
             init_has_cleanup = declared_cleanup_var(vm, vars_before);
             if (init_has_cleanup)
                 open_cleanup_scope(vm);
