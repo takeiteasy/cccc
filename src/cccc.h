@@ -1586,6 +1586,8 @@ struct Type {
     bool is_func_const;   // __attribute__((const)): no side effects, no global
                           // reads
     bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
+    bool      is_gnu_inline; // __attribute__((gnu_inline)): `extern inline` is
+                             // inline-only, never an external definition
     AddrSpace addr_space; // [[cccc::global]] etc: space of the pointed-to or
                           // declared object; ignored outside kernel checks
     char     *deprecated_msg;
@@ -2457,6 +2459,7 @@ struct Obj {
     bool is_pure;
     bool is_func_const;
     bool is_kernel;
+    bool is_gnu_inline; // GNU extern-inline definition: emitted only if called
     bool is_kernel_thunk; // outlined cccc_launch body; a call to it serializes
                           // as __cccc_kernel_launch (see parse_postfix.c)
     bool is_kernel_local_obj; // [[cccc::local]] object in a kernel entry's body,

@@ -457,7 +457,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     // First pass: Generate code for all live functions
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function && fn->body) {
-            if (fn->is_inline && fn->is_static && !fn->is_live)
+            if (obj_is_inline_only(fn) && !fn->is_live)
                 continue;
             gen_function(vm, fn);
         }
@@ -475,7 +475,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     HashMap fn_defs = {};
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body && !fn->is_static)
+        if (fn->is_function && fn->body && !fn->is_static &&
+            !(fn->is_gnu_inline && !fn->is_live))
             hashmap_put(&fn_defs, fn->name, fn);
     }
 

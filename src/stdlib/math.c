@@ -750,6 +750,26 @@ static long long cccc_fpclassify_f(float x) {
     return CCCC_FP_NORMAL;
 }
 
+#ifdef __APPLE__
+// __sincos[pi][f]_stret return a two-element struct by value, but the VM
+// expects a struct return as a pointer to it (see wrap_div in stdlib.c): copy
+// the result into a small rotating thread-local pool and return its slot.
+#define CCCC_STRET_POOL_SLOTS 4
+#define CCCC_STRET_WRAP(fn, arg_ty, ret_ty)                                    \
+    static _Thread_local ret_ty fn##_pool[CCCC_STRET_POOL_SLOTS];              \
+    static _Thread_local int    fn##_pool_idx;                                 \
+    static long long wrap##fn(arg_ty x) {                                      \
+        ret_ty *slot  = &fn##_pool[fn##_pool_idx];                             \
+        fn##_pool_idx = (fn##_pool_idx + 1) % CCCC_STRET_POOL_SLOTS;           \
+        *slot         = fn(x);                                                 \
+        return (long long)(intptr_t)slot;                                      \
+    }
+CCCC_STRET_WRAP(__sincos_stret, double, struct __double2)
+CCCC_STRET_WRAP(__sincospi_stret, double, struct __double2)
+CCCC_STRET_WRAP(__sincosf_stret, float, struct __float2)
+CCCC_STRET_WRAP(__sincospif_stret, float, struct __float2)
+#endif
+
 // Register all math.h functions
 void register_math_functions(VirtualMachine *vm) {
     // Basic operations
@@ -1082,4 +1102,14 @@ void register_math_functions(VirtualMachine *vm) {
                          1, 0, 0b1);
     cc_register_cfunc_ex(vm, "__cccc_fpclassify_d", (void *)cccc_fpclassify_d,
                          1, 0, 0b1);
+#ifdef __APPLE__
+    cc_register_cfunc_ex(vm, "__sincos_stret", (void *)wrap__sincos_stret, 1, 0,
+                         0b1);
+    cc_register_cfunc_ex(vm, "__sincospi_stret", (void *)wrap__sincospi_stret,
+                         1, 0, 0b1);
+    cc_register_cfunc_ex(vm, "__sincosf_stret", (void *)wrap__sincosf_stret, 1,
+                         0, 0);
+    cc_register_cfunc_ex(vm, "__sincospif_stret", (void *)wrap__sincospif_stret,
+                         1, 0, 0);
+#endif
 }

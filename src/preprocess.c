@@ -1855,6 +1855,7 @@ static const AttrInfo known_attrs[] = {
     {"alias", ATTR_GNU, true, 0},
     {"target", ATTR_GNU, true, 0},
     {"always_inline", ATTR_GNU, true, 0},
+    {"gnu_inline", ATTR_GNU, true, 0},
     {"noinline", ATTR_GNU, true, 0},
     {"flatten", ATTR_GNU, true, 0},
     {"cold", ATTR_GNU, true, 0},
@@ -1972,6 +1973,49 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_cccc_dynamic_check",
         "__builtin_pc_function_name",
         "__builtin_pc_source_location",
+        "__atomic_load_n",
+        "__atomic_load",
+        "__atomic_store_n",
+        "__atomic_store",
+        "__atomic_exchange_n",
+        "__atomic_exchange",
+        "__atomic_compare_exchange_n",
+        "__atomic_compare_exchange",
+        "__atomic_thread_fence",
+        "__atomic_signal_fence",
+        "__atomic_test_and_set",
+        "__atomic_clear",
+        "__atomic_is_lock_free",
+        "__atomic_always_lock_free",
+        "__atomic_fetch_add",
+        "__atomic_fetch_sub",
+        "__atomic_fetch_and",
+        "__atomic_fetch_or",
+        "__atomic_fetch_xor",
+        "__atomic_fetch_nand",
+        "__atomic_add_fetch",
+        "__atomic_sub_fetch",
+        "__atomic_and_fetch",
+        "__atomic_or_fetch",
+        "__atomic_xor_fetch",
+        "__atomic_nand_fetch",
+        "__sync_fetch_and_add",
+        "__sync_fetch_and_sub",
+        "__sync_fetch_and_and",
+        "__sync_fetch_and_or",
+        "__sync_fetch_and_xor",
+        "__sync_fetch_and_nand",
+        "__sync_add_and_fetch",
+        "__sync_sub_and_fetch",
+        "__sync_and_and_fetch",
+        "__sync_or_and_fetch",
+        "__sync_xor_and_fetch",
+        "__sync_nand_and_fetch",
+        "__sync_bool_compare_and_swap",
+        "__sync_val_compare_and_swap",
+        "__sync_lock_test_and_set",
+        "__sync_lock_release",
+        "__sync_synchronize",
         NULL,
     };
 
@@ -7364,6 +7408,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 // -std= flag (long form: --std=) is parsed) and always produces the complete
 // correct state.
 void define_std_macros(VirtualMachine *vm) {
+    // GCC's inline model: C99 semantics from C99 on, GNU89 semantics before.
+    // System headers pick their `extern inline` spelling from these.
+    bool c99 = vm->compiler.c_std != CCCC_STD_C89;
+    undef_macro(vm, c99 ? "__GNUC_GNU_INLINE__" : "__GNUC_STDC_INLINE__");
+    define_macro(vm, c99 ? "__GNUC_STDC_INLINE__" : "__GNUC_GNU_INLINE__", "1");
+
     const char *v;
     switch (vm->compiler.c_std) {
         case CCCC_STD_C89:

@@ -2257,12 +2257,12 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
-         !attr->is_kernel && !attr->format_style && !attr->cleanup_fn &&
-         !attr->attr_error_msg && !attr->attr_warning_msg &&
-         !attr->nonnull_all && !attr->nonnull_mask && !attr->returns_nonnull &&
-         !attr->is_constructor && !attr->is_destructor && !attr->is_sentinel &&
-         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size &&
-         !attr->vec_visible))
+         !attr->is_gnu_inline && !attr->is_kernel && !attr->format_style &&
+         !attr->cleanup_fn && !attr->attr_error_msg &&
+         !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
+         !attr->returns_nonnull && !attr->is_constructor &&
+         !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
+         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible))
         return ty;
 
     if (attr->has_vector_size)
@@ -2279,6 +2279,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_pure = true;
     if (attr->is_func_const && ty->kind == TY_FUNC)
         ty->is_func_const = true;
+    if (attr->is_gnu_inline && ty->kind == TY_FUNC)
+        ty->is_gnu_inline = true;
     if (attr->is_kernel && ty->kind == TY_FUNC)
         ty->is_kernel = true;
     if (attr->format_style && ty->kind == TY_FUNC) {
@@ -2331,6 +2333,7 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_noreturn     |= src->is_noreturn;
     dst->is_pure         |= src->is_pure;
     dst->is_func_const   |= src->is_func_const;
+    dst->is_gnu_inline   |= src->is_gnu_inline;
     dst->is_kernel       |= src->is_kernel;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
@@ -2844,6 +2847,15 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 continue;
             }
 
+            if (is_attr_name(tok, "gnu_inline")) {
+                tok = tok->next;
+                if (ty)
+                    ty->is_gnu_inline = true;
+                if (attr)
+                    attr->is_gnu_inline = true;
+                continue;
+            }
+
             // GNU equivalent of [[nodiscard]]: warn if return value is
             // discarded
             if (is_attr_name(tok, "warn_unused_result")) {
@@ -3096,6 +3108,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 attr_is(name_tok, "no_unique_address");
             bool is_pure_attr       = attr_is(name_tok, "pure");
             bool is_func_const_attr = attr_is(name_tok, "const");
+            bool is_gnu_inline_attr =
+                gnu_scoped && attr_is(name_tok, "gnu_inline");
             bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
             bool is_addr_space_attr =
                 cccc_scoped &&
@@ -3432,6 +3446,11 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     ty->is_func_const = true;
                 if (attr)
                     attr->is_func_const = true;
+            } else if (is_gnu_inline_attr) {
+                if (ty)
+                    ty->is_gnu_inline = true;
+                if (attr)
+                    attr->is_gnu_inline = true;
             } else if (is_designated_init_attr) {
                 if (ty)
                     ty->designated_init = true;
