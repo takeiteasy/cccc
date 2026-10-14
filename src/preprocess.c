@@ -327,15 +327,33 @@ static void normalize_include_operand_spacing(char *line) {
     memmove(start + content_len, end, strlen(end) + 1); // +1 for NUL
 }
 
-// TODO(#1564): stops at the first newline, so a multi-line trailing /* comment
-// is left unterminated.
+// Copies the directive up to its real end of line. A newline inside a block
+// comment is replaced by a space so the copy stays one physical line.
 static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     char *end = start->loc;
-    while (*end && *end != '\n')
-        end++;
+    while (*end && *end != '\n') {
+        if (*end == '"' || *end == '\'') {
+            char quote = *end++;
+            while (*end && *end != '\n' && *end != quote)
+                end += (*end == '\\' && end[1] && end[1] != '\n') ? 2 : 1;
+            if (*end == quote)
+                end++;
+        } else if (end[0] == '/' && end[1] == '/') {
+            while (*end && *end != '\n')
+                end++;
+        } else if (end[0] == '/' && end[1] == '*') {
+            char *close = strstr(end + 2, "*/");
+            end         = close ? close + 2 : end + strlen(end);
+        } else {
+            end++;
+        }
+    }
     if (end > start->loc && end[-1] == '\r')
         end--;
     char *line = arena_strndup(vm, start->loc, end - start->loc);
+    for (char *p = line; *p; p++)
+        if (*p == '\n' || *p == '\r')
+            *p = ' ';
     normalize_include_operand_spacing(line);
     return line;
 }

@@ -9659,6 +9659,62 @@ def case_extended_asm_native_executes(cccc: Path, tmp: str) -> bool:
                             EXTENDED_ASM_PROGRAM)
 
 
+IMPL_HEADER_CALLBACK_HEADER = (
+    "#ifdef LIB_IMPL\n"
+    "typedef void (*lib_cb)(int);\n"
+    "static int lib_run(int x) {\n"
+    "    LIB_LOG(x);\n"
+    "    LIB_COUNT++;\n"
+    "    lib_cb cb = LIB_CB;\n"
+    "    cb(x);\n"
+    "    return x;\n"
+    "}\n"
+    "#endif\n"
+)
+
+IMPL_HEADER_CALLBACK_PROGRAM = (
+    "static int g_seen;\n"
+    "static int g_hits;\n"
+    "static void note(int v) { g_seen += v; }\n"
+    "static void on_cb(int v) { g_seen += v; }\n"
+    "#define LIB_IMPL\n"
+    "#define LIB_LOG(x) note(x)\n"
+    "#define LIB_COUNT g_hits\n"
+    "#define LIB_CB (&on_cb)\n"
+    '#include "impl_header_callback.h"\n'
+    "int main(void) {\n"
+    "    int r = lib_run(20);\n"
+    "    return (r == 20 && g_seen == 40 && g_hits == 1) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_impl_header_callback(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header calling the includer's statics through "
+          "config macros: prototypes land ahead of the replayed #include.")
+    write(Path(tmp) / "impl_header_callback.h", IMPL_HEADER_CALLBACK_HEADER)
+    return _vm_and_native_run_case(cccc, tmp, "impl_header_callback",
+                                   IMPL_HEADER_CALLBACK_PROGRAM)
+
+
+MULTILINE_COMMENT_DEFINE_PROGRAM = (
+    "#define K 3 /* spans\n"
+    "   two lines */\n"
+    '#define S "/*"\n'
+    "#include <string.h>\n"
+    "int main(void) {\n"
+    "    return (int)strlen(\"ab\") + 40 + K - 3 + (int)strlen(S) - 2;\n"
+    "}\n"
+)
+
+
+def case_multiline_comment_define(cccc: Path, tmp: str) -> bool:
+    print("  captured #define with a multi-line trailing /* comment is "
+          "replayed on one line, and a \"/*\" string does not open one.")
+    return _vm_and_native_run_case(cccc, tmp, "multiline_comment_define",
+                                   MULTILINE_COMMENT_DEFINE_PROGRAM)
+
+
 CASES = [
     case_native_end_to_end,
     case_dump_expanded_no_attrtarget,
@@ -9847,6 +9903,8 @@ CASES = [
     case_vendored_macro_defined_outside_1308,
     case_widening_cast_shift_1312,
     case_extended_asm_native_executes,
+    case_impl_header_callback,
+    case_multiline_comment_define,
 ]
 
 

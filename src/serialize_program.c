@@ -4465,6 +4465,140 @@ static bool obj_is_test_fn(VirtualMachine *vm, const Obj *o) {
     return false;
 }
 
+// A replayed implementation-style header can call an input function (or touch
+// an input static) through a config macro, but the input's own declarations
+// print after the whole directive block. Each such reference gets a prototype
+// printed just before the header's #include.
+typedef struct {
+    Obj        *target;
+    const char *header; // name of the header whose body references it
+    const char *key;    // canonical path of that header
+    bool        emitted;
+} PreludeRef;
+
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *fn;
+    const char     *key;
+    PreludeRef     *refs;
+    int             len, cap;
+} PreludeScan;
+
+static bool prelude_target_is_input_def(VirtualMachine *vm, Obj *v) {
+    if (!v || v->is_local || v->is_param || v->is_macro_generated || !v->tok ||
+        v->name[0] == '.')
+        return false;
+    if (v->is_function ? !v->body : !v->is_static)
+        return false;
+    Token *site = token_expansion_site(v->tok);
+    return site && site->file &&
+           file_is_command_line_input(vm, site->file->name);
+}
+
+static void prelude_ref_visit(Node *n, void *vctx) {
+    PreludeScan *s = vctx;
+    if (n->kind != ND_VAR || n->var == s->fn ||
+        !prelude_target_is_input_def(s->vm, n->var))
+        return;
+    for (int i = 0; i < s->len; i++)
+        if (s->refs[i].target == n->var && !strcmp(s->refs[i].key, s->key))
+            return;
+    if (s->len == s->cap) {
+        s->cap  = s->cap ? s->cap * 2 : 8;
+        s->refs = realloc(s->refs, s->cap * sizeof(*s->refs));
+    }
+    s->refs[s->len++] = (PreludeRef){
+        .target = n->var,
+        .header = s->fn->body->tok->file->name,
+        .key    = s->key,
+    };
+}
+
+// Only builtin scalars and pointers/arrays/functions of them: input types
+// print after the directives, and a header typedef may not be replayed yet.
+static bool type_is_prelude_safe(SerializeContext *ctx, Type *ty) {
+    if (!ty)
+        return true;
+    switch (ty->kind) {
+        case TY_VOID:
+        case TY_BOOL:
+        case TY_CHAR:
+        case TY_SHORT:
+        case TY_INT:
+        case TY_LONG:
+        case TY_FLOAT:
+        case TY_DOUBLE:
+            break;
+        case TY_PTR:
+        case TY_ARRAY:
+            return !find_typedef_name_exact(ctx, ty) &&
+                   type_is_prelude_safe(ctx, ty->base);
+        case TY_FUNC:
+            if (!type_is_prelude_safe(ctx, ty->return_ty))
+                return false;
+            for (Type *p = ty->params; p; p = p->next)
+                if (!type_is_prelude_safe(ctx, p))
+                    return false;
+            return true;
+        default:
+            return false;
+    }
+    return !find_typedef_name_exact(ctx, ty);
+}
+
+static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
+                            Obj *prog, PreludeScan *s) {
+    s->vm = vm;
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !function_is_header_supplied(vm, ctx, obj) ||
+            !obj->body->tok)
+            continue;
+        Token *site = token_expansion_site(obj->body->tok);
+        if (!site || !site->file)
+            continue;
+        s->fn  = obj;
+        s->key = cc_canonical_path_key(vm, site->file->name);
+        serialize_ast_walk(obj->body, prelude_ref_visit, s);
+    }
+}
+
+static void prelude_emit(FILE *f, SerializeContext *ctx, PreludeScan *s,
+                         const char *key) {
+    for (int i = 0; i < s->len; i++) {
+        PreludeRef *r = &s->refs[i];
+        if (r->emitted || strcmp(r->key, key))
+            continue;
+        Obj *t = r->target;
+        if (t->is_function) {
+            bool ok = type_is_prelude_safe(ctx, t->ty);
+            if (!ok)
+                continue;
+            serialize_function_signature(f, ctx, t, true);
+        } else {
+            if (!type_is_prelude_safe(ctx, t->ty))
+                continue;
+            fprintf(f, "static ");
+            serialize_type_decl(f, ctx, t->ty, t->name);
+        }
+        fprintf(f, ";\n");
+        r->emitted = true;
+    }
+}
+
+// A static has no other declaration the header could see, so a missed one is
+// a certain host-compiler failure; anything else is left as it was.
+// TODO(#1565): typedef'd/tagged signatures and transitive header anchors.
+static void prelude_check(VirtualMachine *vm, PreludeScan *s) {
+    for (int i = 0; i < s->len; i++) {
+        PreludeRef *r = &s->refs[i];
+        if (!r->emitted && r->target->is_static)
+            error_tok(vm, r->target->tok,
+                      "'%s' is used by replayed header '%s' but cannot be "
+                      "declared ahead of its #include",
+                      r->target->name, r->header);
+    }
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -5000,6 +5134,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // exists somewhere earlier in this TU". A conditional-group shell is
     // captured too (#1064) but is never itself a #define/#undef, so
     // stdio.c's own `#endif` correctly fails this check.
+    PreludeScan prelude = {0};
+    prelude_collect(vm, &ctx, prog, &prelude);
     HashMap candidate_index = {0}; // canonical path key -> chosen index + 1
     {
         int tu_starts_n = vm->compiler.emit_directives_tu_starts_count;
@@ -5204,6 +5340,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // verbatim replay below.
         if (emit_url_include_rewrite(f, vm, line))
             continue;
+        if (resolved)
+            prelude_emit(f, &ctx, &prelude,
+                         cc_canonical_path_key(vm, resolved));
         fprintf(f, "%s\n", line);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
         // `struct statfs` into scope the way it does on macOS/BSD -- real
@@ -5263,6 +5402,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             emitted_sys_socket_h = true;
         }
     }
+    prelude_check(vm, &prelude);
+    free(prelude.refs);
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
 

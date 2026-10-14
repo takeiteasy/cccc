@@ -294,6 +294,29 @@ real host compiler, so header handling shifts:
   wasn't meant to configure that inclusion at all — a pathological ordering
   no real vendored-header usage produces.
 
+### Implementation-style headers that call back into your code
+
+A header configured through macros can call your own functions or touch your
+own statics from its bodies:
+
+```c
+static void my_log(const char *m) { /* ... */ }
+#define LIB_LOG(s) my_log(s)
+#include "lib_impl.h"      // bodies expand LIB_LOG(...)
+```
+
+The replayed output prints a prototype for each such function or static
+immediately before that header's `#include`, so the host compiler sees it
+when the header's bodies expand. Only signatures built from builtin scalar
+types and pointers, arrays and function types of them qualify. A `static`
+whose signature names a typedef or a `struct`/`union`/`enum` — or whose
+header is only reached through another header — is a cccc error naming the
+function and the header. A non-static function with such a signature is left
+to the host compiler's own diagnostic.
+
+A captured `#define` whose trailing `/* ... */` comment spans several lines is
+replayed on one line, comment text kept.
+
 ### Host-owned type/struct layout under self-hosting
 
 When cccc compiles its own `src/stdlib/*.c` FFI-translation source as guest
