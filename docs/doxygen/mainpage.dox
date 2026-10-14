@@ -18,10 +18,18 @@ This site documents the public headers. The user guides live in
 | @ref reflection.h "cccc/reflection.h" | Write comptime macros: inspect, build and quote AST nodes | [MACROS](https://github.com/takeiteasy/cccc/blob/trunk/docs/MACROS.md) |
 | @ref testing.h "cccc/testing.h" | Write `[[cccc::test]]` tests with the `Assert*` macros | [TEST_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/TEST_MODE.md) |
 | @ref kernel.h "cccc/kernel.h" | Launch `[[cccc::kernel]]` functions over a grid of work-items | [KERNELS](https://github.com/takeiteasy/cccc/blob/trunk/docs/KERNELS.md) |
+| @ref omp.h "omp.h" | Call the OpenMP runtime API under `-fopenmp` | [OPENMP](https://github.com/takeiteasy/cccc/blob/trunk/docs/OPENMP.md) |
 | @ref opencl.h "cccc/opencl.h" | Read OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model | [OPENCL](https://github.com/takeiteasy/cccc/blob/trunk/docs/OPENCL.md) |
 
 `testing.h`, `building.h` and `opencl.h` are injected automatically in their
 modes. `reflection.h` is available to comptime code without an include.
+
+## Build scripts
+
+A `build.c` script declares targets with the Builder API of @ref building.h "building.h":
+each target is a function returning a `BuildTarget *`, run with
+`cccc --build build.c --build-target=<name>`. CCCC's own `build.c` is a working
+example, and its `docs` target builds this site.
 
 ## Example
 
