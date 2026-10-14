@@ -224,6 +224,11 @@ typedef struct {
     // used by value -- see emit_typedef_and_deps's own comment). Shared
     // dedup set so neither emitter re-prints what the other already did.
     TypeVec emitted_defs;
+    // Which file-scope typedefs are already printed, shared by the file-scope
+    // serialize_type_defs_for_owner() pass and prelude_declare_types() (a
+    // typedef hoisted ahead of a replayed #include is not printed again).
+    bool *file_typedef_done;
+    int   file_typedef_done_len;
     // #1005: current break/continue target stack (innermost first) and the
     // innermost enclosing ND_SWITCH (for ND_CASE to test default_case
     // against) -- both NULL outside any loop/switch, pushed/popped around
@@ -323,6 +328,17 @@ bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn);
 bool type_is_cccc_va_list(Type *ty);
 bool type_is_complete_tagged(Type *ty);
 bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth);
+
+// Is the header-supplied type `tn` already visible, or made so by printing an
+// #include to `f` (NULL: check only)?
+typedef bool (*PreludeTypeVisible)(void *user, FILE *f, TypeName *tn);
+// Prints whatever `ty` needs declared at this point -- tag forward
+// declarations, input typedefs and struct/enum bodies -- and returns true;
+// false (nothing printed) when it names a type that cannot be declared yet.
+// `f` NULL checks only.
+bool prelude_declare_types(FILE *f, SerializeContext *ctx, Type *ty,
+                           bool by_value, PreludeTypeVisible visible,
+                           void *user);
 bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty);
 bool type_vec_contains(TypeVec *vec, Type *ty);
 bool typedef_alias_header_suppressed(SerializeContext *ctx, TypeName *alias);

@@ -9715,6 +9715,72 @@ def case_multiline_comment_define(cccc: Path, tmp: str) -> bool:
                                    MULTILINE_COMMENT_DEFINE_PROGRAM)
 
 
+CLARITY_PARENS_PROGRAM = (
+    "#include <stdbool.h>\n"
+    "int main(void) {\n"
+    "    int a = 1, b = 2, c = 0, id = 0;\n"
+    "    bool ok = true, flag = false;\n"
+    "    ok &= id != 0;\n"
+    "    flag |= id == 0;\n"
+    "    int r = a & (b != 0);\n"
+    "    int s = (a + b) << 1;\n"
+    "    int t = a || (b && c);\n"
+    "    int v = a | (b & c);\n"
+    "    return (!ok && flag && r == 1 && s == 6 && t == 1 && v == 1) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_clarity_parens(cccc: Path, tmp: str) -> bool:
+    print("  mixed-precedence operands (incl. bool compound assignment) reach "
+          "the host compiler parenthesized: no -Wparentheses.")
+    src = Path(tmp) / "clarity_parens.c"
+    write(src, CLARITY_PARENS_PROGRAM)
+    result = run([str(cccc), "-c=native", "-o", "clarity_parens_out", src.name],
+                 cwd=tmp)
+    if result.returncode != 0 or "Wparentheses" in result.stderr:
+        print(f"    FAIL: compile {result.returncode}\n    {result.stderr}")
+        return False
+    return _native_run_case(cccc, tmp, "clarity_parens", CLARITY_PARENS_PROGRAM)
+
+
+def _impl_header_case(cccc: Path, tmp: str, name: str, headers: list) -> bool:
+    tests = Path(__file__).parent.parent / "tests"
+    for h in headers:
+        write(Path(tmp) / h, (tests / h).read_text())
+    return _vm_and_native_run_case(cccc, tmp, name,
+                                   (tests / f"test_{name}.c").read_text())
+
+
+def case_impl_header_typedef(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header callback taking a typedef an earlier replayed "
+          "header supplies.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_typedef",
+                             ["native_impl_header_struct.h"])
+
+
+def case_impl_header_typedef_stdio(cccc: Path, tmp: str) -> bool:
+    print("  size_t reached only through <stdio.h>: <stddef.h> printed ahead "
+          "of the prototype.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_typedef_stdio",
+                             ["native_impl_header_struct.h"])
+
+
+def case_impl_header_transitive(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header reached through another header: the prototype "
+          "lands ahead of the replayed wrapper #include.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_transitive",
+                             ["native_impl_header_struct.h",
+                              "native_impl_header_wrap.h"])
+
+
+def case_impl_header_input_types(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header callbacks whose signatures name the includer's "
+          "struct/typedef/enum: types declared ahead of the #include.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_input_types",
+                             ["native_impl_header_types.h"])
+
+
 CASES = [
     case_native_end_to_end,
     case_dump_expanded_no_attrtarget,
@@ -9905,6 +9971,11 @@ CASES = [
     case_extended_asm_native_executes,
     case_impl_header_callback,
     case_multiline_comment_define,
+    case_clarity_parens,
+    case_impl_header_typedef,
+    case_impl_header_typedef_stdio,
+    case_impl_header_transitive,
+    case_impl_header_input_types,
 ]
 
 

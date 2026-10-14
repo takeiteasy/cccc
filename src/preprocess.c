@@ -3550,6 +3550,9 @@ static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
         if (equal(tok->next, "endif") && tok->next->next->kind == TK_EOF)
             return macro;
 
+        // TODO(#1567): `tok` is the `#` here, so this never matches; nested
+        // conditionals are not skipped and a header ending in `#endif` is
+        // taken as guarded whole.
         if (equal(tok, "if") || equal(tok, "ifdef") || equal(tok, "ifndef"))
             tok = skip_cond_incl(vm, tok->next);
         else

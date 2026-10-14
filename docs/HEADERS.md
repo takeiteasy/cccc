@@ -306,13 +306,25 @@ static void my_log(const char *m) { /* ... */ }
 ```
 
 The replayed output prints a prototype for each such function or static
-immediately before that header's `#include`, so the host compiler sees it
-when the header's bodies expand. Only signatures built from builtin scalar
-types and pointers, arrays and function types of them qualify. A `static`
-whose signature names a typedef or a `struct`/`union`/`enum` — or whose
-header is only reached through another header — is a cccc error naming the
-function and the header. A non-static function with such a signature is left
-to the host compiler's own diagnostic.
+immediately before the `#include` that brings that header in, so the host
+compiler sees it when the header's bodies expand. The header can be the
+`#include`d one or any header it includes.
+
+The types a prototype names are declared there too:
+
+| Signature names | Printed ahead of the `#include` |
+| --- | --- |
+| a pointer to a tagged `struct`/`union` | `struct P;` |
+| a `struct`/`union`/`enum`, or a typedef of one, by value | its full definition |
+| a typedef of your own (`typedef int my_t;`) | the typedef |
+| a typedef an earlier replayed header supplies (`size_t`, `uint32_t`) | nothing |
+| `size_t` and its siblings, reached only through another standard header | `#include <stddef.h>` |
+
+A `static` whose signature names a type that cannot be declared yet is a cccc
+error naming the function and the header: a type the replayed header itself
+declares and no earlier `#include` supplies, a function-local type, or a
+`_BitInt` wider than 128 bits. A non-static function with such a signature is
+left to the host compiler's own diagnostic.
 
 A captured `#define` whose trailing `/* ... */` comment spans several lines is
 replayed on one line, comment text kept.
