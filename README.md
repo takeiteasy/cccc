@@ -257,7 +257,8 @@ Build Options:
 
 Watch Options:
 	--watch              Hot-reload the program when a source file is saved; with --build,
-	                    rebuild instead (implied by [[cccc::build]] in the file)
+	                    rebuild instead (implied by [[cccc::build]] in the file);
+	                    with --repl, reload the files :load read
 	--watch-path=PATH    Also watch a file or directory (repeatable)
 	--watch-ignore=GLOB  Ignore matching paths (repeatable)
 	--watch-debounce=MS  Quiet time that ends a burst of saves (default 100)
@@ -366,6 +367,8 @@ Example:
 ```
 
 ## Credits
+
+Third-party license notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `./cccc tests/test_c4.c -- tests/test_fortytwo.c`).
 
