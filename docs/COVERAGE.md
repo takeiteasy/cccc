@@ -70,7 +70,7 @@ See [THREADING.md](THREADING.md). Per-feature rows are below and in [STDLIB.md](
 | `#line` | ~ | Directive parsed; line tracking updated |
 | Object-like and function-like macros | ✓ | |
 | Macro stringification `#` and token-pasting `##` | ✓ | |
-| Forward declarations and incomplete types | ✓ | |
+| Forward declarations and incomplete types | ✓ | A lone `struct S;` / `union S;` declares `S` in the current scope, shadowing an outer tag (C11 §6.7.2.3p7) |
 | Multiple translation units / linker | ✓ | |
 
 ---
@@ -86,6 +86,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `//` single-line comments | ✓ | |
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
+| `_Float16` | ~ | Storage only: declarations, `sizeof`/`_Alignof` (2), struct layout, pointers, typedefs, `_Generic` and prototypes work, and `-c=native` spells it through. Reading or writing a value, arithmetic, conversions, calls and a non-zero initializer are rejected with "_Float16 values are not supported"; a zero initializer inside an aggregate or static storage is accepted. `__FLT16_*` stay undefined |
 | `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
@@ -171,7 +172,7 @@ language coverage figures apply.
 | `__VA_OPT__` | ✓ | |
 | `__has_c_attribute` | ✓ | Returns C23 version date (`202311L`) for standard C23 attributes; `1` for CCCC vendor attributes |
 | `__has_include` | ✓ | Checks CCCC, `-I`, and `-i` include paths; also accepts URLs in curl-enabled builds, probing the same shared cache a real fetch uses (non-curl builds report 0 for URLs) |
-| `__has_include_next` | ✓ | Searches from the directory after the one the current file was found in, like `#include_next` |
+| `__has_include_next` | ✓ | Searches from the directory after the one the current file was found in, like `#include_next`, continuing through framework directories |
 | `__has_declspec_attribute` | ✓ | Recognized and parses correctly; always returns `0` (CCCC supports no `__declspec` attributes) |
 | `__has_warning` | ✓ | Recognized and parses correctly; always returns `0` (no `-W`-name-keyed diagnostic registry) |
 | Unrecognized `__has_*`-shaped operator | ✓ | Evaluates to `0` and warns (`-Wcpp`) naming the operator, whether literal or reached through a macro expansion, instead of a "not a function" error |
@@ -183,6 +184,7 @@ language coverage figures apply.
 
 | Feature | Status | Notes |
 |---|---|---|
+| Predefined target macros (`__INT*_MAX__`, `__*_TYPE__`, `__*_FMT*__`, `__FLT_*__`/`__DBL_*__`/`__LDBL_*__`, `__BYTE_ORDER__`, `_LP64`, Apple `__MACH__`/`__APPLE_CC__`) | ✓ | Values follow CCCC's type model; clang identity and feature macros (`__clang__`, `__BLOCKS__`, `__ARM_*`, `__GCC_ATOMIC_*`, `__INT_LEAST*`/`__INT_FAST*`) are not defined. See [HEADERS.md](HEADERS.md#real-sdk-headers-under---use-system-headers--sysroot) |
 | Statement expressions `({ ... })` | ✓ | |
 | 128-bit integers `__int128` / `__int128_t` / `__uint128_t` | ✓ | Implemented on top of the `_BitInt(128)` machinery (multi-word, address-based storage). `unsigned __int128` is honoured; `__SIZEOF_INT128__` is defined so feature-detecting code selects these paths. `sizeof` is 16 and `_Alignof` is 16, matching clang/gcc on every supported target (x86_64 and aarch64, Linux and macOS) (#1135). A file-scope/`static` `__int128` initializer (constant arithmetic, not just a bare literal) folds at compile time the same way as any other wide `_BitInt`. Serializes under `-c=native`/`-m`/`-c=generated` too, as the real host `__int128`/`unsigned __int128` — see [Serialized-output divergences](NATIVE.md#serialized-output-divergences) for `_BitInt(N)` widths beyond 128 bits, which lower to an emitted multi-word container instead |
 | `__attribute__((...))` | ~ | Parsed; `aligned`, `packed`, `unused`, `deprecated`, `format`, `nodiscard`, `warn_unused_result`, `fallthrough`, `noreturn`, `error`, `warning`, `constructor`, `destructor`, `sentinel`, `alloc_size`, `malloc` supported (see [ATTRIBUTES.md](ATTRIBUTES.md)) |

@@ -736,6 +736,9 @@ typedef uint32_t Pc;
  The VM is stack-based with an accumulator `ax`. These opcodes are
  emitted by the code generator and interpreted by the VM executor.
 */
+// Rows in the libm_builtins table (src/parse_decl.c).
+#define CCCC_LIBM_BUILTINS 10
+
 typedef enum {
 #define X(NAME, OPERANDS) NAME,
     OPS_X
@@ -1404,6 +1407,10 @@ typedef enum {
     TY_DECIMAL32  = 23,
     TY_DECIMAL64  = 24,
     TY_DECIMAL128 = 25,
+    // Storage-only _Float16: declarations, sizeof, layout, pointers and
+    // prototypes; any value use is an error.
+    // TODO: full half-precision support (#1556)
+    TY_FLOAT16 = 26,
 } TypeKind;
 
 /*!
@@ -2559,6 +2566,7 @@ struct Obj {
     bool is_definition;
     bool is_static;
     bool is_builtin_alloca;  // the builtin alloca() used to lower VLAs (#588)
+    const char *builtin_spelling; // printed verbatim for a private builtin stub
     bool is_constexpr;
     bool is_implicit;        // synthesized by an implicit function declaration
     bool is_macro_generated; // true if created by a #pragma macro via
@@ -4269,6 +4277,8 @@ typedef struct Compiler {
     Obj  *builtin_memcpy;     // Builtin memcpy (forwarded to libc, #1144)
     Obj  *builtin_memmove;    // Builtin memmove (forwarded to libc, #1144)
     Obj  *builtin_memcmp;     // Builtin memcmp (forwarded to libc, #1144)
+    Obj  *builtin_libm[CCCC_LIBM_BUILTINS]
+                      [3];    // __builtin_fabs etc.: [row][d,f,l]
     Obj  *builtin_setjmp;     // Builtin setjmp function
     Obj  *builtin_longjmp;    // Builtin longjmp function
     Obj  *builtin__setjmp;    // Builtin _setjmp (POSIX alias, same semantics as
@@ -4300,6 +4310,8 @@ typedef struct Compiler {
 
     StringArray include_paths;        // Quote include search paths
     StringArray system_include_paths; // System header search paths for <...>
+    StringArray framework_paths; // -F: <Name/X.h> -> Name.framework/Headers
+    StringArray system_framework_paths; // --iframework, --sysroot: as above
     HashMap     include_cache;        // Cache for search_include_paths
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
@@ -5193,6 +5205,25 @@ void cc_include(VirtualMachine *vm, const char *path);
  @param path Filesystem path to add to system include search.
 */
 void cc_system_include(VirtualMachine *vm, const char *path);
+
+/*!
+ @brief Add a directory searched for macOS framework headers.
+ @details `<Name/X.h>` resolves to `<path>/Name.framework/Headers/X.h`, then
+             `Name.framework/PrivateHeaders/X.h`. Searched after the regular
+             include paths.
+ @param vm The CCCC instance.
+ @param path Directory holding `*.framework` bundles.
+*/
+void cc_framework_path(VirtualMachine *vm, const char *path);
+
+/*!
+ @brief Add a directory searched for system framework headers.
+ @details Like cc_framework_path(), searched after the system include paths;
+             headers found here are treated as system headers.
+ @param vm The CCCC instance.
+ @param path Directory holding `*.framework` bundles.
+*/
+void cc_system_framework_path(VirtualMachine *vm, const char *path);
 
 /*!
  @brief Define or override a preprocessor macro for the given VM.

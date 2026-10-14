@@ -152,6 +152,10 @@ typedef struct {
     CheckedScope checked_scope;
 
     Token *decl_start; // first token of the declaration (function source span)
+
+    // Declared inside a struct/union member list, where a bare `struct S;`
+    // keeps referring to the visible tag instead of redeclaring it.
+    bool in_member_list;
 } VarAttr;
 
 struct CustomAttrUse {
@@ -279,6 +283,7 @@ typedef enum {
     DK_DECIMAL32,
     DK_DECIMAL64,
     DK_DECIMAL128,
+    DK_FLOAT16,
     // GNU 128-bit integers (mapped onto _BitInt(128))
     DK_INT128,
 } DeclKw;

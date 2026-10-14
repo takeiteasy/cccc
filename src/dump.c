@@ -188,6 +188,8 @@ static const char *type_kind_name(TypeKind kind) {
             return "nullptr_t";
         case TY_BITINT:
             return "_BitInt";
+        case TY_FLOAT16:
+            return "_Float16";
         case TY_DECIMAL32:
             return "_Decimal32";
         case TY_DECIMAL64:
@@ -798,6 +800,9 @@ static void dump_scalar_at(FILE *f, VirtualMachine *vm, Type *ty,
         case TY_BITINT:
             fprintf(f, "<_BitInt value: printing not yet supported>");
             return;
+        case TY_FLOAT16:
+            fprintf(f, "<_Float16 value: printing not yet supported>");
+            return;
         case TY_DECIMAL32:
         case TY_DECIMAL64:
         case TY_DECIMAL128:
@@ -972,6 +977,9 @@ void cc_dump_value_reg(FILE *f, VirtualMachine *vm, Type *ty, long long ival,
             return;
         case TY_BITINT:
             fprintf(f, "<_BitInt value: printing not yet supported>");
+            return;
+        case TY_FLOAT16:
+            fprintf(f, "<_Float16 value: printing not yet supported>");
             return;
         case TY_DECIMAL32:
         case TY_DECIMAL64:

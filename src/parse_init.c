@@ -1273,6 +1273,13 @@ static Node *balanced_comma(VirtualMachine *vm, Node **items, int lo, int hi,
     return new_binary(vm, ND_COMMA, l, r, tok);
 }
 
+// A zero initializer for a _Float16 inside an aggregate or static storage is
+// already satisfied by the pre-zeroed memory.
+static bool is_float16_zero_init(Type *ty, Node *expr) {
+    return is_float16(ty) && expr && expr->kind == ND_NUM &&
+           !is_flonum(expr->ty) && expr->val == 0;
+}
+
 static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
                               InitDesg *desg, Token *tok) {
     // Multi-dimensional VLA (#977): a nested row's own type is TY_VLA (e.g.
@@ -1384,7 +1391,7 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
         return node;
     }
 
-    if (!init->expr)
+    if (!init->expr || (desg->next && is_float16_zero_init(ty, init->expr)))
         return new_node(vm, ND_NULL_EXPR, tok);
 
     Node *lhs = init_desg_expr(vm, desg, tok);
@@ -1809,6 +1816,12 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
     if (!init->expr)
         return cur;
 
+    if (ty->kind == TY_FLOAT16) {
+        if (!is_float16_zero_init(ty, init->expr))
+            error_float16_unsupported(vm, init->expr->tok);
+        return cur;
+    }
+
     if (ty->kind == TY_FLOAT) {
         *(float *)(buf + offset) = eval_double(vm, init->expr);
         return cur;
@@ -1981,17 +1994,17 @@ pthread_once_t typename_map_once = PTHREAD_ONCE_INIT;
 
 void init_typename_map(void) {
     static char *kw[] = {
-        "void",          "_Bool",        "char",          "short",
-        "int",           "long",         "struct",        "union",
-        "typedef",       "enum",         "static",        "extern",
-        "_Alignas",      "signed",       "unsigned",      "const",
-        "volatile",      "auto",         "register",      "restrict",
-        "__auto_type",   "__restrict",    "__restrict__", "_Noreturn",     "float",
-        "double",        "typeof",       "typeof_unqual", "inline",
-        "_Thread_local", "__thread",     "_Atomic",       "constexpr",
-        "__block",       "_Complex",     "_Imaginary",    "_BitInt",
-        "_Decimal32",    "_Decimal64",   "_Decimal128",   "__int128",
-        "__int128_t",    "__uint128_t",
+        "void",        "_Bool",         "char",         "short",
+        "int",         "long",          "struct",       "union",
+        "typedef",     "enum",          "static",       "extern",
+        "_Alignas",    "signed",        "unsigned",     "const",
+        "volatile",    "auto",          "register",     "restrict",
+        "__auto_type", "__restrict",    "__restrict__", "_Noreturn",
+        "float",       "double",        "typeof",       "typeof_unqual",
+        "inline",      "_Thread_local", "__thread",     "_Atomic",
+        "constexpr",   "__block",       "_Complex",     "_Imaginary",
+        "_BitInt",     "_Decimal32",    "_Decimal64",   "_Decimal128",
+        "__int128",    "_Float16",      "__int128_t",   "__uint128_t",
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)

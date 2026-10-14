@@ -84,6 +84,8 @@ static const char *type_kind_name(TypeKind kind) {
             return "nullptr_t";
         case TY_BITINT:
             return "_BitInt";
+        case TY_FLOAT16:
+            return "float16";
         case TY_DECIMAL32:
             return "decimal32";
         case TY_DECIMAL64:

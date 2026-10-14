@@ -59,6 +59,7 @@ static void fenv_barrier_end(int saved_round) {
 
 // Prototypes for the comptime builtins registered below (CC_BUILTIN).
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
+#define __CCCC_TAG(n) n
 #include "../include/cccc/reflection.h"
 
 // NOTE: unlike cc_record_emit_object below, this does NOT dedup -- the
@@ -1414,13 +1415,36 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     return result;
 }
 
-// Ticket #235: idempotently preprocess reflection.h so that its built-in
-// @comptime(attribute(...)) handlers (e.g. __builtin_attr_serialize) are
-// registered into vm->compiler.macro_fns before the first attribute-dispatch
-// lookup (find_attribute_macro / run_custom_attrs in parse.c). Without this, a
-// translation unit with no @comptime definitions of its own never triggers
-// implicit_reflection_tokens() until compile_macro_program() — too late for
-// the very first @serialize/@deserialize/etc. dispatch to find a handler.
+// Attribute names handled by reflection.h's built-in
+// @comptime(attribute(...)) handlers. Keep in sync with that header
+// (tests/host/test_reflection_attr_list.c checks it).
+static const char *const reflection_attr_names[] = {
+    "serialize",
+    "deserialize",
+    "enum_to_string",
+    "enum_from_string",
+    "generate_getters",
+    "generate_setters",
+    "generate_constructor",
+    NULL,
+};
+
+const char *const *reflection_builtin_attr_names(void) {
+    return reflection_attr_names;
+}
+
+bool is_reflection_builtin_attr(const char *name, int len) {
+    for (int i = 0; reflection_attr_names[i]; i++)
+        if ((int)strlen(reflection_attr_names[i]) == len &&
+            !strncmp(reflection_attr_names[i], name, len))
+            return true;
+    return false;
+}
+
+// Idempotently preprocesses reflection.h so its built-in attribute handlers
+// are registered before the first lookup of one of reflection_attr_names.
+// Registering them makes macro_fns non-empty, which runs the whole comptime
+// pass, so find_attribute_macro only calls this for those names.
 // Safe to call mid-parse: implicit_reflection_tokens only tokenizes and
 // preprocesses reflection.h and temporarily toggles include-guard macros.
 void ensure_reflection_attrs_registered(VirtualMachine *vm) {

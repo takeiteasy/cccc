@@ -149,9 +149,8 @@ MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
         return NULL;
     if (!tok || tok->kind != TK_IDENT)
         return NULL;
-    // Ticket #235: make sure reflection.h's built-in @comptime(attribute(...))
-    // handlers (e.g. __cccc_attr_serialize) are registered before searching.
-    ensure_reflection_attrs_registered(vm);
+    if (is_reflection_builtin_attr(tok->loc, tok->len))
+        ensure_reflection_attrs_registered(vm);
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (!pm->is_attribute_handler || !pm->attribute_name)
             continue;
@@ -533,8 +532,14 @@ Node *new_vla_ptr(VirtualMachine *vm, Obj *var, Token *tok) {
     return node;
 }
 
+void error_float16_unsupported(VirtualMachine *vm, Token *tok) {
+    error_tok(vm, tok, "_Float16 values are not supported");
+}
+
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty) {
     add_type(vm, expr);
+    if (is_float16(expr->ty) || is_float16(ty))
+        error_float16_unsupported(vm, expr->tok);
     Node *node = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     memset(node, 0, sizeof(Node));
     node->kind = ND_CAST;

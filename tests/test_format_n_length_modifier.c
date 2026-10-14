@@ -4,12 +4,12 @@
 // CCCC_EXPECT_STDERR: expected type 'long \*'
 // CCCC_REJECT_STDERR: expected type 'unsigned long \*'
 /*
- * #1230: the -F format checker's `case 'n'` arm hardcoded FMT_EXPECT_INT_PTR
- * for every length-modifier spelling, so `%ln` accepted `int *` and `%hhn`
- * accepted `int *`. It now mirrors the modifier-aware `%d`/`%u` arms -- with
- * one difference: `%n` has no signed/unsigned conversion split, so the wide
- * modifiers accept an 8-byte target of *either* signedness (`long *` or
- * `unsigned long *`), rejecting only a narrower pointer. That matches
+ * #1230: the --format-string-checks format checker's `case 'n'` arm hardcoded
+ * FMT_EXPECT_INT_PTR for every length-modifier spelling, so `%ln` accepted `int
+ * *` and `%hhn` accepted `int *`. It now mirrors the modifier-aware `%d`/`%u`
+ * arms -- with one difference: `%n` has no signed/unsigned conversion split, so
+ * the wide modifiers accept an 8-byte target of *either* signedness (`long *`
+ * or `unsigned long *`), rejecting only a narrower pointer. That matches
  * gcc/clang `-Wformat`, which check `%n`'s argument for width only. The
  * CCCC_REJECT_STDERR line pins that: a well-typed `unsigned long *` passed
  * to `%ln` must never produce the "expected type 'unsigned long *'"

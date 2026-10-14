@@ -100,6 +100,8 @@ Type *ty_decimal32  = &(Type){.kind = TY_DECIMAL32, .size = 4, .align = 4};
 Type *ty_decimal64  = &(Type){.kind = TY_DECIMAL64, .size = 8, .align = 8};
 Type *ty_decimal128 = &(Type){.kind = TY_DECIMAL128, .size = 16, .align = 16};
 
+Type       *ty_float16    = &(Type){.kind = TY_FLOAT16, .size = 2, .align = 2};
+
 static Type ty_error_obj = {TY_ERROR, 0, 1};
 Type       *ty_error     = &ty_error_obj;
 
@@ -207,6 +209,10 @@ bool is_flonum(Type *ty) {
 // the FReg/fregs[] file, so callers that gate on is_flonum() must not treat
 // decimal as flonum, or they'd force a 4/8/16-byte decimal value through a
 // flat 64-bit double register -- lossy for d32/d64, impossible for d128.
+bool is_float16(Type *ty) {
+    return ty && ty->kind == TY_FLOAT16;
+}
+
 bool is_decimal(Type *ty) {
     if (!ty)
         return false;
@@ -374,6 +380,7 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
         case TY_DECIMAL32:
         case TY_DECIMAL64:
         case TY_DECIMAL128:
+        case TY_FLOAT16:
             return true;
         case TY_COMPLEX:
             return compat_nested(t1->base, t2->base, strict, family);
@@ -1195,6 +1202,15 @@ void add_type(VirtualMachine *vm, Node *node) {
         (node->cond && node->cond->ty && is_error_type(node->cond->ty))) {
         node->ty = ty_error;
         return;
+    }
+
+    // _Float16 is storage-only: an operand is only legal where its address
+    // or type is taken, never its value.
+    if (node->kind != ND_ADDR) {
+        Node *const ops[] = {node->lhs, node->rhs, node->cond};
+        for (int i = 0; i < 3; i++)
+            if (ops[i] && is_float16(ops[i]->ty))
+                error_float16_unsupported(vm, node->tok);
     }
 
     switch (node->kind) {

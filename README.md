@@ -139,9 +139,11 @@ Options:
 	-x <lang>               Read every input as <lang>: cl (OpenCL C) or c; default is by extension (.cl is OpenCL C)
 	-I/--include <path>      Add <path> to include search paths
 	-i/--isystem <path>      Add <path> to system include paths (for non-standard headers)
+	-F/--framework-path <path> Add <path> to framework search paths (<Name/X.h> -> Name.framework/Headers/X.h)
+	   --iframework <path>   Add <path> to system framework search paths
 	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
 	   --no-builtin-includes Do not fall back to CCCC's own bundled headers for non-owned standard headers (requires --use-system-headers)
-	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths and implies --use-system-headers
+	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths (and <path>/System/Library/Frameworks to system framework paths) and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths
 	-l/--library <name>      Link dynamic library by name or path
 	   --url-cache-dir <path> Directory for caching #include/#embed <https://...> fetches
@@ -315,7 +317,7 @@ Memory Safety Options (can be combined with safety levels):
 FFI Safety Options:
 	   --ffi-allow=list       Allow only comma-separated native function names
 	   --ffi-deny=list        Deny comma-separated native function names
-	-F/--disable-ffi          Block all registered and dynamic native calls
+	   --disable-ffi         Block all registered and dynamic native calls
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 

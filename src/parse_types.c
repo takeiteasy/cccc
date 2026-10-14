@@ -139,6 +139,10 @@ DeclKw declspec_kw(Token *tok) {
                             if (memcmp(s + 2, "omplex", 6) == 0)
                                 return DK_COMPLEX;
                             break;
+                        case 'F':
+                            if (memcmp(s + 2, "loat16", 6) == 0)
+                                return DK_FLOAT16;
+                            break;
                         case '_':
                             if (memcmp(s + 2, "thread", 6) == 0)
                                 return DK_TLS;
@@ -227,11 +231,13 @@ DeclKw declspec_kw(Token *tok) {
 }
 
 static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok);
-static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                         bool bare_decl);
 static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok);
 static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest,
                                      Token *tok);
-static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                        bool bare_decl);
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef" | "static" | "extern" | "inline"
@@ -474,14 +480,17 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
             case DK_NONE:
             case DK_DECIMAL32:
             case DK_DECIMAL64:
-            case DK_DECIMAL128: {
+            case DK_DECIMAL128:
+            case DK_FLOAT16: {
                 Type *ty2 = (dk == DK_NONE) ? find_typedef(vm, tok) : NULL;
                 if (counter)
                     goto declspec_done;
+                // C11 6.7.2.3p7: a lone `struct S;` declares S in this scope.
+                bool bare_decl = attr && !attr->in_member_list && tok == start;
                 if (dk == DK_STRUCT)
-                    ty = struct_decl(vm, &tok, tok->next);
+                    ty = struct_decl(vm, &tok, tok->next, bare_decl);
                 else if (dk == DK_UNION)
-                    ty = union_decl(vm, &tok, tok->next);
+                    ty = union_decl(vm, &tok, tok->next, bare_decl);
                 else if (dk == DK_ENUM)
                     ty = enum_specifier(vm, &tok, tok->next);
                 else if (dk == DK_TYPEOF)
@@ -496,6 +505,9 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                     tok = tok->next;
                 } else if (dk == DK_DECIMAL128) {
                     ty  = ty_decimal128;
+                    tok = tok->next;
+                } else if (dk == DK_FLOAT16) {
+                    ty  = ty_float16;
                     tok = tok->next;
                 } else {
                     VarScope *sc = find_var(vm, tok);
@@ -2017,7 +2029,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             error_tok(vm, tok,
                       "#pragma pack changed inside a struct/union body is "
                       "not supported -- move it outside the declaration");
-        VarAttr attr   = {};
+        VarAttr attr   = {.in_member_list = true};
         Type   *basety = declspec(vm, &tok, tok, &attr);
         if (has_custom_attrs(basety, &attr))
             error_tok(vm, tok,
@@ -3452,7 +3464,8 @@ Token *c23_attribute_list(VirtualMachine *vm, Token *tok, Type *ty,
 // re-registering the type under the wrong name in the *referencing
 // function's* scope -- see #897.
 static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                               TypeKind kind, bool *is_definition) {
+                               TypeKind kind, bool *is_definition,
+                               bool bare_decl) {
     *is_definition = false;
     Type *ty       = struct_type(vm);
     ty->kind       = kind;
@@ -3478,7 +3491,9 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     if (tag && !equal(tok, "{")) {
         *rest     = tok;
 
-        Type *ty2 = find_tag(vm, tag);
+        Type *ty2 = bare_decl && equal(tok, ";")
+                        ? find_tag_in_current_scope(vm, tag)
+                        : find_tag(vm, tag);
         if (ty2) {
             if (ty2->kind != kind)
                 error_tok(vm, tag, "tag redeclared as different kind");
@@ -3534,9 +3549,11 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
 #endif
 
 // struct-decl = struct-union-decl
-static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
+static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                         bool bare_decl) {
     bool  is_definition = false;
-    Type *ty = struct_union_decl(vm, rest, tok, TY_STRUCT, &is_definition);
+    Type *ty =
+        struct_union_decl(vm, rest, tok, TY_STRUCT, &is_definition, bare_decl);
 
     if (ty->size < 0)
         return ty;
@@ -3712,9 +3729,11 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok) {
 }
 
 // union-decl = struct-union-decl
-static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok) {
+static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
+                        bool bare_decl) {
     bool  is_definition = false;
-    Type *ty = struct_union_decl(vm, rest, tok, TY_UNION, &is_definition);
+    Type *ty =
+        struct_union_decl(vm, rest, tok, TY_UNION, &is_definition, bare_decl);
 
     if (ty->size < 0)
         return ty;

@@ -97,6 +97,8 @@ static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system);
+static char *search_framework_paths(VirtualMachine *vm, const char *filename,
+                                    const char *includer);
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 static long pp_const_expr(VirtualMachine *vm, Token **rest, Token *expr);
 static Token *rewrite_pp_operators(VirtualMachine *vm, Token *tok);
@@ -1698,6 +1700,10 @@ static char *resolve_include_probe(VirtualMachine *vm, Token *start,
     if (!path && is_dquote)
         path = search_include_paths(vm, filename, filename_len, true);
 
+    if (!path)
+        path = search_framework_paths(vm, filename,
+                                      start->file ? start->file->name : NULL);
+
     return path;
 }
 
@@ -1896,6 +1902,9 @@ bool cc_has_attribute(const char *name, int len) {
 }
 
 static bool is_has_builtin_supported(char *name) {
+    int libm_row, libm_variant;
+    if (libm_builtin_lookup(name, (int)strlen(name), &libm_row, &libm_variant))
+        return true;
     static const char *builtins[] = {
         "__builtin_types_compatible_p",
         "__builtin_classify_type",
@@ -2973,6 +2982,60 @@ static bool wants_builtin_header(VirtualMachine *vm, bool is_std, bool owned) {
     return owned || (is_std && !vm->compiler.no_builtin_includes);
 }
 
+static char *probe_framework_dir(const char *dir, const char *name,
+                                 int name_len, const char *rest) {
+    static const char *const subdirs[] = {"Headers", "PrivateHeaders"};
+    for (int i = 0; i < 2; i++) {
+        char *path = format("%s/%.*s.framework/%s/%s", dir, name_len, name,
+                            subdirs[i], rest);
+        if (file_exists(path))
+            return path;
+        free(path);
+    }
+    return NULL;
+}
+
+// Resolves `Name/rest` to `<dir>/Name.framework/{Headers,PrivateHeaders}/rest`
+// for each -F then --iframework directory. A header inside a framework also
+// sees that framework's bundled sub-frameworks
+// (`X.framework/Frameworks/Name.framework`), which is how CoreServices.h
+// reaches CarbonCore, AE, FSEvents and the rest. The result depends on
+// `includer`, so it is not memoised in include_cache.
+static char *search_framework_paths(VirtualMachine *vm, const char *filename,
+                                    const char *includer) {
+    const char *slash = strchr(filename, '/');
+    if (filename[0] == '/' || !slash || slash == filename)
+        return NULL;
+    int         name_len = slash - filename;
+    const char *rest     = slash + 1;
+
+    if (includer) {
+        static const char suffix[] = ".framework";
+        for (const char *p = strstr(includer, ".framework/"); p;
+             p             = strstr(p + 1, ".framework/")) {
+            char *dir =
+                format("%.*s/Frameworks",
+                       (int)(p - includer) + (int)sizeof(suffix) - 1, includer);
+            char *path = probe_framework_dir(dir, filename, name_len, rest);
+            free(dir);
+            if (path)
+                return path;
+        }
+    }
+
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    for (int k = 0; k < 2; k++) {
+        for (int i = 0; i < lists[k]->len; i++) {
+            char *path = probe_framework_dir(lists[k]->data[i], filename,
+                                             name_len, rest);
+            if (path)
+                return path;
+        }
+    }
+    return NULL;
+}
+
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
                            bool is_system) {
     if (filename[0] == '/')
@@ -3223,8 +3286,20 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
     free(buf);
 }
 
-// Searches include_paths then system_include_paths from index `start`
-// (system entries are numbered after the include_paths ones).
+// Splits `Name/rest` for framework lookup; false for any other spelling.
+static bool split_framework_name(const char *filename, int *name_len,
+                                 const char **rest) {
+    const char *slash = strchr(filename, '/');
+    if (filename[0] == '/' || !slash || slash == filename)
+        return false;
+    *name_len = (int)(slash - filename);
+    *rest     = slash + 1;
+    return true;
+}
+
+// Searches include_paths, system_include_paths, then the -F and --iframework
+// framework directories (#include's own order) from index `start`, the
+// entries being numbered consecutively across the four lists.
 static char *search_include_next(VirtualMachine *vm, char *filename,
                                  int start) {
     int npaths = vm->compiler.include_paths.len;
@@ -3241,6 +3316,23 @@ static char *search_include_next(VirtualMachine *vm, char *filename,
         if (file_exists(path))
             return path;
     }
+
+    int         name_len;
+    const char *rest;
+    if (!split_framework_name(filename, &name_len, &rest))
+        return NULL;
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    int          base    = npaths + vm->compiler.system_include_paths.len;
+    for (int k = 0; k < 2; k++) {
+        for (int i = start > base ? start - base : 0; i < lists[k]->len; i++) {
+            char *path = probe_framework_dir(lists[k]->data[i], filename,
+                                             name_len, rest);
+            if (path)
+                return path;
+        }
+        base += lists[k]->len;
+    }
     return NULL;
 }
 
@@ -3249,20 +3341,49 @@ static char *search_include_next(VirtualMachine *vm, char *filename,
 static int include_next_start_for(VirtualMachine *vm, const char *path,
                                   const char *filename) {
     size_t plen = strlen(path), flen = strlen(filename);
-    if (plen <= flen + 1 || strcmp(path + plen - flen, filename) ||
-        path[plen - flen - 1] != '/')
-        return 0;
-    size_t dlen   = plen - flen - 1;
     int    npaths = vm->compiler.include_paths.len;
-    for (int i = 0; i < npaths; i++) {
-        const char *d = vm->compiler.include_paths.data[i];
-        if (strlen(d) == dlen && !strncmp(d, path, dlen))
-            return i + 1;
+    int    nsys   = vm->compiler.system_include_paths.len;
+
+    if (plen > flen + 1 && !strcmp(path + plen - flen, filename) &&
+        path[plen - flen - 1] == '/') {
+        size_t dlen = plen - flen - 1;
+        for (int i = 0; i < npaths; i++) {
+            const char *d = vm->compiler.include_paths.data[i];
+            if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                return i + 1;
+        }
+        for (int i = 0; i < nsys; i++) {
+            const char *d = vm->compiler.system_include_paths.data[i];
+            if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                return npaths + i + 1;
+        }
     }
-    for (int i = 0; i < vm->compiler.system_include_paths.len; i++) {
-        const char *d = vm->compiler.system_include_paths.data[i];
-        if (strlen(d) == dlen && !strncmp(d, path, dlen))
-            return npaths + i + 1;
+
+    // `dir/Name.framework/{Headers,PrivateHeaders}/rest` for `Name/rest`.
+    int         name_len;
+    const char *rest;
+    if (!split_framework_name(filename, &name_len, &rest))
+        return 0;
+    StringArray *lists[] = {&vm->compiler.framework_paths,
+                            &vm->compiler.system_framework_paths};
+    for (int h = 0; h < 2; h++) {
+        char  *tail = format("/%.*s.framework/%s/%s", name_len, filename,
+                             h ? "PrivateHeaders" : "Headers", rest);
+        size_t tlen = strlen(tail);
+        bool   hit  = plen > tlen && !strcmp(path + plen - tlen, tail);
+        free(tail);
+        if (!hit)
+            continue;
+        size_t dlen = plen - tlen;
+        int    base = npaths + nsys;
+        for (int k = 0; k < 2; k++) {
+            for (int i = 0; i < lists[k]->len; i++) {
+                const char *d = lists[k]->data[i];
+                if (strlen(d) == dlen && !strncmp(d, path, dlen))
+                    return base + i + 1;
+            }
+            base += lists[k]->len;
+        }
     }
     return 0;
 }
@@ -6158,6 +6279,9 @@ static char *resolve_comptime_include_path(VirtualMachine *vm, Token *start_tok,
         resolved = search_include_paths(vm, filename, filename_len, !is_dquote);
     if (!resolved && is_dquote)
         resolved = search_include_paths(vm, filename, filename_len, true);
+    if (!resolved)
+        resolved = search_framework_paths(
+            vm, filename, start_tok->file ? start_tok->file->name : NULL);
     return resolved;
 }
 
@@ -6959,6 +7083,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     found_in_sys = (path != NULL);
                 }
 
+                if (!path)
+                    path = search_framework_paths(
+                        vm, filename, start->file ? start->file->name : NULL);
+
                 if (!path) {
                     // Nothing on disk (no -I hit, no CCCC ./include fallback —
                     // e.g. cccc running from a CWD that isn't its own repo, or
@@ -7518,8 +7646,196 @@ static void init_time_macros(VirtualMachine *vm) {
 #undef T
 }
 
+typedef struct {
+    const char *stem; // INT64 -> __INT64_TYPE__, __INT64_MAX__, ...
+    const char *type;
+    int         bits;
+    bool        is_signed;
+    const char *len; // printf length modifier
+    bool        fmt; // emit __<stem>_FMT*__
+    bool        c_suffix;
+} PredefInt;
+
+static void define_predef_int(VirtualMachine *vm, const PredefInt *t) {
+    uint64_t    max    = t->is_signed ? (UINT64_MAX >> (65 - t->bits))
+                                      : (UINT64_MAX >> (64 - t->bits));
+    const char *suffix = t->bits == 64
+                             ? (t->is_signed ? "L" : "UL")
+                             : (!t->is_signed && t->bits == 32 ? "U" : "");
+    char       *name;
+
+#define PD(field, value)                                                       \
+    (name = arena_format(vm, "__%s_" field "__", t->stem),                     \
+     define_macro(vm, name, value))
+    PD("TYPE",
+       arena_format(vm, "%s%s", t->is_signed ? "" : "unsigned ", t->type));
+    PD("WIDTH", arena_format(vm, "%d", t->bits));
+    PD("MAX", arena_format(vm, "%llu%s", (unsigned long long)max, suffix));
+    if (!t->fmt) {
+        if (t->is_signed) {
+            PD("MIN", arena_format(vm, "(-__%s_MAX__ - 1)", t->stem));
+        } else {
+            PD("MIN", "0U");
+        }
+    }
+    if (t->fmt) {
+        if (t->is_signed) {
+            PD("FMTd", arena_format(vm, "\"%sd\"", t->len));
+            PD("FMTi", arena_format(vm, "\"%si\"", t->len));
+        } else {
+            PD("FMTo", arena_format(vm, "\"%so\"", t->len));
+            PD("FMTu", arena_format(vm, "\"%su\"", t->len));
+            PD("FMTx", arena_format(vm, "\"%sx\"", t->len));
+            PD("FMTX", arena_format(vm, "\"%sX\"", t->len));
+        }
+    }
+    if (t->c_suffix)
+        PD("C_SUFFIX", (char *)suffix);
+#undef PD
+}
+
+typedef struct {
+    const char *prefix, *suffix;
+    const char *mant_dig, *dig, *decimal_dig, *min_exp, *max_exp, *min_10_exp,
+        *max_10_exp, *max, *min, *epsilon, *denorm_min;
+} PredefFloat;
+
+// Mirrors include/float.h (long double is double-precision on every target).
+static void define_predef_float(VirtualMachine *vm, const PredefFloat *f) {
+#define PF(field, value)                                                       \
+    define_macro(vm, arena_format(vm, "__%s_" field "__", f->prefix), value)
+#define PFV(field, value) PF(field, arena_format(vm, "%s%s", value, f->suffix))
+    PF("MANT_DIG", (char *)f->mant_dig);
+    PF("DIG", (char *)f->dig);
+    PF("DECIMAL_DIG", (char *)f->decimal_dig);
+    PF("MIN_EXP", (char *)f->min_exp);
+    PF("MAX_EXP", (char *)f->max_exp);
+    PF("MIN_10_EXP", (char *)f->min_10_exp);
+    PF("MAX_10_EXP", (char *)f->max_10_exp);
+    PFV("MAX", f->max);
+    PFV("NORM_MAX", f->max);
+    PFV("MIN", f->min);
+    PFV("EPSILON", f->epsilon);
+    PFV("DENORM_MIN", f->denorm_min);
+    PF("HAS_DENORM", "1");
+    PF("HAS_INFINITY", "1");
+    PF("HAS_QUIET_NAN", "1");
+#undef PFV
+#undef PF
+}
+
+// Target ABI facts (type limits/widths/names, float characteristics,
+// endianness) taken from cccc's own type model and bundled headers, not from
+// the host compiler. Names mirror gcc/clang so SDK and vendored headers that
+// key on them (libkern/OSByteOrder.h, dmon.h) resolve.
+static void init_target_macros(VirtualMachine *vm) {
+    static const PredefInt ints[] = {
+        {"INT8", "signed char", 8, true, "hh", true, true},
+        {"UINT8", "char", 8, false, "hh", true, true},
+        {"INT16", "short", 16, true, "h", true, true},
+        {"UINT16", "short", 16, false, "h", true, true},
+        {"INT32", "int", 32, true, "", true, true},
+        {"UINT32", "int", 32, false, "", true, true},
+        {"INT64", "long", 64, true, "l", true, true},
+        {"UINT64", "long", 64, false, "l", true, true},
+        {"INTMAX", "long", 64, true, "l", true, true},
+        {"UINTMAX", "long", 64, false, "l", true, true},
+        {"INTPTR", "long", 64, true, "l", true, false},
+        {"UINTPTR", "long", 64, false, "l", true, false},
+        {"PTRDIFF", "long", 64, true, "l", true, false},
+        {"SIZE", "long", 64, false, "l", true, false},
+        {"SIG_ATOMIC", "int", 32, true, "", false, false},
+        {"WINT", "int", 32, false, "", false, false},
+#if defined(__linux__) && defined(__aarch64__)
+        {"WCHAR", "int", 32, false, "", false, false},
+#else
+        {"WCHAR", "int", 32, true, "", false, false},
+#endif
+    };
+    for (size_t i = 0; i < sizeof ints / sizeof *ints; i++)
+        define_predef_int(vm, &ints[i]);
+
+    define_macro(vm, "__CHAR16_TYPE__", "unsigned short");
+    define_macro(vm, "__CHAR32_TYPE__", "unsigned int");
+    define_macro(vm, "__CHAR_BIT__", "8");
+    define_macro(vm, "__BOOL_WIDTH__", "1");
+    define_macro(vm, "__SCHAR_MAX__", "127");
+    define_macro(vm, "__SHRT_MAX__", "32767");
+    define_macro(vm, "__INT_MAX__", "2147483647");
+    define_macro(vm, "__LONG_MAX__", "9223372036854775807L");
+    define_macro(vm, "__LONG_LONG_MAX__", "9223372036854775807LL");
+    define_macro(vm, "__SHRT_WIDTH__", "16");
+    define_macro(vm, "__INT_WIDTH__", "32");
+    define_macro(vm, "__LONG_WIDTH__", "64");
+    define_macro(vm, "__LLONG_WIDTH__", "64");
+    define_macro(vm, "__POINTER_WIDTH__", "64");
+    define_macro(vm, "__SIZEOF_WCHAR_T__", "4");
+    define_macro(vm, "__SIZEOF_WINT_T__", "4");
+    define_macro(vm, "__PTRDIFF_TYPE__", "long");
+    define_macro(vm, "__INTPTR_TYPE__", "long");
+#if defined(__APPLE__) && defined(__aarch64__)
+    define_macro(vm, "__BIGGEST_ALIGNMENT__", "8");
+#else
+    define_macro(vm, "__BIGGEST_ALIGNMENT__", "16");
+#endif
+#ifndef _WIN32
+    define_macro(vm, "_LP64", "1");
+#endif
+    // include/limits.h BITINT_MAXWIDTH
+    define_macro(vm, "__BITINT_MAXWIDTH__", "65535");
+    define_macro(vm, "__STDC_EMBED_NOT_FOUND__", "0");
+    define_macro(vm, "__STDC_EMBED_FOUND__", "1");
+    define_macro(vm, "__STDC_EMBED_EMPTY__", "2");
+
+    static const PredefFloat floats[] = {
+        {"FLT", "F", "24", "6", "9", "(-125)", "128", "(-37)", "38",
+         "3.40282347e+38", "1.17549435e-38", "1.19209290e-07",
+         "1.40129846e-45"},
+        {"DBL", "", "53", "15", "17", "(-1021)", "1024", "(-307)", "308",
+         "1.7976931348623157e+308", "2.2250738585072014e-308",
+         "2.2204460492503131e-16", "4.9406564584124654e-324"},
+        {"LDBL", "L", "53", "15", "17", "(-1021)", "1024", "(-307)", "308",
+         "1.7976931348623157e+308", "2.2250738585072014e-308",
+         "2.2204460492503131e-16", "4.9406564584124654e-324"},
+    };
+    for (size_t i = 0; i < sizeof floats / sizeof *floats; i++)
+        define_predef_float(vm, &floats[i]);
+    define_macro(vm, "__FLT_RADIX__", "2");
+    define_macro(vm, "__FLT_EVAL_METHOD__", "0");
+    define_macro(vm, "__DECIMAL_DIG__", "17");
+
+    define_macro(vm, "__ORDER_LITTLE_ENDIAN__", "1234");
+    define_macro(vm, "__ORDER_BIG_ENDIAN__", "4321");
+    define_macro(vm, "__ORDER_PDP_ENDIAN__", "3412");
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    define_macro(vm, "__BYTE_ORDER__", "__ORDER_BIG_ENDIAN__");
+#else
+    define_macro(vm, "__BYTE_ORDER__", "__ORDER_LITTLE_ENDIAN__");
+#endif
+
+#ifdef __APPLE__
+    // Apple's SDK headers (TargetConditionals.h, libkern/OSByteOrder.h) and
+    // dmon.h select their platform branch on these.
+#ifndef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
+#define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ 110000
+#endif
+#define CCCC_STR2(x) #x
+#define CCCC_STR(x)  CCCC_STR2(x)
+    define_macro(vm, "__MACH__", "1");
+    define_macro(vm, "__APPLE_CC__", "6000");
+    define_macro(vm, "__LITTLE_ENDIAN__", "1");
+    define_macro(vm, "__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__",
+                 CCCC_STR(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__));
+    define_macro(vm, "__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__",
+                 CCCC_STR(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__));
+#undef CCCC_STR
+#undef CCCC_STR2
+#endif
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
+    init_target_macros(vm);
     init_fenv_macros(vm);
     init_errno_macros(vm);
     init_dlfcn_macros(vm);

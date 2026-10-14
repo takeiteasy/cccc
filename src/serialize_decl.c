@@ -1454,6 +1454,12 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         return;
     }
 
+    // Storage-only _Float16 accepts only a zero initializer.
+    if (ty->kind == TY_FLOAT16) {
+        fprintf(f, "0");
+        return;
+    }
+
     // Any kind with no verified byte layout here (TY_COMPLEX has had its own
     // case since #1122 -- this comment used to name it, stale since then):
     // fail loudly rather than guess (#918's whole point -- emitting a

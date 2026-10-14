@@ -68,6 +68,9 @@ qualifiers when deciding compatibility; clang keeps them. (Both families
 agree everywhere else, including on a function *parameter*'s `_Atomic`,
 which is significant, and its `const`, which is not.)
 
+`--compiler-family` does not change the predefined macro set (see
+[HEADERS.md](HEADERS.md#real-sdk-headers-under---use-system-headers--sysroot)).
+
 `--compiler-family=FAM` selects the reading:
 
 - **`gcc`** — the default. Today's behaviour; nothing changes for anyone who

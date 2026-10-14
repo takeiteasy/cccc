@@ -1334,7 +1334,7 @@ Current PC:    0xb98800148 (offset: 41)
 ### `--format-string-checks` — Format string validation
 
 - Validates format strings at compile time via `__attribute__((format(printf/scanf, …)))`
-- Gated by `-F` / `--format-string-checks` or included in safety presets `-S1` / `-S2`
+- Gated by `--format-string-checks` or included in safety presets `-S1` / `-S2`
 - Annotates printf/scanf-family functions in the bundled standard library headers
 - Works with any function annotated with the GNU `format` attribute
 - Counts format specifiers (%d, %s, %f, %x, %p, %c, etc.) and compares with argument count

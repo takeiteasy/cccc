@@ -68,7 +68,9 @@ Two different classifications drive the rules above:
   `system_include_paths`) before falling back to CCCC's own copy. Owned
   headers are unaffected — they still always resolve to CCCC's copy.
 - **`--sysroot <path>`**: adds `<path>/usr/include` and
-  `<path>/usr/local/include` to the system search paths; implies
+  `<path>/usr/local/include` to the system search paths, and
+  `<path>/System/Library/Frameworks` to the system framework paths (see
+  [Framework headers](#framework-headers-macos)); implies
   `--use-system-headers`.
 - **`--no-builtin-includes`** (requires `--use-system-headers`; passing it
   alone is a CLI error): for known, non-owned standard headers, do **not**
@@ -83,8 +85,31 @@ Two different classifications drive the rules above:
 
 ### Real SDK headers under `--use-system-headers`/`--sysroot`
 
-A real SDK header's own `#if` guards can use constructs CCCC's preprocessor
-needs help with:
+A real SDK header's own `#if` guards key on compiler predefines, and can use
+constructs CCCC's preprocessor needs help with.
+
+**Predefined target macros.** CCCC defines the gcc/clang ABI macros SDK
+headers test, with values from its own type model and bundled headers:
+
+| Group | Examples |
+|---|---|
+| Endianness | `__BYTE_ORDER__`, `__ORDER_LITTLE_ENDIAN__`, `__LITTLE_ENDIAN__` (Apple only) |
+| Integer types | `__INT64_TYPE__`, `__INT64_MAX__`, `__INT64_FMTd__`, `__SIZE_MAX__`, `__WCHAR_TYPE__` |
+| Floating point | `__DBL_EPSILON__`, `__LDBL_MANT_DIG__`, `__FLT_RADIX__` |
+| Data model | `_LP64`, `__CHAR_BIT__`, `__POINTER_WIDTH__`, `__BITINT_MAXWIDTH__` |
+| Apple | `__MACH__`, `__APPLE_CC__`, `__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__` |
+
+Each one equals its bundled-header counterpart (`__INT_MAX__ == INT_MAX`,
+`__LDBL_MANT_DIG__ == LDBL_MANT_DIG`), so `__INT64_TYPE__` is `long` and
+`long double` is double-precision. A command-line `-D`/`-U` overrides any of
+them.
+
+Identity and feature macros stay undefined because CCCC does not implement
+what they advertise: `__clang__`, `__BLOCKS__`, `__ARM_NEON`, the
+`__FLT16_*` macros (`_Float16` is storage-only), the `__GCC_ATOMIC_*` family, `__STDC_NO_THREADS__`. They are
+not affected by `--compiler-family`.
+
+Other constructs:
 
 - **`defined`/`__has_*` reached through a macro expansion.** A macro can
   itself expand *to* `defined(...)` or `__has_builtin(...)`/
@@ -142,6 +167,33 @@ via `is_system_header`), CCCC suppresses:
 
 These are common in real SDK headers and are informational hints to the native
 compiler that have no meaning in CCCC's VM execution.
+
+## Framework headers (macOS)
+
+`<Name/X.h>` resolves to `Name.framework/Headers/X.h` (then
+`Name.framework/PrivateHeaders/X.h`) under the framework search paths:
+
+| Flag | Directory is treated as |
+|------|-------------------------|
+| `-F <dir>` / `--framework-path <dir>` | user framework path |
+| `--iframework <dir>` | system framework path |
+| `--sysroot <sdk>` | adds `<sdk>/System/Library/Frameworks` as a system framework path |
+
+```sh
+cccc --sysroot "$(xcrun --show-sdk-path)" -E watcher.c    # <CoreServices/CoreServices.h> resolves
+cccc -F ./vendor/Frameworks app.c                         # ./vendor/Frameworks/Foo.framework
+```
+
+Framework paths are searched after `-I` and `--isystem`. A header inside a
+framework also finds that framework's bundled sub-frameworks
+(`X.framework/Frameworks/Name.framework`), so `<CoreServices/CoreServices.h>`
+reaches `<CarbonCore/CarbonCore.h>` and friends. `#include_next` and
+`__has_include_next` continue in that same order, so an `-I` header can hand
+off to a framework header and a framework header to the same framework in a
+later directory. Under `-c=native` the flags are forwarded to the host
+compiler as `-F` and `-iframework`.[^fw]
+
+[^fw]: `-framework NAME` at link time is a separate option.
 
 ## `-c=native` and auto-captured includes
 

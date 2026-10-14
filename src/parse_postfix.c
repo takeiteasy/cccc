@@ -1119,6 +1119,11 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     node->ty             = unqualified(vm, ty->return_ty);
     node->args           = head.next;
     node->has_splice_arg = deferred_splice;
+    if (is_float16(node->ty))
+        error_float16_unsupported(vm, fn->tok);
+    for (Node *a = head.next; a; a = a->next)
+        if (a->ty && is_float16(a->ty))
+            error_float16_unsupported(vm, a->tok);
 
     // If a function returns a struct, it is caller's responsibility
     // to allocate a space for the return value.
@@ -3442,6 +3447,37 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         add_type(vm, a);
         add_type(vm, b);
         add_type(vm, c);
+        return node;
+    }
+
+    // __builtin_fabs/sqrt/floor/... (+ f/l): forward to libm like the mem*
+    // builtins above, converting each argument to the parameter type.
+    // TODO: constant arguments are not folded (#1557)
+    int libm_row, libm_variant;
+    int libm_arity =
+        tok->kind == TK_IDENT
+            ? libm_builtin_lookup(tok->loc, tok->len, &libm_row, &libm_variant)
+            : 0;
+    if (libm_arity) {
+        Obj  *fn   = vm->compiler.builtin_libm[libm_row][libm_variant];
+        Node  head = {};
+        Node *cur  = &head;
+        Type *pty  = fn->ty->params;
+        tok        = skip(vm, tok->next, "(");
+        for (int i = 0; i < libm_arity; i++, pty = pty->next) {
+            if (i)
+                tok = skip(vm, tok, ",");
+            cur = cur->next = new_cast(vm, assign(vm, &tok, tok), pty);
+        }
+        *rest = skip(vm, tok, ")");
+        Node *node =
+            new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, head.next->tok),
+                      head.next->tok);
+        node->func_ty = fn->ty;
+        node->ty      = fn->ty->return_ty;
+        node->args    = head.next;
+        for (Node *a = head.next; a; a = a->next)
+            add_type(vm, a);
         return node;
     }
 

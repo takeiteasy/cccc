@@ -56,15 +56,15 @@ int encode_utf8(char *buf, uint32_t c) {
 // encoded in one to four bytes. One byte UTF-8 code points are
 // identical to ASCII. Non-ASCII characters are encoded using more
 // than one byte.
-uint32_t decode_utf8(VirtualMachine *vm, char **new_pos, char *p) {
+static bool try_decode_utf8(char **new_pos, char *p, uint32_t *out) {
     if ((unsigned char)*p < 128) {
         *new_pos = p + 1;
-        return *p;
+        *out     = *p;
+        return true;
     }
 
-    char    *start = p;
-    int      len   = 0;
-    uint32_t c     = 0;
+    int      len = 0;
+    uint32_t c   = 0;
 
     if ((unsigned char)*p >= 0b11110000) {
         len = 4;
@@ -76,18 +76,35 @@ uint32_t decode_utf8(VirtualMachine *vm, char **new_pos, char *p) {
         len = 2;
         c   = *p & 0b11111;
     } else {
-        error_at(vm, start, "invalid UTF-8 sequence");
+        return false;
     }
 
     for (int i = 1; i < len; i++) {
-        if ((unsigned char)p[i] >> 6 != 0b10) {
-            error_at(vm, start, "invalid UTF-8 sequence");
-        }
+        if ((unsigned char)p[i] >> 6 != 0b10)
+            return false;
         c = (c << 6) | (p[i] & 0b111111);
     }
 
     *new_pos = p + len;
+    *out     = c;
+    return true;
+}
+
+uint32_t decode_utf8(VirtualMachine *vm, char **new_pos, char *p) {
+    uint32_t c;
+    if (!try_decode_utf8(new_pos, p, &c))
+        error_at(vm, p, "invalid UTF-8 sequence");
     return c;
+}
+
+// Diagnostics also render lines whose comments hold stray non-UTF-8 bytes:
+// an invalid byte counts as one column instead of aborting.
+static uint32_t decode_utf8_lenient(char **new_pos, char *p) {
+    uint32_t c;
+    if (try_decode_utf8(new_pos, p, &c))
+        return c;
+    *new_pos = p + 1;
+    return 0xFFFD;
 }
 
 static bool in_range(uint32_t *range, uint32_t c) {
@@ -207,7 +224,7 @@ int display_width(VirtualMachine *vm, char *p, int len) {
     char *start = p;
     int   w     = 0;
     while (p - start < len) {
-        uint32_t c  = decode_utf8(vm, &p, p);
+        uint32_t c  = decode_utf8_lenient(&p, p);
         w          += char_width(c);
     }
     return w;
@@ -220,7 +237,7 @@ int caret_padding(VirtualMachine *vm, char *line, int len, char *buf, int cap) {
     char *p = line;
     int   n = 0;
     while (p - line < len) {
-        uint32_t c = decode_utf8(vm, &p, p);
+        uint32_t c = decode_utf8_lenient(&p, p);
         int      w = c == '\t' ? 1 : char_width(c);
         for (int i = 0; i < w && n < cap - 1; i++)
             buf[n++] = c == '\t' ? '\t' : ' ';
