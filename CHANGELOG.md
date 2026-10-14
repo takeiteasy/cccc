@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-14
+
 - Added: `__builtin_fabs`, `sqrt`, `floor`, `ceil`, `trunc`, `round`,
   `copysign`, `fmin`, `fmax` and `fma` (and their `f`/`l` forms) without
   `<math.h>`. See `docs/STDLIB.md`.
