@@ -19,6 +19,7 @@
 
 #include "./cccc.h"
 #include "./internal.h"
+#include "./watch.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>
@@ -767,6 +768,20 @@ static void usage(const char *argv0, int exit_code) {
            "env var or /usr/local).\n");
     printf("\t   -- [args...]          Forward positional args to the build "
            "entry (BuildArgc/BuildArgv).\n");
+    printf("\nWatch Options:\n");
+    printf("\t--watch              Hot-reload the program when a source file "
+           "is saved; with --build,\n");
+    printf("\t                    rebuild instead (implied by "
+           "[[cccc::build]] in the file)\n");
+    printf(
+        "\t--watch-path=PATH    Also watch a file or directory (repeatable)\n");
+    printf("\t--watch-ignore=GLOB  Ignore matching paths (repeatable)\n");
+    printf("\t--watch-debounce=MS  Quiet time that ends a burst of saves "
+           "(default 100)\n");
+    printf("\t--watch-clear        Clear the terminal before each restart or "
+           "rebuild\n");
+    printf("\t--watch-restart      Restart the program on a change instead of "
+           "reloading it\n");
     printf("\nWarning Options:\n");
     printf("\t-Wall               Enable common warning categories\n");
     printf("\t-Wextra             Enable extra warning categories\n");
@@ -1351,6 +1366,30 @@ static uint32_t warn_ignored_vm_flags(uint32_t flags, const char *context) {
     return flags & ~relevant;
 }
 
+// Starts the watcher and seeds it with the program's own files (those the
+// preprocessor read from disk, never the embedded headers), then the
+// --watch-path/--watch-ignore entries.
+static void watch_begin(VirtualMachine *vm, const CcWatchOptions *wo,
+                        const char **paths, int paths_count,
+                        const char **ignores, int ignores_count) {
+    if (!cc_watch_init(wo)) {
+        fprintf(stderr, "error: --watch: cannot start the file watcher\n");
+        exit(1);
+    }
+    for (File **f = vm->compiler.input_files; f && *f; f++) {
+        const char *n = (*f)->name;
+        if (n && !(*f)->is_system_header && access(n, R_OK) == 0)
+            cc_watch_add(n);
+    }
+    for (int i = 0; i < paths_count; i++)
+        cc_watch_add(paths[i]);
+    for (int i = 0; i < ignores_count; i++)
+        cc_watch_ignore(ignores[i]);
+    if (!cc_watch_arm())
+        fprintf(stderr, "warning: --watch: some directories cannot be "
+                        "watched\n");
+}
+
 int main(int argc, const char *argv[]) {
     /* Initialise and install libbacktrace crash handler as early as possible
      * so that any fault during parse/codegen/VM produces a symbolic host
@@ -1487,6 +1526,14 @@ int main(int argc, const char *argv[]) {
     const char **build_options       = NULL;  // --build-option=key=value (#559)
     int          build_options_count = 0;
     int          build_install       = 0;     // --build-install (#560)
+    bool         watch                  = false; // --watch
+    bool         watch_clear            = false; // --watch-clear
+    bool         watch_restart          = false; // --watch-restart
+    int          watch_debounce         = 100;   // --watch-debounce=MS
+    const char **watch_paths            = NULL;  // --watch-path=PATH
+    int          watch_paths_count      = 0;
+    const char **watch_ignores          = NULL;  // --watch-ignore=GLOB
+    int          watch_ignores_count    = 0;
     bool         use_system_headers  = false; // --use-system-headers
     bool         no_builtin_includes = false; // --no-builtin-includes
     const char  *sysroot             = NULL;  // --sysroot <path>
@@ -1598,6 +1645,12 @@ int main(int argc, const char *argv[]) {
         {"build-cache", optional_argument, 0, 1091},
         {"build-option", required_argument, 0, 1092},
         {"build-install", no_argument, 0, 1093},
+        {"watch", no_argument, 0, 1128},
+        {"watch-path", required_argument, 0, 1129},
+        {"watch-ignore", required_argument, 0, 1130},
+        {"watch-debounce", required_argument, 0, 1131},
+        {"watch-clear", no_argument, 0, 1132},
+        {"watch-restart", no_argument, 0, 1133},
         // System-header mode
         {"use-system-headers", no_argument, 0, 1112},
         {"no-builtin-includes", no_argument, 0, 1113},
@@ -2269,6 +2322,49 @@ int main(int argc, const char *argv[]) {
                 build_install = 1;
                 build_mode    = 1;
                 break;
+            case 1128:   // --watch
+                watch = true;
+                break;
+            case 1129:   // --watch-path=PATH
+            case 1130: { // --watch-ignore=GLOB
+                bool         path_opt = opt == 1129;
+                const char **list     = path_opt ? watch_paths : watch_ignores;
+                int         *count =
+                    path_opt ? &watch_paths_count : &watch_ignores_count;
+                const char **tmp = realloc(list, (*count + 1) * sizeof(*list));
+                if (!tmp) {
+                    fprintf(stderr, "error: out of memory\n");
+                    return 1;
+                }
+                tmp[(*count)++] = optarg;
+                if (path_opt)
+                    watch_paths = tmp;
+                else
+                    watch_ignores = tmp;
+                watch = true;
+                break;
+            }
+            case 1131: { // --watch-debounce=MS
+                char *end = NULL;
+                long  ms  = strtol(optarg, &end, 10);
+                if (*optarg == 0 || *end || ms < 0 || ms > 60000) {
+                    fprintf(stderr,
+                            "error: --watch-debounce needs milliseconds "
+                            "(0-60000)\n");
+                    usage(argv[0], 1);
+                }
+                watch_debounce = (int)ms;
+                watch          = true;
+                break;
+            }
+            case 1132: // --watch-clear
+                watch_clear = true;
+                watch       = true;
+                break;
+            case 1133: // --watch-restart
+                watch_restart = true;
+                watch         = true;
+                break;
             case 1066: // --test-format=FORMAT
                 if (strcmp(optarg, "tap") == 0) {
                     test_format = TEST_FORMAT_TAP;
@@ -2435,6 +2531,40 @@ int main(int argc, const char *argv[]) {
         }
         compile_format = COMPILE_NATIVE;
         compile_only   = 1;
+    }
+
+    if (watch) {
+        // A file that carries its own [[cccc::build]] is rebuilt, not run.
+        for (int i = 0; !build_mode && i < input_files_count; i++) {
+            bool wants_test = false, wants_build = false;
+            cc_scan_source_for_mode_attrs(input_files[i], &wants_test,
+                                          &wants_build);
+            build_mode = wants_build;
+        }
+        if (repl_mode || testing_mode || test_run_mode ||
+            compile_format != COMPILE_NONE || disassemble || preprocess_only ||
+            dump_expanded_only || print_tokens || output_json ||
+            output_ffi_decls || dump_ast || vm_profile || out_file) {
+            fprintf(stderr,
+                    "error: --watch runs or builds the program; it cannot be "
+                    "combined with --repl, --testing, --test-run, -c, -d, -E, "
+                    "-m, -p, --ast, --vm-profile or -o\n");
+            usage(argv[0], 1);
+        }
+        if (input_files_count == 0) {
+            fprintf(stderr, "error: --watch needs an input file\n");
+            usage(argv[0], 1);
+        }
+        if (watch_restart && build_mode) {
+            fprintf(stderr, "error: --watch-restart applies to a run, not to "
+                            "--build\n");
+            usage(argv[0], 1);
+        }
+        for (int i = 0; i < input_files_count; i++)
+            if (!strcmp(input_files[i], "-")) {
+                fprintf(stderr, "error: --watch cannot watch standard input\n");
+                usage(argv[0], 1);
+            }
     }
 
     if (repl_mode) {
@@ -3374,9 +3504,29 @@ int main(int argc, const char *argv[]) {
             .argv0               = argv[0],
         };
 
+        CcWatchOptions watch_opts = {
+            .debounce_ms = watch_debounce,
+            .clear       = watch_clear,
+            .argv        = (char **)argv,
+        };
+        if (watch) {
+            watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
+                        watch_ignores, watch_ignores_count);
+            cc_watch_exclude(build_out_dir ? build_out_dir : "build");
+            build_opts.watch = true;
+        }
+
         int build_code = cc_run_build(&vm, merged_prog, &build_opts);
         if (build_code != 0)
             exit_code = build_code;
+        if (watch) {
+            cc_watch_arm();
+            fflush(NULL);
+            fprintf(stderr, "watch: %d files; waiting for changes\n",
+                    cc_watch_file_count());
+            cc_watch_wait();
+            cc_watch_reexec();
+        }
 
         goto BAIL;
     }
@@ -3487,11 +3637,47 @@ int main(int argc, const char *argv[]) {
     int    prog_argc = 0;
     char **prog_argv =
         build_source_argv(&prog_argc, argc, argv, optind, dashdash);
+    if (watch) {
+        CcWatchOptions watch_opts = {
+            .debounce_ms = watch_debounce,
+            .restart     = watch_restart,
+            .clear       = watch_clear,
+            .argv        = (char **)argv,
+            .on_change   = cc_watch_notify,
+        };
+        watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
+                    watch_ignores, watch_ignores_count);
+    }
     exit_code      = cc_run(&vm, prog_argc, prog_argv);
     vm_profile_ran = 1;
     free(prog_argv);
+    if (watch) {
+        fflush(NULL);
+        fprintf(stderr, "watch: exited with %d; waiting for changes\n",
+                exit_code);
+        cc_watch_wait();
+        cc_watch_reexec();
+    }
 
 BAIL:
+    // A compile error (or a failed build) under --watch waits for the fix.
+    if (watch && !cc_watch_active()) {
+        CcWatchOptions watch_opts = {
+            .debounce_ms = watch_debounce,
+            .clear       = watch_clear,
+            .argv        = (char **)argv,
+        };
+        watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
+                    watch_ignores, watch_ignores_count);
+        for (int i = 0; i < input_files_count; i++)
+            cc_watch_add(input_files[i]);
+        cc_watch_arm();
+        fflush(NULL);
+        fprintf(stderr, "watch: failed with %d; waiting for changes\n",
+                exit_code);
+        cc_watch_wait();
+        cc_watch_reexec();
+    }
     // Modes that never run the program report the comptime profile only, and
     // write its JSON (in place of the text report) to stderr so it can't mix
     // with C written to stdout.

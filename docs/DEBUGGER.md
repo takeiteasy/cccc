@@ -212,6 +212,9 @@ unchanged; edit it and restart. `fix` refuses such a call too. Like `fix`, the
 command reaches the last file's scope. Embedders call
 `cc_debug_reload(vm, path)`.
 
+`cccc --watch` runs this reload on every save, without the debugger; see
+[WATCH.md](WATCH.md).
+
 ## `print` and live-stack address validation
 
 `print`/`p` (and the recursive struct/union/array/vector formatting it uses)

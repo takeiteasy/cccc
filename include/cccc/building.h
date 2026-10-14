@@ -79,6 +79,15 @@ const char *__builtin_build_host(Builder *ctx);
  */
 int __builtin_build_verbose(Builder *ctx);
 
+/*! @brief Adds a file, or a directory (recursively), to the @c --watch set. */
+void __builtin_build_watch(Builder *ctx, const char *path);
+/*! @brief Adds an @c fnmatch glob to the @c --watch set. */
+void __builtin_build_watch_glob(Builder *ctx, const char *pattern);
+/*! @brief Drops @c --watch events for paths matching an @c fnmatch glob. */
+void __builtin_build_ignore_watch(Builder *ctx, const char *pattern);
+/*! @brief Non-zero under @c --watch. */
+int __builtin_build_watching(Builder *ctx);
+
 /*!
  * @brief Absolute path of the running @c cccc executable.
  * @details A @c CcccExecutable target uses this as its compiler automatically;
@@ -683,6 +692,33 @@ int __builtin_build_run_default(Builder *ctx);
  * @brief Non-zero when verbose output was requested.
  * @param ctx Build context. */
 #define BuildVerbose(ctx) __builtin_build_verbose(ctx)
+
+/*! @def Watch
+ * @brief Under @c --watch, also rebuild when this file (or directory) changes.
+ * The sources, @c AddInput files and headers of every target are watched
+ * automatically; use this for files the build reads in other ways.
+ * @param ctx Build context.
+ * @param path File or directory. */
+#define Watch(ctx, path) __builtin_build_watch(ctx, path)
+
+/*! @def WatchGlob
+ * @brief Under @c --watch, also rebuild when a file matching @c pat changes or
+ * appears.
+ * @param ctx Build context.
+ * @param pat @c fnmatch glob, for example every @c .png under @c assets. */
+#define WatchGlob(ctx, pat) __builtin_build_watch_glob(ctx, pat)
+
+/*! @def IgnoreWatch
+ * @brief Under @c --watch, never rebuild for paths matching @c pat.
+ * @param ctx Build context.
+ * @param pat @c fnmatch glob matched against the full path, the path from the
+ * working directory and the file name. */
+#define IgnoreWatch(ctx, pat) __builtin_build_ignore_watch(ctx, pat)
+
+/*! @def BuildWatching
+ * @brief Non-zero when the build runs under @c --watch.
+ * @param ctx Build context. */
+#define BuildWatching(ctx) __builtin_build_watching(ctx)
 
 /*! @def CcccPath
  * @brief Absolute path of the running @c cccc — for a @c RunCustom command that

@@ -594,6 +594,10 @@ dispatch:
     if (__builtin_expect(_cccc_any_pending != 0, 0)) {
         _cccc_any_pending   = 0;
         bool _still_pending = false;
+        if (__builtin_expect(_cccc_watch_pending != 0, 0)) {
+            _cccc_watch_pending = 0;
+            cc_watch_apply(vm);
+        }
         for (int _sig = 1; _sig < CCCC_NSIG; _sig++) {
             if (!_cccc_pending[_sig])
                 continue;

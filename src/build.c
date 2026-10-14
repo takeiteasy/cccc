@@ -41,6 +41,7 @@
 #endif
 
 #include "paul_shell.h"
+#include "watch.h"
 
 #if defined(__APPLE__)
 #define CCCC_BUILD_HOST "darwin"
@@ -1091,6 +1092,34 @@ static long long impl_install_artifact(long long ctx, long long t) {
     return 0;
 }
 
+// Watch / WatchGlob / IgnoreWatch / BuildWatching: only meaningful under
+// --watch, where the watcher is already running; otherwise no-ops.
+static long long impl_watch(long long ctx, long long path) {
+    (void)ctx;
+    if (cc_watch_active() && path)
+        cc_watch_add((const char *)path);
+    return 0;
+}
+
+static long long impl_watch_glob(long long ctx, long long pattern) {
+    (void)ctx;
+    if (cc_watch_active() && pattern)
+        cc_watch_add_glob((const char *)pattern);
+    return 0;
+}
+
+static long long impl_ignore_watch(long long ctx, long long pattern) {
+    (void)ctx;
+    if (cc_watch_active() && pattern)
+        cc_watch_ignore((const char *)pattern);
+    return 0;
+}
+
+static long long impl_build_watching(long long ctx) {
+    (void)ctx;
+    return cc_watch_active();
+}
+
 static long long impl_build_wants_install(long long ctx) {
     (void)ctx;
     return s_ctx ? (long long)s_ctx->build_install : 0;
@@ -1385,6 +1414,13 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       (void *)impl_build_cccc_path, 1, 0);
     cc_register_cfunc(vm, "__builtin_build_verbose", (void *)impl_build_verbose,
                       1, 0);
+    cc_register_cfunc(vm, "__builtin_build_watch", (void *)impl_watch, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_watch_glob", (void *)impl_watch_glob,
+                      2, 0);
+    cc_register_cfunc(vm, "__builtin_build_ignore_watch",
+                      (void *)impl_ignore_watch, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_watching",
+                      (void *)impl_build_watching, 1, 0);
     cc_register_cfunc(vm, "__builtin_build_run", (void *)impl_build_run, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_run_all", (void *)impl_build_run_all,
                       1, 0);
@@ -3545,7 +3581,63 @@ static void init_builder_ctx(Builder *ctx, VirtualMachine *vm,
 // Mirrors init_builder_ctx's teardown half, minus the final install-prefix
 // chdir restore which run_install() itself may have moved away from --
 // callers still free/restore ctx->original_cwd themselves right after this.
+// Header and compiler-reported inputs: every depfile the build left in out_dir.
+static void watch_depfiles(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d)
+        return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.')
+            continue;
+        char path[2048];
+        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        size_t n = strlen(e->d_name);
+        if (n > 2 && !strcmp(e->d_name + n - 2, ".d")) {
+            StringArray prereqs = {0};
+            read_dep_prereqs(path, &prereqs);
+            for (int i = 0; i < prereqs.len; i++) {
+                const char *p = prereqs.data[i];
+                if (strncmp(p, "/usr/", 5) &&
+                    strncmp(p, "/Applications/", 14) &&
+                    strncmp(p, "/Library/", 9) && strncmp(p, "/System/", 8))
+                    cc_watch_add(p);
+                free(prereqs.data[i]);
+            }
+            free(prereqs.data);
+        } else {
+            struct stat st;
+            if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+                watch_depfiles(path);
+        }
+    }
+    closedir(d);
+}
+
+// --watch: everything this build read becomes the watch set, and everything it
+// wrote is excluded so the build cannot trigger itself.
+static void collect_watch_set(Builder *ctx) {
+    cc_watch_exclude(ctx->out_dir);
+    for (int i = 0; i < ctx->targets_count; i++) {
+        BuildTarget *t = ctx->targets[i];
+        for (int j = 0; j < t->outputs.len; j++)
+            cc_watch_exclude(t->outputs.data[j]);
+    }
+    for (int i = 0; i < ctx->targets_count; i++) {
+        BuildTarget *t = ctx->targets[i];
+        for (int j = 0; j < t->sources.len; j++)
+            cc_watch_add(t->sources.data[j]);
+        for (int j = 0; j < t->inputs.len; j++)
+            cc_watch_add(t->inputs.data[j]);
+        for (int j = 0; j < t->deferred_globs.len; j++)
+            cc_watch_add_glob(t->deferred_globs.data[j]);
+    }
+    watch_depfiles(ctx->out_dir);
+}
+
 static void teardown_builder_ctx(Builder *ctx) {
+    if (cc_watch_active())
+        collect_watch_set(ctx);
     for (int i = 0; i < ctx->targets_count; i++)
         free_target(ctx->targets[i]);
     free(ctx->targets);

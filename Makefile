@@ -41,7 +41,7 @@ LDFLAGS := -pthread
 ifeq ($(UNAME_S),Darwin)
 	# iconv() symbols resolve at link time via libiconv on macOS; glibc ships
 	# iconv in libc itself.
-	LDFLAGS += -liconv
+	LDFLAGS += -liconv -framework CoreServices
 else
 	CFLAGS += -fgnu89-inline -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
 	LDFLAGS += -lm

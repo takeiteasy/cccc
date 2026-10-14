@@ -1146,6 +1146,12 @@ if (triple && strstr(triple, "aarch64"))
 > Cross-compilation tests use `--build-dry-run` to verify the correct flags
 > appear in output without requiring a cross-toolchain on the host.
 
+## Watching
+
+`cccc --watch build.c` runs the build again whenever a source, header or other
+input changes. The script can add to the watch set with `Watch`, `WatchGlob` and
+`IgnoreWatch`, and ask `BuildWatching`. See [WATCH.md](WATCH.md).
+
 ## Bootstrapping
 
 `make` builds `./cccc`; `--build` then drives everything else for CCCC itself.
@@ -1191,6 +1197,7 @@ are not redistributed between a parallel target build and its children (see
 ## See also
 
 - [BUILD.md](BUILD.md) — building `cccc` itself (`make` and the `build.c` targets).
+- [WATCH.md](WATCH.md) — `--watch`: rebuild on save.
 - [TEST_MODE.md](TEST_MODE.md) — `--testing` mode, the working analog this mode mirrors.
 - [MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
 - [COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
