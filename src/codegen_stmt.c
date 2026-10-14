@@ -161,6 +161,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_EXPR_STMT:
             reset_temp_regs();
             gen_expr(vm, node->lhs, REG_ZERO);
+            if (node->cleanup_open)
+                cleanup_range_open(vm, node->cleanup_open);
             return;
 
         case ND_RETURN:
@@ -335,6 +337,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             if (vm->flags & CCCC_STACK_INSTR)
                 emit_scopeout(vm, vm->current_function_scope_id);
             emit(vm, LEV3);
+            cleanup_ranges_reopen(vm);
             return;
 
         case ND_IF: {
@@ -599,6 +602,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             Pc patch            = emit_word_ptr(vm);
             vm->text_seg[patch] = 0;
             add_label_patch(node->unique_label, patch, false);
+            cleanup_ranges_reopen(vm);
             return;
         }
 

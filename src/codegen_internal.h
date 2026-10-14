@@ -243,6 +243,8 @@ void emit_rrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2);
 void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2, int scale);
 void emit_rrs(VirtualMachine *vm, int op, int rd, int rs1, int scale);
 void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope);
+void cleanup_range_open(VirtualMachine *vm, Obj *var);
+void cleanup_ranges_reopen(VirtualMachine *vm);
 void emit_scopein(VirtualMachine *vm, int scope_id);
 void emit_scopeout(VirtualMachine *vm, int scope_id);
 void emit_source_location(VirtualMachine *vm, Node *node);

@@ -186,8 +186,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             if (attr->is_block_var)
                 var->is_block_var = true;
             claim_cleanup(vm, var, attr);
+            Node *marker = NULL;
             if (var->cleanup_fn)
-                cur = cur->next = new_cleanup_decl(vm, var, name_tok);
+                marker = cur = cur->next = new_cleanup_decl(vm, var, name_tok);
 
             vm->compiler.initializing_var = var;
             Node *lhs                     = new_var_node(vm, var, name_tok);
@@ -195,6 +196,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             Node *asgn = new_binary(vm, ND_ASSIGN, lhs, init_expr, name_tok);
             add_type(vm, asgn);
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, asgn, name_tok);
+            if (var->cleanup_fn)
+                cleanup_open_after(var, marker, cur);
             continue;
         }
 
@@ -241,6 +244,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 tok_local);
 
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok_local);
+            Node *alloca_stmt = cur;
+            if (var->cleanup_fn)
+                cleanup_open_after(var, NULL, cur);
 
             // Handle VLA initialization if present
             if (equal(tok, "=")) {
@@ -279,6 +285,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                         new_binary(vm, ND_COMMA, zero, init_node, tok_local);
                     cur = cur->next =
                         new_unary(vm, ND_EXPR_STMT, comma, tok_local);
+                    if (var->cleanup_fn)
+                        cleanup_open_after(var, alloca_stmt, cur);
                 }
             }
 
@@ -299,8 +307,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         if (attr && attr->is_block_var)
             var->is_block_var = true;
         claim_cleanup(vm, var, attr);
+        Node *marker = NULL;
         if (var->cleanup_fn)
-            cur = cur->next = new_cleanup_decl(vm, var, ty->name);
+            marker = cur = cur->next = new_cleanup_decl(vm, var, ty->name);
         // Resolve checked-pointer bounds (#770/#483) now that this local is
         // itself in scope, so a bound may reference any prior sibling local.
         if (var->checked_kind != CHECKED_NONE)
@@ -348,6 +357,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             if (type_contains_vla(var->ty))
                 var->deferred_vla_ptr_init = expr;
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
+            if (var->cleanup_fn)
+                cleanup_open_after(var, marker, cur);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
 

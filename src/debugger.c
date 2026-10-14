@@ -506,11 +506,12 @@ static void print_help(bool inspect_only) {
         printf("  frame/fr [n]       - Select frame n (default: show "
                "selected)\n");
         printf("  up / down          - Select the caller / callee frame\n");
-        printf("  return [expr]      - Pop the selected frame as if it "
+        printf("  return [-n] [expr] - Pop the selected frame as if it "
                "returned expr\n");
-        printf("  restart            - Re-enter the selected frame's function "
+        printf("  restart [-n]       - Re-enter the selected frame's function "
                "with its\n");
         printf("                       original arguments (needs -g)\n");
+        printf("                       (-n: skip [[cleanup]] handlers)\n");
         printf("  fix <function>     - Replace a function with the definition "
                "typed next\n");
         printf("  reload <file>      - Re-read a source file, redefining the "
@@ -604,6 +605,18 @@ static const char *debugger_command_rest(const char *line) {
     while (isspace((unsigned char)*line))
         line++;
     return line;
+}
+
+// Consumes a leading `-n` (skip [[cleanup]] handlers).
+static bool debugger_take_skip_flag(const char **rest) {
+    const char *p = *rest;
+    if (p[0] != '-' || p[1] != 'n' || (p[2] && !isspace((unsigned char)p[2])))
+        return false;
+    p += 2;
+    while (isspace((unsigned char)*p))
+        p++;
+    *rest = p;
+    return true;
 }
 
 // Reopen the REPL at the pc the scheduled frame operation lands on.
@@ -796,13 +809,18 @@ static void debug_repl(VirtualMachine *vm, bool inspect_only) {
         } else if (STREQ_LIT(cmd, "down")) {
             debugger_select_and_show(vm, vm->dbg.selected_frame - 1);
         } else if (STREQ_LIT(cmd, "return")) {
-            if (cc_debug_return(vm, vm->dbg.selected_frame,
-                                debugger_command_rest(line)) == 0) {
+            const char *rest         = debugger_command_rest(line);
+            bool        run_cleanups = !debugger_take_skip_flag(&rest);
+            if (cc_debug_return(vm, vm->dbg.selected_frame, rest,
+                                run_cleanups) == 0) {
                 debugger_stop_after_frame_op(vm);
                 break;
             }
         } else if (STREQ_LIT(cmd, "restart")) {
-            if (cc_debug_restart(vm, vm->dbg.selected_frame) == 0) {
+            const char *rest         = debugger_command_rest(line);
+            bool        run_cleanups = !debugger_take_skip_flag(&rest);
+            if (cc_debug_restart(vm, vm->dbg.selected_frame, run_cleanups) ==
+                0) {
                 debugger_stop_after_frame_op(vm);
                 break;
             }
@@ -1667,7 +1685,7 @@ static void debugger_drop_condition(VirtualMachine *vm, Obj *wrapper) {
 // own frame on entry, same as any real call) and only pushes a fresh return
 // sentinel below the current vm->sp, exactly like a normal nested call.
 static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
-                                double *fval) {
+                                double *fval, const long long *a0) {
     long long saved_regs[NUM_REGS];
     FReg      saved_fregs[NUM_REGS];
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
@@ -1689,6 +1707,8 @@ static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
     vm->dbg.step_over                       = 0;
     vm->dbg.step_out                        = 0;
     vm->dbg.debugger_attached               = 0;
+    if (a0)
+        vm->regs[REG_A0] = *a0;
     if (vm->flags & CCCC_CFI)
         *--vm->shadow_sp = 0;
     *--vm->sp      = 0; // sentinel return address
@@ -1724,7 +1744,7 @@ static bool debugger_exec_condition_wrapper(VirtualMachine *vm, Obj *fn,
                                             Type *cond_ty) {
     long long ival;
     double    fval;
-    if (debugger_run_wrapper(vm, fn, &ival, &fval) < 0) {
+    if (debugger_run_wrapper(vm, fn, &ival, &fval, NULL) < 0) {
         printf("Error: Condition evaluation failed\n");
         return false;
     }
@@ -1785,23 +1805,118 @@ static int debugger_frame_by_index(VirtualMachine *vm, int frame, DbgFrame *out,
     return 0;
 }
 
-// Popped frames skip their [[cleanup]] handlers; say which functions lose any.
-// TODO: run them; needs a pc -> active-cleanups table
-// (https://todo.sr.ht/~takeiteasy/cccc/1505)
-static void debugger_warn_skipped_cleanups(VirtualMachine *vm, int last_frame) {
-    DbgFrame frames[DBG_MAX_FRAMES];
-    int      n = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+// A [[cleanup]] handler a popped frame still owes.
+typedef struct {
+    Obj       *var;
+    Obj       *fn; // function whose frame owes it
+    long long *bp;
+} DbgOwed;
+
+extern int ffi_index_for_callee(VirtualMachine *vm, Obj *callee);
+
+// Handlers owed by frames 0..last_frame, innermost frame first and latest
+// declared first within a frame. A frame is owed those whose range covers the
+// pc it resumes at: its own pc, or the instruction after the call it is in.
+static DbgOwed *debugger_collect_owed(VirtualMachine *vm,
+                                      const DbgFrame *frames, int n,
+                                      int last_frame, int *count) {
+    DbgOwed *owed = NULL;
+    int      len = 0, cap = 0;
     for (int i = 0; i <= last_frame && i < n; i++) {
         if (!frames[i].fn || !frames[i].bp)
             continue;
-        for (Obj *l = frames[i].fn->locals; l; l = l->next) {
-            if (l->cleanup_fn) {
-                fprintf(stderr, "warning: skipped [[cleanup]] handlers in %s\n",
-                        frames[i].fn->name);
-                break;
+        long long pc    = i == 0 ? frames[i].pc : (long long)frames[i].pc + 1;
+        int       first = len;
+        for (CleanupRange *r = frames[i].fn->cleanup_ranges; r; r = r->next) {
+            if (pc < r->start || (r->end >= 0 && pc >= r->end))
+                continue;
+            if (len == cap) {
+                cap  = cap ? cap * 2 : 8;
+                owed = realloc(owed, (size_t)cap * sizeof(*owed));
             }
+            DbgOwed o = {r->var, frames[i].fn, frames[i].bp};
+            int     j = len++;
+            while (j > first &&
+                   owed[j - 1].var->cleanup_seq < o.var->cleanup_seq) {
+                owed[j] = owed[j - 1];
+                j--;
+            }
+            owed[j] = o;
         }
     }
+    *count = len;
+    return owed;
+}
+
+static Obj *debugger_handler_definition(VirtualMachine *vm, Obj *handler) {
+    if (handler->body)
+        return fn_canonical(handler);
+    for (Obj *g = vm->compiler.globals; g; g = g->next)
+        if (g->is_function && g->body && !strcmp(g->name, handler->name))
+            return fn_canonical(g);
+    return NULL;
+}
+
+// Runs one handler on its variable, as the frame's own exit code would.
+static int debugger_run_owed(VirtualMachine *vm, const DbgOwed *o) {
+    Obj  *var       = o->var;
+    void *addr      = o->bp + var->offset;
+    int   align_log = local_align_log(var);
+    if (align_log)
+        addr = (void *)cc_align_up_ll((long long)addr, 8LL << align_log);
+    if (var->ty->kind == TY_VLA || var->is_block_var)
+        addr = *(void **)addr;
+    long long arg = (long long)addr;
+
+    int       ffi = ffi_index_for_callee(vm, var->cleanup_fn);
+    if (ffi >= 0) {
+        long long ignored;
+        return cccc_call_guest_callback(vm, CCCC_FFI_TOKEN_BASE - ffi, &arg, 1,
+                                        &ignored);
+    }
+    Obj *def = debugger_handler_definition(vm, var->cleanup_fn);
+    if (!def)
+        return -1;
+    // The handler gets a raw address into a frame the program still owns, which
+    // carries no live epoch tag.
+    long long ival;
+    double    fval;
+    uint32_t  saved_flags  = vm->flags;
+    vm->flags             &= ~CCCC_DANGLING_DETECT;
+    int rc                 = debugger_run_wrapper(vm, def, &ival, &fval, &arg);
+    vm->flags              = saved_flags;
+    return rc;
+}
+
+// Frames 0..last_frame are about to be popped. Runs the handlers they owe, or
+// with `run` false says which functions skip any. A failing handler stops the
+// pop.
+static int debugger_finish_frames(VirtualMachine *vm, int last_frame,
+                                  bool run) {
+    DbgFrame frames[DBG_MAX_FRAMES];
+    int      n     = debugger_collect_frames(vm, frames, DBG_MAX_FRAMES);
+    int      count = 0;
+    DbgOwed *owed  = debugger_collect_owed(vm, frames, n, last_frame, &count);
+    int      rc    = 0;
+    for (int i = 0; i < count; i++) {
+        if (!run) {
+            if (i == 0 || owed[i].bp != owed[i - 1].bp)
+                fprintf(stderr, "warning: skipped [[cleanup]] handlers in %s\n",
+                        owed[i].fn->name);
+            continue;
+        }
+        if (debugger_run_owed(vm, &owed[i]) < 0) {
+            fprintf(stderr,
+                    "error: [[cleanup]] handler %s for '%s' in %s failed; "
+                    "frame not popped\n",
+                    owed[i].var->cleanup_fn->name, owed[i].var->name,
+                    owed[i].fn->name);
+            rc = -1;
+            break;
+        }
+    }
+    free(owed);
+    return rc;
 }
 
 int cc_debug_frame_count(VirtualMachine *vm) {
@@ -1817,7 +1932,8 @@ int cc_debug_select_frame(VirtualMachine *vm, int frame) {
     return 0;
 }
 
-int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
+int cc_debug_return(VirtualMachine *vm, int frame, const char *expr,
+                    bool run_cleanups) {
     if (!debugger_frame_op_allowed(vm, "return"))
         return -1;
     DbgFrame f;
@@ -1850,7 +1966,7 @@ int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
         Obj *frame_var = vm->dbg.dbg_frame_var;
         *(void **)(vm->data_seg + frame_var->offset) =
             (void *)(f.bp ? f.bp : vm->bp);
-        int run_rc = debugger_run_wrapper(vm, wrapper, &ival, &fval);
+        int run_rc = debugger_run_wrapper(vm, wrapper, &ival, &fval, NULL);
         cc_code_discard(vm, &mark);
         if (run_rc < 0) {
             fprintf(stderr, "error: evaluating the return value failed\n");
@@ -1859,7 +1975,8 @@ int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
         has_value = true;
     }
 
-    debugger_warn_skipped_cleanups(vm, frame);
+    if (debugger_finish_frames(vm, frame, run_cleanups))
+        return -1;
     vm->dbg.pending_op          = CC_FRAME_OP_RETURN;
     vm->dbg.pending_bp          = f.bp;
     vm->dbg.pending_shadow_pops = pops;
@@ -1869,7 +1986,7 @@ int cc_debug_return(VirtualMachine *vm, int frame, const char *expr) {
     return 0;
 }
 
-int cc_debug_restart(VirtualMachine *vm, int frame) {
+int cc_debug_restart(VirtualMachine *vm, int frame, bool run_cleanups) {
     if (!debugger_frame_op_allowed(vm, "restart"))
         return -1;
     DbgFrame f;
@@ -1887,7 +2004,8 @@ int cc_debug_restart(VirtualMachine *vm, int frame) {
         return -1;
     }
 
-    debugger_warn_skipped_cleanups(vm, frame);
+    if (debugger_finish_frames(vm, frame, run_cleanups))
+        return -1;
     vm->dbg.pending_op    = CC_FRAME_OP_RESTART;
     vm->dbg.pending_bp    = f.bp;
     vm->dbg.pending_entry = (Pc)fn_canonical(f.fn)->code_addr;

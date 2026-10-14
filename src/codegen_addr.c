@@ -33,15 +33,61 @@
 // codegen_stmt.c and codegen_func.c); defined here.
 CleanupScopeEntry *g_cleanup_scope = NULL;
 
-// Emit address-of a local variable into dest_reg.
+// Emit address-of a local variable into dest_reg. Untagged: the frame may not
+// push an epoch, and a recorded tag would then name a stale one.
 static void emit_local_addr(VirtualMachine *vm, Obj *var, int dest_reg) {
-    emit_lea3_var_plain(vm, dest_reg, var);
+    emit_lea3_var_internal(vm, dest_reg, var);
+}
+
+// Records where each cleanup handler is owed (see CleanupRange). Positions are
+// text offsets, so they hold for the life of the function's code.
+static bool cleanup_var_in_scope(Obj *var) {
+    for (CleanupScopeEntry *s = g_cleanup_scope; s; s = s->outer)
+        for (CleanupVar *cv = s->vars; cv; cv = cv->next)
+            if (cv->var == var)
+                return true;
+    return false;
+}
+
+void cleanup_range_open(VirtualMachine *vm, Obj *var) {
+    if (!cleanup_var_in_scope(var))
+        return; // no exit code runs its handler
+    CleanupRange *r    = arena_alloc(&vm->compiler.parser_arena, sizeof(*r));
+    r->var             = var;
+    r->start           = vm->text_ptr + 1;
+    r->end             = -1;
+    Obj *fn            = vm->compiler.current_fn;
+    r->next            = fn->cleanup_ranges;
+    fn->cleanup_ranges = r;
+    var->cleanup_cur   = r;
+}
+
+static void cleanup_range_close(VirtualMachine *vm, Obj *var, bool reopen) {
+    CleanupRange *r = var->cleanup_cur;
+    if (!r)
+        return;
+    r->end           = vm->text_ptr + 1;
+    r->reopen        = reopen;
+    var->cleanup_cur = NULL;
+}
+
+// Code after an early exit sequence is reachable only through labels, where
+// the variables it closed are live again.
+void cleanup_ranges_reopen(VirtualMachine *vm) {
+    Obj *fn = vm->compiler.current_fn;
+    for (CleanupRange *r = fn->cleanup_ranges; r; r = r->next) {
+        if (!r->reopen)
+            continue;
+        r->reopen = false;
+        cleanup_range_open(vm, r->var);
+    }
 }
 
 // Call cv->cleanup_fn(&cv->var). The cleanup fn returns void so REG_A0 is
 // clobbered. Uses the standard CALL+patch mechanism (same as ND_FUNCALL for
-// CCCC functions).
-static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
+// CCCC functions). An early exit (`early`) is followed by more code in which
+// the variable stays live.
+static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv, bool early) {
     int r_addr = alloc_temp_reg();
     emit_local_addr(vm, cv->var, r_addr);
     // A VLA's slot holds the alloca pointer and a __block var's the heap box
@@ -58,13 +104,14 @@ static void emit_one_cleanup(VirtualMachine *vm, CleanupVar *cv) {
     vm->compiler.call_patches[vm->compiler.num_call_patches].function =
         cv->cleanup_fn;
     vm->compiler.num_call_patches++;
+    cleanup_range_close(vm, cv->var, early);
     reset_temp_regs();
 }
 
 // Emit cleanup calls for one scope's vars (iterate in stored order = LIFO).
 void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope) {
     for (CleanupVar *cv = scope->vars; cv; cv = cv->next)
-        emit_one_cleanup(vm, cv);
+        emit_one_cleanup(vm, cv, false);
 }
 
 // Emit cleanup calls for all active scopes with depth > target_depth (innermost
@@ -75,7 +122,7 @@ void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
          s                    = s->outer)
         for (CleanupVar *cv = s->vars; cv; cv = cv->next)
             if (!seq_limit || cv->var->cleanup_seq < seq_limit)
-                emit_one_cleanup(vm, cv);
+                emit_one_cleanup(vm, cv, true);
 }
 
 // ========== Forward Declarations ==========

@@ -31,6 +31,9 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Reset cleanup scope stack for this function
     g_cleanup_scope = NULL;
+    fn->cleanup_ranges = NULL;
+    for (Obj *v = fn->locals; v; v = v->next)
+        v->cleanup_cur = NULL;
 
     vm->compiler.ent3_extra_stack = 0;
 

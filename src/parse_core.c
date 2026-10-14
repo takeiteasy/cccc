@@ -508,8 +508,17 @@ Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
 Node *new_cleanup_decl(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node =
         new_unary(vm, ND_EXPR_STMT, new_node(vm, ND_NULL_EXPR, tok), tok);
-    node->var = var;
+    node->var          = var;
+    node->cleanup_open = var;
     return node;
+}
+
+// Moves the open point from the marker (NULL for a VLA, which has none) to the
+// declaration's last node, so a pause inside the initializer owes no handler.
+void cleanup_open_after(Obj *var, Node *marker, Node *last) {
+    if (marker)
+        marker->cleanup_open = NULL;
+    last->cleanup_open = var;
 }
 
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok) {

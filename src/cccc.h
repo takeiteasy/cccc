@@ -1923,6 +1923,17 @@ typedef struct CleanupVar {
     struct CleanupVar *next;
 } CleanupVar;
 
+// Text range [start, end) in which a cleanup local is initialized and its
+// handler has not yet run, so the debugger knows which handlers a popped
+// frame still owes. Several per variable: each early exit closes and reopens.
+typedef struct CleanupRange {
+    struct CleanupRange *next;
+    struct Obj          *var;
+    long long            start;
+    long long            end;    // -1 while open during codegen
+    bool                 reopen; // closed by an early exit, reopens after it
+} CleanupRange;
+
 // Parse-time ancestry node for cleanup scopes. Unlike the flat
 // cleanup_scope_depth counter, the parent chain gives each cleanup scope an
 // identity so resolve_goto_labels can compute the lowest common ancestor of a
@@ -2098,6 +2109,11 @@ struct Node {
     // ND_GOTO/ND_RETURN: only cleanup vars with cleanup_seq below this were
     // declared before the jump; 0 means no limit.
     int cleanup_seq_limit;
+
+    // The last node of a cleanup var's declaration (its initializer, or the
+    // marker when there is none): codegen opens the var's CleanupRange once it
+    // has emitted this node.
+    struct Obj *cleanup_open;
 
     // ND_BLOCK: cleanup vars declared in this scope (declaration order);
     // codegen emits LIFO
@@ -2455,6 +2471,8 @@ struct Obj {
     struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit
                                   // (__attribute__((cleanup)))
     int cleanup_seq;              // declaration order among cleanup vars
+    CleanupRange *cleanup_ranges; // function: where each handler is owed
+    CleanupRange *cleanup_cur;    // cleanup local: its open range in codegen
     int cleanup_fp_retval_offset; // stack offset for float retval save slot
                                   // (set by assign_stack_offsets)
 
@@ -5851,20 +5869,25 @@ int cc_debug_select_frame(VirtualMachine *vm, int frame);
  @return 0 on success (applied when execution resumes), nonzero with a
            diagnostic on stderr if rejected (after a host fault, outside the
            frame range, or `expr` fails to compile).
- @details Skips `[[cleanup]]` handlers of the popped frames and does not undo
-             their side effects.
+ @param run_cleanups Run the `[[cleanup]]` handlers the popped frames still
+               owe, innermost frame first. A handler that fails rejects the
+               call. False skips them with a warning.
+ @details Does not undo other side effects of the popped frames.
  */
-int cc_debug_return(VirtualMachine *vm, int frame, const char *expr);
+int cc_debug_return(VirtualMachine *vm, int frame, const char *expr,
+                    bool run_cleanups);
 
 /*!
  @brief Schedules re-entering `frame`'s function from the start with its
            original arguments.
+ @param run_cleanups As for cc_debug_return, for `frame` and the frames
+               inside it.
  @return 0 on success (applied when execution resumes), nonzero with a
            diagnostic on stderr if rejected. Needs an explicit -g: frames are
            snapshotted at entry. Re-enters the newest body of a redefined
            function (cc_redefine_function).
  */
-int cc_debug_restart(VirtualMachine *vm, int frame);
+int cc_debug_restart(VirtualMachine *vm, int frame, bool run_cleanups);
 
 /*!
  @brief Replaces the function `name` with the definition in `src` while the

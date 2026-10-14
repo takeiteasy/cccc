@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: debugger `return` and `restart` run the `[[cleanup]]` handlers the
+  popped frames still owe; `return -n` and `restart -n` skip them.
+  `cc_debug_return` and `cc_debug_restart` take a `run_cleanups` argument.
+- Fixed: the address a `[[cleanup]]` handler receives is no longer tagged for
+  dangling-pointer detection (`-3`), which could report a stale frame epoch.
 - Added: the debugger's `reload <file>` and the REPL's `:reload <file>` re-read
   an edited source file and redefine the functions whose bodies changed;
   globals and statics keep their values. Embedders use `cc_debug_reload` and

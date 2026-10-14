@@ -47,8 +47,8 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
 | `backtrace` | `bt` | List the call frames, innermost first. |
 | `frame [n]` | `fr [n]` | Select frame `n` (default: show the selected one). |
 | `up` / `down` | | Select the caller / callee frame. |
-| `return [expr]` | | Pop the selected frame as if it returned `expr`. |
-| `restart` | | Re-enter the selected frame's function from the start. |
+| `return [-n] [expr]` | | Pop the selected frame as if it returned `expr`, running its `[[cleanup]]` handlers (`-n` skips them). |
+| `restart [-n]` | | Re-enter the selected frame's function from the start, running the abandoned frame's `[[cleanup]]` handlers (`-n` skips them). |
 | `fix <function>` | | Replace a function with the definition typed next, or edited in `$EDITOR`. |
 | `reload <file>` | | Re-read a source file, redefining the functions whose bodies changed. |
 | `registers` | `r` | Print all register values. |
@@ -83,6 +83,19 @@ at the resulting pc.
 | `return 7` | Pops the frame (and every frame inside it); its caller sees `7`, converted to the function's return type. `expr` is evaluated in the frame's scope. |
 | `return` | Pops the frame and leaves the return registers as they are. |
 | `restart` | Pops the frames inside the selected one and re-enters its function with the arguments it was called with. Needs an explicit `-g`.[^snapshot] |
+| `return -n`, `restart -n` | As above, without running `[[cleanup]]` handlers. |
+
+Popping frames runs the `[[cleanup]]` handlers they still owe, innermost frame
+first and latest declared first within a frame, as the frames' own exits
+would.[^cleanup] A variable owes its handler from the end of its initializer
+until its scope exits. `restart` runs the restarted frame's handlers too, since
+it abandons that activation. If a handler fails, the command is rejected and
+the program stays paused where it was.
+
+```
+(cccc-dbg) return -n 0    # pop leaf() without releasing what it holds
+warning: skipped [[cleanup]] handlers in leaf
+```
 
 A function stopped at a `break <function>` has no frame yet: `restart` jumps to
 its entry again (the newest body, if it was redefined), and `return` returns
@@ -98,8 +111,7 @@ Limits:
 
 - Side effects the popped frames already caused (output, heap and global
   writes) stay.
-- `[[cleanup]]` handlers of popped frames do not run; a warning names the
-  functions that skip any.[^cleanup]
+- Handlers run without dangling-pointer checks (`-3`).
 - A frame that replaced its caller through a tail call appears once.
 - Frames stop at the root of the current run: `main`, a host callback or a
   signal handler.
@@ -110,8 +122,10 @@ Limits:
     (about 200 bytes), so `restart` never depends on parameters the body has
     since overwritten. Sessions that only enabled the debugger for crash
     trapping take no snapshots.
-[^cleanup]: Running them needs a table of the cleanups active at each pc:
-    https://todo.sr.ht/~takeiteasy/cccc/1505
+[^cleanup]: The compiler records, per function, the code ranges in which each
+    cleanup variable is live, and the debugger looks up the pc each popped
+    frame resumes at. A frame paused inside one of its own handlers does not
+    run that handler, or any that ran before it, again.
 
 ## Edit and continue
 

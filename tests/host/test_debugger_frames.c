@@ -24,6 +24,7 @@
 
 #include "internal.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
@@ -62,6 +63,8 @@ static struct {
     int         fire;     // invocations left that act
     int         rc;
     int         frames_seen;
+    bool        skip_cleanups;
+    int        *disarm; // zeroed after the op is scheduled
 } plan;
 
 static void arm(int frame, const char *ret_expr) {
@@ -69,6 +72,8 @@ static void arm(int frame, const char *ret_expr) {
     plan.ret_expr = ret_expr;
     plan.fire     = 1;
     plan.rc       = -1;
+    plan.skip_cleanups = false;
+    plan.disarm        = NULL;
 }
 
 static long long hook(void) {
@@ -76,8 +81,12 @@ static long long hook(void) {
     if (plan.fire <= 0)
         return 0;
     plan.fire--;
-    plan.rc = plan.ret_expr ? cc_debug_return(&vm, plan.frame, plan.ret_expr)
-                            : cc_debug_restart(&vm, plan.frame);
+    bool run = !plan.skip_cleanups;
+    plan.rc  = plan.ret_expr
+                   ? cc_debug_return(&vm, plan.frame, plan.ret_expr, run)
+                   : cc_debug_restart(&vm, plan.frame, run);
+    if (plan.disarm)
+        *plan.disarm = 0;
     return 0;
 }
 
@@ -256,8 +265,8 @@ static void test_rejections(void) {
     // Both calls are rejected the way the REPL rejects them after a host
     // fault.
     vm.dbg.host_fault_signal = SIGSEGV;
-    int rc_restart           = cc_debug_restart(&vm, 0);
-    int rc_return            = cc_debug_return(&vm, 0, "1");
+    int rc_restart           = cc_debug_restart(&vm, 0, true);
+    int rc_return            = cc_debug_return(&vm, 0, "1", true);
     vm.dbg.host_fault_signal = 0;
     CHECK(rc_restart != 0 && rc_return != 0,
           "frame ops rejected after a host fault");
@@ -300,7 +309,7 @@ static long long fix_hook(void) {
         fix_rc =
             cc_debug_fix(&vm, "fixme", "int fixme(int x){ return x * 3; }");
         if (fix_rc == 0)
-            cc_debug_restart(&vm, 0);
+            cc_debug_restart(&vm, 0, true);
     }
     return 0;
 }
@@ -360,6 +369,169 @@ static void test_fix(void) {
     CHECK(cc_debug_fix(&vm, "bpf", "int bpf(int x){ return x +; }") != 0,
           "syntax error rejected");
     CHECK(eval("bpf(8)") == 8, "function intact after rejected fixes");
+}
+
+static long long cfix_hook(void) {
+    if (cc_debug_fix(&vm, "fxc", "int fxc(void){ return 9; }") == 0)
+        cc_debug_return(&vm, 0, "0", true);
+    return 0;
+}
+
+static int host_log;
+
+static void host_rec(int *p) {
+    host_log += *p;
+}
+
+// Guest [[cleanup]] handlers log their variable into lg[]; hook() pops a frame
+// while the variables are live.
+static void test_cleanup(void) {
+    decl("int lg[16]; int ln = 0; int armed = 0;");
+    decl("void rec(int *p){ lg[ln++] = *p; }");
+    decl("void rech(int *p){ lg[ln++] = *p; hook(); }");
+    decl("void bad(int *p){ if (armed) lg[0] = 1 / (armed - 1); }");
+    long long armed = eval("(long long)&armed");
+    long long ln    = eval("(long long)&ln");
+    int      *lgp   = (int *)eval("(long long)lg");
+#define RESET() (*(int *)ln = 0)
+#define LOG(i)  lgp[i]
+
+    decl("int vlog = 0; void recv(void *p){ vlog++; }");
+    decl("int vla(int n){ __attribute__((cleanup(recv))) int a[n]; hook();"
+         " return 0; }");
+    long long vlog = eval("(long long)&vlog");
+    arm(0, "0");
+    eval("vla(3)");
+    CHECK(*(int *)vlog == 1, "VLA handler ran: %d", *(int *)vlog);
+
+    // Frame 0, two nested scopes: innermost declared first out.
+    decl("int nest(void){ __attribute__((cleanup(rec))) int a = 1;"
+         " { __attribute__((cleanup(rec))) int b = 2; hook(); } return 7; }");
+    plan.fire = 0;
+    RESET();
+    CHECK(eval("nest()") == 7, "no op");
+    CHECK(*(int *)ln == 2 && LOG(0) == 2 && LOG(1) == 1,
+          "natural exit order: %d %d %d", *(int *)ln, LOG(0), LOG(1));
+    RESET();
+    arm(0, "9");
+    CHECK(eval("nest()") == 9, "return pops the frame");
+    CHECK(plan.rc == 0, "return scheduled");
+    CHECK(*(int *)ln == 2 && LOG(0) == 2 && LOG(1) == 1,
+          "return runs both handlers, innermost first: %d %d %d", *(int *)ln,
+          LOG(0), LOG(1));
+
+    // Several frames: the innermost frame's handlers run first.
+    decl("int cin(void){ __attribute__((cleanup(rec))) int c = 3; hook();"
+         " return 1; }");
+    decl("int cout(void){ __attribute__((cleanup(rec))) int d = 4;"
+         " return cin() + 100; }");
+    RESET();
+    arm(1, "5");
+    CHECK(eval("cout()") == 5, "return from the outer frame");
+    CHECK(*(int *)ln == 2 && LOG(0) == 3 && LOG(1) == 4,
+          "inner frame first: %d %d %d", *(int *)ln, LOG(0), LOG(1));
+
+    // Variables not yet declared, or already out of scope, owe nothing.
+    decl("int late(void){ __attribute__((cleanup(rec))) int a = 1; hook();"
+         " __attribute__((cleanup(rec))) int b = 2; return b; }");
+    RESET();
+    arm(0, "0");
+    eval("late()");
+    CHECK(*(int *)ln == 1 && LOG(0) == 1, "only the declared variable: %d",
+          *(int *)ln);
+    decl("int gone(void){ { __attribute__((cleanup(rec))) int a = 1; }"
+         " hook(); return 0; }");
+    RESET();
+    arm(0, "0");
+    eval("gone()");
+    CHECK(*(int *)ln == 1, "a closed scope's handler ran once: %d", *(int *)ln);
+
+    // A pause inside a variable's initializer owes nothing for that variable.
+    decl("int mkv(void){ hook(); return 5; }");
+    decl("int ini(void){ __attribute__((cleanup(rec))) int a = mkv();"
+         " return a; }");
+    RESET();
+    arm(1, "0");
+    eval("ini()");
+    CHECK(*(int *)ln == 0, "initializer in progress: %d", *(int *)ln);
+    // A pause inside a handler: the ones already started or run are done.
+    decl("int midh(void){ __attribute__((cleanup(rec))) int a = 1;"
+         " __attribute__((cleanup(rech))) int b = 2; return 0; }");
+    RESET();
+    arm(1, "0");
+    eval("midh()");
+    CHECK(*(int *)ln == 2 && LOG(0) == 2 && LOG(1) == 1,
+          "natural exit, paused in the first handler: %d %d %d", *(int *)ln,
+          LOG(0), LOG(1));
+    decl("int early(int x){ __attribute__((cleanup(rec))) int a = 1;"
+         " if (x) { __attribute__((cleanup(rech))) int b = 2; return 5; }"
+         " return 6; }");
+    RESET();
+    arm(1, "0");
+    eval("early(1)");
+    CHECK(*(int *)ln == 2 && LOG(0) == 2 && LOG(1) == 1,
+          "return path, paused in the first handler: %d %d %d", *(int *)ln,
+          LOG(0), LOG(1));
+    plan.fire = 0;
+    RESET();
+    CHECK(eval("early(0)") == 6, "later code is still owed its handler");
+    CHECK(*(int *)ln == 1, "fall-through after an early exit: %d", *(int *)ln);
+    decl("int brk(void){ for (int i = 0; i < 2; i++) {"
+         " __attribute__((cleanup(rec))) int a = 1;"
+         " __attribute__((cleanup(rech))) int b = 2; break; } return 0; }");
+    RESET();
+    arm(1, "0");
+    eval("brk()");
+    CHECK(*(int *)ln == 2 && LOG(0) == 2 && LOG(1) == 1,
+          "break path, paused in the first handler: %d %d %d", *(int *)ln,
+          LOG(0), LOG(1));
+
+    // restart abandons the frame, so its handlers run too.
+    decl("int rs(void){ __attribute__((cleanup(rec))) int a = 1; hook();"
+         " return ln; }");
+    RESET();
+    arm(0, NULL);
+    CHECK(eval("rs()") == 1, "restart ran the abandoned frame's handler");
+    CHECK(*(int *)ln == 2, "and the re-entered body its own: %d", *(int *)ln);
+
+    // -n skips them.
+    RESET();
+    arm(0, "9");
+    plan.skip_cleanups = true;
+    CHECK(eval("nest()") == 9, "return -n pops the frame");
+    CHECK(*(int *)ln == 0, "handlers skipped: %d", *(int *)ln);
+
+    // A failing handler rejects the op and leaves the frame running.
+    decl("int bd(void){ __attribute__((cleanup(bad))) int a = 1; hook();"
+         " return 7; }");
+    RESET();
+    *(int *)armed = 1;
+    arm(0, "9");
+    plan.disarm = (int *)armed;
+    CHECK(eval("bd()") == 7, "frame not popped after a handler failure");
+    CHECK(plan.rc != 0, "op rejected");
+    CHECK(*(int *)armed == 0, "hook disarmed the handler");
+
+    // A host (FFI) handler.
+    decl("void host_rec(int *p);");
+    decl("int hc(void){ __attribute__((cleanup(host_rec))) int a = 7; hook();"
+         " return 0; }");
+    host_log = 0;
+    arm(0, "0");
+    eval("hc()");
+    CHECK(host_log == 7, "host handler ran once: %d", host_log);
+
+    // The popped frame runs the body it was paused in, even after a fix.
+    decl("int cfix_hook(void);");
+    decl("int fxc(void){ __attribute__((cleanup(rec))) int a = 1;"
+         " cfix_hook(); return 5; }");
+    RESET();
+    CHECK(eval("fxc()") == 0, "popped through the fix");
+    CHECK(*(int *)ln == 1 && LOG(0) == 1, "old body's handler ran: %d",
+          *(int *)ln);
+    CHECK(eval("fxc()") == 9, "later calls run the new body");
+#undef RESET
+#undef LOG
 }
 
 static Obj *find_fn(const char *name) {
@@ -636,6 +808,8 @@ int main(void) {
     cc_register_cfunc(&vm, "hook", (void *)hook, 0, 0);
     cc_register_cfunc(&vm, "session_hook", (void *)session_hook, 0, 0);
     cc_register_cfunc(&vm, "fix_hook", (void *)fix_hook, 0, 0);
+    cc_register_cfunc(&vm, "cfix_hook", (void *)cfix_hook, 0, 0);
+    cc_register_cfunc(&vm, "host_rec", (void *)host_rec, 1, 0);
     cc_repl_init(&vm);
 
     test_holes();
@@ -645,6 +819,7 @@ int main(void) {
     test_restart();
     test_rejections();
     test_session();
+    test_cleanup();
     test_fix();
     test_fix_editor();
     test_reclaim();
