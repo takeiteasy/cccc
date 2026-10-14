@@ -128,6 +128,12 @@ Other constructs:
   written literally or reached through a macro expansion, rather than the
   confusing "not a function" error a raw, unhandled `__has_foo(...)` would
   otherwise produce.
+- **A host header named like a cccc-supplied one** (the SDK's real
+  `Availability.h` under `--sysroot`) is replayed like any other host
+  header. Only a file whose bytes equal cccc's bundled copy is treated as
+  cccc's own, so `#include <stdio.h>` under `-c=native` stays a plain
+  `#include <stdio.h>` instead of being flattened into the SDK's internal
+  headers.
 - **`secure/_string.h`'s `_FORTIFY_SOURCE` macros still need
   `-D_FORTIFY_SOURCE=0`.** Apple's fortified `strcpy`/`memcpy`/etc rewrite to
   `__builtin___*_chk(...)` calls CCCC doesn't implement — pass

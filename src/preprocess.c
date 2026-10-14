@@ -327,6 +327,8 @@ static void normalize_include_operand_spacing(char *line) {
     memmove(start + content_len, end, strlen(end) + 1); // +1 for NUL
 }
 
+// TODO(#1564): stops at the first newline, so a multi-line trailing /* comment
+// is left unterminated.
 static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     char *end = start->loc;
     while (*end && *end != '\n')
@@ -3013,6 +3015,27 @@ static bool is_cccc_supplied_only_header(const char *name) {
         if (!strcmp(name, cccc_only[i]))
             return true;
     return false;
+}
+
+// True if the file at `path` is CCCC's own bundled copy of `name`. A header
+// found on disk under the same name (e.g. the SDK's real Availability.h under
+// --sysroot) is a host header and must be replayed like any other.
+static bool path_is_cccc_copy(const char *name, const char *path) {
+    const char *own = get_std_header(name);
+    if (!own || !path)
+        return own != NULL;
+    struct stat st;
+    size_t      len = strlen(own);
+    if (stat(path, &st) || (size_t)st.st_size != len)
+        return false;
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return false;
+    char *buf  = malloc(len + 1);
+    bool  same = buf && fread(buf, 1, len, fp) == len && !memcmp(buf, own, len);
+    free(buf);
+    fclose(fp);
+    return same;
 }
 
 // Whether CCCC's own copy of a standard header — the embedded src/std_table.c
@@ -7037,7 +7060,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // the *host's* fcntl.h, which never declares
                         // close()). get_std_header() identifies the target
                         // by name, same test the on-disk branch below uses.
-                        if (get_std_header(filename))
+                        if (path_is_cccc_copy(filename, path))
                             mark_cccc_bundled_file(vm, path);
                         // #1288: the mark below used to sit inside the
                         // get_std_header() branch above (#1297), so the
@@ -7217,7 +7240,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // disk (e.g. under the test targets' -I./include), which
                 // #1003's own investigation found is not merely the
                 // embedded-table case the ticket described.
-                if (is_cccc_supplied_only_header(filename))
+                if (is_cccc_supplied_only_header(filename) &&
+                    path_is_cccc_copy(filename, path))
                     mark_cccc_only_file(vm, path ? path : filename);
                 // #1096: an on-disk hit (e.g. `-I./include`) for a name
                 // CCCC also bundles (get_std_header() != NULL, independent
@@ -7228,7 +7252,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // regardless of which of the two resolution paths a given
                 // invocation took (this on-disk path is what the test
                 // harness's standard -I./include invocation always uses).
-                if (get_std_header(filename))
+                if (path_is_cccc_copy(filename, path))
                     mark_cccc_bundled_file(vm, path ? path : filename);
                 // #1288: same widening as the quote-relative on-disk branch
                 // above -- mark every transitively-reached target, not just
