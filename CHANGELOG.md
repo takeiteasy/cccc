@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `--dangling-pointers` no longer reports a variable-length array's
+  pointer slot as dangling when an earlier call left a stale tag at that
+  address.
 - Fixed: `[[cleanup]]` written before the type in a `for` initializer
   (`for (__attribute__((cleanup(f))) int v = 0; ...)`) now runs its handler
   when the loop ends.

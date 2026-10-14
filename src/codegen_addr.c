@@ -799,6 +799,8 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
                 return false;
             return true;
         }
+        case ND_VLA_PTR: // the hidden pointer slot of a non-param local VLA
+            return true;
         case ND_MEMBER:
             return addr_is_local_frame(vm, node->lhs);
         case ND_COMMA:
@@ -1199,8 +1201,9 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // into it) NOT the pointer value - that's for gen_expr when
             // accessing the array
             if (node->var->is_local) {
-                emit_lea3(vm, dest_reg,
-                          node->var->offset); // Address of the pointer variable
+                // Never escapes: also retires a stale tag a dead frame left
+                // at this slot (#1447).
+                emit_lea3_internal(vm, dest_reg, node->var->offset);
             } else {
                 error_tok(vm, node->tok, "VLA must be local");
             }
