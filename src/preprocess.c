@@ -7518,8 +7518,196 @@ static void init_time_macros(VirtualMachine *vm) {
 #undef T
 }
 
+typedef struct {
+    const char *stem; // INT64 -> __INT64_TYPE__, __INT64_MAX__, ...
+    const char *type;
+    int         bits;
+    bool        is_signed;
+    const char *len; // printf length modifier
+    bool        fmt; // emit __<stem>_FMT*__
+    bool        c_suffix;
+} PredefInt;
+
+static void define_predef_int(VirtualMachine *vm, const PredefInt *t) {
+    uint64_t    max    = t->is_signed ? (UINT64_MAX >> (65 - t->bits))
+                                      : (UINT64_MAX >> (64 - t->bits));
+    const char *suffix = t->bits == 64
+                             ? (t->is_signed ? "L" : "UL")
+                             : (!t->is_signed && t->bits == 32 ? "U" : "");
+    char       *name;
+
+#define PD(field, value)                                                       \
+    (name = arena_format(vm, "__%s_" field "__", t->stem),                     \
+     define_macro(vm, name, value))
+    PD("TYPE",
+       arena_format(vm, "%s%s", t->is_signed ? "" : "unsigned ", t->type));
+    PD("WIDTH", arena_format(vm, "%d", t->bits));
+    PD("MAX", arena_format(vm, "%llu%s", (unsigned long long)max, suffix));
+    if (!t->fmt) {
+        if (t->is_signed) {
+            PD("MIN", arena_format(vm, "(-__%s_MAX__ - 1)", t->stem));
+        } else {
+            PD("MIN", "0U");
+        }
+    }
+    if (t->fmt) {
+        if (t->is_signed) {
+            PD("FMTd", arena_format(vm, "\"%sd\"", t->len));
+            PD("FMTi", arena_format(vm, "\"%si\"", t->len));
+        } else {
+            PD("FMTo", arena_format(vm, "\"%so\"", t->len));
+            PD("FMTu", arena_format(vm, "\"%su\"", t->len));
+            PD("FMTx", arena_format(vm, "\"%sx\"", t->len));
+            PD("FMTX", arena_format(vm, "\"%sX\"", t->len));
+        }
+    }
+    if (t->c_suffix)
+        PD("C_SUFFIX", (char *)suffix);
+#undef PD
+}
+
+typedef struct {
+    const char *prefix, *suffix;
+    const char *mant_dig, *dig, *decimal_dig, *min_exp, *max_exp, *min_10_exp,
+        *max_10_exp, *max, *min, *epsilon, *denorm_min;
+} PredefFloat;
+
+// Mirrors include/float.h (long double is double-precision on every target).
+static void define_predef_float(VirtualMachine *vm, const PredefFloat *f) {
+#define PF(field, value)                                                       \
+    define_macro(vm, arena_format(vm, "__%s_" field "__", f->prefix), value)
+#define PFV(field, value) PF(field, arena_format(vm, "%s%s", value, f->suffix))
+    PF("MANT_DIG", (char *)f->mant_dig);
+    PF("DIG", (char *)f->dig);
+    PF("DECIMAL_DIG", (char *)f->decimal_dig);
+    PF("MIN_EXP", (char *)f->min_exp);
+    PF("MAX_EXP", (char *)f->max_exp);
+    PF("MIN_10_EXP", (char *)f->min_10_exp);
+    PF("MAX_10_EXP", (char *)f->max_10_exp);
+    PFV("MAX", f->max);
+    PFV("NORM_MAX", f->max);
+    PFV("MIN", f->min);
+    PFV("EPSILON", f->epsilon);
+    PFV("DENORM_MIN", f->denorm_min);
+    PF("HAS_DENORM", "1");
+    PF("HAS_INFINITY", "1");
+    PF("HAS_QUIET_NAN", "1");
+#undef PFV
+#undef PF
+}
+
+// Target ABI facts (type limits/widths/names, float characteristics,
+// endianness) taken from cccc's own type model and bundled headers, not from
+// the host compiler. Names mirror gcc/clang so SDK and vendored headers that
+// key on them (libkern/OSByteOrder.h, dmon.h) resolve.
+static void init_target_macros(VirtualMachine *vm) {
+    static const PredefInt ints[] = {
+        {"INT8", "signed char", 8, true, "hh", true, true},
+        {"UINT8", "char", 8, false, "hh", true, true},
+        {"INT16", "short", 16, true, "h", true, true},
+        {"UINT16", "short", 16, false, "h", true, true},
+        {"INT32", "int", 32, true, "", true, true},
+        {"UINT32", "int", 32, false, "", true, true},
+        {"INT64", "long", 64, true, "l", true, true},
+        {"UINT64", "long", 64, false, "l", true, true},
+        {"INTMAX", "long", 64, true, "l", true, true},
+        {"UINTMAX", "long", 64, false, "l", true, true},
+        {"INTPTR", "long", 64, true, "l", true, false},
+        {"UINTPTR", "long", 64, false, "l", true, false},
+        {"PTRDIFF", "long", 64, true, "l", true, false},
+        {"SIZE", "long", 64, false, "l", true, false},
+        {"SIG_ATOMIC", "int", 32, true, "", false, false},
+        {"WINT", "int", 32, false, "", false, false},
+#if defined(__linux__) && defined(__aarch64__)
+        {"WCHAR", "int", 32, false, "", false, false},
+#else
+        {"WCHAR", "int", 32, true, "", false, false},
+#endif
+    };
+    for (size_t i = 0; i < sizeof ints / sizeof *ints; i++)
+        define_predef_int(vm, &ints[i]);
+
+    define_macro(vm, "__CHAR16_TYPE__", "unsigned short");
+    define_macro(vm, "__CHAR32_TYPE__", "unsigned int");
+    define_macro(vm, "__CHAR_BIT__", "8");
+    define_macro(vm, "__BOOL_WIDTH__", "1");
+    define_macro(vm, "__SCHAR_MAX__", "127");
+    define_macro(vm, "__SHRT_MAX__", "32767");
+    define_macro(vm, "__INT_MAX__", "2147483647");
+    define_macro(vm, "__LONG_MAX__", "9223372036854775807L");
+    define_macro(vm, "__LONG_LONG_MAX__", "9223372036854775807LL");
+    define_macro(vm, "__SHRT_WIDTH__", "16");
+    define_macro(vm, "__INT_WIDTH__", "32");
+    define_macro(vm, "__LONG_WIDTH__", "64");
+    define_macro(vm, "__LLONG_WIDTH__", "64");
+    define_macro(vm, "__POINTER_WIDTH__", "64");
+    define_macro(vm, "__SIZEOF_WCHAR_T__", "4");
+    define_macro(vm, "__SIZEOF_WINT_T__", "4");
+    define_macro(vm, "__PTRDIFF_TYPE__", "long");
+    define_macro(vm, "__INTPTR_TYPE__", "long");
+#if defined(__APPLE__) && defined(__aarch64__)
+    define_macro(vm, "__BIGGEST_ALIGNMENT__", "8");
+#else
+    define_macro(vm, "__BIGGEST_ALIGNMENT__", "16");
+#endif
+#ifndef _WIN32
+    define_macro(vm, "_LP64", "1");
+#endif
+    // include/limits.h BITINT_MAXWIDTH
+    define_macro(vm, "__BITINT_MAXWIDTH__", "65535");
+    define_macro(vm, "__STDC_EMBED_NOT_FOUND__", "0");
+    define_macro(vm, "__STDC_EMBED_FOUND__", "1");
+    define_macro(vm, "__STDC_EMBED_EMPTY__", "2");
+
+    static const PredefFloat floats[] = {
+        {"FLT", "F", "24", "6", "9", "(-125)", "128", "(-37)", "38",
+         "3.40282347e+38", "1.17549435e-38", "1.19209290e-07",
+         "1.40129846e-45"},
+        {"DBL", "", "53", "15", "17", "(-1021)", "1024", "(-307)", "308",
+         "1.7976931348623157e+308", "2.2250738585072014e-308",
+         "2.2204460492503131e-16", "4.9406564584124654e-324"},
+        {"LDBL", "L", "53", "15", "17", "(-1021)", "1024", "(-307)", "308",
+         "1.7976931348623157e+308", "2.2250738585072014e-308",
+         "2.2204460492503131e-16", "4.9406564584124654e-324"},
+    };
+    for (size_t i = 0; i < sizeof floats / sizeof *floats; i++)
+        define_predef_float(vm, &floats[i]);
+    define_macro(vm, "__FLT_RADIX__", "2");
+    define_macro(vm, "__FLT_EVAL_METHOD__", "0");
+    define_macro(vm, "__DECIMAL_DIG__", "17");
+
+    define_macro(vm, "__ORDER_LITTLE_ENDIAN__", "1234");
+    define_macro(vm, "__ORDER_BIG_ENDIAN__", "4321");
+    define_macro(vm, "__ORDER_PDP_ENDIAN__", "3412");
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    define_macro(vm, "__BYTE_ORDER__", "__ORDER_BIG_ENDIAN__");
+#else
+    define_macro(vm, "__BYTE_ORDER__", "__ORDER_LITTLE_ENDIAN__");
+#endif
+
+#ifdef __APPLE__
+    // Apple's SDK headers (TargetConditionals.h, libkern/OSByteOrder.h) and
+    // dmon.h select their platform branch on these.
+#ifndef __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
+#define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ 110000
+#endif
+#define CCCC_STR2(x) #x
+#define CCCC_STR(x)  CCCC_STR2(x)
+    define_macro(vm, "__MACH__", "1");
+    define_macro(vm, "__APPLE_CC__", "6000");
+    define_macro(vm, "__LITTLE_ENDIAN__", "1");
+    define_macro(vm, "__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__",
+                 CCCC_STR(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__));
+    define_macro(vm, "__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__",
+                 CCCC_STR(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__));
+#undef CCCC_STR
+#undef CCCC_STR2
+#endif
+}
+
 void init_macros(VirtualMachine *vm) {
     // Define predefined macros
+    init_target_macros(vm);
     init_fenv_macros(vm);
     init_errno_macros(vm);
     init_dlfcn_macros(vm);

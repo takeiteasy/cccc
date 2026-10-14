@@ -83,8 +83,31 @@ Two different classifications drive the rules above:
 
 ### Real SDK headers under `--use-system-headers`/`--sysroot`
 
-A real SDK header's own `#if` guards can use constructs CCCC's preprocessor
-needs help with:
+A real SDK header's own `#if` guards key on compiler predefines, and can use
+constructs CCCC's preprocessor needs help with.
+
+**Predefined target macros.** CCCC defines the gcc/clang ABI macros SDK
+headers test, with values from its own type model and bundled headers:
+
+| Group | Examples |
+|---|---|
+| Endianness | `__BYTE_ORDER__`, `__ORDER_LITTLE_ENDIAN__`, `__LITTLE_ENDIAN__` (Apple only) |
+| Integer types | `__INT64_TYPE__`, `__INT64_MAX__`, `__INT64_FMTd__`, `__SIZE_MAX__`, `__WCHAR_TYPE__` |
+| Floating point | `__DBL_EPSILON__`, `__LDBL_MANT_DIG__`, `__FLT_RADIX__` |
+| Data model | `_LP64`, `__CHAR_BIT__`, `__POINTER_WIDTH__`, `__BITINT_MAXWIDTH__` |
+| Apple | `__MACH__`, `__APPLE_CC__`, `__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__` |
+
+Each one equals its bundled-header counterpart (`__INT_MAX__ == INT_MAX`,
+`__LDBL_MANT_DIG__ == LDBL_MANT_DIG`), so `__INT64_TYPE__` is `long` and
+`long double` is double-precision. A command-line `-D`/`-U` overrides any of
+them.
+
+Identity and feature macros stay undefined because CCCC does not implement
+what they advertise: `__clang__`, `__BLOCKS__`, `__ARM_NEON`, `_Float16`
+(`__FLT16_*`), the `__GCC_ATOMIC_*` family, `__STDC_NO_THREADS__`. They are
+not affected by `--compiler-family`.
+
+Other constructs:
 
 - **`defined`/`__has_*` reached through a macro expansion.** A macro can
   itself expand *to* `defined(...)` or `__has_builtin(...)`/
