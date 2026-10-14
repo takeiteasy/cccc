@@ -1723,7 +1723,9 @@ void cc_destroy(VirtualMachine *vm) {
 
     // Free source map and index (debugger)
     free(vm->compiler.dead_marks);
+    free(vm->compiler.text_holes);
     free(vm->dbg.source_map);
+    free(vm->dbg.debug_symbols);
     for (int i = 0; i < vm->dbg.num_conds; i++)
         free(vm->dbg.conds[i].text);
     free(vm->dbg.conds);

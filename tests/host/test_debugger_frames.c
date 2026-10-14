@@ -512,6 +512,121 @@ static void test_condition_stale_tag(void) {
     cc_remove_breakpoint(&vm, miss);
 }
 
+// Steps over the instructions in [from, to) and reports whether they end
+// exactly on `to`.
+static bool text_walk_aligned(Pc from, Pc to) {
+    Pc pc = from;
+    while (pc < to) {
+        int words = cc_instr_words((int)vm.text_seg[pc]);
+        if (words <= 0)
+            return false;
+        pc += (Pc)words;
+    }
+    return pc == to;
+}
+
+static bool source_map_sorted(void) {
+    for (int i = 1; i < vm.dbg.source_map_count; i++)
+        if (vm.dbg.source_map[i].pc_offset < vm.dbg.source_map[i - 1].pc_offset)
+            return false;
+    return true;
+}
+
+// Text freed below live code is reused by later conditions.
+static void test_holes(void) {
+    int dead0  = vm.compiler.num_dead_marks;
+    int holes0 = vm.compiler.num_text_holes;
+    Pc  a_in, b_in, c_in;
+    decl_fn("ho_a", &a_in, NULL);
+    decl_fn("ho_b", &b_in, NULL);
+    decl_fn("ho_c", &c_in, NULL);
+
+    int a = cond_bp(a_in, "x > 99 && x < 200");
+    eval("ho_a(1)");
+    Obj *aw = vm.dbg.breakpoints[a].cond_fn;
+    CHECK(aw != NULL, "condition A compiled");
+    Pc a_code = (Pc)aw->code_addr;
+    Pc a_end  = (Pc)aw->code_end_addr;
+
+    decl("int ho_live(int x){ return x + 1; }");
+    Obj *live = find_fn("ho_live");
+    CHECK(live && (Pc)live->code_addr == a_end, "live code sits right above A");
+    Pc    top     = vm.text_ptr;
+    File *lf      = last_compiled_file();
+    Pc    live_pc = cc_find_pc_for_source(&vm, lf, 1);
+
+    cc_remove_breakpoint(&vm, a);
+    CHECK(vm.text_ptr == top, "live code above the wrapper stays");
+    CHECK(vm.compiler.num_text_holes == holes0 + 1, "A's text is a hole: %d",
+          vm.compiler.num_text_holes);
+    CHECK(vm.compiler.num_dead_marks == dead0, "no wrapper left waiting");
+    CHECK(vm.text_seg[a_code] == HOLE && vm.text_seg[a_end - 1] == HOLE,
+          "the hole is filled with HOLE words");
+    CHECK(text_walk_aligned(a_code, a_end), "a hole can be walked");
+
+    // A smaller condition fits in a hole (the evaluation wrapper that ran A
+    // was freed below A, so there may be an earlier one).
+    int b = cond_bp(b_in, "x == 1");
+    eval("ho_b(1)");
+    Obj *bw = vm.dbg.breakpoints[b].cond_fn;
+    CHECK(bw && (Pc)bw->code_addr < top, "B reuses freed text: %lld vs %u",
+          bw ? bw->code_addr : -1, top);
+    CHECK(vm.text_ptr == top, "text top unchanged by a hole compile");
+    Pc b_end = bw ? (Pc)bw->code_end_addr : 0;
+    for (int i = 0; i < vm.compiler.num_text_holes; i++)
+        if (vm.compiler.text_holes[i].start == b_end)
+            CHECK(text_walk_aligned((Pc)bw->code_addr,
+                                    vm.compiler.text_holes[i].end),
+                  "a partly filled hole can be walked");
+    CHECK(eval("ho_b(1)") == 1, "program runs with B in the hole");
+    CHECK(vm.dbg.breakpoints[b].hit_count == 2,
+          "B evaluates true in the hole: %d", vm.dbg.breakpoints[b].hit_count);
+    CHECK(source_map_sorted(), "source map stays sorted");
+    CHECK(cc_find_pc_for_source(&vm, lf, 1) == live_pc,
+          "live code keeps its line");
+
+    // A larger condition does not fit and goes to the top.
+    int c = cond_bp(c_in, "x > 99 && x < 200 && x != 150 && x != 151");
+    eval("ho_c(1)");
+    Obj *cw = vm.dbg.breakpoints[c].cond_fn;
+    CHECK(cw && (Pc)cw->code_addr > top, "C does not fit and goes on top");
+
+    // Holes next to each other merge, and the top takes them back.
+    cc_remove_breakpoint(&vm, b);
+    cc_remove_breakpoint(&vm, c);
+    CHECK(vm.text_ptr == top, "top wrapper released: %u vs %u", vm.text_ptr,
+          top);
+    CHECK(source_map_sorted(), "source map sorted after releases");
+
+    // A wrapper released while conditions run waits until they are done.
+    int e = cond_bp(a_in, "x == 3");
+    eval("ho_a(1)");
+    int holes1        = vm.compiler.num_text_holes;
+    vm.dbg.cond_depth = 1;
+    cc_remove_breakpoint(&vm, e);
+    CHECK(vm.compiler.num_text_holes == holes1 &&
+              vm.compiler.num_dead_marks == dead0 + 1,
+          "release deferred while a condition runs");
+    vm.dbg.cond_depth = 0;
+    cc_code_retry_dead(&vm);
+    CHECK(vm.compiler.num_dead_marks == dead0, "deferred release done");
+}
+
+// The symbol table grows past its initial capacity.
+static void test_many_symbols(void) {
+    enum { N = 5000 };
+    char *src = malloc((size_t)N * 32);
+    char *p   = src;
+    for (int i = 0; i < N; i++)
+        p += sprintf(p, "int sym_many_%d;", i);
+    decl(src);
+    free(src);
+    CHECK(vm.dbg.num_debug_symbols >= N, "symbols recorded: %d",
+          vm.dbg.num_debug_symbols);
+    CHECK(cc_lookup_symbol(&vm, "sym_many_0") != NULL, "first symbol found");
+    CHECK(cc_lookup_symbol(&vm, "sym_many_4999") != NULL, "last symbol found");
+}
+
 int main(void) {
     cc_init(&vm, CCCC_ENABLE_DEBUGGER | CCCC_CFI | CCCC_STACK_CANARIES |
                      CCCC_DANGLING_DETECT);
@@ -523,6 +638,7 @@ int main(void) {
     cc_register_cfunc(&vm, "fix_hook", (void *)fix_hook, 0, 0);
     cc_repl_init(&vm);
 
+    test_holes();
     test_return();
     test_return_locals();
     test_return_types();
@@ -533,6 +649,7 @@ int main(void) {
     test_fix_editor();
     test_reclaim();
     test_condition_stale_tag();
+    test_many_symbols();
 
     cc_destroy(&vm);
     if (!failed)

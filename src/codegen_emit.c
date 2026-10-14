@@ -24,6 +24,8 @@
 void emit_word(VirtualMachine *vm, InstrWord word) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
+    if (vm->compiler.text_limit && vm->text_ptr + 1 >= vm->compiler.text_limit)
+        error("internal: wrapper overflowed its reclaimed text");
     if (vm->text_ptr + 1 >= (Pc)(vm->text_committed / sizeof(InstrWord))) {
         if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
             error("codegen: text segment overflow (limit: %d instructions)",
@@ -35,6 +37,8 @@ void emit_word(VirtualMachine *vm, InstrWord word) {
 Pc emit_word_ptr(VirtualMachine *vm) {
     if (!vm || !vm->text_seg)
         error("codegen: text segment not initialized");
+    if (vm->compiler.text_limit && vm->text_ptr + 1 >= vm->compiler.text_limit)
+        error("internal: wrapper overflowed its reclaimed text");
     if (vm->text_ptr + 1 >= (Pc)(vm->text_committed / sizeof(InstrWord))) {
         if (vm_text_ensure_count(vm, vm->text_ptr + 2) != 0)
             error("codegen: text segment overflow (limit: %d instructions)",

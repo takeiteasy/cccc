@@ -1571,6 +1571,30 @@ static Obj *debugger_compile_expr(VirtualMachine *vm, const char *src,
     return fn;
 }
 
+// A wrapper just compiled at the top is compiled again into a reclaimed hole
+// below live code, if one is big enough: the first compile only measures it.
+static void debugger_move_into_hole(VirtualMachine *vm, Breakpoint *bp,
+                                    Obj *scope, CcCodeMark *mark) {
+    Pc hole_start, hole_end;
+    if (mark->new_vars || mark->data_end != mark->data_start ||
+        mark->text_end == mark->text_start ||
+        !cc_text_hole_find(vm, mark->text_end - mark->text_start, &hole_start,
+                           &hole_end))
+        return;
+
+    CcCodeMark top = *mark;
+    if (cc_code_release(vm, &top) != 1)
+        return;
+    CcCodeMark hole = {.hole_start = hole_start, .hole_end = hole_end};
+    Obj *fn = debugger_compile_expr(vm, bp->condition, scope, NULL, &hole);
+    if (!fn) {
+        hole = (CcCodeMark){0};
+        fn   = debugger_compile_expr(vm, bp->condition, scope, NULL, &hole);
+    }
+    bp->cond_fn = fn;
+    *mark       = hole;
+}
+
 // Compile a breakpoint's condition exactly once, sharing the wrapper of an
 // identical condition in the same function. On success bp->cond_fn is set; on
 // failure bp->cond_compile_failed is set (so later hits don't retry and
@@ -1590,6 +1614,8 @@ static bool debugger_compile_condition_once(VirtualMachine *vm,
 
     CcCodeMark mark = {0};
     bp->cond_fn = debugger_compile_expr(vm, bp->condition, scope, NULL, &mark);
+    if (bp->cond_fn)
+        debugger_move_into_hole(vm, bp, scope, &mark);
     bp->cond_compile_failed = !bp->cond_fn;
     if (!bp->cond_fn)
         return false;
@@ -1611,10 +1637,10 @@ static bool debugger_compile_condition_once(VirtualMachine *vm,
 }
 
 // A breakpoint stopped using its compiled condition. A wrapper nobody uses is
-// given back once the code compiled after it is gone, in any order.
-// TODO: a wrapper below code that stays (a declaration, a block literal in the
-// condition) is never reclaimed; a free-hole allocator needs relocatable text
-// (https://todo.sr.ht/~takeiteasy/cccc/1508)
+// given back: from the top, or as a hole that a later condition reuses.
+// TODO: a wrapper whose data holds a string literal or static, or that defines
+// a block literal or label, is never reclaimed
+// (https://todo.sr.ht/~takeiteasy/cccc/1513)
 static void debugger_drop_condition(VirtualMachine *vm, Obj *wrapper) {
     for (int i = 0; wrapper && i < vm->dbg.num_conds; i++) {
         DbgCond *c = &vm->dbg.conds[i];
@@ -1669,7 +1695,9 @@ static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
     vm->pc         = (Pc)fn->code_addr;
     // vm_eval returns the wrapper's value on success, so a negative value is
     // indistinguishable from an error code; a completed run leaves pc invalid.
+    vm->dbg.cond_depth++;
     vm_eval(vm);
+    vm->dbg.cond_depth--;
     int rc = vm->pc == CCCC_INVALID_PC ? 0 : -1;
     *ival  = vm->regs[REG_A0];
     *fval  = vm->fregs[FREG_A0].f64;
@@ -1688,6 +1716,7 @@ static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
     vm->dbg.step_out_bp           = saved_step_out_bp;
     vm->dbg.debugger_attached     = saved_debugger_attached;
 
+    cc_code_retry_dead(vm);
     return rc;
 }
 

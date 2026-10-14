@@ -5257,6 +5257,12 @@ static inline int op_CHKBS_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_HOLE_fn(VirtualMachine *vm) {
+    printf("\nError: executed reclaimed code at PC %lld\n",
+           (long long)vm->pc - 1);
+    return -1;
+}
+
 static inline int op_CHKI_fn(VirtualMachine *vm) {
     // Check initialization: fail if variable at bp+offset has not been written.
     // Format: [CHKI] [offset:i64]

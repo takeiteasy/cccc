@@ -720,7 +720,11 @@ extern "C" {
                    global storage.                                                   \
                    Format: [CHKBS][rs_off:8|unused:8][limit:i64] (RR operand         \
                    word + i64 immediate, same shape as CHKD -- see emit_rri).        \
-                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB. */
+                   Gated on CCCC_BOUNDS_CHECKS, same as CHKB. */                     \
+    /* Appended (never interleaved -- see the rule stated above CHKR) so no          \
+       existing opcode renumbers. */                                                 \
+    X(HOLE, 0) /* Fills reclaimed text inside live code so instruction walkers       \
+                  stay aligned; executing it is a runtime error. */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -3675,17 +3679,27 @@ typedef struct Breakpoint {
  @details Start values are taken once the compile is under way; end values and
           the counts only when it finished. See cc_code_release.
 */
+/*! @brief A run of reclaimed text words, [start, end). */
+typedef struct TextHole {
+    Pc start, end;
+} TextHole;
+
 typedef struct CcCodeMark {
     bool  started, ended;
     bool  text_done, data_done; // already given back (or never to be)
     Pc    text_start, text_end;
     char *data_start, *data_end;
-    int   call_patches, func_addr_patches, global_labels;
-    int   call_patches_end, func_addr_patches_end, global_labels_end;
-    int   source_map, source_map_end, debug_symbols, debug_symbols_end;
+    int   global_labels, global_labels_end;
     File *last_file;
     int   last_line, last_col;
     int   new_fns, new_vars;
+
+    // Compile into a text hole: set hole_start/hole_end (words, end
+    // exclusive) before the compile; the rest is kept for the rollback.
+    Pc   hole_start, hole_end;
+    bool in_hole;
+    Pc   saved_top;
+    int  saved_source_map;
 } CcCodeMark;
 
 /*!
@@ -3751,9 +3765,6 @@ typedef struct Arena {
              debug symbols, and watchpoints. Enabled via CCCC_ENABLE_DEBUGGER
  flag.
 */
-#ifndef MAX_DEBUG_SYMBOLS
-#define MAX_DEBUG_SYMBOLS 4096
-#endif
 /*!
  @brief Entry snapshot of one call frame, taken by ENT3 under -g so the
            debugger's `restart` can re-enter the function with its original
@@ -3822,8 +3833,8 @@ typedef struct Debugger {
     int source_index_built_for; // source_map_count the index was built from
 
     // Debug symbols for expression evaluation
-    DebugSymbol debug_symbols[MAX_DEBUG_SYMBOLS];
-    int         num_debug_symbols;
+    DebugSymbol *debug_symbols;
+    int          num_debug_symbols, debug_symbols_cap;
 
     // Watchpoints (data breakpoints)
     Watchpoint watchpoints[MAX_WATCHPOINTS];
@@ -3835,6 +3846,7 @@ typedef struct Debugger {
     // to the live vm->bp immediately before each conditional-breakpoint hit
     // runs its cached wrapper -- see debugger_eval_condition in debugger.c.
     struct Obj *dbg_frame_var;
+    int         cond_depth; // condition wrappers running; their code stays put
 } Debugger;
 
 #ifndef MAX_CALLS
@@ -4397,6 +4409,11 @@ typedef struct Compiler {
     // Discarded wrappers with later code above them (cc_code_discard).
     CcCodeMark *dead_marks;
     int         num_dead_marks, dead_marks_cap;
+
+    // Reclaimed text below live code, sorted, non-adjacent (cc_code_release).
+    TextHole *text_holes;
+    int       num_text_holes, text_holes_cap;
+    Pc text_limit; // 0, or the word emit may not reach (compile into a hole)
 
     // Function address patches for function pointers
     struct {
@@ -5627,14 +5644,16 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
 /*!
  @brief Give back the code and data of a throw-away wrapper compile.
- @details Each segment and table is rolled back only if nothing was appended
-          after the compile. Text is kept when the compile added any function
-          besides the wrapper or a global label (an address may have escaped);
-          data is kept when it added a global (a string literal, a static).
-          A compile that never finished (`!mark->ended`) rolls back whatever it
-          emitted.
- @return 1 if the text was rolled back (or the compile emitted none), 0 if
-         code was compiled after it, -1 if the text must stay.
+ @details Text at the top is rolled back; text below later code becomes a
+          hole (filled with HOLE words) that cc_text_hole_find offers to the
+          next compile. Data is rolled back only if nothing was appended after
+          it. Text is kept when the compile added any function besides the
+          wrapper or a global label (an address may have escaped); data is
+          kept when it added a global (a string literal, a static). A compile
+          that never finished (`!mark->ended`) gives back whatever it emitted.
+ @return 1 if the text was given back (or the compile emitted none), 0 if
+         it must wait (condition wrappers are running), -1 if the text must
+         stay.
 */
 int cc_code_release(VirtualMachine *vm, CcCodeMark *mark);
 
@@ -5643,6 +5662,15 @@ int cc_code_release(VirtualMachine *vm, CcCodeMark *mark);
         it and retry whenever a later release succeeds.
 */
 void cc_code_discard(VirtualMachine *vm, CcCodeMark *mark);
+
+/*!
+ @brief Find the smallest reclaimed text hole of at least `words` words.
+ @return true and its word range [*start, *end) if there is one.
+*/
+bool cc_text_hole_find(VirtualMachine *vm, Pc words, Pc *start, Pc *end);
+
+/*! @brief Retry the discarded wrappers that were waiting on later code. */
+void cc_code_retry_dead(VirtualMachine *vm);
 
 /*!
  @brief Allocate the RETBUF rotating pool (struct/union/vector/wide-_BitInt

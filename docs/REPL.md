@@ -168,7 +168,8 @@ VM-only.
   back afterwards. Data stays when the expression creates a string literal or
   other static storage, and code stays when the expression defines a label or
   a block literal. Code compiled while the expression runs (a condition
-  breakpoint's first hit) keeps the wrapper below it until that code goes.
+  breakpoint's first hit) leaves the wrapper's code as free text below it,
+  which later conditions reuse.
 - Only functions can be redefined; redefining a variable is an error (see
   [Redefining functions](#redefining-functions)).
 - Certain internal compiler errors outside of parsing/type-checking (for

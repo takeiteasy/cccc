@@ -238,10 +238,15 @@ void add_debug_symbol(VirtualMachine *vm, char *name, long long offset,
                       Type *ty, int is_local, Obj *owner_fn, int align_log) {
     if (!(vm->flags & CCCC_ENABLE_DEBUGGER) || !name || !*name)
         return;
-    // TODO: fixed table; later symbols are silently dropped
-    // (https://todo.sr.ht/~takeiteasy/cccc/1509)
-    if (vm->dbg.num_debug_symbols >= MAX_DEBUG_SYMBOLS)
-        return;
+    if (vm->dbg.num_debug_symbols == vm->dbg.debug_symbols_cap) {
+        vm->dbg.debug_symbols_cap =
+            vm->dbg.debug_symbols_cap ? vm->dbg.debug_symbols_cap * 2 : 256;
+        vm->dbg.debug_symbols =
+            realloc(vm->dbg.debug_symbols,
+                    (size_t)vm->dbg.debug_symbols_cap * sizeof(DebugSymbol));
+        if (!vm->dbg.debug_symbols)
+            error("out of memory for debug symbols");
+    }
 
     DebugSymbol *sym = &vm->dbg.debug_symbols[vm->dbg.num_debug_symbols++];
     sym->name        = name;

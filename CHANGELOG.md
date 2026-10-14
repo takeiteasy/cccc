@@ -28,6 +28,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   segments: expression and `return <expr>` wrappers are given back after use,
   and conditional breakpoints with the same condition in one function share
   one compiled wrapper that is released when its breakpoints are deleted.
+  Code freed below newer code is reused by later conditions.
+- Fixed: the debugger's symbol table grows on demand; `print` and watchpoints
+  find globals and locals past the first 4096 symbols.
 - Added: `fix <function>` opens `$VISUAL`/`$EDITOR` on the function's current
   source when a terminal is attached, and offers to re-edit on a compile error.
   Macros of the last file expand in `fix` source.

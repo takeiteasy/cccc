@@ -691,6 +691,188 @@ static void redirect_function_entry(VirtualMachine *vm, Obj *fn) {
 // code_addr, data offsets, and current runtime contents are untouched. This
 // mirrors the sequence compile_macro_program() uses to compile the separate
 // comptime program (macros.c), retargeted at the main globals list.
+// ========== Reclaimed text (holes) ==========
+
+// Index of the first source-map entry at or after `pc`; the map is sorted.
+static int source_map_lower_bound(VirtualMachine *vm, Pc pc) {
+    int lo = 0, hi = vm->dbg.source_map_count;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (vm->dbg.source_map[mid].pc_offset < pc)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+// Entries appended since `first` came from code below the top: put them where
+// their pcs belong.
+static void source_map_merge_tail(VirtualMachine *vm, int first) {
+    int total = vm->dbg.source_map_count;
+    if (!vm->dbg.source_map || first >= total)
+        return;
+    SourceMap *map  = vm->dbg.source_map;
+    int        pos  = source_map_lower_bound(vm, map[first].pc_offset);
+    int        tail = total - first;
+    if (pos >= first)
+        return;
+    SourceMap *copy = malloc((size_t)tail * sizeof(SourceMap));
+    if (!copy)
+        error("out of memory merging the source map");
+    memcpy(copy, &map[first], (size_t)tail * sizeof(SourceMap));
+    memmove(&map[pos + tail], &map[pos],
+            (size_t)(first - pos) * sizeof(SourceMap));
+    memcpy(&map[pos], copy, (size_t)tail * sizeof(SourceMap));
+    free(copy);
+}
+
+// Drop what refers to the text words [start, end).
+static void forget_text_range(VirtualMachine *vm, Pc start, Pc end) {
+    if (vm->dbg.source_map) {
+        int lo = source_map_lower_bound(vm, start);
+        int hi = source_map_lower_bound(vm, end);
+        memmove(&vm->dbg.source_map[lo], &vm->dbg.source_map[hi],
+                (size_t)(vm->dbg.source_map_count - hi) * sizeof(SourceMap));
+        vm->dbg.source_map_count -= hi - lo;
+    }
+
+    int kept = 0;
+    for (int i = 0; i < vm->compiler.num_call_patches; i++) {
+        Pc loc = vm->compiler.call_patches[i].location;
+        if (loc < start || loc >= end)
+            vm->compiler.call_patches[kept++] = vm->compiler.call_patches[i];
+    }
+    vm->compiler.num_call_patches = kept;
+
+    kept                          = 0;
+    for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
+        Pc loc = vm->compiler.func_addr_patches[i].location;
+        if (loc < start || loc >= end)
+            vm->compiler.func_addr_patches[kept++] =
+                vm->compiler.func_addr_patches[i];
+    }
+    vm->compiler.num_func_addr_patches = kept;
+
+    kept                               = 0;
+    for (int i = 0; i < vm->dbg.num_debug_symbols; i++) {
+        DebugSymbol *sym = &vm->dbg.debug_symbols[i];
+        bool         own = sym->is_local && sym->owner_fn &&
+                           sym->owner_fn->code_addr >= start &&
+                           sym->owner_fn->code_addr < end;
+        if (!own)
+            vm->dbg.debug_symbols[kept++] = *sym;
+    }
+    vm->dbg.num_debug_symbols = kept;
+
+    if (vm->dynobjsz_scan_pc > (long long)start)
+        vm->dynobjsz_scan_pc = (long long)start;
+
+    vm->dbg.source_index_built_for = -1;
+    if (vm->dbg.source_map_count)
+        cc_build_source_index(vm);
+    else
+        vm->dbg.source_index_count = 0;
+}
+
+static void fill_reclaimed_text(VirtualMachine *vm, Pc start, Pc end) {
+    for (Pc pc = start; pc < end; pc++)
+        vm->text_seg[pc] = HOLE;
+}
+
+static void add_text_hole(VirtualMachine *vm, Pc start, Pc end) {
+    TextHole *h = vm->compiler.text_holes;
+    int       n = vm->compiler.num_text_holes;
+    int       i = 0;
+    while (i < n && h[i].start < start)
+        i++;
+    if (i > 0 && h[i - 1].end == start) {
+        h[i - 1].end = end;
+        i--;
+    } else {
+        if (n == vm->compiler.text_holes_cap) {
+            vm->compiler.text_holes_cap = vm->compiler.text_holes_cap
+                                              ? vm->compiler.text_holes_cap * 2
+                                              : 8;
+            h = realloc(vm->compiler.text_holes,
+                        (size_t)vm->compiler.text_holes_cap * sizeof(TextHole));
+            if (!h)
+                error("out of memory for reclaimed text");
+            vm->compiler.text_holes = h;
+        }
+        memmove(&h[i + 1], &h[i], (size_t)(n - i) * sizeof(TextHole));
+        h[i].start = start;
+        h[i].end   = end;
+        vm->compiler.num_text_holes++;
+    }
+    if (i + 1 < vm->compiler.num_text_holes && h[i].end == h[i + 1].start) {
+        h[i].end = h[i + 1].end;
+        memmove(&h[i + 1], &h[i + 2],
+                (size_t)(vm->compiler.num_text_holes - i - 2) *
+                    sizeof(TextHole));
+        vm->compiler.num_text_holes--;
+    }
+}
+
+// The top has moved down onto a hole: take the hole back into the top.
+static void absorb_text_holes(VirtualMachine *vm) {
+    while (vm->compiler.num_text_holes > 0) {
+        TextHole *h = &vm->compiler.text_holes[vm->compiler.num_text_holes - 1];
+        if (h->end != vm->text_ptr + 1)
+            break;
+        memset(&vm->text_seg[h->start], 0,
+               (size_t)(h->end - h->start) * sizeof(vm->text_seg[0]));
+        vm->text_ptr = h->start - 1;
+        vm->compiler.num_text_holes--;
+    }
+}
+
+bool cc_text_hole_find(VirtualMachine *vm, Pc words, Pc *start, Pc *end) {
+    bool found = false;
+    for (int i = 0; i < vm->compiler.num_text_holes; i++) {
+        Pc hs = vm->compiler.text_holes[i].start;
+        Pc he = vm->compiler.text_holes[i].end;
+        if (he - hs < words || (found && he - hs >= *end - *start))
+            continue;
+        *start = hs;
+        *end   = he;
+        found  = true;
+    }
+    return found;
+}
+
+// A compile into a hole is done (or threw): the top, the limit and the dedup
+// state go back to what they were.
+static void restore_top_state(VirtualMachine *vm, CcCodeMark *m) {
+    m->text_end             = vm->text_ptr;
+    vm->text_ptr            = m->saved_top;
+    vm->compiler.text_limit = 0;
+    vm->dbg.last_debug_file = m->last_file;
+    vm->dbg.last_debug_line = m->last_line;
+    vm->dbg.last_debug_col  = m->last_col;
+    source_map_merge_tail(vm, m->saved_source_map);
+}
+
+// The compile took [hole_start, text_end]: what is left of the hole stays one.
+static void leave_text_hole(VirtualMachine *vm, CcCodeMark *m) {
+    restore_top_state(vm, m);
+    if (vm->dynobjsz_scan_pc > (long long)m->hole_start)
+        vm->dynobjsz_scan_pc = (long long)m->hole_start;
+    for (int i = 0; i < vm->compiler.num_text_holes; i++) {
+        TextHole *h = &vm->compiler.text_holes[i];
+        if (h->start != m->hole_start)
+            continue;
+        h->start = m->text_end + 1;
+        if (h->start >= h->end) {
+            memmove(h, h + 1,
+                    (size_t)(vm->compiler.num_text_holes - i - 1) *
+                        sizeof(TextHole));
+            vm->compiler.num_text_holes--;
+        }
+        return;
+    }
+}
+
 void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     cc_repl_compile_new_marked(vm, old_head, NULL);
 }
@@ -725,19 +907,20 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
     cc_alloc_return_buffer_pool(vm);
 
     // After the RETBUF pool, which a later release must not take back.
-    if (mark)
-        *mark = (CcCodeMark){.started      = true,
-                             .text_start   = vm->text_ptr,
-                             .data_start   = vm->data_ptr,
-                             .call_patches = vm->compiler.num_call_patches,
-                             .func_addr_patches =
-                                 vm->compiler.num_func_addr_patches,
-                             .global_labels = num_global_labels,
-                             .source_map    = vm->dbg.source_map_count,
-                             .debug_symbols = vm->dbg.num_debug_symbols,
-                             .last_file     = vm->dbg.last_debug_file,
-                             .last_line     = vm->dbg.last_debug_line,
-                             .last_col      = vm->dbg.last_debug_col};
+    if (mark) {
+        Pc hole_start = mark->hole_start, hole_end = mark->hole_end;
+        *mark = (CcCodeMark){.started          = true,
+                             .text_start       = vm->text_ptr,
+                             .data_start       = vm->data_ptr,
+                             .global_labels    = num_global_labels,
+                             .last_file        = vm->dbg.last_debug_file,
+                             .last_line        = vm->dbg.last_debug_line,
+                             .last_col         = vm->dbg.last_debug_col,
+                             .hole_start       = hole_start,
+                             .hole_end         = hole_end,
+                             .saved_top        = vm->text_ptr,
+                             .saved_source_map = vm->dbg.source_map_count};
+    }
 
     // Count and collect the new non-function globals, oldest-first (the list
     // is built by prepending, so walking old_head..globals gives newest-first).
@@ -815,6 +998,16 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
         int call_patch_start = vm->compiler.num_call_patches;
         int addr_patch_start = vm->compiler.num_func_addr_patches;
 
+        if (mark && mark->hole_start) {
+            mark->in_hole           = true;
+            mark->text_start        = mark->hole_start - 1;
+            vm->text_ptr            = mark->text_start;
+            vm->compiler.text_limit = mark->hole_end;
+            vm->dbg.last_debug_file = NULL;
+            vm->dbg.last_debug_line = -1;
+            vm->dbg.last_debug_col  = -1;
+        }
+
         for (int i = 0; i < num_new_fns; i++) {
             // No liveness pass runs in a session, so a static inline body is
             // compiled even though nothing has marked it live.
@@ -871,6 +1064,9 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                 redirect_function_entry(vm, farr[i]);
     }
 
+    if (mark && mark->in_hole)
+        leave_text_hole(vm, mark);
+
     // Only this unit's globals: re-applying an older initializer would
     // overwrite whatever the program has stored there since.
     apply_global_relocations(vm, vm->compiler.globals, old_head);
@@ -879,20 +1075,24 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
     if (mark) {
         mark->ended                 = true;
-        mark->text_end              = vm->text_ptr;
-        mark->data_end              = vm->data_ptr;
-        mark->call_patches_end      = vm->compiler.num_call_patches;
-        mark->func_addr_patches_end = vm->compiler.num_func_addr_patches;
-        mark->global_labels_end     = num_global_labels;
-        mark->source_map_end        = vm->dbg.source_map_count;
-        mark->debug_symbols_end     = vm->dbg.num_debug_symbols;
-        mark->new_fns               = num_new_fns;
-        mark->new_vars              = num_new_vars;
+        if (!mark->in_hole)
+            mark->text_end = vm->text_ptr;
+        mark->data_end          = vm->data_ptr;
+        mark->global_labels_end = num_global_labels;
+        mark->new_fns           = num_new_fns;
+        mark->new_vars          = num_new_vars;
     }
 }
 
 int cc_code_release(VirtualMachine *vm, CcCodeMark *m) {
     if (!m->started)
+        return 0;
+    // A compile into a hole that threw left the top and the limit moved.
+    if (m->in_hole && !m->ended && vm->compiler.text_limit)
+        restore_top_state(vm, m);
+
+    // A running wrapper's return addresses must not point into reused code.
+    if (vm->dbg.cond_depth > 0)
         return 0;
 
     // Data first: it stays reachable through anything the text left behind.
@@ -916,83 +1116,63 @@ int cc_code_release(VirtualMachine *vm, CcCodeMark *m) {
     if (m->ended &&
         (m->new_fns > 1 || m->global_labels_end != m->global_labels))
         return -1;
-    Pc text_end = m->ended ? m->text_end : vm->text_ptr;
-    if (vm->text_ptr != text_end)
-        return 0;
+
+    Pc text_end  = m->ended || m->in_hole ? m->text_end : vm->text_ptr;
     m->text_done = true;
+    if (!m->ended && num_global_labels > m->global_labels)
+        num_global_labels = m->global_labels;
     if (text_end == m->text_start)
         return 1;
 
-    memset(&vm->text_seg[m->text_start + 1], 0,
-           (size_t)(text_end - m->text_start) * sizeof(vm->text_seg[0]));
-    vm->text_ptr = m->text_start;
-    if (!m->ended || vm->compiler.num_call_patches == m->call_patches_end)
-        vm->compiler.num_call_patches = m->call_patches;
-    if (!m->ended ||
-        vm->compiler.num_func_addr_patches == m->func_addr_patches_end)
-        vm->compiler.num_func_addr_patches = m->func_addr_patches;
-    if (!m->ended || num_global_labels == m->global_labels_end)
-        num_global_labels = m->global_labels;
-    if (!m->ended || vm->dbg.num_debug_symbols == m->debug_symbols_end)
-        vm->dbg.num_debug_symbols = m->debug_symbols;
-    if (vm->dbg.source_map &&
-        (!m->ended || vm->dbg.source_map_count == m->source_map_end)) {
-        vm->dbg.source_map_count = m->source_map;
-        vm->dbg.last_debug_file  = m->last_file;
-        vm->dbg.last_debug_line  = m->last_line;
-        vm->dbg.last_debug_col   = m->last_col;
+    Pc start = m->text_start + 1, end = text_end + 1;
+    forget_text_range(vm, start, end);
+    if (m->in_hole || vm->text_ptr != text_end) {
+        // Below live code: the words stay, as a hole.
+        fill_reclaimed_text(vm, start, end);
+        if (m->ended)
+            add_text_hole(vm, start, end);
+        return 1;
     }
-    if (vm->dynobjsz_scan_pc > (long long)m->text_start + 1)
-        vm->dynobjsz_scan_pc = (long long)m->text_start + 1;
 
-    // The index is sorted and keeps each line's lowest pc, so the entries
-    // pointing past the mark are exactly the wrapper's.
-    if (vm->dbg.source_index) {
-        int kept = 0;
-        for (int i = 0; i < vm->dbg.source_index_count; i++)
-            if (vm->dbg.source_index[i].first_pc <= m->text_start)
-                vm->dbg.source_index[kept++] = vm->dbg.source_index[i];
-        vm->dbg.source_index_count     = kept;
-        vm->dbg.source_index_built_for = vm->dbg.source_map_count;
-    }
+    memset(&vm->text_seg[start], 0,
+           (size_t)(end - start) * sizeof(vm->text_seg[0]));
+    vm->text_ptr = m->text_start;
+    if (m->ended && num_global_labels == m->global_labels_end)
+        num_global_labels = m->global_labels;
+    // Nothing is left to dedup against; the next entry is always written.
+    vm->dbg.last_debug_file = NULL;
+    vm->dbg.last_debug_line = -1;
+    vm->dbg.last_debug_col  = -1;
+    absorb_text_holes(vm);
     return 1;
 }
 
 void cc_code_discard(VirtualMachine *vm, CcCodeMark *m) {
     if (!m->started)
         return;
-    int rc = cc_code_release(vm, m);
-    if (rc == 0) {
-        if (vm->compiler.num_dead_marks == vm->compiler.dead_marks_cap) {
-            vm->compiler.dead_marks_cap = vm->compiler.dead_marks_cap
-                                              ? vm->compiler.dead_marks_cap * 2
-                                              : 8;
-            vm->compiler.dead_marks     = realloc(
-                vm->compiler.dead_marks,
-                (size_t)vm->compiler.dead_marks_cap * sizeof(CcCodeMark));
-            if (!vm->compiler.dead_marks)
-                error("out of memory for discarded wrappers");
-        }
-        vm->compiler.dead_marks[vm->compiler.num_dead_marks++] = *m;
+    if (cc_code_release(vm, m) != 0)
         return;
+    if (vm->compiler.num_dead_marks == vm->compiler.dead_marks_cap) {
+        vm->compiler.dead_marks_cap =
+            vm->compiler.dead_marks_cap ? vm->compiler.dead_marks_cap * 2 : 8;
+        vm->compiler.dead_marks =
+            realloc(vm->compiler.dead_marks,
+                    (size_t)vm->compiler.dead_marks_cap * sizeof(CcCodeMark));
+        if (!vm->compiler.dead_marks)
+            error("out of memory for discarded wrappers");
     }
-    if (rc < 0)
-        return;
+    vm->compiler.dead_marks[vm->compiler.num_dead_marks++] = *m;
+}
 
-    // Rolling back may have uncovered an older wrapper's end.
-    for (bool again = true; again;) {
-        again = false;
-        for (int i = 0; i < vm->compiler.num_dead_marks; i++) {
-            int r = cc_code_release(vm, &vm->compiler.dead_marks[i]);
-            if (r == 0)
-                continue;
-            memmove(&vm->compiler.dead_marks[i],
-                    &vm->compiler.dead_marks[i + 1],
-                    (size_t)(vm->compiler.num_dead_marks - i - 1) *
-                        sizeof(CcCodeMark));
-            vm->compiler.num_dead_marks--;
-            again = r > 0;
-            break;
+void cc_code_retry_dead(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.num_dead_marks;) {
+        if (cc_code_release(vm, &vm->compiler.dead_marks[i]) == 0) {
+            i++;
+            continue;
         }
+        memmove(&vm->compiler.dead_marks[i], &vm->compiler.dead_marks[i + 1],
+                (size_t)(vm->compiler.num_dead_marks - i - 1) *
+                    sizeof(CcCodeMark));
+        vm->compiler.num_dead_marks--;
     }
 }
