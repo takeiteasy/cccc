@@ -7,6 +7,20 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-14
+
+- Added: `--watch` hot-reloads a running program when a source file is saved
+  (changed functions are redefined, globals keep their values), restarts it
+  when it exits, and waits for the fix after a compile error. With `--build`,
+  or when the file carries `[[cccc::build]]`, a save rebuilds. See
+  `docs/WATCH.md`.
+- Added: `--watch-path`, `--watch-ignore`, `--watch-debounce`, `--watch-clear`
+  and `--watch-restart`.
+- Added: `Watch`, `WatchGlob`, `IgnoreWatch` and `BuildWatching` in
+  `building.h`.
+- File watching uses the vendored dmon library (`src/dmon.h`); macOS builds link
+  CoreServices.
+
 ## [0.9.2] - 2026-10-14
 
 - Fixed: a debugger condition, return-value expression or REPL `:type`

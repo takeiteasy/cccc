@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.9.2"
+#define CCCC_RELEASE_VERSION "0.10.0"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -1440,6 +1440,13 @@ void register_signal_functions(VirtualMachine *vm);
 /* VM-managed signal pending flags (set only by async-safe native shims) */
 extern volatile sig_atomic_t _cccc_pending[CCCC_NSIG];
 extern volatile sig_atomic_t _cccc_any_pending;
+
+/* --watch: set by cc_watch_notify() on the watcher's thread, drained by the
+   dispatch loop's safe point through cc_watch_apply() (src/reload.c). Raises
+   _cccc_any_pending so the hot path needs no check of its own. */
+extern volatile sig_atomic_t _cccc_watch_pending;
+void cc_watch_notify(void);
+void cc_watch_apply(VirtualMachine *vm);
 
 /* SIGEV_THREAD (#870) notification cookies -- set only by the async-safe
    host trampoline cccc_sigev_thread_trampoline() (src/stdlib/posix_aio.c),

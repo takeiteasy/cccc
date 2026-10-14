@@ -15,6 +15,7 @@ Everything else is optional and probed at build time:
 | Optional dependency | Enables | Notes |
 |---|---|---|
 | GNU **readline** | line editing/history in the REPL | probed via `pkg-config`; Homebrew fallback on macOS |
+| **CoreServices** (macOS) | `--watch`, through FSEvents | ships with the system; linked on every macOS build |
 | **libbacktrace** | symbolic host C stack traces on a crash | git submodule at `vendor/libbacktrace`, **on by default** when the submodule is initialised |
 | **libcurl** | URL `#include`/`#embed` and URL-aware `__has_include`/`__has_embed` | off by default |
 | **doxygen** (+ graphviz) | the HTML API docs (`docs` target) | off by default, never part of a normal build |

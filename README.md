@@ -105,6 +105,7 @@ Manuals live in [`docs/`](docs/):
 | Guide | Covers |
 |---|---|
 | [BUILD.md](docs/BUILD.md) | Building `cccc` itself — `make`, the `build.c` targets, `CCCC_HAS_*` feature knobs |
+| [WATCH.md](docs/WATCH.md) | `--watch`: hot-reload a program or rebuild a `--build` script when a file is saved |
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
@@ -254,6 +255,15 @@ Build Options:
 	                         to the install prefix (default: PREFIX env var or /usr/local).
 	   -- [args...]          Forward positional args to the build entry (BuildArgc/BuildArgv).
 
+Watch Options:
+	--watch              Hot-reload the program when a source file is saved; with --build,
+	                    rebuild instead (implied by [[cccc::build]] in the file)
+	--watch-path=PATH    Also watch a file or directory (repeatable)
+	--watch-ignore=GLOB  Ignore matching paths (repeatable)
+	--watch-debounce=MS  Quiet time that ends a burst of saves (default 100)
+	--watch-clear        Clear the terminal before each restart or rebuild
+	--watch-restart      Restart the program on a change instead of reloading it
+
 Warning Options:
 	-Wall               Enable common warning categories
 	-Wextra             Enable extra warning categories
@@ -360,6 +370,8 @@ Example:
 This project builds on [chibicc](https://github.com/rui314/chibicc) for the C frontend and on ideas from [c4](https://github.com/rswier/c4) / [write-a-C-interpreter](https://github.com/lotabout/write-a-C-interpreter) for the VM-oriented execution model (You can run [test_c4](tests/test_c4.c) inside cccc by running `./cccc tests/test_c4.c -- tests/test_fortytwo.c`).
 
 [stb_sprintf.h](https://github.com/nothings/stb/blob/master/stb_sprintf.h) is used as a base for C23 compliant `*printf` functions.
+
+`--watch` uses [dmon](https://github.com/septag/dmon) by Sepehr Taghdisian (BSD 2-clause), vendored as `src/dmon.h`.
 
 Host C crash backtraces use [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) by Ian Lance Taylor (BSD 3-clause), a git submodule in `vendor/libbacktrace`.
 

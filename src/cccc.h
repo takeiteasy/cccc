@@ -6217,6 +6217,7 @@ typedef struct {
     const char **build_options; // --build-option=key=value strings (#559)
     int          build_options_count;
     int build_install; // --build-install: copy artifacts after build (#560)
+    bool watch;         // --watch: register the build's inputs with the watcher
     const char **user_args; // positional args after -- on the CLI (#558)
     int          user_args_count;
     const char  *argv0;     // the cccc process's own argv[0]; cc_run_build

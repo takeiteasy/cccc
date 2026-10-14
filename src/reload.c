@@ -30,9 +30,11 @@
 
 #include "internal.h"
 #include "parse_internal.h"
+#include "watch.h"
 
 #include <limits.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 
 typedef struct {
@@ -359,7 +361,9 @@ static bool has_old_definition_in(Obj *old_head, const char *key) {
     return false;
 }
 
-int cc_debug_reload(VirtualMachine *vm, const char *path) {
+// quiet_noop: a file with nothing to redefine prints nothing (--watch reloads
+// every file of the program on each change).
+static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     if (vm->dbg.host_fault_signal) {
         fprintf(stderr, "error: cannot reload after a host fault; execution "
                         "cannot resume\n");
@@ -389,13 +393,13 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
     CcPreprocessorState pp           = cc_preprocessor_begin_reload(vm);
     volatile bool       pp_active    = true;
     Scope *volatile fresh            = NULL;
-    MacroFn      *old_fns              = vm->compiler.macro_fns;
-    ComptimeVar  *old_vars             = vm->compiler.comptime_vars;
-    CompileError *err_tail             = vm->errors_tail;
-    int           err_count            = vm->error_count;
-    CcCodeMark  mark                 = {0};
-    ReloadStats st                   = {0};
-    int         rc                   = -1;
+    MacroFn      *old_fns            = vm->compiler.macro_fns;
+    ComptimeVar  *old_vars           = vm->compiler.comptime_vars;
+    CompileError *err_tail           = vm->errors_tail;
+    int           err_count          = vm->error_count;
+    CcCodeMark    mark               = {0};
+    ReloadStats   st                 = {0};
+    int           rc                 = -1;
     vm->error_jmp_buf                = &jb;
 
     if (setjmp(jb) == 0) {
@@ -403,7 +407,7 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
         if (!tok)
             error("failed to preprocess %s", path);
         cc_preprocessor_end_reload(vm, pp);
-        pp_active        = false;
+        pp_active = false;
 
         if (!settle_comptime(vm, old_fns, old_vars))
             goto refused;
@@ -444,8 +448,9 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
         publish_new(vm, old_head);
         unlink_reused(vm, old_head);
         debugger_reresolve_breakpoints(vm);
-        printf("reloaded %s: %d changed, %d unchanged, %d new\n", path,
-               st.changed, st.unchanged, st.added);
+        if (!quiet_noop || st.changed || st.added)
+            printf("reloaded %s: %d changed, %d unchanged, %d new\n", path,
+                   st.changed, st.unchanged, st.added);
         rc = 0;
         goto done;
     }
@@ -473,4 +478,89 @@ done:
         hashmap_deinit_borrowed(&fresh->tag_map);
     }
     return rc;
+}
+
+int cc_debug_reload(VirtualMachine *vm, const char *path) {
+    return reload_file(vm, path, false);
+}
+
+volatile sig_atomic_t _cccc_watch_pending;
+
+void cc_watch_notify(void) {
+    _cccc_watch_pending = 1;
+    _cccc_any_pending   = 1;
+}
+
+// A header may change any file that includes it, and the include graph is not
+// recorded, so a change to anything but a .c file reloads every file that
+// defines a function; unchanged functions are skipped.
+// TODO(#1529): record includer->included edges and reload only dependents.
+void cc_watch_apply(VirtualMachine *vm) {
+    // A reload can run guest code (a new global's initializer), which reaches
+    // the safe point again; the nested save waits for the outer reload.
+    static bool applying;
+    if (applying) {
+        _cccc_watch_pending = 1;
+        return;
+    }
+    applying            = true;
+
+    int    n            = 0;
+    char **changed      = cc_watch_take(&n);
+    bool   sources_only = n > 0;
+    for (int i = 0; i < n; i++) {
+        size_t len = strlen(changed[i]);
+        if (len < 2 || strcmp(changed[i] + len - 2, ".c"))
+            sources_only = false;
+    }
+
+    char **owners = NULL;
+    int    count = 0, cap = 0;
+    for (Obj *o = vm->compiler.globals; n > 0 && o; o = o->next) {
+        if (!is_file_scope_obj(o) || !o->is_function || !o->body)
+            continue;
+        char *key = file_key(obj_file(o));
+        // Functions of embedded headers have no file on disk.
+        bool dup = !key || access(key, R_OK) != 0;
+        for (int i = 0; !dup && i < count; i++)
+            dup = !strcmp(owners[i], key);
+        // Only the saved .c files, when nothing else changed.
+        for (int i = 0; !dup && sources_only; i++) {
+            if (i == n) {
+                dup = true;
+                break;
+            }
+            if (!strcmp(changed[i], key))
+                break;
+        }
+        if (dup) {
+            free(key);
+            continue;
+        }
+        if (count == cap) {
+            cap    = cap ? cap * 2 : 8;
+            owners = realloc(owners, (size_t)cap * sizeof *owners);
+        }
+        owners[count++] = key;
+    }
+    for (int i = 0; i < n; i++)
+        free(changed[i]);
+    free(changed);
+
+    char cwd[PATH_MAX], raw_cwd[PATH_MAX];
+    if (!getcwd(raw_cwd, sizeof raw_cwd) || !realpath(raw_cwd, cwd))
+        cwd[0] = 0;
+    size_t cwd_len = strlen(cwd);
+    for (int i = 0; i < count; i++) {
+        const char *shown = owners[i];
+        if (cwd_len && !strncmp(shown, cwd, cwd_len) && shown[cwd_len] == '/')
+            shown += cwd_len + 1;
+        reload_file(vm, shown, true);
+        free(owners[i]);
+    }
+    free(owners);
+
+    applying = false;
+    if (_cccc_watch_pending)
+        _cccc_any_pending = 1;
 }

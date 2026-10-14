@@ -264,6 +264,9 @@ static void add_cccc_flags_opt(Builder *ctx, BuildTarget *t, BuildTarget *bt,
         // every cccc-family target fails to link on macOS with undefined
         // _iconv/_iconv_open/_iconv_close symbols from posix.c.
         AddLib(t, "iconv");
+        // src/watch.c's dmon backend is FSEvents.
+        AddLdFlag(t, "-framework");
+        AddLdFlag(t, "CoreServices");
     }
     probe_libffi(ctx, t);
     maybe_add_curl(ctx, t);
@@ -615,7 +618,8 @@ BuildTarget *clean(Builder *ctx) {
 // RunCustom shell has no variables or exit-code capture to accumulate a
 // fail flag across commands the way the Makefile's `for` loop does.
 
-static BuildTarget *make_host_tests(Builder *ctx, BuildTarget *bt) {
+static BuildTarget *make_host_tests(Builder *ctx, BuildTarget *bt,
+                                    BuildTarget *cccc) {
     const char **files = GlobFiles(ctx, "tests/host/test_*.c");
     BuildTarget *tests[256];
     int          n = 0;
@@ -653,12 +657,15 @@ static BuildTarget *make_host_tests(Builder *ctx, BuildTarget *bt) {
     BuildTarget *step = RunCustom(ctx, "host-tests", cmd);
     for (int i = 0; i < n; i++)
         DependsOn(step, tests[i]);
+    // test_watch_cli runs build/cccc.
+    DependsOn(step, cccc);
     return step;
 }
 
 [[cccc::build_target]]
 BuildTarget *host_tests(Builder *ctx) {
-    return make_host_tests(ctx, make_libbacktrace(ctx));
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_host_tests(ctx, bt, make_cccc_exe_named(ctx, bt, "cccc"));
 }
 
 // ---- test / test-vm / test-native --
@@ -669,7 +676,7 @@ BuildTarget *test(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
     BuildTarget *all  = make_test_step(ctx, cccc, "test");
-    DependsOn(all, make_host_tests(ctx, bt));
+    DependsOn(all, make_host_tests(ctx, bt, cccc));
     return all;
 }
 
