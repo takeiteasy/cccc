@@ -4205,6 +4205,12 @@ typedef struct Compiler {
     HashMap input_file_slots; // path -> input_files index + 1; a path read again
                               // (a reload) reuses its slot
 
+    // Include graph (--watch): root file realpath -> HashMap* (a set) of the
+    // realpaths of the non-system files its preprocessing read.
+    HashMap  tu_deps;
+    HashMap *dep_set;           // set being filled by the running preprocess
+    HashMap *dep_replaced;      // set the latest install replaced, for rollback
+
     // Parser state
     Obj   *locals;    // All local variable instances during parsing
     Obj   *globals;   // Global variables accumulated list

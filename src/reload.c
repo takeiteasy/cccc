@@ -380,7 +380,8 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     }
 
     Obj *old_head = vm->compiler.globals;
-    if (!has_old_definition_in(old_head, resolved)) {
+    if (!has_old_definition_in(old_head, resolved) &&
+        !hashmap_get(&vm->compiler.tu_deps, resolved)) {
         fprintf(stderr, "error: reload: '%s' is not a file of this program\n",
                 path);
         return -1;
@@ -392,6 +393,8 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     Obj                *saved_locals = vm->compiler.locals;
     CcPreprocessorState pp           = cc_preprocessor_begin_reload(vm);
     volatile bool       pp_active    = true;
+    HashMap            *saved_deps   = vm->compiler.dep_set;
+    volatile bool       deps_changed = false;
     Scope *volatile fresh            = NULL;
     MacroFn      *old_fns            = vm->compiler.macro_fns;
     ComptimeVar  *old_vars           = vm->compiler.comptime_vars;
@@ -403,7 +406,8 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     vm->error_jmp_buf                = &jb;
 
     if (setjmp(jb) == 0) {
-        Token *tok = cc_preprocess_ex(vm, resolved, false);
+        Token *tok   = cc_preprocess_ex(vm, resolved, false);
+        deps_changed = true;
         if (!tok)
             error("failed to preprocess %s", path);
         cc_preprocessor_end_reload(vm, pp);
@@ -451,6 +455,7 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
         if (!quiet_noop || st.changed || st.added)
             printf("reloaded %s: %d changed, %d unchanged, %d new\n", path,
                    st.changed, st.unchanged, st.added);
+        cc_deps_commit(vm);
         rc = 0;
         goto done;
     }
@@ -464,7 +469,11 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
         cc_preprocessor_end_reload(vm, pp);
     if (mark.started)
         cc_code_discard(vm, &mark);
+    if (!deps_changed)
+        cc_deps_abort(vm, saved_deps);
 refused:
+    if (deps_changed)
+        cc_deps_rollback(vm, resolved);
     vm->compiler.globals       = old_head;
     vm->compiler.macro_fns     = old_fns;
     vm->compiler.comptime_vars = old_vars;
@@ -491,10 +500,49 @@ void cc_watch_notify(void) {
     _cccc_any_pending   = 1;
 }
 
-// A header may change any file that includes it, and the include graph is not
-// recorded, so a change to anything but a .c file reloads every file that
-// defines a function; unchanged functions are skipped.
-// TODO(#1529): record includer->included edges and reload only dependents.
+typedef struct {
+    char **changed;
+    bool  *covered;
+    int    n;
+    char **roots;
+    int    count, cap;
+} ApplyPlan;
+
+static void plan_add(ApplyPlan *p, const char *path) {
+    for (int i = 0; i < p->count; i++)
+        if (!strcmp(p->roots[i], path))
+            return;
+    if (p->count == p->cap) {
+        p->cap   = p->cap ? p->cap * 2 : 8;
+        p->roots = realloc(p->roots, (size_t)p->cap * sizeof *p->roots);
+    }
+    p->roots[p->count++] = strdup(path);
+}
+
+// A root is reloaded when it, or a file it read, changed.
+static int plan_root_iter(char *key, int keylen, void *val, void *user_data) {
+    ApplyPlan *p   = user_data;
+    char      *root = strndup(key, (size_t)keylen);
+    for (int i = 0; i < p->n; i++)
+        if (hashmap_get((HashMap *)val, p->changed[i])) {
+            p->covered[i] = true;
+            plan_add(p, root);
+        }
+    free(root);
+    return 0;
+}
+
+static int watch_dep_iter(char *key, int keylen, void *val, void *user_data) {
+    (void)val;
+    (void)user_data;
+    char *path = strndup(key, (size_t)keylen);
+    cc_watch_add(path);
+    free(path);
+    return 0;
+}
+
+// Reloads the files that read a changed path. A changed file that no root
+// read (one the REPL loaded) is reloaded on its own when it defines functions.
 void cc_watch_apply(VirtualMachine *vm) {
     // A reload can run guest code (a new global's initializer), which reaches
     // the safe point again; the nested save waits for the outer reload.
@@ -503,49 +551,23 @@ void cc_watch_apply(VirtualMachine *vm) {
         _cccc_watch_pending = 1;
         return;
     }
-    applying            = true;
+    applying = true;
 
-    int    n            = 0;
-    char **changed      = cc_watch_take(&n);
-    bool   sources_only = n > 0;
-    for (int i = 0; i < n; i++) {
-        size_t len = strlen(changed[i]);
-        if (len < 2 || strcmp(changed[i] + len - 2, ".c"))
-            sources_only = false;
-    }
+    ApplyPlan plan = {0};
+    plan.changed   = cc_watch_take(&plan.n);
+    plan.covered   = calloc((size_t)plan.n + 1, sizeof(bool));
+    hashmap_foreach(&vm->compiler.tu_deps, plan_root_iter, &plan);
+    for (int i = 0; i < plan.n; i++)
+        if (!plan.covered[i] && access(plan.changed[i], R_OK) == 0 &&
+            has_old_definition_in(vm->compiler.globals, plan.changed[i]))
+            plan_add(&plan, plan.changed[i]);
+    for (int i = 0; i < plan.n; i++)
+        free(plan.changed[i]);
+    free(plan.changed);
+    free(plan.covered);
 
-    char **owners = NULL;
-    int    count = 0, cap = 0;
-    for (Obj *o = vm->compiler.globals; n > 0 && o; o = o->next) {
-        if (!is_file_scope_obj(o) || !o->is_function || !o->body)
-            continue;
-        char *key = file_key(obj_file(o));
-        // Functions of embedded headers have no file on disk.
-        bool dup = !key || access(key, R_OK) != 0;
-        for (int i = 0; !dup && i < count; i++)
-            dup = !strcmp(owners[i], key);
-        // Only the saved .c files, when nothing else changed.
-        for (int i = 0; !dup && sources_only; i++) {
-            if (i == n) {
-                dup = true;
-                break;
-            }
-            if (!strcmp(changed[i], key))
-                break;
-        }
-        if (dup) {
-            free(key);
-            continue;
-        }
-        if (count == cap) {
-            cap    = cap ? cap * 2 : 8;
-            owners = realloc(owners, (size_t)cap * sizeof *owners);
-        }
-        owners[count++] = key;
-    }
-    for (int i = 0; i < n; i++)
-        free(changed[i]);
-    free(changed);
+    char **owners = plan.roots;
+    int    count  = plan.count;
 
     char cwd[PATH_MAX], raw_cwd[PATH_MAX];
     if (!getcwd(raw_cwd, sizeof raw_cwd) || !realpath(raw_cwd, cwd))
@@ -555,10 +577,16 @@ void cc_watch_apply(VirtualMachine *vm) {
         const char *shown = owners[i];
         if (cwd_len && !strncmp(shown, cwd, cwd_len) && shown[cwd_len] == '/')
             shown += cwd_len + 1;
-        reload_file(vm, shown, true);
+        if (reload_file(vm, shown, true) == 0 && cc_watch_active()) {
+            HashMap *deps = hashmap_get(&vm->compiler.tu_deps, owners[i]);
+            if (deps)
+                hashmap_foreach(deps, watch_dep_iter, NULL);
+        }
         free(owners[i]);
     }
     free(owners);
+    if (cc_watch_active())
+        cc_watch_arm();
 
     applying = false;
     if (_cccc_watch_pending)

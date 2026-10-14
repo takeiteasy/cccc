@@ -33,8 +33,10 @@ count=20
 
 - **Refused reloads** (a parse error, a changed signature or struct layout) print
   the error. The old code keeps running and the next save tries again.
-- **Headers:** every file of the program is reloaded on any change; unchanged
-  functions are skipped, so only the ones a header edit touches are redefined.
+- **Headers:** saving a header reloads the files that include it, directly or
+  through another header; unchanged functions are skipped, so only the ones the
+  edit touches are redefined. A header a reload starts to include is watched
+  from then on.
 - **Program exit:** the process waits for the next save and then runs the
   program from the start.
 - **Compile errors** at startup print the error and wait for the fix.

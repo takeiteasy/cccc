@@ -3444,9 +3444,90 @@ static const char *pragma_once_key(VirtualMachine *vm, const char *path) {
     return cc_canonical_path_key(vm, path);
 }
 
+static void dep_free(HashMap *set) {
+    if (set) {
+        hashmap_deinit(set);
+        free(set);
+    }
+}
+
+static int dep_free_iter(char *key, int keylen, void *val, void *user_data) {
+    (void)key;
+    (void)keylen;
+    (void)user_data;
+    dep_free(val);
+    return 0;
+}
+
+void cc_deps_free_all(VirtualMachine *vm) {
+    hashmap_foreach(&vm->compiler.tu_deps, dep_free_iter, NULL);
+    hashmap_deinit(&vm->compiler.tu_deps);
+    cc_deps_commit(vm);
+    dep_free(vm->compiler.dep_set);
+    vm->compiler.dep_set = NULL;
+}
+
+// Drops the set the latest install replaced; the new one stays.
+void cc_deps_commit(VirtualMachine *vm) {
+    dep_free(vm->compiler.dep_replaced);
+    vm->compiler.dep_replaced = NULL;
+}
+
+// Puts the replaced set back and drops the one installed over it.
+void cc_deps_rollback(VirtualMachine *vm, const char *root) {
+    HashMap *nw = hashmap_get(&vm->compiler.tu_deps, root);
+    if (vm->compiler.dep_replaced)
+        hashmap_put(&vm->compiler.tu_deps, root, vm->compiler.dep_replaced);
+    else
+        hashmap_delete(&vm->compiler.tu_deps, root);
+    vm->compiler.dep_replaced = NULL;
+    dep_free(nw);
+    cc_deps_commit(vm);
+}
+
+// Leaves a preprocess that was cut short by an error: its half-built set is
+// dropped and the enclosing one (if any) is current again.
+void cc_deps_abort(VirtualMachine *vm, HashMap *outer) {
+    if (vm->compiler.dep_set != outer)
+        dep_free(vm->compiler.dep_set);
+    vm->compiler.dep_set = outer;
+}
+
+static void dep_record(VirtualMachine *vm, const char *path) {
+    char resolved[PATH_MAX];
+    if (vm->compiler.dep_set && realpath(path, resolved))
+        hashmap_put(vm->compiler.dep_set, resolved, (void *)1);
+}
+
+// Starts the set for a root file; returns the set it interrupts.
+HashMap *cc_deps_begin(VirtualMachine *vm, const char *root) {
+    HashMap *outer       = vm->compiler.dep_set;
+    vm->compiler.dep_set = calloc(1, sizeof(HashMap));
+    dep_record(vm, root);
+    return outer;
+}
+
+// Files the root read become its entry in tu_deps.
+void cc_deps_install(VirtualMachine *vm, const char *root, HashMap *outer) {
+    HashMap *set         = vm->compiler.dep_set;
+    vm->compiler.dep_set = outer;
+    char key[PATH_MAX];
+    if (!realpath(root, key)) {
+        dep_free(set);
+        return;
+    }
+    cc_deps_commit(vm);
+    vm->compiler.dep_replaced = hashmap_get(&vm->compiler.tu_deps, key);
+    hashmap_put(&vm->compiler.tu_deps, key, set);
+}
+
 static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
                            Token *filename_tok, const char *include_name,
                            bool is_system) {
+    // Before the #pragma once / guard exits: a header an earlier root already
+    // pulled in still belongs to this one.
+    if (!is_system)
+        dep_record(vm, path);
     const char *once_key = pragma_once_key(vm, path);
 
     // Check for "#pragma once"

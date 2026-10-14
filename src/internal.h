@@ -1448,6 +1448,16 @@ extern volatile sig_atomic_t _cccc_watch_pending;
 void cc_watch_notify(void);
 void cc_watch_apply(VirtualMachine *vm);
 
+// Include graph (src/preprocess.c): cc_preprocess_ex records the files each
+// root reads in vm->compiler.tu_deps. A re-preprocess of the same root keeps
+// the set it replaced until it is committed or rolled back.
+HashMap *cc_deps_begin(VirtualMachine *vm, const char *root);
+void cc_deps_install(VirtualMachine *vm, const char *root, HashMap *outer);
+void cc_deps_commit(VirtualMachine *vm);
+void cc_deps_rollback(VirtualMachine *vm, const char *root);
+void cc_deps_abort(VirtualMachine *vm, HashMap *outer);
+void cc_deps_free_all(VirtualMachine *vm);
+
 /* SIGEV_THREAD (#870) notification cookies -- set only by the async-safe
    host trampoline cccc_sigev_thread_trampoline() (src/stdlib/posix_aio.c),
    polled by the VM dispatch loop's safe point (src/vm.c) alongside

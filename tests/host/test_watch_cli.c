@@ -192,6 +192,45 @@ static void test_refused_reload(const char *dir) {
     reap(&c);
 }
 
+// Two files share a header; saving a header reloads the file that includes
+// it, also a header that file only started to include after an earlier reload.
+static void test_header_reload(const char *dir) {
+    write_file(dir, "h_main.c",
+               "#include <stdio.h>\n#include <unistd.h>\n"
+               "int fb(void);\n"
+               "int main(void) {\n"
+               "    for (int i = 0; i < 400; i++) {\n"
+               "        printf(\"fb=%d\\n\", fb());\n"
+               "        fflush(stdout);\n"
+               "        usleep(50000);\n"
+               "    }\n"
+               "    return 0;\n"
+               "}\n");
+    write_file(dir, "h_b.h", "#define B 1\n");
+    write_file(dir, "h_c.h", "#define C 10\n");
+    write_file(dir, "h_b.c", "#include \"h_b.h\"\nint fb(void) { return B; }\n");
+    char *argv[] = {cccc, "--watch", "h_main.c", "h_b.c", NULL};
+    Child c;
+    spawn(&c, dir, argv);
+    long at = EXPECT(&c, "fb=1\n", 0, "header reload: first run");
+
+    write_file(dir, "h_b.h", "#define B 2\n");
+    at = EXPECT(&c, "reloaded h_b.c: 1 changed", (size_t)at,
+                "header reload: includer reloaded");
+    at = EXPECT(&c, "fb=2\n", (size_t)at, "header reload: new header value");
+
+    write_file(dir, "h_b.c",
+               "#include \"h_b.h\"\n#include \"h_c.h\"\n"
+               "int fb(void) { return B + C; }\n");
+    at = EXPECT(&c, "fb=12\n", (size_t)at, "header reload: new include");
+
+    write_file(dir, "h_c.h", "#define C 20\n");
+    at = EXPECT(&c, "reloaded h_b.c: 1 changed", (size_t)at,
+                "header reload: header added by a reload is watched");
+    EXPECT(&c, "fb=22\n", (size_t)at, "header reload: new header value (2)");
+    reap(&c);
+}
+
 static void test_restart(const char *dir) {
     write_file(dir, "s.c",
                "#include <stdio.h>\n#include <unistd.h>\n"
@@ -317,6 +356,7 @@ int main(void) {
 
     test_hot_reload(root);
     test_refused_reload(root);
+    test_header_reload(root);
     test_restart(root);
     test_exit_waits(root);
     test_build(root);
