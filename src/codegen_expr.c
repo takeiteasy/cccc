@@ -3929,8 +3929,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                          is_wide_bitint(cap->ty) || is_decimal(cap->ty)))
                         emit_rr(vm, LDR_D, r_val,
                                 r_val); // load pointer from slot
+                    // A slot of this frame is a known bp-relative address, so
+                    // only the static-chain case needs the dangling check.
                     if (!wide_copy)
-                        emit_load(vm, cap->ty, r_val, r_val);
+                        emit_load_ex(vm, cap->ty, r_val, r_val,
+                                     outer_owner != NULL);
                 } else {
                     // Global
                     emit_lda3(vm, r_val, cap->offset);

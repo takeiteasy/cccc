@@ -775,15 +775,29 @@ static void test_confined_text(void) {
     CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
           "a wrapper with a block literal is reclaimed: text %u",
           vm.text_ptr - t0);
+
+    b = cond_bp(cb_in, "({ int (^k)(void) = ^{ return x; }; k(); }) == 1");
+    CHECK(eval("cb_fn(1)") == 1, "cb_fn with a capturing block");
+    CHECK(vm.dbg.breakpoints[b].hit_count == 1,
+          "capturing block condition is true: %d",
+          vm.dbg.breakpoints[b].hit_count);
+    cc_remove_breakpoint(&vm, b);
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "a wrapper with a capturing block is reclaimed: text %u",
+          vm.text_ptr - t0);
 }
 
-// Runs cf_fn(1) under `cond` and returns how often the breakpoint fired.
-static int cond_hits(Pc pc, const char *cond) {
+// Runs `call` under `cond` and returns how often the breakpoint fired.
+static int cond_hits_in(Pc pc, const char *cond, const char *call) {
     int b = cond_bp(pc, cond);
-    eval("cf_fn(1)");
+    eval(call);
     int hits = vm.dbg.breakpoints[b].hit_count;
     cc_remove_breakpoint(&vm, b);
     return hits;
+}
+
+static int cond_hits(Pc pc, const char *cond) {
+    return cond_hits_in(pc, cond, "cf_fn(1)");
 }
 
 // A paused-frame local resolves after a string literal, inside statement
@@ -803,17 +817,34 @@ static void test_frame_locals(void) {
         "x++ == 1",
         "(x += 0) == 1",
         "__atomic_fetch_add(&x, 0, 0) == 1",
+        "({ int (^k)(void) = ^{ return x; }; k(); }) == 1",
+        "^{ return x + y; }() == 2",
+        "^{ return ^{ return x; }(); }() == 1",
+        "({ int (^k)(void) = ^{ return x; }; x = 5; int r = k(); x = 1; r; }) "
+        "== 1",
+        "({ x = 5; int r = ^{ return x; }(); x = 1; r; }) == 5",
     };
     static const char *const miss[] = {
         "(*\"abc\", x) == 99",
         "({ int r = x; r; }) == 99",
         "__atomic_fetch_add(&x, 0, 0) == 99",
+        "({ int (^k)(void) = ^{ return x; }; k(); }) == 99",
     };
     for (size_t i = 0; i < sizeof(hit) / sizeof(*hit); i++)
         CHECK(cond_hits(cf_in, hit[i]) == 1, "condition fires: %s", hit[i]);
     for (size_t i = 0; i < sizeof(miss) / sizeof(*miss); i++)
         CHECK(cond_hits(cf_in, miss[i]) == 0, "condition is silent: %s",
               miss[i]);
+
+    decl("int cv_fn(const int c){\n  int a[2] = {3, 4};\n  __block int b = 7;\n"
+         "  return c;\n}");
+    Pc cv_in = cc_find_pc_for_source(&vm, last_compiled_file(), 4);
+    CHECK(cond_hits_in(cv_in, "^{ return c; }() == 5", "cv_fn(5)") == 1,
+          "a const parameter is captured");
+    CHECK(cond_hits_in(cv_in, "^{ return a[0]; }() == 3", "cv_fn(5)") == 0,
+          "an array local is not captured");
+    CHECK(cond_hits_in(cv_in, "^{ return b; }() == 7", "cv_fn(5)") == 0,
+          "a __block local is not captured");
 }
 
 // Steps over the instructions in [from, to) and reports whether they end

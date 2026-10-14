@@ -895,6 +895,7 @@ Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params);
 // codegen.c's slot addressing can never drift apart.
 long cc_block_capture_offset(Obj *block_fn, int idx);
 long cc_block_desc_size(Obj *block_fn);
+void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var);
 Type *complex_type_for(VirtualMachine *vm, Type *base);
 Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned);
 void add_type(VirtualMachine *vm, Node *node);

@@ -1327,6 +1327,8 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
 #include "../include/cccc/reflection.h"
 extern int local_align_log(Obj *var); // codegen_emit.c (#1137)
+extern Obj *new_lvar(VirtualMachine *vm, char *name, int name_len,
+                     Type *ty);       // parse_core.c
 
 static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     if (!var || !var->name || !*var->name)
@@ -1391,9 +1393,10 @@ static void debugger_rewrite_local(Node *node, void *vctx) {
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
         Obj  *var       = node->var;
-        // Referenced by Obj, not by name: a REPL session drops globals created
-        // while a unit ran from its list, so a lookup could miss the variable
-        // though its storage lives on.
+        // TODO: a __block local's slot holds its heap-box pointer, not the
+        // value (#1522) Referenced by Obj, not by name: a REPL session drops
+        // globals created while a unit ran from its list, so a lookup could
+        // miss the variable though its storage lives on.
         Node *frame_ref = cc_ast_var_node(vm, vm->dbg.dbg_frame_var);
         Node *char_ptr = __builtin_ast_cast(frame_ref, pointer_to(vm, ty_char));
         Node *idx      = __builtin_ast_int_literal((int64_t)var->offset *
@@ -1445,8 +1448,157 @@ static void debugger_rewrite_local(Node *node, void *vctx) {
     }
 }
 
+// A block literal's body is not part of the condition's node tree, so a paused
+// local it names is captured by value instead: the body reads a wrapper-local
+// proxy, and the literal becomes `(proxy = local, ..., literal)` so the copy
+// happens each time the literal is evaluated. The `local` in the assignment is
+// then rewritten like any other reference.
+// orig[i] is a paused-frame local, proxy[i] its stand-in; one map per
+// top-level literal.
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *current_fn;
+    Obj           **orig;
+    Obj           **proxy;
+    int             n, cap;
+} ProxyMap;
+
+typedef struct {
+    ProxyMap *map;
+    Obj     **used; // proxies the walked block (and any inside it) reads
+    int       n, cap;
+} BlockWalk;
+
+static Obj *debugger_capture_proxy(ProxyMap *m, Obj *var) {
+    for (int i = 0; i < m->n; i++)
+        if (m->orig[i] == var)
+            return m->proxy[i];
+    if (var->is_block_var || var->ty->kind == TY_ARRAY ||
+        var->ty->kind == TY_VLA)
+        error("a block in a condition cannot capture %s '%s'",
+              var->is_block_var ? "__block variable" : "array", var->name);
+
+    Type *ty = unqualified(m->vm, var->ty);
+    if (ty->name) {
+        ty           = copy_type(m->vm, ty);
+        ty->name     = NULL;
+        ty->name_pos = NULL;
+    }
+    Obj *proxy = new_lvar(m->vm, "", 0, ty);
+    if (m->n == m->cap) {
+        m->cap   = m->cap ? m->cap * 2 : 4;
+        m->orig  = realloc(m->orig, m->cap * sizeof(*m->orig));
+        m->proxy = realloc(m->proxy, m->cap * sizeof(*m->proxy));
+    }
+    m->orig[m->n]  = var;
+    m->proxy[m->n] = proxy;
+    m->n++;
+    return proxy;
+}
+
+static void debugger_walk_add_used(BlockWalk *w, Obj *proxy) {
+    for (int i = 0; i < w->n; i++)
+        if (w->used[i] == proxy)
+            return;
+    if (w->n == w->cap) {
+        w->cap  = w->cap ? w->cap * 2 : 4;
+        w->used = realloc(w->used, w->cap * sizeof(*w->used));
+    }
+    w->used[w->n++] = proxy;
+}
+
+static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent);
+
+static void debugger_capture_visit(Node *n, void *vctx) {
+    BlockWalk *w = vctx;
+    if (n->kind == ND_VAR && n->var &&
+        debugger_var_is_paused_frame_local(w->map->current_fn, n->var)) {
+        Obj *proxy = debugger_capture_proxy(w->map, n->var);
+        n->var     = proxy;
+        debugger_walk_add_used(w, proxy);
+    } else if (n->kind == ND_BLOCK_LITERAL && n->block_fn) {
+        debugger_capture_block(w->map, n, w);
+    }
+}
+
+// Points the body of `lit` (and of the blocks inside it) at proxies and
+// registers them as captures. `parent` also gets them, since an enclosing
+// block must capture what its inner block reads.
+static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent) {
+    BlockWalk w = {.map = m};
+    serialize_ast_walk(lit->block_fn->body, debugger_capture_visit, &w);
+    for (int i = 0; i < w.n; i++) {
+        cc_block_add_capture(m->vm, lit, w.used[i]);
+        if (parent)
+            debugger_walk_add_used(parent, w.used[i]);
+    }
+    free(w.used);
+}
+
+typedef struct {
+    Node **v;
+    int    n, cap;
+} LiteralList;
+
+static void debugger_gather_literal(Node *n, void *vctx) {
+    LiteralList *l = vctx;
+    if (n->kind != ND_BLOCK_LITERAL || !n->block_fn)
+        return;
+    if (l->n == l->cap) {
+        l->cap = l->cap ? l->cap * 2 : 4;
+        l->v   = realloc(l->v, l->cap * sizeof(*l->v));
+    }
+    l->v[l->n++] = n;
+}
+
+static void debugger_capture_blocks(VirtualMachine *vm, Obj *current_fn,
+                                    Node *root) {
+    if (!current_fn)
+        return;
+    LiteralList lits = {0};
+    serialize_ast_walk(root, debugger_gather_literal, &lits);
+
+    for (int i = 0; i < lits.n; i++) {
+        Node    *lit = lits.v[i];
+        ProxyMap m   = {.vm = vm, .current_fn = current_fn};
+        debugger_capture_block(&m, lit, NULL);
+
+        if (m.n) {
+            Node *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+            *copy       = *lit;
+            copy->next  = NULL;
+
+            Node *chain = NULL;
+            for (int j = 0; j < m.n; j++) {
+                Node *assign =
+                    __builtin_ast_assign(cc_ast_var_node(vm, m.proxy[j]),
+                                         cc_ast_var_node(vm, m.orig[j]));
+                add_type(vm, assign);
+                if (chain) {
+                    chain = __builtin_ast_comma(chain, assign);
+                    add_type(vm, chain);
+                } else {
+                    chain = assign;
+                }
+            }
+            Node  *comma = __builtin_ast_comma(chain, copy);
+            Node  *next  = lit->next;
+            Token *tok   = lit->tok;
+            Type  *ty    = lit->ty;
+            *lit         = *comma;
+            lit->next    = next;
+            lit->tok     = tok;
+            lit->ty      = ty;
+        }
+        free(m.orig);
+        free(m.proxy);
+    }
+    free(lits.v);
+}
+
 static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
                                     Node *root) {
+    debugger_capture_blocks(vm, current_fn, root);
     RewriteCtx ctx = {vm, current_fn};
     serialize_ast_walk(root, debugger_rewrite_local, &ctx);
 }
