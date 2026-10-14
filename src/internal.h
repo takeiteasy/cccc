@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.9.0"
+#define CCCC_RELEASE_VERSION "0.9.1"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -895,6 +895,7 @@ Type *block_type(VirtualMachine *vm, Type *return_ty, Type *params);
 // codegen.c's slot addressing can never drift apart.
 long cc_block_capture_offset(Obj *block_fn, int idx);
 long cc_block_desc_size(Obj *block_fn);
+void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var);
 Type *complex_type_for(VirtualMachine *vm, Type *base);
 Type *bitint_type(VirtualMachine *vm, Token *tok, int width, bool is_unsigned);
 void add_type(VirtualMachine *vm, Node *node);

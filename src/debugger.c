@@ -10,6 +10,7 @@
 */
 
 #include "./internal.h"
+#include "./serialize_internal.h"
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
 
@@ -1325,7 +1326,10 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 // __builtin_current_vm, which cc_init seeds for the whole compile.
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
 #include "../include/cccc/reflection.h"
-extern int local_align_log(Obj *var); // codegen_emit.c (#1137)
+extern int local_align_log(Obj *var);           // codegen_emit.c (#1137)
+extern bool param_slot_holds_pointer(Type *ty); // codegen_emit.c
+extern Obj *new_lvar(VirtualMachine *vm, char *name, int name_len,
+                     Type *ty);       // parse_core.c
 
 static void debugger_add_condition_scope_var(VarScopeNode **vars, Obj *var) {
     if (!var || !var->name || !*var->name)
@@ -1378,10 +1382,14 @@ static bool debugger_var_is_paused_frame_local(Obj *current_fn, Obj *var) {
 // through ordinary codegen since a single data segment is shared by every
 // function. The rewrite is type-preserving (see the node->ty note below), so
 // ancestor nodes never need retyping and this can simply mutate in place.
-static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
-                                    Node *node) {
-    if (!node)
-        return;
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *current_fn;
+} RewriteCtx;
+
+static void debugger_rewrite_local(Node *node, void *vctx) {
+    VirtualMachine *vm         = ((RewriteCtx *)vctx)->vm;
+    Obj            *current_fn = ((RewriteCtx *)vctx)->current_fn;
 
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
@@ -1414,18 +1422,26 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
             add_type(vm, masked);
             addr = masked;
         }
+        // A __block local, a VLA and a by-pointer aggregate parameter keep a
+        // pointer to their storage in the slot: read it, then go through it.
+        bool slot_holds_pointer =
+            var->is_block_var || var->ty->kind == TY_VLA ||
+            (var->is_param && param_slot_holds_pointer(var->ty));
+        if (slot_holds_pointer) {
+            Node *slot = __builtin_ast_cast(
+                addr, pointer_to(vm, pointer_to(vm, ty_void)));
+            addr = __builtin_ast_unary(ND_DEREF, slot);
+            add_type(vm, addr);
+            addr->dbg_frame_local = true;
+        }
         Node *typed_ptr = __builtin_ast_cast(addr, pointer_to(vm, var->ty));
 
         node->kind      = ND_DEREF;
         node->lhs       = typed_ptr;
         node->var       = NULL;
-        // By-pointer aggregate params hold a pointer in the frame slot, so
-        // their access stays checked (as in addr_is_local_frame's ND_VAR).
-        node->dbg_frame_local =
-            !(var->is_param &&
-              (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
-               is_decimal(var->ty)));
+        // Storage reached through a slot pointer stays checked, as in
+        // addr_is_local_frame's ND_VAR.
+        node->dbg_frame_local = !slot_holds_pointer;
         // Type-preserving rewrite: *(T*)&frame[off] has exactly the same type
         // T as the original variable, so set it directly instead of clearing
         // it for add_type to recompute. That matters beyond saving a call:
@@ -1437,16 +1453,162 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
         // conversions), clearing that cast's ->ty to force a "fresh" retype
         // would permanently null it out instead.
         node->ty = var->ty;
-        return;
     }
+}
 
-    debugger_rewrite_locals(vm, current_fn, node->lhs);
-    debugger_rewrite_locals(vm, current_fn, node->rhs);
-    debugger_rewrite_locals(vm, current_fn, node->cond);
-    debugger_rewrite_locals(vm, current_fn, node->then);
-    debugger_rewrite_locals(vm, current_fn, node->els);
-    for (Node *a = node->args; a; a = a->next)
-        debugger_rewrite_locals(vm, current_fn, a);
+// A block literal's body is not part of the condition's node tree, so a paused
+// local it names is captured by value instead: the body reads a wrapper-local
+// proxy, and the literal becomes `(proxy = local, ..., literal)` so the copy
+// happens each time the literal is evaluated. The `local` in the assignment is
+// then rewritten like any other reference.
+// orig[i] is a paused-frame local, proxy[i] its stand-in; one map per
+// top-level literal.
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *current_fn;
+    Obj           **orig;
+    Obj           **proxy;
+    int             n, cap;
+} ProxyMap;
+
+typedef struct {
+    ProxyMap *map;
+    Obj     **used; // proxies the walked block (and any inside it) reads
+    int       n, cap;
+} BlockWalk;
+
+static Obj *debugger_capture_proxy(ProxyMap *m, Obj *var, Token *tok) {
+    for (int i = 0; i < m->n; i++)
+        if (m->orig[i] == var)
+            return m->proxy[i];
+    if (var->is_block_var || var->ty->kind == TY_ARRAY ||
+        var->ty->kind == TY_VLA)
+        error_tok(m->vm, tok, "a block in a condition cannot capture %s '%s'",
+                  var->is_block_var ? "__block variable" : "array", var->name);
+
+    Type *ty = unqualified(m->vm, var->ty);
+    if (ty->name) {
+        ty           = copy_type(m->vm, ty);
+        ty->name     = NULL;
+        ty->name_pos = NULL;
+    }
+    Obj *proxy = new_lvar(m->vm, "", 0, ty);
+    if (m->n == m->cap) {
+        m->cap   = m->cap ? m->cap * 2 : 4;
+        m->orig  = realloc(m->orig, m->cap * sizeof(*m->orig));
+        m->proxy = realloc(m->proxy, m->cap * sizeof(*m->proxy));
+    }
+    m->orig[m->n]  = var;
+    m->proxy[m->n] = proxy;
+    m->n++;
+    return proxy;
+}
+
+static void debugger_walk_add_used(BlockWalk *w, Obj *proxy) {
+    for (int i = 0; i < w->n; i++)
+        if (w->used[i] == proxy)
+            return;
+    if (w->n == w->cap) {
+        w->cap  = w->cap ? w->cap * 2 : 4;
+        w->used = realloc(w->used, w->cap * sizeof(*w->used));
+    }
+    w->used[w->n++] = proxy;
+}
+
+static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent);
+
+static void debugger_capture_visit(Node *n, void *vctx) {
+    BlockWalk *w = vctx;
+    if (n->kind == ND_VAR && n->var &&
+        debugger_var_is_paused_frame_local(w->map->current_fn, n->var)) {
+        Obj *proxy = debugger_capture_proxy(w->map, n->var, n->tok);
+        n->var     = proxy;
+        debugger_walk_add_used(w, proxy);
+    } else if (n->kind == ND_BLOCK_LITERAL && n->block_fn) {
+        debugger_capture_block(w->map, n, w);
+    }
+}
+
+// Points the body of `lit` (and of the blocks inside it) at proxies and
+// registers them as captures. `parent` also gets them, since an enclosing
+// block must capture what its inner block reads.
+static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent) {
+    BlockWalk w = {.map = m};
+    serialize_ast_walk(lit->block_fn->body, debugger_capture_visit, &w);
+    for (int i = 0; i < w.n; i++) {
+        cc_block_add_capture(m->vm, lit, w.used[i]);
+        if (parent)
+            debugger_walk_add_used(parent, w.used[i]);
+    }
+    free(w.used);
+}
+
+typedef struct {
+    Node **v;
+    int    n, cap;
+} LiteralList;
+
+static void debugger_gather_literal(Node *n, void *vctx) {
+    LiteralList *l = vctx;
+    if (n->kind != ND_BLOCK_LITERAL || !n->block_fn)
+        return;
+    if (l->n == l->cap) {
+        l->cap = l->cap ? l->cap * 2 : 4;
+        l->v   = realloc(l->v, l->cap * sizeof(*l->v));
+    }
+    l->v[l->n++] = n;
+}
+
+static void debugger_capture_blocks(VirtualMachine *vm, Obj *current_fn,
+                                    Node *root) {
+    if (!current_fn)
+        return;
+    LiteralList lits = {0};
+    serialize_ast_walk(root, debugger_gather_literal, &lits);
+
+    for (int i = 0; i < lits.n; i++) {
+        Node    *lit = lits.v[i];
+        ProxyMap m   = {.vm = vm, .current_fn = current_fn};
+        debugger_capture_block(&m, lit, NULL);
+
+        if (m.n) {
+            Node *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+            *copy       = *lit;
+            copy->next  = NULL;
+
+            Node *chain = NULL;
+            for (int j = 0; j < m.n; j++) {
+                Node *assign =
+                    __builtin_ast_assign(cc_ast_var_node(vm, m.proxy[j]),
+                                         cc_ast_var_node(vm, m.orig[j]));
+                add_type(vm, assign);
+                if (chain) {
+                    chain = __builtin_ast_comma(chain, assign);
+                    add_type(vm, chain);
+                } else {
+                    chain = assign;
+                }
+            }
+            Node  *comma = __builtin_ast_comma(chain, copy);
+            Node  *next  = lit->next;
+            Token *tok   = lit->tok;
+            Type  *ty    = lit->ty;
+            *lit         = *comma;
+            lit->next    = next;
+            lit->tok     = tok;
+            lit->ty      = ty;
+        }
+        free(m.orig);
+        free(m.proxy);
+    }
+    free(lits.v);
+}
+
+static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
+                                    Node *root) {
+    debugger_capture_blocks(vm, current_fn, root);
+    RewriteCtx ctx = {vm, current_fn};
+    serialize_ast_walk(root, debugger_rewrite_local, &ctx);
 }
 
 // Lazily declare and compile the single session-wide frame-pointer global
@@ -1506,7 +1668,12 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
     jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
     Scope         *saved_scope        = vm->compiler.scope;
     VarScopeNode *volatile scope_vars = NULL;
-    vm->error_jmp_buf                 = &jb;
+    // condition_scope stays a bare list; parse_scope in front of it takes the
+    // parser's own pushes (literals, compound literals). Buckets in
+    // condition_scope would make scope_find_var skip its list.
+    Scope condition_scope = {0};
+    Scope parse_scope     = {0};
+    vm->error_jmp_buf     = &jb;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize(vm, &temp_file);
@@ -1514,36 +1681,38 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
             error("failed to tokenize the expression");
         convert_pp_tokens(vm, tok);
 
-        Scope condition_scope = {0};
         for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
             debugger_add_condition_scope_var(&condition_scope.vars, obj);
         if (scope_fn) {
             for (Obj *obj = scope_fn->locals; obj; obj = obj->next)
                 debugger_add_condition_scope_var(&condition_scope.vars, obj);
         }
-        // The parser may push (arena-allocated) entries in front of ours, such
-        // as a compound literal's anonymous variable; free only our chain.
         scope_vars           = condition_scope.vars;
         condition_scope.next = saved_scope;
-        vm->compiler.scope   = &condition_scope;
+        parse_scope.next     = &condition_scope;
+        vm->compiler.scope   = &parse_scope;
         Token *rest          = NULL;
         Node  *expr          = cc_parse_expr(vm, &rest, tok);
         vm->compiler.scope   = saved_scope;
         debugger_free_condition_scope(scope_vars);
         scope_vars = NULL;
+        hashmap_deinit_borrowed(&parse_scope.var_map);
+        hashmap_deinit_borrowed(&parse_scope.tag_map);
         if (!expr)
-            error("failed to parse the expression");
+            error_tok(vm, tok, "failed to parse the expression");
         add_type(vm, expr);
 
         if (result_ty &&
             (result_ty->kind == TY_STRUCT || result_ty->kind == TY_UNION)) {
             if (!expr->ty || !is_compatible(expr->ty, result_ty))
-                error("value is not a compatible aggregate");
+                error_tok(vm, expr->tok ? expr->tok : tok,
+                          "value is not a compatible aggregate");
         } else if (result_ty) {
             expr = new_cast(vm, expr, result_ty);
             add_type(vm, expr);
         } else if (!debugger_type_is_valid_condition(expr->ty)) {
-            error("condition must have scalar type");
+            error_tok(vm, expr->tok ? expr->tok : tok,
+                      "condition must have scalar type");
         }
 
         debugger_rewrite_locals(vm, scope_fn, expr);
@@ -1563,6 +1732,8 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
     vm->error_jmp_buf  = saved_jmp_buf;
     vm->compiler.scope = saved_scope;
     debugger_free_condition_scope(scope_vars);
+    hashmap_deinit_borrowed(&parse_scope.var_map);
+    hashmap_deinit_borrowed(&parse_scope.tag_map);
     printf("Error: %s\n", vm->error_message ? vm->error_message
                                             : "failed to compile expression");
     vm->error_message = NULL;

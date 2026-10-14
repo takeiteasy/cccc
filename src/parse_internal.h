@@ -418,7 +418,7 @@ bool is_typename(VirtualMachine *vm, Token *tok);
 bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice);
 void leave_scope(VirtualMachine *vm);
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
-void mark_addr_escapes(Node *node);
+void mark_addr_escapes(Node *node, Obj *fn);
 void mark_nested_captures(Obj *fn, Node *node);
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);

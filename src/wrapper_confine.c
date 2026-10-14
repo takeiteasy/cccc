@@ -63,11 +63,19 @@ static bool owned_lvalue(Node *lv) {
     }
 }
 
+// A block literal, possibly behind the snapshot comma the debugger puts in
+// front of one that captures paused-frame locals.
+static Node *peel_comma(Node *n) {
+    while (n && n->kind == ND_COMMA)
+        n = n->rhs;
+    return n;
+}
+
 static bool call_confined(Node *call) {
     Node *callee = call->lhs;
     if (!callee)
         return false;
-    if (callee->kind == ND_BLOCK_LITERAL)
+    if (peel_comma(callee)->kind == ND_BLOCK_LITERAL)
         return true;
     if (callee->kind != ND_VAR || !callee->var->is_function ||
         callee->var->body)
@@ -90,7 +98,7 @@ static void visit(Node *n, void *vctx) {
     // A block value is only trusted when it was made here: invoking one that
     // came from outside runs code that was never checked.
     if (n->ty && n->ty->kind == TY_BLOCK && n->kind != ND_BLOCK_LITERAL &&
-        n->kind != ND_ASSIGN && n->kind != ND_CAST &&
+        n->kind != ND_ASSIGN && n->kind != ND_CAST && n->kind != ND_COMMA &&
         !(n->kind == ND_VAR && n->var->is_local)) {
         c->ok = false;
         return;
@@ -158,7 +166,7 @@ static void visit(Node *n, void *vctx) {
             break;
         case ND_BLOCK_CALL:
             c->ok =
-                n->lhs && (n->lhs->kind == ND_BLOCK_LITERAL ||
+                n->lhs && (peel_comma(n->lhs)->kind == ND_BLOCK_LITERAL ||
                            (n->lhs->kind == ND_VAR && n->lhs->var->is_local));
             break;
         case ND_BLOCK_LITERAL:

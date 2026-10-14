@@ -201,6 +201,28 @@ long cc_block_desc_size(Obj *block_fn) {
     return align_to((int)off, 8);
 }
 
+// Adds `var` to a finished block literal's captures and grows its descriptor
+// slot to fit. For callers that rewrite a block's body after parsing.
+void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var) {
+    Obj *fn = lit->block_fn;
+    for (int i = 0; i < fn->num_captures; i++)
+        if (fn->captures[i] == var)
+            return;
+
+    int   n = fn->num_captures;
+    Obj **caps =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Obj *) * (n + 1));
+    for (int i = 0; i < n; i++)
+        caps[i] = fn->captures[i];
+    caps[n]          = var;
+    var->is_captured = true;
+
+    fn->captures = lit->block_captures = caps;
+    fn->num_captures = lit->num_block_captures = n + 1;
+    lit->block_desc_var->ty =
+        array_of(vm, ty_long, (int)(cc_block_desc_size(fn) / 8));
+}
+
 // Parse a block literal: ^{ ... } or ^(params){ ... } or ^returntype(params){
 // ... }
 Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
@@ -346,7 +368,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     leave_scope(vm);
     resolve_objsize_queries(vm, block_fn->body);
-    mark_addr_escapes(block_fn->body);
+    mark_addr_escapes(block_fn->body, block_fn);
     propagate_checked_bounds(vm, block_fn);
     verify_checked_assign_bounds(vm, block_fn);
 

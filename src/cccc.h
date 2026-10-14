@@ -2353,6 +2353,12 @@ struct Node {
     // flag's purpose.
     bool is_rmw_temp_addr;
 
+    // On the `&A` of to_assign()'s RMW desugar (both the generic and the
+    // member form): the address only feeds the `*tmp` read and write that
+    // follow, so it is not recorded as provenance and mark_addr_escapes does
+    // not count it as `A`'s address escaping.
+    bool rmw_addr_feeds_temp;
+
     // On the synthesized `*tmp` derefs of to_assign()'s RMW desugar: the
     // original lvalue `tmp` was assigned the address of (`A`, or the object
     // of `A.x`), so addr_is_local_frame() can classify the access by what the

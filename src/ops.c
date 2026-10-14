@@ -5351,7 +5351,9 @@ static inline int op_MARKP_fn(VirtualMachine *vm) {
     long long       ptr  = vm->regs[rs_ptr];
     long long       base = vm->regs[rs_base];
 
-    ProvenanceInfo *info = malloc(sizeof(ProvenanceInfo));
+    ProvenanceInfo *info = hashmap_get_int(&vm->provenance, ptr);
+    if (!info)
+        info = malloc(sizeof(ProvenanceInfo));
     if (!info)
         return 0;
     info->origin_type = origin_type;

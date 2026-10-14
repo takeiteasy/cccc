@@ -1221,7 +1221,32 @@ static void find_and_mark_escaping_addr(Node *n) {
 // zero-init) is "record" -- this pass only ever adds escaping marks, never
 // removes the safe default, so a pattern this scan doesn't recognize is
 // merely a missed pruning opportunity, not a #673 regression.
-void mark_addr_escapes(Node *node) {
+static bool var_in_fn_locals(Obj *fn, Obj *var);
+extern bool param_slot_holds_pointer(Type *ty); // codegen_emit.c
+
+// True for the `tmp = &A` store of an RMW desugar whose `A` is one of `fn`'s
+// own plain locals (or a member of one): the access through `tmp` is then a
+// known frame-local one, so the address needs no recording.
+// TODO: var_in_fn_locals walks fn->locals, O(locals) per RMW; an owner field
+// on Obj makes it O(1) (#1527)
+static bool rmw_store_stays_in_frame(Node *assign, Obj *fn) {
+    Node *addr = assign->rhs;
+    while (addr && addr->kind == ND_CAST)
+        addr = addr->lhs;
+    if (!fn || !addr || addr->kind != ND_ADDR || !addr->rmw_addr_feeds_temp)
+        return false;
+    Node *n = addr->lhs;
+    while (n && (n->kind == ND_MEMBER || n->kind == ND_CAST))
+        n = n->lhs;
+    if (!n || n->kind != ND_VAR || !n->var)
+        return false;
+    Obj *var = n->var;
+    return var->is_local && !var->is_block_var && !var->is_captured &&
+           !(var->is_param && param_slot_holds_pointer(var->ty)) &&
+           var_in_fn_locals(fn, var);
+}
+
+void mark_addr_escapes(Node *node, Obj *fn) {
     for (; node; node = node->next) {
         switch (node->kind) {
             case ND_FUNCALL:
@@ -1233,6 +1258,8 @@ void mark_addr_escapes(Node *node) {
                     find_and_mark_escaping_addr(node->lhs);
                 break;
             case ND_ASSIGN:
+                if (rmw_store_stays_in_frame(node, fn))
+                    break;
                 // Escaping iff the destination is a pointer (or aggregate --
                 // e.g. an array of pointers/structs-of-pointers via a member
                 // store) lvalue; a store into a plain scalar can't retain an
@@ -1264,16 +1291,16 @@ void mark_addr_escapes(Node *node) {
             default:
                 break;
         }
-        mark_addr_escapes(node->lhs);
-        mark_addr_escapes(node->rhs);
-        mark_addr_escapes(node->cond);
-        mark_addr_escapes(node->then);
-        mark_addr_escapes(node->els);
-        mark_addr_escapes(node->init);
-        mark_addr_escapes(node->inc);
-        mark_addr_escapes(node->body);
+        mark_addr_escapes(node->lhs, fn);
+        mark_addr_escapes(node->rhs, fn);
+        mark_addr_escapes(node->cond, fn);
+        mark_addr_escapes(node->then, fn);
+        mark_addr_escapes(node->els, fn);
+        mark_addr_escapes(node->init, fn);
+        mark_addr_escapes(node->inc, fn);
+        mark_addr_escapes(node->body, fn);
         for (Node *a = node->args; a; a = a->next)
-            mark_addr_escapes(a);
+            mark_addr_escapes(a, fn);
     }
 }
 

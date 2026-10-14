@@ -721,7 +721,7 @@ static void test_confined_data(void) {
     t0 = vm.text_ptr;
     d0 = vm.data_ptr;
     for (int i = 0; i < 50; i++) {
-        int b = cond_bp(cf_in, "x == 1 && strcmp(\"foo\", \"bar\") != 0");
+        int b = cond_bp(cf_in, "strcmp(\"foo\", \"bar\") != 0 && x == 1");
         CHECK(eval("cf_fn(1)") == 1, "cf_fn");
         CHECK(vm.dbg.breakpoints[b].hit_count == 1,
               "condition with a literal is true: %d",
@@ -758,7 +758,7 @@ static void test_confined_text(void) {
     eval("1 + 2");
     Pc    t0 = vm.text_ptr;
     char *d0 = vm.data_ptr;
-    int   b  = cond_bp(cb_in, "({ int r = 0; goto l; r = 5; l: ; r; }) == 0");
+    int   b  = cond_bp(cb_in, "({ int r = x; goto l; r = 5; l: ; r; }) == 1");
     CHECK(eval("cb_fn(1)") == 1, "cb_fn");
     CHECK(vm.dbg.breakpoints[b].hit_count == 1, "label condition is true: %d",
           vm.dbg.breakpoints[b].hit_count);
@@ -775,6 +775,100 @@ static void test_confined_text(void) {
     CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
           "a wrapper with a block literal is reclaimed: text %u",
           vm.text_ptr - t0);
+
+    b = cond_bp(cb_in, "({ int (^k)(void) = ^{ return x; }; k(); }) == 1");
+    CHECK(eval("cb_fn(1)") == 1, "cb_fn with a capturing block");
+    CHECK(vm.dbg.breakpoints[b].hit_count == 1,
+          "capturing block condition is true: %d",
+          vm.dbg.breakpoints[b].hit_count);
+    cc_remove_breakpoint(&vm, b);
+    CHECK(vm.text_ptr == t0 && vm.data_ptr == d0,
+          "a wrapper with a capturing block is reclaimed: text %u",
+          vm.text_ptr - t0);
+}
+
+// Runs `call` under `cond` and returns how often the breakpoint fired.
+static int cond_hits_in(Pc pc, const char *cond, const char *call) {
+    int b = cond_bp(pc, cond);
+    eval(call);
+    int hits = vm.dbg.breakpoints[b].hit_count;
+    cc_remove_breakpoint(&vm, b);
+    return hits;
+}
+
+static int cond_hits(Pc pc, const char *cond) {
+    return cond_hits_in(pc, cond, "cf_fn(1)");
+}
+
+// A paused-frame local resolves after a string literal, inside statement
+// expressions and through atomic operands, and shadows a same-named global.
+static void test_frame_locals(void) {
+    decl("int x = 99;");
+    decl("int strcmp(const char *, const char *);");
+    Pc cf_in;
+    decl_fn("cf_fn", &cf_in, NULL);
+
+    static const char *const hit[] = {
+        "(*\"abc\", x) == 1",
+        "strcmp(\"foo\", \"bar\") != 0 && x == 1",
+        "({ int r = x; r; }) == 1",
+        "({ int r = 0; r + x; }) == 1",
+        "({ x = 1; x; }) == 1",
+        "x++ == 1",
+        "(x += 0) == 1",
+        "__atomic_fetch_add(&x, 0, 0) == 1",
+        "({ int (^k)(void) = ^{ return x; }; k(); }) == 1",
+        "(^{ return x + y; })() == 2",
+        "(^{ return (^{ return x; })(); })() == 1",
+        "({ int (^k)(void) = ^{ return x; }; x = 5; int r = k(); x = 1; r; }) "
+        "== 1",
+        "({ x = 5; int r = (^{ return x; })(); x = 1; r; }) == 5",
+    };
+    static const char *const miss[] = {
+        "(*\"abc\", x) == 99",
+        "({ int r = x; r; }) == 99",
+        "__atomic_fetch_add(&x, 0, 0) == 99",
+        "({ int (^k)(void) = ^{ return x; }; k(); }) == 99",
+    };
+    for (size_t i = 0; i < sizeof(hit) / sizeof(*hit); i++)
+        CHECK(cond_hits(cf_in, hit[i]) == 1, "condition fires: %s", hit[i]);
+    for (size_t i = 0; i < sizeof(miss) / sizeof(*miss); i++)
+        CHECK(cond_hits(cf_in, miss[i]) == 0, "condition is silent: %s",
+              miss[i]);
+
+    decl("int cv_fn(const int c){\n  int a[2] = {3, 4};\n  __block int b = 7;\n"
+         "  return c;\n}");
+    Pc cv_in = cc_find_pc_for_source(&vm, last_compiled_file(), 4);
+    CHECK(cond_hits_in(cv_in, "(^{ return c; })() == 5", "cv_fn(5)") == 1,
+          "a const parameter is captured");
+    CHECK(cond_hits_in(cv_in, "(^{ return a[0]; })() == 3", "cv_fn(5)") == 0,
+          "an array local is not captured");
+    CHECK(cond_hits_in(cv_in, "(^{ return b; })() == 7", "cv_fn(5)") == 0,
+          "a __block local is not captured");
+
+    // Slots that hold a pointer to the value: __block box, VLA, by-pointer
+    // struct parameter.
+    decl("struct Pt { int x, y; };");
+    decl("int pv_fn(struct Pt s, int n){\n  int vl[n];\n  vl[0] = 6;\n"
+         "  __block int b = 7;\n  return s.x + b;\n}");
+    Pc          pv_in = cc_find_pc_for_source(&vm, last_compiled_file(), 5);
+    const char *pv    = "pv_fn((struct Pt){3, 4}, 2)";
+    CHECK(cond_hits_in(pv_in, "b == 7", pv) == 1,
+          "a __block local reads its value");
+    CHECK(cond_hits_in(pv_in, "b == 99", pv) == 0,
+          "a __block local does not match another value");
+    CHECK(cond_hits_in(pv_in, "s.x == 3 && s.y == 4", pv) == 1,
+          "a by-pointer struct parameter reads its members");
+    CHECK(cond_hits_in(pv_in, "s.x == 99", pv) == 0,
+          "a by-pointer struct parameter does not match another value");
+    CHECK(cond_hits_in(pv_in, "vl[0] == 6 && n == 2", pv) == 1,
+          "a VLA local reads its elements");
+    CHECK(cond_hits_in(pv_in, "vl[0] == 99", pv) == 0,
+          "a VLA local does not match another value");
+
+    int bp = cond_bp(pv_in, "(b = 8, 0)");
+    CHECK(eval(pv) == 11, "a condition store reaches the __block box");
+    cc_remove_breakpoint(&vm, bp);
 }
 
 // Steps over the instructions in [from, to) and reports whether they end
@@ -922,6 +1016,7 @@ int main(void) {
     test_condition_stale_tag();
     test_confined_data();
     test_confined_text();
+    test_frame_locals();
     test_many_symbols();
 
     cc_destroy(&vm);

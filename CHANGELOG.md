@@ -7,6 +7,27 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-14
+
+- Fixed: a debugger condition that names a `__block` local, a variable-length
+  array or a struct or union parameter reads its value (a `__block` condition
+  never fired).
+- Fixed: a debugger condition with a compile error (a non-scalar result, or a
+  block that captures an array or `__block` local) prints the error and counts
+  as false instead of ending the process.
+- Fixed: a debugger condition reads paused-frame locals after a string literal
+  and inside statement expressions.
+- Fixed: a block literal in a debugger condition captures paused-frame locals
+  by value.
+- Fixed: `++`, `--` and compound assignment on a local no longer record its
+  address under `--dangling-pointers`, which removes a hashmap write per
+  update and a stale tag a later frame could hit.
+- Fixed: re-taking an address under `-3` no longer leaks its provenance entry.
+- Fixed: a block-scope `_Thread_local` without `static` or `extern` is an error,
+  as in gcc and clang.
+- Fixed: a block-scope `static _Thread_local` variable is private to each
+  thread instead of shared.
+
 ## [0.9.0] - 2026-10-14
 
 - Fixed: the debugger's `reload` and `fix` print their compile errors (they
