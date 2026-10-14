@@ -845,6 +845,30 @@ static void test_frame_locals(void) {
           "an array local is not captured");
     CHECK(cond_hits_in(cv_in, "(^{ return b; })() == 7", "cv_fn(5)") == 0,
           "a __block local is not captured");
+
+    // Slots that hold a pointer to the value: __block box, VLA, by-pointer
+    // struct parameter.
+    decl("struct Pt { int x, y; };");
+    decl("int pv_fn(struct Pt s, int n){\n  int vl[n];\n  vl[0] = 6;\n"
+         "  __block int b = 7;\n  return s.x + b;\n}");
+    Pc          pv_in = cc_find_pc_for_source(&vm, last_compiled_file(), 5);
+    const char *pv    = "pv_fn((struct Pt){3, 4}, 2)";
+    CHECK(cond_hits_in(pv_in, "b == 7", pv) == 1,
+          "a __block local reads its value");
+    CHECK(cond_hits_in(pv_in, "b == 99", pv) == 0,
+          "a __block local does not match another value");
+    CHECK(cond_hits_in(pv_in, "s.x == 3 && s.y == 4", pv) == 1,
+          "a by-pointer struct parameter reads its members");
+    CHECK(cond_hits_in(pv_in, "s.x == 99", pv) == 0,
+          "a by-pointer struct parameter does not match another value");
+    CHECK(cond_hits_in(pv_in, "vl[0] == 6 && n == 2", pv) == 1,
+          "a VLA local reads its elements");
+    CHECK(cond_hits_in(pv_in, "vl[0] == 99", pv) == 0,
+          "a VLA local does not match another value");
+
+    int bp = cond_bp(pv_in, "(b = 8, 0)");
+    CHECK(eval(pv) == 11, "a condition store reaches the __block box");
+    cc_remove_breakpoint(&vm, bp);
 }
 
 // Steps over the instructions in [from, to) and reports whether they end

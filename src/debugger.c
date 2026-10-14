@@ -1326,7 +1326,8 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 // __builtin_current_vm, which cc_init seeds for the whole compile.
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
 #include "../include/cccc/reflection.h"
-extern int local_align_log(Obj *var); // codegen_emit.c (#1137)
+extern int local_align_log(Obj *var);           // codegen_emit.c (#1137)
+extern bool param_slot_holds_pointer(Type *ty); // codegen_emit.c
 extern Obj *new_lvar(VirtualMachine *vm, char *name, int name_len,
                      Type *ty);       // parse_core.c
 
@@ -1393,10 +1394,9 @@ static void debugger_rewrite_local(Node *node, void *vctx) {
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
         Obj  *var       = node->var;
-        // TODO: a __block local's slot holds its heap-box pointer, not the
-        // value (#1522) Referenced by Obj, not by name: a REPL session drops
-        // globals created while a unit ran from its list, so a lookup could
-        // miss the variable though its storage lives on.
+        // Referenced by Obj, not by name: a REPL session drops globals created
+        // while a unit ran from its list, so a lookup could miss the variable
+        // though its storage lives on.
         Node *frame_ref = cc_ast_var_node(vm, vm->dbg.dbg_frame_var);
         Node *char_ptr = __builtin_ast_cast(frame_ref, pointer_to(vm, ty_char));
         Node *idx      = __builtin_ast_int_literal((int64_t)var->offset *
@@ -1422,18 +1422,26 @@ static void debugger_rewrite_local(Node *node, void *vctx) {
             add_type(vm, masked);
             addr = masked;
         }
+        // A __block local, a VLA and a by-pointer aggregate parameter keep a
+        // pointer to their storage in the slot: read it, then go through it.
+        bool slot_holds_pointer =
+            var->is_block_var || var->ty->kind == TY_VLA ||
+            (var->is_param && param_slot_holds_pointer(var->ty));
+        if (slot_holds_pointer) {
+            Node *slot = __builtin_ast_cast(
+                addr, pointer_to(vm, pointer_to(vm, ty_void)));
+            addr = __builtin_ast_unary(ND_DEREF, slot);
+            add_type(vm, addr);
+            addr->dbg_frame_local = true;
+        }
         Node *typed_ptr = __builtin_ast_cast(addr, pointer_to(vm, var->ty));
 
         node->kind      = ND_DEREF;
         node->lhs       = typed_ptr;
         node->var       = NULL;
-        // By-pointer aggregate params hold a pointer in the frame slot, so
-        // their access stays checked (as in addr_is_local_frame's ND_VAR).
-        node->dbg_frame_local =
-            !(var->is_param &&
-              (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
-               var->ty->kind == TY_VECTOR || is_wide_bitint(var->ty) ||
-               is_decimal(var->ty)));
+        // Storage reached through a slot pointer stays checked, as in
+        // addr_is_local_frame's ND_VAR.
+        node->dbg_frame_local = !slot_holds_pointer;
         // Type-preserving rewrite: *(T*)&frame[off] has exactly the same type
         // T as the original variable, so set it directly instead of clearing
         // it for add_type to recompute. That matters beyond saving a call:
