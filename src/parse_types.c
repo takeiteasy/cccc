@@ -348,7 +348,8 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 else if (dk == DK_EXTERN)
                     attr->is_extern = true;
                 else if (dk == DK_INLINE) {
-                    if (vm->compiler.c_std < CCCC_STD_C99)
+                    if (vm->compiler.c_std < CCCC_STD_C99 &&
+                        !vm->compiler.c_std_gnu && !tok->origin)
                         error_tok(vm, tok,
                                   "'inline' is not available before C99");
                     attr->is_inline = true;
