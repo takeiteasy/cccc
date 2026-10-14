@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-14
+
 - Fixed: a debugger condition, return-value expression or REPL `:type`
   expression with tokens after the expression (`x == 1 garbage`) is an error
   instead of being read as the part before them.
