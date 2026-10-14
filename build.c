@@ -17,7 +17,8 @@
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
 //   clean, host_tests, fuzz_replay, comptime_native_smoke, test / test_vm /
-//   test_native / test_release / test_msan; test_extra (the loose tests) =
+//   test_native / test_release / test_msan / test_ubsan / test_asan /
+//   test_tsan; test_extra (the loose tests) =
 //   test_warnings / test_serialize / test_build_mode / test_safety /
 //   test_parallel / test_macros / test_misc docs                Doxygen HTML
 //   API docs for include/cccc/*.h (needs doxygen) build_cache_toolchain_smoke
@@ -680,6 +681,33 @@ BuildTarget *test_msan(Builder *ctx) {
     return make_test_step(
         ctx, make_sanitizer_variant(ctx, bt, "cccc-msan", "-fsanitize=memory"),
         "test-msan");
+}
+
+[[cccc::build_target]]
+BuildTarget *test_ubsan(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_test_step(
+        ctx,
+        make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined"),
+        "test-ubsan");
+}
+
+[[cccc::build_target]]
+BuildTarget *test_asan(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_test_step(
+        ctx,
+        make_sanitizer_variant(ctx, bt, "cccc-asan",
+                               "-fsanitize=address,undefined"),
+        "test-asan");
+}
+
+[[cccc::build_target]]
+BuildTarget *test_tsan(Builder *ctx) {
+    BuildTarget *bt = make_libbacktrace(ctx);
+    return make_test_step(
+        ctx, make_sanitizer_variant(ctx, bt, "cccc-tsan", "-fsanitize=thread"),
+        "test-tsan");
 }
 
 [[cccc::build_target]]
