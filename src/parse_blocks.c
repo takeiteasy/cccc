@@ -368,7 +368,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     leave_scope(vm);
     resolve_objsize_queries(vm, block_fn->body);
-    mark_addr_escapes(block_fn->body);
+    mark_addr_escapes(block_fn->body, block_fn);
     propagate_checked_bounds(vm, block_fn);
     verify_checked_assign_bounds(vm, block_fn);
 

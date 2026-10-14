@@ -825,7 +825,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // here -- it's now a precise dereference-time range check in
             // op_CHKP3_fn (#670).
             if (node->lhs->kind == ND_VAR && node->lhs->var->is_local &&
-                !node->lhs->var->is_block_var) {
+                !node->lhs->var->is_block_var && !node->rmw_addr_feeds_temp) {
                 if (vm->flags & CCCC_PROVENANCE_TRACK) {
                     size_t var_size =
                         node->lhs->var->ty ? node->lhs->var->ty->size : 8;

@@ -436,9 +436,10 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     if (binary->lhs->kind == ND_MEMBER) {
         Obj  *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->lhs->ty));
 
-        Node *expr1 =
-            new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
-                       new_unary(vm, ND_ADDR, binary->lhs->lhs, tok), tok);
+        Node *member_addr = new_unary(vm, ND_ADDR, binary->lhs->lhs, tok);
+        member_addr->rmw_addr_feeds_temp = true;
+        Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
+                                 member_addr, tok);
 
         Node *expr2 = new_unary(
             vm, ND_MEMBER,
@@ -587,6 +588,7 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // Node.is_rmw_temp_addr's comment.
     Node *addr_of_lhs             = new_unary(vm, ND_ADDR, binary->lhs, tok);
     addr_of_lhs->is_rmw_temp_addr = true;
+    addr_of_lhs->rmw_addr_feeds_temp = true;
     Node *expr1 =
         new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), addr_of_lhs, tok);
 

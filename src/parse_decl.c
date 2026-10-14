@@ -877,7 +877,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             // Diagnostics here are rolled back below; nothing to defer.
             resolve_goto_labels(vm, /*defer_unused=*/false);
             resolve_objsize_queries(vm, fn->body);
-            mark_addr_escapes(fn->body);
+            mark_addr_escapes(fn->body, fn);
             propagate_checked_bounds(vm, fn);
             verify_checked_assign_bounds(vm, fn);
             // check_nonnull_flow() runs post-parse now (#688) -- see the
@@ -984,7 +984,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         leave_scope(vm);
         resolve_goto_labels(vm, vm->compiler.macro_fns != NULL);
         resolve_objsize_queries(vm, fn->body);
-        mark_addr_escapes(fn->body);
+        mark_addr_escapes(fn->body, fn);
         // #919: any nested function textually inside `fn` has already run
         // its own mark_nested_captures() call (inside the compound_stmt()
         // above) and set is_captured on whichever of `fn`'s own locals it
