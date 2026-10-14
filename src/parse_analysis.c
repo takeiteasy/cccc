@@ -1225,8 +1225,8 @@ static bool var_in_fn_locals(Obj *fn, Obj *var);
 extern bool param_slot_holds_pointer(Type *ty); // codegen_emit.c
 
 // True for the `tmp = &A` store of an RMW desugar whose `A` is one of `fn`'s
-// own plain locals (or a member of one): the access through `tmp` is then a
-// known frame-local one, so the address needs no recording.
+// own plain locals (or a member or array element of one): the access through
+// `tmp` is then a known frame-local one, so the address needs no recording.
 // TODO: var_in_fn_locals walks fn->locals, O(locals) per RMW; an owner field
 // on Obj makes it O(1) (#1527)
 static bool rmw_store_stays_in_frame(Node *assign, Obj *fn) {
@@ -1236,8 +1236,23 @@ static bool rmw_store_stays_in_frame(Node *assign, Obj *fn) {
     if (!fn || !addr || addr->kind != ND_ADDR || !addr->rmw_addr_feeds_temp)
         return false;
     Node *n = addr->lhs;
-    while (n && (n->kind == ND_MEMBER || n->kind == ND_CAST))
-        n = n->lhs;
+    for (;;) {
+        if (n && (n->kind == ND_MEMBER || n->kind == ND_CAST)) {
+            n = n->lhs;
+        } else if (n && n->kind == ND_DEREF) {
+            // `arr[i]`: only an array base is known to be in the frame.
+            Node *base = n->lhs;
+            while (base && (base->kind == ND_ADD || base->kind == ND_SUB ||
+                            (base->kind == ND_CAST && base->ty &&
+                             base->ty->kind == TY_PTR)))
+                base = base->lhs;
+            if (!base || !base->ty || base->ty->kind != TY_ARRAY)
+                return false;
+            n = base;
+        } else {
+            break;
+        }
+    }
     if (!n || n->kind != ND_VAR || !n->var)
         return false;
     Obj *var = n->var;
