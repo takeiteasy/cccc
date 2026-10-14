@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-14
+
 - Added: `--watch` hot-reloads a running program when a source file is saved
   (changed functions are redefined, globals keep their values), restarts it
   when it exits, and waits for the fix after a compile error. With `--build`,
