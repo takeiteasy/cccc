@@ -33,8 +33,10 @@ count=20
 
 - **Refused reloads** (a parse error, a changed signature or struct layout) print
   the error. The old code keeps running and the next save tries again.
-- **Headers:** every file of the program is reloaded on any change; unchanged
-  functions are skipped, so only the ones a header edit touches are redefined.
+- **Headers:** saving a header reloads the files that include it, directly or
+  through another header; unchanged functions are skipped, so only the ones the
+  edit touches are redefined. A header a reload starts to include is watched
+  from then on.
 - **Program exit:** the process waits for the next save and then runs the
   program from the start.
 - **Compile errors** at startup print the error and wait for the fix.
@@ -45,6 +47,25 @@ count=20
 
 Use `--watch-restart` when a change is outside what a reload accepts, or when
 the program should start fresh each time.
+
+## In the REPL
+
+`cccc --repl --watch` reloads each file `:load` read when it is saved, as
+`:reload` would. The message appears at the prompt without pressing Enter, and a
+half-typed line is redrawn below it.
+
+```
+$ cccc --repl --watch
+cccc> :load f.c
+cccc> f()
+(int) 41
+reloaded f.c: 1 changed, 0 unchanged, 0 new
+cccc> f()
+(int) 42
+```
+
+A file with statements at file scope cannot be reloaded, as with `:reload`.
+`--watch-restart` does not apply to the REPL, and `--watch-clear` does nothing.
 
 ## Building
 
@@ -105,8 +126,8 @@ These calls do nothing without `--watch`.
 
 ## Limits
 
-`--watch` cannot be combined with `--repl`, `--testing`, `--test-run`, `-c`, `-d`,
-`-E`, `-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
+`--watch` cannot be combined with `--testing`, `--test-run`, `-c`, `-d`, `-E`,
+`-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
 
 A reload follows the rules in [DEBUGGER.md](DEBUGGER.md#reloading-a-file): no
 layout changes, and functions that call `[[cccc::comptime]]` code are not

@@ -25,6 +25,10 @@ on:
         description: "Existing tag to build and publish (e.g. v0.1.0)"
         required: true
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   linux-amd64:
     runs-on: ubuntu-24.04
@@ -71,7 +75,7 @@ jobs:
           NAME="cccc-${VERSION}-linux-x86_64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
-          cp LICENSE README.md "$NAME/"
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md "$NAME/"
           tar czf "$NAME.tar.gz" "$NAME"
       - uses: actions/upload-artifact@v4
         with:
@@ -109,7 +113,7 @@ jobs:
           NAME="cccc-${VERSION}-linux-aarch64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
-          cp LICENSE README.md "$NAME/"
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md "$NAME/"
           tar czf "$NAME.tar.gz" "$NAME"
       - uses: actions/upload-artifact@v4
         with:
@@ -142,7 +146,7 @@ jobs:
           NAME="cccc-${VERSION}-macos-arm64"
           mkdir "$NAME"
           cp build/cccc-release "$NAME/cccc"
-          cp LICENSE README.md "$NAME/"
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md "$NAME/"
           tar czf "$NAME.tar.gz" "$NAME"
       - uses: actions/upload-artifact@v4
         with:

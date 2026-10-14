@@ -69,6 +69,13 @@ static char *write_file(const char *name, const char *text) {
     return path;
 }
 
+static int input_file_count(void) {
+    int n = 0;
+    while (vm.compiler.input_files && vm.compiler.input_files[n])
+        n++;
+    return n;
+}
+
 static void load(const char *path) {
     CHECK(cc_repl_load_file(&vm, path) == 0, "load %s", path);
 }
@@ -109,7 +116,11 @@ static void test_changed_and_kept(void) {
     CHECK(eval("gone()") == 1, "removed function stays");
 
     // A second reload of the same text changes nothing.
+    int files = input_file_count();
     CHECK(cc_debug_reload(&vm, p) == 0, "reload again");
+    for (int i = 0; i < 5; i++)
+        cc_debug_reload(&vm, p);
+    CHECK(input_file_count() == files, "reloads reuse the input_files entry");
     CHECK(eval("bump()") == 26, "second reload keeps state");
     CHECK(eval("twice(5)") == 10, "unchanged after two reloads");
 }

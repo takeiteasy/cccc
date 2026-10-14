@@ -772,7 +772,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t--watch              Hot-reload the program when a source file "
            "is saved; with --build,\n");
     printf("\t                    rebuild instead (implied by "
-           "[[cccc::build]] in the file)\n");
+           "[[cccc::build]] in the file);\n");
+    printf("\t                    with --repl, reload the files :load read\n");
     printf(
         "\t--watch-path=PATH    Also watch a file or directory (repeatable)\n");
     printf("\t--watch-ignore=GLOB  Ignore matching paths (repeatable)\n");
@@ -2541,23 +2542,23 @@ int main(int argc, const char *argv[]) {
                                           &wants_build);
             build_mode = wants_build;
         }
-        if (repl_mode || testing_mode || test_run_mode ||
-            compile_format != COMPILE_NONE || disassemble || preprocess_only ||
-            dump_expanded_only || print_tokens || output_json ||
-            output_ffi_decls || dump_ast || vm_profile || out_file) {
+        if (testing_mode || test_run_mode || compile_format != COMPILE_NONE ||
+            disassemble || preprocess_only || dump_expanded_only ||
+            print_tokens || output_json || output_ffi_decls || dump_ast ||
+            vm_profile || out_file) {
             fprintf(stderr,
                     "error: --watch runs or builds the program; it cannot be "
-                    "combined with --repl, --testing, --test-run, -c, -d, -E, "
-                    "-m, -p, --ast, --vm-profile or -o\n");
+                    "combined with --testing, --test-run, -c, -d, -E, -m, -p, "
+                    "--ast, --vm-profile or -o\n");
             usage(argv[0], 1);
         }
-        if (input_files_count == 0) {
+        if (input_files_count == 0 && !repl_mode) {
             fprintf(stderr, "error: --watch needs an input file\n");
             usage(argv[0], 1);
         }
-        if (watch_restart && build_mode) {
+        if (watch_restart && (build_mode || repl_mode)) {
             fprintf(stderr, "error: --watch-restart applies to a run, not to "
-                            "--build\n");
+                            "--build or --repl\n");
             usage(argv[0], 1);
         }
         for (int i = 0; i < input_files_count; i++)
@@ -2745,6 +2746,16 @@ int main(int argc, const char *argv[]) {
         // See src/repl.c for the session driver.
         if (macro_recursion_limit >= 0)
             vm.compiler.macro_recursion_limit = macro_recursion_limit;
+        if (watch) {
+            // :load adds the files to watch; a save is applied at the prompt.
+            CcWatchOptions watch_opts = {
+                .debounce_ms = watch_debounce,
+                .argv        = (char **)argv,
+                .on_change   = cc_watch_notify,
+            };
+            watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
+                        watch_ignores, watch_ignores_count);
+        }
         cc_run_repl(&vm);
         goto BAIL;
     }

@@ -4202,6 +4202,14 @@ typedef struct Compiler {
     int embedded_file_no; // Next embedded/in-memory file counter (negative file
                           // numbers); was a function-local static in
                           // tokenize_string (#181)
+    HashMap input_file_slots; // path -> input_files index + 1; a path read again
+                              // (a reload) reuses its slot
+
+    // Include graph (--watch): root file realpath -> HashMap* (a set) of the
+    // realpaths of the non-system files its preprocessing read.
+    HashMap  tu_deps;
+    HashMap *dep_set;           // set being filled by the running preprocess
+    HashMap *dep_replaced;      // set the latest install replaced, for rollback
 
     // Parser state
     Obj   *locals;    // All local variable instances during parsing

@@ -62,6 +62,8 @@ Token *cc_preprocess_ex(VirtualMachine *vm, const char *path, bool opencl) {
     //     tok = append_tokens(tok, tok2);
     // }
 
+    HashMap *outer_deps = cc_deps_begin(vm, path);
+
     // Tokenize and parse.
     Token *tok2 = must_tokenize_file(vm, (char *)path);
     if (!vm->compiler.primary_file && tok2)
@@ -74,6 +76,7 @@ Token *cc_preprocess_ex(VirtualMachine *vm, const char *path, bool opencl) {
         tok = preprocess(vm, tok);
     }
 
+    cc_deps_install(vm, path, outer_deps);
     return tok;
 }
 

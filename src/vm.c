@@ -1677,6 +1677,8 @@ void cc_destroy(VirtualMachine *vm) {
     // Free input files array
     if (vm->compiler.input_files)
         free(vm->compiler.input_files);
+    hashmap_deinit(&vm->compiler.input_file_slots);
+    cc_deps_free_all(vm);
 
     // Free URL cache directory
     if (vm->compiler.url_cache_dir)

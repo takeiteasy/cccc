@@ -2119,15 +2119,22 @@ Token *tokenize_file(VirtualMachine *vm, char *path, bool allow_shebang) {
     remove_backslash_newline(p);
     convert_universal_chars(vm, p);
 
-    // Save the filename for assembler .file directive.
-    File *file = new_file(vm, path, vm->compiler.file_no + 1, p);
-
-    // Save the filename for assembler .file directive.
-    vm->compiler.input_files = realloc(
-        vm->compiler.input_files, sizeof(char *) * (vm->compiler.file_no + 2));
-    vm->compiler.input_files[vm->compiler.file_no]     = file;
-    vm->compiler.input_files[vm->compiler.file_no + 1] = NULL;
-    vm->compiler.file_no++;
+    // A path read again replaces its entry rather than growing input_files.
+    intptr_t slot = (intptr_t)hashmap_get(&vm->compiler.input_file_slots, path);
+    File    *file =
+        new_file(vm, path, slot ? (int)slot : vm->compiler.file_no + 1, p);
+    if (slot) {
+        vm->compiler.input_files[slot - 1] = file;
+    } else {
+        vm->compiler.input_files = realloc(
+            vm->compiler.input_files,
+            sizeof(char *) * (vm->compiler.file_no + 2));
+        vm->compiler.input_files[vm->compiler.file_no]     = file;
+        vm->compiler.input_files[vm->compiler.file_no + 1] = NULL;
+        hashmap_put(&vm->compiler.input_file_slots, path,
+                    (void *)(intptr_t)(vm->compiler.file_no + 1));
+        vm->compiler.file_no++;
+    }
 
     return tokenize(vm, file);
 }
