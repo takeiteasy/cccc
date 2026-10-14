@@ -3540,21 +3540,21 @@ static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
         !equal(tok->next->next, macro))
         return NULL;
 
-    // Read until the end of the file.
+    // Walk to the #endif closing the opening #ifndef; it must end the file.
     while (tok->kind != TK_EOF) {
         if (!is_hash(tok)) {
             tok = tok->next;
             continue;
         }
 
-        if (equal(tok->next, "endif") && tok->next->next->kind == TK_EOF)
-            return macro;
-
-        // TODO(#1567): `tok` is the `#` here, so this never matches; nested
-        // conditionals are not skipped and a header ending in `#endif` is
-        // taken as guarded whole.
-        if (equal(tok, "if") || equal(tok, "ifdef") || equal(tok, "ifndef"))
-            tok = skip_cond_incl(vm, tok->next);
+        if (equal(tok->next, "if") || equal(tok->next, "ifdef") ||
+            equal(tok->next, "ifndef"))
+            tok = skip_cond_incl2(vm, tok->next->next, 0);
+        else if (equal(tok->next, "endif"))
+            return tok->next->next->kind == TK_EOF ? macro : NULL;
+        else if (equal(tok->next, "else") || equal(tok->next, "elif") ||
+                 equal(tok->next, "elifdef") || equal(tok->next, "elifndef"))
+            return NULL;
         else
             tok = tok->next;
     }
