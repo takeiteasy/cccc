@@ -77,8 +77,9 @@ Wait with a mutex and condition variable, or call `thrd_yield()` in the loop.
 ## Thread-local storage
 
 `_Thread_local`, `__thread` and C23 `thread_local` give each thread a private
-copy that starts from the variable's initialiser. `pthread_key_create` and
-`tss_create` keys work with the usual destructors.
+copy that starts from the variable's initialiser. A block-scope thread-local
+must be `static` or `extern`. `pthread_key_create` and `tss_create` keys work
+with the usual destructors.
 
 ## Race and deadlock checks
 

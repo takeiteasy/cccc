@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a block-scope `_Thread_local` without `static` or `extern` is an error,
+  as in gcc and clang.
+- Fixed: a block-scope `static _Thread_local` variable is private to each
+  thread instead of shared.
+
 ## [0.9.0] - 2026-10-14
 
 - Fixed: the debugger's `reload` and `fix` print their compile errors (they

@@ -118,6 +118,12 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             error_tok(vm, ty->name_pos, "variable name omitted");
         }
 
+        if (attr && attr->is_tls && !attr->is_static)
+            error_tok(vm, ty->name,
+                      "function-scope '%.*s' implicitly auto and declared "
+                      "'_Thread_local'",
+                      (int)ty->name->len, ty->name->loc);
+
         // #485: reject an unchecked pointer local in a checked region.
         cc_check_checked_scope_decl(vm, ty, ty->name, "local variable");
 
@@ -169,6 +175,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 var->tok             = name_tok;
                 var->display_name    = get_ident(vm, name_tok);
                 var->is_local_symbol = true;
+                var->is_tls          = attr->is_tls;
                 var->is_maybe_unused = ty->is_maybe_unused;
                 var->is_deprecated   = ty->is_deprecated;
                 var->deprecated_msg  = ty->deprecated_msg;
@@ -209,6 +216,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->tok             = ty->name;
             var->display_name    = get_ident(vm, ty->name);
             var->is_local_symbol = true;
+            var->is_tls          = attr->is_tls;
             var->static_owner    = vm->compiler.current_fn;
             var->is_constexpr    = attr->is_constexpr;
             var->is_maybe_unused = ty->is_maybe_unused;
