@@ -1,8 +1,15 @@
+/*!
+ * @file omp.h
+ * @brief OpenMP runtime API for `-fopenmp`. See docs/OPENMP.md.
+ *
+ * In the VM parallel regions run on one thread, so the team is always the
+ * initial thread and locks cannot contend. `-c=native`, `-m` and
+ * `-c=generated` run them on real threads with the same API. Documented here
+ * is the VM form.
+ */
+
 #ifndef __OMP_H
 #define __OMP_H
-
-/* OpenMP runtime for -fopenmp. Parallel regions run on one thread, so the
-   team is always the initial thread and locks cannot contend. */
 
 #include <stdio.h>
 #include <time.h>
@@ -48,36 +55,52 @@ int  omp_test_nest_lock(omp_nest_lock_t *lock);
 
 #else
 
+/*! @brief Simple lock. */
 typedef struct {
     int held;
 } omp_lock_t;
 
+/*! @brief Nestable lock. */
 typedef struct {
     int depth;
 } omp_nest_lock_t;
 
+/*! @brief Threads in the current team (1 in the VM). */
 static inline int omp_get_num_threads(void) { return 1; }
+/*! @brief Upper bound on the next team's size. */
 static inline int omp_get_max_threads(void) { return 1; }
+/*! @brief Calling thread's index in its team (0 in the VM). */
 static inline int omp_get_thread_num(void) { return 0; }
+/*! @brief Maximum number of threads the program may use. */
 static inline int omp_get_thread_limit(void) { return 1; }
+/*! @brief Non-zero inside a parallel region (always 0 in the VM). */
 static inline int omp_in_parallel(void) { return 0; }
+/*! @brief Online processors on the host. */
 static inline int omp_get_num_procs(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n > 0 ? (int)n : 1;
 }
+/*! @brief Requests a team size for later regions. Ignored in the VM. */
 static inline void omp_set_num_threads(int n) { (void)n; }
+/*! @brief Enables or disables dynamic team sizing. Ignored in the VM. */
 static inline void omp_set_dynamic(int on) { (void)on; }
+/*! @brief Whether dynamic team sizing is on (always 0 in the VM). */
 static inline int omp_get_dynamic(void) { return 0; }
 
+/*! @brief Monotonic wall-clock time in seconds. */
 static inline double omp_get_wtime(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
+/*! @brief Resolution of omp_get_wtime() in seconds. */
 static inline double omp_get_wtick(void) { return 1e-9; }
 
+/*! @brief Initialises a lock as unheld. */
 static inline void omp_init_lock(omp_lock_t *lock) { lock->held = 0; }
+/*! @brief Destroys a lock. */
 static inline void omp_destroy_lock(omp_lock_t *lock) { lock->held = 0; }
+/*! @brief Acquires a lock. Re-acquiring a held lock in the VM is a deadlock and traps. */
 static inline void omp_set_lock(omp_lock_t *lock) {
     if (lock->held) {
         fputs("omp_set_lock: lock is already held (deadlock)\n", stderr);
@@ -85,7 +108,9 @@ static inline void omp_set_lock(omp_lock_t *lock) {
     }
     lock->held = 1;
 }
+/*! @brief Releases a lock. */
 static inline void omp_unset_lock(omp_lock_t *lock) { lock->held = 0; }
+/*! @brief Acquires a lock if it is free. Returns non-zero on success. */
 static inline int omp_test_lock(omp_lock_t *lock) {
     if (lock->held)
         return 0;
@@ -93,17 +118,22 @@ static inline int omp_test_lock(omp_lock_t *lock) {
     return 1;
 }
 
+/*! @brief Initialises a nestable lock with depth 0. */
 static inline void omp_init_nest_lock(omp_nest_lock_t *lock) {
     lock->depth = 0;
 }
+/*! @brief Destroys a nestable lock. */
 static inline void omp_destroy_nest_lock(omp_nest_lock_t *lock) {
     lock->depth = 0;
 }
+/*! @brief Acquires a nestable lock, increasing its depth. */
 static inline void omp_set_nest_lock(omp_nest_lock_t *lock) { lock->depth++; }
+/*! @brief Decreases a nestable lock's depth. */
 static inline void omp_unset_nest_lock(omp_nest_lock_t *lock) {
     if (lock->depth > 0)
         lock->depth--;
 }
+/*! @brief Tries to acquire a nestable lock. Returns its new depth. */
 static inline int omp_test_nest_lock(omp_nest_lock_t *lock) {
     return ++lock->depth;
 }

@@ -2,7 +2,7 @@
 #
 # Scope is intentionally narrow: only the public headers under include/cccc/
 # (--build, --testing, the reflection/macro FFI, and the kernel/OpenCL model),
-# plus the front page in docs/doxygen/mainpage.dox. The rest of include/ is
+# include/omp.h, and the front page in docs/doxygen/mainpage.dox. The rest of include/ is
 # ~90 libc/POSIX polyfill headers that must not be swept into this
 # documentation.
 #
@@ -19,6 +19,7 @@ INPUT                   = include/cccc/building.h \
                            include/cccc/testing.h \
                            include/cccc/kernel.h \
                            include/cccc/opencl.h \
+                           include/omp.h \
                            docs/doxygen/mainpage.dox
 
 OUTPUT_DIRECTORY        = build/docs
