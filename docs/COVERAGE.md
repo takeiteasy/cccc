@@ -70,7 +70,7 @@ See [THREADING.md](THREADING.md). Per-feature rows are below and in [STDLIB.md](
 | `#line` | ~ | Directive parsed; line tracking updated |
 | Object-like and function-like macros | ✓ | |
 | Macro stringification `#` and token-pasting `##` | ✓ | |
-| Forward declarations and incomplete types | ✓ | |
+| Forward declarations and incomplete types | ✓ | A lone `struct S;` / `union S;` declares `S` in the current scope, shadowing an outer tag (C11 §6.7.2.3p7) |
 | Multiple translation units / linker | ✓ | |
 
 ---

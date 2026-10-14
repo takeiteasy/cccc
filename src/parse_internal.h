@@ -152,6 +152,10 @@ typedef struct {
     CheckedScope checked_scope;
 
     Token *decl_start; // first token of the declaration (function source span)
+
+    // Declared inside a struct/union member list, where a bare `struct S;`
+    // keeps referring to the visible tag instead of redeclaring it.
+    bool in_member_list;
 } VarAttr;
 
 struct CustomAttrUse {

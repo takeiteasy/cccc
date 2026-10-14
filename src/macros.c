@@ -59,6 +59,7 @@ static void fenv_barrier_end(int saved_round) {
 
 // Prototypes for the comptime builtins registered below (CC_BUILTIN).
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
+#define __CCCC_TAG(n) n
 #include "../include/cccc/reflection.h"
 
 // NOTE: unlike cc_record_emit_object below, this does NOT dedup -- the

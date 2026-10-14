@@ -25,6 +25,7 @@
 // reflection.h's prototypes make any drift from a definition below a compile
 // error (conflicting declaration).
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
+#define __CCCC_TAG(n) n
 #include "../include/cccc/reflection.h"
 
 // Aliases so the public API types match reflection.h

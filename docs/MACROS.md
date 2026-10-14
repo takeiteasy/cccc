@@ -1820,6 +1820,12 @@ their free references bound.
 
 ## Type And Symbol Reflection
 
+The handle types (`Node`, `Type`, `Obj`, `Token`, `Member`, `EnumConstant`,
+`AttrTarget`, `Builder`, `BuildTarget`) are opaque typedefs. Their struct tags
+are reserved, so your own `struct Node`, `union Type` or `enum Obj` coexists
+with them; only a *typedef* named `Node` etc. in your own code is shadowed
+inside comptime code.
+
 Macros can inspect types and global symbols that are visible at the macro
 execution point.
 

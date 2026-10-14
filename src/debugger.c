@@ -1325,6 +1325,7 @@ DebugSymbol *cc_lookup_symbol(VirtualMachine *vm, const char *name) {
 // AST-builder / gensym entry points (src/reflection.c). They read
 // __builtin_current_vm, which cc_init seeds for the whole compile.
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
+#define __CCCC_TAG(n) n
 #include "../include/cccc/reflection.h"
 extern int local_align_log(Obj *var);           // codegen_emit.c (#1137)
 extern bool param_slot_holds_pointer(Type *ty); // codegen_emit.c

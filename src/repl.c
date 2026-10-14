@@ -69,6 +69,7 @@
 // AST-builder / gensym entry points (src/reflection.c). They read
 // __builtin_current_vm, which cc_init seeds for the whole compile.
 #define CCCC_REFLECTION_PROTOTYPES_ONLY
+#define __CCCC_TAG(n) n
 #include "../include/cccc/reflection.h"
 
 #define REPL_PROMPT      "cccc> "

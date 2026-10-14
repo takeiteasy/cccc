@@ -96,46 +96,53 @@ extern "C" {
 
 // Forward declarations (opaque types for comptime functions)
 
+// Reserved tag spellings keep these handles from colliding with a user's own
+// `struct Node`, `union Type`, ... in the comptime scope. cccc's own sources
+// define __CCCC_TAG(n) as `n` to match their internal struct names.
+#ifndef __CCCC_TAG
+#define __CCCC_TAG(n) __cccc_##n
+#endif
+
 /*! @brief Opaque compiler/VM instance. Macro authors never see or pass this;
  *           functions that need it read it internally from a process-global
  *           set for the duration of macro execution. */
-typedef struct VirtualMachine VirtualMachine;
+typedef struct __CCCC_TAG(VirtualMachine) VirtualMachine;
 
 /*! @brief Opaque compiler type descriptor (primitive, pointer, array,
  *           function, struct/union, or enum). Inspect it with the
  *           @c GetTypeKind / @c Type* family of macros. */
-typedef struct Type Type;
+typedef struct __CCCC_TAG(Type) Type;
 
 /*! @brief Opaque AST node (expression, statement, or literal). Built with
  *           the @c Make* family of macros and spliced into the compiled
  *           program by returning it from a comptime function or via
  * PublishNode. */
-typedef struct Node Node;
+typedef struct __CCCC_TAG(Node) Node;
 
 /*! @brief Opaque global symbol (a function or global variable). Created by
  *           @c MakeFunction / @c GlobalVar, or looked up with @c FindGlobal /
  *           @c GlobalAt. */
-typedef struct Obj Obj;
+typedef struct __CCCC_TAG(Obj) Obj;
 
 /*! @brief Opaque struct/union member descriptor, returned by
  *           @c StructMemberAt / @c StructMemberFind and inspected with the
  *           @c Member* family of macros. */
-typedef struct Member Member;
+typedef struct __CCCC_TAG(Member) Member;
 
 /*! @brief Opaque enum constant descriptor, returned by @c EnumAt / @c EnumFind
  *           and inspected with @c EnumConstantName / @c EnumConstantValue. */
-typedef struct EnumConstant EnumConstant;
+typedef struct __CCCC_TAG(EnumConstant) EnumConstant;
 
 /*! @brief Opaque source-location handle attached to AST nodes for
  *           diagnostics. Obtained via @c CurrentToken / @c SyntheticToken /
  *           @c TokenFromNode and attached with @c SetToken. */
-typedef struct Token Token;
+typedef struct __CCCC_TAG(Token) Token;
 
 /*! @brief Opaque handle to the declaration a custom @c \@attribute handler
  *           was invoked on. Inspected with the @c AttrTarget* family of
  *           macros inside a function registered via
  *           @c \@comptime(attribute("...")). */
-typedef struct AttrTarget AttrTarget;
+typedef struct __CCCC_TAG(AttrTarget) AttrTarget;
 
 #ifndef CCCC_REFLECTION_PROTOTYPES_ONLY
 /*! @brief Discriminates the kind of a Type: primitive, pointer, array,
@@ -1304,7 +1311,7 @@ void __builtin_ast_add_build_target_attr(Obj *fn, const char *kind);
 
 /*! @brief Create and expose a new named struct type.
  * @param name The struct tag name.
- * @return The new struct Type*, or NULL on error.
+ * @return The new Type*, or NULL on error.
  * @details Use StructAddField to add fields after creation.
  *             The type is immediately visible via FindType(name).
  *             Convenience wrapper: MakeStruct(name).

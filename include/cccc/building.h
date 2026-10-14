@@ -42,10 +42,10 @@
 // ============================================================================
 
 /*! @brief Opaque build context; passed to the entry and forwarded to macros. */
-typedef struct Builder Builder;
+typedef struct __cccc_Builder Builder;
 
 /*! @brief Opaque handle to a declared build target. */
-typedef struct BuildTarget BuildTarget;
+typedef struct __cccc_BuildTarget BuildTarget;
 
 // ============================================================================
 // Underlying FFI-callable functions
