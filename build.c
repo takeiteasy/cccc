@@ -16,7 +16,8 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests, fuzz_replay, comptime_native_smoke, test / test_vm /
+//   clean, host_tests (also run by test), fuzz_replay, comptime_native_smoke,
+//   test / test_vm /
 //   test_native / test_release / test_msan / test_ubsan / test_asan /
 //   test_tsan; test_extra (the loose tests) =
 //   test_warnings / test_serialize / test_build_mode / test_safety /
@@ -614,9 +615,7 @@ BuildTarget *clean(Builder *ctx) {
 // RunCustom shell has no variables or exit-code capture to accumulate a
 // fail flag across commands the way the Makefile's `for` loop does.
 
-[[cccc::build_target]]
-BuildTarget *host_tests(Builder *ctx) {
-    BuildTarget *bt    = make_libbacktrace(ctx);
+static BuildTarget *make_host_tests(Builder *ctx, BuildTarget *bt) {
     const char **files = GlobFiles(ctx, "tests/host/test_*.c");
     BuildTarget *tests[256];
     int          n = 0;
@@ -643,6 +642,7 @@ BuildTarget *host_tests(Builder *ctx) {
         if (n > 0)
             strncat(cmd, " && ", sizeof(cmd) - strlen(cmd) - 1);
         strncat(cmd, TargetOutput(t), sizeof(cmd) - strlen(cmd) - 1);
+        strncat(cmd, " </dev/null", sizeof(cmd) - strlen(cmd) - 1);
         tests[n++] = t;
     }
     if (n == 0) {
@@ -656,13 +656,21 @@ BuildTarget *host_tests(Builder *ctx) {
     return step;
 }
 
+[[cccc::build_target]]
+BuildTarget *host_tests(Builder *ctx) {
+    return make_host_tests(ctx, make_libbacktrace(ctx));
+}
+
 // ---- test / test-vm / test-native --
 
+// The suites in both passes, plus the host tests.
 [[cccc::build_target]]
 BuildTarget *test(Builder *ctx) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    return make_test_step(ctx, cccc, "test");
+    BuildTarget *all  = make_test_step(ctx, cccc, "test");
+    DependsOn(all, make_host_tests(ctx, bt));
+    return all;
 }
 
 // The suites against the -O2 release binary, and against the MSan build
