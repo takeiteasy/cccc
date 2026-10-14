@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: the debugger's `reload` and `fix` print their compile errors (they
+  were silent under `-g`).
+- Fixed: a `reload` of a file with `[[cccc::comptime]]` functions leaves the
+  session's comptime functions in use. It refuses a changed or new comptime
+  function or variable, a file-scope comptime call, and a new or changed
+  function that calls a comptime function; `fix` refuses such a call with a
+  clear message.
 - Changed: a debugger condition or REPL expression that only reads program
   state gives back its string literals, block literals and labels too, and
   data freed below newer data is reused by later conditions.

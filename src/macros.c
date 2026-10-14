@@ -3340,6 +3340,55 @@ static Token *synthesize_global_decl_tokens(VirtualMachine *vm, Obj *var) {
     return toks;
 }
 
+static bool is_comptime_entry_call(VirtualMachine *vm, const Token *tok) {
+    if (tok->kind != TK_IDENT || !tok->next || !equal(tok->next, "("))
+        return false;
+    for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next)
+        if (m->is_macro_entry && strlen(m->name) == (size_t)tok->len &&
+            !strncmp(m->name, tok->loc, (size_t)tok->len))
+            return true;
+    return false;
+}
+
+Token *cc_find_comptime_call(VirtualMachine *vm, Token *from, Token *to) {
+    for (Token *t = from; t && t->kind != TK_EOF; t = t->next) {
+        if (is_comptime_entry_call(vm, t))
+            return t;
+        if (t == to)
+            break;
+    }
+    return NULL;
+}
+
+// The first file-scope `macro(...);` statement in `tok` that
+// scan_and_execute_global_calls would run, or NULL. Runs nothing.
+Token *cc_find_file_scope_comptime_call(VirtualMachine *vm, Token *tok) {
+    int  brace_depth = 0;
+    int  paren_depth = 0;
+    bool in_init     = false;
+
+    for (; tok && tok->kind != TK_EOF; tok = tok->next) {
+        if (equal(tok, "{"))
+            brace_depth++;
+        else if (equal(tok, "}")) {
+            if (--brace_depth == 0)
+                in_init = false;
+        } else if (equal(tok, "("))
+            paren_depth++;
+        else if (equal(tok, ")"))
+            paren_depth--;
+        else if (equal(tok, ";") && brace_depth == 0)
+            in_init = false;
+        else if (equal(tok, "=") && brace_depth == 0 && paren_depth == 0)
+            in_init = true;
+
+        if (!brace_depth && !paren_depth && !in_init &&
+            is_comptime_entry_call(vm, tok))
+            return tok;
+    }
+    return NULL;
+}
+
 // Scan a single token stream for file-scope calls to non-inline macros,
 // execute them, collect generated definitions, and remove the call tokens.
 // Newly generated Obj definitions are drained into vm->compiler.macro_globals

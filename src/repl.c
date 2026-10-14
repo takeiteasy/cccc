@@ -340,6 +340,10 @@ static void repl_print_pending_error(VirtualMachine *vm) {
         fputs(vm->error_message, stderr);
         vm->error_message = NULL;
     }
+    if (vm->errors) {
+        cc_print_all_errors(vm);
+        cc_clear_errors(vm);
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -549,9 +553,15 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, repl_unit_name, (char *)text);
-        if (expand_macros)
+        if (expand_macros) {
             tok = cc_expand_macros_only(vm, tok);
-        else
+            Token *call = cc_find_comptime_call(vm, tok, NULL);
+            if (call)
+                error_tok(vm, call,
+                          "comptime function '%.*s' cannot be expanded in a "
+                          "live session",
+                          call->len, call->loc);
+        } else
             convert_pp_tokens(vm, tok);
 
         Node        *expr_node = NULL;

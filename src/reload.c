@@ -24,7 +24,9 @@
 // becomes a hot-reload redefinition (Obj.reload_of); an unchanged function or
 // a kept global is not compiled again (Obj.reuse_of). Every check runs before
 // code is generated, and the new code is linked in one step, so a failed
-// reload leaves the session as it was.
+// reload leaves the session as it was. Comptime code is not part of the running
+// program, so a file that changes or adds a comptime function or variable,
+// calls one at file scope, or calls one from a changed function is refused.
 
 #include "internal.h"
 #include "parse_internal.h"
@@ -120,6 +122,79 @@ static void reload_fail(VirtualMachine *vm, const char *fmt, const char *a,
     (void)vm;
 }
 
+static bool tokens_equal(const Token *a, const Token *b) {
+    for (; a && b; a = a->next, b = b->next) {
+        if (a->kind != b->kind || a->len != b->len ||
+            memcmp(a->loc, b->loc, (size_t)a->len))
+            return false;
+        if (a->kind == TK_EOF)
+            return true;
+    }
+    return false;
+}
+
+// Re-preprocessing the file registers its comptime functions and variables
+// again. Drops each copy of a live one so the compiled entry stays in use, and
+// refuses a changed or new one.
+static bool settle_comptime(VirtualMachine *vm, MacroFn *old_fns,
+                            ComptimeVar *old_vars) {
+    for (MacroFn **link = &vm->compiler.macro_fns; *link != old_fns;) {
+        MacroFn *nw   = *link;
+        bool     same = false, known = false;
+        for (MacroFn *m = old_fns; m && !same; m = m->next)
+            if (!strcmp(m->name, nw->name)) {
+                known = true;
+                same  = tokens_equal(m->body_tokens, nw->body_tokens);
+            }
+        if (!same) {
+            reload_fail(vm,
+                        known ? "comptime function '%s' changed; restart "
+                                "to apply it"
+                              : "comptime function '%s' is new; restart "
+                                "to apply it",
+                        nw->name, NULL);
+            return false;
+        }
+        *link = nw->next;
+    }
+    for (ComptimeVar **link = &vm->compiler.comptime_vars; *link != old_vars;) {
+        ComptimeVar *nw   = *link;
+        bool         same = false, known = false;
+        for (ComptimeVar *c = old_vars; c && !same; c = c->next)
+            if (!strcmp(c->name, nw->name)) {
+                known = true;
+                same  = tokens_equal(c->decl_tokens, nw->decl_tokens);
+            }
+        if (!same) {
+            reload_fail(vm,
+                        known ? "comptime variable '%s' changed; restart "
+                                "to apply it"
+                              : "comptime variable '%s' is new; restart "
+                                "to apply it",
+                        nw->name, NULL);
+            return false;
+        }
+        *link = nw->next;
+    }
+    return true;
+}
+
+// Prints the diagnostics collected since `tail` and drops them from the list.
+static void flush_errors(VirtualMachine *vm, CompileError *tail, int count) {
+    CompileError *first = tail ? tail->next : vm->errors;
+    for (CompileError *e = first; e; e = e->next) {
+        fputs(e->message, stderr);
+        for (CompileError *n = e->notes; n; n = n->next)
+            fputs(n->message, stderr);
+    }
+    if (tail)
+        tail->next = NULL;
+    else
+        vm->errors = NULL;
+    vm->errors_tail = tail;
+    vm->error_count = count;
+}
+
 // Names the first tag, typedef or enumerator the new file scope defines
 // differently from the live one, or returns NULL.
 static const char *changed_declaration(Scope *live, Scope *fresh,
@@ -212,6 +287,25 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st) {
     return true;
 }
 
+// Refuses a new or changed definition that calls a comptime function: there is
+// no compiled comptime code to expand it with.
+static bool no_comptime_calls(VirtualMachine *vm, Obj *old_head) {
+    for (Obj *nw = vm->compiler.globals; nw != old_head; nw = nw->next) {
+        if (!is_file_scope_obj(nw) || nw->reuse_of)
+            continue;
+        if (nw->has_pending_macro_init ||
+            (nw->is_function && nw->body &&
+             cc_find_comptime_call(vm, nw->def_begin, nw->def_end))) {
+            reload_fail(vm,
+                        "'%s' calls a comptime function; restart to apply "
+                        "the change",
+                        nw->name, NULL);
+            return false;
+        }
+    }
+    return true;
+}
+
 // Old definitions from `key` that the new file no longer defines.
 static void note_removed(VirtualMachine *vm, Obj *old_head, const char *key,
                          const char *path, ReloadStats *st) {
@@ -295,6 +389,10 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
     CcPreprocessorState pp           = cc_preprocessor_begin_reload(vm);
     volatile bool       pp_active    = true;
     Scope *volatile fresh            = NULL;
+    MacroFn      *old_fns              = vm->compiler.macro_fns;
+    ComptimeVar  *old_vars             = vm->compiler.comptime_vars;
+    CompileError *err_tail             = vm->errors_tail;
+    int           err_count            = vm->error_count;
     CcCodeMark  mark                 = {0};
     ReloadStats st                   = {0};
     int         rc                   = -1;
@@ -307,7 +405,20 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
         cc_preprocessor_end_reload(vm, pp);
         pp_active        = false;
 
-        fresh            = cc_parse_file_isolated(vm, tok);
+        if (!settle_comptime(vm, old_fns, old_vars))
+            goto refused;
+        Token *call = cc_find_file_scope_comptime_call(vm, tok);
+        if (call) {
+            char *name = strndup(call->loc, (size_t)call->len);
+            reload_fail(vm, "file-scope comptime call '%s' cannot be reloaded",
+                        name, NULL);
+            free(name);
+            goto refused;
+        }
+
+        fresh = cc_parse_file_isolated(vm, tok);
+        if (vm->error_count > err_count)
+            goto refused;
 
         const char *kind = NULL;
         char       *name =
@@ -319,6 +430,8 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
             goto refused;
         }
         if (!match_objects(vm, old_head, &st))
+            goto refused;
+        if (!no_comptime_calls(vm, old_head))
             goto refused;
 
         vm->compiler.current_fn = NULL;
@@ -347,8 +460,11 @@ int cc_debug_reload(VirtualMachine *vm, const char *path) {
     if (mark.started)
         cc_code_discard(vm, &mark);
 refused:
-    vm->compiler.globals = old_head;
+    vm->compiler.globals       = old_head;
+    vm->compiler.macro_fns     = old_fns;
+    vm->compiler.comptime_vars = old_vars;
 done:
+    flush_errors(vm, err_tail, err_count);
     vm->error_jmp_buf       = saved_jb;
     vm->compiler.current_fn = saved_fn;
     vm->compiler.locals     = saved_locals;

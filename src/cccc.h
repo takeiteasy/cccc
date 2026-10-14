@@ -5586,6 +5586,21 @@ Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt);
 void cc_expand_macros(VirtualMachine *vm, Obj *prog);
 
 /*!
+ @brief Find a call to a comptime function in a token range.
+ @param from First token to look at.
+ @param to Last token to look at, or NULL to stop at the end of the stream.
+ @return The call's name token, or NULL.
+*/
+Token *cc_find_comptime_call(VirtualMachine *vm, Token *from, Token *to);
+
+/*!
+ @brief Find a file-scope call to a comptime function in a token stream.
+ @details These are the calls cc_execute_inline_macros runs before parsing.
+ @return The call's name token, or NULL.
+*/
+Token *cc_find_file_scope_comptime_call(VirtualMachine *vm, Token *tok);
+
+/*!
  @brief Expand a single ND_MACRO_CALL node using the already-compiled macros.
  @details Called from cc_finalize_macro_gvar_inits while in_macro_expansion is
  true. Must only be called after compile_all_macros has run (i.e. from within

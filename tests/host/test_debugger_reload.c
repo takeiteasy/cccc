@@ -216,6 +216,76 @@ static void test_running_program(void) {
     cc_destroy(&vm);
 }
 
+// The comptime function's compiled code is gone once the program runs, so a
+// reload keeps the live comptime definitions and refuses what needs them.
+static const char *ct_path;
+
+static void write_ct(const char *comptime, const char *f, const char *g,
+                     const char *extra) {
+    char text[1024];
+    snprintf(text, sizeof(text),
+             "%s\n"
+             "int f(void) { return %s; }\n"
+             "int g(void) { return %s; }\n"
+             "%s\n"
+             "int reload_hook(void);\n"
+             "int main(void) { reload_hook(); return f() + g(); }\n",
+             comptime, f, g, extra);
+    write_file("ct.c", text);
+}
+
+static long long ct_hook(void) {
+    const char *val42 =
+        "@comptime Node *val(void) { return MakeIntLiteral(42); }";
+    write_ct(val42, "val()", "2", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "unchanged comptime reloads");
+    write_ct(val42, "val()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "reloads again");
+
+    write_ct(val42, "val() + 1", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "new comptime call refused");
+    CHECK(cc_redefine_function(&vm, "int f(void) { return val() + 5; }") != 0,
+          "fix with a comptime call refused");
+    write_ct("@comptime Node *val(void) { return MakeIntLiteral(7); }", "val()",
+             "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "changed comptime refused");
+    write_ct(val42, "val()", "3", "@comptime int extra(void) { return 1; }");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "new comptime refused");
+    write_ct(val42, "val()", "3", "val();");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "file-scope call refused");
+    write_ct(val42, "val()", "3 +", "");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "parse error refused");
+    CHECK(vm.error_count == 0, "diagnostics are cleared");
+
+    write_ct(val42, "val()", "4", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "reload after refusals");
+    return 0;
+}
+
+static void test_comptime(void) {
+    ct_path = write_file("ct.c", "");
+    write_ct("@comptime Node *val(void) { return MakeIntLiteral(42); }",
+             "val()", "1", "");
+
+    cc_init(&vm, CCCC_CFI | CCCC_STACK_CANARIES | CCCC_DANGLING_DETECT);
+    vm.collect_errors           = true;
+    vm.compiler.compiler_family = CCCC_COMPILER_FAMILY_GCC;
+    init_mode_macros(&vm);
+    register_stdlib_functions(&vm);
+    cc_register_cfunc(&vm, "reload_hook", (void *)ct_hook, 0, 0);
+
+    Token *tok = cc_preprocess(&vm, ct_path);
+    CHECK(tok != NULL, "preprocess");
+    Obj *prog   = cc_parse(&vm, tok);
+    Obj *merged = cc_link_progs(&vm, &prog, 1);
+    cc_expand_macros(&vm, merged);
+    cc_compile(&vm, merged);
+
+    int rc = cc_run_at(&vm, (Pc)vm.text_seg[0], 0, NULL);
+    CHECK(rc == 42 + 4, "program result %d", rc);
+    cc_destroy(&vm);
+}
+
 int main(void) {
     snprintf(dir, sizeof(dir), "%s/cccc-reload-XXXXXX",
              getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
@@ -234,6 +304,7 @@ int main(void) {
     test_refusals();
     cc_destroy(&vm);
     test_running_program();
+    test_comptime();
 
     if (!failed)
         printf("PASS: debugger reload\n");

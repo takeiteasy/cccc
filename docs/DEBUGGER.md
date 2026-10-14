@@ -200,11 +200,17 @@ The reload is refused, with nothing changed, if the file
 - changes a function's signature (return type, parameters, `static`);
 - changes the layout of a struct, union, enum or typedef it defines, or the
   type of a global;
-- changes the value of a `constexpr` object.
+- changes the value of a `constexpr` object;
+- adds or changes a `[[cccc::comptime]]` function or variable, or calls one at
+  file scope;
+- has a new or changed function (or global initializer) that calls a comptime
+  function.
 
-Comptime macros in the file are not expanded again
-(https://todo.sr.ht/~takeiteasy/cccc/1511), and like `fix` the command
-reaches the last file's scope. Embedders call `cc_debug_reload(vm, path)`.
+Comptime code is not part of the running program, so a call to it cannot be
+expanded in a live session. A function that calls one reloads only while it is
+unchanged; edit it and restart. `fix` refuses such a call too. Like `fix`, the
+command reaches the last file's scope. Embedders call
+`cc_debug_reload(vm, path)`.
 
 ## `print` and live-stack address validation
 
