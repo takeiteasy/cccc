@@ -1469,14 +1469,14 @@ typedef struct {
     int       n, cap;
 } BlockWalk;
 
-static Obj *debugger_capture_proxy(ProxyMap *m, Obj *var) {
+static Obj *debugger_capture_proxy(ProxyMap *m, Obj *var, Token *tok) {
     for (int i = 0; i < m->n; i++)
         if (m->orig[i] == var)
             return m->proxy[i];
     if (var->is_block_var || var->ty->kind == TY_ARRAY ||
         var->ty->kind == TY_VLA)
-        error("a block in a condition cannot capture %s '%s'",
-              var->is_block_var ? "__block variable" : "array", var->name);
+        error_tok(m->vm, tok, "a block in a condition cannot capture %s '%s'",
+                  var->is_block_var ? "__block variable" : "array", var->name);
 
     Type *ty = unqualified(m->vm, var->ty);
     if (ty->name) {
@@ -1513,7 +1513,7 @@ static void debugger_capture_visit(Node *n, void *vctx) {
     BlockWalk *w = vctx;
     if (n->kind == ND_VAR && n->var &&
         debugger_var_is_paused_frame_local(w->map->current_fn, n->var)) {
-        Obj *proxy = debugger_capture_proxy(w->map, n->var);
+        Obj *proxy = debugger_capture_proxy(w->map, n->var, n->tok);
         n->var     = proxy;
         debugger_walk_add_used(w, proxy);
     } else if (n->kind == ND_BLOCK_LITERAL && n->block_fn) {
@@ -1691,18 +1691,20 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
         hashmap_deinit_borrowed(&parse_scope.var_map);
         hashmap_deinit_borrowed(&parse_scope.tag_map);
         if (!expr)
-            error("failed to parse the expression");
+            error_tok(vm, tok, "failed to parse the expression");
         add_type(vm, expr);
 
         if (result_ty &&
             (result_ty->kind == TY_STRUCT || result_ty->kind == TY_UNION)) {
             if (!expr->ty || !is_compatible(expr->ty, result_ty))
-                error("value is not a compatible aggregate");
+                error_tok(vm, expr->tok ? expr->tok : tok,
+                          "value is not a compatible aggregate");
         } else if (result_ty) {
             expr = new_cast(vm, expr, result_ty);
             add_type(vm, expr);
         } else if (!debugger_type_is_valid_condition(expr->ty)) {
-            error("condition must have scalar type");
+            error_tok(vm, expr->tok ? expr->tok : tok,
+                      "condition must have scalar type");
         }
 
         debugger_rewrite_locals(vm, scope_fn, expr);

@@ -818,11 +818,11 @@ static void test_frame_locals(void) {
         "(x += 0) == 1",
         "__atomic_fetch_add(&x, 0, 0) == 1",
         "({ int (^k)(void) = ^{ return x; }; k(); }) == 1",
-        "^{ return x + y; }() == 2",
-        "^{ return ^{ return x; }(); }() == 1",
+        "(^{ return x + y; })() == 2",
+        "(^{ return (^{ return x; })(); })() == 1",
         "({ int (^k)(void) = ^{ return x; }; x = 5; int r = k(); x = 1; r; }) "
         "== 1",
-        "({ x = 5; int r = ^{ return x; }(); x = 1; r; }) == 5",
+        "({ x = 5; int r = (^{ return x; })(); x = 1; r; }) == 5",
     };
     static const char *const miss[] = {
         "(*\"abc\", x) == 99",
@@ -839,11 +839,11 @@ static void test_frame_locals(void) {
     decl("int cv_fn(const int c){\n  int a[2] = {3, 4};\n  __block int b = 7;\n"
          "  return c;\n}");
     Pc cv_in = cc_find_pc_for_source(&vm, last_compiled_file(), 4);
-    CHECK(cond_hits_in(cv_in, "^{ return c; }() == 5", "cv_fn(5)") == 1,
+    CHECK(cond_hits_in(cv_in, "(^{ return c; })() == 5", "cv_fn(5)") == 1,
           "a const parameter is captured");
-    CHECK(cond_hits_in(cv_in, "^{ return a[0]; }() == 3", "cv_fn(5)") == 0,
+    CHECK(cond_hits_in(cv_in, "(^{ return a[0]; })() == 3", "cv_fn(5)") == 0,
           "an array local is not captured");
-    CHECK(cond_hits_in(cv_in, "^{ return b; }() == 7", "cv_fn(5)") == 0,
+    CHECK(cond_hits_in(cv_in, "(^{ return b; })() == 7", "cv_fn(5)") == 0,
           "a __block local is not captured");
 }
 
