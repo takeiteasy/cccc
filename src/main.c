@@ -180,8 +180,9 @@ static int run_native_backend(
     VirtualMachine *vm, Obj *prog, const char *out_file, const char **inc_paths,
     int inc_paths_count, const char **sys_inc_paths, int sys_inc_paths_count,
     const char **lib_paths, int lib_paths_count, const char **libs,
-    int libs_count, const char **defines, int defines_count,
-    const char **undefs, int undefs_count, const char *std_arg, bool emit_cccc,
+    int libs_count, const char **link_args, int link_args_count,
+    const char **defines, int defines_count, const char **undefs,
+    int undefs_count, const char *std_arg, bool emit_cccc,
     bool emit_test_harness, bool no_emit_tests, int opt_level) {
     if (!out_file) {
         fprintf(
@@ -412,6 +413,8 @@ static int run_native_backend(
     }
     for (int i = 0; i < libs_count; i++)
         push_owned_flag(&cc_args, &owned, "-l", libs[i]);
+    for (int i = 0; i < link_args_count; i++)
+        argv_push(&cc_args, (char *)link_args[i]);
     // #1051: libm is never linked otherwise -- a guest program calling any
     // math.h function CCCC's own bundled header declares (fmaximum/
     // totalorder/etc, the whole C23 IEC 60559:2020 family CCCC implements
@@ -575,6 +578,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-L/--library-path <path> Add <path> to dynamic library search "
            "paths\n");
     printf("\t-l/--library <name>      Link dynamic library by name or path\n");
+    printf("\t   --link-arg <arg>      With -c=native: pass <arg> verbatim to "
+           "the host cc link line (repeatable; e.g. -framework X, a .o)\n");
 #ifdef CCCC_HAS_CURL
     printf("\t   --url-cache-dir <path> Directory for caching #include/#embed "
            "<https://...> fetches\n");
@@ -1429,6 +1434,8 @@ int main(int argc, const char *argv[]) {
     int          lib_paths_count     = 0;
     const char **libs                = NULL; // --library
     int          libs_count          = 0;
+    const char **link_args           = NULL; // --link-arg
+    int          link_args_count     = 0;
     const char **defines             = NULL; // -D
     int          defines_count       = 0;
     const char **undefs              = NULL; // -U
@@ -1608,6 +1615,7 @@ int main(int argc, const char *argv[]) {
         {"isystem", required_argument, 0, 'i'},
         {"library-path", required_argument, 0, 'L'},
         {"library", required_argument, 0, 'l'},
+        {"link-arg", required_argument, 0, 1136},
         {"define", required_argument, 0, 'D'},
         {"undef", required_argument, 0, 'U'},
         {"url-cache-dir", required_argument, 0, 1008},
@@ -2112,6 +2120,11 @@ int main(int argc, const char *argv[]) {
                 fw_paths =
                     realloc(fw_paths, sizeof(*fw_paths) * (fw_paths_count + 1));
                 fw_paths[fw_paths_count++] = strdup(optarg);
+                break;
+            case 1136: // --link-arg
+                link_args = realloc(link_args,
+                                    sizeof(*link_args) * (link_args_count + 1));
+                link_args[link_args_count++] = strdup(optarg);
                 break;
             case 1135: // --iframework
                 sys_fw_paths =
@@ -2642,6 +2655,11 @@ int main(int argc, const char *argv[]) {
     if (deps_file && compile_format != COMPILE_NATIVE && !dump_expanded_only) {
         fprintf(stderr, "error: --deps-file requires -c=native, -m, or "
                         "-c=generated\n");
+        usage(argv[0], 1);
+    }
+
+    if (link_args_count && compile_format != COMPILE_NATIVE) {
+        fprintf(stderr, "error: --link-arg requires -c=native\n");
         usage(argv[0], 1);
     }
 
@@ -3651,8 +3669,8 @@ int main(int argc, const char *argv[]) {
         exit_code = run_native_backend(
             &vm, merged_prog, out_file, inc_paths, inc_paths_count,
             sys_inc_paths, sys_inc_paths_count, lib_paths, lib_paths_count,
-            libs, libs_count, defines, defines_count, undefs, undefs_count,
-            std_arg, (bool)emit_cccc_mode,
+            libs, libs_count, link_args, link_args_count, defines,
+            defines_count, undefs, undefs_count, std_arg, (bool)emit_cccc_mode,
             testing_backend == TESTING_BACKEND_NATIVE, (bool)no_emit_tests,
             opt_level);
         goto BAIL;
@@ -3775,6 +3793,11 @@ BAIL:
         for (int i = 0; i < lib_paths_count; i++)
             free((void *)lib_paths[i]);
         free(lib_paths);
+    }
+    if (link_args) {
+        for (int i = 0; i < link_args_count; i++)
+            free((void *)link_args[i]);
+        free(link_args);
     }
     if (libs) {
         for (int i = 0; i < libs_count; i++)

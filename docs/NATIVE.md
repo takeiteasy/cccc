@@ -84,6 +84,17 @@ passed through the front end to the host `cc`. `-c=native` additionally always
 adds `-lm`, `-pthread`, and `-fsigned-char` (CCCC models `char` as signed on
 every target, so the host build must match).
 
+`--link-arg=ARG` (repeatable, `-c=native` only) passes `ARG` verbatim to the
+host link line, after `-L`/`-l` and before the automatic `-lm`/`-pthread`. Use it
+for what `-l` cannot name: a `.o` or `.a`, `-framework X`, `-Wl,...`.
+
+```sh
+cccc -c=native main.c --link-arg=helper.o -o app
+cccc -c=native main.c --link-arg=-framework --link-arg=CoreServices -o app
+```
+
+Giving `--link-arg` without `-c=native` is an error.
+
 ### How `--std=` is handled
 
 The emitted C is a fixed **GNU C11** floor regardless of what `--std=` you

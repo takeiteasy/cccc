@@ -350,7 +350,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->asm_label = ty->asm_label;
     }
 
-    fn->is_root = !(fn->is_static && fn->is_inline);
+    fn->is_root = !obj_is_inline_only(fn);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
                           fn, fn->tok);
     return fn;
@@ -637,7 +637,15 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->asm_label = ty->asm_label;
     }
 
-    fn->is_root = !(fn->is_static && fn->is_inline);
+    // GNU89 `extern inline`, or C99 with gnu_inline: an inline-only
+    // definition, never emitted as an external symbol. Judged per definition,
+    // so a later real definition of a name clears it.
+    if (defines_body)
+        fn->is_gnu_inline = attr->is_inline && attr->is_extern &&
+                            (ty->is_gnu_inline || attr->is_gnu_inline ||
+                             vm->compiler.c_std < CCCC_STD_C99);
+
+    fn->is_root = !obj_is_inline_only(fn);
 
     if (consume(vm, &tok, tok, ";")) {
         // #485: [[cccc::checked]]/[[cccc::unchecked]] applies to a
@@ -705,7 +713,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->nesting_depth = 0;
     }
 
-    fn->is_root = !(fn->is_static && fn->is_inline);
+    fn->is_root = !obj_is_inline_only(fn);
 
     // -Wmissing-declarations / -Wmissing-prototypes for external function
     // definitions.

@@ -98,6 +98,7 @@ typedef struct {
     bool           is_fallthrough;
     bool           is_pure;
     bool           is_func_const;
+    bool           is_gnu_inline;
     bool           is_kernel;
     char          *deprecated_msg;
     char          *nodiscard_msg;

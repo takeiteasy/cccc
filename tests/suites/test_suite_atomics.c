@@ -282,4 +282,98 @@ int test_atomic_incdec_value_forms(void) {
     return 42;
 }
 
+// Legacy GCC __sync_* builtins: fetch/op, CAS, test_and_set, release, fence.
+[[cccc::test(return = 42)]]
+int test_sync_builtins(void) {
+    int x = 10;
+    if (__sync_fetch_and_add(&x, 5) != 10 || x != 15)
+        return 1;
+    if (__sync_add_and_fetch(&x, 5) != 20 || x != 20)
+        return 2;
+    if (__sync_fetch_and_sub(&x, 4) != 20 || __sync_sub_and_fetch(&x, 4) != 12)
+        return 3;
+    if (__sync_fetch_and_or(&x, 3) != 12 || x != 15)
+        return 4;
+    if (__sync_and_and_fetch(&x, 6) != 6 || __sync_xor_and_fetch(&x, 3) != 5)
+        return 5;
+    x = 6;
+    if (__sync_fetch_and_nand(&x, 3) != 6 || x != ~(6 & 3))
+        return 6;
+    x = 6;
+    if (__sync_nand_and_fetch(&x, 3) != ~(6 & 3))
+        return 7;
+
+    x = 1;
+    if (!__sync_bool_compare_and_swap(&x, 1, 2) || x != 2)
+        return 8;
+    if (__sync_bool_compare_and_swap(&x, 1, 3) || x != 2)
+        return 9;
+    if (__sync_val_compare_and_swap(&x, 2, 7) != 2 || x != 7)
+        return 10;
+    if (__sync_val_compare_and_swap(&x, 2, 9) != 7 || x != 7)
+        return 11;
+
+    x = 5;
+    if (__sync_lock_test_and_set(&x, 8) != 5 || x != 8)
+        return 12;
+    __sync_lock_release(&x);
+    if (x != 0)
+        return 13;
+    __sync_synchronize();
+    return 42;
+}
+
+static int sync_cell;
+static int sync_calls;
+static int *sync_target(void) {
+    sync_calls++;
+    return &sync_cell;
+}
+static int sync_value(void) {
+    sync_calls++;
+    return 2;
+}
+
+// The shapes src/dmon.h uses: a bool flag, a pointer pointee, and a trailing
+// (discarded) protected-variable argument.
+[[cccc::test(return = 42)]]
+int test_sync_builtins_operand_shapes(void) {
+    volatile bool quit = false;
+    if (!__sync_bool_compare_and_swap(&quit, false, false))
+        return 1;
+    (void)__sync_lock_test_and_set(&quit, true);
+    if (!quit)
+        return 2;
+
+    int  a = 1, b = 2;
+    int *p = &a;
+    if (!__sync_bool_compare_and_swap(&p, &a, &b) || p != &b)
+        return 3;
+    if (__sync_val_compare_and_swap(&p, &a, &a) != &b)
+        return 4;
+
+    long y = 0;
+    if (__sync_fetch_and_add(&y, 1, &a, &b) != 0 || y != 1)
+        return 5;
+
+    // Operands evaluate exactly once.
+    sync_calls = 0;
+    __sync_fetch_and_add(sync_target(), sync_value());
+    __sync_add_and_fetch(sync_target(), sync_value());
+    __sync_bool_compare_and_swap(sync_target(), sync_value(), sync_value());
+    if (sync_calls != 7 || sync_cell != 4)
+        return 6;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_has_builtin_atomics(void) {
+    if (!__has_builtin(__sync_fetch_and_add) ||
+        !__has_builtin(__sync_bool_compare_and_swap) ||
+        !__has_builtin(__atomic_load_n) ||
+        !__has_builtin(__atomic_compare_exchange_n))
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end

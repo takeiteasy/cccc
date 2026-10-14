@@ -96,6 +96,49 @@ static bool cast_is_implicit_int_widening(Type *dst, Type *src) {
            cccc_int_conv_rank[dst->kind] >= cccc_int_conv_rank[src->kind];
 }
 
+static bool is_comparison_kind(NodeKind k) {
+    return k == ND_EQ || k == ND_NE || k == ND_LT || k == ND_LE;
+}
+
+// Operand pairs gcc/clang's -Wparentheses flags when printed bare, though
+// C's precedence already groups them the way the AST does.
+static bool clarity_parens_wanted(NodeKind parent, NodeKind child) {
+    switch (parent) {
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+            return is_comparison_kind(child) || child == ND_ADD ||
+                   child == ND_SUB ||
+                   (parent != ND_BITAND &&
+                    (child == ND_BITAND ||
+                     (parent == ND_BITOR && child == ND_BITXOR)));
+        case ND_LOGOR:
+            return child == ND_LOGAND;
+        case ND_SHL:
+        case ND_SHR:
+            return child == ND_ADD || child == ND_SUB;
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+            return is_comparison_kind(child);
+        default:
+            return false;
+    }
+}
+
+// Precedence to print `child` at as an operand of `parent`: raised past every
+// binary operator when it needs clarity parentheses. A dropped widening cast
+// forwards it to the cast's operand.
+static int operand_prec(NodeKind parent, Node *child, int prec) {
+    Node *n = child;
+    while (n && n->kind == ND_CAST && n->lhs &&
+           cast_is_implicit_int_widening(n->ty, n->lhs->ty))
+        n = n->lhs;
+    return n && clarity_parens_wanted(parent, n->kind) ? get_precedence(ND_CAST)
+                                                       : prec;
+}
+
 // Get operator string for binary operations
 static const char *get_binary_op_str(NodeKind kind) {
     switch (kind) {
@@ -2029,9 +2072,13 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // into an ENT3 operand's high word exactly this way, and dropping
             // the cast made every self-hosted guest function read its incoming
             // parameter as 0.
-            serialize_shift_operand(f, vm, ctx, node->lhs, node_prec);
+            serialize_shift_operand(
+                f, vm, ctx, node->lhs,
+                operand_prec(node->kind, node->lhs, node_prec));
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_shift_operand(f, vm, ctx, node->rhs, node_prec + 1);
+            serialize_shift_operand(
+                f, vm, ctx, node->rhs,
+                operand_prec(node->kind, node->rhs, node_prec + 1));
             break;
 
         case ND_MUL:
@@ -2046,9 +2093,11 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
         case ND_LE:
         case ND_LOGAND:
         case ND_LOGOR:
-            serialize_expr(f, vm, ctx, node->lhs, node_prec);
+            serialize_expr(f, vm, ctx, node->lhs,
+                           operand_prec(node->kind, node->lhs, node_prec));
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_expr(f, vm, ctx, node->rhs, node_prec + 1);
+            serialize_expr(f, vm, ctx, node->rhs,
+                           operand_prec(node->kind, node->rhs, node_prec + 1));
             break;
 
         case ND_ASSIGN:

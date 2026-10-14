@@ -1556,7 +1556,7 @@ static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
 
     // C99 reserved names — illegal below C99 (fire when --std=c89 is selected)
     if (s < CCCC_STD_C99) {
-        if (KW("restrict") || KW("__restrict") || KW("__restrict__"))
+        if (KW("restrict"))
             error_tok(vm, t, "'%.*s' is not available before C99", len, kw);
         if (KW("_Bool"))
             error_tok(vm, t, "'_Bool' is not available before C99");
@@ -1571,7 +1571,7 @@ static bool keyword_std_ok(VirtualMachine *vm, Token *t) {
         if (KW("_Noreturn"))
             warn_tok(vm, t, CCCC_WARN_PEDANTIC,
                      "'_Noreturn' is not available before C11");
-        if (KW("_Thread_local") || KW("__thread"))
+        if (KW("_Thread_local"))
             error_tok(vm, t, "'%.*s' is not available before C11", len, kw);
         if (KW("_Atomic"))
             error_tok(vm, t, "'_Atomic' is not available before C11");

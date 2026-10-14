@@ -145,7 +145,16 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                     (existing->is_function && existing->body) ||
                     (!existing->is_function && existing->init_data);
 
-                if (obj_is_def && existing_is_def) {
+                bool both_def = obj_is_def && existing_is_def;
+                if (both_def && obj->is_function && obj->is_gnu_inline &&
+                    existing->is_function) {
+                    // A GNU inline-only body yields to a real definition,
+                    // and a second copy of the same body (one per TU that
+                    // includes the header) is dropped silently.
+                } else if (both_def && existing->is_function &&
+                           existing->is_gnu_inline) {
+                    hashmap_put(&symbol_map, obj->name, obj);
+                } else if (both_def) {
                     // Both are definitions - error
                     error_tok(vm, obj->tok, "redefinition of '%s'", obj->name);
                 } else if (obj_is_def) {
@@ -246,6 +255,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 // call site lived in a non-primary TU -- "use of undeclared
                 // identifier '__cccc_stderr'" from the host compiler with no
                 // cccc-side diagnostic at all.
+                canonical->is_live         |= obj->is_live;
                 canonical->is_used         |= obj->is_used;
                 canonical->is_maybe_unused |= obj->is_maybe_unused;
                 canonical->is_deprecated   |= obj->is_deprecated;

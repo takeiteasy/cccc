@@ -327,13 +327,33 @@ static void normalize_include_operand_spacing(char *line) {
     memmove(start + content_len, end, strlen(end) + 1); // +1 for NUL
 }
 
+// Copies the directive up to its real end of line. A newline inside a block
+// comment is replaced by a space so the copy stays one physical line.
 static char *copy_raw_directive_line(VirtualMachine *vm, Token *start) {
     char *end = start->loc;
-    while (*end && *end != '\n')
-        end++;
+    while (*end && *end != '\n') {
+        if (*end == '"' || *end == '\'') {
+            char quote = *end++;
+            while (*end && *end != '\n' && *end != quote)
+                end += (*end == '\\' && end[1] && end[1] != '\n') ? 2 : 1;
+            if (*end == quote)
+                end++;
+        } else if (end[0] == '/' && end[1] == '/') {
+            while (*end && *end != '\n')
+                end++;
+        } else if (end[0] == '/' && end[1] == '*') {
+            char *close = strstr(end + 2, "*/");
+            end         = close ? close + 2 : end + strlen(end);
+        } else {
+            end++;
+        }
+    }
     if (end > start->loc && end[-1] == '\r')
         end--;
     char *line = arena_strndup(vm, start->loc, end - start->loc);
+    for (char *p = line; *p; p++)
+        if (*p == '\n' || *p == '\r')
+            *p = ' ';
     normalize_include_operand_spacing(line);
     return line;
 }
@@ -1855,6 +1875,7 @@ static const AttrInfo known_attrs[] = {
     {"alias", ATTR_GNU, true, 0},
     {"target", ATTR_GNU, true, 0},
     {"always_inline", ATTR_GNU, true, 0},
+    {"gnu_inline", ATTR_GNU, true, 0},
     {"noinline", ATTR_GNU, true, 0},
     {"flatten", ATTR_GNU, true, 0},
     {"cold", ATTR_GNU, true, 0},
@@ -1972,6 +1993,49 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_cccc_dynamic_check",
         "__builtin_pc_function_name",
         "__builtin_pc_source_location",
+        "__atomic_load_n",
+        "__atomic_load",
+        "__atomic_store_n",
+        "__atomic_store",
+        "__atomic_exchange_n",
+        "__atomic_exchange",
+        "__atomic_compare_exchange_n",
+        "__atomic_compare_exchange",
+        "__atomic_thread_fence",
+        "__atomic_signal_fence",
+        "__atomic_test_and_set",
+        "__atomic_clear",
+        "__atomic_is_lock_free",
+        "__atomic_always_lock_free",
+        "__atomic_fetch_add",
+        "__atomic_fetch_sub",
+        "__atomic_fetch_and",
+        "__atomic_fetch_or",
+        "__atomic_fetch_xor",
+        "__atomic_fetch_nand",
+        "__atomic_add_fetch",
+        "__atomic_sub_fetch",
+        "__atomic_and_fetch",
+        "__atomic_or_fetch",
+        "__atomic_xor_fetch",
+        "__atomic_nand_fetch",
+        "__sync_fetch_and_add",
+        "__sync_fetch_and_sub",
+        "__sync_fetch_and_and",
+        "__sync_fetch_and_or",
+        "__sync_fetch_and_xor",
+        "__sync_fetch_and_nand",
+        "__sync_add_and_fetch",
+        "__sync_sub_and_fetch",
+        "__sync_and_and_fetch",
+        "__sync_or_and_fetch",
+        "__sync_xor_and_fetch",
+        "__sync_nand_and_fetch",
+        "__sync_bool_compare_and_swap",
+        "__sync_val_compare_and_swap",
+        "__sync_lock_test_and_set",
+        "__sync_lock_release",
+        "__sync_synchronize",
         NULL,
     };
 
@@ -2971,6 +3035,27 @@ static bool is_cccc_supplied_only_header(const char *name) {
     return false;
 }
 
+// True if the file at `path` is CCCC's own bundled copy of `name`. A header
+// found on disk under the same name (e.g. the SDK's real Availability.h under
+// --sysroot) is a host header and must be replayed like any other.
+static bool path_is_cccc_copy(const char *name, const char *path) {
+    const char *own = get_std_header(name);
+    if (!own || !path)
+        return own != NULL;
+    struct stat st;
+    size_t      len = strlen(own);
+    if (stat(path, &st) || (size_t)st.st_size != len)
+        return false;
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return false;
+    char *buf  = malloc(len + 1);
+    bool  same = buf && fread(buf, 1, len, fp) == len && !memcmp(buf, own, len);
+    free(buf);
+    fclose(fp);
+    return same;
+}
+
 // Whether CCCC's own copy of a standard header — the embedded src/std_table.c
 // table (tried by the PP_INCLUDE handler before ever calling this function;
 // see docs/HEADERS.md) or the on-disk builtin_include_dir fallback below —
@@ -3455,18 +3540,21 @@ static char *detect_include_guard(VirtualMachine *vm, Token *tok) {
         !equal(tok->next->next, macro))
         return NULL;
 
-    // Read until the end of the file.
+    // Walk to the #endif closing the opening #ifndef; it must end the file.
     while (tok->kind != TK_EOF) {
         if (!is_hash(tok)) {
             tok = tok->next;
             continue;
         }
 
-        if (equal(tok->next, "endif") && tok->next->next->kind == TK_EOF)
-            return macro;
-
-        if (equal(tok, "if") || equal(tok, "ifdef") || equal(tok, "ifndef"))
-            tok = skip_cond_incl(vm, tok->next);
+        if (equal(tok->next, "if") || equal(tok->next, "ifdef") ||
+            equal(tok->next, "ifndef"))
+            tok = skip_cond_incl2(vm, tok->next->next, 0);
+        else if (equal(tok->next, "endif"))
+            return tok->next->next->kind == TK_EOF ? macro : NULL;
+        else if (equal(tok->next, "else") || equal(tok->next, "elif") ||
+                 equal(tok->next, "elifdef") || equal(tok->next, "elifndef"))
+            return NULL;
         else
             tok = tok->next;
     }
@@ -6993,7 +7081,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         // the *host's* fcntl.h, which never declares
                         // close()). get_std_header() identifies the target
                         // by name, same test the on-disk branch below uses.
-                        if (get_std_header(filename))
+                        if (path_is_cccc_copy(filename, path))
                             mark_cccc_bundled_file(vm, path);
                         // #1288: the mark below used to sit inside the
                         // get_std_header() branch above (#1297), so the
@@ -7173,7 +7261,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // disk (e.g. under the test targets' -I./include), which
                 // #1003's own investigation found is not merely the
                 // embedded-table case the ticket described.
-                if (is_cccc_supplied_only_header(filename))
+                if (is_cccc_supplied_only_header(filename) &&
+                    path_is_cccc_copy(filename, path))
                     mark_cccc_only_file(vm, path ? path : filename);
                 // #1096: an on-disk hit (e.g. `-I./include`) for a name
                 // CCCC also bundles (get_std_header() != NULL, independent
@@ -7184,7 +7273,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 // regardless of which of the two resolution paths a given
                 // invocation took (this on-disk path is what the test
                 // harness's standard -I./include invocation always uses).
-                if (get_std_header(filename))
+                if (path_is_cccc_copy(filename, path))
                     mark_cccc_bundled_file(vm, path ? path : filename);
                 // #1288: same widening as the quote-relative on-disk branch
                 // above -- mark every transitively-reached target, not just
@@ -7364,6 +7453,12 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 // -std= flag (long form: --std=) is parsed) and always produces the complete
 // correct state.
 void define_std_macros(VirtualMachine *vm) {
+    // GCC's inline model: C99 semantics from C99 on, GNU89 semantics before.
+    // System headers pick their `extern inline` spelling from these.
+    bool c99 = vm->compiler.c_std != CCCC_STD_C89;
+    undef_macro(vm, c99 ? "__GNUC_GNU_INLINE__" : "__GNUC_STDC_INLINE__");
+    define_macro(vm, c99 ? "__GNUC_STDC_INLINE__" : "__GNUC_GNU_INLINE__", "1");
+
     const char *v;
     switch (vm->compiler.c_std) {
         case CCCC_STD_C89:

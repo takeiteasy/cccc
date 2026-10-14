@@ -402,9 +402,11 @@ bin/<name>` invocation, so its sources may contain `[[cccc::comptime]]`. It has
 no per-source object files — it caches per target, not per source (see
 [Incremental builds](#incremental-builds-and-header-dependencies) below) — and
 accepts only the flags `cccc --compile=native` understands:
-`-I`/`-isystem`/`-D`/`-U`/`-L`/`-l`/`--std=`. `AddCFlag`, `AddLdFlag`,
-`AddFramework`, `SetProfile`, and `SetTargetTriple` are rejected on this kind;
-there is no host-`cc` flag pass-through. Use `SetTargetEnv(t, "CCCC_NATIVE_CC",
+`-I`/`-isystem`/`-D`/`-U`/`-L`/`-l`/`--std=`/`--link-arg`. `AddLdFlag` and
+`AddFramework` are sent as `--link-arg` to the host link line; add an object
+passed that way with `AddInput` too, so the target rebuilds when it changes.
+`AddCFlag`, `SetProfile`, and `SetTargetTriple` are rejected on this kind;
+there is no compile-side host-`cc` flag pass-through. Use `SetTargetEnv(t, "CCCC_NATIVE_CC",
 "...")` to choose the host compiler that links the emitted C — e.g. `cosmocc`
 for a portable binary.
 

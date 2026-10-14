@@ -1877,6 +1877,58 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     return node;
 }
 
+// __sync_{bool,val}_compare_and_swap(p, old, new, ...): ND_CAS takes a pointer
+// to the expected value, so `old` is hoisted into a temporary. ND_CAS writes
+// the current value back into it on failure, and on success it still holds the
+// prior value, so the val form just yields the temporary.
+//   ({ T *addr = p; T exp = (T)old; cas(addr, &exp, (T)new); want_val ? exp :
+//   r; })
+static Node *build_sync_cas(VirtualMachine *vm, Token *tok, Node *obj,
+                            Node *oldexpr, Node *newexpr, bool want_val) {
+    add_type(vm, obj);
+    if (!obj->ty || obj->ty->kind != TY_PTR)
+        error_tok(vm, tok, "__sync builtin: first argument must be a pointer");
+    Type *pointee = unqualified(vm, without_addr_space(vm, obj->ty->base));
+
+    Node  head    = {};
+    Node *cur     = &head;
+
+    Obj  *addr    = new_lvar(vm, "", 0, obj->ty);
+    Obj  *expv    = new_lvar(vm, "", 0, pointee);
+
+    cur = cur->next = new_unary(
+        vm, ND_EXPR_STMT,
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, addr, tok), obj, tok), tok);
+    cur = cur->next =
+        new_unary(vm, ND_EXPR_STMT,
+                  new_binary(vm, ND_ASSIGN, new_var_node(vm, expv, tok),
+                             new_cast(vm, oldexpr, pointee), tok),
+                  tok);
+
+    Node *cas     = new_node(vm, ND_CAS, tok);
+    cas->cas_addr = new_var_node(vm, addr, tok);
+    cas->cas_old  = new_unary(vm, ND_ADDR, new_var_node(vm, expv, tok), tok);
+    cas->cas_new  = new_cast(vm, newexpr, pointee);
+    cur = cur->next = new_unary(vm, ND_EXPR_STMT, cas, tok);
+    if (want_val)
+        cur = cur->next =
+            new_unary(vm, ND_EXPR_STMT, new_var_node(vm, expv, tok), tok);
+
+    Node *node = new_node(vm, ND_STMT_EXPR, tok);
+    node->body = head.next;
+    return node;
+}
+
+// Discards GCC's optional trailing arguments to a __sync builtin (the list of
+// variables the barrier protects).
+static Token *skip_sync_tail(VirtualMachine *vm, Token *tok) {
+    while (equal(tok, ",")) {
+        tok = tok->next;
+        assign(vm, &tok, tok);
+    }
+    return tok;
+}
+
 // A statement expression whose block declares cleanup vars keeps that block,
 // so its cleanups run, and takes its value from a temporary assigned inside it:
 // `({ s; e; })` becomes `({ { s; tmp = e; } tmp; })`, which copies the value
@@ -2721,6 +2773,54 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return new_binary(vm, ND_COMMA, ptr_expr, lockfree, tok);
     }
 
+    // Legacy GCC __sync_* builtins: seq_cst like everything above, with
+    // optional trailing arguments that are parsed and discarded.
+    if (equal(tok, "__sync_bool_compare_and_swap") ||
+        equal(tok, "__sync_val_compare_and_swap")) {
+        bool   want_val = equal(tok, "__sync_val_compare_and_swap");
+        Token *name     = tok;
+        tok             = skip(vm, tok->next, "(");
+        Node *obj       = assign(vm, &tok, tok);
+        tok             = skip(vm, tok, ",");
+        Node *oldexpr   = assign(vm, &tok, tok);
+        tok             = skip(vm, tok, ",");
+        Node *newexpr   = assign(vm, &tok, tok);
+        tok             = skip_sync_tail(vm, tok);
+        *rest           = skip(vm, tok, ")");
+        return build_sync_cas(vm, name, obj, oldexpr, newexpr, want_val);
+    }
+
+    if (equal(tok, "__sync_lock_test_and_set")) {
+        Node *node = new_node(vm, ND_EXCH, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        tok        = skip(vm, tok, ",");
+        node->rhs  = assign(vm, &tok, tok);
+        tok        = skip_sync_tail(vm, tok);
+        *rest      = skip(vm, tok, ")");
+        return node;
+    }
+
+    if (equal(tok, "__sync_lock_release")) {
+        Node *node = new_node(vm, ND_ASTORE, tok);
+        tok        = skip(vm, tok->next, "(");
+        node->lhs  = assign(vm, &tok, tok);
+        node->rhs  = new_num(vm, 0, tok);
+        tok        = skip_sync_tail(vm, tok);
+        *rest      = skip(vm, tok, ")");
+        return new_cast(vm, node, ty_void);
+    }
+
+    if (equal(tok, "__sync_synchronize")) {
+        Node *node = new_node(vm, ND_FENCE, tok);
+        node->val  = 0;
+        node->lhs  = new_num(vm, 5, tok); // __ATOMIC_SEQ_CST
+        tok        = skip(vm, tok->next, "(");
+        tok        = skip_sync_tail(vm, tok);
+        *rest      = skip(vm, tok, ")");
+        return node;
+    }
+
     // __atomic_fetch_{add,sub,and,or,xor,nand} (fetch-then-op, returns the
     // OLD value) and __atomic_{add,sub,and,or,xor,nand}_fetch (op-then-fetch,
     // returns the NEW value) -- a CAS retry loop, same shape as
@@ -2729,26 +2829,41 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // which doesn't apply here: these builtins take a plain pointer
     // expression, not a checked-pointer lvalue, exactly like every other
     // __atomic_*/__builtin_atomic_* builtin beside them.
+    // The legacy __sync_fetch_and_OP / __sync_OP_and_fetch spellings are the
+    // same operations without the order argument.
     {
         static const struct {
             const char *fetch_first_name; // __atomic_fetch_OP
             const char *op_fetch_name;    // __atomic_OP_fetch
+            const char *sync_fetch_first; // __sync_fetch_and_OP
+            const char *sync_op_fetch;    // __sync_OP_and_fetch
             NodeKind    op_kind;          // ignored when is_nand
             bool        is_nand;
         } fetch_ops[] = {
-            {"__atomic_fetch_add", "__atomic_add_fetch", ND_ADD, false},
-            {"__atomic_fetch_sub", "__atomic_sub_fetch", ND_SUB, false},
-            {"__atomic_fetch_and", "__atomic_and_fetch", ND_BITAND, false},
-            {"__atomic_fetch_or", "__atomic_or_fetch", ND_BITOR, false},
-            {"__atomic_fetch_xor", "__atomic_xor_fetch", ND_BITXOR, false},
-            {"__atomic_fetch_nand", "__atomic_nand_fetch", ND_BITAND, true},
+            {"__atomic_fetch_add", "__atomic_add_fetch", "__sync_fetch_and_add",
+             "__sync_add_and_fetch", ND_ADD, false},
+            {"__atomic_fetch_sub", "__atomic_sub_fetch", "__sync_fetch_and_sub",
+             "__sync_sub_and_fetch", ND_SUB, false},
+            {"__atomic_fetch_and", "__atomic_and_fetch", "__sync_fetch_and_and",
+             "__sync_and_and_fetch", ND_BITAND, false},
+            {"__atomic_fetch_or", "__atomic_or_fetch", "__sync_fetch_and_or",
+             "__sync_or_and_fetch", ND_BITOR, false},
+            {"__atomic_fetch_xor", "__atomic_xor_fetch", "__sync_fetch_and_xor",
+             "__sync_xor_and_fetch", ND_BITXOR, false},
+            {"__atomic_fetch_nand", "__atomic_nand_fetch",
+             "__sync_fetch_and_nand", "__sync_nand_and_fetch", ND_BITAND, true},
         };
         for (size_t i = 0; i < sizeof(fetch_ops) / sizeof(fetch_ops[0]); i++) {
             bool want_old;
+            bool is_sync = false;
             if (equal(tok, (char *)fetch_ops[i].fetch_first_name))
                 want_old = true;
             else if (equal(tok, (char *)fetch_ops[i].op_fetch_name))
                 want_old = false;
+            else if (equal(tok, (char *)fetch_ops[i].sync_fetch_first))
+                want_old = is_sync = true;
+            else if (equal(tok, (char *)fetch_ops[i].sync_op_fetch))
+                is_sync = true, want_old = false;
             else
                 continue;
 
@@ -2756,8 +2871,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             Node *obj     = assign(vm, &tok, tok);
             tok           = skip(vm, tok, ",");
             Node *valexpr = assign(vm, &tok, tok);
-            tok           = skip(vm, tok, ",");
-            assign(vm, &tok, tok); // order, discarded
+            if (is_sync) {
+                tok = skip_sync_tail(vm, tok);
+            } else {
+                tok = skip(vm, tok, ",");
+                assign(vm, &tok, tok); // order, discarded
+            }
             *rest = skip(vm, tok, ")");
             return build_atomic_fetch_op(vm, tok, obj, valexpr,
                                          fetch_ops[i].op_kind,

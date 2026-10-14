@@ -181,6 +181,8 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
 
     if (fn->is_static)
         fprintf(f, "static ");
+    else if (fn->is_gnu_inline)
+        fprintf(f, "extern __inline __attribute__((__gnu_inline__)) ");
 
     // #1026: a function returning a function pointer (`int (*f(void))(int,
     // int)`) can't be spelled as "<return-type> <name>(<params>)" -- the

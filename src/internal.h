@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.10.2"
+#define CCCC_RELEASE_VERSION "0.10.3"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -67,6 +67,12 @@
 // Stack canary constant for detecting stack overflows (used when random
 // canaries disabled)
 #define STACK_CANARY 0xDEADBEEFCAFEBABELL
+
+// A function whose body is emitted only when something calls it: `static
+// inline`, or a GNU `extern inline` definition (see Obj.is_gnu_inline).
+static inline bool obj_is_inline_only(const Obj *fn) {
+    return (fn->is_static && fn->is_inline) || fn->is_gnu_inline;
+}
 
 // ========== Multi-Register VM Infrastructure ==========
 // Register file indices (RISC-V style naming)

@@ -128,6 +128,12 @@ Other constructs:
   written literally or reached through a macro expansion, rather than the
   confusing "not a function" error a raw, unhandled `__has_foo(...)` would
   otherwise produce.
+- **A host header named like a cccc-supplied one** (the SDK's real
+  `Availability.h` under `--sysroot`) is replayed like any other host
+  header. Only a file whose bytes equal cccc's bundled copy is treated as
+  cccc's own, so `#include <stdio.h>` under `-c=native` stays a plain
+  `#include <stdio.h>` instead of being flattened into the SDK's internal
+  headers.
 - **`secure/_string.h`'s `_FORTIFY_SOURCE` macros still need
   `-D_FORTIFY_SOURCE=0`.** Apple's fortified `strcpy`/`memcpy`/etc rewrite to
   `__builtin___*_chk(...)` calls CCCC doesn't implement — pass
@@ -287,6 +293,41 @@ real host compiler, so header handling shifts:
   would see that macro applied a second time, ahead of the header, when it
   wasn't meant to configure that inclusion at all — a pathological ordering
   no real vendored-header usage produces.
+
+### Implementation-style headers that call back into your code
+
+A header configured through macros can call your own functions or touch your
+own statics from its bodies:
+
+```c
+static void my_log(const char *m) { /* ... */ }
+#define LIB_LOG(s) my_log(s)
+#include "lib_impl.h"      // bodies expand LIB_LOG(...)
+```
+
+The replayed output prints a prototype for each such function or static
+immediately before the `#include` that brings that header in, so the host
+compiler sees it when the header's bodies expand. The header can be the
+`#include`d one or any header it includes.
+
+The types a prototype names are declared there too:
+
+| Signature names | Printed ahead of the `#include` |
+| --- | --- |
+| a pointer to a tagged `struct`/`union` | `struct P;` |
+| a `struct`/`union`/`enum`, or a typedef of one, by value | its full definition |
+| a typedef of your own (`typedef int my_t;`) | the typedef |
+| a typedef an earlier replayed header supplies (`size_t`, `uint32_t`) | nothing |
+| `size_t` and its siblings, reached only through another standard header | `#include <stddef.h>` |
+
+A `static` whose signature names a type that cannot be declared yet is a cccc
+error naming the function and the header: a type the replayed header itself
+declares and no earlier `#include` supplies, a function-local type, or a
+`_BitInt` wider than 128 bits. A non-static function with such a signature is
+left to the host compiler's own diagnostic.
+
+A captured `#define` whose trailing `/* ... */` comment spans several lines is
+replayed on one line, comment text kept.
 
 ### Host-owned type/struct layout under self-hosting
 

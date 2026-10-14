@@ -9659,6 +9659,128 @@ def case_extended_asm_native_executes(cccc: Path, tmp: str) -> bool:
                             EXTENDED_ASM_PROGRAM)
 
 
+IMPL_HEADER_CALLBACK_HEADER = (
+    "#ifdef LIB_IMPL\n"
+    "typedef void (*lib_cb)(int);\n"
+    "static int lib_run(int x) {\n"
+    "    LIB_LOG(x);\n"
+    "    LIB_COUNT++;\n"
+    "    lib_cb cb = LIB_CB;\n"
+    "    cb(x);\n"
+    "    return x;\n"
+    "}\n"
+    "#endif\n"
+)
+
+IMPL_HEADER_CALLBACK_PROGRAM = (
+    "static int g_seen;\n"
+    "static int g_hits;\n"
+    "static void note(int v) { g_seen += v; }\n"
+    "static void on_cb(int v) { g_seen += v; }\n"
+    "#define LIB_IMPL\n"
+    "#define LIB_LOG(x) note(x)\n"
+    "#define LIB_COUNT g_hits\n"
+    "#define LIB_CB (&on_cb)\n"
+    '#include "impl_header_callback.h"\n'
+    "int main(void) {\n"
+    "    int r = lib_run(20);\n"
+    "    return (r == 20 && g_seen == 40 && g_hits == 1) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_impl_header_callback(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header calling the includer's statics through "
+          "config macros: prototypes land ahead of the replayed #include.")
+    write(Path(tmp) / "impl_header_callback.h", IMPL_HEADER_CALLBACK_HEADER)
+    return _vm_and_native_run_case(cccc, tmp, "impl_header_callback",
+                                   IMPL_HEADER_CALLBACK_PROGRAM)
+
+
+MULTILINE_COMMENT_DEFINE_PROGRAM = (
+    "#define K 3 /* spans\n"
+    "   two lines */\n"
+    '#define S "/*"\n'
+    "#include <string.h>\n"
+    "int main(void) {\n"
+    "    return (int)strlen(\"ab\") + 40 + K - 3 + (int)strlen(S) - 2;\n"
+    "}\n"
+)
+
+
+def case_multiline_comment_define(cccc: Path, tmp: str) -> bool:
+    print("  captured #define with a multi-line trailing /* comment is "
+          "replayed on one line, and a \"/*\" string does not open one.")
+    return _vm_and_native_run_case(cccc, tmp, "multiline_comment_define",
+                                   MULTILINE_COMMENT_DEFINE_PROGRAM)
+
+
+CLARITY_PARENS_PROGRAM = (
+    "#include <stdbool.h>\n"
+    "int main(void) {\n"
+    "    int a = 1, b = 2, c = 0, id = 0;\n"
+    "    bool ok = true, flag = false;\n"
+    "    ok &= id != 0;\n"
+    "    flag |= id == 0;\n"
+    "    int r = a & (b != 0);\n"
+    "    int s = (a + b) << 1;\n"
+    "    int t = a || (b && c);\n"
+    "    int v = a | (b & c);\n"
+    "    return (!ok && flag && r == 1 && s == 6 && t == 1 && v == 1) ? 42 : 1;\n"
+    "}\n"
+)
+
+
+def case_clarity_parens(cccc: Path, tmp: str) -> bool:
+    print("  mixed-precedence operands (incl. bool compound assignment) reach "
+          "the host compiler parenthesized: no -Wparentheses.")
+    src = Path(tmp) / "clarity_parens.c"
+    write(src, CLARITY_PARENS_PROGRAM)
+    result = run([str(cccc), "-c=native", "-o", "clarity_parens_out", src.name],
+                 cwd=tmp)
+    if result.returncode != 0 or "Wparentheses" in result.stderr:
+        print(f"    FAIL: compile {result.returncode}\n    {result.stderr}")
+        return False
+    return _native_run_case(cccc, tmp, "clarity_parens", CLARITY_PARENS_PROGRAM)
+
+
+def _impl_header_case(cccc: Path, tmp: str, name: str, headers: list) -> bool:
+    tests = Path(__file__).parent.parent / "tests"
+    for h in headers:
+        write(Path(tmp) / h, (tests / h).read_text())
+    return _vm_and_native_run_case(cccc, tmp, name,
+                                   (tests / f"test_{name}.c").read_text())
+
+
+def case_impl_header_typedef(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header callback taking a typedef an earlier replayed "
+          "header supplies.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_typedef",
+                             ["native_impl_header_struct.h"])
+
+
+def case_impl_header_typedef_stdio(cccc: Path, tmp: str) -> bool:
+    print("  size_t reached only through <stdio.h>: <stddef.h> printed ahead "
+          "of the prototype.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_typedef_stdio",
+                             ["native_impl_header_struct.h"])
+
+
+def case_impl_header_transitive(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header reached through another header: the prototype "
+          "lands ahead of the replayed wrapper #include.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_transitive",
+                             ["native_impl_header_struct.h",
+                              "native_impl_header_wrap.h"])
+
+
+def case_impl_header_input_types(cccc: Path, tmp: str) -> bool:
+    print("  impl-style header callbacks whose signatures name the includer's "
+          "struct/typedef/enum: types declared ahead of the #include.")
+    return _impl_header_case(cccc, tmp, "native_impl_header_input_types",
+                             ["native_impl_header_types.h"])
+
+
 CASES = [
     case_native_end_to_end,
     case_dump_expanded_no_attrtarget,
@@ -9847,6 +9969,13 @@ CASES = [
     case_vendored_macro_defined_outside_1308,
     case_widening_cast_shift_1312,
     case_extended_asm_native_executes,
+    case_impl_header_callback,
+    case_multiline_comment_define,
+    case_clarity_parens,
+    case_impl_header_typedef,
+    case_impl_header_typedef_stdio,
+    case_impl_header_transitive,
+    case_impl_header_input_types,
 ]
 
 

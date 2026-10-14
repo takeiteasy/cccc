@@ -488,14 +488,16 @@ static long long impl_cccc_executable(long long ctx, long long name) {
 }
 
 // Reject a builder call that has no meaning for a CCCC_TGT_NATIVE_CCCC target
-// (#1133). `cccc --compile=native` accepts only -I/-i/-D/-U/-L/-l/--std=/-O<n>;
-// there is no host-cc flag pass-through, so silently dropping -Wall /
-// -fsanitize=… / a cross triple would be a quiet correctness change. Hard-error
-// naming the call, like check_name_unique() — declaration-time, fatal.
+// (#1133). `cccc --compile=native` accepts only -I/-i/-D/-U/-L/-l/--std=/-O<n>
+// and --link-arg; compile-side host-cc flags have no pass-through, so silently
+// dropping -Wall / -fsanitize=… / a cross triple would be a quiet correctness
+// change. Hard-error naming the call, like check_name_unique() —
+// declaration-time, fatal.
 static void reject_for_cccc_target(const BuildTarget *t, const char *call) {
     if (t->kind == CCCC_TGT_NATIVE_CCCC)
         error("build: %s is not supported on a CcccExecutable target ('%s') — "
-              "cccc --compile=native takes only -I/-D/-U/-L/-l/--std=/-O<n>",
+              "cccc --compile=native takes only -I/-D/-U/-L/-l/--std=/-O<n> "
+              "and --link-arg",
               call, t->name);
 }
 
@@ -639,7 +641,6 @@ static long long impl_add_cflag(long long t, long long flag) {
     return 0;
 }
 static long long impl_add_ldflag(long long t, long long flag) {
-    reject_for_cccc_target((BuildTarget *)(intptr_t)t, "AddLdFlag");
     strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags,
                   xstrdup((const char *)flag));
     return 0;
@@ -1052,7 +1053,6 @@ static long long impl_add_framework(long long t, long long name) {
     const char  *fw  = (const char *)name;
     if (!tgt || !fw)
         return -1;
-    reject_for_cccc_target(tgt, "AddFramework");
     strarray_push(&tgt->ldflags, xstrdup("-framework"));
     strarray_push(&tgt->ldflags, xstrdup(fw));
     return 0;
@@ -2071,9 +2071,10 @@ static int link_output_is_current(const char *out_abs, char *const *obj_paths,
 
 // Compile-side flags a CcccExecutable target forwards to `cccc
 // --compile=native`. Deliberately narrow: `cccc --compile=native` understands
-// only -I/-i/-D/-U/-L/-l/--std=/-O<n>, and there is no host-cc flag
-// pass-through, so AddCflag/AddLdflag/AddFramework/SetProfile/SetTargetTriple
-// are rejected at declaration time (reject_for_cccc_target). --std= is
+// only -I/-i/-D/-U/-L/-l/--std=/-O<n>, and there is no compile-side host-cc
+// flag pass-through, so AddCflag/SetProfile/SetTargetTriple are rejected at
+// declaration time (reject_for_cccc_target). AddLdflag/AddFramework reach the
+// host link line as --link-arg (see the CcccExecutable invocation). --std= is
 // forwarded byte-for-byte (not through cccc_resolve_host_std — that probes a
 // *host* cc; cccc applies its own C11 floor internally). `owned` accumulates
 // heap strings freed after the spawn, exactly like push_compile_flags().
@@ -2302,6 +2303,14 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
         }
         char *f = malloc(strlen(t->deps[i]->name) + 3);
         snprintf(f, strlen(t->deps[i]->name) + 3, "-l%s", t->deps[i]->name);
+        strarray_push(&owned, f);
+        argv_push(&a, f);
+    }
+
+    for (int i = 0; i < t->ldflags.len; i++) {
+        char *f = malloc(strlen(t->ldflags.data[i]) + 12);
+        snprintf(f, strlen(t->ldflags.data[i]) + 12, "--link-arg=%s",
+                 t->ldflags.data[i]);
         strarray_push(&owned, f);
         argv_push(&a, f);
     }

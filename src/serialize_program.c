@@ -4465,6 +4465,174 @@ static bool obj_is_test_fn(VirtualMachine *vm, const Obj *o) {
     return false;
 }
 
+// A replayed implementation-style header can call an input function (or touch
+// an input static) through a config macro, but the input's own declarations
+// print after the whole directive block. Each such reference gets a prototype
+// -- and the types it names, see prelude_declare_types() -- printed just
+// before the #include that brings the header in.
+typedef struct {
+    Obj        *target;
+    const char *header; // name of the header whose body references it
+    const char *site;   // canonical path of that header
+    bool        emitted;
+} PreludeRef;
+
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *fn;
+    const char       *site;
+    const char       *header; // File.name of that site
+    PreludeRef     *refs;
+    int             len, cap;
+    SerializeContext *ctx;
+    const char      **replayed; // resolved paths of the includes printed so far
+    int               nreplayed, replayed_cap;
+    const char *synth[8]; // standard headers printed for a missing typedef
+    int         nsynth;
+} PreludeScan;
+
+static bool prelude_target_is_input_def(VirtualMachine *vm, Obj *v) {
+    if (!v || v->is_local || v->is_param || v->is_macro_generated || !v->tok ||
+        v->name[0] == '.')
+        return false;
+    if (v->is_function ? !v->body : !v->is_static)
+        return false;
+    Token *site = token_expansion_site(v->tok);
+    return site && site->file &&
+           file_is_command_line_input(vm, site->file->name);
+}
+
+static void prelude_ref_visit(Node *n, void *vctx) {
+    PreludeScan *s = vctx;
+    if (n->kind != ND_VAR || n->var == s->fn ||
+        !prelude_target_is_input_def(s->vm, n->var))
+        return;
+    for (int i = 0; i < s->len; i++)
+        if (s->refs[i].target == n->var && !strcmp(s->refs[i].site, s->site))
+            return;
+    if (s->len == s->cap) {
+        s->cap  = s->cap ? s->cap * 2 : 8;
+        s->refs = realloc(s->refs, s->cap * sizeof(*s->refs));
+    }
+    s->refs[s->len++] = (PreludeRef){
+        .target = n->var,
+        .header = s->header,
+        .site   = s->site,
+    };
+}
+
+static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
+                            Obj *prog, PreludeScan *s) {
+    s->vm  = vm;
+    s->ctx = ctx;
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (!obj->is_function || !function_is_header_supplied(vm, ctx, obj) ||
+            !obj->body->tok)
+            continue;
+        Token *site = token_expansion_site(obj->body->tok);
+        if (!site || !site->file)
+            continue;
+        s->fn     = obj;
+        s->header = site->file->name;
+        s->site   = cc_canonical_path_key(vm, site->file->name);
+        serialize_ast_walk(obj->body, prelude_ref_visit, s);
+    }
+}
+
+// Is `target_key` the file `from`, or one it reaches through plain #includes?
+static bool include_reaches(VirtualMachine *vm, const char *from,
+                            const char *target_key, HashMap *seen) {
+    const char *key = cc_canonical_path_key(vm, from);
+    if (!strcmp(key, target_key))
+        return true;
+    if (hashmap_get(seen, key))
+        return false;
+    hashmap_put(seen, key, (void *)1);
+    StringArray *kids = hashmap_get(&vm->compiler.include_children, from);
+    for (int i = 0; kids && i < kids->len; i++)
+        if (include_reaches(vm, kids->data[i], target_key, seen))
+            return true;
+    return false;
+}
+
+static bool prelude_include_reaches(VirtualMachine *vm, const char *from,
+                                    const char *target) {
+    HashMap seen = {0};
+    bool    r =
+        include_reaches(vm, from, cc_canonical_path_key(vm, target), &seen);
+    hashmap_deinit(&seen);
+    return r;
+}
+
+// A type a replayed header supplies is visible once that header, or one it
+// includes, is replayed. A standard typedef name (size_t...) whose header is
+// only reached through cccc's bundled headers gets the host's own header
+// printed instead.
+static bool prelude_type_visible(void *vs, FILE *f, TypeName *tn) {
+    PreludeScan *s = vs;
+    for (int i = 0; tn->file_path && i < s->nreplayed; i++)
+        if (prelude_include_reaches(s->vm, s->replayed[i], tn->file_path))
+            return true;
+    const char *header = synth_typedef_header_for_name(tn->name, tn->name_len);
+    if (!header || has_colliding_user_typedef(s->ctx, tn->name, tn->name_len))
+        return false;
+    if (f) {
+        for (int i = 0; i < s->nsynth; i++)
+            if (!strcmp(s->synth[i], header))
+                return true;
+        if (s->nsynth < (int)(sizeof(s->synth) / sizeof(s->synth[0])))
+            s->synth[s->nsynth++] = header;
+        fprintf(f, "#include <%s>\n", header);
+    }
+    return true;
+}
+
+static void prelude_note_replayed(PreludeScan *s, const char *resolved) {
+    if (s->nreplayed == s->replayed_cap) {
+        s->replayed_cap = s->replayed_cap ? s->replayed_cap * 2 : 8;
+        s->replayed =
+            realloc(s->replayed, s->replayed_cap * sizeof(*s->replayed));
+    }
+    s->replayed[s->nreplayed++] = resolved;
+}
+
+// Prints the prototypes anchored at the include that resolved to `resolved`:
+// the header itself, or one it reaches through plain #includes.
+static void prelude_emit(FILE *f, SerializeContext *ctx, PreludeScan *s,
+                         const char *resolved) {
+    for (int i = 0; i < s->len; i++) {
+        PreludeRef *r = &s->refs[i];
+        if (r->emitted || !prelude_include_reaches(s->vm, resolved, r->site))
+            continue;
+        Obj *t = r->target;
+        if (!prelude_declare_types(NULL, ctx, t->ty, true, prelude_type_visible,
+                                   s))
+            continue;
+        prelude_declare_types(f, ctx, t->ty, true, prelude_type_visible, s);
+        if (t->is_function) {
+            serialize_function_signature(f, ctx, t, true);
+        } else {
+            fprintf(f, "static ");
+            serialize_type_decl(f, ctx, t->ty, t->name);
+        }
+        fprintf(f, ";\n");
+        r->emitted = true;
+    }
+}
+
+// A static has no other declaration the header could see, so a missed one is
+// a certain host-compiler failure; anything else is left as it was.
+static void prelude_check(VirtualMachine *vm, PreludeScan *s) {
+    for (int i = 0; i < s->len; i++) {
+        PreludeRef *r = &s->refs[i];
+        if (!r->emitted && r->target->is_static)
+            error_tok(vm, r->target->tok,
+                      "'%s' is used by replayed header '%s' but cannot be "
+                      "declared ahead of its #include",
+                      r->target->name, r->header);
+    }
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -4845,6 +5013,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         free_nested_envs(&ctx);
         free(ctx.hoisted.data);
         free(ctx.emitted_defs.data);
+        free(ctx.file_typedef_done);
         return;
     }
 
@@ -5000,6 +5169,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     // exists somewhere earlier in this TU". A conditional-group shell is
     // captured too (#1064) but is never itself a #define/#undef, so
     // stdio.c's own `#endif` correctly fails this check.
+    PreludeScan prelude = {0};
+    prelude_collect(vm, &ctx, prog, &prelude);
     HashMap candidate_index = {0}; // canonical path key -> chosen index + 1
     {
         int tu_starts_n = vm->compiler.emit_directives_tu_starts_count;
@@ -5204,7 +5375,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // verbatim replay below.
         if (emit_url_include_rewrite(f, vm, line))
             continue;
+        if (resolved)
+            prelude_emit(f, &ctx, &prelude, resolved);
         fprintf(f, "%s\n", line);
+        if (resolved)
+            prelude_note_replayed(&prelude, resolved);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
         // `struct statfs` into scope the way it does on macOS/BSD -- real
         // glibc's own <sys/mount.h> only carries mount(2) flags; the struct
@@ -5263,6 +5438,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             emitted_sys_socket_h = true;
         }
     }
+    prelude_check(vm, &prelude);
+    free(prelude.refs);
+    free(prelude.replayed);
     if (vm->compiler.emit_directives.len > 0)
         fprintf(f, "\n");
 
@@ -5663,5 +5841,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     free_nested_envs(&ctx);
     free(ctx.hoisted.data);
     free(ctx.emitted_defs.data);
+    free(ctx.file_typedef_done);
     free(ctx.enum_renames); // #1016: was missing from this list
 }

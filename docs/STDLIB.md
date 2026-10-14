@@ -130,6 +130,21 @@ These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`).
 | `__builtin_atomic_thread_fence(order)` | Cross-thread memory fence (#1188); no VM opcode, lowers to `__atomic_thread_fence(order)` under `-c=native` |
 | `__builtin_atomic_signal_fence(order)` | Compiler-only (signal-handler) fence (#1188); no VM opcode, lowers to `__atomic_signal_fence(order)` under `-c=native` |
 
+GCC's `__atomic_*` and legacy `__sync_*` builtins work on 1/2/4/8-byte integer and pointer objects. Every operation is sequentially consistent: `__atomic_*` accepts and ignores its memory-order arguments, and `__sync_*` takes optional trailing arguments that are evaluated and discarded.
+
+| Builtin | Description |
+|---------|-------------|
+| `__atomic_load_n` / `__atomic_store_n` / `__atomic_exchange_n` / `__atomic_compare_exchange_n` | Value forms |
+| `__atomic_load` / `__atomic_store` / `__atomic_exchange` / `__atomic_compare_exchange` | Pointer forms |
+| `__atomic_fetch_{add,sub,and,or,xor,nand}` / `__atomic_{add,sub,and,or,xor,nand}_fetch` | Return the old / new value |
+| `__atomic_test_and_set` / `__atomic_clear` / `__atomic_{always_,}is_lock_free` / `__atomic_thread_fence` / `__atomic_signal_fence` | Flag, lock-free and fence helpers |
+| `__sync_fetch_and_{add,sub,and,or,xor,nand}` / `__sync_{add,sub,and,or,xor,nand}_and_fetch` | Return the old / new value (`nand` is `~(old & v)`) |
+| `__sync_bool_compare_and_swap(p, old, new)` / `__sync_val_compare_and_swap(p, old, new)` | Return success / the prior value |
+| `__sync_lock_test_and_set(p, v)` / `__sync_lock_release(p)` | Exchange; store `0` |
+| `__sync_synchronize()` | Full fence |
+
+All of them are reported by `__has_builtin`.
+
 #### Bit-Manipulation Builtins
 
 These are implemented as VM opcodes. The `ll` variants operate on 64-bit

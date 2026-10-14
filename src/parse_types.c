@@ -348,7 +348,8 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 else if (dk == DK_EXTERN)
                     attr->is_extern = true;
                 else if (dk == DK_INLINE) {
-                    if (vm->compiler.c_std < CCCC_STD_C99)
+                    if (vm->compiler.c_std < CCCC_STD_C99 &&
+                        !vm->compiler.c_std_gnu && !tok->origin)
                         error_tok(vm, tok,
                                   "'inline' is not available before C99");
                     attr->is_inline = true;
@@ -2257,12 +2258,12 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
-         !attr->is_kernel && !attr->format_style && !attr->cleanup_fn &&
-         !attr->attr_error_msg && !attr->attr_warning_msg &&
-         !attr->nonnull_all && !attr->nonnull_mask && !attr->returns_nonnull &&
-         !attr->is_constructor && !attr->is_destructor && !attr->is_sentinel &&
-         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size &&
-         !attr->vec_visible))
+         !attr->is_gnu_inline && !attr->is_kernel && !attr->format_style &&
+         !attr->cleanup_fn && !attr->attr_error_msg &&
+         !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
+         !attr->returns_nonnull && !attr->is_constructor &&
+         !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
+         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible))
         return ty;
 
     if (attr->has_vector_size)
@@ -2279,6 +2280,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_pure = true;
     if (attr->is_func_const && ty->kind == TY_FUNC)
         ty->is_func_const = true;
+    if (attr->is_gnu_inline && ty->kind == TY_FUNC)
+        ty->is_gnu_inline = true;
     if (attr->is_kernel && ty->kind == TY_FUNC)
         ty->is_kernel = true;
     if (attr->format_style && ty->kind == TY_FUNC) {
@@ -2331,6 +2334,7 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_noreturn     |= src->is_noreturn;
     dst->is_pure         |= src->is_pure;
     dst->is_func_const   |= src->is_func_const;
+    dst->is_gnu_inline   |= src->is_gnu_inline;
     dst->is_kernel       |= src->is_kernel;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
@@ -2507,6 +2511,29 @@ static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
     return tok;
 }
 
+// Archetype of format(<archetype>, i, j), with or without __x__ decoration.
+// Returns 1 (printf) or 2 (scanf), the only styles checked; 0 for a known
+// archetype CCCC does not check; -1 if unrecognized.
+static int format_archetype_style(Token *tok) {
+    static char *const printf_names[]    = {"printf", "gnu_printf", "printf0"};
+    static char *const scanf_names[]     = {"scanf", "gnu_scanf"};
+    static char *const unchecked_names[] = {
+        "strftime",    "gnu_strftime",    "strfmon",  "ms_printf", "ms_scanf",
+        "ms_strftime", "os_log",          "os_trace", "NSString",  "CFString",
+        "kprintf",     "freebsd_kprintf", "syslog",   "zcmn_err"};
+    for (size_t i = 0; i < sizeof printf_names / sizeof *printf_names; i++)
+        if (is_attr_name(tok, printf_names[i]))
+            return 1;
+    for (size_t i = 0; i < sizeof scanf_names / sizeof *scanf_names; i++)
+        if (is_attr_name(tok, scanf_names[i]))
+            return 2;
+    for (size_t i = 0; i < sizeof unchecked_names / sizeof *unchecked_names;
+         i++)
+        if (is_attr_name(tok, unchecked_names[i]))
+            return 0;
+    return -1;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
@@ -2650,24 +2677,21 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (is_attr_name(tok, "format")) {
                 tok = tok->next;
                 if (equal(tok, "(")) {
-                    tok       = tok->next;
-                    int style = 0;
-                    // Accept GCC/Clang alternate spellings.  strftime, os_log
-                    // and unknown variants are accepted silently (style=0 = no
-                    // validation).
-                    if (equal(tok, "printf") || equal(tok, "__printf__") ||
-                        equal(tok, "gnu_printf") || equal(tok, "printf0") ||
-                        equal(tok, "__printf0__"))
-                        style = 1;
-                    else if (equal(tok, "scanf") || equal(tok, "__scanf__") ||
-                             equal(tok, "gnu_scanf"))
-                        style = 2;
-                    else if (!equal(tok, "strftime") &&
-                             !equal(tok, "__strftime__") &&
-                             !equal(tok, "os_log") && !equal(tok, "__os_log__"))
-                        error_tok(
-                            vm, tok,
-                            "expected 'printf' or 'scanf' in format attribute");
+                    tok = tok->next;
+                    if (tok->kind != TK_IDENT)
+                        error_tok(vm, tok,
+                                  "expected a format archetype in format "
+                                  "attribute");
+                    // Style 0 = no validation (known unchecked or unknown).
+                    int style = format_archetype_style(tok);
+                    if (style < 0) {
+                        style = 0;
+                        if (!vm->compiler.in_type_lookahead)
+                            warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES,
+                                     "'%s' is an unrecognized format function "
+                                     "type; attribute not checked",
+                                     arena_strndup(vm, tok->loc, tok->len));
+                    }
                     tok           = tok->next;
                     tok           = skip(vm, tok, ",");
                     int fmt_idx   = const_expr(vm, &tok, tok);
@@ -2821,6 +2845,15 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     ty->is_func_const = true;
                 if (attr)
                     attr->is_func_const = true;
+                continue;
+            }
+
+            if (is_attr_name(tok, "gnu_inline")) {
+                tok = tok->next;
+                if (ty)
+                    ty->is_gnu_inline = true;
+                if (attr)
+                    attr->is_gnu_inline = true;
                 continue;
             }
 
@@ -3076,6 +3109,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 attr_is(name_tok, "no_unique_address");
             bool is_pure_attr       = attr_is(name_tok, "pure");
             bool is_func_const_attr = attr_is(name_tok, "const");
+            bool is_gnu_inline_attr =
+                gnu_scoped && attr_is(name_tok, "gnu_inline");
             bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
             bool is_addr_space_attr =
                 cccc_scoped &&
@@ -3412,6 +3447,11 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     ty->is_func_const = true;
                 if (attr)
                     attr->is_func_const = true;
+            } else if (is_gnu_inline_attr) {
+                if (ty)
+                    ty->is_gnu_inline = true;
+                if (attr)
+                    attr->is_gnu_inline = true;
             } else if (is_designated_init_attr) {
                 if (ty)
                     ty->designated_init = true;

@@ -1,0 +1,1 @@
+#define SYSROOT_AVAILABILITY 1

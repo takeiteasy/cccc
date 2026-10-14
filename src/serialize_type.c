@@ -3901,6 +3901,19 @@ static void serialize_tag_forward_decls(FILE *f, SerializeContext *ctx) {
     free(targets.data);
 }
 
+// The file-scope typedef_done array, grown on demand: shared between the
+// file-scope pass below and prelude_declare_types() (end of file).
+static bool *file_scope_typedef_done(SerializeContext *ctx) {
+    if (ctx->typedefs_len > ctx->file_typedef_done_len) {
+        ctx->file_typedef_done =
+            realloc(ctx->file_typedef_done, (size_t)ctx->typedefs_len);
+        memset(ctx->file_typedef_done + ctx->file_typedef_done_len, 0,
+               (size_t)(ctx->typedefs_len - ctx->file_typedef_done_len));
+        ctx->file_typedef_done_len = ctx->typedefs_len;
+    }
+    return ctx->file_typedef_done;
+}
+
 void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                    Obj *owner_fn) {
     Obj *saved_fn   = ctx->current_fn;
@@ -3909,9 +3922,11 @@ void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
     if (!owner_fn)
         serialize_tag_forward_decls(f, ctx);
 
-    bool *typedef_done = ctx->typedefs_len > 0
-                             ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
-                             : NULL;
+    bool *typedef_done =
+        owner_fn ? (ctx->typedefs_len > 0
+                        ? calloc((size_t)ctx->typedefs_len, sizeof(bool))
+                        : NULL)
+                 : file_scope_typedef_done(ctx);
 
     for (int i = 0; i < ctx->defs.len; i++) {
         Type *ty = ctx->defs.data[i];
@@ -4025,6 +4040,144 @@ void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         }
     }
 
-    free(typedef_done);
+    if (owner_fn)
+        free(typedef_done);
     ctx->current_fn = saved_fn;
+}
+
+// A replayed implementation-style header's bodies can call an input function
+// whose signature names input types, but those print after the whole directive
+// block. prelude_declare_types() prints what such a signature needs just
+// before the #include: a tag forward declaration for a pointer, the full
+// definition for a by-value aggregate, enum or typedef, and nothing for a type
+// a header replayed earlier already supplies.
+typedef struct {
+    FILE              *f; // NULL: check only
+    SerializeContext  *ctx;
+    PreludeTypeVisible visible;
+    void              *user;
+    bool              *typedef_done;
+    TypeVec            fwd; // tags already forward-declared
+    int                depth;
+} PreludeWalk;
+
+static bool prelude_walk(PreludeWalk *w, Type *ty, bool by_value);
+
+static bool prelude_members(PreludeWalk *w, Type *ty) {
+    for (Member *m = ty->members; m; m = m->next)
+        if (!prelude_walk(w, m->ty, true))
+            return false;
+    return ty->kind != TY_ENUM || prelude_walk(w, ty->enum_base_type, true);
+}
+
+static bool prelude_typedef(PreludeWalk *w, TypeName *td, bool by_value) {
+    SerializeContext *ctx = w->ctx;
+    if (td->owner_fn)
+        return false;
+    if (typedef_alias_header_suppressed(ctx, td))
+        return w->visible(w->user, w->f, td);
+    // Hidden while its own target is walked, as emit_typedef_and_deps() does.
+    Type *real = td->ty;
+    td->ty     = NULL;
+    bool ok    = prelude_walk(w, real, by_value);
+    td->ty     = real;
+    if (ok && w->f)
+        emit_typedef_and_deps(w->f, ctx, (int)(td - ctx->typedefs), NULL,
+                              w->typedef_done);
+    return ok;
+}
+
+static bool prelude_aggregate(PreludeWalk *w, Type *ty, bool by_value) {
+    SerializeContext *ctx = w->ctx;
+    if (type_decl_owner(ctx, ty) || type_vec_contains(&ctx->hoisted, ty) ||
+        type_needs_opaque_storage(ty))
+        return false;
+    TypeName *tag = find_tag_name(ctx, ty);
+    if (!tag) {
+        TypeName *anon = find_anonymous_typedef_name(ctx, ty);
+        return anon ? prelude_typedef(w, anon, by_value)
+                    : prelude_members(w, ty);
+    }
+    // A pointer needs no definition, but an enum has no incomplete form.
+    if (!by_value && ty->kind != TY_ENUM) {
+        if (w->f && !type_vec_contains(&w->fwd, ty)) {
+            type_vec_push(&w->fwd, ty);
+            fprintf(w->f, "%s %.*s;\n", aggregate_keyword(ty), tag->name_len,
+                    tag->name);
+        }
+        return true;
+    }
+    if (type_def_is_from_include_suppressed(ctx, ty)) {
+        TypeName *src = find_tag_name_for_provenance(ctx, ty);
+        return src && w->visible(w->user, w->f, src);
+    }
+    if (!prelude_members(w, ty))
+        return false;
+    if (w->f && !type_vec_contains_nominal(ctx, &ctx->emitted_defs, ty)) {
+        type_vec_push_nominal(ctx, &ctx->emitted_defs, ty);
+        if (ty->kind == TY_ENUM)
+            serialize_enum_def(w->f, ctx, ty);
+        else
+            serialize_struct_def(w->f, ctx, ty);
+    }
+    return true;
+}
+
+static bool prelude_walk_type(PreludeWalk *w, Type *ty, bool by_value) {
+    SerializeContext *ctx = w->ctx;
+    TypeName         *td  = find_typedef_name_exact(ctx, ty);
+    if (td)
+        return !ctx->generated_only && prelude_typedef(w, td, by_value);
+    switch (ty->kind) {
+        case TY_VOID:
+        case TY_BOOL:
+        case TY_CHAR:
+        case TY_SHORT:
+        case TY_INT:
+        case TY_LONG:
+        case TY_FLOAT:
+        case TY_DOUBLE:
+            return true;
+        case TY_PTR:
+            return prelude_walk(w, ty->base, false);
+        case TY_ARRAY:
+            return prelude_walk(w, ty->base, by_value);
+        case TY_FUNC:
+            if (!prelude_walk(w, ty->return_ty, true))
+                return false;
+            for (Type *p = ty->params; p; p = p->next)
+                if (!prelude_walk(w, p, true))
+                    return false;
+            return true;
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_ENUM:
+            return !ctx->generated_only && prelude_aggregate(w, ty, by_value);
+        default:
+            return false;
+    }
+}
+
+static bool prelude_walk(PreludeWalk *w, Type *ty, bool by_value) {
+    if (!ty)
+        return true;
+    if (w->depth >= 24)
+        return false;
+    w->depth++;
+    bool ok = prelude_walk_type(w, ty, by_value);
+    w->depth--;
+    return ok;
+}
+
+bool prelude_declare_types(FILE *f, SerializeContext *ctx, Type *ty,
+                           bool by_value, PreludeTypeVisible visible,
+                           void *user) {
+    PreludeWalk w  = {.f            = f,
+                      .ctx          = ctx,
+                      .visible      = visible,
+                      .user         = user,
+                      .typedef_done = file_scope_typedef_done(ctx)};
+    bool        ok = prelude_walk(&w, ty, by_value);
+    free(w.fwd.data);
+    return ok;
 }
