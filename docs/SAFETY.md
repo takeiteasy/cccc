@@ -1099,7 +1099,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   arithmetic on that base such as `arr + i`) is observed as a call
   argument, a `return` operand, or stored into a pointer/aggregate
   lvalue (`++`, `--` and compound assignment on a function's own plain local,
-  or a member of one, are not escapes); `LEA3` carries a `LEA3_NO_RECORD` flag (set at codegen time) that
+  a member of one, or an element of a local array, are not escapes); `LEA3` carries a `LEA3_NO_RECORD` flag (set at codegen time) that
   tells `op_LEA3_fn` to skip the `stack_ptr_epochs` write whenever the
   creating var's address was never marked. This is the *opposite* polarity
   from the earlier escape-analysis mistake below: an **unmarked** local

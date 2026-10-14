@@ -684,6 +684,30 @@ static void test_condition_stale_tag(void) {
     cc_remove_breakpoint(&vm, miss);
 }
 
+// Tokens after the expression are an error, not silently dropped.
+static void test_condition_trailing_tokens(void) {
+    decl("int tt_f(int x){\n  int y = x;\n  return y;\n}");
+    File       *f     = last_compiled_file();
+    Pc          line3 = cc_find_pc_for_source(&vm, f, 3);
+
+    const char *bad[] = {"x == 2 garbage", "x == 2 ) ( 3"};
+    for (int i = 0; i < 2; i++) {
+        int bp = cond_bp(line3, bad[i]);
+        CHECK(eval("tt_f(2)") == 2, "tt_f(2)");
+        CHECK(vm.dbg.breakpoints[bp].cond_compile_failed,
+              "'%s' fails to compile", bad[i]);
+        CHECK(!vm.dbg.breakpoints[bp].cond_fn, "'%s' has no wrapper", bad[i]);
+        CHECK(vm.dbg.breakpoints[bp].hit_count == 0, "'%s' does not fire",
+              bad[i]);
+        cc_remove_breakpoint(&vm, bp);
+    }
+
+    int ok = cond_bp(line3, "x == 2");
+    eval("tt_f(2)");
+    CHECK(vm.dbg.breakpoints[ok].hit_count == 1, "the bare prefix fires");
+    cc_remove_breakpoint(&vm, ok);
+}
+
 // A wrapper that only reads program state gives back its string literals; one
 // that could leave an address behind keeps them.
 static void test_confined_data(void) {
@@ -1014,6 +1038,7 @@ int main(void) {
     test_fix_editor();
     test_reclaim();
     test_condition_stale_tag();
+    test_condition_trailing_tokens();
     test_confined_data();
     test_confined_text();
     test_frame_locals();
