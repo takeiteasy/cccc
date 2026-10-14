@@ -264,6 +264,10 @@ void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx) {
         AST_WALK_1044_PUSH(n->args);
         AST_WALK_1044_PUSH(n->case_next);
         AST_WALK_1044_PUSH(n->default_case);
+        AST_WALK_1044_PUSH(n->cas_addr);
+        AST_WALK_1044_PUSH(n->cas_old);
+        AST_WALK_1044_PUSH(n->cas_new);
+        AST_WALK_1044_PUSH(n->atomic_expr);
         AST_WALK_1044_PUSH(n->next);
     }
 #undef AST_WALK_1044_PUSH

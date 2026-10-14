@@ -10,6 +10,7 @@
 */
 
 #include "./internal.h"
+#include "./serialize_internal.h"
 
 #define STREQ_LIT(s, lit) (strncmp((s), (lit), sizeof(lit)) == 0)
 
@@ -1378,10 +1379,14 @@ static bool debugger_var_is_paused_frame_local(Obj *current_fn, Obj *var) {
 // through ordinary codegen since a single data segment is shared by every
 // function. The rewrite is type-preserving (see the node->ty note below), so
 // ancestor nodes never need retyping and this can simply mutate in place.
-static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
-                                    Node *node) {
-    if (!node)
-        return;
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *current_fn;
+} RewriteCtx;
+
+static void debugger_rewrite_local(Node *node, void *vctx) {
+    VirtualMachine *vm         = ((RewriteCtx *)vctx)->vm;
+    Obj            *current_fn = ((RewriteCtx *)vctx)->current_fn;
 
     if (node->kind == ND_VAR && node->var &&
         debugger_var_is_paused_frame_local(current_fn, node->var)) {
@@ -1437,16 +1442,13 @@ static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
         // conversions), clearing that cast's ->ty to force a "fresh" retype
         // would permanently null it out instead.
         node->ty = var->ty;
-        return;
     }
+}
 
-    debugger_rewrite_locals(vm, current_fn, node->lhs);
-    debugger_rewrite_locals(vm, current_fn, node->rhs);
-    debugger_rewrite_locals(vm, current_fn, node->cond);
-    debugger_rewrite_locals(vm, current_fn, node->then);
-    debugger_rewrite_locals(vm, current_fn, node->els);
-    for (Node *a = node->args; a; a = a->next)
-        debugger_rewrite_locals(vm, current_fn, a);
+static void debugger_rewrite_locals(VirtualMachine *vm, Obj *current_fn,
+                                    Node *root) {
+    RewriteCtx ctx = {vm, current_fn};
+    serialize_ast_walk(root, debugger_rewrite_local, &ctx);
 }
 
 // Lazily declare and compile the single session-wide frame-pointer global
@@ -1506,7 +1508,12 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
     jmp_buf       *saved_jmp_buf = vm->error_jmp_buf;
     Scope         *saved_scope        = vm->compiler.scope;
     VarScopeNode *volatile scope_vars = NULL;
-    vm->error_jmp_buf                 = &jb;
+    // condition_scope stays a bare list; parse_scope in front of it takes the
+    // parser's own pushes (literals, compound literals). Buckets in
+    // condition_scope would make scope_find_var skip its list.
+    Scope condition_scope = {0};
+    Scope parse_scope     = {0};
+    vm->error_jmp_buf     = &jb;
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize(vm, &temp_file);
@@ -1514,23 +1521,23 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
             error("failed to tokenize the expression");
         convert_pp_tokens(vm, tok);
 
-        Scope condition_scope = {0};
         for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
             debugger_add_condition_scope_var(&condition_scope.vars, obj);
         if (scope_fn) {
             for (Obj *obj = scope_fn->locals; obj; obj = obj->next)
                 debugger_add_condition_scope_var(&condition_scope.vars, obj);
         }
-        // The parser may push (arena-allocated) entries in front of ours, such
-        // as a compound literal's anonymous variable; free only our chain.
         scope_vars           = condition_scope.vars;
         condition_scope.next = saved_scope;
-        vm->compiler.scope   = &condition_scope;
+        parse_scope.next     = &condition_scope;
+        vm->compiler.scope   = &parse_scope;
         Token *rest          = NULL;
         Node  *expr          = cc_parse_expr(vm, &rest, tok);
         vm->compiler.scope   = saved_scope;
         debugger_free_condition_scope(scope_vars);
         scope_vars = NULL;
+        hashmap_deinit_borrowed(&parse_scope.var_map);
+        hashmap_deinit_borrowed(&parse_scope.tag_map);
         if (!expr)
             error("failed to parse the expression");
         add_type(vm, expr);
@@ -1563,6 +1570,8 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
     vm->error_jmp_buf  = saved_jmp_buf;
     vm->compiler.scope = saved_scope;
     debugger_free_condition_scope(scope_vars);
+    hashmap_deinit_borrowed(&parse_scope.var_map);
+    hashmap_deinit_borrowed(&parse_scope.tag_map);
     printf("Error: %s\n", vm->error_message ? vm->error_message
                                             : "failed to compile expression");
     vm->error_message = NULL;
