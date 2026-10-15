@@ -5067,6 +5067,7 @@ struct VirtualMachine {
     // types.
     void             *gil_mutex;
     int               gil_initialized;
+    int               gil_depth; // recursive levels held by the GIL owner
     void *kernel_loop_item;  // work-item of a barrier-free cccc_launch loop
     int   kernel_max_group;  // --kernel-max-group-size (0 = default 256)
     ThreadRecord     *active_thread;

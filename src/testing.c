@@ -725,11 +725,14 @@ static bool run_hooks_guarded(VirtualMachine *vm, Obj *prog,
 
     CCCCTestRunState *saved = s_run;
     s_run                   = &guard;
+    int gil_depth           = vm->gil_depth;
     int jval                = setjmp(guard.jmp);
-    if (jval == 0)
+    if (jval == 0) {
         run_hooks(vm, prog, setups, is_teardown, once_only, suite, disp);
-    else
+    } else {
+        cccc_gil_release_to(vm, gil_depth);
         guard.failed = 1;
+    }
     s_run = saved;
 
     if (guard.failed && fail_msg_out)
@@ -1750,7 +1753,10 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 #endif
 
-        int jval = setjmp(run.jmp);
+        int gil_depth = vm->gil_depth;
+        int jval      = setjmp(run.jmp);
+        if (jval != 0)
+            cccc_gil_release_to(vm, gil_depth);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
             cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);

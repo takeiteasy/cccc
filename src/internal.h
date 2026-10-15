@@ -1244,6 +1244,7 @@ void cccc_gil_init(VirtualMachine *vm);
 void cccc_gil_destroy(VirtualMachine *vm);
 void cccc_gil_acquire(VirtualMachine *vm);
 void cccc_gil_release(VirtualMachine *vm);
+void cccc_gil_release_to(VirtualMachine *vm, int depth);
 
 //
 // debugger.c
