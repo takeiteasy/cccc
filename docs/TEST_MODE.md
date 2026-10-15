@@ -1016,6 +1016,25 @@ binary, builds it with the host compiler, runs it and exits with its status
 ./cccc --testing=native -o suite_bin suite.c  # same run, binary kept at suite_bin
 ```
 
+The harness takes the same selection flags as the VM runner, so a kept binary
+accepts them directly:
+
+| Flag | Effect |
+|---|---|
+| `--test=GLOB` | run tests whose name matches |
+| `--test-suite=NAME` | run a suite and its sub-suites (glob if `NAME` has `*?[`) |
+| `--fail-fast` | stop after the first failure or timeout |
+| `--test-timeout=N` | default per-test timeout in seconds |
+| `--list-tests` | list the selected tests without running them |
+
+```
+./cccc --testing=native -o suite_bin suite.c
+./suite_bin --test='math_*' --fail-fast
+```
+
+Output is always TAP; `--test-format=plain|json` is refused with
+`--testing=native`.
+
 Not supported natively (refused with a diagnostic): `test_setup`/`test_teardown`
 hooks and negative tests (`error=`, `expect_compile_error=`). A per-test
 `flags=` delta is `SKIP`ped in the TAP output.
@@ -1233,7 +1252,7 @@ options. Both can coexist: per-test `flags=` takes precedence over
 ### Native mode
 
 `flags=` applies only to the bytecode/VM execution path. Under
-`--testing=native` (#1033) a test carrying a `flags=` delta is not
+`--testing=native` a test carrying a `flags=` delta is not
 silently ignored — it is individually marked `SKIP` in the generated TAP
 output, since a per-test safety/warning configuration would
 need a separate native binary per test, which v1 doesn't attempt.
