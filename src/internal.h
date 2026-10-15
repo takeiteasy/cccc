@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.10.6"
+#define CCCC_RELEASE_VERSION "0.10.7"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -1244,6 +1244,7 @@ void cccc_gil_init(VirtualMachine *vm);
 void cccc_gil_destroy(VirtualMachine *vm);
 void cccc_gil_acquire(VirtualMachine *vm);
 void cccc_gil_release(VirtualMachine *vm);
+void cccc_gil_release_to(VirtualMachine *vm, int depth);
 
 //
 // debugger.c

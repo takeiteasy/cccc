@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.7] - 2026-10-15
+
+- Fixed: `--testing` no longer hangs after a test fails an `Assert` or times out.
+  A later `exit_code=` test or a test that starts a thread now runs normally.
+
 ## [0.10.6] - 2026-10-15
 
 - Fixed: a VLA length expression with a side effect runs once under

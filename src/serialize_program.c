@@ -4392,6 +4392,93 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "}\n\n",
           f);
 
+    CcTestFormat fmt = vm->compiler.test_format;
+    const char  *header, *suite_line, *footer;
+    if (fmt == TEST_FORMAT_PLAIN) {
+        fputs("static void __cccc_report(int num, const char *name, const "
+              "char *suite, int st, const char *msg) {\n"
+              "    const char *p = st == 0 ? \"  \\xe2\\x9c\\x93\" : "
+              "st == 2 ? \"  -\" : \"  \\xe2\\x9c\\x97\";\n"
+              "    (void)num; (void)suite;\n"
+              "    if (!msg && st == 3) msg = \"TIMEOUT\";\n"
+              "    if (msg) printf(\"%s %s (%s)\\n\", p, name, msg);\n"
+              "    else printf(\"%s %s\\n\", p, name);\n"
+              "}\n",
+              f);
+        header     = "    if (selected == 0) printf(\"No tests found.\\n\");\n"
+                     "    else printf(\"Running %d test%s...\\n\", selected, "
+                     "selected == 1 ? \"\" : \"s\");\n";
+        suite_line = "            printf(\"\\xe2\\x94\\x80\\xe2\\x94\\x80 %s "
+                     "\\xe2\\x94\\x80\\xe2\\x94\\x80\\n\", tc->suite ? "
+                     "tc->suite : \"(no suite)\");\n";
+        footer = "    if (selected > 0) printf(\"\\n\");\n"
+                 "    printf(\"=======================\\n\");\n"
+                 "    printf(\"Test Results Summary\\n\");\n"
+                 "    printf(\"=======================\\n\");\n"
+                 "    printf(\"Total:          %d\\n\", selected);\n"
+                 "    printf(\"Passed:         %d\\n\", passed);\n"
+                 "    if (failed > 0) printf(\"Failed:         %d\\n\", "
+                 "failed);\n"
+                 "    if (skipped > 0) printf(\"Skipped:        %d\\n\", "
+                 "skipped);\n"
+                 "    if (timedout > 0) printf(\"Timed out:      %d\\n\", "
+                 "timedout);\n";
+    } else if (fmt == TEST_FORMAT_JSON) {
+        fputs("static int __cccc_json_first = 1;\n"
+              "static void __cccc_json_str(const char *s) {\n"
+              "    putchar('\"');\n"
+              "    for (; *s; s++) {\n"
+              "        if (*s == '\"') fputs(\"\\\\\\\"\", stdout);\n"
+              "        else if (*s == '\\\\') fputs(\"\\\\\\\\\", stdout);\n"
+              "        else if (*s == '\\n') fputs(\"\\\\n\", stdout);\n"
+              "        else if (*s == '\\r') fputs(\"\\\\r\", stdout);\n"
+              "        else if (*s == '\\t') fputs(\"\\\\t\", stdout);\n"
+              "        else putchar(*s);\n"
+              "    }\n"
+              "    putchar('\"');\n"
+              "}\n"
+              "static void __cccc_report(int num, const char *name, const "
+              "char *suite, int st, const char *msg) {\n"
+              "    (void)num;\n"
+              "    if (!__cccc_json_first) printf(\",\\n\");\n"
+              "    __cccc_json_first = 0;\n"
+              "    printf(\"  {\\\"name\\\":\");\n"
+              "    __cccc_json_str(name);\n"
+              "    if (suite) { printf(\",\\\"suite\\\":\"); "
+              "__cccc_json_str(suite); }\n"
+              "    printf(\",\\\"status\\\":\\\"%s\\\"\", st == 0 ? "
+              "\"pass\" : st == 2 ? \"skip\" : st == 3 ? \"timeout\" : "
+              "\"fail\");\n"
+              "    if (msg) { printf(\",\\\"message\\\":\"); "
+              "__cccc_json_str(msg); }\n"
+              "    printf(\"}\");\n"
+              "}\n",
+              f);
+        header     = "    printf(\"[\\n\");\n";
+        suite_line = "            (void)0;\n";
+        footer     = "    printf(\"\\n]\\n\");\n";
+    } else {
+        fputs("static void __cccc_report(int num, const char *name, const "
+              "char *suite, int st, const char *msg) {\n"
+              "    (void)suite;\n"
+              "    if (st == 0) printf(\"ok %d - %s\\n\", num, name);\n"
+              "    else if (st == 2) printf(\"ok %d - %s # SKIP %s\\n\", num, "
+              "name, msg ? msg : \"\");\n"
+              "    else if (st == 3) printf(\"not ok %d - %s\\n# "
+              "TIMEOUT\\n\", num, name);\n"
+              "    else printf(\"not ok %d - %s\\n# %s\\n\", num, name, msg "
+              "? msg : \"failed\");\n"
+              "}\n",
+              f);
+        header     = "    printf(\"TAP version 13\\n\");\n"
+                     "    printf(\"1..%d\\n\", selected);\n";
+        suite_line = "            printf(\"# Suite: %s\\n\", tc->suite ? "
+                     "tc->suite : \"(none)\");\n";
+        footer     = "    printf(\"# passed: %d, failed: %d, skipped: %d, timed "
+                     "out: %d\\n\", passed, failed, skipped, timedout);\n";
+    }
+    fputs("\n", f);
+
     fputs("int main(int argc, char **argv) {\n", f);
     fprintf(f, "    int n = %d;\n", n);
     // #1186: `for (int i = ...)` is a C99 declaration -- the harness main()
@@ -4439,9 +4526,9 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "        }\n"
           "        return 0;\n"
           "    }\n"
-          "    printf(\"TAP version 13\\n\");\n"
-          "    printf(\"1..%d\\n\", selected);\n"
-          "    const char *prev_suite = NULL;\n"
+          "", f);
+    fputs(header, f);
+    fputs("    const char *prev_suite = NULL;\n"
           "    int have_prev_suite = 1;\n"
           "    signal(__CCCC_SIGALRM, __cccc_test_alarm);\n"
           "    for (i = 0; i < n; i++) {\n"
@@ -4454,14 +4541,14 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "            (tc->suite && prev_suite && strcmp(tc->suite, "
           "prev_suite) != 0);\n"
           "        if (suite_changed) {\n"
-          "            printf(\"# Suite: %s\\n\", tc->suite ? tc->suite : "
-          "\"(none)\");\n"
-          "            prev_suite = tc->suite;\n"
+          "", f);
+    fputs(suite_line, f);
+    fputs("            prev_suite = tc->suite;\n"
           "            have_prev_suite = 1;\n"
           "        }\n"
           "        if (!tc->run && !tc->run_exit) {\n"
-          "            printf(\"ok %d - %s # SKIP %s\\n\", num, tc->name, "
-          "tc->skip_reason ? tc->skip_reason : \"\");\n"
+          "            __cccc_report(num, tc->name, tc->suite, 2, "
+          "tc->skip_reason);\n"
           "            skipped++;\n"
           "            continue;\n"
           "        }\n"
@@ -4517,8 +4604,7 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "        if (err_pipe[0] >= 0) close(err_pipe[0]);\n"
           "        if (timed_out) {\n"
           "            waitpid(pid, NULL, 0);\n"
-          "            printf(\"not ok %d - %s\\n# TIMEOUT\\n\", num, "
-          "tc->name);\n"
+          "            __cccc_report(num, tc->name, tc->suite, 3, NULL);\n"
           "            timedout++;\n"
           "        } else if (tc->expect_exit_code >= 0) {\n"
           "            int actual = -1;\n"
@@ -4526,14 +4612,15 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "__CCCC_WEXITSTATUS(wstatus);\n"
           "            else if (__CCCC_WIFSIGNALED(wstatus)) actual = 128 + "
           "__CCCC_WTERMSIG(wstatus);\n"
-          "            if (actual == tc->expect_exit_code) { printf(\"ok "
-          "%d - %s\\n\", num, tc->name); passed++; }\n"
-          "            else { printf(\"not ok %d - %s\\n# expected "
-          "exit_code %d, got %d\\n\", num, tc->name, tc->expect_exit_code, "
-          "actual); failed++; }\n"
+          "            if (actual == tc->expect_exit_code) { "
+          "__cccc_report(num, tc->name, tc->suite, 0, NULL); passed++; }\n"
+          "            else { char em[64]; sprintf(em, \"expected exit_code "
+          "%d, got %d\", tc->expect_exit_code, actual); "
+          "__cccc_report(num, tc->name, tc->suite, 1, em); failed++; }\n"
           "        } else if (__CCCC_WIFSIGNALED(wstatus)) {\n"
-          "            printf(\"not ok %d - %s\\n# aborted by signal "
-          "%d\\n\", num, tc->name, __CCCC_WTERMSIG(wstatus));\n"
+          "            char sm[48]; sprintf(sm, \"aborted by signal %d\", "
+          "__CCCC_WTERMSIG(wstatus));\n"
+          "            __cccc_report(num, tc->name, tc->suite, 1, sm);\n"
           "            failed++;\n"
           "        } else if (__CCCC_WIFEXITED(wstatus) && "
           "__CCCC_WEXITSTATUS(wstatus) == "
@@ -4546,19 +4633,19 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "cap_err, 0) &&\n"
           "                   __cccc_check_pattern(tc->reject_stderr, "
           "cap_err, 1)) {\n"
-          "            printf(\"ok %d - %s\\n\", num, tc->name);\n"
+          "            __cccc_report(num, tc->name, tc->suite, 0, NULL);\n"
           "            passed++;\n"
           "        } else {\n"
-          "            printf(\"not ok %d - %s\\n# %s\\n\", num, tc->name, "
+          "            __cccc_report(num, tc->name, tc->suite, 1, "
           "(msg && msg[0]) ? msg : \"failed\");\n"
           "            failed++;\n"
           "        }\n"
           "        free(msg); free(cap_out); free(cap_err);\n"
           "        if (fail_fast && (failed || timedout)) break;\n"
           "    }\n"
-          "    printf(\"# passed: %d, failed: %d, skipped: %d, timed out: "
-          "%d\\n\", passed, failed, skipped, timedout);\n"
-          "    return (passed + skipped == selected) ? 0 : 1;\n"
+          "", f);
+    fputs(footer, f);
+    fputs("    return (passed + skipped == selected) ? 0 : 1;\n"
           "}\n",
           f);
 

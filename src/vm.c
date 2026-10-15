@@ -1370,6 +1370,7 @@ void cccc_gil_acquire(VirtualMachine *vm) {
         cccc_gil_init(vm);
 #if !defined(_WIN32) && !defined(_WIN64)
     pthread_mutex_lock((pthread_mutex_t *)vm->gil_mutex);
+    vm->gil_depth++;
 #endif
 }
 
@@ -1377,8 +1378,15 @@ void cccc_gil_release(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
+    vm->gil_depth--;
     pthread_mutex_unlock((pthread_mutex_t *)vm->gil_mutex);
 #endif
+}
+
+// Drops levels a longjmp out of cc_run_at left held (its release is skipped).
+void cccc_gil_release_to(VirtualMachine *vm, int depth) {
+    while (vm && vm->gil_initialized && vm->gil_depth > depth)
+        cccc_gil_release(vm);
 }
 
 void cc_destroy(VirtualMachine *vm) {
