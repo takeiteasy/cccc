@@ -4464,7 +4464,7 @@ typedef struct Compiler {
     // doubles on overflow).  The four tables share the same shape: a pointer
     // to the entries, a count, and a capacity.  No hard ceiling; very large
     // translation units (e.g. minilua 31k lines) grow gracefully.
-    struct CallPatch {
+    struct {
         Pc   location; // Location in text segment to patch
         Obj *function; // Function to call
     }  *call_patches;
@@ -4485,7 +4485,7 @@ typedef struct Compiler {
     int       num_data_holes, data_holes_cap;
 
     // Function address patches for function pointers
-    struct FuncAddrPatch {
+    struct {
         Pc   location; // Location of IMM operand to patch
         Obj *function; // Function whose address to use
     }  *func_addr_patches;

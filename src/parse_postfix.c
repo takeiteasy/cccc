@@ -1959,6 +1959,18 @@ static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
     return blk;
 }
 
+// is_const_expr() only checks a comma's rhs, so a folded argument could drop
+// a side effect in the lhs.
+static bool has_impure_comma(VirtualMachine *vm, Node *node) {
+    if (!node)
+        return false;
+    if (node->kind == ND_COMMA && !is_const_expr(vm, node->lhs))
+        return true;
+    return has_impure_comma(vm, node->lhs) || has_impure_comma(vm, node->rhs) ||
+           has_impure_comma(vm, node->cond) || has_impure_comma(vm, node->then) ||
+           has_impure_comma(vm, node->els);
+}
+
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -3571,7 +3583,6 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // __builtin_fabs/sqrt/floor/... (+ f/l): forward to libm like the mem*
     // builtins above, converting each argument to the parameter type.
-    // TODO: constant arguments are not folded (#1557)
     int libm_row, libm_variant;
     int libm_arity =
         tok->kind == TK_IDENT
@@ -3589,6 +3600,23 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             cur = cur->next = new_cast(vm, assign(vm, &tok, tok), pty);
         }
         *rest = skip(vm, tok, ")");
+        double args[3];
+        bool   foldable = true;
+        int    n        = 0;
+        for (Node *a = head.next; a && foldable; a = a->next, n++)
+            foldable = is_const_expr(vm, a) && !has_impure_comma(vm, a);
+        long double folded;
+        if (foldable) {
+            n = 0;
+            for (Node *a = head.next; a; a = a->next)
+                args[n++] = eval_double(vm, a);
+            if (libm_builtin_fold(libm_row, libm_variant, args, &folded)) {
+                Node *num = new_node(vm, ND_NUM, start);
+                num->fval = folded;
+                num->ty   = fn->ty->return_ty;
+                return num;
+            }
+        }
         Node *node =
             new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, head.next->tok),
                       head.next->tok);

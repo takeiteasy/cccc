@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.10.4"
+#define CCCC_RELEASE_VERSION "0.10.5"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -643,6 +643,10 @@ Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
 // Matches __builtin_<libm name>[f|l]; sets *row (table index) and *variant
 // (0 double, 1 float, 2 long double), returns the argument count or 0.
 int libm_builtin_lookup(const char *name, int len, int *row, int *variant);
+// Folds a constant-argument call; false when it must stay a run-time call
+// (domain/range error, signaling NaN).
+bool libm_builtin_fold(int row, int variant, const double *args,
+                       long double *out);
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok);
 // #1095: const_expr()'s own body, but surfacing sizeof/_Alignof-of-a-
 // from_include-type provenance (Node.layout_ty/layout_is_align, #1031) to
