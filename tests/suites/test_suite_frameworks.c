@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing -F./tests/fixtures/frameworks
+// CCCC_NATIVE_SKIP: framework lookup is Apple-toolchain only (gcc has no -F)
 #include <Outer/Outer.h>
 #include <Outer/Priv.h>
 
