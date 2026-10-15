@@ -495,6 +495,10 @@ static void collect_referenced_globals(Node *n, void *vctx) {
 }
 
 // Serialize a function
+static void serialize_var_definition(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Obj *var,
+                                     bool force_static);
+
 void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         Obj *fn) {
     if (!fn->is_function)
@@ -816,13 +820,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             if (__dl->owner_fn != fn)
                 continue;
             print_indent_level(f, 1);
-            fprintf(f, "static ");
-            serialize_type_decl(f, ctx, __dl->var->ty, __dl->var->name);
-            if (__dl->var->init_data) {
-                fprintf(f, " = ");
-                serialize_init_bytes(f, vm, ctx, __dl->var, __dl->var->ty, 0);
-            }
-            fprintf(f, ";\n");
+            serialize_var_definition(f, vm, ctx, __dl->var, true);
         }
 
         // #1074: if `fn` directly parents at least one nested function,
@@ -1560,48 +1558,13 @@ void serialize_alignas_if_needed(FILE *f, Obj *var) {
         fprintf(f, "_Alignas(%d) ", var->ty->align);
 }
 
-void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
-                          Obj *var) {
-    if (var->is_function)
-        return;
-
-    // String literals are inlined at their point of use (ND_VAR /
-    // serialize_reloc_init) instead of getting their own definition. Every
-    // other `.L..N`-named global (compound literal, static local) is
-    // renamed to a valid identifier by rename_anon_globals() before this
-    // runs, so it falls through and is serialized like any other global
-    // (#925).
-    if (var->is_string_literal)
-        return;
-
-    // #1044: deferred into its owning function's own body instead --
-    // serialize_function() emits its real definition; see
-    // collect_deferred_static_labels()'s own comment.
-    if (var_is_deferred_label_static(ctx, var))
-        return;
-
-    // #1047: a global whose declaration lives entirely in a replayed
-    // header is already supplied by that header's own #include text --
-    // see global_is_header_supplied()'s comment.
-    if (global_is_header_supplied(vm, ctx, var))
-        return;
-
-    // #1011: the #918/#928 forward-declaration pass (cc_serialize_program,
-    // further down this file) already emitted a line for this global ahead
-    // of every definition -- `static T name;` for a static with no
-    // initializer, or `extern T name;` for a declaration with no
-    // definition (is_definition false). When this global also has no
-    // init_data, what follows below would print the exact same text a
-    // second time, back to back (e.g. a function-local `static struct Foo
-    // a;` hoisted to file scope by rename_anon_globals() as `__cccc_a_0`).
-    // A global that *does* have an initializer still needs both lines (the
-    // forward declaration, then the real `T name = ...;` definition), so
-    // this only skips the no-initializer case.
-    if (!var->init_data && !global_is_static_tls(var) &&
-        (var->is_static || !var->is_definition))
-        return;
-
-    if (var->is_static)
+// Prints `var`'s definition: storage class, type, name and initializer.
+// `force_static` is for a definition emitted inside a function body, where a
+// bare declaration would be an automatic variable.
+static void serialize_var_definition(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Obj *var,
+                                     bool force_static) {
+    if (var->is_static || force_static)
         fprintf(f, "static ");
     else if (!var->is_definition)
         // #901: a global written `extern int g;` (no initializer, no
@@ -1643,4 +1606,51 @@ void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     }
 
     fprintf(f, ";\n");
+}
+
+void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
+                          Obj *var) {
+    if (var->is_function)
+        return;
+
+    // String literals are inlined at their point of use (ND_VAR /
+    // serialize_reloc_init) instead of getting their own definition. Every
+    // other `.L..N`-named global (compound literal, static local) is
+    // renamed to a valid identifier by rename_anon_globals() before this
+    // runs, so it falls through and is serialized like any other global
+    // (#925).
+    if (var->is_string_literal)
+        return;
+
+    // #1044: deferred into its owning function's own body instead --
+    // serialize_function() emits its real definition; see
+    // collect_deferred_static_labels()'s own comment.
+    if (var_is_deferred_label_static(ctx, var))
+        return;
+
+    // #1047: a global whose declaration lives entirely in a replayed
+    // header is already supplied by that header's own #include text --
+    // see global_is_header_supplied()'s comment.
+    if (global_is_header_supplied(vm, ctx, var))
+        return;
+
+    // #1011: the #918/#928 forward-declaration pass (cc_serialize_program,
+    // further down this file) already emitted a line for this global ahead
+    // of every definition -- `static T name;` for a static with no
+    // initializer, or `extern T name;` for a declaration with no
+    // definition (is_definition false). When this global also has no
+    // init_data, what follows below would print the exact same text a
+    // second time, back to back (e.g. a function-local `static struct Foo
+    // a;` hoisted to file scope by rename_anon_globals() as `__cccc_a_0`).
+    // A global that *does* have an initializer still needs both lines (the
+    // forward declaration, then the real `T name = ...;` definition), so
+    // this only skips the no-initializer case.
+    // The forward-declaration pass skips a global whose type has no name to
+    // spell (type_needs_anon_aggregate), so there is nothing to duplicate.
+    if (!var->init_data && !global_is_static_tls(var) &&
+        (var->is_static || !var->is_definition) &&
+        !type_needs_anon_aggregate(ctx, var->ty))
+        return;
+
+    serialize_var_definition(f, vm, ctx, var, false);
 }

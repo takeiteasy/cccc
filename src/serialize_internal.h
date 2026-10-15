@@ -32,6 +32,10 @@ typedef struct {
     // #1010: mirrors TypeNameRecord.defines_type -- see that field's comment
     // (cccc.h) and find_tag_name_for_provenance() below.
     bool defines_type;
+    // Synthesized tag for a tagless aggregate (synthesize_anon_aggregate_tags,
+    // hoist_local_type_to_file_scope). Never matches a type that has a tag of
+    // its own, see tag_rec_mismatch().
+    bool synth_tag;
 } TypeName;
 
 // #965: pairs a lifted block function (Obj.is_block) with the name of the
@@ -146,6 +150,7 @@ typedef struct {
     int  anon_local_counter; // names compiler-synthesized temps (e.g. ++/--
                              // desugaring)
     int anon_global_counter; // names non-string-literal `.L..N` globals (#925)
+    int anon_tag_counter; // names synthesized `__cccc_anon<N>` aggregate tags
     // #953: resolved paths of headers actually auto-captured into
     // generated_only (-c=generated) output -- built once in
     // cc_serialize_program from vm->compiler.emit_include_paths. Only
@@ -341,6 +346,8 @@ bool prelude_declare_types(FILE *f, SerializeContext *ctx, Type *ty,
                            void *user);
 bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty);
 bool type_vec_contains(TypeVec *vec, Type *ty);
+void synthesize_anon_aggregate_tags(VirtualMachine *vm, SerializeContext *ctx);
+Obj *type_local_owner(SerializeContext *ctx, Type *ty);
 bool typedef_alias_header_suppressed(SerializeContext *ctx, TypeName *alias);
 bool var_is_deferred_label_static(SerializeContext *ctx, Obj *var);
 const char *enum_const_spelling(SerializeContext *ctx, Type *ty,

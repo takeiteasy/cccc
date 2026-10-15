@@ -570,6 +570,17 @@ VarScope *push_scope(VirtualMachine *vm, char *name, int name_len) {
     return (VarScope *)node;
 }
 
+// True when `tok` was written in an included file rather than a command-line
+// input (see TypeNameRecord.from_include for what that gates). A `<quote>`
+// pseudo-file template and a file using cccc-only routing syntax never count.
+bool token_is_from_include(VirtualMachine *vm, Token *tok) {
+    bool is_quote_pseudo_file = tok && tok->file && tok->file->name &&
+                                strcmp(tok->file->name, "<quote>") == 0;
+    return tok && tok->file && !is_quote_pseudo_file &&
+           !cc_file_is_command_line_input(vm, tok->file->name) &&
+           !cc_file_is_cccc_only(vm, tok->file->name);
+}
+
 // decl_tok is the token the name/tag was declared at, used to tell whether
 // this declaration came from an #include (see TypeNameRecord.from_include in
 // cccc.h). NULL is treated as "not from an include" (the synthetic-token
@@ -616,13 +627,7 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
     // incomplete-type error. Matched by exact name, not a "<...>" prefix
     // (tried first; wrongly caught tokenize_private_header's real headers
     // too and undid #892's AttrTarget/opaque-handle-collision fix).
-    bool is_quote_pseudo_file = decl_tok && decl_tok->file &&
-                                decl_tok->file->name &&
-                                strcmp(decl_tok->file->name, "<quote>") == 0;
-    rec->from_include =
-        decl_tok && decl_tok->file && !is_quote_pseudo_file &&
-        !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
-        !cc_file_is_cccc_only(vm, decl_tok->file->name);
+    rec->from_include = token_is_from_include(vm, decl_tok);
     rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
     rec->in_system_header =
         decl_tok && decl_tok->file && decl_tok->file->is_system_header;

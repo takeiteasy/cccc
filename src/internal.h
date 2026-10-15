@@ -868,6 +868,7 @@ void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
 bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family);
 bool is_compatible_qualified_strict(Type *t1, Type *t2);
+bool token_is_from_include(VirtualMachine *vm, Token *tok);
 bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 // `ty` without its address space: the type of a private temporary that holds a
