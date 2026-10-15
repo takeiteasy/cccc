@@ -21,6 +21,8 @@
 // edits them and reads what it prints. The binary is $CCCC_BIN, else
 // build/cccc, else ./cccc; the test is skipped when none exists.
 
+#define _GNU_SOURCE // posix_openpt and friends on glibc
+
 #include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>

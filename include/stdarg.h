@@ -121,12 +121,13 @@
  * sizeof/offsetof over-allocates real storage on every one of them,
  * mirroring #1054's jmp_buf widening rather than diagnosing the fold.
  */
-typedef struct {
+struct __cccc_va_list {
     char *reg_ptr;        /* Current position in register spill area */
     char *stack_ptr;      /* Current position in stack overflow area */
     int   reg_count;      /* Remaining slots in register spill area */
     char  __reserved[40]; /* #1059: headroom for the real host va_list size */
-} va_list;
+};
+typedef struct __cccc_va_list va_list;
 
 /*
  * va_start(ap, last) - Initialize va_list
@@ -313,11 +314,9 @@ typedef struct {
  * to the corresponding va_* macros here so that code using either form works
  * identically when <stdarg.h> is included.
  *
- * Note: __builtin_va_list is defined as 'char*' by the preprocessor
- * (preprocess.c) for macOS system-header compatibility and is intentionally
- * NOT the struct va_list used by this header.  These macros therefore require
- * that the ap argument has type 'va_list' (the struct) rather than
- * '__builtin_va_list'.
+ * Note: the preprocessor defines __builtin_va_list and __gnuc_va_list as
+ * 'struct __cccc_va_list' (preprocess.c), so system headers' own va_list
+ * typedefs name this same struct.
  */
 #define __builtin_va_start(ap, last) va_start(ap, last)
 #define __builtin_va_end(ap)         va_end(ap)

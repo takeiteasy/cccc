@@ -778,7 +778,7 @@ static void heap_marks_truncate_to(VirtualMachine *vm, long long *new_bp) {
 // below the new one: the stack grows down) are dropped here, so LEV3, CALLT and
 // longjmp need no hook of their own.
 static void frame_record_push(VirtualMachine *vm) {
-    Debugger *d = &vm->dbg;
+    DebuggerState *d = &vm->dbg;
     while (d->num_frame_records > 0 &&
            d->frame_records[d->num_frame_records - 1].bp <= vm->bp)
         d->num_frame_records--;
@@ -818,7 +818,7 @@ FrameRecord *cc_find_frame_record(VirtualMachine *vm, long long *bp) {
 // after the REPL returns (VRAISE, watchpoint loads) cannot clobber the result.
 // The target is NULL when the function is paused at its entry, before ENT3.
 void cc_apply_frame_op(VirtualMachine *vm) {
-    Debugger  *d  = &vm->dbg;
+    DebuggerState *d = &vm->dbg;
     FrameOp    op = d->pending_op;
     long long *t  = d->pending_bp;
     d->pending_op = CC_FRAME_OP_NONE;

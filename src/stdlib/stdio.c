@@ -230,6 +230,7 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "fclose", (void *)wrap_fclose, 1, 0);
     cc_register_cfunc(vm, "fflush", (void *)wrap_fflush, 1, 0);
     cc_register_cfunc(vm, "fopen", (void *)fopen, 2, 0);
+    cc_register_cfunc(vm, "fdopen", (void *)fdopen, 2, 0);
     cc_register_cfunc(vm, "freopen", (void *)freopen, 3, 0);
     // open_memstream: not printf-family, so it sits outside the
     // CCCC_HAVE_NATIVE_PCT_B split above. Plain 2-arg passthrough returning a

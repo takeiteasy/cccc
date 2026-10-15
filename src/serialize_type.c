@@ -2527,8 +2527,12 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             // warning to a hard error. Prefer the alias here so every site
             // -- declaration, argument, assignment -- agrees and binds to
             // the same (host-supplied) type throughout.
-            if (tag && alias && !ty->members &&
-                type_def_is_from_include_suppressed(ctx, ty))
+            // The host's own <stdarg.h> supplies va_list; the guest struct's
+            // tag (`__cccc_va_list`, from __builtin_va_list) means nothing there.
+            if (type_is_cccc_va_list(ty))
+                fputs("va_list", f);
+            else if (tag && alias && !ty->members &&
+                     type_def_is_from_include_suppressed(ctx, ty))
                 fprintf(f, "%.*s", alias->name_len, alias->name);
             else if (tag)
                 fprintf(f, "struct %.*s", tag->name_len, tag->name);

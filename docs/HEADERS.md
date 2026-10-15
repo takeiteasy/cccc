@@ -160,6 +160,13 @@ Other constructs:
   parses correctly; `declarator()` (`src/parse_types.c`) loops
   attribute-list/asm-label parsing until a pass consumes nothing, so any
   interleaving of the two is accepted.
+- **`va_list`** is one type whichever of `<stdio.h>` and `<stdarg.h>` comes
+  first: `__builtin_va_list` and `__gnuc_va_list` name cccc's own
+  `struct __cccc_va_list`, so the SDK's `typedef __darwin_va_list va_list`
+  and the `v*printf` prototypes agree with `va_arg`.
+- **Legacy BSD calls** (`bcmp`, `bzero`, `index`, `getpagesize`, ...) are
+  hidden by the SDK under cccc's predefined `_POSIX_C_SOURCE=200809L`;
+  declare them yourself or `-U_POSIX_C_SOURCE`.
 
 ### Pragma suppression in system-header mode
 
