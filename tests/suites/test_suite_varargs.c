@@ -637,9 +637,9 @@ static int _varargs_struct_simple2_double_equal(double a, double b,
 typedef struct {
     int a;
     int b;
-} Simple;
+} VaArgPair;
 
-static Simple use_va_arg(int x, ...) {
+static VaArgPair use_va_arg(int x, ...) {
     va_list args;
     va_start(args, x);
 
@@ -648,7 +648,7 @@ static Simple use_va_arg(int x, ...) {
 
     va_end(args);
 
-    Simple result = {x + y, z};
+    VaArgPair result = {x + y, z};
     return result;
 }
 
@@ -1148,7 +1148,7 @@ int test_varargs_struct_simple2(void) {
 // test_varargs_struct_va
 [[cccc::test(return = 42)]]
 int test_varargs_struct_va(void) {
-    Simple s = use_va_arg(5, 10, 20);
+    VaArgPair s = use_va_arg(5, 10, 20);
     if (s.a != 15)
         return 1; // 5 + 10
     if (s.b != 20)

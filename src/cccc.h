@@ -3628,6 +3628,7 @@ typedef struct TypeNameRecord {
     // and must never be silently dropped from generated output.
     bool from_include;
     bool always_emit;
+    bool in_system_header; // declared in a `<...>`-included header
     // #953: the declaring token's resolved file path (NULL when there is no
     // token, i.e. always_emit records). Lets cc_serialize_program's
     // generated_only path (-c=generated) tell a from_include type whose

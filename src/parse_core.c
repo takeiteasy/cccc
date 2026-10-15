@@ -624,7 +624,9 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
         !cc_file_is_command_line_input(vm, decl_tok->file->name) &&
         !cc_file_is_cccc_only(vm, decl_tok->file->name);
     rec->file_path = decl_tok && decl_tok->file ? decl_tok->file->name : NULL;
-    rec->next      = vm->compiler.type_names;
+    rec->in_system_header =
+        decl_tok && decl_tok->file && decl_tok->file->is_system_header;
+    rec->next               = vm->compiler.type_names;
     vm->compiler.type_names = rec;
 }
 
