@@ -628,4 +628,34 @@ int test_vla_2d_brace_init_short_bounds_checked(void) {
                                                                         : 1;
 }
 
+// A comma whose left side has a side effect is not a constant expression, so
+// the left side runs and the array is a VLA (the call count is checked in
+// tests/test_vla_comma_side_effect.c; -c=native runs it twice).
+static int vla_comma_calls;
+static int vla_comma_side_effect(void) {
+    return ++vla_comma_calls;
+}
+
+[[cccc::test(return = 42)]]
+int test_vla_comma_side_effect(void) {
+    vla_comma_calls = 0;
+    int a[(vla_comma_side_effect(), 3)];
+    unsigned long n = sizeof(int[(vla_comma_side_effect(), 2)]);
+    return sizeof a == 3 * sizeof(int) && n == 2 * sizeof(int) &&
+                   vla_comma_calls >= 2
+               ? 42
+               : 1;
+}
+
+// A comma of two constants still folds.
+[[cccc::test(return = 42)]]
+int test_comma_constants_fold(void) {
+    int a[(1, 3)];
+    switch (2) {
+        case (1, 2):
+            return sizeof a == 3 * sizeof(int) ? 42 : 1;
+    }
+    return 2;
+}
+
 #pragma cccc suite end

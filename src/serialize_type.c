@@ -1906,7 +1906,7 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         size_t lensz  = 0;
         FILE  *lf     = open_memstream(&lenbuf, &lensz);
         if (ty->vla_len && ctx->vm)
-            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 0);
+            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 2);
         fclose(lf);
 
         char buf[1024];

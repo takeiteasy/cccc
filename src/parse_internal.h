@@ -415,6 +415,7 @@ void init_typename_map(void);
 bool is_attr_name(Token *tok, char *name);
 bool is_compound_literal_head(VirtualMachine *vm, Token *tok);
 bool is_const_expr(VirtualMachine *vm, Node *node);
+void require_const_comma_lhs(VirtualMachine *vm, Node *comma);
 bool is_decl_start(VirtualMachine *vm, Token *tok);
 bool is_type_name_start(VirtualMachine *vm, Token *tok);
 bool is_end(Token *tok);

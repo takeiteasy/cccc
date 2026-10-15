@@ -198,6 +198,9 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // once `v` is a genuine array. Emit a real declaration in its place
             // instead; serialize_stmt_list_item() keeps the enclosing block
             // unbraced so it stays visible to later statements.
+            // TODO(#1577): the length expression also runs in the tmp
+            // statement emitted before this declaration, so a side effect in
+            // it happens twice.
             if (node_is_vla_ptr_assign(node->lhs)) {
                 Obj *var = node->lhs->lhs->var;
                 print_indent_level(f, indent);
