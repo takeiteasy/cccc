@@ -1441,6 +1441,7 @@ int main(int argc, const char *argv[]) {
     const char **undefs              = NULL; // -U
     int          undefs_count        = 0;
     char        *out_file            = NULL; // -o (single)
+    bool         out_file_is_tmp     = false; // --testing=native, no -o
     int          dump_ast            = 0;    // -a
     int          disassemble         = 0;    // -d
     int          verbose             = 0;    // -v
@@ -2709,7 +2710,14 @@ int main(int argc, const char *argv[]) {
                             "policy options\n");
             usage(argv[0], 1);
         }
-        if (!out_file) {
+        if (!out_file && testing_backend == TESTING_BACKEND_NATIVE) {
+            out_file = make_tmp_path("");
+            if (!out_file) {
+                fprintf(stderr, "error: cannot create a temporary file\n");
+                usage(argv[0], 1);
+            }
+            out_file_is_tmp = true;
+        } else if (!out_file) {
             // Match cc/clang/gcc's a.out convention: -c=native with no -o
             // builds ./a.out instead of erroring.
             out_file = strdup("a.out");
@@ -3673,6 +3681,18 @@ int main(int argc, const char *argv[]) {
             defines_count, undefs, undefs_count, std_arg, (bool)emit_cccc_mode,
             testing_backend == TESTING_BACKEND_NATIVE, (bool)no_emit_tests,
             opt_level);
+        if (exit_code == 0 && testing_backend == TESTING_BACKEND_NATIVE) {
+            // execvp searches PATH for a slash-less name.
+            size_t exe_len = strlen(out_file) + 3;
+            char  *exe     = malloc(exe_len);
+            snprintf(exe, exe_len, "%s%s", strchr(out_file, '/') ? "" : "./",
+                     out_file);
+            char *const run_args[] = {exe, NULL};
+            exit_code              = run_argv(run_args);
+            free(exe);
+        }
+        if (out_file_is_tmp)
+            unlink(out_file);
         goto BAIL;
     }
 

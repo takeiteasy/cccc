@@ -202,7 +202,8 @@ static void parse_header(Header *h, const char *file) {
     }
     fclose(f);
     for (int i = 0; i < h->nflags; i++) {
-        if (!strcmp(h->flags[i], "--testing"))
+        if (!strcmp(h->flags[i], "--testing") ||
+            !strncmp(h->flags[i], "--testing=", 10))
             h->testing = 1;
         if (!strcmp(h->flags[i], "--build"))
             h->build = 1;

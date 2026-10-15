@@ -1007,8 +1007,18 @@ The process exits with code `0` if all tests pass, `1` if any fail.
 (no `=`) means `=vm` — the default, in-process behaviour described above.
 
 `--testing=native` serializes the harness itself into a standalone native
-binary — see "`[[cccc::test]]` suite files (`--testing=native`, #1033)"
-above for what it covers and its v1 scope cuts.
+binary, builds it with the host compiler, runs it and exits with its status
+(`0` all passed, `1` any failed). Each test runs in a forked child, so
+`exit_code=`, stdout/stderr capture and timeouts work as under `=vm`.
+
+```
+./cccc --testing=native suite.c               # build in a temp file, run, delete
+./cccc --testing=native -o suite_bin suite.c  # same run, binary kept at suite_bin
+```
+
+Not supported natively (refused with a diagnostic): `test_setup`/`test_teardown`
+hooks and negative tests (`error=`, `expect_compile_error=`). A per-test
+`flags=` delta is `SKIP`ped in the TAP output.
 
 ### Combining `--testing` with `-c` (compile pre-pass)
 
