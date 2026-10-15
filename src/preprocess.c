@@ -7991,6 +7991,7 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__inline", "inline");
     define_macro(vm, "__inline__", "inline");
     define_macro(vm, "__signed__", "signed");
+    define_macro(vm, "__signed", "signed");
     define_macro(vm, "__typeof__", "typeof");
     define_macro(vm, "__volatile__", "volatile");
     define_macro(vm, "__CCCC__", "1");
@@ -8040,11 +8041,11 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__GNUC_MINOR__", "2");
     define_macro(vm, "__GNUC_PATCHLEVEL__", "1");
 
-    // __builtin_va_list - system headers use this for va_list typedef
-    // Define as char* for compatibility (macOS system headers expect a pointer
-    // type)
-    define_macro(vm, "__builtin_va_list", "char*");
-    define_macro(vm, "__gnuc_va_list", "char*");
+    // __builtin_va_list - system headers typedef va_list to this. Naming
+    // <stdarg.h>'s own tagged struct keeps va_list one type whichever header
+    // is included first.
+    define_macro(vm, "__builtin_va_list", "struct __cccc_va_list");
+    define_macro(vm, "__gnuc_va_list", "struct __cccc_va_list");
 
     // Strip __attribute__ specifications from system headers since CCCC parser
     // doesn't handle all attribute positions. Attributes are used for

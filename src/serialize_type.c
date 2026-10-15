@@ -452,6 +452,7 @@ static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
     (*items)[*len].always_emit  = always_emit;
     (*items)[*len].file_path    = file_path;
     (*items)[*len].defines_type = defines_type;
+    (*items)[*len].synth_tag    = false;
     (*len)++;
 }
 
@@ -859,6 +860,18 @@ static bool tag_spelling_mismatch(Type *ty, Type *cand) {
     return ty && cand && !ty->struct_tag && cand->struct_tag;
 }
 
+// A synthesized tag names a tagless aggregate, so a same-shaped type that has
+// a tag of its own must not resolve to it. Lookups that deliberately match a
+// tagless copy to its tagged record structurally (owner/hoist) check only
+// this; spelling lookups use tag_rec_mismatch(), which adds the #1091 rule.
+static bool synth_rec_mismatch(Type *ty, TypeName *rec) {
+    return rec->synth_tag && ty && ty->struct_tag;
+}
+
+static bool tag_rec_mismatch(Type *ty, TypeName *rec) {
+    return tag_spelling_mismatch(ty, rec->ty) || synth_rec_mismatch(ty, rec);
+}
+
 static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (!ctx || !ty)
         return NULL;
@@ -873,13 +886,13 @@ static TypeName *find_tag_name(SerializeContext *ctx, Type *ty) {
     if (ctx->tag_renamed)
         TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
     if (name_visible(&ctx->tags[i], ctx->current_fn) &&
-        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        !tag_rec_mismatch(ty, &ctx->tags[i]) &&
         same_type_strong(ctx->tags[i].ty, ty))
         return &ctx->tags[i];
 
     TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
     if (name_visible(&ctx->tags[i], ctx->current_fn) &&
-        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        !tag_rec_mismatch(ty, &ctx->tags[i]) &&
         same_type_or_origin(ctx->tags[i].ty, ty))
         return &ctx->tags[i];
     return NULL;
@@ -908,6 +921,7 @@ static TypeName *find_tag_name_for_provenance(SerializeContext *ctx, Type *ty) {
     TypeName *first_match = NULL;
     TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len) {
         if (!name_visible(&ctx->tags[i], ctx->current_fn) ||
+            synth_rec_mismatch(ty, &ctx->tags[i]) ||
             !same_type_or_origin(ctx->tags[i].ty, ty))
             continue;
         if (ctx->tags[i].defines_type)
@@ -1217,7 +1231,8 @@ static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
     }
     for (int k = 0; k < ttot; k++) {
         int i = tcn < 0 ? k : tcb[k];
-        if (same_type_or_origin(ctx->tags[i].ty, ty))
+        if (!synth_rec_mismatch(ty, &ctx->tags[i]) &&
+            same_type_or_origin(ctx->tags[i].ty, ty))
             return ctx->tags[i].owner_fn;
     }
     for (int k = 0; k < ytot; k++) {
@@ -2200,6 +2215,8 @@ static void serialize_opaque_members(FILE *f, Type *ty) {
 // at parse time too, so a bit-field's m->explicit_align (when set) can only
 // have come from a legal suffix __attribute__((aligned(N))), which is
 // re-emitted the same way, after the `: width` instead of before the type.
+static void serialize_anon_aggregate(FILE *f, SerializeContext *ctx, Type *ty);
+
 static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
                                         Type *ty) {
     if (type_needs_opaque_storage(ty)) {
@@ -2235,8 +2252,14 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         } else {
             if (emit_align)
                 fprintf(f, "_Alignas(%d) ", emit_align);
-            if (ty->is_flexible && !m->next && m->ty->kind == TY_ARRAY &&
-                m->ty->array_len == 0) {
+            // A C11 anonymous member has no declarator: naming its type
+            // would turn it into a member-less declaration.
+            if (!m->name &&
+                (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) &&
+                !m->ty->struct_tag) {
+                serialize_anon_aggregate(f, ctx, m->ty);
+            } else if (ty->is_flexible && !m->next && m->ty->kind == TY_ARRAY &&
+                       m->ty->array_len == 0) {
                 strncat(name, "[]", sizeof(name) - strlen(name) - 1);
                 serialize_type_decl(f, ctx, m->ty->base, name);
             } else {
@@ -2527,8 +2550,12 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             // warning to a hard error. Prefer the alias here so every site
             // -- declaration, argument, assignment -- agrees and binds to
             // the same (host-supplied) type throughout.
-            if (tag && alias && !ty->members &&
-                type_def_is_from_include_suppressed(ctx, ty))
+            // The host's own <stdarg.h> supplies va_list; the guest struct's
+            // tag (`__cccc_va_list`, from __builtin_va_list) means nothing there.
+            if (type_is_cccc_va_list(ty))
+                fputs("va_list", f);
+            else if (tag && alias && !ty->members &&
+                     type_def_is_from_include_suppressed(ctx, ty))
                 fprintf(f, "%.*s", alias->name_len, alias->name);
             else if (tag)
                 fprintf(f, "struct %.*s", tag->name_len, tag->name);
@@ -2796,7 +2823,7 @@ bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
         // tagless typedef isn't the definition, and its own standalone
         // body (correctly printed elsewhere, via serialize_struct_def)
         // gets a second, redundant copy from serialize_typedef_alias.
-        !tag_spelling_mismatch(ty, ctx->tags[i].ty) &&
+        !tag_rec_mismatch(ty, &ctx->tags[i]) &&
         same_type_or_origin(ctx->tags[i].ty, ty))
         return true;
     return false;
@@ -2810,6 +2837,7 @@ bool type_has_tag_for_owner(SerializeContext *ctx, Type *ty, Obj *owner_fn) {
 static bool type_has_file_scope_name(SerializeContext *ctx, Type *ty) {
     TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
     if (ctx->tags[i].owner_fn == NULL &&
+        !synth_rec_mismatch(ty, &ctx->tags[i]) &&
         same_type_or_origin(ctx->tags[i].ty, ty))
         return true;
     TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
@@ -2871,7 +2899,8 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     // existing tests untouched in the common (no-collision) case.
     TypeName *existing_tag = NULL;
     TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
-    if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+    if (!synth_rec_mismatch(ty, &ctx->tags[i]) &&
+        same_type_or_origin(ctx->tags[i].ty, ty)) {
         existing_tag = &ctx->tags[i];
         break;
     }
@@ -2914,7 +2943,8 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     // but find_tag_name()/find_typedef_name() may later return a different
     // one depending on ctx->current_fn.
     TYPE_CAND_FOR(i, type_cand_tags, ctx, ty, ctx->tags_len)
-    if (same_type_or_origin(ctx->tags[i].ty, ty)) {
+    if (!synth_rec_mismatch(ty, &ctx->tags[i]) &&
+        same_type_or_origin(ctx->tags[i].ty, ty)) {
         ctx->tags[i].owner_fn = NULL;
         ctx->tags[i].name     = chosen_name;
         ctx->tags[i].name_len = chosen_len;
@@ -2923,13 +2953,15 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     if (same_type_or_origin(ctx->typedefs[i].ty, ty))
         ctx->typedefs[i].owner_fn = NULL;
 
-    if (!existing_tag)
+    if (!existing_tag) {
         // No tag record existed at all (a tagless local aggregate) --
         // synthesize one so serialize_type prefers `struct <tag>` at every
         // site, including inside the declaring function, which is exactly
         // what gives the one-definition property.
         type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty,
                        chosen_name, chosen_len, NULL, false, true, NULL, true);
+        ctx->tags[ctx->tags_len - 1].synth_tag = true;
+    }
 
     Obj *saved_fn   = ctx->current_fn;
     ctx->current_fn = NULL;
@@ -2938,6 +2970,114 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
     else
         serialize_struct_def(f, ctx, ty);
     ctx->current_fn = saved_fn;
+}
+
+// The function whose local type `ty` depends on (NULL when it only needs file
+// scope): the owner of its own tag/typedef record, or, for a tagless aggregate
+// that has none yet, of the first member that has one.
+Obj *type_local_owner(SerializeContext *ctx, Type *ty) {
+    static int depth;
+    if (!ty || depth > 16)
+        return NULL;
+    Obj *owner = NULL;
+    depth++;
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_ARRAY:
+        case TY_VLA:
+            owner = type_local_owner(ctx, ty->base);
+            break;
+        case TY_FUNC:
+            owner = type_local_owner(ctx, ty->return_ty);
+            for (Type *p = ty->params; !owner && p; p = p->next)
+                owner = type_local_owner(ctx, p);
+            break;
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_ENUM:
+            owner = type_decl_owner(ctx, ty);
+            if (!owner && !ty->struct_tag && ty->kind != TY_ENUM &&
+                !type_has_file_scope_name(ctx, ty))
+                for (Member *m = ty->members; !owner && m; m = m->next)
+                    owner = type_local_owner(ctx, m->ty);
+            break;
+        default:
+            break;
+    }
+    depth--;
+    return owner;
+}
+
+static bool is_tagless_aggregate(Type *ty) {
+    return ty && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+           !ty->struct_tag;
+}
+
+// Pushes into `ex` every tagless aggregate reachable from `ty`'s members.
+static void exclude_member_aggregates(TypeVec *ex, Type *ty, bool only_unnamed,
+                                      int depth) {
+    if (depth > 16 || !ty)
+        return;
+    for (Member *m = ty->members; m; m = m->next) {
+        Type *mt = m->ty;
+        while (mt && (mt->kind == TY_PTR || mt->kind == TY_ARRAY ||
+                      mt->kind == TY_VLA))
+            mt = mt->base;
+        if (!is_tagless_aggregate(mt) || (only_unnamed && m->name) ||
+            m->is_bitfield)
+            continue;
+        type_vec_push(ex, mt);
+        exclude_member_aggregates(ex, mt, only_unnamed, depth + 1);
+    }
+}
+
+// Gives every tagless, un-typedef'd aggregate a tag (`__cccc_anon<N>`), so
+// each use spells the one type instead of a fresh inline `struct { ... }`,
+// which the host compiler treats as a different type at every spelling.
+// Types the host owns (members of a header's definition) and C11 anonymous
+// members keep their inline spelling. Skipped for -c=generated, which keeps
+// its output literal.
+void synthesize_anon_aggregate_tags(VirtualMachine *vm, SerializeContext *ctx) {
+    if (ctx->generated_only)
+        return;
+
+    TypeVec excluded = {0};
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *d = ctx->defs.data[i];
+        if (d->kind != TY_STRUCT && d->kind != TY_UNION)
+            continue;
+        exclude_member_aggregates(&excluded, d, true, 0);
+        if (type_def_is_from_include_suppressed(ctx, d))
+            exclude_member_aggregates(&excluded, d, false, 0);
+    }
+
+    for (int i = 0; i < ctx->defs.len; i++) {
+        Type *ty = ctx->defs.data[i];
+        if (!is_tagless_aggregate(ty) || ty->size < 0 || !ty->members)
+            continue;
+        if (find_tag_name(ctx, ty) || type_vec_contains(&excluded, ty))
+            continue;
+        bool typedef_named = false;
+        TYPE_CAND_FOR(j, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
+        if (same_type_or_origin(ctx->typedefs[j].ty, ty)) {
+            typedef_named = true;
+            break;
+        }
+        if (typedef_named)
+            continue;
+        Member *first = ty->members;
+        if (token_is_from_include(vm, first->name ? first->name : first->tok))
+            continue;
+
+        Obj *owner = NULL;
+        for (Member *m = ty->members; !owner && m; m = m->next)
+            owner = type_local_owner(ctx, m->ty);
+        char *name = arena_format(vm, "__cccc_anon%d", ctx->anon_tag_counter++);
+        type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty, name,
+                       (int)strlen(name), owner, false, true, NULL, true);
+        ctx->tags[ctx->tags_len - 1].synth_tag = true;
+    }
+    free(excluded.data);
 }
 
 // #953: true when `path` (a type's declaring file, TypeName.file_path) is

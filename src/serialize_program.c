@@ -363,6 +363,49 @@ static void var_ref_visit(Node *n, void *vctx) {
         vr->found = true;
 }
 
+// True when deferring `var` into `owner`'s body would leave a reference to it
+// somewhere it is not in scope: another function's body (a block literal or
+// nested function, which -c=native lifts out to file scope), or another
+// global's initializer taking its address. `siblings` are the other statics
+// being deferred into `owner`, whose own initializers may refer to `var`.
+static bool static_referenced_elsewhere(VirtualMachine *vm, Obj *prog, Obj *var,
+                                        Obj *owner, Obj **siblings, int nsib) {
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (!fn->is_function || !fn->body || fn == owner)
+            continue;
+        VarRefCtx vr = {.var = var, .found = false};
+        serialize_ast_walk(fn->body, var_ref_visit, &vr);
+        if (vr.found)
+            return true;
+    }
+    // Another global's own initializer taking `var`'s address (e.g.
+    // `static void **p = tab;` reading a `static void *tab[] = {&&L};`
+    // declared alongside it) is legal C, and `p` itself has nothing
+    // wrong with its own relocation -- it resolves to a real Obj, so
+    // it is never itself a deferral candidate and keeps its ordinary
+    // file-scope definition. But once `var` moves inside its owner
+    // function's body, that file-scope reference to it would name a
+    // symbol that no longer exists at file scope ("use of undeclared
+    // identifier"). Declining the deferral here falls back to the
+    // pre-existing "unresolved relocation target" diagnostic for `var`
+    // itself, same fail-loudly policy as the cross-function guard
+    // above.
+    for (Obj *other = prog; other; other = other->next) {
+        if (other == var || other->is_function || !other->rel)
+            continue;
+        bool sibling = false;
+        for (int i = 0; i < nsib && !sibling; i++)
+            sibling = siblings[i] == other;
+        if (sibling)
+            continue;
+        for (Relocation *rel = other->rel; rel; rel = rel->next)
+            if (rel->label && *rel->label &&
+                serialize_find_global(vm, *rel->label) == var)
+                return true;
+    }
+    return false;
+}
+
 // #1044: an anonymous global whose relocation(s) resolve only against a
 // label (never against a real Obj -- see serialize_reloc_init()'s own
 // comment) must be defined inside the one function that owns that label
@@ -426,44 +469,7 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
 
         // Cross-function reference guard -- see this function's own
         // comment above.
-        bool referenced_elsewhere = false;
-        for (Obj *fn = prog; fn; fn = fn->next) {
-            if (!fn->is_function || !fn->body || fn == owner)
-                continue;
-            VarRefCtx vr = {.var = var, .found = false};
-            serialize_ast_walk(fn->body, var_ref_visit, &vr);
-            if (vr.found) {
-                referenced_elsewhere = true;
-                break;
-            }
-        }
-        // Another global's own initializer taking `var`'s address (e.g.
-        // `static void **p = tab;` reading a `static void *tab[] = {&&L};`
-        // declared alongside it) is legal C, and `p` itself has nothing
-        // wrong with its own relocation -- it resolves to a real Obj, so
-        // it is never itself a deferral candidate and keeps its ordinary
-        // file-scope definition. But once `var` moves inside its owner
-        // function's body, that file-scope reference to it would name a
-        // symbol that no longer exists at file scope ("use of undeclared
-        // identifier"). Declining the deferral here falls back to the
-        // pre-existing "unresolved relocation target" diagnostic for `var`
-        // itself, same fail-loudly policy as the cross-function guard
-        // above.
-        if (!referenced_elsewhere) {
-            for (Obj *other = prog; other && !referenced_elsewhere;
-                 other      = other->next) {
-                if (other == var || other->is_function || !other->rel)
-                    continue;
-                for (Relocation *rel = other->rel; rel; rel = rel->next) {
-                    if (rel->label && *rel->label &&
-                        serialize_find_global(vm, *rel->label) == var) {
-                        referenced_elsewhere = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (referenced_elsewhere)
+        if (static_referenced_elsewhere(vm, prog, var, owner, NULL, 0))
             continue;
 
         if (ctx->deferred_label_statics_len ==
@@ -482,6 +488,63 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
         entry->var      = var;
         entry->owner_fn = owner;
     }
+}
+
+// A static whose type is declared inside a function (`static struct S buf[4];`
+// with `struct S` local to it) cannot be defined at file scope: the type is
+// not visible there. Defined instead inside that function, after the type's
+// own definition. A static another function also refers to (a block literal,
+// a nested function) stays at file scope, where hoist_static_local_types()
+// promotes its type.
+static void collect_deferred_local_type_statics(VirtualMachine *vm, Obj *prog,
+                                                SerializeContext *ctx) {
+    Obj **cands  = NULL;
+    Obj **owners = NULL;
+    int   n = 0, cap = 0;
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function || var->is_string_literal || !var->is_static ||
+            !var->static_owner || var_is_deferred_label_static(ctx, var))
+            continue;
+        Obj *owner = type_local_owner(ctx, var->ty);
+        if (owner != var->static_owner)
+            continue;
+        if (n == cap) {
+            cap    = cap ? cap * 2 : 8;
+            cands  = realloc(cands, sizeof(*cands) * cap);
+            owners = realloc(owners, sizeof(*owners) * cap);
+        }
+        cands[n]    = var;
+        owners[n++] = owner;
+    }
+    // prog is newest-first; a static's initializer may name an earlier one,
+    // so defer in declaration order.
+    for (int i = n - 1; i >= 0; i--) {
+        Obj *sibs[64];
+        int  nsib = 0;
+        for (int j = 0; j < n && nsib < 64; j++)
+            if (j != i && owners[j] == owners[i])
+                sibs[nsib++] = cands[j];
+        if (static_referenced_elsewhere(vm, prog, cands[i], owners[i], sibs,
+                                        nsib))
+            continue;
+        if (ctx->deferred_label_statics_len ==
+            ctx->deferred_label_statics_cap) {
+            ctx->deferred_label_statics_cap =
+                ctx->deferred_label_statics_cap
+                    ? ctx->deferred_label_statics_cap * 2
+                    : 8;
+            ctx->deferred_label_statics =
+                realloc(ctx->deferred_label_statics,
+                        ctx->deferred_label_statics_cap *
+                            sizeof(*ctx->deferred_label_statics));
+        }
+        DeferredStaticLabel *entry =
+            &ctx->deferred_label_statics[ctx->deferred_label_statics_len++];
+        entry->var      = cands[i];
+        entry->owner_fn = owners[i];
+    }
+    free(cands);
+    free(owners);
 }
 
 // #1032: two File records can spell the identical on-disk header two
@@ -2755,6 +2818,23 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
     }
 }
 
+// A static that stays at file scope although its type is declared inside a
+// function (another function refers to it, see
+// collect_deferred_local_type_statics()) needs that type promoted to file
+// scope first, the same way hoist_compiler_temp_anon_types() does for temps.
+static void hoist_static_local_types(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Obj *prog) {
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function || var->is_string_literal ||
+            var_is_deferred_label_static(ctx, var))
+            continue;
+        if (ctx->generated_only && !var->is_macro_generated)
+            continue;
+        if (type_local_owner(ctx, var->ty))
+            hoist_local_type_to_file_scope(f, vm, ctx, var->ty);
+    }
+}
+
 // #1186: a compiler-synthesized temporary (empty name -- var->name[0] ==
 // '\0', see serialize_decl.c's own __cccc_tmpN naming pass, run later than
 // this one) whose type is a genuinely anonymous struct/union (no tag, no
@@ -4721,6 +4801,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
          sa                     = sa->next)
         collect_static_assert_types(&ctx, sa->cond);
     reorder_defs_by_byval_deps(&ctx); // #1042(a)
+    synthesize_anon_aggregate_tags(vm, &ctx);
+    collect_deferred_local_type_statics(vm, prog, &ctx);
 
     // Header comment
     fprintf(f, "/* Generated by CCCC pragma macro expansion */\n\n");
@@ -4857,6 +4939,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         serialize_block_preamble(f, vm, &ctx, prog);
         serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
         hoist_compiler_temp_anon_types(f, vm, &ctx, prog); // #1186
+        hoist_static_local_types(f, vm, &ctx, prog);
         // #928: forward-declare every macro-generated global before any
         // definition, mirroring the #918 pass below (serialize_global_var's
         // sibling loop, further down this function) and for the same
@@ -5562,6 +5645,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     serialize_block_preamble(f, vm, &ctx, prog);
     serialize_nested_preamble(f, vm, &ctx, prog);      // #1074
     hoist_compiler_temp_anon_types(f, vm, &ctx, prog); // #1186
+    hoist_static_local_types(f, vm, &ctx, prog);
 
     // #918: forward-declare every global before any definition, mirroring
     // the function-prototype pass below and for the same reason -- a

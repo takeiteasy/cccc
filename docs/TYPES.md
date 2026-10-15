@@ -31,6 +31,26 @@ folds to a `1` / `0` constant at compile time. It parses two `type-name`
 operands; spell a function or qualified-return type through a `typedef` if
 the inline abstract declarator does not parse.
 
+## Typedef redefinition
+
+A typedef may be repeated in the same scope when every declaration names the
+same type, qualifiers included. A conflicting one is an error:
+
+```c
+typedef int T;
+typedef int T;           // ok
+typedef struct S S;
+typedef struct S S;      // ok
+typedef const int C;
+typedef int C;           // error: typedef redefinition with different types: 'C'
+enum { K };
+typedef int K;           // error: 'K' redeclared as a different kind of symbol
+```
+
+When both declarations come from system headers (a bundled header and the
+SDK's under `--use-system-headers`), the conflict is a warning and the later
+one wins. A nested scope may give the name any type.
+
 ## `_Generic` arm selection
 
 The controlling expression undergoes the lvalue conversion first: its own

@@ -591,4 +591,19 @@ int __cccc_iseqsig_d(double, double);
 
 #define iscanonical(x) ((void)(x), 1)
 
+#if defined(__APPLE__) && defined(__CCCC__)
+struct __float2 {
+    float __sinval;
+    float __cosval;
+};
+struct __double2 {
+    double __sinval;
+    double __cosval;
+};
+extern struct __float2  __sincosf_stret(float);
+extern struct __double2 __sincos_stret(double);
+extern struct __float2  __sincospif_stret(float);
+extern struct __double2 __sincospi_stret(double);
+#endif
+
 #endif /* __MATH_H */

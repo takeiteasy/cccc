@@ -189,6 +189,23 @@ output is not guaranteed to preserve every local's exact source spelling; if
 you are diffing or grepping generated output for a local variable by name and
 it doesn't appear verbatim, check for this suffix.
 
+## Anonymous structs and unions
+
+A struct or union with no tag and no typedef name gets a synthesized tag
+`__cccc_anon<N>` in `-m` and `-c=native` output, so every use names the same
+type:
+
+```c
+static struct { int loc; void *fn; } buf[4];   // source
+static struct __cccc_anon0 buf[4];             // output, one shared definition
+```
+
+A C11 anonymous member (a struct or union written without a declarator inside
+another one) and the members of a header-owned type keep their inline
+spelling. `-c=generated` output keeps every anonymous aggregate inline. A
+`static` local whose type is declared inside the function is defined inside
+that function, after the type.
+
 ## Serialized-output divergences
 
 Everywhere else the rule is that the emitted C behaves as the VM behaves. A

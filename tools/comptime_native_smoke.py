@@ -3240,6 +3240,180 @@ def case_macro_declared_global_1303(cccc: Path, tmp: str) -> bool:
     return True
 
 
+ANON_AGGREGATE_ASSIGN_PROGRAM = (
+    "typedef struct { int pad; struct { int loc; void *fn; } *p; int n; } C;\n"
+    "typedef struct { C c; } VM;\n"
+    "static struct { int loc; void *fn; } buf[4];\n"
+    "int main(void) {\n"
+    "    VM v = {0};\n"
+    "    VM *vm = &v;\n"
+    "    vm->c.p = buf;\n"
+    "    vm->c.p[0].loc = 40;\n"
+    "    vm->c.p[1].loc = 2;\n"
+    "    int kept = 0;\n"
+    "    for (int i = 0; i < 2; i++)\n"
+    "        vm->c.p[kept++] = vm->c.p[i];\n"
+    "    return vm->c.p[0].loc + vm->c.p[1].loc;\n"
+    "}\n"
+)
+
+ANON_MEMBER_BESIDE_TAGLESS_PROGRAM = (
+    "struct T { int a; struct { int x; }; union { int u; char c; }; };\n"
+    "static struct { int x; } g;\n"
+    "int main(void) {\n"
+    "    struct T t = {1};\n"
+    "    t.x = 40;\n"
+    "    t.u = 0;\n"
+    "    g.x = 1;\n"
+    "    return t.a + t.x + g.x;\n"
+    "}\n"
+)
+
+ANON_AGGREGATE_PACK_PROGRAM = (
+    "#pragma pack(push, 1)\n"
+    "static struct { char c; int i; } a, b;\n"
+    "#pragma pack(pop)\n"
+    "int main(void) {\n"
+    "    a.c = 1; a.i = 40;\n"
+    "    b = a;\n"
+    "    return b.c + b.i + (int)sizeof(a) - 4;\n"
+    "}\n"
+)
+
+ANON_AGGREGATE_GLOBAL_REF_PROGRAM = (
+    "static struct { int a, b; } g = {40, 2};\n"
+    "static int *pa = &g.a;\n"
+    "int main(void) {\n"
+    "    return *pa + g.b;\n"
+    "}\n"
+)
+
+ANON_AGGREGATE_UNION_PROGRAM = (
+    "static union { int i; char c[4]; } u1, u2;\n"
+    "int main(void) {\n"
+    "    u1.i = 42;\n"
+    "    u2 = u1;\n"
+    "    return u2.i;\n"
+    "}\n"
+)
+
+
+LOCAL_TYPE_STATIC_PROGRAMS = {
+    "local_type_static_tagged": (
+        "int main(void) {\n"
+        "    static struct S { int loc; void *fn; } buf[4];\n"
+        "    buf[0].loc = 40;\n"
+        "    buf[1].loc = 2;\n"
+        "    return buf[0].loc + buf[1].loc;\n"
+        "}\n"),
+    "local_type_static_tagless": (
+        "int main(void) {\n"
+        "    static struct { int loc; void *fn; } buf[4];\n"
+        "    buf[0].loc = 42;\n"
+        "    return buf[0].loc;\n"
+        "}\n"),
+    "local_type_static_init": (
+        "int main(void) {\n"
+        "    static struct S { int loc; int fn; } buf[2] = {{40, 1}, {2, 3}};\n"
+        "    struct S *p = buf;\n"
+        "    return p[0].loc + p[1].loc;\n"
+        "}\n"),
+    "local_type_static_order": (
+        "int main(void) {\n"
+        "    struct S { int v; };\n"
+        "    static struct S a = {40};\n"
+        "    static struct S *p = &a;\n"
+        "    static struct S b = {2};\n"
+        "    return p->v + b.v;\n"
+        "}\n"),
+    "local_type_static_typedef_enum": (
+        "int main(void) {\n"
+        "    typedef struct L { int v; } A;\n"
+        "    static A x = {42};\n"
+        "    enum E { K = 7 };\n"
+        "    static enum E e = K;\n"
+        "    return x.v + (int)e - 7;\n"
+        "}\n"),
+    "local_type_static_tagless_member": (
+        "int main(void) {\n"
+        "    struct S { int v; };\n"
+        "    static struct { struct S s; int n; } w = {{40}, 2};\n"
+        "    return w.s.v + w.n;\n"
+        "}\n"),
+    "local_type_static_block": (
+        "int main(void) {\n"
+        "    struct S { int v; };\n"
+        "    static struct S a = {40};\n"
+        "    int (^blk)(void) = ^{ return a.v + 2; };\n"
+        "    return blk();\n"
+        "}\n"),
+    "local_type_static_nested_fn": (
+        "int main(void) {\n"
+        "    struct S { int v; };\n"
+        "    static struct S a = {40};\n"
+        "    int g(void) { return a.v + 2; }\n"
+        "    return g();\n"
+        "}\n"),
+}
+
+
+def case_local_type_static_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: a function-local static whose struct/enum type is declared in the function "
+          "(tagged, tagless, initialized, ordered, via typedef, referenced from a block or nested function)")
+    for name, program in LOCAL_TYPE_STATIC_PROGRAMS.items():
+        if not _vm_and_native_run_case(cccc, tmp, name, program):
+            print(f"    (case {name})")
+            return False
+    return True
+
+
+def case_anon_aggregate_assign_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: assigning one element of a tagless-struct array to another builds and runs")
+    return _vm_and_native_run_case(cccc, tmp, "anon_aggregate_assign",
+                                   ANON_AGGREGATE_ASSIGN_PROGRAM)
+
+
+def case_anon_aggregate_assign_m_output(cccc: Path, tmp: str) -> bool:
+    print("  -m: a tagless struct is defined once under a synthesized tag and never spelled inline at a use")
+    src = Path(tmp) / "anon_aggregate_assign_dump.c"
+    write(src, ANON_AGGREGATE_ASSIGN_PROGRAM)
+    out = Path(tmp) / "anon_aggregate_assign_dump.m.c"
+    result = run([str(cccc), "-m", "-o", out.name, src.name], cwd=tmp)
+    if result.returncode != 0:
+        print(f"    FAIL: -m exited {result.returncode}\n    {result.stderr}")
+        return False
+    text = out.read_text()
+    if "(struct {" in text or "struct __cccc_anon0 {" not in text:
+        print("    FAIL: -m output spells the struct inline or lacks its tagged definition")
+        return False
+    print("    ok")
+    return True
+
+
+def case_anon_member_beside_tagless_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: a C11 anonymous member stays inline next to a same-shaped tagless global")
+    return _vm_and_native_run_case(cccc, tmp, "anon_member_beside_tagless",
+                                   ANON_MEMBER_BESIDE_TAGLESS_PROGRAM)
+
+
+def case_anon_aggregate_pack_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: a tagless struct under #pragma pack used by value twice")
+    return _vm_and_native_run_case(cccc, tmp, "anon_aggregate_pack",
+                                   ANON_AGGREGATE_PACK_PROGRAM)
+
+
+def case_anon_aggregate_global_ref_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: a pointer global initialized from a member of a tagless-struct global")
+    return _vm_and_native_run_case(cccc, tmp, "anon_aggregate_global_ref",
+                                   ANON_AGGREGATE_GLOBAL_REF_PROGRAM)
+
+
+def case_anon_union_assign_native_round_trip(cccc: Path, tmp: str) -> bool:
+    print("  -c=native: assigning one tagless-union global to another")
+    return _vm_and_native_run_case(cccc, tmp, "anon_union_assign",
+                                   ANON_AGGREGATE_UNION_PROGRAM)
+
+
 def case_assert_ternary_comma_1305(cccc: Path, tmp: str) -> bool:
     # NB: the pre-existing case_shared_header_unrelated_define_1305 etc. carry
     # an *informal* #1305-#1308 tag from #1132's own numbering convention and
@@ -9958,6 +10132,13 @@ CASES = [
     case_setjmp_transitive_header_1299,
     case_ptr_int_cast_offsetof_1300,
     case_anon_struct_ptr_cast_1300,
+    case_anon_aggregate_assign_native_round_trip,
+    case_local_type_static_native_round_trip,
+    case_anon_aggregate_assign_m_output,
+    case_anon_member_beside_tagless_native_round_trip,
+    case_anon_aggregate_pack_native_round_trip,
+    case_anon_aggregate_global_ref_native_round_trip,
+    case_anon_union_assign_native_round_trip,
     case_assert_ternary_comma_1305,
     case_macro_declared_global_1303,
     case_macro_declared_fn_bodyless_1303,

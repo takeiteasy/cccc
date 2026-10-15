@@ -98,6 +98,17 @@
 #include <termios.h>
 #include <unistd.h>
 #include <utime.h>
+#if defined(__CCCC__) && defined(__APPLE__)
+// The SDK hides these legacy APIs under cccc's predefined
+// _POSIX_C_SOURCE=200809L (real clang defines none), so a --use-system-headers
+// self-hosted build of this TU declares them locally -- same gap class as SCHED_BATCH above.
+int   getpagesize(void);
+int   bcmp(const void *, const void *, size_t);
+void  bzero(void *, size_t);
+void  bcopy(const void *, void *, size_t);
+char *index(const char *, int);
+char *rindex(const char *, int);
+#endif
 #include <wordexp.h>
 #ifdef __linux__
 #include <sys/vfs.h>

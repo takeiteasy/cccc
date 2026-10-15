@@ -119,7 +119,7 @@ When `<stdarg.h>` is included, the following macros are available as aliases for
 | `__builtin_va_copy(d, s)` | `va_copy(d, s)` |
 | `__builtin_va_arg(ap, type)` | `va_arg(ap, type)` |
 
-These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`). `__builtin_va_list` is defined as `char*` for macOS system-header compatibility and is a separate type.
+These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`). `__builtin_va_list` and `__gnuc_va_list` name the same struct, so `va_list` is one type even under real system headers.
 
 #### Atomic Operations
 

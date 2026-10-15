@@ -134,6 +134,7 @@ extern char *tmpnam(char *s);
 extern int fclose(FILE *stream);
 extern int fflush(FILE *stream);
 extern FILE *fopen(const char *filename, const char *mode);
+extern FILE *fdopen(int fd, const char *mode);
 extern FILE *freopen(const char *filename, const char *mode, FILE *stream);
 /* open_memstream: a write-only FILE* backed by a dynamically-grown heap
    buffer; *bufp / *sizep are updated on fflush()/fclose(). POSIX.1-2008;

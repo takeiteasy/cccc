@@ -112,6 +112,7 @@ extern long pathconf(const char *path, int name);
 extern long fpathconf(int fd, int name);
 extern size_t confstr(int name, char *buf, size_t len);
 extern int mkstemp(char *tmpl);
+extern int mkstemps(char *tmpl, int suffixlen);
 extern char *mkdtemp(char *tmpl);
 
 /* Positioned I/O */

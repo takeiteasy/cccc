@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-15
+
+- Changed: a same-scope typedef redefinition with a different type, or a typedef
+  of a name already bound as an enumerator or variable, is an error. A clash
+  between two system headers warns. See `docs/TYPES.md`.
+- Fixed: `-c=native` and `-m` define a tagless struct or union once under a
+  `__cccc_anon<N>` tag, so assigning one anonymous-struct lvalue to another
+  builds with the host compiler. See `docs/NATIVE.md`.
+- Fixed: `-c=native` defines a `static` whose struct type is declared in the
+  function, and a tagless global with no initializer, instead of dropping it.
+- Fixed: `tests/host/test_watch_cli.c` builds on Linux.
+
 ## [0.10.3] - 2026-10-14
 
 - Added: `--link-arg=ARG` passes `ARG` to the host link line under `-c=native`;

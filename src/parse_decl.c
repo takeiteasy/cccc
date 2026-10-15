@@ -23,6 +23,41 @@
 
 #include "./parse_internal.h"
 
+// Whether the newest typedef record for `name` was declared in a system
+// header. Only consulted on the conflict path, so the list walk is cheap.
+static bool typedef_declared_in_system_header(VirtualMachine *vm, char *name,
+                                              int name_len) {
+    for (TypeNameRecord *r = vm->compiler.type_names; r; r = r->next)
+        if (!r->is_tag && r->name_len == name_len &&
+            strncmp(r->name, name, name_len) == 0)
+            return r->in_system_header;
+    return false;
+}
+
+// A same-scope redeclaration must agree with the earlier typedef (C11
+// 6.7p3). A clash between two system headers (cccc's bundled header vs the
+// SDK's under --use-system-headers) is a warning so the SDK still builds.
+static void check_typedef_redefinition(VirtualMachine *vm, Type *ty,
+                                       char *name) {
+    if (vm->compiler.allow_fn_redefinition)
+        return;
+    VarScope *old = find_var_in_current_scope(vm, name, ty->name->len);
+    if (!old)
+        return;
+    bool old_is_typedef = old->type_def != NULL;
+    if (old_is_typedef && is_compatible_qualified_strict(old->type_def, ty))
+        return;
+    bool  system = ty->name->file && ty->name->file->is_system_header &&
+                   typedef_declared_in_system_header(vm, name, ty->name->len);
+    char *fmt    = old_is_typedef
+                       ? "typedef redefinition with different types: '%s'"
+                       : "'%s' redeclared as a different kind of symbol";
+    if (system)
+        warn_tok(vm, ty->name, CCCC_WARN_PEDANTIC, fmt, name);
+    else
+        error_tok(vm, ty->name, fmt, name);
+}
+
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
                      VarAttr *attr) {
     bool first = true;
@@ -76,7 +111,8 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
             ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
         drop_cleanup_attr(vm, ty, attr, ty->name);
-        char     *name     = get_ident(vm, ty->name);
+        char *name = get_ident(vm, ty->name);
+        check_typedef_redefinition(vm, ty, name);
         VarScope *sc       = push_scope(vm, name, ty->name->len);
         sc->type_def       = ty;
         sc->is_deprecated  = ty->is_deprecated;

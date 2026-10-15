@@ -3628,6 +3628,7 @@ typedef struct TypeNameRecord {
     // and must never be silently dropped from generated output.
     bool from_include;
     bool always_emit;
+    bool in_system_header; // declared in a `<...>`-included header
     // #953: the declaring token's resolved file path (NULL when there is no
     // token, i.e. always_emit records). Lets cc_serialize_program's
     // generated_only path (-c=generated) tell a from_include type whose
@@ -3838,7 +3839,7 @@ typedef enum {
     CC_FRAME_OP_RESTART,
 } FrameOp;
 
-typedef struct Debugger {
+typedef struct DebuggerState {
     // Breakpoints
     Breakpoint breakpoints[MAX_BREAKPOINTS];
     int        num_breakpoints;
@@ -3899,7 +3900,7 @@ typedef struct Debugger {
     // runs its cached wrapper -- see debugger_eval_condition in debugger.c.
     struct Obj *dbg_frame_var;
     int         cond_depth; // condition wrappers running; their code stays put
-} Debugger;
+} DebuggerState;
 
 #ifndef MAX_CALLS
 #define MAX_CALLS 16384
@@ -4463,7 +4464,7 @@ typedef struct Compiler {
     // doubles on overflow).  The four tables share the same shape: a pointer
     // to the entries, a count, and a capacity.  No hard ceiling; very large
     // translation units (e.g. minilua 31k lines) grow gracefully.
-    struct {
+    struct CallPatch {
         Pc   location; // Location in text segment to patch
         Obj *function; // Function to call
     }  *call_patches;
@@ -4484,7 +4485,7 @@ typedef struct Compiler {
     int       num_data_holes, data_holes_cap;
 
     // Function address patches for function pointers
-    struct {
+    struct FuncAddrPatch {
         Pc   location; // Location of IMM operand to patch
         Obj *function; // Function whose address to use
     }  *func_addr_patches;
@@ -5002,7 +5003,7 @@ struct VirtualMachine {
     VmProfileCounts *vm_profile_comptime;
 
     // Debugger state (enable via CCCC_ENABLE_DEBUGGER flag)
-    Debugger        dbg;
+    DebuggerState   dbg;
 
     DynamicLibrary *dynlibs;
     int             dynlib_count;

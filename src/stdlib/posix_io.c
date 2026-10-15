@@ -413,6 +413,7 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "ftruncate", (void *)ftruncate, 2, 0);
     cc_register_cfunc(vm, "truncate", (void *)truncate, 2, 0);
     cc_register_cfunc(vm, "mkstemp", (void *)mkstemp, 1, 0);
+    cc_register_cfunc(vm, "mkstemps", (void *)mkstemps, 2, 0);
     cc_register_cfunc(vm, "mkdtemp", (void *)mkdtemp, 1, 0);
     cc_register_cfunc(vm, "seteuid", (void *)seteuid, 1, 0);
     cc_register_cfunc(vm, "setegid", (void *)setegid, 1, 0);
