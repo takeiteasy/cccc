@@ -59,7 +59,7 @@ static void check_typedef_redefinition(VirtualMachine *vm, Type *ty,
 }
 
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
-                     VarAttr *attr) {
+                     VarAttr *attr, Node **cur) {
     bool first = true;
 
     while (!consume(vm, &tok, tok, ";")) {
@@ -120,6 +120,11 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         record_type_name(vm, ty, name, ty->name->len, false, ty->name);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty, NULL,
                               ty->name);
+        // A block-scope typedef of a variably modified type evaluates its
+        // lengths here, when the declaration is reached.
+        if (cur && type_contains_vla(ty))
+            *cur = (*cur)->next = new_unary(
+                vm, ND_EXPR_STMT, compute_vla_size(vm, ty, ty->name), ty->name);
     }
     return tok;
 }
@@ -1869,7 +1874,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
 
         // Typedef
         if (attr.is_typedef) {
-            tok = parse_typedef(vm, tok, basety, &attr);
+            tok = parse_typedef(vm, tok, basety, &attr, NULL);
             continue;
         }
 

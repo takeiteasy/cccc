@@ -464,7 +464,7 @@ bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
                               int *arg_count);
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
-                     VarAttr *attr);
+                     VarAttr *attr, Node **cur);
 void propagate_checked_bounds(VirtualMachine *vm, Obj *fn);
 VarScope *push_scope(VirtualMachine *vm, char *name, int name_len);
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty);
