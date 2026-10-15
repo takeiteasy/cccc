@@ -4005,6 +4005,7 @@ typedef struct Compiler {
     ComptimeVar
         *comptime_vars;     // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns; // Linked list of [[cccc::test]] function names
+    CcTestFormat  test_format; // --testing=native harness output format
     TestSetupRecord
         *test_setups; // Linked list of [[cccc::test_setup/teardown]] records
     BuildFnRecord

@@ -827,6 +827,8 @@ static void emit_test_result(CcTestFormat fmt, const char *name,
                 prefix = "  \xe2\x9c\x97";
             if (message)
                 printf("%s %s (%s)\n", prefix, name, message);
+            else if (strcmp(status, "timeout") == 0)
+                printf("%s %s (TIMEOUT)\n", prefix, name);
             else if (strcmp(status, "neg_pass") == 0)
                 printf("%s %s (correctly rejected)\n", prefix, name);
             else

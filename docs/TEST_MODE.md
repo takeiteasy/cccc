@@ -1032,8 +1032,9 @@ accepts them directly:
 ./suite_bin --test='math_*' --fail-fast
 ```
 
-Output is always TAP; `--test-format=plain|json` is refused with
-`--testing=native`.
+`--test-format=tap|plain|json` picks the output format, with the same output as
+`--testing=vm`. The format is fixed when the binary is built, so a kept binary
+does not take `--test-format`.
 
 Not supported natively (refused with a diagnostic): `test_setup`/`test_teardown`
 hooks and negative tests (`error=`, `expect_compile_error=`). A per-test

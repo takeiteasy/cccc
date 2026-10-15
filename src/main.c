@@ -2574,11 +2574,6 @@ int main(int argc, const char *argv[]) {
                     "-d, -E, -m, --ast, -j, -J, or other output modes\n");
             usage(argv[0], 1);
         }
-        if (test_format != TEST_FORMAT_TAP) {
-            fprintf(stderr, "error: --testing=native only supports "
-                            "--test-format=tap\n");
-            usage(argv[0], 1);
-        }
         compile_format = COMPILE_NATIVE;
         compile_only   = 1;
     }
@@ -3676,6 +3671,7 @@ int main(int argc, const char *argv[]) {
                 exit_code = 1;
                 goto BAIL;
             }
+            vm.compiler.test_format = test_format;
         }
         // -c=native defaults out_file to "a.out" above, so exe_path is
         // always a non-NULL path here.
