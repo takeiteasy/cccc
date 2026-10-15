@@ -1246,6 +1246,39 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
 // so that p+n points to the location n elements (not bytes) ahead of p.
 // In other words, we need to scale an integer value before adding to a
 // pointer value. This function takes care of the scaling.
+// A VLA-row-pointer operand that itself assigns (a cast's size temporaries)
+// is spilled to a temporary first: the arithmetic reads those temporaries, and
+// C does not sequence the two operands of `+`/`-`/`/`.
+bool node_assigns(const Node *n) {
+    return n && (n->kind == ND_ASSIGN || node_assigns(n->lhs) ||
+                 node_assigns(n->rhs) || node_assigns(n->cond));
+}
+
+static Node *spill_if_assigns(VirtualMachine *vm, Node **operand, Node *prefix,
+                              Token *tok) {
+    if (!node_assigns(*operand))
+        return prefix;
+    add_type(vm, *operand);
+    Type *ty     = (*operand)->ty;
+    Type *char_p = pointer_to(vm, ty_char);
+    // An array-typed operand is held by address so it keeps its array type.
+    bool  array  = ty->kind == TY_ARRAY || ty->kind == TY_VLA;
+    Node *value  = array ? new_unary(vm, ND_ADDR, *operand, tok) : *operand;
+    Obj  *tmp    = new_lvar(vm, "", 0, char_p);
+    Node *store  = new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, tok),
+                              new_cast(vm, value, char_p), tok);
+    Node *back   = new_cast(vm, new_var_node(vm, tmp, tok),
+                            array ? pointer_to(vm, ty) : ty);
+    *operand     = array ? new_unary(vm, ND_DEREF, back, tok) : back;
+    add_type(vm, *operand);
+    return prefix ? new_binary(vm, ND_COMMA, prefix, store, tok) : store;
+}
+
+static Node *sequence_after(VirtualMachine *vm, Node *prefix, Node *result,
+                            Token *tok) {
+    return prefix ? new_binary(vm, ND_COMMA, prefix, result, tok) : result;
+}
+
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
@@ -1308,9 +1341,12 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
 
     // VLA + num
     if (lhs->ty->base->kind == TY_VLA) {
-        rhs = new_binary(vm, ND_MUL, rhs,
-                         new_var_node(vm, lhs->ty->base->vla_size, tok), tok);
-        return new_binary(vm, ND_ADD, lhs, rhs, tok);
+        Node *spill = spill_if_assigns(vm, &lhs, NULL, tok);
+        rhs         = new_binary(
+            vm, ND_MUL, rhs, new_var_node(vm, lhs->ty->base->vla_size, tok),
+            tok);
+        return sequence_after(vm, spill, new_binary(vm, ND_ADD, lhs, rhs, tok),
+                              tok);
     }
 
     // Function pointer arithmetic is a GNU extension
@@ -1367,12 +1403,14 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     // and multiplying two pointer-ish values together, so the genuine ptr-ptr
     // arm below was unreachable for the VLA case.
     if (lhs->ty->base->kind == TY_VLA && !rhs->ty->base) {
-        rhs = new_binary(vm, ND_MUL, rhs,
-                         new_var_node(vm, lhs->ty->base->vla_size, tok), tok);
+        Node *spill = spill_if_assigns(vm, &lhs, NULL, tok);
+        rhs         = new_binary(
+            vm, ND_MUL, rhs, new_var_node(vm, lhs->ty->base->vla_size, tok),
+            tok);
         add_type(vm, rhs);
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty   = lhs->ty;
-        return node;
+        return sequence_after(vm, spill, node, tok);
     }
 
     // ptr - num
@@ -1400,6 +1438,11 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
                  rhs->ty->base->kind == TY_FUNC)
             warn_tok(vm, tok, CCCC_WARN_POINTER_ARITH,
                      "pointer to a function used in arithmetic");
+        Node *spill = NULL;
+        if (lhs->ty->base->kind == TY_VLA) {
+            spill = spill_if_assigns(vm, &lhs, spill, tok);
+            spill = spill_if_assigns(vm, &rhs, spill, tok);
+        }
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty   = ty_long;
         // #976: when lhs->ty->base is TY_VLA (e.g. `&v[1] - &v[0]` on a 2-D
@@ -1424,7 +1467,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
             Node *divisor = new_cast(
                 vm, new_var_node(vm, lhs->ty->base->vla_size, tok), ty_long);
             add_type(vm, divisor);
-            return new_binary(vm, ND_DIV, node, divisor, tok);
+            return sequence_after(
+                vm, spill, new_binary(vm, ND_DIV, node, divisor, tok), tok);
         }
         return new_binary(vm, ND_DIV, node,
                           new_num(vm, lhs->ty->base->size, tok), tok);
@@ -1656,6 +1700,12 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
             if (vm->flags & CCCC_CHECKED_BOUNDS)
                 node = checked_cast_desugar(vm, node, ty, start);
         }
+
+        // A cast to a variably modified type evaluates its lengths when
+        // reached, before the operand.
+        if (!vm->compiler.in_type_lookahead && ty && type_contains_vla(ty))
+            node = new_binary(vm, ND_COMMA, compute_vla_size(vm, ty, start),
+                              node, start);
 
         *rest = tok;
         return node;

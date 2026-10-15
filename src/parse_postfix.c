@@ -292,6 +292,9 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
         } else {
             Obj  *var = new_lvar(vm, "", 0, ty);
             Node *lhs = lvar_initializer(vm, rest, tok, var);
+            if (type_contains_vla(ty))
+                lhs = new_binary(vm, ND_COMMA, compute_vla_size(vm, ty, start),
+                                 lhs, start);
             node = new_binary(vm, ND_COMMA, lhs, new_var_node(vm, var, start),
                               start);
         }
@@ -2027,8 +2030,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "sizeof")) {
         Node *node = unary(vm, rest, tok->next);
         add_type(vm, node);
-        if (node->ty->kind == TY_VLA)
-            return new_var_node(vm, node->ty->vla_size, tok);
+        if (node->ty->kind == TY_VLA) {
+            Node *size = new_var_node(vm, node->ty->vla_size, tok);
+            // A VLA-typed operand is evaluated (C11 6.5.3.4p2); only one
+            // that assigns (a cast's size temporaries) is observable.
+            if (node_assigns(node))
+                size = new_binary(vm, ND_COMMA, new_cast(vm, node, ty_void),
+                                  size, tok);
+            return size;
+        }
         Node *sn               = new_ulong(vm, node->ty->size, tok);
         sn->is_sizeof_ptr_expr = (node->ty->kind == TY_PTR);
         sn->layout_ty          = node->ty; // #1031
