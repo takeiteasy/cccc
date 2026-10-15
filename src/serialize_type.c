@@ -1737,6 +1737,15 @@ bool serialize_flonum_special(FILE *f, long double v, const char *suf) {
     return false;
 }
 
+// Double counterpart of format_float_literal: %.17g round-trips a double, and
+// the forced ".0" keeps an integral value (including -0) a floating literal.
+void format_double_literal(char *buf, size_t cap, double v) {
+    int n = snprintf(buf, cap, "%.17g", v);
+    if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
+        snprintf(buf + n, cap - (size_t)n, ".0");
+    }
+}
+
 void format_float_literal(char *buf, size_t cap, double v) {
     int n = snprintf(buf, cap, "%.9g", v);
     if (n > 0 && (size_t)n < cap && !strpbrk(buf, ".eEnN")) {
@@ -1897,7 +1906,7 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         size_t lensz  = 0;
         FILE  *lf     = open_memstream(&lenbuf, &lensz);
         if (ty->vla_len && ctx->vm)
-            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 0);
+            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 2);
         fclose(lf);
 
         char buf[1024];

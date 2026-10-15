@@ -1786,11 +1786,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // double vararg passed positionally, #1018).
                     if (!serialize_flonum_special(f, node->fval, "")) {
                         char buf[64];
-                        int  n = snprintf(buf, sizeof buf, "%.17g",
-                                          (double)node->fval);
-                        if (n > 0 && (size_t)n < sizeof buf &&
-                            !strpbrk(buf, ".eEnN"))
-                            snprintf(buf + n, sizeof(buf) - (size_t)n, ".0");
+                        format_double_literal(buf, sizeof buf,
+                                              (double)node->fval);
                         fprintf(f, "%s", buf);
                     }
                 }

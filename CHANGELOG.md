@@ -7,6 +7,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-10-15
+
+- Fixed: a VLA length expression with a side effect runs once under
+  `-c=native`/`-m`, as in the VM. A block-scope typedef of a variably modified
+  type evaluates its length where it is declared, in the VM too.
+- Fixed: `--testing=native` honours `--test`, `--test-suite`, `--fail-fast`,
+  `--test-timeout` and `--list-tests`, and the built binary accepts them
+  directly. `--test-format=plain|json` is refused with it. See
+  `docs/TEST_MODE.md`.
+
 ## [0.10.5] - 2026-10-15
 
 - Fixed: `__builtin_fabs`/`sqrt`/`floor`/`ceil`/`trunc`/`round`/`copysign`/`fmin`/`fmax`/`fma`

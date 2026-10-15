@@ -1007,8 +1007,37 @@ The process exits with code `0` if all tests pass, `1` if any fail.
 (no `=`) means `=vm` — the default, in-process behaviour described above.
 
 `--testing=native` serializes the harness itself into a standalone native
-binary — see "`[[cccc::test]]` suite files (`--testing=native`, #1033)"
-above for what it covers and its v1 scope cuts.
+binary, builds it with the host compiler, runs it and exits with its status
+(`0` all passed, `1` any failed). Each test runs in a forked child, so
+`exit_code=`, stdout/stderr capture and timeouts work as under `=vm`.
+
+```
+./cccc --testing=native suite.c               # build in a temp file, run, delete
+./cccc --testing=native -o suite_bin suite.c  # same run, binary kept at suite_bin
+```
+
+The harness takes the same selection flags as the VM runner, so a kept binary
+accepts them directly:
+
+| Flag | Effect |
+|---|---|
+| `--test=GLOB` | run tests whose name matches |
+| `--test-suite=NAME` | run a suite and its sub-suites (glob if `NAME` has `*?[`) |
+| `--fail-fast` | stop after the first failure or timeout |
+| `--test-timeout=N` | default per-test timeout in seconds |
+| `--list-tests` | list the selected tests without running them |
+
+```
+./cccc --testing=native -o suite_bin suite.c
+./suite_bin --test='math_*' --fail-fast
+```
+
+Output is always TAP; `--test-format=plain|json` is refused with
+`--testing=native`.
+
+Not supported natively (refused with a diagnostic): `test_setup`/`test_teardown`
+hooks and negative tests (`error=`, `expect_compile_error=`). A per-test
+`flags=` delta is `SKIP`ped in the TAP output.
 
 ### Combining `--testing` with `-c` (compile pre-pass)
 
@@ -1223,7 +1252,7 @@ options. Both can coexist: per-test `flags=` takes precedence over
 ### Native mode
 
 `flags=` applies only to the bytecode/VM execution path. Under
-`--testing=native` (#1033) a test carrying a `flags=` delta is not
+`--testing=native` a test carrying a `flags=` delta is not
 silently ignored — it is individually marked `SKIP` in the generated TAP
 output, since a per-test safety/warning configuration would
 need a separate native binary per test, which v1 doesn't attempt.

@@ -417,7 +417,7 @@ static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
             error_tok(vm, tok,
                       "custom attributes are only supported on file-scope "
                       "declarations");
-        *rest      = parse_typedef(vm, tok, basety, attr);
+        *rest      = parse_typedef(vm, tok, basety, attr, NULL);
         loop->init = new_node(vm, ND_BLOCK, start);
     } else if (attr->is_extern && !is_fn) {
         *rest      = global_variable(vm, tok, basety, attr);
@@ -1198,7 +1198,10 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
                     error_tok(vm, tok,
                               "custom attributes are only supported on "
                               "file-scope declarations");
-                tok = parse_typedef(vm, tok, basety, &attr);
+                Node *before = cur;
+                tok          = parse_typedef(vm, tok, basety, &attr, &cur);
+                for (Node *n = before->next; n; n = n->next)
+                    add_type(vm, n);
                 continue;
             }
 

@@ -415,6 +415,7 @@ void init_typename_map(void);
 bool is_attr_name(Token *tok, char *name);
 bool is_compound_literal_head(VirtualMachine *vm, Token *tok);
 bool is_const_expr(VirtualMachine *vm, Node *node);
+void require_const_comma_lhs(VirtualMachine *vm, Node *comma);
 bool is_decl_start(VirtualMachine *vm, Token *tok);
 bool is_type_name_start(VirtualMachine *vm, Token *tok);
 bool is_end(Token *tok);
@@ -463,7 +464,7 @@ bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
                               int *arg_count);
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
-                     VarAttr *attr);
+                     VarAttr *attr, Node **cur);
 void propagate_checked_bounds(VirtualMachine *vm, Obj *fn);
 VarScope *push_scope(VirtualMachine *vm, char *name, int name_len);
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty);

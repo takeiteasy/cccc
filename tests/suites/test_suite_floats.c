@@ -1056,6 +1056,28 @@ int test_strtold_return(void) {
     return 42;
 }
 
+// A static initializer keeps the sign of -0.0 (serialized as "-0.0", not "-0").
+static double         fz_neg_zero          = -0.0;
+static double         fz_arr[2]            = {1.0, -0.0};
+static double _Complex fz_complex          = CMPLX(1.0, -0.0);
+static struct {
+    int    a;
+    double d;
+} fz_struct = {1, -0.0};
+
+[[cccc::test(return = 42)]]
+int test_static_init_negative_zero(void) {
+    if (!signbit(fz_neg_zero) || 1.0 / fz_neg_zero >= 0)
+        return 1;
+    if (signbit(fz_arr[0]) || !signbit(fz_arr[1]))
+        return 2;
+    if (!signbit(fz_struct.d))
+        return 3;
+    if (signbit(creal(fz_complex)) || !signbit(cimag(fz_complex)))
+        return 4;
+    return 42;
+}
+
 #pragma cccc suite end
 
 // [from test_nexttoward.c]

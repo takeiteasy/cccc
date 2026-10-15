@@ -76,6 +76,7 @@ double eval_double(VirtualMachine *vm, Node *node) {
             return eval_double(vm, node->cond) ? eval_double(vm, node->then)
                                                : eval_double(vm, node->els);
         case ND_COMMA:
+            require_const_comma_lhs(vm, node);
             return eval_double(vm, node->rhs);
         case ND_CAST:
             // #832: a decimal-to-binary-float cast (e.g. `(double)(1.1dd +
@@ -220,6 +221,7 @@ void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im) {
                 eval_complex(vm, node->els, re, im);
             break;
         case ND_COMMA:
+            require_const_comma_lhs(vm, node);
             eval_complex(vm, node->rhs, re, im);
             break;
         case ND_CAST:
@@ -365,6 +367,7 @@ static void eval_decimal_rec(VirtualMachine *vm, Node *node, int w, void *out) {
                 eval_decimal_rec(vm, node->els, w, out);
             return;
         case ND_COMMA:
+            require_const_comma_lhs(vm, node);
             eval_decimal_rec(vm, node->rhs, w, out);
             return;
         case ND_VAR:

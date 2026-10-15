@@ -367,6 +367,7 @@ void collect_obj_types(SerializeContext *ctx, Obj *obj);
 void collect_static_assert_types(SerializeContext *ctx, Node *cond); // #1167
 void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm);
 void format_float_literal(char *buf, size_t cap, double v);
+void format_double_literal(char *buf, size_t cap, double v);
 void format_ldouble_literal(char *buf, size_t cap, long double v);
 void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
                                     SerializeContext *ctx, Type *ty);

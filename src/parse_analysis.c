@@ -248,6 +248,7 @@ static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst) {
                 eval_wide_node(vm, node->els, dst);
             return;
         case ND_COMMA:
+            require_const_comma_lhs(vm, node);
             eval_wide_node(vm, node->rhs, dst);
             return;
         case ND_CAST:
@@ -431,6 +432,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
             return eval(vm, node->cond) ? eval2(vm, node->then, label)
                                         : eval2(vm, node->els, label);
         case ND_COMMA:
+            require_const_comma_lhs(vm, node);
             return eval2(vm, node->rhs, label);
         case ND_NOT:
             if (is_wide_bitint(node->lhs->ty))
@@ -649,7 +651,7 @@ bool is_const_expr(VirtualMachine *vm, Node *node) {
             return is_const_expr(vm,
                                  eval(vm, node->cond) ? node->then : node->els);
         case ND_COMMA:
-            return is_const_expr(vm, node->rhs);
+            return is_const_expr(vm, node->lhs) && is_const_expr(vm, node->rhs);
         case ND_NEG:
         case ND_NOT:
         case ND_BITNOT:
@@ -663,6 +665,12 @@ bool is_const_expr(VirtualMachine *vm, Node *node) {
         default:
             return false;
     }
+}
+
+// eval() drops a comma's lhs, so a user-written `(f(), 5)` must not reach it.
+void require_const_comma_lhs(VirtualMachine *vm, Node *comma) {
+    if (comma->is_user_comma && !is_const_expr(vm, comma->lhs))
+        error_tok(vm, comma->lhs->tok, "not a compile-time constant");
 }
 
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {

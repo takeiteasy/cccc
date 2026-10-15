@@ -1959,18 +1959,6 @@ static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
     return blk;
 }
 
-// is_const_expr() only checks a comma's rhs, so a folded argument could drop
-// a side effect in the lhs.
-static bool has_impure_comma(VirtualMachine *vm, Node *node) {
-    if (!node)
-        return false;
-    if (node->kind == ND_COMMA && !is_const_expr(vm, node->lhs))
-        return true;
-    return has_impure_comma(vm, node->lhs) || has_impure_comma(vm, node->rhs) ||
-           has_impure_comma(vm, node->cond) || has_impure_comma(vm, node->then) ||
-           has_impure_comma(vm, node->els);
-}
-
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
 
@@ -3604,7 +3592,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         bool   foldable = true;
         int    n        = 0;
         for (Node *a = head.next; a && foldable; a = a->next, n++)
-            foldable = is_const_expr(vm, a) && !has_impure_comma(vm, a);
+            foldable = is_const_expr(vm, a);
         long double folded;
         if (foldable) {
             n = 0;

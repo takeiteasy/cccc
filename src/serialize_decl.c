@@ -1168,8 +1168,11 @@ static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
     } else {
         double dv;
         memcpy(&dv, p, 8);
-        if (!serialize_flonum_special(f, (long double)dv, ""))
-            fprintf(f, "%.17g", dv);
+        if (!serialize_flonum_special(f, (long double)dv, "")) {
+            char buf[64];
+            format_double_literal(buf, sizeof buf, dv);
+            fprintf(f, "%s", buf);
+        }
     }
 }
 
@@ -1314,17 +1317,14 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
 
         case TY_DOUBLE:
         case TY_LDOUBLE: {
-            // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed %g here,
-            // matching this function's pre-#918 behavior exactly -- a latent
-            // long-double-precision/suffix gap, but pre-existing and unrelated
-            // to #918's scope. Still present after #1038 (which fixed the
-            // ND_NUM/expression-literal counterpart of this same gap, not this
-            // global-initializer path) -- left alone here for the same reason:
-            // out of scope, tracked separately, not touched incidentally.
+            // TY_LDOUBLE shares TY_DOUBLE's 8-byte read and unsuffixed literal.
             double dv;
             memcpy(&dv, var->init_data + offset, 8);
-            if (!serialize_flonum_special(f, (long double)dv, ""))
-                fprintf(f, "%.17g", dv);
+            if (!serialize_flonum_special(f, (long double)dv, "")) {
+                char buf[64];
+                format_double_literal(buf, sizeof buf, dv);
+                fprintf(f, "%s", buf);
+            }
             return;
         }
 

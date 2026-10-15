@@ -1441,6 +1441,7 @@ int main(int argc, const char *argv[]) {
     const char **undefs              = NULL; // -U
     int          undefs_count        = 0;
     char        *out_file            = NULL; // -o (single)
+    bool         out_file_is_tmp     = false; // --testing=native, no -o
     int          dump_ast            = 0;    // -a
     int          disassemble         = 0;    // -d
     int          verbose             = 0;    // -v
@@ -2573,6 +2574,11 @@ int main(int argc, const char *argv[]) {
                     "-d, -E, -m, --ast, -j, -J, or other output modes\n");
             usage(argv[0], 1);
         }
+        if (test_format != TEST_FORMAT_TAP) {
+            fprintf(stderr, "error: --testing=native only supports "
+                            "--test-format=tap\n");
+            usage(argv[0], 1);
+        }
         compile_format = COMPILE_NATIVE;
         compile_only   = 1;
     }
@@ -2709,7 +2715,14 @@ int main(int argc, const char *argv[]) {
                             "policy options\n");
             usage(argv[0], 1);
         }
-        if (!out_file) {
+        if (!out_file && testing_backend == TESTING_BACKEND_NATIVE) {
+            out_file = make_tmp_path("");
+            if (!out_file) {
+                fprintf(stderr, "error: cannot create a temporary file\n");
+                usage(argv[0], 1);
+            }
+            out_file_is_tmp = true;
+        } else if (!out_file) {
             // Match cc/clang/gcc's a.out convention: -c=native with no -o
             // builds ./a.out instead of erroring.
             out_file = strdup("a.out");
@@ -3673,6 +3686,45 @@ int main(int argc, const char *argv[]) {
             defines_count, undefs, undefs_count, std_arg, (bool)emit_cccc_mode,
             testing_backend == TESTING_BACKEND_NATIVE, (bool)no_emit_tests,
             opt_level);
+        if (exit_code == 0 && testing_backend == TESTING_BACKEND_NATIVE) {
+            // execvp searches PATH for a slash-less name.
+            size_t exe_len = strlen(out_file) + 3;
+            char  *exe     = malloc(exe_len);
+            snprintf(exe, exe_len, "%s%s", strchr(out_file, '/') ? "" : "./",
+                     out_file);
+            char *run_args[8];
+            char *own[3] = {NULL, NULL, NULL};
+            int   nargs  = 0;
+            run_args[nargs++] = exe;
+            if (test_glob) {
+                size_t n = strlen(test_glob) + 8;
+                own[0]   = malloc(n);
+                snprintf(own[0], n, "--test=%s", test_glob);
+                run_args[nargs++] = own[0];
+            }
+            if (suite_filter) {
+                size_t n = strlen(suite_filter) + 14;
+                own[1]   = malloc(n);
+                snprintf(own[1], n, "--test-suite=%s", suite_filter);
+                run_args[nargs++] = own[1];
+            }
+            if (fail_fast)
+                run_args[nargs++] = "--fail-fast";
+            if (list_tests)
+                run_args[nargs++] = "--list-tests";
+            if (test_timeout > 0) {
+                own[2] = malloc(32);
+                snprintf(own[2], 32, "--test-timeout=%d", test_timeout);
+                run_args[nargs++] = own[2];
+            }
+            run_args[nargs] = NULL;
+            exit_code       = run_argv(run_args);
+            for (int k = 0; k < 3; k++)
+                free(own[k]);
+            free(exe);
+        }
+        if (out_file_is_tmp)
+            unlink(out_file);
         goto BAIL;
     }
 

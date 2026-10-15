@@ -1,5 +1,5 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: int v\[n\]\[m\];
+// CCCC_EXPECT_STDOUT: int v\[__cccc_tmp[0-9]+\]\[__cccc_tmp[0-9]+\];
 // CCCC_REJECT_STDOUT: int\[m\]
 //
 // #964: serialize_type_decl()'s TY_VLA branch used to print base-then-name-
@@ -7,7 +7,7 @@
 // (an invalid declarator -- the outer dimension's base was printed before
 // recursing into it, instead of after). Rewritten to build the declarator
 // through the same buffer-recursion shape TY_ARRAY uses, so dimensions
-// accumulate in the right order: `int v[n][m]`.
+// accumulate in the right order: `int v[tmp1][tmp2]`.
 //
 // #971 (fixed): multi-dimensional VLA *subscript* used to SIGSEGV in the VM
 // (an unrelated codegen bug, not a serialization one -- gen_expr's ND_DEREF

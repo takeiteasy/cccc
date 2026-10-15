@@ -23,14 +23,18 @@
 
 #include "./parse_internal.h"
 
-// Generate code for computing a VLA size.
+// Generate code for computing a VLA size. The length expression runs here,
+// once, into a temporary that replaces vla_len: later spellings of the type
+// (declarator, cast, typedef use) read the temporary instead of re-running it.
 Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
     Node *node = new_node(vm, ND_NULL_EXPR, tok);
     if (ty->base)
         node = new_binary(vm, ND_COMMA, node,
                           compute_vla_size(vm, ty->base, tok), tok);
 
-    if (ty->kind != TY_VLA)
+    // Already evaluated: a typedef'd or typeof'd VLA keeps the size from the
+    // point it was declared.
+    if (ty->kind != TY_VLA || ty->vla_size)
         return node;
 
     Node *base_sz;
@@ -39,6 +43,16 @@ Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
     else
         base_sz =
             new_num(vm, get_vm_size(ty->base), tok); // Use VM-adjusted size
+
+    if (ty->vla_len) {
+        Obj *len = new_lvar(vm, "", 0, ty_long);
+        node     = new_binary(
+            vm, ND_COMMA, node,
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, len, tok), ty->vla_len,
+                       tok),
+            tok);
+        ty->vla_len = new_var_node(vm, len, tok);
+    }
 
     ty->vla_size = new_lvar(vm, "", 0, ty_ulong);
     Node *expr =
