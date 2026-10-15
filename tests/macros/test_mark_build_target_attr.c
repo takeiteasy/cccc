@@ -3,8 +3,6 @@
 // MarkAsBuildTarget registers a programmatically generated function as a
 // [[cccc::build_target]] factory, selectable via --build-target.
 
-typedef struct BuildTarget BuildTarget;
-typedef struct Builder     Builder;
 BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
 
 [[cccc::comptime]]

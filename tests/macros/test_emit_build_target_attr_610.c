@@ -6,8 +6,6 @@
 // Executable/AddSource are preprocessor macros, so we use their underlying
 // builtins directly inside the emit block where macro expansion is bypassed.
 
-typedef struct BuildTarget BuildTarget;
-typedef struct Builder     Builder;
 BuildTarget *__builtin_build_executable(Builder *ctx, const char *name);
 void __builtin_build_add_source(BuildTarget *t, const char *path);
 
