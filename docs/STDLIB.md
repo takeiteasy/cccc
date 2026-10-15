@@ -97,7 +97,7 @@ These are forwarded to libc via a private stub bound to the real libc name, not 
 
 #### Math Builtins
 
-Each name below, and its `f` (float) and `l` (long double) form, forwards to the libm function of the same name. No `#include <math.h>` is needed, and a program's own `fabs` does not conflict. Arguments convert to the parameter type, so `__builtin_fabs(-42)` takes an `int`. Under `-c=native`/`-m`/`-c=generated` the serializer prints the literal `__builtin_` spelling. Calls are evaluated at run time, so they are not valid in constant expressions or static initializers.
+Each name below, and its `f` (float) and `l` (long double) form, forwards to the libm function of the same name. No `#include <math.h>` is needed, and a program's own `fabs` does not conflict. Arguments convert to the parameter type, so `__builtin_fabs(-42)` takes an `int`. Under `-c=native`/`-m`/`-c=generated` the serializer prints the literal `__builtin_` spelling. Calls with constant arguments fold at compile time, so they work in static initializers, `constexpr` and `_Static_assert`. `sqrt` and `fma` fold only when every argument and the result are finite, and a signaling-NaN argument never folds; those calls stay run-time calls so `errno` and FP exceptions still happen.[^libm-fold]
 
 | Builtin | Arguments | Description |
 |---------|-----------|-------------|
@@ -484,3 +484,5 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > reason (the VM reads the object back with an 8-byte load).
 
 > **Known limitation ([#407](https://todo.sr.ht/~takeiteasy/cccc/407)):** when a user-defined variadic function forwards its `va_list` to `vprintf`/`vfprintf`/`vsprintf`/`vsnprintf`/`vscanf`/`vfscanf`/`vsscanf`, only the *first* variadic argument is passed through correctly; subsequent arguments are garbage. This is a pre-existing VM/FFI limitation, not specific to `%b`/`%B`.
+
+[^libm-fold]: Arguments are evaluated as `double`, so a `long double` argument folds at double precision.

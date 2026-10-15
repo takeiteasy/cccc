@@ -1435,12 +1435,38 @@ static void warn_unused_globals(VirtualMachine *vm) {
     free(infos);
 }
 
+// X(name, arity, exact): `exact` rows never raise an exception or set errno
+// for non-signaling operands, so they fold for any such argument; the others
+// fold only when every argument and the result are finite.
+#define LIBM_BUILTINS(X)                                                       \
+    X(fabs, 1, true)                                                           \
+    X(sqrt, 1, false)                                                          \
+    X(floor, 1, true)                                                          \
+    X(ceil, 1, true)                                                           \
+    X(trunc, 1, true)                                                          \
+    X(round, 1, true)                                                          \
+    X(copysign, 2, true)                                                       \
+    X(fmin, 2, true)                                                           \
+    X(fmax, 2, true)                                                           \
+    X(fma, 3, false)
+
 static const struct {
     const char *base;
     int         arity;
-} libm_builtins[CCCC_LIBM_BUILTINS] = {
-    {"fabs", 1},  {"sqrt", 1},     {"floor", 1}, {"ceil", 1}, {"trunc", 1},
-    {"round", 1}, {"copysign", 2}, {"fmin", 2},  {"fmax", 2}, {"fma", 3},
+    bool        exact;
+} libm_builtins[] = {
+#define X(n, ar, ex) {#n, ar, ex},
+    LIBM_BUILTINS(X)
+#undef X
+};
+static_assert(sizeof libm_builtins / sizeof *libm_builtins ==
+                  CCCC_LIBM_BUILTINS,
+              "CCCC_LIBM_BUILTINS out of sync with LIBM_BUILTINS");
+
+enum {
+#define X(n, ar, ex) LIBM_ROW_##n,
+    LIBM_BUILTINS(X)
+#undef X
 };
 
 int libm_builtin_lookup(const char *name, int len, int *row, int *variant) {
@@ -1466,6 +1492,50 @@ int libm_builtin_lookup(const char *name, int len, int *row, int *variant) {
         return libm_builtins[i].arity;
     }
     return 0;
+}
+
+#define LIBM_APPLY_1(n)                                                        \
+    (v == 0   ? (long double)n(a[0])                                           \
+     : v == 1 ? (long double)n##f((float)a[0])                                 \
+              : n##l((long double)a[0]))
+#define LIBM_APPLY_2(n)                                                        \
+    (v == 0   ? (long double)n(a[0], a[1])                                     \
+     : v == 1 ? (long double)n##f((float)a[0], (float)a[1])                    \
+              : n##l((long double)a[0], (long double)a[1]))
+#define LIBM_APPLY_3(n)                                                        \
+    (v == 0   ? (long double)n(a[0], a[1], a[2])                               \
+     : v == 1 ? (long double)n##f((float)a[0], (float)a[1], (float)a[2])       \
+              : n##l((long double)a[0], (long double)a[1], (long double)a[2]))
+
+static bool is_signaling_nan(double x) {
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
+    return isnan(x) && !(bits & 0x0008000000000000ull);
+}
+
+// Folds __builtin_<row>[f|l](a...) on the host. Declines (returns false) when
+// folding would hide a run-time errno or FP exception, so the call stays.
+bool libm_builtin_fold(int row, int variant, const double *a,
+                       long double *out) {
+    const int v = variant;
+    for (int i = 0; i < libm_builtins[row].arity; i++) {
+        if (is_signaling_nan(a[i]) ||
+            (!libm_builtins[row].exact && !isfinite(a[i])))
+            return false;
+    }
+    long double r = 0;
+    switch (row) {
+#define X(n, ar, ex)                                                           \
+    case LIBM_ROW_##n:                                                         \
+        r = LIBM_APPLY_##ar(n);                                                \
+        break;
+        LIBM_BUILTINS(X)
+#undef X
+    }
+    if (!libm_builtins[row].exact && !isfinite(r))
+        return false;
+    *out = r;
+    return true;
 }
 
 static void declare_builtin_functions(VirtualMachine *vm) {
