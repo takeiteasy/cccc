@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-10-15
+
 - Fixed: `__builtin_fabs`/`sqrt`/`floor`/`ceil`/`trunc`/`round`/`copysign`/`fmin`/`fmax`/`fma`
   (+ `f`/`l`) with constant arguments fold at compile time, so they are valid in
   static initializers, `constexpr` and `_Static_assert`. See `docs/STDLIB.md`.
