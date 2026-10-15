@@ -1024,6 +1024,7 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                               int returns_float, int is_variadic,
                               int num_fixed_args);
 VirtualMachine *cccc_current_ffi_vm(void);
+void cccc_ffi_vm_reset(void);
 
 // Kernel launch support (stdlib/pthread.c, used by stdlib/kernel.c).
 // The work-item the current guest thread runs, or NULL.
@@ -1245,6 +1246,24 @@ void cccc_gil_destroy(VirtualMachine *vm);
 void cccc_gil_acquire(VirtualMachine *vm);
 void cccc_gil_release(VirtualMachine *vm);
 void cccc_gil_release_to(VirtualMachine *vm, int depth);
+
+// State a longjmp out of cc_run_at (a failed Assert or a timeout) can leave
+// stale, snapshotted before each harness setjmp and restored where it lands.
+// Host resources a callback held (qsort scratch, scandir/glob allocations)
+// are not recoverable.
+typedef struct {
+    int        gil_depth;
+    uint32_t   flags;
+    int        single_step;
+    int        step_over;
+    int        step_out;
+    Pc         step_over_return_addr;
+    long long *step_out_bp;
+    int        debugger_attached;
+} CcUnwindPoint;
+
+void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p);
+void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p);
 
 //
 // debugger.c

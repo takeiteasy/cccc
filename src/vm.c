@@ -1384,9 +1384,35 @@ void cccc_gil_release(VirtualMachine *vm) {
 }
 
 // Drops levels a longjmp out of cc_run_at left held (its release is skipped).
+// TODO: gil_depth is VM-wide, so this is wrong if another thread owns the GIL
+// (#1587).
 void cccc_gil_release_to(VirtualMachine *vm, int depth) {
     while (vm && vm->gil_initialized && vm->gil_depth > depth)
         cccc_gil_release(vm);
+}
+
+void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
+    p->gil_depth             = vm->gil_depth;
+    p->flags                 = vm->flags;
+    p->single_step           = vm->dbg.single_step;
+    p->step_over             = vm->dbg.step_over;
+    p->step_out              = vm->dbg.step_out;
+    p->step_over_return_addr = vm->dbg.step_over_return_addr;
+    p->step_out_bp           = vm->dbg.step_out_bp;
+    p->debugger_attached     = vm->dbg.debugger_attached;
+}
+
+void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
+    cccc_gil_release_to(vm, p->gil_depth);
+    vm->flags                     = p->flags;
+    vm->dbg.single_step           = p->single_step;
+    vm->dbg.step_over             = p->step_over;
+    vm->dbg.step_out              = p->step_out;
+    vm->dbg.step_over_return_addr = p->step_over_return_addr;
+    vm->dbg.step_out_bp           = p->step_out_bp;
+    vm->dbg.debugger_attached     = p->debugger_attached;
+    cc_running_vm                 = NULL;
+    cccc_ffi_vm_reset();
 }
 
 void cc_destroy(VirtualMachine *vm) {

@@ -21,6 +21,7 @@
 
 #include <fnmatch.h>
 #include <inttypes.h>
+#include <pthread.h>
 #include <regex.h>
 #include <signal.h>
 #include <string.h>
@@ -36,10 +37,11 @@
 // calls that arrive outside a test run (e.g. from a [[cccc::comptime]] during
 // the comptime pass) -- ticket #334.
 typedef struct {
-    jmp_buf jmp;
-    int     failed;
-    int     timed_out;
-    char    fail_msg[512];
+    jmp_buf   jmp;
+    pthread_t owner; // thread that owns jmp; a longjmp from another is UB
+    int       failed;
+    int       timed_out;
+    char      fail_msg[512];
 } CCCCTestRunState;
 
 static CCCCTestRunState     *s_run         = NULL;
@@ -57,8 +59,37 @@ static void handle_alarm(int sig) {
         return; // waitpid in parent will get EINTR
     }
 #endif
-    if (s_run)
-        longjmp(s_run->jmp, 2); // 2 = timeout sentinel
+    if (!s_run)
+        return;
+    // The alarm can be delivered to any thread; only the owner may longjmp.
+    if (!pthread_equal(pthread_self(), s_run->owner)) {
+        pthread_kill(s_run->owner, SIGALRM);
+        return;
+    }
+    longjmp(s_run->jmp, 2); // 2 = timeout sentinel
+}
+
+// First failure wins: later ones (e.g. main failing after a worker did) write
+// to a throwaway buffer.
+static char *fail_slot(void) {
+    static _Thread_local char discard[512];
+    return s_run->failed ? discard : s_run->fail_msg;
+}
+
+// Fails the current test. On the owning thread this longjmps to the harness.
+// A guest worker thread instead ends itself, as pthread_exit does, and the
+// failure is reported once the test function returns.
+// TODO: an Assert in a callback or kernel item on a worker only ends that
+// callback or item (#1588).
+static void fail_exit(void) {
+    s_run->failed = 1;
+    if (pthread_equal(pthread_self(), s_run->owner))
+        longjmp(s_run->jmp, 1);
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm) {
+        vm->regs[REG_A0] = 0;
+        vm->pc           = CCCC_INVALID_PC;
+    }
 }
 
 static void impl_assert(long long cond, long long expr, long long file,
@@ -69,10 +100,9 @@ static void impl_assert(long long cond, long long expr, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld)",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld)",
                  (char *)expr, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -84,11 +114,10 @@ static void impl_assert_eq(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld != %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -100,11 +129,10 @@ static void impl_assert_neq(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s == %s (both %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -116,10 +144,9 @@ static void impl_assert_null(long long p, long long ps, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is not null (%s:%lld)", (char *)ps, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -132,10 +159,9 @@ static void impl_assert_not_null(long long p, long long ps, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
-                 "%s is null (%s:%lld)", (char *)ps, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s is null (%s:%lld)",
+                 (char *)ps, (char *)file, line);
+        fail_exit();
     }
 }
 
@@ -148,11 +174,10 @@ static void impl_assert_streq(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (\"%s\" != \"%s\") (%s:%lld)", (char *)as,
                  (char *)bs, (char *)a, (char *)b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -165,10 +190,9 @@ static void impl_assert_false(long long cond, long long expr, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "!%s (%s:%lld)",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "!%s (%s:%lld)",
                  (char *)expr, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -178,10 +202,9 @@ static void impl_assert_fail(long long file, long long line) {
                 (char *)file, line);
         return;
     }
-    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
-             "forced failure (%s:%lld)", (char *)file, line);
-    s_run->failed = 1;
-    longjmp(s_run->jmp, 1);
+    snprintf(fail_slot(), sizeof(s_run->fail_msg), "forced failure (%s:%lld)",
+             (char *)file, line);
+    fail_exit();
 }
 
 static void impl_assert_fail_msg(long long msg, long long file,
@@ -191,10 +214,9 @@ static void impl_assert_fail_msg(long long msg, long long file,
                 (char *)file, line);
         return;
     }
-    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld)",
-             (char *)msg, (char *)file, line);
-    s_run->failed = 1;
-    longjmp(s_run->jmp, 1);
+    snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld)", (char *)msg,
+             (char *)file, line);
+    fail_exit();
 }
 
 static void impl_assert_gt(long long a, long long b, long long as, long long bs,
@@ -205,11 +227,10 @@ static void impl_assert_gt(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s <= %s (%lld <= %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -221,11 +242,10 @@ static void impl_assert_lt(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s >= %s (%lld >= %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -237,11 +257,10 @@ static void impl_assert_ge(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s < %s (%lld < %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -253,11 +272,10 @@ static void impl_assert_le(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s > %s (%lld > %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -274,12 +292,11 @@ static void impl_assert_within(long long delta, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s |%s - %s| = %lld > %s (%lld) (%s:%lld)", (char *)as,
                  (char *)es, (char *)as, diff, (char *)ds, delta, (char *)file,
                  line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -293,11 +310,10 @@ static void impl_assert_streq_len(long long a, long long b, long long len,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (first %lld chars differ) (%s:%lld)", (char *)as,
                  (char *)bs, len, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -311,11 +327,10 @@ static void impl_assert_mem_eq(long long expected, long long actual,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld bytes differ) (%s:%lld)", (char *)es,
                  (char *)as, len, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -333,12 +348,11 @@ static void impl_assert_float_within(double delta, double expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s |%s - %s| = %g > %s (%g) (%s:%lld)", (char *)as,
                  (char *)es, (char *)as, diff, (char *)ds, delta, (char *)file,
                  line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -360,13 +374,12 @@ static void impl_assert_bits(long long mask, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld)", (char *)as,
                  (char *)ms, (unsigned long long)(actual & mask), (char *)es,
                  (char *)ms, (unsigned long long)(expected & mask),
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -379,11 +392,10 @@ static void impl_assert_bit_high(long long bit, long long actual, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s bit %lld of %s is low (%s:%lld)", (char *)bs, bit,
                  (char *)as, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -396,11 +408,10 @@ static void impl_assert_bit_low(long long bit, long long actual, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s bit %lld of %s is high (%s:%lld)", (char *)bs, bit,
                  (char *)as, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -416,12 +427,11 @@ static void impl_assert_eq_array(long long expected, long long actual,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s[0..%lld] != %s[0..%lld] (%lld bytes differ) (%s:%lld)",
                  (char *)es, count - 1, (char *)as, count - 1, (long long)total,
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -436,10 +446,9 @@ static void impl_assert_msg(long long cond, long long expr, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld) - %s",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld) - %s",
                  (char *)expr, (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -453,11 +462,10 @@ static void impl_assert_eq_msg(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld != %lld) (%s:%lld) - %s", (char *)as,
                  (char *)bs, a, b, (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -471,12 +479,11 @@ static void impl_assert_streq_msg(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (\"%s\" != \"%s\") (%s:%lld) - %s", (char *)as,
                  (char *)bs, (char *)a, (char *)b, (char *)file, line,
                  (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -489,11 +496,10 @@ static void impl_assert_null_msg(long long p, long long ps, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is not null (%s:%lld) - %s", (char *)ps, (char *)file,
                  line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -506,11 +512,10 @@ static void impl_assert_not_null_msg(long long p, long long ps, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is null (%s:%lld) - %s", (char *)ps, (char *)file, line,
                  (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -525,13 +530,12 @@ static void impl_assert_bits_msg(long long mask, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld) - %s",
                  (char *)as, (char *)ms, (unsigned long long)(actual & mask),
                  (char *)es, (char *)ms, (unsigned long long)(expected & mask),
                  (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -666,9 +670,8 @@ static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
         cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
         char fail_msg[512];
         if (s_run && test_took_runtime_fault(vm, fail_msg, sizeof(fail_msg))) {
-            snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s", fail_msg);
-            s_run->failed = 1;
-            longjmp(s_run->jmp, 1);
+            snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s", fail_msg);
+            fail_exit();
         }
     }
 }
@@ -720,17 +723,21 @@ static bool run_hooks_guarded(VirtualMachine *vm, Obj *prog,
                               const char *disp, char fail_msg_out[512]) {
     CCCCTestRunState guard;
     guard.failed            = 0;
+    guard.owner             = pthread_self();
+    guard.owner             = pthread_self();
+    guard.owner             = pthread_self();
     guard.timed_out         = 0;
     guard.fail_msg[0]       = '\0';
 
     CCCCTestRunState *saved = s_run;
     s_run                   = &guard;
-    int gil_depth           = vm->gil_depth;
-    int jval                = setjmp(guard.jmp);
+    CcUnwindPoint unwind;
+    cccc_unwind_point_save(vm, &unwind);
+    int jval = setjmp(guard.jmp);
     if (jval == 0) {
         run_hooks(vm, prog, setups, is_teardown, once_only, suite, disp);
     } else {
-        cccc_gil_release_to(vm, gil_depth);
+        cccc_unwind_point_restore(vm, &unwind);
         guard.failed = 1;
     }
     s_run = saved;
@@ -1288,6 +1295,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     CCCCTestRunState run;
     s_run = &run;
+    run.owner = pthread_self();
 
     // Register SIGALRM handler for timeouts (always, since per-test timeouts
     // may be set on individual [[cccc::test]] attributes).
@@ -1753,10 +1761,11 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 #endif
 
-        int gil_depth = vm->gil_depth;
-        int jval      = setjmp(run.jmp);
+        CcUnwindPoint unwind;
+        cccc_unwind_point_save(vm, &unwind);
+        int jval = setjmp(run.jmp);
         if (jval != 0)
-            cccc_gil_release_to(vm, gil_depth);
+            cccc_unwind_point_restore(vm, &unwind);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
             cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);

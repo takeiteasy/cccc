@@ -660,6 +660,41 @@ setup or teardown hook is attributed the same way. Use an `exit_code =`
 test (above) instead if the point of the test is to assert on the specific
 exit code a crash produces.
 
+## Asserts in Threads and Callbacks
+
+A failed `Assert*` ends the test wherever it runs; later tests are unaffected.
+
+| Where the assert fails | Effect |
+|---|---|
+| Test function or a function it calls | Test stops at the assert and reports `not ok`. |
+| Callback invoked by a host function (a `qsort` comparator, `bsearch`, `scandir`) | Same. Debugger flags, GIL and VM state are restored for the next test. |
+| Thread started with `pthread_create` / `thrd_create` | That thread ends as if it called `pthread_exit` (its TSS destructors run). The test reports `not ok` once the test function returns. |
+
+When several asserts fail in one test, the first message is the one
+reported:
+
+```c
+static void *worker(void *arg) {
+    AssertMsg(0, "worker failed first");   // reported
+    return arg;
+}
+
+[[cccc::test]]
+void both_fail(void) {
+    pthread_t t;
+    pthread_create(&t, 0, worker, 0);
+    pthread_join(t, 0);
+    AssertMsg(0, "main failed second");    // ignored
+}
+```
+
+Limitations:
+
+- An assert inside a callback or kernel item running on a worker thread ends
+  only that callback or item (#1588).
+- Workers a test leaves running after it fails or times out keep running
+  (#1585).
+
 ## Setup and Teardown
 
 The framework supports lifecycle hooks that run before and/or after tests. Use

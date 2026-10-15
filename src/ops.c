@@ -5615,6 +5615,12 @@ VirtualMachine *cccc_current_ffi_vm(void) {
     return cccc_tls_ffi_vm;
 }
 
+// A longjmp out of a host call skips the restore at the end of
+// cccc_call_native_function.
+void cccc_ffi_vm_reset(void) {
+    cccc_tls_ffi_vm = NULL;
+}
+
 int cccc_ffi_name_in_list(char **list, int count, const char *name) {
     if (!name)
         name = "<anonymous>";
