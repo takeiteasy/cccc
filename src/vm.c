@@ -646,9 +646,13 @@ dispatch:
                 *--vm->sp = (long long)vm->pc;
                 if (vm->flags & CCCC_CFI)
                     *--vm->shadow_sp = (long long)vm->pc;
-                vm->regs[REG_A0] = (long long)_sig;
+                /* Snapshot the interrupted registers before REG_A0 carries
+                   the signal number, or the handler's return would restore
+                   the clobbered value (e.g. the result of a call that had
+                   just returned). */
                 int _flags       = cccc_signal_prepare_delivery(vm, _sig, _slot,
                                                                 /*async=*/true);
+                vm->regs[REG_A0] = (long long)_sig;
                 if (_flags & SA_SIGINFO) {
                     /* #745: real captured siginfo -- this path only runs
                        after an actual host-level signal delivery. */

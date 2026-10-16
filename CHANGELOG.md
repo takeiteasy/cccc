@@ -7,6 +7,31 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.9] - 2026-10-16
+
+- Fixed: a guest thread that runs between two `--testing` tests no longer leaves
+  its stack in the VM, so the next test no longer runs on freed memory (a
+  sporadic crash on macOS). Blocking calls such as `usleep` and `wait` now keep
+  the calling thread's thread-local storage across the wait.
+- Fixed: a `[[cccc::comptime]]` macro call is expanded in `case` labels
+  (including ranges), enumerator values, `_Static_assert` conditions and
+  file-scope array lengths. See `docs/MACROS.md`.
+- Fixed: `@serialize`, `@deserialize`, `@enum_to_string`, `@enum_from_string`,
+  `@generate_getters`, `@generate_setters` and `@generate_constructor` accept
+  `typedef` declarations as well as tagged ones.
+- Fixed: `@serialize` copies bit-fields and the fields of anonymous
+  struct/union members.
+- Fixed: `@generate_getters`, `@generate_setters` and `@generate_constructor`
+  handle array members and anonymous struct/union members.
+- Fixed: `@enum_to_string` accepts enums with aliased values; the first name
+  wins.
+- Fixed: `GenerateSum`, `GenerateMap`, `GenerateReduce` and `GenerateFilter` can
+  be called more than once for the same element type.
+- Added: `@generate_getters("Prefix")` and `@generate_setters("Prefix")` name
+  the functions `Prefix_get_<field>` / `Prefix_set_<field>`, and
+  `@generate_accessors` publishes both.
+- Added: `StringLiteralValue(node)` reads a string literal macro argument.
+
 ## [0.10.8] - 2026-10-16
 
 - Fixed: a thread left running by a passing `--testing` test no longer unbalances
