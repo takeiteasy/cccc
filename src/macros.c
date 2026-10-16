@@ -1419,14 +1419,9 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 // @comptime(attribute(...)) handlers. Keep in sync with that header
 // (tests/host/test_reflection_attr_list.c checks it).
 static const char *const reflection_attr_names[] = {
-    "serialize",
-    "deserialize",
-    "enum_to_string",
-    "enum_from_string",
-    "generate_getters",
-    "generate_setters",
-    "generate_constructor",
-    NULL,
+    "serialize",          "deserialize",          "enum_to_string",
+    "enum_from_string",   "generate_getters",     "generate_setters",
+    "generate_accessors", "generate_constructor", NULL,
 };
 
 const char *const *reflection_builtin_attr_names(void) {
