@@ -9,12 +9,6 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [0.11.0] - 2026-10-16
 
-- Changed: the minor version marks the macro standard library additions that
-  shipped in 0.10.9 (`@generate_accessors`, the `@generate_getters` /
-  `@generate_setters` prefix argument, `StringLiteralValue`). No other changes.
-
-## [0.10.9] - 2026-10-16
-
 - Fixed: a guest thread that runs between two `--testing` tests no longer leaves
   its stack in the VM, so the next test no longer runs on freed memory (a
   sporadic crash on macOS). Blocking calls such as `usleep` and `wait` now keep
