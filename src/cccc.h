@@ -5670,6 +5670,20 @@ Token *cc_find_file_scope_comptime_call(VirtualMachine *vm, Token *tok);
 Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node);
 
 /*!
+ @brief True if any node in the expression tree is an ND_MACRO_CALL.
+*/
+bool cc_expr_contains_macro_call(Node *node);
+
+/*!
+ @brief Expand the comptime macro calls in an expression the parser needs as a
+ constant (case label, enumerator value, array length, _Static_assert).
+ @details Compiles the macro program on first use, then runs the calls now
+ instead of in the post-parse pass.
+ @return The expanded node, or `node` unchanged if it has no macro call.
+*/
+Node *cc_expand_const_macro_calls(VirtualMachine *vm, Node *node);
+
+/*!
  @brief Finalize global variable initializers that were deferred due to macro
  calls.
  @details During cc_parse, gvar initializers containing ND_MACRO_CALL are

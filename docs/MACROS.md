@@ -540,6 +540,29 @@ functions are not affected.
   in a global initializer is rejected with "expression-position comptime functions
   must return Node*".
 
+## Comptime functions in constant expressions
+
+A `Node *`-returning comptime function call is expanded where the parser needs
+a constant: `case` labels (including GNU ranges), enumerator values,
+`_Static_assert` conditions and file-scope array lengths.
+
+```c
+[[cccc::comptime]]
+Node *PLUS(Node *a, Node *b) { return MakeBinary(NK_ADD, a, b); }
+
+enum { A = PLUS(1, 2) };
+int table[PLUS(2, 3)];
+_Static_assert(PLUS(40, 2) == 42, "ok");
+
+switch (v) {
+    case PLUS(20, 2): ...
+}
+```
+
+The call runs during the parse, so the comptime program is compiled at the
+first such use. A block-scope array length such as `int v[PLUS(n, 1)]` stays a
+runtime (VLA) length.
+
 ## Global Generation
 
 Use a non-inline macro with a file-scope call when generated functions should be

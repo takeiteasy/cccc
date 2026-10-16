@@ -1918,20 +1918,6 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
     return cur->next;
 }
 
-// Returns true if any node in the expression tree is an ND_MACRO_CALL.
-// Used to detect scalar global initializers that require deferred evaluation.
-static bool expr_contains_macro_call(Node *node) {
-    if (!node)
-        return false;
-    if (node->kind == ND_MACRO_CALL)
-        return true;
-    return expr_contains_macro_call(node->lhs) ||
-           expr_contains_macro_call(node->rhs) ||
-           expr_contains_macro_call(node->cond) ||
-           expr_contains_macro_call(node->then) ||
-           expr_contains_macro_call(node->els);
-}
-
 // Initializers for global variables are evaluated at compile-time and
 // embedded to .data section. This function serializes Initializer
 // objects to a flat byte array. It is a compile error if an
@@ -1960,7 +1946,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     // This avoids premature compile_all_macros which would break $symbol
     // forward-reference lookups in other comptime functions (#613).
     if (!var->is_constexpr && init->expr &&
-        expr_contains_macro_call(init->expr)) {
+        cc_expr_contains_macro_call(init->expr)) {
         // Temporarily borrow constexpr_init (unused for non-constexpr vars) to
         // store the pending Initializer tree. constexpr_init_for_node() guards
         // on is_constexpr before reading this field, so there is no conflict.
