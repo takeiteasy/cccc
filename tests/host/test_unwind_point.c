@@ -21,10 +21,14 @@
 // out of cc_run_at / cccc_call_guest_callback (a failed Assert or timeout in a
 // test) leaves stale -- the callback clears CCCC_ENABLE_DEBUGGER and the
 // debugger step state, and the run leaves cc_running_vm and the FFI vm set.
+// The restore never releases a GIL another thread owns.
 
 #include "internal.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
+#include <unistd.h>
 
 static int failed = 0;
 
@@ -38,7 +42,48 @@ static int failed = 0;
         }                                                                      \
     } while (0)
 
+static VirtualMachine *g_vm;
+static atomic_int      g_worker_state; // 1 = holds the GIL, 2 = may release
+
+static void *gil_holder(void *arg) {
+    (void)arg;
+    cccc_gil_acquire(g_vm);
+    atomic_store(&g_worker_state, 1);
+    while (atomic_load(&g_worker_state) != 2)
+        usleep(1000);
+    cccc_gil_release(g_vm);
+    return NULL;
+}
+
+// A worker takes the GIL after the save point; the restoring thread must leave
+// it alone.
+static void test_foreign_owner(void) {
+    VirtualMachine vm;
+    cc_init(&vm, 0);
+    g_vm = &vm;
+    atomic_store(&g_worker_state, 0);
+
+    CcUnwindPoint p;
+    cccc_unwind_point_save(&vm, &p);
+
+    pthread_t t;
+    pthread_create(&t, NULL, gil_holder, NULL);
+    while (atomic_load(&g_worker_state) != 1)
+        usleep(1000);
+
+    cccc_unwind_point_restore(&vm, &p);
+    CHECK(vm.gil_depth == 1, "restore released another thread's GIL: depth %d",
+          vm.gil_depth);
+
+    atomic_store(&g_worker_state, 2);
+    pthread_join(t, NULL);
+    CHECK(vm.gil_depth == 0, "gil_depth = %d after the worker, expected 0",
+          vm.gil_depth);
+    cc_destroy(&vm);
+}
+
 int main(void) {
+    test_foreign_owner();
     VirtualMachine vm;
     cc_init(&vm, CCCC_ENABLE_DEBUGGER);
     vm.dbg.single_step       = 1;

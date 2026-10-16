@@ -26,6 +26,7 @@
 #include <getopt.h> // host getopt.h -- #1041, cccc_reset_getopt_state()
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>
+#include <stdatomic.h>
 #endif
 
 // Global pointer to the currently executing VM instance.
@@ -1329,13 +1330,30 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     cccc_gil_init(vm);
 }
 
+#if !defined(_WIN32) && !defined(_WIN64)
+// What vm->gil_mutex points at. The mutex stays first so the pointer is also
+// a pthread_mutex_t *.
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_t       owner; // valid while owned
+    atomic_bool     owned;
+} Gil;
+
+static bool gil_held_by_caller(const VirtualMachine *vm) {
+    const Gil *gil = vm->gil_mutex;
+    return gil && atomic_load(&gil->owned) &&
+           pthread_equal(gil->owner, pthread_self());
+}
+#endif
+
 void cccc_gil_init(VirtualMachine *vm) {
     if (!vm || vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_t *mutex = malloc(sizeof(*mutex));
-    if (!mutex)
+    Gil *gil = calloc(1, sizeof(*gil));
+    if (!gil)
         error("could not allocate VM GIL");
+    pthread_mutex_t    *mutex = &gil->mutex;
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr) != 0)
         error("could not initialize VM GIL attributes");
@@ -1344,7 +1362,7 @@ void cccc_gil_init(VirtualMachine *vm) {
     if (pthread_mutex_init(mutex, &attr) != 0)
         error("could not initialize VM GIL");
     pthread_mutexattr_destroy(&attr);
-    vm->gil_mutex = mutex;
+    vm->gil_mutex = gil;
 #endif
     vm->gil_initialized = 1;
 }
@@ -1353,10 +1371,10 @@ void cccc_gil_destroy(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_t *mutex = (pthread_mutex_t *)vm->gil_mutex;
-    if (mutex) {
-        pthread_mutex_destroy(mutex);
-        free(mutex);
+    Gil *gil = vm->gil_mutex;
+    if (gil) {
+        pthread_mutex_destroy(&gil->mutex);
+        free(gil);
     }
 #endif
     vm->gil_mutex       = NULL;
@@ -1369,8 +1387,12 @@ void cccc_gil_acquire(VirtualMachine *vm) {
     if (!vm->gil_initialized)
         cccc_gil_init(vm);
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_lock((pthread_mutex_t *)vm->gil_mutex);
-    vm->gil_depth++;
+    Gil *gil = vm->gil_mutex;
+    pthread_mutex_lock(&gil->mutex);
+    if (vm->gil_depth++ == 0) {
+        gil->owner = pthread_self();
+        atomic_store(&gil->owned, true);
+    }
 #endif
 }
 
@@ -1378,16 +1400,28 @@ void cccc_gil_release(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    vm->gil_depth--;
-    pthread_mutex_unlock((pthread_mutex_t *)vm->gil_mutex);
+    Gil *gil = vm->gil_mutex;
+    if (--vm->gil_depth == 0)
+        atomic_store(&gil->owned, false);
+    pthread_mutex_unlock(&gil->mutex);
 #endif
 }
 
+// Levels of the GIL the calling thread holds (0 when another thread owns it).
+static int gil_depth_of_caller(const VirtualMachine *vm) {
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (vm && vm->gil_initialized && gil_held_by_caller(vm))
+        return vm->gil_depth;
+#else
+    (void)vm;
+#endif
+    return 0;
+}
+
 // Drops levels a longjmp out of cc_run_at left held (its release is skipped).
-// TODO: gil_depth is VM-wide, so this is wrong if another thread owns the GIL
-// (#1587).
+// Never touches a GIL another thread owns.
 void cccc_gil_release_to(VirtualMachine *vm, int depth) {
-    while (vm && vm->gil_initialized && vm->gil_depth > depth)
+    while (gil_depth_of_caller(vm) > depth)
         cccc_gil_release(vm);
 }
 
@@ -1407,7 +1441,7 @@ void cccc_thread_exit_end(void) {
 }
 
 void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
-    p->gil_depth             = vm->gil_depth;
+    p->gil_depth             = gil_depth_of_caller(vm);
     p->flags                 = vm->flags;
     p->single_step           = vm->dbg.single_step;
     p->step_over             = vm->dbg.step_over;
