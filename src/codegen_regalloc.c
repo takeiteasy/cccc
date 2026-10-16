@@ -225,12 +225,30 @@ Obj *reuse_root(Obj *obj) {
     return obj;
 }
 
-Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target) {
+// A name two static functions share maps to this instead of either of them.
+static Obj ambiguous_static_def;
+
+void add_static_function_def(HashMap *static_defs, Obj *fn) {
+    Obj *prev = hashmap_get(static_defs, fn->name);
+    hashmap_put(static_defs, fn->name, prev ? &ambiguous_static_def : fn);
+}
+
+// A static target is resolved by identity. A body-less static prototype (code
+// macro-generated against the TU's own static function names it that way)
+// falls back to the unique static definition of that name.
+Obj *find_function_definition_for_patch(HashMap *fn_defs, HashMap *static_defs,
+                                        Obj *target) {
     if (target->reuse_of)
         return fn_canonical(reuse_root(target));
-    Obj *def = (target->is_static && target->body)
-                   ? target
-                   : hashmap_get(fn_defs, target->name);
+    Obj *def;
+    if (target->is_static && target->body)
+        def = target;
+    else if (target->is_static) {
+        def = hashmap_get(static_defs, target->name);
+        if (def == &ambiguous_static_def)
+            def = NULL;
+    } else
+        def = hashmap_get(fn_defs, target->name);
     return def ? fn_canonical(def) : NULL;
 }
 

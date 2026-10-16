@@ -143,7 +143,9 @@ int gen_flonum_arg_to_scratch(VirtualMachine *vm, Node *arg);
 int temp_regs_free(void);
 long long alloc_decimal_temp(VirtualMachine *vm, int bytes);
 long long alloc_wide_bitint_temp(VirtualMachine *vm, int words);
-Obj *find_function_definition_for_patch(HashMap *fn_defs, Obj *target);
+Obj *find_function_definition_for_patch(HashMap *fn_defs, HashMap *static_defs,
+                                        Obj *target);
+void add_static_function_def(HashMap *static_defs, Obj *fn);
 // The oldest Obj of a hot-reload chain: the one whose entry address is
 // canonical for every call and function pointer.
 Obj *fn_canonical(Obj *fn);

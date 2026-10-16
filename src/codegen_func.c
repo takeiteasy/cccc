@@ -473,10 +473,13 @@ void gen(VirtualMachine *vm, Obj *prog) {
         }
     }
 
-    HashMap fn_defs = {};
+    HashMap fn_defs     = {};
+    HashMap static_defs = {};
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body && !fn->is_static &&
-            !(fn->is_gnu_inline && !fn->is_live))
+        if (fn->is_function && fn->body && fn->is_static)
+            add_static_function_def(&static_defs, fn);
+        else if (fn->is_function && fn->body &&
+                 !(fn->is_gnu_inline && !fn->is_live))
             hashmap_put(&fn_defs, fn->name, fn);
     }
 
@@ -486,7 +489,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
         const char *fn_name = obj_external_name(target);
         Pc          loc     = vm->compiler.call_patches[i].location;
 
-        Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+        Obj        *fn_def =
+            find_function_definition_for_patch(&fn_defs, &static_defs, target);
 
         if (!fn_def) {
             // Check for FFI function
@@ -512,7 +516,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
         Obj *target = vm->compiler.func_addr_patches[i].function;
         Pc   loc    = vm->compiler.func_addr_patches[i].location;
 
-        Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+        Obj *fn_def =
+            find_function_definition_for_patch(&fn_defs, &static_defs, target);
 
         if (fn_def) {
             cc_write_i64_at(vm, loc,
@@ -535,6 +540,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
     }
 
     hashmap_deinit(&fn_defs);
+
+    hashmap_deinit(&static_defs);
 
     // #957: cross-TU reference roll-up. A reference compiled in a
     // *non-defining* translation unit marks the alias Obj (gen_addr sets
@@ -1165,17 +1172,22 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
         // A newly-compiled function may call any previously-compiled function,
         // so build the patch-resolution map over the full globals list.
-        HashMap fn_defs = {};
-        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-            if (fn->is_function && fn->body && !fn->is_static)
+        HashMap fn_defs     = {};
+        HashMap static_defs = {};
+        for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
+            if (fn->is_function && fn->body && fn->is_static)
+                add_static_function_def(&static_defs, fn);
+            else if (fn->is_function && fn->body)
                 hashmap_put(&fn_defs, fn->name, fn);
+        }
 
         for (int i = call_patch_start; i < vm->compiler.num_call_patches; i++) {
             Obj        *target  = vm->compiler.call_patches[i].function;
             const char *fn_name = obj_external_name(target);
             Pc          loc     = vm->compiler.call_patches[i].location;
 
-            Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+            Obj        *fn_def  = find_function_definition_for_patch(
+                &fn_defs, &static_defs, target);
             if (!fn_def) {
                 int ffi_idx = find_ffi_function(vm, fn_name);
                 if (ffi_idx >= 0)
@@ -1190,7 +1202,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
             Obj *target = vm->compiler.func_addr_patches[i].function;
             Pc   loc    = vm->compiler.func_addr_patches[i].location;
 
-            Obj *fn_def = find_function_definition_for_patch(&fn_defs, target);
+            Obj *fn_def = find_function_definition_for_patch(
+                &fn_defs, &static_defs, target);
             if (fn_def) {
                 cc_write_i64_at(vm, loc,
                                 cc_pc_to_byte_offset((Pc)fn_def->code_addr));
@@ -1205,6 +1218,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
         }
 
         hashmap_deinit(&fn_defs);
+
+        hashmap_deinit(&static_defs);
 
         // Only now is each new body fully patched and safe to jump into.
         for (int i = 0; i < num_new_fns; i++)
