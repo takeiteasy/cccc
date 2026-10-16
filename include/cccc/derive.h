@@ -1246,6 +1246,112 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fn);
 }
 
+// ---- @compare ------------------------------------------------------------------
+
+// if (a < b) return -1; if (b < a) return 1; for every leaf, in declaration
+// order. char[N] compares as unsigned bytes up to the first NUL.
+@comptime void __builtin_compare_value(Node *block, Type *ty, Node *a, Node *b,
+                                       const char *path) {
+    int k = __builtin_derive_kind(ty);
+    if (k == 0 || k == 8)
+        __builtin_derive_bad_member("@compare", path);
+    if (k == 5) {
+        Type *uc   = GetType("unsigned char");
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *done = MakeLocalVarUnique(GetType("int"));
+        Node *ca   = MakeLocalVarUnique(uc);
+        Node *cb   = MakeLocalVarUnique(uc);
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(step, MakeExprStmt(MakeAssign(
+                               ca, MakeCast(MakeSubscript(a, i), uc))));
+        BlockAddStmt(step, MakeExprStmt(MakeAssign(
+                               cb, MakeCast(MakeSubscript(b, i), uc))));
+        BlockAddStmt(step, MakeIf(MakeBinary(NK_LT, ca, cb),
+                                  MakeReturn(MakeIntLiteral(-1)), NULL));
+        BlockAddStmt(step, MakeIf(MakeBinary(NK_LT, cb, ca),
+                                  MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(step,
+                     MakeIf(MakeUnary(NK_NOT, ca),
+                            MakeExprStmt(MakeAssign(done, MakeIntLiteral(1))),
+                            NULL));
+        Node *body = MakeBlock(NULL, 0);
+        BlockAddStmt(body, MakeIf(MakeUnary(NK_NOT, done), step, NULL));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(done, MakeIntLiteral(0))));
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (k == 6) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *body = MakeBlock(NULL, 0);
+        __builtin_compare_value(body, TypeBase(ty), MakeSubscript(a, i),
+                                MakeSubscript(b, i), elem);
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (k == 7) {
+        const char *names[128];
+        Type       *types[128];
+        Node       *ea[128];
+        Node       *eb[128];
+        int         n = 0;
+        int         m = 0;
+        __builtin_derive_collect(ty, a, "@compare", "equals_skip", names, types,
+                                 ea, &n);
+        __builtin_derive_collect(ty, b, "@compare", "equals_skip", names, types,
+                                 eb, &m);
+        for (int j = 0; j < n; j++) {
+            char sub[256];
+            __builtin_derive_path(sub, path, ".");
+            strcat(sub, names[j]);
+            __builtin_compare_value(block, types[j], ea[j], eb[j], sub);
+        }
+    } else {
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, a, b),
+                                   MakeReturn(MakeIntLiteral(-1)), NULL));
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, b, a),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+    }
+}
+
+// @compare struct Foo {...}; publishes
+//   int Foo_compare(const struct Foo *a, const struct Foo *b);
+// returning <0, 0 or >0 by the first differing member in declaration order
+// (nested structs member-wise, char[N] as an unsigned C string, arrays
+// element-wise). Members carrying @equals_skip are left out, so
+// Foo_compare(a, b) == 0 exactly when Foo_equals(a, b). A pointer or union is a
+// compile error. A NaN member compares equal to everything.
+// @compare("P") publishes P_Foo_compare.
+@comptime(attribute("compare")) void __builtin_attr_compare(AttrTarget *target,
+                                                            ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@compare");
+    const char *tname  = __builtin_attr_type_name(target, "@compare");
+    const char *prefix = __builtin_attr_prefix_arg("@compare");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_compare");
+
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    FunctionAddParam(fn, "a", MakePointer(MakeConst(ty)));
+    FunctionAddParam(fn, "b", MakePointer(MakeConst(ty)));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_compare_value(
+            block, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "a")),
+            MakeUnary(NK_DEREF, MakeParamRef(fn, "b")), tname);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
 // ---- @bitflags
 
 @comptime void __builtin_bitflags_check(Type *ty) {

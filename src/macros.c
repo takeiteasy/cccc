@@ -1438,6 +1438,7 @@ static const char *const derive_attr_names[] = {
     "equals_skip",
     "dump_skip",
     "bitflags",
+    "compare",
     NULL,
 };
 

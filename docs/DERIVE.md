@@ -34,6 +34,7 @@ int main(void) {
 | `@equals` | struct | `_Bool T_equals(const T *a, const T *b)` |
 | `@hash` | struct | `size_t T_hash(const T *self)` |
 | `@dump` | struct | `void T_dump(const T *self, FILE *out)` |
+| `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
 | `@dump_skip` | member | leaves the member out of `@dump` |
@@ -245,6 +246,29 @@ compile under `-c=native` yet ([#1631](https://todo.sr.ht/~takeiteasy/cccc/1631)
 
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
+
+## Ordering
+
+`@compare` generates `int T_compare(const T *a, const T *b)`, returning a
+negative, zero or positive value by the first member that differs, in
+declaration order:
+
+```c
+@compare
+struct Version { int major; int minor; char tag[8]; };
+
+struct Version a = {1, 2, "rc"}, b = {1, 10, "rc"};
+Version_compare(&a, &b);   // < 0
+```
+
+It takes the same members as `@equals` (nested and anonymous structs expanded,
+`@equals_skip` leaves one out), so `T_compare(a, b) == 0` exactly when
+`T_equals(a, b)` is true. Integers, enums, `bool` and bit-fields order by value,
+floats with `<`, `char[N]` as unsigned bytes up to the first NUL, other arrays
+element by element. A `NaN` member compares equal to everything. A pointer
+member or a union is a compile error. `@compare("app")` publishes
+`app_Version_compare`. It fits `qsort` through a one-line wrapper that casts
+the `const void *` arguments.
 
 ## Bit Flags
 

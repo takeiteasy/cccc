@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@compare` generates `int T_compare(const T *a, const T *b)` for a
+  struct, ordering by members in declaration order. See `docs/DERIVE.md`.
 - Added: `@bitflags` on an enum of power-of-two flags generates `T_set`,
   `T_clear`, `T_toggle`, `T_has` and `T_format`. See `docs/DERIVE.md`.
 - Added: `@equals`, `@hash` and `@dump` generate `T_equals`, `T_hash` and
