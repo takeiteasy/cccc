@@ -1183,4 +1183,78 @@ int test_elvis_volatile_cond_uses_temp_path(void) {
     return 42;
 }
 
+static int switch_call_hash(const char *s) {
+    int h = 0;
+    for (; *s; s++)
+        h = h * 31 + *s;
+    return h;
+}
+
+static int switch_call_id(int x) {
+    return x;
+}
+
+[[cccc::test(return = 42)]]
+int test_switch_on_call_sparse_cases(void) {
+    int         hash_one = switch_call_hash("one");
+    int         hash_two = switch_call_hash("two");
+    int         r[3];
+    const char *in[3] = {"one", "two", "three"};
+    for (int i = 0; i < 3; i++) {
+        switch (switch_call_hash(in[i])) {
+            case 110182:
+                r[i] = 1;
+                break;
+            case 115276:
+                r[i] = 2;
+                break;
+            default:
+                r[i] = 0;
+        }
+    }
+    if (hash_one != 110182 || hash_two != 115276)
+        return 1;
+    if (r[0] != 1 || r[1] != 2 || r[2] != 0)
+        return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_switch_on_call_dense_and_nested(void) {
+    for (int i = 0; i < 6; i++) {
+        int got;
+        switch (switch_call_id(i)) {
+            case 0:
+                got = 10;
+                break;
+            case 1:
+                got = 11;
+                break;
+            case 2:
+                got = 12;
+                break;
+            case 3:
+                got = 13;
+                break;
+            default:
+                got = -1;
+        }
+        if (got != (i < 4 ? 10 + i : -1))
+            return 1;
+        switch (switch_call_id(i) + 1) {
+            case 1:
+                got = 100;
+                break;
+            case 3:
+                got = 300;
+                break;
+            default:
+                got = 0;
+        }
+        if (got != (i == 0 ? 100 : i == 2 ? 300 : 0))
+            return 2;
+    }
+    return 42;
+}
+
 #pragma cccc suite end

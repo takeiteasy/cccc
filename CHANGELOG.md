@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-10-16
+
+- Fixed: `switch (f(x))` with a function call as the controlling expression
+  always took the first matching branch in the VM.
+- Fixed: `Serialize`, `Deserialize`, `@serialize` and `@deserialize` need no
+  particular alignment of the buffer; `Deserialize` rebuilds the value member
+  by member instead of casting the buffer.
+
 ## [0.11.0] - 2026-10-16
 
 - Fixed: a guest thread that runs between two `--testing` tests no longer leaves

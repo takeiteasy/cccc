@@ -437,6 +437,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             reset_temp_regs();
             int r_val = alloc_temp_reg();
             gen_expr(vm, node->cond, r_val);
+            // A call in the controlling expression resets the temp registers.
+            mark_temp_reg_used(r_val);
 
             int              num_cases      = 0;
             long             min_case       = 0;

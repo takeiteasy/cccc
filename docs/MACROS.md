@@ -2215,7 +2215,9 @@ Returns `-1` if any field name in the chain is not found.
 
 #### `Serialize(type, expr, buf)` / `Deserialize(type, buf)`
 
-Build a block that flat-copies a struct into/out of a raw byte buffer:
+Build a block that copies a struct into a raw byte buffer, and an expression
+that rebuilds it from one. Both copy bytes member by member, so the buffer
+needs no particular alignment:
 
 ```c
 [[cccc::comptime]]
@@ -2230,7 +2232,9 @@ Node *deser(Node *buf) {
 
 V1 scope: scalars and flat structs (nested flat structs, bit-fields and the
 fields of anonymous struct/union members are copied; pointer-typed members are
-copied as raw pointer bytes).
+copied as raw pointer bytes). The buffer holds each member at its natural
+offset; padding is not written, and `Deserialize` zeroes the padding of the
+value it returns.
 
 #### `@serialize` / `@deserialize` attributes
 
