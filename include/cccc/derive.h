@@ -1246,6 +1246,364 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fn);
 }
 
+// ---- @owned / @clone / @destroy ---------------------------------------------
+// `char *s @owned` is a heap C string, `T *p @owned` a heap T and
+// `T *a @owned("n")` a heap array whose length is the integer member n of the
+// same struct. @clone deep-copies those members and @destroy frees them;
+// members without @owned are copied as they are. A struct pointee that itself
+// owns memory is cloned and destroyed through its own T_clone / T_destroy.
+
+@comptime(attribute("owned")) void __builtin_attr_owned(AttrTarget *target,
+                                                        ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0), "@owned applies to a struct member");
+    if (GetTypeKind(MemberType(AttrTargetMember(target))) != TK_PTR)
+        MacroErrorAt(MakeIntLiteral(0), "@owned applies to a pointer member");
+    if (VarargCount() > 1)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@owned takes at most one argument (the length member)");
+    if (VarargCount() == 1) {
+        const char *count = StringLiteralValue(VarargAt(0));
+        if (!count || !count[0])
+            MacroErrorAt(MakeIntLiteral(0),
+                         "@owned expects the length member's name as a string "
+                         "literal");
+    }
+}
+
+// Whether `ty` (a struct, or an array of them) has an @owned member.
+@comptime int __builtin_owned_has(Type *ty) {
+    int tk = GetTypeKind(ty);
+    if (tk == TK_ARRAY)
+        return __builtin_owned_has(TypeBase(ty));
+    if (tk != TK_STRUCT)
+        return 0;
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member *m = StructMemberAt(ty, i);
+        if (MemberHasAttr(m, "owned") || __builtin_owned_has(MemberType(m)))
+            return 1;
+    }
+    return 0;
+}
+
+// 1 when the pointee `pt` of an owned member is cloned/destroyed through its
+// own function (`out` receives its name), 0 when it is copied as plain bytes.
+@comptime int __builtin_owned_pointee_fn(char *out, Type *pt, const char *prefix,
+                                         const char *self_name,
+                                         const char *suffix, const char *attr,
+                                         const char *path) {
+    int tk = GetTypeKind(pt);
+    if (tk == TK_VOID)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to void; use a typed "
+                     "pointer",
+                     attr, path);
+    if (tk != TK_STRUCT)
+        return 0;
+    const char *pname = TypeName(pt);
+    bool        self  = pname && !strcmp(pname, self_name);
+    if (!self && !__builtin_owned_has(pt))
+        return 0;
+    if (!pname)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to an unnamed struct", attr,
+                     path);
+    __builtin_json_fn_name(out, prefix, pname, suffix);
+    if (!self && !FindGlobal(out))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' needs %s; put @clone and @destroy "
+                     "on '%s', declared before '%s'",
+                     attr, path, out, pname, self_name);
+    return 1;
+}
+
+// The length member `cname` of the struct `ty` that holds an @owned array.
+@comptime void __builtin_owned_count_check(Type *ty, const char *cname,
+                                           const char *attr, const char *path) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        if (!field || strcmp(field, cname))
+            continue;
+        int tk = GetTypeKind(MemberType(m));
+        if (tk != TK_CHAR && tk != TK_SHORT && tk != TK_INT && tk != TK_LONG)
+            MacroErrorAt(MakeIntLiteral(0),
+                         "%s: length member '%s' of '%s' is not an integer",
+                         attr, cname, path);
+        return;
+    }
+    MacroErrorAt(MakeIntLiteral(0), "%s: '%s' has no length member '%s'", attr,
+                 path, cname);
+}
+
+@comptime void __builtin_owned_require(const char *attr) {
+    if (!FindGlobal("malloc"))
+        MacroErrorAt(MakeIntLiteral(0), "%s needs #include <stdlib.h>", attr);
+}
+
+@comptime Node *__builtin_owned_loop(Node *i, int len, Node *body) {
+    return MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                   MakeBinary(NK_LT, i, MakeIntLiteral(len)),
+                   MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                   body);
+}
+
+// Frees the @owned members reachable from the struct lvalue `e` and sets them
+// to NULL, or only sets them to NULL when `null_only`.
+@comptime void __builtin_owned_release(Node *block, Type *ty, Node *e,
+                                       bool null_only, const char *prefix,
+                                       const char *self_name, const char *attr,
+                                       const char *path) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            if (GetTypeKind(fty) == TK_STRUCT)
+                __builtin_owned_release(block, fty, e, null_only, prefix,
+                                        self_name, attr, path);
+            continue;
+        }
+        char sub[256];
+        __builtin_derive_path(sub, path, ".");
+        strcat(sub, field);
+        if (!MemberHasAttr(m, "owned")) {
+            if (!__builtin_owned_has(fty))
+                continue;
+            Node *member = MakeMember(e, field);
+            if (GetTypeKind(fty) == TK_ARRAY) {
+                Node *idx  = MakeLocalVarUnique(GetType("int"));
+                Node *body = MakeBlock(NULL, 0);
+                __builtin_owned_release(body, TypeBase(fty),
+                                        MakeSubscript(member, idx), null_only,
+                                        prefix, self_name, attr, sub);
+                BlockAddStmt(block, __builtin_owned_loop(
+                                        idx, TypeArrayLen(fty), body));
+            } else {
+                __builtin_owned_release(block, fty, member, null_only, prefix,
+                                        self_name, attr, sub);
+            }
+            continue;
+        }
+
+        Node *p = MakeMember(e, field);
+        if (null_only) {
+            BlockAddStmt(block, Quote("$1 = 0;", p));
+            continue;
+        }
+        char fn[256];
+        int  deep =
+            __builtin_owned_pointee_fn(fn, TypeBase(MemberType(m)), prefix,
+                                       self_name, "_destroy", attr, sub);
+        char tmpl[512];
+        if (MemberAttrArgCount(m, "owned") == 1) {
+            const char *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
+            __builtin_owned_count_check(ty, cname, attr, sub);
+            Node *n = MakeMember(e, cname);
+            if (deep) {
+                strcpy(tmpl, "if ($1) { for (long i_ = 0; i_ < (long)$2; i_++) ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "(&$1[i_]); free((void *)$1); $1 = 0; }");
+                BlockAddStmt(block, Quote(tmpl, p, n));
+                continue;
+            }
+        } else if (deep) {
+            strcpy(tmpl, "if ($1) { ");
+            strcat(tmpl, fn);
+            strcat(tmpl, "($1); free((void *)$1); $1 = 0; }");
+            BlockAddStmt(block, Quote(tmpl, p));
+            continue;
+        }
+        BlockAddStmt(block, Quote("free((void *)$1); $1 = 0;", p));
+    }
+}
+
+// Deep-copies the @owned members of the struct lvalue `src` into `dst`, which
+// already holds a shallow copy with those pointers set to NULL. A failed
+// allocation sets `fail` and the remaining members are skipped.
+@comptime void __builtin_owned_copy(Node *block, Type *ty, Node *dst, Node *src,
+                                    Node *fail, const char *prefix,
+                                    const char *self_name, const char *attr,
+                                    const char *path) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            if (GetTypeKind(fty) == TK_STRUCT)
+                __builtin_owned_copy(block, fty, dst, src, fail, prefix,
+                                     self_name, attr, path);
+            continue;
+        }
+        char sub[256];
+        __builtin_derive_path(sub, path, ".");
+        strcat(sub, field);
+        if (!MemberHasAttr(m, "owned")) {
+            if (!__builtin_owned_has(fty))
+                continue;
+            Node *d = MakeMember(dst, field);
+            Node *s = MakeMember(src, field);
+            if (GetTypeKind(fty) == TK_ARRAY) {
+                Node *idx  = MakeLocalVarUnique(GetType("int"));
+                Node *body = MakeBlock(NULL, 0);
+                __builtin_owned_copy(body, TypeBase(fty), MakeSubscript(d, idx),
+                                     MakeSubscript(s, idx), fail, prefix,
+                                     self_name, attr, sub);
+                BlockAddStmt(block, __builtin_owned_loop(
+                                        idx, TypeArrayLen(fty), body));
+            } else {
+                __builtin_owned_copy(block, fty, d, s, fail, prefix, self_name,
+                                     attr, sub);
+            }
+            continue;
+        }
+
+        Node *d = MakeMember(dst, field);
+        Node *s = MakeMember(src, field);
+        char  fn[256];
+        char  dfn[256];
+        int   deep = __builtin_owned_pointee_fn(fn, TypeBase(fty), prefix,
+                                                self_name, "_clone", attr, sub);
+        if (deep)
+            __builtin_owned_pointee_fn(dfn, TypeBase(fty), prefix, self_name,
+                                       "_destroy", attr, sub);
+        char tmpl[768];
+        if (MemberAttrArgCount(m, "owned") == 1) {
+            const char *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
+            __builtin_owned_count_check(ty, cname, attr, sub);
+            Node *n = MakeMember(src, cname);
+            strcpy(tmpl,
+                   "if (!$3 && $2) { unsigned long n_ = $4 > 0 ? "
+                   "(unsigned long)$4 : 0; ");
+            if (deep) {
+                strcat(tmpl, "$1 = calloc(n_ ? n_ : 1, sizeof(*$2)); "
+                             "if (!$1) $3 = 1; else for (unsigned long i_ = 0; "
+                             "i_ < n_ && !$3; i_++) if (");
+                strcat(tmpl, fn);
+                strcat(tmpl, "(&$1[i_], &$2[i_])) $3 = 1; }");
+            } else {
+                strcat(tmpl, "$1 = malloc((n_ ? n_ : 1) * sizeof(*$2)); "
+                             "if (!$1) $3 = 1; else for (unsigned long i_ = 0; "
+                             "i_ < n_; i_++) $1[i_] = $2[i_]; }");
+            }
+            BlockAddStmt(block, Quote(tmpl, d, s, fail, n));
+        } else if (deep) {
+            strcpy(tmpl, "if (!$3 && $2) { $1 = calloc(1, sizeof(*$2)); "
+                         "if (!$1 || ");
+            strcat(tmpl, fn);
+            strcat(tmpl, "($1, $2)) $3 = 1; }");
+            BlockAddStmt(block, Quote(tmpl, d, s, fail));
+        } else if (GetTypeKind(TypeBase(fty)) == TK_CHAR) {
+            BlockAddStmt(
+                block,
+                Quote("if (!$3 && $2) { unsigned long n_ = 0; while ($2[n_]) "
+                      "n_++; $1 = malloc(n_ + 1); if (!$1) $3 = 1; else for "
+                      "(unsigned long i_ = 0; i_ <= n_; i_++) ((char "
+                      "*)$1)[i_] = $2[i_]; }",
+                      d, s, fail));
+        } else {
+            BlockAddStmt(block,
+                         Quote("if (!$3 && $2) { $1 = malloc(sizeof(*$2)); if "
+                               "(!$1) $3 = 1; else *$1 = *$2; }",
+                               d, s, fail));
+        }
+    }
+}
+
+// Publishes a prototype for fname unless the program already has one, so the
+// generated bodies can call it; MakeFunction then defines it with the
+// prototype's parameters.
+@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
+                                     const char *first_name, Type *second,
+                                     const char *second_name) {
+    if (FindGlobal(fname))
+        return;
+    Obj *proto = FunctionPrototype(fname, ret);
+    FunctionAddParam(proto, first_name, first);
+    if (second)
+        FunctionAddParam(proto, second_name, second);
+    PublishNode(proto);
+}
+
+// @destroy struct Foo {...}; publishes
+//   void Foo_destroy(struct Foo *self);
+// which frees the @owned members and sets them to NULL (self itself is not
+// freed), so a second call is harmless. @destroy("P") publishes P_Foo_destroy.
+@comptime(attribute("destroy")) void __builtin_attr_destroy(AttrTarget *target,
+                                                            ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@destroy");
+    const char *tname  = __builtin_attr_type_name(target, "@destroy");
+    const char *prefix = __builtin_attr_prefix_arg("@destroy");
+    __builtin_owned_require("@destroy");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_destroy");
+    __builtin_owned_proto(fname, GetType("void"), MakePointer(ty), "self", NULL,
+                          NULL);
+
+    Obj *fn = MakeFunction(fname, GetType("void"));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_owned_release(block, ty,
+                                MakeUnary(NK_DEREF, MakeParamRef(fn, "self")),
+                                false, prefix, tname, "@destroy", tname);
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// @clone struct Foo {...}; publishes
+//   int Foo_clone(struct Foo *out, const struct Foo *self);
+// which copies *self into *out, giving every @owned member its own copy of
+// the memory, and returns 0. If an allocation fails it frees what it already
+// made, returns 1 and leaves *out untouched. Needs @destroy on the same type.
+// @clone("P") publishes P_Foo_clone.
+@comptime(attribute("clone")) void __builtin_attr_clone(AttrTarget *target,
+                                                        ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@clone");
+    const char *tname  = __builtin_attr_type_name(target, "@clone");
+    const char *prefix = __builtin_attr_prefix_arg("@clone");
+    __builtin_owned_require("@clone");
+
+    char fname[256];
+    char dname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_clone");
+    __builtin_json_fn_name(dname, prefix, tname, "_destroy");
+    __builtin_owned_proto(dname, GetType("void"), MakePointer(ty), "self", NULL,
+                          NULL);
+    __builtin_owned_proto(fname, GetType("int"), MakePointer(ty), "out",
+                          MakePointer(MakeConst(ty)), "self");
+
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *r     = MakeLocalVarUnique(ty);
+        Node *fail  = MakeLocalVarUnique(GetType("int"));
+        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(r, self)));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(fail, MakeIntLiteral(0))));
+        __builtin_owned_release(block, ty, r, true, prefix, tname, "@clone",
+                                tname);
+        __builtin_owned_copy(block, ty, r, self, fail, prefix, tname, "@clone",
+                             tname);
+        Node *undo = MakeBlock(NULL, 0);
+        __builtin_owned_release(undo, ty, r, false, prefix, tname, "@clone",
+                                tname);
+        BlockAddStmt(undo, MakeReturn(MakeIntLiteral(1)));
+        BlockAddStmt(block, MakeIf(fail, undo, NULL));
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(
+                         MakeUnary(NK_DEREF, MakeParamRef(fn, "out")), r)));
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
 // ---- @compare ------------------------------------------------------------------
 
 // if (a < b) return -1; if (b < a) return 1; for every leaf, in declaration

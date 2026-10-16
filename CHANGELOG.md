@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@clone` and `@destroy` generate `T_clone` and `T_destroy` for a struct,
+  deep-copying and freeing the pointer members marked `@owned`. They need
+  `#include <stdlib.h>`. See `docs/DERIVE.md`.
 - Added: `@compare` generates `int T_compare(const T *a, const T *b)` for a
   struct, ordering by members in declaration order. See `docs/DERIVE.md`.
 - Added: `@bitflags` on an enum of power-of-two flags generates `T_set`,
