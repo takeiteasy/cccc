@@ -2031,7 +2031,7 @@ static void reflect_serialize_members(VirtualMachine *vm, Node *block, Type *ty,
 // types, copies each scalar/pointer leaf member at its natural offset
 // (recursing into nested flat structs); for scalar types, copies the whole
 // value in one memcpy. V1 placeholder: pointer-typed members are copied as
-// raw pointer bytes, not followed (TODO #<follow-up>: deep/pointer-aware
+// raw pointer bytes, not followed (TODO #1614: deep/pointer-aware
 // serialization).
 CC_BUILTIN(__builtin_ast_serialize, 3);
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
@@ -2061,7 +2061,7 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
 
 // Deserialize(ty, buf) — reinterpret `buf` (void*/char*) as a `ty` value:
 // *(ty*)buf. V1 placeholder: this is a cast+deref, so it inherits the host's
-// alignment requirements for `ty` (TODO #<follow-up>: field-by-field
+// alignment requirements for `ty` (TODO #1615: field-by-field
 // reconstruction if Serialize ever produces a packed/portable layout).
 CC_BUILTIN(__builtin_ast_deserialize, 2);
 Node *__builtin_ast_deserialize(Type *ty, Node *buf) {
