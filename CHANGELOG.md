@@ -13,6 +13,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   its stack in the VM, so the next test no longer runs on freed memory (a
   sporadic crash on macOS). Blocking calls such as `usleep` and `wait` now keep
   the calling thread's thread-local storage across the wait.
+- Fixed: a guest signal handler that runs right after a call returns no longer
+  replaces that call's result with the signal number.
 - Fixed: a `[[cccc::comptime]]` macro call is expanded in `case` labels
   (including ranges), enumerator values, `_Static_assert` conditions and
   file-scope array lengths. See `docs/MACROS.md`.
