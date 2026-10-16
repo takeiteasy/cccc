@@ -1432,6 +1432,11 @@ static const char *const derive_attr_names[] = {
     "from_json",
     "json_skip",
     "json_name",
+    "equals",
+    "hash",
+    "dump",
+    "equals_skip",
+    "dump_skip",
     NULL,
 };
 

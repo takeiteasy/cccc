@@ -31,6 +31,11 @@ int main(void) {
 | `@generate_constructor` | struct/union | `T T_create(<member>, ...)` |
 | `@to_json` | struct | `size_t T_to_json(const T *self, char *buf, size_t cap)` |
 | `@from_json` | struct | `int T_from_json(T *out, const char *json)` |
+| `@equals` | struct | `_Bool T_equals(const T *a, const T *b)` |
+| `@hash` | struct | `size_t T_hash(const T *self)` |
+| `@dump` | struct | `void T_dump(const T *self, FILE *out)` |
+| `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
+| `@dump_skip` | member | leaves the member out of `@dump` |
 | `@json_skip` | member | leaves the member out of `@to_json` / `@from_json` |
 | `@json_name("key")` | member | uses `key` as the member's JSON key |
 
@@ -182,6 +187,63 @@ read and written under the new key only. Two members with the same key
 `@json_name`, a key that is empty or longer than 127 bytes, or either attribute
 outside a struct member.
 
+
+## Equality, hashing and dumping
+
+`@equals`, `@hash` and `@dump` walk the members of a struct. Nested structs and
+anonymous structs are expanded in place, so the nested type needs no attribute
+of its own. A union target, an anonymous union member, or a named union member
+is a compile error.
+
+```c
+#include <cccc/derive.h>
+#include <stdio.h>
+
+typedef enum { RED, GREEN } Color;
+
+@equals
+@hash
+@dump
+struct Item {
+    int   id;
+    Color color;
+    char  name[8];
+    int   cache @equals_skip @dump_skip;
+};
+
+struct Item a = {1, GREEN, "ann", 0};
+struct Item b = {1, GREEN, "ann", 99};
+Item_equals(&a, &b);          // 1: cache is skipped
+Item_hash(&a) == Item_hash(&b); // 1
+Item_dump(&a, stdout);        // Item { id = 1, color = GREEN, name = "ann" }
+```
+
+A prefix names the functions `<prefix>_<Type>_equals` (likewise `_hash` and
+`_dump`): `@equals("app")` on `struct Pair` publishes `app_Pair_equals`.
+
+| Member | `@equals` / `@hash` | `@dump` |
+|---|---|---|
+| Integer, enum, `bool`, bit-field | Compared by value | Number; enum by name (the number when no constant matches); `true` / `false` |
+| `float`, `double`, `long double` | `==`; `-0.0` equals `0.0` | `%.17g` (`%Lg` for `long double`) |
+| Pointer | Address | `%p` |
+| `char[N]` | C string, at most `N` bytes | `"..."`, not escaped |
+| `T[N]` | Element-wise | `{ 1, 2 }` |
+| Struct | Member-wise | `Inner { b = 2 }` |
+
+Members are compared one at a time, so padding is ignored. A `NaN` member makes
+`T_equals` false, like `==`. `T_equals(a, b)` implies `T_hash(a) == T_hash(b)`;
+the hash is FNV-1a over the compared members, with a string hashed up to its
+first NUL.
+
+`@equals_skip` leaves a member out of both `@equals` and `@hash`, and
+`@dump_skip` out of `@dump`. Both go on struct members, take no arguments, and
+are a compile error anywhere else.
+
+Limitations: an array of arrays (`int grid[2][2]`) works on the VM but does not
+compile under `-c=native` yet ([#1631](https://todo.sr.ht/~takeiteasy/cccc/1631)).
+
+`@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
+(a missing include is a compile error that names it).
 
 ## Writing your own
 

@@ -42,5 +42,11 @@ int main(void) {
     app_Item_to_json(&it, buf, sizeof buf);
     if (strcmp(buf, "{\"label\":\"a\\tb\",\"on\":true,\"tags\":[7,8],\"nan\":null}"))
         return 4;
+
+    // A const struct is accepted.
+    const struct Point cp = {1, 2};
+    Point_to_json(&cp, buf, sizeof buf);
+    if (strcmp(buf, "{\"x\":1,\"y\":2}"))
+        return 5;
     return 42;
 }

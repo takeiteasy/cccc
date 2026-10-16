@@ -727,7 +727,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     __builtin_json_fn_name(fname, prefix, tname, "_to_json");
 
     Obj *fn = MakeFunction(fname, GetType("size_t"));
-    FunctionAddParam(fn, "self", MakePointer(ty));
+    FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
     FunctionAddParam(fn, "buf", MakePointer(GetType("char")));
     FunctionAddParam(fn, "cap", GetType("size_t"));
     WithFn(fn) {
@@ -782,6 +782,465 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                                   __builtin_json_addr(r))),
                    MakeReturn(MakeIntLiteral(1)), NULL));
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// ---- @equals / @hash / @dump
+// ------------------------------------------------- Each generates one function
+// that walks the members of a struct (nested and anonymous structs expanded in
+// place, a union is rejected). Member kinds, as in the JSON section plus 8
+// pointer.
+
+@comptime int __builtin_derive_kind(Type *ty) {
+    if (GetTypeKind(ty) == TK_PTR)
+        return 8;
+    return __builtin_json_kind(ty);
+}
+
+@comptime Type *__builtin_derive_struct_target(AttrTarget *target,
+                                               const char *attr) {
+    Type *ty = __builtin_attr_type_target(target, attr, false);
+    if (GetTypeKind(ty) == TK_UNION)
+        MacroErrorAt(MakeIntLiteral(0), "%s does not support unions", attr);
+    return ty;
+}
+
+// Flattens the members of `ty` (anonymous structs included) that do not carry
+// the member attribute `skip`; exprs[i] reads member i of `e`.
+@comptime void __builtin_derive_collect(Type *ty, Node *e, const char *attr,
+                                        const char *skip, const char **names,
+                                        Type **types, Node **exprs, int *n) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_UNION)
+                MacroErrorAt(MakeIntLiteral(0),
+                             "%s does not support an anonymous union member",
+                             attr);
+            if (tk == TK_STRUCT)
+                __builtin_derive_collect(fty, e, attr, skip, names, types,
+                                         exprs, n);
+            continue;
+        }
+        if (MemberHasAttr(m, skip))
+            continue;
+        if (*n >= 128)
+            MacroErrorAt(MakeIntLiteral(0), "%s supports at most 128 members",
+                         attr);
+        names[*n] = field;
+        types[*n] = fty;
+        exprs[*n] = MakeMember(e, field);
+        (*n)++;
+    }
+}
+
+@comptime void __builtin_derive_bad_member(const char *attr, const char *path) {
+    MacroErrorAt(MakeIntLiteral(0), "%s: member '%s' has an unsupported type",
+                 attr, path);
+}
+
+@comptime void __builtin_derive_path(char *out, const char *path,
+                                     const char *suffix) {
+    strcpy(out, path);
+    strcat(out, suffix);
+}
+
+@comptime void __builtin_derive_skip_target(AttrTarget *target,
+                                            const char *attr) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0), "%s applies to a struct member", attr);
+    if (VarargCount() != 0)
+        MacroErrorAt(MakeIntLiteral(0), "%s takes no arguments", attr);
+}
+
+// @equals_skip leaves a member out of @equals and @hash, @dump_skip out of
+// @dump: `int cache @equals_skip;`.
+@comptime(attribute("equals_skip")) void __builtin_attr_equals_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@equals_skip");
+}
+
+@comptime(attribute("dump_skip")) void __builtin_attr_dump_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@dump_skip");
+}
+
+// if (a != b) return 0; for every leaf. char[N] compares as a C string.
+@comptime void __builtin_equals_value(Node *block, Type *ty, Node *a, Node *b,
+                                      const char *path) {
+    int k = __builtin_derive_kind(ty);
+    if (k == 0)
+        __builtin_derive_bad_member("@equals", path);
+    if (k == 5) {
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *done = MakeLocalVarUnique(GetType("int"));
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(step, MakeIf(MakeBinary(NK_NE, MakeSubscript(a, i),
+                                             MakeSubscript(b, i)),
+                                  MakeReturn(MakeIntLiteral(0)), NULL));
+        BlockAddStmt(step,
+                     MakeIf(MakeUnary(NK_NOT, MakeSubscript(a, i)),
+                            MakeExprStmt(MakeAssign(done, MakeIntLiteral(1))),
+                            NULL));
+        Node *body = MakeBlock(NULL, 0);
+        BlockAddStmt(body, MakeIf(MakeUnary(NK_NOT, done), step, NULL));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(done, MakeIntLiteral(0))));
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (k == 6) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *body = MakeBlock(NULL, 0);
+        __builtin_equals_value(body, TypeBase(ty), MakeSubscript(a, i),
+                               MakeSubscript(b, i), elem);
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (k == 7) {
+        const char *names[128];
+        Type       *types[128];
+        Node       *ea[128];
+        Node       *eb[128];
+        int         n = 0;
+        int         m = 0;
+        __builtin_derive_collect(ty, a, "@equals", "equals_skip", names, types,
+                                 ea, &n);
+        __builtin_derive_collect(ty, b, "@equals", "equals_skip", names, types,
+                                 eb, &m);
+        for (int j = 0; j < n; j++) {
+            char sub[256];
+            __builtin_derive_path(sub, path, ".");
+            strcat(sub, names[j]);
+            __builtin_equals_value(block, types[j], ea[j], eb[j], sub);
+        }
+    } else {
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_NE, a, b),
+                                   MakeReturn(MakeIntLiteral(0)), NULL));
+    }
+}
+
+// h = (h ^ byte) * prime for the 8 bytes of `value` (an unsigned long long
+// expression): FNV-1a.
+@comptime void __builtin_hash_mix(Node *block, Node *h, Node *value) {
+    Type *u64 = GetType("unsigned long long");
+    Node *t   = MakeLocalVarUnique(u64);
+    Node *k   = MakeLocalVarUnique(GetType("int"));
+    BlockAddStmt(block, MakeExprStmt(MakeAssign(t, value)));
+    Node *byte = MakeBinary(
+        NK_BITAND,
+        MakeBinary(NK_SHR, t, MakeBinary(NK_MUL, k, MakeIntLiteral(8))),
+        MakeIntLiteral(255));
+    Node *step =
+        MakeAssign(h, MakeBinary(NK_MUL, MakeBinary(NK_BITXOR, h, byte),
+                                 MakeCast(MakeIntLiteral(1099511628211), u64)));
+    BlockAddStmt(
+        block, MakeFor(MakeExprStmt(MakeAssign(k, MakeIntLiteral(0))),
+                       MakeBinary(NK_LT, k, MakeIntLiteral(8)),
+                       MakeAssign(k, MakeBinary(NK_ADD, k, MakeIntLiteral(1))),
+                       MakeExprStmt(step)));
+}
+
+@comptime void __builtin_hash_value(Node *block, Node *h, Type *ty, Node *e,
+                                    const char *path) {
+    Type *u64 = GetType("unsigned long long");
+    int   k   = __builtin_derive_kind(ty);
+    if (k == 0)
+        __builtin_derive_bad_member("@hash", path);
+    if (k == 1 || k == 2 || k == 4 || k == 8) {
+        __builtin_hash_mix(block, h, MakeCast(e, u64));
+    } else if (k == 3) {
+        // x + 0.0 turns -0.0 into 0.0, which compares equal to it.
+        Node *d = MakeLocalVarUnique(GetType("double"));
+        Node *t = MakeLocalVarUnique(u64);
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(
+                         d, MakeBinary(NK_ADD, MakeCast(e, GetType("double")),
+                                       MakeFloatLiteral(0.0)))));
+        BlockAddStmt(block, MakeExprStmt(Memcpy(MakeUnary(NK_ADDR, t),
+                                                MakeUnary(NK_ADDR, d),
+                                                MakeIntLiteral(8))));
+        __builtin_hash_mix(block, h, t);
+    } else if (k == 5) {
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *done = MakeLocalVarUnique(GetType("int"));
+        Node *mix  = MakeBlock(NULL, 0);
+        __builtin_hash_mix(
+            mix, h,
+            MakeCast(MakeCast(MakeSubscript(e, i), GetType("unsigned char")),
+                     u64));
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(step,
+                     MakeIf(MakeUnary(NK_NOT, MakeSubscript(e, i)),
+                            MakeExprStmt(MakeAssign(done, MakeIntLiteral(1))),
+                            mix));
+        Node *body = MakeBlock(NULL, 0);
+        BlockAddStmt(body, MakeIf(MakeUnary(NK_NOT, done), step, NULL));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(done, MakeIntLiteral(0))));
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (k == 6) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("int"));
+        Node *body = MakeBlock(NULL, 0);
+        __builtin_hash_value(body, h, TypeBase(ty), MakeSubscript(e, i), elem);
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else {
+        const char *names[128];
+        Type       *types[128];
+        Node       *exprs[128];
+        int         n = 0;
+        __builtin_derive_collect(ty, e, "@hash", "equals_skip", names, types,
+                                 exprs, &n);
+        for (int j = 0; j < n; j++) {
+            char sub[256];
+            __builtin_derive_path(sub, path, ".");
+            strcat(sub, names[j]);
+            __builtin_hash_value(block, h, types[j], exprs[j], sub);
+        }
+    }
+}
+
+// @equals struct Foo {...}; publishes
+//   _Bool Foo_equals(const struct Foo *a, const struct Foo *b);
+// which compares the members one by one (padding is ignored): scalars and
+// pointers with ==, char[N] as a C string, other arrays element-wise, nested
+// structs member-wise. @equals("P") publishes P_Foo_equals.
+@comptime(attribute("equals")) void __builtin_attr_equals(AttrTarget *target,
+                                                          ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@equals");
+    const char *tname  = __builtin_attr_type_name(target, "@equals");
+    const char *prefix = __builtin_attr_prefix_arg("@equals");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_equals");
+
+    Obj *fn = MakeFunction(fname, GetType("_Bool"));
+    FunctionAddParam(fn, "a", MakePointer(MakeConst(ty)));
+    FunctionAddParam(fn, "b", MakePointer(MakeConst(ty)));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_equals_value(
+            block, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "a")),
+            MakeUnary(NK_DEREF, MakeParamRef(fn, "b")), tname);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(1)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// @hash struct Foo {...}; publishes
+//   size_t Foo_hash(const struct Foo *self);
+// an FNV-1a hash of the members @equals compares, so Foo_equals(a, b) implies
+// Foo_hash(a) == Foo_hash(b). @hash("P") publishes P_Foo_hash.
+@comptime(attribute("hash")) void __builtin_attr_hash(AttrTarget *target, ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@hash");
+    const char *tname  = __builtin_attr_type_name(target, "@hash");
+    const char *prefix = __builtin_attr_prefix_arg("@hash");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_hash");
+
+    // size_t is only declared once the program includes a header for it.
+    Type *size_ty =
+        FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+    Obj *fn = MakeFunction(fname, size_ty);
+    FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
+    WithFn(fn) {
+        Type *u64   = GetType("unsigned long long");
+        Node *block = MakeBlock(NULL, 0);
+        Node *h     = MakeLocalVarUnique(u64);
+        BlockAddStmt(
+            block,
+            MakeExprStmt(MakeAssign(
+                h, MakeCast(MakeIntLiteral(-3750763034362895579LL), u64))));
+        __builtin_hash_value(
+            block, h, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "self")), tname);
+        BlockAddStmt(block, MakeReturn(MakeCast(h, size_ty)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+@comptime void __builtin_dump_text(Node *block, Node *out, const char *text) {
+    BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                            "fputs", MakeStringLiteral(text), out)));
+}
+
+@comptime void __builtin_dump_printf1(Node *block, Node *out, const char *fmt,
+                                      Node *a) {
+    BlockAddStmt(block, MakeExprStmt(__builtin_json_call3(
+                            "fprintf", out, MakeStringLiteral(fmt), a)));
+}
+
+// fprintf(out, fmt, (T)e) through a temporary of type `ty`: the assignment
+// converts where -c=native drops a cast on a variadic argument.
+// TODO(#1632): pass MakeCast(e, ty) directly once the cast survives.
+@comptime Node *__builtin_dump_temp(Node *block, Type *ty, Node *e) {
+    Node *t = MakeLocalVarUnique(ty);
+    BlockAddStmt(block, MakeExprStmt(MakeAssign(t, e)));
+    return t;
+}
+
+// "%.<n>s": at most n bytes, stopping at a NUL. Written by hand so the handler
+// needs no stdio declarations.
+@comptime void __builtin_dump_string_format(char *out, int n) {
+    char digits[16];
+    int  len = 0;
+    do {
+        digits[len++]  = (char)('0' + n % 10);
+        n             /= 10;
+    } while (n > 0);
+    int pos    = 0;
+    out[pos++] = '%';
+    out[pos++] = '.';
+    while (len > 0)
+        out[pos++] = digits[--len];
+    out[pos++] = 's';
+    out[pos]   = 0;
+}
+
+@comptime void __builtin_dump_value(Node *block, Node *out, Type *ty, Node *e,
+                                    const char *tname, const char *path) {
+    int k = __builtin_derive_kind(ty);
+    if (k == 0)
+        __builtin_derive_bad_member("@dump", path);
+    if (k == 1 && GetTypeKind(ty) == TK_ENUM) {
+        // if (e == A) fputs("A"); else if ... else fprintf("%lld", e);
+        Node *v     = __builtin_dump_temp(block, GetType("long long"), e);
+        Node *chain = MakeBlock(NULL, 0);
+        __builtin_dump_printf1(chain, out, "%lld", v);
+        Node *tail = chain;
+        for (int i = EnumValueCount(ty) - 1; i >= 0; i--) {
+            Node *hit = MakeBlock(NULL, 0);
+            __builtin_dump_text(hit, out, EnumValueName(ty, i));
+            tail =
+                MakeIf(MakeBinary(NK_EQ, v, MakeIntLiteral(EnumValue(ty, i))),
+                       hit, tail);
+        }
+        BlockAddStmt(block, tail);
+    } else if (k == 1) {
+        __builtin_dump_printf1(
+            block, out, "%lld",
+            __builtin_dump_temp(block, GetType("long long"), e));
+    } else if (k == 2) {
+        __builtin_dump_printf1(
+            block, out, "%llu",
+            __builtin_dump_temp(block, GetType("unsigned long long"), e));
+    } else if (k == 3) {
+        if (GetTypeKind(ty) == TK_LDOUBLE)
+            __builtin_dump_printf1(block, out, "%Lg", e);
+        else
+            __builtin_dump_printf1(block, out, "%.17g",
+                                   MakeCast(e, GetType("double")));
+    } else if (k == 4) {
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "fputs",
+                                MakeCond(e, MakeStringLiteral("true"),
+                                         MakeStringLiteral("false")),
+                                out)));
+    } else if (k == 8) {
+        __builtin_dump_printf1(block, out, "%p",
+                               MakeCast(e, MakePointer(GetType("void"))));
+    } else if (k == 5) {
+        __builtin_dump_text(block, out, "\"");
+        char fmt[32];
+        __builtin_dump_string_format(fmt, TypeArrayLen(ty));
+        __builtin_dump_printf1(block, out, fmt, __builtin_json_charp(e));
+        __builtin_dump_text(block, out, "\"");
+    } else if (k == 6) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("int"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_dump_text(comma, out, ", ");
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        __builtin_dump_value(body, out, TypeBase(ty), MakeSubscript(e, i), NULL,
+                             elem);
+        __builtin_dump_text(block, out, "{ ");
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_dump_text(block, out, " }");
+    } else {
+        const char *names[128];
+        Type       *types[128];
+        Node       *exprs[128];
+        int         n = 0;
+        __builtin_derive_collect(ty, e, "@dump", "dump_skip", names, types,
+                                 exprs, &n);
+        const char *label = tname ? tname : TypeName(ty);
+        if (label && label[0]) {
+            __builtin_dump_text(block, out, label);
+            __builtin_dump_text(block, out, n ? " { " : " {");
+        } else {
+            __builtin_dump_text(block, out, n ? "{ " : "{");
+        }
+        for (int j = 0; j < n; j++) {
+            char sub[256];
+            __builtin_derive_path(sub, path, ".");
+            strcat(sub, names[j]);
+            char head[256];
+            strcpy(head, j ? ", " : "");
+            strcat(head, names[j]);
+            strcat(head, " = ");
+            __builtin_dump_text(block, out, head);
+            __builtin_dump_value(block, out, types[j], exprs[j], NULL, sub);
+        }
+        __builtin_dump_text(block, out, n ? " }" : "}");
+    }
+}
+
+// @dump struct Foo {...}; publishes
+//   void Foo_dump(const struct Foo *self, FILE *out);
+// which prints `Foo { a = 1, name = "x", in = Inner { b = 2 }, v = { 1, 2 } }`
+// to out. Enums print by name (the number when no constant matches), pointers
+// with %p. Needs #include <stdio.h>. @dump("P") publishes P_Foo_dump.
+@comptime(attribute("dump")) void __builtin_attr_dump(AttrTarget *target, ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@dump");
+    const char *tname  = __builtin_attr_type_name(target, "@dump");
+    const char *prefix = __builtin_attr_prefix_arg("@dump");
+    if (!FindType("FILE") || !FindGlobal("fprintf"))
+        MacroErrorAt(MakeIntLiteral(0), "@dump needs #include <stdio.h>");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_dump");
+
+    Obj *fn = MakeFunction(fname, GetType("void"));
+    FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
+    FunctionAddParam(fn, "out", MakePointer(GetType("FILE")));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_dump_value(block, MakeParamRef(fn, "out"), ty,
+                             MakeUnary(NK_DEREF, MakeParamRef(fn, "self")),
+                             tname, tname);
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);

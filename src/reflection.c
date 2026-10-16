@@ -1787,6 +1787,8 @@ Node *__builtin_ast_subscript(Node *arr, Node *idx) {
         Node *add = alloc_node(vm, ND_ADD);
         add->lhs  = ptr;
         add->rhs  = scaled;
+        // TODO(#1631): an array-of-array `ptr->ty` is spelled `int [2] *` by
+        // -c=native; it needs the pointer-to-array form `int (*)[2]`.
         add->ty   = ptr->ty; // pointer result type
         // Dereference: *(ptr + scaled)
         Node *deref = alloc_node(vm, ND_DEREF);

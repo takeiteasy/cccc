@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@equals`, `@hash` and `@dump` generate `T_equals`, `T_hash` and
+  `T_dump` for a struct, with `@equals_skip` and `@dump_skip` to leave members
+  out. `@dump` needs `#include <stdio.h>`. See `docs/DERIVE.md`.
 - Added: `@to_json` and `@from_json` generate `T_to_json` and `T_from_json` for
   a struct; they need `#include <cccc/json.h>` as well as `<cccc/derive.h>`.
   See `docs/DERIVE.md`.
