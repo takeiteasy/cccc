@@ -21,6 +21,7 @@
     X(std_assert_h, "assert.h", "include/assert.h", 0) \
     X(std_building_h, "building.h", "include/cccc/building.h", 0) \
     X(std_cccc_derive_h, "cccc/derive.h", "include/cccc/derive.h", 0) \
+    X(std_cccc_json_h, "cccc/json.h", "include/cccc/json.h", 0) \
     X(std_cccc_kernel_h, "cccc/kernel.h", "include/cccc/kernel.h", 0) \
     X(std_cccc_opencl_h, "cccc/opencl.h", "include/cccc/opencl.h", 0) \
     X(std_complex_h, "complex.h", "include/complex.h", 0) \

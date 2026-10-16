@@ -1156,6 +1156,9 @@ Node *__builtin_ast_cast(Node *expr, Type *target_type) {
     if (!vm || !expr || !target_type)
         return NULL;
 
+    // A MakeMember/MakeSubscript operand has no type until add_type runs.
+    add_type(vm, expr);
+
     Node *node = alloc_node(vm, ND_CAST);
     node->lhs  = expr;
     node->ty   = target_type;

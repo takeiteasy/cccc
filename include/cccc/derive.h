@@ -342,4 +342,400 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     __builtin_generate_constructor(ty, tname);
 }
 
+// ---- @to_json / @from_json ---------------------------------------------------
+// Both generate a function over a struct whose members are integers, floats,
+// bool, enums, char arrays (JSON strings), arrays of those, and nested structs
+// (expanded in place), and need #include <cccc/json.h>. The member kinds:
+//   1 signed integer / enum   2 unsigned integer   3 float   4 bool
+//   5 char[N] string          6 other array        7 struct   0 unsupported
+
+@comptime void __builtin_json_require(const char *attr) {
+    if (!FindGlobal("__cccc_json_w_init"))
+        MacroErrorAt(MakeIntLiteral(0), "%s needs #include <cccc/json.h>",
+                     attr);
+}
+
+@comptime int __builtin_json_kind(Type *ty) {
+    int tk = GetTypeKind(ty);
+    if (tk == TK_BOOL)
+        return 4;
+    if (tk == TK_ENUM)
+        return 1;
+    if (tk == TK_CHAR || tk == TK_SHORT || tk == TK_INT || tk == TK_LONG)
+        return TypeIsUnsigned(ty) ? 2 : 1;
+    if (tk == TK_FLOAT || tk == TK_DOUBLE || tk == TK_LDOUBLE)
+        return 3;
+    if (tk == TK_ARRAY)
+        return GetTypeKind(TypeBase(ty)) == TK_CHAR ? 5 : 6;
+    if (tk == TK_STRUCT)
+        return 7;
+    return 0;
+}
+
+@comptime Node *__builtin_json_call1(const char *fn, Node *a) {
+    Node *args[1] = {a};
+    return MakeFuncCall(MakeVarRef(fn), args, 1);
+}
+
+@comptime Node *__builtin_json_call2(const char *fn, Node *a, Node *b) {
+    Node *args[2] = {a, b};
+    return MakeFuncCall(MakeVarRef(fn), args, 2);
+}
+
+@comptime Node *__builtin_json_call3(const char *fn, Node *a, Node *b,
+                                     Node *c) {
+    Node *args[3] = {a, b, c};
+    return MakeFuncCall(MakeVarRef(fn), args, 3);
+}
+
+@comptime Node *__builtin_json_call4(const char *fn, Node *a, Node *b, Node *c,
+                                     Node *d) {
+    Node *args[4] = {a, b, c, d};
+    return MakeFuncCall(MakeVarRef(fn), args, 4);
+}
+
+@comptime Node *__builtin_json_addr(Node *x) {
+    return MakeUnary(NK_ADDR, x);
+}
+
+@comptime Node *__builtin_json_charp(Node *array) {
+    return MakeCast(MakeUnary(NK_ADDR, array),
+                    MakePointer(MakeConst(GetType("char"))));
+}
+
+@comptime void __builtin_json_put_ch(Node *block, Node *w, int c) {
+    BlockAddStmt(block,
+                 MakeExprStmt(__builtin_json_call2("__cccc_json_w_ch",
+                                                   __builtin_json_addr(w),
+                                                   MakeIntLiteral(c))));
+}
+
+// Return 1 from the generated function when `call` (an int-returning reader)
+// reports an error.
+@comptime void __builtin_json_fail_if(Node *block, Node *call) {
+    BlockAddStmt(block, MakeIf(call, MakeReturn(MakeIntLiteral(1)), NULL));
+}
+
+// Flattens the members of `ty` (anonymous struct members included) into
+// names/types/exprs, where exprs[i] reads member i of `e`.
+@comptime void __builtin_json_collect(Type *ty, Node *e, const char *attr,
+                                      const char **names, Type **types,
+                                      Node **exprs, int *n) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_UNION)
+                MacroErrorAt(MakeIntLiteral(0),
+                             "%s does not support an anonymous union member",
+                             attr);
+            if (tk == TK_STRUCT)
+                __builtin_json_collect(fty, e, attr, names, types, exprs, n);
+            continue;
+        }
+        if (*n >= 128)
+            MacroErrorAt(MakeIntLiteral(0), "%s supports at most 128 members",
+                         attr);
+        names[*n] = field;
+        types[*n] = fty;
+        exprs[*n] = MakeMember(e, field);
+        (*n)++;
+    }
+}
+
+@comptime void __builtin_json_write_value(Node *block, Node *w, Type *ty,
+                                          Node *e, const char *attr,
+                                          const char *path) {
+    int k = __builtin_json_kind(ty);
+    if (k == 0)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: member '%s' has a type JSON cannot represent", attr,
+                     path);
+    Node *wp = __builtin_json_addr(w);
+    if (k == 1) {
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_json_w_i64", wp,
+                                MakeCast(e, GetType("long long")))));
+    } else if (k == 2) {
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_json_w_u64", wp,
+                                MakeCast(e, GetType("unsigned long long")))));
+    } else if (k == 3) {
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_json_w_f64", wp,
+                                MakeCast(e, GetType("double")))));
+    } else if (k == 4) {
+        BlockAddStmt(block,
+                     MakeExprStmt(__builtin_json_call2(
+                         "__cccc_json_w_bool", wp, MakeCast(e, GetType("int")))));
+    } else if (k == 5) {
+        BlockAddStmt(block,
+                     MakeExprStmt(__builtin_json_call3(
+                         "__cccc_json_w_str", wp, __builtin_json_charp(e),
+                         MakeIntLiteral(TypeArrayLen(ty)))));
+    } else if (k == 6) {
+        char elem_path[256];
+        strcpy(elem_path, path);
+        strcat(elem_path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("int"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_json_put_ch(comma, w, ',');
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        __builtin_json_write_value(body, w, TypeBase(ty), MakeSubscript(e, i),
+                                   attr, elem_path);
+        __builtin_json_put_ch(block, w, '[');
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_json_put_ch(block, w, ']');
+    } else {
+        const char *names[128];
+        Type       *types[128];
+        Node       *exprs[128];
+        int         n = 0;
+        __builtin_json_collect(ty, e, attr, names, types, exprs, &n);
+        __builtin_json_put_ch(block, w, '{');
+        for (int j = 0; j < n; j++) {
+            char sub[256];
+            strcpy(sub, path);
+            strcat(sub, ".");
+            strcat(sub, names[j]);
+            if (j > 0)
+                __builtin_json_put_ch(block, w, ',');
+            BlockAddStmt(block,
+                         MakeExprStmt(__builtin_json_call2(
+                             "__cccc_json_w_key", __builtin_json_addr(w),
+                             MakeStringLiteral(names[j]))));
+            __builtin_json_write_value(block, w, types[j], exprs[j], attr, sub);
+        }
+        __builtin_json_put_ch(block, w, '}');
+    }
+}
+
+@comptime void __builtin_json_read_value(Node *block, Node *r, Type *ty,
+                                         Node *e, const char *attr,
+                                         const char *path) {
+    int k = __builtin_json_kind(ty);
+    if (k == 0)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: member '%s' has a type JSON cannot represent", attr,
+                     path);
+    Node *rp = __builtin_json_addr(r);
+    if (k >= 1 && k <= 4) {
+        const char *scalar = k == 1   ? "long long"
+                             : k == 2 ? "unsigned long long"
+                             : k == 3 ? "double"
+                                      : "int";
+        const char *reader = k == 1   ? "__cccc_json_r_int"
+                             : k == 2 ? "__cccc_json_r_uint"
+                             : k == 3 ? "__cccc_json_r_f64"
+                                      : "__cccc_json_r_bool";
+        Node *t = MakeLocalVarUnique(GetType(scalar));
+        Node *call = (k == 1 || k == 2)
+                         ? __builtin_json_call3(reader, rp,
+                                                __builtin_json_addr(t),
+                                                MakeIntLiteral(TypeSize(ty)))
+                         : __builtin_json_call2(reader, rp,
+                                                __builtin_json_addr(t));
+        __builtin_json_fail_if(block, call);
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(e, MakeCast(t, ty))));
+    } else if (k == 5) {
+        __builtin_json_fail_if(
+            block, __builtin_json_call3("__cccc_json_r_str", rp,
+                                        MakeCast(__builtin_json_addr(e),
+                                                 MakePointer(GetType("char"))),
+                                        MakeIntLiteral(TypeArrayLen(ty))));
+    } else if (k == 6) {
+        char elem_path[256];
+        strcpy(elem_path, path);
+        strcat(elem_path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("int"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_json_fail_if(
+            comma, __builtin_json_call2("__cccc_json_r_open",
+                                        __builtin_json_addr(r),
+                                        MakeIntLiteral(',')));
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        __builtin_json_read_value(body, r, TypeBase(ty), MakeSubscript(e, i),
+                                  attr, elem_path);
+        __builtin_json_fail_if(
+            block, __builtin_json_call2("__cccc_json_r_open",
+                                        __builtin_json_addr(r),
+                                        MakeIntLiteral('[')));
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_json_fail_if(
+            block, __builtin_json_call2("__cccc_json_r_open",
+                                        __builtin_json_addr(r),
+                                        MakeIntLiteral(']')));
+    } else {
+        const char *names[128];
+        Type       *types[128];
+        Node       *exprs[128];
+        int         n = 0;
+        __builtin_json_collect(ty, e, attr, names, types, exprs, &n);
+
+        Node *seen =
+            MakeLocalVarUnique(MakeArray(GetType("unsigned char"), n ? n : 1));
+        Node *key   = MakeLocalVarUnique(MakeArray(GetType("char"), 128));
+        Node *first = MakeLocalVarUnique(GetType("int"));
+        Node *next  = MakeLocalVarUnique(GetType("int"));
+        Node *uchar_p = MakePointer(GetType("unsigned char"));
+
+        __builtin_json_fail_if(
+            block, __builtin_json_call2("__cccc_json_r_open",
+                                        __builtin_json_addr(r),
+                                        MakeIntLiteral('{')));
+        BlockAddStmt(block,
+                     MakeExprStmt(__builtin_json_call2(
+                         "__cccc_json_zero",
+                         MakeCast(__builtin_json_addr(seen), uchar_p),
+                         MakeIntLiteral(n ? n : 1))));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(first, MakeIntLiteral(1))));
+
+        // if (key_is(key, "a")) {...} else if ... else if (r_skip(&r)) return 1;
+        Node *chain = MakeIf(__builtin_json_call1("__cccc_json_r_skip",
+                                                  __builtin_json_addr(r)),
+                             MakeReturn(MakeIntLiteral(1)), NULL);
+        for (int j = n - 1; j >= 0; j--) {
+            char sub[256];
+            strcpy(sub, path);
+            strcat(sub, ".");
+            strcat(sub, names[j]);
+            Node *member = MakeBlock(NULL, 0);
+            __builtin_json_read_value(member, r, types[j], exprs[j], attr, sub);
+            BlockAddStmt(member,
+                         MakeExprStmt(MakeAssign(
+                             MakeSubscript(seen, MakeIntLiteral(j)),
+                             MakeIntLiteral(1))));
+            Node *is_key = __builtin_json_call2(
+                "__cccc_json_key_is", __builtin_json_charp(key),
+                MakeStringLiteral(names[j]));
+            chain = MakeIf(is_key, member, chain);
+        }
+
+        Node *loop_cond = MakeBinary(
+            NK_LT, MakeIntLiteral(0),
+            MakeAssign(next, __builtin_json_call4(
+                                 "__cccc_json_r_key", __builtin_json_addr(r),
+                                 MakeCast(__builtin_json_addr(key),
+                                          MakePointer(GetType("char"))),
+                                 MakeIntLiteral(128),
+                                 __builtin_json_addr(first))));
+        BlockAddStmt(block, MakeWhile(loop_cond, chain));
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, next, MakeIntLiteral(0)),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(
+            block,
+            MakeIf(MakeUnary(NK_NOT,
+                             __builtin_json_call2(
+                                 "__cccc_json_all_set",
+                                 MakeCast(__builtin_json_addr(seen), uchar_p),
+                                 MakeIntLiteral(n ? n : 1))),
+                   MakeReturn(MakeIntLiteral(1)), NULL));
+    }
+}
+
+// <prefix>_<Type>_<suffix>, or <Type>_<suffix> when the prefix is empty.
+@comptime void __builtin_json_fn_name(char *out, const char *prefix,
+                                      const char *tname, const char *suffix) {
+    out[0] = 0;
+    if (prefix[0]) {
+        strcpy(out, prefix);
+        strcat(out, "_");
+    }
+    strcat(out, tname);
+    strcat(out, suffix);
+}
+
+// @to_json struct Foo {...}; publishes
+//   size_t Foo_to_json(const struct Foo *self, char *buf, size_t cap);
+// which writes the struct as a JSON object and returns the length it needs
+// (snprintf style: buf is always NUL-terminated when cap > 0).
+// @to_json("P") publishes P_Foo_to_json.
+@comptime(attribute("to_json")) void __builtin_attr_to_json(AttrTarget *target,
+                                                            ...) {
+    Type *ty = __builtin_attr_type_target(target, "@to_json", false);
+    if (GetTypeKind(ty) == TK_UNION)
+        MacroErrorAt(MakeIntLiteral(0), "@to_json does not support unions");
+    const char *tname  = __builtin_attr_type_name(target, "@to_json");
+    const char *prefix = __builtin_attr_prefix_arg("@to_json");
+    __builtin_json_require("@to_json");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_to_json");
+
+    Obj *fn = MakeFunction(fname, GetType("size_t"));
+    FunctionAddParam(fn, "self", MakePointer(ty));
+    FunctionAddParam(fn, "buf", MakePointer(GetType("char")));
+    FunctionAddParam(fn, "cap", GetType("size_t"));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *w     = MakeLocalVarUnique(GetType("__cccc_json_w"));
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call3(
+                                "__cccc_json_w_init", __builtin_json_addr(w),
+                                MakeParamRef(fn, "buf"),
+                                MakeParamRef(fn, "cap"))));
+        Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        __builtin_json_write_value(block, w, ty, self, "@to_json", tname);
+        BlockAddStmt(block, MakeReturn(__builtin_json_call1(
+                                "__cccc_json_w_end", __builtin_json_addr(w))));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// @from_json struct Foo {...}; publishes
+//   int Foo_from_json(struct Foo *out, const char *json);
+// which reads a JSON object into *out and returns 0, or nonzero on malformed
+// input, a missing or mistyped member, or a value that does not fit.
+// Members the struct lacks are skipped. @from_json("P") publishes
+// P_Foo_from_json.
+@comptime(attribute("from_json")) void __builtin_attr_from_json(
+    AttrTarget *target, ...) {
+    Type *ty = __builtin_attr_type_target(target, "@from_json", false);
+    if (GetTypeKind(ty) == TK_UNION)
+        MacroErrorAt(MakeIntLiteral(0), "@from_json does not support unions");
+    const char *tname  = __builtin_attr_type_name(target, "@from_json");
+    const char *prefix = __builtin_attr_prefix_arg("@from_json");
+    __builtin_json_require("@from_json");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_from_json");
+
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    FunctionAddParam(fn, "out", MakePointer(ty));
+    FunctionAddParam(fn, "json", MakePointer(MakeConst(GetType("char"))));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *r     = MakeLocalVarUnique(GetType("__cccc_json_r"));
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_json_r_init", __builtin_json_addr(r),
+                                MakeParamRef(fn, "json"))));
+        Node *out = MakeUnary(NK_DEREF, MakeParamRef(fn, "out"));
+        __builtin_json_read_value(block, r, ty, out, "@from_json", tname);
+        BlockAddStmt(
+            block,
+            MakeIf(MakeUnary(NK_NOT,
+                             __builtin_json_call1("__cccc_json_r_at_end",
+                                                  __builtin_json_addr(r))),
+                   MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
 #endif // CCCC_DERIVE_H

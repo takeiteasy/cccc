@@ -1419,9 +1419,17 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 // used to hint at the missing #include when one is used without it. Keep in
 // sync with that header (tests/host/test_derive_attr_list.c checks it).
 static const char *const derive_attr_names[] = {
-    "serialize",          "deserialize",          "enum_to_string",
-    "enum_from_string",   "generate_getters",     "generate_setters",
-    "generate_accessors", "generate_constructor", NULL,
+    "serialize",
+    "deserialize",
+    "enum_to_string",
+    "enum_from_string",
+    "generate_getters",
+    "generate_setters",
+    "generate_accessors",
+    "generate_constructor",
+    "to_json",
+    "from_json",
+    NULL,
 };
 
 const char *const *derive_builtin_attr_names(void) {

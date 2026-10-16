@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@to_json` and `@from_json` generate `T_to_json` and `T_from_json` for
+  a struct; they need `#include <cccc/json.h>` as well as `<cccc/derive.h>`.
+  See `docs/DERIVE.md`.
+- Changed: the built-in attributes (`@serialize`, `@deserialize`,
+  `@enum_to_string`, `@enum_from_string`, `@generate_*`) need
+  `#include <cccc/derive.h>`; without it they are a compile error that names
+  the header.
+- Fixed: a comptime-generated function can call a `static` function of the
+  program.
+- Fixed: `MakeCast` on a `MakeMember` or `MakeSubscript` node crashed the
+  compiler.
+
 ## [0.11.1] - 2026-10-16
 
 - Fixed: `switch (f(x))` with a function call as the controlling expression

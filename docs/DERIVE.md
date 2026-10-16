@@ -29,6 +29,8 @@ int main(void) {
 | `@generate_setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
 | `@generate_accessors` | struct/union | getters and setters |
 | `@generate_constructor` | struct/union | `T T_create(<member>, ...)` |
+| `@to_json` | struct | `size_t T_to_json(const T *self, char *buf, size_t cap)` |
+| `@from_json` | struct | `int T_from_json(T *out, const char *json)` |
 
 Every attribute accepts both `struct T {...};` and `typedef ... T;`. Applying
 one to the wrong kind of type (an enum attribute on a struct, say) is a compile
@@ -106,6 +108,54 @@ struct/union members are flattened into the parameter list:
 struct Point { int x; int y; };
 // struct Point Point_create(int x, int y);
 ```
+
+## JSON
+
+`@to_json` and `@from_json` also need `#include <cccc/json.h>`, the runtime the
+generated functions call (a missing include is a compile error that names it).
+
+```c
+#include <cccc/derive.h>
+#include <cccc/json.h>
+
+@to_json
+@from_json
+typedef struct { int id; char name[16]; double scores[2]; } User;
+
+User  u = {7, "ann", {1.5, 2}};
+char  buf[128];
+size_t n = User_to_json(&u, buf, sizeof buf);
+// buf: {"id":7,"name":"ann","scores":[1.5,2]}
+
+User v;
+if (User_from_json(&v, buf) != 0) { /* malformed or mismatched */ }
+```
+
+`T_to_json` returns the length the whole output needs, like `snprintf`: the
+buffer is always NUL-terminated when `cap > 0`, and `cap == 0` only measures.
+`T_from_json` returns 0 on success and nonzero otherwise.
+
+| Member | JSON |
+|---|---|
+| Integers, enums | Number (an enum is its numeric value) |
+| `float`, `double` | Number; NaN and infinities are written as `null` |
+| `bool` | `true` / `false` |
+| `char[N]` | String, escaped; reading fails if it does not fit |
+| `T[N]` | Array; reading requires exactly `N` elements |
+| Struct, anonymous struct | Object, expanded in place |
+
+A pointer or union member, or a union target, is a compile error that names
+the member (`Outer.inner.name`).
+
+Reading is strict: every member must be present with the right type, a number
+must fit the member (`256` does not fit an `unsigned char`), and anything after
+the closing `}` is an error. Members the struct does not have are skipped, in
+any order. Doubles are written with 17 significant digits, so `0.1` comes back
+as `0.10000000000000001`.
+
+A prefix names the functions `<prefix>_<Type>_to_json` and
+`<prefix>_<Type>_from_json`: `@to_json("app")` on `struct Pair` publishes
+`app_Pair_to_json`.
 
 ## Writing your own
 
