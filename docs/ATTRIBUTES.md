@@ -1177,7 +1177,9 @@ functions, and globals) and on members of file-scope structs and unions. Their
 arguments are parsed as expression AST nodes and passed to the registered
 handler after the decorated target has been built; the handler reads them with
 `StringLiteralValue` and `ConstIntValue` ([MACROS.md](MACROS.md#custom-attributes)). Member attributes are
-described in [MACROS.md](MACROS.md#member-attributes).
+described in [MACROS.md](MACROS.md#member-attributes). An `@name` with no
+registered handler is dropped with a `-Wunknown-attributes` warning, which is
+on by default ([WARNINGS.md](WARNINGS.md)).
 `__declspec` (Windows) is reserved as a future fourth fallback category.
 
 ## Position in Grammar

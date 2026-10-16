@@ -4244,9 +4244,12 @@ static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
     Token *new_toks =
         tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     Token *last = new_toks;
-    while (last->next && last->next->kind != TK_EOF)
-        last = last->next;
-    last->next = kw->next;
+    while (last->next && last->next->kind != TK_EOF) {
+        last->src_site = kw;
+        last           = last->next;
+    }
+    last->src_site = kw;
+    last->next     = kw->next;
     *tok_ptr   = new_toks;
     return true;
 }
@@ -4319,9 +4322,12 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
         tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     // Strip trailing TK_EOF and splice new tokens before `after`.
     Token *last = new_toks;
-    while (last->next && last->next->kind != TK_EOF)
-        last = last->next;
-    last->next = after;
+    while (last->next && last->next->kind != TK_EOF) {
+        last->src_site = name_tok;
+        last           = last->next;
+    }
+    last->src_site = name_tok;
+    last->next     = after;
 
     *tok_ptr   = new_toks;
     return true;

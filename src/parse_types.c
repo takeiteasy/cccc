@@ -2494,6 +2494,13 @@ static void error_if_derive_attr_not_included(VirtualMachine *vm, Token *name) {
                   name->len, name->loc);
 }
 
+// An unknown @name is its own on-by-default category; the other spellings
+// stay under -Wattributes.
+static CCCCWarning unknown_attr_warning(Token *name_tok) {
+    return name_tok->src_site ? CCCC_WARN_UNKNOWN_ATTRIBUTES
+                              : CCCC_WARN_ATTRIBUTES;
+}
+
 static bool is_opencl_hint_attr(VirtualMachine *vm, Token *tok) {
     return vm->compiler.opencl &&
            (equal(tok, "reqd_work_group_size") ||
@@ -3048,7 +3055,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 if (!vm->compiler.in_type_lookahead &&
                     !is_opencl_hint_attr(vm, name_tok) &&
                     !cc_has_attribute(name_tok->loc, name_tok->len))
-                    warn_tok(vm, name_tok, CCCC_WARN_ATTRIBUTES,
+                    warn_tok(vm, name_tok, unknown_attr_warning(name_tok),
                              "unknown attribute '%.*s' ignored", name_tok->len,
                              name_tok->loc);
 
@@ -3488,7 +3495,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                        !(gnu_scoped &&
                          cc_has_attribute(name_tok->loc, name_tok->len))) {
                 error_if_derive_attr_not_included(vm, name_tok);
-                warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
+                warn_tok(vm, attr_tok, unknown_attr_warning(name_tok),
                          "unknown attribute '%.*s' ignored",
                          (cccc_scoped || gnu_scoped) ? name_tok->len
                                                      : attr_tok->len,

@@ -1486,7 +1486,7 @@ int main(int argc, const char *argv[]) {
                           //   the system compiler.)
     int      max_errors         = 20; // --max-errors (default: 20)
     int      warnings_as_errors = 0;  // -Werror / --Werror
-    uint64_t warnings           = 0;
+    uint64_t warnings           = CCCC_WARN_UNKNOWN_ATTRIBUTES;
     uint64_t warning_errors     = 0;
     uint64_t warning_no_errors  = 0;
     uint64_t warning_sticky_errors =

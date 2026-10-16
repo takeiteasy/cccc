@@ -69,6 +69,7 @@ static const WarningInfo warning_infos[] = {
     {"comptime-block-leak", CCCC_WARN_COMPTIME_BLOCK_LEAK, false},
     {"ignored-features", CCCC_WARN_IGNORED_FEATURES, false},
     {"attributes", CCCC_WARN_ATTRIBUTES, false},
+    {"unknown-attributes", CCCC_WARN_UNKNOWN_ATTRIBUTES, false},
     {"nodiscard", CCCC_WARN_NODISCARD, false},
     {"fallthrough", CCCC_WARN_FALLTHROUGH, false},
     {"static-array-size", CCCC_WARN_STATIC_ARRAY_SIZE, false},
@@ -527,18 +528,24 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
     exit(1);
 }
 
+// The token a diagnostic reports its location at.
+static Token *diag_site(Token *tok) {
+    return tok && tok->src_site ? tok->src_site : tok;
+}
+
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int             line_no = tok_line_no(tok);
-    int             col_no  = tok_col_no(tok);
+    Token          *site    = diag_site(tok);
+    int             line_no = tok_line_no(site);
+    int             col_no  = tok_col_no(site);
 
     ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
+    verror_at(vm, site->file->name, site->file->contents, line_no, site->loc,
               chain, fmt, ap);
     va_end(ap);
 
-    collect_compile_error(vm, tok->file->name, line_no, col_no);
+    collect_compile_error(vm, site->file->name, line_no, col_no);
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
@@ -551,17 +558,18 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
 // Returns true if parsing should continue with recovery, false if max errors
 // hit
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
-    int             line_no = tok_line_no(tok);
-    int             col_no  = tok_col_no(tok);
+    Token          *site    = diag_site(tok);
+    int             line_no = tok_line_no(site);
+    int             col_no  = tok_col_no(site);
 
     ExpansionFrame *chain   = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    verror_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
+    verror_at(vm, site->file->name, site->file->contents, line_no, site->loc,
               chain, fmt, ap);
     va_end(ap);
 
-    if (collect_compile_error(vm, tok->file->name, line_no, col_no)) {
+    if (collect_compile_error(vm, site->file->name, line_no, col_no)) {
         // Check if we've hit max errors
         if (vm->max_errors > 0 && vm->error_count >= vm->max_errors) {
             // Too many errors, bail out
@@ -597,8 +605,9 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
     if (!vm || !(eff_warnings & mask))
         return;
 
-    int         line_no   = tok_line_no(tok);
-    int         col_no    = tok_col_no(tok);
+    Token      *site      = diag_site(tok);
+    int         line_no   = tok_line_no(site);
+    int         col_no    = tok_col_no(site);
 
     const char *warn_name = cccc_warning_name(category);
     bool        is_error =
@@ -608,8 +617,9 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
     ExpansionFrame *chain = resolve_expansion_chain(vm, tok);
     va_list         ap;
     va_start(ap, fmt);
-    vdiagnostic_at(vm, tok->file->name, tok->file->contents, line_no, tok->loc,
-                   is_error ? "error" : "warning", warn_name, chain, fmt, ap);
+    vdiagnostic_at(vm, site->file->name, site->file->contents, line_no,
+                   site->loc, is_error ? "error" : "warning", warn_name, chain,
+                   fmt, ap);
     va_end(ap);
 
     // If error_jmp_buf is set but collect_errors is false, print the warning
@@ -627,7 +637,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
             CompileError *err =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
             err->message   = vm->error_message;
-            err->filename  = tok->file->name;
+            err->filename  = site->file->name;
             err->line_no   = line_no;
             err->col_no    = col_no;
             err->severity  = 0; // error (not warning)
@@ -659,7 +669,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
         CompileError *err =
             arena_alloc(&vm->compiler.parser_arena, sizeof(CompileError));
         err->message   = vm->error_message;
-        err->filename  = tok->file->name;
+        err->filename  = site->file->name;
         err->line_no   = line_no;
         err->col_no    = col_no;
         err->severity  = 1; // warning

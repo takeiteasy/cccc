@@ -985,14 +985,15 @@ typedef enum {
         (1ULL << 24), // const/volatile/restrict discarded in pointer assignment
 
     // Ticket #410: lower-priority / safety-overlap flags
-    CCCC_WARN_NULL_DEREFERENCE =
-        (1ULL << 25), // no-op; runtime safety covers at -S2/-S3
-    CCCC_WARN_RESTRICT = (1ULL << 26), // no-op; runtime safety covers
-    CCCC_WARN_ARRAY_BOUNDS =
-        (1ULL << 27), // no-op; runtime safety covers at -S2/-S3
-    CCCC_WARN_STRINGOP_OVERFLOW = (1ULL << 28), // no-op; runtime safety covers
-    CCCC_WARN_STRINGOP_TRUNCATION =
-        (1ULL << 29),                           // no-op; runtime safety covers
+    // The five names below are accepted but never emitted (runtime safety
+    // covers them at -S2/-S3), so they share one bit.
+    CCCC_WARN_NULL_DEREFERENCE    = (1ULL << 25),
+    CCCC_WARN_RESTRICT            = CCCC_WARN_NULL_DEREFERENCE,
+    CCCC_WARN_ARRAY_BOUNDS        = CCCC_WARN_NULL_DEREFERENCE,
+    CCCC_WARN_STRINGOP_OVERFLOW   = CCCC_WARN_NULL_DEREFERENCE,
+    CCCC_WARN_STRINGOP_TRUNCATION = CCCC_WARN_NULL_DEREFERENCE,
+    // An unregistered @name attribute (on by default)
+    CCCC_WARN_UNKNOWN_ATTRIBUTES  = (1ULL << 26),
     CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
     CCCC_WARN_DUPLICATED_COND =
         (1ULL << 31), // same condition repeated in if/else-if chain
@@ -1308,6 +1309,9 @@ typedef struct Token {
     Hideset *hideset;    // For macro expansion
     struct Token
         *origin;         // If this is expanded from a macro, the original token
+    struct Token *src_site; // Token synthesized from source text (an @name
+                            // rewritten to an attribute): the source token
+                            // diagnostics point at
 
     // Effective diagnostic state stamped by the preprocessor.
     // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask

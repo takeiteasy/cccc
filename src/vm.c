@@ -1188,7 +1188,7 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.tail_calls            = true;
 
     vm->compiler.macro_recursion_limit = 256;
-    vm->compiler.warnings              = 0;
+    vm->compiler.warnings              = CCCC_WARN_UNKNOWN_ATTRIBUTES;
     vm->compiler.warning_errors        = 0;
     vm->compiler.warning_no_errors     = 0;
 
