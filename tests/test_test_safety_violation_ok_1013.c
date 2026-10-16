@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing --uninitialized-detection
-// CCCC_EXPECT_STDOUT: ok 1 -
+// CCCC_EXPECT_STDOUT: ^ok 1 -
 // CCCC_REJECT_STDOUT: not ok
 //
 // Positive control for #1013: a clean, fully-initialized [[cccc::test]]

@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_EXPECT_STDOUT: ok 1 - add_works
+// CCCC_EXPECT_STDOUT: ^ok 1 - add_works
 // Not run natively: this file defines its own main(), which --testing=native
 // (the native pass for a --testing test) always
 // rejects -- the generated harness supplies its own main() (src/main.c);

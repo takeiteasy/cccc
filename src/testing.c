@@ -69,6 +69,22 @@ static void handle_alarm(int sig) {
     longjmp(s_run->jmp, 2); // 2 = timeout sentinel
 }
 
+// Stops the guest threads test `epoch` started and never joined: a thread
+// that keeps running would write into later tests' state, and a spinning one
+// would hold the GIL against them. Returns how many are still blocked after
+// the grace period; those exit as soon as they wake.
+static int abandon_test_threads(VirtualMachine *vm, unsigned epoch) {
+    if (!vm->test_threads)
+        return 0;
+    __atomic_store_n(&vm->abandon_epoch, epoch, __ATOMIC_SEQ_CST);
+    _cccc_any_pending = 1;
+    cccc_gil_acquire(vm);
+    int blocked = cccc_pthread_reap_abandoned(vm, epoch, 200);
+    __atomic_store_n(&vm->abandon_epoch, 0, __ATOMIC_SEQ_CST);
+    cccc_gil_release(vm);
+    return blocked;
+}
+
 // First failure wins: later ones (e.g. main failing after a worker did) write
 // to a throwaway buffer.
 static char *fail_slot(void) {
@@ -1807,7 +1823,8 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
         CcUnwindPoint unwind;
         cccc_unwind_point_save(vm, &unwind);
-        int jval = setjmp(run.jmp);
+        vm->thread_epoch = (unsigned)test_num;
+        int jval         = setjmp(run.jmp);
         if (jval != 0)
             cccc_unwind_point_restore(vm, &unwind);
         if (jval == 0) {
@@ -1840,6 +1857,15 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 
         SET_TIMEOUT(0);
+
+        // Before teardown hooks: their cc_run_at would wait on a spinning
+        // worker.
+        int  blocked_threads  = 0;
+        bool threads_abandoned = false;
+        if (jval != 0 || run.failed) {
+            blocked_threads = abandon_test_threads(vm, (unsigned)test_num);
+            threads_abandoned = true;
+        }
 
         // Restore stdout/stderr and drain captured output.
 #ifdef _POSIX_VERSION
@@ -1993,6 +2019,16 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         free(captured_stdout);
         free(captured_stderr);
 #endif
+
+        // A failure found after the body (teardown, return value, output).
+        if ((run.failed || run.timed_out) && !threads_abandoned)
+            blocked_threads = abandon_test_threads(vm, (unsigned)test_num);
+        vm->thread_epoch = 0;
+        if (blocked_threads)
+            fprintf(stderr,
+                    "# test %d: %d guest thread(s) still blocked; they end "
+                    "when they wake\n",
+                    test_num, blocked_threads);
 
         if (run.timed_out) {
             emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first,

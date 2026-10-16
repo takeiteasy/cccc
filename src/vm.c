@@ -595,6 +595,18 @@ dispatch:
     if (__builtin_expect(_cccc_any_pending != 0, 0)) {
         _cccc_any_pending   = 0;
         bool _still_pending = false;
+        /* #1585: a thread of an abandoned test ends here. While one is being
+           reaped every other thread keeps the request alive, in case the
+           thread it is aimed at runs next. */
+        if (__builtin_expect(vm->abandon_epoch != 0, 0)) {
+            if (cccc_pthread_should_abandon(vm)) {
+                cccc_thread_exit_begin();
+                vm->regs[REG_A0] = 0;
+                vm->pc           = CCCC_INVALID_PC;
+                return 0;
+            }
+            _still_pending = true;
+        }
         if (__builtin_expect(_cccc_watch_pending != 0, 0)) {
             _cccc_watch_pending = 0;
             cc_watch_apply(vm);
@@ -1452,7 +1464,8 @@ void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
 }
 
 void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
-    cccc_gil_release_to(vm, p->gil_depth);
+    if (gil_depth_of_caller(vm) > p->gil_depth)
+        cccc_pthread_main_unwinding(vm);
     vm->flags                     = p->flags;
     vm->dbg.single_step           = p->single_step;
     vm->dbg.step_over             = p->step_over;
@@ -1462,6 +1475,8 @@ void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
     vm->dbg.debugger_attached     = p->debugger_attached;
     cc_running_vm                 = NULL;
     cccc_ffi_vm_reset();
+    // Last: another thread may run as soon as the GIL is free.
+    cccc_gil_release_to(vm, p->gil_depth);
 }
 
 void cc_destroy(VirtualMachine *vm) {

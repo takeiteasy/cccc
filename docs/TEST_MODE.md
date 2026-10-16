@@ -309,6 +309,19 @@ with one following directive (`// EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2`). A
 on exit 0 or 42. A `--testing` or `--build` test with `CCCC_EXPECT_STDERR`
 may exit non-zero.[^regex]
 
+Two rules keep a `--testing` file from passing on the wrong line:
+
+- An `ok` pattern is written `^ok 2 - name`. An unanchored `ok 2 - name` also
+  matches inside `not ok 2 - name`, so `testcheck` rejects it.
+- Every failure line (`not ok`, `✗`, a JSON `"status":"fail"` or
+  `"timeout"`) must match some `CCCC_EXPECT_STDOUT` / `CCCC_EXPECT_STDERR`
+  pattern. A file that expects `not ok 1 - fails` needs a line saying so:
+
+```c
+// CCCC_EXPECT_STDERR: ^not ok 1 - fails
+// CCCC_EXPECT_STDERR: ^ok 2 - after
+```
+
 [^regex]: Patterns are POSIX extended regular expressions. `\s \S \d \w \n \t`
     work inside and outside brackets, `(?:...)` is accepted, and `[\s\S]`
     means any character. Stdout patterns match with `.` crossing newlines and
@@ -670,6 +683,7 @@ A failed `Assert*` ends the test wherever it runs; later tests are unaffected.
 | Test function or a function it calls | Test stops at the assert and reports `not ok`. |
 | Callback invoked by a host function (a `qsort` comparator, `bsearch`, `scandir`) | Same. Debugger flags, GIL and VM state are restored for the next test. |
 | Thread started with `pthread_create` / `thrd_create` | That thread ends as if it called `pthread_exit` (its TSS destructors run). The test reports `not ok` once the test function returns. |
+| Threads still running when a test fails or times out | They end at their next instruction, or as soon as they wake from a blocking call, without running TSS destructors. See [Threads left behind](#threads-left-behind). |
 | Callback on such a thread (a `qsort` comparator) | The whole thread ends, not just the callback; code after the `qsort` call never runs. `pthread_exit` / `thrd_exit` inside a callback behaves the same. |
 | Body of an `exit_code =` test | Test reports `not ok` with the assert's message. |
 
@@ -691,10 +705,15 @@ void both_fail(void) {
 }
 ```
 
-Limitations:
+### Threads left behind
 
-- Workers a test leaves running after it fails or times out keep running
-  (#1585).
+A test that fails or times out stops the threads it started and did not join.
+They never run again, so they cannot write into later tests' state or hold the
+interpreter lock against them. A thread blocked for good (on a condition
+nobody signals) cannot be stopped; the harness waits up to 200 ms, prints
+`# test N: K guest thread(s) still blocked; they end when they wake` and moves
+on. Threads of a passing test, and threads started by `once` setup hooks, are
+left alone.
 
 ## Setup and Teardown
 

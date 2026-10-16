@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --testing --test-timeout=1
 // CCCC_EXPECT_STDERR: ^ok 2 - code3
+// CCCC_EXPECT_STDERR: ^not ok 1 - hangs # TIMEOUT
 // An exit_code= test still runs after an earlier test timed out.
 [[cccc::test]]
 void hangs(void) {

@@ -1483,6 +1483,12 @@ void register_posix_wordexp_functions(VirtualMachine *vm);
 void register_pthread_functions(VirtualMachine *vm);
 void register_threads_functions(VirtualMachine *vm);
 void cccc_pthread_cleanup(VirtualMachine *vm);
+bool cccc_pthread_should_abandon(VirtualMachine *vm);
+void cccc_pthread_main_released(VirtualMachine *vm, const ExecState *exec);
+void cccc_pthread_main_resumed(VirtualMachine *vm);
+void cccc_pthread_main_unwinding(VirtualMachine *vm);
+int  cccc_pthread_reap_abandoned(VirtualMachine *vm, unsigned epoch,
+                                 int grace_ms);
 void register_signal_functions(VirtualMachine *vm);
 
 /* VM-managed signal pending flags (set only by async-safe native shims) */

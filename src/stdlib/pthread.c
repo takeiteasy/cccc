@@ -80,14 +80,48 @@ struct ThreadRecord {
     // destructors for main, since POSIX/glibc run them for an explicit
     // pthread_exit() but not for a plain `return` from main() (#863).
     int exited_via_pthread_exit;
+    // Test that created this thread (vm->thread_epoch, 0 outside a test), and
+    // whether that test was abandoned. Both only touched under the GIL.
+    unsigned             epoch;
+    int                  abandoned;
+    struct ThreadRecord *test_next; // vm->test_threads, while epoch != 0
 };
 
 struct PthreadState {
     ThreadRecord main_thread;
 };
 
+// Main's execution state as of its last GIL release during a test. A failed
+// or timed-out test unwinds main without it resuming, leaving the VM holding
+// another thread's state; the harness puts this back.
+typedef struct {
+    ExecState     exec;
+    ThreadRecord *active;
+    char         *tls;
+    int           released;
+} MainSnapshot;
+
 static VirtualMachine *current_vm(void) {
     return cccc_current_ffi_vm();
+}
+
+// The guest thread running on this host thread (NULL on main and elsewhere).
+static _Thread_local ThreadRecord *t_self_rec;
+
+// Whether the calling guest thread belongs to a test the harness has given up
+// on. Call with the GIL held. The result is sticky: a thread that wakes in a
+// later test still reports true.
+bool cccc_pthread_should_abandon(VirtualMachine *vm) {
+    ThreadRecord *rec = t_self_rec;
+    if (!rec || rec->vm != vm)
+        return false;
+    if (!rec->abandoned) {
+        unsigned epoch = __atomic_load_n(&vm->abandon_epoch, __ATOMIC_SEQ_CST);
+        if (!epoch || rec->epoch != epoch)
+            return false;
+        rec->abandoned = 1;
+    }
+    return true;
 }
 
 static void enable_pthread_runtime(VirtualMachine *vm) {
@@ -107,6 +141,7 @@ static PthreadState *pthread_state(VirtualMachine *vm) {
             return NULL;
         vm->pthread_state->main_thread.vm          = vm;
         vm->pthread_state->main_thread.host_thread = pthread_self();
+        // TODO: drops workers already linked; see #1610
         vm->thread_records = &vm->pthread_state->main_thread;
     }
     return vm->pthread_state;
@@ -146,10 +181,44 @@ typedef struct {
     char         *tls_seg;
 } GilPause;
 
+// Main thread only, and only under --testing (vm->thread_epoch != 0).
+void cccc_pthread_main_released(VirtualMachine *vm, const ExecState *exec) {
+    if (t_self_rec || !vm->thread_epoch)
+        return;
+    MainSnapshot *snap = vm->main_snapshot;
+    if (!snap && !(snap = vm->main_snapshot = calloc(1, sizeof(*snap))))
+        return;
+    snap->exec     = *exec;
+    snap->active   = vm->active_thread;
+    snap->tls      = vm->current_tls_seg;
+    snap->released = 1;
+}
+
+// Main is unwinding out of a test while it still holds the GIL: keep its
+// state before other threads can overwrite the VM's.
+void cccc_pthread_main_unwinding(VirtualMachine *vm) {
+    if (t_self_rec || !vm->thread_epoch || !vm->test_threads)
+        return;
+    MainSnapshot *snap = vm->main_snapshot;
+    if (!snap && !(snap = vm->main_snapshot = calloc(1, sizeof(*snap))))
+        return;
+    cccc_exec_state_save(vm, &snap->exec);
+    snap->active   = vm->active_thread;
+    snap->tls      = vm->current_tls_seg;
+    snap->released = 1;
+}
+
+void cccc_pthread_main_resumed(VirtualMachine *vm) {
+    MainSnapshot *snap = vm->main_snapshot;
+    if (!t_self_rec && snap)
+        snap->released = 0;
+}
+
 static void save_and_release_gil(VirtualMachine *vm, GilPause *pause) {
     pause->active_thread = vm->active_thread;
     pause->tls_seg       = vm->current_tls_seg;
     cccc_exec_state_save(vm, &pause->exec);
+    cccc_pthread_main_released(vm, &pause->exec);
     cccc_gil_release(vm);
 }
 
@@ -158,6 +227,10 @@ static void acquire_and_restore_gil(VirtualMachine *vm, const GilPause *pause) {
     vm->active_thread   = pause->active_thread;
     vm->current_tls_seg = pause->tls_seg;
     cccc_exec_state_restore(vm, &pause->exec);
+    cccc_pthread_main_resumed(vm);
+    // The dispatch loop's safe point ends the thread on its next instruction.
+    if (cccc_pthread_should_abandon(vm))
+        _cccc_any_pending = 1;
 }
 
 static void link_thread(VirtualMachine *vm, ThreadRecord *rec) {
@@ -180,6 +253,13 @@ static void unlink_thread(VirtualMachine *vm, ThreadRecord *rec) {
 static void free_thread_record(ThreadRecord *rec) {
     if (!rec)
         return;
+    if (rec->epoch && rec->vm) {
+        ThreadRecord **cur = &rec->vm->test_threads;
+        while (*cur && *cur != rec)
+            cur = &(*cur)->test_next;
+        if (*cur)
+            *cur = rec->test_next;
+    }
     CCCCPthreadValue *value = rec->values;
     while (value) {
         CCCCPthreadValue *next = value->next;
@@ -304,6 +384,7 @@ static void *vm_thread_start(void *arg) {
     ThreadRecord   *rec = arg;
     VirtualMachine *vm  = rec->vm;
 
+    t_self_rec = rec;
     cccc_gil_acquire(vm);
     ThreadRecord *saved_active  = vm->active_thread;
     char         *saved_tls_seg = vm->current_tls_seg;
@@ -312,6 +393,13 @@ static void *vm_thread_start(void *arg) {
     if (rec->tls_seg)
         vm->current_tls_seg = rec->tls_seg;
     cccc_exec_state_restore(vm, &rec->exec);
+    // Created but not yet scheduled when its test was abandoned: end without
+    // running guest code.
+    if (cccc_pthread_should_abandon(vm)) {
+        cccc_thread_exit_begin();
+        vm->regs[REG_A0] = 0;
+        vm->pc           = CCCC_INVALID_PC;
+    }
     // Stack canaries stay enabled in threads: the frame-layout shift is baked
     // into stack offsets at compile time, so the flag must match what codegen
     // assumed (#445).
@@ -337,7 +425,8 @@ static void *vm_thread_start(void *arg) {
     // here (matches glibc); pthread_exit() called ON the main thread also
     // doesn't run key destructors in cccc today -- that's a separate,
     // post-GIL-release teardown path, tracked as a followup ticket.
-    run_tss_destructors(vm, rec);
+    if (!rec->abandoned)
+        run_tss_destructors(vm, rec);
     cccc_exec_state_save(vm, &rec->exec);
     vm->active_thread   = saved_active;
     vm->current_tls_seg = saved_tls_seg;
@@ -371,6 +460,11 @@ static long long wrap_pthread_create(long long threadp, long long attrp,
     rec->vm       = vm;
     rec->start_fn = start_fn;
     rec->arg      = (void *)arg;
+    rec->epoch    = vm->thread_epoch;
+    if (rec->epoch) {
+        rec->test_next   = vm->test_threads;
+        vm->test_threads = rec;
+    }
     if (cccc_exec_state_alloc_stack(vm, &rec->exec) != 0) {
         free(rec);
         return EAGAIN;
@@ -1520,9 +1614,59 @@ void register_threads_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_call_once", (void *)wrap_call_once, 2, 0);
 }
 
+// Marks the guest threads created during test `epoch` abandoned, then gives
+// them up to grace_ms to end and reaps the ones that did. Returns how many
+// are still blocked; those stay flagged and exit as soon as they wake. Call
+// with the GIL held once.
+int cccc_pthread_reap_abandoned(VirtualMachine *vm, unsigned epoch,
+                                int grace_ms) {
+    if (!vm || !epoch)
+        return 0;
+    MainSnapshot *snap = vm->main_snapshot;
+    if (snap && snap->released) {
+        cccc_exec_state_restore(vm, &snap->exec);
+        vm->active_thread   = snap->active;
+        vm->current_tls_seg = snap->tls;
+        snap->released      = 0;
+    }
+    int blocked = 0;
+    for (int waited = 0;; waited++) {
+        blocked = 0;
+        for (ThreadRecord *rec = vm->test_threads; rec; rec = rec->test_next) {
+            if (rec->epoch != epoch)
+                continue;
+            rec->abandoned = 1;
+            if (!rec->exited)
+                blocked++;
+        }
+        if (!blocked || waited >= grace_ms)
+            break;
+        GilPause pause;
+        save_and_release_gil(vm, &pause);
+        usleep(1000);
+        acquire_and_restore_gil(vm, &pause);
+    }
+    ThreadRecord *rec = vm->test_threads;
+    while (rec) {
+        ThreadRecord *next = rec->test_next;
+        if (rec->epoch == epoch && rec->exited && !rec->detached &&
+            !rec->joined) {
+            pthread_join(rec->host_thread, NULL);
+            rec->joined = 1;
+            unlink_thread(vm, rec);
+            free_thread_record(rec);
+        }
+        rec = next;
+    }
+    return blocked;
+}
+
 void cccc_pthread_cleanup(VirtualMachine *vm) {
     if (!vm)
         return;
+    free(vm->main_snapshot);
+    vm->main_snapshot = NULL;
+    vm->test_threads  = NULL;
     ThreadRecord *main_thread =
         vm->pthread_state ? &vm->pthread_state->main_thread : NULL;
     ThreadRecord *rec = vm->thread_records;

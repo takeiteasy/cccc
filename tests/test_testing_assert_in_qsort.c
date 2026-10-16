@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^ok 2 - after
+// CCCC_EXPECT_STDERR: ^not ok 1 - in_comparator
 // An Assert inside a qsort comparator fails its test without breaking later
 // ones.
 #include <stdlib.h>

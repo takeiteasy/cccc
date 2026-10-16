@@ -1026,6 +1026,7 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
     // blocks' storage a skipped HREL left behind) before bp is
     // overwritten below, same ordering reason as frame_epoch_pop_if_owner
     // just above.
+    // TODO: the guard flips when a thread unlinks mid-frame; see #1609
     if (vm->heap_reclaim_enabled && !vm->thread_records) {
         char *target;
         if (heap_marks_pop_frame(vm, &target))

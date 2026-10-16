@@ -5075,6 +5075,12 @@ struct VirtualMachine {
     PthreadKeyRecord *pthread_keys;
     int               pthread_next_key;
     PthreadState     *pthread_state;
+    // --testing: the running test (stamped on new guest threads) and the
+    // abandoned one (0 when none). See cccc_pthread_should_abandon.
+    volatile unsigned thread_epoch;
+    volatile unsigned abandon_epoch;
+    void             *main_snapshot; // MainSnapshot, src/stdlib/pthread.c
+    ThreadRecord     *test_threads;  // guest threads made during a test
 
     // Threading safety diagnostics (CCCC_THREAD_SAFETY)
     // Lock graph for lock-order inversion detection: parallel arrays of
