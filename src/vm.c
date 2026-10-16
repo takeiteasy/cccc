@@ -26,6 +26,7 @@
 #include <getopt.h> // host getopt.h -- #1041, cccc_reset_getopt_state()
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>
+#include <stdatomic.h>
 #endif
 
 // Global pointer to the currently executing VM instance.
@@ -594,6 +595,18 @@ dispatch:
     if (__builtin_expect(_cccc_any_pending != 0, 0)) {
         _cccc_any_pending   = 0;
         bool _still_pending = false;
+        /* #1585: a thread of an abandoned test ends here. While one is being
+           reaped every other thread keeps the request alive, in case the
+           thread it is aimed at runs next. */
+        if (__builtin_expect(vm->abandon_epoch != 0, 0)) {
+            if (cccc_pthread_should_abandon(vm)) {
+                cccc_thread_exit_begin();
+                vm->regs[REG_A0] = 0;
+                vm->pc           = CCCC_INVALID_PC;
+                return 0;
+            }
+            _still_pending = true;
+        }
         if (__builtin_expect(_cccc_watch_pending != 0, 0)) {
             _cccc_watch_pending = 0;
             cc_watch_apply(vm);
@@ -1329,13 +1342,30 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     cccc_gil_init(vm);
 }
 
+#if !defined(_WIN32) && !defined(_WIN64)
+// What vm->gil_mutex points at. The mutex stays first so the pointer is also
+// a pthread_mutex_t *.
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_t       owner; // valid while owned
+    atomic_bool     owned;
+} Gil;
+
+static bool gil_held_by_caller(const VirtualMachine *vm) {
+    const Gil *gil = vm->gil_mutex;
+    return gil && atomic_load(&gil->owned) &&
+           pthread_equal(gil->owner, pthread_self());
+}
+#endif
+
 void cccc_gil_init(VirtualMachine *vm) {
     if (!vm || vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_t *mutex = malloc(sizeof(*mutex));
-    if (!mutex)
+    Gil *gil = calloc(1, sizeof(*gil));
+    if (!gil)
         error("could not allocate VM GIL");
+    pthread_mutex_t    *mutex = &gil->mutex;
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr) != 0)
         error("could not initialize VM GIL attributes");
@@ -1344,7 +1374,7 @@ void cccc_gil_init(VirtualMachine *vm) {
     if (pthread_mutex_init(mutex, &attr) != 0)
         error("could not initialize VM GIL");
     pthread_mutexattr_destroy(&attr);
-    vm->gil_mutex = mutex;
+    vm->gil_mutex = gil;
 #endif
     vm->gil_initialized = 1;
 }
@@ -1353,10 +1383,10 @@ void cccc_gil_destroy(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_t *mutex = (pthread_mutex_t *)vm->gil_mutex;
-    if (mutex) {
-        pthread_mutex_destroy(mutex);
-        free(mutex);
+    Gil *gil = vm->gil_mutex;
+    if (gil) {
+        pthread_mutex_destroy(&gil->mutex);
+        free(gil);
     }
 #endif
     vm->gil_mutex       = NULL;
@@ -1369,8 +1399,12 @@ void cccc_gil_acquire(VirtualMachine *vm) {
     if (!vm->gil_initialized)
         cccc_gil_init(vm);
 #if !defined(_WIN32) && !defined(_WIN64)
-    pthread_mutex_lock((pthread_mutex_t *)vm->gil_mutex);
-    vm->gil_depth++;
+    Gil *gil = vm->gil_mutex;
+    pthread_mutex_lock(&gil->mutex);
+    if (vm->gil_depth++ == 0) {
+        gil->owner = pthread_self();
+        atomic_store(&gil->owned, true);
+    }
 #endif
 }
 
@@ -1378,15 +1412,71 @@ void cccc_gil_release(VirtualMachine *vm) {
     if (!vm || !vm->gil_initialized)
         return;
 #if !defined(_WIN32) && !defined(_WIN64)
-    vm->gil_depth--;
-    pthread_mutex_unlock((pthread_mutex_t *)vm->gil_mutex);
+    Gil *gil = vm->gil_mutex;
+    if (--vm->gil_depth == 0)
+        atomic_store(&gil->owned, false);
+    pthread_mutex_unlock(&gil->mutex);
 #endif
 }
 
+// Levels of the GIL the calling thread holds (0 when another thread owns it).
+static int gil_depth_of_caller(const VirtualMachine *vm) {
+#if !defined(_WIN32) && !defined(_WIN64)
+    if (vm && vm->gil_initialized && gil_held_by_caller(vm))
+        return vm->gil_depth;
+#else
+    (void)vm;
+#endif
+    return 0;
+}
+
 // Drops levels a longjmp out of cc_run_at left held (its release is skipped).
+// Never touches a GIL another thread owns.
 void cccc_gil_release_to(VirtualMachine *vm, int depth) {
-    while (vm && vm->gil_initialized && vm->gil_depth > depth)
+    while (gil_depth_of_caller(vm) > depth)
         cccc_gil_release(vm);
+}
+
+// Per host thread: every guest thread shares one VirtualMachine.
+static _Thread_local bool t_thread_exiting;
+
+void cccc_thread_exit_begin(void) {
+    t_thread_exiting = true;
+}
+
+bool cccc_thread_exiting(void) {
+    return t_thread_exiting;
+}
+
+void cccc_thread_exit_end(void) {
+    t_thread_exiting = false;
+}
+
+void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
+    p->gil_depth             = gil_depth_of_caller(vm);
+    p->flags                 = vm->flags;
+    p->single_step           = vm->dbg.single_step;
+    p->step_over             = vm->dbg.step_over;
+    p->step_out              = vm->dbg.step_out;
+    p->step_over_return_addr = vm->dbg.step_over_return_addr;
+    p->step_out_bp           = vm->dbg.step_out_bp;
+    p->debugger_attached     = vm->dbg.debugger_attached;
+}
+
+void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
+    if (gil_depth_of_caller(vm) > p->gil_depth)
+        cccc_pthread_main_unwinding(vm);
+    vm->flags                     = p->flags;
+    vm->dbg.single_step           = p->single_step;
+    vm->dbg.step_over             = p->step_over;
+    vm->dbg.step_out              = p->step_out;
+    vm->dbg.step_over_return_addr = p->step_over_return_addr;
+    vm->dbg.step_out_bp           = p->step_out_bp;
+    vm->dbg.debugger_attached     = p->debugger_attached;
+    cc_running_vm                 = NULL;
+    cccc_ffi_vm_reset();
+    // Last: another thread may run as soon as the GIL is free.
+    cccc_gil_release_to(vm, p->gil_depth);
 }
 
 void cc_destroy(VirtualMachine *vm) {
@@ -2331,6 +2421,7 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cccc_thread_exit_end();
     cc_scan_dynobjsz(vm);
     // #981: (re)compute the full heap-reclamation gate now that
     // dynobjsz_present is resolved for whatever bytecode exists so far --
@@ -2345,7 +2436,8 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     // model) and dynobjsz_present can flip from false to true if a later-
     // compiled function introduces a DYNOBJSZ opcode.
     vm->heap_reclaim_enabled =
-        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present;
+        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present &&
+        !vm->thread_records;
     cc_running_vm = vm;
     cccc_gil_acquire(vm);
     vm->dbg.host_fault_signal = 0;
@@ -2421,7 +2513,7 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     // reclaimed by the same heap_marks_truncate_to LONGJMP already uses,
     // sweeping both VLA and bare-alloca storage since whole frames are
     // being discarded, not just one block.
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_truncate_to(vm, vm->bp);
 
     // Initialise main thread's TLS copy from the template built by gen().
@@ -2532,6 +2624,15 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
         return -1;
 
+    // The thread is ending: report a clean return so the caller (qsort,
+    // a kernel loop) carries on without a spurious fault, and keep the thread
+    // unwinding.
+    if (cccc_thread_exiting()) {
+        *out_ival = 0;
+        vm->pc    = CCCC_INVALID_PC;
+        return 0;
+    }
+
     long long saved_regs[NUM_REGS];
     FReg      saved_fregs[NUM_REGS];
     VReg      saved_vregs[NUM_REGS];
@@ -2606,6 +2707,12 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     vm->dbg.step_out_bp           = saved_step_out_bp;
     vm->dbg.debugger_attached     = saved_debugger_attached;
 
+    // The callback ended its thread: restoring saved_pc would resume it.
+    if (cccc_thread_exiting()) {
+        *out_ival = 0;
+        vm->pc    = CCCC_INVALID_PC;
+        return 0;
+    }
     if (!completed_cleanly)
         return -1;
     *out_ival = ival;

@@ -21,6 +21,7 @@
 
 #include <fnmatch.h>
 #include <inttypes.h>
+#include <pthread.h>
 #include <regex.h>
 #include <signal.h>
 #include <string.h>
@@ -36,10 +37,11 @@
 // calls that arrive outside a test run (e.g. from a [[cccc::comptime]] during
 // the comptime pass) -- ticket #334.
 typedef struct {
-    jmp_buf jmp;
-    int     failed;
-    int     timed_out;
-    char    fail_msg[512];
+    jmp_buf   jmp;
+    pthread_t owner; // thread that owns jmp; a longjmp from another is UB
+    int       failed;
+    int       timed_out;
+    char      fail_msg[512];
 } CCCCTestRunState;
 
 static CCCCTestRunState     *s_run         = NULL;
@@ -57,8 +59,52 @@ static void handle_alarm(int sig) {
         return; // waitpid in parent will get EINTR
     }
 #endif
-    if (s_run)
-        longjmp(s_run->jmp, 2); // 2 = timeout sentinel
+    if (!s_run)
+        return;
+    // The alarm can be delivered to any thread; only the owner may longjmp.
+    if (!pthread_equal(pthread_self(), s_run->owner)) {
+        pthread_kill(s_run->owner, SIGALRM);
+        return;
+    }
+    longjmp(s_run->jmp, 2); // 2 = timeout sentinel
+}
+
+// Stops the guest threads test `epoch` started and never joined: a thread
+// that keeps running would write into later tests' state, and a spinning one
+// would hold the GIL against them. Returns how many are still blocked after
+// the grace period; those exit as soon as they wake.
+static int abandon_test_threads(VirtualMachine *vm, unsigned epoch) {
+    if (!vm->test_threads)
+        return 0;
+    __atomic_store_n(&vm->abandon_epoch, epoch, __ATOMIC_SEQ_CST);
+    _cccc_any_pending = 1;
+    cccc_gil_acquire(vm);
+    int blocked = cccc_pthread_reap_abandoned(vm, epoch, 200);
+    __atomic_store_n(&vm->abandon_epoch, 0, __ATOMIC_SEQ_CST);
+    cccc_gil_release(vm);
+    return blocked;
+}
+
+// First failure wins: later ones (e.g. main failing after a worker did) write
+// to a throwaway buffer.
+static char *fail_slot(void) {
+    static _Thread_local char discard[512];
+    return s_run->failed ? discard : s_run->fail_msg;
+}
+
+// Fails the current test. On the owning thread this longjmps to the harness.
+// A guest worker thread instead ends itself, as pthread_exit does, and the
+// failure is reported once the test function returns.
+static void fail_exit(void) {
+    s_run->failed = 1;
+    if (pthread_equal(pthread_self(), s_run->owner))
+        longjmp(s_run->jmp, 1);
+    cccc_thread_exit_begin();
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    if (vm) {
+        vm->regs[REG_A0] = 0;
+        vm->pc           = CCCC_INVALID_PC;
+    }
 }
 
 static void impl_assert(long long cond, long long expr, long long file,
@@ -69,10 +115,9 @@ static void impl_assert(long long cond, long long expr, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld)",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld)",
                  (char *)expr, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -84,11 +129,10 @@ static void impl_assert_eq(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld != %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -100,11 +144,10 @@ static void impl_assert_neq(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s == %s (both %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -116,10 +159,9 @@ static void impl_assert_null(long long p, long long ps, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is not null (%s:%lld)", (char *)ps, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -132,10 +174,9 @@ static void impl_assert_not_null(long long p, long long ps, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
-                 "%s is null (%s:%lld)", (char *)ps, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s is null (%s:%lld)",
+                 (char *)ps, (char *)file, line);
+        fail_exit();
     }
 }
 
@@ -148,11 +189,10 @@ static void impl_assert_streq(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (\"%s\" != \"%s\") (%s:%lld)", (char *)as,
                  (char *)bs, (char *)a, (char *)b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -165,10 +205,9 @@ static void impl_assert_false(long long cond, long long expr, long long file,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "!%s (%s:%lld)",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "!%s (%s:%lld)",
                  (char *)expr, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -178,10 +217,9 @@ static void impl_assert_fail(long long file, long long line) {
                 (char *)file, line);
         return;
     }
-    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
-             "forced failure (%s:%lld)", (char *)file, line);
-    s_run->failed = 1;
-    longjmp(s_run->jmp, 1);
+    snprintf(fail_slot(), sizeof(s_run->fail_msg), "forced failure (%s:%lld)",
+             (char *)file, line);
+    fail_exit();
 }
 
 static void impl_assert_fail_msg(long long msg, long long file,
@@ -191,10 +229,9 @@ static void impl_assert_fail_msg(long long msg, long long file,
                 (char *)file, line);
         return;
     }
-    snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld)",
-             (char *)msg, (char *)file, line);
-    s_run->failed = 1;
-    longjmp(s_run->jmp, 1);
+    snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld)", (char *)msg,
+             (char *)file, line);
+    fail_exit();
 }
 
 static void impl_assert_gt(long long a, long long b, long long as, long long bs,
@@ -205,11 +242,10 @@ static void impl_assert_gt(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s <= %s (%lld <= %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -221,11 +257,10 @@ static void impl_assert_lt(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s >= %s (%lld >= %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -237,11 +272,10 @@ static void impl_assert_ge(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s < %s (%lld < %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -253,11 +287,10 @@ static void impl_assert_le(long long a, long long b, long long as, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s > %s (%lld > %lld) (%s:%lld)", (char *)as, (char *)bs, a,
                  b, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -274,12 +307,11 @@ static void impl_assert_within(long long delta, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s |%s - %s| = %lld > %s (%lld) (%s:%lld)", (char *)as,
                  (char *)es, (char *)as, diff, (char *)ds, delta, (char *)file,
                  line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -293,11 +325,10 @@ static void impl_assert_streq_len(long long a, long long b, long long len,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (first %lld chars differ) (%s:%lld)", (char *)as,
                  (char *)bs, len, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -311,11 +342,10 @@ static void impl_assert_mem_eq(long long expected, long long actual,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld bytes differ) (%s:%lld)", (char *)es,
                  (char *)as, len, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -333,12 +363,11 @@ static void impl_assert_float_within(double delta, double expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s |%s - %s| = %g > %s (%g) (%s:%lld)", (char *)as,
                  (char *)es, (char *)as, diff, (char *)ds, delta, (char *)file,
                  line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -360,13 +389,12 @@ static void impl_assert_bits(long long mask, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld)", (char *)as,
                  (char *)ms, (unsigned long long)(actual & mask), (char *)es,
                  (char *)ms, (unsigned long long)(expected & mask),
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -379,11 +407,10 @@ static void impl_assert_bit_high(long long bit, long long actual, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s bit %lld of %s is low (%s:%lld)", (char *)bs, bit,
                  (char *)as, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -396,11 +423,10 @@ static void impl_assert_bit_low(long long bit, long long actual, long long bs,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s bit %lld of %s is high (%s:%lld)", (char *)bs, bit,
                  (char *)as, (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -416,12 +442,11 @@ static void impl_assert_eq_array(long long expected, long long actual,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s[0..%lld] != %s[0..%lld] (%lld bytes differ) (%s:%lld)",
                  (char *)es, count - 1, (char *)as, count - 1, (long long)total,
                  (char *)file, line);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -436,10 +461,9 @@ static void impl_assert_msg(long long cond, long long expr, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s (%s:%lld) - %s",
+        snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s (%s:%lld) - %s",
                  (char *)expr, (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -453,11 +477,10 @@ static void impl_assert_eq_msg(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (%lld != %lld) (%s:%lld) - %s", (char *)as,
                  (char *)bs, a, b, (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -471,12 +494,11 @@ static void impl_assert_streq_msg(long long a, long long b, long long as,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s != %s (\"%s\" != \"%s\") (%s:%lld) - %s", (char *)as,
                  (char *)bs, (char *)a, (char *)b, (char *)file, line,
                  (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -489,11 +511,10 @@ static void impl_assert_null_msg(long long p, long long ps, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is not null (%s:%lld) - %s", (char *)ps, (char *)file,
                  line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -506,11 +527,10 @@ static void impl_assert_not_null_msg(long long p, long long ps, long long msg,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s is null (%s:%lld) - %s", (char *)ps, (char *)file, line,
                  (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -525,13 +545,12 @@ static void impl_assert_bits_msg(long long mask, long long expected,
                     (char *)file, line);
             return;
         }
-        snprintf(s_run->fail_msg, sizeof(s_run->fail_msg),
+        snprintf(fail_slot(), sizeof(s_run->fail_msg),
                  "%s & %s = 0x%llx != %s & %s = 0x%llx (%s:%lld) - %s",
                  (char *)as, (char *)ms, (unsigned long long)(actual & mask),
                  (char *)es, (char *)ms, (unsigned long long)(expected & mask),
                  (char *)file, line, (char *)msg);
-        s_run->failed = 1;
-        longjmp(s_run->jmp, 1);
+        fail_exit();
     }
 }
 
@@ -666,9 +685,8 @@ static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
         cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
         char fail_msg[512];
         if (s_run && test_took_runtime_fault(vm, fail_msg, sizeof(fail_msg))) {
-            snprintf(s_run->fail_msg, sizeof(s_run->fail_msg), "%s", fail_msg);
-            s_run->failed = 1;
-            longjmp(s_run->jmp, 1);
+            snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s", fail_msg);
+            fail_exit();
         }
     }
 }
@@ -720,17 +738,19 @@ static bool run_hooks_guarded(VirtualMachine *vm, Obj *prog,
                               const char *disp, char fail_msg_out[512]) {
     CCCCTestRunState guard;
     guard.failed            = 0;
+    guard.owner             = pthread_self();
     guard.timed_out         = 0;
     guard.fail_msg[0]       = '\0';
 
     CCCCTestRunState *saved = s_run;
     s_run                   = &guard;
-    int gil_depth           = vm->gil_depth;
-    int jval                = setjmp(guard.jmp);
+    CcUnwindPoint unwind;
+    cccc_unwind_point_save(vm, &unwind);
+    int jval = setjmp(guard.jmp);
     if (jval == 0) {
         run_hooks(vm, prog, setups, is_teardown, once_only, suite, disp);
     } else {
-        cccc_gil_release_to(vm, gil_depth);
+        cccc_unwind_point_restore(vm, &unwind);
         guard.failed = 1;
     }
     s_run = saved;
@@ -1288,6 +1308,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
 
     CCCCTestRunState run;
     s_run = &run;
+    run.owner = pthread_self();
 
     // Register SIGALRM handler for timeouts (always, since per-test timeouts
     // may be set on individual [[cccc::test]] attributes).
@@ -1576,27 +1597,60 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             memcpy(vm->data_seg,
                    once_suite_snap(once_suite, n_once_suite, cur_snap),
                    snap_size);
-            run_hooks(vm, prog, setups, false, false, cur_suite, disp);
+            char setup_fail[512] = {0};
+            if (!run_hooks_guarded(vm, prog, setups, false, false, cur_suite,
+                                   disp, setup_fail)) {
+                run_hooks_guarded(vm, prog, setups, true, false, cur_suite,
+                                  disp, NULL);
+                emit_test_result(fmt, disp, cur_suite, "fail", setup_fail,
+                                 &json_first, test_num);
+                total_failures++;
+                if (opts && opts->fail_fast)
+                    stop_early = true;
+                continue;
+            }
 
             fflush(stdout);
             fflush(stderr);
             s_alarm_fired = 0;
 
-            pid_t pid     = fork();
+            // The child reports a failed Assert through this pipe.
+            int fail_pipe[2];
+            if (pipe(fail_pipe) != 0)
+                fail_pipe[0] = fail_pipe[1] = -1;
+
+            pid_t pid = fork();
             if (pid == 0) {
                 signal(SIGALRM, SIG_DFL);
                 s_fork_child_pid = 0;
+                if (fail_pipe[0] >= 0)
+                    close(fail_pipe[0]);
                 // Prevent leaks -atExit instrumentation (handed down via
                 // MallocStackLogging / DYLD_INSERT_LIBRARIES) from hanging
                 // in the child when the test calls exit(2) or crashes.
                 unsetenv("MallocStackLogging");
                 unsetenv("MallocStackLoggingNoCompact");
                 unsetenv("DYLD_INSERT_LIBRARIES");
-                int rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                // Own guard: the parent's run state is not a valid jump target
+                // here, and a longjmp into it would resume the harness loop.
+                CCCCTestRunState child = {0};
+                child.owner            = pthread_self();
+                s_run                  = &child;
+                int rc                 = 0;
+                if (setjmp(child.jmp) == 0)
+                    rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                if (child.failed) {
+                    if (fail_pipe[1] >= 0)
+                        (void)!write(fail_pipe[1], child.fail_msg,
+                                     strlen(child.fail_msg));
+                    _exit(1);
+                }
                 _exit((unsigned char)rc); /* -1 (VM error) → 255, matching
                                              non-testing exit convention */
             }
 
+            if (fail_pipe[1] >= 0)
+                close(fail_pipe[1]);
             s_fork_child_pid = pid;
             long effective_ms =
                 r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
@@ -1613,6 +1667,13 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             SET_TIMEOUT(0);
             s_fork_child_pid    = 0;
 
+            char child_fail[512] = {0};
+            if (fail_pipe[0] >= 0) {
+                if (read(fail_pipe[0], child_fail, sizeof(child_fail) - 1) < 0)
+                    child_fail[0] = '\0';
+                close(fail_pipe[0]);
+            }
+
             bool fork_timed_out = (waited < 0 && s_alarm_fired);
             if (fork_timed_out) {
                 waitpid(pid, NULL, 0);
@@ -1628,26 +1689,33 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 else if (WIFSIGNALED(wstatus))
                     actual_code = 128 + WTERMSIG(wstatus);
 
-                if (actual_code == r->expect_exit_code) {
+                char td_fail[512] = {0};
+                bool td_ok = run_hooks_guarded(vm, prog, setups, true, false,
+                                               cur_suite, disp, td_fail);
+
+                char code_fail[128];
+                const char *fail = NULL;
+                if (child_fail[0]) {
+                    fail = child_fail;
+                } else if (actual_code != r->expect_exit_code) {
+                    snprintf(code_fail, sizeof(code_fail),
+                             "expected exit_code %d, got %d",
+                             r->expect_exit_code, actual_code);
+                    fail = code_fail;
+                } else if (!td_ok) {
+                    fail = td_fail;
+                }
+
+                if (!fail) {
                     emit_test_result(fmt, disp, cur_suite, "pass", NULL,
                                      &json_first, test_num);
                     passed++;
                 } else {
-                    char fail_msg[128];
-                    snprintf(fail_msg, sizeof(fail_msg),
-                             "expected exit_code %d, got %d",
-                             r->expect_exit_code, actual_code);
-                    emit_test_result(fmt, disp, cur_suite, "fail", fail_msg,
+                    emit_test_result(fmt, disp, cur_suite, "fail", fail,
                                      &json_first, test_num);
                     total_failures++;
                     if (opts && opts->fail_fast)
                         stop_early = true;
-                }
-
-                if (!fork_timed_out) {
-                    char td_fail[512] = {0};
-                    run_hooks_guarded(vm, prog, setups, true, false, cur_suite,
-                                      disp, td_fail);
                 }
             }
             continue;
@@ -1753,10 +1821,12 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 #endif
 
-        int gil_depth = vm->gil_depth;
-        int jval      = setjmp(run.jmp);
+        CcUnwindPoint unwind;
+        cccc_unwind_point_save(vm, &unwind);
+        vm->thread_epoch = (unsigned)test_num;
+        int jval         = setjmp(run.jmp);
         if (jval != 0)
-            cccc_gil_release_to(vm, gil_depth);
+            cccc_unwind_point_restore(vm, &unwind);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
             cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
@@ -1787,6 +1857,15 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         }
 
         SET_TIMEOUT(0);
+
+        // Before teardown hooks: their cc_run_at would wait on a spinning
+        // worker.
+        int  blocked_threads  = 0;
+        bool threads_abandoned = false;
+        if (jval != 0 || run.failed) {
+            blocked_threads = abandon_test_threads(vm, (unsigned)test_num);
+            threads_abandoned = true;
+        }
 
         // Restore stdout/stderr and drain captured output.
 #ifdef _POSIX_VERSION
@@ -1940,6 +2019,16 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
         free(captured_stdout);
         free(captured_stderr);
 #endif
+
+        // A failure found after the body (teardown, return value, output).
+        if ((run.failed || run.timed_out) && !threads_abandoned)
+            blocked_threads = abandon_test_threads(vm, (unsigned)test_num);
+        vm->thread_epoch = 0;
+        if (blocked_threads)
+            fprintf(stderr,
+                    "# test %d: %d guest thread(s) still blocked; they end "
+                    "when they wake\n",
+                    test_num, blocked_threads);
 
         if (run.timed_out) {
             emit_test_result(fmt, disp, cur_suite, "timeout", NULL, &json_first,

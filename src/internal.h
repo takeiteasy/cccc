@@ -54,7 +54,7 @@
 // Product release version (#883). Stamped by tools/release.sh into an
 // annotated git tag; it is not otherwise derived from git automatically.
 #ifndef CCCC_RELEASE_VERSION
-#define CCCC_RELEASE_VERSION "0.10.7"
+#define CCCC_RELEASE_VERSION "0.10.8"
 #endif
 
 // Git describe string, passed by build.c/Makefile via -DCCCC_GIT_DESC=...
@@ -1024,6 +1024,7 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                               int returns_float, int is_variadic,
                               int num_fixed_args);
 VirtualMachine *cccc_current_ffi_vm(void);
+void cccc_ffi_vm_reset(void);
 
 // Kernel launch support (stdlib/pthread.c, used by stdlib/kernel.c).
 // The work-item the current guest thread runs, or NULL.
@@ -1246,6 +1247,32 @@ void cccc_gil_acquire(VirtualMachine *vm);
 void cccc_gil_release(VirtualMachine *vm);
 void cccc_gil_release_to(VirtualMachine *vm, int depth);
 
+// State a longjmp out of cc_run_at (a failed Assert or a timeout) can leave
+// stale, snapshotted before each harness setjmp and restored where it lands.
+// Host resources a callback held (qsort scratch, scandir/glob allocations)
+// are not recoverable.
+typedef struct {
+    int        gil_depth;
+    uint32_t   flags;
+    int        single_step;
+    int        step_over;
+    int        step_out;
+    Pc         step_over_return_addr;
+    long long *step_out_bp;
+    int        debugger_attached;
+} CcUnwindPoint;
+
+void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p);
+void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p);
+
+// Marks the calling guest thread as ending (a failed Assert or pthread_exit).
+// While set, cccc_call_guest_callback_ex skips new callbacks and abandons
+// running ones, so the whole thread unwinds rather than just the innermost
+// callback. The thread clears it once its start function has returned.
+void cccc_thread_exit_begin(void);
+bool cccc_thread_exiting(void);
+void cccc_thread_exit_end(void);
+
 //
 // debugger.c
 //
@@ -1456,6 +1483,12 @@ void register_posix_wordexp_functions(VirtualMachine *vm);
 void register_pthread_functions(VirtualMachine *vm);
 void register_threads_functions(VirtualMachine *vm);
 void cccc_pthread_cleanup(VirtualMachine *vm);
+bool cccc_pthread_should_abandon(VirtualMachine *vm);
+void cccc_pthread_main_released(VirtualMachine *vm, const ExecState *exec);
+void cccc_pthread_main_resumed(VirtualMachine *vm);
+void cccc_pthread_main_unwinding(VirtualMachine *vm);
+int  cccc_pthread_reap_abandoned(VirtualMachine *vm, unsigned epoch,
+                                 int grace_ms);
 void register_signal_functions(VirtualMachine *vm);
 
 /* VM-managed signal pending flags (set only by async-safe native shims) */

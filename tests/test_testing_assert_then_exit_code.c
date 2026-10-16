@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^ok 2 - code3
+// CCCC_EXPECT_STDERR: ^not ok 1 - bad
 // An exit_code= test still runs after an earlier test failed an Assert.
 [[cccc::test]]
 void bad(void) {

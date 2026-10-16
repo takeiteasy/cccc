@@ -802,7 +802,7 @@ static void frame_record_push(VirtualMachine *vm) {
 static void vm_unwind_frames(VirtualMachine *vm, long long *new_bp) {
     if (stack_extents_enabled(vm))
         frame_epoch_truncate_to(vm, new_bp);
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_truncate_to(vm, new_bp);
 }
 
@@ -899,11 +899,11 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // VLA-declaring block anywhere in this frame's body needs a target to
     // rewind to at LEV3/HREL. Gated on both halves of the design: the VM-
     // wide reclaim gate (vm->heap_reclaim_enabled, which folds in whether
-    // any address-keyed safety feature is on) and !vm->thread_records (the
+    // any address-keyed safety feature is on, or a thread has been created; the
     // heap is one global arena, not per-thread -- see HeapMarks' own
     // comment, src/cccc.h). Cheap to check unconditionally: both are a
     // single field read, no allocation happens unless both pass.
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_push(vm, vm->bp, -1);
 
     // Assign this activation a fresh liveness epoch (#673, and #648 for
@@ -1026,7 +1026,7 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
     // blocks' storage a skipped HREL left behind) before bp is
     // overwritten below, same ordering reason as frame_epoch_pop_if_owner
     // just above.
-    if (vm->heap_reclaim_enabled && !vm->thread_records) {
+    if (vm->heap_reclaim_enabled) {
         char *target;
         if (heap_marks_pop_frame(vm, &target))
             heap_rewind_to(vm, target, HEAP_SWEEP_FRAME_AND_ALLOCA);
@@ -3044,7 +3044,7 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
     // entries unpopped would instead risk the callee's first HMRK/ENT3
     // truncating against a caller-era mark taken at a lower heap_ptr (see
     // heap_marks_push's own truncate-before-push rule).
-    if (vm->heap_reclaim_enabled && !vm->thread_records) {
+    if (vm->heap_reclaim_enabled) {
         char *discarded;
         heap_marks_pop_frame(vm, &discarded);
     }
@@ -3357,7 +3357,7 @@ static inline int op_ZX4_fn(VirtualMachine *vm) {
 // nothing automatic should be left un-reclaimed).
 //
 // Callers are expected to have already checked vm->heap_reclaim_enabled
-// and !vm->thread_records (this function re-checks defensively, since it's
+// (this function re-checks defensively, since it's
 // also reachable from op_HREL_fn below with no other gate in between).
 //
 // Because the heap is a pure bump allocator, sorted_allocs' append order is
@@ -3374,7 +3374,7 @@ static inline int op_ZX4_fn(VirtualMachine *vm) {
 // than giving up on the whole mark.
 static void heap_rewind_to(VirtualMachine *vm, char *target,
                            HeapSweepSet sweep) {
-    if (!vm->heap_reclaim_enabled || vm->thread_records)
+    if (!vm->heap_reclaim_enabled)
         return;
     if (!target || (char *)vm->heap_ptr <= target)
         return;                  // nothing above the mark to reclaim
@@ -3668,7 +3668,7 @@ static inline int op_ALCV_fn(VirtualMachine *vm) {
 static inline int op_HMRK_fn(VirtualMachine *vm) {
     // Format: [HMRK] [depth:i32]
     int depth = (int)cc_read_word(vm);
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_push(vm, vm->bp, depth);
     return 0;
 }
@@ -3676,7 +3676,7 @@ static inline int op_HMRK_fn(VirtualMachine *vm) {
 static inline int op_HREL_fn(VirtualMachine *vm) {
     // Format: [HREL] [depth:i32]
     int depth = (int)cc_read_word(vm);
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_release(vm, depth);
     return 0;
 }
@@ -5613,6 +5613,12 @@ static _Thread_local VirtualMachine *cccc_tls_ffi_vm;
 
 VirtualMachine *cccc_current_ffi_vm(void) {
     return cccc_tls_ffi_vm;
+}
+
+// A longjmp out of a host call skips the restore at the end of
+// cccc_call_native_function.
+void cccc_ffi_vm_reset(void) {
+    cccc_tls_ffi_vm = NULL;
 }
 
 int cccc_ffi_name_in_list(char **list, int count, const char *name) {

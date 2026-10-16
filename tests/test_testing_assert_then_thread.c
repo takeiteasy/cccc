@@ -1,5 +1,6 @@
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^ok 2 - threads
+// CCCC_EXPECT_STDERR: ^not ok 1 - bad
 // A thread can be created and joined after an earlier test failed an Assert.
 #include <pthread.h>
 

@@ -9,6 +9,7 @@ VirtualMachine *cccc_posix_current_vm(void) {
 
 void cccc_posix_save_and_release_gil(VirtualMachine *vm, ExecState *state) {
     cccc_exec_state_save(vm, state);
+    cccc_pthread_main_released(vm, state);
     cccc_gil_release(vm);
 }
 
@@ -16,6 +17,9 @@ void cccc_posix_acquire_and_restore_gil(VirtualMachine  *vm,
                                         const ExecState *state) {
     cccc_gil_acquire(vm);
     cccc_exec_state_restore(vm, state);
+    cccc_pthread_main_resumed(vm);
+    if (cccc_pthread_should_abandon(vm))
+        _cccc_any_pending = 1;
 }
 
 void cccc_posix_guest_sigset_to_host(unsigned int guest_mask,

@@ -1,7 +1,7 @@
 // CCCC_FLAGS: --testing=native --test-suite=alpha
 // CCCC_EXPECT_STDOUT: 1\.\.2
-// CCCC_EXPECT_STDOUT: ok 1 - in_alpha
-// CCCC_EXPECT_STDOUT: ok 2 - in_inner
+// CCCC_EXPECT_STDOUT: ^ok 1 - in_alpha
+// CCCC_EXPECT_STDOUT: ^ok 2 - in_inner
 // CCCC_REJECT_STDOUT: in_beta
 // --test-suite=NAME selects the suite and its sub-suites.
 #pragma cccc suite begin "alpha"

@@ -15,6 +15,10 @@
 //   CCCC_NATIVE_SKIP[: reason]     ignored here
 // Otherwise the program must exit 42 (see pass_rule()).
 //
+// EXPECT patterns for TAP `ok N` lines are written `^ok N`; an unanchored `ok`
+// also matches inside `not ok`. A --testing run additionally fails on any
+// `not ok` / `✗` / JSON fail or timeout line that no EXPECT pattern matches.
+//
 // Patterns are POSIX ERE with a few Python-style escapes translated
 // (translate_pattern()). STDOUT patterns see `.` match newlines and `^`/`$`
 // anchor at line boundaries; STDERR patterns use REG_NEWLINE.
@@ -75,9 +79,13 @@ static void split_words(char **out, int *n, char *s) {
     }
 }
 
-static void add_pattern(char **list, int *n, const char *v, const char *file) {
+static void add_pattern(char **list, int *n, const char *v, const char *file,
+                        int must_match) {
     if (*n >= MAX_PATTERNS)
         die("%s: too many patterns", file);
+    // `ok 2 - x` also matches inside `not ok 2 - x`.
+    if (must_match && !strncmp(v, "ok ", 3))
+        die("%s: pattern '%s' must be anchored as '^%s'", file, v, v);
     list[(*n)++] = strdup(v);
 }
 
@@ -132,16 +140,16 @@ static char *apply_directive(Header *h, char *p, const char *file) {
                     split_words(h->run_args, &h->nrun_args, v);
                     break;
                 case 2:
-                    add_pattern(h->expect_out, &h->nexpect_out, v, file);
+                    add_pattern(h->expect_out, &h->nexpect_out, v, file, 1);
                     break;
                 case 3:
-                    add_pattern(h->reject_out, &h->nreject_out, v, file);
+                    add_pattern(h->reject_out, &h->nreject_out, v, file, 0);
                     break;
                 case 4:
-                    add_pattern(h->expect_err, &h->nexpect_err, v, file);
+                    add_pattern(h->expect_err, &h->nexpect_err, v, file, 1);
                     break;
                 case 5:
-                    add_pattern(h->reject_err, &h->nreject_err, v, file);
+                    add_pattern(h->reject_err, &h->nreject_err, v, file, 0);
                     break;
             }
             return NULL;
@@ -573,6 +581,61 @@ static int check_patterns(const Header *h, const Buf *out, const Buf *err,
     return ok;
 }
 
+static int is_failure_line(const char *line) {
+    while (*line == ' ' || *line == '\t')
+        line++;
+    return !strncmp(line, "not ok ", 7) || !strncmp(line, "\xE2\x9C\x97", 3) ||
+           strstr(line, "\"status\":\"fail\"") ||
+           strstr(line, "\"status\":\"timeout\"");
+}
+
+static int line_matches_expect(const Header *h, const char *line,
+                               const char *file) {
+    struct {
+        char *const *list;
+        int          n, is_stdout;
+    } all[] = {
+        {h->expect_out, h->nexpect_out, 1},
+        {h->expect_err, h->nexpect_err, 0},
+    };
+    for (int c = 0; c < 2; c++)
+        for (int i = 0; i < all[c].n; i++) {
+            regex_t re;
+            if (compile_pattern(&re, all[c].list[i], all[c].is_stdout, file, 1))
+                die("%s: bad pattern", file);
+            int matched = regexec(&re, line, 0, NULL, 0) == 0;
+            regfree(&re);
+            if (matched)
+                return 1;
+        }
+    return 0;
+}
+
+// A --testing run reports every failed or timed-out test; each such line must
+// be one the test expects, so a regression cannot hide behind a pattern that
+// matches only the passing lines.
+static int check_failure_lines(const Header *h, const Buf *out, const Buf *err,
+                               const char *file) {
+    const Buf *streams[] = {out, err};
+    for (int s = 0; s < 2; s++) {
+        const char *p = streams[s]->data;
+        while (p && *p) {
+            size_t n    = strcspn(p, "\n");
+            char  *line = strndup(p, n);
+            int    bad  = is_failure_line(line) &&
+                       !line_matches_expect(h, line, file);
+            if (bad)
+                fprintf(stderr, "FAIL %s: unexpected failure line: %s\n", file,
+                        line);
+            free(line);
+            if (bad)
+                return 0;
+            p += n + (p[n] == '\n');
+        }
+    }
+    return 1;
+}
+
 static int lint(char **files, int n) {
     int bad = 0;
     for (int i = 0; i < n; i++) {
@@ -657,6 +720,8 @@ int main(int argc, char **argv) {
         }
     }
     if (!why && !check_patterns(&h, &out, &err, file))
+        why = "";
+    if (!why && h.testing && !check_failure_lines(&h, &out, &err, file))
         why = "";
     if (why) {
         if (*why)
