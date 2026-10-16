@@ -1124,15 +1124,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                             "fprintf", out, MakeStringLiteral(fmt), a)));
 }
 
-// fprintf(out, fmt, (T)e) through a temporary of type `ty`: the assignment
-// converts where -c=native drops a cast on a variadic argument.
-// TODO(#1632): pass MakeCast(e, ty) directly once the cast survives.
-@comptime Node *__builtin_dump_temp(Node *block, Type *ty, Node *e) {
-    Node *t = MakeLocalVarUnique(ty);
-    BlockAddStmt(block, MakeExprStmt(MakeAssign(t, e)));
-    return t;
-}
-
 // "%.<n>s": at most n bytes, stopping at a NUL. Written by hand so the handler
 // needs no stdio declarations.
 @comptime void __builtin_dump_string_format(char *out, int n) {
@@ -1158,7 +1149,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         __builtin_derive_bad_member("@dump", path);
     if (k == 1 && GetTypeKind(ty) == TK_ENUM) {
         // if (e == A) fputs("A"); else if ... else fprintf("%lld", e);
-        Node *v     = __builtin_dump_temp(block, GetType("long long"), e);
+        // `e` is read by every comparison, so evaluate it once.
+        Node *v = MakeLocalVarUnique(GetType("long long"));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(v, e)));
         Node *chain = MakeBlock(NULL, 0);
         __builtin_dump_printf1(chain, out, "%lld", v);
         Node *tail = chain;
@@ -1171,13 +1164,11 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         }
         BlockAddStmt(block, tail);
     } else if (k == 1) {
-        __builtin_dump_printf1(
-            block, out, "%lld",
-            __builtin_dump_temp(block, GetType("long long"), e));
+        __builtin_dump_printf1(block, out, "%lld",
+                               MakeCast(e, GetType("long long")));
     } else if (k == 2) {
-        __builtin_dump_printf1(
-            block, out, "%llu",
-            __builtin_dump_temp(block, GetType("unsigned long long"), e));
+        __builtin_dump_printf1(block, out, "%llu",
+                               MakeCast(e, GetType("unsigned long long")));
     } else if (k == 3) {
         if (GetTypeKind(ty) == TK_LDOUBLE)
             __builtin_dump_printf1(block, out, "%Lg", e);

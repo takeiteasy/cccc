@@ -115,4 +115,13 @@ void test_compound_assign(void) {
     AssertEq(f, 42);
 }
 
+// The cast widens the shift itself past `int`.
+[[cccc::test]]
+void test_shift_widened_operand(void) {
+    int                x = 1;
+    unsigned long long r = (unsigned long long)x << 40;
+    AssertEq(r >> 40, 1);
+    AssertEq(((long long)x << 32) >> 32, 1);
+}
+
 #pragma cccc suite end

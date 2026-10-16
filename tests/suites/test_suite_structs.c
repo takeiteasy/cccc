@@ -1261,4 +1261,24 @@ int test_bitint128_alignment(void) {
     return 42;
 }
 
+// GNU/C23 empty structs are complete, zero-sized types.
+struct StructsEmpty {};
+struct StructsHoldsEmpty {
+    struct StructsEmpty e;
+    int                 x;
+};
+
+[[cccc::test(return = 42)]]
+int test_empty_struct_complete(void) {
+    struct StructsEmpty      e = {};
+    struct StructsHoldsEmpty h = {{}, 40};
+    struct {
+    } anon = {};
+    (void)e;
+    (void)anon;
+    if (sizeof(struct StructsEmpty) != 0 || sizeof anon != 0)
+        return 1;
+    return h.x + 2;
+}
+
 #pragma cccc suite end

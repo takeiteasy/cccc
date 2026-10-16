@@ -86,3 +86,26 @@ static const char *captured(char *buf, size_t cap, FILE *f) {
     app_Pair_dump(&p, f);
     AssertEq(strcmp(captured(buf, sizeof buf, f), "Pair { a = 1, b = 2 }"), 0);
 }
+
+@dump struct Grid {
+    int grid[2][2];
+};
+
+@dump struct Nothing {
+};
+
+[[cccc::test]] void test_dump_array_of_arrays(void) {
+    struct Grid g = {{{1, 2}, {3, 4}}};
+    char        buf[128];
+    FILE       *f = tmpfile();
+    Grid_dump(&g, f);
+    AssertEq(strstr(captured(buf, sizeof buf, f), "{ 3, 4 }") != NULL, 1);
+}
+
+[[cccc::test]] void test_dump_empty_struct(void) {
+    struct Nothing n = {};
+    char           buf[64];
+    FILE          *f = tmpfile();
+    Nothing_dump(&n, f);
+    AssertEq(strstr(captured(buf, sizeof buf, f), "Nothing") != NULL, 1);
+}

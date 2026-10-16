@@ -147,3 +147,18 @@ static void fill(struct Everything *e, int fill_byte) {
     AssertEq(!!(app_Pair_hash(&a) == app_Pair_hash(&b)), 1);
     AssertEq(!!(app_Pair_hash(&a) != app_Pair_hash(&c)), 1);
 }
+
+@equals @hash struct Grid {
+    int grid[2][2];
+};
+
+[[cccc::test]] void test_equals_hash_array_of_arrays(void) {
+    struct Grid a = {{{1, 2}, {3, 4}}};
+    struct Grid b = a;
+    struct Grid c = a;
+    c.grid[1][0]  = 9;
+    AssertEq(!!(Grid_equals(&a, &b)), 1);
+    AssertEq(!!(Grid_equals(&a, &c)), 0);
+    AssertEq(!!(Grid_hash(&a) == Grid_hash(&b)), 1);
+    AssertEq(!!(Grid_hash(&a) != Grid_hash(&c)), 1);
+}

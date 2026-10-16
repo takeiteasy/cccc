@@ -15,6 +15,7 @@
 #include "stdarg.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 // [from test_nested_vararg]
 // Nested variadic test with val*2
@@ -1310,6 +1311,36 @@ int test_va_opt(void) {
     VAOPT_ASSERT(ox == 5, "ADD_IF_ARGS no args");
     VAOPT_ASSERT(oy == 15, "ADD_IF_ARGS with args");
     if (vaopt_tests_failed != 0)
+        return 1;
+    return 42;
+}
+
+// A widening cast past int must survive as a variadic argument: the callee
+// reads the argument's own type.
+[[cccc::test(return = 42)]]
+int test_varargs_widening_cast_kept(void) {
+    int      i = -7;
+    unsigned u = 4000000000u;
+    char     buf[64];
+    snprintf(buf, sizeof buf, "%lld %ld %llu", (long long)i, (long)i,
+             (unsigned long long)u);
+    if (strcmp(buf, "-7 -7 4000000000") != 0)
+        return 1;
+    return 42;
+}
+
+@comptime Node *varargs_cast_arg(Node *buf, Node *v) {
+    Node *args[4] = {buf, MakeStringLiteral("%lld"),
+                     MakeCast(v, GetType("long long")), NULL};
+    return MakeFuncCall(MakeVarRef("sprintf"), args, 3);
+}
+
+[[cccc::test(return = 42)]]
+int test_varargs_comptime_cast_kept(void) {
+    int  i = -7;
+    char buf[32];
+    varargs_cast_arg(buf, i);
+    if (strcmp(buf, "-7") != 0)
         return 1;
     return 42;
 }

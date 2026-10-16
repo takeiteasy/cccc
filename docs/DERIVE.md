@@ -274,9 +274,6 @@ first NUL.
 `@dump_skip` out of `@dump`. Both go on struct members, take no arguments, and
 are a compile error anywhere else.
 
-Limitations: an array of arrays (`int grid[2][2]`) works on the VM but does not
-compile under `-c=native` yet ([#1631](https://todo.sr.ht/~takeiteasy/cccc/1631)).
-
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
 

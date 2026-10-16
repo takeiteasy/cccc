@@ -74,8 +74,8 @@ static int get_precedence(NodeKind kind) {
     }
 }
 
-// Integer-conversion-rank table for the plain integer kinds, shared by the
-// ND_CAST suppression check and serialize_shift_operand() below.
+// Integer-conversion-rank table for the plain integer kinds, used by the
+// ND_CAST suppression check.
 static const int cccc_int_conv_rank[] = {
     [TY_BOOL] = 0, [TY_CHAR] = 1, [TY_SHORT] = 2, [TY_INT] = 3, [TY_LONG] = 4};
 
@@ -86,14 +86,17 @@ static bool is_ranked_int_kind(TypeKind k) {
 
 // Would serialize_expr()'s ND_CAST arm drop this dst<-src integer cast as an
 // always-implicit widening conversion? (Same-signedness, dst rank >= src rank.)
-// Such a cast is genuinely redundant in almost every context -- but NOT as a
-// shift operand; see serialize_shift_operand().
+// A cast that widens past `int` is never dropped: it is significant wherever
+// the operand's own type is what the context reads -- a variadic argument, a
+// shift operand (`(long long)x << 32`).
 static bool cast_is_implicit_int_widening(Type *dst, Type *src) {
     if (!dst || !src || !is_ranked_int_kind(dst->kind) ||
         !is_ranked_int_kind(src->kind))
         return false;
-    return dst->is_unsigned == src->is_unsigned &&
-           cccc_int_conv_rank[dst->kind] >= cccc_int_conv_rank[src->kind];
+    int dst_rank = cccc_int_conv_rank[dst->kind];
+    int src_rank = cccc_int_conv_rank[src->kind];
+    return dst->is_unsigned == src->is_unsigned && dst_rank >= src_rank &&
+           (dst_rank <= cccc_int_conv_rank[TY_INT] || dst_rank == src_rank);
 }
 
 static bool is_comparison_kind(NodeKind k) {
@@ -955,35 +958,37 @@ static void serialize_addr_comma(FILE *f, VirtualMachine *vm,
 // (same trick serialize_atomic_addr()/#1101 uses).
 static void serialize_offset_cast_type(FILE *f, VirtualMachine *vm,
                                        SerializeContext *ctx, Type *ty) {
+    bool is_array = ty && (ty->kind == TY_ARRAY || ty->kind == TY_VLA);
     bool qualified =
         ty && ty->base &&
         (ty->base->is_const || ty->base->is_volatile || ty->base->is_atomic);
     fprintf(f, "(");
-    if (!qualified) {
-        if (ty && (ty->kind == TY_ARRAY || ty->kind == TY_VLA)) {
-            serialize_type(f, ctx, ty->base);
-            fprintf(f, " *");
-        } else {
-            serialize_type(f, ctx, ty);
-        }
+    if (!qualified && !is_array) {
+        serialize_type(f, ctx, ty);
     } else {
-        // Strip the qualifiers onto a fresh unqualified pointee, then
-        // re-spell a plain pointer TO it through serialize_type() rather
-        // than printing `pointee *` by hand -- the pointee may itself be
-        // a pointer (an array of const-qualified function pointers, e.g.
-        // `static int (*const table[])(void)`), where naive concatenation
-        // produces the unparseable `(int (*)(void) *)`.
-        Type pointee        = *ty->base;
-        pointee.is_const    = false;
-        pointee.is_volatile = false;
-        pointee.is_atomic   = false;
-        pointee.origin      = NULL;
-        Type ptr            = {0};
-        ptr.kind            = TY_PTR;
-        ptr.size            = 8;
-        ptr.align           = 8;
-        ptr.is_unsigned     = true;
-        ptr.base            = &pointee;
+        // Re-spell a plain pointer TO the (unqualified) element through
+        // serialize_type() rather than printing `pointee *` by hand -- the
+        // pointee may itself be a pointer or an array (an array of const-
+        // qualified function pointers, e.g. `static int (*const
+        // table[])(void)`, or a row of a 2-D array), where naive
+        // concatenation produces the unparseable `(int (*)(void) *)` /
+        // `int [2] *` instead of `int (*)[2]`.
+        Type  pointee = {0};
+        Type *base    = ty->base;
+        if (qualified) {
+            pointee             = *ty->base;
+            pointee.is_const    = false;
+            pointee.is_volatile = false;
+            pointee.is_atomic   = false;
+            pointee.origin      = NULL;
+            base                = &pointee;
+        }
+        Type ptr        = {0};
+        ptr.kind        = TY_PTR;
+        ptr.size        = 8;
+        ptr.align       = 8;
+        ptr.is_unsigned = true;
+        ptr.base        = base;
         serialize_type(f, ctx, &ptr);
     }
     fprintf(f, ")");
@@ -1362,27 +1367,6 @@ static bool serialize_wide_bitint_expr(FILE *f, VirtualMachine *vm,
         default:
             return false;
     }
-}
-
-// Serialize one operand of a `<<` / `>>`. Ordinarily identical to
-// serialize_expr(), but preserves a widening integer cast the ND_CAST arm
-// would drop when that cast widens past `int` -- see the ND_SHL/ND_SHR arm's
-// comment. Only the immediate cast node is forced; anything deeper keeps
-// serialize_expr()'s normal suppression.
-static void serialize_shift_operand(FILE *f, VirtualMachine *vm,
-                                    SerializeContext *ctx, Node *node,
-                                    int parent_prec) {
-    if (node && node->kind == ND_CAST && node->lhs && node->ty &&
-        node->lhs->ty &&
-        cast_is_implicit_int_widening(node->ty, node->lhs->ty) &&
-        cccc_int_conv_rank[node->ty->kind] > cccc_int_conv_rank[TY_INT]) {
-        fprintf(f, "(");
-        serialize_type(f, ctx, node->ty);
-        fprintf(f, ")");
-        serialize_expr(f, vm, ctx, node->lhs, get_precedence(ND_CAST));
-        return;
-    }
-    serialize_expr(f, vm, ctx, node, parent_prec);
 }
 
 // ---------- members of opaque-storage aggregates ----------
@@ -2059,23 +2043,14 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
 
         case ND_SHL:
         case ND_SHR:
-            // A shift never applies the usual arithmetic conversions -- each
-            // operand only undergoes the integer promotions (to `int`). A
-            // widening cast that the ND_CAST arm would otherwise drop as
-            // "implicit" is therefore significant here once it widens past
-            // `int`: `(long long)x << 32` shifts in 64-bit, `x << 32` is a
-            // 32-bit shift and undefined for a count >= 32. Found by #1132's
-            // self-hosting spike -- codegen_func.c packs `spill_param_count`
-            // into an ENT3 operand's high word exactly this way, and dropping
-            // the cast made every self-hosted guest function read its incoming
-            // parameter as 0.
-            serialize_shift_operand(
-                f, vm, ctx, node->lhs,
-                operand_prec(node->kind, node->lhs, node_prec));
+            // A shift only promotes each operand to `int`, so the ND_CAST
+            // arm's kept widening-past-`int` cast decides the shift width:
+            // `(long long)x << 32` is 64-bit, `x << 32` is undefined.
+            serialize_expr(f, vm, ctx, node->lhs,
+                           operand_prec(node->kind, node->lhs, node_prec));
             fprintf(f, " %s ", get_binary_op_str(node->kind));
-            serialize_shift_operand(
-                f, vm, ctx, node->rhs,
-                operand_prec(node->kind, node->rhs, node_prec + 1));
+            serialize_expr(f, vm, ctx, node->rhs,
+                           operand_prec(node->kind, node->rhs, node_prec + 1));
             break;
 
         case ND_MUL:

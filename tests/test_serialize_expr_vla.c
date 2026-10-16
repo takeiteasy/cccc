@@ -1,5 +1,5 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: n = 4;[\s\S]*__cccc_tmp[0-9]+ = n[\s\S]*int v\[__cccc_tmp[0-9]+\];
+// CCCC_EXPECT_STDOUT: n = 4;[\s\S]*__cccc_tmp[0-9]+ = (\(long\))?n[\s\S]*int v\[__cccc_tmp[0-9]+\];
 // CCCC_REJECT_STDOUT: unsupported expr kind
 // CCCC_REJECT_STDOUT: \+ \(int \*\)
 //

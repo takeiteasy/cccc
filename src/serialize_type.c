@@ -2713,7 +2713,8 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     TypeName *tag   = find_tag_name(ctx, ty);
     TypeName *alias = find_typedef_name(ctx, ty);
 
-    if (!ty->members) {
+    // An empty complete aggregate (`struct E {};`) has no members but a size.
+    if (!ty->members && ty->size < 0) {
         if (!tag && alias)
             fprintf(f, "typedef %s", aggregate_keyword(ty));
         else
