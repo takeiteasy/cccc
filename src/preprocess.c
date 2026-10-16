@@ -1827,15 +1827,6 @@ static const AttrInfo known_attrs[] = {
     {"constant", ATTR_CCCC, true, 1},
     {"private", ATTR_CCCC, true, 1},
     {"generic", ATTR_CCCC, true, 1},
-    // Built-in attribute handlers (include/cccc/derive.h)
-    // TODO(#1624): generate_accessors is missing from this list
-    {"serialize", ATTR_CCCC, true, 1},
-    {"deserialize", ATTR_CCCC, true, 1},
-    {"enum_to_string", ATTR_CCCC, true, 1},
-    {"enum_from_string", ATTR_CCCC, true, 1},
-    {"generate_getters", ATTR_CCCC, true, 1},
-    {"generate_setters", ATTR_CCCC, true, 1},
-    {"generate_constructor", ATTR_CCCC, true, 1},
     // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
     {"maybe_unused", ATTR_STD, false, 202311L},
     {"deprecated", ATTR_STD, true, 202311L},
@@ -1890,10 +1881,22 @@ static const AttrInfo known_attrs[] = {
     {NULL, 0, false, 0},
 };
 
-static const AttrInfo *find_attr_info(char *name) {
+static const AttrInfo *lookup_attr_info(const char *name) {
     for (int i = 0; known_attrs[i].name; i++)
         if (!strcmp(name, known_attrs[i].name))
             return &known_attrs[i];
+
+    // derive.h attributes come from derive_builtin_attr_names() (src/macros.c)
+    static const AttrInfo derive_attr = {"", ATTR_CCCC, true, 1};
+    if (is_derive_builtin_attr(name, (int)strlen(name)))
+        return &derive_attr;
+    return NULL;
+}
+
+static const AttrInfo *find_attr_info(char *name) {
+    const AttrInfo *exact = lookup_attr_info(name);
+    if (exact)
+        return exact;
 
     // GNU __x__ alternate spelling (e.g. __pure__, __cleanup__): strip the
     // leading/trailing "__" and retry, matching real GCC/Clang behavior
@@ -1906,9 +1909,7 @@ static const AttrInfo *find_attr_info(char *name) {
         size_t inner_len = len - 4;
         memcpy(inner, name + 2, inner_len);
         inner[inner_len] = '\0';
-        for (int i = 0; known_attrs[i].name; i++)
-            if (!strcmp(inner, known_attrs[i].name))
-                return &known_attrs[i];
+        return lookup_attr_info(inner);
     }
     return NULL;
 }

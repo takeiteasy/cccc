@@ -709,6 +709,16 @@ test_gnu_once_setup_b(void) {
 #if !__has_c_attribute(cccc::test_teardown)
 #error "__has_c_attribute(cccc::test_teardown) should be 1"
 #endif
+// derive.h attributes report 1 without including derive.h
+#if __has_c_attribute(cccc::serialize) != 1 ||                                 \
+    __has_c_attribute(cccc::generate_accessors) != 1 ||                        \
+    __has_c_attribute(cccc::to_json) != 1 ||                                   \
+    __has_c_attribute(cccc::from_json) != 1
+#error "__has_c_attribute(cccc::<derive attribute>) should be 1"
+#endif
+#if !__has_attribute(generate_accessors) || !__has_attribute(__to_json__)
+#error "__has_attribute(<derive attribute>) should be 1"
+#endif
 
 // [from test_attr_format_spellings]
 // Verify __attribute__((format(...))) accepts GNU/Clang alternate spellings.

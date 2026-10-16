@@ -1415,9 +1415,10 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     return result;
 }
 
-// Attribute names handled by derive.h's @comptime(attribute(...)) handlers,
-// used to hint at the missing #include when one is used without it. Keep in
-// sync with that header (tests/host/test_derive_attr_list.c checks it).
+// Attribute names handled by derive.h's @comptime(attribute(...)) handlers.
+// Used to hint at the missing #include when one is used without it, and by
+// the attribute registry (__has_c_attribute, @name routing). Keep in sync with
+// that header (tests/host/test_derive_attr_list.c checks it).
 static const char *const derive_attr_names[] = {
     "serialize",
     "deserialize",

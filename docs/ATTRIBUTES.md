@@ -35,7 +35,9 @@ optimizer, no machine-mode type system — see
 name, matching real GCC/Clang so headers that feature-test on them don't
 diverge; genuinely unrecognized attributes return `0`.
 `__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
-attributes (C23 N3220 §6.10.10.2), `1` for CCCC vendor attributes, and `1`
+attributes (C23 N3220 §6.10.10.2), `1` for CCCC vendor attributes (including the
+[`<cccc/derive.h>`](DERIVE.md) ones such as `cccc::generate_accessors`, whether
+or not the header is included), and `1`
 for any attribute `__has_attribute` recognizes when it is written in the `gnu`
 or `__gnu__` scope (`__has_c_attribute(gnu::cold)`); unsupported or unknown
 attributes return `0`. `__has_cpp_attribute` returns `0`.

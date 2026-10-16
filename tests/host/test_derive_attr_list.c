@@ -66,6 +66,8 @@ int main(void) {
         snprintf(needle, sizeof needle, "\"%s\")", *n);
         CHECK(strstr(src, needle), "'%s' is listed but derive.h has no handler",
               *n);
+        CHECK(cc_has_attribute(*n, (int)strlen(*n)),
+              "'%s' is listed but cc_has_attribute is false", *n);
     }
     CHECK(registered == listed, "derive.h has %d handlers, list has %d",
           registered, listed);
