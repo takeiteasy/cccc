@@ -267,7 +267,7 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
 
 static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
                              AttrTargetKind kind, char *name, Type *ty,
-                             Obj *obj, Token *tok) {
+                             Obj *obj, Token *tok, Member *mem, Type *owner) {
     // Serialize/Deserialize and the enum-string builders call memcpy/strcmp,
     // which the runtime TU may not declare.
     if (attrs && !vm->compiler.no_comptime)
@@ -293,6 +293,8 @@ static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
         target->ty   = ty;
         target->obj  = obj;
         target->tok  = tok ? tok : use->tok;
+        target->mem   = mem;
+        target->owner = owner;
         cc_execute_attribute_macro(vm, pm, use->tok, target, use->args,
                                    use->arg_count);
     }
@@ -305,11 +307,66 @@ bool has_custom_attrs(Type *ty, VarAttr *attr) {
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                            AttrTargetKind kind, char *name, Type *target_ty,
                            Obj *obj, Token *tok) {
+    run_pending_member_attrs(vm);
     if (attr && attr->custom_attrs)
         run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
-                         tok);
+                         tok, NULL, NULL);
     if (ty && ty->custom_attrs)
-        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj, tok);
+        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj, tok,
+                         NULL, NULL);
+}
+
+CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src) {
+    CustomAttrUse *head = NULL, **tail = &head;
+    for (; src; src = src->next) {
+        CustomAttrUse *use =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(CustomAttrUse));
+        *use      = *src;
+        use->next = NULL;
+        *tail     = use;
+        tail      = &use->next;
+    }
+    return head;
+}
+
+void queue_member_attrs(VirtualMachine *vm, Member *mem, Type *owner) {
+    if (vm->compiler.current_fn)
+        error_tok(vm, mem->custom_attrs->tok,
+                  "custom attributes on members are only supported in "
+                  "file-scope structs and unions");
+    PendingMemberAttrs *p =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(PendingMemberAttrs));
+    p->mem   = mem;
+    p->owner = owner;
+    if (vm->compiler.pending_member_attrs_tail)
+        vm->compiler.pending_member_attrs_tail->next = p;
+    else
+        vm->compiler.pending_member_attrs = p;
+    vm->compiler.pending_member_attrs_tail = p;
+}
+
+// Runs the handlers of every queued member. Called once the enclosing
+// file-scope declaration is complete, so layout is final and a handler never
+// runs inside a half-parsed struct.
+void run_pending_member_attrs(VirtualMachine *vm) {
+    // A handler compiles the comptime program, whose own parse reaches this
+    // again: only the outermost drain runs handlers.
+    if (vm->compiler.in_macro_mode || vm->compiler.draining_member_attrs)
+        return;
+    vm->compiler.draining_member_attrs = true;
+    while (vm->compiler.pending_member_attrs) {
+        PendingMemberAttrs *p             = vm->compiler.pending_member_attrs;
+        vm->compiler.pending_member_attrs = p->next;
+        if (!p->next)
+            vm->compiler.pending_member_attrs_tail = NULL;
+        char *name = p->mem->name ? arena_strndup(vm, p->mem->name->loc,
+                                                  p->mem->name->len)
+                                  : NULL;
+        run_custom_attrs(
+            vm, p->mem->custom_attrs, ATTR_TARGET_MEMBER, name, p->mem->ty,
+            NULL, p->mem->name ? p->mem->name : p->mem->tok, p->mem, p->owner);
+    }
+    vm->compiler.draining_member_attrs = false;
 }
 
 // Ticket #619: generic programmatic attribute application for AST-generated

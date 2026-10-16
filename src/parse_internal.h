@@ -159,14 +159,6 @@ typedef struct {
     bool in_member_list;
 } VarAttr;
 
-struct CustomAttrUse {
-    char          *name;
-    Token         *tok;
-    Node          *args;
-    int            arg_count;
-    CustomAttrUse *next;
-};
-
 // This struct represents a variable initializer. Since initializers
 // can be nested (e.g. `int x[2][2] = {{1, 2}, {3, 4}}`), this struct
 // is a tree data structure.
@@ -306,6 +298,9 @@ int explicit_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
 void append_custom_attr(VirtualMachine *vm, CustomAttrUse **list,
                         Token *name_tok, Node *args, int arg_count);
 void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
+CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src);
+void queue_member_attrs(VirtualMachine *vm, Member *mem, Type *owner);
+void run_pending_member_attrs(VirtualMachine *vm);
 Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Type *ty, const char *name);
 // #485: effective checked-region state at `tok` -- see cc_checked_scope_at()'s

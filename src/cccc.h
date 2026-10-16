@@ -1803,6 +1803,10 @@ typedef struct Member {
     // identical to no request at all). See explicit_decl_align()
     // (parse_types.c) and struct_decl()/union_decl()'s mem_align locals.
     int explicit_align;
+
+    // Custom comptime attributes written on this member (@name / [[name]]).
+    // Read through the Member* query builtins; run by the attribute handlers.
+    struct CustomAttrUse *custom_attrs;
 } Member;
 
 /*!
@@ -2923,12 +2927,20 @@ typedef struct CondIncl {
 } CondIncl;
 
 typedef struct CustomAttrUse CustomAttrUse;
+struct CustomAttrUse {
+    char          *name;
+    Token         *tok;
+    Node          *args;
+    int            arg_count;
+    CustomAttrUse *next;
+};
 
 typedef enum {
     ATTR_TARGET_TYPEDEF  = 1,
     ATTR_TARGET_TYPE     = 2,
     ATTR_TARGET_FUNCTION = 3,
     ATTR_TARGET_GLOBAL   = 4,
+    ATTR_TARGET_MEMBER   = 5,
 } AttrTargetKind;
 
 typedef struct AttrTarget {
@@ -2937,7 +2949,17 @@ typedef struct AttrTarget {
     Type          *ty;
     Obj           *obj;
     Token         *tok;
+    Member        *mem;   // ATTR_TARGET_MEMBER: the attributed member
+    Type          *owner; // ATTR_TARGET_MEMBER: the struct/union declaring it
 } AttrTarget;
+
+// A member carrying custom attributes, queued by struct_members() until the
+// enclosing file-scope declaration is complete (see run_pending_member_attrs).
+typedef struct PendingMemberAttrs {
+    struct PendingMemberAttrs *next;
+    Member                    *mem;
+    Type                      *owner;
+} PendingMemberAttrs;
 
 /*!
  @brief Represents a compile-time macro function.
@@ -4237,6 +4259,9 @@ typedef struct Compiler {
                                // literal itself has no storage-class specifier
                                // and lexical scope is not file scope (#720).
     Obj   *current_fn;         // Function being parsed
+    PendingMemberAttrs *pending_member_attrs; // FIFO head; tail via _tail
+    PendingMemberAttrs *pending_member_attrs_tail;
+    bool                draining_member_attrs;
     int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)
     bool   in_type_lookahead;  // Parsing a declarator only to classify it
     AddrSpace *addr_space_sink; // declspec(): where [[cccc::global]] etc land

@@ -1430,6 +1430,8 @@ static const char *const derive_attr_names[] = {
     "generate_constructor",
     "to_json",
     "from_json",
+    "json_skip",
+    "json_name",
     NULL,
 };
 
@@ -2746,6 +2748,20 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
     }
     char *target_desc =
         target->name ? arena_format(vm, "%s%s", tag, target->name) : NULL;
+    if (target->kind == ATTR_TARGET_MEMBER && target->name) {
+        const char *owner_kind =
+            target->owner && target->owner->kind == TY_UNION ? "union"
+                                                             : "struct";
+        const char *owner_name =
+            target->owner && target->owner->name
+                ? arena_strndup(vm, target->owner->name->loc,
+                                target->owner->name->len)
+                : NULL;
+        target_desc = owner_name
+                          ? arena_format(vm, "member %s of %s %s", target->name,
+                                         owner_kind, owner_name)
+                          : arena_format(vm, "member %s", target->name);
+    }
     ExpansionFrameHint hint = {
         .kind        = EXPANSION_ATTR_HANDLER,
         .target_desc = target_desc,

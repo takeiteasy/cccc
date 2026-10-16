@@ -92,3 +92,44 @@ void test_from_json_rejections(void) {
     AssertEq(app_Pair_from_json(&p, "{\"a\":1,\"b\":2} x") != 0, 1);
     AssertEq(app_Pair_from_json(&p, "{\"a\":1,\"b\":99999999999}") != 0, 1);
 }
+
+@to_json @from_json struct Account {
+    int  id @json_name("account_id");
+    char owner[8];
+    int  secret @json_skip;
+    struct {
+        int depth @json_name("d");
+        int hidden @json_skip;
+    } inner;
+};
+
+[[cccc::test]]
+void test_member_skip_and_rename(void) {
+    struct Account a = {7, "bob", 99, {5, 6}};
+    char           buf[128];
+    Account_to_json(&a, buf, sizeof buf);
+    AssertEq(strcmp(buf, "{\"account_id\":7,\"owner\":\"bob\","
+                         "\"inner\":{\"d\":5}}"),
+             0);
+
+    struct Account b = {0, "", 123, {0, 77}};
+    AssertEq(Account_from_json(&b, "{\"account_id\":9,\"owner\":\"al\","
+                                   "\"inner\":{\"d\":3}}"),
+             0);
+    AssertEq(b.id, 9);
+    AssertEq(b.inner.depth, 3);
+    AssertEq(b.secret, 123);
+    AssertEq(b.inner.hidden, 77);
+}
+
+[[cccc::test]]
+void test_renamed_key_is_required(void) {
+    struct Account b;
+    AssertEq(Account_from_json(
+                 &b, "{\"id\":9,\"owner\":\"al\",\"inner\":{\"d\":3}}") != 0,
+             1);
+    AssertEq(Account_from_json(&b, "{\"account_id\":9,\"owner\":\"al\","
+                                   "\"inner\":{\"d\":3,\"hidden\":1},"
+                                   "\"secret\":1}"),
+             0);
+}

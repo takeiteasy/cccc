@@ -225,6 +225,7 @@ typedef enum {
     ATTR_TARGET_TYPE     = 2,
     ATTR_TARGET_FUNCTION = 3,
     ATTR_TARGET_GLOBAL   = 4,
+    ATTR_TARGET_MEMBER   = 5,
 } AttrTargetKind;
 #endif // CCCC_REFLECTION_PROTOTYPES_ONLY
 
@@ -862,6 +863,46 @@ Obj *__builtin_attr_target_obj(AttrTarget *target);
 /*! @brief Return a source token for the decorated declaration.
  */
 Token *__builtin_attr_target_token(AttrTarget *target);
+
+/*! @brief Return the attributed member of an ATTR_TARGET_MEMBER target, else
+ * NULL.
+ */
+Member *__builtin_attr_target_member(AttrTarget *target);
+
+/*! @brief Return the struct or union declaring an ATTR_TARGET_MEMBER target's
+ * member, else NULL.
+ */
+Type *__builtin_attr_target_owner(AttrTarget *target);
+
+/*! @brief Return 1 if the member carries the custom attribute `name`.
+ */
+int __builtin_ast_member_has_attr(Member *m, const char *name);
+
+/*! @brief Return the argument count of the member's first use of `name`, or -1
+ * when absent.
+ */
+int __builtin_ast_member_attr_arg_count(Member *m, const char *name);
+
+/*! @brief Return argument `index` of the member's first use of `name`, or NULL.
+ */
+Node *__builtin_ast_member_attr_arg(Member *m, const char *name, int index);
+
+/*! @brief Return the number of custom attribute uses on the member.
+ */
+int __builtin_ast_member_attr_count(Member *m);
+
+/*! @brief Return the name of the member's attribute use `index`, or NULL.
+ */
+const char *__builtin_ast_member_attr_name_at(Member *m, int index);
+
+/*! @brief Return the argument count of the member's attribute use `index`, or
+ * -1.
+ */
+int __builtin_ast_member_attr_arg_count_at(Member *m, int index);
+
+/*! @brief Return argument `arg` of the member's attribute use `index`, or NULL.
+ */
+Node *__builtin_ast_member_attr_arg_at(Member *m, int index, int arg);
 
 // ============================================================================
 // AST Node Construction - Literals
@@ -2171,6 +2212,43 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Return a source token for the decorated declaration.
  * @param target The attribute target to inspect. */
 #define AttrTargetToken(target) __builtin_attr_target_token(target)
+/*! @def AttrTargetMember
+ * @brief Return the attributed member of an ATTR_TARGET_MEMBER target.
+ * @param target The attribute target to inspect. */
+#define AttrTargetMember(target) __builtin_attr_target_member(target)
+/*! @def AttrTargetOwner
+ * @brief Return the struct or union declaring an ATTR_TARGET_MEMBER target's
+ * member.
+ * @param target The attribute target to inspect. */
+#define AttrTargetOwner(target) __builtin_attr_target_owner(target)
+/*! @def MemberHasAttr
+ * @brief Return 1 if the member carries the custom attribute `name`.
+ * @param m The member. @param name Attribute name without the `@`. */
+#define MemberHasAttr(m, name) __builtin_ast_member_has_attr(m, name)
+/*! @def MemberAttrArgCount
+ * @brief Return the argument count of the first use of `name`, or -1 if absent.
+ * @param m The member. @param name Attribute name. */
+#define MemberAttrArgCount(m, name) __builtin_ast_member_attr_arg_count(m, name)
+/*! @def MemberAttrArg
+ * @brief Return argument `i` of the first use of `name` as an expression node.
+ * @param m The member. @param name Attribute name. @param i Argument index. */
+#define MemberAttrArg(m, name, i) __builtin_ast_member_attr_arg(m, name, i)
+/*! @def MemberAttrCount
+ * @brief Return the number of custom attribute uses on the member.
+ * @param m The member. */
+#define MemberAttrCount(m) __builtin_ast_member_attr_count(m)
+/*! @def MemberAttrNameAt
+ * @brief Return the name of attribute use `i`.
+ * @param m The member. @param i Use index. */
+#define MemberAttrNameAt(m, i) __builtin_ast_member_attr_name_at(m, i)
+/*! @def MemberAttrArgCountAt
+ * @brief Return the argument count of attribute use `i`.
+ * @param m The member. @param i Use index. */
+#define MemberAttrArgCountAt(m, i) __builtin_ast_member_attr_arg_count_at(m, i)
+/*! @def MemberAttrArgAt
+ * @brief Return argument `j` of attribute use `i` as an expression node.
+ * @param m The member. @param i Use index. @param j Argument index. */
+#define MemberAttrArgAt(m, i, j) __builtin_ast_member_attr_arg_at(m, i, j)
 
 /*! @def MakeFunction
  * @brief Create a new function object, automatically added to the globals list.

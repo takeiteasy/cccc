@@ -1110,13 +1110,13 @@ static void forward_fn_attrs_to_pointee(VirtualMachine *vm, Type *ty,
     ty->base = apply_var_attrs_to_type(vm, ty->base, &fn);
 }
 
-// The TY_AUTO sentinel is a shared singleton: attributes land on a copy.
+// Base types are shared singletons: attributes land on a copy.
 static Type *with_custom_attrs(VirtualMachine *vm, Type *ty,
                                CustomAttrUse *list) {
     if (!list)
         return ty;
-    if (ty == ty_auto)
-        ty = copy_type(vm, ty);
+    ty               = copy_type(vm, ty);
+    ty->custom_attrs = clone_custom_attr_list(vm, ty->custom_attrs);
     append_custom_attr_list(&ty->custom_attrs, list);
     return ty;
 }
@@ -2016,6 +2016,26 @@ int effective_decl_align(VirtualMachine *vm, Token *tok, Type *ty,
     return explicit_align > ty->align ? explicit_align : ty->align;
 }
 
+// Gathers the custom attributes written on one member: the declspec's (shared
+// by every declarator of the declaration, so cloned), the declarator's and a
+// trailing bit-field suffix's. They then belong to the member, not its type.
+static void collect_member_attrs(VirtualMachine *vm, Member *mem, VarAttr *attr,
+                                 CustomAttrUse *suffix, Type *owner,
+                                 bool is_anonymous) {
+    append_custom_attr_list(&mem->custom_attrs,
+                            clone_custom_attr_list(vm, attr->custom_attrs));
+    if (!is_anonymous && mem->ty->custom_attrs) {
+        append_custom_attr_list(
+            &mem->custom_attrs,
+            clone_custom_attr_list(vm, mem->ty->custom_attrs));
+        mem->ty               = copy_type(vm, mem->ty);
+        mem->ty->custom_attrs = NULL;
+    }
+    append_custom_attr_list(&mem->custom_attrs, suffix);
+    if (mem->custom_attrs)
+        queue_member_attrs(vm, mem, owner);
+}
+
 // struct-members = (declspec declarator (","  declarator)* ";")*
 static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                            Type *ty) {
@@ -2036,10 +2056,6 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                       "not supported -- move it outside the declaration");
         VarAttr attr   = {.in_member_list = true};
         Type   *basety = declspec(vm, &tok, tok, &attr);
-        if (has_custom_attrs(basety, &attr))
-            error_tok(vm, tok,
-                      "custom attributes are only supported on file-scope "
-                      "declarations");
         bool first = true;
 
         // Anonymous struct member
@@ -2054,6 +2070,8 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             memset(mem, 0, sizeof(Member));
             mem->ty  = basety;
             mem->idx = idx++;
+            mem->tok = anon_tok;
+            collect_member_attrs(vm, mem, &attr, NULL, ty, true);
             mem->explicit_align =
                 explicit_decl_align(vm, anon_tok, mem->ty, &attr);
             mem->align = mem->explicit_align > mem->ty->align
@@ -2072,13 +2090,10 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             Member *mem =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
             memset(mem, 0, sizeof(Member));
-            mem->ty = declarator(vm, &tok, tok, basety);
-            if (has_custom_attrs(mem->ty, NULL))
-                error_tok(vm, mem->name ? mem->name : tok,
-                          "custom attributes are only supported on file-scope "
-                          "declarations");
+            mem->ty                        = declarator(vm, &tok, tok, basety);
             mem->name = mem->ty->name;
             mem->idx  = idx++;
+            CustomAttrUse *mem_extra_attrs = NULL;
 
             // #485: reject an unchecked pointer member in a checked region.
             cc_check_checked_scope_decl(vm, mem->ty, mem->name,
@@ -2112,10 +2127,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                 Token  *bf_tok  = tok;
                 VarAttr bf_attr = {};
                 tok             = attribute_list(vm, tok, NULL, &bf_attr);
-                if (has_custom_attrs(NULL, &bf_attr))
-                    error_tok(vm, mem->name ? mem->name : bf_tok,
-                              "custom attributes are only supported on "
-                              "file-scope declarations");
+                mem_extra_attrs = bf_attr.custom_attrs;
 
                 // _Alignas/alignas on a bit-field is rejected outright by
                 // gcc ("alignment specified for bit-field") -- cccc must
@@ -2147,10 +2159,9 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                                      : mem->ty->align;
                 }
 
-                append_custom_attr_list(&mem->ty->custom_attrs,
-                                        bf_attr.custom_attrs);
                 mem->ty = apply_var_attrs_to_type(vm, mem->ty, &bf_attr);
             }
+            collect_member_attrs(vm, mem, &attr, mem_extra_attrs, ty, false);
             drop_cleanup_attr(vm, mem->ty, &attr, mem->name);
 
             cur = cur->next = mem;

@@ -153,7 +153,7 @@ CCCC supports two macro execution forms:
 |------|--------------|--------------|-----------------------------|
 | Global generation | `[[cccc::comptime]] void gen(char *a1, ...)` called at file scope | Before the main parse | `NULL` / `void` return means side-effects only. An `ND_BLOCK` return splices its body declarations directly into file scope (see [Block return](#block-return-from-file-scope-macros)). Args are stringified into `char *` parameters. |
 | Call-site expansion | `[[cccc::comptime]] Node *gen(Node *a1, ...)` called inside code | During macro expansion after parsing | Replaces the call expression or statement |
-| Custom attribute | `@comptime(attribute("name")) void gen(AttrTarget *target, ...)` used by `@name` on a file-scope declaration | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `Node *` expression nodes. |
+| Custom attribute | `@comptime(attribute("name")) void gen(AttrTarget *target, ...)` used by `@name` on a file-scope declaration or a struct/union member | During the main parse, after the target declaration is built | Return value is ignored; generated declarations are side effects. Attribute arguments are passed as `Node *` expression nodes. |
 
 ### Pre-parse macro declaration context
 
@@ -498,14 +498,64 @@ macros. The target helpers are:
 
 | Helper | Description |
 |---|---|
-| `GetAttrTargetKind(target)` | `ATTR_TARGET_TYPE`, `ATTR_TARGET_FUNCTION`, `ATTR_TARGET_GLOBAL`, or `ATTR_TARGET_TYPEDEF` |
+| `GetAttrTargetKind(target)` | `ATTR_TARGET_TYPE`, `ATTR_TARGET_FUNCTION`, `ATTR_TARGET_GLOBAL`, `ATTR_TARGET_TYPEDEF`, or `ATTR_TARGET_MEMBER` |
 | `AttrTargetName(target)` | Source name when available |
-| `$ATTR_TARGET_TYPE(target)` | Target type |
-| `AttrTargetObj(target)` | Function/global object, or `NULL` for type/typedef targets |
+| `$ATTR_TARGET_TYPE(target)` | Target type (the member's type for a member) |
+| `AttrTargetObj(target)` | Function/global object, or `NULL` for type/typedef/member targets |
 | `AttrTargetToken(target)` | Source token for diagnostics |
+| `AttrTargetMember(target)` | The `Member *` of a member target, else `NULL` |
+| `AttrTargetOwner(target)` | The struct/union declaring a member target, else `NULL` |
 
-Custom attributes are v1 file-scope features. Applying one to a local variable
-or struct member is a compile error.
+Applying a custom attribute to a local variable is a compile error.
+
+### Member attributes
+
+A custom attribute can sit on a struct or union member, in any declarator
+position:
+
+```c
+struct Account {
+    int id @column("account_id");   // after the declarator
+    @column("tag") int a, b;        // before the type: a and b both carry it
+    int flags : 3 @column("flags"); // after a bit-field width
+};
+```
+
+A handler registered for the name runs once per attributed member, after the
+enclosing declaration is complete, so offsets are final and the owner's member
+list is full. `a` and `b` each get their own run of the handler. An anonymous
+struct/union member takes attributes from the declaration specifiers only.
+
+A struct-level handler reads the attributes while it walks the members:
+
+```c
+@comptime(attribute("columns")) void columns(AttrTarget *target) {
+    Type *ty = AttrTargetType(target);
+    for (int i = 0; i < StructMemberCount(ty); i++) {
+        Member *m = StructMemberAt(ty, i);
+        if (MemberHasAttr(m, "column"))
+            use(StringLiteralValue(MemberAttrArg(m, "column", 0)));
+    }
+}
+```
+
+| Helper | Description |
+|---|---|
+| `MemberHasAttr(m, "name")` | 1 if the member carries the attribute |
+| `MemberAttrArgCount(m, "name")` | Argument count of the first use, `-1` if absent |
+| `MemberAttrArg(m, "name", i)` | Argument `i` of the first use as a `Node *`, or `NULL` |
+| `MemberAttrCount(m)` | Number of attribute uses on the member |
+| `MemberAttrNameAt(m, i)` | Name of use `i`, or `NULL` |
+| `MemberAttrArgCountAt(m, i)` | Argument count of use `i`, `-1` if out of range |
+| `MemberAttrArgAt(m, i, j)` | Argument `j` of use `i`, or `NULL` |
+
+The name-based helpers see the first use when a name repeats; the `At` helpers
+walk every use. A member attribute needs a registered handler: a name with
+none is dropped silently, as on any declaration, so a misspelled name does not
+error. A member handler that has nothing to do can be an empty function.
+
+Member attributes are not allowed on the members of a struct defined inside a
+function body.
 
 ## Comptime functions in global initializers
 

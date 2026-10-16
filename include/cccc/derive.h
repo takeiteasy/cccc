@@ -417,10 +417,12 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 }
 
 // Flattens the members of `ty` (anonymous struct members included) into
-// names/types/exprs, where exprs[i] reads member i of `e`.
+// names/keys/types/exprs, where exprs[i] reads member i of `e`, names[i] is the
+// C member name and keys[i] its JSON key (@json_name). @json_skip members are
+// left out.
 @comptime void __builtin_json_collect(Type *ty, Node *e, const char *attr,
-                                      const char **names, Type **types,
-                                      Node **exprs, int *n) {
+                                      const char **names, const char **keys,
+                                      Type **types, Node **exprs, int *n) {
     int count = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
         Member     *m     = StructMemberAt(ty, i);
@@ -433,13 +435,24 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                              "%s does not support an anonymous union member",
                              attr);
             if (tk == TK_STRUCT)
-                __builtin_json_collect(fty, e, attr, names, types, exprs, n);
+                __builtin_json_collect(fty, e, attr, names, keys, types, exprs,
+                                       n);
             continue;
         }
+        if (MemberHasAttr(m, "json_skip"))
+            continue;
         if (*n >= 128)
             MacroErrorAt(MakeIntLiteral(0), "%s supports at most 128 members",
                          attr);
+        const char *key = field;
+        if (MemberHasAttr(m, "json_name"))
+            key = StringLiteralValue(MemberAttrArg(m, "json_name", 0));
+        for (int j = 0; j < *n; j++)
+            if (!strcmp(keys[j], key))
+                MacroErrorAt(MakeIntLiteral(0), "%s: duplicate JSON key '%s'",
+                             attr, key);
         names[*n] = field;
+        keys[*n]  = key;
         types[*n] = fty;
         exprs[*n] = MakeMember(e, field);
         (*n)++;
@@ -497,10 +510,11 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         __builtin_json_put_ch(block, w, ']');
     } else {
         const char *names[128];
+        const char *keys[128];
         Type       *types[128];
         Node       *exprs[128];
         int         n = 0;
-        __builtin_json_collect(ty, e, attr, names, types, exprs, &n);
+        __builtin_json_collect(ty, e, attr, names, keys, types, exprs, &n);
         __builtin_json_put_ch(block, w, '{');
         for (int j = 0; j < n; j++) {
             char sub[256];
@@ -509,10 +523,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             strcat(sub, names[j]);
             if (j > 0)
                 __builtin_json_put_ch(block, w, ',');
-            BlockAddStmt(block,
-                         MakeExprStmt(__builtin_json_call2(
-                             "__cccc_json_w_key", __builtin_json_addr(w),
-                             MakeStringLiteral(names[j]))));
+            BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                    "__cccc_json_w_key", __builtin_json_addr(w),
+                                    MakeStringLiteral(keys[j]))));
             __builtin_json_write_value(block, w, types[j], exprs[j], attr, sub);
         }
         __builtin_json_put_ch(block, w, '}');
@@ -582,10 +595,11 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                         MakeIntLiteral(']')));
     } else {
         const char *names[128];
+        const char *keys[128];
         Type       *types[128];
         Node       *exprs[128];
         int         n = 0;
-        __builtin_json_collect(ty, e, attr, names, types, exprs, &n);
+        __builtin_json_collect(ty, e, attr, names, keys, types, exprs, &n);
 
         Node *seen =
             MakeLocalVarUnique(MakeArray(GetType("unsigned char"), n ? n : 1));
@@ -620,9 +634,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                          MakeExprStmt(MakeAssign(
                              MakeSubscript(seen, MakeIntLiteral(j)),
                              MakeIntLiteral(1))));
-            Node *is_key = __builtin_json_call2(
-                "__cccc_json_key_is", __builtin_json_charp(key),
-                MakeStringLiteral(names[j]));
+            Node *is_key = __builtin_json_call2("__cccc_json_key_is",
+                                                __builtin_json_charp(key),
+                                                MakeStringLiteral(keys[j]));
             chain = MakeIf(is_key, member, chain);
         }
 
@@ -646,6 +660,41 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                  MakeIntLiteral(n ? n : 1))),
                    MakeReturn(MakeIntLiteral(1)), NULL));
     }
+}
+
+// ---- @json_skip / @json_name -------------------------------------------
+// Member attributes read by @to_json and @from_json: `int x @json_skip;` leaves
+// the member out of the JSON, `int x @json_name("id");` uses another key.
+
+@comptime void __builtin_json_member_target(AttrTarget *target,
+                                            const char *attr) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0), "%s applies to a struct member", attr);
+}
+
+@comptime(attribute("json_skip")) void __builtin_attr_json_skip(
+    AttrTarget *target, ...) {
+    __builtin_json_member_target(target, "@json_skip");
+    if (VarargCount() != 0)
+        MacroErrorAt(MakeIntLiteral(0), "@json_skip takes no arguments");
+    if (MemberHasAttr(AttrTargetMember(target), "json_name"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@json_skip and @json_name cannot share a member");
+}
+
+@comptime(attribute("json_name")) void __builtin_attr_json_name(
+    AttrTarget *target, ...) {
+    __builtin_json_member_target(target, "@json_name");
+    if (VarargCount() != 1)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@json_name takes one string literal key");
+    const char *key = StringLiteralValue(VarargAt(0));
+    if (!key || !key[0])
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@json_name expects a non-empty string literal key");
+    if (strlen(key) >= 128)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@json_name key is longer than 127 characters");
 }
 
 // <prefix>_<Type>_<suffix>, or <Type>_<suffix> when the prefix is empty.

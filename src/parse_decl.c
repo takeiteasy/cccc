@@ -1810,6 +1810,7 @@ static Token *file_scope_asm(VirtualMachine *vm, Token *tok) {
 
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
+        run_pending_member_attrs(vm);
         // _Static_assert or static_assert (C23) - check before declspec
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
             Token *decl_tok = tok;
@@ -1903,6 +1904,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         // Global variable
         tok = global_variable(vm, tok, basety, &attr);
     }
+    run_pending_member_attrs(vm);
     return tok;
 }
 

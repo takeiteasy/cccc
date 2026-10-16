@@ -1172,10 +1172,11 @@ struct @packed point { char x; int y; };
 ```
 
 The `@` prefix is accepted wherever the corresponding canonical form is valid.
-Custom comptime attributes currently run only on file-scope declarations
-(types, typedefs, functions, and globals). Their arguments are parsed as
-expression AST nodes and passed to the registered handler after the decorated
-target has been built.
+Custom comptime attributes run on file-scope declarations (types, typedefs,
+functions, and globals) and on members of file-scope structs and unions. Their
+arguments are parsed as expression AST nodes and passed to the registered
+handler after the decorated target has been built. Member attributes are
+described in [MACROS.md](MACROS.md#member-attributes).
 `__declspec` (Windows) is reserved as a future fourth fallback category.
 
 ## Position in Grammar

@@ -31,6 +31,8 @@ int main(void) {
 | `@generate_constructor` | struct/union | `T T_create(<member>, ...)` |
 | `@to_json` | struct | `size_t T_to_json(const T *self, char *buf, size_t cap)` |
 | `@from_json` | struct | `int T_from_json(T *out, const char *json)` |
+| `@json_skip` | member | leaves the member out of `@to_json` / `@from_json` |
+| `@json_name("key")` | member | uses `key` as the member's JSON key |
 
 Every attribute accepts both `struct T {...};` and `typedef ... T;`. Applying
 one to the wrong kind of type (an enum attribute on a struct, say) is a compile
@@ -157,6 +159,30 @@ A prefix names the functions `<prefix>_<Type>_to_json` and
 `<prefix>_<Type>_from_json`: `@to_json("app")` on `struct Pair` publishes
 `app_Pair_to_json`.
 
+### Skipping and renaming members
+
+`@json_skip` and `@json_name("key")` go on the members, in any declarator
+position (`int id @json_name("user_id");`, `@json_skip int a, b;`):
+
+```c
+@to_json
+@from_json
+struct Account {
+    int  id @json_name("account_id");
+    char owner[8];
+    int  secret @json_skip;
+};
+// {"account_id":7,"owner":"bob"}
+```
+
+A skipped member is not written, and `T_from_json` leaves it as it was. Its
+key in the input is ignored like any other unknown key. A renamed member is
+read and written under the new key only. Two members with the same key
+(after renaming) are a compile error, as is `@json_skip` together with
+`@json_name`, a key that is empty or longer than 127 bytes, or either attribute
+outside a struct member.
+
+
 ## Writing your own
 
 Handlers for your own attributes use the same mechanism
@@ -164,3 +190,7 @@ Handlers for your own attributes use the same mechanism
 [MACROS.md](MACROS.md). The first handler registered for a name wins, so a
 handler you define for a name above, before `#include <cccc/derive.h>` (or
 without the include), replaces the built-in one.
+
+A handler for a struct reads the attributes on its members with
+`MemberHasAttr` and `MemberAttrArg`; see
+[Member attributes](MACROS.md#member-attributes).

@@ -865,6 +865,89 @@ Token *__builtin_attr_target_token(AttrTarget *target) {
     return target ? target->tok : NULL;
 }
 
+CC_BUILTIN(__builtin_attr_target_member, 1);
+Member *__builtin_attr_target_member(AttrTarget *target) {
+    return target ? target->mem : NULL;
+}
+
+CC_BUILTIN(__builtin_attr_target_owner, 1);
+Type *__builtin_attr_target_owner(AttrTarget *target) {
+    return target ? target->owner : NULL;
+}
+
+// ============================================================================
+// Member attributes
+// ============================================================================
+
+static CustomAttrUse *member_attr_nth(Member *m, int index) {
+    if (!m || index < 0)
+        return NULL;
+    CustomAttrUse *use = m->custom_attrs;
+    for (int i = 0; i < index && use; i++)
+        use = use->next;
+    return use;
+}
+
+// First use of `name` on the member.
+static CustomAttrUse *member_attr_find(Member *m, const char *name) {
+    if (!m || !name)
+        return NULL;
+    for (CustomAttrUse *use = m->custom_attrs; use; use = use->next)
+        if (!strcmp(use->name, name))
+            return use;
+    return NULL;
+}
+
+static Node *attr_use_arg(CustomAttrUse *use, int index) {
+    if (!use || index < 0 || index >= use->arg_count)
+        return NULL;
+    Node *arg = use->args;
+    for (int i = 0; i < index && arg; i++)
+        arg = arg->next;
+    return arg;
+}
+
+CC_BUILTIN(__builtin_ast_member_has_attr, 2);
+int __builtin_ast_member_has_attr(Member *m, const char *name) {
+    return member_attr_find(m, name) != NULL;
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_arg_count, 2);
+int __builtin_ast_member_attr_arg_count(Member *m, const char *name) {
+    CustomAttrUse *use = member_attr_find(m, name);
+    return use ? use->arg_count : -1;
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_arg, 3);
+Node *__builtin_ast_member_attr_arg(Member *m, const char *name, int index) {
+    return attr_use_arg(member_attr_find(m, name), index);
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_count, 1);
+int __builtin_ast_member_attr_count(Member *m) {
+    int n = 0;
+    for (CustomAttrUse *use = m ? m->custom_attrs : NULL; use; use = use->next)
+        n++;
+    return n;
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_name_at, 2);
+const char *__builtin_ast_member_attr_name_at(Member *m, int index) {
+    CustomAttrUse *use = member_attr_nth(m, index);
+    return use ? use->name : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_arg_count_at, 2);
+int __builtin_ast_member_attr_arg_count_at(Member *m, int index) {
+    CustomAttrUse *use = member_attr_nth(m, index);
+    return use ? use->arg_count : -1;
+}
+
+CC_BUILTIN(__builtin_ast_member_attr_arg_at, 3);
+Node *__builtin_ast_member_attr_arg_at(Member *m, int index, int arg) {
+    return attr_use_arg(member_attr_nth(m, index), arg);
+}
+
 // ============================================================================
 // AST Node Construction - Helper
 // ============================================================================
