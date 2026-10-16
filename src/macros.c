@@ -1419,14 +1419,9 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 // @comptime(attribute(...)) handlers. Keep in sync with that header
 // (tests/host/test_reflection_attr_list.c checks it).
 static const char *const reflection_attr_names[] = {
-    "serialize",
-    "deserialize",
-    "enum_to_string",
-    "enum_from_string",
-    "generate_getters",
-    "generate_setters",
-    "generate_constructor",
-    NULL,
+    "serialize",          "deserialize",          "enum_to_string",
+    "enum_from_string",   "generate_getters",     "generate_setters",
+    "generate_accessors", "generate_constructor", NULL,
 };
 
 const char *const *reflection_builtin_attr_names(void) {
@@ -3909,6 +3904,63 @@ Node *cc_eager_expand_macro_call(VirtualMachine *vm, Node *node) {
     // void/return-type checks, NULL-result errors, and recursive re-expansion.
     // Deferred global initializers are always expression position.
     return transform_node(vm, node, 0, false);
+}
+
+bool cc_expr_contains_macro_call(Node *node) {
+    if (!node)
+        return false;
+    if (node->kind == ND_MACRO_CALL)
+        return true;
+    return cc_expr_contains_macro_call(node->lhs) ||
+           cc_expr_contains_macro_call(node->rhs) ||
+           cc_expr_contains_macro_call(node->cond) ||
+           cc_expr_contains_macro_call(node->then) ||
+           cc_expr_contains_macro_call(node->els);
+}
+
+Node *cc_expand_const_macro_calls(VirtualMachine *vm, Node *node) {
+    if (!node || !cc_expr_contains_macro_call(node))
+        return node;
+    init_vm_segments_for_macros(vm);
+
+    // Compiling the macro program runs a nested parse() and codegen; keep the
+    // host function's parse state out of it and intact afterwards.
+    Obj              *saved_fn       = vm->compiler.current_fn;
+    Obj              *saved_locals   = vm->compiler.locals;
+    Node             *saved_gotos    = vm->compiler.gotos;
+    Node             *saved_labels   = vm->compiler.labels;
+    Node             *saved_switch   = vm->compiler.current_switch;
+    char             *saved_brk      = vm->compiler.brk_label;
+    char             *saved_cont     = vm->compiler.cont_label;
+    CleanupChainNode *saved_chain    = vm->compiler.cur_cleanup_chain;
+    int               saved_clean_d  = vm->compiler.cleanup_scope_depth;
+    int               saved_brk_d    = vm->compiler.brk_cleanup_depth;
+    int               saved_cont_d   = vm->compiler.cont_cleanup_depth;
+    vm->compiler.current_fn          = NULL;
+    vm->compiler.locals              = NULL;
+    vm->compiler.gotos               = NULL;
+    vm->compiler.labels              = NULL;
+    vm->compiler.current_switch      = NULL;
+    vm->compiler.brk_label           = NULL;
+    vm->compiler.cont_label          = NULL;
+    vm->compiler.cur_cleanup_chain   = NULL;
+    vm->compiler.cleanup_scope_depth = 0;
+    compile_all_macros(vm);
+    vm->compiler.current_fn          = saved_fn;
+    vm->compiler.locals              = saved_locals;
+    vm->compiler.gotos               = saved_gotos;
+    vm->compiler.labels              = saved_labels;
+    vm->compiler.current_switch      = saved_switch;
+    vm->compiler.brk_label           = saved_brk;
+    vm->compiler.cont_label          = saved_cont;
+    vm->compiler.cur_cleanup_chain   = saved_chain;
+    vm->compiler.cleanup_scope_depth = saved_clean_d;
+    vm->compiler.brk_cleanup_depth   = saved_brk_d;
+    vm->compiler.cont_cleanup_depth  = saved_cont_d;
+
+    node                             = transform_node(vm, node, 0, false);
+    add_type(vm, node);
+    return node;
 }
 
 // Expand all macro calls in the program

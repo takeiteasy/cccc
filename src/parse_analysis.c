@@ -674,7 +674,7 @@ void require_const_comma_lhs(VirtualMachine *vm, Node *comma) {
 }
 
 int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
-    Node *node = conditional(vm, rest, tok);
+    Node *node = cc_expand_const_macro_calls(vm, conditional(vm, rest, tok));
     return eval(vm, node);
 }
 
@@ -710,7 +710,7 @@ bool node_layout_const(Node *node, Type **out_ty, LayoutOp *out_align) {
 // enum values) needs this instead of a plain const_expr() call.
 int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
                           Type **out_ty, LayoutOp *out_align) {
-    Node *node = conditional(vm, rest, tok);
+    Node *node = cc_expand_const_macro_calls(vm, conditional(vm, rest, tok));
     node_layout_const(node, out_ty, out_align);
     return eval(vm, node);
 }

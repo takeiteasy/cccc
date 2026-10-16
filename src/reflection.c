@@ -913,6 +913,16 @@ Node *__builtin_ast_float_literal(double value) {
     return node;
 }
 
+CC_BUILTIN(__builtin_ast_string_literal_value, 1);
+const char *__builtin_ast_string_literal_value(Node *node) {
+    while (node && node->kind == ND_CAST)
+        node = node->lhs;
+    if (!node || node->kind != ND_VAR || !node->var ||
+        !node->var->is_string_literal)
+        return NULL;
+    return (const char *)node->var->init_data;
+}
+
 CC_BUILTIN(__builtin_ast_string_literal, 1);
 Node *__builtin_ast_string_literal(const char *str) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -1425,8 +1435,21 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
         return NULL;
 
     Member *mem = (Member *)__builtin_ast_struct_member_find(ty, name);
-    if (!mem)
+    if (!mem) {
+        // A field of an anonymous struct/union member is reached through it.
+        for (Member *m = ty->members; m; m = m->next) {
+            if (m->name || m->is_bitfield ||
+                (m->ty->kind != TY_STRUCT && m->ty->kind != TY_UNION))
+                continue;
+            Node *through   = alloc_node(vm, ND_MEMBER);
+            through->lhs    = obj;
+            through->member = m;
+            Node *found     = __builtin_ast_member(through, name);
+            if (found)
+                return found;
+        }
         return NULL;
+    }
 
     Node *node   = alloc_node(vm, ND_MEMBER);
     node->lhs    = obj;
@@ -1859,7 +1882,7 @@ CC_BUILTIN(__builtin_ast_init_struct, 4);
 Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
                                 int n) {
     VirtualMachine *vm = __builtin_current_vm;
-    if (!vm || !ty || n <= 0)
+    if (!vm || !ty || n < 0 || (n > 0 && (!fields || !values)))
         return NULL;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return NULL;
@@ -1948,22 +1971,47 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
 // Serialization (ticket #235)
 // ============================================================================
 
-// Recursively emit memcpy() calls copying each scalar/pointer leaf member of
-// `ty` (starting from `expr`) into `buf_char[base_offset + member->offset]`.
-// Nested struct/union members are recursed into (flat serialization).
-// Bitfields are skipped (TODO #<follow-up>: bit-packed serialization).
+// Recursively emit stores copying each leaf member of `ty` into `buf_char`.
+// `expr` is the (named) object being copied and sits at `expr_base` in the
+// buffer; `ty_off` is where `ty` starts inside `expr` (non-zero while walking
+// an anonymous struct/union member, whose fields are reached through `expr`).
+// Plain members are memcpy()d, named struct/union members recursed into, and
+// bit-fields assigned through the containing type so the packed bits survive.
 static void reflect_serialize_members(VirtualMachine *vm, Node *block, Type *ty,
-                                      Node *expr, Node *buf_char,
-                                      int base_offset) {
+                                      Node *expr, Node *buf_char, int expr_base,
+                                      int ty_off) {
     for (Member *m = ty->members; m; m = m->next) {
-        if (!m->name || m->is_bitfield)
+        int off = expr_base + ty_off + m->offset;
+
+        if (!m->name) {
+            if (!m->is_bitfield &&
+                (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION))
+                reflect_serialize_members(vm, block, m->ty, expr, buf_char,
+                                          expr_base, ty_off + m->offset);
             continue;
+        }
 
         Node *field = __builtin_ast_member(expr, __builtin_ast_member_name(m));
-        int   off   = base_offset + m->offset;
+
+        if (m->is_bitfield) {
+            Node *dst_ptr = __builtin_ast_cast(
+                __builtin_ast_unary(
+                    ND_ADDR,
+                    __builtin_ast_subscript(
+                        buf_char, __builtin_ast_int_literal(expr_base))),
+                pointer_to(vm, expr->ty));
+            Node *dst =
+                __builtin_ast_member(__builtin_ast_unary(ND_DEREF, dst_ptr),
+                                     __builtin_ast_member_name(m));
+            __builtin_ast_block_add_stmt(
+                block,
+                __builtin_ast_expr_stmt(__builtin_ast_assign(dst, field)));
+            continue;
+        }
 
         if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) {
-            reflect_serialize_members(vm, block, m->ty, field, buf_char, off);
+            reflect_serialize_members(vm, block, m->ty, field, buf_char, off,
+                                      0);
             continue;
         }
 
@@ -1998,7 +2046,7 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     Node *buf_char = __builtin_ast_cast(buf, pointer_to(vm, ty_char));
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
-        reflect_serialize_members(vm, block, ty, expr, buf_char, 0);
+        reflect_serialize_members(vm, block, ty, expr, buf_char, 0, 0);
     } else {
         Node *src  = __builtin_ast_unary(ND_ADDR, expr);
         Node *call = __builtin_ast_funcall(
@@ -2037,15 +2085,21 @@ Node *__builtin_ast_enum_to_string_switch(Type *ty, Node *expr) {
 
     add_type(vm, expr);
 
-    Node *sw = __builtin_ast_switch(expr);
-    int   n  = __builtin_ast_enum_value_count(ty);
+    Node   *sw   = __builtin_ast_switch(expr);
+    int     n    = __builtin_ast_enum_value_count(ty);
+    HashMap seen = {0};
     for (int i = 0; i < n; i++) {
-        const char *name       = __builtin_ast_enum_value_name(ty, i);
-        int64_t     val        = __builtin_ast_enum_value(ty, i);
-        Node       *value_node = __builtin_ast_int_literal(val);
+        const char *name = __builtin_ast_enum_value_name(ty, i);
+        int64_t     val  = __builtin_ast_enum_value(ty, i);
+        // Aliased enumerators share a value; the first name wins.
+        if (hashmap_get_int(&seen, val))
+            continue;
+        hashmap_put_int(&seen, val, (void *)1);
+        Node *value_node = __builtin_ast_int_literal(val);
         Node *body = __builtin_ast_return(__builtin_ast_string_literal(name));
         __builtin_ast_switch_add_case(sw, value_node, body);
     }
+    hashmap_deinit(&seen);
     __builtin_ast_switch_set_default(
         sw, __builtin_ast_return(__builtin_ast_string_literal("")));
 
@@ -3009,6 +3063,18 @@ Node *__builtin_ast_loop_set_body(Node *loop, Node *body) {
 // __builtin_generate_sum(elem_ty): publishes
 //   T sum_T(T *arr, size_t n) { T total = 0; for (...) total += arr[i]; return
 //   total; }
+// True when a macro-generated definition named `name` already exists, so a
+// generator can publish once per element type and ignore repeat calls.
+static bool generated_fn_defined(VirtualMachine *vm, const char *name) {
+    Obj *lists[] = {vm->compiler.globals, vm->compiler.macro_globals};
+    for (int i = 0; i < 2; i++)
+        for (Obj *obj = lists[i]; obj; obj = obj->next)
+            if (obj->is_function && obj->is_definition &&
+                obj->is_macro_generated && !strcmp(obj->name, name))
+                return true;
+    return false;
+}
+
 CC_BUILTIN(__builtin_generate_sum, 1);
 void __builtin_generate_sum(Type *elem_ty) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -3018,6 +3084,8 @@ void __builtin_generate_sum(Type *elem_ty) {
     char gname[128];
     strcpy(gname, "sum_");
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
+    if (generated_fn_defined(vm, gname))
+        return;
 
     Type *size_ty = __builtin_ast_get_type("size_t");
     Obj  *fn      = __builtin_ast_function(gname, elem_ty);
@@ -3069,6 +3137,8 @@ void __builtin_generate_map(Type *elem_ty) {
     char gname[128];
     strcpy(gname, "map_");
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
+    if (generated_fn_defined(vm, gname))
+        return;
 
     Type *size_ty = __builtin_ast_get_type("size_t");
     Type *cb_ty =
@@ -3124,6 +3194,8 @@ void __builtin_generate_reduce(Type *elem_ty) {
     char gname[128];
     strcpy(gname, "reduce_");
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
+    if (generated_fn_defined(vm, gname))
+        return;
 
     Type *size_ty = __builtin_ast_get_type("size_t");
     Type *cb_ty   = __builtin_ast_make_func_ptr_type(
@@ -3185,6 +3257,8 @@ void __builtin_generate_filter(Type *elem_ty) {
     char gname[128];
     strcpy(gname, "filter_");
     strcat(gname, __builtin_ast_type_c_name(elem_ty));
+    if (generated_fn_defined(vm, gname))
+        return;
 
     Type *size_ty = __builtin_ast_get_type("size_t");
     Type *cb_ty   = __builtin_ast_make_func_ptr_type(

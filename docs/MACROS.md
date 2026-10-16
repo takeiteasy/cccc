@@ -540,6 +540,29 @@ functions are not affected.
   in a global initializer is rejected with "expression-position comptime functions
   must return Node*".
 
+## Comptime functions in constant expressions
+
+A `Node *`-returning comptime function call is expanded where the parser needs
+a constant: `case` labels (including GNU ranges), enumerator values,
+`_Static_assert` conditions and file-scope array lengths.
+
+```c
+[[cccc::comptime]]
+Node *PLUS(Node *a, Node *b) { return MakeBinary(NK_ADD, a, b); }
+
+enum { A = PLUS(1, 2) };
+int table[PLUS(2, 3)];
+_Static_assert(PLUS(40, 2) == 42, "ok");
+
+switch (v) {
+    case PLUS(20, 2): ...
+}
+```
+
+The call runs during the parse, so the comptime program is compiled at the
+first such use. A block-scope array length such as `int v[PLUS(n, 1)]` stays a
+runtime (VLA) length.
+
 ## Global Generation
 
 Use a non-inline macro with a file-scope call when generated functions should be
@@ -2205,23 +2228,27 @@ Node *deser(Node *buf) {
 }
 ```
 
-V1 scope: scalars and flat structs (nested flat structs are recursed;
-pointer-typed members are copied as raw pointer bytes).
+V1 scope: scalars and flat structs (nested flat structs, bit-fields and the
+fields of anonymous struct/union members are copied; pointer-typed members are
+copied as raw pointer bytes).
 
 #### `@serialize` / `@deserialize` attributes
 
-Attach directly to a struct to auto-generate `<Type>_serialize` and
-`<Type>_deserialize` functions:
+Attach to a struct, union or `typedef` of one to auto-generate
+`<Type>_serialize` and `<Type>_deserialize` functions:
 
 ```c
 @serialize
 @deserialize
-struct Point { int x; int y; };
+typedef struct { int x; int y; } Point;
 
 // Generates:
 //   int Point_serialize(Point *self, void *buf);   // returns sizeof(Point)
 //   Point Point_deserialize(void *buf);
 ```
+
+The same targets (a tagged declaration or a `typedef`) apply to every attribute
+in this section.
 
 ### Enum String Conversion
 
@@ -2249,15 +2276,19 @@ typedef enum { RED, GREEN, BLUE } Color;
 //   Color Color_from_string(const char *s);  // returns -1 on no match
 ```
 
+Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
+
 ### Code Generators
 
-#### `@generate_getters` / `@generate_setters`
+#### `@generate_getters` / `@generate_setters` / `@generate_accessors`
 
-Publish one `get_<field>` / `set_<field>` function per struct member:
+Publish one `get_<field>` / `set_<field>` function per struct member.
+`@generate_accessors` publishes both. An optional string literal prefix gives
+the functions a `<prefix>_` name, which keeps two structs with a shared field
+name apart; `""` means no prefix.
 
 ```c
-@generate_getters
-@generate_setters
+@generate_accessors
 struct Point { int x; int y; };
 
 // Generates:
@@ -2265,11 +2296,24 @@ struct Point { int x; int y; };
 //   int get_y(struct Point *self);
 //   void set_x(struct Point *self, int value);
 //   void set_y(struct Point *self, int value);
+
+@generate_accessors("Size")
+struct Size { int x; };
+
+// Generates Size_get_x and Size_set_x.
 ```
+
+| Member | Getter | Setter |
+|---|---|---|
+| Scalar, struct, pointer | Returns the value | Assigns `value` |
+| Array `T a[N]` | Returns `T *` to the first element | Takes `const T *value`, copies the whole array |
+| Field of an anonymous struct/union | Same as a direct member | Same as a direct member |
 
 #### `@generate_constructor`
 
-Publish a `<Type>_create(field1, field2, ...)` constructor:
+Publish a `<Type>_create(field1, field2, ...)` constructor. Array members take
+a pointer parameter and are copied; fields of anonymous struct/union members
+are flattened into the parameter list:
 
 ```c
 @generate_constructor
@@ -2278,8 +2322,6 @@ struct Point { int x; int y; };
 // Generates:
 //   struct Point Point_create(int x, int y);
 ```
-
-V1 cap: up to 64 members per struct.
 
 #### FP-Style Array Generators
 
@@ -2309,6 +2351,9 @@ written.
 | `GenerateMap(T)` | `void map_T(T *arr, size_t n, T *out, T (*f)(T))` |
 | `GenerateReduce(T)` | `T reduce_T(T *arr, size_t n, T init, T (*f)(T, T))` |
 | `GenerateFilter(T)` | `void filter_T(T *arr, size_t n, T *out, size_t *out_n, bool (*pred)(T))` |
+
+Each generator publishes once per element type; repeating a call, from the same
+or another comptime function or input file, does nothing.
 
 The function name suffix is derived from the element type's canonical C name
 (`int`, `ulong`, `double`, etc.) or its user-defined type name for struct/enum
@@ -2554,6 +2599,7 @@ a compile with warnings puts more than one document there.
 | `MakeIntLiteral(val)` | Integer literal |
 | `MakeFloatLiteral(val)` | Floating-point literal |
 | `MakeStringLiteral(str)` | String literal |
+| `StringLiteralValue(node)` | Text of a string literal argument, or `NULL` |
 | `MakeVarRef(name)` | Variable reference |
 | `MakeParamRef(fn, name)` | Generated function parameter reference |
 | `Gensym(prefix)` | Unique arena-allocated symbol name using `__builtin_gensym` |

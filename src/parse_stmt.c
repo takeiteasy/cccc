@@ -480,7 +480,8 @@ Token *static_assert_decl(VirtualMachine *vm, Token *tok, Node **out_cond,
     bool   c23_static_assert = equal(tok, "static_assert");
     Token *start_tok         = tok;
     tok                      = skip(vm, tok->next, "(");
-    Node     *cond_node      = conditional(vm, &tok, tok);
+    Node *cond_node =
+        cc_expand_const_macro_calls(vm, conditional(vm, &tok, tok));
     long long val            = eval(vm, cond_node);
     char     *message        = "static assertion failed";
     int       message_len    = (int)strlen(message);

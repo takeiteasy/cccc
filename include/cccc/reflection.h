@@ -888,6 +888,14 @@ Node *__builtin_ast_float_literal(double value);
  */
 Node *__builtin_ast_string_literal(const char *str);
 
+/*! @brief Return the text of a string literal node.
+ * @param node A node, typically a macro or attribute argument.
+ * @return The NUL-terminated string, or NULL if @a node is not a string
+ *         literal.
+ * @details Convenience wrapper: StringLiteralValue(node).
+ */
+const char *__builtin_ast_string_literal_value(Node *node);
+
 /*! @brief Build a variable reference AST node.
  * @param name The variable name.
  * @return An NK_VAR node referencing name.
@@ -1729,6 +1737,10 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Build a string literal AST node.
  * @param str A NUL-terminated string. */
 #define MakeStringLiteral(str) __builtin_ast_string_literal(str)
+/*! @def StringLiteralValue
+ * @brief Return the text of a string literal node, or NULL.
+ * @param node A node, typically a macro or attribute argument. */
+#define StringLiteralValue(node) __builtin_ast_string_literal_value(node)
 /*! @def MakeVarRef
  * @brief Build a variable reference AST node.
  * @param name The variable name. */
@@ -2588,18 +2600,44 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // Macro Standard Library Attributes (ticket #235)
 // ============================================================================
 
+// The attributes below apply to `struct X {...};` and `typedef ... X;` alike.
+
+// The Type an attribute target names, or a diagnostic for `attr` when the
+// target is not a struct/union (want_enum == false) or enum (true) type.
+@comptime Type *__builtin_attr_type_target(AttrTarget *target, const char *attr,
+                                           bool want_enum) {
+    int kind = GetAttrTargetKind(target);
+    if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
+        MacroErrorAt(MakeIntLiteral(0), "%s expects a type or typedef target",
+                     attr);
+
+    Type *ty = AttrTargetType(target);
+    if (!ty)
+        MacroErrorAt(MakeIntLiteral(0), "%s target has no usable type", attr);
+
+    int tk = GetTypeKind(ty);
+    if (want_enum ? tk != TK_ENUM : (tk != TK_STRUCT && tk != TK_UNION))
+        MacroErrorAt(MakeIntLiteral(0), "%s expects %s target", attr,
+                     want_enum ? "an enum" : "a struct/union");
+    return ty;
+}
+
+// The name an attribute target is declared with (tag or typedef name).
+@comptime const char *__builtin_attr_type_name(AttrTarget *target,
+                                               const char *attr) {
+    const char *tname = AttrTargetName(target);
+    if (!tname)
+        MacroErrorAt(MakeIntLiteral(0), "%s target has no usable name", attr);
+    return tname;
+}
+
 // @serialize struct Foo {...}; publishes
 //   int Foo_serialize(struct Foo *self, void *buf);
 // which copies *self into buf via Serialize and returns sizeof(struct Foo).
 @comptime(attribute("serialize")) void __builtin_attr_serialize(
     AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@serialize expects a type (struct/union) target");
-
-    Type       *ty    = AttrTargetType(target);
-    const char *tname = AttrTargetName(target);
-    if (!ty || !tname)
-        MacroErrorAt(0, "@serialize target has no usable type/name");
+    Type       *ty    = __builtin_attr_type_target(target, "@serialize", false);
+    const char *tname = __builtin_attr_type_name(target, "@serialize");
 
     char fname[128];
     strcpy(fname, tname);
@@ -2623,13 +2661,8 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // which reconstructs a struct Foo from buf via Deserialize.
 @comptime(attribute("deserialize")) void __builtin_attr_deserialize(
     AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@deserialize expects a type (struct/union) target");
-
-    Type       *ty    = AttrTargetType(target);
-    const char *tname = AttrTargetName(target);
-    if (!ty || !tname)
-        MacroErrorAt(0, "@deserialize target has no usable type/name");
+    Type       *ty = __builtin_attr_type_target(target, "@deserialize", false);
+    const char *tname = __builtin_attr_type_name(target, "@deserialize");
 
     char fname[128];
     strcpy(fname, tname);
@@ -2647,18 +2680,11 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // @enum_to_string enum Color {...}; publishes
 //   const char *Color_to_string(enum Color v);
 // which switches over v and returns the matching constant's name, or "" if
-// no constant matches.
+// no constant matches. Constants sharing a value return the first name.
 @comptime(attribute("enum_to_string")) void __builtin_attr_enum_to_string(
     AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@enum_to_string expects a type (enum) target");
-
-    Type       *ty    = AttrTargetType(target);
-    const char *tname = AttrTargetName(target);
-    if (!ty || !tname)
-        MacroErrorAt(0, "@enum_to_string target has no usable type/name");
-    if (GetTypeKind(ty) != TK_ENUM)
-        MacroErrorAt(0, "@enum_to_string expects an enum target");
+    Type *ty = __builtin_attr_type_target(target, "@enum_to_string", true);
+    const char *tname = __builtin_attr_type_name(target, "@enum_to_string");
 
     char fname[128];
     strcpy(fname, tname);
@@ -2680,15 +2706,8 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 // value, or -1 if no constant matches.
 @comptime(attribute("enum_from_string")) void __builtin_attr_enum_from_string(
     AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0, "@enum_from_string expects a type (enum) target");
-
-    Type       *ty    = AttrTargetType(target);
-    const char *tname = AttrTargetName(target);
-    if (!ty || !tname)
-        MacroErrorAt(0, "@enum_from_string target has no usable type/name");
-    if (GetTypeKind(ty) != TK_ENUM)
-        MacroErrorAt(0, "@enum_from_string expects an enum target");
+    Type *ty = __builtin_attr_type_target(target, "@enum_from_string", true);
+    const char *tname = __builtin_attr_type_name(target, "@enum_from_string");
 
     char fname[128];
     strcpy(fname, tname);
@@ -2704,112 +2723,184 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
     PublishNode(fn);
 }
 
-// Ticket #235: GenerateGetters/GenerateSetters/GenerateConstructor
-// helpers. These are plain @comptime functions (no attribute name), compiled
-// into the same macro program as the @generate_* attribute handlers below
-// and called from them as ordinary functions.
-
-// __builtin_generate_getters(ty): for each member of struct/union `ty`,
-// publishes `<MemberType> get_<field>(<ty> *self) { return self->field; }`.
-@comptime void __builtin_generate_getters(Type *ty) {
-    ForeachMember(ty, m, {
-        const char *field = MemberName(m);
-        Type       *fty   = MemberType(m);
-
-        char        gname[128];
-        strcpy(gname, "get_");
-        strcat(gname, field);
-
-        Obj *fn = MakeFunction(gname, fty);
-        FunctionAddParam(fn, "self", MakePointer(ty));
-        WithFn(fn) {
-            Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
-            FunctionSetBody(fn, MakeReturn(MakeMember(self, field)));
-        }
-        PublishNode(fn);
-    });
+// The optional name prefix passed as `@attr("Prefix")`: "" when absent.
+@comptime const char *__builtin_attr_prefix_arg(const char *attr) {
+    if (VarargCount() == 0)
+        return "";
+    if (VarargCount() > 1)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s takes at most one argument (a name prefix)", attr);
+    const char *prefix = StringLiteralValue(VarargAt(0));
+    if (!prefix)
+        MacroErrorAt(MakeIntLiteral(0), "%s expects a string literal prefix",
+                     attr);
+    return prefix;
 }
 
-// __builtin_generate_setters(ty): for each member of struct/union `ty`,
-// publishes `void set_<field>(<ty> *self, <MemberType> value) { self->field =
-// value; }`.
-@comptime void __builtin_generate_setters(Type *ty) {
-    ForeachMember(ty, m, {
+// <prefix>_<verb>_<field>, or <verb>_<field> when prefix is empty.
+@comptime void __builtin_accessor_name(char *out, const char *prefix,
+                                       const char *verb, const char *field) {
+    out[0] = 0;
+    if (prefix[0]) {
+        strcpy(out, prefix);
+        strcat(out, "_");
+    }
+    strcat(out, verb);
+    strcat(out, "_");
+    strcat(out, field);
+}
+
+// Publishes the getter and/or setter of every member of struct/union `ty`
+// (fields of anonymous struct/union members included) taking `self_ty *`.
+// An array member's getter returns a pointer to its first element and its
+// setter copies the whole array from a pointer.
+@comptime void __builtin_generate_accessors(Type *self_ty, Type *ty,
+                                            const char *prefix, bool getters,
+                                            bool setters) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
         const char *field = MemberName(m);
         Type       *fty   = MemberType(m);
-
-        char        gname[128];
-        strcpy(gname, "set_");
-        strcat(gname, field);
-
-        Obj *fn = MakeFunction(gname, GetType("void"));
-        FunctionAddParam(fn, "self", MakePointer(ty));
-        FunctionAddParam(fn, "value", fty);
-        WithFn(fn) {
-            Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
-            Node *value = MakeParamRef(fn, "value");
-            FunctionSetBody(
-                fn, MakeExprStmt(MakeAssign(MakeMember(self, field), value)));
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                __builtin_generate_accessors(self_ty, fty, prefix, getters,
+                                             setters);
+            continue;
         }
-        PublishNode(fn);
-    });
+
+        bool is_array = GetTypeKind(fty) == TK_ARRAY;
+        char name[256];
+
+        if (getters) {
+            __builtin_accessor_name(name, prefix, "get", field);
+            Obj *fn =
+                MakeFunction(name, is_array ? MakePointer(TypeBase(fty)) : fty);
+            FunctionAddParam(fn, "self", MakePointer(self_ty));
+            WithFn(fn) {
+                Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+                FunctionSetBody(fn, MakeReturn(MakeMember(self, field)));
+            }
+            PublishNode(fn);
+        }
+
+        if (setters) {
+            __builtin_accessor_name(name, prefix, "set", field);
+            Obj *fn = MakeFunction(name, GetType("void"));
+            FunctionAddParam(fn, "self", MakePointer(self_ty));
+            FunctionAddParam(fn, "value",
+                             is_array ? MakePointer(MakeConst(TypeBase(fty)))
+                                      : fty);
+            WithFn(fn) {
+                Node *self   = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+                Node *target = MakeMember(self, field);
+                Node *value  = MakeParamRef(fn, "value");
+                Node *store  = is_array ? Memcpy(target, value,
+                                                 MakeIntLiteral(TypeSize(fty)))
+                                        : MakeAssign(target, value);
+                FunctionSetBody(fn, MakeExprStmt(store));
+            }
+            PublishNode(fn);
+        }
+    }
+}
+
+// Constructor parameters mirror the members of `ty`, anonymous struct/union
+// members flattened; `r` accumulates them in the body.
+@comptime void __builtin_constructor_params(Obj *fn, Type *ty) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                __builtin_constructor_params(fn, fty);
+            continue;
+        }
+        FunctionAddParam(fn, field,
+                         GetTypeKind(fty) == TK_ARRAY
+                             ? MakePointer(MakeConst(TypeBase(fty)))
+                             : fty);
+    }
+}
+
+@comptime void __builtin_constructor_stores(Obj *fn, Node *block, Node *r,
+                                            Type *ty) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                __builtin_constructor_stores(fn, block, r, fty);
+            continue;
+        }
+        Node *target = MakeMember(r, field);
+        Node *value  = MakeParamRef(fn, field);
+        Node *store = GetTypeKind(fty) == TK_ARRAY
+                          ? Memcpy(target, value, MakeIntLiteral(TypeSize(fty)))
+                          : MakeAssign(target, value);
+        BlockAddStmt(block, MakeExprStmt(store));
+    }
 }
 
 // __builtin_generate_constructor(ty, tname): publishes
-// `<ty> <tname>_create(<member1>, <member2>, ...) { return (ty){ .member1 =
-// member1, ... }; }` with one parameter per member of `ty`.
+// `<ty> <tname>_create(<member1>, <member2>, ...)` returning a zero-initialised
+// `ty` with each member set from its parameter.
 @comptime void __builtin_generate_constructor(Type *ty, const char *tname) {
     char gname[128];
     strcpy(gname, tname);
     strcat(gname, "_create");
 
     Obj *fn = MakeFunction(gname, ty);
-
-    ForeachMember(ty, m,
-                  { FunctionAddParam(fn, MemberName(m), MemberType(m)); });
+    __builtin_constructor_params(fn, ty);
 
     WithFn(fn) {
-        const char *fields[64];
-        Node       *values[64];
-        int         n = 0;
-        ForeachMember(ty, m, {
-            fields[n] = MemberName(m);
-            values[n] = MakeParamRef(fn, MemberName(m));
-            n++;
-        });
-        FunctionSetBody(fn, MakeReturn(InitStruct(ty, fields, values, n)));
+        Node *r     = MakeLocalVar("r", ty);
+        Node *block = MakeBlock(NULL, 0);
+        BlockAddStmt(
+            block, MakeExprStmt(MakeAssign(r, InitStruct(ty, NULL, NULL, 0))));
+        __builtin_constructor_stores(fn, block, r, ty);
+        BlockAddStmt(block, MakeReturn(r));
+        FunctionSetBody(fn, block);
     }
     PublishNode(fn);
 }
 
 // @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
-// for each member, returning self->field.
+// for each member, returning self->field. @generate_getters("Foo") names them
+// Foo_get_<field>.
 @comptime(attribute("generate_getters")) void __builtin_attr_generate_getters(
-    AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0,
-                     "@generate_getters expects a type (struct/union) target");
-
-    Type *ty = AttrTargetType(target);
-    if (!ty)
-        MacroErrorAt(0, "@generate_getters target has no usable type");
-
-    __builtin_generate_getters(ty);
+    AttrTarget *target, ...) {
+    Type *ty = __builtin_attr_type_target(target, "@generate_getters", false);
+    const char *prefix = __builtin_attr_prefix_arg("@generate_getters");
+    __builtin_generate_accessors(ty, ty, prefix, true, false);
 }
 
 // @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
 // <FieldType> value) for each member, assigning self->field = value.
+// @generate_setters("Foo") names them Foo_set_<field>.
 @comptime(attribute("generate_setters")) void __builtin_attr_generate_setters(
-    AttrTarget *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(0,
-                     "@generate_setters expects a type (struct/union) target");
+    AttrTarget *target, ...) {
+    Type *ty = __builtin_attr_type_target(target, "@generate_setters", false);
+    const char *prefix = __builtin_attr_prefix_arg("@generate_setters");
+    __builtin_generate_accessors(ty, ty, prefix, false, true);
+}
 
-    Type *ty = AttrTargetType(target);
-    if (!ty)
-        MacroErrorAt(0, "@generate_setters target has no usable type");
-
-    __builtin_generate_setters(ty);
+// @generate_accessors struct Foo {...}; publishes both the getter and the
+// setter of every member. @generate_accessors("Foo") prefixes both names.
+@comptime(attribute(
+    "generate_accessors")) void __builtin_attr_generate_accessors(AttrTarget
+                                                                      *target,
+                                                                  ...) {
+    Type *ty = __builtin_attr_type_target(target, "@generate_accessors", false);
+    const char *prefix = __builtin_attr_prefix_arg("@generate_accessors");
+    __builtin_generate_accessors(ty, ty, prefix, true, true);
 }
 
 // @generate_constructor struct Foo {...}; publishes
@@ -2819,15 +2910,10 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf);
     "generate_"
     "constructor")) void __builtin_attr_generate_constructor(AttrTarget
                                                                  *target) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_TYPE)
-        MacroErrorAt(
-            0, "@generate_constructor expects a type (struct/union) target");
-
-    Type       *ty    = AttrTargetType(target);
-    const char *tname = AttrTargetName(target);
-    if (!ty || !tname)
-        MacroErrorAt(0, "@generate_constructor target has no usable type/name");
-
+    Type *ty =
+        __builtin_attr_type_target(target, "@generate_constructor", false);
+    const char *tname =
+        __builtin_attr_type_name(target, "@generate_constructor");
     __builtin_generate_constructor(ty, tname);
 }
 #endif // CCCC_REFLECTION_PROTOTYPES_ONLY

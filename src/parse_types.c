@@ -895,8 +895,12 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
 
     Token *expr_tok = tok;
     Node  *expr     = conditional(vm, &tok, tok);
-    tok             = skip(vm, tok, "]");
-    ty              = type_suffix(vm, rest, tok, ty);
+    // File-scope lengths must be constant; a block-scope call may be a VLA
+    // length and keeps the post-parse expansion.
+    if (!vm->compiler.current_fn)
+        expr = cc_expand_const_macro_calls(vm, expr);
+    tok = skip(vm, tok, "]");
+    ty  = type_suffix(vm, rest, tok, ty);
 
     if (ty->kind == TY_VLA || !is_const_expr(vm, expr)) {
         if (vm->compiler.c_std < CCCC_STD_C99)
