@@ -79,12 +79,11 @@ static char *fail_slot(void) {
 // Fails the current test. On the owning thread this longjmps to the harness.
 // A guest worker thread instead ends itself, as pthread_exit does, and the
 // failure is reported once the test function returns.
-// TODO: an Assert in a callback or kernel item on a worker only ends that
-// callback or item (#1588).
 static void fail_exit(void) {
     s_run->failed = 1;
     if (pthread_equal(pthread_self(), s_run->owner))
         longjmp(s_run->jmp, 1);
+    cccc_thread_exit_begin();
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm) {
         vm->regs[REG_A0] = 0;
@@ -723,8 +722,6 @@ static bool run_hooks_guarded(VirtualMachine *vm, Obj *prog,
                               const char *disp, char fail_msg_out[512]) {
     CCCCTestRunState guard;
     guard.failed            = 0;
-    guard.owner             = pthread_self();
-    guard.owner             = pthread_self();
     guard.owner             = pthread_self();
     guard.timed_out         = 0;
     guard.fail_msg[0]       = '\0';
@@ -1584,27 +1581,60 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             memcpy(vm->data_seg,
                    once_suite_snap(once_suite, n_once_suite, cur_snap),
                    snap_size);
-            run_hooks(vm, prog, setups, false, false, cur_suite, disp);
+            char setup_fail[512] = {0};
+            if (!run_hooks_guarded(vm, prog, setups, false, false, cur_suite,
+                                   disp, setup_fail)) {
+                run_hooks_guarded(vm, prog, setups, true, false, cur_suite,
+                                  disp, NULL);
+                emit_test_result(fmt, disp, cur_suite, "fail", setup_fail,
+                                 &json_first, test_num);
+                total_failures++;
+                if (opts && opts->fail_fast)
+                    stop_early = true;
+                continue;
+            }
 
             fflush(stdout);
             fflush(stderr);
             s_alarm_fired = 0;
 
-            pid_t pid     = fork();
+            // The child reports a failed Assert through this pipe.
+            int fail_pipe[2];
+            if (pipe(fail_pipe) != 0)
+                fail_pipe[0] = fail_pipe[1] = -1;
+
+            pid_t pid = fork();
             if (pid == 0) {
                 signal(SIGALRM, SIG_DFL);
                 s_fork_child_pid = 0;
+                if (fail_pipe[0] >= 0)
+                    close(fail_pipe[0]);
                 // Prevent leaks -atExit instrumentation (handed down via
                 // MallocStackLogging / DYLD_INSERT_LIBRARIES) from hanging
                 // in the child when the test calls exit(2) or crashes.
                 unsetenv("MallocStackLogging");
                 unsetenv("MallocStackLoggingNoCompact");
                 unsetenv("DYLD_INSERT_LIBRARIES");
-                int rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                // Own guard: the parent's run state is not a valid jump target
+                // here, and a longjmp into it would resume the harness loop.
+                CCCCTestRunState child = {0};
+                child.owner            = pthread_self();
+                s_run                  = &child;
+                int rc                 = 0;
+                if (setjmp(child.jmp) == 0)
+                    rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                if (child.failed) {
+                    if (fail_pipe[1] >= 0)
+                        (void)!write(fail_pipe[1], child.fail_msg,
+                                     strlen(child.fail_msg));
+                    _exit(1);
+                }
                 _exit((unsigned char)rc); /* -1 (VM error) → 255, matching
                                              non-testing exit convention */
             }
 
+            if (fail_pipe[1] >= 0)
+                close(fail_pipe[1]);
             s_fork_child_pid = pid;
             long effective_ms =
                 r->timeout_ms > 0 ? r->timeout_ms : global_timeout_ms;
@@ -1621,6 +1651,13 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             SET_TIMEOUT(0);
             s_fork_child_pid    = 0;
 
+            char child_fail[512] = {0};
+            if (fail_pipe[0] >= 0) {
+                if (read(fail_pipe[0], child_fail, sizeof(child_fail) - 1) < 0)
+                    child_fail[0] = '\0';
+                close(fail_pipe[0]);
+            }
+
             bool fork_timed_out = (waited < 0 && s_alarm_fired);
             if (fork_timed_out) {
                 waitpid(pid, NULL, 0);
@@ -1636,26 +1673,33 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 else if (WIFSIGNALED(wstatus))
                     actual_code = 128 + WTERMSIG(wstatus);
 
-                if (actual_code == r->expect_exit_code) {
+                char td_fail[512] = {0};
+                bool td_ok = run_hooks_guarded(vm, prog, setups, true, false,
+                                               cur_suite, disp, td_fail);
+
+                char code_fail[128];
+                const char *fail = NULL;
+                if (child_fail[0]) {
+                    fail = child_fail;
+                } else if (actual_code != r->expect_exit_code) {
+                    snprintf(code_fail, sizeof(code_fail),
+                             "expected exit_code %d, got %d",
+                             r->expect_exit_code, actual_code);
+                    fail = code_fail;
+                } else if (!td_ok) {
+                    fail = td_fail;
+                }
+
+                if (!fail) {
                     emit_test_result(fmt, disp, cur_suite, "pass", NULL,
                                      &json_first, test_num);
                     passed++;
                 } else {
-                    char fail_msg[128];
-                    snprintf(fail_msg, sizeof(fail_msg),
-                             "expected exit_code %d, got %d",
-                             r->expect_exit_code, actual_code);
-                    emit_test_result(fmt, disp, cur_suite, "fail", fail_msg,
+                    emit_test_result(fmt, disp, cur_suite, "fail", fail,
                                      &json_first, test_num);
                     total_failures++;
                     if (opts && opts->fail_fast)
                         stop_early = true;
-                }
-
-                if (!fork_timed_out) {
-                    char td_fail[512] = {0};
-                    run_hooks_guarded(vm, prog, setups, true, false, cur_suite,
-                                      disp, td_fail);
                 }
             }
             continue;

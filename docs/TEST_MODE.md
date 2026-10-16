@@ -633,6 +633,7 @@ expected exit_code 139, got 0
 ### Limitations
 
 - `exit_code` tests are run in a forked subprocess. Setup hooks run in the parent (before the fork) so their state is visible to the child; teardown hooks run in the parent (after the child exits).
+- A failed `Assert*` in a setup hook, a teardown hook or the test body fails the test and reports the assert's message, even when the exit code matches. Setup failures skip the fork.
 - Global state changes made inside an `exit_code` test are not visible to subsequent tests (the child process exits and the parent restores its own snapshot as usual).
 - `exit_code` tests are skipped on non-POSIX platforms where `fork` is unavailable.
 
@@ -669,6 +670,8 @@ A failed `Assert*` ends the test wherever it runs; later tests are unaffected.
 | Test function or a function it calls | Test stops at the assert and reports `not ok`. |
 | Callback invoked by a host function (a `qsort` comparator, `bsearch`, `scandir`) | Same. Debugger flags, GIL and VM state are restored for the next test. |
 | Thread started with `pthread_create` / `thrd_create` | That thread ends as if it called `pthread_exit` (its TSS destructors run). The test reports `not ok` once the test function returns. |
+| Callback on such a thread (a `qsort` comparator) | The whole thread ends, not just the callback; code after the `qsort` call never runs. `pthread_exit` / `thrd_exit` inside a callback behaves the same. |
+| Body of an `exit_code =` test | Test reports `not ok` with the assert's message. |
 
 When several asserts fail in one test, the first message is the one
 reported:
@@ -690,8 +693,6 @@ void both_fail(void) {
 
 Limitations:
 
-- An assert inside a callback or kernel item running on a worker thread ends
-  only that callback or item (#1588).
 - Workers a test leaves running after it fails or times out keep running
   (#1585).
 

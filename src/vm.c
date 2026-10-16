@@ -1391,6 +1391,21 @@ void cccc_gil_release_to(VirtualMachine *vm, int depth) {
         cccc_gil_release(vm);
 }
 
+// Per host thread: every guest thread shares one VirtualMachine.
+static _Thread_local bool t_thread_exiting;
+
+void cccc_thread_exit_begin(void) {
+    t_thread_exiting = true;
+}
+
+bool cccc_thread_exiting(void) {
+    return t_thread_exiting;
+}
+
+void cccc_thread_exit_end(void) {
+    t_thread_exiting = false;
+}
+
 void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
     p->gil_depth             = vm->gil_depth;
     p->flags                 = vm->flags;
@@ -2357,6 +2372,7 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     if (!vm || !vm->text_seg) {
         error("VM not initialized - call cc_compile first");
     }
+    cccc_thread_exit_end();
     cc_scan_dynobjsz(vm);
     // #981: (re)compute the full heap-reclamation gate now that
     // dynobjsz_present is resolved for whatever bytecode exists so far --
@@ -2558,6 +2574,15 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
         return -1;
 
+    // The thread is ending: report a clean return so the caller (qsort,
+    // a kernel loop) carries on without a spurious fault, and keep the thread
+    // unwinding.
+    if (cccc_thread_exiting()) {
+        *out_ival = 0;
+        vm->pc    = CCCC_INVALID_PC;
+        return 0;
+    }
+
     long long saved_regs[NUM_REGS];
     FReg      saved_fregs[NUM_REGS];
     VReg      saved_vregs[NUM_REGS];
@@ -2632,6 +2657,12 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     vm->dbg.step_out_bp           = saved_step_out_bp;
     vm->dbg.debugger_attached     = saved_debugger_attached;
 
+    // The callback ended its thread: restoring saved_pc would resume it.
+    if (cccc_thread_exiting()) {
+        *out_ival = 0;
+        vm->pc    = CCCC_INVALID_PC;
+        return 0;
+    }
     if (!completed_cleanly)
         return -1;
     *out_ival = ival;

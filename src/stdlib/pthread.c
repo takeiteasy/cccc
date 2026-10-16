@@ -318,8 +318,14 @@ static void *vm_thread_start(void *arg) {
     // vm_eval's value is the start function's own return (REG_A0) on a clean
     // return; only reaching the sentinel pc says the thread did not trap.
     int rc      = vm_eval(vm);
+    // Before kernel_exit and the TSS destructors, which call back into the
+    // guest.
+    cccc_thread_exit_end();
     rec->vm_rc  = vm->pc == CCCC_INVALID_PC ? 0 : (rc ? rc : -1);
-    rec->retval = (void *)vm->regs[REG_A0];
+    // pthread_exit recorded its value; REG_A0 may be a restored callback
+    // frame's.
+    if (!rec->exited_via_pthread_exit)
+        rec->retval = (void *)vm->regs[REG_A0];
     rec->exited = 1;
     if (rec->kernel_exit)
         rec->kernel_exit(rec->kernel_item);
@@ -467,6 +473,7 @@ static long long wrap_pthread_exit(long long retval) {
     }
     vm->regs[REG_A0] = retval;
     vm->pc           = CCCC_INVALID_PC;
+    cccc_thread_exit_begin();
     return 0;
 }
 

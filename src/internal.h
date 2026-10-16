@@ -1265,6 +1265,14 @@ typedef struct {
 void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p);
 void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p);
 
+// Marks the calling guest thread as ending (a failed Assert or pthread_exit).
+// While set, cccc_call_guest_callback_ex skips new callbacks and abandons
+// running ones, so the whole thread unwinds rather than just the innermost
+// callback. The thread clears it once its start function has returned.
+void cccc_thread_exit_begin(void);
+bool cccc_thread_exiting(void);
+void cccc_thread_exit_end(void);
+
 //
 // debugger.c
 //
