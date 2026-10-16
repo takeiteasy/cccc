@@ -339,8 +339,11 @@ whose pointee needs a missing function is a compile error that names it
 `@clone` needs `@destroy` on the same type. `@clone("app")` and
 `@destroy("app")` publish `app_Doc_clone` and `app_Doc_destroy`, and the same
 prefix is used to find a pointee's functions. `@owned` goes on pointer
-members only; a `void *` member, a pointee with `const` elements, or two
-structs that own each other cannot be cloned.
+members only; a `void *` member or a pointee with `const` elements cannot
+be cloned.
+
+Limitations: two structs that own pointers to each other cannot be cloned
+([#1635](https://todo.sr.ht/~takeiteasy/cccc/1635)).
 
 ## Ordering
 
