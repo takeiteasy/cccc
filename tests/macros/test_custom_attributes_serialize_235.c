@@ -1,6 +1,8 @@
 // Ticket #235: @serialize/@deserialize attribute handlers shipped in
 // reflection.h. Mirrors test_custom_attributes_335.c.
 
+#include <cccc/derive.h>
+
 @serialize @deserialize struct Vec2 {
     int x;
     int y;

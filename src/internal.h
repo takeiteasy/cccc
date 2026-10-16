@@ -670,7 +670,6 @@ void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args, int arg_count);
-void ensure_derive_attrs_registered(VirtualMachine *vm);
 bool is_derive_builtin_attr(const char *name, int len);
 const char *const *derive_builtin_attr_names(void);
 void __builtin_ensure_string_h_decls(void);

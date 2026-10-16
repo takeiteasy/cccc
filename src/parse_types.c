@@ -2471,6 +2471,18 @@ static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
 // pointed-to type like const does, so it is collected by declspec() through
 // addr_space_sink and is an error anywhere else.
 // Work-group hints that OpenCL sources carry; nothing here uses them.
+// A derive.h attribute name with no registered handler means the program did
+// not #include <cccc/derive.h>; ignoring it would only fail later at the first
+// use of the function it should have generated.
+static void error_if_derive_attr_not_included(VirtualMachine *vm, Token *name) {
+    if (!vm->compiler.in_type_lookahead &&
+        is_derive_builtin_attr(name->loc, name->len))
+        error_tok(vm, name,
+                  "undefined custom attribute '%.*s' (#include "
+                  "<cccc/derive.h> for the built-in attributes)",
+                  name->len, name->loc);
+}
+
 static bool is_opencl_hint_attr(VirtualMachine *vm, Token *tok) {
     return vm->compiler.opencl &&
            (equal(tok, "reqd_work_group_size") ||
@@ -3021,6 +3033,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             if (tok->kind == TK_IDENT) {
                 Token *name_tok = tok;
                 tok             = tok->next;
+                error_if_derive_attr_not_included(vm, name_tok);
                 if (!vm->compiler.in_type_lookahead &&
                     !is_opencl_hint_attr(vm, name_tok) &&
                     !cc_has_attribute(name_tok->loc, name_tok->len))
@@ -3463,6 +3476,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                        !vm->compiler.in_type_lookahead &&
                        !(gnu_scoped &&
                          cc_has_attribute(name_tok->loc, name_tok->len))) {
+                error_if_derive_attr_not_included(vm, name_tok);
                 warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
                          "unknown attribute '%.*s' ignored",
                          (cccc_scoped || gnu_scoped) ? name_tok->len

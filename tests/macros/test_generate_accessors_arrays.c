@@ -1,6 +1,8 @@
 // Array and anonymous-struct members: the getter returns a pointer to the
 // first element, the setter and the constructor copy the whole array.
 
+#include <cccc/derive.h>
+
 @generate_accessors("S") @generate_constructor struct S {
     int arr[4];
     int grid[2][3];

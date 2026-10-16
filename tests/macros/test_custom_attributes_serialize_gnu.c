@@ -1,6 +1,8 @@
 // reflection.h's @serialize handler also fires through the GNU
 // __attribute__ spelling, with no comptime code of the program's own.
 
+#include <cccc/derive.h>
+
 __attribute__((serialize)) struct Vec2 {
     int x;
     int y;

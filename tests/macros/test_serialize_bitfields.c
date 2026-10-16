@@ -1,5 +1,7 @@
 // @serialize/@deserialize carry bit-field members and the fields of
 // anonymous struct/union members.
+#include <cccc/derive.h>
+
 #include <string.h>
 
 @serialize @deserialize struct Packed {

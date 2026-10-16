@@ -6,7 +6,7 @@
 // root.
 //
 // Rows are sorted by name: get_std_header() binary-searches them. The private
-// headers (reflection.h, derive.h, testing.h, building.h) are listed by bare name for
+// headers (reflection.h, testing.h, building.h) are listed by bare name for
 // internal injection and are not includable by user source.
 
 #include "./embed.h"
@@ -20,13 +20,13 @@
     X(std_arpa_inet_h, "arpa/inet.h", "include/arpa/inet.h", "register_posix_net_functions") \
     X(std_assert_h, "assert.h", "include/assert.h", 0) \
     X(std_building_h, "building.h", "include/cccc/building.h", 0) \
+    X(std_cccc_derive_h, "cccc/derive.h", "include/cccc/derive.h", 0) \
     X(std_cccc_kernel_h, "cccc/kernel.h", "include/cccc/kernel.h", 0) \
     X(std_cccc_opencl_h, "cccc/opencl.h", "include/cccc/opencl.h", 0) \
     X(std_complex_h, "complex.h", "include/complex.h", 0) \
     X(std_cpio_h, "cpio.h", "include/cpio.h", 0) \
     X(std_ctype_h, "ctype.h", "include/ctype.h", "register_ctype_functions") \
     X(std_decimal_math_h, "decimal_math.h", "include/decimal_math.h", "register_decimal_math_functions") \
-    X(std_derive_h, "derive.h", "include/cccc/derive.h", 0) \
     X(std_dirent_h, "dirent.h", "include/dirent.h", "register_posix_dir_functions") \
     X(std_dlfcn_h, "dlfcn.h", "include/dlfcn.h", "register_posix_functions") \
     X(std_errno_h, "errno.h", "include/errno.h", "register_posix_io_functions") \

@@ -1,5 +1,7 @@
 // Ticket #235: @enum_to_string/@enum_from_string custom attributes.
 
+#include <cccc/derive.h>
+
 #include <string.h>
 
 @enum_to_string @enum_from_string enum Color {

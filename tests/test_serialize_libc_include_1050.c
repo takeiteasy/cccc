@@ -39,6 +39,8 @@
 // prototype could conflict with <string.h>'s own declaration if it's also
 // reached some other way in the same TU.
 
+#include <cccc/derive.h>
+
 [[cccc::comptime]]
 void generate_stdlib_wrappers_1050(void) {
     Obj *cpy = MakeFunction("wrap_memcpy_1050", MakePointer(GetType("void")));

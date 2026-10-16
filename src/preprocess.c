@@ -1828,6 +1828,7 @@ static const AttrInfo known_attrs[] = {
     {"private", ATTR_CCCC, true, 1},
     {"generic", ATTR_CCCC, true, 1},
     // Built-in attribute handlers (include/cccc/derive.h)
+    // TODO(#1624): generate_accessors is missing from this list
     {"serialize", ATTR_CCCC, true, 1},
     {"deserialize", ATTR_CCCC, true, 1},
     {"enum_to_string", ATTR_CCCC, true, 1},
@@ -3024,10 +3025,9 @@ static bool is_opencl_prelude_file(const char *name) {
 
 static bool is_cccc_supplied_only_header(const char *name) {
     static const char *cccc_only[] = {
-        "stdbit.h", "stdckdint.h",    "threads.h",
-        "uchar.h",  "Availability.h", "decimal_math.h",
-        "omp.h",    "cccc/kernel.h",  "cccc/opencl.h",
-        NULL,
+        "stdbit.h",       "stdckdint.h",    "threads.h", "uchar.h",
+        "Availability.h", "decimal_math.h", "omp.h",     "cccc/kernel.h",
+        "cccc/opencl.h",  "cccc/derive.h",  NULL,
     };
     for (int i = 0; cccc_only[i]; i++)
         if (!strcmp(name, cccc_only[i]))

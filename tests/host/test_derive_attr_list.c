@@ -1,10 +1,11 @@
-// The attribute names find_attribute_macro treats as derive.h handlers match
-// the handlers derive.h actually registers, and none are registered until one
-// is asked for.
+// The names is_derive_builtin_attr hints at (attributes that need
+// #include <cccc/derive.h>) match the handlers include/cccc/derive.h
+// registers.
 
 #include "internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failed = 0;
@@ -19,38 +20,57 @@ static int failed = 0;
         }                                                                      \
     } while (0)
 
-int main(void) {
-    VirtualMachine vm;
-    cc_init(&vm, 0);
-    CHECK(!vm.compiler.macro_fns, "handlers registered before first use");
+static char *slurp(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    rewind(f);
+    char *buf = malloc(n + 1);
+    if (buf && fread(buf, 1, n, f) == (size_t)n)
+        buf[n] = 0;
+    else {
+        free(buf);
+        buf = NULL;
+    }
+    fclose(f);
+    return buf;
+}
 
-    ensure_derive_attrs_registered(&vm);
+int main(void) {
+    char *src = slurp("include/cccc/derive.h");
+    CHECK(src, "cannot read include/cccc/derive.h (run from the repo root)");
+    if (!src)
+        return 1;
 
     int registered = 0;
-    for (MacroFn *pm = vm.compiler.macro_fns; pm; pm = pm->next) {
-        if (!pm->is_attribute_handler || !pm->attribute_name)
+    for (const char *p = src; (p = strstr(p, "attribute(")); p += 10) {
+        const char *name = p + 10;
+        while (*name == ' ' || *name == '\n')
+            name++;
+        if (*name != '"')
             continue;
+        name++;
+        const char *end = strchr(name, '"');
         registered++;
-        CHECK(is_derive_builtin_attr(pm->attribute_name,
-                                     (int)strlen(pm->attribute_name)),
-              "derive.h registers '%s' but it is not in the list",
-              pm->attribute_name);
+        CHECK(is_derive_builtin_attr(name, (int)(end - name)),
+              "derive.h registers '%.*s' but it is not in the list",
+              (int)(end - name), name);
     }
 
     int listed = 0;
     for (const char *const *n = derive_builtin_attr_names(); *n; n++) {
         listed++;
-        bool found = false;
-        for (MacroFn *pm = vm.compiler.macro_fns; pm; pm = pm->next)
-            if (pm->is_attribute_handler && pm->attribute_name &&
-                !strcmp(pm->attribute_name, *n))
-                found = true;
-        CHECK(found, "'%s' is listed but derive.h does not register it", *n);
+        char needle[128];
+        snprintf(needle, sizeof needle, "\"%s\")", *n);
+        CHECK(strstr(src, needle), "'%s' is listed but derive.h has no handler",
+              *n);
     }
-    CHECK(registered == listed, "registered %d handlers, list has %d",
+    CHECK(registered == listed, "derive.h has %d handlers, list has %d",
           registered, listed);
 
-    cc_destroy(&vm);
+    free(src);
     if (!failed)
         printf("PASS: derive attribute list matches derive.h\n");
     return failed;

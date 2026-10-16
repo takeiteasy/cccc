@@ -301,9 +301,11 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Header | Loaded | Provides |
 |---|---|---|
 | `reflection.h` | Implicitly, in every comptime program | Reflection and AST-building API, see [MACROS.md](MACROS.md) |
-| `derive.h` | Implicitly, the first time a built-in attribute is used | Handlers for `@serialize`, `@deserialize`, `@enum_to_string`, `@enum_from_string`, `@generate_getters`, `@generate_setters`, `@generate_accessors`, `@generate_constructor`, see [DERIVE.md](DERIVE.md) |
+| `cccc/derive.h` | `#include <cccc/derive.h>` | Handlers for `@serialize`, `@deserialize`, `@enum_to_string`, `@enum_from_string`, `@generate_getters`, `@generate_setters`, `@generate_accessors`, `@generate_constructor`, see [DERIVE.md](DERIVE.md) |
 
-Both are private: user source cannot `#include` them.
+`reflection.h` is private: user source cannot `#include` it. `cccc/derive.h`
+adds no code to the program, so `-c=native` output carries only the generated
+functions.
 
 ---
 

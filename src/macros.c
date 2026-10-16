@@ -1364,9 +1364,7 @@ static void reflection_enum_names_restore(VirtualMachine *vm, void **saved) {
                         saved[i]);
 }
 
-static Token *implicit_private_header_tokens(VirtualMachine *vm,
-                                             const char     *header,
-                                             const char     *origin) {
+static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     // Temporarily suppress user-defined TK_*/NK_* macros (TypeKind/NodeKind
     // enum constant names) so they can't expand inside reflection.h's enum
     // initializers.  reflection.h's own #define macros (WithFn, VM, etc.)
@@ -1400,7 +1398,8 @@ static Token *implicit_private_header_tokens(VirtualMachine *vm,
     vm->compiler.warnings       = 0;
     vm->compiler.warning_errors = 0;
 
-    Token *tokens               = tokenize_private_header(vm, header, origin);
+    Token *tokens =
+        tokenize_private_header(vm, "reflection.h", "<implicit-reflection.h>");
     Token *result               = preprocess(vm, tokens);
 
     vm->compiler.warnings       = saved_warnings;
@@ -1416,14 +1415,9 @@ static Token *implicit_private_header_tokens(VirtualMachine *vm,
     return result;
 }
 
-static Token *implicit_reflection_tokens(VirtualMachine *vm) {
-    return implicit_private_header_tokens(vm, "reflection.h",
-                                          "<implicit-reflection.h>");
-}
-
-// Attribute names handled by derive.h's built-in
-// @comptime(attribute(...)) handlers. Keep in sync with that header
-// (tests/host/test_derive_attr_list.c checks it).
+// Attribute names handled by derive.h's @comptime(attribute(...)) handlers,
+// used to hint at the missing #include when one is used without it. Keep in
+// sync with that header (tests/host/test_derive_attr_list.c checks it).
 static const char *const derive_attr_names[] = {
     "serialize",          "deserialize",          "enum_to_string",
     "enum_from_string",   "generate_getters",     "generate_setters",
@@ -1440,24 +1434,6 @@ bool is_derive_builtin_attr(const char *name, int len) {
             !strncmp(derive_attr_names[i], name, len))
             return true;
     return false;
-}
-
-// Idempotently preprocesses reflection.h and then derive.h so the built-in
-// attribute handlers are registered before the first lookup of one of
-// derive_attr_names. Registering them makes macro_fns non-empty, which runs
-// the whole comptime pass, so find_attribute_macro only calls this for those
-// names. derive.h comes second because its handlers use reflection.h's macros.
-// Safe to call mid-parse: it only tokenizes and preprocesses the two headers
-// and temporarily toggles include-guard macros.
-void ensure_derive_attrs_registered(VirtualMachine *vm) {
-    if (vm->compiler.no_comptime)
-        return;
-    if (vm->compiler.derive_attrs_registered)
-        return;
-    vm->compiler.derive_attrs_registered = true;
-    implicit_reflection_tokens(vm);
-    implicit_private_header_tokens(vm, "derive.h", "<implicit-derive.h>");
-    __builtin_ensure_string_h_decls();
 }
 
 static Token *build_combined_macro_tokens(VirtualMachine *vm,

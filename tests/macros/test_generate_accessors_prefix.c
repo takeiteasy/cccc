@@ -1,6 +1,8 @@
 // @generate_getters/_setters/_accessors take an optional string prefix, so
 // two structs sharing a field name do not collide.
 
+#include <cccc/derive.h>
+
 @generate_accessors("A") struct A {
     int x;
 };

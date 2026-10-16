@@ -1,5 +1,7 @@
 // The macro standard library attributes accept `typedef` declarations as well
 // as `struct X {...};` / `enum X {...};`.
+#include <cccc/derive.h>
+
 #include <string.h>
 
 @serialize @deserialize @generate_constructor @generate_getters("Pt")

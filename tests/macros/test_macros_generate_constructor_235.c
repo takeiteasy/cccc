@@ -1,5 +1,7 @@
 // Ticket #235: @generate_constructor custom attribute.
 
+#include <cccc/derive.h>
+
 @generate_constructor struct Point {
     int x;
     int y;

@@ -1,9 +1,12 @@
 # Derived Attributes
 
 Attach an attribute to a struct, union, enum or `typedef` and CCCC generates
-functions for it at compile time. No `#include` and no handler code needed.
+functions for it at compile time. `#include <cccc/derive.h>` once; no handler
+code needed.
 
 ```c
+#include <cccc/derive.h>
+
 @serialize
 @generate_accessors
 typedef struct { int x; int y; } Point;
@@ -31,9 +34,10 @@ Every attribute accepts both `struct T {...};` and `typedef ... T;`. Applying
 one to the wrong kind of type (an enum attribute on a struct, say) is a compile
 error.
 
-The handlers live in a private header that CCCC loads the first time one of
-these attribute names appears. A comptime program that uses none of them does
-not see their helper names.
+Using one of these attributes without the include is a compile error that
+names `<cccc/derive.h>`. The header adds no code to the program: the handlers
+run at compile time, and `-c=native` output carries only the generated
+functions.
 
 ## Serialization
 
@@ -107,5 +111,6 @@ struct Point { int x; int y; };
 
 Handlers for your own attributes use the same mechanism
 (`@comptime(attribute("name"))`); see [ATTRIBUTES.md](ATTRIBUTES.md) and
-[MACROS.md](MACROS.md). A handler you define for a name above takes
-precedence over the built-in one.
+[MACROS.md](MACROS.md). The first handler registered for a name wins, so a
+handler you define for a name above, before `#include <cccc/derive.h>` (or
+without the include), replaces the built-in one.

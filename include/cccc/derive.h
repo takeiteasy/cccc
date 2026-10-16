@@ -18,9 +18,8 @@
 */
 
 // Handlers for the built-in comptime attributes (@serialize, @enum_to_string,
-// @generate_getters, ...). Private: preprocessed right after reflection.h the
-// first time one of these attribute names is used, so reflection.h's API is
-// already in scope.
+// @generate_getters, ...). A program that uses them includes this header; the
+// handlers run at compile time and add nothing to the program itself.
 
 #ifndef CCCC_DERIVE_H
 #define CCCC_DERIVE_H
@@ -334,10 +333,8 @@
 // @generate_constructor struct Foo {...}; publishes
 //   struct Foo Foo_create(<member1>, <member2>, ...);
 // returning a struct Foo initialized from the given member values.
-@comptime(attribute(
-    "generate_"
-    "constructor")) void __builtin_attr_generate_constructor(AttrTarget
-                                                                 *target) {
+@comptime(attribute("generate_constructor")) void
+__builtin_attr_generate_constructor(AttrTarget *target) {
     Type *ty =
         __builtin_attr_type_target(target, "@generate_constructor", false);
     const char *tname =

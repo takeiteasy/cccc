@@ -149,8 +149,6 @@ MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
         return NULL;
     if (!tok || tok->kind != TK_IDENT)
         return NULL;
-    if (is_derive_builtin_attr(tok->loc, tok->len))
-        ensure_derive_attrs_registered(vm);
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (!pm->is_attribute_handler || !pm->attribute_name)
             continue;
@@ -270,10 +268,10 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
 static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
                              AttrTargetKind kind, char *name, Type *ty,
                              Obj *obj, Token *tok) {
-    // Register derive.h's built-in @comptime(attribute(...)) handlers before
-    // searching.
-    if (attrs)
-        ensure_derive_attrs_registered(vm);
+    // Serialize/Deserialize and the enum-string builders call memcpy/strcmp,
+    // which the runtime TU may not declare.
+    if (attrs && !vm->compiler.no_comptime)
+        __builtin_ensure_string_h_decls();
     for (CustomAttrUse *use = attrs; use; use = use->next) {
         MacroFn *pm = NULL;
         for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next) {

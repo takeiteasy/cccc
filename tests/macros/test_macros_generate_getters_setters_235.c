@@ -1,5 +1,7 @@
 // Ticket #235: @generate_getters/@generate_setters custom attributes.
 
+#include <cccc/derive.h>
+
 @generate_getters @generate_setters struct Point {
     int x;
     int y;

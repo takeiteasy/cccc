@@ -1,4 +1,6 @@
 // Enumerators sharing a value produce one case; the first name wins.
+#include <cccc/derive.h>
+
 #include <string.h>
 
 @enum_to_string @enum_from_string enum Dup { A, B, C = 1, D = -5, E = -5 };
