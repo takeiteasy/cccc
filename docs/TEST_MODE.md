@@ -713,7 +713,8 @@ interpreter lock against them. A thread blocked for good (on a condition
 nobody signals) cannot be stopped; the harness waits up to 200 ms, prints
 `# test N: K guest thread(s) still blocked; they end when they wake` and moves
 on. Threads of a passing test, and threads started by `once` setup hooks, are
-left alone.
+left alone: they keep running, and what they write to globals lands in the state
+of whichever test is running then. Join them before the test returns to avoid it.
 
 ## Setup and Teardown
 

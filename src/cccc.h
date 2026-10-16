@@ -676,8 +676,8 @@ extern "C" {
                   design: gated off whenever any address-keyed side table            \
                   (UAF/bounds/dangling/tagging/type-checks/uninit-detection/         \
                   leak-detection/heap-canaries) could go stale from address          \
-                  reuse, and whenever more than one thread has been                  \
-                  created (the VM heap is global, not per-thread). */                \
+                  reuse, and whenever a guest thread has been created during         \
+                  this run (the VM heap is global, not per-thread). */               \
     X(HREL, 1) /* Heap release: the matching block-exit half of HMRK.                \
                   Format: [HREL] [depth:i32]. Finds the {vm->bp, D} entry            \
                   HMRK pushed and rewinds vm->heap_ptr back to its recorded          \
@@ -4708,10 +4708,10 @@ typedef struct {
 // storage) or ENT3 (frame-scoped, depth == -1), truncated/rewound by HREL,
 // LEV3, and LONGJMP. VM-level, NOT per-thread like FrameEpochs/
 // StackIntervals above -- the heap it guards (vm->heap_ptr) is a single
-// VM-wide arena, and heap reclamation is unconditionally disabled the
-// moment more than one thread has ever been created (see
-// vm->heap_reclaim_enabled and the thread-record check in heap_rewind_to,
-// src/ops.c): two threads' allocations interleave in that one arena, so a
+// VM-wide arena, and heap reclamation is disabled for the rest of the run
+// the moment a guest thread is created (see vm->heap_reclaim_enabled,
+// cleared by link_thread in src/stdlib/pthread.c): two threads' allocations interleave in that one
+// arena, so a
 // per-frame LIFO rewind on one thread could otherwise sweep another
 // thread's still-live VLA. Indexed by (bp, depth) rather than a plain
 // parallel-to-FrameEpochs stack because a block's mark must survive

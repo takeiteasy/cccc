@@ -2436,7 +2436,8 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     // model) and dynobjsz_present can flip from false to true if a later-
     // compiled function introduces a DYNOBJSZ opcode.
     vm->heap_reclaim_enabled =
-        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present;
+        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present &&
+        !vm->thread_records;
     cc_running_vm = vm;
     cccc_gil_acquire(vm);
     vm->dbg.host_fault_signal = 0;
@@ -2512,7 +2513,7 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     // reclaimed by the same heap_marks_truncate_to LONGJMP already uses,
     // sweeping both VLA and bare-alloca storage since whole frames are
     // being discarded, not just one block.
-    if (vm->heap_reclaim_enabled && !vm->thread_records)
+    if (vm->heap_reclaim_enabled)
         heap_marks_truncate_to(vm, vm->bp);
 
     // Initialise main thread's TLS copy from the template built by gen().

@@ -141,8 +141,6 @@ static PthreadState *pthread_state(VirtualMachine *vm) {
             return NULL;
         vm->pthread_state->main_thread.vm          = vm;
         vm->pthread_state->main_thread.host_thread = pthread_self();
-        // TODO: drops workers already linked; see #1610
-        vm->thread_records = &vm->pthread_state->main_thread;
     }
     return vm->pthread_state;
 }
@@ -233,7 +231,10 @@ static void acquire_and_restore_gil(VirtualMachine *vm, const GilPause *pause) {
         _cccc_any_pending = 1;
 }
 
+// Heap reclamation goes off for the rest of the run: a frame that pushed no
+// mark must not pop one after a worker unlinks itself.
 static void link_thread(VirtualMachine *vm, ThreadRecord *rec) {
+    vm->heap_reclaim_enabled = false;
     rec->next          = vm->thread_records;
     vm->thread_records = rec;
 }
