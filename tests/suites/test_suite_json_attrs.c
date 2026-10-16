@@ -133,3 +133,20 @@ void test_renamed_key_is_required(void) {
                                    "\"secret\":1}"),
              0);
 }
+
+@to_json struct Bits {
+    int      id;
+    unsigned at_skip     : 3 @json_skip;
+    unsigned c23_skip    : 2 [[cccc::json_skip]];
+    unsigned gnu_skip    : 4 __attribute__((json_skip));
+    unsigned renamed     : 4 @json_name("r") __attribute__((aligned(4)));
+    unsigned c23_renamed : 3 [[cccc::json_name("c")]];
+};
+
+[[cccc::test]]
+void test_member_attrs_after_bit_field_width(void) {
+    struct Bits b = {1, 2, 3, 4, 5, 6};
+    char        buf[128];
+    Bits_to_json(&b, buf, sizeof buf);
+    AssertEq(strcmp(buf, "{\"id\":1,\"r\":5,\"c\":6}"), 0);
+}

@@ -2106,27 +2106,26 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
 
             if (consume(vm, &tok, tok, ":")) {
                 mem->is_bitfield = true;
-                mem->bit_width   = const_expr(vm, &tok, tok);
+                vm->compiler.in_bitfield_width = true;
+                mem->bit_width                 = const_expr(vm, &tok, tok);
+                vm->compiler.in_bitfield_width = false;
                 if (mem->bit_width < 0)
                     error_tok(vm, tok, "negative bit-field width");
                 if (mem->bit_width >
                     (mem->ty->kind == TY_BOOL ? 1 : mem->ty->size * CHAR_BIT))
                     error_tok(vm, tok, "bit-field width exceeds its type");
 
-                // #1165: a trailing __attribute__(...) after the bit-width
-                // (`int b : 5 __attribute__((aligned(16)));`) -- gcc/clang
-                // both parse this and *honor* aligned(N) on a bit-field
-                // (verified against gcc-16/clang: it aligns the bit-field's
-                // storage unit and raises the aggregate's own alignment,
-                // surviving `packed` exactly like #1163's non-bit-field
-                // case). Only [[...]] (C23 attribute syntax) is left
-                // unparsed here -- gcc's own constant-expression parser
-                // grabs the leading `[` at this position too, so cccc's
-                // pre-existing syntax error there matches gcc's rejection
-                // and is deliberately not "fixed".
+                // Attributes after the width, in either spelling and any
+                // order (`int b : 5 __attribute__((aligned(16)));` -- gcc
+                // honors aligned(N) on a bit-field). `[[...]]` here is a cccc
+                // extension (gcc rejects it); it is what `@name` rewrites to.
                 Token  *bf_tok  = tok;
                 VarAttr bf_attr = {};
-                tok             = attribute_list(vm, tok, NULL, &bf_attr);
+                for (Token *prev = NULL; prev != tok;) {
+                    prev = tok;
+                    tok  = attribute_list(vm, tok, NULL, &bf_attr);
+                    tok  = c23_attribute_list(vm, tok, NULL, &bf_attr);
+                }
                 mem_extra_attrs = bf_attr.custom_attrs;
 
                 // _Alignas/alignas on a bit-field is rejected outright by

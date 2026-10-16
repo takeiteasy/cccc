@@ -1922,13 +1922,24 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 // ---- @bitflags
 
 @comptime void __builtin_bitflags_check(Type *ty) {
-    int count = EnumValueCount(ty);
+    int       count = EnumValueCount(ty);
+    long long named = 0;
     for (int i = 0; i < count; i++) {
         long long v = EnumValue(ty, i);
-        if (v < 0 || (v != 0 && (v & (v - 1)) != 0))
+        if (v > 0 && (v & (v - 1)) == 0)
+            named |= v;
+    }
+    for (int i = 0; i < count; i++) {
+        long long v = EnumValue(ty, i);
+        if (v < 0)
             MacroErrorAt(MakeIntLiteral(0),
-                         "@bitflags: constant '%s' (%lld) is not a power of two",
+                         "@bitflags: constant '%s' (%lld) is negative",
                          EnumValueName(ty, i), v);
+        if (v & ~named)
+            MacroErrorAt(MakeIntLiteral(0),
+                         "@bitflags: constant '%s' (%lld) has bits no "
+                         "single-bit constant names (0x%llx)",
+                         EnumValueName(ty, i), v, v & ~named);
     }
 }
 
@@ -1970,13 +1981,44 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fn);
 }
 
+@comptime int __builtin_bitflags_popcount(long long v) {
+    int n = 0;
+    for (; v != 0; v &= v - 1)
+        n++;
+    return n;
+}
+
+// Appends the T_format step that prints `name` when every bit of `val` is
+// still unclaimed in `rem`.
+@comptime void __builtin_bitflags_emit(char *src, const char *name,
+                                       long long val) {
+    char num[32];
+    __builtin_bitflags_ull(num, val);
+    strcat(src, " if ((rem & ");
+    strcat(src, num);
+    strcat(src, ") == ");
+    strcat(src, num);
+    strcat(src, ") { if (!first) { if (n + 1 < $3) $2[n] = '|'; "
+                "n++; } for (unsigned long i = 0; ");
+    strcat(src, "\"");
+    strcat(src, name);
+    strcat(src, "\"[i]; i++) { if (n + 1 < $3) $2[n] = \"");
+    strcat(src, name);
+    strcat(src, "\"[i]; n++; } first = 0; rem &= ~");
+    strcat(src, num);
+    strcat(src, "; }");
+}
+
 // @bitflags enum Perm { R = 1, W = 2, X = 4 }; publishes
 //   Perm Perm_set(Perm v, Perm f);      Perm Perm_clear(Perm v, Perm f);
 //   Perm Perm_toggle(Perm v, Perm f);   _Bool Perm_has(Perm v, Perm f);
 //   size_t Perm_format(Perm v, char *buf, size_t cap);
-// Every constant must be 0 or a power of two. Perm_format writes the set flags
-// as `R|W` in declaration order (bits with no constant as `0x..`, zero as the
-// 0 constant's name or `0`) and returns the length it needs, snprintf style.
+// Every constant must be 0, a power of two, or a combination of the
+// power-of-two constants (`RW = R|W`). Perm_format writes the set flags as
+// `R|W` (bits with no constant as `0x..`, zero as the 0 constant's name or `0`)
+// and returns the length it needs, snprintf style. Constants with more bits are
+// tried first (ties in declaration order), so R|W prints as `RW`; single flags
+// follow in declaration order.
 // @bitflags("P") publishes P_Perm_set, ...
 @comptime(attribute("bitflags")) void __builtin_attr_bitflags(AttrTarget *target,
                                                               ...) {
@@ -2013,35 +2055,26 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                 " unsigned long long rem = (unsigned long long)$1;");
     int         count     = EnumValueCount(ty);
     const char *zero_name = "0";
-    for (int i = 0; i < count; i++) {
-        long long   val  = EnumValue(ty, i);
-        const char *name = EnumValueName(ty, i);
-        if (val == 0) {
-            if (zero_name[0] == '0' && !zero_name[1])
-                zero_name = name;
-            continue;
+    for (int i = 0; i < count; i++)
+        if (EnumValue(ty, i) == 0 && zero_name[0] == '0' && !zero_name[1])
+            zero_name = EnumValueName(ty, i);
+    for (int bits = 64; bits >= 1; bits--) {
+        for (int i = 0; i < count; i++) {
+            long long val = EnumValue(ty, i);
+            if (val == 0 || __builtin_bitflags_popcount(val) != bits)
+                continue;
+            bool seen = false;
+            for (int j = 0; j < i; j++)
+                if (EnumValue(ty, j) == val)
+                    seen = true;
+            if (seen)
+                continue;
+            const char *name = EnumValueName(ty, i);
+            if (strlen(src) + 2 * strlen(name) + 400 > sizeof src - 1024)
+                MacroErrorAt(MakeIntLiteral(0),
+                             "@bitflags: too many or too long constant names");
+            __builtin_bitflags_emit(src, name, val);
         }
-        bool seen = false;
-        for (int j = 0; j < i; j++)
-            if (EnumValue(ty, j) == val)
-                seen = true;
-        if (seen)
-            continue;
-        if (strlen(src) + 2 * strlen(name) + 400 > sizeof src - 1024)
-            MacroErrorAt(MakeIntLiteral(0), "@bitflags: too many or too long constant names");
-        char num[32];
-        __builtin_bitflags_ull(num, val);
-        strcat(src, " if ((rem & ");
-        strcat(src, num);
-        strcat(src, ") != 0) { if (!first) { if (n + 1 < $3) $2[n] = '|'; "
-                    "n++; } for (unsigned long i = 0; ");
-        strcat(src, "\"");
-        strcat(src, name);
-        strcat(src, "\"[i]; i++) { if (n + 1 < $3) $2[n] = \"");
-        strcat(src, name);
-        strcat(src, "\"[i]; n++; } first = 0; rem &= ~");
-        strcat(src, num);
-        strcat(src, "; }");
     }
     strcat(src,
            " if (rem != 0) { if (!first) { if (n + 1 < $3) $2[n] = '|'; n++; }"

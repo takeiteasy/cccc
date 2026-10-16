@@ -1,5 +1,5 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: @bitflags: constant 'NEG' \(-1\) is not a power of two
+// CCCC_EXPECT_STDERR: @bitflags: constant 'NEG' \(-1\) is negative
 
 #include <cccc/derive.h>
 

@@ -202,7 +202,8 @@ A prefix names the functions `<prefix>_<Type>_to_json` and
 ### Skipping and renaming members
 
 `@json_skip` and `@json_name("key")` go on the members, in any declarator
-position (`int id @json_name("user_id");`, `@json_skip int a, b;`):
+position (`int id @json_name("user_id");`, `@json_skip int a, b;`,
+`unsigned flag : 1 @json_skip;`):
 
 ```c
 @to_json
@@ -394,8 +395,8 @@ the `const void *` arguments.
 
 ## Bit Flags
 
-`@bitflags` on an enum whose constants are `0` or powers of two generates
-flag helpers:
+`@bitflags` on an enum whose constants are `0`, powers of two, or
+combinations of those powers generates flag helpers:
 
 ```c
 @bitflags
@@ -422,9 +423,23 @@ constant print as `0x..` after the names (`R|0x40`). A value of `0` prints as
 the `0` constant's name, or `0` when there is none. Constants that share a
 value print once, under the first name.
 
-A negative constant, or one that is neither `0` nor a power of two, is a
-compile error that names it (`@bitflags: constant 'RW' (3) is not a power of
-two`), as is a struct or union target. A prefix names the functions
+A composite constant is an alias for several flags. `T_format` prints
+composites with the most bits first (ties in declaration order), so the alias
+replaces the names it covers:
+
+```c
+@bitflags
+typedef enum { R = 1, W = 2, X = 4, RW = R | W, RWX = R | W | X } Perm;
+
+Perm_format(R | W | X, buf, sizeof buf);       // "RWX"
+Perm_format(R | W, buf, sizeof buf);           // "RW"
+Perm_format(R | X, buf, sizeof buf);           // "R|X"
+Perm_format(R | W | 0x40, buf, sizeof buf);    // "RW|0x40"
+```
+
+A negative constant is a compile error that names it, as is a constant with a
+bit no power-of-two constant names (`@bitflags: constant 'RX' (5) has bits no
+single-bit constant names (0x4)`) and a struct or union target. A prefix names the functions
 `<prefix>_<Type>_set` and so on: `@bitflags("app")` on `enum Mode` publishes
 `app_Mode_set`.
 

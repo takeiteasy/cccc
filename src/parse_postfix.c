@@ -344,7 +344,8 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             continue;
         }
 
-        if (equal(tok, "[")) {
+        if (equal(tok, "[") &&
+            !(vm->compiler.in_bitfield_width && equal(tok->next, "["))) {
             // x[y] is short for *(x+y)
             Token *start = tok;
             Node  *idx   = expr(vm, &tok, tok->next);

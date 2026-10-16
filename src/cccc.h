@@ -4262,6 +4262,8 @@ typedef struct Compiler {
                                // an anonymous constant global even when the
                                // literal itself has no storage-class specifier
                                // and lexical scope is not file scope (#720).
+    bool   in_bitfield_width;  // True while parsing a bit-field width: a "[["
+                               // then starts an attribute, not a subscript.
     Obj   *current_fn;         // Function being parsed
     PendingMemberAttrs *pending_member_attrs; // FIFO head; tail via _tail
     PendingMemberAttrs *pending_member_attrs_tail;

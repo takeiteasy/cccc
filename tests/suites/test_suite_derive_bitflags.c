@@ -10,6 +10,16 @@
 
 @bitflags enum Plain { P_X = 1 };
 
+@bitflags typedef enum {
+    F_RW  = 3,
+    F_R   = 1,
+    F_W   = 2,
+    F_X   = 4,
+    F_RWX = 7,
+} Fl;
+
+@bitflags typedef enum { O_A = 1, O_B = 2, O_C = 4, O_AB = 3, O_BC = 6 } Ov;
+
 [[cccc::test]] void test_set_clear_toggle_has(void) {
     Perm p = Perm_set(NONE, R);
     p      = Perm_set(p, X);
@@ -65,4 +75,28 @@
     char buf[16];
     Plain_format((enum Plain)0, buf, sizeof buf);
     AssertEq(strcmp(buf, "0"), 0);
+}
+
+[[cccc::test]] void test_composite_alias(void) {
+    char buf[64];
+    Fl_format((Fl)7, buf, sizeof buf);
+    AssertEq(strcmp(buf, "F_RWX"), 0);
+    Fl_format((Fl)(F_R | F_W), buf, sizeof buf);
+    AssertEq(strcmp(buf, "F_RW"), 0);
+    Fl_format((Fl)(F_R | F_X), buf, sizeof buf);
+    AssertEq(strcmp(buf, "F_R|F_X"), 0);
+    Fl_format((Fl)(F_R | F_W | 0x40), buf, sizeof buf);
+    AssertEq(strcmp(buf, "F_RW|0x40"), 0);
+    AssertEq(!!Fl_has((Fl)7, F_RW), 1);
+    AssertEq(!!Fl_has((Fl)F_R, F_RW), 0);
+    AssertEq((int)Fl_set((Fl)0, F_RW), 3);
+    AssertEq((int)Fl_clear((Fl)7, F_RW), 4);
+}
+
+[[cccc::test]] void test_overlapping_composites_do_not_double_print(void) {
+    char buf[64];
+    Ov_format((Ov)7, buf, sizeof buf);
+    AssertEq(strcmp(buf, "O_AB|O_C"), 0);
+    Ov_format((Ov)6, buf, sizeof buf);
+    AssertEq(strcmp(buf, "O_BC"), 0);
 }
