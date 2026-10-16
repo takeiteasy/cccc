@@ -2435,11 +2435,13 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     // CCCC_FLAGS override, testing.c's one-cc_run_at-per-test-function
     // model) and dynobjsz_present can flip from false to true if a later-
     // compiled function introduces a DYNOBJSZ opcode.
+    cc_running_vm = vm;
+    cccc_gil_acquire(vm);
+    if (vm->gil_depth == 1)
+        cccc_pthread_main_reclaim(vm);
     vm->heap_reclaim_enabled =
         cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present &&
         !vm->thread_records;
-    cc_running_vm = vm;
-    cccc_gil_acquire(vm);
     vm->dbg.host_fault_signal = 0;
     // #1013: clear the previous run's fault marker so each cc_run_at cycle
     // starts clean -- otherwise a fault from an earlier call (e.g. a prior
@@ -2547,6 +2549,9 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
                  : vm_eval(vm);
     if (rc == CCCC_HOST_SIGNAL_RC && vm->dbg.host_fault_signal > 0)
         rc = 128 + vm->dbg.host_fault_signal;
+    // A worker may run before the next top-level run starts.
+    if (vm->gil_depth == 1)
+        cccc_pthread_main_unwinding(vm);
     cccc_gil_release(vm);
     cc_running_vm = NULL;
     return rc;

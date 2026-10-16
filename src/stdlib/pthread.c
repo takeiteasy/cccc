@@ -206,6 +206,18 @@ void cccc_pthread_main_unwinding(VirtualMachine *vm) {
     snap->released = 1;
 }
 
+// Start of a top-level run on main: a worker that ran since main last held
+// the GIL left its own stack, TLS and epochs in the VM's fields.
+void cccc_pthread_main_reclaim(VirtualMachine *vm) {
+    MainSnapshot *snap = vm->main_snapshot;
+    if (t_self_rec || !snap || !snap->released)
+        return;
+    cccc_exec_state_restore(vm, &snap->exec);
+    vm->active_thread   = snap->active;
+    vm->current_tls_seg = snap->tls;
+    snap->released      = 0;
+}
+
 void cccc_pthread_main_resumed(VirtualMachine *vm) {
     MainSnapshot *snap = vm->main_snapshot;
     if (!t_self_rec && snap)
@@ -1623,13 +1635,7 @@ int cccc_pthread_reap_abandoned(VirtualMachine *vm, unsigned epoch,
                                 int grace_ms) {
     if (!vm || !epoch)
         return 0;
-    MainSnapshot *snap = vm->main_snapshot;
-    if (snap && snap->released) {
-        cccc_exec_state_restore(vm, &snap->exec);
-        vm->active_thread   = snap->active;
-        vm->current_tls_seg = snap->tls;
-        snap->released      = 0;
-    }
+    cccc_pthread_main_reclaim(vm);
     int blocked = 0;
     for (int waited = 0;; waited++) {
         blocked = 0;

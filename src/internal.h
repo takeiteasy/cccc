@@ -1233,6 +1233,10 @@ typedef struct ExecState {
     HashMap            live_epochs;
     HashMap            stack_ptr_epochs;
     StackIntervals     stack_intervals;
+    // Set by the POSIX blocking helpers (posix_util.c) so a thread resuming
+    // from a blocking call gets back its own active thread and TLS.
+    void *gil_active_thread;
+    char *gil_tls_seg;
 } ExecState;
 
 void cccc_exec_state_save(VirtualMachine *vm, ExecState *state);
@@ -1487,6 +1491,7 @@ bool cccc_pthread_should_abandon(VirtualMachine *vm);
 void cccc_pthread_main_released(VirtualMachine *vm, const ExecState *exec);
 void cccc_pthread_main_resumed(VirtualMachine *vm);
 void cccc_pthread_main_unwinding(VirtualMachine *vm);
+void cccc_pthread_main_reclaim(VirtualMachine *vm);
 int  cccc_pthread_reap_abandoned(VirtualMachine *vm, unsigned epoch,
                                  int grace_ms);
 void register_signal_functions(VirtualMachine *vm);
