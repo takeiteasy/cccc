@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.10.8] - 2026-10-16
+
+- Fixed: a thread left running by a passing `--testing` test no longer unbalances
+  VLA/`alloca` reclamation in later tests. Reclamation stays off for the rest of
+  a run once a thread has been created.
+- Fixed: a thread created before the program's first `pthread_self`, mutex or
+  TSS call is tracked, so it is reaped at exit.
+- Fixed: `--testing` stops the threads a failed or timed-out test left behind,
+  and a failed `Assert` in a setup hook, forked `exit_code=` child, worker or
+  callback no longer crashes, hangs or re-runs later tests. See
+  `docs/TEST_MODE.md`.
+
 ## [0.10.7] - 2026-10-15
 
 - Fixed: `--testing` no longer hangs after a test fails an `Assert` or times out.
