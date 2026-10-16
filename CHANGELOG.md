@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@bitflags` on an enum of power-of-two flags generates `T_set`,
+  `T_clear`, `T_toggle`, `T_has` and `T_format`. See `docs/DERIVE.md`.
 - Added: `@equals`, `@hash` and `@dump` generate `T_equals`, `T_hash` and
   `T_dump` for a struct, with `@equals_skip` and `@dump_skip` to leave members
   out. `@dump` needs `#include <stdio.h>`. See `docs/DERIVE.md`.

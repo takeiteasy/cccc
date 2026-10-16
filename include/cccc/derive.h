@@ -1246,4 +1246,158 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fn);
 }
 
+// ---- @bitflags
+
+@comptime void __builtin_bitflags_check(Type *ty) {
+    int count = EnumValueCount(ty);
+    for (int i = 0; i < count; i++) {
+        long long v = EnumValue(ty, i);
+        if (v < 0 || (v != 0 && (v & (v - 1)) != 0))
+            MacroErrorAt(MakeIntLiteral(0),
+                         "@bitflags: constant '%s' (%lld) is not a power of two",
+                         EnumValueName(ty, i), v);
+    }
+}
+
+// `v` as a decimal unsigned long long literal ("4ULL") in out.
+@comptime void __builtin_bitflags_ull(char *out, long long v) {
+    char digits[24];
+    int  len = 0;
+    do {
+        digits[len++]  = (char)('0' + v % 10);
+        v             /= 10;
+    } while (v > 0);
+    int pos = 0;
+    while (len > 0)
+        out[pos++] = digits[--len];
+    out[pos++] = 'U';
+    out[pos++] = 'L';
+    out[pos++] = 'L';
+    out[pos]   = 0;
+}
+
+// A flag helper `T <name>(T v, T f)` returning `T` built from `op(v, f)`.
+@comptime void __builtin_bitflags_op(Type *ty, const char *prefix,
+                                     const char *tname, const char *suffix,
+                                     Type *ret, int op, bool negate_f) {
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, suffix);
+    Obj *fn = MakeFunction(fname, ret);
+    FunctionAddParam(fn, "v", ty);
+    FunctionAddParam(fn, "f", ty);
+    WithFn(fn) {
+        Type *wide = GetType("unsigned long long");
+        Node *v    = MakeCast(MakeParamRef(fn, "v"), wide);
+        Node *f    = MakeCast(MakeParamRef(fn, "f"), wide);
+        if (negate_f)
+            f = MakeUnary(NK_BITNOT, f);
+        Node *r = MakeBinary(op, v, f);
+        FunctionSetBody(fn, MakeReturn(MakeCast(r, ret)));
+    }
+    PublishNode(fn);
+}
+
+// @bitflags enum Perm { R = 1, W = 2, X = 4 }; publishes
+//   Perm Perm_set(Perm v, Perm f);      Perm Perm_clear(Perm v, Perm f);
+//   Perm Perm_toggle(Perm v, Perm f);   _Bool Perm_has(Perm v, Perm f);
+//   size_t Perm_format(Perm v, char *buf, size_t cap);
+// Every constant must be 0 or a power of two. Perm_format writes the set flags
+// as `R|W` in declaration order (bits with no constant as `0x..`, zero as the
+// 0 constant's name or `0`) and returns the length it needs, snprintf style.
+// @bitflags("P") publishes P_Perm_set, ...
+@comptime(attribute("bitflags")) void __builtin_attr_bitflags(AttrTarget *target,
+                                                              ...) {
+    Type       *ty     = __builtin_attr_type_target(target, "@bitflags", true);
+    const char *tname  = __builtin_attr_type_name(target, "@bitflags");
+    const char *prefix = __builtin_attr_prefix_arg("@bitflags");
+    __builtin_bitflags_check(ty);
+
+    __builtin_bitflags_op(ty, prefix, tname, "_set", ty, NK_BITOR, false);
+    __builtin_bitflags_op(ty, prefix, tname, "_clear", ty, NK_BITAND, true);
+    __builtin_bitflags_op(ty, prefix, tname, "_toggle", ty, NK_BITXOR, false);
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_has");
+    Obj *has = MakeFunction(fname, GetType("_Bool"));
+    FunctionAddParam(has, "v", ty);
+    FunctionAddParam(has, "f", ty);
+    WithFn(has) {
+        Type *wide = GetType("unsigned long long");
+        Node *v    = MakeCast(MakeParamRef(has, "v"), wide);
+        Node *f    = MakeCast(MakeParamRef(has, "f"), wide);
+        Node *both = MakeBinary(NK_BITAND, v, f);
+        FunctionSetBody(
+            has, MakeReturn(MakeBinary(NK_EQ, both,
+                                       MakeCast(MakeParamRef(has, "f"), wide))));
+    }
+    PublishNode(has);
+
+    // size_t is only declared once the program includes a header for it.
+    Type *size_ty =
+        FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+    char src[32768];
+    strcpy(src, "unsigned long n = 0; int first = 1;"
+                " unsigned long long rem = (unsigned long long)$1;");
+    int         count     = EnumValueCount(ty);
+    const char *zero_name = "0";
+    for (int i = 0; i < count; i++) {
+        long long   val  = EnumValue(ty, i);
+        const char *name = EnumValueName(ty, i);
+        if (val == 0) {
+            if (zero_name[0] == '0' && !zero_name[1])
+                zero_name = name;
+            continue;
+        }
+        bool seen = false;
+        for (int j = 0; j < i; j++)
+            if (EnumValue(ty, j) == val)
+                seen = true;
+        if (seen)
+            continue;
+        if (strlen(src) + 2 * strlen(name) + 400 > sizeof src - 1024)
+            MacroErrorAt(MakeIntLiteral(0), "@bitflags: too many or too long constant names");
+        char num[32];
+        __builtin_bitflags_ull(num, val);
+        strcat(src, " if ((rem & ");
+        strcat(src, num);
+        strcat(src, ") != 0) { if (!first) { if (n + 1 < $3) $2[n] = '|'; "
+                    "n++; } for (unsigned long i = 0; ");
+        strcat(src, "\"");
+        strcat(src, name);
+        strcat(src, "\"[i]; i++) { if (n + 1 < $3) $2[n] = \"");
+        strcat(src, name);
+        strcat(src, "\"[i]; n++; } first = 0; rem &= ~");
+        strcat(src, num);
+        strcat(src, "; }");
+    }
+    strcat(src,
+           " if (rem != 0) { if (!first) { if (n + 1 < $3) $2[n] = '|'; n++; }"
+           " if (n + 1 < $3) $2[n] = '0'; n++;"
+           " if (n + 1 < $3) $2[n] = 'x'; n++;"
+           " int started = 0;"
+           " for (int sh = 60; sh >= 0; sh -= 4) {"
+           " unsigned d = (unsigned)((rem >> sh) & 15);"
+           " if (d != 0 || started) { if (n + 1 < $3)"
+           " $2[n] = \"0123456789abcdef\"[d]; n++; started = 1; } }"
+           " first = 0; }"
+           " if (first) { for (unsigned long i = 0; \"");
+    strcat(src, zero_name);
+    strcat(src, "\"[i]; i++) { if (n + 1 < $3) $2[n] = \"");
+    strcat(src, zero_name);
+    strcat(src, "\"[i]; n++; } }"
+                " if ($3 > 0) $2[n < $3 ? n : $3 - 1] = 0; return n;");
+
+    __builtin_json_fn_name(fname, prefix, tname, "_format");
+    Obj *fmt = MakeFunction(fname, size_ty);
+    FunctionAddParam(fmt, "v", ty);
+    FunctionAddParam(fmt, "buf", MakePointer(GetType("char")));
+    FunctionAddParam(fmt, "cap", size_ty);
+    WithFn(fmt) {
+        FunctionSetBody(fmt, QuoteLazy(src, MakeParamRef(fmt, "v"),
+                                  MakeParamRef(fmt, "buf"),
+                                  MakeParamRef(fmt, "cap")));
+    }
+    PublishNode(fmt);
+}
+
 #endif // CCCC_DERIVE_H

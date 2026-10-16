@@ -34,6 +34,7 @@ int main(void) {
 | `@equals` | struct | `_Bool T_equals(const T *a, const T *b)` |
 | `@hash` | struct | `size_t T_hash(const T *self)` |
 | `@dump` | struct | `void T_dump(const T *self, FILE *out)` |
+| `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
 | `@dump_skip` | member | leaves the member out of `@dump` |
 | `@json_skip` | member | leaves the member out of `@to_json` / `@from_json` |
@@ -244,6 +245,42 @@ compile under `-c=native` yet ([#1631](https://todo.sr.ht/~takeiteasy/cccc/1631)
 
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
+
+## Bit Flags
+
+`@bitflags` on an enum whose constants are `0` or powers of two generates
+flag helpers:
+
+```c
+@bitflags
+typedef enum { NONE = 0, R = 1, W = 2, X = 4 } Perm;
+
+Perm p = Perm_set(NONE, R);      // R
+p = Perm_toggle(p, X);           // R|X
+p = Perm_clear(p, R);            // X
+Perm_has(p, X);                  // 1
+
+char buf[32];
+Perm_format(R | X, buf, sizeof buf);   // "R|X"
+```
+
+| Function | Result |
+|---|---|
+| `T_set(v, f)` / `T_clear(v, f)` / `T_toggle(v, f)` | `v` with the bits of `f` set / cleared / flipped |
+| `T_has(v, f)` | Nonzero when every bit of `f` is set in `v` (always true for `f == 0`) |
+| `T_format(v, buf, cap)` | Writes the set flags as `R\|W`, in declaration order |
+
+`T_format` returns the length the whole output needs and always NUL-terminates
+when `cap > 0`, like `snprintf`; `cap == 0` only measures. Bits with no
+constant print as `0x..` after the names (`R|0x40`). A value of `0` prints as
+the `0` constant's name, or `0` when there is none. Constants that share a
+value print once, under the first name.
+
+A negative constant, or one that is neither `0` nor a power of two, is a
+compile error that names it (`@bitflags: constant 'RW' (3) is not a power of
+two`), as is a struct or union target. A prefix names the functions
+`<prefix>_<Type>_set` and so on: `@bitflags("app")` on `enum Mode` publishes
+`app_Mode_set`.
 
 ## Writing your own
 

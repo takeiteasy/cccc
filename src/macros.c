@@ -1437,6 +1437,7 @@ static const char *const derive_attr_names[] = {
     "dump",
     "equals_skip",
     "dump_skip",
+    "bitflags",
     NULL,
 };
 
