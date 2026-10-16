@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@builder` generates a `T_builder` type with chaining setters and
+  `T_build` for a struct, with `@builder_default` and `@builder_required`
+  members. See `docs/DERIVE.md`.
 - Added: `@clone` and `@destroy` generate `T_clone` and `T_destroy` for a struct,
   deep-copying and freeing the pointer members marked `@owned`. They need
   `#include <stdlib.h>`. See `docs/DERIVE.md`.

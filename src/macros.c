@@ -1442,6 +1442,9 @@ static const char *const derive_attr_names[] = {
     "owned",
     "clone",
     "destroy",
+    "builder",
+    "builder_default",
+    "builder_required",
     NULL,
 };
 

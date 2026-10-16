@@ -1604,6 +1604,196 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fn);
 }
 
+// ---- @builder ----------------------------------------------------------------
+// @builder struct Foo {...}; publishes a `Foo_builder` type and
+//   Foo_builder  Foo_builder_new(void);
+//   Foo_builder *Foo_builder_<field>(Foo_builder *b, <FieldType> value);
+//   int          Foo_build(const Foo_builder *b, struct Foo *out);
+// Foo_builder_new zero-initialises and applies the @builder_default members,
+// each setter returns its builder for chaining, and Foo_build returns nonzero
+// (leaving *out alone) while a @builder_required member was never set.
+// @builder("P") publishes P_Foo_builder, P_Foo_builder_new, ...
+
+@comptime(attribute("builder_default")) void __builtin_attr_builder_default(
+    AttrTarget *target, ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_default applies to a struct member");
+    if (VarargCount() != 1)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_default takes one default value expression");
+    Member *m = AttrTargetMember(target);
+    if (MemberHasAttr(m, "builder_required"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_default and @builder_required cannot share a "
+                     "member");
+    if (GetTypeKind(MemberType(m)) == TK_ARRAY)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_default does not apply to an array member");
+}
+
+@comptime(attribute("builder_required")) void __builtin_attr_builder_required(
+    AttrTarget *target, ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_required applies to a struct member");
+    if (VarargCount() != 0)
+        MacroErrorAt(MakeIntLiteral(0), "@builder_required takes no arguments");
+    if (MemberHasAttr(AttrTargetMember(target), "builder_default"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@builder_default and @builder_required cannot share a "
+                     "member");
+}
+
+// Number of @builder_required members of `ty` (anonymous structs included).
+@comptime int __builtin_builder_required_count(Type *ty) {
+    int n     = 0;
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member *m     = StructMemberAt(ty, i);
+        Type   *fty   = MemberType(m);
+        if (!MemberName(m)) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                n += __builtin_builder_required_count(fty);
+        } else if (MemberHasAttr(m, "builder_required")) {
+            n++;
+        }
+    }
+    return n;
+}
+
+// Publishes the setter of every member of `ty`; `*req` numbers the required
+// members.
+@comptime void __builtin_builder_setters(Type *ty, Type *bty, const char *bname,
+                                         int *req) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                __builtin_builder_setters(fty, bty, bname, req);
+            continue;
+        }
+        if (!strcmp(field, "new"))
+            MacroErrorAt(MakeIntLiteral(0),
+                         "@builder: member 'new' clashes with %s_new", bname);
+        bool is_array = GetTypeKind(fty) == TK_ARRAY;
+        char name[256];
+        strcpy(name, bname);
+        strcat(name, "_");
+        strcat(name, field);
+        Obj *fn = MakeFunction(name, MakePointer(bty));
+        FunctionAddParam(fn, "b", MakePointer(bty));
+        FunctionAddParam(fn, "value",
+                         is_array ? MakePointer(MakeConst(TypeBase(fty))) : fty);
+        WithFn(fn) {
+            Node *b      = MakeUnary(NK_DEREF, MakeParamRef(fn, "b"));
+            Node *target = MakeMember(MakeMember(b, "value"), field);
+            Node *value  = MakeParamRef(fn, "value");
+            Node *block  = MakeBlock(NULL, 0);
+            Node *store  = is_array ? Memcpy(target, value,
+                                             MakeIntLiteral(TypeSize(fty)))
+                                    : MakeAssign(target, value);
+            BlockAddStmt(block, MakeExprStmt(store));
+            if (MemberHasAttr(m, "builder_required")) {
+                BlockAddStmt(
+                    block,
+                    MakeExprStmt(MakeAssign(
+                        MakeSubscript(MakeMember(b, "set"),
+                                      MakeIntLiteral((*req)++)),
+                        MakeIntLiteral(1))));
+            }
+            BlockAddStmt(block, MakeReturn(MakeParamRef(fn, "b")));
+            FunctionSetBody(fn, block);
+        }
+        PublishNode(fn);
+    }
+}
+
+// Assigns the @builder_default members of `ty` in `Foo_builder_new`.
+@comptime void __builtin_builder_defaults(Node *block, Type *ty, Node *value) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_STRUCT || tk == TK_UNION)
+                __builtin_builder_defaults(block, fty, value);
+            continue;
+        }
+        if (MemberHasAttr(m, "builder_default"))
+            BlockAddStmt(block,
+                         MakeExprStmt(MakeAssign(
+                             MakeMember(value, field),
+                             MemberAttrArg(m, "builder_default", 0))));
+    }
+}
+
+@comptime(attribute("builder")) void __builtin_attr_builder(AttrTarget *target,
+                                                            ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@builder");
+    const char *tname  = __builtin_attr_type_name(target, "@builder");
+    const char *prefix = __builtin_attr_prefix_arg("@builder");
+
+    char bname[256];
+    __builtin_json_fn_name(bname, prefix, tname, "_builder");
+    int required = __builtin_builder_required_count(ty);
+
+    Type *bty = MakeStruct(bname);
+    StructAddField(bty, "value", ty);
+    StructAddField(bty, "set",
+                   MakeArray(GetType("unsigned char"), required ? required : 1));
+    PublishNode(bty);
+    PublishNode(MakeTypedef(bname, bty));
+
+    char nname[256];
+    strcpy(nname, bname);
+    strcat(nname, "_new");
+    Obj *nf = MakeFunction(nname, bty);
+    WithFn(nf) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *b     = MakeLocalVarUnique(bty);
+        BlockAddStmt(
+            block, MakeExprStmt(MakeAssign(b, InitStruct(bty, NULL, NULL, 0))));
+        __builtin_builder_defaults(block, ty, MakeMember(b, "value"));
+        BlockAddStmt(block, MakeReturn(b));
+        FunctionSetBody(nf, block);
+    }
+    PublishNode(nf);
+
+    int req = 0;
+    __builtin_builder_setters(ty, bty, bname, &req);
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_build");
+    Obj *bf = MakeFunction(fname, GetType("int"));
+    FunctionAddParam(bf, "b", MakePointer(MakeConst(bty)));
+    FunctionAddParam(bf, "out", MakePointer(ty));
+    WithFn(bf) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *b     = MakeUnary(NK_DEREF, MakeParamRef(bf, "b"));
+        for (int k = 0; k < required; k++)
+            BlockAddStmt(
+                block,
+                MakeIf(MakeUnary(NK_NOT, MakeSubscript(MakeMember(b, "set"),
+                                                       MakeIntLiteral(k))),
+                       MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(
+            block, MakeExprStmt(MakeAssign(
+                       MakeUnary(NK_DEREF, MakeParamRef(bf, "out")),
+                       MakeMember(b, "value"))));
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(bf, block);
+    }
+    PublishNode(bf);
+}
+
 // ---- @compare ------------------------------------------------------------------
 
 // if (a < b) return -1; if (b < a) return 1; for every leaf, in declaration

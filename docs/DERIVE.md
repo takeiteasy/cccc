@@ -37,6 +37,9 @@ int main(void) {
 | `@clone` | struct | `int T_clone(T *out, const T *self)` |
 | `@destroy` | struct | `void T_destroy(T *self)` |
 | `@owned` / `@owned("n")` | member | marks a pointer member as heap memory for `@clone` / `@destroy` |
+| `@builder` | struct | `T_builder` type, `T_builder_new`, a chaining `T_builder_<field>` setter per member, `int T_build(const T_builder *b, T *out)` |
+| `@builder_default(expr)` | member | the value `T_builder_new` starts the member with |
+| `@builder_required` | member | makes `T_build` fail until the member is set |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
@@ -249,6 +252,46 @@ compile under `-c=native` yet ([#1631](https://todo.sr.ht/~takeiteasy/cccc/1631)
 
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
+
+## Builders
+
+`@builder` publishes a `T_builder` type that collects member values one setter
+at a time. `T_build` copies them into a `T`, or fails while a required member
+is missing:
+
+```c
+enum { DEFAULT_PORT = 8080 };
+
+@builder
+struct Config {
+    char host[32] @builder_required;
+    int  port     @builder_default(DEFAULT_PORT);
+    int  retries;
+};
+
+Config_builder b = Config_builder_new();     // port = 8080, retries = 0
+Config_builder_retries(Config_builder_host(&b, "example.org"), 3);
+
+struct Config c;
+if (Config_build(&b, &c) != 0) { /* a required member is missing */ }
+```
+
+| Function | Behaviour |
+|---|---|
+| `T_builder_new()` | Zeroes every member, then applies each `@builder_default` |
+| `T_builder_<field>(b, value)` | Stores `value` and returns `b`; an array member takes a `const` element pointer and copies the array |
+| `T_build(b, out)` | Returns 0 and fills `*out`; returns 1 and leaves `*out` alone while a `@builder_required` member was never set |
+
+`@builder_default(expr)` takes any expression that is valid where the struct is
+used (constants, enumerators, `sizeof`). It does not apply to array members,
+and a member cannot carry both attributes. A builder is a plain value:
+copying it copies the pending state, and the struct sits in its `value` member.
+Nested and anonymous struct members get a setter per field, like
+`@generate_setters`. A member named `new` is a compile error, because its
+setter would clash with `T_builder_new`.
+
+`@builder("app")` publishes `app_Config_builder`, `app_Config_builder_new`,
+`app_Config_builder_<field>` and `app_Config_build`.
 
 ## Owned memory
 
