@@ -970,7 +970,7 @@ Node *__builtin_ast_string_literal(const char *str) {
 }
 
 // #1050: names reflection.h's Memcpy()/Strlen()/Strcmp() macros (and
-// reflect_serialize_members/__builtin_ast_serialize's own direct
+// serdes_copy/__builtin_ast_serialize's own direct
 // __builtin_ast_var_ref("memcpy") calls, for @serialize/@deserialize) can
 // resolve to, and the real host header that declares each. Two distinct,
 // independently-discovered ways an Obj for one of these names can end up
@@ -1971,68 +1971,95 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
 // Serialization (ticket #235)
 // ============================================================================
 
-// Recursively emit stores copying each leaf member of `ty` into `buf_char`.
-// `expr` is the (named) object being copied and sits at `expr_base` in the
-// buffer; `ty_off` is where `ty` starts inside `expr` (non-zero while walking
-// an anonymous struct/union member, whose fields are reached through `expr`).
-// Plain members are memcpy()d, named struct/union members recursed into, and
-// bit-fields assigned through the containing type so the packed bits survive.
-static void reflect_serialize_members(VirtualMachine *vm, Node *block, Type *ty,
-                                      Node *expr, Node *buf_char, int expr_base,
-                                      int ty_off) {
+// Growable list of the memcpy() calls a (de)serialization emits.
+typedef struct {
+    Node **items;
+    int    len, cap;
+} SerdesCalls;
+
+static void serdes_add(SerdesCalls *calls, Node *call) {
+    if (calls->len == calls->cap) {
+        calls->cap   = calls->cap ? calls->cap * 2 : 16;
+        calls->items = realloc(calls->items, sizeof(Node *) * calls->cap);
+        if (!calls->items)
+            error("out of memory");
+    }
+    calls->items[calls->len++] = call;
+}
+
+// memcpy() between `size` bytes at `obj_off` inside the object `obj` and
+// `buf_off` inside `buf_char`; only bytes are copied, so neither side needs the
+// alignment of the type it holds.
+static Node *serdes_copy(VirtualMachine *vm, Node *obj, int obj_off,
+                         Node *buf_char, int buf_off, int size, bool to_buf) {
+    Node *obj_bytes = __builtin_ast_cast(__builtin_ast_unary(ND_ADDR, obj),
+                                         pointer_to(vm, ty_char));
+    Node *obj_ptr   = __builtin_ast_unary(
+        ND_ADDR,
+        __builtin_ast_subscript(obj_bytes, __builtin_ast_int_literal(obj_off)));
+    Node *buf_ptr = __builtin_ast_unary(
+        ND_ADDR,
+        __builtin_ast_subscript(buf_char, __builtin_ast_int_literal(buf_off)));
+    Node *args[3] = {to_buf ? buf_ptr : obj_ptr, to_buf ? obj_ptr : buf_ptr,
+                     __builtin_ast_int_literal(size)};
+    return __builtin_ast_funcall(__builtin_ast_var_ref("memcpy"), args, 3);
+}
+
+// Recursively emit the copies between each leaf member of `ty` and `buf_char`.
+// `expr` is the (named) object and sits at `expr_base` in the buffer; `ty_off`
+// is where `ty` starts inside `expr` (non-zero while walking an anonymous
+// struct/union member, whose fields are reached through `expr`). Bit-fields
+// copy the bytes holding their bits (little-endian bit numbering).
+static void reflect_serdes_members(VirtualMachine *vm, SerdesCalls *calls,
+                                   Type *ty, Node *expr, Node *buf_char,
+                                   int expr_base, int ty_off, bool to_buf) {
     for (Member *m = ty->members; m; m = m->next) {
         int off = expr_base + ty_off + m->offset;
 
         if (!m->name) {
             if (!m->is_bitfield &&
                 (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION))
-                reflect_serialize_members(vm, block, m->ty, expr, buf_char,
-                                          expr_base, ty_off + m->offset);
+                reflect_serdes_members(vm, calls, m->ty, expr, buf_char,
+                                       expr_base, ty_off + m->offset, to_buf);
+            continue;
+        }
+
+        if (m->is_bitfield) {
+            int first = m->bit_offset / 8;
+            int size  = (m->bit_offset % 8 + m->bit_width + 7) / 8;
+            serdes_add(calls, serdes_copy(vm, expr, ty_off + m->offset + first,
+                                          buf_char, off + first, size, to_buf));
             continue;
         }
 
         Node *field = __builtin_ast_member(expr, __builtin_ast_member_name(m));
-
-        if (m->is_bitfield) {
-            Node *dst_ptr = __builtin_ast_cast(
-                __builtin_ast_unary(
-                    ND_ADDR,
-                    __builtin_ast_subscript(
-                        buf_char, __builtin_ast_int_literal(expr_base))),
-                pointer_to(vm, expr->ty));
-            Node *dst =
-                __builtin_ast_member(__builtin_ast_unary(ND_DEREF, dst_ptr),
-                                     __builtin_ast_member_name(m));
-            __builtin_ast_block_add_stmt(
-                block,
-                __builtin_ast_expr_stmt(__builtin_ast_assign(dst, field)));
-            continue;
-        }
-
         if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) {
-            reflect_serialize_members(vm, block, m->ty, field, buf_char, off,
-                                      0);
+            reflect_serdes_members(vm, calls, m->ty, field, buf_char, off, 0,
+                                   to_buf);
             continue;
         }
 
-        Node *dst = __builtin_ast_unary(
-            ND_ADDR,
-            __builtin_ast_subscript(buf_char, __builtin_ast_int_literal(off)));
-        Node *src  = __builtin_ast_unary(ND_ADDR, field);
-        Node *call = __builtin_ast_funcall(
-            __builtin_ast_var_ref("memcpy"),
-            (Node *[]){dst, src, __builtin_ast_int_literal(m->ty->size)}, 3);
-        __builtin_ast_block_add_stmt(block, __builtin_ast_expr_stmt(call));
+        serdes_add(calls, serdes_copy(vm, field, 0, buf_char, off, m->ty->size,
+                                      to_buf));
     }
 }
 
+// Collect the copies for a whole value of type `ty` held in `obj`.
+static void reflect_serdes_value(VirtualMachine *vm, SerdesCalls *calls,
+                                 Type *ty, Node *obj, Node *buf_char,
+                                 bool to_buf) {
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        reflect_serdes_members(vm, calls, ty, obj, buf_char, 0, 0, to_buf);
+    else
+        serdes_add(calls,
+                   serdes_copy(vm, obj, 0, buf_char, 0, ty->size, to_buf));
+}
+
 // Serialize(ty, expr, buf) — build a block of memcpy() calls copying `expr`
-// (of type `ty`) byte-for-byte into `buf` (void*/char*). For struct/union
-// types, copies each scalar/pointer leaf member at its natural offset
-// (recursing into nested flat structs); for scalar types, copies the whole
-// value in one memcpy. V1 placeholder: pointer-typed members are copied as
-// raw pointer bytes, not followed (TODO #1614: deep/pointer-aware
-// serialization).
+// (of type `ty`) into `buf` (void*/char*) at the members' natural offsets;
+// padding is not written. `buf` needs no particular alignment. V1
+// placeholder: pointer-typed members are copied as raw pointer bytes, not
+// followed (TODO #1614: deep/pointer-aware serialization).
 CC_BUILTIN(__builtin_ast_serialize, 3);
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -2042,27 +2069,23 @@ Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     add_type(vm, expr);
     add_type(vm, buf);
 
-    Node *block    = __builtin_ast_block(NULL, 0);
-    Node *buf_char = __builtin_ast_cast(buf, pointer_to(vm, ty_char));
-
-    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
-        reflect_serialize_members(vm, block, ty, expr, buf_char, 0, 0);
-    } else {
-        Node *src  = __builtin_ast_unary(ND_ADDR, expr);
-        Node *call = __builtin_ast_funcall(
-            __builtin_ast_var_ref("memcpy"),
-            (Node *[]){buf, src, __builtin_ast_int_literal(ty->size)}, 3);
-        __builtin_ast_block_add_stmt(block, __builtin_ast_expr_stmt(call));
-    }
+    Node       *block    = __builtin_ast_block(NULL, 0);
+    Node       *buf_char = __builtin_ast_cast(buf, pointer_to(vm, ty_char));
+    SerdesCalls calls    = {0};
+    reflect_serdes_value(vm, &calls, ty, expr, buf_char, true);
+    for (int i = 0; i < calls.len; i++)
+        __builtin_ast_block_add_stmt(block,
+                                     __builtin_ast_expr_stmt(calls.items[i]));
+    free(calls.items);
 
     add_type(vm, block);
     return block;
 }
 
-// Deserialize(ty, buf) — reinterpret `buf` (void*/char*) as a `ty` value:
-// *(ty*)buf. V1 placeholder: this is a cast+deref, so it inherits the host's
-// alignment requirements for `ty` (TODO #1615: field-by-field
-// reconstruction if Serialize ever produces a packed/portable layout).
+// Deserialize(ty, buf) — rebuild a `ty` value from `buf` (void*/char*) by
+// copying each member out of the buffer into a zeroed hidden local, the
+// mirror of Serialize; `buf` needs no particular alignment. Outside a
+// function (no local to hold the value) it falls back to `*(ty*)buf`.
 CC_BUILTIN(__builtin_ast_deserialize, 2);
 Node *__builtin_ast_deserialize(Type *ty, Node *buf) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -2070,8 +2093,25 @@ Node *__builtin_ast_deserialize(Type *ty, Node *buf) {
         return NULL;
 
     add_type(vm, buf);
-    Node *typed_ptr = __builtin_ast_cast(buf, pointer_to(vm, ty));
-    return __builtin_ast_unary(ND_DEREF, typed_ptr);
+    Node *tmp = make_local_var_node(vm, reflect_unique_name(vm), ty);
+    if (!tmp)
+        return __builtin_ast_unary(ND_DEREF,
+                                   __builtin_ast_cast(buf, pointer_to(vm, ty)));
+    tmp->ty              = ty;
+
+    Node       *buf_char = __builtin_ast_cast(buf, pointer_to(vm, ty_char));
+    SerdesCalls calls    = {0};
+    reflect_serdes_value(vm, &calls, ty, tmp, buf_char, false);
+
+    Node *chain = alloc_node(vm, ND_MEMZERO);
+    chain->var  = tmp->var;
+    for (int i = 0; i < calls.len; i++)
+        chain = __builtin_ast_comma(chain, calls.items[i]);
+    free(calls.items);
+
+    Node *result = __builtin_ast_comma(chain, tmp);
+    add_type(vm, result);
+    return result;
 }
 
 // EnumToString(ty, expr) — builds switch (expr) { case V0: return "Name0";

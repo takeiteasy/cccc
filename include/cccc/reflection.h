@@ -2482,37 +2482,40 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
 
 /**
  * @brief Build a block of memcpy() calls copying expr (of type ty)
- *           byte-for-byte into buf (a void or char pointer). Struct/union
- *           types are copied member-by-member at their natural offsets,
- *           recursing into nested flat structs; scalar types are copied
- *           in one memcpy.
+ *           into buf (a void or char pointer). Struct/union types are
+ *           copied member-by-member at their natural offsets, recursing
+ *           into nested structs; bit-fields copy the bytes holding their
+ *           bits; scalar types are copied in one memcpy. buf needs no
+ *           particular alignment.
  * @note V1 placeholder: pointer-typed members are copied as raw pointer
  *       bytes, not followed.
  */
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf);
 
 /**
- * @brief Build `*(ty*)buf` — reinterpret buf as a ty value.
- * @note V1 placeholder: inherits the host's alignment requirements for ty;
- *       if Serialize ever produces a packed/portable layout this must
- *       change to field-by-field reconstruction.
+ * @brief Build an expression that reconstructs a ty value from buf,
+ *           copying each member out of the buffer into a zeroed hidden
+ *           local (the mirror of Serialize). buf needs no particular
+ *           alignment.
  */
 Node *__builtin_ast_deserialize(Type *ty, Node *buf);
 
 /*! @def Serialize
  * @brief Build a block of memcpy() calls copying @a expr (of type @a ty)
- * byte-for-byte into @a buf.
+ * into @a buf.
  * @param ty The type of expr.
  * @param expr The expression to serialize.
  * @param buf A void or char pointer destination.
  * @details Struct/union types are copied member-by-member at their natural
- * offsets; pointer members are copied as raw bytes, not followed. */
+ * offsets; padding is not written and @a buf needs no particular alignment.
+ * Pointer members are copied as raw bytes, not followed. */
 #define Serialize(ty, expr, buf) __builtin_ast_serialize(ty, expr, buf)
 /*! @def Deserialize
- * @brief Build @c *(ty*)buf — reinterpret @a buf as a @a ty value.
- * @param ty The type to reinterpret as.
- * @param buf The source buffer.
- * @details Inherits the host's alignment requirements for ty. */
+ * @brief Build an expression that reconstructs a @a ty value from @a buf.
+ * @param ty The type to reconstruct.
+ * @param buf The source buffer, laid out as Serialize writes it.
+ * @details Padding in the result is zero and @a buf needs no particular
+ * alignment. */
 #define Deserialize(ty, buf) __builtin_ast_deserialize(ty, buf)
 
 // Global variable generation (ticket #152)
