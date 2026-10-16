@@ -4061,9 +4061,8 @@ typedef struct Compiler {
     // call hashmap_restore and clear the flag before returning.
     bool    has_macro_snapshot;
     HashMap macro_snapshot_backup;
-    bool reflection_attrs_registered; // True after
-                                      // ensure_reflection_attrs_registered has
-                                      // run (#235)
+    bool derive_attrs_registered; // True after ensure_derive_attrs_registered
+                                  // has run
     bool any_block_type; // Set by block_type(); never cleared
     bool no_comptime; // --no-comptime: skip entire comptime/macro phase (for
                       // TUs that don't use comptime)

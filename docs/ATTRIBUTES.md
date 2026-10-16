@@ -1119,6 +1119,9 @@ the canonical attribute form before parsing:
 | `@name` (GNU / unknown) | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 | `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 
+The ready-made custom attributes (`@serialize`, `@enum_to_string`,
+`@generate_accessors`, ...) are listed in [DERIVE.md](DERIVE.md).
+
 Resolution order: CCCC-specific attributes are checked first (they become
 `[[cccc::name(...)]]`), then standard C23 attributes (they become
 `[[name(...)]]`), then registered custom comptime attributes, then GNU

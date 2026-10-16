@@ -732,7 +732,7 @@ int __builtin_ast_member_bitfield_width(Member *m) {
     return (m && m->is_bitfield) ? m->bit_width : 0;
 }
 
-// Ticket #235: OffsetofChain(ty, "a", "b", ...) — sum of member offsets
+// OffsetofChain(ty, "a", "b", ...) — sum of member offsets
 // walking nested struct/union members, e.g. offsetof(ty, a.b). Returns -1
 // if any name in the chain cannot be resolved.
 CC_BUILTIN(__builtin_ast_offsetof_chain, 3);
@@ -1968,7 +1968,7 @@ Node *__builtin_ast_init_struct(Type *ty, const char **fields, Node **values,
 }
 
 // ============================================================================
-// Serialization (ticket #235)
+// Serialization
 // ============================================================================
 
 // Growable list of the memcpy() calls a (de)serialization emits.
@@ -2288,9 +2288,9 @@ static void ensure_libc_fn_decl(VirtualMachine *vm, const char *name,
     vm->compiler.globals = fn;
 }
 
-// Ticket #235: ensure memcpy/memmove/memcmp/strlen/strcmp are resolvable via
+// Ensure memcpy/memmove/memcmp/strlen/strcmp are resolvable via
 // __builtin_ast_var_ref in the runtime TU's globals, for Serialize/Deserialize
-// and future EnumToString/EnumFromString-style generators.
+// and the EnumToString/EnumFromString-style generators.
 void __builtin_ensure_string_h_decls(void) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
@@ -3097,7 +3097,7 @@ Node *__builtin_ast_loop_set_body(Node *loop, Node *body) {
 }
 
 // ============================================================================
-// Ticket #235: FP-style array generators (GenerateSum/map/reduce/filter)
+// FP-style array generators (GenerateSum/map/reduce/filter)
 // ============================================================================
 
 // __builtin_generate_sum(elem_ty): publishes

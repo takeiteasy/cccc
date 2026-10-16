@@ -274,6 +274,11 @@ groups from that ticket.
 Attribute support (`__attribute__((...))`, `[[...]]`, and the `@name`
 shorthand) has its own reference: [ATTRIBUTES.md](ATTRIBUTES.md).
 
+The built-in comptime attributes (`@serialize`, `@deserialize`,
+`@enum_to_string`, `@enum_from_string`, `@generate_getters`,
+`@generate_setters`, `@generate_accessors`, `@generate_constructor`) are CCCC
+extensions with no standard counterpart; see [DERIVE.md](DERIVE.md).
+
 ## See also
 
 - [NATIVE.md](NATIVE.md) — `-c=native`/`-m`/`-c=generated` serializer scope:

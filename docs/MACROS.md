@@ -2159,11 +2159,13 @@ void gen_lookup(void) {
 gen_lookup();
 ```
 
-## Macro Standard Library (ticket #235)
+## Macro Standard Library
 
-`include/cccc/reflection.h` ships a bundled set of `$`-prefixed helpers for
-common macro-author tasks. Because reflection.h is implicitly included in every
-macro/comptime TU, these are available without any extra `#include`.
+`include/cccc/reflection.h` ships a bundled set of helpers for common
+macro-author tasks. Because reflection.h is implicitly included in every
+macro/comptime TU, these are available without any extra `#include`. The
+ready-made attributes built on them (`@serialize`, `@enum_to_string`,
+`@generate_accessors`, ...) are covered in [DERIVE.md](DERIVE.md).
 
 ### String and Memory Wrappers
 
@@ -2230,29 +2232,11 @@ Node *deser(Node *buf) {
 }
 ```
 
-V1 scope: scalars and flat structs (nested flat structs, bit-fields and the
+Scope: scalars and flat structs (nested flat structs, bit-fields and the
 fields of anonymous struct/union members are copied; pointer-typed members are
 copied as raw pointer bytes). The buffer holds each member at its natural
 offset; padding is not written, and `Deserialize` zeroes the padding of the
 value it returns.
-
-#### `@serialize` / `@deserialize` attributes
-
-Attach to a struct, union or `typedef` of one to auto-generate
-`<Type>_serialize` and `<Type>_deserialize` functions:
-
-```c
-@serialize
-@deserialize
-typedef struct { int x; int y; } Point;
-
-// Generates:
-//   int Point_serialize(Point *self, void *buf);   // returns sizeof(Point)
-//   Point Point_deserialize(void *buf);
-```
-
-The same targets (a tagged declaration or a `typedef`) apply to every attribute
-in this section.
 
 ### Enum String Conversion
 
@@ -2268,66 +2252,7 @@ Node *color_name(Node *v) {
 }
 ```
 
-#### `@enum_to_string` / `@enum_from_string` attributes
-
-```c
-@enum_to_string
-@enum_from_string
-typedef enum { RED, GREEN, BLUE } Color;
-
-// Generates:
-//   const char *Color_to_string(Color v);
-//   Color Color_from_string(const char *s);  // returns -1 on no match
-```
-
-Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
-
-### Code Generators
-
-#### `@generate_getters` / `@generate_setters` / `@generate_accessors`
-
-Publish one `get_<field>` / `set_<field>` function per struct member.
-`@generate_accessors` publishes both. An optional string literal prefix gives
-the functions a `<prefix>_` name, which keeps two structs with a shared field
-name apart; `""` means no prefix.
-
-```c
-@generate_accessors
-struct Point { int x; int y; };
-
-// Generates:
-//   int get_x(struct Point *self);
-//   int get_y(struct Point *self);
-//   void set_x(struct Point *self, int value);
-//   void set_y(struct Point *self, int value);
-
-@generate_accessors("Size")
-struct Size { int x; };
-
-// Generates Size_get_x and Size_set_x.
-```
-
-| Member | Getter | Setter |
-|---|---|---|
-| Scalar, struct, pointer | Returns the value | Assigns `value` |
-| Array `T a[N]` | Returns `T *` to the first element | Takes `const T *value`, copies the whole array |
-| Field of an anonymous struct/union | Same as a direct member | Same as a direct member |
-
-#### `@generate_constructor`
-
-Publish a `<Type>_create(field1, field2, ...)` constructor. Array members take
-a pointer parameter and are copied; fields of anonymous struct/union members
-are flattened into the parameter list:
-
-```c
-@generate_constructor
-struct Point { int x; int y; };
-
-// Generates:
-//   struct Point Point_create(int x, int y);
-```
-
-#### FP-Style Array Generators
+### FP-Style Array Generators
 
 `GenerateSum`, `GenerateMap`, `GenerateReduce`, and `GenerateFilter`
 publish typed array helpers for a given element type. Call from a comptime
@@ -2363,9 +2288,7 @@ The function name suffix is derived from the element type's canonical C name
 (`int`, `ulong`, `double`, etc.) or its user-defined type name for struct/enum
 types.
 
-### Reflection API additions (ticket #235)
-
-New entries in the reflection table:
+### Reflection helpers
 
 | Task | API |
 |------|-----|

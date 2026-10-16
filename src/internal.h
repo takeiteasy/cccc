@@ -670,9 +670,9 @@ void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args, int arg_count);
-void ensure_reflection_attrs_registered(VirtualMachine *vm);
-bool is_reflection_builtin_attr(const char *name, int len);
-const char *const *reflection_builtin_attr_names(void);
+void ensure_derive_attrs_registered(VirtualMachine *vm);
+bool is_derive_builtin_attr(const char *name, int len);
+const char *const *derive_builtin_attr_names(void);
 void __builtin_ensure_string_h_decls(void);
 void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
                          Token *site_tok);

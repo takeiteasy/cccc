@@ -11,8 +11,8 @@
 #define TK_DOUBLE 200
 #define TK_STRUCT 300
 
-// A comptime annotation triggers ensure_reflection_attrs_registered(), which
-// preprocesses reflection.h.  Compilation succeeding is the regression guard.
+// A comptime annotation triggers ensure_derive_attrs_registered(), which
+// preprocesses reflection.h and derive.h.  Compilation succeeding is the regression guard.
 [[cccc::comptime]]
 Node *identity42(void) {
     return MakeIntLiteral(42);

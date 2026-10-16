@@ -6,7 +6,7 @@
 // root.
 //
 // Rows are sorted by name: get_std_header() binary-searches them. The private
-// headers (reflection.h, testing.h, building.h) are listed by bare name for
+// headers (reflection.h, derive.h, testing.h, building.h) are listed by bare name for
 // internal injection and are not includable by user source.
 
 #include "./embed.h"
@@ -26,6 +26,7 @@
     X(std_cpio_h, "cpio.h", "include/cpio.h", 0) \
     X(std_ctype_h, "ctype.h", "include/ctype.h", "register_ctype_functions") \
     X(std_decimal_math_h, "decimal_math.h", "include/decimal_math.h", "register_decimal_math_functions") \
+    X(std_derive_h, "derive.h", "include/cccc/derive.h", 0) \
     X(std_dirent_h, "dirent.h", "include/dirent.h", "register_posix_dir_functions") \
     X(std_dlfcn_h, "dlfcn.h", "include/dlfcn.h", "register_posix_functions") \
     X(std_errno_h, "errno.h", "include/errno.h", "register_posix_io_functions") \
