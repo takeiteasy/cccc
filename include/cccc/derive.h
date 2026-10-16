@@ -196,6 +196,8 @@
                                              setters);
             continue;
         }
+        if (MemberHasAttr(m, "accessor_skip"))
+            continue;
 
         bool is_array = GetTypeKind(fty) == TK_ARRAY;
         char name[256];
@@ -247,6 +249,8 @@
                 __builtin_constructor_params(fn, fty);
             continue;
         }
+        if (MemberHasAttr(m, "constructor_skip"))
+            continue;
         FunctionAddParam(fn, field,
                          GetTypeKind(fty) == TK_ARRAY
                              ? MakePointer(MakeConst(TypeBase(fty)))
@@ -267,6 +271,8 @@
                 __builtin_constructor_stores(fn, block, r, fty);
             continue;
         }
+        if (MemberHasAttr(m, "constructor_skip"))
+            continue;
         Node *target = MakeMember(r, field);
         Node *value  = MakeParamRef(fn, field);
         Node *store = GetTypeKind(fty) == TK_ARRAY
@@ -869,6 +875,28 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 @comptime(attribute("dump_skip")) void __builtin_attr_dump_skip(
     AttrTarget *target, ...) {
     __builtin_derive_skip_target(target, "@dump_skip");
+}
+
+// @serialize_skip leaves a member out of @serialize, @deserialize and the
+// Serialize/Deserialize builders, @accessor_skip out of the @generate_getters,
+// setters and accessors functions, @constructor_skip out of
+// @generate_constructor.
+@comptime(attribute("serialize_skip")) void __builtin_attr_serialize_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@serialize_skip");
+    if (MemberIsBitfield(AttrTargetMember(target)))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@serialize_skip cannot apply to a bit-field");
+}
+
+@comptime(attribute("accessor_skip")) void __builtin_attr_accessor_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@accessor_skip");
+}
+
+@comptime(attribute("constructor_skip")) void __builtin_attr_constructor_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@constructor_skip");
 }
 
 // if (a != b) return 0; for every leaf. char[N] compares as a C string.

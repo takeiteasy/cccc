@@ -493,6 +493,20 @@ after that receive attribute arguments as `Node *` expression nodes, so
 void answer_attr(AttrTarget *target, Node *value) { ... }
 ```
 
+A handler reads a string argument with `StringLiteralValue(node)` and an
+integer argument with `ConstIntValue(node, &out)`, which accepts any integer
+constant expression (`3`, `-1`, `N * 2`, an enum constant) and returns false for
+anything else:
+
+```c
+@comptime(attribute("weight"))
+void weight_attr(AttrTarget *target, Node *value) {
+    int64_t w;
+    if (!ConstIntValue(value, &w))
+        MacroErrorAt(value, "@weight expects an integer constant");
+}
+```
+
 Variadic attribute handlers use the same `$ast_vararg_*` helpers as inline
 macros. The target helpers are:
 
@@ -2577,6 +2591,7 @@ a compile with warnings puts more than one document there.
 | `MakeFloatLiteral(val)` | Floating-point literal |
 | `MakeStringLiteral(str)` | String literal |
 | `StringLiteralValue(node)` | Text of a string literal argument, or `NULL` |
+| `ConstIntValue(node, &out)` | Stores an integer constant expression argument in `out`; false if it is not one |
 | `MakeVarRef(name)` | Variable reference |
 | `MakeParamRef(fn, name)` | Generated function parameter reference |
 | `Gensym(prefix)` | Unique arena-allocated symbol name using `__builtin_gensym` |

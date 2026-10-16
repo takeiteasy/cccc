@@ -937,6 +937,15 @@ Node *__builtin_ast_string_literal(const char *str);
  */
 const char *__builtin_ast_string_literal_value(Node *node);
 
+/*! @brief Evaluate an integer constant expression node.
+ * @param node A node, typically a macro or attribute argument.
+ * @param out Receives the value when the result is true.
+ * @return true if @a node is an integer constant expression (`3`, `-1`,
+ *         `2 * N`, an enum constant), false otherwise.
+ * @details Convenience wrapper: ConstIntValue(node, &out).
+ */
+bool __builtin_ast_const_int_value(Node *node, int64_t *out);
+
 /*! @brief Build a variable reference AST node.
  * @param name The variable name.
  * @return An NK_VAR node referencing name.
@@ -1782,6 +1791,11 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Return the text of a string literal node, or NULL.
  * @param node A node, typically a macro or attribute argument. */
 #define StringLiteralValue(node) __builtin_ast_string_literal_value(node)
+/*! @def ConstIntValue
+ * @brief Evaluate an integer constant expression node; false if it is not one.
+ * @param node A node, typically a macro or attribute argument.
+ * @param out An `int64_t *` that receives the value. */
+#define ConstIntValue(node, out) __builtin_ast_const_int_value(node, out)
 /*! @def MakeVarRef
  * @brief Build a variable reference AST node.
  * @param name The variable name. */

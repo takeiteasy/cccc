@@ -2130,6 +2130,10 @@ int64_t cc_eval(VirtualMachine *vm, Node *node) {
     return eval(vm, node);
 }
 
+bool cc_is_const_expr(VirtualMachine *vm, Node *node) {
+    return is_const_expr(vm, node);
+}
+
 double cc_eval_double(VirtualMachine *vm, Node *node) {
     return eval_double(vm, node);
 }

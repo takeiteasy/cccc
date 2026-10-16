@@ -44,6 +44,9 @@ int main(void) {
 | `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
 | `@dump_skip` | member | leaves the member out of `@dump` |
+| `@serialize_skip` | member | leaves the member out of `@serialize` / `@deserialize` |
+| `@accessor_skip` | member | generates no getter or setter for the member |
+| `@constructor_skip` | member | drops the member from `@generate_constructor`'s parameters |
 | `@json_skip` | member | leaves the member out of `@to_json` / `@from_json` |
 | `@json_name("key")` | member | uses `key` as the member's JSON key |
 
@@ -90,6 +93,30 @@ typedef enum { RED, GREEN, BLUE } Color;
 ```
 
 Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
+
+## Skipping Members
+
+`@serialize_skip`, `@accessor_skip` and `@constructor_skip` go on struct
+members, take no arguments, and leave the member out of one family of
+generated functions:
+
+```c
+@serialize
+@deserialize
+@generate_accessors
+@generate_constructor
+struct Session {
+    int  id;
+    char token[16] @serialize_skip @accessor_skip;
+    int  hits      @constructor_skip;
+};
+```
+
+| Attribute | Effect |
+|---|---|
+| `@serialize_skip` | The member's bytes are not written; `T_deserialize` leaves it zero. `T_serialize` still returns `sizeof(T)` and the other members keep their offsets. The `Serialize` / `Deserialize` builders skip it too. Not valid on a bit-field. |
+| `@accessor_skip` | No `get_<field>` or `set_<field>`. |
+| `@constructor_skip` | No `T_create` parameter; the member is zero-initialised. |
 
 ## Accessors and Constructors
 

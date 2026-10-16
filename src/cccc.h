@@ -5535,6 +5535,7 @@ void cc_resolve_body_label_refs(VirtualMachine *vm, Obj *fn);
 void cc_flush_deferred_unused_labels(VirtualMachine *vm);
 
 int64_t cc_eval(VirtualMachine *vm, Node *node);
+bool cc_is_const_expr(VirtualMachine *vm, Node *node);
 double cc_eval_double(VirtualMachine *vm, Node *node);
 void cc_init_parser(VirtualMachine *vm);
 

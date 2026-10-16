@@ -1006,6 +1006,18 @@ const char *__builtin_ast_string_literal_value(Node *node) {
     return (const char *)node->var->init_data;
 }
 
+CC_BUILTIN(__builtin_ast_const_int_value, 2);
+bool __builtin_ast_const_int_value(Node *node, int64_t *out) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !node || !out)
+        return false;
+    add_type(vm, node);
+    if (!node->ty || !is_integer(node->ty) || !cc_is_const_expr(vm, node))
+        return false;
+    *out = cc_eval(vm, node);
+    return true;
+}
+
 CC_BUILTIN(__builtin_ast_string_literal, 1);
 Node *__builtin_ast_string_literal(const char *str) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -2112,6 +2124,9 @@ static void reflect_serdes_members(VirtualMachine *vm, SerdesCalls *calls,
             continue;
         }
 
+        if (member_attr_find(m, "serialize_skip"))
+            continue;
+
         if (m->is_bitfield) {
             int first = m->bit_offset / 8;
             int size  = (m->bit_offset % 8 + m->bit_width + 7) / 8;
@@ -2145,9 +2160,9 @@ static void reflect_serdes_value(VirtualMachine *vm, SerdesCalls *calls,
 
 // Serialize(ty, expr, buf) — build a block of memcpy() calls copying `expr`
 // (of type `ty`) into `buf` (void*/char*) at the members' natural offsets;
-// padding is not written. `buf` needs no particular alignment. V1
-// placeholder: pointer-typed members are copied as raw pointer bytes, not
-// followed (TODO #1614: deep/pointer-aware serialization).
+// padding and @serialize_skip members are not written. `buf` needs no
+// particular alignment. V1 placeholder: pointer-typed members are copied as raw
+// pointer bytes, not followed (TODO #1614: deep/pointer-aware serialization).
 CC_BUILTIN(__builtin_ast_serialize, 3);
 Node *__builtin_ast_serialize(Type *ty, Node *expr, Node *buf) {
     VirtualMachine *vm = __builtin_current_vm;

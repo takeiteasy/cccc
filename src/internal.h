@@ -682,6 +682,7 @@ Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain);
 // Compile-time constant evaluators (wrappers around the static
 // eval/eval_double).
 int64_t cc_eval(VirtualMachine *vm, Node *node);
+bool cc_is_const_expr(VirtualMachine *vm, Node *node);
 double cc_eval_double(VirtualMachine *vm, Node *node);
 
 //
