@@ -11,7 +11,8 @@ extern const char *const   cccc_optstring;
 typedef enum {
     CFG_FREE,  // applies from any config
     CFG_TRUST, // widens what runs or where cccc writes; local files need trust
-    CFG_CLI_ONLY, // modes and actions; never read from a config
+    CFG_CLI_ONLY,  // modes and actions; never read from a config
+    CFG_USER_ONLY, // the user's own config and the command line, not a project
 } CfgClass;
 
 // Class of a config key (a long option name or a short option letter), or -1

@@ -23,6 +23,7 @@
 // arguments. See docs/CONFIG.md.
 
 #include "config.h"
+#include "sha256.h"
 #include "toml.h"
 
 #include <stdbool.h>
@@ -85,6 +86,9 @@ static const struct {
     {"show-config", CFG_CLI_ONLY},
     {"trust", CFG_CLI_ONLY},
     {"untrust", CFG_CLI_ONLY},
+
+    // Policy about project configs, so a project config cannot set it.
+    {"trust-hash", CFG_USER_ONLY},
 
     // Widen what runs or where cccc writes.
     {"comptime-allow", CFG_TRUST},
@@ -449,7 +453,8 @@ static char *find_local(void) {
 
 // --- parsing -----------------------------------------------------------------
 
-static const char *cfg_dir; // directory of the file being parsed
+static const char *cfg_dir;   // directory of the file being parsed
+static bool        cfg_local; // the file being parsed is a project config
 
 // Emits one option for `key`; `val` is NULL for a bare flag.
 static void emit(Opts *o, const char *key, const char *val, CfgClass cls) {
@@ -506,14 +511,22 @@ static void emit_scalar(Opts *o, toml_datum_t at, const char *key, int arity,
     }
 }
 
-static void parse_file(const char *path, Opts *o) {
+// Parses a config file. For a project file (`local`) a user-only key is an
+// error. `hex`, when given, receives the SHA-256 of the bytes parsed.
+static void parse_file(const char *path, Opts *o, bool local, char *hex) {
     char *slash = strrchr(path, '/');
     char *dir   = slash ? xstrdup(path) : xstrdup(".");
     if (slash)
         dir[slash == path ? 1 : slash - path] = '\0';
-    cfg_dir         = dir;
+    cfg_dir   = dir;
+    cfg_local = local;
 
-    toml_result_t r = cccc_toml_load(path);
+    size_t len;
+    char  *text = cccc_toml_read(path, &len);
+    if (hex)
+        cccc_sha256_hex(text, len, hex);
+    toml_result_t r = cccc_toml_parse_text(path, text, len);
+    free(text);
     cccc_toml_check_text(r.toptab);
     for (int i = 0; i < r.toptab.u.tab.size; i++) {
         const char  *key = r.toptab.u.tab.key[i];
@@ -526,6 +539,8 @@ static void parse_file(const char *path, Opts *o) {
         int cls = cccc_config_class(key);
         if (cls < 0 || cls == CFG_CLI_ONLY)
             cccc_toml_fail(v, "'%s' cannot be set in a config file", key);
+        if (cls == CFG_USER_ONLY && local)
+            cccc_toml_fail(v, "'%s' can only be set in the user config", key);
         if (v.type != TOML_ARRAY) {
             emit_scalar(o, v, key, arity, (CfgClass)cls);
             continue;
@@ -548,8 +563,9 @@ static void parse_file(const char *path, Opts *o) {
 
 // --- trust store -------------------------------------------------------------
 
-// TODO: grants are keyed by path and approved values, so an edit that adds no
-// grant is not noticed; an opt-in SHA-256 mode is #1650.
+// One line per grant, "<realpath>\t<key>=<value>". A file pinned by hash also
+// has "<realpath>\t@sha256=<hex>"; no option key starts with '@'.
+#define HASH_KEY "@sha256="
 
 static char *trust_file(void) {
     char *dir = global_config_dir();
@@ -597,6 +613,28 @@ static bool is_trusted(const char *store, const char *real, const char *pair) {
     return found;
 }
 
+// The SHA-256 a file was pinned with (64 hex digits, malloc'd), or NULL.
+static char *stored_hash(const char *store, const char *real) {
+    if (!path_storable(real))
+        return NULL;
+    char *prefix = xasprintf("\n%s\t" HASH_KEY "%s", real, "");
+    char *at     = strstr(store, prefix);
+    char *hex    = NULL;
+    if (at) {
+        const char *h = at + strlen(prefix);
+        size_t      n = strspn(h, "0123456789abcdef");
+        if (n == 64 && (h[n] == '\n' || h[n] == '\0')) {
+            hex = malloc(65);
+            if (hex) {
+                memcpy(hex, h, 64);
+                hex[64] = '\0';
+            }
+        }
+    }
+    free(prefix);
+    return hex;
+}
+
 static void mkdir_p(const char *dir) {
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof tmp, "%s", dir);
@@ -628,7 +666,8 @@ static bool trust_append(const char *real, char *const *pairs, int n) {
     return true;
 }
 
-static void trust_remove(const char *real) {
+// Drops every line for `real`, or only its hash line when `hash_only`.
+static void trust_remove(const char *real, bool hash_only) {
     char *file = trust_file();
     if (!file)
         return;
@@ -640,17 +679,31 @@ static void trust_remove(const char *real) {
         return;
     }
     size_t rl = strlen(real);
-    for (char *line = strtok(store, "\n"); line; line = strtok(NULL, "\n"))
-        if (!(strncmp(line, real, rl) == 0 && line[rl] == '\t'))
-            fprintf(f, "%s\n", line);
+    for (char *line = strtok(store, "\n"); line; line = strtok(NULL, "\n")) {
+        bool mine = strncmp(line, real, rl) == 0 && line[rl] == '\t';
+        if (mine &&
+            (!hash_only || !strncmp(line + rl + 1, HASH_KEY, strlen(HASH_KEY))))
+            continue;
+        fprintf(f, "%s\n", line);
+    }
     fclose(f);
     free(store);
+}
+
+// Pins `real` to `hex`, replacing any earlier pin.
+static bool trust_pin(const char *real, const char *hex) {
+    trust_remove(real, true);
+    char *pair = xasprintf(HASH_KEY "%s%s", hex, "");
+    bool  ok   = trust_append(real, &pair, 1);
+    free(pair);
+    return ok;
 }
 
 // --- trust decision ----------------------------------------------------------
 
 // TODO: parallel runs each prompt and race on the trust list; lock it (#1651).
-static bool prompt_tty(const char *path, char *const *new_pairs, int n) {
+static bool prompt_tty(const char *path, bool changed, char *const *new_pairs,
+                       int n) {
     const char *skip = getenv(NO_PROMPT_ENV);
     if (skip && skip[0] && strcmp(skip, "0"))
         return false;
@@ -662,7 +715,8 @@ static bool prompt_tty(const char *path, char *const *new_pairs, int n) {
         close(fd);
         return false;
     }
-    fprintf(tty, "cccc: %s asks for:\n", path);
+    fprintf(tty, "cccc: %s %s asks for:\n", path,
+            changed ? "has changed since you trusted it; it" : "");
     for (int i = 0; i < n; i++)
         fprintf(tty, "    %s\n", new_pairs[i]);
     fprintf(tty, "Trust these settings? [y/N] ");
@@ -675,43 +729,57 @@ static bool prompt_tty(const char *path, char *const *new_pairs, int n) {
 
 // Drops every option that needs trust and has not been approved, asking on
 // the terminal first when `interactive`. `show` prints each pair's state
-// instead of warning.
-static void apply_trust(Opts *o, const char *path, bool interactive,
-                        bool show) {
+// instead of warning. `hex` is the SHA-256 of the file as parsed: a file
+// pinned to a different hash has every grant unapproved, and approving it
+// again repins it (as does `pin_default` for a file not yet pinned).
+static void apply_trust(Opts *o, const char *path, const char *hex,
+                        bool pin_default, bool interactive, bool show) {
     char  real[PATH_MAX];
     bool  have_real = realpath(path, real) != NULL;
     char *file      = trust_file();
     char *store     = slurp(file);
     free(file);
 
-    char *missing[256];
-    int   nmissing = 0;
+    char *pinned  = have_real ? stored_hash(store, real) : NULL;
+    bool  changed = pinned && strcmp(pinned, hex) != 0;
+
+    char *missing[256], *fresh[256];
+    int   nmissing = 0, nfresh = 0;
     for (int i = 0; i < o->n; i++) {
         if (!o->pair[i])
             continue;
-        bool ok = have_real && is_trusted(store, real, o->pair[i]);
+        bool known = have_real && is_trusted(store, real, o->pair[i]);
+        bool ok    = known && !changed;
         if (show)
             printf("  %s  %s\n", ok ? "trusted  " : "untrusted", o->pair[i]);
         if (!ok && nmissing < 256)
             missing[nmissing++] = o->pair[i];
+        if (!known && nfresh < 256)
+            fresh[nfresh++] = o->pair[i];
     }
+    if (show && pinned)
+        printf("  %s\n", changed ? "changed since trusted (sha256 pin differs)"
+                                 : "pinned    (sha256 matches)");
     bool granted = false;
     if (nmissing && have_real && interactive && !show)
-        granted = prompt_tty(path, missing, nmissing) &&
-                  trust_append(real, missing, nmissing);
+        granted = prompt_tty(path, changed, missing, nmissing) &&
+                  trust_append(real, fresh, nfresh) &&
+                  (!(pinned || pin_default) || trust_pin(real, hex));
     int kept = 0;
     for (int i = 0; i < o->n; i++) {
         bool drop = false;
         if (o->pair[i]) {
-            bool ok =
-                granted || (have_real && is_trusted(store, real, o->pair[i]));
+            bool ok = granted || (have_real && !changed &&
+                                  is_trusted(store, real, o->pair[i]));
             if (!ok) {
                 drop = true;
                 if (!show)
                     fprintf(stderr,
-                            "warning: %s: ignoring %s (not trusted); run "
+                            "warning: %s: ignoring %s (%s); run "
                             "'cccc --trust=%s'\n",
-                            path, o->pair[i], path);
+                            path, o->pair[i],
+                            changed ? "changed since trusted" : "not trusted",
+                            path);
             }
         }
         if (drop)
@@ -721,6 +789,7 @@ static void apply_trust(Opts *o, const char *path, bool interactive,
         kept++;
     }
     o->n = kept;
+    free(pinned);
     free(store);
 }
 
@@ -733,6 +802,30 @@ static const char *flag_value(const char *arg, const char *name) {
     if (arg[n] == '\0')
         return "";
     return arg[n] == '=' ? arg + n + 1 : NULL;
+}
+
+// The value of a --trust-hash[=on|off] option: -1 when `arg` is another
+// option, else 1 (on) or 0 (off).
+static int trust_hash_value(const char *arg) {
+    const char *v = flag_value(arg, "--trust-hash");
+    if (!v)
+        return -1;
+    if (!v[0] || !strcmp(v, "on") || !strcmp(v, "true"))
+        return 1;
+    if (!strcmp(v, "off") || !strcmp(v, "false"))
+        return 0;
+    fprintf(stderr, "error: --trust-hash takes on or off, not '%s'\n", v);
+    exit(1);
+}
+
+// The last --trust-hash among `args`, else `dflt`.
+static bool last_trust_hash(char *const *args, int n, bool dflt) {
+    for (int i = n - 1; i >= 0; i--) {
+        int v = trust_hash_value(args[i]);
+        if (v >= 0)
+            return v;
+    }
+    return dflt;
 }
 
 // The .cccc.toml a --trust/--untrust names: a file, a directory holding one,
@@ -765,6 +858,7 @@ const char **cccc_config_expand(int *argc, const char **argv) {
     bool        build   = false; // a build script is its own configuration
     const char *trust   = NULL;
     const char *untrust = NULL;
+    int         cli_hash = -1;    // --trust-hash on the command line, if any
     for (int i = 1; i < *argc && strcmp(argv[i], "--"); i++) {
         if (!strcmp(argv[i], "--no-config"))
             skip = true;
@@ -776,6 +870,8 @@ const char **cccc_config_expand(int *argc, const char **argv) {
             trust = flag_value(argv[i], "--trust");
         else if (flag_value(argv[i], "--untrust"))
             untrust = flag_value(argv[i], "--untrust");
+        else if (trust_hash_value(argv[i]) >= 0)
+            cli_hash = trust_hash_value(argv[i]);
     }
     const char *env = getenv("CCCC_NO_CONFIG");
     if (env && env[0] && strcmp(env, "0"))
@@ -791,15 +887,25 @@ const char **cccc_config_expand(int *argc, const char **argv) {
             exit(1);
         }
         if (untrust) {
-            trust_remove(real);
+            trust_remove(real, false);
             printf("cccc: no longer trusting %s\n", real);
             exit(0);
         }
+        bool  user_default = false;
+        char *global       = skip ? NULL : find_global();
+        if (global) {
+            Opts g = {0};
+            parse_file(global, &g, false, NULL);
+            user_default = last_trust_hash(g.arg, g.n, false);
+        }
         Opts o = {0};
-        parse_file(path, &o);
-        char *tfile = trust_file();
-        char *store = slurp(tfile);
+        char hex[65];
+        parse_file(path, &o, true, hex);
+        char *tfile  = trust_file();
+        char *store  = slurp(tfile);
+        char *pinned = stored_hash(store, real);
         free(tfile);
+        bool  pin = cli_hash >= 0 ? cli_hash : (pinned || user_default);
         char *fresh[256];
         int   nfresh = 0;
         printf("cccc: trusting %s\n", real);
@@ -813,6 +919,16 @@ const char **cccc_config_expand(int *argc, const char **argv) {
         if (nfresh && !trust_append(real, fresh, nfresh)) {
             fprintf(stderr, "error: cannot write the trust list\n");
             exit(1);
+        }
+        if (pin) {
+            if (!trust_pin(real, hex)) {
+                fprintf(stderr, "error: cannot write the trust list\n");
+                exit(1);
+            }
+            printf("    pinned by sha256 %s\n", hex);
+        } else if (pinned) {
+            trust_remove(real, true);
+            printf("    no longer pinned by sha256\n");
         }
         exit(0);
     }
@@ -832,11 +948,13 @@ const char **cccc_config_expand(int *argc, const char **argv) {
             printf("local:  %s\n", local ? local : "(none)");
         }
         if (global)
-            parse_file(global, &all);
+            parse_file(global, &all, false, NULL);
         if (local) {
             Opts lo = {0};
-            parse_file(local, &lo);
-            apply_trust(&lo, local, true, show);
+            char hex[65];
+            parse_file(local, &lo, true, hex);
+            apply_trust(&lo, local, hex, last_trust_hash(all.arg, all.n, false),
+                        true, show);
             for (int i = 0; i < lo.n; i++)
                 opts_push(&all, lo.arg[i], NULL);
         }

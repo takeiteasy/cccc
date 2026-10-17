@@ -924,6 +924,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --trust[=path]         Approve a project .cccc.toml's "
            "capability grants\n");
     printf("\t   --untrust[=path]       Withdraw that approval\n");
+    printf("\t   --trust-hash[=on|off]  With --trust: pin the file by its "
+           "SHA-256\n");
     printf("\nLanguage Standard:\n");
     printf(
         "\t-s/--std=<std>       Select C language standard (default: gnu23)\n");
@@ -2056,6 +2058,7 @@ int main(int argc, const char *argv[]) {
             case 1143: // handled in cccc_config_expand
             case 1144:
             case 1145:
+            case 1148:
                 break;
             case 1141: { // --comptime-allow
                 char bad[64];

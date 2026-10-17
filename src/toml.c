@@ -41,14 +41,9 @@ void cccc_toml_fail(toml_datum_t at, const char *fmt, ...) {
     va_end(ap);
 }
 
-toml_result_t cccc_toml_load(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "error: cannot read %s\n", path);
-        exit(1);
-    }
-    toml_result_t r = toml_parse_file_named(f, path);
-    fclose(f);
+toml_result_t cccc_toml_parse_text(const char *name, const char *src,
+                                   size_t len) {
+    toml_result_t r = toml_parse_named(src, (int)len, name);
     if (!r.ok) {
         // The parser words its errors "(line N) message".
         int         line  = 0;
@@ -56,9 +51,43 @@ toml_result_t cccc_toml_load(const char *path) {
         const char *close = strchr(msg, ')');
         if (close && sscanf(msg, "(line %d)", &line) == 1)
             msg = close + 1 + (close[1] == ' ');
-        toml_datum_t at = {.source = path, .lineno = line};
+        toml_datum_t at = {.source = name, .lineno = line};
         cccc_toml_fail(at, "%s", msg);
     }
+    return r;
+}
+
+char *cccc_toml_read(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "error: cannot read %s\n", path);
+        exit(1);
+    }
+    size_t cap = 4096, n = 0;
+    char  *buf = malloc(cap);
+    size_t got;
+    while (buf && (got = fread(buf + n, 1, cap - n, f)) > 0) {
+        n += got;
+        if (n == cap) {
+            cap *= 2;
+            buf  = realloc(buf, cap);
+        }
+    }
+    bool bad = !buf || ferror(f);
+    fclose(f);
+    if (bad) {
+        fprintf(stderr, "error: cannot read %s\n", path);
+        exit(1);
+    }
+    *len = n;
+    return buf;
+}
+
+toml_result_t cccc_toml_load(const char *path) {
+    size_t        len;
+    char         *src = cccc_toml_read(path, &len);
+    toml_result_t r   = cccc_toml_parse_text(path, src, len);
+    free(src);
     return r;
 }
 

@@ -148,4 +148,5 @@ const struct option cccc_long_options[] = {
     {"show-config", no_argument, 0, 1143},
     {"trust", optional_argument, 0, 1144},
     {"untrust", optional_argument, 0, 1145},
+    {"trust-hash", optional_argument, 0, 1148},
     {0, 0, 0, 0}};

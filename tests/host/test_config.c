@@ -412,6 +412,100 @@ static void test_trust(const char *proj) {
     CHECK(r.rc != 42, "grant is untrusted again after --untrust: rc=%d", r.rc);
 }
 
+static char *read_trusted(void) {
+    static char buf[1 << 14];
+    char        p[PATH_MAX + 32];
+    snprintf(p, sizeof p, "%s/home/xdg/cccc/trusted", root);
+    FILE  *f = fopen(p, "r");
+    size_t n = f ? fread(buf, 1, sizeof buf - 1, f) : 0;
+    if (f)
+        fclose(f);
+    buf[n] = '\0';
+    return buf;
+}
+
+static int count_of(const char *hay, const char *needle) {
+    int n = 0;
+    for (const char *p = hay; (p = strstr(p, needle)); p += strlen(needle))
+        n++;
+    return n;
+}
+
+static void test_trust_hash(const char *proj) {
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n");
+    Run r = RUN(proj, "--trust", "--trust-hash");
+    CHECK(r.rc == 0 && strstr(r.out, "pinned by sha256"), "--trust-hash: %s",
+          r.out);
+    r = RUN(proj, "fs.c");
+    CHECK(r.rc == 42, "pinned file applies: rc=%d %s", r.rc, r.out);
+    r = RUN(proj, "--show-config", "fs.c");
+    CHECK(strstr(r.out, "pinned    (sha256 matches)"), "show pinned: %s",
+          r.out);
+
+    // An edit that adds no grant is still noticed.
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n# edited\n");
+    r = RUN(proj, "fs.c");
+    CHECK(
+        r.rc != 42 &&
+            strstr(r.out, "ignoring comptime-allow=fs (changed since trusted)"),
+        "edit withholds the grant: rc=%d %s", r.rc, r.out);
+    r = RUN(proj, "--show-config", "fs.c");
+    CHECK(strstr(r.out, "untrusted  comptime-allow=fs") &&
+              strstr(r.out, "changed since trusted (sha256 pin differs)"),
+          "show changed: %s", r.out);
+
+    // A plain --trust keeps the pin and refreshes the hash.
+    r = RUN(proj, "--trust");
+    CHECK(r.rc == 0 && strstr(r.out, "pinned by sha256"), "repin: %s", r.out);
+    r = RUN(proj, "fs.c");
+    CHECK(r.rc == 42, "repinned file applies: rc=%d %s", r.rc, r.out);
+    const char *list = read_trusted();
+    CHECK(count_of(list, "@sha256=") == 1, "one pin line: %s", list);
+    CHECK(count_of(list, "comptime-allow=fs") == 1, "grant not duplicated: %s",
+          list);
+
+    r = RUN(proj, "--trust", "--trust-hash=off");
+    CHECK(r.rc == 0 && strstr(r.out, "no longer pinned"), "unpin: %s", r.out);
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n# again\n");
+    r = RUN(proj, "fs.c");
+    CHECK(r.rc == 42, "unpinned file ignores edits: rc=%d %s", r.rc, r.out);
+
+    r = RUN(proj, "--trust", "--trust-hash=maybe");
+    CHECK(r.rc != 0 && strstr(r.out, "takes on or off"), "bad value: %s",
+          r.out);
+
+    RUN(proj, "--trust", "--trust-hash");
+    r = RUN(proj, "--untrust");
+    CHECK(r.rc == 0 && !strstr(read_trusted(), "@sha256="),
+          "--untrust clears the pin: %s", read_trusted());
+}
+
+static void test_trust_hash_user_default(const char *proj) {
+    char g[PATH_MAX + 32];
+    snprintf(g, sizeof g, "%s/home/xdg/cccc", root);
+    write_file(g, "config.toml", "trust-hash = true\n");
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n");
+    Run r = RUN(proj, "--trust");
+    CHECK(r.rc == 0 && strstr(r.out, "pinned by sha256"),
+          "user default pins: %s", r.out);
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n# edited\n");
+    r = RUN(proj, "fs.c");
+    CHECK(r.rc != 42 && strstr(r.out, "changed since trusted"),
+          "user default catches edits: rc=%d %s", r.rc, r.out);
+    r = RUN(proj, "--trust", "--trust-hash=off");
+    CHECK(r.rc == 0 && strstr(r.out, "no longer pinned"),
+          "command line overrides the default: %s", r.out);
+    CHECK(!strstr(read_trusted(), "@sha256="), "no pin left: %s",
+          read_trusted());
+}
+
+static void test_trust_hash_project_rejected(const char *proj) {
+    write_file(proj, ".cccc.toml", "trust-hash = true\n");
+    Run r = RUN(proj, "answer.c");
+    CHECK(r.rc != 0 && strstr(r.out, "can only be set in the user config"),
+          "project trust-hash is an error: rc=%d %s", r.rc, r.out);
+}
+
 static void test_global_grants_without_trust(const char *proj) {
     char g[PATH_MAX + 32];
     snprintf(g, sizeof g, "%s/home/xdg/cccc", root);
@@ -471,6 +565,12 @@ int main(void) {
     test_symlinked_config_ignored(proj);
     reset(proj);
     test_trust(proj);
+    reset(proj);
+    test_trust_hash(proj);
+    reset(proj);
+    test_trust_hash_user_default(proj);
+    reset(proj);
+    test_trust_hash_project_rejected(proj);
     reset(proj);
     test_global_grants_without_trust(proj);
 

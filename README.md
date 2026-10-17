@@ -109,7 +109,7 @@ Manuals live in [`docs/`](docs/):
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@generate_accessors`, ... |
-| [CONFIG.md](docs/CONFIG.md) | `.cccc.toml` config files, which options they can set, and the trust prompt for project grants |
+| [CONFIG.md](docs/CONFIG.md) | `.cccc.toml` config files, which options they can set, the trust prompt for project grants, and pinning an approval by hash |
 | [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
 | [SECURITY.md](docs/SECURITY.md) | What runs or downloads while compiling, who can allow it, `--sandbox`, and compiling untrusted code |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
@@ -339,6 +339,7 @@ Configuration (see docs/CONFIG.md):
 	   --show-config          Print the config files read and the options they add
 	   --trust[=path]         Approve a project .cccc.toml's capability grants
 	   --untrust[=path]       Withdraw that approval
+	   --trust-hash[=on|off]  With --trust: pin the file by its SHA-256
 
 Language Standard:
 	-s/--std=<std>       Select C language standard (default: gnu23)
@@ -398,6 +399,8 @@ This project builds on [chibicc](https://github.com/rui314/chibicc) for the C fr
 `--watch` uses [dmon](https://github.com/septag/dmon) by Sepehr Taghdisian (BSD 2-clause), vendored as `src/dmon.h`.
 
 Config files are parsed with [tomlc17](https://github.com/cktan/tomlc17) by CK Tan (MIT), vendored as `src/tomlc17.c`.
+
+Pinning a trusted config by hash uses the SHA-256 from [libscrypt](https://github.com/technion/libscrypt) by Colin Percival (BSD 2-clause), reduced to the digest in `src/sha256.c`.
 
 Host C crash backtraces use [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) by Ian Lance Taylor (BSD 3-clause), a git submodule in `vendor/libbacktrace`.
 

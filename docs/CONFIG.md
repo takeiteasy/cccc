@@ -52,6 +52,7 @@ error: /work/proj/.cccc.toml:2: 'repl' cannot be set in a config file
 |---|---|---|
 | Free | `std`, `D`, `U`, `I`, `isystem`, `W`, `f`, `O`, the safety and check flags, `ffi-deny`, `disable-ffi`, `sandbox`, `test-timeout`, `max-errors`, ... | always applied |
 | Trust | `comptime-allow`, `comptime-include-all`, `ffi-allow`, `asm-passthru`, `allow-url`, `library`, `library-path`, `framework-path`, `iframework`, `link-arg`, `out`, `deps-file`, `url-cache-dir`, `sysroot`, `use-system-headers`, `compile`, `build-cc`, `build-tool-allow`, `build-option`, `build-out-dir`, `build-cache` | applied from the user file; from a project file only once approved |
+| User config only | `trust-hash` | applied from the user file and the command line; an error in a project file |
 | Command line only | `help`, `version`, `repl`, `debug`, `build`, `test`, `watch`, `entry`, the dump modes (`ast`, `preprocess`, `json`, ...), `trust`, `untrust`, `show-config`, `no-config` | an error in a config |
 
 Trust options widen what runs on your machine or where cccc writes, so a cloned repository must not be able to switch them on by itself.
@@ -82,6 +83,36 @@ warning: /work/proj/.cccc.toml: ignoring comptime-allow=fs (not trusted); run 'c
 
 The prompt reads the terminal, never standard input, so `cccc prog.c < data` keeps its input.
 
+## Pinning a file by hash
+
+By default an approval survives any edit that adds no new grant. A pinned file is approved only while its content is unchanged: any edit, even a comment, withdraws every grant in it until you approve again.
+
+```
+cccc --trust --trust-hash       # approve and pin the nearest .cccc.toml
+```
+
+After an edit the prompt says so, and without a terminal the grants are skipped:
+
+```
+cccc: /work/proj/.cccc.toml has changed since you trusted it; it asks for:
+    comptime-allow=fs
+Trust these settings? [y/N]
+```
+
+```
+warning: /work/proj/.cccc.toml: ignoring comptime-allow=fs (changed since trusted); run 'cccc --trust=/work/proj/.cccc.toml'
+```
+
+| Setting | Effect |
+|---|---|
+| `cccc --trust --trust-hash` | approve and pin the file |
+| `cccc --trust` on a pinned file | approve again and pin the new content |
+| `cccc --trust --trust-hash=off` | approve and drop the pin |
+| `trust-hash = true` in the user config | pin every file approved from now on, by the prompt or by `--trust`; files already approved stay unpinned until `cccc --trust` runs on them again[^2] |
+| `cccc --untrust` | remove the approval and the pin |
+
+`--show-config` reports a pinned file as `pinned` or `changed since trusted`. The value is `on` or `off` and is written with `=`: `--trust-hash=off`.
+
 ## Inspecting and bypassing
 
 | Command | Effect |
@@ -109,3 +140,5 @@ cccc prog.c         # comptime fopen/glob now work
 See [COMPTIME_POLICY.md](COMPTIME_POLICY.md) for the capability classes.
 
 [^1]: TOML escapes such as `"\u001b"` are decoded before the control-character check, which also rejects DEL, NUL and the C1 range (`U+0080`–`U+009F`). A key or value that could rewrite the trust prompt or an error message never reaches the terminal. The parser is the vendored [tomlc17](https://github.com/cktan/tomlc17) in `src/tomlc17.c`.
+
+[^2]: A pin is one more line in the trusted list, `<path>` then a tab then `@sha256=<digest>`. The digest is taken from the same bytes cccc parses, so the file cannot change between the check and its use.

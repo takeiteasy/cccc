@@ -61,7 +61,7 @@ Put `sandbox = true` in `~/.config/cccc/config.toml` to confine every run. A pro
 ## Running an untrusted repository
 
 1. `cccc --sandbox prog.c` rather than a plain `cccc prog.c`.
-2. Leave `--comptime-allow`, `--allow-url` and the config trust prompt (`.cccc.toml`) unapproved until you have read what they ask for.
+2. Leave `--comptime-allow`, `--allow-url` and the config trust prompt (`.cccc.toml`; `--trust-hash` makes any later edit ask again) unapproved until you have read what they ask for.
 3. Do not run `cccc --build build.c` on it without `--sandbox`: the script runs as a program.
 
 [^1]: macOS uses `sandbox_init`; Linux uses landlock (kernel 5.13 or newer) for files and exec, plus a seccomp filter that refuses inet sockets. Reads are unrestricted and exec is allowed by toolchain directory, not by exact binary.
