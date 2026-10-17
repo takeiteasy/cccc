@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-17
+
+- Added: `--sandbox` confines the process with the OS sandbox (macOS
+  `sandbox_init`, Linux landlock + seccomp): no network, writes only to output
+  and temp directories, exec only of cccc and the host C toolchain. See
+  `docs/SECURITY.md`.
+- Changed: URL `#include` and `#embed` download only with `--allow-url`; cached
+  copies still resolve.
+- Changed: runtime `dlopen` returns NULL under `--disable-ffi`.
+- Changed: `CcccExecutable` and `CcccObject` child cccc processes run with
+  `--no-config` and inherit the build's `--comptime-allow`, `--allow-url`,
+  `--disable-ffi` and `--ffi-allow`/`--ffi-deny`.
 - Changed: comptime loads and stores outside VM memory are compile errors
   instead of host crashes. Compiler builtins work under `--disable-ffi` and
   return names and arrays as VM copies. See `docs/COMPTIME_POLICY.md`.
