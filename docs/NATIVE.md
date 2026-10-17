@@ -111,6 +111,8 @@ cc main.c lib.o -o app
 dropped; pass them when linking the object. `--test-run` and
 `--testing=native` need an executable and cannot be combined with it.
 Repeating `-c` with a different format (`-c=native -c=object`) is an error.
+A `--build` script gets the same output from a
+[`CcccObject` target](BUILD_MODE.md#target-kinds).
 
 ### How `--std=` is handled
 

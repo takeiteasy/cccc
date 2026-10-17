@@ -394,6 +394,7 @@ __attribute__((cccc::build_target))
 | Static library | `StaticLib(name)` | `lib/lib<name>.a` | `ar rcs` |
 | Dynamic library | `DynamicLib(name)` | `lib/lib<name>.{so,dylib}` | `cc -shared` |
 | cccc executable | `CcccExecutable(name)` | `bin/<name>` | `cccc --compile=native` |
+| cccc object | `CcccObject(name)` | `obj/<name>.o` | `cccc --compile=object` |
 | Custom step | `RunCustom(name, cmd)` | (none) | vendored shell |
 
 A **`CcccExecutable`** target is compiled by the running `cccc` itself, not a
@@ -409,6 +410,27 @@ passed that way with `AddInput` too, so the target rebuilds when it changes.
 there is no compile-side host-`cc` flag pass-through. Use `SetTargetEnv(t, "CCCC_NATIVE_CC",
 "...")` to choose the host compiler that links the emitted C — e.g. `cosmocc`
 for a portable binary.
+
+A **`CcccObject`** target compiles its sources with one `cccc --compile=object`
+invocation and does not link, so the sources need no `main`. Other targets take
+the object with `LinkWith`:
+
+```c
+BuildTarget *core = CcccObject(ctx, "core");
+AddSource(core, "src/core.c");              // may use [[cccc::comptime]]
+
+BuildTarget *app = Executable(ctx, "app");
+AddSource(app, "src/main.c");
+LinkWith(app, core);                        // links obj/core.o
+```
+
+An `Executable` or `DynamicLib` links the object, a `StaticLib` archives it,
+and a `CcccExecutable` passes it as `--link-arg`. Each consumer rebuilds when
+the object changes. `AddSource`, `AddInclude`, `AddDefine`, `AddUndef`,
+`AddInput`, `DependsOn`, `SetOutput` and `SetTargetEnv` apply. Link options
+(`AddLdFlag`, `AddFramework`, `AddLib`, `AddLibPath`, `LinkWith`,
+`PkgConfig`) and `AddCFlag`, `SetProfile` and `SetTargetTriple` are errors;
+put link options on the consuming target. `InstallArtifact` does not accept it.
 
 ## Builder API
 
@@ -427,6 +449,7 @@ BuildTarget *Executable(Builder *ctx, const char *name);
 BuildTarget *StaticLib(Builder *ctx, const char *name);
 BuildTarget *DynamicLib(Builder *ctx, const char *name);
 BuildTarget *CcccExecutable(Builder *ctx, const char *name); // compiled by cccc itself
+BuildTarget *CcccObject(Builder *ctx, const char *name);     // object compiled by cccc itself
 const char  *CcccPath(Builder *ctx);     // the running cccc, for a RunCustom cmd
 
 // Output / sources
@@ -695,7 +718,7 @@ target's single per-target cache key, and mtime-checks them the same way
 Level 1 checks a `.d`'s prerequisites. A target with no `.d` yet (first
 build) is never trusted by mtime alone. The upshot: editing a header a
 `CcccExecutable` source `#include`s invalidates the cached binary with no
-`AddInput` declaration.
+`AddInput` declaration. A **`CcccObject`** caches the same way.
 
 ### Environment and filesystem
 

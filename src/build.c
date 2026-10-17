@@ -70,7 +70,12 @@ typedef enum {
                           // (#1133): the running cccc is the compiler, not a
                           // host cc. No per-source .o — one invocation per
                           // target, cached per target.
+    CCCC_TGT_OBJECT_CCCC, // `cccc --compile=object`: one host object, no link
 } CcTargetKind;
+
+static int is_cccc_kind(CcTargetKind k) {
+    return k == CCCC_TGT_NATIVE_CCCC || k == CCCC_TGT_OBJECT_CCCC;
+}
 
 typedef struct BuildTarget BuildTarget;
 typedef struct Builder     Builder;
@@ -301,6 +306,9 @@ static char *default_output(const BuildTarget *t) {
         case CCCC_TGT_DYNAMIC:
             snprintf(buf, sizeof(buf), "lib/lib%s.%s", t->name, CCCC_DYLIB_EXT);
             break;
+        case CCCC_TGT_OBJECT_CCCC:
+            snprintf(buf, sizeof(buf), "obj/%s.o", t->name);
+            break;
         case CCCC_TGT_CUSTOM:
             return xstrdup(""); // custom targets have no output artifact
     }
@@ -486,8 +494,15 @@ static long long impl_cccc_executable(long long ctx, long long name) {
     return (long long)(intptr_t)new_target(CCCC_TGT_NATIVE_CCCC,
                                            (const char *)name);
 }
+// An object file compiled by the running cccc (`--compile=object`), consumed by
+// other targets through LinkWith.
+static long long impl_cccc_object(long long ctx, long long name) {
+    (void)ctx;
+    return (long long)(intptr_t)new_target(CCCC_TGT_OBJECT_CCCC,
+                                           (const char *)name);
+}
 
-// Reject a builder call that has no meaning for a CCCC_TGT_NATIVE_CCCC target
+// Reject a builder call that has no meaning for a cccc-compiled target
 // (#1133). `cccc --compile=native` accepts only -I/-i/-D/-U/-L/-l/--std=/-O<n>
 // and --link-arg; compile-side host-cc flags have no pass-through, so silently
 // dropping -Wall / -fsanitize=… / a cross triple would be a quiet correctness
@@ -498,6 +513,19 @@ static void reject_for_cccc_target(const BuildTarget *t, const char *call) {
         error("build: %s is not supported on a CcccExecutable target ('%s') — "
               "cccc --compile=native takes only -I/-D/-U/-L/-l/--std=/-O<n> "
               "and --link-arg",
+              call, t->name);
+    if (t->kind == CCCC_TGT_OBJECT_CCCC)
+        error("build: %s is not supported on a CcccObject target ('%s') — "
+              "cccc --compile=object takes only -I/-D/-U/--std=/-O<n>",
+              call, t->name);
+}
+
+// A CcccObject is not linked, so link-only calls on it are errors.
+static void reject_link_for_cccc_object(const BuildTarget *t,
+                                        const char        *call) {
+    if (t->kind == CCCC_TGT_OBJECT_CCCC)
+        error("build: %s is not supported on a CcccObject target ('%s') — "
+              "it is not linked; add link options to the consuming target",
               call, t->name);
 }
 
@@ -641,6 +669,7 @@ static long long impl_add_cflag(long long t, long long flag) {
     return 0;
 }
 static long long impl_add_ldflag(long long t, long long flag) {
+    reject_link_for_cccc_object((BuildTarget *)(intptr_t)t, "AddLdFlag");
     strarray_push(&((BuildTarget *)(intptr_t)t)->ldflags,
                   xstrdup((const char *)flag));
     return 0;
@@ -662,6 +691,7 @@ static void add_dep(BuildTarget *tgt, BuildTarget *d, int link) {
 }
 
 static long long impl_link_with(long long t, long long dep) {
+    reject_link_for_cccc_object((BuildTarget *)(intptr_t)t, "LinkWith");
     add_dep((BuildTarget *)(intptr_t)t, (BuildTarget *)(intptr_t)dep, 1);
     return 0;
 }
@@ -672,11 +702,13 @@ static long long impl_depends_on(long long t, long long dep) {
     return 0;
 }
 static long long impl_add_lib(long long t, long long name) {
+    reject_link_for_cccc_object((BuildTarget *)(intptr_t)t, "AddLib");
     strarray_push(&((BuildTarget *)(intptr_t)t)->libs,
                   xstrdup((const char *)name));
     return 0;
 }
 static long long impl_add_libpath(long long t, long long path) {
+    reject_link_for_cccc_object((BuildTarget *)(intptr_t)t, "AddLibPath");
     strarray_push(&((BuildTarget *)(intptr_t)t)->libpaths,
                   xstrdup((const char *)path));
     return 0;
@@ -816,6 +848,7 @@ static long long impl_pkg_config(long long t, long long pkg) {
     const char  *pkgname = (const char *)pkg;
     if (!tgt || !pkgname || !s_ctx)
         return -1;
+    reject_link_for_cccc_object(tgt, "PkgConfig");
 
     if (!tool_allowed(s_ctx, "pkg-config")) {
         fprintf(stderr,
@@ -1053,6 +1086,7 @@ static long long impl_add_framework(long long t, long long name) {
     const char  *fw  = (const char *)name;
     if (!tgt || !fw)
         return -1;
+    reject_link_for_cccc_object(tgt, "AddFramework");
     strarray_push(&tgt->ldflags, xstrdup("-framework"));
     strarray_push(&tgt->ldflags, xstrdup(fw));
     return 0;
@@ -1354,6 +1388,8 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       (void *)impl_dynamic_lib, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_cccc_executable",
                       (void *)impl_cccc_executable, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_cccc_object",
+                      (void *)impl_cccc_object, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_set_output", (void *)impl_set_output,
                       2, 0);
     cc_register_cfunc(vm, "__builtin_build_target_output",
@@ -2123,6 +2159,9 @@ static void push_compile_flags_cccc(ArgVec *args, const Builder *ctx,
         strarray_push(owned, f);
         argv_push(args, f);
     }
+    // -L/-l belong to the link, which a CcccObject target does not do.
+    if (t->kind == CCCC_TGT_OBJECT_CCCC)
+        return;
     for (int i = 0; d && i < d->lib_paths_count; i++) {
         argv_push(args, "-L");
         argv_push(args, d->lib_paths[i]);
@@ -2143,6 +2182,18 @@ static void push_compile_flags_cccc(ArgVec *args, const Builder *ctx,
         strarray_push(owned, f);
         argv_push(args, f);
     }
+}
+
+static const char *cccc_kind_name(const BuildTarget *t) {
+    return t->kind == CCCC_TGT_OBJECT_CCCC ? "CcccObject" : "CcccExecutable";
+}
+
+// Path of a LinkWith'd CcccObject dependency of `t`, or NULL for any other
+// dependency. Caller frees.
+static char *linked_object_path(Builder *ctx, const BuildTarget *t, int i) {
+    if (!t->deps_link[i] || t->deps[i]->kind != CCCC_TGT_OBJECT_CCCC)
+        return NULL;
+    return resolved_target_output(ctx, t->deps[i]);
 }
 
 // Content hash of the running cccc binary, memoized on the Builder (#1133).
@@ -2194,6 +2245,12 @@ static uint64_t cccc_native_cache_key(Builder *ctx, char *const *argv,
         h = fnv1a_file(t->sources.data[i], h);
     for (int i = 0; i < t->inputs.len; i++)
         h = fnv1a_file(t->inputs.data[i], h);
+    for (int i = 0; i < t->deps_count; i++) {
+        char *obj = linked_object_path(ctx, t, i);
+        if (obj)
+            h = fnv1a_file(obj, h);
+        free(obj);
+    }
     if (prereqs)
         for (int i = 0; i < prereqs->len; i++)
             h = fnv1a_file(prereqs->data[i], h);
@@ -2230,7 +2287,7 @@ static void cccc_native_stamp_write(const char *tobjdir, uint64_t key) {
 // every other build.c staleness check. `prereqs` NULL means no deps file has
 // been written yet (first build) -- the mtime fast path cannot be trusted, so
 // force a rebuild (read_dep_prereqs()'s documented contract).
-static int cccc_native_output_is_current(const BuildTarget *t,
+static int cccc_native_output_is_current(Builder *ctx, const BuildTarget *t,
                                          const char *out_abs, uint64_t key,
                                          const char  *tobjdir,
                                          StringArray *prereqs) {
@@ -2257,6 +2314,16 @@ static int cccc_native_output_is_current(const BuildTarget *t,
             out_st.st_mtime < h_st.st_mtime)
             return 0;
     }
+    for (int i = 0; i < t->deps_count; i++) {
+        char *obj = linked_object_path(ctx, t, i);
+        if (!obj)
+            continue;
+        struct stat o_st;
+        int stale = stat(obj, &o_st) != 0 || out_st.st_mtime < o_st.st_mtime;
+        free(obj);
+        if (stale)
+            return 0;
+    }
     return cccc_native_stamp_matches(tobjdir, key);
 }
 
@@ -2266,15 +2333,15 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
                                     const char *out_abs, const char *tobjdir,
                                     int *step, int total) {
     if (t->sources.len == 0) {
-        fprintf(stderr, "build: CcccExecutable target '%s' has no sources\n",
-                t->name);
+        fprintf(stderr, "build: %s target '%s' has no sources\n",
+                cccc_kind_name(t), t->name);
         return 1;
     }
     if (!ctx->cccc_self || !*ctx->cccc_self) {
         fprintf(stderr,
-                "build: CcccExecutable target '%s': could not resolve the "
+                "build: %s target '%s': could not resolve the "
                 "running cccc binary\n",
-                t->name);
+                cccc_kind_name(t), t->name);
         return 1;
     }
 
@@ -2286,16 +2353,28 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
     // Long form: `-c` takes an optional_argument, so the space-separated short
     // form would swallow the next token as a source file (same reason the
     // retired --compile=bytecode path used the long form).
-    argv_push(&a, "--compile=native");
+    argv_push(&a, t->kind == CCCC_TGT_OBJECT_CCCC ? "--compile=object"
+                                                  : "--compile=native");
     argv_push(&a, "-o");
     argv_push(&a, (char *)out_abs);
     push_compile_flags_cccc(&a, ctx, t, &owned);
     // LinkWith deps: -L<out>/lib -l<dep>, mirroring the native EXE link branch.
+    // A CcccObject dep is a file, not a library: it goes on as --link-arg and
+    // is hashed into the cache key below.
     char *libdir      = join(ctx->out_dir, "lib");
     int   have_libdir = 0;
     for (int i = 0; i < t->deps_count; i++) {
         if (!t->deps_link[i])
             continue; // DependsOn: ordering only
+        if (t->deps[i]->kind == CCCC_TGT_OBJECT_CCCC) {
+            char *p = resolved_target_output(ctx, t->deps[i]);
+            char *f = malloc(strlen(p) + 12);
+            snprintf(f, strlen(p) + 12, "--link-arg=%s", p);
+            free(p);
+            strarray_push(&owned, f);
+            argv_push(&a, f);
+            continue;
+        }
         if (!have_libdir) {
             argv_push(&a, "-L");
             argv_push(&a, libdir);
@@ -2336,8 +2415,8 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
         int         have    = read_dep_prereqs(dfile, &prereqs);
         key         = cccc_native_cache_key(ctx, (char *const *)a.data, t,
                                             have ? &prereqs : NULL);
-        int current = cccc_native_output_is_current(t, out_abs, key, tobjdir,
-                                                    have ? &prereqs : NULL);
+        int current         = cccc_native_output_is_current(
+            ctx, t, out_abs, key, tobjdir, have ? &prereqs : NULL);
         free_strarray(&prereqs);
         if (current) {
             if (!ctx->quiet || ctx->verbose)
@@ -2856,8 +2935,7 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         int added = t->sources.len - before;
         // CUSTOM has no per-source step; NATIVE_CCCC is one whole-program step
         // regardless of source count — neither grows the step total.
-        if (added > 0 && t->kind != CCCC_TGT_CUSTOM &&
-            t->kind != CCCC_TGT_NATIVE_CCCC)
+        if (added > 0 && t->kind != CCCC_TGT_CUSTOM && !is_cccc_kind(t->kind))
             *total_p += added;
     }
     int total = *total_p;
@@ -2868,7 +2946,8 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
                                : t->kind == CCCC_TGT_DYNAMIC ? "dynamic library"
                                : t->kind == CCCC_TGT_NATIVE_CCCC
                                    ? "cccc executable"
-                                   : "custom";
+                               : t->kind == CCCC_TGT_OBJECT_CCCC ? "cccc object"
+                                                                 : "custom";
         if (t->kind == CCCC_TGT_CUSTOM)
             printf(">> target '%s' [%s]\n", t->name, kind_str);
         else
@@ -2950,7 +3029,7 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
     // --compile=native` invocation — no host cc, no per-source .o, no --std=
     // host probe. Handle it here, before effective_cc_for_target()/the --std=
     // probe both of which assume a host compiler.
-    if (t->kind == CCCC_TGT_NATIVE_CCCC) {
+    if (is_cccc_kind(t->kind)) {
         int rc =
             build_cccc_native_target(ctx, t, out_abs, tobjdir, step, total);
         free(out_rel);
@@ -3020,6 +3099,16 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         argv_push(&a, out_abs);
         for (int i = 0; i < objs.len; i++)
             argv_push(&a, objs.data[i]);
+        // LinkWith'd CcccObject targets are archived too; they join `objs` so
+        // the staleness check below stats them.
+        for (int i = 0; i < t->deps_count; i++) {
+            char *obj = linked_object_path(ctx, t, i);
+            if (!obj)
+                continue;
+            strarray_push(&objs, obj);
+            argv_push(&a, obj);
+        }
+        n_real_objs = objs.len;
         // Link-step staleness check (#851): skip re-archiving when the .a is
         // already newer than every .o and the ar argv is unchanged.
         if (ctx->cache_dir && !ctx->dry_run &&
@@ -3058,6 +3147,12 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
         for (int i = 0; i < t->deps_count; i++) {
             if (!t->deps_link[i])
                 continue; // DependsOn edge — ordering only, no linker flag
+            char *obj = linked_object_path(ctx, t, i);
+            if (obj) {
+                strarray_push(&objs, obj); // owner pool, like the -l strings
+                argv_push(&a, obj);
+                continue;
+            }
             if (!have_libdir) {
                 argv_push(&a, "-L");
                 argv_push(&a, libdir);
@@ -3090,8 +3185,9 @@ static int build_target(Builder *ctx, const char *cc, BuildTarget *t, int *step,
             for (int i = 0; i < t->deps_count; i++) {
                 if (!t->deps_link[i])
                     continue;
-                char *dep_lib =
-                    format("%s/lib%s.a", libdir, t->deps[i]->name);
+                char *dep_lib = linked_object_path(ctx, t, i);
+                if (!dep_lib)
+                    dep_lib = format("%s/lib%s.a", libdir, t->deps[i]->name);
                 struct stat dep_st;
                 if (stat(dep_lib, &dep_st) == 0 &&
                     dep_st.st_mtime > out_st.st_mtime)
@@ -3134,8 +3230,7 @@ done:
 static int count_steps(BuildTarget **order, int n) {
     int total = 0;
     for (int i = 0; i < n; i++) {
-        if (order[i]->kind == CCCC_TGT_CUSTOM ||
-            order[i]->kind == CCCC_TGT_NATIVE_CCCC)
+        if (order[i]->kind == CCCC_TGT_CUSTOM || is_cccc_kind(order[i]->kind))
             total += 1; // one step: the custom command, or one whole-program
                         // `cccc --compile=native` invocation
         else

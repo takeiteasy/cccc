@@ -135,16 +135,38 @@ BuildTarget *__builtin_build_dynamic_lib(Builder *ctx, const char *name);
  *
  *            Only @c AddSource / @c AddInclude / @c AddDefine / @c AddUndef /
  *            @c AddLib / @c AddLibPath / @c AddInput / @c LinkWith /
- *            @c DependsOn / @c SetOutput / @c SetTargetEnv apply.
- *            @c AddCFlag / @c AddLdFlag / @c AddFramework / @c SetProfile /
- *            @c SetTargetTriple are rejected: @c cccc @c --compile=native takes
- *            only @c -I/-D/-U/-L/-l/--std= and has no host-cc flag
- *            pass-through.
+ *            @c DependsOn / @c SetOutput / @c SetTargetEnv apply, and
+ *            @c AddLdFlag / @c AddFramework are sent as @c --link-arg.
+ *            @c AddCFlag / @c SetProfile / @c SetTargetTriple are rejected:
+ *            @c cccc @c --compile=native takes only
+ *            @c -I/-D/-U/-L/-l/--std= and has no host-cc flag pass-through.
  * @param ctx Build context.
  * @param name Target name.
  * @return The new target handle.
  */
 BuildTarget *__builtin_build_cccc_executable(Builder *ctx, const char *name);
+
+/*!
+ * @brief Create an object file compiled by the running @c cccc itself
+ *          (output @c obj/\<name\>.o).
+ * @details The target is built with a single
+ *            @c "cccc --compile=object \<sources...\> -o obj/\<name\>.o"
+ *            invocation: no link step. Other targets consume the object with
+ *            @c LinkWith (an @c Executable, @c DynamicLib or @c StaticLib
+ *            links or archives it; a @c CcccExecutable passes it as
+ *            @c --link-arg), and rebuild when it changes.
+ *
+ *            Only @c AddSource / @c AddInclude / @c AddDefine / @c AddUndef /
+ *            @c AddInput / @c DependsOn / @c SetOutput / @c SetTargetEnv apply.
+ *            Link options (@c AddLdFlag / @c AddFramework / @c AddLib /
+ *            @c AddLibPath / @c LinkWith / @c PkgConfig) and @c AddCFlag /
+ *            @c SetProfile / @c SetTargetTriple are rejected. It cannot be
+ *            installed with @c InstallArtifact.
+ * @param ctx Build context.
+ * @param name Target name.
+ * @return The new target handle.
+ */
+BuildTarget *__builtin_build_cccc_object(Builder *ctx, const char *name);
 
 /*!
  * @brief Override the target's output path (relative to the out dir).
@@ -749,12 +771,20 @@ int __builtin_build_run_default(Builder *ctx);
  * @brief Create an executable compiled by the running @c cccc itself via
  * @c "cccc --compile=native" — whole-program, no host @c cc, sources may
  * contain @c [[cccc::comptime]]. Set @c CCCC_NATIVE_CC with @c SetTargetEnv to
- * pick the host compiler that links the emitted C. @c AddCFlag / @c AddLdFlag /
- * @c AddFramework / @c SetProfile / @c SetTargetTriple are rejected on this
- * kind.
+ * pick the host compiler that links the emitted C. @c AddCFlag / @c SetProfile
+ * /
+ * @c SetTargetTriple are rejected on this kind.
  * @param ctx Build context.
  * @param name Target name. */
 #define CcccExecutable(ctx, name) __builtin_build_cccc_executable(ctx, name)
+
+/*! @def CcccObject
+ * @brief Create an object file (output @c obj/\<name\>.o) compiled by the
+ * running @c cccc via @c "cccc --compile=object", for other targets to
+ * @c LinkWith. Link options are rejected on this kind.
+ * @param ctx Build context.
+ * @param name Target name. */
+#define CcccObject(ctx, name) __builtin_build_cccc_object(ctx, name)
 
 /*! @def SetOutput
  * @brief Override the target's output path (relative to the out dir).

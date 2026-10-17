@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `CcccObject` build target compiles a cccc source to an object file
+  (`cccc --compile=object`) that other targets take with `LinkWith`. See
+  `docs/BUILD_MODE.md`.
+
 ## [0.14.0] - 2026-10-17
 
 - Added: `-c=object` compiles to an object file with the host compiler and
