@@ -7,6 +7,28 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-17
+
+- Added: `@range(min, max)` on an integer, enum or bit-field member, with
+  `@validate` and `@clamp` generating `T_validate` and `T_clamp` for a struct.
+  See `docs/DERIVE.md`.
+- Added: `@compare_order(N)` and `@compare_desc` choose the order and direction
+  `@compare` uses for a member.
+- Added: `@equals`, `@hash`, `@dump`, `@compare`, `@to_json` and `@from_json`
+  treat `@owned` members by content.
+- Added: `@clone` and `@destroy` work through a pointer to a struct that is
+  declared but not yet defined.
+- Added: `@bitflags` accepts composite aliases such as `RW = R|W`, and member
+  attributes can follow a bit-field width.
+- Added: `ConstIntValue(node, &out)` reads an integer constant expression
+  argument of a macro or attribute. See `docs/MACROS.md`.
+- Added: `@serialize_skip`, `@accessor_skip` and `@constructor_skip` leave a
+  member out of `@serialize` / `@deserialize`, the getters and setters, and
+  `@generate_constructor`.
+- Changed: an `@name` attribute with no registered handler warns by default
+  (`-Wunknown-attributes`).
+- Fixed: `-c=native` output for array-of-array subscripts, widening casts and
+  empty structs.
 - Added: `@builder` generates a `T_builder` type with chaining setters and
   `T_build` for a struct, with `@builder_default` and `@builder_required`
   members. See `docs/DERIVE.md`.
