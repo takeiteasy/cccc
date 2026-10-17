@@ -32,6 +32,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -666,15 +668,20 @@ static bool trust_append(const char *real, char *const *pairs, int n) {
     return true;
 }
 
-// Drops every line for `real`, or only its hash line when `hash_only`.
+// Drops every line for `real`, or only its hash line when `hash_only`. The
+// list is replaced by rename so an unlocked reader never sees it half-written.
 static void trust_remove(const char *real, bool hash_only) {
     char *file = trust_file();
     if (!file)
         return;
     char *store = slurp(file);
-    FILE *f     = fopen(file, "w");
-    free(file);
+    char  pid[24];
+    snprintf(pid, sizeof pid, ".tmp.%ld", (long)getpid());
+    char *tmp = xasprintf("%s%s", file, pid);
+    FILE *f   = fopen(tmp, "w");
     if (!f) {
+        free(file);
+        free(tmp);
         free(store);
         return;
     }
@@ -686,8 +693,47 @@ static void trust_remove(const char *real, bool hash_only) {
             continue;
         fprintf(f, "%s\n", line);
     }
-    fclose(f);
+    bool ok = fclose(f) == 0;
+    if (!ok || rename(tmp, file) != 0)
+        unlink(tmp);
+    free(file);
+    free(tmp);
     free(store);
+}
+
+// Serialises every read-modify-write of the trust list across processes.
+// Only callers take it, never trust_append/_remove/_pin: flock belongs to the
+// open file description, so locking again from a helper would deadlock.
+// Returns the lock fd, or -1 when it cannot be taken (the caller carries on
+// unlocked). `*waited` is set when another process held it.
+static int trust_lock(bool *waited) {
+    *waited    = false;
+    char *file = trust_file();
+    if (!file)
+        return -1;
+    char *lock = xasprintf("%s%s", file, ".lock");
+    free(file);
+    char *slash = strrchr(lock, '/');
+    *slash      = '\0';
+    mkdir_p(lock);
+    *slash = '/';
+    int fd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    free(lock);
+    if (fd < 0)
+        return -1;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        if (errno != EWOULDBLOCK || flock(fd, LOCK_EX) != 0) {
+            close(fd);
+            return -1;
+        }
+        *waited = true;
+    }
+    return fd;
+}
+
+static void trust_unlock(int fd) {
+    if (fd >= 0)
+        close(fd);
 }
 
 // Pins `real` to `hex`, replacing any earlier pin.
@@ -701,7 +747,6 @@ static bool trust_pin(const char *real, const char *hex) {
 
 // --- trust decision ----------------------------------------------------------
 
-// TODO: parallel runs each prompt and race on the trust list; lock it (#1651).
 static bool prompt_tty(const char *path, bool changed, char *const *new_pairs,
                        int n) {
     const char *skip = getenv(NO_PROMPT_ENV);
@@ -727,11 +772,47 @@ static bool prompt_tty(const char *path, bool changed, char *const *new_pairs,
     return yes;
 }
 
+typedef struct {
+    char *pinned;       // SHA-256 the file was pinned with, or NULL
+    bool  changed;
+    char *missing[256]; // pairs still needing approval
+    char *fresh[256];   // pairs not yet in the list
+    int   nmissing, nfresh;
+} TrustState;
+
+// Classifies o's pairs against `store`; `show` prints each pair's state.
+static void classify_trust(TrustState *t, const Opts *o, const char *store,
+                           const char *real, bool have_real, const char *hex,
+                           bool show) {
+    free(t->pinned);
+    t->pinned   = have_real ? stored_hash(store, real) : NULL;
+    t->changed  = t->pinned && strcmp(t->pinned, hex) != 0;
+    t->nmissing = t->nfresh = 0;
+    for (int i = 0; i < o->n; i++) {
+        if (!o->pair[i])
+            continue;
+        bool known = have_real && is_trusted(store, real, o->pair[i]);
+        bool ok    = known && !t->changed;
+        if (show)
+            printf("  %s  %s\n", ok ? "trusted  " : "untrusted", o->pair[i]);
+        if (!ok && t->nmissing < 256)
+            t->missing[t->nmissing++] = o->pair[i];
+        if (!known && t->nfresh < 256)
+            t->fresh[t->nfresh++] = o->pair[i];
+    }
+    if (show && t->pinned)
+        printf("  %s\n", t->changed
+                             ? "changed since trusted (sha256 pin differs)"
+                             : "pinned    (sha256 matches)");
+}
+
 // Drops every option that needs trust and has not been approved, asking on
 // the terminal first when `interactive`. `show` prints each pair's state
 // instead of warning. `hex` is the SHA-256 of the file as parsed: a file
 // pinned to a different hash has every grant unapproved, and approving it
 // again repins it (as does `pin_default` for a file not yet pinned).
+// Parallel runs ask once: the prompt happens under the trust-list lock and a
+// run that waited for it reuses the answer instead of asking.
 static void apply_trust(Opts *o, const char *path, const char *hex,
                         bool pin_default, bool interactive, bool show) {
     char  real[PATH_MAX];
@@ -740,36 +821,38 @@ static void apply_trust(Opts *o, const char *path, const char *hex,
     char *store     = slurp(file);
     free(file);
 
-    char *pinned  = have_real ? stored_hash(store, real) : NULL;
-    bool  changed = pinned && strcmp(pinned, hex) != 0;
-
-    char *missing[256], *fresh[256];
-    int   nmissing = 0, nfresh = 0;
-    for (int i = 0; i < o->n; i++) {
-        if (!o->pair[i])
-            continue;
-        bool known = have_real && is_trusted(store, real, o->pair[i]);
-        bool ok    = known && !changed;
-        if (show)
-            printf("  %s  %s\n", ok ? "trusted  " : "untrusted", o->pair[i]);
-        if (!ok && nmissing < 256)
-            missing[nmissing++] = o->pair[i];
-        if (!known && nfresh < 256)
-            fresh[nfresh++] = o->pair[i];
-    }
-    if (show && pinned)
-        printf("  %s\n", changed ? "changed since trusted (sha256 pin differs)"
-                                 : "pinned    (sha256 matches)");
+    TrustState t = {0};
+    classify_trust(&t, o, store, real, have_real, hex, show);
     bool granted = false;
-    if (nmissing && have_real && interactive && !show)
-        granted = prompt_tty(path, changed, missing, nmissing) &&
-                  trust_append(real, fresh, nfresh) &&
-                  (!(pinned || pin_default) || trust_pin(real, hex));
+    if (t.nmissing && have_real && interactive && !show) {
+        bool waited;
+        int  lock = trust_lock(&waited);
+        if (lock >= 0) {
+            free(store);
+            file  = trust_file();
+            store = slurp(file);
+            free(file);
+            classify_trust(&t, o, store, real, have_real, hex, false);
+        }
+        if (!t.nmissing)
+            granted = true;
+        else if (!waited)
+            granted = prompt_tty(path, t.changed, t.missing, t.nmissing) &&
+                      trust_append(real, t.fresh, t.nfresh) &&
+                      (!(t.pinned || pin_default) || trust_pin(real, hex));
+        trust_unlock(lock);
+        if (granted) {
+            free(store);
+            file  = trust_file();
+            store = slurp(file);
+            free(file);
+        }
+    }
     int kept = 0;
     for (int i = 0; i < o->n; i++) {
         bool drop = false;
         if (o->pair[i]) {
-            bool ok = granted || (have_real && !changed &&
+            bool ok = granted || (have_real && !t.changed &&
                                   is_trusted(store, real, o->pair[i]));
             if (!ok) {
                 drop = true;
@@ -778,7 +861,7 @@ static void apply_trust(Opts *o, const char *path, const char *hex,
                             "warning: %s: ignoring %s (%s); run "
                             "'cccc --trust=%s'\n",
                             path, o->pair[i],
-                            changed ? "changed since trusted" : "not trusted",
+                            t.changed ? "changed since trusted" : "not trusted",
                             path);
             }
         }
@@ -789,7 +872,7 @@ static void apply_trust(Opts *o, const char *path, const char *hex,
         kept++;
     }
     o->n = kept;
-    free(pinned);
+    free(t.pinned);
     free(store);
 }
 
@@ -886,6 +969,8 @@ const char **cccc_config_expand(int *argc, const char **argv) {
             fprintf(stderr, "error: cannot resolve %s\n", path);
             exit(1);
         }
+        bool waited;
+        trust_lock(&waited); // held until exit
         if (untrust) {
             trust_remove(real, false);
             printf("cccc: no longer trusting %s\n", real);

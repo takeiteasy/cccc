@@ -83,6 +83,8 @@ warning: /work/proj/.cccc.toml: ignoring comptime-allow=fs (not trusted); run 'c
 
 The prompt reads the terminal, never standard input, so `cccc prog.c < data` keeps its input.
 
+Parallel runs (`make -j`, a build driver) ask once. The first run prompts; runs started meanwhile wait, then use its answer, so a decline skips the grants everywhere without asking again.
+
 ## Pinning a file by hash
 
 By default an approval survives any edit that adds no new grant. A pinned file is approved only while its content is unchanged: any edit, even a comment, withdraws every grant in it until you approve again.
