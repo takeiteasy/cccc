@@ -27,6 +27,13 @@ environment:
   # stay covered instead of being flattened to one.
   CC: clang
 tasks:
+  - guard: |
+      # sr.ht submits one job per pushed ref; only devel is built here.
+      # Runs when GIT_REF is unset (manual submit).
+      case "${GIT_REF:-refs/heads/devel}" in
+        refs/heads/devel|devel) ;;
+        *) echo "skipping ${GIT_REF}: only devel is built"; complete-build ;;
+      esac
   - build: |
       # One pass: `make` builds ./cccc, the only compiler binary.
       cd cccc
