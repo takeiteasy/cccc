@@ -1,4 +1,4 @@
-// CCCC_FLAGS: --asm-passthru
+// CCCC_FLAGS: --asm-passthru --comptime-allow=all
 //
 // Extended asm inside a comptime function runs on the host while the program
 // is still being compiled, so its thunk is built before the macro executes.

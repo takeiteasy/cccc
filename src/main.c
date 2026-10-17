@@ -21,6 +21,7 @@
 #include "./internal.h"
 #include "./config.h"
 #include "./watch.h"
+#include "./os_sandbox.h"
 #include <getopt.h>
 #if defined(_WIN32)
 #include <io.h>
@@ -554,6 +555,14 @@ static bool path_has_suffix(const char *path, const char *suffix) {
     return len >= n && !strcmp(path + len - n, suffix);
 }
 
+// Absolute path of the running cccc, which a sandboxed run may exec again.
+static char *sandbox_self_path(const char *argv0) {
+    char resolved[PATH_MAX];
+    if (strchr(argv0, '/'))
+        return realpath(argv0, resolved) ? strdup(resolved) : NULL;
+    return cccc_path_find_executable(argv0);
+}
+
 static void usage(const char *argv0, int exit_code) {
     printf("CCCC: Comprehensive C Compensation Compiler\n");
     printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
@@ -899,6 +908,10 @@ static void usage(const char *argv0, int exit_code) {
            "classes beyond the safe default:\n");
     printf("\t                         fs, exec, net, env, dlopen, thread, "
            "signal, ipc, all\n");
+    printf("\t   --sandbox              Confine this process with the OS "
+           "sandbox: no network, writes only to output\n");
+    printf("\t                         and temp directories, exec only of "
+           "cccc and the C toolchain\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
@@ -1494,6 +1507,7 @@ int main(int argc, const char *argv[]) {
     int   output_ffi_decls    = 0;    // -J/--ffi-decls
     char *deps_file           = NULL; // --deps-file=PATH (#1308)
     bool allow_url = false; // --allow-url
+    bool        sandbox             = false; // --sandbox
 #ifdef CCCC_HAS_CURL
     char  *url_cache_dir   = NULL;    // --url-cache-dir
     int    url_cache_clear = 0;       // --url-cache-clear
@@ -1956,6 +1970,9 @@ int main(int argc, const char *argv[]) {
 #endif
             case 1146: // --allow-url
                 allow_url = true;
+                break;
+            case 1147: // --sandbox
+                sandbox = true;
                 break;
             case 'n': // --max-errors
                 max_errors = atoi(optarg);
@@ -2752,6 +2769,31 @@ int main(int argc, const char *argv[]) {
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi          = disable_all_ffi;
     vm.comptime_allow           = comptime_allow_mask;
+    if (sandbox) {
+        if (allow_url) {
+            fprintf(stderr, "error: --sandbox cannot be combined with "
+                            "--allow-url (the sandbox has no network)\n");
+            exit(1);
+        }
+        CcccSandboxPaths sb_paths = {
+            .out_file    = out_file,
+            .default_out = !out_file && compile_format != COMPILE_NONE,
+            .deps_file   = deps_file,
+#ifdef CCCC_HAS_CURL
+            .url_cache_dir = url_cache_dir,
+#endif
+            .build_out_dir =
+                build_mode ? (build_out_dir ? build_out_dir : "build") : NULL,
+            .build_cache = build_cache && *build_cache ? build_cache : NULL,
+            .self        = sandbox_self_path(argv[0]),
+        };
+        char sb_err[512];
+        if (!cccc_sandbox_enter(&sb_paths, sb_err, sizeof sb_err)) {
+            fprintf(stderr, "error: --sandbox unavailable: %s\n", sb_err);
+            exit(1);
+        }
+        free((void *)sb_paths.self);
+    }
     vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
     if (vm_profile)

@@ -79,6 +79,7 @@ const struct option cccc_long_options[] = {
     {"url-timeout", required_argument, 0, 1010},
     {"url-max-size", required_argument, 0, 1011},
     {"allow-url", no_argument, 0, 1146},
+    {"sandbox", no_argument, 0, 1147},
     {"max-errors", required_argument, 0, 'n'},
     {"Werror", no_argument, 0, 'w'},
     {"embed-limit", required_argument, 0, 1048},

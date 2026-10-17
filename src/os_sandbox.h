@@ -1,5 +1,5 @@
-#ifndef CCCC_SANDBOX_H
-#define CCCC_SANDBOX_H
+#ifndef CCCC_OS_SANDBOX_H
+#define CCCC_OS_SANDBOX_H
 
 #include <stdbool.h>
 #include <stddef.h>
