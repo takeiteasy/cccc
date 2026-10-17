@@ -7,6 +7,26 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-17
+
+- Added: config files. A user file and the nearest project `.cccc.toml` set
+  default command-line options in TOML; a project file that grants
+  capabilities needs approval first. See `docs/CONFIG.md`.
+- Added: `--comptime-allow=<class>[,...]` grants comptime code the `fs`,
+  `exec`, `net`, `env`, `dlopen`, `thread`, `signal` and `ipc` capability
+  classes, or `all`. See `docs/COMPTIME_POLICY.md`.
+- Changed: comptime code can call only a safe subset of libc unless a class is
+  granted; calls to anything else are denied.
+- Changed: taking the address of `setjmp`, `_setjmp` or `sigsetjmp` is a
+  compile error in the VM.
+- Fixed: a static or global function pointer initialised with `free`
+  (`static void (*p)(void *) = free;`, `{0, realloc, free}`) failed with
+  `undefined relocation target: free` in the VM and under `-c=native`.
+- Fixed: the address of `signal`, `raise`, `longjmp`, `_longjmp`,
+  `siglongjmp`, `dlopen`, `dlsym`, `dlclose` or `dlerror` evaluated to NULL in
+  the VM, or failed in a static initialiser; it is now callable through a
+  function pointer.
+
 ## [0.12.0] - 2026-10-17
 
 - Added: `@range(min, max)` on an integer, enum or bit-field member, with
