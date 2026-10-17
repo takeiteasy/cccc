@@ -51,7 +51,7 @@ error: /work/proj/.cccc.toml:2: 'repl' cannot be set in a config file
 | Class | Options | Rule |
 |---|---|---|
 | Free | `std`, `D`, `U`, `I`, `isystem`, `W`, `f`, `O`, the safety and check flags, `ffi-deny`, `disable-ffi`, `test-timeout`, `max-errors`, ... | always applied |
-| Trust | `comptime-allow`, `comptime-include-all`, `ffi-allow`, `asm-passthru`, `library`, `library-path`, `framework-path`, `iframework`, `link-arg`, `out`, `deps-file`, `url-cache-dir`, `sysroot`, `use-system-headers`, `compile`, `build-cc`, `build-tool-allow`, `build-option`, `build-out-dir`, `build-cache` | applied from the user file; from a project file only once approved |
+| Trust | `comptime-allow`, `comptime-include-all`, `ffi-allow`, `asm-passthru`, `allow-url`, `library`, `library-path`, `framework-path`, `iframework`, `link-arg`, `out`, `deps-file`, `url-cache-dir`, `sysroot`, `use-system-headers`, `compile`, `build-cc`, `build-tool-allow`, `build-option`, `build-out-dir`, `build-cache` | applied from the user file; from a project file only once approved |
 | Command line only | `help`, `version`, `repl`, `debug`, `build`, `test`, `watch`, `entry`, the dump modes (`ast`, `preprocess`, `json`, ...), `trust`, `untrust`, `show-config`, `no-config` | an error in a config |
 
 Trust options widen what runs on your machine or where cccc writes, so a cloned repository must not be able to switch them on by itself.

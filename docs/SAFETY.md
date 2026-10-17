@@ -2561,6 +2561,7 @@ PC offset:  12
 ### `--disable-ffi` — Disable all FFI calls
 
 - Completely blocks all foreign function calls at runtime
+- `dlopen` returns `NULL` and `dlerror()` reports the flag
 - Overrides both allow and deny lists
 - Compiler builtins used by `[[cccc::comptime]]` code stay callable
 - Not a sandbox: see [COMPTIME_POLICY.md](COMPTIME_POLICY.md) for what comptime can reach

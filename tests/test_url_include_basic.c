@@ -1,3 +1,4 @@
+// CCCC_FLAGS: --allow-url
 // Test basic URL include functionality
 // This test is only exercised when CCCC is built with libcurl
 // (__CCCC_HAS_CURL__ is predefined for guest code in that case); otherwise it

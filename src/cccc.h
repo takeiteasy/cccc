@@ -4354,6 +4354,8 @@ typedef struct Compiler {
     int     url_timeout;   // curl fetch timeout in seconds (default 30)
     size_t  url_max_size;  // Cap on any fetched URL payload (default
                            // 10MB), independent of the #embed limits
+    bool    allow_url;     // --allow-url: URL includes may hit the network
+    bool    url_denied;    // last fetch refused for want of --allow-url
     HashMap url_to_path;   // Maps URLs to cached file paths
     // #1324: true once any URL #include/#embed has been mirrored into
     // <url_cache_dir> under a URL-shaped path (fetch_url_to_cache(),

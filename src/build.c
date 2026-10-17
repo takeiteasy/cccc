@@ -169,6 +169,9 @@ struct Builder {
     // target spawns this exact binary as its compiler; its content hash also
     // folds into that target's cache key so a rebuilt cccc invalidates.
     const char *cccc_self;
+    // Policy flags (--comptime-allow, --allow-url, --disable-ffi, --ffi-*) of
+    // the cccc running the build, forwarded to every cccc child process.
+    StringArray policy_args;
     uint64_t    cccc_self_hash; // fnv1a of cccc_self's bytes; 0 = not computed
     int         cccc_self_hashed; // 1 once cccc_self_hash is populated
     // Strings returned by CaptureCommand/GlobFiles/ReadFile; freed at teardown.
@@ -2208,6 +2211,27 @@ static uint64_t cccc_self_content_hash(Builder *ctx) {
     return ctx->cccc_self_hash;
 }
 
+// Flags that carry the build's own policy to a cccc child process. Project
+// config files are never read there, as for the parent.
+static void collect_policy_args(StringArray *out, const VirtualMachine *vm) {
+    if (vm->comptime_allow == COMPTIME_ALLOW_ALL) {
+        strarray_push(out, xstrdup("--comptime-allow=all"));
+    } else {
+        for (int c = CT_SAFE + 1; c < CT_CLASS_COUNT; c++)
+            if (vm->comptime_allow & (1u << c))
+                strarray_push(out, format("--comptime-allow=%s",
+                                          cccc_comptime_class_name(c)));
+    }
+    if (vm->compiler.allow_url)
+        strarray_push(out, xstrdup("--allow-url"));
+    if (vm->disable_all_ffi)
+        strarray_push(out, xstrdup("--disable-ffi"));
+    for (int i = 0; i < vm->ffi_allow_count; i++)
+        strarray_push(out, format("--ffi-allow=%s", vm->ffi_allow_list[i]));
+    for (int i = 0; i < vm->ffi_deny_count; i++)
+        strarray_push(out, format("--ffi-deny=%s", vm->ffi_deny_list[i]));
+}
+
 // Per-target cache key for a CcccExecutable target. Unlike a native EXE there
 // is no per-source .o, so this does NOT go through the shared CAS — it is
 // written into the target's own objdir stamp. Folds:
@@ -2358,6 +2382,9 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
     argv_push(&a, "-o");
     argv_push(&a, (char *)out_abs);
     push_compile_flags_cccc(&a, ctx, t, &owned);
+    argv_push(&a, "--no-config");
+    for (int i = 0; i < ctx->policy_args.len; i++)
+        argv_push(&a, ctx->policy_args.data[i]);
     // LinkWith deps: -L<out>/lib -l<dep>, mirroring the native EXE link branch.
     // A CcccObject dep is a file, not a library: it goes on as --link-arg and
     // is hashed into the cache key below.
@@ -3668,6 +3695,7 @@ static void init_builder_ctx(Builder *ctx, VirtualMachine *vm,
     ctx->cross_triple     = opts->cross_triple;
     ctx->cross_cc         = opts->cross_cc;
     ctx->cccc_self        = resolve_cccc_self(opts->argv0);
+    collect_policy_args(&ctx->policy_args, vm);
     if (opts->build_cache) {
         ctx->cache_dir = *opts->build_cache ? xstrdup(opts->build_cache)
                                             : join(ctx->out_dir, ".cccc-cache");
@@ -3748,6 +3776,9 @@ static void teardown_builder_ctx(Builder *ctx) {
     free(ctx->out_dir);
     free(ctx->cache_dir);
     free((char *)ctx->cccc_self);
+    for (int i = 0; i < ctx->policy_args.len; i++)
+        free(ctx->policy_args.data[i]);
+    free(ctx->policy_args.data);
     for (int i = 0; i < ctx->captures_count; i++)
         free(ctx->captures[i]);
     free(ctx->captures);

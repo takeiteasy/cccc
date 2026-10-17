@@ -118,6 +118,10 @@ are rejected on the `cccc --build` command line. (This is about the CLI flag
 `-c`; a `CcccExecutable` target invokes `cccc --compile=native` internally, and
 that is unrelated.)
 
+A `CcccExecutable`/`CcccObject` child `cccc` also receives the build's own
+`--comptime-allow`, `--allow-url`, `--disable-ffi`, `--ffi-allow` and
+`--ffi-deny`, and never reads `.cccc.toml` files (`--no-config`).
+
 ### How `--std=` is handled
 
 An `Executable`/`StaticLib`/`DynamicLib` target compiles the source *you

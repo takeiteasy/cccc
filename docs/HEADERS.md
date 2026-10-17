@@ -374,7 +374,9 @@ See [NATIVE.md](NATIVE.md) for the native pipeline itself.
 ## URL includes under `-c=native`/`-m`/`-c=generated`
 
 A URL `#include`/`#embed` (curl-enabled builds only — see
-[BUILD.md](BUILD.md)) fetches into a shared on-disk cache
+[BUILD.md](BUILD.md)) downloads only when `--allow-url` is passed; a URL
+already in the cache resolves without it, and `__has_include`/`__has_embed`
+never download without it. Downloads go into a shared on-disk cache
 (`--url-cache-dir`, default `$TMPDIR/.cccc`) on every path, VM included. Every
 fetch is also mirrored into that same directory under a URL-shaped path
 (`<cache-dir>/https:/<host>/<path>`), so a raw `#include "https://…"` line

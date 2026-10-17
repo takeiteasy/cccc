@@ -163,6 +163,7 @@ static const struct {
     {"D", CFG_FREE},
     {"undef", CFG_FREE},
     {"U", CFG_FREE},
+    {"allow-url", CFG_TRUST},
     {"url-timeout", CFG_FREE},
     {"url-max-size", CFG_FREE},
     {"max-errors", CFG_FREE},

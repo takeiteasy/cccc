@@ -267,8 +267,13 @@ static size_t write_callback(void *ptr, size_t size, size_t nmemb,
     return fwrite(ptr, size, nmemb, (FILE *)stream);
 }
 
+const char *url_denied_hint(const VirtualMachine *vm) {
+    return vm->compiler.url_denied ? " (not cached; pass --allow-url to download)"
+                                   : "";
+}
+
 char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
-    // Ensure cache directory exists
+    vm->compiler.url_denied = false;
     init_url_cache(vm);
 
     // Generate cache path
@@ -284,6 +289,12 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
             return NULL;
         mirror_cache_entry(vm, cache_path, url); // #1324
         return cache_path;
+    }
+
+    // Cached copies are local data; only a download needs the opt-in.
+    if (!vm->compiler.allow_url) {
+        vm->compiler.url_denied = true;
+        return NULL;
     }
 
     // Initialize curl
@@ -357,5 +368,10 @@ char *fetch_url_to_cache(VirtualMachine *vm, const char *url) {
     (void)vm;
     (void)url;
     return NULL; // URL support not compiled in
+}
+
+const char *url_denied_hint(const VirtualMachine *vm) {
+    (void)vm;
+    return "";
 }
 #endif // CCCC_HAS_CURL

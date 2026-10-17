@@ -591,6 +591,8 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --url-cache-dir <path> Directory for caching #include/#embed "
            "<https://...> fetches\n");
     printf("\t   --url-cache-clear     Clear the URL fetch cache and exit\n");
+    printf("\t   --allow-url           Let #include/#embed <https://...> download "
+           "files that are not already cached\n");
     printf("\t   --url-timeout=SECONDS Set URL fetch timeout in seconds "
            "(default: 30)\n");
     printf("\t   --url-max-size=SIZE   Cap fetched URL payload size (e.g., "
@@ -1491,6 +1493,7 @@ int main(int argc, const char *argv[]) {
     int   output_json         = 0;    // -j (general "emit JSON" flag)
     int   output_ffi_decls    = 0;    // -J/--ffi-decls
     char *deps_file           = NULL; // --deps-file=PATH (#1308)
+    bool allow_url = false; // --allow-url
 #ifdef CCCC_HAS_CURL
     char  *url_cache_dir   = NULL;    // --url-cache-dir
     int    url_cache_clear = 0;       // --url-cache-clear
@@ -1951,6 +1954,9 @@ int main(int argc, const char *argv[]) {
                 url_max_size = parse_size(optarg, "--url-max-size");
                 break;
 #endif
+            case 1146: // --allow-url
+                allow_url = true;
+                break;
             case 'n': // --max-errors
                 max_errors = atoi(optarg);
                 if (max_errors <= 0) {
@@ -2871,6 +2877,7 @@ int main(int argc, const char *argv[]) {
         vm.compiler.url_max_size = url_max_size;
     }
 #endif
+    vm.compiler.allow_url = allow_url;
 
     vm.collect_errors     = true;
     vm.max_errors         = max_errors;

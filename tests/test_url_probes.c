@@ -1,3 +1,4 @@
+// CCCC_FLAGS: --allow-url
 // Test URL feature-detection probes: __has_include(<https://...>) and
 // __has_embed(<https://...>) resolve through the same shared cache a real
 // #include/#embed uses, so both agree with each other and answer what an

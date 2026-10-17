@@ -148,6 +148,10 @@ long long cccc_rt_dlopen(VirtualMachine *vm, const char *path, int mode) {
         return 0;
     cccc_comptime_enforce(vm, "dlopen");
     cccc_clear_dyn_error(vm);
+    if (vm->disable_all_ffi) {
+        cccc_set_dyn_error(vm, "dlopen disabled by --disable-ffi");
+        return 0;
+    }
 
 #if defined(_WIN32) || defined(_WIN64)
     (void)mode;

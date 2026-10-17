@@ -779,6 +779,10 @@ int cccc_comptime_class_of(const char *name) {
     if (hashmap_get2(&math_bases, name, (int)len))
         return CT_SAFE;
 
+    // --asm-passthru thunks run arbitrary host assembly.
+    if (strncmp(name, "__cccc_asm_passthru_", 20) == 0)
+        return -1;
+
     for (size_t i = 0; i < sizeof(SAFE_PREFIXES) / sizeof(SAFE_PREFIXES[0]);
          i++)
         if (strncmp(name, SAFE_PREFIXES[i], strlen(SAFE_PREFIXES[i])) == 0)

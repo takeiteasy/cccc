@@ -1,3 +1,4 @@
+// CCCC_FLAGS: --allow-url
 // EXPECT_COMPILE_ERROR
 // CCCC_REJECT_STDERR: expected '>' after #embed filename
 // Offline regression test: the tokenizer must preserve "//" inside an

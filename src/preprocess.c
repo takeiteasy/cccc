@@ -4012,7 +4012,8 @@ static Token *handle_embed_directive(VirtualMachine *vm, Token *tok,
 #ifdef CCCC_HAS_CURL
         char *cache_path = fetch_url_to_cache(vm, filename);
         if (!cache_path) {
-            error_tok(vm, directive_start, "failed to fetch URL: %s", filename);
+            error_tok(vm, directive_start, "failed to fetch URL: %s%s",
+                      filename, url_denied_hint(vm));
         }
         // Track URL -> cache path mapping for error reporting
         hashmap_put(&vm->compiler.url_to_path, cache_path, (void *)filename);
@@ -7033,8 +7034,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 #ifdef CCCC_HAS_CURL
                     char *cache_path = fetch_url_to_cache(vm, filename);
                     if (!cache_path) {
-                        error_tok(vm, start->next, "failed to fetch URL: %s",
-                                  filename);
+                        error_tok(vm, start->next, "failed to fetch URL: %s%s",
+                                  filename, url_denied_hint(vm));
                     }
                     // Track URL -> cache path mapping for error reporting
                     hashmap_put(&vm->compiler.url_to_path, cache_path,

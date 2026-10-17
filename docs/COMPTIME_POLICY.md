@@ -34,7 +34,7 @@ Compilation stops at the first denied call and names the function and the flag t
 error: comptime call to 'fopen' denied (class fs); pass --comptime-allow=fs
 ```
 
-A function that no class lists (for example one bound from a shared library with `extern`) is denied until `--comptime-allow=all`.
+A function that no class lists (for example one bound from a shared library with `extern`, or an `asm` statement under `--asm-passthru`) is denied until `--comptime-allow=all`.
 
 ## Example: reading files at comptime
 
