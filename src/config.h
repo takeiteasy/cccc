@@ -19,6 +19,9 @@ typedef enum {
 // when the key has no class.
 int cccc_config_class(const char *key);
 
+// The user config directory (malloc'd), or NULL when there is no home.
+char *cccc_config_dir(void);
+
 // Returns a fresh argv holding the global config's options, the trusted
 // project config's options, then the command line. Updates *argc. Exits on a
 // config error and for --trust, --untrust and --show-config.

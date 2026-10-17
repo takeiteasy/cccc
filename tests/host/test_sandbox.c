@@ -65,6 +65,8 @@ static void write_file(const char *path, const char *text) {
 
 // Bit 1: ran a command. 2: wrote outside the allowed directories.
 // 4: bound a socket. 8: wrote into the temp directory.
+// 16: read a file outside the allowed directories. 32: read the input's
+// neighbour.
 static const char probe_src[] =
     "#include[[cccc::comptime]] <stdio.h>\n"
     "#include[[cccc::comptime]] <stdlib.h>\n"
@@ -83,6 +85,10 @@ static const char probe_src[] =
     " r |= 4;\n"
     "    f = fopen(\"%s/inside\", \"w\");\n"
     "    if (f) { fclose(f); r |= 8; }\n"
+    "    f = fopen(\"%s/key\", \"r\");\n"
+    "    if (f) { fclose(f); r |= 16; }\n"
+    "    f = fopen(\"%s/ok.c\", \"r\");\n"
+    "    if (f) { fclose(f); r |= 32; }\n"
     "    return r;\n"
     "}\n"
     "[[cccc::comptime]] void gen(void) {\n"
@@ -105,25 +111,39 @@ int main(void) {
     if (!getcwd(cwd, sizeof cwd))
         return 2;
 
+    // Outside the working directory and the temp directories, which are open.
+    const char *home = getenv("HOME");
+    char        secret[PATH_MAX], indir[PATH_MAX];
+    snprintf(secret, sizeof secret, "%s/.cccc_sandbox_secret_XXXXXX",
+             home ? home : "");
+    snprintf(indir, sizeof indir, "%s/.cccc_sandbox_input_XXXXXX",
+             home ? home : "");
+    if (!home || !mkdtemp(secret) || !mkdtemp(indir)) {
+        printf("SKIP: sandbox (no writable $HOME for the read probe)\n");
+        run("rm -rf %s %s %s", root, secret, indir);
+        return 0;
+    }
     char path[PATH_MAX];
-    snprintf(path, sizeof path, "%s/ok.c", root);
+    snprintf(path, sizeof path, "%s/key", secret);
+    write_file(path, "secret\n");
+    snprintf(path, sizeof path, "%s/ok.c", indir);
     write_file(path, "int main(void) { return 42; }\n");
-    char src[sizeof probe_src + 2 * PATH_MAX];
-    snprintf(src, sizeof src, probe_src, cwd, root);
+    char src[sizeof probe_src + 4 * PATH_MAX];
+    snprintf(src, sizeof src, probe_src, cwd, root, secret, indir);
     char probe[PATH_MAX];
-    snprintf(probe, sizeof probe, "%s/probe.c", root);
+    snprintf(probe, sizeof probe, "%s/probe.c", indir);
     write_file(probe, src);
 
     int failed = 0;
-    int rc     = run("%s --sandbox %s/ok.c >/dev/null 2>&1", cccc, root);
+    int rc     = run("%s --sandbox %s/ok.c >/dev/null 2>&1", cccc, indir);
     if (rc != 42) {
         printf("SKIP: sandbox (not enforceable here: exit %d)\n", rc);
         goto done;
     }
 
     rc = run("%s --comptime-allow=all %s >/dev/null 2>&1", cccc, probe);
-    if (rc != 15) {
-        printf("SKIP: sandbox (unconfined probe exited %d, not 15)\n", rc);
+    if (rc != 63) {
+        printf("SKIP: sandbox (unconfined probe exited %d, not 63)\n", rc);
         goto done;
     }
 
@@ -132,21 +152,68 @@ int main(void) {
 
     rc = run("%s --sandbox --comptime-allow=all %s >/dev/null 2>&1", cccc,
              probe);
-    if (rc != 8) {
-        fprintf(stderr, "FAIL: sandboxed probe exited %d, expected 8\n", rc);
+    if (rc != 40) {
+        fprintf(stderr, "FAIL: sandboxed probe exited %d, expected 40\n", rc);
         failed = 1;
     }
+
+    rc = run("%s --sandbox --sandbox-read=%s --comptime-allow=all %s "
+             ">/dev/null 2>&1",
+             cccc, secret, probe);
+    if (rc != 56) {
+        fprintf(stderr, "FAIL: --sandbox-read probe exited %d, expected 56\n",
+                rc);
+        failed = 1;
+    }
+    snprintf(path, sizeof path, "%s/escape", cwd);
+    unlink(path);
 
     char out[PATH_MAX];
     snprintf(out, sizeof out, "%s/ok.out", root);
     if (run("%s --sandbox -c=native -o %s %s/ok.c >/dev/null 2>&1", cccc, out,
-            root) != 0 ||
+            indir) != 0 ||
         run("%s", out) != 42) {
         fprintf(stderr, "FAIL: -c=native under --sandbox did not build\n");
         failed = 1;
     }
 
-    if (run("%s --sandbox --allow-url %s/ok.c >/dev/null 2>&1", cccc, root) ==
+    // A build script and the cccc and cc it runs, all confined.
+    char script[2 * PATH_MAX];
+    snprintf(script, sizeof script,
+             "[[cccc::build]]\n"
+             "int build_main(Builder *ctx) {\n"
+             "    BuildTarget *app = Executable(ctx, \"app\");\n"
+             "    AddSource(app, \"%s/ok.c\");\n"
+             "    return BuildDefault(ctx);\n"
+             "}\n",
+             indir);
+    char build_c[PATH_MAX];
+    snprintf(build_c, sizeof build_c, "%s/build.c", indir);
+    write_file(build_c, script);
+    char built[PATH_MAX];
+    snprintf(built, sizeof built, "%s/bo/bin/app", root);
+    if (run("%s --sandbox --build-out-dir=%s/bo --build %s >/dev/null 2>&1",
+            cccc, root, build_c) != 0 ||
+        run("%s", built) != 42) {
+        fprintf(stderr, "FAIL: --build under --sandbox\n");
+        failed = 1;
+    }
+
+    // A compiler outside the system directories reads its own tree.
+    const char *other_cc = "/opt/homebrew/opt/llvm/bin/clang";
+    if (access(other_cc, X_OK) == 0) {
+        unlink(out);
+        if (run("CCCC_NATIVE_CC=%s %s --sandbox -c=native -o %s %s/ok.c "
+                ">/dev/null 2>&1",
+                other_cc, cccc, out, indir) != 0 ||
+            run("%s", out) != 42) {
+            fprintf(stderr, "FAIL: -c=native with %s under --sandbox\n",
+                    other_cc);
+            failed = 1;
+        }
+    }
+
+    if (run("%s --sandbox --allow-url %s/ok.c >/dev/null 2>&1", cccc, indir) ==
         42) {
         fprintf(stderr, "FAIL: --sandbox accepted --allow-url\n");
         failed = 1;
@@ -161,6 +228,6 @@ int main(void) {
         printf("PASS: sandbox\n");
 
 done:
-    run("rm -rf %s", root);
+    run("rm -rf %s %s %s", root, secret, indir);
     return failed;
 }

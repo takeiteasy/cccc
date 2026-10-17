@@ -563,6 +563,16 @@ static char *sandbox_self_path(const char *argv0) {
     return cccc_path_find_executable(argv0);
 }
 
+// Appends the entries of `list` to `*out` (borrowed, not copied).
+static void sandbox_collect_reads(const char ***out, int *count,
+                                  const char **list, int n) {
+    if (n <= 0)
+        return;
+    *out = realloc(*out, sizeof(**out) * (size_t)(*count + n));
+    for (int i = 0; i < n; i++)
+        (*out)[(*count)++] = list[i];
+}
+
 static void usage(const char *argv0, int exit_code) {
     printf("CCCC: Comprehensive C Compensation Compiler\n");
     printf("https://git.sr.ht/~takeiteasy/cccc\n\n");
@@ -910,8 +920,12 @@ static void usage(const char *argv0, int exit_code) {
            "signal, ipc, all\n");
     printf("\t   --sandbox              Confine this process with the OS "
            "sandbox: no network, writes only to output\n");
-    printf("\t                         and temp directories, exec only of "
-           "cccc and the C toolchain\n");
+    printf("\t                         and temp directories, reads only "
+           "inputs, include/library paths and the toolchain,\n");
+    printf("\t                         exec only of cccc and the C "
+           "toolchain\n");
+    printf("\t   --sandbox-read <path>  Let --sandbox read <path> too "
+           "(repeatable)\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
@@ -1510,6 +1524,8 @@ int main(int argc, const char *argv[]) {
     char *deps_file           = NULL; // --deps-file=PATH (#1308)
     bool allow_url = false; // --allow-url
     bool        sandbox             = false; // --sandbox
+    const char **sandbox_reads       = NULL;  // --sandbox-read
+    int          sandbox_reads_count = 0;
 #ifdef CCCC_HAS_CURL
     char  *url_cache_dir   = NULL;    // --url-cache-dir
     int    url_cache_clear = 0;       // --url-cache-clear
@@ -1975,6 +1991,12 @@ int main(int argc, const char *argv[]) {
                 break;
             case 1147: // --sandbox
                 sandbox = true;
+                break;
+            case 1149: // --sandbox-read
+                sandbox_reads =
+                    realloc(sandbox_reads,
+                            sizeof(*sandbox_reads) * (sandbox_reads_count + 1));
+                sandbox_reads[sandbox_reads_count++] = strdup(optarg);
                 break;
             case 'n': // --max-errors
                 max_errors = atoi(optarg);
@@ -2778,6 +2800,24 @@ int main(int argc, const char *argv[]) {
                             "--allow-url (the sandbox has no network)\n");
             exit(1);
         }
+        const char **sb_reads  = NULL;
+        int          sb_nreads = 0;
+        sandbox_collect_reads(&sb_reads, &sb_nreads, inc_paths,
+                              inc_paths_count);
+        sandbox_collect_reads(&sb_reads, &sb_nreads, sys_inc_paths,
+                              sys_inc_paths_count);
+        sandbox_collect_reads(&sb_reads, &sb_nreads, fw_paths, fw_paths_count);
+        sandbox_collect_reads(&sb_reads, &sb_nreads, sys_fw_paths,
+                              sys_fw_paths_count);
+        sandbox_collect_reads(&sb_reads, &sb_nreads, lib_paths,
+                              lib_paths_count);
+        for (int i = 0; i < sandbox_reads_count; i++)
+            if (access(sandbox_reads[i], F_OK) != 0)
+                fprintf(stderr, "warning: --sandbox-read: %s: %s\n",
+                        sandbox_reads[i], strerror(errno));
+        sandbox_collect_reads(&sb_reads, &sb_nreads, sandbox_reads,
+                              sandbox_reads_count);
+        sandbox_collect_reads(&sb_reads, &sb_nreads, &sysroot, sysroot ? 1 : 0);
         CcccSandboxPaths sb_paths = {
             .out_file    = out_file,
             .default_out = !out_file && compile_format != COMPILE_NONE,
@@ -2787,8 +2827,14 @@ int main(int argc, const char *argv[]) {
 #endif
             .build_out_dir =
                 build_mode ? (build_out_dir ? build_out_dir : "build") : NULL,
-            .build_cache = build_cache && *build_cache ? build_cache : NULL,
-            .self        = sandbox_self_path(argv[0]),
+            .build_cache     = build_cache && *build_cache ? build_cache : NULL,
+            .self            = sandbox_self_path(argv[0]),
+            .read_paths      = sb_reads,
+            .read_count      = sb_nreads,
+            .inputs          = input_files,
+            .inputs_count    = input_files_count,
+            .link_args       = link_args,
+            .link_args_count = link_args_count,
         };
         char sb_err[512];
         if (!cccc_sandbox_enter(&sb_paths, sb_err, sizeof sb_err)) {
@@ -2796,6 +2842,7 @@ int main(int argc, const char *argv[]) {
             exit(1);
         }
         free((void *)sb_paths.self);
+        free(sb_reads);
     }
     vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;

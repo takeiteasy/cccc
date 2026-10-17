@@ -40,15 +40,20 @@ The allowlist prevents accidents. It is not a sandbox:
 
 | Allowed | Denied |
 |---|---|
-| Reading files | Network access |
+| Reading the inputs and their directories, the working directory, `-I`/`-isystem`/`-F`/`-L`/`--sysroot` paths, `--sandbox-read` paths, the cccc config, and the system and toolchain directories | Reading anything else, such as `~/.ssh` |
+| | Network access |
 | Writing the `-o` directory (or the working directory when `-o` is omitted in a compile mode), `--deps-file`, `--url-cache-dir`, `--build-out-dir`, `--build-cache`, `/tmp` and `$TMPDIR` | Writing anywhere else |
-| Running cccc itself and the host C compiler's toolchain | Running anything else |
+| Running cccc itself and the exact programs the host C compiler runs | Running anything else |
 
 ```sh
 cccc --sandbox prog.c                          # compile and run, confined
 cccc --sandbox -c=native -o prog prog.c        # compile with the host cc, confined
 cccc --sandbox --comptime-allow=all prog.c     # comptime still cannot escape
+cccc --sandbox --sandbox-read=/data prog.c     # also let the run read /data
 ```
+
+- Running from `$HOME` makes all of `$HOME` readable, because the working directory is always readable. Run from the project directory.
+- `--sandbox-read=<path>` (repeatable) adds a readable file or directory. It is a trust option, so a project `.cccc.toml` needs approval to use it.
 
 - The program a sandboxed `cccc prog.c` runs is confined too. Use `-c=native` and run the result outside the sandbox when it needs the network or other files.
 - Child cccc processes started by `--build` and `--watch` inherit the sandbox.
@@ -64,4 +69,4 @@ Put `sandbox = true` in `~/.config/cccc/config.toml` to confine every run. A pro
 2. Leave `--comptime-allow`, `--allow-url` and the config trust prompt (`.cccc.toml`; `--trust-hash` makes any later edit ask again) unapproved until you have read what they ask for.
 3. Do not run `cccc --build build.c` on it without `--sandbox`: the script runs as a program.
 
-[^1]: macOS uses `sandbox_init`; Linux uses landlock (kernel 5.13 or newer) for files and exec, plus a seccomp filter that refuses inet sockets. Reads are unrestricted and exec is allowed by toolchain directory, not by exact binary.
+[^1]: macOS uses `sandbox_init`; Linux uses landlock (kernel 5.13 or newer) for files and exec, plus a seccomp filter that refuses inet sockets. Reads use `file-read-data` rules on macOS and landlock read rights on Linux; file names and metadata stay visible. The programs allowed to run come from `cc -###` and `-print-prog-name`, and the compiler's own directories from `-print-search-dirs`. When the probe finds no programs, cccc warns and allows the toolchain directories instead. A toolchain whose `as` or `ld` is a shell script needs its interpreter allowed too, which `--sandbox` does not do.

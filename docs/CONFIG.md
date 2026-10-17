@@ -51,7 +51,7 @@ error: /work/proj/.cccc.toml:2: 'repl' cannot be set in a config file
 | Class | Options | Rule |
 |---|---|---|
 | Free | `std`, `D`, `U`, `I`, `isystem`, `W`, `f`, `O`, the safety and check flags, `ffi-deny`, `disable-ffi`, `sandbox`, `test-timeout`, `max-errors`, ... | always applied |
-| Trust | `comptime-allow`, `comptime-include-all`, `ffi-allow`, `asm-passthru`, `allow-url`, `library`, `library-path`, `framework-path`, `iframework`, `link-arg`, `out`, `deps-file`, `url-cache-dir`, `sysroot`, `use-system-headers`, `compile`, `build-cc`, `build-tool-allow`, `build-option`, `build-out-dir`, `build-cache` | applied from the user file; from a project file only once approved |
+| Trust | `comptime-allow`, `comptime-include-all`, `ffi-allow`, `asm-passthru`, `allow-url`, `library`, `library-path`, `framework-path`, `iframework`, `link-arg`, `out`, `deps-file`, `url-cache-dir`, `sysroot`, `use-system-headers`, `compile`, `build-cc`, `build-tool-allow`, `build-option`, `build-out-dir`, `build-cache`, `sandbox-read` | applied from the user file; from a project file only once approved |
 | User config only | `trust-hash` | applied from the user file and the command line; an error in a project file |
 | Command line only | `help`, `version`, `repl`, `debug`, `build`, `test`, `watch`, `entry`, the dump modes (`ast`, `preprocess`, `json`, ...), `trust`, `untrust`, `show-config`, `no-config` | an error in a config |
 

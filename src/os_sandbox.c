@@ -19,15 +19,14 @@
 
 // --sandbox: OS-level confinement of the whole process (macOS sandbox_init,
 // Linux landlock + seccomp).
-// TODO(#1666): reads are unrestricted and exec is allowed by toolchain path,
-// not by binary; a read allowlist built from the include paths and inputs
-// would close the first.
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include "os_sandbox.h"
+#include "config.h"
 #include "internal.h"
+#include <glob.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,18 +34,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define MAX_ROOTS 64
+#define MAX_ROOTS      64
+#define MAX_READ_ROOTS 512
 
 typedef struct {
     char *write_roots[MAX_ROOTS];
     int   write_count;
     char *exec_roots[MAX_ROOTS];
     int   exec_count;
+    char *read_roots[MAX_READ_ROOTS];
+    int   read_count;
 } Roots;
 
-static void add_root(char **list, int *count, const char *path) {
+static void add_root(char **list, int *count, int max, const char *path) {
     char resolved[PATH_MAX];
-    if (!path || !*path || !realpath(path, resolved) || *count >= MAX_ROOTS)
+    if (!path || !*path || !realpath(path, resolved) || *count >= max)
         return;
     for (int i = 0; i < *count; i++)
         if (!strcmp(list[i], resolved))
@@ -55,11 +57,15 @@ static void add_root(char **list, int *count, const char *path) {
 }
 
 static void add_write(Roots *r, const char *path) {
-    add_root(r->write_roots, &r->write_count, path);
+    add_root(r->write_roots, &r->write_count, MAX_ROOTS, path);
 }
 
 static void add_exec(Roots *r, const char *path) {
-    add_root(r->exec_roots, &r->exec_count, path);
+    add_root(r->exec_roots, &r->exec_count, MAX_ROOTS, path);
+}
+
+static void add_read(Roots *r, const char *path) {
+    add_root(r->read_roots, &r->read_count, MAX_READ_ROOTS, path);
 }
 
 // Directories the run will create (build output, caches) must exist before
@@ -80,20 +86,25 @@ static void add_write_created(Roots *r, const char *dir) {
     add_write(r, path);
 }
 
-static void add_write_dir_of(Roots *r, const char *file) {
-    if (!file)
-        return;
+// The directory holding `file` ("." for a bare name).
+static char *dir_of(const char *file) {
     char *copy  = strdup(file);
     char *slash = strrchr(copy, '/');
     if (!slash)
-        add_write(r, ".");
+        strcpy(copy, ".");
     else if (slash == copy)
-        add_write(r, "/");
-    else {
+        strcpy(copy, "/");
+    else
         *slash = '\0';
-        add_write(r, copy);
-    }
-    free(copy);
+    return copy;
+}
+
+static void add_write_dir_of(Roots *r, const char *file) {
+    if (!file)
+        return;
+    char *dir = dir_of(file);
+    add_write(r, dir);
+    free(dir);
 }
 
 static void free_roots(Roots *r) {
@@ -101,10 +112,176 @@ static void free_roots(Roots *r) {
         free(r->write_roots[i]);
     for (int i = 0; i < r->exec_count; i++)
         free(r->exec_roots[i]);
+    for (int i = 0; i < r->read_count; i++)
+        free(r->read_roots[i]);
 }
 
-// Host C compiler and the programs it runs, resolved before the sandbox closes.
-static void add_toolchain(Roots *r) {
+// All of `cmd`'s output (stdout and stderr as the command redirects them), or
+// NULL when it cannot run.
+static char *capture(const char *cmd) {
+    FILE *p = popen(cmd, "r");
+    if (!p)
+        return NULL;
+    size_t cap = 4096, len = 0;
+    char  *buf = malloc(cap);
+    for (;;) {
+        if (cap - len < 2)
+            buf = realloc(buf, cap *= 2);
+        size_t n = fread(buf + len, 1, cap - len - 1, p);
+        if (n == 0)
+            break;
+        len += n;
+    }
+    buf[len] = '\0';
+    pclose(p);
+    return buf;
+}
+
+// Appends ` '<arg>'` to cmd, shell-quoted; drops the argument when it does not
+// fit.
+static void append_quoted(char *cmd, size_t size, const char *arg) {
+    size_t len  = strlen(cmd);
+    size_t need = len + 4;
+    for (const char *c = arg; *c; c++)
+        need += *c == '\'' ? 4 : 1;
+    if (need >= size)
+        return;
+    cmd[len++] = ' ';
+    cmd[len++] = '\'';
+    for (const char *c = arg; *c; c++) {
+        if (*c == '\'') {
+            memcpy(cmd + len, "'\\''", 4);
+            len += 4;
+        } else {
+            cmd[len++] = *c;
+        }
+    }
+    cmd[len++] = '\'';
+    cmd[len]   = '\0';
+}
+
+// Adds each ':'-separated directory of `list` as readable.
+static void add_read_list(Roots *r, const char *list) {
+    char *copy = strdup(list), *save = NULL;
+    for (char *dir = strtok_r(copy, ":\n", &save); dir;
+         dir       = strtok_r(NULL, ":\n", &save))
+        add_read(r, dir);
+    free(copy);
+}
+
+// `cc -print-search-dirs`: the install, program and library directories.
+static void add_read_search_dirs(Roots *r, const char *cc) {
+    char cmd[PATH_MAX + 64];
+    snprintf(cmd, sizeof cmd, "'%s' -print-search-dirs 2>/dev/null", cc);
+    char *out = capture(cmd);
+    if (!out)
+        return;
+    for (char *line = strtok(out, "\n"); line; line = strtok(NULL, "\n")) {
+        const char *labels[] = {"install:", "programs:", "libraries:"};
+        for (size_t i = 0; i < sizeof labels / sizeof *labels; i++) {
+            size_t n = strlen(labels[i]);
+            if (strncmp(line, labels[i], n))
+                continue;
+            const char *v = line + n;
+            while (*v == ' ' || *v == '=')
+                v++;
+            add_read_list(r, v);
+        }
+    }
+    free(out);
+}
+
+// The `#include <...>` search list `cc -E -v` prints.
+static void add_read_include_dirs(Roots *r, const char *cc) {
+    char cmd[PATH_MAX + 64];
+    snprintf(cmd, sizeof cmd, "'%s' -E -v -x c /dev/null -o /dev/null 2>&1",
+             cc);
+    char *out = capture(cmd);
+    if (!out)
+        return;
+    bool in_list = false;
+    for (char *line = strtok(out, "\n"); line; line = strtok(NULL, "\n")) {
+        if (strstr(line, "search starts here:")) {
+            in_list = true;
+        } else if (strstr(line, "End of search list.")) {
+            in_list = false;
+        } else if (in_list && line[0] == ' ') {
+            while (*line == ' ')
+                line++;
+            char *note = strstr(line, " (");
+            if (note)
+                *note = '\0';
+            add_read(r, line);
+        }
+    }
+    free(out);
+}
+
+// Adds a program by path, or by name looked up on PATH as the compiler does.
+static void add_exec_program(Roots *r, const char *prog) {
+    if (prog[0] == '/') {
+        add_exec(r, prog);
+        return;
+    }
+    char *found = cccc_path_find_executable(prog);
+    add_exec(r, found);
+    free(found);
+}
+
+// Programs `cc -###` says a compile and link run. Returns how many.
+static int add_exec_from_dryrun(Roots *r, const char *cc,
+                                const CcccSandboxPaths *p) {
+    char cmd[8192];
+    snprintf(cmd, sizeof cmd, "'%s' -###", cc);
+    for (int i = 0; i < p->link_args_count; i++)
+        append_quoted(cmd, sizeof cmd, p->link_args[i]);
+    strncat(cmd, " -x c /dev/null -o /dev/null 2>&1",
+            sizeof cmd - strlen(cmd) - 1);
+    char *out = capture(cmd);
+    if (!out)
+        return 0;
+    int found = 0;
+    // A command line starts with a space: clang quotes its program, gcc does
+    // not and names `as` and `ld` without a directory.
+    for (char *line = strtok(out, "\n"); line; line = strtok(NULL, "\n")) {
+        if (line[0] != ' ')
+            continue;
+        char *prog = line + strspn(line, " ");
+        char *end  = NULL;
+        if (*prog == '"') {
+            prog++;
+            end = strchr(prog, '"');
+        } else {
+            end = prog + strcspn(prog, " ");
+        }
+        if (!end || end == prog)
+            continue;
+        *end       = '\0';
+        int before = r->exec_count;
+        add_exec_program(r, prog);
+        found += r->exec_count > before;
+    }
+    free(out);
+    return found;
+}
+
+// A program the compiler names by `-print-prog-name`, as an absolute path.
+static void add_exec_prog_name(Roots *r, const char *cc, const char *prog) {
+    char cmd[PATH_MAX + 96];
+    snprintf(cmd, sizeof cmd, "'%s' -print-prog-name=%s 2>/dev/null", cc, prog);
+    char *out = capture(cmd);
+    if (!out)
+        return;
+    out[strcspn(out, "\n")] = '\0';
+    if (out[0])
+        add_exec_program(r, out);
+    free(out);
+}
+
+// Host C compiler, the programs it runs and the files it reads, resolved
+// before the sandbox closes. Exec is limited to the exact programs; when the
+// dry run names none, whole toolchain directories are allowed instead.
+static void add_toolchain(Roots *r, const CcccSandboxPaths *p) {
     const char *env = getenv("CCCC_NATIVE_CC");
     char       *cc  = env && *env ? cccc_path_find_executable(env) : NULL;
     const char *fallback[] = {"cc", "clang", "gcc"};
@@ -113,37 +290,145 @@ static void add_toolchain(Roots *r) {
     if (!cc)
         return;
     add_exec(r, cc);
+    int exact = add_exec_from_dryrun(r, cc, p);
+    // gcc's collect2 runs ld and lto-wrapper itself, which -### never shows.
+    const char *progs[] = {"cc1", "as", "ld", "collect2", "lto-wrapper"};
+    for (size_t i = 0; i < sizeof progs / sizeof *progs; i++)
+        add_exec_prog_name(r, cc, progs[i]);
+    add_read_search_dirs(r, cc);
+    add_read_include_dirs(r, cc);
+    // The install prefix, as invoked and as resolved.
+    char        resolved[PATH_MAX] = "";
+    const char *spellings[] = {cc, realpath(cc, resolved) ? resolved : NULL};
+    for (size_t i = 0; i < sizeof spellings / sizeof *spellings; i++) {
+        if (!spellings[i])
+            continue;
+        char *bin    = dir_of(spellings[i]);
+        char *prefix = dir_of(bin);
+        if (strcmp(prefix, "/") && strcmp(prefix, "/usr"))
+            add_read(r, prefix);
+        free(prefix);
+        free(bin);
+    }
+    // A package store's programs load libraries from sibling packages.
+    const char *cellar = strstr(resolved, "/Cellar/");
+    if (cellar) {
+        char store[PATH_MAX];
+        snprintf(store, sizeof store, "%.*s", (int)(cellar - resolved),
+                 resolved);
+        add_read(r, store);
+    }
+    if (!strncmp(resolved, "/nix/store/", 11))
+        add_read(r, "/nix/store");
 #if defined(__APPLE__)
     add_exec(r, "/usr/bin/xcrun");
-    add_exec(r, "/Library/Developer/CommandLineTools");
-    FILE *p = popen("xcode-select -p 2>/dev/null", "r");
-    if (p) {
-        char dir[PATH_MAX];
-        if (fgets(dir, sizeof dir, p)) {
-            dir[strcspn(dir, "\n")] = '\0';
-            add_exec(r, dir);
-        }
-        pclose(p);
+    // /usr/bin/{as,ld} are shims that run the developer directory's own.
+    const char *queries[] = {"xcode-select -p 2>/dev/null",
+                             "xcrun --show-sdk-path 2>/dev/null"};
+    for (size_t i = 0; i < sizeof queries / sizeof *queries; i++) {
+        char *out = capture(queries[i]);
+        if (!out)
+            continue;
+        out[strcspn(out, "\n")] = '\0';
+        add_read(r, out);
+        free(out);
+    }
+    const char *tools[] = {"as", "ld", "clang"};
+    for (size_t i = 0; i < sizeof tools / sizeof *tools; i++) {
+        char cmd[64];
+        snprintf(cmd, sizeof cmd, "xcrun -f %s 2>/dev/null", tools[i]);
+        char *out = capture(cmd);
+        if (!out)
+            continue;
+        out[strcspn(out, "\n")] = '\0';
+        add_exec(r, out);
+        free(out);
+    }
+    if (!exact) {
+        fprintf(stderr, "warning: --sandbox: toolchain probe failed; exec "
+                        "allowed by directory\n");
+        add_exec(r, "/Library/Developer/CommandLineTools");
+        add_exec(r, "/usr/bin");
     }
 #else
-    const char *progs[] = {"cc1", "as", "ld", "collect2", "lto-wrapper"};
-    for (size_t i = 0; i < sizeof progs / sizeof *progs; i++) {
-        char cmd[PATH_MAX + 64];
-        snprintf(cmd, sizeof cmd, "'%s' -print-prog-name=%s 2>/dev/null", cc,
-                 progs[i]);
-        FILE *p = popen(cmd, "r");
-        if (!p)
-            continue;
-        char path[PATH_MAX];
-        if (fgets(path, sizeof path, p)) {
-            path[strcspn(path, "\n")] = '\0';
-            if (path[0] == '/')
-                add_exec(r, path);
-        }
-        pclose(p);
+    if (!exact) {
+        fprintf(stderr, "warning: --sandbox: toolchain probe failed; exec "
+                        "allowed by directory\n");
+        const char *dirs[] = {"/lib", "/lib64", "/usr/lib", "/usr/lib64",
+                              "/usr/libexec"};
+        for (size_t i = 0; i < sizeof dirs / sizeof *dirs; i++)
+            add_exec(r, dirs[i]);
     }
 #endif
     free(cc);
+}
+
+static void add_read_dir_of_file(Roots *r, const char *file) {
+    if (!file || !strcmp(file, "-"))
+        return;
+    char *dir = dir_of(file);
+    add_read(r, dir);
+    free(dir);
+}
+
+// Fixed system locations every run needs to read.
+static void add_system_reads(Roots *r) {
+#if defined(__APPLE__)
+    const char *dirs[] = {"/usr/lib",
+                          "/usr/share",
+                          "/usr/include",
+                          "/usr/libexec",
+                          "/usr/bin",
+                          "/System",
+                          "/Library/Developer",
+                          "/private/etc",
+                          "/private/var/db",
+                          "/private/var/select",
+                          "/dev"};
+#else
+    // TODO: whole /etc; the files used are ld.so.cache, nsswitch, localtime,
+    // passwd, group and the ld.so.conf tree (#1667).
+    const char *dirs[] = {"/lib",
+                          "/lib64",
+                          "/usr/lib",
+                          "/usr/lib64",
+                          "/usr/include",
+                          "/usr/local/include",
+                          "/usr/share",
+                          "/etc",
+                          "/dev",
+                          "/proc/self",
+                          "/proc/cpuinfo",
+                          "/proc/meminfo",
+                          "/sys/devices/system/cpu"};
+#endif
+    for (size_t i = 0; i < sizeof dirs / sizeof *dirs; i++)
+        add_read(r, dirs[i]);
+}
+
+// Config files a cccc started inside the sandbox reads.
+static void add_config_reads(Roots *r) {
+    char *dir = cccc_config_dir();
+    add_read(r, dir);
+    free(dir);
+    const char *home = getenv("HOME");
+    if (home && *home) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof path, "%s/.cccc.toml", home);
+        add_read(r, path);
+    }
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof cwd))
+        return;
+    for (;;) {
+        char path[PATH_MAX + 16];
+        snprintf(path, sizeof path, "%s/.cccc.toml", cwd);
+        add_read(r, path);
+        char *slash = strrchr(cwd, '/');
+        if (!slash || slash == cwd)
+            break;
+        *slash = '\0';
+    }
 }
 
 static void collect_roots(Roots *r, const CcccSandboxPaths *p) {
@@ -173,13 +458,34 @@ static void collect_roots(Roots *r, const CcccSandboxPaths *p) {
 #if defined(__linux__)
     add_write(r, "/dev/null");
     add_write(r, "/dev/tty");
-    // The ELF interpreter and the compiler's helper programs live here.
-    const char *libs[] = {"/lib", "/lib64", "/usr/lib", "/usr/lib64"};
-    for (size_t i = 0; i < sizeof libs / sizeof *libs; i++)
-        add_exec(r, libs[i]);
+    // The ELF interpreter, which the kernel executes for every program.
+    const char *interps[] = {"/lib*/ld-linux*", "/lib*/ld-musl*",
+                             "/lib/*/ld-linux*", "/usr/lib*/ld-linux*"};
+    for (size_t i = 0; i < sizeof interps / sizeof *interps; i++) {
+        glob_t g;
+        if (glob(interps[i], 0, NULL, &g) == 0)
+            for (size_t j = 0; j < g.gl_pathc; j++)
+                add_exec(r, g.gl_pathv[j]);
+        globfree(&g);
+    }
 #endif
     add_exec(r, p->self);
-    add_toolchain(r);
+    add_toolchain(r, p);
+
+    // Readable: what the run was told about, the working directory and the
+    // system; every write and exec root can be read too.
+    add_read(r, ".");
+    for (int i = 0; i < p->inputs_count; i++)
+        add_read_dir_of_file(r, p->inputs[i]);
+    for (int i = 0; i < p->read_count; i++)
+        add_read(r, p->read_paths[i]);
+    add_read(r, p->self);
+    add_config_reads(r);
+    add_system_reads(r);
+    for (int i = 0; i < r->write_count; i++)
+        add_read(r, r->write_roots[i]);
+    for (int i = 0; i < r->exec_count; i++)
+        add_read(r, r->exec_roots[i]);
 }
 
 #if defined(__APPLE__)
@@ -212,8 +518,9 @@ bool cccc_sandbox_enter(const CcccSandboxPaths *p, char *err, size_t err_size) {
     Roots roots = {0};
     collect_roots(&roots, p);
 
-    size_t size    = 4096 + (size_t)(roots.write_count + roots.exec_count) *
-                                (PATH_MAX * 2 + 64);
+    size_t size     = 4096 + (size_t)(roots.write_count + roots.exec_count +
+                                      roots.read_count) *
+                                 (PATH_MAX * 2 + 64);
     char  *profile = malloc(size);
     size_t len     = 0;
     len += (size_t)snprintf(profile, size,
@@ -222,6 +529,12 @@ bool cccc_sandbox_enter(const CcccSandboxPaths *p, char *err, size_t err_size) {
                             "(allow file-write* (regex #\"^/dev/\")");
     for (int i = 0; i < roots.write_count; i++)
         sbpl_subpath(profile, size, &len, roots.write_roots[i]);
+    len += (size_t)snprintf(profile + len, size - len,
+                            ")(deny file-read-data)"
+                            "(allow file-read-data (literal \"/\")"
+                            "(regex #\"^/dev/\")");
+    for (int i = 0; i < roots.read_count; i++)
+        sbpl_subpath(profile, size, &len, roots.read_roots[i]);
     len += (size_t)snprintf(profile + len, size - len, ")(deny process-exec*)");
     if (roots.exec_count) {
         len +=
@@ -270,6 +583,8 @@ struct ll_path_beneath_attr {
 
 #define LL_FS_EXECUTE             (1ULL << 0)
 #define LL_FS_WRITE_FILE          (1ULL << 1)
+#define LL_FS_READ_FILE           (1ULL << 2)
+#define LL_FS_READ_DIR            (1ULL << 3)
 #define LL_FS_TRUNCATE            (1ULL << 14)
 #define LL_CREATE_RULESET_VERSION (1U << 0)
 #define LL_RULE_PATH_BENEATH      1
@@ -287,8 +602,9 @@ static bool landlock_apply(const Roots *r, char *err, size_t err_size) {
         snprintf(err, err_size, "landlock is not available on this kernel");
         return false;
     }
-    // Everything except reading: execute, write, create, remove, rename.
-    uint64_t handled = LL_FS_EXECUTE | LL_FS_WRITE_FILE | 0x1ff0ULL;
+    // Execute, read, write, create, remove, rename.
+    uint64_t handled = LL_FS_EXECUTE | LL_FS_WRITE_FILE | LL_FS_READ_FILE |
+                       LL_FS_READ_DIR | 0x1ff0ULL;
     if (abi >= 2)
         handled |= 1ULL << 13; // REFER
     if (abi >= 3)
@@ -299,17 +615,25 @@ static bool landlock_apply(const Roots *r, char *err, size_t err_size) {
         snprintf(err, err_size, "landlock_create_ruleset: %s", strerror(errno));
         return false;
     }
-    uint64_t file_bits = LL_FS_EXECUTE | LL_FS_WRITE_FILE | LL_FS_TRUNCATE;
-    for (int pass = 0; pass < 2; pass++) {
-        int    n     = pass ? r->exec_count : r->write_count;
-        char **paths = pass ? (char **)r->exec_roots : (char **)r->write_roots;
+    uint64_t file_bits =
+        LL_FS_EXECUTE | LL_FS_WRITE_FILE | LL_FS_READ_FILE | LL_FS_TRUNCATE;
+    const uint64_t read_bits = LL_FS_READ_FILE | LL_FS_READ_DIR;
+    for (int pass = 0; pass < 3; pass++) {
+        int    n     = pass == 0   ? r->write_count
+                       : pass == 1 ? r->exec_count
+                                   : r->read_count;
+        char **paths = pass == 0   ? r->write_roots
+                       : pass == 1 ? r->exec_roots
+                                   : r->read_roots;
         for (int i = 0; i < n; i++) {
             int pfd = open(paths[i], O_PATH | O_CLOEXEC);
             if (pfd < 0)
                 continue;
             struct stat st;
             bool        is_dir = fstat(pfd, &st) == 0 && S_ISDIR(st.st_mode);
-            uint64_t want = pass ? LL_FS_EXECUTE : (handled & ~LL_FS_EXECUTE);
+            uint64_t    want   = pass == 0   ? (handled & ~LL_FS_EXECUTE)
+                                 : pass == 1 ? LL_FS_EXECUTE
+                                             : read_bits;
             struct ll_path_beneath_attr rule = {
                 .allowed_access = (is_dir ? want : want & file_bits) & handled,
                 .parent_fd      = pfd};

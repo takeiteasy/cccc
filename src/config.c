@@ -171,6 +171,7 @@ static const struct {
     {"U", CFG_FREE},
     {"allow-url", CFG_TRUST},
     {"sandbox", CFG_FREE},
+    {"sandbox-read", CFG_TRUST},
     {"url-timeout", CFG_FREE},
     {"url-max-size", CFG_FREE},
     {"max-errors", CFG_FREE},
@@ -249,6 +250,7 @@ static const char *const list_keys[] = {
     "build-tool-allow",
     "build-option",
     "link-arg",
+    "sandbox-read",
 };
 
 // Keys whose relative values are taken from the config file's directory.
@@ -269,6 +271,7 @@ static const char *const path_keys[] = {
     "sysroot",
     "build-out-dir",
     "watch-path",
+    "sandbox-read",
 };
 
 static bool is_path_key(const char *key) {
@@ -397,6 +400,10 @@ static char *global_config_dir(void) {
     if (home && home[0])
         return join(home, "/.config/cccc");
     return NULL;
+}
+
+char *cccc_config_dir(void) {
+    return global_config_dir();
 }
 
 static char *find_global(void) {
