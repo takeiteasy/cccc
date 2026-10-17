@@ -179,14 +179,17 @@ Options:
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
 	-S/--no-stdlib           Do not link standard library
-	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), generated
+	-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: native (default), object, generated
 	                         native: build a native executable via CCCC_NATIVE_CC
 	                                 (cc, clang, or gcc); writes to -o file, or ./a.out
 	                                 if -o omitted
+	                         object: like native but stop before linking; writes
+	                                 to -o file, or <input>.o (-o required for
+	                                 several inputs); -l/-L/--link-arg are rejected
 	                         generated: serialize the runtime TU + macro-generated
 	                                    objects to C; writes to -o file, or ./a.gen.c
 	                                    if -o omitted
-	                         Aliases: native=n, generated=gen=g. Use
+	                         Aliases: native=n, object=obj=o, generated=gen=g. Use
 	                         -cnative or --compile=native (short form must be
 	                         attached; long form may use '=' or separate arg).
 	   --deps-file=PATH      With -c=native/-m/-c=generated: write a make-style

@@ -177,18 +177,19 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 #define NATIVE_STD_PROBE_FLAGS                                                 \
     (CCCC_STD_PROBE_PREFER_GNU | CCCC_STD_PROBE_C11_FLOOR)
 
-static int run_native_backend(
-    VirtualMachine *vm, Obj *prog, const char *out_file, const char **inc_paths,
-    int inc_paths_count, const char **sys_inc_paths, int sys_inc_paths_count,
-    const char **lib_paths, int lib_paths_count, const char **libs,
-    int libs_count, const char **link_args, int link_args_count,
-    const char **defines, int defines_count, const char **undefs,
-    int undefs_count, const char *std_arg, bool emit_cccc,
-    bool emit_test_harness, bool no_emit_tests, int opt_level) {
+static int
+run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
+                   const char **inc_paths, int inc_paths_count,
+                   const char **sys_inc_paths, int sys_inc_paths_count,
+                   const char **lib_paths, int lib_paths_count,
+                   const char **libs, int libs_count, const char **link_args,
+                   int link_args_count, const char **defines, int defines_count,
+                   const char **undefs, int undefs_count, const char *std_arg,
+                   bool emit_cccc, bool emit_test_harness, bool no_emit_tests,
+                   int opt_level, bool object_only) {
     if (!out_file) {
-        fprintf(
-            stderr,
-            "error: -c=native requires -o <file> (no executable path given)\n");
+        fprintf(stderr,
+                "error: -c=native requires -o <file> (no output path given)\n");
         return 1;
     }
 
@@ -319,6 +320,8 @@ static int run_native_backend(
     StringArray owned   = {0}; // #1065: heap-backed flags freed after the spawn
     argv_push(&cc_args, cc);
     argv_push(&cc_args, source_path);
+    if (object_only)
+        argv_push(&cc_args, "-c");
     argv_push(&cc_args, "-o");
     argv_push(&cc_args, exe_path);
     // #1073: an explicit --std= used to be forwarded byte-for-byte,
@@ -408,53 +411,56 @@ static int run_native_backend(
         push_owned_flag(&cc_args, &owned, "-D", defines[i]);
     for (int i = 0; i < undefs_count; i++)
         push_owned_flag(&cc_args, &owned, "-U", undefs[i]);
-    for (int i = 0; i < lib_paths_count; i++) {
-        argv_push(&cc_args, "-L");
-        argv_push(&cc_args, lib_paths[i]);
-    }
-    for (int i = 0; i < libs_count; i++)
-        push_owned_flag(&cc_args, &owned, "-l", libs[i]);
-    for (int i = 0; i < link_args_count; i++)
-        argv_push(&cc_args, (char *)link_args[i]);
-    // #1051: libm is never linked otherwise -- a guest program calling any
-    // math.h function CCCC's own bundled header declares (fmaximum/
-    // totalorder/etc, the whole C23 IEC 60559:2020 family CCCC implements
-    // in software) fails to *link* on a host where those specific symbols
-    // haven't been folded into libc itself. This stayed invisible until
-    // #1037's math test hit it, because glibc >= 2.34 already folds the
-    // *common* math functions (sin/sqrt/etc.) into libc.so.6, so most
-    // native programs linked fine with no -lm at all. Appended last (after
-    // every other -l flag) so it can satisfy an unresolved libm symbol left
-    // by a preceding static archive on a linker that resolves strictly
-    // left-to-right; harmless everywhere else -- an unused -lm is dropped
-    // by the linker, and on a host where libm is already folded into libc
-    // (glibc's newer functions aside) or into libSystem (macOS), the flag
-    // is simply a no-op.
-    argv_push(&cc_args, "-lm");
-    // #1088: pthread is never linked otherwise -- the <threads.h> shims
-    // (serialize_threads_shims, src/serialize_shims.c) call real
-    // pthread_create/ pthread_mutex_*/pthread_cond_*/pthread_key_* directly,
-    // same as any guest program using <pthread.h> itself. This stayed invisible
-    // for pthread until now for the same reason -lm did (#1051): glibc >= 2.34
-    // folds libpthread into libc.so.6 and macOS always had it in
-    // libSystem, so every existing native pthread test linked fine with no
-    // flag at all. An older glibc (< 2.34) needs it explicitly. Harmless
-    // where unnecessary, same rationale as -lm just above.
-    argv_push(&cc_args, "-pthread");
-    // #1147: iconv is never linked otherwise -- <iconv.h>'s iconv_open/
-    // iconv/iconv_close (include/iconv.h) are real, directly-called host
-    // functions under -c=native (no CCCC wrapper, unlike the VM's own
-    // FFI-resolved iconv), and macOS ships them in a separate libiconv
-    // rather than folding them into libSystem the way glibc folds them
-    // into libc itself -- verified directly (link fails on macOS without
-    // -liconv, succeeds with it; not needed at all on Linux). Unlike -lm/
-    // -pthread just above, this can't be forwarded unconditionally: glibc
-    // has no separate libiconv, so an unconditional -liconv would convert
-    // a macOS link gap into a Linux one. Mirrors this project's own build
-    // (Makefile's Darwin-only LDFLAGS += -liconv).
+    if (!object_only) {
+        for (int i = 0; i < lib_paths_count; i++) {
+            argv_push(&cc_args, "-L");
+            argv_push(&cc_args, lib_paths[i]);
+        }
+        for (int i = 0; i < libs_count; i++)
+            push_owned_flag(&cc_args, &owned, "-l", libs[i]);
+        for (int i = 0; i < link_args_count; i++)
+            argv_push(&cc_args, (char *)link_args[i]);
+        // #1051: libm is never linked otherwise -- a guest program calling any
+        // math.h function CCCC's own bundled header declares (fmaximum/
+        // totalorder/etc, the whole C23 IEC 60559:2020 family CCCC implements
+        // in software) fails to *link* on a host where those specific symbols
+        // haven't been folded into libc itself. This stayed invisible until
+        // #1037's math test hit it, because glibc >= 2.34 already folds the
+        // *common* math functions (sin/sqrt/etc.) into libc.so.6, so most
+        // native programs linked fine with no -lm at all. Appended last (after
+        // every other -l flag) so it can satisfy an unresolved libm symbol left
+        // by a preceding static archive on a linker that resolves strictly
+        // left-to-right; harmless everywhere else -- an unused -lm is dropped
+        // by the linker, and on a host where libm is already folded into libc
+        // (glibc's newer functions aside) or into libSystem (macOS), the flag
+        // is simply a no-op.
+        argv_push(&cc_args, "-lm");
+        // #1088: pthread is never linked otherwise -- the <threads.h> shims
+        // (serialize_threads_shims, src/serialize_shims.c) call real
+        // pthread_create/ pthread_mutex_*/pthread_cond_*/pthread_key_*
+        // directly, same as any guest program using <pthread.h> itself. This
+        // stayed invisible for pthread until now for the same reason -lm did
+        // (#1051): glibc >= 2.34 folds libpthread into libc.so.6 and macOS
+        // always had it in libSystem, so every existing native pthread test
+        // linked fine with no flag at all. An older glibc (< 2.34) needs it
+        // explicitly. Harmless where unnecessary, same rationale as -lm just
+        // above.
+        argv_push(&cc_args, "-pthread");
+        // #1147: iconv is never linked otherwise -- <iconv.h>'s iconv_open/
+        // iconv/iconv_close (include/iconv.h) are real, directly-called host
+        // functions under -c=native (no CCCC wrapper, unlike the VM's own
+        // FFI-resolved iconv), and macOS ships them in a separate libiconv
+        // rather than folding them into libSystem the way glibc folds them
+        // into libc itself -- verified directly (link fails on macOS without
+        // -liconv, succeeds with it; not needed at all on Linux). Unlike -lm/
+        // -pthread just above, this can't be forwarded unconditionally: glibc
+        // has no separate libiconv, so an unconditional -liconv would convert
+        // a macOS link gap into a Linux one. Mirrors this project's own build
+        // (Makefile's Darwin-only LDFLAGS += -liconv).
 #ifdef __APPLE__
     argv_push(&cc_args, "-liconv");
 #endif
+    }
     // #1064: plain `char` is signed under every one of CCCC's own type
     // rules (ty_char, src/type.c), but a real host's plain `char` isn't
     // universally signed -- measured directly in the cccc-linux-arm64
@@ -644,19 +650,25 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t-S/--no-stdlib           Do not link standard library\n");
     printf("\t-c[FMT]/--compile[=FMT]  Compile only; do not execute. FMT: "
            "native (default), "
-           "generated\n");
+           "object, generated\n");
     printf("\t                         native: build a native executable via "
            "CCCC_NATIVE_CC\n");
     printf("\t                                 (cc, clang, or gcc); writes to "
            "-o file, or ./a.out\n");
     printf("\t                                 if -o omitted\n");
+    printf("\t                         object: like native but stop before "
+           "linking; writes\n");
+    printf("\t                                 to -o file, or <input>.o "
+           "(-o required for\n");
+    printf("\t                                 several inputs); -l/-L/"
+           "--link-arg are rejected\n");
     printf("\t                         generated: serialize the runtime TU + "
            "macro-generated\n");
     printf("\t                                    objects to C; writes to -o "
            "file, or ./a.gen.c\n");
     printf("\t                                    if -o omitted\n");
-    printf(
-        "\t                         Aliases: native=n, generated=gen=g. Use\n");
+    printf("\t                         Aliases: native=n, object=obj=o, "
+           "generated=gen=g. Use\n");
     printf("\t                         -cnative or --compile=native (short "
            "form must be\n");
     printf("\t                         attached; long form may use '=' or "
@@ -1494,6 +1506,7 @@ int main(int argc, const char *argv[]) {
     int      test_run_mode         = 0; // --test-run[=LEVEL]
     uint64_t test_run_flags =
         0;                // safety preset bits for --test-run's VM smoke test
+    int native_object = 0; // -c=object: native compile, stop before linking
     int compile_only = 0; // -c (set whenever -c/--compile is given; semantics:
                           //   "compile, do not execute". -c=native hands off to
                           //   the system compiler.)
@@ -1880,36 +1893,39 @@ int main(int argc, const char *argv[]) {
                 const char *fmt = optarg;
                 if (fmt && fmt[0] == '=')
                     fmt++;
-                if (!fmt || !*fmt) {
-                    compile_format = COMPILE_NATIVE;
-                    compile_only   = 1;
-                } else if (strcmp(fmt, "native") == 0 ||
-                           strcmp(fmt, "n") == 0) {
-                    compile_format = COMPILE_NATIVE;
-                    compile_only   = 1;
+                bool new_object = false, new_generated = false;
+                if (!fmt || !*fmt || strcmp(fmt, "native") == 0 ||
+                    strcmp(fmt, "n") == 0) {
+                } else if (strcmp(fmt, "object") == 0 ||
+                           strcmp(fmt, "obj") == 0 || strcmp(fmt, "o") == 0) {
+                    new_object = true;
                 } else if (strcmp(fmt, "generated") == 0 ||
                            strcmp(fmt, "gen") == 0 || strcmp(fmt, "g") == 0) {
-                    // -c=generated (#936): folds the old standalone -G/
-                    // --emit-generated into the -c namespace. Unlike native
-                    // this does NOT set compile_only -- it reuses the
-                    // dump_expanded_only/emit_generated_only serialization path
-                    // below (same as -m), which historically has never been
-                    // gated by compile_only. Flipping compile_only here would
-                    // change behavior at every site that branches on it (the
-                    // --repl/--build validation blocks, etc.) for no
-                    // reason -- -c=generated is a serialize-and-exit mode, not
-                    // a "hand off to another backend" mode like native is.
-                    // compile_format is only consulted here to pick
-                    // -c=generated's default output filename.
+                    new_generated = true;
+                } else {
+                    fprintf(stderr,
+                            "error: invalid --compile format '%s' "
+                            "(use 'native', 'object' or 'generated')\n",
+                            fmt);
+                    usage(argv[0], 1);
+                }
+                if (compile_format != COMPILE_NONE &&
+                    ((compile_format == COMPILE_GENERATED) != new_generated ||
+                     (bool)native_object != new_object)) {
+                    fprintf(stderr, "error: conflicting -c formats\n");
+                    usage(argv[0], 1);
+                }
+                if (new_generated) {
+                    // -c=generated (#936) reuses the -m serialization path and
+                    // does not set compile_only; compile_format only picks its
+                    // default output filename.
                     compile_format      = COMPILE_GENERATED;
                     dump_expanded_only  = 1;
                     emit_generated_only = 1;
                 } else {
-                    fprintf(stderr,
-                            "error: invalid --compile format '%s' "
-                            "(use 'native' or 'generated')\n",
-                            fmt);
-                    usage(argv[0], 1);
+                    compile_format = COMPILE_NATIVE;
+                    compile_only   = 1;
+                    native_object  = new_object;
                 }
                 break;
             }
@@ -2624,6 +2640,36 @@ int main(int argc, const char *argv[]) {
                             "policy options\n");
             usage(argv[0], 1);
         }
+        if (native_object) {
+            if (test_run_mode || testing_backend == TESTING_BACKEND_NATIVE) {
+                fprintf(stderr, "error: -c=object produces no executable; it "
+                                "cannot be combined with --test-run or "
+                                "--testing=native\n");
+                usage(argv[0], 1);
+            }
+            if (libs_count || lib_paths_count || link_args_count) {
+                fprintf(stderr, "error: -c=object does not link; -l, -L and "
+                                "--link-arg are not allowed\n");
+                usage(argv[0], 1);
+            }
+            if (!out_file &&
+                (input_files_count > 1 ||
+                 (input_files_count == 1 && !strcmp(input_files[0], "-")))) {
+                fprintf(stderr, "error: -c=object with several inputs or stdin "
+                                "requires -o\n");
+                usage(argv[0], 1);
+            }
+            if (!out_file && input_files_count == 1) {
+                const char *in    = input_files[0];
+                const char *slash = strrchr(in, '/');
+                const char *base  = slash ? slash + 1 : in;
+                const char *dot   = strrchr(base, '.');
+                size_t      stem =
+                    dot && dot != base ? (size_t)(dot - base) : strlen(base);
+                out_file = malloc(stem + 3);
+                snprintf(out_file, stem + 3, "%.*s.o", (int)stem, base);
+            }
+        }
         if (!out_file && testing_backend == TESTING_BACKEND_NATIVE) {
             out_file = make_tmp_path("");
             if (!out_file) {
@@ -3288,7 +3334,8 @@ int main(int argc, const char *argv[]) {
     // linked) the same as -l. Copies are made so `libs[]` and
     // vm.compiler.pragma_link_libs each own their own strings (both are freed
     // independently at cleanup).
-    for (int i = 0; i < vm.compiler.pragma_link_libs.len; i++) {
+    for (int i = 0; !native_object && i < vm.compiler.pragma_link_libs.len;
+         i++) {
         libs               = realloc(libs, sizeof(*libs) * (libs_count + 1));
         libs[libs_count++] = strdup(vm.compiler.pragma_link_libs.data[i]);
     }
@@ -3596,7 +3643,7 @@ int main(int argc, const char *argv[]) {
             libs, libs_count, link_args, link_args_count, defines,
             defines_count, undefs, undefs_count, std_arg, (bool)emit_cccc_mode,
             testing_backend == TESTING_BACKEND_NATIVE, (bool)no_emit_tests,
-            opt_level);
+            opt_level, (bool)native_object);
         if (exit_code == 0 && testing_backend == TESTING_BACKEND_NATIVE) {
             // execvp searches PATH for a slash-less name.
             size_t exe_len = strlen(out_file) + 3;

@@ -10,14 +10,15 @@ normal VM build. Only what happens *after* the AST is resolved changes.
 
 Supported host platforms: macOS (aarch64) and Linux (aarch64, x86_64).
 
-## The four output modes
+## The output modes
 
 | Flag | What it does | Typical use |
 |---|---|---|
 | *(none)* | Compile to VM bytecode, run it in the interpreter | Default: portability, sandboxing, the debugger, the safety suite, iteration with no system compiler |
 | `-m` / `--dump-expanded` | Serialize the AST to portable C, print to stdout; don't compile | Seeing what CCCC would hand a host compiler |
-| `-c=generated` | Serialize to C, write to a file (`-o`, default `./a.c`); don't compile | Build systems that drive their own `cc` |
+| `-c=generated` | Serialize to C, write to a file (`-o`, default `./a.gen.c`); don't compile | Build systems that drive their own `cc` |
 | `-c=native` | Serialize to C, compile + link a real executable (`-o`, default `./a.out`) | The production path |
+| `-c=object` | Serialize to C, compile to an object file without linking (`-o`, default `<input>.o`) | Libraries, or linking with other objects yourself |
 
 All three serializing modes run the same tree walk and are subject to
 everything in this document identically — "under `-c=native`" below means all
@@ -94,6 +95,22 @@ cccc -c=native main.c --link-arg=-framework --link-arg=CoreServices -o app
 ```
 
 Giving `--link-arg` without `-c=native` is an error.
+
+### Object files
+
+`-c=object` (aliases `obj`, `o`) compiles with the host `cc -c` and stops
+before linking, so a file without `main` works.
+
+```sh
+cccc -c=object lib.c                 # writes ./lib.o
+cccc -c=object a.c b.c -o ab.o       # several inputs need -o
+cc main.c lib.o -o app
+```
+
+`-l`, `-L` and `--link-arg` are errors, and `#pragma cccc link` libraries are
+dropped; pass them when linking the object. `--test-run` and
+`--testing=native` need an executable and cannot be combined with it.
+Repeating `-c` with a different format (`-c=native -c=object`) is an error.
 
 ### How `--std=` is handled
 
