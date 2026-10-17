@@ -1087,4 +1087,42 @@ int test_restrict_noalias_opt(void) {
     return 42;
 }
 
+static void fp_ret_target(int x) {
+    (void)x;
+}
+static void (*fp_ret_get(int k))(int) {
+    return k ? fp_ret_target : 0;
+}
+static int (*fp_ret_row(int (*a)[3]))[3] {
+    return a;
+}
+typedef void (*FpRetHandler)(int);
+typedef void (*(*FpRetGetter)(int))(int);
+struct FpRetHolder {
+    void (*(*get)(int))(int);
+};
+static FpRetHandler (*fp_ret_aliased)(int) = 0;
+
+static int fp_ret_param(void (*(*g)(int))(int)) {
+    return g(1) == fp_ret_target;
+}
+
+[[cccc::test(return = 42)]]
+int test_function_returning_function_pointer_declarators(void) {
+    void (*(*local)(int))(int)     = fp_ret_get;
+    FpRetGetter        tdef        = fp_ret_get;
+    struct FpRetHolder h           = {fp_ret_get};
+    int (*(*rowfn)(int (*)[3]))[3] = fp_ret_row;
+    int a[2][3]                    = {{0}};
+    if (local(1) != fp_ret_target || tdef(1) != fp_ret_target ||
+        h.get(1) != fp_ret_target || rowfn(a) != a)
+        return 1;
+    if ((void (*(*)(int))(int))local != tdef || !fp_ret_param(h.get))
+        return 2;
+    fp_ret_aliased = (FpRetHandler (*)(int))fp_ret_get;
+    if (fp_ret_aliased(1) != fp_ret_target)
+        return 3;
+    return 42;
+}
+
 #pragma cccc suite end

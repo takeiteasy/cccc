@@ -33,6 +33,16 @@ int test_signal_raise_through_pointers(void) {
 }
 
 [[cccc::test(return = 42)]]
+int test_signal_pointer_spelled_out(void) {
+    void (*(*s)(int, void (*)(int)))(int) = signal;
+    hit                                   = 0;
+    s(SIGUSR1, on_signal);
+    if (!s || raise(SIGUSR1) != 0 || hit != SIGUSR1)
+        return 1;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
 int test_local_raise_pointer(void) {
     int (*lr)(int) = raise;
     hit            = 0;

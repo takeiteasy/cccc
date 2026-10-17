@@ -1281,4 +1281,46 @@ int test_empty_struct_complete(void) {
     return h.x + 2;
 }
 
+typedef struct StructsSpan StructsSpan;
+struct StructsSpan {
+    const char *ptr;
+    int         len;
+};
+struct StructsShapeHolder {
+    int k;
+    union {
+        const char *s;
+        struct {
+            const char *ptr;
+            int         len;
+        } str;
+    } u;
+};
+struct StructsShapeFirst {
+    struct {
+        const char *ptr;
+        int         len;
+    } str;
+};
+typedef struct StructsSpanLate StructsSpanLate;
+struct StructsSpanLate {
+    const char *ptr;
+    int         len;
+};
+
+[[cccc::test(return = 42)]]
+int test_tagless_member_beside_same_shape_tagged_typedef(void) {
+    struct StructsShapeHolder h = {0};
+    struct StructsShapeFirst  f = {{0, 0}};
+    StructsSpan               s = {0, 0};
+    StructsSpanLate           l = {0, 0};
+    h.u.str.len                 = 30;
+    f.str.len                   = 8;
+    s.len                       = 3;
+    l.len                       = 1;
+    if (sizeof h.u.str != sizeof s || sizeof f.str != sizeof l)
+        return 1;
+    return h.u.str.len + f.str.len + s.len + l.len;
+}
+
 #pragma cccc suite end

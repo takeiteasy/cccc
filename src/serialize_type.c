@@ -956,6 +956,7 @@ TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
 
     TYPE_CAND_FOR(i, type_cand_typedefs, ctx, ty, ctx->typedefs_len)
     if (name_visible(&ctx->typedefs[i], ctx->current_fn) &&
+        !tag_spelling_mismatch(ty, ctx->typedefs[i].ty) &&
         same_type_or_origin(ctx->typedefs[i].ty, ty))
         return &ctx->typedefs[i];
     return NULL;
@@ -1189,7 +1190,8 @@ static TypeName *find_anonymous_typedef_name(SerializeContext *ctx, Type *ty) {
         if (!name_visible(name, ctx->current_fn) || !name->ty ||
             name->ty->kind != ty->kind)
             continue;
-        if (!same_type_or_origin(name->ty, ty))
+        if (tag_spelling_mismatch(ty, name->ty) ||
+            !same_type_or_origin(name->ty, ty))
             continue;
         if (!type_has_tag_for_owner(ctx, name->ty, name->owner_fn))
             return name;
@@ -1983,25 +1985,44 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
     }
 
     if (ty->kind == TY_FUNC) {
-        serialize_type(f, ctx, ty->return_ty);
+        // A pointer return type (`void (*(*s)(int))(int)`) wraps around the
+        // whole `name(params)` unit, so build that first. An aliased return
+        // type keeps its typedef spelling instead of being decomposed.
+        bool   wrap_ret = ty->return_ty && ty->return_ty->kind == TY_PTR &&
+                          !find_typedef_name_exact(ctx, ty->return_ty);
+        FILE  *out      = f;
+        char  *declbuf  = NULL;
+        size_t declsz   = 0;
+        if (wrap_ret)
+            out = open_memstream(&declbuf, &declsz);
+        else {
+            serialize_type(f, ctx, ty->return_ty);
+            if (name && *name)
+                fprintf(f, " ");
+        }
         if (name && *name)
-            fprintf(f, " %s", name);
-        fprintf(f, "(");
+            fprintf(out, "%s", name);
+        fprintf(out, "(");
         bool first = true;
         for (Type *p = ty->params; p; p = p->next) {
             if (!first)
-                fprintf(f, ", ");
+                fprintf(out, ", ");
             first = false;
-            serialize_type(f, ctx, p);
+            serialize_type(out, ctx, p);
         }
         if (ty->is_variadic) {
             if (!first)
-                fprintf(f, ", ");
-            fprintf(f, "...");
+                fprintf(out, ", ");
+            fprintf(out, "...");
         } else if (first) {
-            fprintf(f, "void");
+            fprintf(out, "void");
         }
-        fprintf(f, ")");
+        fprintf(out, ")");
+        if (wrap_ret) {
+            fclose(out);
+            serialize_type_decl(f, ctx, ty->return_ty, declbuf ? declbuf : "");
+            free(declbuf);
+        }
         return;
     }
 
