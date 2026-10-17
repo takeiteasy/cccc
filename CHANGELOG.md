@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: comptime loads and stores outside VM memory are compile errors
+  instead of host crashes. Compiler builtins work under `--disable-ffi` and
+  return names and arrays as VM copies. See `docs/COMPTIME_POLICY.md`.
+
 ## [0.15.0] - 2026-10-17
 
 - Added: `CcccObject` build target compiles a cccc source to an object file

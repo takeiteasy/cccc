@@ -69,6 +69,13 @@ At comptime a call must pass both the comptime classes and `--ffi-allow` / `--ff
 
 ## Limits
 
-The policy is accident prevention, not isolation.[^1] Comptime pointers are real host pointers, so a raw store through a bad address can still crash or corrupt the compiler.
+The policy is accident prevention, not isolation.[^1] Comptime pointers are real host pointers, but comptime loads and stores are confined to VM memory (data, stack, heap and thread-local storage). An access outside it is a compile error at the macro call:
+
+```
+error: compile-time macro 'poke' aborted (opcode 'STR_W' faulted)
+Write of 4 byte(s) at 0x8 is outside VM memory
+```
+
+Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies. Libc calls and the handles passed to builtins are still trusted, so run untrusted code under an OS sandbox.
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`; a new libc binding needs a row there, which `tests/host/test_comptime_policy.c` enforces.

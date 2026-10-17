@@ -474,6 +474,53 @@ static void check_atomic_access(VirtualMachine *vm, void *addr) {
     hashmap_put_int(&vm->atomic_shadow, (long long)(uintptr_t)addr, tid);
 }
 
+// ---------------------------------------------------------------------------
+// Comptime memory containment
+// ---------------------------------------------------------------------------
+// While comptime code runs (comptime_depth > 0) a guest load or store must
+// land inside VM memory, so a forged address becomes a compile error instead
+// of a host fault. Applies to the register-addressed memory ops: LDR/STR,
+// FLDR/FSTR, VLDR/VSTR, ALDR/ASTR/AXCHG/ACAS, MCPY, MSET. bp-relative
+// LDR_LOCAL/STR_LOCAL use compiler-chosen frame offsets and are not checked.
+// TODO(#1663): libc pointer arguments and the wide-bitint, decimal, setjmp
+// and free ops also dereference guest pointers unchecked.
+static bool comptime_addr_in(const void *p, size_t n, const void *base,
+                             size_t len) {
+    uintptr_t a = (uintptr_t)p, b = (uintptr_t)base;
+    return a >= b && n <= len && a - b <= len - n;
+}
+
+static bool comptime_addr_ok(VirtualMachine *vm, const void *p, size_t n,
+                             bool write) {
+    if (n == 0)
+        return true;
+    return comptime_addr_in(p, n, vm->data_seg, vm->data_committed) ||
+           comptime_addr_in(p, n, vm->heap_seg, vm->heap_committed) ||
+           comptime_addr_in(p, n, vm->stack_base, vm->stack_committed) ||
+           comptime_addr_in(p, n, vm->current_tls_seg, vm->tls_template_size) ||
+           (!write && comptime_addr_in(p, n, vm->text_seg, vm->text_committed));
+}
+
+static __attribute__((noinline)) int comptime_contain_fault(VirtualMachine *vm,
+                                                            const void     *p,
+                                                            size_t          n,
+                                                            bool write) {
+    printf("\n========== COMPTIME MEMORY ACCESS ==========\n");
+    printf("%s of %zu byte(s) at %p is outside VM memory\n",
+           write ? "Write" : "Read", n, p);
+    printf("PC: 0x%llx\n", (long long)vm->pc);
+    printf("============================================\n");
+    return -1;
+}
+
+#define COMPTIME_CONTAIN(vm, p, n, write)                                      \
+    do {                                                                       \
+        if (__builtin_expect((vm)->comptime_depth != 0, 0) &&                  \
+            !comptime_addr_ok((vm), (const void *)(p), (n), (write)))          \
+            return comptime_contain_fault((vm), (const void *)(p), (n),        \
+                                          (write));                            \
+    } while (0)
+
 static inline int op_LDA3_fn(VirtualMachine *vm) {
     // Load data-relative address: [LDA3] [rd:8] [byte_offset:64]
     long long operands = cc_read_word(vm);
@@ -1421,8 +1468,10 @@ static inline int op_LDR_B_fn(VirtualMachine *vm) {
 
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 1, WATCH_READ);
-    if (rd != REG_ZERO)
+    if (rd != REG_ZERO) {
+        COMPTIME_CONTAIN(vm, vm->regs[rs], 1, false);
         vm->regs[rd] = *(signed char *)vm->regs[rs];
+    }
     return 0;
 }
 
@@ -1435,8 +1484,10 @@ static inline int op_LDR_H_fn(VirtualMachine *vm) {
 
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_READ);
-    if (rd != REG_ZERO)
+    if (rd != REG_ZERO) {
+        COMPTIME_CONTAIN(vm, vm->regs[rs], 2, false);
         vm->regs[rd] = ld_i16((void *)vm->regs[rs]);
+    }
     return 0;
 }
 
@@ -1449,8 +1500,10 @@ static inline int op_LDR_W_fn(VirtualMachine *vm) {
 
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
-    if (rd != REG_ZERO)
+    if (rd != REG_ZERO) {
+        COMPTIME_CONTAIN(vm, vm->regs[rs], 4, false);
         vm->regs[rd] = ld_i32((void *)vm->regs[rs]);
+    }
     return 0;
 }
 
@@ -1463,8 +1516,10 @@ static inline int op_LDR_D_fn(VirtualMachine *vm) {
 
     check_race_access(vm, (void *)vm->regs[rs], 0);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
-    if (rd != REG_ZERO)
+    if (rd != REG_ZERO) {
+        COMPTIME_CONTAIN(vm, vm->regs[rs], 8, false);
         vm->regs[rd] = ld_i64((void *)vm->regs[rs]);
+    }
     return 0;
 }
 
@@ -1475,6 +1530,7 @@ static inline int op_STR_B_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 1, true);
     check_race_access(vm, (void *)vm->regs[rs], 1);
     *(char *)vm->regs[rs] = (char)vm->regs[rd];
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 1, WATCH_WRITE);
@@ -1488,6 +1544,7 @@ static inline int op_STR_H_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 2, true);
     check_race_access(vm, (void *)vm->regs[rs], 1);
     st_i16((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 2, WATCH_WRITE);
@@ -1501,6 +1558,7 @@ static inline int op_STR_W_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 4, true);
     check_race_access(vm, (void *)vm->regs[rs], 1);
     st_i32((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
@@ -1514,6 +1572,7 @@ static inline int op_STR_D_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 8, true);
     check_race_access(vm, (void *)vm->regs[rs], 1);
     st_i64((void *)vm->regs[rs], vm->regs[rd]);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
@@ -1534,6 +1593,7 @@ static inline int op_ALDR_fn(VirtualMachine *vm) {
     int       is_unsigned = (int)(width_enc & 1);
 
     void     *addr        = (void *)vm->regs[rs];
+    COMPTIME_CONTAIN(vm, addr, sz, false);
     check_atomic_access(vm, addr);
     WATCHPOINT_CHECK(vm, addr, sz, WATCH_READ);
     if (rd != REG_ZERO) {
@@ -1568,6 +1628,7 @@ static inline int op_ASTR_fn(VirtualMachine *vm) {
     int       sz        = (int)(width_enc >> 1);
 
     void     *addr      = (void *)vm->regs[rs];
+    COMPTIME_CONTAIN(vm, addr, sz, true);
     check_atomic_access(vm, addr);
     switch (sz) {
         case 1:
@@ -1602,6 +1663,7 @@ static inline int op_AXCHG_fn(VirtualMachine *vm) {
     long long new_val     = vm->regs[REG_A1];
     long long old_val;
 
+    COMPTIME_CONTAIN(vm, addr, sz, true);
     check_atomic_access(vm, addr);
     switch (sz) {
         case 1:
@@ -1643,6 +1705,8 @@ static inline int op_ACAS_fn(VirtualMachine *vm) {
     void     *exp_ptr   = (void *)vm->regs[REG_A1]; // T* — pointer to expected
     long long desired   = vm->regs[REG_A2];
 
+    COMPTIME_CONTAIN(vm, obj_ptr, sz, true);
+    COMPTIME_CONTAIN(vm, exp_ptr, sz, true);
     check_atomic_access(vm, obj_ptr);
     int success = 0;
     switch (sz) {
@@ -1694,6 +1758,7 @@ static inline int op_FLDR_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 8, false);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_READ);
     cccc_freg_set_f64(vm, rd, ld_f64((void *)vm->regs[rs]));
     return 0;
@@ -1706,6 +1771,7 @@ static inline int op_FSTR_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 8, true);
     st_f64((void *)vm->regs[rs], cccc_freg_get_f64(vm, rd));
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 8, WATCH_WRITE);
     return 0;
@@ -1718,6 +1784,7 @@ static inline int op_FLDR_F32_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 4, false);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_READ);
     cccc_freg_set_f32(vm, rd, ld_f32((void *)vm->regs[rs]));
     return 0;
@@ -1730,6 +1797,7 @@ static inline int op_FSTR_F32_fn(VirtualMachine *vm) {
     int       rd, rs;
     DECODE_RR(operands, rd, rs);
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], 4, true);
     st_f32((void *)vm->regs[rs], cccc_freg_get_f32(vm, rd));
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], 4, WATCH_WRITE);
     return 0;
@@ -3767,6 +3835,7 @@ static inline int op_PMEMA_fn(VirtualMachine *vm) {
     void    **memptr         = (void **)vm->regs[REG_A0];
     size_t    alignment      = (size_t)vm->regs[REG_A1];
     long long requested_size = vm->regs[REG_A2];
+    COMPTIME_CONTAIN(vm, memptr, sizeof(void *), true);
     vm->regs[REG_A0] =
         cccc_vm_heap_posix_memalign(vm, memptr, alignment, requested_size);
     return 0;
@@ -3902,6 +3971,8 @@ static inline int op_MCPY_fn(VirtualMachine *vm) {
     void  *dest  = (void *)vm->regs[REG_A0];
     void  *src   = (void *)vm->regs[REG_A1];
     size_t count = (size_t)vm->regs[REG_A2];
+    COMPTIME_CONTAIN(vm, src, count, false);
+    COMPTIME_CONTAIN(vm, dest, count, true);
     memcpy(dest, src, count);
     // Propagate effective type along with the bytes (C11 6.5p6): backs
     // struct/union assignment and the restrict memcpy-loop lowering, so
@@ -3918,6 +3989,7 @@ static inline int op_MSET_fn(VirtualMachine *vm) {
     // aggregate initialisers).
     void  *dest  = (void *)vm->regs[REG_A0];
     size_t count = (size_t)vm->regs[REG_A2];
+    COMPTIME_CONTAIN(vm, dest, count, true);
     memset(dest, 0, count);
     // dest may be a stack or heap address; type_shadow_clear is a no-op
     // outside the tracked heap range, so this is safe either way (#653).
@@ -4394,6 +4466,7 @@ static inline int op_VLDR_fn(VirtualMachine *vm) {
         return -1;
     }
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], width, false);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], width, WATCH_READ);
     ld_vN((void *)vm->regs[rs], &vm->vregs[rd], width);
     return 0;
@@ -4416,6 +4489,7 @@ static inline int op_VSTR_fn(VirtualMachine *vm) {
         return -1;
     }
 
+    COMPTIME_CONTAIN(vm, vm->regs[rs], width, true);
     st_vN((void *)vm->regs[rs], &vm->vregs[rd], width);
     WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], width, WATCH_WRITE);
     return 0;
@@ -5647,9 +5721,36 @@ static int cccc_handle_ffi_policy_error(VirtualMachine *vm, const char *kind,
     return vm->ffi_errors_fatal ? -1 : 0;
 }
 
-static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name,
-                                 int actual_nargs, int is_variadic,
-                                 int num_fixed_args) {
+static int cmp_builtin_fn(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)(*(CcBuiltin *const *)a)->fn;
+    uintptr_t y = (uintptr_t)(*(CcBuiltin *const *)b)->fn;
+    return (x > y) - (x < y);
+}
+
+// The CC_BUILTIN entry for `func_ptr`, or NULL. Builtins are the comptime
+// macro API rather than user FFI.
+static const CcBuiltin *find_compiler_builtin(void *func_ptr) {
+    static CcBuiltin **sorted;
+    static size_t      count;
+    if (!sorted) {
+        for (CcBuiltin *b = cc_builtins; b; b = b->next)
+            count++;
+        sorted    = malloc(count * sizeof(*sorted));
+        size_t ix = 0;
+        for (CcBuiltin *b = cc_builtins; b; b = b->next)
+            sorted[ix++] = b;
+        qsort(sorted, count, sizeof(*sorted), cmp_builtin_fn);
+    }
+    CcBuiltin   key = {.fn = func_ptr};
+    CcBuiltin  *k   = &key;
+    CcBuiltin **hit =
+        bsearch(&k, sorted, count, sizeof(*sorted), cmp_builtin_fn);
+    return hit ? *hit : NULL;
+}
+
+static int cccc_check_ffi_policy(VirtualMachine *vm, void *func_ptr,
+                                 const char *name, int actual_nargs,
+                                 int is_variadic, int num_fixed_args) {
     // In --build mode the builder API (the __builtin_build_* runtime injected
     // by building.h) is the build runtime itself, not user FFI. It is always
     // callable regardless of --ffi-allow/--ffi-deny/--disable-ffi, exactly as
@@ -5658,6 +5759,13 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name,
     if (vm->compiler.build_mode && name && strlen(name) >= 16 &&
         memcmp(name, "__builtin_build_", 16) == 0)
         return 1;
+
+    // Comptime builtins skip the FFI flags but still pass the comptime policy.
+    // TODO(#1665): their handle arguments are trusted.
+    if (find_compiler_builtin(func_ptr)) {
+        cccc_comptime_enforce(vm, name);
+        return 1;
+    }
 
     if (vm->disable_all_ffi)
         return cccc_handle_ffi_policy_error(
@@ -5696,6 +5804,19 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name,
     return 1;
 }
 
+// Comptime code only dereferences VM memory, so host data a builtin returns
+// is handed back as a VM-heap copy.
+static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,
+                                       void *host) {
+    size_t n = ret == CC_RET_CSTR
+                   ? strlen(host) + 1
+                   : (size_t)vm->compiler.macro_vararg_count * sizeof(Node *);
+    void  *copy = cccc_vm_heap_malloc(vm, (long long)n);
+    if (copy)
+        memcpy(copy, host, n);
+    return copy;
+}
+
 int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                               const char *name, long long *args,
                               int actual_nargs, uint64_t double_arg_mask,
@@ -5708,8 +5829,8 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         return -1;
     }
 
-    int policy = cccc_check_ffi_policy(vm, name, actual_nargs, is_variadic,
-                                       num_fixed_args);
+    int policy = cccc_check_ffi_policy(vm, func_ptr, name, actual_nargs,
+                                       is_variadic, num_fixed_args);
     if (policy <= 0)
         return policy;
 
@@ -5793,6 +5914,10 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     } else {
         long long result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        const CcBuiltin *builtin = find_compiler_builtin(func_ptr);
+        if (builtin && builtin->ret != CC_RET_HANDLE && result)
+            result = (long long)copy_builtin_result_to_vm(vm, builtin->ret,
+                                                          (void *)result);
         vm->regs[REG_A0] = result;
     }
 

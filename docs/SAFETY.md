@@ -2562,7 +2562,8 @@ PC offset:  12
 
 - Completely blocks all foreign function calls at runtime
 - Overrides both allow and deny lists
-- Useful for sandboxing untrusted code
+- Compiler builtins used by `[[cccc::comptime]]` code stay callable
+- Not a sandbox: see [COMPTIME_POLICY.md](COMPTIME_POLICY.md) for what comptime can reach
 
 #### Example
 

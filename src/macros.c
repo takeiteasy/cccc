@@ -122,7 +122,7 @@ Node *__builtin_ast_vararg_at(int index) {
     return vm->compiler.macro_vararg_nodes[index];
 }
 
-CC_BUILTIN(__builtin_ast_varargs_as_array, 0);
+CC_BUILTIN_NODES(__builtin_ast_varargs_as_array, 0);
 Node **__builtin_ast_varargs_as_array(void) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)
@@ -135,7 +135,7 @@ Node **__builtin_ast_varargs_as_array(void) {
     return vm->compiler.macro_vararg_nodes;
 }
 
-CC_BUILTIN(__builtin_ast_vararg_str_at, 1);
+CC_BUILTIN_CSTR(__builtin_ast_vararg_str_at, 1);
 const char *__builtin_ast_vararg_str_at(int index) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm)

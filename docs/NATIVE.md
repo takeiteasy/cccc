@@ -14,7 +14,7 @@ Supported host platforms: macOS (aarch64) and Linux (aarch64, x86_64).
 
 | Flag | What it does | Typical use |
 |---|---|---|
-| *(none)* | Compile to VM bytecode, run it in the interpreter | Default: portability, sandboxing, the debugger, the safety suite, iteration with no system compiler |
+| *(none)* | Compile to VM bytecode, run it in the interpreter | Default: portability, the debugger, the safety suite, iteration with no system compiler |
 | `-m` / `--dump-expanded` | Serialize the AST to portable C, print to stdout; don't compile | Seeing what CCCC would hand a host compiler |
 | `-c=generated` | Serialize to C, write to a file (`-o`, default `./a.gen.c`); don't compile | Build systems that drive their own `cc` |
 | `-c=native` | Serialize to C, compile + link a real executable (`-o`, default `./a.out`) | The production path |

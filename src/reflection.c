@@ -64,7 +64,7 @@ static char *reflect_unique_name(VirtualMachine *vm) {
     return arena_format(vm, ".L..%d", vm->compiler.unique_name_counter++);
 }
 
-CC_BUILTIN(__builtin_gensym, 1);
+CC_BUILTIN_CSTR(__builtin_gensym, 1);
 const char *__builtin_gensym(const char *prefix) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !prefix)
@@ -471,7 +471,7 @@ static Token *type_name_token(Type *ty) {
     return ty->name;
 }
 
-CC_BUILTIN(__builtin_ast_type_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_type_name, 1);
 const char *__builtin_ast_type_name(Type *ty) {
     Token *name = type_name_token(ty);
     if (!name)
@@ -495,7 +495,7 @@ const char *__builtin_ast_type_name(Type *ty) {
 // `typedef int wchar_t`) mutate the singleton type's name field and would
 // otherwise produce misleading names like `sum_wchar_t` for `int`.
 // For non-scalar named types (structs, enums, user typedefs), ty->name is used.
-CC_BUILTIN(__builtin_ast_type_c_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_type_c_name, 1);
 const char *__builtin_ast_type_c_name(Type *ty) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !ty)
@@ -611,7 +611,7 @@ EnumConstant *__builtin_ast_enum_find(Type *enum_type, const char *name) {
     return NULL;
 }
 
-CC_BUILTIN(__builtin_ast_enum_constant_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_enum_constant_name, 1);
 const char *__builtin_ast_enum_constant_name(EnumConstant *ec) {
     return ec ? ec->name : NULL;
 }
@@ -621,7 +621,7 @@ int64_t __builtin_ast_enum_constant_value(EnumConstant *ec) {
     return ec ? ec->value : 0;
 }
 
-CC_BUILTIN(__builtin_ast_enum_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_enum_name, 1);
 const char *__builtin_ast_enum_name(Type *e) {
     return __builtin_ast_type_name(e);
 }
@@ -632,7 +632,7 @@ int __builtin_ast_enum_value_count(Type *e) {
     return count < 0 ? 0 : count;
 }
 
-CC_BUILTIN(__builtin_ast_enum_value_name, 2);
+CC_BUILTIN_CSTR(__builtin_ast_enum_value_name, 2);
 const char *__builtin_ast_enum_value_name(Type *e, int index) {
     EnumConstant *ec = __builtin_ast_enum_at(e, index);
     return __builtin_ast_enum_constant_name(ec);
@@ -695,7 +695,7 @@ Member *__builtin_ast_struct_member_find(Type *struct_type, const char *name) {
     return NULL;
 }
 
-CC_BUILTIN(__builtin_ast_member_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_member_name, 1);
 const char *__builtin_ast_member_name(Member *m) {
     if (!m || !m->name)
         return NULL;
@@ -815,7 +815,7 @@ Obj *__builtin_ast_global_at(int index) {
     return obj;
 }
 
-CC_BUILTIN(__builtin_ast_obj_name, 1);
+CC_BUILTIN_CSTR(__builtin_ast_obj_name, 1);
 const char *__builtin_ast_obj_name(Obj *obj) {
     return obj ? obj->name : NULL;
 }
@@ -845,7 +845,7 @@ int __builtin_attr_target_kind(AttrTarget *target) {
     return target ? target->kind : 0;
 }
 
-CC_BUILTIN(__builtin_attr_target_name, 1);
+CC_BUILTIN_CSTR(__builtin_attr_target_name, 1);
 const char *__builtin_attr_target_name(AttrTarget *target) {
     return target ? target->name : NULL;
 }
@@ -931,7 +931,7 @@ int __builtin_ast_member_attr_count(Member *m) {
     return n;
 }
 
-CC_BUILTIN(__builtin_ast_member_attr_name_at, 2);
+CC_BUILTIN_CSTR(__builtin_ast_member_attr_name_at, 2);
 const char *__builtin_ast_member_attr_name_at(Member *m, int index) {
     CustomAttrUse *use = member_attr_nth(m, index);
     return use ? use->name : NULL;
@@ -996,7 +996,7 @@ Node *__builtin_ast_float_literal(double value) {
     return node;
 }
 
-CC_BUILTIN(__builtin_ast_string_literal_value, 1);
+CC_BUILTIN_CSTR(__builtin_ast_string_literal_value, 1);
 const char *__builtin_ast_string_literal_value(Node *node) {
     while (node && node->kind == ND_CAST)
         node = node->lhs;
@@ -3622,7 +3622,7 @@ void __builtin_dump_tree(Node *node) {
     fflush(stdout);
 }
 
-CC_BUILTIN(__builtin_dump_tree_to_string, 1);
+CC_BUILTIN_CSTR(__builtin_dump_tree_to_string, 1);
 const char *__builtin_dump_tree_to_string(Node *node) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !node)
@@ -3826,7 +3826,7 @@ void __builtin_dump_ast_gen(Node *node) {
     fflush(stdout);
 }
 
-CC_BUILTIN(__builtin_dump_ast_gen_to_string, 1);
+CC_BUILTIN_CSTR(__builtin_dump_ast_gen_to_string, 1);
 const char *__builtin_dump_ast_gen_to_string(Node *node) {
     VirtualMachine *vm = __builtin_current_vm;
     if (!vm || !node)
