@@ -33,8 +33,10 @@ if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
     exit 1
 fi
 
-# 4. Full test suite must pass before anything is tagged.
-./cccc --build build.c --build-target=test
+# 4. Full test suite and the loose-test areas (what the release workflow runs)
+#    must pass before anything is tagged.
+./cccc --build build.c --build-target=test --build-jobs=8 --build-keep-going
+./cccc --build build.c --build-target=test_extra --build-jobs=8 --build-keep-going
 
 # 5. Extract the CHANGELOG section for this version as the tag message.
 NOTES=$(mktemp)
