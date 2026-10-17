@@ -1124,12 +1124,12 @@ typedef struct HashMap {
  @brief Represents the contents and metadata of a source file.
 */
 typedef struct File {
-    char *name;     /**< Original filename string. */
+    const char *name; /**< Original filename string. */
     int   file_no;  /**< Unique numeric id for the file. */
     char *contents; /**< File contents as a NUL-terminated buffer. */
 
     // For #line directive
-    char *display_name; /**< Optional name emitted by a `#line` directive. */
+    const char *display_name; /**< Optional name emitted by a `#line` directive. */
     int   line_delta;   /**< Line number delta applied for `#line` handling. */
 
     bool  is_system_header;   // true when included via <...> from system search
@@ -1300,7 +1300,7 @@ typedef struct Token {
     char    *dec_digits;
 
     File    *file;       // Source location
-    char    *filename;   // Filename
+    const char *filename;   // Filename
     int      line_no;    // Line number
     int      col_no;     // Column number (1-based)
     int      line_delta; // Line number
@@ -3663,7 +3663,7 @@ typedef struct TypeNameRecord {
     // re-deriving) apart from one reached only via a never-captured
     // `#include @comptime`/`@shared`/`@build`/`@test` route, which has
     // nothing else to supply its definition.
-    char *file_path;
+    const char *file_path;
     // #1010: true only for a tag record created at a struct/union/enum
     // *definition* (install_tag_definition's two record_type_name call
     // sites, src/parse_types.c) -- never for a forward-declaration's
@@ -3801,7 +3801,7 @@ typedef struct CompileError {
     struct CompileError
                *next;      /**< Pointer to the next error in the linked list. */
     char       *message;   /**< Formatted error message string. */
-    char       *filename;  /**< Source file name where the error occurred. */
+    const char *filename;  /**< Source file name where the error occurred. */
     int         line_no;   /**< Line number in the source file. */
     int         col_no;    /**< Column number in the source file. */
     int         severity;  /**< 0 for error, 1 for warning, 2 for a note. */

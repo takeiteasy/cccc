@@ -89,10 +89,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok);
 static Macro *find_macro(VirtualMachine *vm, Token *tok);
 static bool probe_function_definition(Token *tok);
 static bool file_exists(char *path);
-static char *format_relative_path(VirtualMachine *vm, char *base_file,
-                                  char *filename);
+static char *format_relative_path(VirtualMachine *vm, const char *base_file,
+                                  const char *filename);
 static char *resolve_embedded_relative_header(VirtualMachine *vm,
-                                              char *base_file, char *filename);
+                                              const char *base_file, const char *filename);
 static char *read_include_filename(VirtualMachine *vm, Token **rest, Token *tok,
                                    bool *is_dquote, int *out_len);
 char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
@@ -1460,7 +1460,7 @@ static Token *skip_cond_incl(VirtualMachine *vm, Token *tok) {
 }
 
 // Double-quote a given string and returns it.
-static char *quote_string(VirtualMachine *vm, char *str) {
+static char *quote_string(VirtualMachine *vm, const char *str) {
     int bufsize = 3;
     for (int i = 0; str[i]; i++) {
         if (str[i] == '\\' || str[i] == '"')
@@ -1482,7 +1482,7 @@ static char *quote_string(VirtualMachine *vm, char *str) {
     return buf;
 }
 
-static Token *new_str_token(VirtualMachine *vm, char *str, Token *tmpl) {
+static Token *new_str_token(VirtualMachine *vm, const char *str, Token *tmpl) {
     char *buf = quote_string(vm, str);
     return tokenize(vm,
                     new_file(vm, tmpl->file->name, tmpl->file->file_no, buf));
@@ -2879,8 +2879,8 @@ static bool file_exists(char *path) {
     return !stat(path, &st);
 }
 
-static char *format_relative_path(VirtualMachine *vm, char *base_file,
-                                  char *filename) {
+static char *format_relative_path(VirtualMachine *vm, const char *base_file,
+                                  const char *filename) {
     char *slash = strrchr(base_file, '/');
     if (!slash)
         return arena_format(vm, "./%s", filename);
@@ -2937,13 +2937,14 @@ static char *lexical_path_join(VirtualMachine *vm, const char *dir,
 // embedded header, or the normalized spelling isn't a known embedded
 // header.
 static char *resolve_embedded_relative_header(VirtualMachine *vm,
-                                              char *base_file, char *filename) {
+                                              const char *base_file,
+                                              const char *filename) {
     static const char PREFIX[]   = "<embedded>/";
     size_t            prefix_len = sizeof(PREFIX) - 1;
     if (!base_file || strncmp(base_file, PREFIX, prefix_len) != 0)
         return NULL;
-    char *embedded_path = base_file + prefix_len;
-    char *slash         = strrchr(embedded_path, '/');
+    const char *embedded_path = base_file + prefix_len;
+    const char *slash = strrchr(embedded_path, '/');
     char *dir =
         slash ? arena_strndup(vm, embedded_path, (int)(slash - embedded_path))
               : arena_strdup(vm, "");

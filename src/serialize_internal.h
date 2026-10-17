@@ -28,7 +28,7 @@ typedef struct {
     // #953: mirrors TypeNameRecord.file_path -- used in generated_only mode
     // to tell whether this type's declaring header was actually captured
     // into the output.
-    char *file_path;
+    const char *file_path;
     // #1010: mirrors TypeNameRecord.defines_type -- see that field's comment
     // (cccc.h) and find_tag_name_for_provenance() below.
     bool defines_type;

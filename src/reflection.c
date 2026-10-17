@@ -4385,7 +4385,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
         return NULL;
 
     // 1. Tokenize the template string
-    Token *toks = tokenize_string(vm, (char *)"<quote>", (char *)tmpl);
+    Token *toks = tokenize_string(vm, "<quote>", tmpl);
     if (!toks)
         return NULL;
     convert_pp_tokens(vm, toks);
@@ -4402,7 +4402,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
     // each running exactly once, over the final chain only.
     if (quote_is_multi_stmt(toks)) {
         char *braced = arena_format(vm, "{ %s }", tmpl);
-        toks         = tokenize_string(vm, (char *)"<quote>", braced);
+        toks         = tokenize_string(vm, "<quote>", braced);
         if (!toks)
             return NULL;
         convert_pp_tokens(vm, toks);

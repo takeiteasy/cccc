@@ -572,7 +572,7 @@ Obj *declare_runtime_fn(VirtualMachine *vm, const char *name,
         push_scope(vm, (char *)name, strlen(name))->var = existing;
         return existing;
     }
-    Token  *tok  = tokenize_string(vm, "<runtime>", (char *)proto);
+    Token  *tok  = tokenize_string(vm, "<runtime>", proto);
     VarAttr attr = {};
     convert_pp_tokens(vm, tok);
     Type *base        = declspec(vm, &tok, tok, &attr);

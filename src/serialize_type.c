@@ -434,7 +434,7 @@ void type_vec_push(TypeVec *vec, Type *ty) {
 
 static void type_name_push(TypeName **items, int *len, int *cap, Type *ty,
                            char *name, int name_len, Obj *owner_fn,
-                           bool from_include, bool always_emit, char *file_path,
+                           bool from_include, bool always_emit, const char *file_path,
                            bool defines_type) {
     if (!ty || !name || name_len <= 0)
         return;

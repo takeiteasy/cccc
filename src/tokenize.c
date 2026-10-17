@@ -293,7 +293,7 @@ static CompileError *build_expansion_notes(VirtualMachine *vm,
 }
 
 //               ^ error: <message here>
-static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
+static void vdiagnostic_at(VirtualMachine *vm, const char *filename, char *input,
                            int line_no, char *loc, const char *kind,
                            const char *warn_name, ExpansionFrame *chain,
                            char *fmt, va_list ap) {
@@ -431,7 +431,7 @@ static void vdiagnostic_at(VirtualMachine *vm, char *filename, char *input,
         print_expansion_notes(stderr, vm, chain);
 }
 
-static void verror_at(VirtualMachine *vm, char *filename, char *input,
+static void verror_at(VirtualMachine *vm, const char *filename, char *input,
                       int line_no, char *loc, ExpansionFrame *chain, char *fmt,
                       va_list ap) {
     vdiagnostic_at(vm, filename, input, line_no, loc, "error", NULL, chain, fmt,
@@ -469,7 +469,7 @@ static int tok_col_no(Token *tok) {
 // CompileError and append it to vm->errors. Returns the new node (already
 // appended) or NULL if collection isn't active. Consumes and clears both
 // vm->error_message and vm->pending_notes.
-static CompileError *collect_compile_error(VirtualMachine *vm, char *filename,
+static CompileError *collect_compile_error(VirtualMachine *vm, const char *filename,
                                            int line_no, int col_no) {
     if (!(vm && vm->collect_errors && vm->error_message))
         return NULL;
@@ -2004,7 +2004,7 @@ unsigned char *read_binary_file(VirtualMachine *vm, char *path,
     return buffer;
 }
 
-File *new_file(VirtualMachine *vm, char *name, int file_no, char *contents) {
+File *new_file(VirtualMachine *vm, const char *name, int file_no, char *contents) {
     File *file = arena_alloc(&vm->compiler.parser_arena, sizeof(File));
     memset(file, 0, sizeof(File));
     file->name         = name;
@@ -2151,7 +2151,7 @@ Token *tokenize_file(VirtualMachine *vm, char *path, bool allow_shebang) {
 }
 
 // Tokenize an in-memory string (for embedded headers)
-Token *tokenize_string(VirtualMachine *vm, char *name, const char *contents) {
+Token *tokenize_string(VirtualMachine *vm, const char *name, const char *contents) {
     // Duplicate contents because tokenize may modify it
     char *p = arena_alloc(&vm->compiler.parser_arena, strlen(contents) + 1);
     strcpy(p, contents);

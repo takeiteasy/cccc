@@ -609,7 +609,7 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
     volatile bool is_expr_unit = false;
 
     if (setjmp(jb) == 0) {
-        Token *tok = tokenize_string(vm, repl_unit_name, (char *)text);
+        Token *tok = tokenize_string(vm, repl_unit_name, text);
         if (expand_macros) {
             tok = cc_expand_macros_only(vm, tok);
             Token *call = cc_find_comptime_call(vm, tok, NULL);
