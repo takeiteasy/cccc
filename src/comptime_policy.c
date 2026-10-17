@@ -790,6 +790,14 @@ int cccc_comptime_class_of(const char *name) {
     return -1;
 }
 
+bool cccc_comptime_is_math_name(const char *name, size_t len) {
+    pthread_once(&table_once, build_tables);
+    if (hashmap_get2(&math_bases, name, (int)len))
+        return true;
+    return len > 1 && (name[len - 1] == 'f' || name[len - 1] == 'l') &&
+           hashmap_get2(&math_bases, name, (int)len - 1);
+}
+
 const char *cccc_comptime_class_name(ComptimeClass cls) {
     return (unsigned)cls < CT_CLASS_COUNT ? CLASS_NAMES[cls] : "?";
 }

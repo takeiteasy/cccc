@@ -482,30 +482,61 @@ static void check_atomic_access(VirtualMachine *vm, void *addr) {
 // of a host fault. Applies to the register-addressed memory ops: LDR/STR,
 // FLDR/FSTR, VLDR/VSTR, ALDR/ASTR/AXCHG/ACAS, MCPY, MSET. bp-relative
 // LDR_LOCAL/STR_LOCAL use compiler-chosen frame offsets and are not checked.
-// TODO(#1663): libc pointer arguments and the wide-bitint, decimal, setjmp
-// and free ops also dereference guest pointers unchecked.
+// MFRE/REALC (heap pointers), SETJMP/LONGJMP, the wide-bitint, decimal and
+// overflow ops are checked too; libc pointer arguments are checked at the
+// native-call boundary (comptime_args.c).
 static bool comptime_addr_in(const void *p, size_t n, const void *base,
                              size_t len) {
     uintptr_t a = (uintptr_t)p, b = (uintptr_t)base;
     return a >= b && n <= len && a - b <= len - n;
 }
 
-static bool comptime_addr_ok(VirtualMachine *vm, const void *p, size_t n,
-                             bool write) {
-    if (n == 0)
-        return true;
-    return comptime_addr_in(p, n, vm->data_seg, vm->data_committed) ||
-           comptime_addr_in(p, n, vm->heap_seg, vm->heap_committed) ||
-           comptime_addr_in(p, n, vm->stack_base, vm->stack_committed) ||
-           comptime_addr_in(p, n, vm->current_tls_seg, vm->tls_template_size) ||
-           (!write && comptime_addr_in(p, n, vm->text_seg, vm->text_committed));
+// Bytes from `p` to the end of the VM segment holding it, or 0 when `p` is
+// outside VM memory. Text is readable only.
+static size_t comptime_region_left(VirtualMachine *vm, const void *p,
+                                   bool write) {
+    const struct {
+        const void *base;
+        size_t      len;
+        bool        readonly;
+    } regions[] = {
+        {vm->data_seg, vm->data_committed, false},
+        {vm->heap_seg, vm->heap_committed, false},
+        {vm->stack_base, vm->stack_committed, false},
+        {vm->current_tls_seg, vm->tls_template_size, false},
+        {vm->text_seg, vm->text_committed, true},
+    };
+    for (size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); i++) {
+        if (regions[i].readonly && write)
+            continue;
+        if (comptime_addr_in(p, 1, regions[i].base, regions[i].len))
+            return regions[i].len -
+                   (size_t)((uintptr_t)p - (uintptr_t)regions[i].base);
+    }
+    return 0;
 }
 
-static __attribute__((noinline)) int comptime_contain_fault(VirtualMachine *vm,
-                                                            const void     *p,
-                                                            size_t          n,
-                                                            bool write) {
+bool cccc_comptime_addr_ok(VirtualMachine *vm, const void *p, size_t n,
+                           bool write) {
+    if (n == 0)
+        return true;
+    return comptime_region_left(vm, p, write) >= n;
+}
+
+long long cccc_comptime_cstr_len(VirtualMachine *vm, const void *p,
+                                 size_t limit) {
+    size_t left = comptime_region_left(vm, p, false);
+    if (left > limit)
+        left = limit;
+    const char *nul = left ? memchr(p, 0, left) : NULL;
+    return nul ? (long long)(nul - (const char *)p) : -1;
+}
+
+int cccc_comptime_fault(VirtualMachine *vm, const char *what, const void *p,
+                        size_t n, bool write) {
     printf("\n========== COMPTIME MEMORY ACCESS ==========\n");
+    if (what)
+        printf("%s: ", what);
     printf("%s of %zu byte(s) at %p is outside VM memory\n",
            write ? "Write" : "Read", n, p);
     printf("PC: 0x%llx\n", (long long)vm->pc);
@@ -513,10 +544,25 @@ static __attribute__((noinline)) int comptime_contain_fault(VirtualMachine *vm,
     return -1;
 }
 
+int cccc_comptime_abort(VirtualMachine *vm, const char *msg) {
+    printf("\n========== COMPTIME MEMORY ACCESS ==========\n");
+    printf("%s\n", msg);
+    printf("PC: 0x%llx\n", (long long)vm->pc);
+    printf("============================================\n");
+    return -1;
+}
+
+static __attribute__((noinline)) int comptime_contain_fault(VirtualMachine *vm,
+                                                            const void     *p,
+                                                            size_t          n,
+                                                            bool write) {
+    return cccc_comptime_fault(vm, NULL, p, n, write);
+}
+
 #define COMPTIME_CONTAIN(vm, p, n, write)                                      \
     do {                                                                       \
         if (__builtin_expect((vm)->comptime_depth != 0, 0) &&                  \
-            !comptime_addr_ok((vm), (const void *)(p), (n), (write)))          \
+            !cccc_comptime_addr_ok((vm), (const void *)(p), (n), (write)))     \
             return comptime_contain_fault((vm), (const void *)(p), (n),        \
                                           (write));                            \
     } while (0)
@@ -3875,6 +3921,8 @@ int cccc_vm_heap_free(VirtualMachine *vm, void *ptr) {
     // peeking at ptr-sizeof(AllocHeader) would read out of bounds. Fall
     // back to system free directly.
     if (!is_vm_heap_ptr(vm, ptr)) {
+        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(ptr))
+            return cccc_comptime_fault(vm, "free", ptr, 1, true);
         free(ptr);
         return 0;
     }
@@ -3885,6 +3933,8 @@ int cccc_vm_heap_free(VirtualMachine *vm, void *ptr) {
     // allocator (e.g. strdup, aligned_alloc). Fall back to system free so
     // mixed-allocator programs work correctly under -V.
     if (header->magic != 0xDEADBEEF) {
+        if (vm->comptime_depth)
+            return cccc_comptime_fault(vm, "free", ptr, 1, true);
         free(ptr);
         return 0;
     }
@@ -4004,7 +4054,63 @@ static inline int op_MSET_fn(VirtualMachine *vm) {
 // internal.h (shared with parse_analysis.c's compile-time wide-const folder,
 // #1122).
 
+// Comptime operand checks for the wide-bitint and decimal ops, whose operand
+// sizes ride in registers.
+static int comptime_wide_check(VirtualMachine *vm, bool b_is_ptr) {
+    long long words = vm->regs[REG_A3];
+    if (words <= 0 || words > (1 << 16))
+        return cccc_comptime_fault(vm, "wide integer", (void *)vm->regs[REG_A0],
+                                   0, true);
+    size_t n = (size_t)words * sizeof(uint64_t);
+    if (!cccc_comptime_addr_ok(vm, (void *)vm->regs[REG_A0], n, true))
+        return cccc_comptime_fault(vm, "wide integer", (void *)vm->regs[REG_A0],
+                                   n, true);
+    if (!cccc_comptime_addr_ok(vm, (void *)vm->regs[REG_A1], n, false))
+        return cccc_comptime_fault(vm, "wide integer", (void *)vm->regs[REG_A1],
+                                   n, false);
+    if (b_is_ptr &&
+        !cccc_comptime_addr_ok(vm, (void *)vm->regs[REG_A2], n, false))
+        return cccc_comptime_fault(vm, "wide integer", (void *)vm->regs[REG_A2],
+                                   n, false);
+    return 0;
+}
+
+#define COMPTIME_WIDE(vm, b_is_ptr)                                            \
+    do {                                                                       \
+        if (__builtin_expect((vm)->comptime_depth != 0, 0) &&                  \
+            comptime_wide_check((vm), (b_is_ptr)))                             \
+            return -1;                                                         \
+    } while (0)
+
+// Decimal width codes 0, 1, 2 are _Decimal32/64/128. A negative size skips
+// the operand.
+static int comptime_dec_check(VirtualMachine *vm, int dst_w, int a_w, int b_w) {
+    const struct {
+        int       w;
+        long long reg;
+        bool      write;
+    } ops[] = {
+        {dst_w, REG_A0, true}, {a_w, REG_A1, false}, {b_w, REG_A2, false}};
+    for (int i = 0; i < 3; i++) {
+        if (ops[i].w == -1)
+            continue;
+        size_t n = ops[i].w >= 0 && ops[i].w <= 2 ? (size_t)4 << ops[i].w : 0;
+        void  *p = (void *)vm->regs[ops[i].reg];
+        if (n == 0 || !cccc_comptime_addr_ok(vm, p, n, ops[i].write))
+            return cccc_comptime_fault(vm, "decimal", p, n, ops[i].write);
+    }
+    return 0;
+}
+
+#define COMPTIME_DEC(vm, dst_w, a_w, b_w)                                      \
+    do {                                                                       \
+        if (__builtin_expect((vm)->comptime_depth != 0, 0) &&                  \
+            comptime_dec_check((vm), (dst_w), (a_w), (b_w)))                   \
+            return -1;                                                         \
+    } while (0)
+
 static inline int op_WIDE_ADD_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, true);
     __cccc_bitint_add((uint64_t *)vm->regs[REG_A0],
                       (uint64_t *)vm->regs[REG_A1],
                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
@@ -4013,6 +4119,7 @@ static inline int op_WIDE_ADD_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_SUB_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, true);
     __cccc_bitint_sub((uint64_t *)vm->regs[REG_A0],
                       (uint64_t *)vm->regs[REG_A1],
                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
@@ -4021,6 +4128,7 @@ static inline int op_WIDE_SUB_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_MUL_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, true);
     __cccc_bitint_mul((uint64_t *)vm->regs[REG_A0],
                       (uint64_t *)vm->regs[REG_A1],
                       (uint64_t *)vm->regs[REG_A2], (int)vm->regs[REG_A3],
@@ -4029,6 +4137,7 @@ static inline int op_WIDE_MUL_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_DIV_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, true);
     uint64_t       *dst   = (uint64_t *)vm->regs[REG_A0];
     const uint64_t *a     = (const uint64_t *)vm->regs[REG_A1];
     const uint64_t *b     = (const uint64_t *)vm->regs[REG_A2];
@@ -4042,6 +4151,7 @@ static inline int op_WIDE_DIV_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_MOD_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, true);
     uint64_t       *dst   = (uint64_t *)vm->regs[REG_A0];
     const uint64_t *a     = (const uint64_t *)vm->regs[REG_A1];
     const uint64_t *b     = (const uint64_t *)vm->regs[REG_A2];
@@ -4055,6 +4165,7 @@ static inline int op_WIDE_MOD_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_SHL_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, false);
     __cccc_bitint_shl((uint64_t *)vm->regs[REG_A0],
                       (uint64_t *)vm->regs[REG_A1], vm->regs[REG_A2],
                       (int)vm->regs[REG_A3], (int)vm->regs[REG_A4]);
@@ -4062,6 +4173,7 @@ static inline int op_WIDE_SHL_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_SHR_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, false);
     __cccc_bitint_sshr((uint64_t *)vm->regs[REG_A0],
                        (uint64_t *)vm->regs[REG_A1], vm->regs[REG_A2],
                        (int)vm->regs[REG_A3], (int)vm->regs[REG_A4]);
@@ -4069,6 +4181,7 @@ static inline int op_WIDE_SHR_fn(VirtualMachine *vm) {
 }
 
 static inline int op_WIDE_USHR_fn(VirtualMachine *vm) {
+    COMPTIME_WIDE(vm, false);
     __cccc_bitint_ushr((uint64_t *)vm->regs[REG_A0],
                        (uint64_t *)vm->regs[REG_A1], vm->regs[REG_A2],
                        (int)vm->regs[REG_A3], (int)vm->regs[REG_A4]);
@@ -4082,6 +4195,8 @@ static inline int op_WIDE_USHR_fn(VirtualMachine *vm) {
 // address operands is emitted by codegen before these ops, exactly like
 // the WIDE_* arithmetic ops; the handlers here just dereference directly.
 static inline int op_DADD_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A3], (int)vm->regs[REG_A3],
+                 (int)vm->regs[REG_A3]);
     cccc_dec_binop('+', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
                    (const void *)vm->regs[REG_A1],
                    (const void *)vm->regs[REG_A2], CCCC_DEC_ENV_DYNAMIC);
@@ -4089,6 +4204,8 @@ static inline int op_DADD_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DSUB_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A3], (int)vm->regs[REG_A3],
+                 (int)vm->regs[REG_A3]);
     cccc_dec_binop('-', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
                    (const void *)vm->regs[REG_A1],
                    (const void *)vm->regs[REG_A2], CCCC_DEC_ENV_DYNAMIC);
@@ -4096,6 +4213,8 @@ static inline int op_DSUB_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DMUL_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A3], (int)vm->regs[REG_A3],
+                 (int)vm->regs[REG_A3]);
     cccc_dec_binop('*', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
                    (const void *)vm->regs[REG_A1],
                    (const void *)vm->regs[REG_A2], CCCC_DEC_ENV_DYNAMIC);
@@ -4103,6 +4222,8 @@ static inline int op_DMUL_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DDIV_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A3], (int)vm->regs[REG_A3],
+                 (int)vm->regs[REG_A3]);
     cccc_dec_binop('/', (int)vm->regs[REG_A3], (void *)vm->regs[REG_A0],
                    (const void *)vm->regs[REG_A1],
                    (const void *)vm->regs[REG_A2], CCCC_DEC_ENV_DYNAMIC);
@@ -4110,12 +4231,14 @@ static inline int op_DDIV_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DNEG_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A2], (int)vm->regs[REG_A2], -1);
     cccc_dec_neg((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
                  (const void *)vm->regs[REG_A1]);
     return 0;
 }
 
 static inline int op_DCMP_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, -1, (int)vm->regs[REG_A2], (int)vm->regs[REG_A2]);
     int w            = (int)vm->regs[REG_A2];
     int result       = cccc_dec_cmp(w, (const void *)vm->regs[REG_A0],
                                     (const void *)vm->regs[REG_A1]);
@@ -4124,6 +4247,7 @@ static inline int op_DCMP_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DFROMI_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A2], -1, -1);
     cccc_dec_from_int((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
                       (long long)vm->regs[REG_A1], vm->regs[REG_A3] != 0,
                       CCCC_DEC_ENV_DYNAMIC);
@@ -4131,6 +4255,7 @@ static inline int op_DFROMI_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DTOI_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, -1, (int)vm->regs[REG_A1], -1);
     long long out = 0;
     cccc_dec_to_int((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0], &out,
                     vm->regs[REG_A2] != 0, CCCC_DEC_ENV_DYNAMIC);
@@ -4139,6 +4264,7 @@ static inline int op_DTOI_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DFROMBITS_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A2], -1, -1);
     cccc_dec_from_bin((int)vm->regs[REG_A2], (void *)vm->regs[REG_A0],
                       (uint64_t)vm->regs[REG_A1], vm->regs[REG_A3] != 0,
                       CCCC_DEC_ENV_DYNAMIC);
@@ -4146,6 +4272,7 @@ static inline int op_DFROMBITS_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DTOBITS_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, -1, (int)vm->regs[REG_A1], -1);
     uint64_t bits = 0;
     cccc_dec_to_bin((int)vm->regs[REG_A1], (const void *)vm->regs[REG_A0],
                     vm->regs[REG_A2] != 0, &bits, CCCC_DEC_ENV_DYNAMIC);
@@ -4154,6 +4281,7 @@ static inline int op_DTOBITS_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DCVT_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, (int)vm->regs[REG_A2], (int)vm->regs[REG_A3], -1);
     cccc_dec_convert((int)vm->regs[REG_A2], (int)vm->regs[REG_A3],
                      (void *)vm->regs[REG_A0], (const void *)vm->regs[REG_A1],
                      CCCC_DEC_ENV_DYNAMIC);
@@ -4161,6 +4289,8 @@ static inline int op_DCVT_fn(VirtualMachine *vm) {
 }
 
 static inline int op_DFMT_fn(VirtualMachine *vm) {
+    COMPTIME_DEC(vm, -1, (int)vm->regs[REG_A3], -1);
+    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], (size_t)vm->regs[REG_A1], true);
     char       *buf     = (char *)vm->regs[REG_A0];
     size_t      n       = (size_t)vm->regs[REG_A1];
     const void *val     = (const void *)vm->regs[REG_A2];
@@ -4192,8 +4322,12 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
     // malloc) — there is no AllocHeader to read, so don't peek at
     // ptr-sizeof(AllocHeader); fall back to system realloc directly.
     if (!is_vm_heap_ptr(vm, ptr)) {
+        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(ptr))
+            return cccc_comptime_fault(vm, "realloc", ptr, 1, true);
         void *new_ptr    = realloc(ptr, (size_t)new_size);
         vm->regs[REG_A0] = (long long)new_ptr;
+        if (vm->comptime_depth)
+            cccc_comptime_host_ptr_add(new_ptr);
         return 0;
     }
 
@@ -4201,6 +4335,8 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
 
     // If the pointer didn't come from the VM heap, fall back to system realloc.
     if (old_header->magic != 0xDEADBEEF) {
+        if (vm->comptime_depth)
+            return cccc_comptime_fault(vm, "realloc", ptr, 1, true);
         void *new_ptr    = realloc(ptr, (size_t)new_size);
         vm->regs[REG_A0] = (long long)new_ptr;
         return 0;
@@ -4219,6 +4355,7 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
     void  *new_ptr = (void *)vm->regs[REG_A0];
     size_t copy_size =
         old_size < (size_t)new_size ? old_size : (size_t)new_size;
+    COMPTIME_CONTAIN(vm, ptr, copy_size, false);
     memcpy(new_ptr, ptr, copy_size);
     // realloc is always a fresh bump allocation here (never in-place), so
     // carry the old block's effective type across the same way MCPY does
@@ -5615,7 +5752,17 @@ static inline int op_MARKW_fn(VirtualMachine *vm) {
 
 // ========== Setjmp/Longjmp ==========
 
+// A longjmp target must be a live-looking frame: pc inside the text emitted so
+// far, sp/bp inside the VM stack.
+static bool comptime_jmp_buf_ok(VirtualMachine *vm, const long long *jb) {
+    size_t stack_len = vm->stack_committed;
+    return (unsigned long long)jb[0] < vm->text_ptr &&
+           comptime_addr_in((void *)jb[1], 1, vm->stack_base, stack_len) &&
+           comptime_addr_in((void *)jb[2], 1, vm->stack_base, stack_len);
+}
+
 static inline int op_SETJMP_fn(VirtualMachine *vm) {
+    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], 4 * sizeof(long long), true);
     // setjmp: jmp_buf address in REG_A0, return 0 in REG_A0
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     jmp_buf[0]         = (long long)vm->pc;
@@ -5631,6 +5778,10 @@ static inline int op_SETJMP_fn(VirtualMachine *vm) {
 }
 
 static inline int op_LONGJMP_fn(VirtualMachine *vm) {
+    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], 4 * sizeof(long long), false);
+    if (vm->comptime_depth &&
+        !comptime_jmp_buf_ok(vm, (long long *)vm->regs[REG_A0]))
+        return cccc_comptime_abort(vm, "longjmp target is not a live frame");
     // longjmp: jmp_buf address in REG_A0, value in REG_A1
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     long long  val     = vm->regs[REG_A1];
@@ -5834,6 +5985,10 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     if (policy <= 0)
         return policy;
 
+    if (__builtin_expect(vm->comptime_depth != 0, 0) &&
+        cccc_comptime_check_args(vm, name, args, actual_nargs))
+        return -1;
+
     ffi_cif    cif;
     ffi_type **arg_types   = NULL;
     ffi_type  *return_type = returns_float    ? &ffi_type_float
@@ -5918,6 +6073,8 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         if (builtin && builtin->ret != CC_RET_HANDLE && result)
             result = (long long)copy_builtin_result_to_vm(vm, builtin->ret,
                                                           (void *)result);
+        if (__builtin_expect(vm->comptime_depth != 0, 0))
+            cccc_comptime_after_call(vm, name, args, actual_nargs, &result);
         vm->regs[REG_A0] = result;
     }
 
@@ -6648,6 +6805,7 @@ static inline int op_IOVFL_fn(VirtualMachine *vm) {
     long long a        = vm->regs[REG_A0];
     long long b        = vm->regs[REG_A1];
     void     *ptr      = (void *)vm->regs[REG_A2];
+    COMPTIME_CONTAIN(vm, ptr, (size_t)nbytes, true);
 
     int       overflow = 0;
     long long result   = 0;

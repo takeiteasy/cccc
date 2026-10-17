@@ -76,6 +76,24 @@ error: compile-time macro 'poke' aborted (opcode 'STR_W' faulted)
 Write of 4 byte(s) at 0x8 is outside VM memory
 ```
 
-Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies. Libc calls and the handles passed to builtins are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+Safe-class libc calls get the same check on their pointer arguments:
 
-[^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`; a new libc binding needs a row there, which `tests/host/test_comptime_policy.c` enforces.
+```
+error: compile-time macro 'poke' aborted (opcode 'CALLF' faulted)
+call to 'memcpy' argument 0: Write of 4 byte(s) at 0x8 is outside VM memory
+```
+
+| Argument | Checked as |
+|---|---|
+| Buffer (`memcpy`, `qsort`, `fread`-style) | The bytes the call touches lie inside VM memory |
+| String (`strlen`, `strcmp`, `puts`) | A NUL inside VM memory |
+| Format string (`printf`, `sscanf`) | The `%s` and `%n`-style arguments it consumes; `%n` and `%1$d` are rejected |
+| `FILE *`, `locale_t`, `iconv_t` | A handle libc returned earlier in the same compile |
+| `free`, `realloc` | A VM-heap pointer or a host allocation libc returned |
+| `longjmp` | A `jmp_buf` saved by `setjmp`: its stack and code positions must still be valid |
+
+Host strings and structs libc returns (`strdup`, `strerror`, `localtime`, `getenv`) are handed to comptime code as VM-heap copies. Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies.
+
+Libc calls you grant with `--comptime-allow`, the handles passed to builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+
+[^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.

@@ -191,6 +191,7 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "vsprintf", (void *)wrap_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void *)wrap_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void *)wrap_vfprintf, 3, 0);
+    // TODO(#1670): asprintf has 2 fixed arguments, not 1.
     cc_register_variadic_cfunc(vm, "asprintf", (void *)asprintf, 1, 0);
     cc_register_cfunc(vm, "vasprintf", (void *)wrap_vasprintf, 3, 0);
 #else
@@ -205,6 +206,7 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "vsprintf", (void *)wrap_cccc_vsprintf, 3, 0);
     cc_register_cfunc(vm, "vsnprintf", (void *)wrap_cccc_vsnprintf, 4, 0);
     cc_register_cfunc(vm, "vfprintf", (void *)wrap_cccc_vfprintf, 3, 0);
+    // TODO(#1670): asprintf has 2 fixed arguments, not 1.
     cc_register_variadic_cfunc(vm, "asprintf", (void *)cccc_asprintf, 1, 0);
     cc_register_cfunc(vm, "vasprintf", (void *)wrap_cccc_vasprintf, 3, 0);
 #endif

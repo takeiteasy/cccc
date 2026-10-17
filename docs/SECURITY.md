@@ -30,7 +30,7 @@ Grants come from the command line or from a config you approved. Source code, at
 
 The allowlist prevents accidents. It is not a sandbox:
 
-- Comptime loads and stores are confined to VM memory, but the libc calls it is allowed to make, and the handles it passes to compiler builtins, are trusted.
+- Comptime loads, stores and the safe libc calls are confined to VM memory. Libc calls you grant with `--comptime-allow` (`fs`, `exec`, ...) and the handles passed to compiler builtins are trusted.
 - `--build` scripts run with your full permissions.
 - A cloned repository's code can run when you compile it, so use `--sandbox` for code you did not write.
 

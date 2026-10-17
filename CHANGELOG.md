@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: comptime libc calls check their pointer arguments against VM
+  memory, and `free`, `realloc`, `longjmp` and the wide-integer, decimal and
+  overflow operations are confined too; bad pointers are compile errors.
+  Strings and structs libc returns from host memory (`strdup`, `strerror`,
+  `localtime`, ...) are VM copies, so comptime code can read them. `%n` is
+  rejected in comptime `printf`. See `docs/COMPTIME_POLICY.md`.
+
 ## [0.16.0] - 2026-10-17
 
 - Added: `--sandbox` confines the process with the OS sandbox (macOS

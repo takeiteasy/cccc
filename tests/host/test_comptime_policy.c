@@ -51,6 +51,19 @@ int main(void) {
               name);
     }
 
+    for (int i = 0; i < vm.compiler.ffi_count; i++) {
+        const char *name = vm.compiler.ffi_table[i].name;
+        if (cccc_comptime_class_of(name) == CT_SAFE)
+            CHECK(cccc_comptime_arg_spec(name) != NULL,
+                  "safe '%s' has no pointer-argument spec "
+                  "(add it to src/comptime_args.c)",
+                  name);
+    }
+    CHECK(cccc_comptime_arg_spec("fopen") == NULL, "fopen is not spec'd");
+    CHECK(strcmp(cccc_comptime_arg_spec("sqrtf"), "") == 0, "sqrtf spec");
+    CHECK(strcmp(cccc_comptime_arg_spec("modff"), "- w=4") == 0, "modff spec");
+    CHECK(strcmp(cccc_comptime_arg_spec("isalpha_l"), "") == 0, "isalpha_l");
+
     CHECK(cccc_comptime_class_of("strlen") == CT_SAFE, "strlen not safe");
     CHECK(cccc_comptime_class_of("sqrtf") == CT_SAFE, "sqrtf not safe");
     CHECK(cccc_comptime_class_of("isalpha_l") == CT_SAFE, "isalpha_l");
