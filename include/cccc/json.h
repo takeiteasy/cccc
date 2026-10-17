@@ -271,6 +271,30 @@ static int __cccc_json_r_str(__cccc_json_r *r, char *dst, size_t cap) {
     return __cccc_json_r_parse_str(r, dst, cap, 0);
 }
 
+// Reads a string into a new malloc'd buffer (*out), which the caller frees.
+static int __cccc_json_r_new_str(__cccc_json_r *r, char **out) {
+    __cccc_json_r_ws(r);
+    if (*r->p != '"')
+        return 1;
+    const char *q = r->p + 1;
+    while (*q != '"') {
+        if ((unsigned char)*q < 0x20)
+            return 1;
+        q += (*q == '\\' && q[1]) ? 2 : 1;
+    }
+    // Decoding never makes the text longer, so the raw span bounds it.
+    size_t cap = (size_t)(q - r->p);
+    char  *s   = malloc(cap);
+    if (!s)
+        return 1;
+    if (__cccc_json_r_parse_str(r, s, cap, 0)) {
+        free(s);
+        return 1;
+    }
+    *out = s;
+    return 0;
+}
+
 // Next member of an object whose '{' is already consumed. Returns 1 with the
 // key in `key` and the ':' consumed, 0 at the closing '}' (consumed), -1 on
 // error. *first is 1 before the first call.

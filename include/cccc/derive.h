@@ -348,10 +348,236 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     __builtin_generate_constructor(ty, tname);
 }
 
-// ---- @to_json / @from_json ---------------------------------------------------
-// Both generate a function over a struct whose members are integers, floats,
-// bool, enums, char arrays (JSON strings), arrays of those, and nested structs
-// (expanded in place), and need #include <cccc/json.h>. The member kinds:
+// <prefix>_<Type>_<suffix>, or <Type>_<suffix> when the prefix is empty.
+@comptime void __builtin_json_fn_name(char *out, const char *prefix,
+                                      const char *tname, const char *suffix) {
+    out[0] = 0;
+    if (prefix[0]) {
+        strcpy(out, prefix);
+        strcat(out, "_");
+    }
+    strcat(out, tname);
+    strcat(out, suffix);
+}
+
+// Whether `ty` (a struct, or an array of them) has an @owned member.
+@comptime int __builtin_owned_has(Type *ty) {
+    int tk = GetTypeKind(ty);
+    if (tk == TK_ARRAY)
+        return __builtin_owned_has(TypeBase(ty));
+    if (tk != TK_STRUCT)
+        return 0;
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member *m = StructMemberAt(ty, i);
+        if (MemberHasAttr(m, "owned") || __builtin_owned_has(MemberType(m)))
+            return 1;
+    }
+    return 0;
+}
+
+// Publishes a prototype for fname unless the program already has one, so the
+// generated bodies can call it; MakeFunction then defines it with the
+// prototype's parameters.
+@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
+                                     const char *first_name, Type *second,
+                                     const char *second_name) {
+    if (FindGlobal(fname))
+        return;
+    Obj *proto = FunctionPrototype(fname, ret);
+    FunctionAddParam(proto, first_name, first);
+    if (second)
+        FunctionAddParam(proto, second_name, second);
+    PublishNode(proto);
+}
+
+// Publishes a prototype for the generated function the derive attribute named
+// by `suffix` gives the struct `pt`, so a caller can reference it before the
+// struct's own attribute has run.
+@comptime void __builtin_derive_pointee_proto(const char *prefix, Type *pt,
+                                              const char *name,
+                                              const char *suffix) {
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, name, suffix);
+    if (!strcmp(suffix, "_destroy")) {
+        __builtin_owned_proto(fname, GetType("void"), MakePointer(pt), "self",
+                              NULL, NULL);
+    } else if (!strcmp(suffix, "_clone")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
+                              MakePointer(MakeConst(pt)), "self");
+    } else if (!strcmp(suffix, "_clone_size") && !FindGlobal(fname)) {
+        PublishNode(FunctionPrototype(fname, GetType("unsigned long")));
+    } else if (!strcmp(suffix, "_equals")) {
+        __builtin_owned_proto(fname, GetType("_Bool"),
+                              MakePointer(MakeConst(pt)), "a",
+                              MakePointer(MakeConst(pt)), "b");
+    } else if (!strcmp(suffix, "_compare")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(MakeConst(pt)),
+                              "a", MakePointer(MakeConst(pt)), "b");
+    } else if (!strcmp(suffix, "_hash")) {
+        Type *size_ty =
+            FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+        __builtin_owned_proto(fname, size_ty, MakePointer(MakeConst(pt)),
+                              "self", NULL, NULL);
+    } else if (!strcmp(suffix, "_json_write")) {
+        __builtin_owned_proto(fname, GetType("void"),
+                              MakePointer(MakeConst(pt)), "self",
+                              MakePointer(GetType("__cccc_json_w")), "w");
+    } else if (!strcmp(suffix, "_json_read")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
+                              MakePointer(GetType("__cccc_json_r")), "r");
+    } else if (!strcmp(suffix, "_dump")) {
+        __builtin_owned_proto(fname, GetType("void"),
+                              MakePointer(MakeConst(pt)), "self",
+                              MakePointer(GetType("FILE")), "out");
+    }
+}
+
+// The pointer parameter `name` of `fn`, retyped as `const T *` against the
+// complete `ty`: a prototype published while T was still incomplete carries a
+// stale qualified copy of it, which cannot be dereferenced.
+@comptime Node *__builtin_derive_const_param(Obj *fn, const char *name,
+                                             Type *ty) {
+    return MakeCast(MakeParamRef(fn, name), MakePointer(MakeConst(ty)));
+}
+
+// 1 when the pointee `pt` of an owned member is cloned/destroyed through its
+// own function (`out` receives its name), 0 when it is copied as plain bytes.
+// A pointee that is still incomplete is assumed to get its own @clone and
+// @destroy later: its prototypes are published here and 2 is returned, because
+// its size and element stride are only known through T_clone_size.
+@comptime int __builtin_owned_pointee_fn(char *out, Type *pt,
+                                         const char *prefix,
+                                         const char *self_name,
+                                         const char *suffix, const char *attr,
+                                         const char *path) {
+    int tk = GetTypeKind(pt);
+    if (tk == TK_VOID)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to void; use a typed "
+                     "pointer",
+                     attr, path);
+    if (tk != TK_STRUCT)
+        return 0;
+    const char *pname      = TypeName(pt);
+    bool        self       = pname && !strcmp(pname, self_name);
+    bool        incomplete = TypeSize(pt) < 0;
+    if (!self && !incomplete && !__builtin_owned_has(pt))
+        return 0;
+    if (!pname)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to an unnamed struct", attr,
+                     path);
+    __builtin_json_fn_name(out, prefix, pname, suffix);
+    if (incomplete) {
+        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone");
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_destroy");
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
+        } else {
+            __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
+        }
+        return 2;
+    }
+    if (!FindGlobal(out)) {
+        char fix[32];
+        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
+            strcpy(fix, "@clone and @destroy");
+        } else if (!strcmp(suffix, "_json_write")) {
+            strcpy(fix, "@to_json");
+        } else if (!strcmp(suffix, "_json_read")) {
+            strcpy(fix, "@from_json");
+        } else {
+            strcpy(fix, "@");
+            strcat(fix, suffix + 1);
+        }
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' needs %s; put %s on '%s', declared "
+                     "before '%s'",
+                     attr, path, out, fix, pname, self_name);
+    }
+    return 1;
+}
+
+// The length member `cname` of the struct `ty` that holds an @owned array.
+@comptime void __builtin_owned_count_check(Type *ty, const char *cname,
+                                           const char *attr, const char *path) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        if (!field || strcmp(field, cname))
+            continue;
+        int tk = GetTypeKind(MemberType(m));
+        if (tk != TK_CHAR && tk != TK_SHORT && tk != TK_INT && tk != TK_LONG)
+            MacroErrorAt(MakeIntLiteral(0),
+                         "%s: length member '%s' of '%s' is not an integer",
+                         attr, cname, path);
+        return;
+    }
+    MacroErrorAt(MakeIntLiteral(0), "%s: '%s' has no length member '%s'", attr,
+                 path, cname);
+}
+
+// The member named `name` of `ty`, looking through anonymous structs; `owner`
+// receives the struct that declares it.
+@comptime Member *__builtin_derive_find_member(Type *ty, const char *name,
+                                               Type **owner) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        if (field) {
+            if (!strcmp(field, name)) {
+                *owner = ty;
+                return m;
+            }
+        } else if (GetTypeKind(MemberType(m)) == TK_STRUCT) {
+            Member *found =
+                __builtin_derive_find_member(MemberType(m), name, owner);
+            if (found)
+                return found;
+        }
+    }
+    return NULL;
+}
+
+// What an @owned pointer member points to: 1 a C string, 2 an array whose
+// length is the member `*cname`, 3 a single object.
+@comptime int __builtin_owned_shape(Member *m, Type *owner, const char *attr,
+                                    const char *path, const char **cname) {
+    if (MemberAttrArgCount(m, "owned") == 1) {
+        *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
+        __builtin_owned_count_check(owner, *cname, attr, path);
+        return 2;
+    }
+    return GetTypeKind(TypeBase(MemberType(m))) == TK_CHAR ? 1 : 3;
+}
+
+// The generated function that handles a struct pointee or element, or 0 when
+// the pointee is walked inline. A pointee that is still incomplete cannot be
+// stepped through as an array.
+@comptime int __builtin_owned_content_fn(char *fn, Type *pt, int shape,
+                                         const char *prefix,
+                                         const char *self_name,
+                                         const char *suffix, const char *attr,
+                                         const char *path) {
+    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
+                                          attr, path);
+    if (deep == 2 && shape == 2)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to an array of a struct "
+                     "that is not declared yet; declare it first",
+                     attr, path);
+    return deep;
+}
+
+// ---- @to_json / @from_json
+// --------------------------------------------------- Both generate a function
+// over a struct whose members are integers, floats, bool, enums, char arrays
+// (JSON strings), arrays of those, and nested structs (expanded in place), plus
+// @owned pointers as their content, and need #include <cccc/json.h>. The member
+// kinds:
 //   1 signed integer / enum   2 unsigned integer   3 float   4 bool
 //   5 char[N] string          6 other array        7 struct   0 unsupported
 
@@ -467,7 +693,88 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 
 @comptime void __builtin_json_write_value(Node *block, Node *w, Type *ty,
                                           Node *e, const char *attr,
-                                          const char *path) {
+                                          const char *path, const char *prefix,
+                                          const char *self_name);
+
+// The generated function that writes/reads a struct pointee or element of an
+// @owned member, or 0 when the pointee is handled inline.
+@comptime int __builtin_json_content_fn(char *fn, Type *pt, int shape,
+                                        const char *prefix,
+                                        const char *self_name,
+                                        const char *suffix, const char *attr,
+                                        const char *path) {
+    int deep = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
+                                          suffix, attr, path);
+    if (deep == 2)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to a struct that is not "
+                     "declared yet; declare it first",
+                     attr, path);
+    return deep;
+}
+
+// An @owned member is written as its content: a C string as a string, an
+// array as an array of its n elements, anything else as *p. NULL is null.
+@comptime void __builtin_json_write_owned(Node *block, Node *w, Member *m,
+                                          Type *owner, Node *e,
+                                          const char *attr, const char *path,
+                                          const char *prefix,
+                                          const char *self_name) {
+    Node       *p     = MakeMember(e, MemberName(m));
+    Type       *pt    = TypeBase(MemberType(m));
+    const char *cname = NULL;
+    int         shape = __builtin_owned_shape(m, owner, attr, path, &cname);
+    char        fn[256];
+    int   deep  = __builtin_json_content_fn(fn, pt, shape, prefix, self_name,
+                                            "_json_write", attr, path);
+    Node *wp    = __builtin_json_addr(w);
+    Node *inner = MakeBlock(NULL, 0);
+    if (shape == 1) {
+        BlockAddStmt(inner,
+                     MakeExprStmt(__builtin_json_call3(
+                         "__cccc_json_w_str", wp,
+                         MakeCast(p, MakePointer(MakeConst(GetType("char")))),
+                         MakeCast(MakeIntLiteral(-1), GetType("size_t")))));
+    } else if (shape == 2) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("long"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_json_put_ch(comma, w, ',');
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        if (deep)
+            BlockAddStmt(body,
+                         MakeExprStmt(__builtin_json_call2(
+                             fn, MakeUnary(NK_ADDR, MakeSubscript(p, i)), wp)));
+        else
+            __builtin_json_write_value(body, w, pt, MakeSubscript(p, i), attr,
+                                       elem, prefix, self_name);
+        __builtin_json_put_ch(inner, w, '[');
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeMember(e, cname)),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_json_put_ch(inner, w, ']');
+    } else if (deep) {
+        BlockAddStmt(inner, MakeExprStmt(__builtin_json_call2(fn, p, wp)));
+    } else {
+        __builtin_json_write_value(inner, w, pt, MakeUnary(NK_DEREF, p), attr,
+                                   path, prefix, self_name);
+    }
+    Node *none = MakeBlock(NULL, 0);
+    BlockAddStmt(none,
+                 MakeExprStmt(__builtin_json_call2("__cccc_json_w_raw", wp,
+                                                   MakeStringLiteral("null"))));
+    BlockAddStmt(block, MakeIf(p, inner, none));
+}
+
+@comptime void __builtin_json_write_value(Node *block, Node *w, Type *ty,
+                                          Node *e, const char *attr,
+                                          const char *path, const char *prefix,
+                                          const char *self_name) {
     int k = __builtin_json_kind(ty);
     if (k == 0)
         MacroErrorAt(MakeIntLiteral(0),
@@ -505,7 +812,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         __builtin_json_put_ch(comma, w, ',');
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         __builtin_json_write_value(body, w, TypeBase(ty), MakeSubscript(e, i),
-                                   attr, elem_path);
+                                   attr, elem_path, prefix, self_name);
         __builtin_json_put_ch(block, w, '[');
         BlockAddStmt(
             block,
@@ -532,7 +839,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
                                     "__cccc_json_w_key", __builtin_json_addr(w),
                                     MakeStringLiteral(keys[j]))));
-            __builtin_json_write_value(block, w, types[j], exprs[j], attr, sub);
+            Type   *owner = NULL;
+            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+            if (mem && MemberHasAttr(mem, "owned"))
+                __builtin_json_write_owned(block, w, mem, owner, e, attr, sub,
+                                           prefix, self_name);
+            else
+                __builtin_json_write_value(block, w, types[j], exprs[j], attr,
+                                           sub, prefix, self_name);
         }
         __builtin_json_put_ch(block, w, '}');
     }
@@ -540,7 +854,124 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 
 @comptime void __builtin_json_read_value(Node *block, Node *r, Type *ty,
                                          Node *e, const char *attr,
-                                         const char *path) {
+                                         const char *path, const char *prefix,
+                                         const char *self_name);
+
+// An @owned member is read into memory it allocates: a string, an array that
+// grows as elements arrive (the length member follows it), or one object. null
+// reads as NULL. `have` is nonzero when the length member's own key was read
+// first, and must then agree with the array. The member stays consistent with
+// what is allocated, so a failed read can be released.
+@comptime void __builtin_json_read_owned(Node *block, Node *r, Member *m,
+                                         Type *owner, Node *e, const char *attr,
+                                         const char *path, const char *prefix,
+                                         const char *self_name, Node *have) {
+    Type       *pty   = MemberType(m);
+    Node       *p     = MakeMember(e, MemberName(m));
+    Type       *pt    = TypeBase(pty);
+    const char *cname = NULL;
+    int         shape = __builtin_owned_shape(m, owner, attr, path, &cname);
+    char        fn[256];
+    int   deep  = __builtin_json_content_fn(fn, pt, shape, prefix, self_name,
+                                            "_json_read", attr, path);
+    Node *rp    = __builtin_json_addr(r);
+    Node *value = MakeBlock(NULL, 0);
+    Node *none  = MakeBlock(NULL, 0);
+    BlockAddStmt(none,
+                 MakeExprStmt(MakeAssign(p, MakeCast(MakeIntLiteral(0), pty))));
+    Node *len = MakeLocalVarUnique(GetType("long"));
+    Node *exp = MakeLocalVarUnique(GetType("long long"));
+    if (shape == 1) {
+        Node *t = MakeLocalVarUnique(MakePointer(GetType("char")));
+        __builtin_json_fail_if(value,
+                               __builtin_json_call2("__cccc_json_r_new_str", rp,
+                                                    __builtin_json_addr(t)));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(p, MakeCast(t, pty))));
+    } else if (shape == 3) {
+        BlockAddStmt(value, Quote("$1 = calloc(1, sizeof(*$1)); if (!$1) "
+                                  "return 1;",
+                                  p));
+        if (deep)
+            __builtin_json_fail_if(value, __builtin_json_call2(fn, p, rp));
+        else
+            __builtin_json_read_value(value, r, pt, MakeUnary(NK_DEREF, p),
+                                      attr, path, prefix, self_name);
+    } else {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *n    = MakeMember(e, cname);
+        Node *cap  = MakeLocalVarUnique(GetType("long"));
+        Node *more = MakeLocalVarUnique(GetType("int"));
+        BlockAddStmt(none, MakeExprStmt(MakeAssign(n, MakeIntLiteral(0))));
+        __builtin_json_fail_if(value,
+                               __builtin_json_call2("__cccc_json_r_open", rp,
+                                                    MakeIntLiteral('[')));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(
+                                p, MakeCast(MakeIntLiteral(0), pty))));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(n, MakeIntLiteral(0))));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(cap, MakeIntLiteral(0))));
+
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(
+            step,
+            MakeIf(MakeBinary(NK_EQ, len, cap),
+                   Quote("{ unsigned long c_ = $3 ? $3 * 2 : 4; void *t_ = "
+                         "realloc($1, c_ * sizeof(*$1)); if (!t_) return 1; "
+                         "memset((char *)t_ + $3 * sizeof(*$1), 0, (c_ - $3) "
+                         "* sizeof(*$1)); $1 = t_; $3 = c_; $2 = c_; }",
+                         p, n, cap),
+                   NULL));
+        if (deep)
+            __builtin_json_fail_if(
+                step, __builtin_json_call2(
+                          fn, MakeUnary(NK_ADDR, MakeSubscript(p, len)), rp));
+        else
+            __builtin_json_read_value(step, r, pt, MakeSubscript(p, len), attr,
+                                      elem, prefix, self_name);
+        BlockAddStmt(step,
+                     MakeExprStmt(MakeAssign(
+                         len, MakeBinary(NK_ADD, len, MakeIntLiteral(1)))));
+        BlockAddStmt(step,
+                     MakeExprStmt(MakeAssign(
+                         more, MakeUnary(NK_NOT, __builtin_json_call2(
+                                                     "__cccc_json_r_open", rp,
+                                                     MakeIntLiteral(','))))));
+        Node *reading = MakeBlock(NULL, 0);
+        BlockAddStmt(reading,
+                     MakeExprStmt(MakeAssign(more, MakeIntLiteral(1))));
+        BlockAddStmt(reading, MakeWhile(more, step));
+        __builtin_json_fail_if(reading,
+                               __builtin_json_call2("__cccc_json_r_open", rp,
+                                                    MakeIntLiteral(']')));
+        BlockAddStmt(reading, MakeExprStmt(MakeAssign(n, len)));
+
+        Node *empty = MakeBlock(NULL, 0);
+        BlockAddStmt(empty, Quote("$1 = calloc(1, sizeof(*$1)); if (!$1) "
+                                  "return 1;",
+                                  p));
+        BlockAddStmt(value,
+                     MakeIf(__builtin_json_call2("__cccc_json_r_open", rp,
+                                                 MakeIntLiteral(']')),
+                            reading, empty));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(
+                                exp, MakeCast(n, GetType("long long")))));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(len, MakeIntLiteral(0))));
+    }
+    BlockAddStmt(block,
+                 MakeIf(MakeUnary(NK_NOT, __builtin_json_call2(
+                                              "__cccc_json_r_lit", rp,
+                                              MakeStringLiteral("null"))),
+                        none, value));
+    if (shape == 2 && have)
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LOGAND, have,
+                                              MakeBinary(NK_NE, exp, len)),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+}
+
+@comptime void __builtin_json_read_value(Node *block, Node *r, Type *ty,
+                                         Node *e, const char *attr,
+                                         const char *path, const char *prefix,
+                                         const char *self_name) {
     int k = __builtin_json_kind(ty);
     if (k == 0)
         MacroErrorAt(MakeIntLiteral(0),
@@ -584,7 +1015,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                         MakeIntLiteral(',')));
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         __builtin_json_read_value(body, r, TypeBase(ty), MakeSubscript(e, i),
-                                  attr, elem_path);
+                                  attr, elem_path, prefix, self_name);
         __builtin_json_fail_if(
             block, __builtin_json_call2("__cccc_json_r_open",
                                         __builtin_json_addr(r),
@@ -606,6 +1037,37 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         Node       *exprs[128];
         int         n = 0;
         __builtin_json_collect(ty, e, attr, names, keys, types, exprs, &n);
+
+        // cidx[j]: the member holding the length of owned array j (or -1);
+        // counted[j]: the owned array whose length member j is (or -1).
+        Type   *owners[128];
+        Member *mems[128];
+        int     cidx[128];
+        int     counted[128];
+        for (int j = 0; j < n; j++) {
+            owners[j]  = NULL;
+            mems[j]    = __builtin_derive_find_member(ty, names[j], &owners[j]);
+            cidx[j]    = -1;
+            counted[j] = -1;
+        }
+        for (int j = 0; j < n; j++) {
+            if (!MemberHasAttr(mems[j], "owned") ||
+                MemberAttrArgCount(mems[j], "owned") != 1)
+                continue;
+            const char *cname =
+                StringLiteralValue(MemberAttrArg(mems[j], "owned", 0));
+            for (int k = 0; k < n; k++) {
+                if (strcmp(names[k], cname))
+                    continue;
+                if (counted[k] >= 0)
+                    MacroErrorAt(MakeIntLiteral(0),
+                                 "%s: two owned arrays share the length "
+                                 "member '%s'",
+                                 attr, cname);
+                cidx[j]    = k;
+                counted[k] = j;
+            }
+        }
 
         Node *seen =
             MakeLocalVarUnique(MakeArray(GetType("unsigned char"), n ? n : 1));
@@ -635,7 +1097,34 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             strcat(sub, ".");
             strcat(sub, names[j]);
             Node *member = MakeBlock(NULL, 0);
-            __builtin_json_read_value(member, r, types[j], exprs[j], attr, sub);
+            if (MemberHasAttr(mems[j], "owned")) {
+                // A repeated key would leak the first allocation.
+                BlockAddStmt(member,
+                             MakeIf(MakeSubscript(seen, MakeIntLiteral(j)),
+                                    MakeReturn(MakeIntLiteral(1)), NULL));
+                Node *have = NULL;
+                if (cidx[j] >= 0)
+                    have = MakeSubscript(seen, MakeIntLiteral(cidx[j]));
+                __builtin_json_read_owned(member, r, mems[j], owners[j], e,
+                                          attr, sub, prefix, self_name, have);
+            } else if (counted[j] >= 0) {
+                // The length of an owned array: it must agree with the array.
+                Node *t = MakeLocalVarUnique(types[j]);
+                __builtin_json_read_value(member, r, types[j], t, attr, sub,
+                                          prefix, self_name);
+                Node *array_seen =
+                    MakeSubscript(seen, MakeIntLiteral(counted[j]));
+                Node *agree = MakeBlock(NULL, 0);
+                BlockAddStmt(agree,
+                             MakeIf(MakeBinary(NK_NE, exprs[j], t),
+                                    MakeReturn(MakeIntLiteral(1)), NULL));
+                BlockAddStmt(member,
+                             MakeIf(array_seen, agree,
+                                    MakeExprStmt(MakeAssign(exprs[j], t))));
+            } else {
+                __builtin_json_read_value(member, r, types[j], exprs[j], attr,
+                                          sub, prefix, self_name);
+            }
             BlockAddStmt(member,
                          MakeExprStmt(MakeAssign(
                              MakeSubscript(seen, MakeIntLiteral(j)),
@@ -703,18 +1192,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                      "@json_name key is longer than 127 characters");
 }
 
-// <prefix>_<Type>_<suffix>, or <Type>_<suffix> when the prefix is empty.
-@comptime void __builtin_json_fn_name(char *out, const char *prefix,
-                                      const char *tname, const char *suffix) {
-    out[0] = 0;
-    if (prefix[0]) {
-        strcpy(out, prefix);
-        strcat(out, "_");
-    }
-    strcat(out, tname);
-    strcat(out, suffix);
-}
-
 // @to_json struct Foo {...}; publishes
 //   size_t Foo_to_json(const struct Foo *self, char *buf, size_t cap);
 // which writes the struct as a JSON object and returns the length it needs
@@ -732,6 +1209,22 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     char fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_to_json");
 
+    // The body writes through T_json_write so an owned pointee of this type
+    // can be written by the same function.
+    char wname[256];
+    __builtin_json_fn_name(wname, prefix, tname, "_json_write");
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_json_write");
+    Obj *writer = MakeFunction(wname, GetType("void"));
+    WithFn(writer) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_json_write_value(
+            block, MakeUnary(NK_DEREF, MakeParamRef(writer, "w")), ty,
+            MakeUnary(NK_DEREF, MakeParamRef(writer, "self")), "@to_json",
+            tname, prefix, tname);
+        FunctionSetBody(writer, block);
+    }
+    PublishNode(writer);
+
     Obj *fn = MakeFunction(fname, GetType("size_t"));
     FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
     FunctionAddParam(fn, "buf", MakePointer(GetType("char")));
@@ -743,8 +1236,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                 "__cccc_json_w_init", __builtin_json_addr(w),
                                 MakeParamRef(fn, "buf"),
                                 MakeParamRef(fn, "cap"))));
-        Node *self = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
-        __builtin_json_write_value(block, w, ty, self, "@to_json", tname);
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                wname, MakeParamRef(fn, "self"),
+                                __builtin_json_addr(w))));
         BlockAddStmt(block, MakeReturn(__builtin_json_call1(
                                 "__cccc_json_w_end", __builtin_json_addr(w))));
         FunctionSetBody(fn, block);
@@ -770,6 +1264,22 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     char fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_from_json");
 
+    // As for @to_json: the body lives in T_json_read.
+    char rname[256];
+    __builtin_json_fn_name(rname, prefix, tname, "_json_read");
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_json_read");
+    Obj *reader = MakeFunction(rname, GetType("int"));
+    WithFn(reader) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_json_read_value(
+            block, MakeUnary(NK_DEREF, MakeParamRef(reader, "r")), ty,
+            MakeUnary(NK_DEREF, MakeParamRef(reader, "out")), "@from_json",
+            tname, prefix, tname);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(reader, block);
+    }
+    PublishNode(reader);
+
     Obj *fn = MakeFunction(fname, GetType("int"));
     FunctionAddParam(fn, "out", MakePointer(ty));
     FunctionAddParam(fn, "json", MakePointer(MakeConst(GetType("char"))));
@@ -779,14 +1289,31 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
                                 "__cccc_json_r_init", __builtin_json_addr(r),
                                 MakeParamRef(fn, "json"))));
-        Node *out = MakeUnary(NK_DEREF, MakeParamRef(fn, "out"));
-        __builtin_json_read_value(block, r, ty, out, "@from_json", tname);
-        BlockAddStmt(
-            block,
-            MakeIf(MakeUnary(NK_NOT,
-                             __builtin_json_call1("__cccc_json_r_at_end",
-                                                  __builtin_json_addr(r))),
-                   MakeReturn(MakeIntLiteral(1)), NULL));
+        // A struct that owns memory is read into a scratch copy that is
+        // released if anything fails, so *out is only written on success.
+        bool  owns = __builtin_owned_has(ty);
+        Node *dst  = MakeUnary(NK_DEREF, MakeParamRef(fn, "out"));
+        if (owns) {
+            dst = MakeLocalVarUnique(ty);
+            BlockAddStmt(block,
+                         Quote("__builtin_memset(&$1, 0, sizeof($1));", dst));
+        }
+        Node *failed = MakeBlock(NULL, 0);
+        if (owns)
+            __builtin_owned_release(failed, ty, dst, false, prefix, tname,
+                                    "@from_json", tname);
+        BlockAddStmt(failed, MakeReturn(MakeIntLiteral(1)));
+        Node *bad = MakeBinary(
+            NK_LOGOR,
+            __builtin_json_call2(rname, __builtin_json_addr(dst),
+                                 __builtin_json_addr(r)),
+            MakeUnary(NK_NOT, __builtin_json_call1("__cccc_json_r_at_end",
+                                                   __builtin_json_addr(r))));
+        BlockAddStmt(block, MakeIf(bad, failed, NULL));
+        if (owns)
+            BlockAddStmt(
+                block, MakeExprStmt(MakeAssign(
+                           MakeUnary(NK_DEREF, MakeParamRef(fn, "out")), dst)));
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
         FunctionSetBody(fn, block);
     }
@@ -897,207 +1424,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 @comptime(attribute("constructor_skip")) void __builtin_attr_constructor_skip(
     AttrTarget *target, ...) {
     __builtin_derive_skip_target(target, "@constructor_skip");
-}
-
-// Whether `ty` (a struct, or an array of them) has an @owned member.
-@comptime int __builtin_owned_has(Type *ty) {
-    int tk = GetTypeKind(ty);
-    if (tk == TK_ARRAY)
-        return __builtin_owned_has(TypeBase(ty));
-    if (tk != TK_STRUCT)
-        return 0;
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member *m = StructMemberAt(ty, i);
-        if (MemberHasAttr(m, "owned") || __builtin_owned_has(MemberType(m)))
-            return 1;
-    }
-    return 0;
-}
-
-// Publishes a prototype for fname unless the program already has one, so the
-// generated bodies can call it; MakeFunction then defines it with the
-// prototype's parameters.
-@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
-                                     const char *first_name, Type *second,
-                                     const char *second_name) {
-    if (FindGlobal(fname))
-        return;
-    Obj *proto = FunctionPrototype(fname, ret);
-    FunctionAddParam(proto, first_name, first);
-    if (second)
-        FunctionAddParam(proto, second_name, second);
-    PublishNode(proto);
-}
-
-// Publishes a prototype for the generated function the derive attribute named
-// by `suffix` gives the struct `pt`, so a caller can reference it before the
-// struct's own attribute has run.
-@comptime void __builtin_derive_pointee_proto(const char *prefix, Type *pt,
-                                              const char *name,
-                                              const char *suffix) {
-    char fname[256];
-    __builtin_json_fn_name(fname, prefix, name, suffix);
-    if (!strcmp(suffix, "_destroy")) {
-        __builtin_owned_proto(fname, GetType("void"), MakePointer(pt), "self",
-                              NULL, NULL);
-    } else if (!strcmp(suffix, "_clone")) {
-        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
-                              MakePointer(MakeConst(pt)), "self");
-    } else if (!strcmp(suffix, "_clone_size") && !FindGlobal(fname)) {
-        PublishNode(FunctionPrototype(fname, GetType("unsigned long")));
-    } else if (!strcmp(suffix, "_equals")) {
-        __builtin_owned_proto(fname, GetType("_Bool"),
-                              MakePointer(MakeConst(pt)), "a",
-                              MakePointer(MakeConst(pt)), "b");
-    } else if (!strcmp(suffix, "_compare")) {
-        __builtin_owned_proto(fname, GetType("int"), MakePointer(MakeConst(pt)),
-                              "a", MakePointer(MakeConst(pt)), "b");
-    } else if (!strcmp(suffix, "_hash")) {
-        Type *size_ty =
-            FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
-        __builtin_owned_proto(fname, size_ty, MakePointer(MakeConst(pt)),
-                              "self", NULL, NULL);
-    } else if (!strcmp(suffix, "_dump")) {
-        __builtin_owned_proto(fname, GetType("void"),
-                              MakePointer(MakeConst(pt)), "self",
-                              MakePointer(GetType("FILE")), "out");
-    }
-}
-
-// The pointer parameter `name` of `fn`, retyped as `const T *` against the
-// complete `ty`: a prototype published while T was still incomplete carries a
-// stale qualified copy of it, which cannot be dereferenced.
-@comptime Node *__builtin_derive_const_param(Obj *fn, const char *name,
-                                             Type *ty) {
-    return MakeCast(MakeParamRef(fn, name), MakePointer(MakeConst(ty)));
-}
-
-// 1 when the pointee `pt` of an owned member is cloned/destroyed through its
-// own function (`out` receives its name), 0 when it is copied as plain bytes.
-// A pointee that is still incomplete is assumed to get its own @clone and
-// @destroy later: its prototypes are published here and 2 is returned, because
-// its size and element stride are only known through T_clone_size.
-@comptime int __builtin_owned_pointee_fn(char *out, Type *pt,
-                                         const char *prefix,
-                                         const char *self_name,
-                                         const char *suffix, const char *attr,
-                                         const char *path) {
-    int tk = GetTypeKind(pt);
-    if (tk == TK_VOID)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to void; use a typed "
-                     "pointer",
-                     attr, path);
-    if (tk != TK_STRUCT)
-        return 0;
-    const char *pname      = TypeName(pt);
-    bool        self       = pname && !strcmp(pname, self_name);
-    bool        incomplete = TypeSize(pt) < 0;
-    if (!self && !incomplete && !__builtin_owned_has(pt))
-        return 0;
-    if (!pname)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to an unnamed struct", attr,
-                     path);
-    __builtin_json_fn_name(out, prefix, pname, suffix);
-    if (incomplete) {
-        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
-            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone");
-            __builtin_derive_pointee_proto(prefix, pt, pname, "_destroy");
-            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
-        } else {
-            __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
-        }
-        return 2;
-    }
-    if (!self && !FindGlobal(out)) {
-        char fix[32];
-        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
-            strcpy(fix, "@clone and @destroy");
-        } else {
-            strcpy(fix, "@");
-            strcat(fix, suffix + 1);
-        }
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' needs %s; put %s on '%s', declared "
-                     "before '%s'",
-                     attr, path, out, fix, pname, self_name);
-    }
-    return 1;
-}
-
-// The length member `cname` of the struct `ty` that holds an @owned array.
-@comptime void __builtin_owned_count_check(Type *ty, const char *cname,
-                                           const char *attr, const char *path) {
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member     *m     = StructMemberAt(ty, i);
-        const char *field = MemberName(m);
-        if (!field || strcmp(field, cname))
-            continue;
-        int tk = GetTypeKind(MemberType(m));
-        if (tk != TK_CHAR && tk != TK_SHORT && tk != TK_INT && tk != TK_LONG)
-            MacroErrorAt(MakeIntLiteral(0),
-                         "%s: length member '%s' of '%s' is not an integer",
-                         attr, cname, path);
-        return;
-    }
-    MacroErrorAt(MakeIntLiteral(0), "%s: '%s' has no length member '%s'", attr,
-                 path, cname);
-}
-
-// The member named `name` of `ty`, looking through anonymous structs; `owner`
-// receives the struct that declares it.
-@comptime Member *__builtin_derive_find_member(Type *ty, const char *name,
-                                               Type **owner) {
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member     *m     = StructMemberAt(ty, i);
-        const char *field = MemberName(m);
-        if (field) {
-            if (!strcmp(field, name)) {
-                *owner = ty;
-                return m;
-            }
-        } else if (GetTypeKind(MemberType(m)) == TK_STRUCT) {
-            Member *found =
-                __builtin_derive_find_member(MemberType(m), name, owner);
-            if (found)
-                return found;
-        }
-    }
-    return NULL;
-}
-
-// What an @owned pointer member points to: 1 a C string, 2 an array whose
-// length is the member `*cname`, 3 a single object.
-@comptime int __builtin_owned_shape(Member *m, Type *owner, const char *attr,
-                                    const char *path, const char **cname) {
-    if (MemberAttrArgCount(m, "owned") == 1) {
-        *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
-        __builtin_owned_count_check(owner, *cname, attr, path);
-        return 2;
-    }
-    return GetTypeKind(TypeBase(MemberType(m))) == TK_CHAR ? 1 : 3;
-}
-
-// The generated function that handles a struct pointee or element, or 0 when
-// the pointee is walked inline. A pointee that is still incomplete cannot be
-// stepped through as an array.
-@comptime int __builtin_owned_content_fn(char *fn, Type *pt, int shape,
-                                         const char *prefix,
-                                         const char *self_name,
-                                         const char *suffix, const char *attr,
-                                         const char *path) {
-    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
-                                          attr, path);
-    if (deep == 2 && shape == 2)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to an array of a struct "
-                     "that is not declared yet; declare it first",
-                     attr, path);
-    return deep;
 }
 
 @comptime void __builtin_equals_value(Node *block, Type *ty, Node *a, Node *b,
