@@ -1,6 +1,6 @@
 // @dump output: enums by name, nested and anonymous structs, arrays, strings,
 // pointers, @dump_skip and the name prefix.
-// CCCC_EXPECT_STDOUT: ^Rec \{ id = -7, big = 18446744073709551615, ratio = 0\.5, flag = true, color = GREEN, odd = 9, name = "ann", v = \{ 1, 2 \}, in = Inner \{ a = 3, grid = \{ \{ 1, 2 \}, \{ 3, 4 \} \} \}, x = 10, nul = (0x)?0+ \}$
+// CCCC_EXPECT_STDOUT: ^Rec \{ id = -7, big = 18446744073709551615, ratio = 0\.5, flag = true, color = GREEN, odd = 9, name = "ann", v = \{ 1, 2 \}, in = Inner \{ a = 3, grid = \{ \{ 1, 2 \}, \{ 3, 4 \} \} \}, x = 10, nul = (\(nil\)|(0x)?0+) \}$
 // CCCC_EXPECT_STDOUT: ^Empty \{\}$
 // CCCC_EXPECT_STDOUT: ^Skip \{ keep = 1 \}$
 
