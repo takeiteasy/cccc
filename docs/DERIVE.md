@@ -261,10 +261,13 @@ A prefix names the functions `<prefix>_<Type>_equals` (likewise `_hash` and
 |---|---|---|
 | Integer, enum, `bool`, bit-field | Compared by value | Number; enum by name (the number when no constant matches); `true` / `false` |
 | `float`, `double`, `long double` | `==`; `-0.0` equals `0.0` | `%.17g` (`%Lg` for `long double`) |
-| Pointer | Address | `%p` |
+| Other pointer | Address | `%p` |
 | `char[N]` | C string, at most `N` bytes | `"..."`, not escaped |
 | `T[N]` | Element-wise | `{ 1, 2 }` |
 | Struct | Member-wise | `Inner { b = 2 }` |
+| `char *s @owned` | C string; `NULL` equals only `NULL` | `"..."`, or `NULL` |
+| `T *a @owned("n")` | Lengths equal, then element-wise | `{ ... }`, or `NULL` |
+| `T *p @owned` | Compares `*p` | `*p`, or `NULL` |
 
 Members are compared one at a time, so padding is ignored. A `NaN` member makes
 `T_equals` false, like `==`. `T_equals(a, b)` implies `T_hash(a) == T_hash(b)`;
@@ -274,6 +277,13 @@ first NUL.
 `@equals_skip` leaves a member out of both `@equals` and `@hash`, and
 `@dump_skip` out of `@dump`. Both go on struct members, take no arguments, and
 are a compile error anywhere else.
+
+An `@owned` member (see [Owned memory](#owned-memory)) is compared, hashed and
+dumped by content instead of by address. When its pointee is a struct that
+owns memory, or is the struct itself (a linked list), `@equals`, `@hash` and
+`@dump` call the pointee's own `T_equals`, `T_hash` or `T_dump`, so put the
+attribute on the pointee first; a missing one is a compile error that names it.
+The same prefix finds them.[^forward]
 
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
@@ -404,8 +414,11 @@ It takes the same members as `@equals` (nested and anonymous structs expanded,
 `@equals_skip` leaves one out), so `T_compare(a, b) == 0` exactly when
 `T_equals(a, b)` is true. Integers, enums, `bool` and bit-fields order by value,
 floats with `<`, `char[N]` as unsigned bytes up to the first NUL, other arrays
-element by element. A `NaN` member compares equal to everything. A pointer
-member or a union is a compile error. `@compare("app")` publishes
+element by element. A `NaN` member compares equal to everything. An `@owned`
+member orders by content with `NULL` first: a `char *` as unsigned bytes, an
+`@owned("n")` array element by element and then by length, any other pointer
+through `*p`. A pointer member that is not `@owned`, or a union, is a compile
+error. `@compare("app")` publishes
 `app_Version_compare`. It fits `qsort` through a one-line wrapper that casts
 the `const void *` arguments.
 
@@ -472,3 +485,5 @@ A handler for a struct reads the attributes on its members with
 [Member attributes](MACROS.md#member-attributes).
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
+
+[^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. An `@owned("n")` array of such a struct is a compile error, because its element size is not known yet.

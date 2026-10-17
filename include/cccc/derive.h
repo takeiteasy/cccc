@@ -899,9 +899,278 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     __builtin_derive_skip_target(target, "@constructor_skip");
 }
 
+// Whether `ty` (a struct, or an array of them) has an @owned member.
+@comptime int __builtin_owned_has(Type *ty) {
+    int tk = GetTypeKind(ty);
+    if (tk == TK_ARRAY)
+        return __builtin_owned_has(TypeBase(ty));
+    if (tk != TK_STRUCT)
+        return 0;
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member *m = StructMemberAt(ty, i);
+        if (MemberHasAttr(m, "owned") || __builtin_owned_has(MemberType(m)))
+            return 1;
+    }
+    return 0;
+}
+
+// Publishes a prototype for fname unless the program already has one, so the
+// generated bodies can call it; MakeFunction then defines it with the
+// prototype's parameters.
+@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
+                                     const char *first_name, Type *second,
+                                     const char *second_name) {
+    if (FindGlobal(fname))
+        return;
+    Obj *proto = FunctionPrototype(fname, ret);
+    FunctionAddParam(proto, first_name, first);
+    if (second)
+        FunctionAddParam(proto, second_name, second);
+    PublishNode(proto);
+}
+
+// Publishes a prototype for the generated function the derive attribute named
+// by `suffix` gives the struct `pt`, so a caller can reference it before the
+// struct's own attribute has run.
+@comptime void __builtin_derive_pointee_proto(const char *prefix, Type *pt,
+                                              const char *name,
+                                              const char *suffix) {
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, name, suffix);
+    if (!strcmp(suffix, "_destroy")) {
+        __builtin_owned_proto(fname, GetType("void"), MakePointer(pt), "self",
+                              NULL, NULL);
+    } else if (!strcmp(suffix, "_clone")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
+                              MakePointer(MakeConst(pt)), "self");
+    } else if (!strcmp(suffix, "_clone_size") && !FindGlobal(fname)) {
+        PublishNode(FunctionPrototype(fname, GetType("unsigned long")));
+    } else if (!strcmp(suffix, "_equals")) {
+        __builtin_owned_proto(fname, GetType("_Bool"),
+                              MakePointer(MakeConst(pt)), "a",
+                              MakePointer(MakeConst(pt)), "b");
+    } else if (!strcmp(suffix, "_compare")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(MakeConst(pt)),
+                              "a", MakePointer(MakeConst(pt)), "b");
+    } else if (!strcmp(suffix, "_hash")) {
+        Type *size_ty =
+            FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+        __builtin_owned_proto(fname, size_ty, MakePointer(MakeConst(pt)),
+                              "self", NULL, NULL);
+    } else if (!strcmp(suffix, "_dump")) {
+        __builtin_owned_proto(fname, GetType("void"),
+                              MakePointer(MakeConst(pt)), "self",
+                              MakePointer(GetType("FILE")), "out");
+    }
+}
+
+// The pointer parameter `name` of `fn`, retyped as `const T *` against the
+// complete `ty`: a prototype published while T was still incomplete carries a
+// stale qualified copy of it, which cannot be dereferenced.
+@comptime Node *__builtin_derive_const_param(Obj *fn, const char *name,
+                                             Type *ty) {
+    return MakeCast(MakeParamRef(fn, name), MakePointer(MakeConst(ty)));
+}
+
+// 1 when the pointee `pt` of an owned member is cloned/destroyed through its
+// own function (`out` receives its name), 0 when it is copied as plain bytes.
+// A pointee that is still incomplete is assumed to get its own @clone and
+// @destroy later: its prototypes are published here and 2 is returned, because
+// its size and element stride are only known through T_clone_size.
+@comptime int __builtin_owned_pointee_fn(char *out, Type *pt,
+                                         const char *prefix,
+                                         const char *self_name,
+                                         const char *suffix, const char *attr,
+                                         const char *path) {
+    int tk = GetTypeKind(pt);
+    if (tk == TK_VOID)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to void; use a typed "
+                     "pointer",
+                     attr, path);
+    if (tk != TK_STRUCT)
+        return 0;
+    const char *pname      = TypeName(pt);
+    bool        self       = pname && !strcmp(pname, self_name);
+    bool        incomplete = TypeSize(pt) < 0;
+    if (!self && !incomplete && !__builtin_owned_has(pt))
+        return 0;
+    if (!pname)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to an unnamed struct", attr,
+                     path);
+    __builtin_json_fn_name(out, prefix, pname, suffix);
+    if (incomplete) {
+        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone");
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_destroy");
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
+        } else {
+            __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
+        }
+        return 2;
+    }
+    if (!self && !FindGlobal(out)) {
+        char fix[32];
+        if (!strcmp(suffix, "_clone") || !strcmp(suffix, "_destroy")) {
+            strcpy(fix, "@clone and @destroy");
+        } else {
+            strcpy(fix, "@");
+            strcat(fix, suffix + 1);
+        }
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' needs %s; put %s on '%s', declared "
+                     "before '%s'",
+                     attr, path, out, fix, pname, self_name);
+    }
+    return 1;
+}
+
+// The length member `cname` of the struct `ty` that holds an @owned array.
+@comptime void __builtin_owned_count_check(Type *ty, const char *cname,
+                                           const char *attr, const char *path) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        if (!field || strcmp(field, cname))
+            continue;
+        int tk = GetTypeKind(MemberType(m));
+        if (tk != TK_CHAR && tk != TK_SHORT && tk != TK_INT && tk != TK_LONG)
+            MacroErrorAt(MakeIntLiteral(0),
+                         "%s: length member '%s' of '%s' is not an integer",
+                         attr, cname, path);
+        return;
+    }
+    MacroErrorAt(MakeIntLiteral(0), "%s: '%s' has no length member '%s'", attr,
+                 path, cname);
+}
+
+// The member named `name` of `ty`, looking through anonymous structs; `owner`
+// receives the struct that declares it.
+@comptime Member *__builtin_derive_find_member(Type *ty, const char *name,
+                                               Type **owner) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        if (field) {
+            if (!strcmp(field, name)) {
+                *owner = ty;
+                return m;
+            }
+        } else if (GetTypeKind(MemberType(m)) == TK_STRUCT) {
+            Member *found =
+                __builtin_derive_find_member(MemberType(m), name, owner);
+            if (found)
+                return found;
+        }
+    }
+    return NULL;
+}
+
+// What an @owned pointer member points to: 1 a C string, 2 an array whose
+// length is the member `*cname`, 3 a single object.
+@comptime int __builtin_owned_shape(Member *m, Type *owner, const char *attr,
+                                    const char *path, const char **cname) {
+    if (MemberAttrArgCount(m, "owned") == 1) {
+        *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
+        __builtin_owned_count_check(owner, *cname, attr, path);
+        return 2;
+    }
+    return GetTypeKind(TypeBase(MemberType(m))) == TK_CHAR ? 1 : 3;
+}
+
+// The generated function that handles a struct pointee or element, or 0 when
+// the pointee is walked inline. A pointee that is still incomplete cannot be
+// stepped through as an array.
+@comptime int __builtin_owned_content_fn(char *fn, Type *pt, int shape,
+                                         const char *prefix,
+                                         const char *self_name,
+                                         const char *suffix, const char *attr,
+                                         const char *path) {
+    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
+                                          attr, path);
+    if (deep == 2 && shape == 2)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s: owned member '%s' points to an array of a struct "
+                     "that is not declared yet; declare it first",
+                     attr, path);
+    return deep;
+}
+
+@comptime void __builtin_equals_value(Node *block, Type *ty, Node *a, Node *b,
+                                      const char *path, const char *prefix,
+                                      const char *self_name);
+
+// An @owned member compares by content: a C string as a string, an array
+// element by element, anything else through *p. NULL equals only NULL.
+@comptime void __builtin_equals_owned(Node *block, Member *m, Type *owner,
+                                      Node *a, Node *b, const char *prefix,
+                                      const char *self_name, const char *path) {
+    const char *field = MemberName(m);
+    Node       *pa    = MakeMember(a, field);
+    Node       *pb    = MakeMember(b, field);
+    Type       *pt    = TypeBase(MemberType(m));
+    const char *cname = NULL;
+    int   shape = __builtin_owned_shape(m, owner, "@equals", path, &cname);
+    char  fn[256];
+    int   deep = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
+                                            "_equals", "@equals", path);
+    Node *no   = MakeIf(
+        MakeBinary(NK_LOGOR, MakeUnary(NK_NOT, pa), MakeUnary(NK_NOT, pb)),
+        MakeReturn(MakeIntLiteral(0)), NULL);
+    Node *inner = MakeBlock(NULL, 0);
+    BlockAddStmt(inner, no);
+    if (shape == 1) {
+        BlockAddStmt(inner, Quote("{ unsigned long i_ = 0; while ($1[i_] && "
+                                  "$1[i_] == $2[i_]) i_++; if ($1[i_] != "
+                                  "$2[i_]) return 0; }",
+                                  pa, pb));
+    } else if (shape == 2) {
+        Node *na = MakeMember(a, cname);
+        Node *nb = MakeMember(b, cname);
+        BlockAddStmt(inner, MakeIf(MakeBinary(NK_NE, na, nb),
+                                   MakeReturn(MakeIntLiteral(0)), NULL));
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("long"));
+        Node *body = MakeBlock(NULL, 0);
+        if (deep) {
+            Node *ea = MakeUnary(NK_ADDR, MakeSubscript(pa, i));
+            Node *eb = MakeUnary(NK_ADDR, MakeSubscript(pb, i));
+            BlockAddStmt(
+                body,
+                MakeIf(MakeUnary(NK_NOT, __builtin_json_call2(fn, ea, eb)),
+                       MakeReturn(MakeIntLiteral(0)), NULL));
+        } else {
+            __builtin_equals_value(body, pt, MakeSubscript(pa, i),
+                                   MakeSubscript(pb, i), elem, prefix,
+                                   self_name);
+        }
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, na),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (deep) {
+        BlockAddStmt(inner,
+                     MakeIf(MakeUnary(NK_NOT, __builtin_json_call2(fn, pa, pb)),
+                            MakeReturn(MakeIntLiteral(0)), NULL));
+    } else {
+        __builtin_equals_value(inner, pt, MakeUnary(NK_DEREF, pa),
+                               MakeUnary(NK_DEREF, pb), path, prefix,
+                               self_name);
+    }
+    BlockAddStmt(block, MakeIf(MakeBinary(NK_NE, pa, pb), inner, NULL));
+}
+
 // if (a != b) return 0; for every leaf. char[N] compares as a C string.
 @comptime void __builtin_equals_value(Node *block, Type *ty, Node *a, Node *b,
-                                      const char *path) {
+                                      const char *path, const char *prefix,
+                                      const char *self_name) {
     int k = __builtin_derive_kind(ty);
     if (k == 0)
         __builtin_derive_bad_member("@equals", path);
@@ -931,7 +1200,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         Node *i    = MakeLocalVarUnique(GetType("int"));
         Node *body = MakeBlock(NULL, 0);
         __builtin_equals_value(body, TypeBase(ty), MakeSubscript(a, i),
-                               MakeSubscript(b, i), elem);
+                               MakeSubscript(b, i), elem, prefix, self_name);
         BlockAddStmt(
             block,
             MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
@@ -953,7 +1222,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             char sub[256];
             __builtin_derive_path(sub, path, ".");
             strcat(sub, names[j]);
-            __builtin_equals_value(block, types[j], ea[j], eb[j], sub);
+            Type   *owner = NULL;
+            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+            if (mem && MemberHasAttr(mem, "owned"))
+                __builtin_equals_owned(block, mem, owner, a, b, prefix,
+                                       self_name, sub);
+            else
+                __builtin_equals_value(block, types[j], ea[j], eb[j], sub,
+                                       prefix, self_name);
         }
     } else {
         BlockAddStmt(block, MakeIf(MakeBinary(NK_NE, a, b),
@@ -983,7 +1259,75 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 }
 
 @comptime void __builtin_hash_value(Node *block, Node *h, Type *ty, Node *e,
-                                    const char *path) {
+                                    const char *path, const char *prefix,
+                                    const char *self_name);
+
+// An @owned member hashes the content @equals compares; NULL hashes nothing.
+@comptime void __builtin_hash_owned(Node *block, Node *h, Member *m,
+                                    Type *owner, Node *e, const char *prefix,
+                                    const char *self_name, const char *path) {
+    Type       *u64   = GetType("unsigned long long");
+    Node       *p     = MakeMember(e, MemberName(m));
+    Type       *pt    = TypeBase(MemberType(m));
+    const char *cname = NULL;
+    int         shape = __builtin_owned_shape(m, owner, "@hash", path, &cname);
+    char        fn[256];
+    int   deep  = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
+                                             "_hash", "@hash", path);
+    Node *inner = MakeBlock(NULL, 0);
+    if (shape == 1) {
+        Node *i    = MakeLocalVarUnique(GetType("long"));
+        Node *done = MakeLocalVarUnique(GetType("int"));
+        Node *mix  = MakeBlock(NULL, 0);
+        __builtin_hash_mix(
+            mix, h,
+            MakeCast(MakeCast(MakeSubscript(p, i), GetType("unsigned char")),
+                     u64));
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(step,
+                     MakeIf(MakeUnary(NK_NOT, MakeSubscript(p, i)),
+                            MakeExprStmt(MakeAssign(done, MakeIntLiteral(1))),
+                            mix));
+        BlockAddStmt(inner, MakeExprStmt(MakeAssign(done, MakeIntLiteral(0))));
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeUnary(NK_NOT, done),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    step));
+    } else if (shape == 2) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("long"));
+        Node *body = MakeBlock(NULL, 0);
+        if (deep)
+            __builtin_hash_mix(
+                body, h,
+                MakeCast(__builtin_json_call1(
+                             fn, MakeUnary(NK_ADDR, MakeSubscript(p, i))),
+                         u64));
+        else
+            __builtin_hash_value(body, h, pt, MakeSubscript(p, i), elem, prefix,
+                                 self_name);
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeMember(e, cname)),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+    } else if (deep) {
+        __builtin_hash_mix(inner, h,
+                           MakeCast(__builtin_json_call1(fn, p), u64));
+    } else {
+        __builtin_hash_value(inner, h, pt, MakeUnary(NK_DEREF, p), path, prefix,
+                             self_name);
+    }
+    BlockAddStmt(block, MakeIf(p, inner, NULL));
+}
+
+@comptime void __builtin_hash_value(Node *block, Node *h, Type *ty, Node *e,
+                                    const char *path, const char *prefix,
+                                    const char *self_name) {
     Type *u64 = GetType("unsigned long long");
     int   k   = __builtin_derive_kind(ty);
     if (k == 0)
@@ -1029,7 +1373,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         __builtin_derive_path(elem, path, "[]");
         Node *i    = MakeLocalVarUnique(GetType("int"));
         Node *body = MakeBlock(NULL, 0);
-        __builtin_hash_value(body, h, TypeBase(ty), MakeSubscript(e, i), elem);
+        __builtin_hash_value(body, h, TypeBase(ty), MakeSubscript(e, i), elem,
+                             prefix, self_name);
         BlockAddStmt(
             block,
             MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
@@ -1047,7 +1392,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             char sub[256];
             __builtin_derive_path(sub, path, ".");
             strcat(sub, names[j]);
-            __builtin_hash_value(block, h, types[j], exprs[j], sub);
+            Type   *owner = NULL;
+            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+            if (mem && MemberHasAttr(mem, "owned"))
+                __builtin_hash_owned(block, h, mem, owner, e, prefix, self_name,
+                                     sub);
+            else
+                __builtin_hash_value(block, h, types[j], exprs[j], sub, prefix,
+                                     self_name);
         }
     }
 }
@@ -1056,7 +1408,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 //   _Bool Foo_equals(const struct Foo *a, const struct Foo *b);
 // which compares the members one by one (padding is ignored): scalars and
 // pointers with ==, char[N] as a C string, other arrays element-wise, nested
-// structs member-wise. @equals("P") publishes P_Foo_equals.
+// structs member-wise. An @owned pointer compares by content (see
+// __builtin_equals_owned). @equals("P") publishes P_Foo_equals.
 @comptime(attribute("equals")) void __builtin_attr_equals(AttrTarget *target,
                                                           ...) {
     Type       *ty     = __builtin_derive_struct_target(target, "@equals");
@@ -1066,14 +1419,15 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     char        fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_equals");
 
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_equals");
     Obj *fn = MakeFunction(fname, GetType("_Bool"));
-    FunctionAddParam(fn, "a", MakePointer(MakeConst(ty)));
-    FunctionAddParam(fn, "b", MakePointer(MakeConst(ty)));
     WithFn(fn) {
         Node *block = MakeBlock(NULL, 0);
         __builtin_equals_value(
-            block, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "a")),
-            MakeUnary(NK_DEREF, MakeParamRef(fn, "b")), tname);
+            block, ty,
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "a", ty)),
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "b", ty)),
+            tname, prefix, tname);
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(1)));
         FunctionSetBody(fn, block);
     }
@@ -1095,8 +1449,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     // size_t is only declared once the program includes a header for it.
     Type *size_ty =
         FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_hash");
     Obj *fn = MakeFunction(fname, size_ty);
-    FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
     WithFn(fn) {
         Type *u64   = GetType("unsigned long long");
         Node *block = MakeBlock(NULL, 0);
@@ -1106,7 +1460,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             MakeExprStmt(MakeAssign(
                 h, MakeCast(MakeIntLiteral(-3750763034362895579LL), u64))));
         __builtin_hash_value(
-            block, h, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "self")), tname);
+            block, h, ty,
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "self", ty)),
+            tname, prefix, tname);
         BlockAddStmt(block, MakeReturn(MakeCast(h, size_ty)));
         FunctionSetBody(fn, block);
     }
@@ -1143,7 +1499,64 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 }
 
 @comptime void __builtin_dump_value(Node *block, Node *out, Type *ty, Node *e,
-                                    const char *tname, const char *path) {
+                                    const char *tname, const char *path,
+                                    const char *prefix, const char *self_name);
+
+// An @owned member prints its content: a C string as "...", an array as
+// { ... }, anything else as *p; NULL prints as NULL.
+@comptime void __builtin_dump_owned(Node *block, Node *out, Member *m,
+                                    Type *owner, Node *e, const char *prefix,
+                                    const char *self_name, const char *path) {
+    Node       *p     = MakeMember(e, MemberName(m));
+    Type       *pt    = TypeBase(MemberType(m));
+    const char *cname = NULL;
+    int         shape = __builtin_owned_shape(m, owner, "@dump", path, &cname);
+    char        fn[256];
+    int   deep  = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
+                                             "_dump", "@dump", path);
+    Node *inner = MakeBlock(NULL, 0);
+    if (shape == 1) {
+        __builtin_dump_text(inner, out, "\"");
+        __builtin_dump_printf1(inner, out, "%s",
+                               MakeCast(p, MakePointer(GetType("char"))));
+        __builtin_dump_text(inner, out, "\"");
+    } else if (shape == 2) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("long"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_dump_text(comma, out, ", ");
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        if (deep)
+            BlockAddStmt(
+                body, MakeExprStmt(__builtin_json_call2(
+                          fn, MakeUnary(NK_ADDR, MakeSubscript(p, i)), out)));
+        else
+            __builtin_dump_value(body, out, pt, MakeSubscript(p, i), NULL, elem,
+                                 prefix, self_name);
+        __builtin_dump_text(inner, out, "{ ");
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeMember(e, cname)),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_dump_text(inner, out, " }");
+    } else if (deep) {
+        BlockAddStmt(inner, MakeExprStmt(__builtin_json_call2(fn, p, out)));
+    } else {
+        __builtin_dump_value(inner, out, pt, MakeUnary(NK_DEREF, p), NULL, path,
+                             prefix, self_name);
+    }
+    Node *none = MakeBlock(NULL, 0);
+    __builtin_dump_text(none, out, "NULL");
+    BlockAddStmt(block, MakeIf(p, inner, none));
+}
+
+@comptime void __builtin_dump_value(Node *block, Node *out, Type *ty, Node *e,
+                                    const char *tname, const char *path,
+                                    const char *prefix, const char *self_name) {
     int k = __builtin_derive_kind(ty);
     if (k == 0)
         __builtin_derive_bad_member("@dump", path);
@@ -1199,7 +1612,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         __builtin_dump_text(comma, out, ", ");
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         __builtin_dump_value(body, out, TypeBase(ty), MakeSubscript(e, i), NULL,
-                             elem);
+                             elem, prefix, self_name);
         __builtin_dump_text(block, out, "{ ");
         BlockAddStmt(
             block,
@@ -1231,7 +1644,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             strcat(head, names[j]);
             strcat(head, " = ");
             __builtin_dump_text(block, out, head);
-            __builtin_dump_value(block, out, types[j], exprs[j], NULL, sub);
+            Type   *owner = NULL;
+            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+            if (mem && MemberHasAttr(mem, "owned"))
+                __builtin_dump_owned(block, out, mem, owner, e, prefix,
+                                     self_name, sub);
+            else
+                __builtin_dump_value(block, out, types[j], exprs[j], NULL, sub,
+                                     prefix, self_name);
         }
         __builtin_dump_text(block, out, n ? " }" : "}");
     }
@@ -1252,14 +1672,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     char fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_dump");
 
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_dump");
     Obj *fn = MakeFunction(fname, GetType("void"));
-    FunctionAddParam(fn, "self", MakePointer(MakeConst(ty)));
-    FunctionAddParam(fn, "out", MakePointer(GetType("FILE")));
     WithFn(fn) {
         Node *block = MakeBlock(NULL, 0);
-        __builtin_dump_value(block, MakeParamRef(fn, "out"), ty,
-                             MakeUnary(NK_DEREF, MakeParamRef(fn, "self")),
-                             tname, tname);
+        __builtin_dump_value(
+            block, MakeParamRef(fn, "out"), ty,
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "self", ty)),
+            tname, tname, prefix, tname);
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
@@ -1288,124 +1708,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                          "@owned expects the length member's name as a string "
                          "literal");
     }
-}
-
-// Whether `ty` (a struct, or an array of them) has an @owned member.
-@comptime int __builtin_owned_has(Type *ty) {
-    int tk = GetTypeKind(ty);
-    if (tk == TK_ARRAY)
-        return __builtin_owned_has(TypeBase(ty));
-    if (tk != TK_STRUCT)
-        return 0;
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member *m = StructMemberAt(ty, i);
-        if (MemberHasAttr(m, "owned") || __builtin_owned_has(MemberType(m)))
-            return 1;
-    }
-    return 0;
-}
-
-// Publishes a prototype for fname unless the program already has one, so the
-// generated bodies can call it; MakeFunction then defines it with the
-// prototype's parameters.
-@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
-                                     const char *first_name, Type *second,
-                                     const char *second_name) {
-    if (FindGlobal(fname))
-        return;
-    Obj *proto = FunctionPrototype(fname, ret);
-    FunctionAddParam(proto, first_name, first);
-    if (second)
-        FunctionAddParam(proto, second_name, second);
-    PublishNode(proto);
-}
-
-// Publishes a prototype for the generated function the derive attribute named
-// by `suffix` gives the struct `pt`, so a caller can reference it before the
-// struct's own attribute has run.
-@comptime void __builtin_derive_pointee_proto(const char *prefix, Type *pt,
-                                              const char *suffix) {
-    char fname[256];
-    __builtin_json_fn_name(fname, prefix, TypeName(pt), suffix);
-    if (!strcmp(suffix, "_destroy")) {
-        __builtin_owned_proto(fname, GetType("void"), MakePointer(pt), "self",
-                              NULL, NULL);
-    } else if (!strcmp(suffix, "_clone")) {
-        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
-                              MakePointer(MakeConst(pt)), "self");
-    } else if (!strcmp(suffix, "_clone_size") && !FindGlobal(fname)) {
-        PublishNode(FunctionPrototype(fname, GetType("unsigned long")));
-    }
-}
-
-// The pointer parameter `name` of `fn`, retyped as `const T *` against the
-// complete `ty`: a prototype published while T was still incomplete carries a
-// stale qualified copy of it, which cannot be dereferenced.
-@comptime Node *__builtin_derive_const_param(Obj *fn, const char *name,
-                                             Type *ty) {
-    return MakeCast(MakeParamRef(fn, name), MakePointer(MakeConst(ty)));
-}
-
-// 1 when the pointee `pt` of an owned member is cloned/destroyed through its
-// own function (`out` receives its name), 0 when it is copied as plain bytes.
-// A pointee that is still incomplete is assumed to get its own @clone and
-// @destroy later: its prototypes are published here and 2 is returned, because
-// its size and element stride are only known through T_clone_size.
-@comptime int __builtin_owned_pointee_fn(char *out, Type *pt, const char *prefix,
-                                         const char *self_name,
-                                         const char *suffix, const char *attr,
-                                         const char *path) {
-    int tk = GetTypeKind(pt);
-    if (tk == TK_VOID)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to void; use a typed "
-                     "pointer",
-                     attr, path);
-    if (tk != TK_STRUCT)
-        return 0;
-    const char *pname      = TypeName(pt);
-    bool        self       = pname && !strcmp(pname, self_name);
-    bool        incomplete = TypeSize(pt) < 0;
-    if (!self && !incomplete && !__builtin_owned_has(pt))
-        return 0;
-    if (!pname)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to an unnamed struct", attr,
-                     path);
-    __builtin_json_fn_name(out, prefix, pname, suffix);
-    if (incomplete) {
-        __builtin_derive_pointee_proto(prefix, pt, "_clone");
-        __builtin_derive_pointee_proto(prefix, pt, "_destroy");
-        __builtin_derive_pointee_proto(prefix, pt, "_clone_size");
-        return 2;
-    }
-    if (!self && !FindGlobal(out))
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' needs %s; put @clone and @destroy "
-                     "on '%s', declared before '%s'",
-                     attr, path, out, pname, self_name);
-    return 1;
-}
-
-// The length member `cname` of the struct `ty` that holds an @owned array.
-@comptime void __builtin_owned_count_check(Type *ty, const char *cname,
-                                           const char *attr, const char *path) {
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member     *m     = StructMemberAt(ty, i);
-        const char *field = MemberName(m);
-        if (!field || strcmp(field, cname))
-            continue;
-        int tk = GetTypeKind(MemberType(m));
-        if (tk != TK_CHAR && tk != TK_SHORT && tk != TK_INT && tk != TK_LONG)
-            MacroErrorAt(MakeIntLiteral(0),
-                         "%s: length member '%s' of '%s' is not an integer",
-                         attr, cname, path);
-        return;
-    }
-    MacroErrorAt(MakeIntLiteral(0), "%s: '%s' has no length member '%s'", attr,
-                 path, cname);
 }
 
 @comptime void __builtin_owned_require(const char *attr) {
@@ -1895,10 +2197,87 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 
 // ---- @compare ------------------------------------------------------------------
 
+@comptime void __builtin_compare_value(Node *block, Type *ty, Node *a, Node *b,
+                                       const char *path, const char *prefix,
+                                       const char *self_name);
+
+// `int c = call; if (c) return c;`
+@comptime void __builtin_compare_call(Node *block, Node *call) {
+    Node *c = MakeLocalVarUnique(GetType("int"));
+    BlockAddStmt(block, MakeExprStmt(MakeAssign(c, call)));
+    BlockAddStmt(block, MakeIf(c, MakeReturn(c), NULL));
+}
+
+// An @owned member orders by content, NULL first: a C string by unsigned
+// bytes, an array lexicographically and then by length, anything else by *p.
+@comptime void __builtin_compare_owned(Node *block, Member *m, Type *owner,
+                                       Node *a, Node *b, const char *prefix,
+                                       const char *self_name,
+                                       const char *path) {
+    const char *field = MemberName(m);
+    Node       *pa    = MakeMember(a, field);
+    Node       *pb    = MakeMember(b, field);
+    Type       *pt    = TypeBase(MemberType(m));
+    const char *cname = NULL;
+    int   shape = __builtin_owned_shape(m, owner, "@compare", path, &cname);
+    char  fn[256];
+    int   deep  = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
+                                             "_compare", "@compare", path);
+    Node *inner = MakeBlock(NULL, 0);
+    BlockAddStmt(inner, MakeIf(MakeUnary(NK_NOT, pa),
+                               MakeReturn(MakeIntLiteral(-1)), NULL));
+    BlockAddStmt(inner, MakeIf(MakeUnary(NK_NOT, pb),
+                               MakeReturn(MakeIntLiteral(1)), NULL));
+    if (shape == 1) {
+        BlockAddStmt(
+            inner,
+            Quote("{ unsigned long i_ = 0; while ($1[i_] && $1[i_] == $2[i_]) "
+                  "i_++; unsigned char x_ = (unsigned char)$1[i_]; unsigned "
+                  "char y_ = (unsigned char)$2[i_]; if (x_ < y_) return -1; "
+                  "if (y_ < x_) return 1; }",
+                  pa, pb));
+    } else if (shape == 2) {
+        Node *na = MakeMember(a, cname);
+        Node *nb = MakeMember(b, cname);
+        char  elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i    = MakeLocalVarUnique(GetType("long"));
+        Node *body = MakeBlock(NULL, 0);
+        if (deep)
+            __builtin_compare_call(
+                body, __builtin_json_call2(
+                          fn, MakeUnary(NK_ADDR, MakeSubscript(pa, i)),
+                          MakeUnary(NK_ADDR, MakeSubscript(pb, i))));
+        else
+            __builtin_compare_value(body, pt, MakeSubscript(pa, i),
+                                    MakeSubscript(pb, i), elem, prefix,
+                                    self_name);
+        BlockAddStmt(
+            inner,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LOGAND, MakeBinary(NK_LT, i, na),
+                               MakeBinary(NK_LT, i, nb)),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        BlockAddStmt(inner, MakeIf(MakeBinary(NK_LT, na, nb),
+                                   MakeReturn(MakeIntLiteral(-1)), NULL));
+        BlockAddStmt(inner, MakeIf(MakeBinary(NK_LT, nb, na),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+    } else if (deep) {
+        __builtin_compare_call(inner, __builtin_json_call2(fn, pa, pb));
+    } else {
+        __builtin_compare_value(inner, pt, MakeUnary(NK_DEREF, pa),
+                                MakeUnary(NK_DEREF, pb), path, prefix,
+                                self_name);
+    }
+    BlockAddStmt(block, MakeIf(MakeBinary(NK_NE, pa, pb), inner, NULL));
+}
+
 // if (a < b) return -1; if (b < a) return 1; for every leaf, in declaration
 // order. char[N] compares as unsigned bytes up to the first NUL.
 @comptime void __builtin_compare_value(Node *block, Type *ty, Node *a, Node *b,
-                                       const char *path) {
+                                       const char *path, const char *prefix,
+                                       const char *self_name) {
     int k = __builtin_derive_kind(ty);
     if (k == 0 || k == 8)
         __builtin_derive_bad_member("@compare", path);
@@ -1936,7 +2315,7 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         Node *i    = MakeLocalVarUnique(GetType("int"));
         Node *body = MakeBlock(NULL, 0);
         __builtin_compare_value(body, TypeBase(ty), MakeSubscript(a, i),
-                                MakeSubscript(b, i), elem);
+                                MakeSubscript(b, i), elem, prefix, self_name);
         BlockAddStmt(
             block,
             MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
@@ -1958,7 +2337,14 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             char sub[256];
             __builtin_derive_path(sub, path, ".");
             strcat(sub, names[j]);
-            __builtin_compare_value(block, types[j], ea[j], eb[j], sub);
+            Type   *owner = NULL;
+            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+            if (mem && MemberHasAttr(mem, "owned"))
+                __builtin_compare_owned(block, mem, owner, a, b, prefix,
+                                        self_name, sub);
+            else
+                __builtin_compare_value(block, types[j], ea[j], eb[j], sub,
+                                        prefix, self_name);
         }
     } else {
         BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, a, b),
@@ -1973,8 +2359,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 // returning <0, 0 or >0 by the first differing member in declaration order
 // (nested structs member-wise, char[N] as an unsigned C string, arrays
 // element-wise). Members carrying @equals_skip are left out, so
-// Foo_compare(a, b) == 0 exactly when Foo_equals(a, b). A pointer or union is a
-// compile error. A NaN member compares equal to everything.
+// Foo_compare(a, b) == 0 exactly when Foo_equals(a, b). An @owned pointer
+// orders by content, NULL first; any other pointer or a union is a compile
+// error. A NaN member compares equal to everything.
 // @compare("P") publishes P_Foo_compare.
 @comptime(attribute("compare")) void __builtin_attr_compare(AttrTarget *target,
                                                             ...) {
@@ -1985,14 +2372,15 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     char fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_compare");
 
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_compare");
     Obj *fn = MakeFunction(fname, GetType("int"));
-    FunctionAddParam(fn, "a", MakePointer(MakeConst(ty)));
-    FunctionAddParam(fn, "b", MakePointer(MakeConst(ty)));
     WithFn(fn) {
         Node *block = MakeBlock(NULL, 0);
         __builtin_compare_value(
-            block, ty, MakeUnary(NK_DEREF, MakeParamRef(fn, "a")),
-            MakeUnary(NK_DEREF, MakeParamRef(fn, "b")), tname);
+            block, ty,
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "a", ty)),
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "b", ty)),
+            tname, prefix, tname);
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
         FunctionSetBody(fn, block);
     }
