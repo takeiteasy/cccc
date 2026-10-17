@@ -42,6 +42,8 @@ int main(void) {
 | `@builder_required` | member | makes `T_build` fail until the member is set |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
+| `@compare_order(N)` | member | compares the member before those without a key, ascending `N` |
+| `@compare_desc` | member | reverses the direction `@compare` orders the member in |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
 | `@dump_skip` | member | leaves the member out of `@dump` |
 | `@serialize_skip` | member | leaves the member out of `@serialize` / `@deserialize` |
@@ -421,6 +423,31 @@ through `*p`. A pointer member that is not `@owned`, or a union, is a compile
 error. `@compare("app")` publishes
 `app_Version_compare`. It fits `qsort` through a one-line wrapper that casts
 the `const void *` arguments.
+
+### Choosing the order
+
+`@compare_order(N)` on a member compares it before the members without a key,
+in ascending `N` (negative keys are fine). Members with the same key, and the
+members without one, keep declaration order. `@compare_desc` reverses the
+direction a member is ordered in:
+
+```c
+@compare
+struct Task {
+    char name[16];
+    int  due      @compare_order(2);
+    int  priority @compare_order(1) @compare_desc;   // highest first
+};
+
+// priority (descending), then due, then name
+```
+
+The keys order the members of one struct; the members of an anonymous struct
+join the struct around it, and a nested struct is ordered by its own keys.
+`@compare_desc` on a struct or array member reverses the whole comparison of
+that member. Both attributes go on struct members, `@compare_order` takes one
+integer constant, and neither can share a member with `@equals_skip`. Only
+`@compare` reads them: `@equals`, `@hash` and `@dump` ignore them.
 
 ## Bit Flags
 

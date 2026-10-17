@@ -1442,6 +1442,8 @@ static const char *const derive_attr_names[] = {
     "constructor_skip",
     "bitflags",
     "compare",
+    "compare_order",
+    "compare_desc",
     "owned",
     "clone",
     "destroy",

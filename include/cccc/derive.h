@@ -2273,6 +2273,47 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     BlockAddStmt(block, MakeIf(MakeBinary(NK_NE, pa, pb), inner, NULL));
 }
 
+// @compare_order(N) on a member orders it before the members without a key,
+// ascending N (ties keep declaration order); @compare_desc reverses its
+// direction. Both only affect @compare.
+@comptime(attribute("compare_order")) void __builtin_attr_compare_order(
+    AttrTarget *target, ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@compare_order applies to a struct member");
+    long long key = 0;
+    if (VarargCount() != 1 || !ConstIntValue(VarargAt(0), &key))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@compare_order expects one integer constant");
+    if (MemberHasAttr(AttrTargetMember(target), "equals_skip"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@compare_order and @equals_skip cannot share a member");
+}
+
+@comptime(attribute("compare_desc")) void __builtin_attr_compare_desc(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@compare_desc");
+    if (MemberHasAttr(AttrTargetMember(target), "equals_skip"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@compare_desc and @equals_skip cannot share a member");
+}
+
+// 1 when the member `a` is compared before `b`: members with a key come first,
+// ascending, and the rest keep their declaration order.
+@comptime int __builtin_compare_before(Member *a, Member *b) {
+    int ka = MemberAttrArgCount(a, "compare_order") == 1;
+    int kb = MemberAttrArgCount(b, "compare_order") == 1;
+    if (!ka)
+        return 0;
+    if (!kb)
+        return 1;
+    long long na = 0;
+    long long nb = 0;
+    ConstIntValue(MemberAttrArg(a, "compare_order", 0), &na);
+    ConstIntValue(MemberAttrArg(b, "compare_order", 0), &nb);
+    return na < nb;
+}
+
 // if (a < b) return -1; if (b < a) return 1; for every leaf, in declaration
 // order. char[N] compares as unsigned bytes up to the first NUL.
 @comptime void __builtin_compare_value(Node *block, Type *ty, Node *a, Node *b,
@@ -2333,17 +2374,40 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                  ea, &n);
         __builtin_derive_collect(ty, b, "@compare", "equals_skip", names, types,
                                  eb, &m);
+        Type   *owners[128];
+        Member *members[128];
+        int     order[128];
         for (int j = 0; j < n; j++) {
+            owners[j]  = NULL;
+            members[j] = __builtin_derive_find_member(ty, names[j], &owners[j]);
+            int at     = j;
+            while (at > 0 && __builtin_compare_before(members[j],
+                                                      members[order[at - 1]])) {
+                order[at] = order[at - 1];
+                at--;
+            }
+            order[at] = j;
+        }
+        for (int x = 0; x < n; x++) {
+            int  j = order[x];
             char sub[256];
             __builtin_derive_path(sub, path, ".");
             strcat(sub, names[j]);
-            Type   *owner = NULL;
-            Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
-            if (mem && MemberHasAttr(mem, "owned"))
-                __builtin_compare_owned(block, mem, owner, a, b, prefix,
-                                        self_name, sub);
+            Node *first  = ea[j];
+            Node *second = eb[j];
+            Node *lhs    = a;
+            Node *rhs    = b;
+            if (MemberHasAttr(members[j], "compare_desc")) {
+                first  = eb[j];
+                second = ea[j];
+                lhs    = b;
+                rhs    = a;
+            }
+            if (MemberHasAttr(members[j], "owned"))
+                __builtin_compare_owned(block, members[j], owners[j], lhs, rhs,
+                                        prefix, self_name, sub);
             else
-                __builtin_compare_value(block, types[j], ea[j], eb[j], sub,
+                __builtin_compare_value(block, types[j], first, second, sub,
                                         prefix, self_name);
         }
     } else {
