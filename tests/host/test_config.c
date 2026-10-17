@@ -201,7 +201,7 @@ static void reset(char *proj) {
 }
 
 static void test_free_keys(const char *proj) {
-    write_file(proj, ".cccc", "# comment\nD = ANSWER=42\n");
+    write_file(proj, ".cccc.toml", "# comment\nD = \"ANSWER=42\"\n");
     Run r = RUN(proj, "answer.c");
     CHECK(r.rc == 42, "project D key: rc=%d %s", r.rc, r.out);
 
@@ -224,43 +224,85 @@ static void test_free_keys(const char *proj) {
     unsetenv("CCCC_TEST_KEEP_NO_CONFIG");
 }
 
-static void test_list_splitting(const char *proj) {
-    write_file(proj, ".cccc", "D = A=1, F(x,y)=2\nW = all, error=format\n");
+static void test_values(const char *proj) {
+    write_file(
+        proj, ".cccc.toml",
+        "D = [\"A=1\", \"F(x,y)=2\"]\nW = [\"all\", \"error=format\"]\n");
     Run r = RUN(proj, "--show-config", "answer.c");
     CHECK(strstr(r.out, "-DA=1 -DF(x,y)=2 -Wall -Werror=format"),
-          "list keys split on top-level commas: %s", r.out);
+          "arrays give one option per item: %s", r.out);
+
+    write_file(proj, ".cccc.toml", "U = \"X\"\nD = \"X\"\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(strstr(r.out, "-UX -DX"), "a list key takes one string: %s", r.out);
+
+    write_file(proj, ".cccc.toml", "U = [\"X\"]\nD = [\"X\"]\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(strstr(r.out, "-UX -DX"), "keys keep file order: %s", r.out);
+
+    write_file(proj, ".cccc.toml", "max-errors = 5\nO = 2\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(strstr(r.out, "--max-errors=5 -O2"), "integers: %s", r.out);
+
+    write_file(proj, ".cccc.toml", "openmp = true\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(strstr(r.out, "options: --openmp"), "a true flag: %s", r.out);
+
+    write_file(proj, ".cccc.toml", "openmp = false\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(!strstr(r.out, "--openmp"), "a false flag adds nothing: %s", r.out);
+
+    char g[PATH_MAX + 32];
+    snprintf(g, sizeof g, "%s/home/xdg/cccc", root);
+    write_file(g, "config.toml", "link-arg = [\"-Wl,-rpath,x\", \"-lm\"]\n");
+    r = RUN(proj, "--show-config", "answer.c");
+    CHECK(strstr(r.out, "--link-arg=-Wl,-rpath,x --link-arg=-lm"),
+          "a value with commas passes through: %s", r.out);
 }
 
 static void test_global_and_local_order(const char *proj) {
     char g[PATH_MAX + 32];
     snprintf(g, sizeof g, "%s/home/xdg/cccc", root);
-    write_file(g, "config", "D = ANSWER=1\n");
-    write_file(proj, ".cccc", "D = ANSWER=42\n");
+    write_file(g, "config.toml", "D = \"ANSWER=1\"\n");
+    write_file(proj, ".cccc.toml", "D = \"ANSWER=42\"\n");
     Run r = RUN(proj, "answer.c");
     CHECK(r.rc == 42, "local beats global: rc=%d %s", r.rc, r.out);
-    write_file(proj, ".cccc", "# nothing\n");
+    write_file(proj, ".cccc.toml", "# nothing\n");
     r = RUN(proj, "answer.c");
     CHECK(r.rc == 1, "global applies: rc=%d", r.rc);
-    snprintf(g, sizeof g, "%s/home/xdg/cccc/config", root);
+    snprintf(g, sizeof g, "%s/home/xdg/cccc/config.toml", root);
     unlink(g);
 }
 
-static void test_bad_keys(const char *proj) {
-    write_file(proj, ".cccc", "std = c17\nrepl = true\n");
+// Writes `text` as the project config and expects exit 1 with `pattern`.
+static void expect_error(const char *proj, const char *text,
+                         const char *pattern) {
+    write_file(proj, ".cccc.toml", text);
     Run r = RUN(proj, "answer.c");
-    CHECK(r.rc == 1 && strstr(r.out, ".cccc:2: 'repl' cannot be set"),
-          "CLI-only key: rc=%d %s", r.rc, r.out);
-    write_file(proj, ".cccc", "bogus = 1\n");
-    r = RUN(proj, "answer.c");
-    CHECK(r.rc == 1 && strstr(r.out, ".cccc:1: unknown key 'bogus'"),
-          "unknown key: rc=%d %s", r.rc, r.out);
-    write_file(proj, ".cccc", "[section]\n");
-    r = RUN(proj, "answer.c");
-    CHECK(r.rc == 1 && strstr(r.out, ".cccc:1: sections are not supported"),
-          "section: rc=%d %s", r.rc, r.out);
-    write_file(proj, ".cccc", "openmp = maybe\n");
-    r = RUN(proj, "answer.c");
-    CHECK(r.rc == 1 && strstr(r.out, "is a flag"), "bad flag value: %s", r.out);
+    CHECK(r.rc == 1 && strstr(r.out, pattern), "%s: want \"%s\", rc=%d %s",
+          text, pattern, r.rc, r.out);
+}
+
+static void test_bad_input(const char *proj) {
+    expect_error(proj, "std = \"c17\"\nrepl = true\n",
+                 ".cccc.toml:2: 'repl' cannot be set");
+    expect_error(proj, "bogus = 1\n", ".cccc.toml:1: unknown key 'bogus'");
+    expect_error(proj, "[section]\n", ".cccc.toml:1: tables are not supported");
+    expect_error(proj, "D.x = \"1\"\n",
+                 ".cccc.toml:1: tables are not supported");
+    expect_error(proj, "openmp = \"maybe\"\n", "is a flag");
+    expect_error(proj, "openmp = 1\n", "is a flag");
+    expect_error(proj, "std = true\n", ".cccc.toml:1: 'std' needs a value");
+    expect_error(proj, "std = \"\"\n", ".cccc.toml:1: 'std' needs a value");
+    expect_error(proj, "std = [\"c17\"]\n", "takes one value, not a list");
+    expect_error(proj, "D = 1.5\n", "'D' cannot be of type float");
+    expect_error(proj, "D = 1979-05-27\n", "cannot be of type date or time");
+    expect_error(proj, "D = [[\"a\"]]\n", "list items must be strings");
+    expect_error(proj, "D = [true]\n", "list items must be strings");
+    expect_error(proj, "std = \"c17\"\nstd = \"c11\"\n",
+                 ".cccc.toml:2: duplicate key");
+    expect_error(proj, "std = \"c17\"\nD = [\n", ".cccc.toml:3:");
+    expect_error(proj, "std = c17\n", ".cccc.toml:1:");
 }
 
 static void test_relative_paths(const char *proj) {
@@ -270,7 +312,7 @@ static void test_relative_paths(const char *proj) {
     write_file(inc, "x.h", "#define VAL 42\n");
     write_file(proj, "rel.c",
                "#include \"x.h\"\nint main(void) { return VAL; }\n");
-    write_file(proj, ".cccc", "I = inc\n");
+    write_file(proj, ".cccc.toml", "I = \"inc\"\n");
     char sub[PATH_MAX + 8];
     snprintf(sub, sizeof sub, "%s/sub", proj);
     Run r = RUN(sub, "../rel.c");
@@ -281,15 +323,32 @@ static void test_relative_paths(const char *proj) {
           "show-config prints the resolved path: %s", r.out);
 }
 
+// Escapes decode to control characters after parsing, so the check runs on
+// decoded text and no raw escape byte reaches the terminal.
 static void test_control_characters(const char *proj) {
-    write_file(proj, ".cccc", "D = A\x1b[2K=1\n");
-    Run r = RUN(proj, "answer.c");
-    CHECK(r.rc == 1 && strstr(r.out, ".cccc:1: control characters"),
-          "control byte: rc=%d %s", r.rc, r.out);
+    const char *bad[] = {
+        "D = \"A\\u001b[2K=1\"\n",         // ESC in a value
+        "D = [\"ok\", \"A\\u001b[2K\"]\n", // ESC in an array item
+        "\"D\\u001b[2K\" = \"x\"\n",       // ESC in a key
+        "D = \"A\\u009b2K\"\n",            // C1 control (CSI)
+        "D = \"A\\u0000B\"\n",             // NUL
+        "D = \"A\\u007fB\"\n",             // DEL
+        "D = 'A\x1b[2K'\n",                // raw ESC in a literal string
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof *bad; i++) {
+        write_file(proj, ".cccc.toml", bad[i]);
+        Run r = RUN(proj, "answer.c");
+        CHECK(r.rc == 1 && !strchr(r.out, 0x1b) && !strchr(r.out, 0x7f) &&
+                  !strstr(r.out, "\xc2\x9b"),
+              "control character %zu: rc=%d %s", i, r.rc, r.out);
+        if (i < 6)
+            CHECK(strstr(r.out, ".cccc.toml:1: control characters"),
+                  "control character %zu is named: %s", i, r.out);
+    }
 }
 
 static void test_build_ignores_config(const char *proj) {
-    write_file(proj, ".cccc", "D = ANSWER=42\n");
+    write_file(proj, ".cccc.toml", "D = \"ANSWER=42\"\n");
     Run r = RUN(proj, "--build", "--show-config", "answer.c");
     CHECK(strstr(r.out, "config disabled"), "--build skips config: %s", r.out);
 }
@@ -297,9 +356,9 @@ static void test_build_ignores_config(const char *proj) {
 static void test_symlinked_global_config(const char *proj) {
     char real[PATH_MAX + 32], link[PATH_MAX + 48];
     snprintf(real, sizeof real, "%s/home", root);
-    write_file(real, "dotfile", "D = ANSWER=42\n");
+    write_file(real, "dotfile", "D = \"ANSWER=42\"\n");
     snprintf(real, sizeof real, "%s/home/dotfile", root);
-    snprintf(link, sizeof link, "%s/home/xdg/cccc/config", root);
+    snprintf(link, sizeof link, "%s/home/xdg/cccc/config.toml", root);
     if (symlink(real, link) != 0)
         exit(2);
     Run r = RUN(proj, "answer.c");
@@ -307,21 +366,22 @@ static void test_symlinked_global_config(const char *proj) {
 }
 
 static void test_symlinked_config_ignored(const char *proj) {
-    write_file(proj, "real.cfg", "D = ANSWER=42\n");
+    write_file(proj, "real.cfg", "D = \"ANSWER=42\"\n");
     char link[PATH_MAX + 16], target[PATH_MAX + 16];
-    snprintf(link, sizeof link, "%s/.cccc", proj);
+    snprintf(link, sizeof link, "%s/.cccc.toml", proj);
     snprintf(target, sizeof target, "%s/real.cfg", proj);
     unlink(link);
     if (symlink(target, link) != 0)
         exit(2);
     Run r = RUN(proj, "answer.c");
     CHECK(r.rc == 1 && strstr(r.out, "not a regular file owned by you"),
-          "a symlinked .cccc is ignored with a warning: rc=%d %s", r.rc, r.out);
+          "a symlinked .cccc.toml is ignored with a warning: rc=%d %s", r.rc,
+          r.out);
     unlink(link);
 }
 
 static void test_trust(const char *proj) {
-    write_file(proj, ".cccc", "comptime-allow = fs\n");
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\"]\n");
     Run r = RUN(proj, "fs.c");
     CHECK(r.rc != 42 &&
               strstr(r.out, "ignoring comptime-allow=fs (not trusted)"),
@@ -339,7 +399,7 @@ static void test_trust(const char *proj) {
     r = RUN(proj, "fs.c");
     CHECK(r.rc == 42, "trusted grant applies: rc=%d %s", r.rc, r.out);
 
-    write_file(proj, ".cccc", "comptime-allow = fs, exec\n");
+    write_file(proj, ".cccc.toml", "comptime-allow = [\"fs\", \"exec\"]\n");
     r = RUN(proj, "fs.c");
     CHECK(r.rc == 42 && strstr(r.out, "ignoring comptime-allow=exec") &&
               !strstr(r.out, "ignoring comptime-allow=fs "),
@@ -347,7 +407,7 @@ static void test_trust(const char *proj) {
 
     r = RUN(proj, "--untrust");
     CHECK(r.rc == 0, "--untrust: %s", r.out);
-    write_file(proj, ".cccc", "comptime-allow = fs\n");
+    write_file(proj, ".cccc.toml", "comptime-allow = \"fs\"\n");
     r = RUN(proj, "fs.c");
     CHECK(r.rc != 42, "grant is untrusted again after --untrust: rc=%d", r.rc);
 }
@@ -355,9 +415,9 @@ static void test_trust(const char *proj) {
 static void test_global_grants_without_trust(const char *proj) {
     char g[PATH_MAX + 32];
     snprintf(g, sizeof g, "%s/home/xdg/cccc", root);
-    write_file(g, "config", "comptime-allow = fs\n");
-    char p[PATH_MAX + 8];
-    snprintf(p, sizeof p, "%s/.cccc", proj);
+    write_file(g, "config.toml", "comptime-allow = \"fs\"\n");
+    char p[PATH_MAX + 16];
+    snprintf(p, sizeof p, "%s/.cccc.toml", proj);
     unlink(p);
     Run r = RUN(proj, "fs.c");
     CHECK(r.rc == 42, "global config is trusted: rc=%d %s", r.rc, r.out);
@@ -394,11 +454,11 @@ int main(void) {
     reset(proj);
     test_free_keys(proj);
     reset(proj);
-    test_list_splitting(proj);
+    test_values(proj);
     reset(proj);
     test_global_and_local_order(proj);
     reset(proj);
-    test_bad_keys(proj);
+    test_bad_input(proj);
     reset(proj);
     test_relative_paths(proj);
     reset(proj);

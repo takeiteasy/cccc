@@ -665,7 +665,7 @@ static int lint(char **files, int n) {
 
 int main(int argc, char **argv) {
     int timeout = 600, a = 1;
-    setenv("CCCC_NO_CONFIG", "1", 1); // a developer's ~/.cccc must not leak in
+    setenv("CCCC_NO_CONFIG", "1", 1); // a developer's ~/.cccc.toml must not leak in
     if (a < argc && !strcmp(argv[a], "--lint"))
         return lint(argv + a + 1, argc - a - 1);
     if (a + 1 < argc && !strcmp(argv[a], "--timeout")) {

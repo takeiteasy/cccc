@@ -109,7 +109,7 @@ Manuals live in [`docs/`](docs/):
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@generate_accessors`, ... |
-| [CONFIG.md](docs/CONFIG.md) | `.cccc` config files, which options they can set, and the trust prompt for project grants |
+| [CONFIG.md](docs/CONFIG.md) | `.cccc.toml` config files, which options they can set, and the trust prompt for project grants |
 | [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
 | [NATIVE.md](docs/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
@@ -328,9 +328,9 @@ FFI Safety Options:
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 
 Configuration (see docs/CONFIG.md):
-	   --no-config            Ignore ~/.config/cccc/config and .cccc files
+	   --no-config            Ignore ~/.config/cccc/config.toml and .cccc.toml files
 	   --show-config          Print the config files read and the options they add
-	   --trust[=path]         Approve a project .cccc's capability grants
+	   --trust[=path]         Approve a project .cccc.toml's capability grants
 	   --untrust[=path]       Withdraw that approval
 
 Language Standard:
@@ -389,6 +389,8 @@ This project builds on [chibicc](https://github.com/rui314/chibicc) for the C fr
 [stb_sprintf.h](https://github.com/nothings/stb/blob/master/stb_sprintf.h) is used as a base for C23 compliant `*printf` functions.
 
 `--watch` uses [dmon](https://github.com/septag/dmon) by Sepehr Taghdisian (BSD 2-clause), vendored as `src/dmon.h`.
+
+Config files are parsed with [tomlc17](https://github.com/cktan/tomlc17) by CK Tan (MIT), vendored as `src/tomlc17.c`.
 
 Host C crash backtraces use [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) by Ian Lance Taylor (BSD 3-clause), a git submodule in `vendor/libbacktrace`.
 

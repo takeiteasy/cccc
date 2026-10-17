@@ -17,13 +17,14 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Config files: ~/.config/cccc/config (or $XDG_CONFIG_HOME) / ~/.cccc, and the
-// nearest .cccc above the working directory. Each `key = value` line becomes a
-// command-line option placed before the real arguments. See docs/CONFIG.md.
+// Config files: ~/.config/cccc/config.toml (or $XDG_CONFIG_HOME) /
+// ~/.cccc.toml, and the nearest .cccc.toml above the working directory. Each
+// top-level key becomes command-line options placed before the real
+// arguments. See docs/CONFIG.md.
 
 #include "config.h"
+#include "toml.h"
 
-#include <ctype.h>
 #include <stdbool.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -213,8 +214,7 @@ static const struct {
 
 #define NCLASSES (sizeof(classes) / sizeof(classes[0]))
 
-// Keys whose value is a comma-separated list, each item becoming its own
-// option. Other keys pass the value verbatim.
+// Keys that may hold an array, each item becoming its own option.
 static const char *const list_keys[] = {
     "define",
     "D",
@@ -239,6 +239,8 @@ static const char *const list_keys[] = {
     "watch-path",
     "watch-ignore",
     "build-tool-allow",
+    "build-option",
+    "link-arg",
 };
 
 // Keys whose relative values are taken from the config file's directory.
@@ -392,7 +394,7 @@ static char *global_config_dir(void) {
 static char *find_global(void) {
     char *dir = global_config_dir();
     if (dir) {
-        char *p = join(dir, "/config");
+        char *p = join(dir, "/config.toml");
         free(dir);
         if (usable_global(p))
             return p;
@@ -400,7 +402,7 @@ static char *find_global(void) {
     }
     const char *home = getenv("HOME");
     if (home && home[0]) {
-        char *p = join(home, "/.cccc");
+        char *p = join(home, "/.cccc.toml");
         if (usable_global(p))
             return p;
         free(p);
@@ -408,8 +410,9 @@ static char *find_global(void) {
     return NULL;
 }
 
-// Nearest .cccc from the working directory upward. The search stops after a
-// directory holding .git, and before $HOME (whose .cccc is the global file).
+// Nearest .cccc.toml from the working directory upward. The search stops after
+// a directory holding .git, and before $HOME (whose .cccc.toml is the global
+// file).
 static char *find_local(void) {
     char cwd[PATH_MAX];
     if (!getcwd(cwd, sizeof cwd))
@@ -420,7 +423,7 @@ static char *find_local(void) {
     for (;;) {
         if (have_home && !strcmp(cwd, home_real))
             return NULL;
-        char       *p = join(cwd, "/.cccc");
+        char       *p = join(cwd, "/.cccc.toml");
         struct stat st;
         if (usable_file(p))
             return p;
@@ -446,141 +449,97 @@ static char *find_local(void) {
 
 static const char *cfg_dir; // directory of the file being parsed
 
-static void config_error(const char *path, int line, const char *fmt,
-                         const char *a) {
-    fprintf(stderr, "error: %s:%d: ", path, line);
-    fprintf(stderr, fmt, a);
-    fputc('\n', stderr);
-    exit(1);
-}
-
-static char *trim(char *s) {
-    while (isspace((unsigned char)*s))
-        s++;
-    char *e = s + strlen(s);
-    while (e > s && isspace((unsigned char)e[-1]))
-        *--e = '\0';
-    return s;
-}
-
-// Drops one pair of surrounding double quotes.
-static char *unquote(char *s) {
-    size_t n = strlen(s);
-    if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
-        s[n - 1] = '\0';
-        return s + 1;
-    }
-    return s;
-}
-
-// Emits one option for `key` with `val`.
-static void emit(Opts *o, const char *path, int line, const char *key,
-                 int arity, char *val, CfgClass cls) {
-    char *arg;
+// Emits one option for `key`; `val` is NULL for a bare flag.
+static void emit(Opts *o, const char *key, const char *val, CfgClass cls) {
     char *resolved = NULL;
-    bool  is_short = key[0] && !key[1];
-    if (val[0] && val[0] != '/' && is_path_key(key)) {
+    if (val && val[0] != '/' && is_path_key(key)) {
         resolved = xasprintf("%s/%s", cfg_dir, val);
         val      = resolved;
     }
-    if (arity == no_argument) {
-        bool on  = !strcmp(val, "true") || !strcmp(val, "1") ||
-                   !strcmp(val, "yes") || !strcmp(val, "on");
-        bool off = !strcmp(val, "false") || !strcmp(val, "0") ||
-                   !strcmp(val, "no") || !strcmp(val, "off");
-        if (!on && !off)
-            config_error(path, line, "'%s' is a flag; use true or false", key);
-        if (off)
-            return;
-        arg = is_short ? join("-", key) : join("--", key);
-    } else if (!val[0]) {
-        if (arity == required_argument)
-            config_error(path, line, "'%s' needs a value", key);
-        arg = is_short ? join("-", key) : join("--", key);
-    } else {
-        char *fmt = is_short ? "-%s%s" : "--%s=%s";
-        arg       = xasprintf(fmt, key, val);
-    }
-    char *pair = NULL;
+    bool  is_short = key[0] && !key[1];
+    char *arg      = !val       ? join(is_short ? "-" : "--", key)
+                     : is_short ? xasprintf("-%s%s", key, val)
+                                : xasprintf("--%s=%s", key, val);
+    char *pair     = NULL;
     if (cls == CFG_TRUST)
-        pair = xasprintf("%s=%s", canonical_key(key), val);
+        pair = xasprintf("%s=%s", canonical_key(key), val ? val : "true");
     opts_push(o, arg, pair);
     free(resolved);
 }
 
-// Splits on commas outside quotes and (), calling emit for each item.
-static void emit_list(Opts *o, const char *path, int line, const char *key,
-                      int arity, char *val, CfgClass cls) {
-    int   depth = 0;
-    bool  quote = false;
-    char *item  = val;
-    for (char *p = val;; p++) {
-        if (*p == '"')
-            quote = !quote;
-        else if (!quote && *p == '(')
-            depth++;
-        else if (!quote && *p == ')' && depth > 0)
-            depth--;
-        if (*p == '\0' || (*p == ',' && !quote && depth == 0)) {
-            bool last = *p == '\0';
-            *p        = '\0';
-            char *it  = unquote(trim(item));
-            if (it[0])
-                emit(o, path, line, key, arity, it, cls);
-            if (last)
-                break;
-            item = p + 1;
+static void emit_text(Opts *o, toml_datum_t at, const char *key, int arity,
+                      const char *val, CfgClass cls) {
+    if (arity == no_argument)
+        cccc_toml_fail(at, "'%s' is a flag; use true or false", key);
+    if (!val[0]) {
+        if (arity == required_argument)
+            cccc_toml_fail(at, "'%s' needs a value", key);
+        val = NULL;
+    }
+    emit(o, key, val, cls);
+}
+
+// Emits the option for a string, integer or boolean value.
+static void emit_scalar(Opts *o, toml_datum_t at, const char *key, int arity,
+                        CfgClass cls) {
+    switch (at.type) {
+        case TOML_BOOLEAN:
+            if (arity == required_argument)
+                cccc_toml_fail(at, "'%s' needs a value", key);
+            if (at.u.boolean)
+                emit(o, key, NULL, cls);
+            break;
+        case TOML_STRING:
+            emit_text(o, at, key, arity, at.u.s, cls);
+            break;
+        case TOML_INT64: {
+            char num[24];
+            snprintf(num, sizeof num, "%lld", (long long)at.u.int64);
+            emit_text(o, at, key, arity, num, cls);
+            break;
         }
+        default:
+            cccc_toml_fail(at, "'%s' cannot be of type %s", key,
+                           cccc_toml_type_name(at.type));
     }
 }
 
 static void parse_file(const char *path, Opts *o) {
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "error: cannot read %s\n", path);
-        exit(1);
-    }
     char *slash = strrchr(path, '/');
     char *dir   = slash ? xstrdup(path) : xstrdup(".");
     if (slash)
         dir[slash == path ? 1 : slash - path] = '\0';
-    cfg_dir = dir;
-    char buf[4096];
-    int  line = 0;
-    while (fgets(buf, sizeof buf, f)) {
-        line++;
-        if (!strchr(buf, '\n') && !feof(f))
-            config_error(path, line, "line too long%s", "");
-        char *s = trim(buf);
-        // A control byte could rewrite the trust prompt's text.
-        for (const char *c = s; *c; c++)
-            if (((unsigned char)*c < 0x20 && *c != '\t') || *c == 0x7f)
-                config_error(path, line, "control characters are not allowed%s",
-                             "");
-        if (!*s || *s == '#' || *s == ';')
-            continue;
-        if (*s == '[')
-            config_error(path, line, "sections are not supported%s", "");
-        char *eq  = strchr(s, '=');
-        char *val = "";
-        if (eq) {
-            *eq = '\0';
-            val = trim(eq + 1);
-        }
-        char *key   = trim(s);
-        int   arity = key_arity(key);
+    cfg_dir         = dir;
+
+    toml_result_t r = cccc_toml_load(path);
+    cccc_toml_check_text(r.toptab);
+    for (int i = 0; i < r.toptab.u.tab.size; i++) {
+        const char  *key = r.toptab.u.tab.key[i];
+        toml_datum_t v   = r.toptab.u.tab.value[i];
+        if (v.type == TOML_TABLE)
+            cccc_toml_fail(v, "tables are not supported in a config file");
+        int arity = key_arity(key);
         if (arity < 0)
-            config_error(path, line, "unknown key '%s'", key);
+            cccc_toml_fail(v, "unknown key '%s'", key);
         int cls = cccc_config_class(key);
         if (cls < 0 || cls == CFG_CLI_ONLY)
-            config_error(path, line, "'%s' cannot be set in a config file",
-                         key);
-        if (is_list_key(key))
-            emit_list(o, path, line, key, arity, val, (CfgClass)cls);
-        else
-            emit(o, path, line, key, arity, unquote(val), (CfgClass)cls);
+            cccc_toml_fail(v, "'%s' cannot be set in a config file", key);
+        if (v.type != TOML_ARRAY) {
+            emit_scalar(o, v, key, arity, (CfgClass)cls);
+            continue;
+        }
+        if (!is_list_key(key))
+            cccc_toml_fail(v, "'%s' takes one value, not a list", key);
+        for (int j = 0; j < v.u.arr.size; j++) {
+            toml_datum_t item = v.u.arr.elem[j];
+            if (item.type != TOML_STRING && item.type != TOML_INT64)
+                cccc_toml_fail(item,
+                               "'%s' list items must be strings, found %s", key,
+                               cccc_toml_type_name(item.type));
+            emit_scalar(o, item, key, arity, (CfgClass)cls);
+        }
     }
-    fclose(f);
+    toml_free(r);
     cfg_dir = NULL;
     free(dir);
 }
@@ -774,8 +733,8 @@ static const char *flag_value(const char *arg, const char *name) {
     return arg[n] == '=' ? arg + n + 1 : NULL;
 }
 
-// The .cccc a --trust/--untrust names: a file, a directory holding one, or
-// (empty) the nearest project config.
+// The .cccc.toml a --trust/--untrust names: a file, a directory holding one,
+// or (empty) the nearest project config.
 static char *resolve_target(const char *spec) {
     char *path;
     if (!spec[0]) {
@@ -783,7 +742,7 @@ static char *resolve_target(const char *spec) {
     } else {
         struct stat st;
         if (stat(spec, &st) == 0 && S_ISDIR(st.st_mode))
-            path = join(spec, "/.cccc");
+            path = join(spec, "/.cccc.toml");
         else
             path = xstrdup(spec);
         if (!usable_file(path)) {
@@ -792,7 +751,7 @@ static char *resolve_target(const char *spec) {
         }
     }
     if (!path) {
-        fprintf(stderr, "error: no usable .cccc found\n");
+        fprintf(stderr, "error: no usable .cccc.toml found\n");
         exit(1);
     }
     return path;

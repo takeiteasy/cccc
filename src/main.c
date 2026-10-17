@@ -890,11 +890,11 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
            "runtime\n");
     printf("\nConfiguration (see docs/CONFIG.md):\n");
-    printf("\t   --no-config            Ignore ~/.config/cccc/config and "
-           ".cccc files\n");
+    printf("\t   --no-config            Ignore ~/.config/cccc/config.toml and "
+           ".cccc.toml files\n");
     printf("\t   --show-config          Print the config files read and the "
            "options they add\n");
-    printf("\t   --trust[=path]         Approve a project .cccc's "
+    printf("\t   --trust[=path]         Approve a project .cccc.toml's "
            "capability grants\n");
     printf("\t   --untrust[=path]       Withdraw that approval\n");
     printf("\nLanguage Standard:\n");
