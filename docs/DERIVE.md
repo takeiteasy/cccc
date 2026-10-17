@@ -361,14 +361,30 @@ anonymous structs, and arrays of them, are walked in place. An `@owned` member
 whose pointee needs a missing function is a compile error that names it
 (`needs Inner_clone`).
 
+A pointee that is only forward-declared can be declared after its owner, which
+lets two structs own pointers to each other:
+
+```c
+struct Leaf;
+
+@clone @destroy struct Branch {
+    struct Leaf *leaves @owned("n");
+    int          n;
+};
+
+@clone @destroy struct Leaf {
+    struct Branch *up @owned;
+};
+```
+
+The pointee must get `@clone` and `@destroy` later in the program; a missing
+one is an undefined-function error when the program links.[^size]
+
 `@clone` needs `@destroy` on the same type. `@clone("app")` and
 `@destroy("app")` publish `app_Doc_clone` and `app_Doc_destroy`, and the same
 prefix is used to find a pointee's functions. `@owned` goes on pointer
 members only; a `void *` member or a pointee with `const` elements cannot
 be cloned.
-
-Limitations: two structs that own pointers to each other cannot be cloned
-([#1635](https://todo.sr.ht/~takeiteasy/cccc/1635)).
 
 ## Ordering
 
@@ -454,3 +470,5 @@ without the include), replaces the built-in one.
 A handler for a struct reads the attributes on its members with
 `MemberHasAttr` and `MemberAttrArg`; see
 [Member attributes](MACROS.md#member-attributes).
+
+[^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.

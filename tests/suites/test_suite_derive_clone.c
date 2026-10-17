@@ -52,6 +52,32 @@ static char *dup_str(const char *s) {
     int *p @owned;
 };
 
+struct Leaf;
+struct Branch;
+
+@clone @destroy struct Branch {
+    char        *name @owned;
+    struct Leaf *leaves @owned("n");
+    int          n;
+    struct Leaf *first @owned;
+};
+
+@clone @destroy struct Leaf {
+    int            v;
+    struct Branch *up @owned;
+};
+
+struct Late;
+
+@clone("app") @destroy("app") struct Early {
+    struct Late *late @owned;
+};
+
+@clone("app") @destroy("app") struct Late {
+    char *s @owned;
+    int   n;
+};
+
 [[cccc::test]] void test_clone_is_independent(void) {
     struct Rec a = {dup_str("ann"), 3, malloc(3 * sizeof(int)), NULL};
     a.vals[0] = 1;
@@ -212,4 +238,53 @@ static char *dup_str(const char *s) {
     a.big = NULL;
     a.n   = 0;
     Tail_destroy(&a);
+}
+
+[[cccc::test]] void test_mutually_owning_structs(void) {
+    struct Branch a;
+    memset(&a, 0, sizeof a);
+    a.name               = dup_str("trunk");
+    a.n                  = 2;
+    a.leaves             = calloc(2, sizeof(struct Leaf));
+    a.leaves[0].v        = 10;
+    a.leaves[1].v        = 20;
+    a.leaves[1].up       = calloc(1, sizeof(struct Branch));
+    a.leaves[1].up->name = dup_str("twig");
+    a.first              = calloc(1, sizeof(struct Leaf));
+    a.first->v           = 30;
+
+    struct Branch b;
+    AssertEq(Branch_clone(&b, &a), 0);
+    AssertTrue(b.leaves != a.leaves);
+    AssertTrue(b.first != a.first);
+    AssertEq(b.n, 2);
+    AssertEq(b.leaves[0].v, 10);
+    AssertEq(b.leaves[1].v, 20);
+    AssertEq(b.first->v, 30);
+    AssertTrue(b.leaves[1].up != a.leaves[1].up);
+    AssertTrue(!strcmp(b.leaves[1].up->name, "twig"));
+    AssertTrue(!strcmp(b.name, "trunk"));
+    AssertEq(b.leaves[0].up == NULL, 1);
+
+    Branch_destroy(&a);
+    AssertTrue(a.leaves == NULL);
+    AssertTrue(!strcmp(b.leaves[1].up->name, "twig"));
+    Branch_destroy(&b);
+    AssertTrue(b.name == NULL && b.first == NULL && b.leaves == NULL);
+}
+
+[[cccc::test]] void test_forward_declared_pointee_with_prefix(void) {
+    struct Early a;
+    a.late    = calloc(1, sizeof(struct Late));
+    a.late->s = dup_str("late");
+    a.late->n = 7;
+
+    struct Early b;
+    AssertEq(app_Early_clone(&b, &a), 0);
+    AssertTrue(b.late != a.late);
+    AssertEq(b.late->n, 7);
+    AssertTrue(!strcmp(b.late->s, "late"));
+    app_Early_destroy(&a);
+    app_Early_destroy(&b);
+    AssertEq(app_Late_clone_size(), (unsigned long)sizeof(struct Late));
 }

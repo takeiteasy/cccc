@@ -1306,8 +1306,52 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     return 0;
 }
 
+// Publishes a prototype for fname unless the program already has one, so the
+// generated bodies can call it; MakeFunction then defines it with the
+// prototype's parameters.
+@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
+                                     const char *first_name, Type *second,
+                                     const char *second_name) {
+    if (FindGlobal(fname))
+        return;
+    Obj *proto = FunctionPrototype(fname, ret);
+    FunctionAddParam(proto, first_name, first);
+    if (second)
+        FunctionAddParam(proto, second_name, second);
+    PublishNode(proto);
+}
+
+// Publishes a prototype for the generated function the derive attribute named
+// by `suffix` gives the struct `pt`, so a caller can reference it before the
+// struct's own attribute has run.
+@comptime void __builtin_derive_pointee_proto(const char *prefix, Type *pt,
+                                              const char *suffix) {
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, TypeName(pt), suffix);
+    if (!strcmp(suffix, "_destroy")) {
+        __builtin_owned_proto(fname, GetType("void"), MakePointer(pt), "self",
+                              NULL, NULL);
+    } else if (!strcmp(suffix, "_clone")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
+                              MakePointer(MakeConst(pt)), "self");
+    } else if (!strcmp(suffix, "_clone_size") && !FindGlobal(fname)) {
+        PublishNode(FunctionPrototype(fname, GetType("unsigned long")));
+    }
+}
+
+// The pointer parameter `name` of `fn`, retyped as `const T *` against the
+// complete `ty`: a prototype published while T was still incomplete carries a
+// stale qualified copy of it, which cannot be dereferenced.
+@comptime Node *__builtin_derive_const_param(Obj *fn, const char *name,
+                                             Type *ty) {
+    return MakeCast(MakeParamRef(fn, name), MakePointer(MakeConst(ty)));
+}
+
 // 1 when the pointee `pt` of an owned member is cloned/destroyed through its
 // own function (`out` receives its name), 0 when it is copied as plain bytes.
+// A pointee that is still incomplete is assumed to get its own @clone and
+// @destroy later: its prototypes are published here and 2 is returned, because
+// its size and element stride are only known through T_clone_size.
 @comptime int __builtin_owned_pointee_fn(char *out, Type *pt, const char *prefix,
                                          const char *self_name,
                                          const char *suffix, const char *attr,
@@ -1320,15 +1364,22 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                      attr, path);
     if (tk != TK_STRUCT)
         return 0;
-    const char *pname = TypeName(pt);
-    bool        self  = pname && !strcmp(pname, self_name);
-    if (!self && !__builtin_owned_has(pt))
+    const char *pname      = TypeName(pt);
+    bool        self       = pname && !strcmp(pname, self_name);
+    bool        incomplete = TypeSize(pt) < 0;
+    if (!self && !incomplete && !__builtin_owned_has(pt))
         return 0;
     if (!pname)
         MacroErrorAt(MakeIntLiteral(0),
                      "%s: owned member '%s' points to an unnamed struct", attr,
                      path);
     __builtin_json_fn_name(out, prefix, pname, suffix);
+    if (incomplete) {
+        __builtin_derive_pointee_proto(prefix, pt, "_clone");
+        __builtin_derive_pointee_proto(prefix, pt, "_destroy");
+        __builtin_derive_pointee_proto(prefix, pt, "_clone_size");
+        return 2;
+    }
     if (!self && !FindGlobal(out))
         MacroErrorAt(MakeIntLiteral(0),
                      "%s: owned member '%s' needs %s; put @clone and @destroy "
@@ -1425,7 +1476,18 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             if (deep) {
                 strcpy(tmpl, "if ($1) { for (long i_ = 0; i_ < (long)$2; i_++) ");
                 strcat(tmpl, fn);
-                strcat(tmpl, "(&$1[i_]); free((void *)$1); $1 = 0; }");
+                if (deep == 2) {
+                    char szfn[256];
+                    __builtin_json_fn_name(szfn, prefix,
+                                           TypeName(TypeBase(MemberType(m))),
+                                           "_clone_size");
+                    strcat(tmpl, "((char *)$1 + i_ * ");
+                    strcat(tmpl, szfn);
+                    strcat(tmpl, "());");
+                } else {
+                    strcat(tmpl, "(&$1[i_]);");
+                }
+                strcat(tmpl, " free((void *)$1); $1 = 0; }");
                 BlockAddStmt(block, Quote(tmpl, p, n));
                 continue;
             }
@@ -1490,7 +1552,17 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         if (deep)
             __builtin_owned_pointee_fn(dfn, TypeBase(fty), prefix, self_name,
                                        "_destroy", attr, sub);
-        char tmpl[768];
+        // An incomplete pointee has no sizeof yet: ask its T_clone_size.
+        char szfn[256];
+        char size[300];
+        strcpy(size, "sizeof(*$2)");
+        if (deep == 2) {
+            __builtin_json_fn_name(szfn, prefix, TypeName(TypeBase(fty)),
+                                   "_clone_size");
+            strcpy(size, szfn);
+            strcat(size, "()");
+        }
+        char tmpl[900];
         if (MemberAttrArgCount(m, "owned") == 1) {
             const char *cname = StringLiteralValue(MemberAttrArg(m, "owned", 0));
             __builtin_owned_count_check(ty, cname, attr, sub);
@@ -1499,11 +1571,20 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                    "if (!$3 && $2) { unsigned long n_ = $4 > 0 ? "
                    "(unsigned long)$4 : 0; ");
             if (deep) {
-                strcat(tmpl, "$1 = calloc(n_ ? n_ : 1, sizeof(*$2)); "
-                             "if (!$1) $3 = 1; else for (unsigned long i_ = 0; "
-                             "i_ < n_ && !$3; i_++) if (");
+                strcat(tmpl, "$1 = calloc(n_ ? n_ : 1, ");
+                strcat(tmpl, size);
+                strcat(tmpl, "); if (!$1) $3 = 1; else for (unsigned long i_ = "
+                             "0; i_ < n_ && !$3; i_++) if (");
                 strcat(tmpl, fn);
-                strcat(tmpl, "(&$1[i_], &$2[i_])) $3 = 1; }");
+                if (deep == 2) {
+                    strcat(tmpl, "((char *)$1 + i_ * ");
+                    strcat(tmpl, size);
+                    strcat(tmpl, ", (const char *)$2 + i_ * ");
+                    strcat(tmpl, size);
+                    strcat(tmpl, ")) $3 = 1; }");
+                } else {
+                    strcat(tmpl, "(&$1[i_], &$2[i_])) $3 = 1; }");
+                }
             } else {
                 strcat(tmpl, "$1 = malloc((n_ ? n_ : 1) * sizeof(*$2)); "
                              "if (!$1) $3 = 1; else for (unsigned long i_ = 0; "
@@ -1511,8 +1592,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             }
             BlockAddStmt(block, Quote(tmpl, d, s, fail, n));
         } else if (deep) {
-            strcpy(tmpl, "if (!$3 && $2) { $1 = calloc(1, sizeof(*$2)); "
-                         "if (!$1 || ");
+            strcpy(tmpl, "if (!$3 && $2) { $1 = calloc(1, ");
+            strcat(tmpl, size);
+            strcat(tmpl, "); if (!$1 || ");
             strcat(tmpl, fn);
             strcat(tmpl, "($1, $2)) $3 = 1; }");
             BlockAddStmt(block, Quote(tmpl, d, s, fail));
@@ -1531,21 +1613,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                d, s, fail));
         }
     }
-}
-
-// Publishes a prototype for fname unless the program already has one, so the
-// generated bodies can call it; MakeFunction then defines it with the
-// prototype's parameters.
-@comptime void __builtin_owned_proto(const char *fname, Type *ret, Type *first,
-                                     const char *first_name, Type *second,
-                                     const char *second_name) {
-    if (FindGlobal(fname))
-        return;
-    Obj *proto = FunctionPrototype(fname, ret);
-    FunctionAddParam(proto, first_name, first);
-    if (second)
-        FunctionAddParam(proto, second_name, second);
-    PublishNode(proto);
 }
 
 // @destroy struct Foo {...}; publishes
@@ -1580,7 +1647,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 // which copies *self into *out, giving every @owned member its own copy of
 // the memory, and returns 0. If an allocation fails it frees what it already
 // made, returns 1 and leaves *out untouched. Needs @destroy on the same type.
-// @clone("P") publishes P_Foo_clone.
+// It also publishes `unsigned long Foo_clone_size(void)`, which an owner of a
+// still-incomplete Foo calls in place of sizeof. @clone("P") publishes
+// P_Foo_clone and P_Foo_clone_size.
 @comptime(attribute("clone")) void __builtin_attr_clone(AttrTarget *target,
                                                         ...) {
     Type       *ty     = __builtin_derive_struct_target(target, "@clone");
@@ -1602,7 +1671,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         Node *block = MakeBlock(NULL, 0);
         Node *r     = MakeLocalVarUnique(ty);
         Node *fail  = MakeLocalVarUnique(GetType("int"));
-        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        Node *self =
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "self", ty));
         BlockAddStmt(block, MakeExprStmt(MakeAssign(r, self)));
         BlockAddStmt(block, MakeExprStmt(MakeAssign(fail, MakeIntLiteral(0))));
         __builtin_owned_release(block, ty, r, true, prefix, tname, "@clone",
@@ -1621,6 +1691,16 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+
+    char sname[256];
+    __builtin_json_fn_name(sname, prefix, tname, "_clone_size");
+    Obj *size_fn = MakeFunction(sname, GetType("unsigned long"));
+    WithFn(size_fn) {
+        Node *block = MakeBlock(NULL, 0);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
+        FunctionSetBody(size_fn, block);
+    }
+    PublishNode(size_fn);
 }
 
 // ---- @builder ----------------------------------------------------------------
