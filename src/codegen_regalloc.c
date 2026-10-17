@@ -153,6 +153,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 target_offset = cc_pc_to_byte_offset(label_pc);
                 value         = target_offset + rel->addend;
             } else if (target->is_function) {
+                Pc stub = 0;
                 if (!target->body) {
                     // Undefined function: if it is an FFI/extern function,
                     // store the FFI dispatch token (CCCC_FFI_TOKEN_BASE - idx)
@@ -166,21 +167,33 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                     // exactly like the text-segment FFI case).
                     int ffi_idx =
                         find_ffi_function(vm, obj_external_name(target));
-                    if (ffi_idx < 0)
-                        error(
-                            "unsupported relocation to undefined function: %s",
-                            target->name);
-                    long long slot  = var->offset + rel->offset;
-                    long long token = CCCC_FFI_TOKEN_BASE - ffi_idx;
-                    if (var->is_tls)
-                        *(long long *)(vm->tls_template + slot) = token;
-                    else
-                        *(long long *)(vm->data_seg + slot) = token;
-                    continue;
+                    if (ffi_idx < 0) {
+                        // VM-lowered intrinsics (signal, longjmp, dlopen...)
+                        // point at their stub instead.
+                        stub = cc_intrinsic_stub_addr(vm, target);
+                        if (!stub &&
+                            (obj_is_reserved_builtin(target, "setjmp") ||
+                             obj_is_reserved_builtin(target, "_setjmp") ||
+                             obj_is_reserved_builtin(target, "sigsetjmp")))
+                            error("cannot take the address of '%s'",
+                                  target->name);
+                        if (!stub)
+                            error("unsupported relocation to undefined "
+                                  "function: %s",
+                                  target->name);
+                    } else {
+                        long long slot  = var->offset + rel->offset;
+                        long long token = CCCC_FFI_TOKEN_BASE - ffi_idx;
+                        if (var->is_tls)
+                            *(long long *)(vm->tls_template + slot) = token;
+                        else
+                            *(long long *)(vm->data_seg + slot) = token;
+                        continue;
+                    }
                 }
                 segment       = 1;
-                target_offset =
-                    cc_pc_to_byte_offset((Pc)fn_canonical(target)->code_addr);
+                target_offset = cc_pc_to_byte_offset(
+                    stub ? stub : (Pc)fn_canonical(target)->code_addr);
                 value = target_offset + rel->addend;
             } else {
                 // #957: a static initializer taking &g needs the same

@@ -19,6 +19,65 @@
 
 #include "./codegen_internal.h"
 
+// ========== Intrinsic address stubs ==========
+
+// Functions the VM lowers to an opcode at the call site have no body and no
+// FFI entry. Taking one's address points at a stub: a frame whose body is the
+// opcode, with the arguments still in REG_A0/REG_A1.
+typedef struct {
+    const char *name;
+    int         op;
+    bool        returns_zero;
+    Pc          addr;
+} IntrinsicStub;
+
+static IntrinsicStub intrinsic_stubs[] = {
+    {"signal", VSIGNAL, false, 0},     {"raise", VRAISE, true, 0},
+    {"longjmp", LONGJMP, false, 0},    {"_longjmp", LONGJMP, false, 0},
+    {"siglongjmp", LONGJMP, false, 0}, {"dlopen", DLOPEN, false, 0},
+    {"dlsym", DLSYM, false, 0},        {"dlclose", DLCLOSE, false, 0},
+    {"dlerror", DLERROR, false, 0},
+};
+
+void cc_reset_intrinsic_stubs(void) {
+    for (size_t i = 0; i < sizeof intrinsic_stubs / sizeof *intrinsic_stubs;
+         i++)
+        intrinsic_stubs[i].addr = 0;
+}
+
+// Code address of the stub for a body-less intrinsic, emitting it at the top
+// of the text on first use; 0 when `target` is not an intrinsic.
+Pc cc_intrinsic_stub_addr(VirtualMachine *vm, Obj *target) {
+    if (!target || !target->is_function || target->body || !target->name)
+        return 0;
+    for (size_t i = 0; i < sizeof intrinsic_stubs / sizeof *intrinsic_stubs;
+         i++) {
+        IntrinsicStub *st = &intrinsic_stubs[i];
+        if (strcmp(st->name, target->name))
+            continue;
+        if (!st->addr) {
+            st->addr = vm->text_ptr + 1;
+            emit(vm, ENT3);
+            emit_i64(vm, 2); // empty frame; keeps the canary slot
+            emit_i64(vm, 0);
+            emit(vm, st->op);
+            if (st->returns_zero)
+                emit_li3(vm, REG_A0, 0);
+            emit(vm, LEV3);
+        }
+        return st->addr;
+    }
+    return 0;
+}
+
+void cc_reject_setjmp_address(VirtualMachine *vm, Node *node) {
+    Obj *fn = node->var;
+    if (obj_is_reserved_builtin(fn, "setjmp") ||
+        obj_is_reserved_builtin(fn, "_setjmp") ||
+        obj_is_reserved_builtin(fn, "sigsetjmp"))
+        error_tok(vm, node->tok, "cannot take the address of '%s'", fn->name);
+}
+
 // ========== Function Generation ==========
 
 void gen_function(VirtualMachine *vm, Obj *fn) {
@@ -366,6 +425,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     vm->compiler.num_call_patches      = 0;
     vm->compiler.num_func_addr_patches = 0;
     vm->compiler.num_data_relocs       = 0;
+    cc_reset_intrinsic_stubs();
 
     // Reset the persistent global label map (populated by define_label during
     // function codegen; consumed by apply_global_relocations for &&label
@@ -525,6 +585,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
         } else {
             const char *fn_name = obj_external_name(target);
             int         ffi_idx = find_ffi_function(vm, fn_name);
+            Pc stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
             if (ffi_idx >= 0) {
                 // FFI function used as a value: store token so CALLN can
                 // call it. (JMPI, the other indirect-control-flow opcode,
@@ -532,6 +593,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
                 // computed goto -- landing on this token there is a runtime
                 // error, not a call.)
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
+            } else if (stub) {
+                cc_write_i64_at(vm, loc, cc_pc_to_byte_offset(stub));
             }
             // else: under -c/--compile, deferred to the host C
             // compiler/linker, same as the call-patch pass above; otherwise
@@ -1012,6 +1075,7 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
 
 void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                                 CcCodeMark *mark) {
+    cc_reset_intrinsic_stubs();
     if (!vm->text_seg) {
         vm_alloc_segments(vm);
         vm->compiler.current_codegen_fn = NULL;
@@ -1210,8 +1274,11 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
             } else {
                 const char *fn_name = obj_external_name(target);
                 int         ffi_idx = find_ffi_function(vm, fn_name);
+                Pc stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
                 if (ffi_idx >= 0)
                     cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
+                else if (stub)
+                    cc_write_i64_at(vm, loc, cc_pc_to_byte_offset(stub));
                 // else: REPL disallows -c/deferred-link, so there is no
                 // cross-module reloc path to fall back to here.
             }

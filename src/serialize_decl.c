@@ -1006,7 +1006,12 @@ static void serialize_reloc_init(FILE *f, VirtualMachine *vm,
 
     fprintf(f, "(");
     serialize_type(f, ctx, ty);
-    fprintf(f, ")((char *)&%s + %lld)", target->name, (long long)rel->addend);
+    bool is_longjmp = !target->is_definition && !target->is_local &&
+                      (!strcmp(target->name, "longjmp") ||
+                       !strcmp(target->name, "_longjmp") ||
+                       !strcmp(target->name, "siglongjmp"));
+    fprintf(f, ")((char *)&%s + %lld)", is_longjmp ? "_longjmp" : target->name,
+            (long long)rel->addend);
 }
 
 // #1207: TY_STRUCT's member walk, factored out of serialize_init_bytes()

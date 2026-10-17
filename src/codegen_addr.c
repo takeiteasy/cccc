@@ -1032,6 +1032,7 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
     switch (node->kind) {
         case ND_VAR:
             if (node->var->is_function) {
+                cc_reject_setjmp_address(vm, node);
                 // Function address - emit placeholder and record patch
                 Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder
 

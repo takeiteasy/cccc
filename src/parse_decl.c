@@ -314,6 +314,31 @@ static void check_sentinel_variadic(VirtualMachine *vm, Type *ty) {
                  "sentinel attribute only applies to variadic functions");
 }
 
+// The synthesized builtin prototypes (declare_builtin_functions) are in scope
+// but not on the globals list. The first user declaration or address-of links
+// the Obj in, keeping its identity, so later passes (static-initialiser
+// relocations, the serializer) see it.
+void link_hidden_builtin(VirtualMachine *vm, Obj *fn) {
+    if (!fn || !fn->is_hidden_builtin)
+        return;
+    fn->is_hidden_builtin = false;
+    fn->next              = vm->compiler.globals;
+    vm->compiler.globals  = fn;
+}
+
+static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
+                                 VarAttr *attr) {
+    if (!fn || !fn->is_hidden_builtin)
+        return false;
+    link_hidden_builtin(vm, fn);
+    fn->tok          = ty->name;
+    fn->display_name = fn->name;
+    fn->is_static    = attr->is_static || (attr->is_inline && !attr->is_extern);
+    fn->is_inline    = attr->is_inline;
+    fn->asm_label    = ty->asm_label;
+    return true;
+}
+
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
                                        VarAttr *attr, Token *tok) {
     if (!ty->name)
@@ -336,6 +361,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     Obj *fn = attr->is_static
                   ? find_func_in_current_scope(vm, name_str, ty->name->len)
                   : find_func(vm, name_str, ty->name->len);
+    bool adopted = adopt_hidden_builtin(vm, fn, ty, attr);
     if (fn) {
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
@@ -346,7 +372,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
-        if (!fn->is_implicit && !fn->is_definition &&
+        if (!adopted && !fn->is_implicit && !fn->is_definition &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
@@ -589,8 +615,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     Obj *fn = (attr->is_static || (is_nested && defines_body))
                   ? find_func_in_current_scope(vm, name_str, ty->name->len)
                   : find_func(vm, name_str, ty->name->len);
+    bool adopted      = adopt_hidden_builtin(vm, fn, ty, attr);
     // Save prototype state before the if/else can mutate fn->is_implicit.
-    bool had_prior_decl = (fn != NULL) && !fn->is_implicit;
+    bool had_prior_decl = (fn != NULL) && !fn->is_implicit && !adopted;
     bool had_full_proto =
         had_prior_decl &&
         (vm->compiler.c_std >= CCCC_STD_C23
@@ -632,7 +659,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
-        if (!fn->is_implicit && !fn->is_definition && !equal(tok, "{") &&
+        if (!adopted && !fn->is_implicit && !fn->is_definition &&
+            !equal(tok, "{") &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
@@ -1544,6 +1572,7 @@ bool libm_builtin_fold(int row, int variant, const double *a,
 }
 
 static void declare_builtin_functions(VirtualMachine *vm) {
+    Obj *prior_globals = vm->compiler.globals;
     // alloca(size) -> void*
     Type *ty                    = func_type(vm, pointer_to(vm, ty_void));
     ty->params                  = copy_type(vm, ty_int);
@@ -1759,13 +1788,20 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     // Ensures Block_release always resolves even when <stdlib.h> is not
     // included (#458).  Named "free" so codegen's is_extern_func_name("free")
     // check routes it to MFRE (CCCC_VM_HEAP) or the host free() via FFI.
-    // If the TU later declares its own free prototype the parser will find the
-    // user declaration in globals first (it's prepended), shadowing this one.
     Type *free_ty                            = func_type(vm, ty_void);
     free_ty->params                          = pointer_to(vm, ty_void);
     vm->compiler.builtin_free                = new_gvar(vm, "free", 4, free_ty);
     vm->compiler.builtin_free->is_function   = true;
     vm->compiler.builtin_free->is_definition = false;
+
+    // parse() empties the globals list after this; the first user declaration
+    // of one of these names links the Obj back in (adopt_hidden_builtin).
+    for (Obj *o = vm->compiler.globals; o && o != prior_globals; o = o->next) {
+        if (o->is_builtin_alloca)
+            continue;
+        o->is_hidden_builtin = true;
+        o->is_function       = true;
+    }
 }
 
 // Parse file-scope declarations (typedef | function-definition |

@@ -1954,6 +1954,12 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     fprintf(f, "__builtin_memcmp");
                 } else if (node->var->builtin_spelling) {
                     fprintf(f, "%s", node->var->builtin_spelling);
+                } else if (obj_is_reserved_builtin(node->var, "longjmp") ||
+                           obj_is_reserved_builtin(node->var, "_longjmp") ||
+                           obj_is_reserved_builtin(node->var, "siglongjmp")) {
+                    // The call-site spelling (see the ND_FUNCALL arm): plain
+                    // `longjmp` is not declared in the generated C.
+                    fprintf(f, "_longjmp");
                 } else {
                     fprintf(f, "%s", node->var->name);
                 }

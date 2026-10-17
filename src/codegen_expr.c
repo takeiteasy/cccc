@@ -682,6 +682,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
         case ND_VAR:
             if (node->var->is_function) {
+                cc_reject_setjmp_address(vm, node);
                 // Function name used as value - function-to-pointer decay
                 // Emit LTA3 with placeholder, patch later
                 Pc addr_loc = emit_lta3(vm, dest_reg, 0); // Placeholder

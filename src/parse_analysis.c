@@ -547,6 +547,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 error_tok(vm, node->tok,
                           "invalid initializer (expected address of array or "
                           "function)");
+            link_hidden_builtin(vm, node->var);
             *label = &node->var->name;
             return 0;
         case ND_NUM:
@@ -582,6 +583,7 @@ static int64_t eval_rval(VirtualMachine *vm, Node *node, char ***label) {
             if (node->var->is_local)
                 error_tok(vm, node->tok,
                           "not a compile-time constant (local variable)");
+            link_hidden_builtin(vm, node->var);
             *label = &node->var->name;
             return 0;
         case ND_DEREF:

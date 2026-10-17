@@ -424,6 +424,28 @@ int test_static_ffi_func_ptr(void) {
     return 42;
 }
 
+// A static function pointer initialised with free, alone and next to realloc.
+static void (*static_free_ptr)(void *) = free;
+typedef struct {
+    int zero;
+    void *(*re)(void *, size_t);
+    void (*fr)(void *);
+} AllocOpts;
+static AllocOpts alloc_opts = {0, realloc, free};
+[[cccc::test(return = 42)]]
+int test_static_free_ptr(void) {
+    if (!static_free_ptr)
+        return 1;
+    char *p = malloc(4);
+    strcpy(p, "abc");
+    p = alloc_opts.re(p, 64);
+    if (strcmp(p, "abc") != 0)
+        return 2;
+    alloc_opts.fr(p);
+    static_free_ptr(malloc(8));
+    return 42;
+}
+
 // [from test_vprintf_ffi]
 // Regression #407: va_list forwarding in v*-family passes all args correctly.
 #include <stdarg.h>

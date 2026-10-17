@@ -2580,6 +2580,7 @@ struct Obj {
     const char *builtin_spelling; // printed verbatim for a private builtin stub
     bool is_constexpr;
     bool is_implicit;        // synthesized by an implicit function declaration
+    bool is_hidden_builtin; // synthesized prototype not yet on the globals list
     bool is_macro_generated; // true if created by a #pragma macro via
                              // $function/$global_var
     bool is_splice_placeholder; // true for $@k vars synthesised by quote_core

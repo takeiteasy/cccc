@@ -429,6 +429,7 @@ Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
 Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
                        Token *tok);
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
+void link_hidden_builtin(VirtualMachine *vm, Obj *fn);
 void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr);
 void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr, Token *tok);
 void cleanup_on_type(VirtualMachine *vm, Token *tok);
