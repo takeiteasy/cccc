@@ -109,6 +109,7 @@ Manuals live in [`docs/`](docs/):
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@generate_accessors`, ... |
+| [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
 | [NATIVE.md](docs/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
 | [HEADERS.md](docs/HEADERS.md) | `#include` resolution: CCCC's bundled headers, project headers, `--use-system-headers`, host-header hand-off |
@@ -320,6 +321,8 @@ FFI Safety Options:
 	   --ffi-allow=list       Allow only comma-separated native function names
 	   --ffi-deny=list        Deny comma-separated native function names
 	   --disable-ffi         Block all registered and dynamic native calls
+	   --comptime-allow=list  Grant comptime code capability classes beyond the safe default:
+	                         fs, exec, net, env, dlopen, thread, signal, ipc, all
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 

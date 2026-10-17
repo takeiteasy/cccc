@@ -23,6 +23,7 @@
 #pragma once
 
 #include "cccc.h"
+#include "comptime_policy.h"
 
 #include <fenv.h> // for feraiseexcept(FE_INVALID) in cccc_f64_to_i64/cccc_f32_to_i64 (#775)
 

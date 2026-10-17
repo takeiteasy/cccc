@@ -2488,6 +2488,9 @@ follow-up.
 The allow/deny/disable policy applies to registered FFI calls and runtime
 native symbols returned by VM-managed `dlsym`.
 
+Comptime code has its own capability classes on top of these flags; see
+[COMPTIME_POLICY.md](COMPTIME_POLICY.md).
+
 
 ### `--ffi-allow=func1,func2` — FFI function whitelist
 

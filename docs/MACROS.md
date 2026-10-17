@@ -1138,6 +1138,8 @@ int helper = 7;                // comptime variable
 int main(void) { ... }
 ```
 
+The `glob` call above reads the filesystem, so it needs `--comptime-allow=fs` (see [COMPTIME_POLICY.md](COMPTIME_POLICY.md)).
+
 Inside a comptime block:
 - `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
 - preprocessor directives marked `@emit` are copied to generated output.

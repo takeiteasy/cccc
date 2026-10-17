@@ -146,6 +146,7 @@ static int cccc_add_dynamic_symbol(VirtualMachine *vm, int lib_idx,
 long long cccc_rt_dlopen(VirtualMachine *vm, const char *path, int mode) {
     if (!vm)
         return 0;
+    cccc_comptime_enforce(vm, "dlopen");
     cccc_clear_dyn_error(vm);
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -174,6 +175,7 @@ long long cccc_rt_dlsym(VirtualMachine *vm, long long handle_token,
         cccc_set_dyn_error(vm, "dlsym requires a symbol name");
         return 0;
     }
+    cccc_comptime_enforce(vm, "dlsym");
     cccc_clear_dyn_error(vm);
 
     int             lib_idx = -1;

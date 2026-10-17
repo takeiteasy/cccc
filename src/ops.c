@@ -5674,6 +5674,8 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, const char *name,
         return cccc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
                                             "Function in deny list");
 
+    cccc_comptime_enforce(vm, name);
+
     if (vm->enable_ffi_type_checking) {
         if (is_variadic) {
             if (actual_nargs < num_fixed_args) {

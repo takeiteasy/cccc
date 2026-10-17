@@ -8664,6 +8664,12 @@ void cc_parse_test_flags(VirtualMachine *vm, Token *src_tok,
                 }
             }
 
+        } else if (strncmp(tok, "--comptime-allow", 16) == 0) {
+            free(buf);
+            error_tok(vm, src_tok,
+                      "[[cccc::test]] flags=\"...\": --comptime-allow is "
+                      "only accepted on the command line (test '%s')",
+                      test_name ? test_name : "?");
         } else {
             // Copy tok before freeing buf (tok points into buf).
             char bad[256];

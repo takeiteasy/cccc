@@ -880,6 +880,10 @@ static void usage(const char *argv0, int exit_code) {
            "names\n");
     printf("\t   --disable-ffi         Block all registered and dynamic "
            "native calls\n");
+    printf("\t   --comptime-allow=list  Grant comptime code capability "
+           "classes beyond the safe default:\n");
+    printf("\t                         fs, exec, net, env, dlopen, thread, "
+           "signal, ipc, all\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
@@ -1503,6 +1507,7 @@ int main(int argc, const char *argv[]) {
     const char **ffi_deny_args            = NULL;
     int          ffi_deny_args_count      = 0;
     int          disable_all_ffi          = 0;
+    unsigned     comptime_allow_mask         = 0;
     int          ffi_errors_fatal         = 0;
     int          enable_ffi_type_checking = 0;
     int          vm_profile               = 0;
@@ -1635,6 +1640,7 @@ int main(int argc, const char *argv[]) {
         {"ffi-allow", required_argument, 0, 1052},
         {"ffi-deny", required_argument, 0, 1053},
         {"disable-ffi", no_argument, 0, 1134},
+        {"comptime-allow", required_argument, 0, 1141},
         {"framework-path", required_argument, 0, 'F'},
         {"iframework", required_argument, 0, 1135},
         {"ffi-errors-fatal", no_argument, 0, 1055},
@@ -2117,6 +2123,19 @@ int main(int argc, const char *argv[]) {
             case 1134: // --disable-ffi
                 disable_all_ffi = 1;
                 break;
+            case 1141: { // --comptime-allow
+                char bad[64];
+                if (!cccc_comptime_parse_classes(optarg, &comptime_allow_mask,
+                                                 bad, sizeof(bad))) {
+                    fprintf(stderr,
+                            "error: --comptime-allow: unknown class '%s' "
+                            "(valid: fs, exec, net, env, dlopen, thread, "
+                            "signal, ipc, all)\n",
+                            bad);
+                    exit(1);
+                }
+                break;
+            }
             case 'F':  // --framework-path
                 fw_paths =
                     realloc(fw_paths, sizeof(*fw_paths) * (fw_paths_count + 1));
@@ -2785,6 +2804,7 @@ int main(int argc, const char *argv[]) {
     init_mode_macros(&vm);
     vm.compiler.diagnostic_json = output_json;
     vm.disable_all_ffi          = disable_all_ffi;
+    vm.comptime_allow           = comptime_allow_mask;
     vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
     if (vm_profile)

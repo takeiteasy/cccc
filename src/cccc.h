@@ -5024,6 +5024,11 @@ struct VirtualMachine {
     int    ffi_errors_fatal;
     int    enable_ffi_type_checking;
 
+    // Comptime native-call policy: classes granted by --comptime-allow
+    // (ComptimeClass bits) and how many comptime vm_eval calls are active.
+    unsigned comptime_allow;
+    int      comptime_depth;
+
     // VM opcode execution profiling (--vm-profile). Comptime execution is
     // counted in vm_profile_comptime while vm_profile_in_comptime is set.
     bool             vm_profile_enabled;
