@@ -53,6 +53,16 @@ int count_inputs(void) {
 
 This needs `cccc --comptime-allow=fs prog.c`. A `[[cccc::comptime]]` attribute, a source comment or a `[[cccc::test(flags=...)]]` string cannot grant access, so a cloned project cannot widen its own permissions.
 
+## Recording grants in a config
+
+A project can list the classes it needs in its `.cccc` instead of repeating them on every command:
+
+```ini
+comptime-allow = fs,exec
+```
+
+cccc applies the line only after you approve it (`cccc --trust`, or `y` at the prompt), and prints what it grants. A line in your own user config applies without approval. See [CONFIG.md](CONFIG.md).
+
 ## Combining with the FFI flags
 
 At comptime a call must pass both the comptime classes and `--ffi-allow` / `--ffi-deny` / `--disable-ffi`. The FFI flags can only narrow what a class grants.

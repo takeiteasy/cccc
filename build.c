@@ -474,7 +474,8 @@ static int suite_header_value(const char *path, const char *key, char *out,
 // `--testing` becomes `--testing=native` when native is set.
 static void suite_command(char *cmd, size_t cap, const char *cccc_path,
                           const char *flags, const char *file, int native) {
-    int  n = snprintf(cmd, cap, "\"%s\" -I./include", cccc_path);
+    int  n = snprintf(cmd, cap, "env CCCC_NO_CONFIG=1 \"%s\" -I./include",
+                      cccc_path);
     char copy[512];
     snprintf(copy, sizeof(copy), "%s", flags);
     for (char *tok = strtok(copy, " \t"); tok; tok = strtok(NULL, " \t")) {
@@ -645,6 +646,7 @@ static BuildTarget *make_host_tests(Builder *ctx, BuildTarget *bt,
 
         if (n > 0)
             strncat(cmd, " && ", sizeof(cmd) - strlen(cmd) - 1);
+        strncat(cmd, "env CCCC_NO_CONFIG=1 ", sizeof(cmd) - strlen(cmd) - 1);
         strncat(cmd, TargetOutput(t), sizeof(cmd) - strlen(cmd) - 1);
         strncat(cmd, " </dev/null", sizeof(cmd) - strlen(cmd) - 1);
         tests[n++] = t;

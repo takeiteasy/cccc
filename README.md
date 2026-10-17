@@ -109,6 +109,7 @@ Manuals live in [`docs/`](docs/):
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
 | [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@generate_accessors`, ... |
+| [CONFIG.md](docs/CONFIG.md) | `.cccc` config files, which options they can set, and the trust prompt for project grants |
 | [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
 | [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
 | [NATIVE.md](docs/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
@@ -325,6 +326,12 @@ FFI Safety Options:
 	                         fs, exec, net, env, dlopen, thread, signal, ipc, all
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
+
+Configuration (see docs/CONFIG.md):
+	   --no-config            Ignore ~/.config/cccc/config and .cccc files
+	   --show-config          Print the config files read and the options they add
+	   --trust[=path]         Approve a project .cccc's capability grants
+	   --untrust[=path]       Withdraw that approval
 
 Language Standard:
 	-s/--std=<std>       Select C language standard (default: gnu23)

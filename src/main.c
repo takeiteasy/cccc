@@ -19,6 +19,7 @@
 
 #include "./cccc.h"
 #include "./internal.h"
+#include "./config.h"
 #include "./watch.h"
 #include <getopt.h>
 #if defined(_WIN32)
@@ -888,6 +889,14 @@ static void usage(const char *argv0, int exit_code) {
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
            "runtime\n");
+    printf("\nConfiguration (see docs/CONFIG.md):\n");
+    printf("\t   --no-config            Ignore ~/.config/cccc/config and "
+           ".cccc files\n");
+    printf("\t   --show-config          Print the config files read and the "
+           "options they add\n");
+    printf("\t   --trust[=path]         Approve a project .cccc's "
+           "capability grants\n");
+    printf("\t   --untrust[=path]       Withdraw that approval\n");
     printf("\nLanguage Standard:\n");
     printf(
         "\t-s/--std=<std>       Select C language standard (default: gnu23)\n");
@@ -1572,127 +1581,9 @@ int main(int argc, const char *argv[]) {
     if (argc <= 1)
         usage(argv[0], 1);
 
-    static struct option long_options[] = {
-        {"help", no_argument, 0, 'h'},
-        {"out", required_argument, 0, 'o'},
-        {"disassemble", no_argument, 0, 'd'},
-        {"verbose", no_argument, 0, 'v'},
-        {"ast", no_argument, 0, 'a'},
-        {"print-tokens", no_argument, 0, 'p'},
-        {"preprocess", no_argument, 0, 'E'},
-        {"dump-expanded", no_argument, 0, 'm'},
-        {"no-preprocess", no_argument, 0, 'X'},
-        {"no-stdlib", no_argument, 0, 'S'},
-        {"json", no_argument, 0, 'j'},
-        {"ffi-decls", no_argument, 0, 'J'},
-        {"compile", optional_argument, 0, 'c'},
-        {"debug", no_argument, 0, 'g'},
-        {"safety", required_argument, 0, 1012},
-        {"bounds-checks", no_argument, 0, 'B'},
-        {"checked-pointers", no_argument, 0, 1119},
-        {"emit-cccc", no_argument, 0, 1120},
-        {"test-run", optional_argument, 0, 1121},
-        {"no-layout-guards", no_argument, 0, 1122},
-        {"compiler-family", required_argument, 0, 1123},
-        {"deps-file", required_argument, 0, 1124},
-        {"uaf-detection", no_argument, 0, 1078},
-        {"type-checks", no_argument, 0, 1079},
-        {"uninitialized-detection", no_argument, 0, 1038},
-        {"overflow-checks", no_argument, 0, 1034},
-        {"stack-canaries", no_argument, 0, 1039},
-        {"heap-canaries", no_argument, 0, 1080},
-        {"pointer-sanitizer", no_argument, 0, 'P'},
-        {"memory-leak-detection", no_argument, 0, 'M'},
-        {"stack-instrumentation", no_argument, 0, 1043},
-        {"stack-errors", no_argument, 0, 1005},
-        {"dangling-pointers", no_argument, 0, 1001},
-        {"alignment-checks", no_argument, 0, 1002},
-        {"provenance-tracking", no_argument, 0, 1003},
-        {"invalid-arithmetic", no_argument, 0, 1004},
-        {"format-string-checks", no_argument, 0, 1044},
-        {"random-canaries", no_argument, 0, 1081},
-        {"memory-poisoning", no_argument, 0, 1007},
-        {"memory-tagging", no_argument, 0, 1045},
-        {"no-vm-heap", no_argument, 0, 'V'},
-        {"control-flow-integrity", no_argument, 0, 1111},
-        {"no-comptime", no_argument, 0, 'C'},
-        {"thread-safety", no_argument, 0, 'T'},
-        {"include", required_argument, 0, 'I'},
-        {"isystem", required_argument, 0, 'i'},
-        {"library-path", required_argument, 0, 'L'},
-        {"library", required_argument, 0, 'l'},
-        {"link-arg", required_argument, 0, 1136},
-        {"define", required_argument, 0, 'D'},
-        {"undef", required_argument, 0, 'U'},
-        {"url-cache-dir", required_argument, 0, 1008},
-        {"url-cache-clear", no_argument, 0, 1009},
-        {"url-timeout", required_argument, 0, 1010},
-        {"url-max-size", required_argument, 0, 1011},
-        {"max-errors", required_argument, 0, 'n'},
-        {"Werror", no_argument, 0, 'w'},
-        {"embed-limit", required_argument, 0, 1048},
-        {"embed-hard-limit", no_argument, 0, 1060},
-        {"optimize", optional_argument, 0, 'O'},
-        {"posix-emulation", no_argument, 0, 1117},
-        {"macro-recursion-limit", required_argument, 0, 1115},
-        {"repl", no_argument, 0, 'r'},
-        {"std", required_argument, 0, 's'},
-        {"ffi-allow", required_argument, 0, 1052},
-        {"ffi-deny", required_argument, 0, 1053},
-        {"disable-ffi", no_argument, 0, 1134},
-        {"comptime-allow", required_argument, 0, 1141},
-        {"framework-path", required_argument, 0, 'F'},
-        {"iframework", required_argument, 0, 1135},
-        {"ffi-errors-fatal", no_argument, 0, 1055},
-        {"ffi-type-checking", no_argument, 0, 1024},
-        {"vm-profile", no_argument, 0, 1056},
-        {"entry", required_argument, 0, 'e'},
-        {"comptime-include-all", no_argument, 0, 1050},
-        {"allow-comptime-pp-bleed", no_argument, 0, 1068},
-        {"asm-passthru", no_argument, 0, 'A'},
-        {"testing", optional_argument, 0, 't'},
-        {"test", required_argument, 0, 1061},
-        {"test-suite", required_argument, 0, 1062},
-        {"list-tests", no_argument, 0, 1063},
-        {"fail-fast", no_argument, 0, 1064},
-        {"test-timeout", required_argument, 0, 1065},
-        {"test-format", required_argument, 0, 1066},
-        {"no-emit-tests", no_argument, 0, 1125}, // #1272
-        {"kernel-max-group-size", required_argument, 0, 1126},
-        {"openmp", no_argument, 0, 1127},
-        {"emit-only", no_argument, 0, 1067},
-        {"attr-target", required_argument, 0, 1069},
-        {"no-debug-on-crash", no_argument, 0, 1071},
-        {"build", no_argument, 0, 'b'},
-        {"build-entry", required_argument, 0, 1074},
-        {"build-out-dir", required_argument, 0, 1075},
-        {"build-dry-run", no_argument, 0, 1076},
-        {"build-target", required_argument, 0, 1077},
-        {"build-tool-allow", required_argument, 0, 1082},
-        {"build-jobs", required_argument, 0, 1083},
-        {"build-keep-going", no_argument, 0, 1084},
-        {"build-quiet", no_argument, 0, 1085},
-        {"build-verbose", no_argument, 0, 1086},
-        {"build-list-targets", no_argument, 0, 1087},
-        {"build-profile", required_argument, 0, 1088},
-        {"build-triple", required_argument, 0, 1089},
-        {"build-cc", required_argument, 0, 1090},
-        {"build-cache", optional_argument, 0, 1091},
-        {"build-option", required_argument, 0, 1092},
-        {"build-install", no_argument, 0, 1093},
-        {"watch", no_argument, 0, 1128},
-        {"watch-path", required_argument, 0, 1129},
-        {"watch-ignore", required_argument, 0, 1130},
-        {"watch-debounce", required_argument, 0, 1131},
-        {"watch-clear", no_argument, 0, 1132},
-        {"watch-restart", no_argument, 0, 1133},
-        // System-header mode
-        {"use-system-headers", no_argument, 0, 1112},
-        {"no-builtin-includes", no_argument, 0, 1113},
-        {"sysroot", required_argument, 0, 1114},
-        {"trap-fp-divzero", no_argument, 0, 1116},
-        {"version", no_argument, 0, 1118},
-        {0, 0, 0, 0}};
+    const struct option *long_options = cccc_long_options;
+    const char         **orig_argv = argv; // watch restarts re-read the config
+    argv                           = cccc_config_expand(&argc, argv);
 
     // Find "--" separator: args after it are forwarded to the compiled program
     int dashdash = -1;
@@ -1740,9 +1631,8 @@ int main(int argc, const char *argv[]) {
     argv[kept]              = NULL;
     argc                    = kept;
     int         getopt_argc = (dashdash >= 0) ? dashdash : argc;
-    const char *optstring =
-        "0123haI:L:D:U:o:c::dvgi:PEMXSjJVCl:W:e:O::F:bt::Tmpn:rs:ABwf:x:";
-    int opt;
+    const char *optstring   = cccc_optstring;
+    int         opt;
     opterr = 0; // we'll handle errors explicitly
     while ((opt = getopt_long(getopt_argc, (char *const *)argv, optstring,
                               long_options, NULL)) != -1) {
@@ -2122,6 +2012,11 @@ int main(int argc, const char *argv[]) {
                 break;
             case 1134: // --disable-ffi
                 disable_all_ffi = 1;
+                break;
+            case 1142: // --no-config, --show-config, --trust, --untrust:
+            case 1143: // handled in cccc_config_expand
+            case 1144:
+            case 1145:
                 break;
             case 1141: { // --comptime-allow
                 char bad[64];
@@ -2826,7 +2721,7 @@ int main(int argc, const char *argv[]) {
             // :load adds the files to watch; a save is applied at the prompt.
             CcWatchOptions watch_opts = {
                 .debounce_ms = watch_debounce,
-                .argv        = (char **)argv,
+                .argv        = (char **)orig_argv,
                 .on_change   = cc_watch_notify,
             };
             watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
@@ -3605,7 +3500,7 @@ int main(int argc, const char *argv[]) {
         CcWatchOptions watch_opts = {
             .debounce_ms = watch_debounce,
             .clear       = watch_clear,
-            .argv        = (char **)argv,
+            .argv        = (char **)orig_argv,
         };
         if (watch) {
             watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
@@ -3780,7 +3675,7 @@ int main(int argc, const char *argv[]) {
             .debounce_ms = watch_debounce,
             .restart     = watch_restart,
             .clear       = watch_clear,
-            .argv        = (char **)argv,
+            .argv        = (char **)orig_argv,
             .on_change   = cc_watch_notify,
         };
         watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
@@ -3803,7 +3698,7 @@ BAIL:
         CcWatchOptions watch_opts = {
             .debounce_ms = watch_debounce,
             .clear       = watch_clear,
-            .argv        = (char **)argv,
+            .argv        = (char **)orig_argv,
         };
         watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
                     watch_ignores, watch_ignores_count);
