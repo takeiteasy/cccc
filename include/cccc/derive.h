@@ -2964,4 +2964,205 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fmt);
 }
 
+// @range(min, max) on an integer, enum or bit-field member is read by
+// @validate and @clamp. A bound that the member's type cannot hold is an
+// error, so @clamp never stores a truncated value.
+// `hi_exact` is 0 for an unsigned 64-bit member: its true maximum is above
+// ConstIntValue's range, so no bound can equal it.
+@comptime int __builtin_range_limits(Member *m, long long *lo, long long *hi,
+                                     int *hi_exact) {
+    int k = __builtin_derive_kind(MemberType(m));
+    if (k != 1 && k != 2)
+        return 0;
+    int bits  = MemberIsBitfield(m) ? MemberBitfieldWidth(m)
+                                    : (int)TypeSize(MemberType(m)) * 8;
+    *hi_exact = 1;
+    if (k == 2) {
+        *lo = 0;
+        if (bits >= 63) {
+            *hi       = 9223372036854775807LL;
+            *hi_exact = bits < 64;
+        } else {
+            *hi = (1LL << bits) - 1;
+        }
+    } else if (bits >= 64) {
+        *lo = -9223372036854775807LL - 1;
+        *hi = 9223372036854775807LL;
+    } else {
+        *lo = -(1LL << (bits - 1));
+        *hi = (1LL << (bits - 1)) - 1;
+    }
+    return 1;
+}
+
+@comptime(attribute("range")) void __builtin_attr_range(AttrTarget *target,
+                                                        ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0), "@range applies to a struct member");
+    long long min = 0;
+    long long max = 0;
+    if (VarargCount() != 2 || !ConstIntValue(VarargAt(0), &min) ||
+        !ConstIntValue(VarargAt(1), &max))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range expects two integer constants, min and max");
+    if (min > max)
+        MacroErrorAt(MakeIntLiteral(0), "@range min is greater than max");
+    long long lo = 0;
+    long long hi = 0;
+    int       exact;
+    if (!__builtin_range_limits(AttrTargetMember(target), &lo, &hi, &exact))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range applies to an integer, enum or bit-field member");
+    if (min < lo || max > hi)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range bounds do not fit the member's type");
+}
+
+// A fresh read of member `name` of *self, one per use: statements never share
+// a node. `ro` reads through a const pointer.
+@comptime Node *__builtin_range_ref(Obj *fn, Type *ty, int ro,
+                                    const char *name) {
+    Node *self = ro ? __builtin_derive_const_param(fn, "self", ty)
+                    : MakeParamRef(fn, "self");
+    return MakeMember(MakeUnary(NK_DEREF, self), name);
+}
+
+// Flattens the @range members of `ty` (anonymous structs included), which
+// are all reached by name from the struct itself; flags[i] bit 0 means the min
+// test and bit 1 the max test would always hold, and are left out.
+@comptime void __builtin_range_collect(Type *ty, const char **names,
+                                       long long *mins, long long *maxs,
+                                       int *flags, int *n, const char *attr) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            int tk = GetTypeKind(fty);
+            if (tk == TK_UNION)
+                MacroErrorAt(MakeIntLiteral(0),
+                             "%s does not support an anonymous union member",
+                             attr);
+            if (tk == TK_STRUCT)
+                __builtin_range_collect(fty, names, mins, maxs, flags, n, attr);
+            continue;
+        }
+        if (!MemberHasAttr(m, "range"))
+            continue;
+        if (*n >= 128)
+            MacroErrorAt(MakeIntLiteral(0), "%s supports at most 128 members",
+                         attr);
+        long long lo = 0;
+        long long hi = 0;
+        int       exact;
+        __builtin_range_limits(m, &lo, &hi, &exact);
+        long long min = 0;
+        long long max = 0;
+        ConstIntValue(MemberAttrArg(m, "range", 0), &min);
+        ConstIntValue(MemberAttrArg(m, "range", 1), &max);
+        names[*n] = field;
+        mins[*n]  = min;
+        maxs[*n]  = max;
+        flags[*n] = (min == lo ? 1 : 0) | (exact && max == hi ? 2 : 0);
+        (*n)++;
+    }
+}
+
+// @validate struct Foo {...}; publishes
+//   _Bool Foo_validate(const struct Foo *self);
+// which returns 1 when every @range member is within its bounds.
+// @validate("P") publishes P_Foo_validate.
+@comptime(attribute("validate")) void __builtin_attr_validate(
+    AttrTarget *target, ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@validate");
+    const char *tname  = __builtin_attr_type_name(target, "@validate");
+    const char *prefix = __builtin_attr_prefix_arg("@validate");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_validate");
+    __builtin_owned_proto(fname, GetType("_Bool"), MakePointer(MakeConst(ty)),
+                          "self", NULL, NULL);
+    Obj *fn = MakeFunction(fname, GetType("_Bool"));
+    WithFn(fn) {
+        const char *names[128];
+        long long   mins[128];
+        long long   maxs[128];
+        int         flags[128];
+        int         n = 0;
+        __builtin_range_collect(ty, names, mins, maxs, flags, &n, "@validate");
+        Node *block = MakeBlock(NULL, 0);
+        for (int i = 0; i < n; i++) {
+            Node *bad = NULL;
+            if (!(flags[i] & 1))
+                bad =
+                    MakeBinary(NK_LT, __builtin_range_ref(fn, ty, 1, names[i]),
+                               MakeIntLiteral(mins[i]));
+            if (!(flags[i] & 2)) {
+                Node *over =
+                    MakeBinary(NK_LT, MakeIntLiteral(maxs[i]),
+                               __builtin_range_ref(fn, ty, 1, names[i]));
+                bad = bad ? MakeBinary(NK_LOGOR, bad, over) : over;
+            }
+            if (bad)
+                BlockAddStmt(block,
+                             MakeIf(bad, MakeReturn(MakeIntLiteral(0)), NULL));
+        }
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(1)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// @clamp struct Foo {...}; publishes
+//   void Foo_clamp(struct Foo *self);
+// which moves every @range member that is out of bounds to the nearer bound.
+// @clamp("P") publishes P_Foo_clamp.
+@comptime(attribute("clamp")) void __builtin_attr_clamp(AttrTarget *target,
+                                                        ...) {
+    Type       *ty     = __builtin_derive_struct_target(target, "@clamp");
+    const char *tname  = __builtin_attr_type_name(target, "@clamp");
+    const char *prefix = __builtin_attr_prefix_arg("@clamp");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_clamp");
+    __builtin_owned_proto(fname, GetType("void"), MakePointer(ty), "self", NULL,
+                          NULL);
+    Obj *fn = MakeFunction(fname, GetType("void"));
+    WithFn(fn) {
+        const char *names[128];
+        long long   mins[128];
+        long long   maxs[128];
+        int         flags[128];
+        int         n = 0;
+        __builtin_range_collect(ty, names, mins, maxs, flags, &n, "@clamp");
+        Node *block = MakeBlock(NULL, 0);
+        for (int i = 0; i < n; i++) {
+            Node *over = NULL;
+            if (!(flags[i] & 2))
+                over =
+                    MakeIf(MakeBinary(NK_LT, MakeIntLiteral(maxs[i]),
+                                      __builtin_range_ref(fn, ty, 0, names[i])),
+                           MakeExprStmt(MakeAssign(
+                               __builtin_range_ref(fn, ty, 0, names[i]),
+                               MakeIntLiteral(maxs[i]))),
+                           NULL);
+            if (!(flags[i] & 1))
+                BlockAddStmt(
+                    block,
+                    MakeIf(MakeBinary(NK_LT,
+                                      __builtin_range_ref(fn, ty, 0, names[i]),
+                                      MakeIntLiteral(mins[i])),
+                           MakeExprStmt(MakeAssign(
+                               __builtin_range_ref(fn, ty, 0, names[i]),
+                               MakeIntLiteral(mins[i]))),
+                           over));
+            else if (over)
+                BlockAddStmt(block, over);
+        }
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
 #endif // CCCC_DERIVE_H

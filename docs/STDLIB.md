@@ -301,7 +301,7 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Header | Loaded | Provides |
 |---|---|---|
 | `reflection.h` | Implicitly, in every comptime program | Reflection and AST-building API, see [MACROS.md](MACROS.md) |
-| `cccc/derive.h` | `#include <cccc/derive.h>` | Handlers for `@serialize`, `@deserialize`, `@enum_to_string`, `@enum_from_string`, `@generate_getters`, `@generate_setters`, `@generate_accessors`, `@generate_constructor`, `@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@builder`, `@bitflags`, see [DERIVE.md](DERIVE.md) |
+| `cccc/derive.h` | `#include <cccc/derive.h>` | Handlers for `@serialize`, `@deserialize`, `@enum_to_string`, `@enum_from_string`, `@generate_getters`, `@generate_setters`, `@generate_accessors`, `@generate_constructor`, `@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@builder`, `@validate`, `@clamp`, `@bitflags`, see [DERIVE.md](DERIVE.md) |
 | `cccc/json.h` | `#include <cccc/json.h>` | The runtime `@to_json` / `@from_json` call; programs use the attributes, not its functions |
 
 `reflection.h` is private: user source cannot `#include` it. `cccc/derive.h`

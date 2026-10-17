@@ -41,6 +41,9 @@ int main(void) {
 | `@builder_default(expr)` | member | the value `T_builder_new` starts the member with |
 | `@builder_required` | member | makes `T_build` fail until the member is set |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
+| `@validate` | struct | `_Bool T_validate(const T *self)` |
+| `@clamp` | struct | `void T_clamp(T *self)` |
+| `@range(min, max)` | member | the bounds `@validate` checks and `@clamp` enforces |
 | `@bitflags` | enum | `T_set`, `T_clear`, `T_toggle`, `_Bool T_has`, `size_t T_format(T v, char *buf, size_t cap)` |
 | `@compare_order(N)` | member | compares the member before those without a key, ascending `N` |
 | `@compare_desc` | member | reverses the direction `@compare` orders the member in |
@@ -485,6 +488,52 @@ join the struct around it, and a nested struct is ordered by its own keys.
 that member. Both attributes go on struct members, `@compare_order` takes one
 integer constant, and neither can share a member with `@equals_skip`. Only
 `@compare` reads them: `@equals`, `@hash` and `@dump` ignore them.
+
+## Validation and clamping
+
+`@range(min, max)` on an integer, enum or bit-field member sets its inclusive
+bounds. `@validate` checks them; `@clamp` enforces them.
+
+```c
+typedef enum { LOW = 1, MID, HIGH } Level;
+
+@validate @clamp struct Cfg {
+    int      port  @range(1, 65535);
+    unsigned retry @range(0, MAX_RETRY);
+    Level    lvl   @range(LOW, HIGH);
+    int      bits : 4 @range(-3, 3);
+    char     name[16];                  // no @range: not checked
+};
+
+struct Cfg c = {.port = 70000};
+Cfg_validate(&c);   // 0
+Cfg_clamp(&c);      // port is now 65535
+Cfg_validate(&c);   // 1
+```
+
+| Generated | Behaviour |
+|---|---|
+| `_Bool T_validate(const T *self)` | 1 when every `@range` member is within its bounds, else 0 |
+| `void T_clamp(T *self)` | moves a member below `min` up to `min` and one above `max` down to `max` |
+
+`@validate("P")` and `@clamp("P")` publish `P_T_validate` and `P_T_clamp`. The
+bounds are integer constant expressions, so enum constants, `sizeof` and casts
+work. Members of an anonymous struct are checked with the struct around them.
+
+A compile error is raised for:
+
+- `@range` that is not on a struct member, does not have exactly two integer
+  constants, or has `min` above `max`
+- `@range` on a `_Bool`, floating-point, pointer, array or struct member
+- a bound the member's type cannot hold (`unsigned char c @range(0, 300)`,
+  `unsigned lo : 3 @range(0, 10)`, a negative `min` on an unsigned member)
+- `@validate` or `@clamp` on a union or an anonymous union member
+
+Only `@validate` and `@clamp` read `@range`; without them it has no effect. The
+`@range` members of a nested named struct are not checked.[^u64]
+
+[^u64]: The bounds are read as `long long`, so the upper bound of an unsigned
+    64-bit member cannot exceed `LLONG_MAX`.
 
 ## Bit Flags
 

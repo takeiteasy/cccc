@@ -277,7 +277,7 @@ shorthand) has its own reference: [ATTRIBUTES.md](ATTRIBUTES.md).
 The built-in comptime attributes (`@serialize`, `@deserialize`,
 `@enum_to_string`, `@enum_from_string`, `@generate_getters`,
 `@generate_setters`, `@generate_accessors`, `@generate_constructor`,
-`@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@builder`, `@bitflags`) are CCCC extensions with no standard counterpart; see [DERIVE.md](DERIVE.md).
+`@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@builder`, `@validate`, `@clamp`, `@bitflags`) are CCCC extensions with no standard counterpart; see [DERIVE.md](DERIVE.md).
 
 ## See also
 
