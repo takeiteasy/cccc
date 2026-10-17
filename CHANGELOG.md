@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-17
+
 - Added: `-c=object` compiles to an object file with the host compiler and
   does not link. See `docs/NATIVE.md`.
 - Changed: repeating `-c` with a different format is an error.
