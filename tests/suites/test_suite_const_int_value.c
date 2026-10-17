@@ -1,4 +1,6 @@
-// ConstIntValue reads integer attribute and macro arguments.
+// CCCC_FLAGS: --testing
+// Suite: ConstIntValue reads integer attribute and macro arguments, run on the
+// VM and under -c=native.
 
 enum { N = 4 };
 
@@ -28,11 +30,22 @@ enum { N = 4 };
 @weight(N * 2) int w_expr;
 @weight((int)5) int w_cast;
 
-int main(void) {
-    if (weight_of_w3() != 3 || weight_of_w_neg() != -2 ||
-        weight_of_w_expr() != 8 || weight_of_w_cast() != 5)
-        return 1;
-    if (plus_one(N * 10) != 41)
-        return 2;
-    return 42;
+[[cccc::test]] void test_literal(void) {
+    AssertEq(weight_of_w3(), 3);
+}
+
+[[cccc::test]] void test_negative(void) {
+    AssertEq(weight_of_w_neg(), -2);
+}
+
+[[cccc::test]] void test_enum_expression(void) {
+    AssertEq(weight_of_w_expr(), 8);
+}
+
+[[cccc::test]] void test_cast(void) {
+    AssertEq(weight_of_w_cast(), 5);
+}
+
+[[cccc::test]] void test_macro_argument(void) {
+    AssertEq(plus_one(N * 10), 41);
 }
