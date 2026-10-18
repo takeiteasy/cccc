@@ -21,6 +21,7 @@
 // Provides type introspection and AST construction functions
 
 #include "./internal.h"
+#include "./serialize_internal.h"
 
 // reflection.h's prototypes make any drift from a definition below a compile
 // error (conflicting declaration).
@@ -49,6 +50,84 @@ VirtualMachine *__builtin_current_vm = NULL;
 // ============================================================================
 // Internal Helpers (replicate static functions from parse.c)
 // ============================================================================
+
+// Linking builtins reject a node that would contain itself or repeat in a
+// list; later compiler walks loop or recurse forever on such a cycle.
+static void reflect_link_error(VirtualMachine *vm, const char *msg) {
+    if (vm->compiler.macro_call_tok)
+        error_tok(vm, vm->compiler.macro_call_tok, "%s", msg);
+    error("%s", msg);
+}
+
+typedef struct {
+    const Node *target;
+    bool        hit;
+} ReachCtx;
+
+static void reach_visit(Node *n, void *user) {
+    ReachCtx *r = user;
+    if (n == r->target)
+        r->hit = true;
+}
+
+// True when `target` is `from` or reachable from it through any child field.
+static bool node_reaches(Node *from, const Node *target) {
+    ReachCtx r = {target, false};
+    serialize_ast_walk(from, reach_visit, &r);
+    return r.hit;
+}
+
+static bool node_in_chain(const Node *head, const Node *n) {
+    for (; head; head = head->next)
+        if (head == n)
+            return true;
+    return false;
+}
+
+static int node_ptr_cmp(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)*(Node *const *)a, y = (uintptr_t)*(Node *const *)b;
+    return x < y ? -1 : x > y;
+}
+
+// Rejects a list that names one node twice; chaining it through `next` would
+// close a loop. A NULL ends the list when `stop_at_null`, else it is skipped.
+static void reflect_check_unique(VirtualMachine *vm, Node **nodes, int count,
+                                 bool stop_at_null) {
+    if (!nodes || count < 2)
+        return;
+    Node **copy = malloc((size_t)count * sizeof *copy);
+    if (!copy)
+        return;
+    int n = 0;
+    for (int i = 0; i < count; i++) {
+        if (!nodes[i] && stop_at_null)
+            break;
+        if (nodes[i])
+            copy[n++] = nodes[i];
+    }
+    qsort(copy, (size_t)n, sizeof *copy, node_ptr_cmp);
+    bool dup = false;
+    for (int i = 1; i < n && !dup; i++)
+        dup = copy[i] == copy[i - 1];
+    free(copy);
+    if (dup)
+        reflect_link_error(vm, "node appears twice in one list; build a "
+                               "separate node for each entry");
+}
+
+static bool type_holds_by_value(const Type *ty, const Type *target) {
+    if (!ty)
+        return false;
+    if (ty == target || (ty->members && ty->members == target->members))
+        return true;
+    if (ty->kind == TY_ARRAY || ty->kind == TY_VLA || ty->kind == TY_VECTOR)
+        return type_holds_by_value(ty->base, target);
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
+        for (const Member *m = ty->members; m; m = m->next)
+            if (type_holds_by_value(m->ty, target))
+                return true;
+    return false;
+}
 
 static Obj *reflect_new_var(VirtualMachine *vm, char *name, int name_len,
                             Type *ty) {
@@ -1294,12 +1373,14 @@ Node *__builtin_ast_block(Node **stmts, int count) {
 
     Node *node = alloc_node(vm, ND_BLOCK);
 
+    reflect_check_unique(vm, stmts, count, true);
     // Link statements together
     Node  head = {};
     Node *cur  = &head;
     for (int i = 0; i < count && stmts[i]; i++) {
         cur = cur->next = stmts[i];
     }
+    cur->next  = NULL;
     node->body = head.next;
     return node;
 }
@@ -1310,7 +1391,11 @@ Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt) {
     if (!vm || !block || !stmt || block->kind != ND_BLOCK)
         return NULL;
 
+    if (node_in_chain(block->body, stmt))
+        reflect_link_error(vm, "statement is already in this block");
     stmt->next = NULL;
+    if (node_reaches(stmt, block))
+        reflect_link_error(vm, "block would contain itself");
     if (!block->body) {
         block->body = stmt;
     } else {
@@ -1367,6 +1452,8 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
     // type-checked by the parser) and errors out at the macro call site if
     // it isn't a compile-time constant -- previously this took value->val
     // directly, which silently read 0 for anything but an ND_NUM literal.
+    if (node_reaches(body, switch_node))
+        reflect_link_error(vm, "switch would contain itself");
     Node   *case_node = alloc_node(vm, ND_CASE);
     int64_t v         = cc_eval(vm, value);
     case_node->begin  = v;
@@ -1400,6 +1487,8 @@ void __builtin_ast_switch_set_default(Node *switch_node, Node *body) {
         __builtin_macro_error_at(switch_node,
                                  "multiple default labels in one switch");
 
+    if (node_reaches(body, switch_node))
+        reflect_link_error(vm, "switch would contain itself");
     Node *def                 = alloc_node(vm, ND_CASE);
     def->lhs                  = body;
     switch_node->default_case = def;
@@ -1612,7 +1701,11 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
         } else if (arg->ty && arg->ty->kind == TY_FLOAT) {
             arg = new_cast(vm, arg, ty_double);
         }
+        if (node_in_chain(head.next, arg))
+            reflect_link_error(vm, "argument node appears twice in one call; "
+                                   "build a separate node for each");
         cur = cur->next = arg;
+        cur->next       = NULL;
     }
     node->args = head.next;
     return node;
@@ -1944,6 +2037,7 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     zero->var           = var;
 
     Node *chain         = NULL;
+    reflect_check_unique(vm, inits, n, false);
     if (n > 0 && inits) {
         for (int i = 0; i < n - 1; i++)
             if (inits[i])
@@ -3204,6 +3298,8 @@ Node *__builtin_ast_loop_set_body(Node *loop, Node *body) {
         if (!body)
             return loop;
     }
+    if (node_reaches(body, loop))
+        reflect_link_error(vm, "loop would contain itself");
     loop->then = body;
     return loop;
 }
@@ -4071,6 +4167,7 @@ typedef struct {
     Obj   *splice_vars[64];      // splice_vars[i]      = Obj for $@(i+1)
     Node **arg_nodes;
     int    n_args;
+    bool   stmt_used[64]; // a statement-kind $k already substituted once
 } QuoteSubstState;
 
 // If stmt is an ND_EXPR_STMT whose sole expression is a reference to a splice
@@ -4108,6 +4205,17 @@ static Node *splice_chain_for(QuoteSubstState *s, Node *stmt) {
     return NULL;                    // not a splice placeholder
 }
 
+// A node placed twice in one statement or argument list would loop through
+// ->next. `list` is the list built so far, always NUL-terminated by the caller.
+static void quote_check_unlinked(QuoteSubstState *s, const Node *list,
+                                 const Node *added, bool whole_chain) {
+    for (const Node *x = added; x; x = whole_chain ? x->next : NULL)
+        if (node_in_chain(list, x))
+            reflect_link_error(s->vm, "quote placeholder repeated in one "
+                                      "list; build a separate node for each "
+                                      "use");
+}
+
 // Walk the parsed tree and replace ND_VAR placeholder nodes with arg nodes.
 // Mirrors the transform_node() field traversal in pragma.c.
 // Splice placeholders ($@k) are expanded in statement-list positions (body).
@@ -4120,8 +4228,18 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     if (node->kind == ND_VAR && node->var) {
         // Scalar placeholder $k → 1:1 replacement
         for (int i = 0; i < s->n_args && i < 64; i++) {
-            if (s->placeholder_vars[i] && node->var == s->placeholder_vars[i])
+            if (s->placeholder_vars[i] && node->var == s->placeholder_vars[i]) {
+                // A statement placed twice is re-linked through ->next.
+                if (node_is_stmt_kind(s->arg_nodes[i])) {
+                    if (s->stmt_used[i])
+                        reflect_link_error(s->vm,
+                                           "quote placeholder repeated in one "
+                                           "list; build a separate node for "
+                                           "each use");
+                    s->stmt_used[i] = true;
+                }
                 return s->arg_nodes[i];
+            }
         }
         // Splice placeholder $@k used as a sub-expression → error.
         // (Direct arg-list and initializer positions are handled elsewhere.)
@@ -4183,6 +4301,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
             Node *chain   = splice_chain_for(s, st);
             if (chain) {
                 // Append the entire caller-provided chain
+                quote_check_unlinked(s, head_val.next, chain, true);
                 Node *tail = chain;
                 while (tail->next)
                     tail = tail->next;
@@ -4191,8 +4310,10 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
             } else {
                 Node *sub = quote_substitute(s, st);
                 if (sub) {
+                    quote_check_unlinked(s, head_val.next, sub, false);
                     cur->next = sub;
                     cur       = sub;
+                    cur->next = NULL;
                 }
             }
             st = next_st;
@@ -4223,6 +4344,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
                 Node *chain;
                 if (splice_chain_for_arg(s, a, &chain)) {
                     if (chain) {
+                        quote_check_unlinked(s, head_val.next, chain, true);
                         Node *tail = chain;
                         while (tail->next)
                             tail = tail->next;
@@ -4233,8 +4355,10 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
                 } else {
                     Node *sub = quote_substitute(s, a);
                     if (sub) {
+                        quote_check_unlinked(s, head_val.next, sub, false);
                         cur->next = sub;
                         cur       = sub;
+                        cur->next = NULL;
                     }
                 }
                 cur->next = NULL;
@@ -4882,6 +5006,7 @@ Node *__builtin_node_list(Node **nodes, int count) {
     if (!vm || !nodes || count <= 0)
         return NULL;
 
+    reflect_check_unique(vm, nodes, count, true);
     Node *head = nodes[0];
     Node *cur  = head;
     for (int i = 1; i < count; i++) {
@@ -5025,6 +5150,8 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
         return NULL;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
         return NULL;
+    if (type_holds_by_value(field_type, ty))
+        reflect_link_error(vm, "struct would contain itself");
 
     int     name_len = (int)strlen(name);
 

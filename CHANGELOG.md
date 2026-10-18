@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: compiler builtins that link nodes (`Block`, `NodeList`, `BlockAddStmt`,
+  `LoopSetBody`, `SwitchAddCase`, `SwitchSetDefault`, compound-literal and call
+  arguments, `StructAddField`, `Quote` statement placeholders) reject a node
+  that would contain itself or repeat in one list, instead of crashing or
+  hanging the compiler. `Block` and call arguments end their `next` chain.
+  See `docs/COMPTIME_POLICY.md`.
+
 ## [0.17.0] - 2026-10-18
 
 - Changed: compiler builtins check their string, string-array, out-pointer and

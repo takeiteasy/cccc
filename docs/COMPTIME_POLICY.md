@@ -152,6 +152,14 @@ call to '__builtin_ast_type_kind' argument 0: not a Type handle
 
 The extra arguments of `Quote`/`QuoteLazy` are checked against the template: each `$N` needs a `Node *` handle, and a template that references `$3` with two arguments is an error. `MacroErrorAt` and `MacroWarningAt` format with the same rules as comptime `printf` (`%n` and positional arguments are rejected). Placeholders inside string literals, character literals and comments do not count.
 
+Builtins that link nodes or fields reject a result that would contain itself, because the compiler loops or crashes on a cycle. A node may be shared inside a tree (`Binary(op, a, a)`), but not repeated in one statement or argument list, added to a block twice, placed inside its own descendant, or used as a field of its own struct:
+
+```
+error: node appears twice in one list; build a separate node for each entry
+error: block would contain itself
+error: struct would contain itself
+```
+
 Libc calls you grant with `--comptime-allow` and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.
