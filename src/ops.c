@@ -6050,7 +6050,6 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     if (__builtin_expect(vm->comptime_depth != 0, 0)) {
         if (cccc_comptime_check_args(vm, name, args, actual_nargs))
             return -1;
-        // TODO(#1677): builtins' string and buffer arguments are unchecked.
         const CcBuiltin *called = find_compiler_builtin(func_ptr);
         if (called &&
             cccc_comptime_check_builtin(vm, called, args, actual_nargs))

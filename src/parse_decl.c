@@ -716,6 +716,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 
     fn->is_root = !obj_is_inline_only(fn);
 
+    if (fn->ty && ty->name && ty->name->file)
+        cccc_builtin_note_signature(name_str, fn->ty, ty->name->file->name);
+
     if (consume(vm, &tok, tok, ";")) {
         // #485: [[cccc::checked]]/[[cccc::unchecked]] applies to a
         // function's *body* -- a bodyless declaration has nothing for it to

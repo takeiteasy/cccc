@@ -1664,7 +1664,8 @@ typedef enum {
     CC_RET_NODES,      // host Node * array of macro_vararg_count elements
 } CcBuiltinRet;
 // Kinds of the opaque compiler handles a builtin takes or returns. CC_H_ARRAY
-// marks an array of handles (`Node **nodes, int count`).
+// marks an array of handles (`Node **nodes, int count`); with CC_H_STR it is an
+// array of C strings (`const char **names, int n`).
 typedef enum {
     CC_H_NONE = 0,
     CC_H_NODE,
@@ -1674,11 +1675,13 @@ typedef enum {
     CC_H_TOKEN,
     CC_H_ENUM_CONSTANT,
     CC_H_ATTR_TARGET,
+    CC_H_STR,
     CC_H_KIND_MASK = 0x0f,
     CC_H_ARRAY     = 0x10,
 } CcHandleKind;
 
 #define CC_BUILTIN_MAX_PARAMS 24
+#define CC_BUILTIN_SPEC_MAX   (CC_BUILTIN_MAX_PARAMS * 6 + 1)
 
 struct CcBuiltin {
     const char  *name;
@@ -1688,14 +1691,19 @@ struct CcBuiltin {
     int          returns_double; // 0 = integer/pointer, 1 = double, 2 = float
     CcBuiltinRet ret;
     CcBuiltin   *next;
-    // Handle signature read from the reflection.h prototype at the first call
-    // site (cccc_builtin_note_signature).
+    // Handle and pointer signature read from the reflection.h prototype at the
+    // first call site (cccc_builtin_note_signature). arg_spec uses the libc
+    // spec grammar of src/comptime_args.c.
     bool    sig_ready;
+    char    arg_spec[CC_BUILTIN_SPEC_MAX];
     uint8_t ret_kind;
     uint8_t arg_kind[CC_BUILTIN_MAX_PARAMS];
     int8_t  arg_count[CC_BUILTIN_MAX_PARAMS]; // count arg of an array
 };
 extern CcBuiltin *cc_builtins;
+
+// Highest splice index a Quote template references.
+int cc_quote_max_index(const char *tmpl);
 
 #define CC_BUILTIN_RET(fn, nargs, variadic, returns_double, ret)               \
     static CcBuiltin cc_builtin_##fn = {                                       \

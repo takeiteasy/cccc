@@ -143,13 +143,15 @@ A fault inside a native call (`abort`, a libc routine) ends the compile at once,
 prog.c:12: error: compile-time execution terminated by host signal 6 in 'abort'
 ```
 
-Builtins check the opaque handles they take (`Node *`, `Type *`, `Member *`, `Obj *`, `Token *`, `EnumConstant *`, `AttrTarget *`, and arrays of them). A handle must be one the compiler gave comptime code, and of the kind the parameter declares; `NULL` passes:
+Builtins check what they take, including when called through a function pointer. Handles (`Node *`, `Type *`, `Member *`, `Obj *`, `Token *`, `EnumConstant *`, `AttrTarget *`, and arrays of them) must be ones the compiler gave comptime code, of the kind the parameter declares. Strings, string arrays, out-pointers and buffers must lie in VM memory. `NULL` passes:
 
 ```
 error: compile-time macro 'probe' aborted (opcode 'CALLF' faulted)
 call to '__builtin_ast_type_kind' argument 0: not a Type handle
 ```
 
-Libc calls you grant with `--comptime-allow`, strings and buffers passed to builtins, the extra arguments of `Quote`-style variadic builtins, and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+The extra arguments of `Quote`/`QuoteLazy` are checked against the template: each `$N` needs a `Node *` handle, and a template that references `$3` with two arguments is an error. `MacroErrorAt` and `MacroWarningAt` format with the same rules as comptime `printf` (`%n` and positional arguments are rejected). Placeholders inside string literals, character literals and comments do not count.
+
+Libc calls you grant with `--comptime-allow` and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.

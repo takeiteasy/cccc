@@ -4622,17 +4622,50 @@ Node *__builtin_quote_n(const char *tmpl, Node **nodes, int count) {
 // Scan the raw template string to derive the max splice index referenced,
 // without tokenising (avoids double arena allocation in quote_core and lets
 // the variadic builtins size their va_arg collection before parsing).
-// Handles $N, $$, $@N, and $@ forms. Shared by __builtin_quote and the
-// #1242 QuoteLazy builtins.
-static int quote_scan_max_index_raw(const char *tmpl) {
+// Handles $N, $$, $@N, and $@ forms. Like the tokenizer it ignores string and
+// character literals, comments, and a `$` inside an identifier (`a$1`, `$1x`).
+// Shared by __builtin_quote, the #1242 QuoteLazy builtins and the comptime
+// argument check.
+static bool quote_ident_char(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+           (c >= 'A' && c <= 'Z') || c == '_' || c == '$';
+}
+
+int cc_quote_max_index(const char *tmpl) {
     int max_index  = 0;
     int incr_count = 0;
 
     for (const char *p = tmpl; *p; p++) {
-        if (*p != '$')
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            while (*p && *p != '\n' && *p != quote)
+                p += *p == '\\' && p[1] && p[1] != '\n' ? 2 : 1;
+            if (!*p)
+                break;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '/') {
+            while (p[1] && p[1] != '\n')
+                p++;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/'))
+                p++;
+            if (!*p)
+                break;
+            p++;
+            continue;
+        }
+        if (*p != '$' || (p > tmpl && quote_ident_char(p[-1])))
             continue;
         const char *q = p + 1;
         if (*q == '$') {
+            if (quote_ident_char(q[1])) {
+                p = q;
+                continue;
+            }
             // $$ incremental scalar splice
             incr_count++;
             if (incr_count > max_index)
@@ -4644,8 +4677,11 @@ static int quote_scan_max_index_raw(const char *tmpl) {
             if (*r >= '1' && *r <= '9') {
                 // $@N positional splice
                 int idx = 0;
-                while (*r >= '0' && *r <= '9')
-                    idx = idx * 10 + (*r++ - '0');
+                while (*r >= '0' && *r <= '9') {
+                    if (idx < 100000)
+                        idx = idx * 10 + (*r - '0');
+                    r++;
+                }
                 if (idx > max_index)
                     max_index = idx;
                 p = r - 1; // loop will advance past last digit
@@ -4659,9 +4695,12 @@ static int quote_scan_max_index_raw(const char *tmpl) {
         } else if (*q >= '1' && *q <= '9') {
             // $N positional scalar splice
             int n = 0;
-            while (*q >= '0' && *q <= '9')
-                n = n * 10 + (*q++ - '0');
-            if (n > max_index)
+            while (*q >= '0' && *q <= '9') {
+                if (n < 100000)
+                    n = n * 10 + (*q - '0');
+                q++;
+            }
+            if (!quote_ident_char(*q) && n > max_index)
                 max_index = n;
             p = q - 1; // loop will increment past last digit
         }
@@ -4676,7 +4715,7 @@ Node *__builtin_quote(const char *tmpl, ...) {
     if (!vm || !tmpl)
         return NULL;
 
-    int max_index = quote_scan_max_index_raw(tmpl);
+    int max_index = cc_quote_max_index(tmpl);
 
     // Collect exactly max_index nodes from va_args
     int   n = (max_index < 64) ? max_index : 64;
@@ -4746,7 +4785,7 @@ Node *__builtin_quote_lazy_n(const char *tmpl, Node **nodes, int count) {
     // QuoteLazyN validates eagerly at the capture site instead, so a wrong
     // count is reported where the caller wrote it rather than deep inside
     // some later, unrelated splice.
-    int max_index = quote_scan_max_index_raw(tmpl);
+    int max_index = cc_quote_max_index(tmpl);
     if (max_index > count) {
         if (vm->compiler.macro_call_tok)
             error_tok(vm, vm->compiler.macro_call_tok,
@@ -4768,7 +4807,7 @@ Node *__builtin_quote_lazy(const char *tmpl, ...) {
     if (!vm || !tmpl)
         return NULL;
 
-    int   max_index = quote_scan_max_index_raw(tmpl);
+    int   max_index = cc_quote_max_index(tmpl);
     int   n         = (max_index < 64) ? max_index : 64;
     Node *arg_buf[64];
     memset(arg_buf, 0, sizeof(arg_buf));

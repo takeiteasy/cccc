@@ -112,8 +112,10 @@ void cccc_comptime_handle_add(VirtualMachine *vm, const void *p, int kind);
 bool cccc_comptime_handle_ok(VirtualMachine *vm, const void *p, int kind);
 void cccc_comptime_handle_add_nodes(VirtualMachine *vm, Node *first);
 
-// Reads which parameters of builtin `name` are handles from its prototype.
-void cccc_builtin_note_signature(const char *name, const Type *fn_ty);
+// Reads builtin `name`'s handle, string and buffer parameters from its
+// reflection.h prototype, declared in `file`.
+void cccc_builtin_note_signature(const char *name, const Type *fn_ty,
+                                 const char *file);
 // Checks a builtin's handle arguments; prints a diagnostic and returns -1 on a
 // forged one.
 int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,

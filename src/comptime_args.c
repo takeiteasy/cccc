@@ -368,6 +368,13 @@ static const struct {
     {"remquo", "- - w=4"},
     {"setpayload", "w=8 -"},
     {"setpayloadsig", "w=8 -"},
+    // Compiler builtins whose prototype can't say enough; the rest are derived
+    // from reflection.h (cccc_builtin_note_signature).
+    {"__builtin_ast_global_var_set_init_data", "- r@2 -"},
+    {"__builtin_macro_error_at", "- f"},
+    {"__builtin_macro_warning_at", "- f"},
+    {"__builtin_quote", "s"},
+    {"__builtin_quote_lazy", "s"},
     // The standard streams are host handles the guest never dereferences.
     {"__cccc_stderr", "> h"},
     {"__cccc_stdin", "> h"},
@@ -566,6 +573,8 @@ static int handle_kind_of_type(const Type *ty) {
     if (ty->base->kind == TY_PTR) {
         ty    = ty->base;
         array = CC_H_ARRAY;
+        if (ty->base && ty->base->kind == TY_CHAR)
+            return CC_H_STR | CC_H_ARRAY;
     }
     const Type *pointee = ty->base;
     if (!pointee || (pointee->kind != TY_STRUCT && pointee->kind != TY_UNION))
@@ -594,18 +603,55 @@ static CcBuiltin *builtin_by_name(const char *name) {
     return NULL;
 }
 
-void cccc_builtin_note_signature(const char *name, const Type *fn_ty) {
-    if (!name || !fn_ty || strncmp(name, "__builtin_", 10) != 0)
+// Spec token for a parameter that is neither a handle nor a string array.
+static const char *param_spec_token(const Type *p, int handle_kind) {
+    static _Thread_local char buf[16];
+    if (handle_kind != CC_H_NONE || p->kind != TY_PTR || !p->base)
+        return "-";
+    switch (p->base->kind) {
+        case TY_CHAR:
+            return "s?";
+        case TY_FUNC:
+        case TY_VOID:
+        case TY_PTR:
+        case TY_STRUCT:
+        case TY_UNION:
+            return "-";
+        default:
+            snprintf(buf, sizeof buf, "%c=%d?", p->base->is_const ? 'r' : 'w',
+                     p->base->size);
+            return buf;
+    }
+}
+
+// Only the reflection.h prototype counts, so a user's own declaration of a
+// builtin name cannot weaken its checks.
+static bool is_reflection_header(const char *file) {
+    static const char tail[] = "cccc/reflection.h";
+    size_t            len    = file ? strlen(file) : 0;
+    return file && (strcmp(file, "<implicit-reflection.h>") == 0 ||
+                    (len >= sizeof tail - 1 &&
+                     strcmp(file + len - (sizeof tail - 1), tail) == 0));
+}
+
+void cccc_builtin_note_signature(const char *name, const Type *fn_ty,
+                                 const char *file) {
+    if (!name || !fn_ty || strncmp(name, "__builtin_", 10) != 0 ||
+        !is_reflection_header(file))
         return;
     CcBuiltin *b = builtin_by_name(name);
     if (!b || b->sig_ready)
         return;
     b->ret_kind = (uint8_t)handle_kind_of_type(fn_ty->return_ty);
-    int i       = 0;
+    int    i    = 0;
+    size_t used = 0;
     for (const Type *p = fn_ty->params; p && i < CC_BUILTIN_MAX_PARAMS;
          p             = p->next, i++) {
         b->arg_kind[i]  = (uint8_t)handle_kind_of_type(p);
         b->arg_count[i] = -1;
+        used += (size_t)snprintf(b->arg_spec + used, sizeof b->arg_spec - used,
+                                 "%s%s", i ? " " : "",
+                                 param_spec_token(p, b->arg_kind[i]));
     }
     // An array's length is the first integer parameter after it.
     int j = 0;
@@ -632,11 +678,20 @@ static int forged_handle(VirtualMachine *vm, const CcBuiltin *b, int arg,
     return cccc_comptime_abort(vm, msg);
 }
 
+static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
+                    long long *args, int nargs, bool locale_tail);
+
+// Strings and buffers by spec (a SPECS row wins over the prototype's), then
+// handles by kind.
 int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
                                 long long *args, int nargs) {
-    if (!b->sig_ready)
-        return 0;
-    // TODO(#1678): arguments in the variadic tail are not checked.
+    pthread_once(&specs_once, build_specs);
+    const char *spec = hashmap_get(&specs, b->name);
+    if (!spec)
+        spec = b->sig_ready ? b->arg_spec : "";
+    int rc = run_spec(vm, b->name, spec, args, nargs, false);
+    if (rc || !b->sig_ready)
+        return rc;
     for (int i = 0; i < nargs && i < CC_BUILTIN_MAX_PARAMS; i++) {
         int kind = b->arg_kind[i];
         if (kind == CC_H_NONE)
@@ -647,19 +702,26 @@ int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
             continue;
         }
         kind       &= CC_H_KIND_MASK;
-        Node **arr  = (Node **)args[i];
+        void **arr   = (void **)args[i];
         int    ci   = b->arg_count[i];
         if (!arr || ci < 0 || ci >= nargs)
             continue;
         long long count = args[ci];
         if (count <= 0)
             continue;
+        char what[96];
+        snprintf(what, sizeof what, "call to '%s' argument %d", b->name, i);
         if ((size_t)count > SIZE_MAX / sizeof *arr ||
             !cccc_comptime_addr_ok(vm, arr, (size_t)count * sizeof *arr, false))
-            return cccc_comptime_fault(vm, b->name, arr, 1, false);
-        for (long long e = 0; e < count; e++)
-            if (!cccc_comptime_handle_ok(vm, arr[e], kind))
+            return cccc_comptime_fault(vm, what, arr, 1, false);
+        for (long long e = 0; e < count; e++) {
+            if (kind == CC_H_STR) {
+                if (arr[e] && cccc_comptime_cstr_len(vm, arr[e], SIZE_MAX) < 0)
+                    return cccc_comptime_fault(vm, what, arr[e], 1, false);
+            } else if (!cccc_comptime_handle_ok(vm, arr[e], kind)) {
                 return forged_handle(vm, b, i, kind);
+            }
+        }
     }
     return 0;
 }
@@ -1384,10 +1446,32 @@ static int pre_regfree(CallCtx *c) {
     return 0;
 }
 
+// A Quote template's placeholders each take a Node * from the variadic tail.
+static int pre_quote(CallCtx *c) {
+    if (c->nargs < 1 || !c->args[0])
+        return 0;
+    int need = cc_quote_max_index((const char *)c->args[0]);
+    if (need > 64)
+        need = 64;
+    if (c->nargs - 1 < need) {
+        char msg[96];
+        snprintf(msg, sizeof msg,
+                 "template references $%d but only %d argument%s passed", need,
+                 c->nargs - 1, c->nargs == 2 ? " was" : "s were");
+        return fault_msg(c, msg);
+    }
+    for (int i = 1; i <= need; i++)
+        if (!cccc_comptime_handle_ok(c->vm, (void *)c->args[i], CC_H_NODE))
+            return fault_arg_msg(c, i, "not a Node handle");
+    return 0;
+}
+
 static const struct {
     const char *name;
     PrecheckFn  fn;
 } PRECHECKS[] = {
+    {"__builtin_quote", pre_quote},
+    {"__builtin_quote_lazy", pre_quote},
     {"alphasort", pre_alphasort},
     {"getopt", pre_getopt},
     {"getopt_long", pre_getopt_long},
@@ -1407,17 +1491,8 @@ static void build_prechecks(void) {
         hashmap_put(&prechecks, PRECHECKS[i].name, (void *)PRECHECKS[i].fn);
 }
 
-int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
-                             long long *args, int nargs) {
-    const char *spec = cccc_comptime_arg_spec(name);
-    if (!spec)
-        return 0;
-    size_t len         = strlen(name);
-    bool   locale_tail = false, alias = false;
-    lookup_spec(name, len, &locale_tail, &alias);
-    if (!*spec && !locale_tail)
-        return 0;
-
+static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
+                    long long *args, int nargs, bool locale_tail) {
     CallCtx     c        = {vm, name, args, nargs};
     const char *p        = spec;
     int         i        = 0;
@@ -1525,6 +1600,20 @@ int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
         return check_format(&c, &s, fmt_scan, (const char *)args[fmt_idx]);
     }
     return 0;
+}
+
+int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
+                             long long *args, int nargs) {
+    if (strncmp(name, "__builtin_", 10) == 0)
+        return 0; // cccc_comptime_check_builtin
+    const char *spec = cccc_comptime_arg_spec(name);
+    if (!spec)
+        return 0;
+    bool locale_tail = false, alias = false;
+    lookup_spec(name, strlen(name), &locale_tail, &alias);
+    if (!*spec && !locale_tail)
+        return 0;
+    return run_spec(vm, name, spec, args, nargs, locale_tail);
 }
 
 // --- Results

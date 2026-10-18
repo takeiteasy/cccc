@@ -2708,9 +2708,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         ffi_fixed_param_count++;
                 }
 
-                cccc_builtin_note_signature(node->lhs->var->name,
-                                            node->func_ty);
-
                 // Count arguments and compute double_arg_mask/float_arg_mask
                 int      nargs           = 0;
                 uint64_t double_arg_mask = 0;

@@ -3620,8 +3620,17 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             fixed_count > 0 ? alloca((size_t)fixed_count *
                                                      sizeof(long long))
                                             : NULL;
-                        for (int i = 0; i < fixed_count; i++)
-                            fixed_args[i] = (long long)arg_strs[i];
+                        // Comptime code only reads VM memory.
+                        for (int i = 0; i < fixed_count; i++) {
+                            size_t n   = strlen(arg_strs[i]) + 1;
+                            char  *vmc = cccc_vm_heap_malloc(vm, (long long)n);
+                            if (!vmc)
+                                error_tok(vm, tok,
+                                          "out of memory copying macro "
+                                          "argument");
+                            memcpy(vmc, arg_strs[i], n);
+                            fixed_args[i] = (long long)vmc;
+                        }
 
                         if (!pm->is_compiled) {
                             error_tok(vm, tok, "macro '%.*s' failed to compile",
