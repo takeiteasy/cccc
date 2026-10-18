@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-18
+
 - Fixed: compiler builtins that link nodes (`Block`, `NodeList`, `BlockAddStmt`,
   `LoopSetBody`, `SwitchAddCase`, `SwitchSetDefault`, compound-literal and call
   arguments, `StructAddField`, `Quote` statement placeholders) reject a node
