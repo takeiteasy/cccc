@@ -1305,6 +1305,15 @@ int cc_is_valid_vm_address(
                  // cc_dump_value, #666)
 
 //
+// host_signal.c
+//
+
+// Marks the calling thread as inside a native call. A host fault there during
+// comptime ends the process at once, since libc may hold a lock.
+void cccc_host_native_enter(const char *name);
+void cccc_host_native_leave(void);
+
+//
 // host_backtrace.c
 //
 

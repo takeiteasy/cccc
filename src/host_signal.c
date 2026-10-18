@@ -17,6 +17,7 @@ struct HostSignalGuard {
     volatile sig_atomic_t signal;
     volatile sig_atomic_t guest_resume;
     void *volatile fault_addr;
+    const char *volatile native; // native call the fault interrupted, or NULL
 };
 
 static const int host_fault_signals[] = {
@@ -34,6 +35,7 @@ static struct sigaction               saved_actions[HOST_FAULT_SIGNAL_COUNT];
 static int                            host_handler_depth;
 static _Thread_local HostSignalGuard *active_guard;
 static _Thread_local sig_atomic_t     handlers_suspended;
+static _Thread_local const char *volatile native_call;
 
 static int host_signal_index(int sig) {
     for (int i = 0; i < HOST_FAULT_SIGNAL_COUNT; i++)
@@ -88,6 +90,7 @@ static void host_fault_handler(int sig, siginfo_t *info, void *context) {
 
     guard->signal     = sig;
     guard->fault_addr = info ? info->si_addr : NULL;
+    guard->native     = native_call;
 
     /* Print the host C backtrace while the faulting stack is still live —
      * after siglongjmp it will be unwound and unavailable.  Only do this on
@@ -96,6 +99,59 @@ static void host_fault_handler(int sig, siginfo_t *info, void *context) {
         cc_host_backtrace_print();
 
     siglongjmp(guard->env, 1);
+}
+
+void cccc_host_native_enter(const char *name) {
+    native_call = name ? name : "?";
+}
+
+void cccc_host_native_leave(void) {
+    native_call = NULL;
+}
+
+// A fault inside a native call can leave a libc lock held, so the diagnostic
+// uses write() and _exit() only: stdio, malloc and error_tok could hang.
+typedef struct {
+    char   buf[512];
+    size_t len;
+} FaultLine;
+
+static void fault_put(FaultLine *l, const char *s) {
+    for (; *s && l->len < sizeof l->buf - 1; s++)
+        l->buf[l->len++] = *s;
+}
+
+static void fault_put_int(FaultLine *l, long v) {
+    char tmp[24];
+    int  n = 0;
+    if (v < 0) {
+        fault_put(l, "-");
+        v = -v;
+    }
+    do
+        tmp[n++] = (char)('0' + v % 10);
+    while ((v /= 10) > 0);
+    while (n > 0 && l->len < sizeof l->buf - 1)
+        l->buf[l->len++] = tmp[--n];
+}
+
+static void native_fault_exit(VirtualMachine *vm, int sig, const char *name) {
+    FaultLine l   = {.len = 0};
+    Token    *tok = vm->compiler.macro_call_tok;
+    if (tok && tok->file && tok->file->name) {
+        fault_put(&l, tok->file->name);
+        fault_put(&l, ":");
+        fault_put_int(&l, tok->line_no);
+        fault_put(&l, ": ");
+    }
+    fault_put(&l, "error: compile-time execution terminated by host signal ");
+    fault_put_int(&l, sig);
+    fault_put(&l, " in '");
+    fault_put(&l, name);
+    fault_put(&l, "'\n");
+    ssize_t ignored = write(STDERR_FILENO, l.buf, l.len);
+    (void)ignored;
+    _exit(1);
 }
 
 static bool host_signal_debug_active(VirtualMachine *vm) {
@@ -204,11 +260,14 @@ int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
     vm->cycle              = 0;
 
-    // TODO(#1679): handlers are installed per comptime call, and a fault inside
-    // malloc/stdio can leave a libc lock held for the diagnostic.
     bool debugger          = host_signal_debug_active(vm);
     if (!debugger && !vm->comptime_depth)
         return cccc_vm_eval_dispatch(vm, &current_pc);
+
+    // A callback re-entering from a native call starts with no native call of
+    // its own active.
+    const char *volatile outer_native = native_call;
+    native_call                       = NULL;
 
     for (;;) {
         HostSignalGuard guard;
@@ -218,9 +277,13 @@ int vm_eval(VirtualMachine *vm) {
 
         if (sigsetjmp(guard.env, 1) != 0) {
             uninstall_host_handlers(&guard);
+            native_call = NULL;
 
             if (guard.guest_resume)
                 continue;
+
+            if (guard.native && !debugger)
+                native_fault_exit(vm, guard.signal, guard.native);
 
             vm->dbg.host_fault_signal = guard.signal;
             vm->pc                    = current_pc;
@@ -230,19 +293,29 @@ int vm_eval(VirtualMachine *vm) {
                                          (void *)guard.fault_addr);
                 handlers_suspended = 0;
             }
+            native_call = outer_native;
             return CCCC_HOST_SIGNAL_RC;
         }
 
-        if (!install_host_handlers(&guard))
+        if (!install_host_handlers(&guard)) {
+            native_call = outer_native;
             return cccc_vm_eval_dispatch(vm, &current_pc);
+        }
 
         int rc = cccc_vm_eval_dispatch(vm, &current_pc);
         uninstall_host_handlers(&guard);
+        native_call = outer_native;
         return rc;
     }
 }
 
 #else
+
+void cccc_host_native_enter(const char *name) {
+    (void)name;
+}
+
+void cccc_host_native_leave(void) {}
 
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
     (void)vm;

@@ -20,6 +20,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `getprotoby*`, `getcwd`, `realpath` and the `scandir` list are VM copies, and
   `glob`, `readdir`, `fts_read`, `getaddrinfo`, `wordexp`, `hsearch`,
   `tsearch` and `mmap` results are readable until their release call.
+- Fixed: a host fault inside a native call during comptime prints one line and
+  exits with status 1 instead of risking a hang on a libc lock. See
+  `docs/COMPTIME_POLICY.md`.
 
 ## [0.16.0] - 2026-10-17
 

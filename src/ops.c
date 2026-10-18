@@ -6073,6 +6073,8 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
 
     VirtualMachine *saved_ffi_vm = cccc_tls_ffi_vm;
     cccc_tls_ffi_vm              = vm;
+    if (__builtin_expect(vm->comptime_depth != 0, 0))
+        cccc_host_native_enter(name);
 
     if (returns_float) {
         float result;
@@ -6103,6 +6105,8 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         vm->regs[REG_A0] = result;
     }
 
+    if (__builtin_expect(vm->comptime_depth != 0, 0))
+        cccc_host_native_leave();
     cccc_tls_ffi_vm = saved_ffi_vm;
 
     return 0;

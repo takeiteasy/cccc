@@ -108,6 +108,12 @@ A fault the checks miss (a native `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL` or `SI
 error: compile-time macro execution terminated by host signal 6
 ```
 
+A fault inside a native call (`abort`, a libc routine) ends the compile at once, because libc may still hold a lock. The message names the call and carries no error count, and cccc exits with status 1:
+
+```
+prog.c:12: error: compile-time execution terminated by host signal 6 in 'abort'
+```
+
 Builtins check the opaque handles they take (`Node *`, `Type *`, `Member *`, `Obj *`, `Token *`, `EnumConstant *`, `AttrTarget *`, and arrays of them). A handle must be one the compiler gave comptime code, and of the kind the parameter declares; `NULL` passes:
 
 ```
