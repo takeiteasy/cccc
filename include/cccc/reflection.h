@@ -335,6 +335,16 @@ Node *__builtin_ast_set_token(Node *node, Token *tok);
  */
 Node *__builtin_ast_copy_location(Node *dst, Node *src);
 
+/*! @brief Deep-copy an expression or simple statement.
+ * @param n Node to copy.
+ * @return A new node that shares no list or child with @a n, or NULL.
+ * @details Nodes are linked into a list by the first builtin that takes them;
+ * CopyNode builds the separate node a second list needs. Loops in the copy get
+ * their own break/continue labels. Labels, goto, switch, declarations and
+ * compound assignments are rejected.
+ */
+Node *__builtin_ast_copy_node(Node *n);
+
 // ============================================================================
 // Macro Diagnostics (ticket #78)
 // ============================================================================
@@ -1713,6 +1723,11 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param dst Generated node to update.
  * @param src Source node whose location should be reused. */
 #define CopyLocation(dst, src) __builtin_ast_copy_location(dst, src)
+/*! @def CopyNode
+ * @brief Deep-copy an expression or simple statement so it can be linked into
+ * a second list.
+ * @param n Node to copy. */
+#define CopyNode(n) __builtin_ast_copy_node(n)
 
 /*! @def FindType
  * @brief Look up a type by tag name (struct/union/enum).

@@ -160,6 +160,22 @@ error: block would contain itself
 error: struct would contain itself
 ```
 
+A node that one list builtin has linked belongs to that list. Linking it into a second list would rewrite the first, so `Block`, `BlockAddStmt`, `NodeList`, compound-literal and call arguments, `Quote` list splices and statement results of a macro reject it. `CopyNode` builds the separate node each list needs:
+
+```c
+Node *a    = Quote("g += 1;");
+Node *b    = Quote("g += 2;");
+Node *x[2] = {a, b};
+Node *y[2] = {CopyNode(b), CopyNode(a)};    // not {b, a}
+```
+
+```
+error: node is already in another list; use CopyNode to build a separate node for each use
+```
+
+`CopyNode` copies expressions, calls, `if`, loops (with their own `break`/`continue` targets), `return`, expression statements and plain blocks.[^2] A node in an expression tree can still be shared without a copy.
+
 Libc calls you grant with `--comptime-allow` and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.
+[^2]: Labels, `goto`, `switch`, declarations and checked-pointer nodes are refused. A copied compound assignment (`g += 1`) shares its temporary with the original, so do not nest a copy inside the original expression.

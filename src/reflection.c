@@ -53,10 +53,17 @@ VirtualMachine *__builtin_current_vm = NULL;
 
 // Linking builtins reject a node that would contain itself or repeat in a
 // list; later compiler walks loop or recurse forever on such a cycle.
-static void reflect_link_error(VirtualMachine *vm, const char *msg) {
-    if (vm->compiler.macro_call_tok)
-        error_tok(vm, vm->compiler.macro_call_tok, "%s", msg);
+static void reflect_link_error_at(VirtualMachine *vm, Token *fallback,
+                                  const char *msg) {
+    Token *tok =
+        vm->compiler.macro_call_tok ? vm->compiler.macro_call_tok : fallback;
+    if (tok)
+        error_tok(vm, tok, "%s", msg);
     error("%s", msg);
+}
+
+static void reflect_link_error(VirtualMachine *vm, const char *msg) {
+    reflect_link_error_at(vm, NULL, msg);
 }
 
 typedef struct {
@@ -113,6 +120,32 @@ static void reflect_check_unique(VirtualMachine *vm, Node **nodes, int count,
     if (dup)
         reflect_link_error(vm, "node appears twice in one list; build a "
                                "separate node for each entry");
+}
+
+// Node.list_link. A builtin that writes a caller's ->next claims the node;
+// claiming one a builtin already linked would rewrite the earlier list.
+enum { LINK_FREE = 0, LINK_PENDING = 1, LINK_LINKED = 2 };
+
+static void reflect_claim(VirtualMachine *vm, Node *n, uint8_t state,
+                          bool allow_pending) {
+    if (n->list_link == LINK_LINKED ||
+        (n->list_link == LINK_PENDING && !allow_pending))
+        reflect_link_error_at(vm, n->tok,
+                              "node is already in another list; use CopyNode "
+                              "to build a separate node for each use");
+    n->list_link = state;
+}
+
+// A list builtin takes `n` into its list.
+static void reflect_link(VirtualMachine *vm, Node *n) {
+    reflect_claim(vm, n, LINK_LINKED, false);
+}
+
+// A quote splice or a lifted macro result takes a NodeList chain (pending) or
+// a free node.
+void cc_claim_spliced_chain(VirtualMachine *vm, Node *head) {
+    for (Node *n = head; n; n = n->next)
+        reflect_claim(vm, n, LINK_LINKED, true);
 }
 
 static bool type_holds_by_value(const Type *ty, const Type *target) {
@@ -1378,6 +1411,7 @@ Node *__builtin_ast_block(Node **stmts, int count) {
     Node  head = {};
     Node *cur  = &head;
     for (int i = 0; i < count && stmts[i]; i++) {
+        reflect_link(vm, stmts[i]);
         cur = cur->next = stmts[i];
     }
     cur->next  = NULL;
@@ -1393,6 +1427,7 @@ Node *__builtin_ast_block_add_stmt(Node *block, Node *stmt) {
 
     if (node_in_chain(block->body, stmt))
         reflect_link_error(vm, "statement is already in this block");
+    reflect_link(vm, stmt);
     stmt->next = NULL;
     if (node_reaches(stmt, block))
         reflect_link_error(vm, "block would contain itself");
@@ -1683,11 +1718,9 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
     // Chain argument nodes via ->next, resolving each argument's type and
     // casting to the corresponding parameter type (mirrors funcall() in
     // parse.c, including array-to-pointer decay for e.g. memcpy/strlen).
-    // CONTRACT: when param_ty is NULL (paramless/variadic callee) or a
-    // struct/union param, `arg` is chained WITHOUT a cast, so its ->next is
-    // overwritten in place -- callers must pass fresh, non-shared nodes for
-    // those argument positions (reusing the same node across multiple
-    // funcalls corrupts earlier calls' arg chains).
+    // For a paramless/variadic callee or a struct/union param `arg` is chained
+    // WITHOUT a cast, so its ->next is written in place; reflect_link rejects
+    // such a node once another list holds it.
     Type *param_ty = ty->params;
     Node  head     = {};
     Node *cur      = &head;
@@ -1704,6 +1737,7 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
         if (node_in_chain(head.next, arg))
             reflect_link_error(vm, "argument node appears twice in one call; "
                                    "build a separate node for each");
+        reflect_link(vm, arg);
         cur = cur->next = arg;
         cur->next       = NULL;
     }
@@ -2039,6 +2073,9 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     Node *chain         = NULL;
     reflect_check_unique(vm, inits, n, false);
     if (n > 0 && inits) {
+        for (int i = 0; i < n; i++)
+            if (inits[i])
+                reflect_link(vm, inits[i]);
         for (int i = 0; i < n - 1; i++)
             if (inits[i])
                 inits[i]->next = inits[i + 1];
@@ -4302,6 +4339,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
             if (chain) {
                 // Append the entire caller-provided chain
                 quote_check_unlinked(s, head_val.next, chain, true);
+                cc_claim_spliced_chain(s->vm, chain);
                 Node *tail = chain;
                 while (tail->next)
                     tail = tail->next;
@@ -4345,6 +4383,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
                 if (splice_chain_for_arg(s, a, &chain)) {
                     if (chain) {
                         quote_check_unlinked(s, head_val.next, chain, true);
+                        cc_claim_spliced_chain(s->vm, chain);
                         Node *tail = chain;
                         while (tail->next)
                             tail = tail->next;
@@ -4356,6 +4395,7 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
                     Node *sub = quote_substitute(s, a);
                     if (sub) {
                         quote_check_unlinked(s, head_val.next, sub, false);
+                        reflect_link(s->vm, sub);
                         cur->next = sub;
                         cur       = sub;
                         cur->next = NULL;
@@ -5007,6 +5047,8 @@ Node *__builtin_node_list(Node **nodes, int count) {
         return NULL;
 
     reflect_check_unique(vm, nodes, count, true);
+    for (int i = 0; i < count && nodes[i]; i++)
+        reflect_claim(vm, nodes[i], LINK_PENDING, false);
     Node *head = nodes[0];
     Node *cur  = head;
     for (int i = 1; i < count; i++) {
@@ -5018,6 +5060,143 @@ Node *__builtin_node_list(Node **nodes, int count) {
     if (cur)
         cur->next = NULL;
     return head;
+}
+
+// CopyNode(n): independent deep copy of an expression or simple statement, so
+// a macro can link "the same" node into a second list.
+typedef struct {
+    VirtualMachine *vm;
+    struct {
+        char *from, *to;
+    } labels[32]; // break/continue targets of loops inside the copy
+    int n_labels;
+    int depth;
+} CopyCtx;
+
+static Node *copy_node_tree(CopyCtx *cx, Node *n);
+
+static void copy_node_refuse(CopyCtx *cx, const Node *n, const char *why) {
+    char buf[160];
+    snprintf(buf, sizeof buf, "CopyNode cannot copy %s (%s)",
+             cc_node_kind_name(n->kind), why);
+    reflect_link_error(cx->vm, buf);
+}
+
+static Node *copy_node_chain(CopyCtx *cx, Node *head) {
+    Node  out = {};
+    Node *cur = &out;
+    for (; head; head = head->next)
+        cur = cur->next = copy_node_tree(cx, head);
+    return out.next;
+}
+
+// The bounds expressions are subtrees of their own that a shallow copy would
+// alias.
+static bool node_has_checked_bounds(const Node *n) {
+    return n->checked_bounds_lo || n->checked_bounds_hi ||
+           n->checked_bounds_obj_init || n->checked_rmw_mirror ||
+           n->checked_assign_dst_lo || n->checked_assign_dst_hi ||
+           n->checked_assign_dst_obj_init || n->checked_assign_src_lo ||
+           n->checked_assign_src_hi;
+}
+
+// TODO: labels, goto, switch, declarations and checked-pointer nodes are
+// refused (#1698).
+static void copy_node_check(CopyCtx *cx, const Node *n) {
+    bool ok = n->kind <= ND_LOGOR;
+    switch (n->kind) {
+        case ND_RETURN:
+        case ND_IF:
+        case ND_FOR:
+        case ND_DO:
+        case ND_BLOCK:
+        case ND_FUNCALL:
+        case ND_EXPR_STMT:
+        case ND_STMT_EXPR:
+        case ND_VAR:
+        case ND_NUM:
+        case ND_CAST:
+        case ND_QUOTE_LAZY:
+            ok = true;
+            break;
+        case ND_GOTO:
+            ok = !n->label; // break/continue; a user label would need renaming
+            break;
+        default:
+            break;
+    }
+    if (!ok)
+        copy_node_refuse(cx, n,
+                         "labels, goto, switch and declarations are "
+                         "not supported");
+    if (n->kind == ND_BLOCK && (n->cleanup_vars || n->is_decl_group || n->omp ||
+                                n->static_assert_cond))
+        copy_node_refuse(cx, n, "declarations are not supported");
+    if (n->kind == ND_FUNCALL && n->ret_buffer)
+        copy_node_refuse(cx, n, "struct-returning call; rebuild it");
+    if (node_has_checked_bounds(n))
+        copy_node_refuse(cx, n, "checked-pointer node; rebuild it");
+}
+
+static char *copy_node_label(CopyCtx *cx, char *label) {
+    for (int i = cx->n_labels - 1; i >= 0; i--)
+        if (cx->labels[i].from == label)
+            return cx->labels[i].to;
+    return label; // targets a loop outside the copy
+}
+
+static Node *copy_node_tree(CopyCtx *cx, Node *n) {
+    if (!n)
+        return NULL;
+    if (++cx->depth > 4096)
+        reflect_link_error(cx->vm, "CopyNode: tree is nested too deeply");
+    copy_node_check(cx, n);
+
+    Node *c      = arena_alloc(&cx->vm->compiler.parser_arena, sizeof(Node));
+    *c           = *n;
+    c->next      = NULL;
+    c->list_link = LINK_FREE;
+
+    int saved_labels = cx->n_labels;
+    if (n->kind == ND_FOR || n->kind == ND_DO) {
+        if (cx->n_labels + 2 > 32)
+            reflect_link_error(cx->vm, "CopyNode: loops nested too deeply");
+        if (n->brk_label) {
+            c->brk_label                  = new_unique_name(cx->vm);
+            cx->labels[cx->n_labels].from = n->brk_label;
+            cx->labels[cx->n_labels++].to = c->brk_label;
+        }
+        if (n->cont_label) {
+            c->cont_label                 = new_unique_name(cx->vm);
+            cx->labels[cx->n_labels].from = n->cont_label;
+            cx->labels[cx->n_labels++].to = c->cont_label;
+        }
+    }
+    if (n->kind == ND_GOTO)
+        c->unique_label = copy_node_label(cx, n->unique_label);
+
+    c->lhs       = copy_node_tree(cx, n->lhs);
+    c->rhs       = copy_node_tree(cx, n->rhs);
+    c->cond      = copy_node_tree(cx, n->cond);
+    c->then      = copy_node_tree(cx, n->then);
+    c->els       = copy_node_tree(cx, n->els);
+    c->init      = copy_node_tree(cx, n->init);
+    c->inc       = copy_node_tree(cx, n->inc);
+    c->body      = copy_node_chain(cx, n->body);
+    c->args      = copy_node_chain(cx, n->args);
+
+    cx->n_labels = saved_labels;
+    cx->depth--;
+    return c;
+}
+
+CC_BUILTIN(__builtin_ast_copy_node, 1);
+Node *__builtin_ast_copy_node(Node *n) {
+    VirtualMachine *vm = __builtin_current_vm;
+    if (!vm || !n)
+        return NULL;
+    CopyCtx cx = {.vm = vm};
+    return copy_node_tree(&cx, n);
 }
 
 // ============================================================================

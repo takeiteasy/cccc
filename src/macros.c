@@ -3041,6 +3041,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
         if (node->lhs) {
             if (node_is_stmt_kind(node->lhs)) {
                 Node *lifted = node->lhs;
+                cc_claim_spliced_chain(vm, lifted);
                 // Re-attach the sibling chain so statements after the macro
                 // call are not dropped.  Walk to the tail of the lifted node
                 // so we don't clobber a non-NULL ->next on the lifted result

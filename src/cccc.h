@@ -2030,6 +2030,9 @@ enum {
 struct Node {
     NodeKind     kind; /**< Node kind (see NodeKind). */
     struct Node *next; // Next node
+    // Comptime list builtins: who owns this node's ->next (0 free, 1 pending
+    // NodeList chain, 2 linked into a list); see reflect_link().
+    uint8_t list_link;
     Type  *ty;  /**< Resolved type of this node (after semantic analysis). */
     Token *tok; // Representative token
 

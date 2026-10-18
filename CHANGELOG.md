@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `CopyNode(n)` deep-copies an expression or simple statement so a macro
+  can link it into a second list.
+- Fixed: `Block`, `BlockAddStmt`, `NodeList`, compound-literal and call
+  arguments, `Quote` list splices and macro results that are statements reject
+  a node another list already holds, instead of rewriting the earlier list.
+  See `docs/COMPTIME_POLICY.md`.
+
 ## [0.17.1] - 2026-10-18
 
 - Fixed: compiler builtins that link nodes (`Block`, `NodeList`, `BlockAddStmt`,
