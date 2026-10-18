@@ -44,6 +44,10 @@ Node *check(void) {
     struct tm *tm  = gmtime(&t);
     bad           += tm->tm_year != 70;
 
+    char *as        = NULL;
+    bad += asprintf(&as, "%s/%d", "a", 5) != 3 || strcmp(as, "a/5") != 0;
+    free(as);
+
     int ex;
     bad += frexp(8.0, &ex) != 0.5 || ex != 4;
 

@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `asprintf` no longer crashes; its format string was passed as a
+  variadic argument.
 - Changed: comptime libc calls check their pointer arguments against VM
   memory, and `free`, `realloc`, `longjmp` and the wide-integer, decimal and
   overflow operations are confined too; bad pointers are compile errors.

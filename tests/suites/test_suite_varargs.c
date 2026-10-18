@@ -15,6 +15,7 @@
 #include "stdarg.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // [from test_nested_vararg]
@@ -1342,6 +1343,26 @@ int test_varargs_comptime_cast_kept(void) {
     varargs_cast_arg(buf, i);
     if (strcmp(buf, "-7") != 0)
         return 1;
+    return 42;
+}
+
+static int varargs_vasprintf(char **out, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vasprintf(out, fmt, ap);
+    va_end(ap);
+    return n;
+}
+
+[[cccc::test(return = 42)]]
+int test_varargs_asprintf(void) {
+    char *p = NULL;
+    if (asprintf(&p, "%s/%s", "a", "b") != 3 || strcmp(p, "a/b") != 0)
+        return 1;
+    free(p);
+    if (varargs_vasprintf(&p, "%d-%s", 7, "x") != 3 || strcmp(p, "7-x") != 0)
+        return 2;
+    free(p);
     return 42;
 }
 
