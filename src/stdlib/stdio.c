@@ -1,5 +1,6 @@
 // stdio.h stdlib function registration
 #include "../cccc.h"
+#include "../internal.h" // cccc_current_ffi_vm, cccc_vm_heap_realloc
 #include <stdarg.h>
 
 // C23 adds the %b/%B (binary integer) conversion specifier to the
@@ -160,6 +161,43 @@ static long long wrap_vasprintf(char **strp, const char *fmt,
 
 #endif // CCCC_HAVE_NATIVE_PCT_B
 
+// getline/getdelim: libc would realloc() *lineptr, but a guest buffer is VM
+// heap memory, so the line is read into a host scratch buffer and copied into
+// a guest buffer grown through the VM allocator.
+// TODO: the extra copy per line could be avoided by reading straight into the
+// guest buffer with getc_unlocked.
+static _Thread_local char  *getdelim_scratch;
+static _Thread_local size_t getdelim_scratch_cap;
+
+static long long wrap_getdelim(char **lineptr, size_t *n, int delim,
+                               FILE *stream) {
+    if (!lineptr || !n || !stream) {
+        errno = EINVAL;
+        return -1;
+    }
+    ssize_t len =
+        getdelim(&getdelim_scratch, &getdelim_scratch_cap, delim, stream);
+    if (len < 0)
+        return -1;
+    size_t need = (size_t)len + 1;
+    if (!*lineptr || *n < need) {
+        VirtualMachine *vm = cccc_current_ffi_vm();
+        char *grown = vm ? cccc_vm_heap_realloc(vm, *lineptr, need) : NULL;
+        if (!grown) {
+            errno = ENOMEM;
+            return -1;
+        }
+        *lineptr = grown;
+        *n       = need;
+    }
+    memcpy(*lineptr, getdelim_scratch, need);
+    return len;
+}
+
+static long long wrap_getline(char **lineptr, size_t *n, FILE *stream) {
+    return wrap_getdelim(lineptr, n, '\n', stream);
+}
+
 // Register all stdio.h functions
 void register_stdio_functions(VirtualMachine *vm) {
     // Standard streams
@@ -251,6 +289,8 @@ void register_stdio_functions(VirtualMachine *vm) {
 
     // String I/O
     cc_register_cfunc(vm, "fgets", (void *)fgets, 3, 0);
+    cc_register_cfunc(vm, "getline", (void *)wrap_getline, 3, 0);
+    cc_register_cfunc(vm, "getdelim", (void *)wrap_getdelim, 4, 0);
     cc_register_cfunc(vm, "fputs", (void *)wrap_fputs, 2, 0);
     cc_register_cfunc(vm, "puts", (void *)wrap_puts, 1, 0);
 

@@ -109,6 +109,8 @@ static const char *const FS_NAMES[] = {
     "getchar",
     "getchar_unlocked",
     "getcwd",
+    "getdelim",
+    "getline",
     "glob",
     "globfree",
     "ioctl",

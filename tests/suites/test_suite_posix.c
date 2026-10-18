@@ -4845,4 +4845,40 @@ int test_ndbm_roundtrip(void) {
     return 42;
 }
 #endif
+// getline/getdelim grow a guest malloc'd (or NULL) buffer, as libc does.
+[[cccc::test(return = 42)]]
+int test_getline_getdelim(void) {
+    FILE *f = tmpfile();
+    if (!f)
+        return 1;
+    fputs("short\nthis line is considerably longer than eight bytes\nx;y\nlast",
+          f);
+    rewind(f);
+
+    size_t cap = 8;
+    char  *buf = malloc(cap);
+    if (getline(&buf, &cap, f) != 6 || strcmp(buf, "short\n") != 0)
+        return 2;
+    ssize_t n = getline(&buf, &cap, f);
+    if (n != 50 || cap < 51 || strncmp(buf, "this line", 9) != 0 || buf[n] != 0)
+        return 3;
+    if (getdelim(&buf, &cap, ';', f) != 2 || strcmp(buf, "x;") != 0)
+        return 4;
+    if (getline(&buf, &cap, f) != 2 || strcmp(buf, "y\n") != 0)
+        return 5;
+    if (getline(&buf, &cap, f) != 4 || strcmp(buf, "last") != 0)
+        return 6;
+    if (getline(&buf, &cap, f) != -1)
+        return 7;
+    free(buf);
+
+    char  *fresh     = NULL;
+    size_t fresh_cap = 0;
+    rewind(f);
+    if (getline(&fresh, &fresh_cap, f) != 6 || fresh_cap < 7)
+        return 8;
+    free(fresh);
+    fclose(f);
+    return 42;
+}
 #pragma cccc suite end

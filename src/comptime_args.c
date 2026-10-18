@@ -133,6 +133,8 @@ static const struct {
     {"feupdateenv", "r=fenv!"},
     {"fflush", "h?"},
     {"fnmatch", "s s -"},
+    {"getdelim", "w=8 w=8 - h"},
+    {"getline", "w=8 w=8 h"},
     {"fprintf", "h f"},
     {"fputc", "- h"},
     {"fputs", "s h"},

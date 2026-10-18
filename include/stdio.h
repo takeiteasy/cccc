@@ -135,6 +135,14 @@ extern int fclose(FILE *stream);
 extern int fflush(FILE *stream);
 extern FILE *fopen(const char *filename, const char *mode);
 extern FILE *fdopen(int fd, const char *mode);
+#ifndef _SSIZE_T
+typedef long ssize_t;
+#define _SSIZE_T
+#endif
+/* POSIX.1-2008 line readers: *lineptr is grown with the guest allocator, so a
+   malloc'd (or NULL) buffer works as in libc. */
+extern ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+extern ssize_t getdelim(char **lineptr, size_t *n, int delim, FILE *stream);
 extern FILE *freopen(const char *filename, const char *mode, FILE *stream);
 /* open_memstream: a write-only FILE* backed by a dynamically-grown heap
    buffer; *bufp / *sizep are updated on fflush()/fclose(). POSIX.1-2008;
