@@ -66,7 +66,25 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
 void cccc_comptime_host_ptr_add(void *p);
 bool cccc_comptime_host_ptr_take(void *p);
 
-// VM-memory containment (ops.c). `p` must lie wholly inside a VM segment.
+// Host memory libc keeps owning but comptime code may read (and write when
+// `writable`) until the release call drops its `owner`. A new range replaces
+// any range it overlaps.
+void cccc_comptime_host_range_add(const void *base, size_t len,
+                                  const void *owner, bool writable);
+void cccc_comptime_host_range_drop(const void *owner);
+size_t cccc_comptime_host_range_left(const void *p, bool write);
+
+// Range helpers for callback trampolines, which hand libc-owned memory to guest
+// code: a `struct dirent *`, an `FTSENT *`, a NUL-terminated string.
+void cccc_comptime_host_dirent(const void *e, const void *owner);
+void cccc_comptime_host_ftsent(const void *e, const void *owner);
+void cccc_comptime_host_string(const void *s, const void *owner);
+
+// True when `p` lies in a VM segment (host ranges do not count).
+bool cccc_comptime_in_vm(VirtualMachine *vm, const void *p);
+
+// VM-memory containment (ops.c). `p` must lie wholly inside a VM segment or a
+// registered host range.
 bool cccc_comptime_addr_ok(VirtualMachine *vm, const void *p, size_t n,
                            bool write);
 long long cccc_comptime_cstr_len(VirtualMachine *vm, const void *p,

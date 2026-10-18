@@ -15,6 +15,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   Strings and structs libc returns from host memory (`strdup`, `strerror`,
   `localtime`, ...) are VM copies, so comptime code can read them. `%n` is
   rejected in comptime `printf`. See `docs/COMPTIME_POLICY.md`.
+- Fixed: comptime code can read what granted libc calls return: `getenv`,
+  `getpwnam`, `getgrnam`, `localeconv`, `gethostby*`, `getservby*`,
+  `getprotoby*`, `getcwd`, `realpath` and the `scandir` list are VM copies, and
+  `glob`, `readdir`, `fts_read`, `getaddrinfo`, `wordexp`, `hsearch`,
+  `tsearch` and `mmap` results are readable until their release call.
 
 ## [0.16.0] - 2026-10-17
 

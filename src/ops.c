@@ -493,8 +493,8 @@ static bool comptime_addr_in(const void *p, size_t n, const void *base,
 
 // Bytes from `p` to the end of the VM segment holding it, or 0 when `p` is
 // outside VM memory. Text is readable only.
-static size_t comptime_region_left(VirtualMachine *vm, const void *p,
-                                   bool write) {
+static size_t comptime_vm_region_left(VirtualMachine *vm, const void *p,
+                                      bool write) {
     const struct {
         const void *base;
         size_t      len;
@@ -514,6 +514,17 @@ static size_t comptime_region_left(VirtualMachine *vm, const void *p,
                    (size_t)((uintptr_t)p - (uintptr_t)regions[i].base);
     }
     return 0;
+}
+
+// VM segments, then host ranges libc results registered.
+static size_t comptime_region_left(VirtualMachine *vm, const void *p,
+                                   bool write) {
+    size_t left = comptime_vm_region_left(vm, p, write);
+    return left ? left : cccc_comptime_host_range_left(p, write);
+}
+
+bool cccc_comptime_in_vm(VirtualMachine *vm, const void *p) {
+    return comptime_vm_region_left(vm, p, false) != 0;
 }
 
 bool cccc_comptime_addr_ok(VirtualMachine *vm, const void *p, size_t n,

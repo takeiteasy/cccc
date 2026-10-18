@@ -33,8 +33,14 @@ static int glob_errfunc_trampoline(const char *epath, int eerrno) {
     VirtualMachine *vm      = cccc_current_ffi_vm();
     long long       args[2] = {(long long)(intptr_t)epath, (long long)eerrno};
     long long       result  = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_glob_errfunc_value, args, 2,
-                                        &result) != 0) {
+    bool            ct      = vm && vm->comptime_depth;
+    if (ct)
+        cccc_comptime_host_string(epath, epath);
+    int failed = !vm || cccc_call_guest_callback(vm, g_glob_errfunc_value, args,
+                                                 2, &result) != 0;
+    if (ct)
+        cccc_comptime_host_range_drop(epath);
+    if (failed) {
         g_glob_errfunc_faulted = 1;
         return 0; /* keep glob() enumerating rather than abort on a faulting
                      errfunc */
@@ -68,8 +74,14 @@ static int scandir_select_trampoline(const struct dirent *e) {
     VirtualMachine *vm      = cccc_current_ffi_vm();
     long long       args[1] = {(long long)(intptr_t)e};
     long long       result  = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_scandir_select_value, args, 1,
-                                        &result) != 0) {
+    bool            ct      = vm && vm->comptime_depth;
+    if (ct)
+        cccc_comptime_host_dirent(e, e);
+    int failed = !vm || cccc_call_guest_callback(vm, g_scandir_select_value,
+                                                 args, 1, &result) != 0;
+    if (ct)
+        cccc_comptime_host_range_drop(e);
+    if (failed) {
         g_scandir_faulted = 1;
         return 0;
     }
@@ -81,8 +93,20 @@ static int scandir_compar_trampoline(const struct dirent **a,
     VirtualMachine *vm      = cccc_current_ffi_vm();
     long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
     long long       result  = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_scandir_compar_value, args, 2,
-                                        &result) != 0) {
+    bool            ct      = vm && vm->comptime_depth;
+    if (ct)
+        for (int i = 0; i < 2; i++) {
+            const struct dirent **slot = i ? b : a;
+            cccc_comptime_host_range_add(slot, sizeof *slot, slot, false);
+            cccc_comptime_host_dirent(*slot, slot);
+        }
+    int failed = !vm || cccc_call_guest_callback(vm, g_scandir_compar_value,
+                                                 args, 2, &result) != 0;
+    if (ct) {
+        cccc_comptime_host_range_drop(a);
+        cccc_comptime_host_range_drop(b);
+    }
+    if (failed) {
         g_scandir_faulted = 1;
         return 0;
     }
@@ -184,8 +208,20 @@ static int fts_compar_trampoline(const FTSENT **a, const FTSENT **b) {
     VirtualMachine *vm      = cccc_current_ffi_vm();
     long long       args[2] = {(long long)(intptr_t)a, (long long)(intptr_t)b};
     long long       result  = 0;
-    if (!vm || cccc_call_guest_callback(vm, g_fts_compar_value, args, 2,
-                                        &result) != 0) {
+    bool            ct      = vm && vm->comptime_depth;
+    if (ct)
+        for (int i = 0; i < 2; i++) {
+            const FTSENT **slot = i ? b : a;
+            cccc_comptime_host_range_add(slot, sizeof *slot, slot, false);
+            cccc_comptime_host_ftsent(*slot, slot);
+        }
+    int failed = !vm || cccc_call_guest_callback(vm, g_fts_compar_value, args,
+                                                 2, &result) != 0;
+    if (ct) {
+        cccc_comptime_host_range_drop(a);
+        cccc_comptime_host_range_drop(b);
+    }
+    if (failed) {
         g_fts_faulted = 1;
         return 0;
     }

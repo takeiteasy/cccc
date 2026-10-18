@@ -134,9 +134,14 @@ static void twalk_action_trampoline(const void *nodep, VISIT which, int depth) {
     long long args[3]  = {(long long)(intptr_t)nodep, (long long)(int)which,
                           (long long)depth};
     long long result   = 0;
+    bool            ct       = vm && vm->comptime_depth;
+    if (ct)
+        cccc_comptime_host_range_add(nodep, sizeof(void *), nodep, false);
     if (!vm || cccc_call_guest_callback(vm, g_twalk_action_value, args, 3,
                                         &result) != 0)
         g_twalk_faulted = 1;
+    if (ct)
+        cccc_comptime_host_range_drop(nodep);
 }
 
 static long long wrap_twalk(long long root, long long action) {

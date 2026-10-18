@@ -47,18 +47,30 @@
 // tests/host/test_comptime_policy.c requires a spec for every safe-class name.
 
 #include "comptime_policy.h"
+#include <dirent.h>
+#include <fts.h>
+#include <glob.h>
+#include <grp.h>
+#include <locale.h>
+#include <net/if.h>
+#include <netdb.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <regex.h>
+#include <search.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <termios.h>
 #include <time.h>
 #include <wchar.h>
+#include <wordexp.h>
 
 #include "internal.h"
 
@@ -350,9 +362,10 @@ static const struct {
     {"__cccc_stdout", "> h"},
 };
 
+// Handles libc returns that comptime code passes back to it.
 static const char *const HOST_PTR_RESULTS[] = {
-    "fdopen",         "fdopendir", "fopen", "freopen",  "getcwd",
-    "open_memstream", "opendir",   "popen", "realpath", "tmpfile",
+    "fdopen",         "fdopendir", "fopen", "freopen",
+    "open_memstream", "opendir",   "popen", "tmpfile",
 };
 
 static HashMap         specs;
@@ -430,6 +443,93 @@ bool cccc_comptime_host_ptr_take(void *p) {
         hashmap_delete_int(&host_ptrs, (long long)(uintptr_t)p);
     pthread_mutex_unlock(&host_lock);
     return hit;
+}
+
+// --- Host memory ranges ------------------------------------------------------
+// Memory libc keeps owning (glob paths, directory entries, search nodes) stays
+// in host memory; comptime reads it through disjoint ranges that the matching
+// release call (globfree, closedir, ...) drops by owner.
+
+typedef struct {
+    uintptr_t   base;
+    size_t      len;
+    const void *owner;
+    bool        writable;
+} HostRange;
+
+// TODO(#1676): sorted array with O(n) insert and owner scans; use an interval
+// tree if results with many thousands of entries show up.
+static HostRange *host_ranges;
+static size_t     host_range_count, host_range_cap;
+
+// Index of the first range whose end is above `a`.
+static size_t range_lower_bound(uintptr_t a) {
+    size_t lo = 0, hi = host_range_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (host_ranges[mid].base + host_ranges[mid].len <= a)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+void cccc_comptime_host_range_add(const void *base, size_t len,
+                                  const void *owner, bool writable) {
+    if (!base || !len)
+        return;
+    uintptr_t a = (uintptr_t)base;
+    pthread_mutex_lock(&host_lock);
+    // A new range replaces whatever it overlaps (a reused dirent buffer).
+    size_t i = range_lower_bound(a);
+    size_t j = i;
+    while (j < host_range_count && host_ranges[j].base < a + len)
+        j++;
+    if (j > i) {
+        memmove(&host_ranges[i], &host_ranges[j],
+                (host_range_count - j) * sizeof *host_ranges);
+        host_range_count -= j - i;
+    }
+    if (host_range_count == host_range_cap) {
+        size_t     cap = host_range_cap ? host_range_cap * 2 : 64;
+        HostRange *n   = realloc(host_ranges, cap * sizeof *n);
+        if (!n) {
+            pthread_mutex_unlock(&host_lock);
+            return;
+        }
+        host_ranges    = n;
+        host_range_cap = cap;
+    }
+    memmove(&host_ranges[i + 1], &host_ranges[i],
+            (host_range_count - i) * sizeof *host_ranges);
+    host_ranges[i] = (HostRange){a, len, owner, writable};
+    host_range_count++;
+    pthread_mutex_unlock(&host_lock);
+}
+
+void cccc_comptime_host_range_drop(const void *owner) {
+    if (!owner)
+        return;
+    pthread_mutex_lock(&host_lock);
+    size_t keep = 0;
+    for (size_t i = 0; i < host_range_count; i++)
+        if (host_ranges[i].owner != owner)
+            host_ranges[keep++] = host_ranges[i];
+    host_range_count = keep;
+    pthread_mutex_unlock(&host_lock);
+}
+
+size_t cccc_comptime_host_range_left(const void *p, bool write) {
+    uintptr_t a    = (uintptr_t)p;
+    size_t    left = 0;
+    pthread_mutex_lock(&host_lock);
+    size_t i = range_lower_bound(a);
+    if (i < host_range_count && host_ranges[i].base <= a &&
+        (!write || host_ranges[i].writable))
+        left = host_ranges[i].base + host_ranges[i].len - a;
+    pthread_mutex_unlock(&host_lock);
+    return left;
 }
 
 // --- Spec evaluation ---------------------------------------------------------
@@ -869,6 +969,417 @@ static void *vm_copy(VirtualMachine *vm, const void *src, size_t n) {
     return copy;
 }
 
+// --- Results of granted-class calls ------------------------------------------
+// By lifetime: libc's static buffers are copied (the next call may free them),
+// caller-owned allocations are copied and freed, and memory libc keeps owning
+// becomes a host range dropped by its release call.
+
+typedef void (*ResultFn)(VirtualMachine *vm, long long *args, int nargs,
+                         long long *result);
+
+static bool is_host(VirtualMachine *vm, const void *p) {
+    return p && !cccc_comptime_in_vm(vm, p);
+}
+
+static char *dup_str(VirtualMachine *vm, const char *s) {
+    return is_host(vm, s) ? vm_copy(vm, s, strlen(s) + 1) : (char *)s;
+}
+
+// NULL-terminated vector of host strings, or of `elem_len`-byte blobs.
+static char **dup_vec(VirtualMachine *vm, char **v, size_t elem_len) {
+    if (!is_host(vm, v))
+        return v;
+    size_t n = 0;
+    while (v[n])
+        n++;
+    char **copy = vm_copy(vm, v, (n + 1) * sizeof *v);
+    for (size_t i = 0; copy && i < n; i++)
+        copy[i] = elem_len ? vm_copy(vm, v[i], elem_len) : dup_str(vm, v[i]);
+    return copy;
+}
+
+static void r_string(VirtualMachine *vm, long long *args, int nargs,
+                     long long *result) {
+    (void)args, (void)nargs;
+    *result = (long long)dup_str(vm, (char *)*result);
+}
+
+static void r_string_free(VirtualMachine *vm, long long *args, int nargs,
+                          long long *result) {
+    (void)args, (void)nargs;
+    char *host = (char *)*result;
+    if (!is_host(vm, host))
+        return;
+    char *copy = dup_str(vm, host);
+    if (copy) {
+        free(host);
+        *result = (long long)copy;
+    }
+}
+
+static void r_passwd(VirtualMachine *vm, long long *args, int nargs,
+                     long long *result) {
+    (void)args, (void)nargs;
+    struct passwd *src = (struct passwd *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct passwd *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->pw_name   = dup_str(vm, src->pw_name);
+    c->pw_passwd = dup_str(vm, src->pw_passwd);
+    c->pw_dir    = dup_str(vm, src->pw_dir);
+    c->pw_shell  = dup_str(vm, src->pw_shell);
+#ifndef __ANDROID__
+    c->pw_gecos = dup_str(vm, src->pw_gecos);
+#endif
+#ifdef __APPLE__
+    c->pw_class = dup_str(vm, src->pw_class);
+#endif
+    *result = (long long)c;
+}
+
+static void r_group(VirtualMachine *vm, long long *args, int nargs,
+                    long long *result) {
+    (void)args, (void)nargs;
+    struct group *src = (struct group *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct group *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->gr_name   = dup_str(vm, src->gr_name);
+    c->gr_passwd = dup_str(vm, src->gr_passwd);
+    c->gr_mem    = dup_vec(vm, src->gr_mem, 0);
+    *result      = (long long)c;
+}
+
+static void r_lconv(VirtualMachine *vm, long long *args, int nargs,
+                    long long *result) {
+    (void)args, (void)nargs;
+    struct lconv *src = (struct lconv *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct lconv *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    char **fields[] = {
+        &c->decimal_point,     &c->thousands_sep,   &c->grouping,
+        &c->int_curr_symbol,   &c->currency_symbol, &c->mon_decimal_point,
+        &c->mon_thousands_sep, &c->mon_grouping,    &c->positive_sign,
+        &c->negative_sign,
+    };
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+        *fields[i] = dup_str(vm, *fields[i]);
+    *result = (long long)c;
+}
+
+static void r_hostent(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)args, (void)nargs;
+    struct hostent *src = (struct hostent *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct hostent *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->h_name      = dup_str(vm, src->h_name);
+    c->h_aliases   = dup_vec(vm, src->h_aliases, 0);
+    c->h_addr_list = dup_vec(vm, src->h_addr_list, (size_t)src->h_length);
+    *result        = (long long)c;
+}
+
+static void r_netent(VirtualMachine *vm, long long *args, int nargs,
+                     long long *result) {
+    (void)args, (void)nargs;
+    struct netent *src = (struct netent *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct netent *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->n_name    = dup_str(vm, src->n_name);
+    c->n_aliases = dup_vec(vm, src->n_aliases, 0);
+    *result      = (long long)c;
+}
+
+static void r_servent(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)args, (void)nargs;
+    struct servent *src = (struct servent *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct servent *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->s_name    = dup_str(vm, src->s_name);
+    c->s_aliases = dup_vec(vm, src->s_aliases, 0);
+    c->s_proto   = dup_str(vm, src->s_proto);
+    *result      = (long long)c;
+}
+
+static void r_protoent(VirtualMachine *vm, long long *args, int nargs,
+                       long long *result) {
+    (void)args, (void)nargs;
+    struct protoent *src = (struct protoent *)*result;
+    if (!is_host(vm, src))
+        return;
+    struct protoent *c = vm_copy(vm, src, sizeof *src);
+    if (!c)
+        return;
+    c->p_name    = dup_str(vm, src->p_name);
+    c->p_aliases = dup_vec(vm, src->p_aliases, 0);
+    *result      = (long long)c;
+}
+
+// `char ***` to the environment: the guest gets a snapshot of the vector.
+static void r_environ(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)args, (void)nargs;
+    char ***src = (char ***)*result;
+    if (!is_host(vm, src))
+        return;
+    char ***cell = vm_copy(vm, src, sizeof *src);
+    if (cell)
+        *cell = dup_vec(vm, *src, 0);
+    *result = (long long)cell;
+}
+
+static size_t dirent_len(const struct dirent *e) {
+    return offsetof(struct dirent, d_name) + strlen(e->d_name) + 1;
+}
+
+void cccc_comptime_host_dirent(const void *e, const void *owner) {
+    if (e)
+        cccc_comptime_host_range_add(e, dirent_len(e), owner, false);
+}
+
+void cccc_comptime_host_ftsent(const void *p, const void *owner) {
+    const FTSENT *e = p;
+    if (e)
+        cccc_comptime_host_range_add(e, sizeof *e + e->fts_namelen + 1, owner,
+                                     false);
+}
+
+void cccc_comptime_host_string(const void *s, const void *owner) {
+    if (s)
+        cccc_comptime_host_range_add(s, strlen(s) + 1, owner, false);
+}
+
+static void host_strv(char *const *v, size_t first, size_t count,
+                      const void *owner) {
+    if (!v)
+        return;
+    cccc_comptime_host_range_add(v, (first + count + 1) * sizeof *v, owner,
+                                 false);
+    for (size_t i = first; i < first + count; i++)
+        cccc_comptime_host_string(v[i], owner);
+}
+
+static void r_scandir(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    int n = (int)*result;
+    if (n < 0 || nargs < 2)
+        return;
+    struct dirent ***out = (struct dirent ***)args[1];
+    if (!cccc_comptime_addr_ok(vm, out, sizeof *out, true) ||
+        !is_host(vm, *out))
+        return;
+    struct dirent **host = *out;
+    struct dirent **copy = cccc_vm_heap_malloc(
+        vm, (long long)((n ? (size_t)n : 1) * sizeof *copy));
+    if (!copy)
+        return;
+    for (int i = 0; i < n; i++) {
+        copy[i] = vm_copy(vm, host[i], dirent_len(host[i]));
+        free(host[i]);
+    }
+    free(host);
+    *out = copy;
+}
+
+static void r_glob(VirtualMachine *vm, long long *args, int nargs,
+                   long long *result) {
+    if (*result != 0 || nargs < 4 ||
+        !cccc_comptime_addr_ok(vm, (void *)args[3], sizeof(glob_t), false))
+        return;
+    glob_t *g = (glob_t *)args[3];
+    cccc_comptime_host_range_drop(g);
+    host_strv(g->gl_pathv, g->gl_offs, g->gl_pathc, g);
+}
+
+static void r_release(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)vm, (void)result;
+    if (nargs > 0)
+        cccc_comptime_host_range_drop((void *)args[0]);
+}
+
+static void r_release_arg1(VirtualMachine *vm, long long *args, int nargs,
+                           long long *result) {
+    (void)vm, (void)result;
+    if (nargs > 1)
+        cccc_comptime_host_range_drop((void *)args[1]);
+}
+
+static void r_readdir(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    if (nargs > 0 && is_host(vm, (void *)*result))
+        cccc_comptime_host_dirent((void *)*result, (void *)args[0]);
+}
+
+// An FTSENT stays readable until the next fts_read: libc reallocates the path
+// buffer its entries share.
+static void r_fts_read(VirtualMachine *vm, long long *args, int nargs,
+                       long long *result) {
+    FTSENT *e = (FTSENT *)*result;
+    if (nargs < 1 || !is_host(vm, e))
+        return;
+    const void *owner = (void *)args[0];
+    cccc_comptime_host_range_drop(owner);
+    for (int depth = 0; e && depth < 4096; e = e->fts_parent, depth++) {
+        cccc_comptime_host_ftsent(e, owner);
+        if (depth == 0) {
+            cccc_comptime_host_string(e->fts_path, owner);
+            cccc_comptime_host_string(e->fts_accpath, owner);
+        }
+    }
+}
+
+static void r_fts_children(VirtualMachine *vm, long long *args, int nargs,
+                           long long *result) {
+    if (nargs < 1)
+        return;
+    for (FTSENT *e = (FTSENT *)*result; is_host(vm, e); e = e->fts_link)
+        cccc_comptime_host_ftsent(e, (void *)args[0]);
+}
+
+static void r_getaddrinfo(VirtualMachine *vm, long long *args, int nargs,
+                          long long *result) {
+    if (*result != 0 || nargs < 4 ||
+        !cccc_comptime_addr_ok(vm, (void *)args[3], sizeof(void *), false))
+        return;
+    struct addrinfo *head = *(struct addrinfo **)args[3];
+    for (struct addrinfo *a = head; is_host(vm, a); a = a->ai_next) {
+        cccc_comptime_host_range_add(a, sizeof *a, head, false);
+        cccc_comptime_host_range_add(a->ai_addr, a->ai_addrlen, head, false);
+        cccc_comptime_host_string(a->ai_canonname, head);
+    }
+}
+
+static void r_nameindex(VirtualMachine *vm, long long *args, int nargs,
+                        long long *result) {
+    (void)args, (void)nargs;
+    struct if_nameindex *v = (struct if_nameindex *)*result;
+    if (!is_host(vm, v))
+        return;
+    size_t n = 0;
+    while (v[n].if_index || v[n].if_name)
+        n++;
+    cccc_comptime_host_range_add(v, (n + 1) * sizeof *v, v, false);
+    for (size_t i = 0; i < n; i++)
+        cccc_comptime_host_string(v[i].if_name, v);
+}
+
+static void r_wordexp(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    if (*result != 0 || nargs < 2 ||
+        !cccc_comptime_addr_ok(vm, (void *)args[1], sizeof(wordexp_t), false))
+        return;
+    wordexp_t *we = (wordexp_t *)args[1];
+    cccc_comptime_host_range_drop(we);
+    host_strv(we->we_wordv, we->we_offs, we->we_wordc, we);
+}
+
+// A tsearch/tfind node is readable until the tree is next modified by tdelete.
+static void r_tnode(VirtualMachine *vm, long long *args, int nargs,
+                    long long *result) {
+    if (nargs > 1 && is_host(vm, (void *)*result))
+        cccc_comptime_host_range_add((void *)*result, sizeof(void *),
+                                     (void *)args[1], false);
+}
+
+static char hsearch_owner;
+
+static void r_hsearch(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)args, (void)nargs;
+    if (is_host(vm, (void *)*result))
+        cccc_comptime_host_range_add((void *)*result, sizeof(ENTRY),
+                                     &hsearch_owner, true);
+}
+
+static void r_hdestroy(VirtualMachine *vm, long long *args, int nargs,
+                       long long *result) {
+    (void)vm, (void)args, (void)nargs, (void)result;
+    cccc_comptime_host_range_drop(&hsearch_owner);
+}
+
+static void r_mmap(VirtualMachine *vm, long long *args, int nargs,
+                   long long *result) {
+    void *p = (void *)*result;
+    if (nargs < 3 || !is_host(vm, p) || p == MAP_FAILED)
+        return;
+    cccc_comptime_host_range_add(p, (size_t)args[1], p,
+                                 (args[2] & PROT_WRITE) != 0);
+}
+
+static const struct {
+    const char *name;
+    ResultFn    fn;
+} RESULTS[] = {
+    {"__cccc_environ_ptr", r_environ},
+    {"catgets", r_string},
+    {"closedir", r_release},
+    {"fts_children", r_fts_children},
+    {"fts_close", r_release},
+    {"fts_read", r_fts_read},
+    {"freeaddrinfo", r_release},
+    {"getaddrinfo", r_getaddrinfo},
+    {"getcwd", r_string_free},
+    {"getenv", r_string},
+    {"getgrgid", r_group},
+    {"getgrnam", r_group},
+    {"gethostbyaddr", r_hostent},
+    {"gethostbyname", r_hostent},
+    {"getlogin", r_string},
+    {"getnetbyaddr", r_netent},
+    {"getnetbyname", r_netent},
+    {"getprotobyname", r_protoent},
+    {"getprotobynumber", r_protoent},
+    {"getpwnam", r_passwd},
+    {"getpwuid", r_passwd},
+    {"getservbyname", r_servent},
+    {"getservbyport", r_servent},
+    {"glob", r_glob},
+    {"globfree", r_release},
+    {"hdestroy", r_hdestroy},
+    {"hsearch", r_hsearch},
+    {"if_freenameindex", r_release},
+    {"if_nameindex", r_nameindex},
+    {"localeconv", r_lconv},
+    {"mmap", r_mmap},
+    {"munmap", r_release},
+    {"readdir", r_readdir},
+    {"realpath", r_string_free},
+    {"scandir", r_scandir},
+    {"tdelete", r_release_arg1},
+    {"tfind", r_tnode},
+    {"tmpnam", r_string},
+    {"tsearch", r_tnode},
+    {"ttyname", r_string},
+    {"wordexp", r_wordexp},
+    {"wordfree", r_release},
+};
+
+static HashMap        results;
+static pthread_once_t results_once = PTHREAD_ONCE_INIT;
+
+static void build_results(void) {
+    for (size_t i = 0; i < sizeof(RESULTS) / sizeof(RESULTS[0]); i++)
+        hashmap_put(&results, RESULTS[i].name, (void *)RESULTS[i].fn);
+}
+
 void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
                               long long *args, int nargs, long long *result) {
     const char *spec = cccc_comptime_arg_spec(name);
@@ -882,7 +1393,7 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
         switch (*res) {
             case 'S':
             case 'D':
-                if (p && !cccc_comptime_addr_ok(vm, p, 1, false)) {
+                if (p && !cccc_comptime_in_vm(vm, p)) {
                     void *copy = vm_copy(vm, p, strlen(p) + 1);
                     if (*res == 'D')
                         free(p);
@@ -890,7 +1401,7 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
                 }
                 break;
             case 'B':
-                if (p && !cccc_comptime_addr_ok(vm, p, 1, false)) {
+                if (p && !cccc_comptime_in_vm(vm, p)) {
                     CallCtx     c = {vm, name, args, nargs};
                     const char *q = res + 1;
                     size_t      n = 0;
@@ -899,14 +1410,14 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
                 }
                 break;
             case 'h':
-                if (p && !cccc_comptime_addr_ok(vm, p, 1, false))
+                if (p && !cccc_comptime_in_vm(vm, p))
                     cccc_comptime_host_ptr_add(p);
                 break;
             case 'A': {
                 char **out = nargs > 0 ? (char **)args[0] : NULL;
                 if (out && *result >= 0 &&
                     cccc_comptime_addr_ok(vm, out, sizeof *out, true) && *out &&
-                    !cccc_comptime_addr_ok(vm, *out, 1, false)) {
+                    !cccc_comptime_in_vm(vm, *out)) {
                     char *host = *out;
                     *out       = vm_copy(vm, host, strlen(host) + 1);
                     free(host);
@@ -921,17 +1432,13 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
          i < sizeof(HOST_PTR_RESULTS) / sizeof(HOST_PTR_RESULTS[0]); i++)
         if (strcmp(name, HOST_PTR_RESULTS[i]) == 0) {
             void *p = (void *)*result;
-            if (p && !cccc_comptime_addr_ok(vm, p, 1, false))
+            if (p && !cccc_comptime_in_vm(vm, p))
                 cccc_comptime_host_ptr_add(p);
             return;
         }
 
-    // getline/getdelim allocate the buffer they store through argument 0.
-    if ((strcmp(name, "getline") == 0 || strcmp(name, "getdelim") == 0) &&
-        nargs > 0 &&
-        cccc_comptime_addr_ok(vm, (void *)args[0], sizeof(char *), false)) {
-        void *buf = *(void **)args[0];
-        if (buf && !cccc_comptime_addr_ok(vm, buf, 1, false))
-            cccc_comptime_host_ptr_add(buf);
-    }
+    pthread_once(&results_once, build_results);
+    ResultFn fn = hashmap_get(&results, name);
+    if (fn)
+        fn(vm, args, nargs, result);
 }

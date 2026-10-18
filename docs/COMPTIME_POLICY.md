@@ -92,7 +92,15 @@ call to 'memcpy' argument 0: Write of 4 byte(s) at 0x8 is outside VM memory
 | `free`, `realloc` | A VM-heap pointer or a host allocation libc returned |
 | `longjmp` | A `jmp_buf` saved by `setjmp`: its stack and code positions must still be valid |
 
-Host strings and structs libc returns (`strdup`, `strerror`, `localtime`, `getenv`) are handed to comptime code as VM-heap copies. Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies.
+Comptime code can read what libc returns, whichever way libc owns it:
+
+| Result | Comptime sees | Calls |
+|---|---|---|
+| libc's static buffer | A VM-heap copy | `getenv`, `getpwnam`, `getgrnam`, `localeconv`, `gethostbyname`, `getservbyname`, `strerror`, `localtime`, `ttyname`, `getlogin` |
+| A buffer you free | A VM-heap copy, freed with `free` as usual | `strdup`, `scandir` list, `getcwd(NULL, 0)`, `realpath(path, NULL)` |
+| Memory libc keeps | The host memory, readable until its release call | `glob` (until `globfree`), `readdir` (`closedir`), `fts_read` (`fts_close`), `getaddrinfo` (`freeaddrinfo`), `wordexp` (`wordfree`), `tfind`/`tsearch` nodes, `mmap` (`munmap`) |
+
+Host memory libc keeps is read-only, except an `hsearch` entry and a writable `mmap`. After its release call a read is a compile error, not a crash. An `FTSENT` is readable until the next `fts_read`, and `tdelete` ends the nodes of that tree. Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies.
 
 Libc calls you grant with `--comptime-allow`, the handles passed to builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
