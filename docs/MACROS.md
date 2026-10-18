@@ -2594,6 +2594,7 @@ a compile with warnings puts more than one document there.
 | `MakeStringLiteral(str)` | String literal |
 | `StringLiteralValue(node)` | Text of a string literal argument, or `NULL` |
 | `ConstIntValue(node, &out)` | Stores an integer constant expression argument in `out`; false if it is not one |
+| `ConstUIntValue(node, &out)` | Like `ConstIntValue` into a `uint64_t`; accepts values up to `UINT64_MAX`, false for a negative signed value |
 | `MakeVarRef(name)` | Variable reference |
 | `MakeParamRef(fn, name)` | Generated function parameter reference |
 | `Gensym(prefix)` | Unique arena-allocated symbol name using `__builtin_gensym` |

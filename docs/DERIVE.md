@@ -491,8 +491,8 @@ integer constant, and neither can share a member with `@equals_skip`. Only
 
 ## Validation and clamping
 
-`@range(min, max)` on an integer, enum or bit-field member sets its inclusive
-bounds. `@validate` checks them; `@clamp` enforces them.
+`@range(min, max)` on an integer, enum or bit-field member, or on an array of
+them, sets its inclusive bounds. `@validate` checks them; `@clamp` enforces them.
 
 ```c
 typedef enum { LOW = 1, MID, HIGH } Level;
@@ -502,6 +502,7 @@ typedef enum { LOW = 1, MID, HIGH } Level;
     unsigned retry @range(0, MAX_RETRY);
     Level    lvl   @range(LOW, HIGH);
     int      bits : 4 @range(-3, 3);
+    short    grid[2][3] @range(0, 100); // every element
     char     name[16];                  // no @range: not checked
 };
 
@@ -518,22 +519,35 @@ Cfg_validate(&c);   // 1
 
 `@validate("P")` and `@clamp("P")` publish `P_T_validate` and `P_T_clamp`. The
 bounds are integer constant expressions, so enum constants, `sizeof` and casts
-work. Members of an anonymous struct are checked with the struct around them.
+work. Members of an anonymous struct are checked with the struct around them. An
+unsigned 64-bit member takes bounds up to `ULLONG_MAX`.
+
+A nested struct member (or an array of them) is checked by calling the nested
+struct's own `T_validate` / `T_clamp`, found by the struct's tag with the same
+prefix, so the nested struct needs the attribute and is declared first:
+
+```c
+@validate @clamp struct Inner { int a @range(0, 9); };
+@validate @clamp struct Outer {
+    struct Inner one;
+    struct Inner many[2];    // Outer_validate checks all three
+};
+```
+
+A nested struct with no `@range` members, and a named union member, is skipped.
 
 A compile error is raised for:
 
 - `@range` that is not on a struct member, does not have exactly two integer
   constants, or has `min` above `max`
-- `@range` on a `_Bool`, floating-point, pointer, array or struct member
+- `@range` on a `_Bool`, floating-point, pointer, `char` array or struct member
 - a bound the member's type cannot hold (`unsigned char c @range(0, 300)`,
   `unsigned lo : 3 @range(0, 10)`, a negative `min` on an unsigned member)
 - `@validate` or `@clamp` on a union or an anonymous union member
+- `@validate` or `@clamp` on a struct with a nested struct that has `@range`
+  members but no `T_validate` / `T_clamp` published
 
-Only `@validate` and `@clamp` read `@range`; without them it has no effect. The
-`@range` members of a nested named struct are not checked.[^u64]
-
-[^u64]: The bounds are read as `long long`, so the upper bound of an unsigned
-    64-bit member cannot exceed `LLONG_MAX`.
+Only `@validate` and `@clamp` read `@range`; without them it has no effect.
 
 ## Bit Flags
 

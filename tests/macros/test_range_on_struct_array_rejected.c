@@ -3,8 +3,12 @@
 
 #include <cccc/derive.h>
 
+struct In {
+    int a;
+};
+
 struct S {
-    int a[2] @range(0, 1);
+    struct In in[2] @range(0, 1);
 };
 
 int main(void) {

@@ -2964,34 +2964,80 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     PublishNode(fmt);
 }
 
-// @range(min, max) on an integer, enum or bit-field member is read by
-// @validate and @clamp. A bound that the member's type cannot hold is an
-// error, so @clamp never stores a truncated value.
-// `hi_exact` is 0 for an unsigned 64-bit member: its true maximum is above
-// ConstIntValue's range, so no bound can equal it.
-@comptime int __builtin_range_limits(Member *m, long long *lo, long long *hi,
-                                     int *hi_exact) {
-    int k = __builtin_derive_kind(MemberType(m));
+// @range(min, max) on an integer, enum or bit-field member, or on an array of
+// them, is read by @validate and @clamp. A bound that the member's type cannot
+// hold is an error, so @clamp never stores a truncated value.
+// Returns 0 when `leaf` takes no @range, 1 for a signed and 2 for an unsigned
+// member; `hi` holds the largest value (as unsigned bits) and `lo` the
+// smallest.
+@comptime int __builtin_range_limits(Member *m, Type *leaf, long long *lo,
+                                     unsigned long long *hi) {
+    int k = __builtin_derive_kind(leaf);
     if (k != 1 && k != 2)
         return 0;
-    int bits  = MemberIsBitfield(m) ? MemberBitfieldWidth(m)
-                                    : (int)TypeSize(MemberType(m)) * 8;
-    *hi_exact = 1;
+    int bits =
+        MemberIsBitfield(m) ? MemberBitfieldWidth(m) : (int)TypeSize(leaf) * 8;
     if (k == 2) {
         *lo = 0;
-        if (bits >= 63) {
-            *hi       = 9223372036854775807LL;
-            *hi_exact = bits < 64;
-        } else {
-            *hi = (1LL << bits) - 1;
-        }
+        *hi = bits >= 64 ? ~0ULL : (1ULL << bits) - 1;
     } else if (bits >= 64) {
         *lo = -9223372036854775807LL - 1;
-        *hi = 9223372036854775807LL;
+        *hi = 9223372036854775807ULL;
     } else {
         *lo = -(1LL << (bits - 1));
-        *hi = (1LL << (bits - 1)) - 1;
+        *hi = (1ULL << (bits - 1)) - 1;
     }
+    return k;
+}
+
+// The element type of a (multi-dimensional) array member, or the type itself.
+@comptime Type *__builtin_range_leaf(Type *ty) {
+    while (GetTypeKind(ty) == TK_ARRAY)
+        ty = TypeBase(ty);
+    return ty;
+}
+
+// Reads both bounds of the @range on `m`: as unsigned bits for an unsigned
+// member (kind 2), as signed values otherwise. Reports a bound the type cannot
+// hold, a descending range or a non-constant bound.
+@comptime int __builtin_range_bounds(Member *m, Type *leaf,
+                                     unsigned long long *min,
+                                     unsigned long long *max,
+                                     unsigned long long *lo_bits,
+                                     unsigned long long *hi) {
+    long long smin = 0;
+    long long smax = 0;
+    if (!ConstIntValue(MemberAttrArg(m, "range", 0), &smin) ||
+        !ConstIntValue(MemberAttrArg(m, "range", 1), &smax))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range expects two integer constants, min and max");
+    long long lo   = 0;
+    int       kind = __builtin_range_limits(m, leaf, &lo, hi);
+    *lo_bits       = (unsigned long long)lo;
+    if (!kind)
+        return 0;
+    unsigned long long umin = 0;
+    unsigned long long umax = 0;
+    int                u0 = ConstUIntValue(MemberAttrArg(m, "range", 0), &umin);
+    int                u1 = ConstUIntValue(MemberAttrArg(m, "range", 1), &umax);
+    if (kind == 2) {
+        if (!u0 || !u1) {
+            *min = 0;
+            *max = 0;
+            return -1;
+        }
+        *min = umin;
+        *max = umax;
+        return 2;
+    }
+    // A bound above LLONG_MAX reads as negative here.
+    if ((smin < 0 && u0) || (smax < 0 && u1)) {
+        *min = 0;
+        *max = 0;
+        return -1;
+    }
+    *min = (unsigned long long)smin;
+    *max = (unsigned long long)smax;
     return 1;
 }
 
@@ -2999,40 +3045,132 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                                                         ...) {
     if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
         MacroErrorAt(MakeIntLiteral(0), "@range applies to a struct member");
-    long long min = 0;
-    long long max = 0;
-    if (VarargCount() != 2 || !ConstIntValue(VarargAt(0), &min) ||
-        !ConstIntValue(VarargAt(1), &max))
+    if (VarargCount() != 2)
         MacroErrorAt(MakeIntLiteral(0),
                      "@range expects two integer constants, min and max");
-    if (min > max)
-        MacroErrorAt(MakeIntLiteral(0), "@range min is greater than max");
-    long long lo = 0;
-    long long hi = 0;
-    int       exact;
-    if (!__builtin_range_limits(AttrTargetMember(target), &lo, &hi, &exact))
+    Member *m    = AttrTargetMember(target);
+    Type   *leaf = __builtin_range_leaf(MemberType(m));
+    if (GetTypeKind(MemberType(m)) == TK_ARRAY && GetTypeKind(leaf) == TK_CHAR)
         MacroErrorAt(MakeIntLiteral(0),
-                     "@range applies to an integer, enum or bit-field member");
-    if (min < lo || max > hi)
+                     "@range applies to an integer, enum or bit-field member, "
+                     "or an array of them, not a char array");
+    unsigned long long min = 0;
+    unsigned long long max = 0;
+    unsigned long long lo  = 0;
+    unsigned long long hi  = 0;
+    int kind = __builtin_range_bounds(m, leaf, &min, &max, &lo, &hi);
+    if (!kind)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range applies to an integer, enum or bit-field member, "
+                     "or an array of them");
+    if (kind < 0)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@range bounds do not fit the member's type");
+    if (kind == 2 ? min > max : (long long)min > (long long)max)
+        MacroErrorAt(MakeIntLiteral(0), "@range min is greater than max");
+    if (kind == 2 ? max > hi
+                  : ((long long)min < (long long)lo ||
+                     (long long)max > (long long)hi))
         MacroErrorAt(MakeIntLiteral(0),
                      "@range bounds do not fit the member's type");
 }
 
-// A fresh read of member `name` of *self, one per use: statements never share
-// a node. `ro` reads through a const pointer.
-@comptime Node *__builtin_range_ref(Obj *fn, Type *ty, int ro,
-                                    const char *name) {
-    Node *self = ro ? __builtin_derive_const_param(fn, "self", ty)
-                    : MakeParamRef(fn, "self");
-    return MakeMember(MakeUnary(NK_DEREF, self), name);
+// 1 when `ty` or a struct nested in it (arrays of structs included) has a
+// member with @range.
+@comptime int __builtin_range_has(Type *ty) {
+    int count = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member *m = StructMemberAt(ty, i);
+        if (MemberName(m) && MemberHasAttr(m, "range"))
+            return 1;
+        Type *leaf = __builtin_range_leaf(MemberType(m));
+        if (GetTypeKind(leaf) == TK_STRUCT && __builtin_range_has(leaf))
+            return 1;
+    }
+    return 0;
 }
 
-// Flattens the @range members of `ty` (anonymous structs included), which
-// are all reached by name from the struct itself; flags[i] bit 0 means the min
-// test and bit 1 the max test would always hold, and are left out.
-@comptime void __builtin_range_collect(Type *ty, const char **names,
-                                       long long *mins, long long *maxs,
-                                       int *flags, int *n, const char *attr) {
+// The state of one @validate/@clamp walk is a void *[38]: [0] the function,
+// [1] the struct type, [2] 1 for @clamp, [3] the attribute name, [4] the name
+// prefix, [5] the path depth, [6..21] the path's member names and [22..37] its
+// index locals. A path step is a member name, or (name NULL) an index local.
+// Every use of the path rebuilds it, because statements never share a node.
+// (A struct would be hidden from this header by a user's own comptime unit.)
+@comptime Node *__builtin_range_path(void **c) {
+    Node *self =
+        c[2] ? MakeParamRef((Obj *)c[0], "self")
+             : __builtin_derive_const_param((Obj *)c[0], "self", (Type *)c[1]);
+    Node *e = MakeUnary(NK_DEREF, self);
+    for (long k = 0; k < (long)c[5]; k++)
+        e = c[6 + k] ? MakeMember(e, (const char *)c[6 + k])
+                     : MakeSubscript(e, (Node *)c[22 + k]);
+    return e;
+}
+
+@comptime void __builtin_range_push(void **c, const char *name, Node *idx) {
+    long d = (long)c[5];
+    if (d >= 16)
+        MacroErrorAt(MakeIntLiteral(0), "%s: members nest too deeply",
+                     (const char *)c[3]);
+    c[6 + d]  = (void *)name;
+    c[22 + d] = (void *)idx;
+    c[5]      = (void *)(d + 1);
+}
+
+@comptime Node *__builtin_range_lit(int kind, unsigned long long v) {
+    if (kind == 2 && v > 9223372036854775807ULL)
+        return MakeCast(MakeIntLiteral((long long)v),
+                        GetType("unsigned long long"));
+    return MakeIntLiteral((long long)v);
+}
+
+// The bound test (@validate) or the bound assignment (@clamp) for the member at
+// the current path. A bound the type always satisfies is left out.
+@comptime void __builtin_range_leaf_stmt(Node *block, void **c, int kind,
+                                         unsigned long long min,
+                                         unsigned long long max,
+                                         unsigned long long lo,
+                                         unsigned long long hi) {
+    int check_min = min != lo;
+    int check_max = max != hi;
+    if (!c[2]) {
+        Node *bad = NULL;
+        if (check_min)
+            bad = MakeBinary(NK_LT, __builtin_range_path(c),
+                             __builtin_range_lit(kind, min));
+        if (check_max) {
+            Node *over = MakeBinary(NK_LT, __builtin_range_lit(kind, max),
+                                    __builtin_range_path(c));
+            bad        = bad ? MakeBinary(NK_LOGOR, bad, over) : over;
+        }
+        if (bad)
+            BlockAddStmt(block,
+                         MakeIf(bad, MakeReturn(MakeIntLiteral(0)), NULL));
+        return;
+    }
+    Node *over = NULL;
+    if (check_max)
+        over = MakeIf(MakeBinary(NK_LT, __builtin_range_lit(kind, max),
+                                 __builtin_range_path(c)),
+                      MakeExprStmt(MakeAssign(__builtin_range_path(c),
+                                              __builtin_range_lit(kind, max))),
+                      NULL);
+    if (check_min)
+        BlockAddStmt(
+            block,
+            MakeIf(MakeBinary(NK_LT, __builtin_range_path(c),
+                              __builtin_range_lit(kind, min)),
+                   MakeExprStmt(MakeAssign(__builtin_range_path(c),
+                                           __builtin_range_lit(kind, min))),
+                   over));
+    else if (over)
+        BlockAddStmt(block, over);
+}
+
+// Walks the members of `ty` (anonymous structs in place), adding to `block` the
+// code for every @range member or array of them, and the call of T_validate or
+// T_clamp for every nested named struct that has one.
+@comptime void __builtin_range_walk(Node *block, void **c, Type *ty) {
     int count = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
         Member     *m     = StructMemberAt(ty, i);
@@ -3043,36 +3181,85 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
             if (tk == TK_UNION)
                 MacroErrorAt(MakeIntLiteral(0),
                              "%s does not support an anonymous union member",
-                             attr);
+                             (const char *)c[3]);
             if (tk == TK_STRUCT)
-                __builtin_range_collect(fty, names, mins, maxs, flags, n, attr);
+                __builtin_range_walk(block, c, fty);
             continue;
         }
-        if (!MemberHasAttr(m, "range"))
+        Type              *leaf   = __builtin_range_leaf(fty);
+        int                ranged = MemberHasAttr(m, "range");
+        char               fname[256];
+        int                kind = 0;
+        unsigned long long min  = 0;
+        unsigned long long max  = 0;
+        unsigned long long lo   = 0;
+        unsigned long long hi   = 0;
+        if (ranged) {
+            kind = __builtin_range_bounds(m, leaf, &min, &max, &lo, &hi);
+        } else if (GetTypeKind(leaf) == TK_STRUCT) {
+            const char *tname = TypeName(leaf);
+            int         has   = __builtin_range_has(leaf);
+            if (tname)
+                __builtin_json_fn_name(fname, (const char *)c[4], tname,
+                                       c[2] ? "_clamp" : "_validate");
+            if (!tname || !FindGlobal(fname)) {
+                if (has)
+                    MacroErrorAt(MakeIntLiteral(0),
+                                 "%s: member '%s' has @range members; put %s "
+                                 "on its struct, declared before '%s' (a "
+                                 "nested struct is found by its tag)",
+                                 (const char *)c[3], field, (const char *)c[3],
+                                 field);
+                continue;
+            }
+        } else {
             continue;
-        if (*n >= 128)
-            MacroErrorAt(MakeIntLiteral(0), "%s supports at most 128 members",
-                         attr);
-        long long lo = 0;
-        long long hi = 0;
-        int       exact;
-        __builtin_range_limits(m, &lo, &hi, &exact);
-        long long min = 0;
-        long long max = 0;
-        ConstIntValue(MemberAttrArg(m, "range", 0), &min);
-        ConstIntValue(MemberAttrArg(m, "range", 1), &max);
-        names[*n] = field;
-        mins[*n]  = min;
-        maxs[*n]  = max;
-        flags[*n] = (min == lo ? 1 : 0) | (exact && max == hi ? 2 : 0);
-        (*n)++;
+        }
+        long depth0 = (long)c[5];
+        __builtin_range_push(c, field, NULL);
+        Type *dims[8];
+        int   nd = 0;
+        for (Type *t = fty; GetTypeKind(t) == TK_ARRAY; t = TypeBase(t)) {
+            if (nd >= 8)
+                MacroErrorAt(MakeIntLiteral(0), "%s: array nests too deeply",
+                             (const char *)c[3]);
+            dims[nd++] = t;
+            __builtin_range_push(c, NULL, MakeLocalVarUnique(GetType("long")));
+        }
+        Node *inner = nd ? MakeBlock(NULL, 0) : block;
+        if (ranged) {
+            __builtin_range_leaf_stmt(inner, c, kind, min, max, lo, hi);
+        } else {
+            Node *call = __builtin_json_call1(
+                fname, MakeUnary(NK_ADDR, __builtin_range_path(c)));
+            BlockAddStmt(inner,
+                         c[2] ? MakeExprStmt(call)
+                              : MakeIf(MakeUnary(NK_NOT, call),
+                                       MakeReturn(MakeIntLiteral(0)), NULL));
+        }
+        for (int d = nd - 1; d >= 0; d--) {
+            Node *idx  = (Node *)c[22 + depth0 + 1 + d];
+            Node *loop = MakeFor(
+                MakeExprStmt(MakeAssign(idx, MakeIntLiteral(0))),
+                MakeBinary(NK_LT, idx, MakeIntLiteral(TypeArrayLen(dims[d]))),
+                MakeAssign(idx, MakeBinary(NK_ADD, idx, MakeIntLiteral(1))),
+                inner);
+            if (d) {
+                inner = MakeBlock(NULL, 0);
+                BlockAddStmt(inner, loop);
+            } else {
+                BlockAddStmt(block, loop);
+            }
+        }
+        c[5] = (void *)depth0;
     }
 }
 
 // @validate struct Foo {...}; publishes
 //   _Bool Foo_validate(const struct Foo *self);
-// which returns 1 when every @range member is within its bounds.
-// @validate("P") publishes P_Foo_validate.
+// which returns 1 when every @range member is within its bounds, including the
+// elements of an array and the members of a nested struct that has its own
+// @validate. @validate("P") publishes P_Foo_validate.
 @comptime(attribute("validate")) void __builtin_attr_validate(
     AttrTarget *target, ...) {
     Type       *ty     = __builtin_derive_struct_target(target, "@validate");
@@ -3085,29 +3272,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                           "self", NULL, NULL);
     Obj *fn = MakeFunction(fname, GetType("_Bool"));
     WithFn(fn) {
-        const char *names[128];
-        long long   mins[128];
-        long long   maxs[128];
-        int         flags[128];
-        int         n = 0;
-        __builtin_range_collect(ty, names, mins, maxs, flags, &n, "@validate");
+        void *c[38] = {fn, ty, (void *)0, (void *)"@validate", (void *)prefix};
         Node *block = MakeBlock(NULL, 0);
-        for (int i = 0; i < n; i++) {
-            Node *bad = NULL;
-            if (!(flags[i] & 1))
-                bad =
-                    MakeBinary(NK_LT, __builtin_range_ref(fn, ty, 1, names[i]),
-                               MakeIntLiteral(mins[i]));
-            if (!(flags[i] & 2)) {
-                Node *over =
-                    MakeBinary(NK_LT, MakeIntLiteral(maxs[i]),
-                               __builtin_range_ref(fn, ty, 1, names[i]));
-                bad = bad ? MakeBinary(NK_LOGOR, bad, over) : over;
-            }
-            if (bad)
-                BlockAddStmt(block,
-                             MakeIf(bad, MakeReturn(MakeIntLiteral(0)), NULL));
-        }
+        __builtin_range_walk(block, c, ty);
         BlockAddStmt(block, MakeReturn(MakeIntLiteral(1)));
         FunctionSetBody(fn, block);
     }
@@ -3116,7 +3283,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 
 // @clamp struct Foo {...}; publishes
 //   void Foo_clamp(struct Foo *self);
-// which moves every @range member that is out of bounds to the nearer bound.
+// which moves every @range member that is out of bounds to the nearer bound,
+// and clamps the members of a nested struct that has its own @clamp.
 // @clamp("P") publishes P_Foo_clamp.
 @comptime(attribute("clamp")) void __builtin_attr_clamp(AttrTarget *target,
                                                         ...) {
@@ -3130,36 +3298,9 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
                           NULL);
     Obj *fn = MakeFunction(fname, GetType("void"));
     WithFn(fn) {
-        const char *names[128];
-        long long   mins[128];
-        long long   maxs[128];
-        int         flags[128];
-        int         n = 0;
-        __builtin_range_collect(ty, names, mins, maxs, flags, &n, "@clamp");
+        void *c[38] = {fn, ty, (void *)1, (void *)"@clamp", (void *)prefix};
         Node *block = MakeBlock(NULL, 0);
-        for (int i = 0; i < n; i++) {
-            Node *over = NULL;
-            if (!(flags[i] & 2))
-                over =
-                    MakeIf(MakeBinary(NK_LT, MakeIntLiteral(maxs[i]),
-                                      __builtin_range_ref(fn, ty, 0, names[i])),
-                           MakeExprStmt(MakeAssign(
-                               __builtin_range_ref(fn, ty, 0, names[i]),
-                               MakeIntLiteral(maxs[i]))),
-                           NULL);
-            if (!(flags[i] & 1))
-                BlockAddStmt(
-                    block,
-                    MakeIf(MakeBinary(NK_LT,
-                                      __builtin_range_ref(fn, ty, 0, names[i]),
-                                      MakeIntLiteral(mins[i])),
-                           MakeExprStmt(MakeAssign(
-                               __builtin_range_ref(fn, ty, 0, names[i]),
-                               MakeIntLiteral(mins[i]))),
-                           over));
-            else if (over)
-                BlockAddStmt(block, over);
-        }
+        __builtin_range_walk(block, c, ty);
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);

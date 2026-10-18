@@ -1018,6 +1018,17 @@ bool __builtin_ast_const_int_value(Node *node, int64_t *out) {
     return true;
 }
 
+CC_BUILTIN(__builtin_ast_const_uint_value, 2);
+bool __builtin_ast_const_uint_value(Node *node, uint64_t *out) {
+    int64_t v;
+    if (!__builtin_ast_const_int_value(node, &v))
+        return false;
+    if (v < 0 && !node->ty->is_unsigned)
+        return false;
+    *out = (uint64_t)v;
+    return true;
+}
+
 CC_BUILTIN(__builtin_ast_string_literal, 1);
 Node *__builtin_ast_string_literal(const char *str) {
     VirtualMachine *vm = __builtin_current_vm;

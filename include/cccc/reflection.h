@@ -946,6 +946,16 @@ const char *__builtin_ast_string_literal_value(Node *node);
  */
 bool __builtin_ast_const_int_value(Node *node, int64_t *out);
 
+/*! @brief Evaluate an unsigned integer constant expression node.
+ * @param node A node, typically a macro or attribute argument.
+ * @param out Receives the value when the result is true.
+ * @return true if @a node is an integer constant expression that is
+ *         non-negative or of an unsigned type, so a value above `INT64_MAX`
+ *         such as `18446744073709551615ULL` is accepted.
+ * @details Convenience wrapper: ConstUIntValue(node, &out).
+ */
+bool __builtin_ast_const_uint_value(Node *node, uint64_t *out);
+
 /*! @brief Build a variable reference AST node.
  * @param name The variable name.
  * @return An NK_VAR node referencing name.
@@ -1796,6 +1806,12 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @param node A node, typically a macro or attribute argument.
  * @param out An `int64_t *` that receives the value. */
 #define ConstIntValue(node, out) __builtin_ast_const_int_value(node, out)
+/*! @def ConstUIntValue
+ * @brief Like ConstIntValue, for a non-negative or unsigned value up to
+ *        `UINT64_MAX`; false for a negative signed value.
+ * @param node A node, typically a macro or attribute argument.
+ * @param out A `uint64_t *` that receives the value. */
+#define ConstUIntValue(node, out) __builtin_ast_const_uint_value(node, out)
 /*! @def MakeVarRef
  * @brief Build a variable reference AST node.
  * @param name The variable name. */
