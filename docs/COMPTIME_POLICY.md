@@ -102,6 +102,12 @@ Comptime code can read what libc returns, whichever way libc owns it:
 
 Host memory libc keeps is read-only, except an `hsearch` entry and a writable `mmap`. After its release call a read is a compile error, not a crash. An `FTSENT` is readable until the next `fts_read`, and `tdelete` ends the nodes of that tree. Compiler builtins (`__builtin_*`, `MakeFunction`, ...) stay callable under `--disable-ffi`; they return names and arrays as VM copies.
 
+A fault the checks miss (a native `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL` or `SIGABRT` inside a libc call) is also a compile error, with or without a terminal. cccc prints a host backtrace first:
+
+```
+error: compile-time macro execution terminated by host signal 6
+```
+
 Libc calls you grant with `--comptime-allow`, the handles passed to builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.

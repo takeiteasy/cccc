@@ -1680,10 +1680,12 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
     vm->compiler.current_fn = saved_current_fn;
 
-    if (eval_rc == CCCC_HOST_SIGNAL_RC)
+    if (eval_rc == CCCC_HOST_SIGNAL_RC) {
+        int sig                   = vm->dbg.host_fault_signal;
+        vm->dbg.host_fault_signal = 0;
         error_tok(vm, init_fn->tok,
-                  "compile-time execution terminated by host signal %d",
-                  vm->dbg.host_fault_signal);
+                  "compile-time execution terminated by host signal %d", sig);
+    }
     // A plain opcode-handler fault (e.g. RETBUF finding an unallocated pool)
     // is not CCCC_HOST_SIGNAL_RC -- it returns -1 through the normal dispatch
     // path (see cccc_vm_note_fault/VM_TRAP_OR_RETURN, src/vm.c). Left
@@ -2657,10 +2659,13 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     vm->compiler.macro_vararg_count       = saved_vararg_count;
     vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 
-    if (eval_rc == CCCC_HOST_SIGNAL_RC)
+    if (eval_rc == CCCC_HOST_SIGNAL_RC) {
+        int sig                   = vm->dbg.host_fault_signal;
+        vm->dbg.host_fault_signal = 0;
         error_tok(vm, call_tok,
                   "compile-time macro execution terminated by host signal %d",
-                  vm->dbg.host_fault_signal);
+                  sig);
+    }
     // A plain opcode-handler fault (e.g. RETBUF finding an unallocated pool)
     // is not CCCC_HOST_SIGNAL_RC -- it returns -1 through the normal dispatch
     // path (see cccc_vm_note_fault/VM_TRAP_OR_RETURN, src/vm.c). Left

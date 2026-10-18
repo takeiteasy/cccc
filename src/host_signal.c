@@ -204,7 +204,8 @@ int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
     vm->cycle              = 0;
 
-    if (!host_signal_debug_active(vm))
+    bool debugger          = host_signal_debug_active(vm);
+    if (!debugger && !vm->comptime_depth)
         return cccc_vm_eval_dispatch(vm, &current_pc);
 
     for (;;) {
@@ -221,10 +222,12 @@ int vm_eval(VirtualMachine *vm) {
 
             vm->dbg.host_fault_signal = guard.signal;
             vm->pc                    = current_pc;
-            handlers_suspended        = 1;
-            cc_debug_repl_host_fault(vm, guard.signal,
-                                     (void *)guard.fault_addr);
-            handlers_suspended = 0;
+            if (debugger) {
+                handlers_suspended = 1;
+                cc_debug_repl_host_fault(vm, guard.signal,
+                                         (void *)guard.fault_addr);
+                handlers_suspended = 0;
+            }
             return CCCC_HOST_SIGNAL_RC;
         }
 
