@@ -34,6 +34,10 @@ static int search_compar_trampoline(const void *a, const void *b) {
     return (int)result;
 }
 
+#ifdef __APPLE__
+static void hsearch_track(ENTRY *e);
+#endif
+
 static long long wrap_hsearch(long long entry_ptr, long long action) {
     // ENTRY is passed by value from the guest, which CCCC marshals as a
     // pointer to the caller's own storage (not decomposed into separate
@@ -44,8 +48,54 @@ static long long wrap_hsearch(long long entry_ptr, long long action) {
     item.key  = guest_entry->key;
     item.data = guest_entry->data;
     ENTRY *r  = hsearch(item, (ACTION)action);
+#ifdef __APPLE__
+    if (action == ENTER && r && r->key == item.key)
+        hsearch_track(r);
+#endif
     return (long long)(intptr_t)r;
 }
+
+#ifdef __APPLE__
+// macOS hdestroy() free()s every key it holds, but a guest key is VM memory.
+// Entries inserted through wrap_hsearch are remembered so hdestroy can detach
+// their keys, let libc free the table, then release the keys through the guest
+// allocator (a non-heap key is an error, as a native free() of it would abort).
+static ENTRY **g_hsearch_entries;
+static size_t  g_hsearch_count;
+static size_t  g_hsearch_cap;
+
+static void hsearch_track(ENTRY *e) {
+    if (g_hsearch_count == g_hsearch_cap) {
+        size_t  cap = g_hsearch_cap ? g_hsearch_cap * 2 : 16;
+        ENTRY **p   = realloc(g_hsearch_entries, cap * sizeof *p);
+        if (!p)
+            return;
+        g_hsearch_entries = p;
+        g_hsearch_cap     = cap;
+    }
+    g_hsearch_entries[g_hsearch_count++] = e;
+}
+
+static void wrap_hdestroy(void) {
+    char **keys = malloc((g_hsearch_count + 1) * sizeof *keys);
+    size_t n    = 0;
+    for (size_t i = 0; keys && i < g_hsearch_count; i++) {
+        ENTRY *e = g_hsearch_entries[i];
+        if (e->key) {
+            keys[n++] = e->key;
+            e->key    = NULL;
+        }
+    }
+    g_hsearch_count = 0;
+    hdestroy();
+    VirtualMachine *vm = cccc_current_ffi_vm();
+    for (size_t i = 0; i < n; i++) {
+        if (vm ? cccc_vm_heap_free(vm, keys[i]) != 0 : (free(keys[i]), 0))
+            error("hdestroy(): a key is not heap memory it can free");
+    }
+    free(keys);
+}
+#endif
 
 static long long wrap_lfind(long long key, long long base, long long nmemb,
                             long long size, long long compar) {
@@ -160,7 +210,11 @@ static long long wrap_twalk(long long root, long long action) {
 
 void register_posix_search_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "hcreate", (void *)hcreate, 1, 0);
+#ifdef __APPLE__
+    cc_register_cfunc(vm, "hdestroy", (void *)wrap_hdestroy, 0, 0);
+#else
     cc_register_cfunc(vm, "hdestroy", (void *)hdestroy, 0, 0);
+#endif
     cc_register_cfunc(vm, "hsearch", (void *)wrap_hsearch, 2, 0);
     cc_register_cfunc(vm, "insque", (void *)insque, 2, 0);
     cc_register_cfunc(vm, "remque", (void *)remque, 1, 0);

@@ -3203,6 +3203,17 @@ int test_posix_search(void) {
 
     hdestroy();
 
+    // A malloc'd key (VM heap memory) is released by hdestroy too.
+    if (hcreate(8) == 0)
+        return 6;
+    char *mkey = malloc(2);
+    mkey[0]    = 'm';
+    mkey[1]    = 0;
+    ENTRY e2   = {mkey, (void *)5};
+    if (!hsearch(e2, ENTER))
+        return 7;
+    hdestroy();
+
     void      *root    = 0;
     static int vals[3] = {3, 1, 2};
     for (int i = 0; i < 3; i++) {

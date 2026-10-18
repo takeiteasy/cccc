@@ -1,5 +1,6 @@
 // Search-table entries and tree nodes libc owns are readable at comptime.
 #include[[cccc::comptime]] < search.h>
+#include[[cccc::comptime]] < stdlib.h>
 #include[[cccc::comptime]] < string.h>
 
 [[cccc::comptime]]
@@ -21,13 +22,15 @@ int probe(void) {
     int bad = 0;
 
     hcreate(8);
-    static char key[] = "k";
-    ENTRY       it    = {key, (void *)7};
+    char *key = malloc(2);
+    strcpy(key, "k");
+    ENTRY it = {key, (void *)7};
     hsearch(it, ENTER);
     ENTRY *found        = hsearch(it, FIND);
     bad                += !found || (long)found->data != 7;
     found->data         = (void *)9;
     bad                += (long)hsearch(it, FIND)->data != 9;
+    hdestroy();
 
     static int keys[3]  = {2, 1, 3};
     void      *root     = NULL;
