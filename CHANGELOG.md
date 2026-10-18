@@ -7,7 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
-## [0.16.1] - 2026-10-18
+## [0.17.0] - 2026-10-18
 
 - Changed: compiler builtins check their string, string-array, out-pointer and
   buffer arguments against VM memory, including when called through a function
