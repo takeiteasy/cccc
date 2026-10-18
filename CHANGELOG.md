@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-10-18
+
 - Added: `CopyNode(n)` deep-copies an expression or simple statement so a macro
   can link it into a second list.
 - Fixed: `Block`, `BlockAddStmt`, `NodeList`, compound-literal and call
