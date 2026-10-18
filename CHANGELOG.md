@@ -7,6 +7,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-18
+
+- Changed: compiler builtins check their string, string-array, out-pointer and
+  buffer arguments against VM memory, including when called through a function
+  pointer. `Quote`/`QuoteLazy` check each `$N` argument is a `Node *` handle
+  and that the template gets as many arguments as it references;
+  `MacroErrorAt`/`MacroWarningAt` format with the comptime `printf` rules.
+  `$N` inside string literals, character literals and comments is not a
+  placeholder. See `docs/COMPTIME_POLICY.md`.
+- Fixed: a file-scope macro's string arguments are VM memory, so `strlen(name)`
+  and `name[0]` work on them.
 - Changed: a comptime function that returns through an overwritten saved frame
   pointer or return address is a compile error instead of running on a forged
   frame. See `docs/COMPTIME_POLICY.md`.
