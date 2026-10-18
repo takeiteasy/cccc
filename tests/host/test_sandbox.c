@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -66,12 +67,14 @@ static void write_file(const char *path, const char *text) {
 // Bit 1: ran a command. 2: wrote outside the allowed directories.
 // 4: bound a socket. 8: wrote into the temp directory.
 // 16: read a file outside the allowed directories. 32: read the input's
-// neighbour.
+// neighbour. 64: started the host C compiler.
 static const char probe_src[] =
     "#include[[cccc::comptime]] <stdio.h>\n"
     "#include[[cccc::comptime]] <stdlib.h>\n"
     "#include[[cccc::comptime]] <sys/socket.h>\n"
     "#include[[cccc::comptime]] <netinet/in.h>\n"
+    "#include[[cccc::comptime]] <spawn.h>\n"
+    "#include[[cccc::comptime]] <sys/wait.h>\n"
     "[[cccc::comptime]] int probe(void) {\n"
     "    int r = 0;\n"
     "    if (system(\"true\") == 0) r |= 1;\n"
@@ -89,6 +92,13 @@ static const char probe_src[] =
     "    if (f) { fclose(f); r |= 16; }\n"
     "    f = fopen(\"%s/ok.c\", \"r\");\n"
     "    if (f) { fclose(f); r |= 32; }\n"
+    "    pid_t pid; char *av[] = {\"cc\", \"--version\", 0}; char *ev[] = "
+    "{0};\n"
+    "    if (posix_spawnp(&pid, \"cc\", 0, 0, av, ev) == 0) {\n"
+    "        int st = 0;\n"
+    "        if (waitpid(pid, &st, 0) == pid && WIFEXITED(st) &&"
+    " WEXITSTATUS(st) == 0) r |= 64;\n"
+    "    }\n"
     "    return r;\n"
     "}\n"
     "[[cccc::comptime]] void gen(void) {\n"
@@ -142,8 +152,8 @@ int main(void) {
     }
 
     rc = run("%s --comptime-allow=all %s >/dev/null 2>&1", cccc, probe);
-    if (rc != 63) {
-        printf("SKIP: sandbox (unconfined probe exited %d, not 63)\n", rc);
+    if (rc != 127) {
+        printf("SKIP: sandbox (unconfined probe exited %d, not 127)\n", rc);
         goto done;
     }
 
@@ -162,6 +172,19 @@ int main(void) {
              cccc, secret, probe);
     if (rc != 56) {
         fprintf(stderr, "FAIL: --sandbox-read probe exited %d, expected 56\n",
+                rc);
+        failed = 1;
+    }
+    snprintf(path, sizeof path, "%s/escape", cwd);
+    unlink(path);
+
+    // --sandbox-exec lets the run start a program: sh runs `true` (macOS's
+    // sh re-executes bash).
+    rc = run("%s --sandbox --sandbox-exec=/bin/sh --sandbox-exec=/bin/bash "
+             "--comptime-allow=all %s >/dev/null 2>&1",
+             cccc, probe);
+    if (rc != 41) {
+        fprintf(stderr, "FAIL: --sandbox-exec probe exited %d, expected 41\n",
                 rc);
         failed = 1;
     }
@@ -212,6 +235,80 @@ int main(void) {
             failed = 1;
         }
     }
+
+    // --testing=native runs the binary it builds.
+    char tests_c[PATH_MAX], tests_out[PATH_MAX];
+    snprintf(tests_c, sizeof tests_c, "%s/t.c", indir);
+    snprintf(tests_out, sizeof tests_out, "%s/t.out", root);
+    write_file(tests_c, "[[cccc::test]] void t(void) { }\n");
+    if (run("%s --sandbox --testing=native -o %s %s >/dev/null 2>&1", cccc,
+            tests_out, tests_c) != 0) {
+        fprintf(stderr, "FAIL: --testing=native under --sandbox\n");
+        failed = 1;
+    }
+
+    // --asm-passthru builds a thunk with the host cc.
+    char asm_c[PATH_MAX];
+    snprintf(asm_c, sizeof asm_c, "%s/asm.c", indir);
+    write_file(asm_c, "int main(void) { __asm__ volatile(\"nop\"); "
+                      "return 42; }\n");
+    if (run("%s -A %s >/dev/null 2>&1", cccc, asm_c) == 42 &&
+        run("%s --sandbox -A %s >/dev/null 2>&1", cccc, asm_c) != 42) {
+        fprintf(stderr, "FAIL: --asm-passthru under --sandbox\n");
+        failed = 1;
+    }
+
+#ifdef __APPLE__
+    // Xcode's `as` is a shell script, which Homebrew gcc runs.
+    const char *gcc = "/opt/homebrew/bin/gcc-16";
+    if (access(gcc, X_OK) == 0) {
+        unlink(out);
+        if (run("CCCC_NATIVE_CC=%s %s --sandbox -c=native -o %s %s/ok.c "
+                ">/dev/null 2>&1",
+                gcc, cccc, out, indir) != 0 ||
+            run("%s", out) != 42) {
+            fprintf(stderr, "FAIL: -c=native with %s under --sandbox\n", gcc);
+            failed = 1;
+        }
+    }
+#endif
+
+#ifdef __linux__
+    // Only the files the loader and name lookups open are readable in /etc.
+    const char *etc_files[] = {"/etc/hostname", "/etc/fstab", "/etc/hosts"};
+    for (size_t i = 0; i < sizeof etc_files / sizeof *etc_files; i++) {
+        struct stat st;
+        if (lstat(etc_files[i], &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+        char etc_src[PATH_MAX + 512], etc_c[PATH_MAX];
+        snprintf(
+            etc_src, sizeof etc_src,
+            "#include[[cccc::comptime]] <stdio.h>\n"
+            "[[cccc::comptime]] int probe(void) {\n"
+            "    FILE *f = fopen(\"%s\", \"r\");\n"
+            "    if (f) { fclose(f); return 1; }\n"
+            "    return 0;\n"
+            "}\n"
+            "[[cccc::comptime]] void gen(void) {\n"
+            "    Obj *fn = MakeFunction(\"result\", GetType(\"int\"));\n"
+            "    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(probe())));\n"
+            "}\n"
+            "gen();\n"
+            "int main(void) { return result(); }\n",
+            etc_files[i]);
+        snprintf(etc_c, sizeof etc_c, "%s/etc.c", indir);
+        write_file(etc_c, etc_src);
+        if (run("%s --comptime-allow=all %s >/dev/null 2>&1", cccc, etc_c) !=
+                1 ||
+            run("%s --sandbox --comptime-allow=all %s >/dev/null 2>&1", cccc,
+                etc_c) != 0) {
+            fprintf(stderr, "FAIL: --sandbox read of %s, expected denied\n",
+                    etc_files[i]);
+            failed = 1;
+        }
+        break;
+    }
+#endif
 
     if (run("%s --sandbox --allow-url %s/ok.c >/dev/null 2>&1", cccc, indir) ==
         42) {

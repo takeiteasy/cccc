@@ -24,14 +24,24 @@ typedef struct {
     // programs it names are the ones the link will run.
     const char *const *link_args;
     int                link_args_count;
+    // Programs the run may exec in addition to the toolchain (--sandbox-exec).
+    const char *const *exec_paths;
+    int                exec_count;
+    // Whether the run can reach the host C compiler. Only then is it probed
+    // and granted; `cc` is the compiler it would use.
+    bool        toolchain;
+    const char *cc;
+    // The run executes the program it builds (--testing=native), so the
+    // output directory is executable too.
+    bool exec_output;
 } CcccSandboxPaths;
 
 // Confines this process and its children: no network, writes only under the
 // given paths and the temp directories, reads only under the given paths, the
-// working directory, the config directory and the toolchain and system
-// directories, and exec only of cccc and the exact programs the host C
-// toolchain runs. Irreversible. Returns false and fills `err` when the platform
-// cannot enforce it.
+// working directory, the config directory and the system directories, and exec
+// only of cccc, the `exec_paths` and, when `toolchain` is set, the exact
+// programs the host C toolchain runs. Irreversible. Returns false and fills
+// `err` when the platform cannot enforce it.
 bool cccc_sandbox_enter(const CcccSandboxPaths *paths, char *err,
                         size_t err_size);
 

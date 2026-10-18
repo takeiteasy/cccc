@@ -42,6 +42,8 @@ typedef struct {
     int   write_count;
     char *exec_roots[MAX_ROOTS];
     int   exec_count;
+    char *interp_roots[MAX_ROOTS]; // may only start as a script's interpreter
+    int   interp_count;
     char *read_roots[MAX_READ_ROOTS];
     int   read_count;
 } Roots;
@@ -67,6 +69,12 @@ static void add_exec(Roots *r, const char *path) {
 static void add_read(Roots *r, const char *path) {
     add_root(r->read_roots, &r->read_count, MAX_READ_ROOTS, path);
 }
+
+#if defined(__APPLE__)
+static void add_interp(Roots *r, const char *path) {
+    add_root(r->interp_roots, &r->interp_count, MAX_ROOTS, path);
+}
+#endif
 
 // Directories the run will create (build output, caches) must exist before
 // the sandbox closes, or there is nothing to grant.
@@ -112,6 +120,8 @@ static void free_roots(Roots *r) {
         free(r->write_roots[i]);
     for (int i = 0; i < r->exec_count; i++)
         free(r->exec_roots[i]);
+    for (int i = 0; i < r->interp_count; i++)
+        free(r->interp_roots[i]);
     for (int i = 0; i < r->read_count; i++)
         free(r->read_roots[i]);
 }
@@ -278,15 +288,66 @@ static void add_exec_prog_name(Roots *r, const char *cc, const char *prog) {
     free(out);
 }
 
+// Grants the interpreter named by the `#!` line of each program already
+// allowed, e.g. Xcode's `as`, which is a zsh script. macOS lets it start only
+// as a script's interpreter, so the shell cannot be run directly; landlock has
+// no such distinction, so on Linux it is an ordinary exec grant. A script also
+// gets the path utilities toolchain wrappers use to find their own directory.
+static void add_script_interpreters(Roots *r) {
+    int  count = r->exec_count; // grants made below are not scanned again
+    bool found_script = false;
+    for (int i = 0; i < count; i++) {
+        FILE *f = fopen(r->exec_roots[i], "r");
+        if (!f)
+            continue;
+        char line[PATH_MAX + 16];
+        bool script = fgets(line, sizeof line, f) && !strncmp(line, "#!", 2);
+        fclose(f);
+        if (!script)
+            continue;
+        found_script = true;
+        char *save   = NULL;
+        char *tok    = strtok_r(line + 2, " \t\r\n", &save);
+        if (!tok)
+            continue;
+        char *interps[2] = {tok, NULL};
+        // `#!/usr/bin/env name`: env, then the program it finds on PATH.
+        const char *base = strrchr(tok, '/');
+        if (base && !strcmp(base + 1, "env")) {
+            char *arg = strtok_r(NULL, " \t\r\n", &save);
+            while (arg && arg[0] == '-')
+                arg = strtok_r(NULL, " \t\r\n", &save);
+            interps[1] = arg;
+        }
+        for (int j = 0; j < 2; j++) {
+            if (!interps[j])
+                continue;
+            char *found = interps[j][0] == '/'
+                              ? strdup(interps[j])
+                              : cccc_path_find_executable(interps[j]);
+            if (found) {
+#if defined(__APPLE__)
+                add_interp(r, found);
+#else
+                add_exec(r, found);
+#endif
+            }
+            free(found);
+        }
+    }
+    if (found_script) {
+        const char *helpers[] = {"/bin/realpath", "/usr/bin/realpath",
+                                 "/usr/bin/dirname", "/usr/bin/basename"};
+        for (size_t i = 0; i < sizeof helpers / sizeof *helpers; i++)
+            add_exec(r, helpers[i]);
+    }
+}
+
 // Host C compiler, the programs it runs and the files it reads, resolved
 // before the sandbox closes. Exec is limited to the exact programs; when the
 // dry run names none, whole toolchain directories are allowed instead.
 static void add_toolchain(Roots *r, const CcccSandboxPaths *p) {
-    const char *env = getenv("CCCC_NATIVE_CC");
-    char       *cc  = env && *env ? cccc_path_find_executable(env) : NULL;
-    const char *fallback[] = {"cc", "clang", "gcc"};
-    for (size_t i = 0; !cc && i < sizeof fallback / sizeof *fallback; i++)
-        cc = cccc_path_find_executable(fallback[i]);
+    char *cc = p->cc ? cccc_path_find_executable(p->cc) : NULL;
     if (!cc)
         return;
     add_exec(r, cc);
@@ -371,6 +432,48 @@ static void add_read_dir_of_file(Roots *r, const char *file) {
     free(dir);
 }
 
+#if !defined(__APPLE__)
+// Grants an ld.so.conf file and, recursively, the files its `include` lines
+// match. The depth cap stops an include cycle.
+static void add_ld_conf_reads(Roots *r, const char *conf, int depth) {
+    add_read(r, conf);
+    FILE *f = fopen(conf, "r");
+    if (!f || depth > 4) {
+        if (f)
+            fclose(f);
+        return;
+    }
+    char line[PATH_MAX + 16];
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, "include", 7) || (line[7] != ' ' && line[7] != '\t'))
+            continue;
+        char *pattern = line + 7 + strspn(line + 7, " \t");
+        pattern[strcspn(pattern, " \t\r\n")] = '\0';
+        char full[PATH_MAX];
+        if (pattern[0] == '/')
+            snprintf(full, sizeof full, "%s", pattern);
+        else
+            snprintf(full, sizeof full, "/etc/%s", pattern);
+        glob_t g;
+        if (glob(full, 0, NULL, &g) == 0)
+            for (size_t i = 0; i < g.gl_pathc; i++)
+                add_ld_conf_reads(r, g.gl_pathv[i], depth + 1);
+        globfree(&g);
+    }
+    fclose(f);
+}
+
+// The /etc files the dynamic loader, name lookups and time zone code open,
+// without the rest of /etc.
+static void add_etc_reads(Roots *r) {
+    const char *files[] = {"/etc/ld.so.cache", "/etc/nsswitch.conf",
+                           "/etc/localtime", "/etc/passwd", "/etc/group"};
+    for (size_t i = 0; i < sizeof files / sizeof *files; i++)
+        add_read(r, files[i]);
+    add_ld_conf_reads(r, "/etc/ld.so.conf", 0);
+}
+#endif
+
 // Fixed system locations every run needs to read.
 static void add_system_reads(Roots *r) {
 #if defined(__APPLE__)
@@ -386,8 +489,7 @@ static void add_system_reads(Roots *r) {
                           "/private/var/select",
                           "/dev"};
 #else
-    // TODO: whole /etc; the files used are ld.so.cache, nsswitch, localtime,
-    // passwd, group and the ld.so.conf tree (#1667).
+    add_etc_reads(r);
     const char *dirs[] = {"/lib",
                           "/lib64",
                           "/usr/lib",
@@ -395,7 +497,6 @@ static void add_system_reads(Roots *r) {
                           "/usr/include",
                           "/usr/local/include",
                           "/usr/share",
-                          "/etc",
                           "/dev",
                           "/proc/self",
                           "/proc/cpuinfo",
@@ -470,7 +571,16 @@ static void collect_roots(Roots *r, const CcccSandboxPaths *p) {
     }
 #endif
     add_exec(r, p->self);
-    add_toolchain(r, p);
+    for (int i = 0; i < p->exec_count; i++)
+        add_exec(r, p->exec_paths[i]);
+    if (p->exec_output && p->out_file) {
+        char *dir = dir_of(p->out_file);
+        add_exec(r, dir);
+        free(dir);
+    }
+    if (p->toolchain)
+        add_toolchain(r, p);
+    add_script_interpreters(r);
 
     // Readable: what the run was told about, the working directory and the
     // system; every write and exec root can be read too.
@@ -486,6 +596,8 @@ static void collect_roots(Roots *r, const CcccSandboxPaths *p) {
         add_read(r, r->write_roots[i]);
     for (int i = 0; i < r->exec_count; i++)
         add_read(r, r->exec_roots[i]);
+    for (int i = 0; i < r->interp_count; i++)
+        add_read(r, r->interp_roots[i]);
 }
 
 #if defined(__APPLE__)
@@ -519,7 +631,7 @@ bool cccc_sandbox_enter(const CcccSandboxPaths *p, char *err, size_t err_size) {
     collect_roots(&roots, p);
 
     size_t size     = 4096 + (size_t)(roots.write_count + roots.exec_count +
-                                      roots.read_count) *
+                                      roots.interp_count + roots.read_count) *
                                  (PATH_MAX * 2 + 64);
     char  *profile = malloc(size);
     size_t len     = 0;
@@ -541,6 +653,13 @@ bool cccc_sandbox_enter(const CcccSandboxPaths *p, char *err, size_t err_size) {
             (size_t)snprintf(profile + len, size - len, "(allow process-exec*");
         for (int i = 0; i < roots.exec_count; i++)
             sbpl_subpath(profile, size, &len, roots.exec_roots[i]);
+        len += (size_t)snprintf(profile + len, size - len, ")");
+    }
+    if (roots.interp_count) {
+        len += (size_t)snprintf(profile + len, size - len,
+                                "(allow process-exec-interpreter");
+        for (int i = 0; i < roots.interp_count; i++)
+            sbpl_subpath(profile, size, &len, roots.interp_roots[i]);
         len += (size_t)snprintf(profile + len, size - len, ")");
     }
 

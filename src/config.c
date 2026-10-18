@@ -172,6 +172,7 @@ static const struct {
     {"allow-url", CFG_TRUST},
     {"sandbox", CFG_FREE},
     {"sandbox-read", CFG_TRUST},
+    {"sandbox-exec", CFG_TRUST},
     {"url-timeout", CFG_FREE},
     {"url-max-size", CFG_FREE},
     {"max-errors", CFG_FREE},
@@ -251,6 +252,7 @@ static const char *const list_keys[] = {
     "build-option",
     "link-arg",
     "sandbox-read",
+    "sandbox-exec",
 };
 
 // Keys whose relative values are taken from the config file's directory.
@@ -272,6 +274,7 @@ static const char *const path_keys[] = {
     "build-out-dir",
     "watch-path",
     "sandbox-read",
+    "sandbox-exec",
 };
 
 static bool is_path_key(const char *key) {

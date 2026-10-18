@@ -926,6 +926,8 @@ static void usage(const char *argv0, int exit_code) {
            "toolchain\n");
     printf("\t   --sandbox-read <path>  Let --sandbox read <path> too "
            "(repeatable)\n");
+    printf("\t   --sandbox-exec <path>  Let --sandbox run <path> too "
+           "(repeatable)\n");
     printf("\t   --ffi-errors-fatal     Abort execution on FFI policy "
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
@@ -1526,6 +1528,8 @@ int main(int argc, const char *argv[]) {
     bool        sandbox             = false; // --sandbox
     const char **sandbox_reads       = NULL;  // --sandbox-read
     int          sandbox_reads_count = 0;
+    const char **sandbox_execs       = NULL;  // --sandbox-exec
+    int          sandbox_execs_count = 0;
 #ifdef CCCC_HAS_CURL
     char  *url_cache_dir   = NULL;    // --url-cache-dir
     int    url_cache_clear = 0;       // --url-cache-clear
@@ -1997,6 +2001,12 @@ int main(int argc, const char *argv[]) {
                     realloc(sandbox_reads,
                             sizeof(*sandbox_reads) * (sandbox_reads_count + 1));
                 sandbox_reads[sandbox_reads_count++] = strdup(optarg);
+                break;
+            case 1150: // --sandbox-exec
+                sandbox_execs =
+                    realloc(sandbox_execs,
+                            sizeof(*sandbox_execs) * (sandbox_execs_count + 1));
+                sandbox_execs[sandbox_execs_count++] = strdup(optarg);
                 break;
             case 'n': // --max-errors
                 max_errors = atoi(optarg);
@@ -2818,6 +2828,15 @@ int main(int argc, const char *argv[]) {
         sandbox_collect_reads(&sb_reads, &sb_nreads, sandbox_reads,
                               sandbox_reads_count);
         sandbox_collect_reads(&sb_reads, &sb_nreads, &sysroot, sysroot ? 1 : 0);
+        for (int i = 0; i < sandbox_execs_count; i++)
+            if (access(sandbox_execs[i], F_OK) != 0)
+                fprintf(stderr, "warning: --sandbox-exec: %s: %s\n",
+                        sandbox_execs[i], strerror(errno));
+        bool sb_toolchain =
+            compile_format == COMPILE_NATIVE || build_mode || asm_passthru;
+        char            *sb_cc    = !sb_toolchain ? NULL
+                                    : build_mode  ? cccc_find_build_cc()
+                                                  : cccc_find_native_cc();
         CcccSandboxPaths sb_paths = {
             .out_file    = out_file,
             .default_out = !out_file && compile_format != COMPILE_NONE,
@@ -2835,6 +2854,12 @@ int main(int argc, const char *argv[]) {
             .inputs_count    = input_files_count,
             .link_args       = link_args,
             .link_args_count = link_args_count,
+            .exec_paths      = sandbox_execs,
+            .exec_count      = sandbox_execs_count,
+            .toolchain       = sb_toolchain,
+            .exec_output =
+                testing_mode && testing_backend == TESTING_BACKEND_NATIVE,
+            .cc = sb_cc,
         };
         char sb_err[512];
         if (!cccc_sandbox_enter(&sb_paths, sb_err, sizeof sb_err)) {
@@ -2842,6 +2867,7 @@ int main(int argc, const char *argv[]) {
             exit(1);
         }
         free((void *)sb_paths.self);
+        free(sb_cc);
         free(sb_reads);
     }
     vm.ffi_errors_fatal         = ffi_errors_fatal;
