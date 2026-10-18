@@ -5032,6 +5032,17 @@ struct VirtualMachine {
     unsigned comptime_allow;
     int      comptime_depth;
     void    *comptime_registry; // handle and host-pointer maps, see comptime_args.c
+    // Saved bp and return address of each live frame entered under comptime,
+    // outermost first, kept outside VM memory so guest stores cannot forge
+    // them.
+    struct ComptimeFrame {
+        long long *bp;
+        long long  saved_bp;
+        long long  ret_addr;
+    }  *comptime_frames;
+    int comptime_frames_len;
+    int comptime_frames_cap;
+    int comptime_frames_base; // records below belong to an outer vm_eval
 
     // VM opcode execution profiling (--vm-profile). Comptime execution is
     // counted in vm_profile_comptime while vm_profile_in_comptime is set.

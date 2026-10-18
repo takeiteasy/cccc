@@ -1665,9 +1665,13 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->runtime_fault_op   = NULL;
     bool saved_in_comptime = vm->vm_profile_in_comptime;
     vm->vm_profile_in_comptime = vm->vm_profile_comptime != NULL;
+    int saved_frames_base      = vm->comptime_frames_base;
+    vm->comptime_frames_base   = vm->comptime_frames_len;
     vm->comptime_depth++;
     int eval_rc = vm_eval(vm);
     vm->comptime_depth--;
+    vm->comptime_frames_len    = vm->comptime_frames_base;
+    vm->comptime_frames_base   = saved_frames_base;
     vm->vm_profile_in_comptime = saved_in_comptime;
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm         = saved_debug;
@@ -2631,9 +2635,13 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     vm->runtime_fault_op   = NULL;
     bool saved_in_comptime = vm->vm_profile_in_comptime;
     vm->vm_profile_in_comptime = vm->vm_profile_comptime != NULL;
+    int saved_frames_base      = vm->comptime_frames_base;
+    vm->comptime_frames_base   = vm->comptime_frames_len;
     vm->comptime_depth++;
     int eval_rc = vm_eval(vm);
     vm->comptime_depth--;
+    vm->comptime_frames_len    = vm->comptime_frames_base;
+    vm->comptime_frames_base   = saved_frames_base;
     vm->vm_profile_in_comptime = saved_in_comptime;
     fenv_barrier_end(fenv_saved_round);
     vm->debug_vm = saved_debug;

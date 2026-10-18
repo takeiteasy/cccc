@@ -481,7 +481,8 @@ static void check_atomic_access(VirtualMachine *vm, void *addr) {
 // land inside VM memory, so a forged address becomes a compile error instead
 // of a host fault. Applies to the register-addressed memory ops: LDR/STR,
 // FLDR/FSTR, VLDR/VSTR, ALDR/ASTR/AXCHG/ACAS, MCPY, MSET. bp-relative
-// LDR_LOCAL/STR_LOCAL use compiler-chosen frame offsets and are not checked.
+// LDR_LOCAL/STR_LOCAL use compiler-chosen frame offsets and are not checked;
+// LEV3/CALLT instead verify the saved bp and return address (comptime_frame_*).
 // MFRE/REALC (heap pointers), SETJMP/LONGJMP, the wide-bitint, decimal and
 // overflow ops are checked too; libc pointer arguments are checked at the
 // native-call boundary (comptime_args.c).
@@ -962,6 +963,45 @@ void cc_apply_frame_op(VirtualMachine *vm) {
     }
 }
 
+// Comptime frame records: ENT3 snapshots the saved bp and return address, and
+// a return compares them, so a forged slot aborts instead of running on a bad
+// frame. Records of frames a longjmp discarded sit at or below the live bp and
+// are dropped lazily; a nested vm_eval restarts the stack, so it never prunes
+// below comptime_frames_base.
+static void comptime_frame_push(VirtualMachine *vm) {
+    while (vm->comptime_frames_len > vm->comptime_frames_base &&
+           vm->comptime_frames[vm->comptime_frames_len - 1].bp <= vm->bp)
+        vm->comptime_frames_len--;
+    if (vm->comptime_frames_len == vm->comptime_frames_cap) {
+        int cap = vm->comptime_frames_cap ? vm->comptime_frames_cap * 2 : 64;
+        struct ComptimeFrame *p =
+            realloc(vm->comptime_frames, (size_t)cap * sizeof(*p));
+        if (!p)
+            return;
+        vm->comptime_frames     = p;
+        vm->comptime_frames_cap = cap;
+    }
+    vm->comptime_frames[vm->comptime_frames_len++] =
+        (struct ComptimeFrame){vm->bp, vm->bp[0], vm->bp[1]};
+}
+
+// Pops the current frame's record; a missing or mismatched one is a forged
+// frame. A failed push leaves no record, so allocation failure also aborts.
+static int comptime_frame_check(VirtualMachine *vm) {
+    while (vm->comptime_frames_len > vm->comptime_frames_base &&
+           vm->comptime_frames[vm->comptime_frames_len - 1].bp < vm->bp)
+        vm->comptime_frames_len--;
+    struct ComptimeFrame *f =
+        vm->comptime_frames_len > vm->comptime_frames_base
+            ? &vm->comptime_frames[vm->comptime_frames_len - 1]
+            : NULL;
+    if (!f || f->bp != vm->bp || vm->bp[0] != f->saved_bp ||
+        vm->bp[1] != f->ret_addr)
+        return cccc_comptime_abort(vm, "return through a corrupted frame");
+    vm->comptime_frames_len--;
+    return 0;
+}
+
 static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Enter function: [ENT3] [stack_size:32|spill_param_count:32]
     // [f32_param_mask:32|float_param_mask:32]
@@ -993,6 +1033,9 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // Save old base pointer
     *--vm->sp = (long long)vm->bp;
     vm->bp    = vm->sp;
+
+    if (__builtin_expect(vm->comptime_depth != 0, 0))
+        comptime_frame_push(vm);
 
     if (__builtin_expect(vm->dbg.frame_records_on, 0))
         frame_record_push(vm);
@@ -1104,6 +1147,10 @@ static inline int op_LEV3_fn(VirtualMachine *vm) {
 
     // Restore stack pointer to base pointer
     vm->sp = vm->bp;
+
+    if (__builtin_expect(vm->comptime_depth != 0, 0) &&
+        comptime_frame_check(vm))
+        return -1;
 
     // If stack canaries are enabled, check canary
     if (vm->flags & CCCC_STACK_CANARIES) {
@@ -3135,6 +3182,11 @@ static inline int op_CALLT_fn(VirtualMachine *vm) {
     Pc target = cc_read_word(vm);
 
     vm->sp    = vm->bp;
+
+    // The tail-callee's ENT3 snapshots the return slot, so check it here.
+    if (__builtin_expect(vm->comptime_depth != 0, 0) &&
+        comptime_frame_check(vm))
+        return -1;
 
     if (vm->flags & CCCC_STACK_CANARIES) {
         long long canary = vm->sp[-1];

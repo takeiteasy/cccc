@@ -92,6 +92,13 @@ call to 'memcpy' argument 0: Write of 4 byte(s) at 0x8 is outside VM memory
 | `free`, `realloc` | A VM-heap pointer or a host allocation libc returned |
 | `longjmp` | A `jmp_buf` saved by `setjmp`: its stack and code positions must still be valid |
 
+A function that returns must find its saved frame pointer and return address as it entered. Comptime code that overwrites them through a local's address is a compile error at the return:
+
+```
+error: compile-time macro 'probe' aborted (opcode 'LEV3' faulted)
+return through a corrupted frame
+```
+
 Comptime code can read what libc returns, whichever way libc owns it:
 
 | Result | Comptime sees | Calls |

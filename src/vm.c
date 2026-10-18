@@ -1855,6 +1855,7 @@ void cc_destroy(VirtualMachine *vm) {
     free(vm->dbg.conds);
     free(vm->dbg.source_index);
     free(vm->dbg.frame_records);
+    free(vm->comptime_frames);
 
     // Free watchpoint expressions
     for (int i = 0; i < MAX_WATCHPOINTS; i++) {

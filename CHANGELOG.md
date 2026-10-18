@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a comptime function that returns through an overwritten saved frame
+  pointer or return address is a compile error instead of running on a forged
+  frame. See `docs/COMPTIME_POLICY.md`.
 - Fixed: `asprintf` no longer crashes; its format string was passed as a
   variadic argument.
 - Changed: comptime libc calls check their pointer arguments against VM
