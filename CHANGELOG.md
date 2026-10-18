@@ -23,6 +23,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   `getprotoby*`, `getcwd`, `realpath` and the `scandir` list are VM copies, and
   `glob`, `readdir`, `fts_read`, `getaddrinfo`, `wordexp`, `hsearch`,
   `tsearch` and `mmap` results are readable until their release call.
+- Changed: comptime libc calls follow the pointers stored in their arguments
+  (`strtok_r` save pointer, `iconv` buffers, `mbsrtowcs`/`wcsrtombs` source,
+  `insque`/`remque` links, `hsearch` key, `tsearch`/`tfind`/`tdelete`/`twalk`
+  roots, `getopt`/`getopt_long` argv and long options, `alphasort` entries,
+  `regex_t`) and reject NULL callbacks; a bad pointer is a compile error.
+  `hsearch` keys are read-only to comptime code. See
+  `docs/COMPTIME_POLICY.md`.
 - Fixed: a host fault inside a native call during comptime prints one line and
   exits with status 1 instead of risking a hang on a libc lock. See
   `docs/COMPTIME_POLICY.md`.

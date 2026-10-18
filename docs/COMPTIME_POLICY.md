@@ -90,7 +90,29 @@ call to 'memcpy' argument 0: Write of 4 byte(s) at 0x8 is outside VM memory
 | Format string (`printf`, `sscanf`) | The `%s` and `%n`-style arguments it consumes; `%n` and `%1$d` are rejected |
 | `FILE *`, `locale_t`, `iconv_t` | A handle libc returned earlier in the same compile |
 | `free`, `realloc` | A VM-heap pointer or a host allocation libc returned |
+| Callback (`qsort`, `bsearch`, `tsearch`, `lfind`) | Not NULL |
 | `longjmp` | A `jmp_buf` saved by `setjmp`: its stack and code positions must still be valid |
+
+Pointers stored inside a checked buffer are followed when libc dereferences them, and a bad one is reported with its byte offset:
+
+```
+call to 'iconv' argument 1 [0]: Read of 2 byte(s) at 0x8 is outside VM memory
+```
+
+| Call | Followed |
+|---|---|
+| `strtok`, `strtok_r` | The string being split must be writable; `*saveptr` when the string argument is NULL |
+| `iconv` | `*inbuf` and `*outbuf` for their `*inbytesleft` and `*outbytesleft` |
+| `mbsrtowcs`, `wcsrtombs` | `*src` must be NUL-terminated, even when `len` bounds the conversion |
+| `insque`, `remque` | The `next` and `prev` links of the neighbours |
+| `hsearch` | `ENTRY.key` of the entry passed in |
+| `tsearch`, `tfind`, `tdelete` | `*rootp` is NULL or a node libc returned for that root variable |
+| `twalk` | The root is NULL or a node libc returned |
+| `getopt`, `getopt_long` | Every `argv[i]` below `argc`, and each `longopts` entry up to its terminator (`name`, `flag`) |
+| `alphasort` | The `d_name` of both entries |
+| `regexec`, `regfree` | A `regex_t` filled by `regcomp` and unchanged since |
+
+Copying a root variable or a `regex_t` to another address, or editing it, is a compile error; `ENTRY.data` stays writable.
 
 A function that returns must find its saved frame pointer and return address as it entered. Comptime code that overwrites them through a local's address is a compile error at the return:
 
@@ -128,6 +150,6 @@ error: compile-time macro 'probe' aborted (opcode 'CALLF' faulted)
 call to '__builtin_ast_type_kind' argument 0: not a Type handle
 ```
 
-Libc calls you grant with `--comptime-allow`, strings and buffers passed to builtins, the extra arguments of `Quote`-style variadic builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+Libc calls you grant with `--comptime-allow`, strings and buffers passed to builtins, the extra arguments of `Quote`-style variadic builtins, and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.

@@ -31,7 +31,9 @@
 //   n<size>  string bounded by <size> bytes
 //   W        NUL-terminated wchar_t string
 //   r<size>  readable buffer         w<size>  writable buffer
+//   m        writable NUL-terminated string (strtok splits it in place)
 //   h        opaque host handle      c / C    strcat / strncat destination
+//   x        guest function pointer, not NULL
 //   f / F    printf / scanf format; the arguments it consumes are checked too
 //   V        va_list pointer, consumed by the preceding format
 //   suffix ? accepts NULL            suffix ! accepts (void *)-1
@@ -42,8 +44,11 @@
 // free the original, B=<size> copy a struct, h remember a handle, A copy the
 // string written through argument 0 (asprintf).
 //
-// A pointer is checked for the bytes the call touches; pointers stored inside
-// a checked buffer are not followed.
+// A token ending in [inner;@off inner...] also checks the pointers stored in
+// the buffer it just validated: each entry reads the pointer at byte offset
+// `off` (default 0) and checks it with a leaf token (r w s m n W h x). `^i`
+// before the bracket applies it only when argument i is NULL. Walks that need a
+// loop or state (argv, longopts, tree roots, regex_t) are PRECHECKS below.
 // tests/host/test_comptime_policy.c requires a spec for every safe-class name.
 
 #include "comptime_policy.h"
@@ -75,6 +80,7 @@
 #include "internal.h"
 
 #include <fenv.h>
+#include <getopt.h>
 
 static const struct {
     const char *name;
@@ -96,7 +102,7 @@ static const struct {
     {"basename", "s? > S"},
     {"bcmp", "r@2 r@2 -"},
     {"bcopy", "r@2 w@2 -"},
-    {"bsearch", "r@3 r@2*@3 - - -"},
+    {"bsearch", "r@3 r@2*@3 - - x"},
     {"btowc", ""},
     {"bzero", "w@1 -"},
     {"c16rtomb", "w=16? - w=mbstate?"},
@@ -147,8 +153,8 @@ static const struct {
     {"geteuid", ""},
     {"getgid", ""},
     {"getgroups", "- w@0*=4?"},
-    {"getopt", "- r@0*=8 s"},
-    {"getopt_long", "- r@0*=8 s r=8 w=4?"},
+    {"getopt", "- w@0*=8 s"},
+    {"getopt_long", "- w@0*=8 s - w=4?"},
     {"getpagesize", ""},
     {"getpgid", ""},
     {"getpgrp", ""},
@@ -164,10 +170,10 @@ static const struct {
     {"gmtime_r", "r=8 w=tm"},
     {"hcreate", ""},
     {"hdestroy", ""},
-    {"hsearch", ""},
+    {"hsearch", "r=16[s] -"},
     {"htonl", ""},
     {"htons", ""},
-    {"iconv", "h w=8? w=8? w=8? w=8?"},
+    {"iconv", "h w=8?[r@@2?] w=8? w=8?[w@@4?] w=8?"},
     {"iconv_close", "h"},
     {"iconv_open", "s s > h"},
     {"index", "s -"},
@@ -175,7 +181,7 @@ static const struct {
     {"inet_ntoa", "> S"},
     {"inet_ntop", "- r=4 w@3 -"},
     {"inet_pton", "- s w=4"},
-    {"insque", "w=16 w=16?"},
+    {"insque", "w=16 w=16?[w=16?]"},
     {"isatty", ""},
     {"iswalnum", ""},
     {"iswalpha", ""},
@@ -192,13 +198,13 @@ static const struct {
     {"iswxdigit", ""},
     {"labs", ""},
     {"ldiv", ""},
-    {"lfind", "r@3 r@@2*@3 r=8 - -"},
+    {"lfind", "r@3 r@@2*@3 r=8 - x"},
     {"llabs", ""},
     {"lldiv", ""},
     {"localeconv", ""},
     {"localtime", "r=8 > B=tm"},
     {"localtime_r", "r=8 w=tm"},
-    {"lsearch", "r@3 w@@2*@3 w=8 - -"},
+    {"lsearch", "r@3 w@@2*@3 w=8 - x"},
     {"malloc", ""},
     {"mblen", "r@1? -"},
     {"mbrlen", "r@1? - w=mbstate?"},
@@ -207,7 +213,7 @@ static const struct {
     {"mbrtoc8", "w=1? r@2? - w=mbstate?"},
     {"mbrtowc", "w=4? r@2? - w=mbstate?"},
     {"mbsinit", "r=mbstate?"},
-    {"mbsrtowcs", "w@2*=4? w=8 - w=mbstate?"},
+    {"mbsrtowcs", "w@2*=4? w=8[s] - w=mbstate?"},
     {"mbstowcs", "w@2*=4? s -"},
     {"mbtowc", "w=4? r@2? -"},
     {"memalignment", ""},
@@ -232,7 +238,7 @@ static const struct {
     {"putchar", ""},
     {"putchar_unlocked", ""},
     {"puts", "s"},
-    {"qsort", "w@1*@2 - - -"},
+    {"qsort", "w@1*@2 - - x"},
     {"quick_exit", ""},
     {"rand", ""},
     {"realloc", ""},
@@ -241,7 +247,7 @@ static const struct {
     {"regerror", "- r=regex w@3? -"},
     {"regexec", "r=regex s - w@2*=regmatch? -"},
     {"regfree", "w=regex"},
-    {"remque", "w=16"},
+    {"remque", "w=16[w=16?;@8 w=16?]"},
     {"rindex", "s -"},
     {"sched_get_priority_max", ""},
     {"sched_get_priority_min", ""},
@@ -282,8 +288,12 @@ static const struct {
     {"strstr", "s s"},
     {"strtod", "s w=8?"},
     {"strtof", "s w=8?"},
-    {"strtok", "s? s"},
-    {"strtok_r", "s? s w=8"},
+    {"strtok", "m? s"},
+#ifdef __APPLE__
+    {"strtok_r", "m? s w=8^0[m?]"},
+#else
+    {"strtok_r", "m? s w=8^0[m]"},
+#endif
     {"strtol", "s w=8? -"},
     {"strtold", "s w=8?"},
     {"strtoll", "s w=8? -"},
@@ -291,8 +301,8 @@ static const struct {
     {"strtoull", "s w=8? -"},
     {"strxfrm", "w@2? s -"},
     {"sysconf", ""},
-    {"tdelete", "- w=8 -"},
-    {"tfind", "- w=8 -"},
+    {"tdelete", "- w=8 x"},
+    {"tfind", "- w=8 x"},
     {"time", "w=8?"},
     {"timegm", "w=tm"},
     {"times", "w=tms"},
@@ -302,8 +312,8 @@ static const struct {
     {"towctrans", ""},
     {"towlower", ""},
     {"towupper", ""},
-    {"tsearch", "- w=8 -"},
-    {"twalk", ""},
+    {"tsearch", "- w=8 x"},
+    {"twalk", "- x?"},
     {"uselocale", "h?! > h"},
     {"usleep", ""},
     {"vasprintf", "w=8 f V > A"},
@@ -322,7 +332,7 @@ static const struct {
     {"wcsncmp", "W W -"},
     {"wcsncpy", "w@2*=4 W -"},
     {"wcsrchr", "W -"},
-    {"wcsrtombs", "w@2? w=8 - w=mbstate?"},
+    {"wcsrtombs", "w@2? w=8[W] - w=mbstate?"},
     {"wcsstr", "W W"},
     {"wcstod", "W w=8?"},
     {"wcstof", "W w=8?"},
@@ -380,8 +390,21 @@ static pthread_once_t specs_once = PTHREAD_ONCE_INIT;
 typedef struct {
     HashMap         handles;
     HashMap         host_ptrs;
+    HashMap         regexes; // regex_t address -> RegexSnap
     pthread_mutex_t lock;
 } Registry;
+
+// The regex_t bytes regcomp left, so a forged or edited one is refused.
+typedef struct {
+    regex_t copy;
+    bool    live;
+} RegexSnap;
+
+static int free_regex_snap(char *key, int keylen, void *val, void *user) {
+    (void)key, (void)keylen, (void)user;
+    free(val);
+    return 0;
+}
 
 void cccc_comptime_registry_init(VirtualMachine *vm) {
     Registry *r = calloc(1, sizeof *r);
@@ -397,6 +420,8 @@ void cccc_comptime_registry_free(VirtualMachine *vm) {
         return;
     hashmap_deinit(&r->handles);
     hashmap_deinit(&r->host_ptrs);
+    hashmap_foreach(&r->regexes, free_regex_snap, NULL);
+    hashmap_deinit(&r->regexes);
     pthread_mutex_destroy(&r->lock);
     free(r);
     vm->comptime_registry = NULL;
@@ -659,6 +684,7 @@ typedef struct {
     size_t      len;
     const void *owner;
     bool        writable;
+    bool        tree_node; // a tsearch node, owner is the root variable
 } HostRange;
 
 // TODO(#1676): sorted array with O(n) insert and owner scans; use an interval
@@ -680,8 +706,8 @@ static size_t range_lower_bound(uintptr_t a) {
     return lo;
 }
 
-void cccc_comptime_host_range_add(const void *base, size_t len,
-                                  const void *owner, bool writable) {
+static void range_add(const void *base, size_t len, const void *owner,
+                      bool writable, bool tree_node) {
     if (!base || !len)
         return;
     uintptr_t a = (uintptr_t)base;
@@ -708,9 +734,30 @@ void cccc_comptime_host_range_add(const void *base, size_t len,
     }
     memmove(&host_ranges[i + 1], &host_ranges[i],
             (host_range_count - i) * sizeof *host_ranges);
-    host_ranges[i] = (HostRange){a, len, owner, writable};
+    host_ranges[i] = (HostRange){a, len, owner, writable, tree_node};
     host_range_count++;
     pthread_mutex_unlock(&range_lock);
+}
+
+void cccc_comptime_host_range_add(const void *base, size_t len,
+                                  const void *owner, bool writable) {
+    range_add(base, len, owner, writable, false);
+}
+
+void cccc_comptime_host_node_add(const void *node, const void *tree) {
+    range_add(node, sizeof(void *), tree, false, true);
+}
+
+bool cccc_comptime_host_node_known(const void *node, const void *tree) {
+    uintptr_t a   = (uintptr_t)node;
+    bool      hit = false;
+    pthread_mutex_lock(&range_lock);
+    size_t i = range_lower_bound(a);
+    if (i < host_range_count && host_ranges[i].base == a &&
+        host_ranges[i].tree_node && (!tree || host_ranges[i].owner == tree))
+        hit = true;
+    pthread_mutex_unlock(&range_lock);
+    return hit;
 }
 
 void cccc_comptime_host_range_drop(const void *owner) {
@@ -731,8 +778,19 @@ size_t cccc_comptime_host_range_left(const void *p, bool write) {
     pthread_mutex_lock(&range_lock);
     size_t i = range_lower_bound(a);
     if (i < host_range_count && host_ranges[i].base <= a &&
-        (!write || host_ranges[i].writable))
-        left = host_ranges[i].base + host_ranges[i].len - a;
+        (!write || host_ranges[i].writable)) {
+        uintptr_t end = host_ranges[i].base + host_ranges[i].len;
+        left          = end - a;
+        // Adjacent ranges read as one (an ENTRY's read-only key, writable
+        // data).
+        for (size_t j = i + 1;
+             j < host_range_count && host_ranges[j].base == end &&
+             (!write || host_ranges[j].writable);
+             j++) {
+            end  += host_ranges[j].len;
+            left += host_ranges[j].len;
+        }
+    }
     pthread_mutex_unlock(&range_lock);
     return left;
 }
@@ -744,11 +802,17 @@ typedef struct {
     const char     *name;
     long long      *args;
     int             nargs;
+    bool            in_deref; // checking a pointer stored at byte deref_off
+    int             deref_off;
 } CallCtx;
 
 static int fault(CallCtx *c, int arg, const void *p, size_t n, bool write) {
     char what[96];
-    snprintf(what, sizeof what, "call to '%s' argument %d", c->name, arg);
+    if (c->in_deref)
+        snprintf(what, sizeof what, "call to '%s' argument %d [%d]", c->name,
+                 arg, c->deref_off);
+    else
+        snprintf(what, sizeof what, "call to '%s' argument %d", c->name, arg);
     return cccc_comptime_fault(c->vm, what, p, n, write);
 }
 
@@ -1029,6 +1093,320 @@ static int check_format(CallCtx *c, Slots *s, bool scan, const char *fmt) {
     return scan ? check_scanf(c, s, fmt) : check_printf(c, s, fmt);
 }
 
+// One parsed spec token: kind letter, size expression, flags and deref suffix.
+typedef struct {
+    char        kind;
+    bool        opt, minus1;
+    int         cond;  // deref only when args[cond] is NULL, -1 for always
+    const char *size;  // start of the <size> expression, NULL when unsized
+    const char *deref; // contents of [...], NULL when absent
+} Tok;
+
+static const char *skip_size(const char *p) {
+    for (;;) {
+        if (p[0] == '@' && p[1] == '@') {
+            p += 3;
+        } else if (p[0] == '@' || p[0] == '$') {
+            p += 2;
+        } else if (p[0] == '=') {
+            p++;
+            if (*p >= '0' && *p <= '9')
+                while (*p >= '0' && *p <= '9')
+                    p++;
+            else
+                while (*p >= 'a' && *p <= 'z')
+                    p++;
+        } else {
+            return p;
+        }
+        if (*p != '*')
+            return p;
+        p++;
+    }
+}
+
+static const char *parse_tok(const char *p, Tok *t) {
+    *t = (Tok){.kind = *p++, .cond = -1};
+    if (t->kind == 'r' || t->kind == 'w' || t->kind == 'n') {
+        t->size = p;
+        p       = skip_size(p);
+    }
+    for (;; p++) {
+        if (*p == '?')
+            t->opt = true;
+        else if (*p == '!')
+            t->minus1 = true;
+        else
+            break;
+    }
+    if (*p == '^') {
+        t->cond  = p[1] - '0';
+        p       += 2;
+    }
+    if (*p == '[') {
+        t->deref = ++p;
+        while (*p && *p != ']')
+            p++;
+        if (*p == ']')
+            p++;
+    }
+    return p;
+}
+
+static int fault_arg_msg(CallCtx *c, int arg, const char *msg) {
+    char buf[160];
+    snprintf(buf, sizeof buf, "call to '%s' argument %d: %s", c->name, arg,
+             msg);
+    return cccc_comptime_abort(c->vm, buf);
+}
+
+// Checks the token kinds that need only the pointer value and a byte count.
+static int check_leaf(CallCtx *c, int arg, char kind, size_t n, void *ptr) {
+    VirtualMachine *vm = c->vm;
+    switch (kind) {
+        case 'r':
+        case 'w':
+            if (n && !cccc_comptime_addr_ok(vm, ptr, n, kind == 'w'))
+                return fault(c, arg, ptr, n, kind == 'w');
+            break;
+        case 's':
+            if (cccc_comptime_cstr_len(vm, ptr, SIZE_MAX) < 0)
+                return fault(c, arg, ptr, 1, false);
+            break;
+        case 'm': {
+            long long len = cccc_comptime_cstr_len(vm, ptr, SIZE_MAX);
+            if (len < 0)
+                return fault(c, arg, ptr, 1, true);
+            if (!cccc_comptime_addr_ok(vm, ptr, (size_t)len + 1, true))
+                return fault(c, arg, ptr, (size_t)len + 1, true);
+            break;
+        }
+        case 'n':
+            if (cccc_comptime_cstr_len(vm, ptr, n) < 0 &&
+                !cccc_comptime_addr_ok(vm, ptr, n, false))
+                return fault(c, arg, ptr, n, false);
+            break;
+        case 'W':
+            if (!wide_str_ok(vm, ptr))
+                return fault(c, arg, ptr, sizeof(wchar_t), false);
+            break;
+        case 'h':
+            if (!host_ptr_known(vm, ptr))
+                return fault(c, arg, ptr, 1, false);
+            break;
+        case 'x':
+            if (!ptr)
+                return fault_arg_msg(c, arg, "function pointer is NULL");
+            break;
+    }
+    return 0;
+}
+
+// Follows the pointers stored in the buffer at `outer`, which passed its own
+// check, and checks each against its leaf token.
+static int check_deref(CallCtx *c, int arg, const Tok *t, void *outer) {
+    if (t->cond >= 0 && (t->cond >= c->nargs || c->args[t->cond]))
+        return 0;
+    const char *p = t->deref;
+    while (*p && *p != ']') {
+        while (*p == ' ' || *p == ';')
+            p++;
+        unsigned long off = 0;
+        if (*p == '@') {
+            off = strtoul(p + 1, (char **)&p, 10);
+            while (*p == ' ')
+                p++;
+        }
+        Tok in;
+        p          = parse_tok(p, &in);
+
+        char *slot = (char *)outer + off;
+        void *inner;
+        c->in_deref  = true;
+        c->deref_off = (int)off;
+        int rc       = 0;
+        if (!cccc_comptime_addr_ok(c->vm, slot, sizeof inner, false)) {
+            rc = fault(c, arg, slot, sizeof inner, false);
+        } else {
+            memcpy(&inner, slot, sizeof inner);
+            size_t n = 0;
+            if (in.kind == '-' || (in.minus1 && inner == (void *)-1) ||
+                (!inner && in.opt)) {
+                // nothing to check
+            } else if (in.size && !eval_size(c, &(const char *){in.size}, &n)) {
+                rc = fault(c, arg, inner, 1, in.kind == 'w');
+            } else {
+                rc = check_leaf(c, arg, in.kind, n, inner);
+            }
+        }
+        c->in_deref = false;
+        if (rc)
+            return rc;
+    }
+    return 0;
+}
+
+// --- Checks that walk arrays or consult registries
+// -----------------------------
+
+typedef int (*PrecheckFn)(CallCtx *c);
+
+// argv[0..argc) are strings libc reads (and, permuting, moves).
+static int check_argv(CallCtx *c) {
+    long long argc = c->args[0];
+    char    **argv = (char **)c->args[1];
+    for (long long i = 0; i < argc; i++) {
+        c->in_deref  = true;
+        c->deref_off = (int)(i * (long long)sizeof *argv);
+        int rc       = 0;
+        if (cccc_comptime_cstr_len(c->vm, argv[i], SIZE_MAX) < 0)
+            rc = fault(c, 1, argv[i], 1, false);
+        c->in_deref = false;
+        if (rc)
+            return rc;
+    }
+    return 0;
+}
+
+static int pre_getopt_long(CallCtx *c) {
+    if (c->nargs < 5)
+        return 0;
+    int rc = check_argv(c);
+    if (rc)
+        return rc;
+    const struct option *longopts = (const struct option *)c->args[3];
+    if (!longopts)
+        return 0;
+    for (size_t i = 0; i < ((size_t)1 << 16); i++) {
+        const struct option *o   = longopts + i;
+        bool                 end = false;
+        c->in_deref              = true;
+        c->deref_off             = (int)(i * sizeof *o);
+        if (!cccc_comptime_addr_ok(c->vm, o, sizeof *o, false))
+            rc = fault(c, 3, o, sizeof *o, false);
+        else if (!o->name)
+            end = true;
+        else if (cccc_comptime_cstr_len(c->vm, o->name, SIZE_MAX) < 0)
+            rc = fault(c, 3, o->name, 1, false);
+        else if (o->flag &&
+                 !cccc_comptime_addr_ok(c->vm, o->flag, sizeof(int), true))
+            rc = fault(c, 3, o->flag, sizeof(int), true);
+        c->in_deref = false;
+        if (rc || end)
+            return rc;
+    }
+    return fault_arg_msg(c, 3, "longopts has no terminating entry");
+}
+
+static int pre_getopt(CallCtx *c) {
+    return c->nargs < 3 ? 0 : check_argv(c);
+}
+
+// scandir hands alphasort pointers to dirent pointers.
+static int pre_alphasort(CallCtx *c) {
+    for (int i = 0; i < 2 && i < c->nargs; i++) {
+        char *e;
+        memcpy(&e, (void *)c->args[i], sizeof e);
+        c->in_deref  = true;
+        c->deref_off = 0;
+        int rc       = 0;
+        if (!cccc_comptime_addr_ok(c->vm, e, offsetof(struct dirent, d_name),
+                                   false))
+            rc = fault(c, i, e, offsetof(struct dirent, d_name), false);
+        else if (cccc_comptime_cstr_len(
+                     c->vm, e + offsetof(struct dirent, d_name), SIZE_MAX) < 0)
+            rc = fault(c, i, e + offsetof(struct dirent, d_name), 1, false);
+        c->in_deref = false;
+        if (rc)
+            return rc;
+    }
+    return 0;
+}
+
+// *rootp is NULL or a node libc returned for this root variable.
+static int pre_tree_root(CallCtx *c) {
+    if (c->nargs < 2)
+        return 0;
+    void *rootp = (void *)c->args[1];
+    void *root;
+    memcpy(&root, rootp, sizeof root);
+    if (root && !cccc_comptime_host_node_known(root, rootp))
+        return fault_arg_msg(c, 1, "the tree root is not a node libc returned");
+    return 0;
+}
+
+static int pre_twalk(CallCtx *c) {
+    void *root = c->nargs > 0 ? (void *)c->args[0] : NULL;
+    if (root && !cccc_comptime_host_node_known(root, NULL))
+        return fault_arg_msg(c, 0, "not a tree node libc returned");
+    return 0;
+}
+
+// --- regex_t: only one regcomp filled, unchanged since ---
+
+static bool regex_matches(VirtualMachine *vm, const regex_t *preg,
+                          bool need_live) {
+    Registry *r = vm->comptime_registry;
+    if (!r)
+        return false;
+    pthread_mutex_lock(&r->lock);
+    RegexSnap *snap = hashmap_get_int(&r->regexes, (long long)(uintptr_t)preg);
+    bool       ok   = snap && (snap->live || !need_live) &&
+                      memcmp(&snap->copy, preg, sizeof *preg) == 0;
+    pthread_mutex_unlock(&r->lock);
+    return ok;
+}
+
+static void regex_record(VirtualMachine *vm, const regex_t *preg, bool live) {
+    Registry *r = vm->comptime_registry;
+    if (!r)
+        return;
+    pthread_mutex_lock(&r->lock);
+    RegexSnap *snap = hashmap_get_int(&r->regexes, (long long)(uintptr_t)preg);
+    if (!snap && (snap = calloc(1, sizeof *snap)))
+        hashmap_put_int(&r->regexes, (long long)(uintptr_t)preg, snap);
+    if (snap) {
+        memcpy(&snap->copy, preg, sizeof *preg);
+        snap->live = live;
+    }
+    pthread_mutex_unlock(&r->lock);
+}
+
+static int pre_regexec(CallCtx *c) {
+    if (!regex_matches(c->vm, (const regex_t *)c->args[0], true))
+        return fault_arg_msg(c, 0, "not a regex_t compiled by regcomp");
+    return 0;
+}
+
+static int pre_regfree(CallCtx *c) {
+    if (!regex_matches(c->vm, (const regex_t *)c->args[0], false))
+        return fault_arg_msg(c, 0, "not a regex_t compiled by regcomp");
+    return 0;
+}
+
+static const struct {
+    const char *name;
+    PrecheckFn  fn;
+} PRECHECKS[] = {
+    {"alphasort", pre_alphasort},
+    {"getopt", pre_getopt},
+    {"getopt_long", pre_getopt_long},
+    {"regexec", pre_regexec},
+    {"regfree", pre_regfree},
+    {"tdelete", pre_tree_root},
+    {"tfind", pre_tree_root},
+    {"tsearch", pre_tree_root},
+    {"twalk", pre_twalk},
+};
+
+static HashMap        prechecks;
+static pthread_once_t prechecks_once = PTHREAD_ONCE_INIT;
+
+static void build_prechecks(void) {
+    for (size_t i = 0; i < sizeof(PRECHECKS) / sizeof(PRECHECKS[0]); i++)
+        hashmap_put(&prechecks, PRECHECKS[i].name, (void *)PRECHECKS[i].fn);
+}
+
 int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
                              long long *args, int nargs) {
     const char *spec = cccc_comptime_arg_spec(name);
@@ -1053,72 +1431,42 @@ int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
         if (!*p || *p == '>')
             break;
         ntokens++;
-        char   kind  = *p++;
-        size_t n     = 0;
-        bool   sized = kind == 'r' || kind == 'w' || kind == 'n';
-        if (sized && !eval_size(&c, &p, &n)) {
-            if (i < nargs)
-                return fault(&c, i, (void *)args[i], 1, kind == 'w');
-        }
-        bool opt = false, minus1 = false;
-        for (;; p++) {
-            if (*p == '?')
-                opt = true;
-            else if (*p == '!')
-                minus1 = true;
-            else
-                break;
-        }
-        if (kind == '-' || i >= nargs)
+        Tok t;
+        p = parse_tok(p, &t);
+        if (t.kind == '-' || i >= nargs)
             continue;
         void *ptr = (void *)args[i];
-        if (minus1 && ptr == (void *)-1)
+        if (t.minus1 && ptr == (void *)-1)
             continue;
-        if (!ptr && opt)
+        if (!ptr && t.opt)
             continue;
-        switch (kind) {
-            case 'r':
-            case 'w':
-                if (n && !cccc_comptime_addr_ok(vm, ptr, n, kind == 'w'))
-                    return fault(&c, i, ptr, n, kind == 'w');
-                break;
-            case 's':
+        size_t n = 0;
+        if (t.size && !eval_size(&c, &(const char *){t.size}, &n))
+            return fault(&c, i, ptr, 1, t.kind == 'w');
+        switch (t.kind) {
             case 'f':
-            case 'F':
-                if (cccc_comptime_cstr_len(vm, ptr, SIZE_MAX) < 0)
-                    return fault(&c, i, ptr, 1, false);
-                if (kind != 's') {
-                    fmt_idx  = i;
-                    fmt_scan = kind == 'F';
-                }
+            case 'F': {
+                int rc = check_leaf(&c, i, 's', n, ptr);
+                if (rc)
+                    return rc;
+                fmt_idx  = i;
+                fmt_scan = t.kind == 'F';
                 break;
-            case 'n':
-                if (cccc_comptime_cstr_len(vm, ptr, n) < 0 &&
-                    !cccc_comptime_addr_ok(vm, ptr, n, false))
-                    return fault(&c, i, ptr, n, false);
-                break;
-            case 'W':
-                if (!wide_str_ok(vm, ptr))
-                    return fault(&c, i, ptr, sizeof(wchar_t), false);
-                break;
-            case 'h':
-                if (!host_ptr_known(vm, ptr))
-                    return fault(&c, i, ptr, 1, false);
-                break;
+            }
             case 'c':
             case 'C': {
                 long long dl = cccc_comptime_cstr_len(vm, ptr, SIZE_MAX);
                 long long sl =
                     i + 1 < nargs
                         ? cccc_comptime_cstr_len(vm, (void *)args[i + 1],
-                                                 kind == 'C' && i + 2 < nargs
+                                                 t.kind == 'C' && i + 2 < nargs
                                                      ? (size_t)args[i + 2]
                                                      : SIZE_MAX)
                         : 0;
                 if (dl < 0)
                     return fault(&c, i, ptr, 1, true);
                 if (sl < 0)
-                    sl = kind == 'C' && i + 2 < nargs ? args[i + 2] : 0;
+                    sl = t.kind == 'C' && i + 2 < nargs ? args[i + 2] : 0;
                 if (!cccc_comptime_addr_ok(vm, ptr, (size_t)(dl + sl + 1),
                                            true))
                     return fault(&c, i, ptr, (size_t)(dl + sl + 1), true);
@@ -1147,7 +1495,22 @@ int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
                 fmt_idx = -1;
                 break;
             }
+            default: {
+                int rc = check_leaf(&c, i, t.kind, n, ptr);
+                if (rc)
+                    return rc;
+                if (t.deref && (rc = check_deref(&c, i, &t, ptr)))
+                    return rc;
+            }
         }
+    }
+
+    pthread_once(&prechecks_once, build_prechecks);
+    PrecheckFn pre = hashmap_get(&prechecks, name);
+    if (pre) {
+        int rc = pre(&c);
+        if (rc)
+            return rc;
     }
 
     if (locale_tail && nargs > 0) {
@@ -1420,13 +1783,6 @@ static void r_release(VirtualMachine *vm, long long *args, int nargs,
         cccc_comptime_host_range_drop((void *)args[0]);
 }
 
-static void r_release_arg1(VirtualMachine *vm, long long *args, int nargs,
-                           long long *result) {
-    (void)vm, (void)result;
-    if (nargs > 1)
-        cccc_comptime_host_range_drop((void *)args[1]);
-}
-
 static void r_readdir(VirtualMachine *vm, long long *args, int nargs,
                       long long *result) {
     if (nargs > 0 && is_host(vm, (void *)*result))
@@ -1496,12 +1852,39 @@ static void r_wordexp(VirtualMachine *vm, long long *args, int nargs,
     host_strv(we->we_wordv, we->we_offs, we->we_wordc, we);
 }
 
-// A tsearch/tfind node is readable until the tree is next modified by tdelete.
+// A tsearch/tfind node is readable until tdelete frees it.
 static void r_tnode(VirtualMachine *vm, long long *args, int nargs,
                     long long *result) {
     if (nargs > 1 && is_host(vm, (void *)*result))
-        cccc_comptime_host_range_add((void *)*result, sizeof(void *),
-                                     (void *)args[1], false);
+        cccc_comptime_host_node_add((void *)*result, (void *)args[1]);
+}
+
+static _Thread_local const void *walk_tree;
+
+static void walk_register(const void *node, VISIT which, int depth) {
+    (void)depth;
+    if (which == postorder || which == leaf)
+        cccc_comptime_host_node_add(node, walk_tree);
+}
+
+// tdelete may free any node and rebalance; the survivors are registered again.
+// TODO(#1695): re-walking the tree on each tdelete is O(n); track the freed
+// node (the returned parent is not it) if large trees show up.
+static void r_tdelete(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)result;
+    if (nargs < 2)
+        return;
+    void *rootp = (void *)args[1];
+    cccc_comptime_host_range_drop(rootp);
+    void *root;
+    if (!cccc_comptime_addr_ok(vm, rootp, sizeof root, false))
+        return;
+    memcpy(&root, rootp, sizeof root);
+    if (!root)
+        return;
+    walk_tree = rootp;
+    twalk(root, walk_register);
 }
 
 static char hsearch_owner;
@@ -1509,15 +1892,33 @@ static char hsearch_owner;
 static void r_hsearch(VirtualMachine *vm, long long *args, int nargs,
                       long long *result) {
     (void)args, (void)nargs;
-    if (is_host(vm, (void *)*result))
-        cccc_comptime_host_range_add((void *)*result, sizeof(ENTRY),
-                                     &hsearch_owner, true);
+    ENTRY *e = (ENTRY *)*result;
+    if (!is_host(vm, e))
+        return;
+    // The key is hsearch's own comparison state; only data is the caller's.
+    cccc_comptime_host_range_add(&e->key, sizeof e->key, &hsearch_owner, false);
+    cccc_comptime_host_range_add(&e->data, sizeof e->data, &hsearch_owner,
+                                 true);
 }
 
 static void r_hdestroy(VirtualMachine *vm, long long *args, int nargs,
                        long long *result) {
     (void)vm, (void)args, (void)nargs, (void)result;
     cccc_comptime_host_range_drop(&hsearch_owner);
+}
+
+static void r_regcomp(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    if (nargs > 0)
+        regex_record(vm, (const regex_t *)args[0], *result == 0);
+}
+
+// A freed regex_t may be freed again, as regfree allows, but not executed.
+static void r_regfree(VirtualMachine *vm, long long *args, int nargs,
+                      long long *result) {
+    (void)result;
+    if (nargs > 0)
+        regex_record(vm, (const regex_t *)args[0], false);
 }
 
 static void r_mmap(VirtualMachine *vm, long long *args, int nargs,
@@ -1566,9 +1967,11 @@ static const struct {
     {"mmap", r_mmap},
     {"munmap", r_release},
     {"readdir", r_readdir},
+    {"regcomp", r_regcomp},
+    {"regfree", r_regfree},
     {"realpath", r_string_free},
     {"scandir", r_scandir},
-    {"tdelete", r_release_arg1},
+    {"tdelete", r_tdelete},
     {"tfind", r_tnode},
     {"tmpnam", r_string},
     {"tsearch", r_tnode},

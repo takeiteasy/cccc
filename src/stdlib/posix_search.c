@@ -99,12 +99,16 @@ static void wrap_hdestroy(void) {
 
 static long long wrap_lfind(long long key, long long base, long long nmemb,
                             long long size, long long compar) {
+    if (!compar) { // libc would call a NULL function pointer
+        errno = EFAULT;
+        return 0;
+    }
     long long saved         = g_search_compar_value;
     int       saved_faulted = g_search_faulted;
     g_search_compar_value   = compar;
     g_search_faulted        = 0;
     void *r = lfind((const void *)key, (const void *)base, (size_t *)nmemb,
-                    (size_t)size, compar ? search_compar_trampoline : NULL);
+                    (size_t)size, search_compar_trampoline);
     int   faulted         = g_search_faulted;
     g_search_compar_value = saved;
     g_search_faulted      = saved_faulted;
@@ -115,12 +119,16 @@ static long long wrap_lfind(long long key, long long base, long long nmemb,
 
 static long long wrap_lsearch(long long key, long long base, long long nmemb,
                               long long size, long long compar) {
+    if (!compar) { // libc would call a NULL function pointer
+        errno = EFAULT;
+        return 0;
+    }
     long long saved         = g_search_compar_value;
     int       saved_faulted = g_search_faulted;
     g_search_compar_value   = compar;
     g_search_faulted        = 0;
     void *r = lsearch((const void *)key, (void *)base, (size_t *)nmemb,
-                      (size_t)size, compar ? search_compar_trampoline : NULL);
+                      (size_t)size, search_compar_trampoline);
     int   faulted         = g_search_faulted;
     g_search_compar_value = saved;
     g_search_faulted      = saved_faulted;
@@ -131,12 +139,16 @@ static long long wrap_lsearch(long long key, long long base, long long nmemb,
 
 static long long wrap_tsearch(long long key, long long rootp,
                               long long compar) {
+    if (!compar) { // libc would call a NULL function pointer
+        errno = EFAULT;
+        return 0;
+    }
     long long saved         = g_search_compar_value;
     int       saved_faulted = g_search_faulted;
     g_search_compar_value   = compar;
     g_search_faulted        = 0;
-    void *r                 = tsearch((const void *)key, (void **)rootp,
-                                      compar ? search_compar_trampoline : NULL);
+    void *r =
+        tsearch((const void *)key, (void **)rootp, search_compar_trampoline);
     int   faulted           = g_search_faulted;
     g_search_compar_value   = saved;
     g_search_faulted        = saved_faulted;
@@ -146,12 +158,16 @@ static long long wrap_tsearch(long long key, long long rootp,
 }
 
 static long long wrap_tfind(long long key, long long rootp, long long compar) {
+    if (!compar) { // libc would call a NULL function pointer
+        errno = EFAULT;
+        return 0;
+    }
     long long saved         = g_search_compar_value;
     int       saved_faulted = g_search_faulted;
     g_search_compar_value   = compar;
     g_search_faulted        = 0;
     void *r                 = tfind((const void *)key, (void *const *)rootp,
-                                    compar ? search_compar_trampoline : NULL);
+                                    search_compar_trampoline);
     int   faulted           = g_search_faulted;
     g_search_compar_value   = saved;
     g_search_faulted        = saved_faulted;
@@ -162,12 +178,16 @@ static long long wrap_tfind(long long key, long long rootp, long long compar) {
 
 static long long wrap_tdelete(long long key, long long rootp,
                               long long compar) {
+    if (!compar) { // libc would call a NULL function pointer
+        errno = EFAULT;
+        return 0;
+    }
     long long saved         = g_search_compar_value;
     int       saved_faulted = g_search_faulted;
     g_search_compar_value   = compar;
     g_search_faulted        = 0;
-    void *r                 = tdelete((const void *)key, (void **)rootp,
-                                      compar ? search_compar_trampoline : NULL);
+    void *r =
+        tdelete((const void *)key, (void **)rootp, search_compar_trampoline);
     int   faulted           = g_search_faulted;
     g_search_compar_value   = saved;
     g_search_faulted        = saved_faulted;
@@ -184,7 +204,9 @@ static void twalk_action_trampoline(const void *nodep, VISIT which, int depth) {
     long long args[3]  = {(long long)(intptr_t)nodep, (long long)(int)which,
                           (long long)depth};
     long long result   = 0;
-    bool            ct       = vm && vm->comptime_depth;
+    // tsearch registered the node; a stray one gets a range for the callback.
+    bool ct =
+        vm && vm->comptime_depth && !cccc_comptime_host_node_known(nodep, NULL);
     if (ct)
         cccc_comptime_host_range_add(nodep, sizeof(void *), nodep, false);
     if (!vm || cccc_call_guest_callback(vm, g_twalk_action_value, args, 3,

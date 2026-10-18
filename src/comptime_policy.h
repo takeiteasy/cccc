@@ -81,6 +81,11 @@ void cccc_comptime_host_range_add(const void *base, size_t len,
 void cccc_comptime_host_range_drop(const void *owner);
 size_t cccc_comptime_host_range_left(const void *p, bool write);
 
+// A tsearch/tfind node (its key slot) libc owns; `tree` is the root variable
+// passed to the call. `tree` NULL in _known matches a node of any tree.
+void cccc_comptime_host_node_add(const void *node, const void *tree);
+bool cccc_comptime_host_node_known(const void *node, const void *tree);
+
 // Range helpers for callback trampolines, which hand libc-owned memory to guest
 // code: a `struct dirent *`, an `FTSENT *`, a NUL-terminated string.
 void cccc_comptime_host_dirent(const void *e, const void *owner);
