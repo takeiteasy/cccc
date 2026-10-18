@@ -225,6 +225,15 @@ int main(void) {
     // A compiler outside the system directories reads its own tree.
     const char *other_cc = "/opt/homebrew/opt/llvm/bin/clang";
     if (access(other_cc, X_OK) == 0) {
+        snprintf(built, sizeof built, "%s/bo2/bin/app", root);
+        if (run("%s --sandbox --build-cc=%s --build-out-dir=%s/bo2 --build %s "
+                ">/dev/null 2>&1",
+                cccc, other_cc, root, build_c) != 0 ||
+            run("%s", built) != 42) {
+            fprintf(stderr, "FAIL: --build --build-cc=%s under --sandbox\n",
+                    other_cc);
+            failed = 1;
+        }
         unlink(out);
         if (run("CCCC_NATIVE_CC=%s %s --sandbox -c=native -o %s %s/ok.c "
                 ">/dev/null 2>&1",

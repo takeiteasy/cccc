@@ -2834,9 +2834,11 @@ int main(int argc, const char *argv[]) {
                         sandbox_execs[i], strerror(errno));
         bool sb_toolchain =
             compile_format == COMPILE_NATIVE || build_mode || asm_passthru;
-        char            *sb_cc    = !sb_toolchain ? NULL
-                                    : build_mode  ? cccc_find_build_cc()
-                                                  : cccc_find_native_cc();
+        char *sb_cc = !sb_toolchain ? NULL
+                      : build_mode
+                          ? (build_cc && *build_cc ? strdup(build_cc)
+                                                   : cccc_find_build_cc())
+                          : cccc_find_native_cc();
         CcccSandboxPaths sb_paths = {
             .out_file    = out_file,
             .default_out = !out_file && compile_format != COMPILE_NONE,

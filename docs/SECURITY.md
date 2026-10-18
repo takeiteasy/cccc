@@ -54,6 +54,7 @@ cccc --sandbox --sandbox-read=/data prog.c     # also let the run read /data
 
 - Running from `$HOME` makes all of `$HOME` readable, because the working directory is always readable. Run from the project directory.
 - `--sandbox-read=<path>` (repeatable) adds a readable file or directory. It is a trust option, so a project `.cccc.toml` needs approval to use it.
+- A `--build` run probes `--build-cc=` (else `CCCC_BUILD_CC`, else `cc`). A compiler a build script sets per target with `SetToolchain` is only known after the sandbox closes, so name it with `--sandbox-exec=<cc>` and its install directory with `--sandbox-read=<dir>`.
 - `--sandbox-exec=<path>` (repeatable) adds a program, or a directory of programs, the run may start. It is a trust option too. Use it for a toolchain the automatic grants miss.
 
 - The program a sandboxed `cccc prog.c` runs is confined too. Use `-c=native` and run the result outside the sandbox when it needs the network or other files.
