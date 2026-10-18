@@ -447,6 +447,172 @@ bool cccc_comptime_host_ptr_take(void *p) {
     return hit;
 }
 
+// --- Compiler handles ----------------------------------------------------
+// Node *, Type *, ... are host pointers comptime code holds as integers. The
+// compiler records each one it hands out; a builtin rejects any other value.
+// TODO(#1680): one global map behind one lock, never pruned; scope it per VM.
+
+static HashMap         handles;
+static pthread_mutex_t handle_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static const struct {
+    const char *tag;
+    int         kind;
+} HANDLE_TAGS[] = {
+    {"Node", CC_H_NODE},
+    {"Type", CC_H_TYPE},
+    {"Member", CC_H_MEMBER},
+    {"Obj", CC_H_OBJ},
+    {"Token", CC_H_TOKEN},
+    {"EnumConstant", CC_H_ENUM_CONSTANT},
+    {"AttrTarget", CC_H_ATTR_TARGET},
+};
+
+static const char *handle_kind_name(int kind) {
+    for (size_t i = 0; i < sizeof HANDLE_TAGS / sizeof HANDLE_TAGS[0]; i++)
+        if (HANDLE_TAGS[i].kind == kind)
+            return HANDLE_TAGS[i].tag;
+    return "?";
+}
+
+void cccc_comptime_handle_add(const void *p, int kind) {
+    if (!p || kind == CC_H_NONE)
+        return;
+    pthread_mutex_lock(&handle_lock);
+    hashmap_put_int(&handles, (long long)(uintptr_t)p, (void *)(uintptr_t)kind);
+    pthread_mutex_unlock(&handle_lock);
+}
+
+bool cccc_comptime_handle_ok(const void *p, int kind) {
+    if (!p)
+        return true;
+    pthread_mutex_lock(&handle_lock);
+    bool hit = (int)(uintptr_t)hashmap_get_int(&handles,
+                                               (long long)(uintptr_t)p) == kind;
+    pthread_mutex_unlock(&handle_lock);
+    return hit;
+}
+
+void cccc_comptime_handle_add_nodes(Node *first) {
+    for (Node *n = first; n; n = n->next)
+        cccc_comptime_handle_add(n, CC_H_NODE);
+}
+
+// The handle kind a pointer parameter or result type declares, or CC_H_NONE.
+static int handle_kind_of_type(const Type *ty) {
+    if (!ty || ty->kind != TY_PTR || !ty->base)
+        return CC_H_NONE;
+    int array = 0;
+    if (ty->base->kind == TY_PTR) {
+        ty    = ty->base;
+        array = CC_H_ARRAY;
+    }
+    const Type *pointee = ty->base;
+    if (!pointee || (pointee->kind != TY_STRUCT && pointee->kind != TY_UNION))
+        return CC_H_NONE;
+    const Token *tag =
+        pointee->struct_tag ? pointee->struct_tag : pointee->name;
+    if (!tag)
+        return CC_H_NONE;
+    const char *text = tag->loc;
+    int         len  = tag->len;
+    if (len > 7 && strncmp(text, "__cccc_", 7) == 0) {
+        text += 7;
+        len  -= 7;
+    }
+    for (size_t i = 0; i < sizeof HANDLE_TAGS / sizeof HANDLE_TAGS[0]; i++)
+        if ((int)strlen(HANDLE_TAGS[i].tag) == len &&
+            strncmp(text, HANDLE_TAGS[i].tag, (size_t)len) == 0)
+            return HANDLE_TAGS[i].kind | array;
+    return CC_H_NONE;
+}
+
+static CcBuiltin *builtin_by_name(const char *name) {
+    for (CcBuiltin *b = cc_builtins; b; b = b->next)
+        if (strcmp(b->name, name) == 0)
+            return b;
+    return NULL;
+}
+
+void cccc_builtin_note_signature(const char *name, const Type *fn_ty) {
+    if (!name || !fn_ty || strncmp(name, "__builtin_", 10) != 0)
+        return;
+    CcBuiltin *b = builtin_by_name(name);
+    if (!b || b->sig_ready)
+        return;
+    b->ret_kind = (uint8_t)handle_kind_of_type(fn_ty->return_ty);
+    int i       = 0;
+    for (const Type *p = fn_ty->params; p && i < CC_BUILTIN_MAX_PARAMS;
+         p             = p->next, i++) {
+        b->arg_kind[i]  = (uint8_t)handle_kind_of_type(p);
+        b->arg_count[i] = -1;
+    }
+    // An array's length is the first integer parameter after it.
+    int j = 0;
+    for (const Type *p = fn_ty->params; p && j < CC_BUILTIN_MAX_PARAMS;
+         p             = p->next, j++) {
+        if (!(b->arg_kind[j] & CC_H_ARRAY))
+            continue;
+        int k = j + 1;
+        for (const Type *q = p->next; q && k < CC_BUILTIN_MAX_PARAMS;
+             q             = q->next, k++)
+            if (is_integer((Type *)q)) {
+                b->arg_count[j] = (int8_t)k;
+                break;
+            }
+    }
+    b->sig_ready = true;
+}
+
+static int forged_handle(VirtualMachine *vm, const CcBuiltin *b, int arg,
+                         int kind) {
+    char msg[160];
+    snprintf(msg, sizeof msg, "call to '%s' argument %d: not a %s handle",
+             b->name, arg, handle_kind_name(kind));
+    return cccc_comptime_abort(vm, msg);
+}
+
+int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
+                                long long *args, int nargs) {
+    if (!b->sig_ready)
+        return 0;
+    // TODO(#1678): arguments in the variadic tail are not checked.
+    for (int i = 0; i < nargs && i < CC_BUILTIN_MAX_PARAMS; i++) {
+        int kind = b->arg_kind[i];
+        if (kind == CC_H_NONE)
+            continue;
+        if (!(kind & CC_H_ARRAY)) {
+            if (!cccc_comptime_handle_ok((void *)args[i], kind))
+                return forged_handle(vm, b, i, kind);
+            continue;
+        }
+        kind       &= CC_H_KIND_MASK;
+        Node **arr  = (Node **)args[i];
+        int    ci   = b->arg_count[i];
+        if (!arr || ci < 0 || ci >= nargs)
+            continue;
+        long long count = args[ci];
+        if (count <= 0)
+            continue;
+        if ((size_t)count > SIZE_MAX / sizeof *arr ||
+            !cccc_comptime_addr_ok(vm, arr, (size_t)count * sizeof *arr, false))
+            return cccc_comptime_fault(vm, b->name, arr, 1, false);
+        for (long long e = 0; e < count; e++)
+            if (!cccc_comptime_handle_ok(arr[e], kind))
+                return forged_handle(vm, b, i, kind);
+    }
+    return 0;
+}
+
+void cccc_comptime_note_builtin_result(const CcBuiltin *b, long long result) {
+    if (!result || !b->sig_ready)
+        return;
+    int kind = b->ret_kind;
+    if (kind & CC_H_ARRAY)
+        return; // the elements are noted where the VM copy is made
+    cccc_comptime_handle_add((void *)result, kind);
+}
+
 // --- Host memory ranges ------------------------------------------------------
 // Memory libc keeps owning (glob paths, directory entries, search nodes) stays
 // in host memory; comptime reads it through disjoint ranges that the matching

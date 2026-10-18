@@ -204,6 +204,8 @@ int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
     vm->cycle              = 0;
 
+    // TODO(#1679): handlers are installed per comptime call, and a fault inside
+    // malloc/stdio can leave a libc lock held for the diagnostic.
     bool debugger          = host_signal_debug_active(vm);
     if (!debugger && !vm->comptime_depth)
         return cccc_vm_eval_dispatch(vm, &current_pc);

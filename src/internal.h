@@ -1654,6 +1654,23 @@ typedef enum {
     CC_RET_CSTR,       // host C string; comptime gets a VM-heap copy
     CC_RET_NODES,      // host Node * array of macro_vararg_count elements
 } CcBuiltinRet;
+// Kinds of the opaque compiler handles a builtin takes or returns. CC_H_ARRAY
+// marks an array of handles (`Node **nodes, int count`).
+typedef enum {
+    CC_H_NONE = 0,
+    CC_H_NODE,
+    CC_H_TYPE,
+    CC_H_MEMBER,
+    CC_H_OBJ,
+    CC_H_TOKEN,
+    CC_H_ENUM_CONSTANT,
+    CC_H_ATTR_TARGET,
+    CC_H_KIND_MASK = 0x0f,
+    CC_H_ARRAY     = 0x10,
+} CcHandleKind;
+
+#define CC_BUILTIN_MAX_PARAMS 24
+
 struct CcBuiltin {
     const char  *name;
     void        *fn;
@@ -1662,6 +1679,12 @@ struct CcBuiltin {
     int          returns_double; // 0 = integer/pointer, 1 = double, 2 = float
     CcBuiltinRet ret;
     CcBuiltin   *next;
+    // Handle signature read from the reflection.h prototype at the first call
+    // site (cccc_builtin_note_signature).
+    bool    sig_ready;
+    uint8_t ret_kind;
+    uint8_t arg_kind[CC_BUILTIN_MAX_PARAMS];
+    int8_t  arg_count[CC_BUILTIN_MAX_PARAMS]; // count arg of an array
 };
 extern CcBuiltin *cc_builtins;
 

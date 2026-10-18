@@ -5923,7 +5923,6 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, void *func_ptr,
         return 1;
 
     // Comptime builtins skip the FFI flags but still pass the comptime policy.
-    // TODO(#1665): their handle arguments are trusted.
     if (find_compiler_builtin(func_ptr)) {
         cccc_comptime_enforce(vm, name);
         return 1;
@@ -5996,9 +5995,15 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     if (policy <= 0)
         return policy;
 
-    if (__builtin_expect(vm->comptime_depth != 0, 0) &&
-        cccc_comptime_check_args(vm, name, args, actual_nargs))
-        return -1;
+    if (__builtin_expect(vm->comptime_depth != 0, 0)) {
+        if (cccc_comptime_check_args(vm, name, args, actual_nargs))
+            return -1;
+        // TODO(#1677): builtins' string and buffer arguments are unchecked.
+        const CcBuiltin *called = find_compiler_builtin(func_ptr);
+        if (called &&
+            cccc_comptime_check_builtin(vm, called, args, actual_nargs))
+            return -1;
+    }
 
     ffi_cif    cif;
     ffi_type **arg_types   = NULL;
@@ -6084,6 +6089,15 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         if (builtin && builtin->ret != CC_RET_HANDLE && result)
             result = (long long)copy_builtin_result_to_vm(vm, builtin->ret,
                                                           (void *)result);
+        if (builtin && vm->comptime_depth) {
+            if (builtin->ret == CC_RET_NODES && result) {
+                Node **nodes = (Node **)result;
+                for (int i = 0; i < vm->compiler.macro_vararg_count; i++)
+                    cccc_comptime_handle_add(nodes[i], CC_H_NODE);
+            } else {
+                cccc_comptime_note_builtin_result(builtin, result);
+            }
+        }
         if (__builtin_expect(vm->comptime_depth != 0, 0))
             cccc_comptime_after_call(vm, name, args, actual_nargs, &result);
         vm->regs[REG_A0] = result;

@@ -5,6 +5,9 @@
 #include <stddef.h>
 
 typedef struct VirtualMachine VirtualMachine;
+typedef struct Node           Node;
+typedef struct Type           Type;
+typedef struct CcBuiltin      CcBuiltin;
 
 // Capability classes for native calls made while comptime code runs.
 // CT_SAFE is always granted; the rest need --comptime-allow.
@@ -93,5 +96,20 @@ int cccc_comptime_fault(VirtualMachine *vm, const char *what, const void *p,
                         size_t n, bool write);
 
 int cccc_comptime_abort(VirtualMachine *vm, const char *msg);
+
+// Opaque compiler handles (Node *, Type *, ...) handed to comptime code. A
+// builtin rejects any handle it was not given. NULL is always accepted.
+void cccc_comptime_handle_add(const void *p, int kind);
+bool cccc_comptime_handle_ok(const void *p, int kind);
+void cccc_comptime_handle_add_nodes(Node *first);
+
+// Reads which parameters of builtin `name` are handles from its prototype.
+void cccc_builtin_note_signature(const char *name, const Type *fn_ty);
+// Checks a builtin's handle arguments; prints a diagnostic and returns -1 on a
+// forged one.
+int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
+                                long long *args, int nargs);
+// Remembers the handles a builtin returns.
+void cccc_comptime_note_builtin_result(const CcBuiltin *b, long long result);
 
 #endif

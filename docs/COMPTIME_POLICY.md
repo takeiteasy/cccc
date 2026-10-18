@@ -108,6 +108,13 @@ A fault the checks miss (a native `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL` or `SI
 error: compile-time macro execution terminated by host signal 6
 ```
 
-Libc calls you grant with `--comptime-allow`, the handles passed to builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+Builtins check the opaque handles they take (`Node *`, `Type *`, `Member *`, `Obj *`, `Token *`, `EnumConstant *`, `AttrTarget *`, and arrays of them). A handle must be one the compiler gave comptime code, and of the kind the parameter declares; `NULL` passes:
+
+```
+error: compile-time macro 'probe' aborted (opcode 'CALLF' faulted)
+call to '__builtin_ast_type_kind' argument 0: not a Type handle
+```
+
+Libc calls you grant with `--comptime-allow`, strings and buffers passed to builtins, the extra arguments of `Quote`-style variadic builtins, and pointers stored inside a checked buffer are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.
