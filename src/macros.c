@@ -2577,7 +2577,7 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     // Inline macro arguments are Node* pointers to the AST nodes. Global
     // generation callers preload char* fixed arguments and set string-mode
     // varargs before entering this helper.
-    cccc_comptime_handle_add_nodes(args);
+    cccc_comptime_handle_add_nodes(vm, args);
     if (fixed_arg_values) {
         setup_macro_call_slots(vm, fixed_arg_values, fixed_arg_count);
     } else if (args) {
@@ -2730,8 +2730,8 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                         : NULL;
     if (fixed_count > 0)
         fixed_values[0] = (long long)target;
-    cccc_comptime_handle_add(target, CC_H_ATTR_TARGET);
-    cccc_comptime_handle_add_nodes(args);
+    cccc_comptime_handle_add(vm, target, CC_H_ATTR_TARGET);
+    cccc_comptime_handle_add_nodes(vm, args);
 
     Node *arg = args;
     for (int i = 1; i < fixed_count; i++) {

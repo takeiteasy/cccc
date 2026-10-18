@@ -101,9 +101,37 @@ int main(void) {
           vm3.compiler.embedded_file_no);
     cc_destroy(&vm3);
 
+    // The comptime handle and host-pointer registries belong to one VM.
+    int             handle, host;
+    VirtualMachine  vm4, vm5;
+    cc_init(&vm4, 0);
+    cc_init(&vm5, 0);
+    cccc_comptime_handle_add(&vm4, &handle, CC_H_NODE);
+    cccc_comptime_host_ptr_add(&vm4, &host);
+    CHECK(cccc_comptime_handle_ok(&vm4, &handle, CC_H_NODE),
+          "vm4 does not know its own handle");
+    CHECK(!cccc_comptime_handle_ok(&vm4, &handle, CC_H_TYPE),
+          "a handle matched the wrong kind");
+    CHECK(!cccc_comptime_handle_ok(&vm5, &handle, CC_H_NODE),
+          "vm5 accepted a handle only vm4 handed out");
+    CHECK(!cccc_comptime_host_ptr_take(&vm5, &host),
+          "vm5 took a host pointer only vm4 registered");
+    CHECK(cccc_comptime_host_ptr_take(&vm4, &host),
+          "vm4 lost its host pointer");
+    CHECK(!cccc_comptime_host_ptr_take(&vm4, &host),
+          "a taken host pointer was taken twice");
+    cc_destroy(&vm4);
+    cc_destroy(&vm5);
+
+    VirtualMachine vm6;
+    cc_init(&vm6, 0);
+    CHECK(!cccc_comptime_handle_ok(&vm6, &handle, CC_H_NODE),
+          "a new VM inherited a destroyed VM's handle");
+    cc_destroy(&vm6);
+
     if (!failed)
         printf("PASS: file_no/embedded_file_no reset per-VM; input_files "
-               "well-formed across instances\n");
+               "well-formed across instances; comptime registries per-VM\n");
 
     return failed;
 }

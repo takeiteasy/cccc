@@ -3932,7 +3932,7 @@ int cccc_vm_heap_free(VirtualMachine *vm, void *ptr) {
     // peeking at ptr-sizeof(AllocHeader) would read out of bounds. Fall
     // back to system free directly.
     if (!is_vm_heap_ptr(vm, ptr)) {
-        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(ptr))
+        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(vm, ptr))
             return cccc_comptime_fault(vm, "free", ptr, 1, true);
         free(ptr);
         return 0;
@@ -4333,12 +4333,12 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
     // malloc) — there is no AllocHeader to read, so don't peek at
     // ptr-sizeof(AllocHeader); fall back to system realloc directly.
     if (!is_vm_heap_ptr(vm, ptr)) {
-        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(ptr))
+        if (vm->comptime_depth && !cccc_comptime_host_ptr_take(vm, ptr))
             return cccc_comptime_fault(vm, "realloc", ptr, 1, true);
         void *new_ptr    = realloc(ptr, (size_t)new_size);
         vm->regs[REG_A0] = (long long)new_ptr;
         if (vm->comptime_depth)
-            cccc_comptime_host_ptr_add(new_ptr);
+            cccc_comptime_host_ptr_add(vm, new_ptr);
         return 0;
     }
 
@@ -6093,9 +6093,9 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
             if (builtin->ret == CC_RET_NODES && result) {
                 Node **nodes = (Node **)result;
                 for (int i = 0; i < vm->compiler.macro_vararg_count; i++)
-                    cccc_comptime_handle_add(nodes[i], CC_H_NODE);
+                    cccc_comptime_handle_add(vm, nodes[i], CC_H_NODE);
             } else {
-                cccc_comptime_note_builtin_result(builtin, result);
+                cccc_comptime_note_builtin_result(vm, builtin, result);
             }
         }
         if (__builtin_expect(vm->comptime_depth != 0, 0))

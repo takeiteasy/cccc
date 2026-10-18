@@ -3884,7 +3884,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if (!found_ty)
             found_ty = find_tag(vm, &fake);
         if (found_ty) {
-            cccc_comptime_handle_add(found_ty, CC_H_TYPE);
+            cccc_comptime_handle_add(vm, found_ty, CC_H_TYPE);
             Node *node = new_ulong(vm, (uint64_t)(uintptr_t)found_ty, tok);
             Type *meta = find_typedef(vm, &type_fake);
             node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
@@ -3895,7 +3895,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // 3. Variable or function (Obj)
         VarScope *vs = find_var(vm, &fake);
         if (vs && vs->var) {
-            cccc_comptime_handle_add(vs->var, CC_H_OBJ);
+            cccc_comptime_handle_add(vm, vs->var, CC_H_OBJ);
             Node *node = new_ulong(vm, (uint64_t)(uintptr_t)vs->var, tok);
             Type *meta = find_typedef(vm, &obj_fake);
             node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);

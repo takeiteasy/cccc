@@ -370,10 +370,37 @@ static const char *const HOST_PTR_RESULTS[] = {
     "open_memstream", "opendir",   "popen", "tmpfile",
 };
 
-static HashMap         specs;
-static HashMap         host_ptrs;
-static pthread_mutex_t host_lock  = PTHREAD_MUTEX_INITIALIZER;
-static pthread_once_t  specs_once = PTHREAD_ONCE_INIT;
+static HashMap        specs;
+static pthread_once_t specs_once = PTHREAD_ONCE_INIT;
+
+// --- Per-VM registries -----------------------------------------------------
+// Compiler handles and host pointers a VM has handed to comptime code. One
+// lock covers both maps; the VM frees them in cc_destroy.
+
+typedef struct {
+    HashMap         handles;
+    HashMap         host_ptrs;
+    pthread_mutex_t lock;
+} Registry;
+
+void cccc_comptime_registry_init(VirtualMachine *vm) {
+    Registry *r = calloc(1, sizeof *r);
+    if (!r)
+        error("could not allocate the comptime registry");
+    pthread_mutex_init(&r->lock, NULL);
+    vm->comptime_registry = r;
+}
+
+void cccc_comptime_registry_free(VirtualMachine *vm) {
+    Registry *r = vm->comptime_registry;
+    if (!r)
+        return;
+    hashmap_deinit(&r->handles);
+    hashmap_deinit(&r->host_ptrs);
+    pthread_mutex_destroy(&r->lock);
+    free(r);
+    vm->comptime_registry = NULL;
+}
 
 static void build_specs(void) {
     for (size_t i = 0; i < sizeof(SPECS) / sizeof(SPECS[0]); i++)
@@ -423,37 +450,40 @@ const char *cccc_comptime_arg_spec(const char *name) {
 
 // --- Host pointer registry ---------------------------------------------
 
-void cccc_comptime_host_ptr_add(void *p) {
-    if (!p)
+void cccc_comptime_host_ptr_add(VirtualMachine *vm, void *p) {
+    Registry *r = vm->comptime_registry;
+    if (!p || !r)
         return;
-    pthread_mutex_lock(&host_lock);
-    hashmap_put_int(&host_ptrs, (long long)(uintptr_t)p, (void *)1);
-    pthread_mutex_unlock(&host_lock);
+    pthread_mutex_lock(&r->lock);
+    hashmap_put_int(&r->host_ptrs, (long long)(uintptr_t)p, (void *)1);
+    pthread_mutex_unlock(&r->lock);
 }
 
-static bool host_ptr_known(const void *p) {
-    pthread_mutex_lock(&host_lock);
-    bool hit = hashmap_get_int(&host_ptrs, (long long)(uintptr_t)p) != NULL;
-    pthread_mutex_unlock(&host_lock);
+static bool host_ptr_known(VirtualMachine *vm, const void *p) {
+    Registry *r = vm->comptime_registry;
+    if (!r)
+        return false;
+    pthread_mutex_lock(&r->lock);
+    bool hit = hashmap_get_int(&r->host_ptrs, (long long)(uintptr_t)p) != NULL;
+    pthread_mutex_unlock(&r->lock);
     return hit;
 }
 
-bool cccc_comptime_host_ptr_take(void *p) {
-    pthread_mutex_lock(&host_lock);
-    bool hit = hashmap_get_int(&host_ptrs, (long long)(uintptr_t)p) != NULL;
+bool cccc_comptime_host_ptr_take(VirtualMachine *vm, void *p) {
+    Registry *r = vm->comptime_registry;
+    if (!r)
+        return false;
+    pthread_mutex_lock(&r->lock);
+    bool hit = hashmap_get_int(&r->host_ptrs, (long long)(uintptr_t)p) != NULL;
     if (hit)
-        hashmap_delete_int(&host_ptrs, (long long)(uintptr_t)p);
-    pthread_mutex_unlock(&host_lock);
+        hashmap_delete_int(&r->host_ptrs, (long long)(uintptr_t)p);
+    pthread_mutex_unlock(&r->lock);
     return hit;
 }
 
 // --- Compiler handles ----------------------------------------------------
 // Node *, Type *, ... are host pointers comptime code holds as integers. The
 // compiler records each one it hands out; a builtin rejects any other value.
-// TODO(#1680): one global map behind one lock, never pruned; scope it per VM.
-
-static HashMap         handles;
-static pthread_mutex_t handle_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static const struct {
     const char *tag;
@@ -475,27 +505,32 @@ static const char *handle_kind_name(int kind) {
     return "?";
 }
 
-void cccc_comptime_handle_add(const void *p, int kind) {
-    if (!p || kind == CC_H_NONE)
+void cccc_comptime_handle_add(VirtualMachine *vm, const void *p, int kind) {
+    Registry *r = vm->comptime_registry;
+    if (!p || !r || kind == CC_H_NONE)
         return;
-    pthread_mutex_lock(&handle_lock);
-    hashmap_put_int(&handles, (long long)(uintptr_t)p, (void *)(uintptr_t)kind);
-    pthread_mutex_unlock(&handle_lock);
+    pthread_mutex_lock(&r->lock);
+    hashmap_put_int(&r->handles, (long long)(uintptr_t)p,
+                    (void *)(uintptr_t)kind);
+    pthread_mutex_unlock(&r->lock);
 }
 
-bool cccc_comptime_handle_ok(const void *p, int kind) {
+bool cccc_comptime_handle_ok(VirtualMachine *vm, const void *p, int kind) {
+    Registry *r = vm->comptime_registry;
     if (!p)
         return true;
-    pthread_mutex_lock(&handle_lock);
-    bool hit = (int)(uintptr_t)hashmap_get_int(&handles,
+    if (!r)
+        return false;
+    pthread_mutex_lock(&r->lock);
+    bool hit = (int)(uintptr_t)hashmap_get_int(&r->handles,
                                                (long long)(uintptr_t)p) == kind;
-    pthread_mutex_unlock(&handle_lock);
+    pthread_mutex_unlock(&r->lock);
     return hit;
 }
 
-void cccc_comptime_handle_add_nodes(Node *first) {
+void cccc_comptime_handle_add_nodes(VirtualMachine *vm, Node *first) {
     for (Node *n = first; n; n = n->next)
-        cccc_comptime_handle_add(n, CC_H_NODE);
+        cccc_comptime_handle_add(vm, n, CC_H_NODE);
 }
 
 // The handle kind a pointer parameter or result type declares, or CC_H_NONE.
@@ -582,7 +617,7 @@ int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
         if (kind == CC_H_NONE)
             continue;
         if (!(kind & CC_H_ARRAY)) {
-            if (!cccc_comptime_handle_ok((void *)args[i], kind))
+            if (!cccc_comptime_handle_ok(vm, (void *)args[i], kind))
                 return forged_handle(vm, b, i, kind);
             continue;
         }
@@ -598,19 +633,20 @@ int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
             !cccc_comptime_addr_ok(vm, arr, (size_t)count * sizeof *arr, false))
             return cccc_comptime_fault(vm, b->name, arr, 1, false);
         for (long long e = 0; e < count; e++)
-            if (!cccc_comptime_handle_ok(arr[e], kind))
+            if (!cccc_comptime_handle_ok(vm, arr[e], kind))
                 return forged_handle(vm, b, i, kind);
     }
     return 0;
 }
 
-void cccc_comptime_note_builtin_result(const CcBuiltin *b, long long result) {
+void cccc_comptime_note_builtin_result(VirtualMachine *vm, const CcBuiltin *b,
+                                       long long result) {
     if (!result || !b->sig_ready)
         return;
     int kind = b->ret_kind;
     if (kind & CC_H_ARRAY)
         return; // the elements are noted where the VM copy is made
-    cccc_comptime_handle_add((void *)result, kind);
+    cccc_comptime_handle_add(vm, (void *)result, kind);
 }
 
 // --- Host memory ranges ------------------------------------------------------
@@ -627,8 +663,9 @@ typedef struct {
 
 // TODO(#1676): sorted array with O(n) insert and owner scans; use an interval
 // tree if results with many thousands of entries show up.
-static HostRange *host_ranges;
-static size_t     host_range_count, host_range_cap;
+static HostRange      *host_ranges;
+static size_t          host_range_count, host_range_cap;
+static pthread_mutex_t range_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Index of the first range whose end is above `a`.
 static size_t range_lower_bound(uintptr_t a) {
@@ -648,7 +685,7 @@ void cccc_comptime_host_range_add(const void *base, size_t len,
     if (!base || !len)
         return;
     uintptr_t a = (uintptr_t)base;
-    pthread_mutex_lock(&host_lock);
+    pthread_mutex_lock(&range_lock);
     // A new range replaces whatever it overlaps (a reused dirent buffer).
     size_t i = range_lower_bound(a);
     size_t j = i;
@@ -663,7 +700,7 @@ void cccc_comptime_host_range_add(const void *base, size_t len,
         size_t     cap = host_range_cap ? host_range_cap * 2 : 64;
         HostRange *n   = realloc(host_ranges, cap * sizeof *n);
         if (!n) {
-            pthread_mutex_unlock(&host_lock);
+            pthread_mutex_unlock(&range_lock);
             return;
         }
         host_ranges    = n;
@@ -673,30 +710,30 @@ void cccc_comptime_host_range_add(const void *base, size_t len,
             (host_range_count - i) * sizeof *host_ranges);
     host_ranges[i] = (HostRange){a, len, owner, writable};
     host_range_count++;
-    pthread_mutex_unlock(&host_lock);
+    pthread_mutex_unlock(&range_lock);
 }
 
 void cccc_comptime_host_range_drop(const void *owner) {
     if (!owner)
         return;
-    pthread_mutex_lock(&host_lock);
+    pthread_mutex_lock(&range_lock);
     size_t keep = 0;
     for (size_t i = 0; i < host_range_count; i++)
         if (host_ranges[i].owner != owner)
             host_ranges[keep++] = host_ranges[i];
     host_range_count = keep;
-    pthread_mutex_unlock(&host_lock);
+    pthread_mutex_unlock(&range_lock);
 }
 
 size_t cccc_comptime_host_range_left(const void *p, bool write) {
     uintptr_t a    = (uintptr_t)p;
     size_t    left = 0;
-    pthread_mutex_lock(&host_lock);
+    pthread_mutex_lock(&range_lock);
     size_t i = range_lower_bound(a);
     if (i < host_range_count && host_ranges[i].base <= a &&
         (!write || host_ranges[i].writable))
         left = host_ranges[i].base + host_ranges[i].len - a;
-    pthread_mutex_unlock(&host_lock);
+    pthread_mutex_unlock(&range_lock);
     return left;
 }
 
@@ -1065,7 +1102,7 @@ int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
                     return fault(&c, i, ptr, sizeof(wchar_t), false);
                 break;
             case 'h':
-                if (!host_ptr_known(ptr))
+                if (!host_ptr_known(vm, ptr))
                     return fault(&c, i, ptr, 1, false);
                 break;
             case 'c':
@@ -1115,7 +1152,7 @@ int cccc_comptime_check_args(VirtualMachine *vm, const char *name,
 
     if (locale_tail && nargs > 0) {
         void *loc = (void *)args[nargs - 1];
-        if (loc != (void *)-1 && !host_ptr_known(loc))
+        if (loc != (void *)-1 && !host_ptr_known(vm, loc))
             return fault(&c, nargs - 1, loc, 1, false);
     }
 
@@ -1579,7 +1616,7 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
                 break;
             case 'h':
                 if (p && !cccc_comptime_in_vm(vm, p))
-                    cccc_comptime_host_ptr_add(p);
+                    cccc_comptime_host_ptr_add(vm, p);
                 break;
             case 'A': {
                 char **out = nargs > 0 ? (char **)args[0] : NULL;
@@ -1601,7 +1638,7 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
         if (strcmp(name, HOST_PTR_RESULTS[i]) == 0) {
             void *p = (void *)*result;
             if (p && !cccc_comptime_in_vm(vm, p))
-                cccc_comptime_host_ptr_add(p);
+                cccc_comptime_host_ptr_add(vm, p);
             return;
         }
 

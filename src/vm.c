@@ -1350,6 +1350,7 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     }
 
     cccc_gil_init(vm);
+    cccc_comptime_registry_init(vm);
 }
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -1511,6 +1512,7 @@ void cc_destroy(VirtualMachine *vm) {
 
     cccc_pthread_cleanup(vm);
     cccc_gil_destroy(vm);
+    cccc_comptime_registry_free(vm);
 
     // Report memory leaks before releasing segments
     if ((vm->flags & CCCC_MEMORY_LEAK_DETECT) && vm->alloc_list) {

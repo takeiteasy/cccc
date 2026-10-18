@@ -66,8 +66,12 @@ void cccc_comptime_after_call(VirtualMachine *vm, const char *name,
                               long long *args, int nargs, long long *result);
 
 // Host allocations and handles comptime code may pass back to libc.
-void cccc_comptime_host_ptr_add(void *p);
-bool cccc_comptime_host_ptr_take(void *p);
+void cccc_comptime_host_ptr_add(VirtualMachine *vm, void *p);
+bool cccc_comptime_host_ptr_take(VirtualMachine *vm, void *p);
+
+// The per-VM handle and host-pointer maps; freed by cc_destroy.
+void cccc_comptime_registry_init(VirtualMachine *vm);
+void cccc_comptime_registry_free(VirtualMachine *vm);
 
 // Host memory libc keeps owning but comptime code may read (and write when
 // `writable`) until the release call drops its `owner`. A new range replaces
@@ -99,9 +103,9 @@ int cccc_comptime_abort(VirtualMachine *vm, const char *msg);
 
 // Opaque compiler handles (Node *, Type *, ...) handed to comptime code. A
 // builtin rejects any handle it was not given. NULL is always accepted.
-void cccc_comptime_handle_add(const void *p, int kind);
-bool cccc_comptime_handle_ok(const void *p, int kind);
-void cccc_comptime_handle_add_nodes(Node *first);
+void cccc_comptime_handle_add(VirtualMachine *vm, const void *p, int kind);
+bool cccc_comptime_handle_ok(VirtualMachine *vm, const void *p, int kind);
+void cccc_comptime_handle_add_nodes(VirtualMachine *vm, Node *first);
 
 // Reads which parameters of builtin `name` are handles from its prototype.
 void cccc_builtin_note_signature(const char *name, const Type *fn_ty);
@@ -110,6 +114,7 @@ void cccc_builtin_note_signature(const char *name, const Type *fn_ty);
 int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
                                 long long *args, int nargs);
 // Remembers the handles a builtin returns.
-void cccc_comptime_note_builtin_result(const CcBuiltin *b, long long result);
+void cccc_comptime_note_builtin_result(VirtualMachine *vm, const CcBuiltin *b,
+                                       long long result);
 
 #endif

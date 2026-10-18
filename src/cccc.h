@@ -5031,6 +5031,7 @@ struct VirtualMachine {
     // (ComptimeClass bits) and how many comptime vm_eval calls are active.
     unsigned comptime_allow;
     int      comptime_depth;
+    void    *comptime_registry; // handle and host-pointer maps, see comptime_args.c
 
     // VM opcode execution profiling (--vm-profile). Comptime execution is
     // counted in vm_profile_comptime while vm_profile_in_comptime is set.
