@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-19
+
+- Added: `-c=native` and `-m` enforce `--checked-pointers` (and
+  `#pragma cccc config(checked_pointers)`) in the C they emit. A violation
+  prints the VM's banner and exits with status 255. See `docs/SAFETY.md`.
+- Changed: `-c=native` and `-m` no longer warn that `--checked-pointers` is
+  ignored. `-c=generated` still drops it.
+
 ## [0.18.0] - 2026-10-19
 
 - Added: `@ctor("prefix")` names the constructor `prefix_T_new`.
