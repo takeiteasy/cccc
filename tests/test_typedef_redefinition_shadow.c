@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: nested typedef redefinitions collide (#1709)
 // A nested scope may give a typedef name a different type.
 typedef int T;
 

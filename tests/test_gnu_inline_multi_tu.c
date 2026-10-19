@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: gnu_inline bodies are not emitted (#1710)
 // CCCC_FLAGS: tests/fixtures/gnu_inline_other_tu.c
 // Expected return: 42
 // The same gnu_inline definitions reached from two translation units are not a

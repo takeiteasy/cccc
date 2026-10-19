@@ -283,6 +283,14 @@ real host compiler, so header handling shifts:
   macro that only *declares* a function, or that *defines* a global, when
   invoked elsewhere is likewise resolved by where it is invoked, not by
   where the producing macro happens to be written.
+- A called `extern inline __attribute__((gnu_inline))` function from a
+  captured user header also gets a weak out-of-line definition after the
+  replayed `#include`, matching the VM: a real definition elsewhere wins,
+  and copies from separately compiled `-c=object` files merge. A system
+  header's copy is left to the host library.
+- A function an input declares before a replayed `#include`, and that the
+  header's own function bodies call, is prototyped ahead of that `#include`.
+  This applies whether its definition is in another input or nowhere.
 - When several TUs `#include` the *same* vendored single-header library,
   only one of the replayed lines survives — the rest are the ordinary
   `#include` dedup any repeated header goes through — but which one

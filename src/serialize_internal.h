@@ -313,6 +313,8 @@ typedef struct {
 bool atomic_serializable_pointee(Node *addr);
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj);
+bool gnu_inline_needs_body(Obj *fn);
+void ensure_global_name_index(VirtualMachine *vm, SerializeContext *ctx);
 bool global_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                Obj *obj);
 // gcc has no tentative TLS definitions, so a `static _Thread_local` global is

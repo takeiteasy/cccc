@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: gnu_inline bodies are not emitted (#1710)
 // Expected return: 42
 // A called gnu_inline definition compiles its own body, including the
 // inline-only helpers it calls.

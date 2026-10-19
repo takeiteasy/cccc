@@ -3287,6 +3287,24 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     return !ctx->generated_only || path_is_captured(ctx, body_exp->file->name);
 }
 
+// A called gnu_inline body is the program's own definition in the VM, but the
+// host emits no symbol for one. A system header's copy is left
+// alone: libc already exports that symbol.
+bool gnu_inline_needs_body(Obj *fn) {
+    if (!fn->is_gnu_inline || !fn->is_live || !fn->body)
+        return false;
+    Token *site = token_expansion_site(fn->body->tok);
+    return !site || !site->file || !site->file->is_system_header;
+}
+
+// Weak, as in the VM: a real definition elsewhere wins and copies from
+// separately compiled objects merge. Clang ignores weak on a declaration
+// that follows a definition, so this goes on one that precedes them all.
+static void serialize_gnu_inline_weak(FILE *f, Obj *fn) {
+    if (gnu_inline_needs_body(fn))
+        fprintf(f, "__attribute__((weak)) ");
+}
+
 // #1151: the bodiless-declaration counterpart of the from_input/
 // cccc_bundled_uncaptured test the prototype-emission loop below applies to
 // a `!obj->is_definition && !obj->body` Obj (a bare declaration, e.g. `extern
@@ -4722,11 +4740,28 @@ static bool prelude_target_is_input_def(VirtualMachine *vm, Obj *v) {
     if (!v || v->is_local || v->is_param || v->is_macro_generated || !v->tok ||
         v->name[0] == '.')
         return false;
-    if (v->is_function ? !v->body : !v->is_static)
+    // A bodiless function counts: the header body's reference is the TU-local
+    // prototype Obj, which never gets the definition's body from the linker.
+    if (!v->is_function && !v->is_static)
         return false;
     Token *site = token_expansion_site(v->tok);
     return site && site->file &&
            file_is_command_line_input(vm, site->file->name);
+}
+
+static void prelude_add(PreludeScan *s, Obj *target) {
+    for (int i = 0; i < s->len; i++)
+        if (s->refs[i].target == target && !strcmp(s->refs[i].site, s->site))
+            return;
+    if (s->len == s->cap) {
+        s->cap  = s->cap ? s->cap * 2 : 8;
+        s->refs = realloc(s->refs, s->cap * sizeof(*s->refs));
+    }
+    s->refs[s->len++] = (PreludeRef){
+        .target = target,
+        .header = s->header,
+        .site   = s->site,
+    };
 }
 
 static void prelude_ref_visit(Node *n, void *vctx) {
@@ -4734,18 +4769,7 @@ static void prelude_ref_visit(Node *n, void *vctx) {
     if (n->kind != ND_VAR || n->var == s->fn ||
         !prelude_target_is_input_def(s->vm, n->var))
         return;
-    for (int i = 0; i < s->len; i++)
-        if (s->refs[i].target == n->var && !strcmp(s->refs[i].site, s->site))
-            return;
-    if (s->len == s->cap) {
-        s->cap  = s->cap ? s->cap * 2 : 8;
-        s->refs = realloc(s->refs, s->cap * sizeof(*s->refs));
-    }
-    s->refs[s->len++] = (PreludeRef){
-        .target = n->var,
-        .header = s->header,
-        .site   = s->site,
-    };
+    prelude_add(s, n->var);
 }
 
 static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
@@ -4762,6 +4786,9 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
         s->fn     = obj;
         s->header = site->file->name;
         s->site   = cc_canonical_path_key(vm, site->file->name);
+        // Its weak declaration must precede the header's definition.
+        if (gnu_inline_needs_body(obj))
+            prelude_add(s, obj);
         serialize_ast_walk(obj->body, prelude_ref_visit, s);
     }
 }
@@ -4837,6 +4864,7 @@ static void prelude_emit(FILE *f, SerializeContext *ctx, PreludeScan *s,
             continue;
         prelude_declare_types(f, ctx, t->ty, true, prelude_type_visible, s);
         if (t->is_function) {
+            serialize_gnu_inline_weak(f, t);
             serialize_function_signature(f, ctx, t, true);
         } else {
             fprintf(f, "static ");
@@ -4857,6 +4885,61 @@ static void prelude_check(VirtualMachine *vm, PreludeScan *s) {
                       "'%s' is used by replayed header '%s' but cannot be "
                       "declared ahead of its #include",
                       r->target->name, r->header);
+    }
+}
+
+// TODO(#1719): O(local records x all records) scan; build a name -> records
+// map once per pass if local type names become common.
+static bool local_type_name_collides(VirtualMachine *vm, SerializeContext *ctx,
+                                     TypeName *recs, int len, TypeName *rec,
+                                     bool is_tag) {
+    if (is_tag && !type_is_complete_tagged(rec->ty))
+        return false;
+    for (int j = 0; j < len; j++) {
+        TypeName *other = &recs[j];
+        if (other == rec || other->name_len != rec->name_len ||
+            strncmp(other->name, rec->name, rec->name_len) != 0 ||
+            (other->owner_fn && other->owner_fn != rec->owner_fn))
+            continue;
+        if (is_tag && !type_is_complete_tagged(other->ty))
+            continue;
+        if (!same_type_strong(other->ty, rec->ty))
+            return true;
+    }
+    if (is_tag)
+        return false;
+    // A typedef name also shares the ordinary-identifier namespace.
+    ensure_global_name_index(vm, ctx);
+    char *name = arena_format(vm, "%.*s", rec->name_len, rec->name);
+    return hashmap_get(&ctx->global_names, name) != NULL;
+}
+
+// Function-local typedefs and tags are all declared at the top of their
+// function, so one reusing a name visible there for a different type (a
+// file-scope one, or another block's) is renamed `<name>__cccc_dup<N>`.
+// Identical copies from sibling blocks share the new name.
+static void rename_colliding_local_type_names(VirtualMachine   *vm,
+                                              SerializeContext *ctx,
+                                              TypeName *recs, int len,
+                                              bool is_tag) {
+    for (int i = 0; i < len; i++) {
+        TypeName *rec = &recs[i];
+        if (!rec->owner_fn ||
+            !local_type_name_collides(vm, ctx, recs, len, rec, is_tag))
+            continue;
+        char *old_name = rec->name;
+        int   old_len  = rec->name_len;
+        char *new_name = arena_format(vm, "%.*s__cccc_dup%d", old_len, old_name,
+                                      ctx->anon_global_counter++);
+        int   new_len  = (int)strlen(new_name);
+        for (int j = i; j < len; j++)
+            if (recs[j].owner_fn == rec->owner_fn &&
+                recs[j].name_len == old_len &&
+                strncmp(recs[j].name, old_name, old_len) == 0 &&
+                same_type_strong(recs[j].ty, rec->ty))
+                recs[j].name = new_name, recs[j].name_len = new_len;
+        if (is_tag)
+            ctx->tag_renamed = true;
     }
 }
 
@@ -4902,6 +4985,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_colliding_type_tags(vm, prog, &ctx);      // #1014
     rename_colliding_typedef_names(vm, prog, &ctx);  // #1293
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
+    rename_colliding_local_type_names(vm, &ctx, ctx.tags, ctx.tags_len, true);
+    rename_colliding_local_type_names(vm, &ctx, ctx.typedefs, ctx.typedefs_len,
+                                      false);
     // #1283: build the type-name candidate index only now -- the passes above
     // mutate Type.struct_tag (an index key) and TypeName.name in place. Reset
     // here rather than before collect_scope_names so a lazy build triggered
@@ -6020,6 +6106,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 !bodyless_decl_from_input_or_bundled(vm, &ctx, obj))
                 continue;
         }
+        serialize_gnu_inline_weak(f, obj);
         serialize_function_signature(f, &ctx, obj, true);
         fprintf(f, ";\n\n");
     }
@@ -6052,7 +6139,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             continue;
         if (no_emit_tests && obj_is_test_fn(vm, obj))
             continue;
-        if (!function_is_header_supplied(vm, &ctx, obj))
+        if (!function_is_header_supplied(vm, &ctx, obj) ||
+            gnu_inline_needs_body(obj))
             serialize_function(f, vm, &ctx, obj);
     }
 

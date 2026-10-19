@@ -181,7 +181,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
 
     if (fn->is_static)
         fprintf(f, "static ");
-    else if (fn->is_gnu_inline)
+    else if (fn->is_gnu_inline && !gnu_inline_needs_body(fn))
         fprintf(f, "extern __inline __attribute__((__gnu_inline__)) ");
 
     // #1026: a function returning a function pointer (`int (*f(void))(int,
@@ -442,8 +442,7 @@ void serialize_hoisted_local_decl(FILE *f, VirtualMachine *vm,
 // would be O(locals x globals x functions) across a whole program -- the
 // #1283 perf wall work made a point of keeping whole-program-scale work off
 // this path, hence the one-time HashMap build instead.
-static void ensure_global_name_index(VirtualMachine   *vm,
-                                     SerializeContext *ctx) {
+void ensure_global_name_index(VirtualMachine *vm, SerializeContext *ctx) {
     if (ctx->built_global_names)
         return;
     ctx->built_global_names = true;
