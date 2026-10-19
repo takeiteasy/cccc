@@ -654,11 +654,19 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             fn->ty          = ty;
             fn->is_implicit = false;
         }
-        if (fn->is_definition && equal(tok, "{"))
+        // GNU lets a non-inline definition replace a gnu_inline one.
+        bool replaces_gnu_inline = fn->is_definition && fn->is_gnu_inline &&
+                                   defines_body && !attr->is_inline;
+        if (fn->is_definition && equal(tok, "{") && !replaces_gnu_inline)
             error_tok(vm, tok, "redefinition of %s", name_str);
-        if (!fn->is_static && attr->is_static)
+        if (!fn->is_static && attr->is_static && !replaces_gnu_inline)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
+        if (replaces_gnu_inline) {
+            fn->is_static = attr->is_static;
+            fn->is_inline = false;
+            fn->refs      = (StringArray){0};
+        }
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
             !equal(tok, "{") &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
