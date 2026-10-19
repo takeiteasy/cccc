@@ -2231,7 +2231,7 @@ gen_lookup();
 macro-author tasks. Because reflection.h is implicitly included in every
 macro/comptime TU, these are available without any extra `#include`. The
 ready-made attributes built on them (`@serialize`, `@enum_to_string`,
-`@generate_accessors`, ...) are covered in [DERIVE.md](DERIVE.md).
+`@accessors`, ...) are covered in [DERIVE.md](DERIVE.md).
 
 ### String and Memory Wrappers
 

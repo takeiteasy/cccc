@@ -1,18 +1,18 @@
-// @generate_getters/_setters/_accessors take an optional string prefix, so
+// @getters/_setters/_accessors take an optional string prefix, so
 // two structs sharing a field name do not collide.
 
 #include <cccc/derive.h>
 
-@generate_accessors("A") struct A {
+@accessors("A") struct A {
     int x;
 };
 
-@generate_getters("B") @generate_setters("B") struct B {
+@getters("B") @setters("B") struct B {
     int x;
     int y;
 };
 
-@generate_accessors("") struct C {
+@accessors("") struct C {
     int z;
 };
 

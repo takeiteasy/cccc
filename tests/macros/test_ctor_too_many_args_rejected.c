@@ -1,11 +1,10 @@
 // EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: @builder does not support unions
+// CCCC_EXPECT_STDERR: @ctor takes at most one argument
 
 #include <cccc/derive.h>
 
-@builder union U {
+@ctor("a", "b") struct S {
     int a;
-    float b;
 };
 
 int main(void) {

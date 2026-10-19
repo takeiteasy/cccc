@@ -108,7 +108,7 @@ Manuals live in [`docs/`](docs/):
 | [WATCH.md](docs/WATCH.md) | `--watch`: hot-reload a program or rebuild a `--build` script when a file is saved |
 | [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
 | [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
-| [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@generate_accessors`, ... |
+| [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@accessors`, ... |
 | [CONFIG.md](docs/CONFIG.md) | `.cccc.toml` config files, which options they can set, the trust prompt for project grants, and pinning an approval by hash |
 | [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
 | [SECURITY.md](docs/SECURITY.md) | What runs or downloads while compiling, who can allow it, `--sandbox`, and compiling untrusted code |
@@ -330,7 +330,10 @@ FFI Safety Options:
 	   --comptime-allow=list  Grant comptime code capability classes beyond the safe default:
 	                         fs, exec, net, env, dlopen, thread, signal, ipc, all
 	   --sandbox              Confine this process with the OS sandbox: no network, writes only to output
-	                         and temp directories, exec only of cccc and the C toolchain
+	                         and temp directories, reads only inputs, include/library paths and the toolchain,
+	                         exec only of cccc and the C toolchain
+	   --sandbox-read <path>  Let --sandbox read <path> too (repeatable)
+	   --sandbox-exec <path>  Let --sandbox run <path> too (repeatable)
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 

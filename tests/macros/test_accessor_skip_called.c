@@ -2,7 +2,7 @@
 // CCCC_EXPECT_STDERR: undeclared function 'get_hidden'
 #include <cccc/derive.h>
 
-@generate_getters struct A {
+@getters struct A {
     int shown;
     int hidden @accessor_skip;
 };

@@ -4,8 +4,7 @@
 
 #include <string.h>
 
-@serialize @deserialize @generate_constructor @generate_getters("Pt")
-    @generate_setters("Pt") typedef struct {
+@serialize @deserialize @ctor @getters("Pt") @setters("Pt") typedef struct {
     int x;
     int y;
 } Pt;
@@ -18,7 +17,7 @@
 } Alias;
 
 int main(void) {
-    Pt p = Pt_create(3, 4);
+    Pt p = Pt_new(3, 4);
     if (Pt_get_x(&p) != 3 || Pt_get_y(&p) != 4)
         return 1;
     Pt_set_y(&p, 9);

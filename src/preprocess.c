@@ -4971,7 +4971,7 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             // this runs during preprocessing, well before that pass, so an
             // attribute name split across adjacent literals (e.g. by a
             // formatter's line-length wrapping of a long single string, the
-            // shape reflection.h's own @generate_constructor hit) still
+            // shape reflection.h's own @ctor hit) still
             // arrives here as separate TK_STR tokens. Concatenate any run of
             // them the same way, narrow-string only (an attribute name has
             // no legitimate use for a wide/unicode literal, rejected below).

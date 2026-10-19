@@ -8,7 +8,7 @@ code needed.
 #include <cccc/derive.h>
 
 @serialize
-@generate_accessors
+@accessors
 typedef struct { int x; int y; } Point;
 
 int main(void) {
@@ -25,10 +25,10 @@ int main(void) {
 | `@deserialize` | struct/union | `T T_deserialize(void *buf)` |
 | `@enum_to_string` | enum | `const char *T_to_string(T v)` |
 | `@enum_from_string` | enum | `T T_from_string(const char *s)` |
-| `@generate_getters` | struct/union | `get_<field>(T *self)` per member |
-| `@generate_setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
-| `@generate_accessors` | struct/union | getters and setters |
-| `@generate_constructor` | struct/union | `T T_create(<member>, ...)` |
+| `@getters` | struct/union | `get_<field>(T *self)` per member |
+| `@setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
+| `@accessors` | struct/union | getters and setters |
+| `@ctor` | struct/union | `T T_new(<member>, ...)` |
 | `@to_json` | struct | `size_t T_to_json(const T *self, char *buf, size_t cap)` |
 | `@from_json` | struct | `int T_from_json(T *out, const char *json)` |
 | `@equals` | struct | `_Bool T_equals(const T *a, const T *b)` |
@@ -37,9 +37,7 @@ int main(void) {
 | `@clone` | struct | `int T_clone(T *out, const T *self)` |
 | `@destroy` | struct | `void T_destroy(T *self)` |
 | `@owned` / `@owned("n")` | member | marks a pointer member as heap memory for `@clone` / `@destroy`; `@equals`, `@hash`, `@dump`, `@compare`, `@to_json` and `@from_json` use its content |
-| `@builder` | struct | `T_builder` type, `T_builder_new`, a chaining `T_builder_<field>` setter per member, `int T_build(const T_builder *b, T *out)` |
-| `@builder_default(expr)` | member | the value `T_builder_new` starts the member with |
-| `@builder_required` | member | makes `T_build` fail until the member is set |
+| `@default(expr)` | member | the value `T_new` gives the member instead of a parameter |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@validate` | struct | `_Bool T_validate(const T *self)` |
 | `@clamp` | struct | `void T_clamp(T *self)` |
@@ -51,7 +49,7 @@ int main(void) {
 | `@dump_skip` | member | leaves the member out of `@dump` |
 | `@serialize_skip` | member | leaves the member out of `@serialize` / `@deserialize` |
 | `@accessor_skip` | member | generates no getter or setter for the member |
-| `@constructor_skip` | member | drops the member from `@generate_constructor`'s parameters |
+| `@ctor_skip` | member | drops the member from `@ctor`'s parameters; it stays zero |
 | `@json_skip` | member | leaves the member out of `@to_json` / `@from_json` |
 | `@json_name("key")` | member | uses `key` as the member's JSON key |
 
@@ -101,19 +99,19 @@ Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
 
 ## Skipping Members
 
-`@serialize_skip`, `@accessor_skip` and `@constructor_skip` go on struct
+`@serialize_skip`, `@accessor_skip` and `@ctor_skip` go on struct
 members, take no arguments, and leave the member out of one family of
 generated functions:
 
 ```c
 @serialize
 @deserialize
-@generate_accessors
-@generate_constructor
+@accessors
+@ctor
 struct Session {
     int  id;
     char token[16] @serialize_skip @accessor_skip;
-    int  hits      @constructor_skip;
+    int  hits      @ctor_skip;
 };
 ```
 
@@ -121,21 +119,21 @@ struct Session {
 |---|---|
 | `@serialize_skip` | The member's bytes are not written; `T_deserialize` leaves it zero. `T_serialize` still returns `sizeof(T)` and the other members keep their offsets. The `Serialize` / `Deserialize` builders skip it too. Not valid on a bit-field. |
 | `@accessor_skip` | No `get_<field>` or `set_<field>`. |
-| `@constructor_skip` | No `T_create` parameter; the member is zero-initialised. |
+| `@ctor_skip` | No `T_new` parameter; the member is zero-initialised. |
 
 ## Accessors and Constructors
 
-`@generate_getters`, `@generate_setters` and `@generate_accessors` publish one
+`@getters`, `@setters` and `@accessors` publish one
 function per member. An optional string literal prefix names them
 `<prefix>_get_<field>`, which keeps two structs with a shared field name
 apart. `""` means no prefix.
 
 ```c
-@generate_accessors
+@accessors
 struct Point { int x; int y; };
 // get_x, get_y, set_x, set_y
 
-@generate_accessors("Size")
+@accessors("Size")
 struct Size { int x; };
 // Size_get_x, Size_set_x
 ```
@@ -146,15 +144,39 @@ struct Size { int x; };
 | Array `T a[N]` | Returns `T *` to the first element | Takes `const T *value`, copies the whole array |
 | Field of an anonymous struct/union | Same as a direct member | Same as a direct member |
 
-`@generate_constructor` publishes `T_create(field1, field2, ...)`. Array
-members take a pointer parameter and are copied; fields of anonymous
-struct/union members are flattened into the parameter list:
+`@ctor` publishes `T_new(field1, field2, ...)`. Array members take a pointer
+parameter and are copied; fields of anonymous struct/union members are
+flattened into the parameter list:
 
 ```c
-@generate_constructor
+@ctor
 struct Point { int x; int y; };
-// struct Point Point_create(int x, int y);
+// struct Point Point_new(int x, int y);
 ```
+
+An optional string literal prefix names it `<prefix>_<T>_new`, as for `@to_json`:
+`@ctor("app") struct Point {...};` publishes `app_Point_new`.
+
+`@default(expr)` on a member removes its parameter and makes `T_new` assign
+`expr` instead; `@ctor_skip` removes it and leaves it zero. A struct whose
+members are all defaulted or skipped gets `T_new()` with no parameters.
+
+```c
+enum { DEFAULT_PORT = 8080 };
+
+@ctor
+struct Config {
+    char *host;
+    int   port    @default(DEFAULT_PORT);
+    char *label   @default("untitled");
+    int   retries @ctor_skip;
+};
+// struct Config Config_new(char *host);
+```
+
+`@default` takes one expression that is valid where the struct is used
+(constants, enumerators, `sizeof`, string literals). It does not apply to array
+members, and a member cannot carry both `@default` and `@ctor_skip`.
 
 ## JSON
 
@@ -329,46 +351,6 @@ The same prefix finds them.[^forward]
 
 `@dump` calls `fputs` and `fprintf`, so the program needs `#include <stdio.h>`
 (a missing include is a compile error that names it).
-
-## Builders
-
-`@builder` publishes a `T_builder` type that collects member values one setter
-at a time. `T_build` copies them into a `T`, or fails while a required member
-is missing:
-
-```c
-enum { DEFAULT_PORT = 8080 };
-
-@builder
-struct Config {
-    char host[32] @builder_required;
-    int  port     @builder_default(DEFAULT_PORT);
-    int  retries;
-};
-
-Config_builder b = Config_builder_new();     // port = 8080, retries = 0
-Config_builder_retries(Config_builder_host(&b, "example.org"), 3);
-
-struct Config c;
-if (Config_build(&b, &c) != 0) { /* a required member is missing */ }
-```
-
-| Function | Behaviour |
-|---|---|
-| `T_builder_new()` | Zeroes every member, then applies each `@builder_default` |
-| `T_builder_<field>(b, value)` | Stores `value` and returns `b`; an array member takes a `const` element pointer and copies the array |
-| `T_build(b, out)` | Returns 0 and fills `*out`; returns 1 and leaves `*out` alone while a `@builder_required` member was never set |
-
-`@builder_default(expr)` takes any expression that is valid where the struct is
-used (constants, enumerators, `sizeof`). It does not apply to array members,
-and a member cannot carry both attributes. A builder is a plain value:
-copying it copies the pending state, and the struct sits in its `value` member.
-Nested and anonymous struct members get a setter per field, like
-`@generate_setters`. A member named `new` is a compile error, because its
-setter would clash with `T_builder_new`.
-
-`@builder("app")` publishes `app_Config_builder`, `app_Config_builder_new`,
-`app_Config_builder_<field>` and `app_Config_build`.
 
 ## Owned memory
 

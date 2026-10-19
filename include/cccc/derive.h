@@ -18,7 +18,7 @@
 */
 
 // Handlers for the built-in comptime attributes (@serialize, @enum_to_string,
-// @generate_getters, ...). A program that uses them includes this header; the
+// @getters, ...). A program that uses them includes this header; the
 // handlers run at compile time and add nothing to the program itself.
 
 #ifndef CCCC_DERIVE_H
@@ -181,9 +181,8 @@
 // (fields of anonymous struct/union members included) taking `self_ty *`.
 // An array member's getter returns a pointer to its first element and its
 // setter copies the whole array from a pointer.
-@comptime void __builtin_generate_accessors(Type *self_ty, Type *ty,
-                                            const char *prefix, bool getters,
-                                            bool setters) {
+@comptime void __builtin_accessors(Type *self_ty, Type *ty, const char *prefix,
+                                   bool getters, bool setters) {
     int count = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
         Member     *m     = StructMemberAt(ty, i);
@@ -192,8 +191,7 @@
         if (!field) {
             int tk = GetTypeKind(fty);
             if (tk == TK_STRUCT || tk == TK_UNION)
-                __builtin_generate_accessors(self_ty, fty, prefix, getters,
-                                             setters);
+                __builtin_accessors(self_ty, fty, prefix, getters, setters);
             continue;
         }
         if (MemberHasAttr(m, "accessor_skip"))
@@ -235,8 +233,8 @@
     }
 }
 
-// Constructor parameters mirror the members of `ty`, anonymous struct/union
-// members flattened; `r` accumulates them in the body.
+// Constructor parameters mirror the members of `ty` that have neither @default
+// nor @ctor_skip, anonymous struct/union members flattened.
 @comptime void __builtin_constructor_params(Obj *fn, Type *ty) {
     int count = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
@@ -249,7 +247,7 @@
                 __builtin_constructor_params(fn, fty);
             continue;
         }
-        if (MemberHasAttr(m, "constructor_skip"))
+        if (MemberHasAttr(m, "ctor_skip") || MemberHasAttr(m, "default"))
             continue;
         FunctionAddParam(fn, field,
                          GetTypeKind(fty) == TK_ARRAY
@@ -271,10 +269,15 @@
                 __builtin_constructor_stores(fn, block, r, fty);
             continue;
         }
-        if (MemberHasAttr(m, "constructor_skip"))
+        if (MemberHasAttr(m, "ctor_skip"))
             continue;
         Node *target = MakeMember(r, field);
-        Node *value  = MakeParamRef(fn, field);
+        if (MemberHasAttr(m, "default")) {
+            BlockAddStmt(block, MakeExprStmt(MakeAssign(
+                                    target, MemberAttrArg(m, "default", 0))));
+            continue;
+        }
+        Node *value = MakeParamRef(fn, field);
         Node *store = GetTypeKind(fty) == TK_ARRAY
                           ? Memcpy(target, value, MakeIntLiteral(TypeSize(fty)))
                           : MakeAssign(target, value);
@@ -282,13 +285,17 @@
     }
 }
 
-// __builtin_generate_constructor(ty, tname): publishes
-// `<ty> <tname>_create(<member1>, <member2>, ...)` returning a zero-initialised
-// `ty` with each member set from its parameter.
-@comptime void __builtin_generate_constructor(Type *ty, const char *tname) {
-    char gname[128];
-    strcpy(gname, tname);
-    strcat(gname, "_create");
+@comptime void __builtin_json_fn_name(char *out, const char *prefix,
+                                      const char *tname, const char *suffix);
+
+// __builtin_generate_constructor(ty, prefix, tname): publishes
+// `<ty> [<prefix>_]<tname>_new(<member1>, <member2>, ...)` returning a
+// zero-initialised `ty` with each parameter member set from its argument and
+// each @default member set to its default.
+@comptime void __builtin_generate_constructor(Type *ty, const char *prefix,
+                                              const char *tname) {
+    char gname[256];
+    __builtin_json_fn_name(gname, prefix, tname, "_new");
 
     Obj *fn = MakeFunction(gname, ty);
     __builtin_constructor_params(fn, ty);
@@ -305,47 +312,61 @@
     PublishNode(fn);
 }
 
-// @generate_getters struct Foo {...}; publishes get_<field>(struct Foo *self)
-// for each member, returning self->field. @generate_getters("Foo") names them
+// @getters struct Foo {...}; publishes get_<field>(struct Foo *self)
+// for each member, returning self->field. @getters("Foo") names them
 // Foo_get_<field>.
-@comptime(attribute("generate_getters")) void __builtin_attr_generate_getters(
-    AttrTarget *target, ...) {
-    Type *ty = __builtin_attr_type_target(target, "@generate_getters", false);
-    const char *prefix = __builtin_attr_prefix_arg("@generate_getters");
-    __builtin_generate_accessors(ty, ty, prefix, true, false);
+@comptime(attribute("getters")) void __builtin_attr_getters(AttrTarget *target,
+                                                            ...) {
+    Type       *ty     = __builtin_attr_type_target(target, "@getters", false);
+    const char *prefix = __builtin_attr_prefix_arg("@getters");
+    __builtin_accessors(ty, ty, prefix, true, false);
 }
 
-// @generate_setters struct Foo {...}; publishes set_<field>(struct Foo *self,
+// @setters struct Foo {...}; publishes set_<field>(struct Foo *self,
 // <FieldType> value) for each member, assigning self->field = value.
-// @generate_setters("Foo") names them Foo_set_<field>.
-@comptime(attribute("generate_setters")) void __builtin_attr_generate_setters(
+// @setters("Foo") names them Foo_set_<field>.
+@comptime(attribute("setters")) void __builtin_attr_setters(AttrTarget *target,
+                                                            ...) {
+    Type       *ty     = __builtin_attr_type_target(target, "@setters", false);
+    const char *prefix = __builtin_attr_prefix_arg("@setters");
+    __builtin_accessors(ty, ty, prefix, false, true);
+}
+
+// @accessors struct Foo {...}; publishes both the getter and the
+// setter of every member. @accessors("Foo") prefixes both names.
+@comptime(attribute("accessors")) void __builtin_attr_accessors(
     AttrTarget *target, ...) {
-    Type *ty = __builtin_attr_type_target(target, "@generate_setters", false);
-    const char *prefix = __builtin_attr_prefix_arg("@generate_setters");
-    __builtin_generate_accessors(ty, ty, prefix, false, true);
+    Type       *ty = __builtin_attr_type_target(target, "@accessors", false);
+    const char *prefix = __builtin_attr_prefix_arg("@accessors");
+    __builtin_accessors(ty, ty, prefix, true, true);
 }
 
-// @generate_accessors struct Foo {...}; publishes both the getter and the
-// setter of every member. @generate_accessors("Foo") prefixes both names.
-@comptime(attribute(
-    "generate_accessors")) void __builtin_attr_generate_accessors(AttrTarget
-                                                                      *target,
-                                                                  ...) {
-    Type *ty = __builtin_attr_type_target(target, "@generate_accessors", false);
-    const char *prefix = __builtin_attr_prefix_arg("@generate_accessors");
-    __builtin_generate_accessors(ty, ty, prefix, true, true);
+// @ctor struct Foo {...}; publishes
+//   struct Foo Foo_new(<member1>, <member2>, ...);
+// returning a struct Foo initialized from the given member values. A member
+// marked @default takes its default instead of a parameter, an @ctor_skip
+// member stays zero. @ctor("app") names it app_Foo_new.
+@comptime(attribute("ctor")) void __builtin_attr_ctor(AttrTarget *target, ...) {
+    Type       *ty     = __builtin_attr_type_target(target, "@ctor", false);
+    const char *tname  = __builtin_attr_type_name(target, "@ctor");
+    const char *prefix = __builtin_attr_prefix_arg("@ctor");
+    __builtin_generate_constructor(ty, prefix, tname);
 }
 
-// @generate_constructor struct Foo {...}; publishes
-//   struct Foo Foo_create(<member1>, <member2>, ...);
-// returning a struct Foo initialized from the given member values.
-@comptime(attribute("generate_constructor")) void
-__builtin_attr_generate_constructor(AttrTarget *target) {
-    Type *ty =
-        __builtin_attr_type_target(target, "@generate_constructor", false);
-    const char *tname =
-        __builtin_attr_type_name(target, "@generate_constructor");
-    __builtin_generate_constructor(ty, tname);
+@comptime(attribute("default")) void __builtin_attr_default(AttrTarget *target,
+                                                            ...) {
+    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
+        MacroErrorAt(MakeIntLiteral(0), "@default applies to a struct member");
+    if (VarargCount() != 1)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@default takes one default value expression");
+    Member *m = AttrTargetMember(target);
+    if (MemberHasAttr(m, "ctor_skip"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@default and @ctor_skip cannot share a member");
+    if (GetTypeKind(MemberType(m)) == TK_ARRAY)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@default does not apply to an array member");
 }
 
 // <prefix>_<Type>_<suffix>, or <Type>_<suffix> when the prefix is empty.
@@ -1405,9 +1426,8 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
 }
 
 // @serialize_skip leaves a member out of @serialize, @deserialize and the
-// Serialize/Deserialize builders, @accessor_skip out of the @generate_getters,
-// setters and accessors functions, @constructor_skip out of
-// @generate_constructor.
+// Serialize/Deserialize builders, @accessor_skip out of the @getters,
+// @setters and @accessors functions, @ctor_skip out of @ctor.
 @comptime(attribute("serialize_skip")) void __builtin_attr_serialize_skip(
     AttrTarget *target, ...) {
     __builtin_derive_skip_target(target, "@serialize_skip");
@@ -1421,9 +1441,12 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
     __builtin_derive_skip_target(target, "@accessor_skip");
 }
 
-@comptime(attribute("constructor_skip")) void __builtin_attr_constructor_skip(
+@comptime(attribute("ctor_skip")) void __builtin_attr_ctor_skip(
     AttrTarget *target, ...) {
-    __builtin_derive_skip_target(target, "@constructor_skip");
+    __builtin_derive_skip_target(target, "@ctor_skip");
+    if (MemberHasAttr(AttrTargetMember(target), "default"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@default and @ctor_skip cannot share a member");
 }
 
 @comptime void __builtin_equals_value(Node *block, Type *ty, Node *a, Node *b,
@@ -2329,196 +2352,6 @@ __builtin_attr_generate_constructor(AttrTarget *target) {
         FunctionSetBody(size_fn, block);
     }
     PublishNode(size_fn);
-}
-
-// ---- @builder ----------------------------------------------------------------
-// @builder struct Foo {...}; publishes a `Foo_builder` type and
-//   Foo_builder  Foo_builder_new(void);
-//   Foo_builder *Foo_builder_<field>(Foo_builder *b, <FieldType> value);
-//   int          Foo_build(const Foo_builder *b, struct Foo *out);
-// Foo_builder_new zero-initialises and applies the @builder_default members,
-// each setter returns its builder for chaining, and Foo_build returns nonzero
-// (leaving *out alone) while a @builder_required member was never set.
-// @builder("P") publishes P_Foo_builder, P_Foo_builder_new, ...
-
-@comptime(attribute("builder_default")) void __builtin_attr_builder_default(
-    AttrTarget *target, ...) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_default applies to a struct member");
-    if (VarargCount() != 1)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_default takes one default value expression");
-    Member *m = AttrTargetMember(target);
-    if (MemberHasAttr(m, "builder_required"))
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_default and @builder_required cannot share a "
-                     "member");
-    if (GetTypeKind(MemberType(m)) == TK_ARRAY)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_default does not apply to an array member");
-}
-
-@comptime(attribute("builder_required")) void __builtin_attr_builder_required(
-    AttrTarget *target, ...) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_required applies to a struct member");
-    if (VarargCount() != 0)
-        MacroErrorAt(MakeIntLiteral(0), "@builder_required takes no arguments");
-    if (MemberHasAttr(AttrTargetMember(target), "builder_default"))
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@builder_default and @builder_required cannot share a "
-                     "member");
-}
-
-// Number of @builder_required members of `ty` (anonymous structs included).
-@comptime int __builtin_builder_required_count(Type *ty) {
-    int n     = 0;
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member *m     = StructMemberAt(ty, i);
-        Type   *fty   = MemberType(m);
-        if (!MemberName(m)) {
-            int tk = GetTypeKind(fty);
-            if (tk == TK_STRUCT || tk == TK_UNION)
-                n += __builtin_builder_required_count(fty);
-        } else if (MemberHasAttr(m, "builder_required")) {
-            n++;
-        }
-    }
-    return n;
-}
-
-// Publishes the setter of every member of `ty`; `*req` numbers the required
-// members.
-@comptime void __builtin_builder_setters(Type *ty, Type *bty, const char *bname,
-                                         int *req) {
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member     *m     = StructMemberAt(ty, i);
-        const char *field = MemberName(m);
-        Type       *fty   = MemberType(m);
-        if (!field) {
-            int tk = GetTypeKind(fty);
-            if (tk == TK_STRUCT || tk == TK_UNION)
-                __builtin_builder_setters(fty, bty, bname, req);
-            continue;
-        }
-        if (!strcmp(field, "new"))
-            MacroErrorAt(MakeIntLiteral(0),
-                         "@builder: member 'new' clashes with %s_new", bname);
-        bool is_array = GetTypeKind(fty) == TK_ARRAY;
-        char name[256];
-        strcpy(name, bname);
-        strcat(name, "_");
-        strcat(name, field);
-        Obj *fn = MakeFunction(name, MakePointer(bty));
-        FunctionAddParam(fn, "b", MakePointer(bty));
-        FunctionAddParam(fn, "value",
-                         is_array ? MakePointer(MakeConst(TypeBase(fty))) : fty);
-        WithFn(fn) {
-            Node *b      = MakeUnary(NK_DEREF, MakeParamRef(fn, "b"));
-            Node *target = MakeMember(MakeMember(b, "value"), field);
-            Node *value  = MakeParamRef(fn, "value");
-            Node *block  = MakeBlock(NULL, 0);
-            Node *store  = is_array ? Memcpy(target, value,
-                                             MakeIntLiteral(TypeSize(fty)))
-                                    : MakeAssign(target, value);
-            BlockAddStmt(block, MakeExprStmt(store));
-            if (MemberHasAttr(m, "builder_required")) {
-                BlockAddStmt(
-                    block,
-                    MakeExprStmt(MakeAssign(
-                        MakeSubscript(MakeMember(b, "set"),
-                                      MakeIntLiteral((*req)++)),
-                        MakeIntLiteral(1))));
-            }
-            BlockAddStmt(block, MakeReturn(MakeParamRef(fn, "b")));
-            FunctionSetBody(fn, block);
-        }
-        PublishNode(fn);
-    }
-}
-
-// Assigns the @builder_default members of `ty` in `Foo_builder_new`.
-@comptime void __builtin_builder_defaults(Node *block, Type *ty, Node *value) {
-    int count = StructMemberCount(ty);
-    for (int i = 0; i < count; i++) {
-        Member     *m     = StructMemberAt(ty, i);
-        const char *field = MemberName(m);
-        Type       *fty   = MemberType(m);
-        if (!field) {
-            int tk = GetTypeKind(fty);
-            if (tk == TK_STRUCT || tk == TK_UNION)
-                __builtin_builder_defaults(block, fty, value);
-            continue;
-        }
-        if (MemberHasAttr(m, "builder_default"))
-            BlockAddStmt(block,
-                         MakeExprStmt(MakeAssign(
-                             MakeMember(value, field),
-                             MemberAttrArg(m, "builder_default", 0))));
-    }
-}
-
-@comptime(attribute("builder")) void __builtin_attr_builder(AttrTarget *target,
-                                                            ...) {
-    Type       *ty     = __builtin_derive_struct_target(target, "@builder");
-    const char *tname  = __builtin_attr_type_name(target, "@builder");
-    const char *prefix = __builtin_attr_prefix_arg("@builder");
-
-    char bname[256];
-    __builtin_json_fn_name(bname, prefix, tname, "_builder");
-    int required = __builtin_builder_required_count(ty);
-
-    Type *bty = MakeStruct(bname);
-    StructAddField(bty, "value", ty);
-    StructAddField(bty, "set",
-                   MakeArray(GetType("unsigned char"), required ? required : 1));
-    PublishNode(bty);
-    PublishNode(MakeTypedef(bname, bty));
-
-    char nname[256];
-    strcpy(nname, bname);
-    strcat(nname, "_new");
-    Obj *nf = MakeFunction(nname, bty);
-    WithFn(nf) {
-        Node *block = MakeBlock(NULL, 0);
-        Node *b     = MakeLocalVarUnique(bty);
-        BlockAddStmt(
-            block, MakeExprStmt(MakeAssign(b, InitStruct(bty, NULL, NULL, 0))));
-        __builtin_builder_defaults(block, ty, MakeMember(b, "value"));
-        BlockAddStmt(block, MakeReturn(b));
-        FunctionSetBody(nf, block);
-    }
-    PublishNode(nf);
-
-    int req = 0;
-    __builtin_builder_setters(ty, bty, bname, &req);
-
-    char fname[256];
-    __builtin_json_fn_name(fname, prefix, tname, "_build");
-    Obj *bf = MakeFunction(fname, GetType("int"));
-    FunctionAddParam(bf, "b", MakePointer(MakeConst(bty)));
-    FunctionAddParam(bf, "out", MakePointer(ty));
-    WithFn(bf) {
-        Node *block = MakeBlock(NULL, 0);
-        Node *b     = MakeUnary(NK_DEREF, MakeParamRef(bf, "b"));
-        for (int k = 0; k < required; k++)
-            BlockAddStmt(
-                block,
-                MakeIf(MakeUnary(NK_NOT, MakeSubscript(MakeMember(b, "set"),
-                                                       MakeIntLiteral(k))),
-                       MakeReturn(MakeIntLiteral(1)), NULL));
-        BlockAddStmt(
-            block, MakeExprStmt(MakeAssign(
-                       MakeUnary(NK_DEREF, MakeParamRef(bf, "out")),
-                       MakeMember(b, "value"))));
-        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
-        FunctionSetBody(bf, block);
-    }
-    PublishNode(bf);
 }
 
 // ---- @compare ------------------------------------------------------------------

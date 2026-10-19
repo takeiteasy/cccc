@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// Suite: @serialize_skip, @accessor_skip and @constructor_skip, run on the VM
+// Suite: @serialize_skip, @accessor_skip and @ctor_skip, run on the VM
 // and under -c=native.
 
 #include <cccc/derive.h>
@@ -11,14 +11,14 @@
     int tail;
 };
 
-@generate_accessors struct A {
+@accessors struct A {
     int shown;
     int hidden @accessor_skip;
 };
 
-@generate_constructor struct C {
+@ctor struct C {
     int given;
-    int unset @constructor_skip;
+    int unset @ctor_skip;
     int also;
 };
 
@@ -43,8 +43,8 @@ void test_accessor_skip(void) {
 }
 
 [[cccc::test]]
-void test_constructor_skip(void) {
-    struct C c = C_create(4, 8);
+void test_ctor_skip(void) {
+    struct C c = C_new(4, 8);
     AssertEq(c.given, 4);
     AssertEq(c.unset, 0);
     AssertEq(c.also, 8);

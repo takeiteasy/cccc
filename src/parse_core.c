@@ -147,7 +147,7 @@ MacroFn *find_macro_fn(VirtualMachine *vm, Token *tok) {
 MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.in_macro_mode)
         return NULL;
-    if (!tok || tok->kind != TK_IDENT)
+    if (!tok || (tok->kind != TK_IDENT && tok->kind != TK_KEYWORD))
         return NULL;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
         if (!pm->is_attribute_handler || !pm->attribute_name)
