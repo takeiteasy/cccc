@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: CLOCK_MONOTONIC is not translated (#1708)
 // CCCC_FLAGS: -fopenmp
 // A #pragma omp inside a function body in a `#pragma cccc emit` block is a
 // statement: it must be spliced to `__cccc_omp(...)` as in ordinary source,

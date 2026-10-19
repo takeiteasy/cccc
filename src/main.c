@@ -478,6 +478,9 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // -c=generated output compiled by hand still needs the flag passed
     // explicitly (documented in docs/NATIVE.md).
     argv_push(&cc_args, "-fsigned-char");
+    // The front end already diagnosed the program under cccc's own -W
+    // options; host warnings about the generated C are noise.
+    argv_push(&cc_args, "-w");
     // #1159: -O<n> used to be a hard error under -c=native (it tunes the VM's
     // own bytecode pipeline, which the native path never runs), so the host
     // cc always built at its own default (-O0 for both clang and gcc) --

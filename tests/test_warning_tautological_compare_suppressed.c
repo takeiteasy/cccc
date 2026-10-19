@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: host cc warnings ignore -Wno-* (#1714)
 // CCCC_FLAGS: -Wno-tautological-compare
 // CCCC_REJECT_STDERR: tautological-compare
 

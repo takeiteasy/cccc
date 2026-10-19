@@ -736,7 +736,9 @@ int main(int argc, char **argv) {
     char *args[MAX_ARGS * 2 + 8];
     int   n   = 0;
     args[n++] = (char *)cccc;
-    args[n++] = "-I./include";
+    // The embedded headers resolve without it.
+    if (!native)
+        args[n++] = "-I./include";
     for (int i = 0; i < h.nflags; i++)
         args[n++] = native && !strcmp(h.flags[i], "--testing")
                         ? "--testing=native"

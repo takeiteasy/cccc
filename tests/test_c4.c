@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: CLOCK_MONOTONIC is not translated (#1708)
+// CCCC_NATIVE_SKIP: a user #define int is replayed before compensating #includes (#1716)
 // c4.c - C in four functions
 // CCCC_RUN_ARGS: tests/test_fortytwo.c
 

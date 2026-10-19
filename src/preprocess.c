@@ -776,9 +776,20 @@ static void mark_cccc_bundled_include_dir(VirtualMachine *vm, const char *dir) {
     hashmap_put(&vm->compiler.cccc_bundled_include_dirs, dir, (void *)1);
 }
 
+// Also true for CCCC's own include directory (it holds cccc/reflection.h)
+// when the program included nothing from it: the emitted shims' own
+// #includes must still reach the host headers.
 bool cc_include_dir_is_cccc_bundled(VirtualMachine *vm, const char *dir) {
-    return dir &&
-           hashmap_get(&vm->compiler.cccc_bundled_include_dirs, dir) != NULL;
+    if (!dir)
+        return false;
+    if (hashmap_get(&vm->compiler.cccc_bundled_include_dirs, dir))
+        return true;
+    char *marker = format("%s/cccc/reflection.h", dir);
+    bool  own    = file_exists(marker);
+    free(marker);
+    if (own)
+        mark_cccc_bundled_include_dir(vm, dir);
+    return own;
 }
 
 // #1143 regression: run_native_backend()'s directory-wide -idirafter
@@ -6903,7 +6914,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 brace_depth > 0 && pp_directive(tok) == PP_INCLUDE;
             if (!vm->compiler.emit_strict && !vm->compiler.in_macro_mode &&
                 !_ac_generated_nonprimary && !_ac_in_function_include &&
-                start->file && !is_opencl_prelude_file(start->file->name) &&
+                // a #warning was already reported (or silenced) here
+                pp_directive(tok) != PP_WARNING && start->file &&
+                !is_opencl_prelude_file(start->file->name) &&
                 (cc_file_is_command_line_input(vm, start->file->name) ||
                  cc_file_is_cccc_only(vm, start->file->name)) &&
                 !(_ac && _ac->type == CTX_COMPTIME) && !is_pragma_cccc(start) &&

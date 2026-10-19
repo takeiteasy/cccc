@@ -82,8 +82,12 @@ automatic header-dependency tracking.
 
 `-I`, `-i`/`--isystem`, `-F`, `--iframework`, `-D`, `-U`, `-L`, `-l`, `--std=`, and `-O<n>` are
 passed through the front end to the host `cc`. `-c=native` additionally always
-adds `-lm`, `-pthread`, and `-fsigned-char` (CCCC models `char` as signed on
-every target, so the host build must match).
+adds `-lm`, `-pthread`, `-fsigned-char` (CCCC models `char` as signed on
+every target, so the host build must match), and `-w`: warnings come from
+CCCC's own front end under its `-W` options, so the host compiler's warnings
+about the generated C are silenced. Host errors still show. A `#warning` is
+likewise reported (or silenced by `-Wno-cpp`) by the front end and is not
+copied into the generated C.
 
 `--link-arg=ARG` (repeatable, `-c=native` only) passes `ARG` verbatim to the
 host link line, after `-L`/`-l` and before the automatic `-lm`/`-pthread`. Use it

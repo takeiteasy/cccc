@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: framework search paths do not reach the host cc (#1711)
+// CCCC_NATIVE_SKIP: host clang does not continue #include_next across -F directories
 // CCCC_FLAGS: -F./tests/fixtures/frameworks_next/a -F./tests/fixtures/frameworks_next/b
 // #include_next in a framework header continues into the next -F directory.
 #include <Chain/Chain.h>

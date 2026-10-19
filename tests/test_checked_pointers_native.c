@@ -19,8 +19,8 @@ static const char *run(Builder *ctx, const char *name, const char *code) {
     if (WriteFile(ctx, src, code) != 0)
         return NULL;
     snprintf(cmd, sizeof(cmd),
-             "sh -c '%s -c=native --checked-pointers -o %s %s 2>&1; "
-             "%s; echo \"%s=$?\"'",
+             "sh -c '%s -c=native --checked-pointers -o %s %s 2>&1 "
+             "&& %s; echo \"%s=$?\"'",
              CcccPath(ctx), bin, src, bin, name);
     return CaptureCommand(ctx, cmd);
 }

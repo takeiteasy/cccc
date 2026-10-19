@@ -20,8 +20,8 @@ int build_main(Builder *ctx) {
 
     snprintf(bin, sizeof(bin), "%s/checked_array_native_bin", out_dir);
     snprintf(cmd, sizeof(cmd),
-             "sh -c '%s -c=native --checked-pointers -o %s %s 2>&1; "
-             "%s; echo \"run=$?\"'",
+             "sh -c '%s -c=native --checked-pointers -o %s %s 2>&1 "
+             "&& %s; echo \"run=$?\"'",
              CcccPath(ctx), bin, src, bin);
     const char *result = CaptureCommand(ctx, cmd);
     if (result)
