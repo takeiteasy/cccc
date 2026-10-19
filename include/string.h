@@ -5,19 +5,19 @@
 
 #include "stddef.h" /* C requires <string.h> to define NULL (and size_t) */
 
-extern void *memcpy(void *dest, const void *src, long n);
-extern void *memmove(void *dest, const void *src, long n);
-extern void *memset(void *s, int c, long n);
-extern int memcmp(const void *s1, const void *s2, long n);
-extern void *memchr(const void *s, int c, long n);
+extern void *memcpy(void *dest, const void *src, size_t n);
+extern void *memmove(void *dest, const void *src, size_t n);
+extern void *memset(void *s, int c, size_t n);
+extern int memcmp(const void *s1, const void *s2, size_t n);
+extern void *memchr(const void *s, int c, size_t n);
 
-extern long strlen(const char *s);
+extern size_t strlen(const char *s);
 extern char *strcpy(char *dest, const char *src);
-extern char *strncpy(char *dest, const char *src, long n);
+extern char *strncpy(char *dest, const char *src, size_t n);
 extern char *strcat(char *dest, const char *src);
-extern char *strncat(char *dest, const char *src, long n);
+extern char *strncat(char *dest, const char *src, size_t n);
 extern int strcmp(const char *s1, const char *s2);
-extern int strncmp(const char *s1, const char *s2, long n);
+extern int strncmp(const char *s1, const char *s2, size_t n);
 
 /* C23 const-correct search functions: return type matches const-ness of input.
  * Macros use the parenthesized (funcname) form to call the actual function and
@@ -48,35 +48,39 @@ extern char *(strstr)(const char *haystack, const char *needle);
         char *: (strpbrk)((s), (accept)))
 extern char *(strpbrk)(const char *s, const char *accept);
 
-extern long strspn(const char *s, const char *accept);
-extern long strcspn(const char *s, const char *reject);
+extern size_t strspn(const char *s, const char *accept);
+extern size_t strcspn(const char *s, const char *reject);
 
-extern long strxfrm(char *dest, const char *src, long n);
+extern size_t strxfrm(char *dest, const char *src, size_t n);
 extern int strcoll(const char *s1, const char *s2);
 extern char *strerror(int errnum);
 /* strsignal: printable description of a signal number, pointer into static
    storage (like strerror). POSIX.1-2008; present on both Darwin and glibc. */
 extern char *strsignal(int sig);
 
-/* extern char* strcpy_s(char *dest, long destsz, const char *src); */
-/* extern char* strncpy_s(char *dest, long destsz, const char *src, long n); */
-/* extern char* strcat_s(char *dest, long destsz, const char *src); */
-/* extern char* strncat_s(char *dest, long destsz, const char *src, long n); */
+/* extern char* strcpy_s(char *dest, size_t destsz, const char *src); */
+/* extern char* strncpy_s(char *dest, size_t destsz, const char *src, size_t n);
+ */
+/* extern char* strcat_s(char *dest, size_t destsz, const char *src); */
+/* extern char* strncat_s(char *dest, size_t destsz, const char *src, size_t n);
+ */
 extern char *strdup(const char *s);
-extern char *strndup(const char *s, long n);
-/* extern long strnlen_s(const char *s, long maxsize); */
+extern char *strndup(const char *s, size_t n);
+/* extern size_t strnlen_s(const char *s, size_t maxsize); */
 extern char *strtok(char *restrict str, const char *restrict delim);
 /* strtok_r: POSIX re-entrant strtok, caller-owned saveptr. Present on both
    Darwin and glibc. */
 extern char *strtok_r(char *restrict str, const char *restrict delim,
                       char **restrict saveptr);
 /* extern char* strtok_s(char *str, const char *delim, char **context); */
-extern void *memset_explicit(void *s, int c, long n);
-/* extern int memset_s(void *s, long smax, int c, long n); */
-/* extern void* memcpy_s(void *dest, long destsz, const void *src, long n); */
-/* extern void* memmove_s(void *dest, long destsz, const void *src, long n); */
-extern void *memccpy(void *dest, const void *src, int c, long n);
-/* extern int strerror_s(char *buf, long bufsz, int errnum); */
-/* extern long strerrorlen_s(int errnum); */
+extern void *memset_explicit(void *s, int c, size_t n);
+/* extern int memset_s(void *s, size_t smax, int c, size_t n); */
+/* extern void* memcpy_s(void *dest, size_t destsz, const void *src, size_t n);
+ */
+/* extern void* memmove_s(void *dest, size_t destsz, const void *src, size_t n);
+ */
+extern void *memccpy(void *dest, const void *src, int c, size_t n);
+/* extern int strerror_s(char *buf, size_t bufsz, int errnum); */
+/* extern size_t strerrorlen_s(int errnum); */
 
 #endif /* __STRING_H */
