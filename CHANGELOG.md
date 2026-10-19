@@ -7,6 +7,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-19
+
+- Added: `@ctor("prefix")` names the constructor `prefix_T_new`.
+- Added: `@default(expr)` on a struct member gives `@ctor`'s `T_new` that value
+  instead of a parameter. See `docs/DERIVE.md`.
+- Changed: `@generate_getters`, `@generate_setters`, `@generate_accessors` and
+  `@generate_constructor` are `@getters`, `@setters`, `@accessors` and `@ctor`;
+  the constructor is `T_new` (was `T_create`); `@constructor_skip` is
+  `@ctor_skip`. The old names warn as unknown attributes.
+- Removed: `@builder`, `@builder_default` and `@builder_required`. `@ctor` with
+  `@default` covers them.
+- Fixed: a custom attribute named like a C keyword (`@default`) reached its
+  handler as an unknown attribute.
 - Added: `CopyNode` copies labels, `goto`, `switch`/`case`, local declarations,
   compound assignments, struct-returning calls and checked-pointer accesses.
   Each copy has its own labels and locals. `static` locals and checked-pointer
