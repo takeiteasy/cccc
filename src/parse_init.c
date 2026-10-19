@@ -87,11 +87,30 @@ static Initializer *initializer(VirtualMachine *vm, Token **rest, Token *tok,
 
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("="
 // expr)?)*)? ";"
+typedef struct {
+    Obj **vars;
+    int   count, cap;
+} DeclVars;
+
+static void decl_vars_add(VirtualMachine *vm, DeclVars *dv, Obj *var) {
+    if (dv->count == dv->cap) {
+        int   cap  = dv->cap ? dv->cap * 2 : 4;
+        Obj **vars = arena_alloc(&vm->compiler.parser_arena,
+                                 (size_t)cap * sizeof(Obj *));
+        if (dv->count)
+            memcpy(vars, dv->vars, (size_t)dv->count * sizeof(Obj *));
+        dv->vars = vars;
+        dv->cap  = cap;
+    }
+    dv->vars[dv->count++] = var;
+}
+
 Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                   VarAttr *attr) {
     Node  head = {};
     Node *cur  = &head;
     int   i    = 0;
+    DeclVars dv   = {};
 
     while (!equal(tok, ";")) {
         if (i++ > 0)
@@ -186,6 +205,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 warn_if_shadowing(vm, name_tok);
                 drop_cleanup_attr(vm, deduced, attr, name_tok);
                 Obj *var             = new_anon_gvar(vm, deduced);
+                decl_vars_add(vm, &dv, var);
                 var->tok             = name_tok;
                 var->display_name    = get_ident(vm, name_tok);
                 var->is_local_symbol = true;
@@ -203,6 +223,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
             Obj *var =
                 new_lvar(vm, get_ident(vm, name_tok), name_tok->len, deduced);
+            decl_vars_add(vm, &dv, var);
             // #1160: also honor GNU aligned(N), not just _Alignas.
             var->align = effective_decl_align(vm, name_tok, deduced, attr);
             if (attr->is_block_var)
@@ -228,6 +249,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             warn_if_shadowing(vm, ty->name);
             drop_cleanup_attr(vm, ty, attr, ty->name);
             Obj *var             = new_anon_gvar(vm, ty);
+            decl_vars_add(vm, &dv, var);
             var->tok             = ty->name;
             var->display_name    = get_ident(vm, ty->name);
             var->is_local_symbol = true;
@@ -259,6 +281,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // For example, `int x[n+2]` is translated to `tmp = n + 2,
             // x = alloca(tmp)`.
             Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+            decl_vars_add(vm, &dv, var);
             claim_cleanup(vm, var, attr);
             Token *tok_local = ty->name;
             Node  *expr      = new_binary(
@@ -317,6 +340,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         }
 
         Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
+        decl_vars_add(vm, &dv, var);
         if (attr && attr->is_constexpr) {
             var->is_constexpr = true;
         }
@@ -477,6 +501,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
     Node *node          = new_node(vm, ND_BLOCK, tok);
     node->body          = head.next;
+    node->decl_vars      = dv.vars;
+    node->decl_var_count = dv.count;
     node->is_decl_group = true; // #981: not a real C block scope, see the
                                 // field's own comment (cccc.h)
     *rest = tok->next;

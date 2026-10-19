@@ -2159,6 +2159,10 @@ struct Node {
     // another) when deciding whether the ENCLOSING real scope needs a
     // watermark, and never self-instrumented.
     bool is_decl_group;
+    // is_decl_group blocks: every object the declaration declares, including
+    // ones that emit no node (`int x;`, `static int n;`).
+    Obj **decl_vars;
+    int   decl_var_count;
 
     // Switch
     struct Node *case_next;

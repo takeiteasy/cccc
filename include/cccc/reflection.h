@@ -335,13 +335,16 @@ Node *__builtin_ast_set_token(Node *node, Token *tok);
  */
 Node *__builtin_ast_copy_location(Node *dst, Node *src);
 
-/*! @brief Deep-copy an expression or simple statement.
+/*! @brief Deep-copy an expression or statement tree.
  * @param n Node to copy.
  * @return A new node that shares no list or child with @a n, or NULL.
  * @details Nodes are linked into a list by the first builtin that takes them;
- * CopyNode builds the separate node a second list needs. Loops in the copy get
- * their own break/continue labels. Labels, goto, switch, declarations and
- * compound assignments are rejected.
+ * CopyNode builds the separate node a second list needs. The copy has its own
+ * loop, switch and user labels, its own cases, and its own locals: declared
+ * variables and the temporaries of compound assignments and struct-returning
+ * calls (so it needs a function context). A goto to a label outside the copy
+ * is bound again by name where the copy lands. Cleanup variables, VLAs, static
+ * locals and checked-pointer declarations are rejected.
  */
 Node *__builtin_ast_copy_node(Node *n);
 

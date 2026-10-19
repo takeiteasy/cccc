@@ -5062,18 +5062,41 @@ Node *__builtin_node_list(Node **nodes, int count) {
     return head;
 }
 
-// CopyNode(n): independent deep copy of an expression or simple statement, so
-// a macro can link "the same" node into a second list.
+// CopyNode(n): independent deep copy of an expression or statement tree, so a
+// macro can link "the same" node into a second list. A first pass refuses what
+// cannot be copied before anything is allocated, so a refusal leaves no stray
+// local behind; the second pass copies. The copy keeps the original's sharing,
+// owns its labels (loops, switches, user labels) and gives every local the
+// tree declares, and every compiler temporary it uses, an Obj of its own.
 typedef struct {
     VirtualMachine *vm;
-    struct {
-        char *from, *to;
-    } labels[32]; // break/continue targets of loops inside the copy
-    int n_labels;
-    int depth;
+    HashMap         seen;     // pass 1: nodes already checked
+    HashMap         declared; // Obj declared by a declaration in the tree
+    HashMap         labels;   // label defined in the tree -> its fresh label
+    HashMap         nodes;    // pass 2: node -> its copy
+    HashMap         objs;     // pass 2: Obj -> its clone
+    Node          **gotos;    // user gotos and &&label in the tree
+    int             n_gotos, cap_gotos;
+    int             depth;
+    bool            needs_fn; // the copy declares or clones a local
 } CopyCtx;
 
-static Node *copy_node_tree(CopyCtx *cx, Node *n);
+// Every Node pointer a copy follows, in one order for both passes. Chains
+// (body, args) and lazy_args are handled apart.
+#define COPY_NODE_CHILDREN(X)                                                  \
+    X(lhs)                                                                     \
+    X(rhs)                                                                     \
+    X(cond) X(then) X(els) X(init) X(inc) X(cas_addr) X(cas_old) X(cas_new)    \
+        X(atomic_expr) X(va_ap) X(va_last) X(va_src) X(static_assert_cond)     \
+            X(rmw_lvalue) X(checked_rmw_mirror) X(checked_bounds_lo)           \
+                X(checked_bounds_hi) X(checked_bounds_obj_init)                \
+                    X(checked_assign_dst_lo) X(checked_assign_dst_hi)          \
+                        X(checked_assign_dst_obj_init)                         \
+                            X(checked_assign_src_lo) X(checked_assign_src_hi)
+
+static long long copy_key(const void *p) {
+    return (long long)(uintptr_t)p;
+}
 
 static void copy_node_refuse(CopyCtx *cx, const Node *n, const char *why) {
     char buf[160];
@@ -5081,6 +5104,133 @@ static void copy_node_refuse(CopyCtx *cx, const Node *n, const char *why) {
              cc_node_kind_name(n->kind), why);
     reflect_link_error(cx->vm, buf);
 }
+
+static bool copy_node_kind_ok(const Node *n) {
+    if (n->kind <= ND_LOGOR)
+        return true;
+    switch (n->kind) {
+        case ND_RETURN:
+        case ND_IF:
+        case ND_FOR:
+        case ND_DO:
+        case ND_SWITCH:
+        case ND_CASE:
+        case ND_BLOCK:
+        case ND_GOTO:
+        case ND_GOTO_EXPR:
+        case ND_LABEL:
+        case ND_LABEL_VAL:
+        case ND_FUNCALL:
+        case ND_EXPR_STMT:
+        case ND_STMT_EXPR:
+        case ND_VAR:
+        case ND_NUM:
+        case ND_CAST:
+        case ND_MEMZERO:
+        case ND_CAS:
+        case ND_EXCH:
+        case ND_QUOTE_LAZY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Compiler temporaries (`g += 1`, call return buffers) have no source name.
+static bool copy_node_is_temp(const Obj *o) {
+    return o && o->is_local && o->name && (!o->name[0] || o->name[0] == '.');
+}
+
+static void copy_node_define_label(CopyCtx *cx, char *label) {
+    if (label && !hashmap_get_int(&cx->labels, copy_key(label)))
+        hashmap_put_int(&cx->labels, copy_key(label), new_unique_name(cx->vm));
+}
+
+// TODO: cleanup variables and VLAs are refused (#1699).
+static void copy_node_check_decls(CopyCtx *cx, Node *n) {
+    for (int i = 0; i < n->decl_var_count; i++) {
+        Obj *v = n->decl_vars[i];
+        hashmap_put_int(&cx->declared, copy_key(v), v);
+        if (!v->is_local)
+            copy_node_refuse(cx, n, "static local; rebuild it");
+        if (v->cleanup_fn)
+            copy_node_refuse(cx, n, "cleanup variable");
+        if (type_contains_vla(v->ty))
+            copy_node_refuse(cx, n, "variable-length array");
+        if (v->checked_kind != CHECKED_NONE)
+            copy_node_refuse(cx, n, "checked-pointer declaration");
+        if (v->is_kernel_local_obj)
+            copy_node_refuse(cx, n, "kernel local object");
+    }
+    if (n->decl_var_count)
+        cx->needs_fn = true;
+}
+
+static void copy_node_check(CopyCtx *cx, Node *n);
+
+static void copy_node_check_chain(CopyCtx *cx, Node *head) {
+    for (; head; head = head->next)
+        copy_node_check(cx, head);
+}
+
+static void copy_node_check(CopyCtx *cx, Node *n) {
+    if (!n || hashmap_get_int(&cx->seen, copy_key(n)))
+        return;
+    hashmap_put_int(&cx->seen, copy_key(n), (void *)1);
+    if (++cx->depth > 4096)
+        reflect_link_error(cx->vm, "CopyNode: tree is nested too deeply");
+
+    if (!copy_node_kind_ok(n))
+        copy_node_refuse(cx, n, "this kind of node is not supported");
+    if (n->cleanup_vars || n->cleanup_open)
+        copy_node_refuse(cx, n, "cleanup variable");
+    if (n->omp || n->init_tail || n->swizzle_store)
+        copy_node_refuse(cx, n, "this node kind is not supported");
+    if (n->kind == ND_MEMZERO && n->rhs)
+        copy_node_refuse(cx, n, "variable-length array");
+    if (n->is_decl_group)
+        copy_node_check_decls(cx, n);
+    if (n->ret_buffer || n->atomic_addr || copy_node_is_temp(n->var))
+        cx->needs_fn = true;
+    if (cx->needs_fn && !cx->vm->compiler.current_fn)
+        copy_node_refuse(cx, n, "needs a function context; use WithFn");
+
+    switch (n->kind) {
+        case ND_FOR:
+        case ND_DO:
+        case ND_SWITCH:
+            copy_node_define_label(cx, n->brk_label);
+            copy_node_define_label(cx, n->cont_label);
+            break;
+        case ND_LABEL:
+            copy_node_define_label(cx, n->unique_label);
+            break;
+        case ND_GOTO:
+        case ND_LABEL_VAL:
+            if (n->label && n->unique_label) {
+                if (cx->n_gotos == cx->cap_gotos) {
+                    cx->cap_gotos = cx->cap_gotos ? cx->cap_gotos * 2 : 8;
+                    cx->gotos = realloc(cx->gotos,
+                                        (size_t)cx->cap_gotos * sizeof(Node *));
+                }
+                cx->gotos[cx->n_gotos++] = n;
+            }
+            break;
+        default:
+            break;
+    }
+
+#define X(f) copy_node_check(cx, n->f);
+    COPY_NODE_CHILDREN(X)
+#undef X
+    copy_node_check_chain(cx, n->body);
+    copy_node_check_chain(cx, n->args);
+    for (int i = 0; n->kind == ND_QUOTE_LAZY && i < n->lazy_arg_count; i++)
+        copy_node_check_chain(cx, n->lazy_args[i]);
+    cx->depth--;
+}
+
+static Node *copy_node_tree(CopyCtx *cx, Node *n);
 
 static Node *copy_node_chain(CopyCtx *cx, Node *head) {
     Node  out = {};
@@ -5090,103 +5240,109 @@ static Node *copy_node_chain(CopyCtx *cx, Node *head) {
     return out.next;
 }
 
-// The bounds expressions are subtrees of their own that a shallow copy would
-// alias.
-static bool node_has_checked_bounds(const Node *n) {
-    return n->checked_bounds_lo || n->checked_bounds_hi ||
-           n->checked_bounds_obj_init || n->checked_rmw_mirror ||
-           n->checked_assign_dst_lo || n->checked_assign_dst_hi ||
-           n->checked_assign_dst_obj_init || n->checked_assign_src_lo ||
-           n->checked_assign_src_hi;
-}
-
-// TODO: labels, goto, switch, declarations and checked-pointer nodes are
-// refused (#1698).
-static void copy_node_check(CopyCtx *cx, const Node *n) {
-    bool ok = n->kind <= ND_LOGOR;
-    switch (n->kind) {
-        case ND_RETURN:
-        case ND_IF:
-        case ND_FOR:
-        case ND_DO:
-        case ND_BLOCK:
-        case ND_FUNCALL:
-        case ND_EXPR_STMT:
-        case ND_STMT_EXPR:
-        case ND_VAR:
-        case ND_NUM:
-        case ND_CAST:
-        case ND_QUOTE_LAZY:
-            ok = true;
-            break;
-        case ND_GOTO:
-            ok = !n->label; // break/continue; a user label would need renaming
-            break;
-        default:
-            break;
-    }
-    if (!ok)
-        copy_node_refuse(cx, n,
-                         "labels, goto, switch and declarations are "
-                         "not supported");
-    if (n->kind == ND_BLOCK && (n->cleanup_vars || n->is_decl_group || n->omp ||
-                                n->static_assert_cond))
-        copy_node_refuse(cx, n, "declarations are not supported");
-    if (n->kind == ND_FUNCALL && n->ret_buffer)
-        copy_node_refuse(cx, n, "struct-returning call; rebuild it");
-    if (node_has_checked_bounds(n))
-        copy_node_refuse(cx, n, "checked-pointer node; rebuild it");
+static Obj *copy_node_obj(CopyCtx *cx, Obj *o) {
+    if (!o)
+        return NULL;
+    Obj *c = hashmap_get_int(&cx->objs, copy_key(o));
+    if (c)
+        return c;
+    if (!hashmap_get_int(&cx->declared, copy_key(o)) && !copy_node_is_temp(o))
+        return o;
+    VirtualMachine *vm   = cx->vm;
+    c                    = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    *c                   = *o;
+    c->offset            = 0;
+    c->objsize_has_alloc = false;
+    c->objsize_init_assign      = NULL;
+    c->objsize_derived_from     = NULL;
+    c->checked_prop_candidate   = false;
+    c->checked_prop_init_assign = NULL;
+    c->next                     = vm->compiler.locals;
+    vm->compiler.locals         = c;
+    hashmap_put_int(&cx->objs, copy_key(o), c);
+    return c;
 }
 
 static char *copy_node_label(CopyCtx *cx, char *label) {
-    for (int i = cx->n_labels - 1; i >= 0; i--)
-        if (cx->labels[i].from == label)
-            return cx->labels[i].to;
-    return label; // targets a loop outside the copy
+    char *fresh = label ? hashmap_get_int(&cx->labels, copy_key(label)) : NULL;
+    return fresh ? fresh : label;
 }
 
 static Node *copy_node_tree(CopyCtx *cx, Node *n) {
     if (!n)
         return NULL;
-    if (++cx->depth > 4096)
-        reflect_link_error(cx->vm, "CopyNode: tree is nested too deeply");
-    copy_node_check(cx, n);
+    Node *c = hashmap_get_int(&cx->nodes, copy_key(n));
+    if (c)
+        return c;
 
-    Node *c      = arena_alloc(&cx->vm->compiler.parser_arena, sizeof(Node));
-    *c           = *n;
-    c->next      = NULL;
-    c->list_link = LINK_FREE;
+    c  = arena_alloc(&cx->vm->compiler.parser_arena, sizeof(Node));
+    *c = *n;
+    hashmap_put_int(&cx->nodes, copy_key(n), c);
+    c->next         = NULL;
+    c->list_link    = LINK_FREE;
+    c->goto_next    = NULL;
+    c->case_next    = NULL;
+    c->default_case = NULL;
 
-    int saved_labels = cx->n_labels;
-    if (n->kind == ND_FOR || n->kind == ND_DO) {
-        if (cx->n_labels + 2 > 32)
-            reflect_link_error(cx->vm, "CopyNode: loops nested too deeply");
-        if (n->brk_label) {
-            c->brk_label                  = new_unique_name(cx->vm);
-            cx->labels[cx->n_labels].from = n->brk_label;
-            cx->labels[cx->n_labels++].to = c->brk_label;
-        }
-        if (n->cont_label) {
-            c->cont_label                 = new_unique_name(cx->vm);
-            cx->labels[cx->n_labels].from = n->cont_label;
-            cx->labels[cx->n_labels++].to = c->cont_label;
-        }
+    switch (n->kind) {
+        case ND_FOR:
+        case ND_DO:
+        case ND_SWITCH:
+            c->brk_label  = copy_node_label(cx, n->brk_label);
+            c->cont_label = copy_node_label(cx, n->cont_label);
+            break;
+        case ND_LABEL:
+            c->unique_label = copy_node_label(cx, n->unique_label);
+            break;
+        case ND_GOTO:
+        case ND_LABEL_VAL:
+            // A user label outside the copy is bound again by name where the
+            // copy lands (cc_resolve_body_label_refs); break/continue keep
+            // their loop.
+            c->unique_label = copy_node_label(cx, n->unique_label);
+            if (n->label && c->unique_label == n->unique_label &&
+                !hashmap_get_int(&cx->labels, copy_key(n->unique_label)))
+                c->unique_label = NULL;
+            break;
+        default:
+            break;
     }
-    if (n->kind == ND_GOTO)
-        c->unique_label = copy_node_label(cx, n->unique_label);
 
-    c->lhs       = copy_node_tree(cx, n->lhs);
-    c->rhs       = copy_node_tree(cx, n->rhs);
-    c->cond      = copy_node_tree(cx, n->cond);
-    c->then      = copy_node_tree(cx, n->then);
-    c->els       = copy_node_tree(cx, n->els);
-    c->init      = copy_node_tree(cx, n->init);
-    c->inc       = copy_node_tree(cx, n->inc);
-    c->body      = copy_node_chain(cx, n->body);
-    c->args      = copy_node_chain(cx, n->args);
+    c->var         = copy_node_obj(cx, n->var);
+    c->ret_buffer  = copy_node_obj(cx, n->ret_buffer);
+    c->atomic_addr = copy_node_obj(cx, n->atomic_addr);
+    if (n->decl_var_count) {
+        c->decl_vars = arena_alloc(&cx->vm->compiler.parser_arena,
+                                   (size_t)n->decl_var_count * sizeof(Obj *));
+        for (int i = 0; i < n->decl_var_count; i++)
+            c->decl_vars[i] = copy_node_obj(cx, n->decl_vars[i]);
+    }
 
-    cx->n_labels = saved_labels;
-    cx->depth--;
+#define X(f) c->f = copy_node_tree(cx, n->f);
+    COPY_NODE_CHILDREN(X)
+#undef X
+    c->body = copy_node_chain(cx, n->body);
+    c->args = copy_node_chain(cx, n->args);
+    if (n->kind == ND_QUOTE_LAZY && n->lazy_arg_count) {
+        c->lazy_args = arena_alloc(&cx->vm->compiler.parser_arena,
+                                   (size_t)n->lazy_arg_count * sizeof(Node *));
+        for (int i = 0; i < n->lazy_arg_count; i++)
+            c->lazy_args[i] = copy_node_chain(cx, n->lazy_args[i]);
+    }
+
+    // Codegen finds a switch's cases by node, so the copy needs its own chain.
+    if (n->kind == ND_SWITCH) {
+        Node *prev = NULL;
+        for (Node *k = n->case_next; k; k = k->case_next) {
+            Node *kc = copy_node_tree(cx, k);
+            if (prev)
+                prev->case_next = kc;
+            else
+                c->case_next = kc;
+            prev = kc;
+        }
+        c->default_case = copy_node_tree(cx, n->default_case);
+    }
     return c;
 }
 
@@ -5196,7 +5352,21 @@ Node *__builtin_ast_copy_node(Node *n) {
     if (!vm || !n)
         return NULL;
     CopyCtx cx = {.vm = vm};
-    return copy_node_tree(&cx, n);
+    copy_node_check(&cx, n);
+    for (int i = 0; i < cx.n_gotos; i++) {
+        Node *g = cx.gotos[i];
+        if (!vm->compiler.in_macro_expansion &&
+            !hashmap_get_int(&cx.labels, copy_key(g->unique_label)))
+            copy_node_refuse(&cx, g, "goto to a label outside the copy");
+    }
+    Node *copy = copy_node_tree(&cx, n);
+    hashmap_deinit(&cx.seen);
+    hashmap_deinit(&cx.declared);
+    hashmap_deinit(&cx.labels);
+    hashmap_deinit(&cx.nodes);
+    hashmap_deinit(&cx.objs);
+    free(cx.gotos);
+    return copy;
 }
 
 // ============================================================================

@@ -2605,7 +2605,7 @@ a compile with warnings puts more than one document there.
 | `TokenFromNode(node)` | Opaque source token attached to a node |
 | `SetToken(node, tok)` | Attach a token to a node and return the node |
 | `CopyLocation(dst, src)` | Copy source location from one node to another |
-| `CopyNode(node)` | Deep copy of an expression or simple statement, for linking into a second list |
+| `CopyNode(node)` | Deep copy of an expression or statement tree (labels, `switch`, declarations included), for linking into a second list |
 | `Quote(tmpl, ...)` | Parse a C template string, splicing `$N`/`$@N` argument nodes, immediately |
 | `QuoteN(tmpl, nodes, count)` | Array-form `Quote`; validates the splice count |
 | `QuoteLazy(tmpl, ...)` | Capture a template and its splice arguments without parsing; parsed only once spliced in, at the splice site's own scope/loop context |
