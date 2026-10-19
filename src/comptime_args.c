@@ -741,63 +741,199 @@ void cccc_comptime_note_builtin_result(VirtualMachine *vm, const CcBuiltin *b,
 // in host memory; comptime reads it through disjoint ranges that the matching
 // release call (globfree, closedir, ...) drops by owner.
 
-typedef struct {
+typedef struct HostRange HostRange;
+struct HostRange {
     uintptr_t   base;
     size_t      len;
     const void *owner;
     bool        writable;
     bool        tree_node; // a tsearch node, owner is the root variable
-} HostRange;
+    bool        seen;      // set by a tdelete walk, cleared by its sweep
+    int         height;
+    HostRange  *left, *right;            // AVL tree ordered by base
+    HostRange  *owner_prev, *owner_next; // ranges sharing an owner
+};
 
-// TODO(#1676): sorted array with O(n) insert and owner scans; use an interval
-// tree if results with many thousands of entries show up.
-static HostRange      *host_ranges;
-static size_t          host_range_count, host_range_cap;
+// Ranges never overlap, so one AVL tree keyed by base orders them; the owner
+// index lets a release call find its ranges without a scan.
+static HostRange      *range_root;
+static HashMap         range_owners; // owner -> first HostRange of its list
 static pthread_mutex_t range_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// Index of the first range whose end is above `a`.
-static size_t range_lower_bound(uintptr_t a) {
-    size_t lo = 0, hi = host_range_count;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        if (host_ranges[mid].base + host_ranges[mid].len <= a)
-            lo = mid + 1;
-        else
-            hi = mid;
+static int range_height(const HostRange *n) {
+    return n ? n->height : 0;
+}
+
+static void range_update(HostRange *n) {
+    int l     = range_height(n->left);
+    int r     = range_height(n->right);
+    n->height = 1 + (l > r ? l : r);
+}
+
+static HostRange *range_rotate_right(HostRange *y) {
+    HostRange *x = y->left;
+    y->left      = x->right;
+    x->right     = y;
+    range_update(y);
+    range_update(x);
+    return x;
+}
+
+static HostRange *range_rotate_left(HostRange *x) {
+    HostRange *y = x->right;
+    x->right     = y->left;
+    y->left      = x;
+    range_update(x);
+    range_update(y);
+    return y;
+}
+
+static HostRange *range_balance(HostRange *n) {
+    range_update(n);
+    int skew = range_height(n->left) - range_height(n->right);
+    if (skew > 1) {
+        if (range_height(n->left->left) < range_height(n->left->right))
+            n->left = range_rotate_left(n->left);
+        return range_rotate_right(n);
     }
-    return lo;
+    if (skew < -1) {
+        if (range_height(n->right->right) < range_height(n->right->left))
+            n->right = range_rotate_right(n->right);
+        return range_rotate_left(n);
+    }
+    return n;
+}
+
+static HostRange *range_tree_insert(HostRange *n, HostRange *r) {
+    if (!n)
+        return r;
+    if (r->base < n->base)
+        n->left = range_tree_insert(n->left, r);
+    else
+        n->right = range_tree_insert(n->right, r);
+    return range_balance(n);
+}
+
+static HostRange *range_tree_pop_min(HostRange *n, HostRange **min) {
+    if (!n->left) {
+        *min = n;
+        return n->right;
+    }
+    n->left = range_tree_pop_min(n->left, min);
+    return range_balance(n);
+}
+
+// Detaches the range at `base` (bases are unique); the caller frees it.
+static HostRange *range_tree_erase(HostRange *n, uintptr_t base) {
+    if (!n)
+        return NULL;
+    if (base < n->base) {
+        n->left = range_tree_erase(n->left, base);
+    } else if (base > n->base) {
+        n->right = range_tree_erase(n->right, base);
+    } else {
+        HostRange *l = n->left, *r = n->right;
+        if (!r)
+            return l;
+        HostRange *min;
+        r          = range_tree_pop_min(r, &min);
+        min->left  = l;
+        min->right = r;
+        return range_balance(min);
+    }
+    return range_balance(n);
+}
+
+// First range whose end is above `a`.
+static HostRange *range_find(uintptr_t a) {
+    HostRange *best = NULL;
+    for (HostRange *n = range_root; n;) {
+        if (n->base + n->len <= a) {
+            n = n->right;
+        } else {
+            best = n;
+            n    = n->left;
+        }
+    }
+    return best;
+}
+
+static HostRange *range_successor(const HostRange *r) {
+    HostRange *best = NULL;
+    for (HostRange *n = range_root; n;) {
+        if (n->base > r->base) {
+            best = n;
+            n    = n->left;
+        } else {
+            n = n->right;
+        }
+    }
+    return best;
+}
+
+static long long owner_key(const void *owner) {
+    return (long long)(uintptr_t)owner;
+}
+
+// A NULL owner is never dropped, so it is not indexed (0 is no hashmap key).
+static void owner_link(HostRange *r) {
+    if (!r->owner)
+        return;
+    HostRange *head = hashmap_get_int(&range_owners, owner_key(r->owner));
+    r->owner_prev   = NULL;
+    r->owner_next   = head;
+    if (head)
+        head->owner_prev = r;
+    hashmap_put_int(&range_owners, owner_key(r->owner), r);
+}
+
+static void owner_unlink(HostRange *r) {
+    if (!r->owner)
+        return;
+    if (r->owner_prev)
+        r->owner_prev->owner_next = r->owner_next;
+    else if (r->owner_next)
+        hashmap_put_int(&range_owners, owner_key(r->owner), r->owner_next);
+    else
+        hashmap_delete_int(&range_owners, owner_key(r->owner));
+    if (r->owner_next)
+        r->owner_next->owner_prev = r->owner_prev;
+}
+
+static void range_remove(HostRange *r) {
+    owner_unlink(r);
+    range_root = range_tree_erase(range_root, r->base);
+    free(r);
+}
+
+// A new range replaces whatever it overlaps (a reused dirent buffer).
+static HostRange *range_add_locked(const void *base, size_t len,
+                                   const void *owner, bool writable,
+                                   bool tree_node) {
+    uintptr_t  a = (uintptr_t)base;
+    HostRange *old;
+    while ((old = range_find(a)) && old->base < a + len)
+        range_remove(old);
+    HostRange *r = calloc(1, sizeof *r);
+    if (!r)
+        return NULL;
+    r->base      = a;
+    r->len       = len;
+    r->owner     = owner;
+    r->writable  = writable;
+    r->tree_node = tree_node;
+    r->height    = 1;
+    range_root   = range_tree_insert(range_root, r);
+    owner_link(r);
+    return r;
 }
 
 static void range_add(const void *base, size_t len, const void *owner,
                       bool writable, bool tree_node) {
     if (!base || !len)
         return;
-    uintptr_t a = (uintptr_t)base;
     pthread_mutex_lock(&range_lock);
-    // A new range replaces whatever it overlaps (a reused dirent buffer).
-    size_t i = range_lower_bound(a);
-    size_t j = i;
-    while (j < host_range_count && host_ranges[j].base < a + len)
-        j++;
-    if (j > i) {
-        memmove(&host_ranges[i], &host_ranges[j],
-                (host_range_count - j) * sizeof *host_ranges);
-        host_range_count -= j - i;
-    }
-    if (host_range_count == host_range_cap) {
-        size_t     cap = host_range_cap ? host_range_cap * 2 : 64;
-        HostRange *n   = realloc(host_ranges, cap * sizeof *n);
-        if (!n) {
-            pthread_mutex_unlock(&range_lock);
-            return;
-        }
-        host_ranges    = n;
-        host_range_cap = cap;
-    }
-    memmove(&host_ranges[i + 1], &host_ranges[i],
-            (host_range_count - i) * sizeof *host_ranges);
-    host_ranges[i] = (HostRange){a, len, owner, writable, tree_node};
-    host_range_count++;
+    range_add_locked(base, len, owner, writable, tree_node);
     pthread_mutex_unlock(&range_lock);
 }
 
@@ -814,9 +950,8 @@ bool cccc_comptime_host_node_known(const void *node, const void *tree) {
     uintptr_t a   = (uintptr_t)node;
     bool      hit = false;
     pthread_mutex_lock(&range_lock);
-    size_t i = range_lower_bound(a);
-    if (i < host_range_count && host_ranges[i].base == a &&
-        host_ranges[i].tree_node && (!tree || host_ranges[i].owner == tree))
+    HostRange *r = range_find(a);
+    if (r && r->base == a && r->tree_node && (!tree || r->owner == tree))
         hit = true;
     pthread_mutex_unlock(&range_lock);
     return hit;
@@ -826,11 +961,35 @@ void cccc_comptime_host_range_drop(const void *owner) {
     if (!owner)
         return;
     pthread_mutex_lock(&range_lock);
-    size_t keep = 0;
-    for (size_t i = 0; i < host_range_count; i++)
-        if (host_ranges[i].owner != owner)
-            host_ranges[keep++] = host_ranges[i];
-    host_range_count = keep;
+    HostRange *r;
+    while ((r = hashmap_get_int(&range_owners, owner_key(owner))))
+        range_remove(r);
+    pthread_mutex_unlock(&range_lock);
+}
+
+// tdelete leaves the tree's live nodes marked; the sweep drops the rest.
+static void tree_node_mark(const void *node, const void *tree) {
+    pthread_mutex_lock(&range_lock);
+    HostRange *r = range_find((uintptr_t)node);
+    if (!(r && r->base == (uintptr_t)node && r->tree_node && r->owner == tree &&
+          r->len == sizeof(void *)))
+        r = range_add_locked(node, sizeof(void *), tree, false, true);
+    if (r)
+        r->seen = true;
+    pthread_mutex_unlock(&range_lock);
+}
+
+static void tree_node_sweep(const void *tree) {
+    pthread_mutex_lock(&range_lock);
+    HostRange *r = hashmap_get_int(&range_owners, owner_key(tree));
+    while (r) {
+        HostRange *next = r->owner_next;
+        if (r->tree_node && !r->seen)
+            range_remove(r);
+        else
+            r->seen = false;
+        r = next;
+    }
     pthread_mutex_unlock(&range_lock);
 }
 
@@ -838,19 +997,17 @@ size_t cccc_comptime_host_range_left(const void *p, bool write) {
     uintptr_t a    = (uintptr_t)p;
     size_t    left = 0;
     pthread_mutex_lock(&range_lock);
-    size_t i = range_lower_bound(a);
-    if (i < host_range_count && host_ranges[i].base <= a &&
-        (!write || host_ranges[i].writable)) {
-        uintptr_t end = host_ranges[i].base + host_ranges[i].len;
+    HostRange *r = range_find(a);
+    if (r && r->base <= a && (!write || r->writable)) {
+        uintptr_t end = r->base + r->len;
         left          = end - a;
         // Adjacent ranges read as one (an ENTRY's read-only key, writable
         // data).
-        for (size_t j = i + 1;
-             j < host_range_count && host_ranges[j].base == end &&
-             (!write || host_ranges[j].writable);
-             j++) {
-            end  += host_ranges[j].len;
-            left += host_ranges[j].len;
+        for (HostRange *n = range_successor(r);
+             n && n->base == end && (!write || n->writable);
+             n = range_successor(n)) {
+            end  += n->len;
+            left += n->len;
         }
     }
     pthread_mutex_unlock(&range_lock);
@@ -1953,27 +2110,27 @@ static _Thread_local const void *walk_tree;
 static void walk_register(const void *node, VISIT which, int depth) {
     (void)depth;
     if (which == postorder || which == leaf)
-        cccc_comptime_host_node_add(node, walk_tree);
+        tree_node_mark(node, walk_tree);
 }
 
-// tdelete may free any node and rebalance; the survivors are registered again.
-// TODO(#1695): re-walking the tree on each tdelete is O(n); track the freed
-// node (the returned parent is not it) if large trees show up.
+// libc frees the matched node or, on glibc and musl, a neighbour whose key it
+// moved, so the walk marks the live nodes and the sweep drops the rest.
 static void r_tdelete(VirtualMachine *vm, long long *args, int nargs,
                       long long *result) {
     (void)result;
     if (nargs < 2)
         return;
     void *rootp = (void *)args[1];
-    cccc_comptime_host_range_drop(rootp);
-    void *root;
-    if (!cccc_comptime_addr_ok(vm, rootp, sizeof root, false))
+    void *root  = NULL;
+    if (cccc_comptime_addr_ok(vm, rootp, sizeof root, false))
+        memcpy(&root, rootp, sizeof root);
+    if (!root) {
+        cccc_comptime_host_range_drop(rootp);
         return;
-    memcpy(&root, rootp, sizeof root);
-    if (!root)
-        return;
+    }
     walk_tree = rootp;
     twalk(root, walk_register);
+    tree_node_sweep(rootp);
 }
 
 static char hsearch_owner;
