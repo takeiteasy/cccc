@@ -343,8 +343,9 @@ Node *__builtin_ast_copy_location(Node *dst, Node *src);
  * loop, switch and user labels, its own cases, and its own locals: declared
  * variables and the temporaries of compound assignments and struct-returning
  * calls (so it needs a function context). A goto to a label outside the copy
- * is bound again by name where the copy lands. Cleanup variables, VLAs, static
- * locals and checked-pointer declarations are rejected.
+ * is bound again by name where the copy lands. Cleanup variables and VLAs get
+ * their own handler and size. Static locals and checked-pointer declarations
+ * are rejected.
  */
 Node *__builtin_ast_copy_node(Node *n);
 

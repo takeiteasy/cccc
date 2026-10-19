@@ -9,8 +9,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: `CopyNode` copies labels, `goto`, `switch`/`case`, local declarations,
   compound assignments, struct-returning calls and checked-pointer accesses.
-  Each copy has its own labels and locals. Cleanup variables, VLAs, `static`
-  locals and checked-pointer declarations are still refused.
+  Each copy has its own labels and locals. `static` locals and checked-pointer
+  declarations are still refused.
+- Added: `CopyNode` copies `cleanup` variables and variable-length arrays; each
+  copy runs its own handler and has its own size.
+- Fixed: a `CopyNode` copy that only reads an enclosing variable-length array
+  read an uninitialised size.
 
 ## [0.17.2] - 2026-10-18
 

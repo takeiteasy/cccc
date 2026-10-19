@@ -3,7 +3,7 @@
 // CopyNode copies labels, switches, declarations and cleanup scopes; the suite
 // also runs under -c=native, where copied labels and locals must stay distinct.
 
-int  cp_g, cp_v, cp_cnt;
+int cp_g, cp_v, cp_cnt, cp_n = 3;
 void cp_bump(int *p) {
     (void)p;
     cp_cnt++;
@@ -50,6 +50,30 @@ Node *cp_cleanup_scope(void) {
                  __builtin_ast_block(s, 6));
 }
 
+[[cccc::comptime]]
+Node *cp_cleanup_var(void) {
+    Node *s =
+        Quote("{ __attribute__((cleanup(cp_bump))) int x = 1; cp_g += 20; }");
+    Node *x[2] = {s, CopyNode(s)};
+    return __builtin_ast_block(x, 2);
+}
+
+[[cccc::comptime]]
+Node *cp_vla(void) {
+    Node *s =
+        Quote("{ int a[cp_n]; for (int i = 0; i < cp_n; i++) a[i] = 2 * i + 1;"
+              " cp_g += (int)sizeof(a) + a[0] + a[1] + a[2]; }");
+    Node *x[2] = {s, CopyNode(s)};
+    return __builtin_ast_block(x, 2);
+}
+
+[[cccc::comptime]]
+Node *cp_vla_outer(void) {
+    Node *s    = Quote("cp_g += m[1][2];");
+    Node *x[2] = {s, CopyNode(s)};
+    return __builtin_ast_block(x, 2);
+}
+
 [[cccc::test]]
 void test_copy_label(void) {
     cp_g = 0;
@@ -87,4 +111,32 @@ void test_copy_cleanup_scope(void) {
     cp_cleanup_scope();
     AssertEq(cp_g, 42);
     AssertEq(cp_cnt, 1);
+}
+
+[[cccc::test]]
+void test_copy_cleanup_var(void) {
+    cp_g   = 0;
+    cp_cnt = 0;
+    cp_cleanup_var();
+    AssertEq(cp_g, 40);
+    AssertEq(cp_cnt, 2);
+}
+
+[[cccc::test]]
+void test_copy_vla(void) {
+    cp_g = 0;
+    cp_vla();
+    AssertEq(cp_g, 42);
+}
+
+[[cccc::test]]
+void test_copy_vla_outer(void) {
+    int n = 3, k = 4;
+    int m[n][k];
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < k; j++)
+            m[i][j] = i * 10 + j;
+    cp_g = 0;
+    cp_vla_outer();
+    AssertEq(cp_g, 24);
 }

@@ -1,14 +1,15 @@
-// EXPECT_COMPILE_ERROR
-// CCCC_EXPECT_STDERR: variable-length array
-int n = 3;
+// A copied VLA has its own size and storage.
+int n = 3, g;
 
 [[cccc::comptime]]
 Node *probe(void) {
-    Node *s = Quote("{ int a[n]; a[0] = 1; }");
-    return CopyNode(s);
+    Node *s = Quote("{ int a[n]; for (int i = 0; i < n; i++) a[i] = 2 * i + 1;"
+                    " g += (int)sizeof(a) + a[0] + a[1] + a[2]; }");
+    Node *x[2] = {s, CopyNode(s)};
+    return __builtin_ast_block(x, 2);
 }
 
 int main(void) {
     probe();
-    return 0;
+    return g == 42 ? 42 : 10;
 }

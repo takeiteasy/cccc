@@ -5067,11 +5067,18 @@ Node *__builtin_node_list(Node **nodes, int count) {
 // cannot be copied before anything is allocated, so a refusal leaves no stray
 // local behind; the second pass copies. The copy keeps the original's sharing,
 // owns its labels (loops, switches, user labels) and gives every local the
-// tree declares, and every compiler temporary it uses, an Obj of its own.
+// tree declares, and every compiler temporary it writes, an Obj of its own. A
+// temporary the tree only reads (an enclosing VLA's size) stays shared.
 typedef struct {
     VirtualMachine *vm;
     HashMap         seen;     // pass 1: nodes already checked
-    HashMap         declared; // Obj declared by a declaration in the tree
+    HashMap         declared; // Obj the tree declares or writes (gets a clone)
+    HashMap         types;    // pass 2: Type -> its clone
+    Obj           **cvars;    // cleanup variables the tree declares, by seq
+    int             n_cvars, cap_cvars;
+    int             seq_base; // cleanup_seq before the copy's variables
+    Obj           **clones;   // pass 2: every cloned Obj
+    int             n_clones, cap_clones;
     HashMap         labels;   // label defined in the tree -> its fresh label
     HashMap         nodes;    // pass 2: node -> its copy
     HashMap         objs;     // pass 2: Obj -> its clone
@@ -5120,6 +5127,7 @@ static bool copy_node_kind_ok(const Node *n) {
         case ND_GOTO_EXPR:
         case ND_LABEL:
         case ND_LABEL_VAL:
+        case ND_VLA_PTR:
         case ND_FUNCALL:
         case ND_EXPR_STMT:
         case ND_STMT_EXPR:
@@ -5146,17 +5154,27 @@ static void copy_node_define_label(CopyCtx *cx, char *label) {
         hashmap_put_int(&cx->labels, copy_key(label), new_unique_name(cx->vm));
 }
 
-// TODO: cleanup variables and VLAs are refused (#1699).
+static void copy_node_declare(CopyCtx *cx, Obj *v) {
+    hashmap_put_int(&cx->declared, copy_key(v), v);
+}
+
 static void copy_node_check_decls(CopyCtx *cx, Node *n) {
     for (int i = 0; i < n->decl_var_count; i++) {
         Obj *v = n->decl_vars[i];
-        hashmap_put_int(&cx->declared, copy_key(v), v);
+        copy_node_declare(cx, v);
         if (!v->is_local)
             copy_node_refuse(cx, n, "static local; rebuild it");
-        if (v->cleanup_fn)
-            copy_node_refuse(cx, n, "cleanup variable");
-        if (type_contains_vla(v->ty))
-            copy_node_refuse(cx, n, "variable-length array");
+        if (v->cleanup_fn) {
+            if (cx->n_cvars == cx->cap_cvars) {
+                cx->cap_cvars = cx->cap_cvars ? cx->cap_cvars * 2 : 4;
+                cx->cvars =
+                    realloc(cx->cvars, (size_t)cx->cap_cvars * sizeof(Obj *));
+            }
+            int j = cx->n_cvars++;
+            for (; j > 0 && cx->cvars[j - 1]->cleanup_seq > v->cleanup_seq; j--)
+                cx->cvars[j] = cx->cvars[j - 1];
+            cx->cvars[j] = v;
+        }
         if (v->checked_kind != CHECKED_NONE)
             copy_node_refuse(cx, n, "checked-pointer declaration");
         if (v->is_kernel_local_obj)
@@ -5182,16 +5200,26 @@ static void copy_node_check(CopyCtx *cx, Node *n) {
 
     if (!copy_node_kind_ok(n))
         copy_node_refuse(cx, n, "this kind of node is not supported");
-    if (n->cleanup_vars || n->cleanup_open)
-        copy_node_refuse(cx, n, "cleanup variable");
     if (n->omp || n->init_tail || n->swizzle_store)
         copy_node_refuse(cx, n, "this node kind is not supported");
-    if (n->kind == ND_MEMZERO && n->rhs)
-        copy_node_refuse(cx, n, "variable-length array");
     if (n->is_decl_group)
         copy_node_check_decls(cx, n);
-    if (n->ret_buffer || n->atomic_addr || copy_node_is_temp(n->var))
+    // A temporary is the copy's own once the tree writes it; a plain read
+    // (ND_VAR) of one written elsewhere refers to the enclosing code's.
+    Obj *written = n->var;
+    if (n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR)
+        written = n->lhs->var;
+    else if (n->kind == ND_VAR)
+        written = NULL;
+    if (copy_node_is_temp(written) || n->ret_buffer || n->atomic_addr) {
+        if (copy_node_is_temp(written))
+            copy_node_declare(cx, written);
+        if (n->ret_buffer)
+            copy_node_declare(cx, n->ret_buffer);
+        if (n->atomic_addr)
+            copy_node_declare(cx, n->atomic_addr);
         cx->needs_fn = true;
+    }
     if (cx->needs_fn && !cx->vm->compiler.current_fn)
         copy_node_refuse(cx, n, "needs a function context; use WithFn");
 
@@ -5240,13 +5268,15 @@ static Node *copy_node_chain(CopyCtx *cx, Node *head) {
     return out.next;
 }
 
+static Type *copy_node_type(CopyCtx *cx, Type *ty);
+
 static Obj *copy_node_obj(CopyCtx *cx, Obj *o) {
     if (!o)
         return NULL;
     Obj *c = hashmap_get_int(&cx->objs, copy_key(o));
     if (c)
         return c;
-    if (!hashmap_get_int(&cx->declared, copy_key(o)) && !copy_node_is_temp(o))
+    if (!hashmap_get_int(&cx->declared, copy_key(o)))
         return o;
     VirtualMachine *vm   = cx->vm;
     c                    = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
@@ -5257,10 +5287,63 @@ static Obj *copy_node_obj(CopyCtx *cx, Obj *o) {
     c->objsize_derived_from     = NULL;
     c->checked_prop_candidate   = false;
     c->checked_prop_init_assign = NULL;
+    c->cleanup_cur              = NULL;
     c->next                     = vm->compiler.locals;
     vm->compiler.locals         = c;
     hashmap_put_int(&cx->objs, copy_key(o), c);
+
+    if (o->cleanup_fn)
+        for (int i = 0; i < cx->n_cvars; i++)
+            if (cx->cvars[i] == o)
+                c->cleanup_seq = cx->seq_base + 1 + i;
+    if (cx->n_clones == cx->cap_clones) {
+        cx->cap_clones = cx->cap_clones ? cx->cap_clones * 2 : 8;
+        cx->clones =
+            realloc(cx->clones, (size_t)cx->cap_clones * sizeof(Obj *));
+    }
+    cx->clones[cx->n_clones++] = c;
+    c->ty                      = copy_node_type(cx, o->ty);
     return c;
+}
+
+// A variable-length type has a runtime size held in an Obj; it is the copy's
+// own only when the tree computes that size.
+static bool copy_node_type_is_own(CopyCtx *cx, Type *ty) {
+    for (Type *t = ty; t; t = t->base) {
+        if (t->kind == TY_VLA && t->vla_size &&
+            hashmap_get_int(&cx->declared, copy_key(t->vla_size)))
+            return true;
+        if (t->kind != TY_PTR && t->kind != TY_ARRAY && t->kind != TY_VLA)
+            break;
+    }
+    return false;
+}
+
+static Type *copy_node_type(CopyCtx *cx, Type *ty) {
+    if (!ty)
+        return NULL;
+    Type *c = hashmap_get_int(&cx->types, copy_key(ty));
+    if (c)
+        return c;
+    if (!copy_node_type_is_own(cx, ty))
+        return ty;
+    c = copy_type(cx->vm, ty);
+    hashmap_put_int(&cx->types, copy_key(ty), c);
+    c->base = copy_node_type(cx, ty->base);
+    if (ty->kind == TY_VLA) {
+        c->vla_size = copy_node_obj(cx, ty->vla_size);
+        c->vla_len  = copy_node_tree(cx, ty->vla_len);
+    }
+    return c;
+}
+
+// A jump's limit counts the cleanup variables declared before it; the copy's
+// variables are numbered after every existing one, in their original order.
+static int copy_node_seq_limit(CopyCtx *cx, int limit) {
+    int before = 0;
+    for (int i = 0; i < cx->n_cvars; i++)
+        before += cx->cvars[i]->cleanup_seq < limit;
+    return cx->seq_base + 1 + before;
 }
 
 static char *copy_node_label(CopyCtx *cx, char *label) {
@@ -5311,6 +5394,20 @@ static Node *copy_node_tree(CopyCtx *cx, Node *n) {
     c->var         = copy_node_obj(cx, n->var);
     c->ret_buffer  = copy_node_obj(cx, n->ret_buffer);
     c->atomic_addr = copy_node_obj(cx, n->atomic_addr);
+    c->ty           = copy_node_type(cx, n->ty);
+    c->cleanup_open = copy_node_obj(cx, n->cleanup_open);
+    if (n->cleanup_seq_limit)
+        c->cleanup_seq_limit = copy_node_seq_limit(cx, n->cleanup_seq_limit);
+    CleanupVar **cv_tail = &c->cleanup_vars;
+    for (CleanupVar *cv = n->cleanup_vars; cv; cv = cv->next) {
+        CleanupVar *cc =
+            arena_alloc(&cx->vm->compiler.parser_arena, sizeof(CleanupVar));
+        cc->var        = copy_node_obj(cx, cv->var);
+        cc->cleanup_fn = cv->cleanup_fn;
+        *cv_tail       = cc;
+        cv_tail        = &cc->next;
+    }
+    *cv_tail = NULL;
     if (n->decl_var_count) {
         c->decl_vars = arena_alloc(&cx->vm->compiler.parser_arena,
                                    (size_t)n->decl_var_count * sizeof(Obj *));
@@ -5359,9 +5456,24 @@ Node *__builtin_ast_copy_node(Node *n) {
             !hashmap_get_int(&cx.labels, copy_key(g->unique_label)))
             copy_node_refuse(&cx, g, "goto to a label outside the copy");
     }
+    cx.seq_base               = vm->compiler.cleanup_seq;
+    vm->compiler.cleanup_seq += cx.n_cvars;
     Node *copy = copy_node_tree(&cx, n);
+    // The deferred-init marker is matched by node identity (internal.h).
+    for (int i = 0; i < cx.n_clones; i++) {
+        Obj  *c = cx.clones[i];
+        Node *m =
+            c->deferred_vla_ptr_init
+                ? hashmap_get_int(&cx.nodes, copy_key(c->deferred_vla_ptr_init))
+                : NULL;
+        if (m)
+            c->deferred_vla_ptr_init = m;
+    }
     hashmap_deinit(&cx.seen);
     hashmap_deinit(&cx.declared);
+    hashmap_deinit(&cx.types);
+    free(cx.cvars);
+    free(cx.clones);
     hashmap_deinit(&cx.labels);
     hashmap_deinit(&cx.nodes);
     hashmap_deinit(&cx.objs);
