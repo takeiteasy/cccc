@@ -7,6 +7,28 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-19
+
+- Fixed: `<string.h>` declares size arguments and the `strlen`/`strspn`/
+  `strcspn`/`strxfrm` returns as `size_t` (was `long`).
+- Fixed: `-c=native` supplies the C23 `<math.h>` functions host libms lack
+  (`exp10`, the pi-scaled trig family, `fmaximum`/`fminimum` family,
+  `totalorder`, `canonicalize`, payload functions, `llogb`, `fromfp` family)
+  and `memset_explicit`, `memalignment`, `free_sized` and
+  `free_aligned_sized`, running the same code as the VM.
+- Fixed: `-c=native` renames block-scope typedefs, tags and enumerators that
+  reuse a name visible at the top of their function.
+- Fixed: `-c=native` gives a called `gnu_inline` body a weak out-of-line
+  definition, and a later non-inline definition replaces an earlier
+  `gnu_inline` one.
+- Fixed: a program's own definition of a library function (`fabs`) wins over
+  the host builtin under `-c=native`.
+- Fixed: user macros no longer rewrite `-c=native` output after the include
+  replay (`#define int long long`).
+- Fixed: `-c=native` finds the host headers when an `-I` names CCCC's include
+  directory, no longer replays `#warning`, and passes `-w` to the host
+  compiler.
+
 ## [0.19.0] - 2026-10-19
 
 - Added: `-c=native` and `-m` enforce `--checked-pointers` (and
