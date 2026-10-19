@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // The VM has no bytecode optimiser any more, so variable-index array access
 // no longer fuses into an LDR_INDEX_* opcode -- every load takes emit_load's

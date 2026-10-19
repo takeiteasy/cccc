@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects FFI policy options
 // CCCC_FLAGS: --disable-ffi
 // CCCC_EXPECT_STDOUT: Error type: FFI Disabled
 // A libc call at comptime is still refused under --disable-ffi (it yields 0).

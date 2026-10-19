@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #768: printf is classified FFI_SHADOW_PRINTF. With no %n in the
 // format string, printf writes through no pointer argument at all (out_arg

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #982 positive control for CHKB (the ADD form): the CHKB/CHKBN split and
 // the pointer-difference exclusion in codegen.c must not silently disable

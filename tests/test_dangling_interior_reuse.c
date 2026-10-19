@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // Ticket #675: retention correctness for reused stack addresses. Unlike
 // sorted_allocs' bump-allocated heap bases, stack addresses ARE reused --

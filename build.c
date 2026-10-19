@@ -21,7 +21,8 @@
 //   test_native / test_release / test_msan / test_ubsan / test_asan /
 //   test_tsan; test_extra (the loose tests) =
 //   test_warnings / test_serialize / test_build_mode / test_safety /
-//   test_parallel / test_macros / test_misc docs                Doxygen HTML
+//   test_parallel / test_macros / test_misc / test_native_loose (the loose
+//   tests under -c=native) docs                Doxygen HTML
 //   API docs for include/cccc/*.h (needs doxygen) build_cache_toolchain_smoke
 //   #1198 regression guard (same-arch, different-compiler-family --build-cache
 //   reuse; skips if only one compiler family is on PATH) linux_amd64_build /
@@ -820,9 +821,13 @@ static BuildTarget *make_testcheck(Builder *ctx) {
     return t;
 }
 
+// `native` runs each test through `testcheck --native` (-c=native).
 static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
-                                    BuildTarget *check, int area) {
-    BuildTarget *agg     = RunCustom(ctx, AREAS[area].target, "true");
+                                    BuildTarget *check, int area, int native) {
+    char agg_name[64];
+    snprintf(agg_name, sizeof(agg_name), "%s%s", native ? "native-loose-" : "",
+             AREAS[area].target);
+    BuildTarget *agg     = RunCustom(ctx, agg_name, "true");
     const char  *globs[] = {"tests/test_*.c", "tests/macros/test_*.c"};
     for (int g = 0; g < 2; g++) {
         const char **files = GlobFiles(ctx, globs[g]);
@@ -832,9 +837,10 @@ static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
             const char *base = strrchr(files[i], '/');
             base             = base ? base + 1 : files[i];
             char cmd[1024], name[192];
-            snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" %s", TargetOutput(check),
+            snprintf(cmd, sizeof(cmd), "\"%s\"%s \"%s\" %s",
+                     TargetOutput(check), native ? " --native" : "",
                      TargetOutput(cccc), files[i]);
-            snprintf(name, sizeof(name), "%s-%s", AREAS[area].target, base);
+            snprintf(name, sizeof(name), "%s-%s", agg_name, base);
             BuildTarget *step = RunCustom(ctx, name, cmd);
             DependsOn(step, cccc);
             DependsOn(step, check);
@@ -847,7 +853,16 @@ static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
 static BuildTarget *area_tests(Builder *ctx, int area) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    return area_tests_with(ctx, cccc, make_testcheck(ctx), area);
+    return area_tests_with(ctx, cccc, make_testcheck(ctx), area, 0);
+}
+
+// Every area's loose tests built and run with -c=native.
+static BuildTarget *native_loose_tests(Builder *ctx, BuildTarget *cccc,
+                                       BuildTarget *check) {
+    BuildTarget *all = RunCustom(ctx, "test-native-loose", "true");
+    for (int i = 0; i < NAREAS; i++)
+        DependsOn(all, area_tests_with(ctx, cccc, check, i, 1));
+    return all;
 }
 
 [[cccc::build_target]]
@@ -892,9 +907,17 @@ BuildTarget *test_extra(Builder *ctx) {
     BuildTarget *check = make_testcheck(ctx);
     BuildTarget *all   = RunCustom(ctx, "test-extra", "true");
     for (int i = 0; i < NAREAS; i++)
-        DependsOn(all, area_tests_with(ctx, cccc, check, i));
+        DependsOn(all, area_tests_with(ctx, cccc, check, i, 0));
+    DependsOn(all, native_loose_tests(ctx, cccc, check));
     DependsOn(all, make_native_smoke(ctx, cccc));
     return all;
+}
+
+[[cccc::build_target]]
+BuildTarget *test_native_loose(Builder *ctx) {
+    BuildTarget *bt   = make_libbacktrace(ctx);
+    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    return native_loose_tests(ctx, cccc, make_testcheck(ctx));
 }
 
 // Doxygen HTML API docs for the public headers.

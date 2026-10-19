@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -3 -d
 // CCCC_EXPECT_STDOUT: STKTAG
 // An array is still recorded when it escapes some other way, and a call in an

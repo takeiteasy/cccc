@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // Ticket #673: the follow-up to #670's dereference-time range check. p holds
 // &x from get_local(), which has already returned by the time use() derefs

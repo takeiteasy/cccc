@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: framework search paths do not reach the host cc (#1711)
 // CCCC_FLAGS: -F./tests/fixtures/frameworks_next/a --iframework ./tests/fixtures/frameworks_next/b
 // #include_next crosses from the -F list into the --iframework list.
 #include <Chain/Chain.h>

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // Indexing a row that does not exist (one past the last row) is reported even
 // though the column index is in range.

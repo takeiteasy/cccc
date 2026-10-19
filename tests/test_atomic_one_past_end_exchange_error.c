@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #985: AXCHG mirror of test_atomic_one_past_end_load_error.c. AXCHG's
 // operand word already carries the #497 register-aliasing hazard, which is

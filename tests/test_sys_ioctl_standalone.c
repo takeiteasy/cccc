@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: ioctl has no allowlist natively (NATIVE.md divergences)
 // Regression test for #792: ioctl() is declared in include/sys/ioctl.h but
 // was never registered via cc_register_cfunc anywhere, so a guest program
 // including ONLY <sys/ioctl.h> (no unistd.h/sys/socket.h to trigger

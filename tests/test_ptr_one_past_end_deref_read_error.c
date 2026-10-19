@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #983: read-side mirror of test_ptr_one_past_end_deref_error.c, exercising
 // CHKD's emission in emit_load_safety_checks (the store-side test only

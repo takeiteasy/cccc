@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: __builtin_pc_* needs the VM symbol table
 // CCCC_FLAGS: --testing
 // Not run natively: __builtin_pc_function_name/__builtin_pc_source_location
 // resolve a VM bytecode offset via the VM's own symbol table, which does not

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #985: the load-bearing ACAS test -- the OBJECT pointer is in bounds, but
 // the EXPECTED pointer is exactly one past the end of its own allocation.

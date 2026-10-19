@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #769: bsearch is classified FFI_SHADOW_READONLY -- the host
 // bsearch() writes through no argument at all, and its comparator's guest

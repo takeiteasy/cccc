@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #751: op_CALLF_fn's generic backstop used to clear an unshimmed
 // host write's ENTIRE allocation, even when the call has a statically-

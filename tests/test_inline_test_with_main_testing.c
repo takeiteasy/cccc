@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native supplies its own main()
 // CCCC_FLAGS: --testing
 // CCCC_EXPECT_STDOUT: ^ok 1 - add_works
 // Not run natively: this file defines its own main(), which --testing=native

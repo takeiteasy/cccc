@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #985: ALDR bypasses emit_load_ex/emit_load_safety_checks entirely (it's
 // codegen'd directly from ND_ALOAD), so it needed its own CHKD emission --

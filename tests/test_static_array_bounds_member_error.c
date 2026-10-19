@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // An out-of-range index into a struct member array, and into the row of a
 // two-dimensional array, is reported.

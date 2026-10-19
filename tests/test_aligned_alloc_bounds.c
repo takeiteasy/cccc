@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --bounds-checks
 // Ticket #668: before this fix, aligned_alloc() bypassed the VM heap
 // entirely and allocated via the host allocator through FFI, so its memory

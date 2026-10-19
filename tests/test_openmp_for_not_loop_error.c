@@ -1,4 +1,3 @@
-// Not run natively: OpenMP runs in the VM only
 // EXPECT_COMPILE_ERROR
 // CCCC_FLAGS: -fopenmp
 // CCCC_EXPECT_STDERR: must be a for loop

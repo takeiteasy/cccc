@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #752: byte-granular tracking (#653) applies to a global's member
 // subobjects too, not just its base address -- a store through one member

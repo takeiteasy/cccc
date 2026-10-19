@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // Ticket #675: the follow-up to #673's frame-epoch liveness check. &arr[i]
 // with a runtime index compiles to a base LEA3 (arr's address) plus a

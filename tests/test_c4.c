@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: CLOCK_MONOTONIC is not translated (#1708)
 // c4.c - C in four functions
 // CCCC_RUN_ARGS: tests/test_fortytwo.c
 

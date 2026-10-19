@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // Ticket #670: the -3 dangling-pointer check was neutered by #669 because
 // the old scope-exit check had zero true-positive capability (it conflated

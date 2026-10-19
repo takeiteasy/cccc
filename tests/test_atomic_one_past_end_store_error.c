@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #985: ASTR mirror of test_atomic_one_past_end_load_error.c -- ASTR
 // bypasses emit_store_ex entirely (codegen'd directly from ND_ASTORE), so

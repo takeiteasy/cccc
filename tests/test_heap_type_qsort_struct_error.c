@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #769: proves wrap_qsort's shadow-preservation is *element-pattern*
 // uniformity, not plain byte-uniformity -- a struct array (mixed member

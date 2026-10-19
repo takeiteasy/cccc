@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: __builtin_dynamic_object_size reads the VM allocation header (NATIVE.md divergences)
 // CCCC_FLAGS: --testing
 // Not run natively: __builtin_dynamic_object_size lowers to clang's own
 // builtin natively, which lacks CCCC's VM-level frame-epoch/AllocHeader

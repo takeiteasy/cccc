@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
 // Test temporal memory tagging with explicit memory reuse: a stale pointer
 // into a freed-and-reallocated struct carries the old generation tag, so

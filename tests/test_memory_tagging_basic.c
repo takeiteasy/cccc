@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
 // Test basic temporal memory tagging - UAF with memory reuse.
 // A stale pointer carries the generation tag of the allocation it was taken

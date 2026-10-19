@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects FFI policy options
 // CCCC_FLAGS: --disable-ffi
 // Builtin names come back as writable VM copies, and builtins work with FFI off.
 

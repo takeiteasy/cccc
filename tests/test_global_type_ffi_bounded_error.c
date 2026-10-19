@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #914: the data-segment narrowing clear must stay narrow -- a
 // bounded write into the HEAD of a global array must not touch the TAIL's

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: macOS libm lacks the C23 functions the VM provides (#1712)
 // Regression test for #1079: cccc_setpayload_impl/cccc_setpayloadf_impl
 // (src/stdlib/math.c) used to leave the destination completely untouched
 // on a failed setpayload/setpayloadsig call. Real glibc -- and the

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --memory-tagging
 // Test temporal memory tagging across multiple alloc/free/reallocate cycles:
 // a pointer tagged with an old generation is a temporal safety violation no

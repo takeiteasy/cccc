@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native floors --std at C11, so implicit declarations are errors
 // clang-format off
 // CCCC_FLAGS: --std=c89 -Wall -Wno-implicit-int -Wno-implicit-function-declaration -Wno-return-type -Wno-pedantic
 // clang-format on

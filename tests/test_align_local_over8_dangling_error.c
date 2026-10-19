@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // #1137: an over-aligned local's returned address is still tracked as a stack
 // address, so a deref after the frame returns is caught (the aligned address

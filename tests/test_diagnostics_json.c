@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects --json
 // CCCC_FLAGS: -Wunused --json
 // CCCC_EXPECT_STDERR: "severity":"warning"
 // CCCC_EXPECT_STDERR: "option":"-Wunused"

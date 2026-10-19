@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #769: cc_type_shadow_elements_uniform must anchor its
 // element-pattern comparison at the array *passed to qsort* (its `base`

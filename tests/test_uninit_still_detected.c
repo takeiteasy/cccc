@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // CCCC_EXPECT_STDERR: UNINITIALIZED VARIABLE READ
 // Positive control for #1008's fix: a genuinely uninitialized local whose

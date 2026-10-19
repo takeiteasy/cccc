@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 //
 // #1179: VLA brace initialization is a deliberate CCCC-only extension (no

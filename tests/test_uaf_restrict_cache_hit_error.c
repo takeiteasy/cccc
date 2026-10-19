@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // The restrict-value cache is gone with the bytecode optimiser, so every
 // deref re-emits the load and its CHKP3. This verifies that under -3,

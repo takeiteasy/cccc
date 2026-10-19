@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --format-string-checks is VM-only
 // CCCC_FLAGS: --format-string-checks
 // CCCC_EXPECT_STDERR: expected type '_Decimal64'
 // CCCC_EXPECT_STDERR: does not accept a decimal length modifier

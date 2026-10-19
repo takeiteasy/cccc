@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --dangling-pointers
 // A live array that covers a dead frame's escaped local must not hide a
 // dereference through the stale pointer: only accesses rooted at the array

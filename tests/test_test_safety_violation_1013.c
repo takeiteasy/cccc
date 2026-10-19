@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --uninitialized-detection is VM-only
 // CCCC_FLAGS: --testing --uninitialized-detection
 // CCCC_EXPECT_STDERR: UNINITIALIZED VARIABLE READ
 // CCCC_EXPECT_STDOUT: not ok 1 -

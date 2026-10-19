@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #982 positive control for CHKBN (the new SUB form) -- the most important
 // control in this set, since CHKBN is brand-new VM code: a permissive

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #752: CHKT3's byte-granular type shadow now also covers globals
 // (vm->data_shadow, mirroring the heap shadow added by #653) -- a store

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native has no setup/teardown hooks
 // CCCC_FLAGS: --testing
 // Ticket #515: stacked once+inherit hooks at two depths verify the snapshot
 // stack model. Hook on "a" (outer) and "a/b" (inner) are both once+inherit.

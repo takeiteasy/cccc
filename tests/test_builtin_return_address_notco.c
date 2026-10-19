@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: __builtin_return_address is a VM bytecode offset (NATIVE.md divergences)
 // CCCC_FLAGS: --testing
 // Not run natively: uses __builtin_pc_function_name, which resolves a VM
 // bytecode offset via the VM's own symbol table and has no native

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native refuses --test-timeout
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^not ok 1 - code3
 // CCCC_EXPECT_STDERR: teardown said no

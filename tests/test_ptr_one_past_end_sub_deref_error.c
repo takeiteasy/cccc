@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #983: CHKBN mirror of test_ptr_one_past_end_deref_error.c. `p - n` with a
 // negative `n` computes CHKBN's `eff = base_off - scaled_offset` where

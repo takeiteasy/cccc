@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects FFI policy options
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --ffi-type-checking
 //
 // Ticket V010 (#874 follow-on): before the fix, op_CALLN_fn's FFI-token

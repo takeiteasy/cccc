@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native refuses --test-timeout
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^not ok 2 - in_body
 // CCCC_EXPECT_STDERR: body said no

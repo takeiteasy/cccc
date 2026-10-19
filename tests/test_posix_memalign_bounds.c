@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --bounds-checks
 // Ticket #668: posix_memalign is a distinct opcode/codegen path from
 // aligned_alloc (PMEMA vs MALCA), so it needs its own proof that a heap

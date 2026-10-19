@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: checks the VM heap allocator
 // CCCC_FLAGS: -2
 // #981: heap reclamation must be fully disabled whenever any address-keyed
 // safety feature is on (bounds checks, UAF/dangling detection, memory

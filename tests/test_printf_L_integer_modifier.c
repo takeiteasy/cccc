@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: %L on an integer is host-libc-defined (NATIVE.md divergences)
 // Not run natively: %Ld/%Li/%Lu/%Lo/%Lx/%Ln treating `L` as `ll` on an
 // integer conversion is a glibc extension (the C standard leaves `L` on `d`
 // etc. undefined); BSD/Apple libc reads/writes a 32-bit slot instead, so the

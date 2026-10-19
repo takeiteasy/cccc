@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #983: the load-bearing test for the formation-vs-dereference split.
 // Forming `p + 4` (see test_ptr_one_past_end_form.c) is now legal, but

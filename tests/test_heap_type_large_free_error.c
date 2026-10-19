@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #753: the byte-granular type shadow is a sparse page table, not a
 // flat array -- a page is freed back to host memory once a clear zeroes it

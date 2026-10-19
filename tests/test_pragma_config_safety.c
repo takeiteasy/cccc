@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: #pragma cccc config safety checks are VM-only
 // EXPECT_RUNTIME_ERROR
 // CCCC_EXPECT_STDERR: INTEGER OVERFLOW
 // #pragma cccc config(safety = 2) enables the STANDARD safety preset

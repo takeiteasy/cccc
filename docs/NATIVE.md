@@ -242,6 +242,8 @@ left to be discovered:
 | `__builtin_return_address(n)` | a VM bytecode offset cast to `void*` | a real host return address — same meaning, unrelated numeric value |
 | `__builtin_dynamic_object_size` | reads the VM allocation header, always exact | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown" |
 | `__builtin_unreachable` / `__builtin_trap` / `__builtin_debugtrap` | all trap | all emit `__builtin_trap()` |
+| a call through an invalid function pointer | reports `invalid indirect call target`, exits 255 | the host process crashes with a signal (`SIGSEGV`/`SIGBUS`) |
+| integer division by zero, with no safety flags | reports `DIVISION BY ZERO`, exits 255 | host-defined: aarch64 yields 0 and continues, x86_64 raises `SIGFPE` |
 | `__builtin_alloca` sharing a block with a real VLA, in a loop | each call gets a fresh address, live until the frame returns | host-compiler-defined; clang -O0 may reuse one slot per iteration |
 | tail calls (`CALLT`) | guaranteed constant stack space | best-effort — the host cc's own heuristic; pass `-O2` to rely on it |
 | a `void` entry function falling off its end | always exits 0 | exit status is whatever the ABI left in the return register |

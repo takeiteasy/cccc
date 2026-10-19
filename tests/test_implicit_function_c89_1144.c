@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native floors --std at C11, so implicit declarations are errors
 // CCCC_FLAGS: --std=c89 -Wimplicit-function-declaration
 // CCCC_EXPECT_STDERR: implicit declaration of function 'isalpha_l'
 //

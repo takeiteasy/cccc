@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only lock misuse detection
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -fopenmp
 #include <omp.h>
 int main(void) {

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: #pragma cccc config safety checks are VM-only
 // EXPECT_RUNTIME_ERROR
 // CCCC_EXPECT_STDERR: INTEGER OVERFLOW
 // A bare key in #pragma cccc config(...) is shorthand for "key = true"

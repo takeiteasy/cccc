@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // The VM has no bytecode optimiser (and no indexed-load fusion or
 // restrict-value cache) any more, so every deref takes the checked path.

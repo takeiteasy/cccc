@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #839 follow-up: strtol's nptr argument (arg 0) is never written by
 // the call, but a plain FFI_SHADOW_BOUNDED rule only narrows the clear for

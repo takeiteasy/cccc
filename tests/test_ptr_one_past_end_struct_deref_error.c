@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #983: struct assignment lowers straight to an MCPY, bypassing
 // emit_load_ex/emit_store_ex entirely (see the ND_ASSIGN struct/union arm

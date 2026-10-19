@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native has no setup/teardown hooks
 // Ticket #515: once+inherit setup fires exactly once across the subtree.
 // Tests in "a" and "a/b" both see the once-counter == 1.
 // CCCC_FLAGS: --testing

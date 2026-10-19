@@ -22,7 +22,8 @@ int main(void) {
     s->i        = 42;   // anonymous union member: must clear, not stamp
     float g     = s->f; // legal punning through the other anon union member
     (void)g;
-    int h = s->tag;     // regular member: still checked, must still match
+    int h  = s->tag;    // regular member: still checked, must still match
+    int ok = h == 7 && s->i == 42;
     free(s);
-    return (h == 7 && s->i == 42) ? 42 : 1;
+    return ok ? 42 : 1;
 }

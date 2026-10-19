@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #653: CHKT3's effective-type shadow is now byte-granular, so a
 // type confusion at a struct member's offset (not just the allocation's

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #839: strtof was missing an FFI_SHADOW_BOUNDED entry in
 // ffi_shadow_rules[] (src/ops.c). Same shape as

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native has no setup/teardown hooks
 // Ticket #515: per-test hook inheritance to sub-suites.
 // An inherit setup on "a" fires for tests in "a/b". A non-inherit setup on "a"
 // does NOT fire for tests in "a/b". Counters are checked within each test run

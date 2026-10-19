@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: the host cc rejects mismatched return statements
 // CCCC_FLAGS: -Wreturn-type
 // CCCC_EXPECT_STDERR: 3 warnings generated.
 int zero(void) {

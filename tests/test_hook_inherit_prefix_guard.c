@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native has no setup/teardown hooks
 // Ticket #515: inherit hook on "math" must NOT fire for suite "mathematics".
 // Verifies the '/' boundary in suite_matches prevents false prefix matches.
 // CCCC_FLAGS: --testing

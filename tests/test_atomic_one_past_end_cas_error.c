@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -2
 // #985: ACAS mirror of test_atomic_one_past_end_load_error.c, checking the
 // object pointer (REG_A0). Same #497 reasoning as

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native floors --std at C11, so implicit declarations are errors
 // CCCC_FLAGS: --std=c89
 // CCCC_REJECT_STDERR: warning:
 // #1144: implicit function declaration is a hard error at C99+; this

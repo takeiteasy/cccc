@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // CCCC_FLAGS: -3
 // EXPECT_RUNTIME_ERROR
 // Ticket #916 follow-up: with the bogus-address bug fixed (see

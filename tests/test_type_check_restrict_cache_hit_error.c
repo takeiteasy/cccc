@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // The restrict-value cache is gone with the bytecode optimiser; this now
 // verifies the type-confusion below (a store through a restrict pointer at a

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: #pragma cccc config safety checks are VM-only
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --overflow-checks
 // CCCC_EXPECT_STDERR: INTEGER OVERFLOW
 // CLI flags win over #pragma cccc config(...) (#357): the pragma tries to

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: asm runs natively, so there is no VM -Wignored-features warning
 // CCCC_FLAGS: -Wignored-features
 // CCCC_EXPECT_STDERR: file-scope asm is not executed by the VM
 //

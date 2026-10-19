@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // Indexing exactly one past the end of a local array is reported at the
 // access, not later at function return (or never, when it stays in-frame).

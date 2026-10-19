@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --bounds-checks
 // Ticket #650: CHKB now resolves interior heap pointers (p + k) via
 // vm->sorted_allocs, not just exact base pointers. An out-of-bounds index

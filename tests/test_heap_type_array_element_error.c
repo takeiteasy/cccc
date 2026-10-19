@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #653: byte-granular CHKT3 tracks effective type per array element
 // offset too, not just the array's base pointer. Writing element [2] as

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #651: CHKT3 is now emitted from codegen and populates
 // AllocHeader.type_kind via an effective-type model (a store through a

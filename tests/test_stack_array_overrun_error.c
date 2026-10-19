@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // A runtime-indexed write past a local array (an access that skips the
 // dangling check as frame-local) is still caught when the function returns:

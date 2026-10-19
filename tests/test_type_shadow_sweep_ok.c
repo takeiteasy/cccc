@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --vm-profile is VM-only
 // CCCC_FLAGS: --type-checks --vm-profile
 // CCCC_EXPECT_STDERR: shadow_pages_swept: [1-9]
 // Ticket #767: type_shadow_fill's page reclaim rule only frees a page when

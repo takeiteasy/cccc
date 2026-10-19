@@ -1,7 +1,12 @@
 // testcheck -- run one loose test file against a cccc binary.
 //
-//   testcheck [--timeout SECS] <cccc> <test.c>
+//   testcheck [--timeout SECS] [--native] <cccc> <test.c>
 //   testcheck --lint <test.c>...        compile every pattern, run nothing
+//
+// --native builds the test with -c=native and runs the binary (a --testing
+// test runs as --testing=native). It skips tests that expect a compile error,
+// carry CCCC_NATIVE_SKIP, or pick their own output mode (-c, -m, -o, -E,
+// --build*, --watch, --emit-cccc).
 //
 // The test's leading comment block carries the directives:
 //   CCCC_FLAGS: <flags>            extra cccc arguments (whitespace split)
@@ -12,7 +17,7 @@
 //   CCCC_REJECT_STDERR: <regex>    stdout+stderr must not match
 //   EXPECT_COMPILE_ERROR           cccc fails with a diagnostic
 //   EXPECT_RUNTIME_ERROR           the program exits 255
-//   CCCC_NATIVE_SKIP[: reason]     ignored here
+//   CCCC_NATIVE_SKIP[: reason]     left out of the --native pass
 // Otherwise the program must exit 42 (see pass_rule()).
 //
 // EXPECT patterns for TAP `ok N` lines are written `^ok N`; an unanchored `ok`
@@ -51,7 +56,8 @@ typedef struct {
     char *expect_err[MAX_PATTERNS], *reject_err[MAX_PATTERNS];
     int   nexpect_out, nreject_out, nexpect_err, nreject_err;
     int   compile_error, runtime_error;
-    int   testing, build;
+    int   testing, build, drives_output;
+    char *native_skip;
 } Header;
 
 typedef struct {
@@ -154,8 +160,10 @@ static char *apply_directive(Header *h, char *p, const char *file) {
             }
             return NULL;
         }
-        if (!strcmp(name, "CCCC_NATIVE_SKIP"))
+        if (!strcmp(name, "CCCC_NATIVE_SKIP")) {
+            h->native_skip = strdup(*v ? v : "CCCC_NATIVE_SKIP");
             return NULL;
+        }
         if (!strcmp(name, "EXPECT_COMPILE_ERROR")) {
             h->compile_error = 1;
             return NULL;
@@ -179,6 +187,19 @@ static char *apply_directive(Header *h, char *p, const char *file) {
         return e;
     }
     return NULL;
+}
+
+static int drives_output(const char *f) {
+    static const char *const exact[] = {
+        "-c", "-m", "-o", "-E", "--dump-expanded", "--watch", "--emit-cccc"};
+    static const char *const prefix[] = {"-c=", "--build"};
+    for (size_t i = 0; i < sizeof(exact) / sizeof(*exact); i++)
+        if (!strcmp(f, exact[i]))
+            return 1;
+    for (size_t i = 0; i < sizeof(prefix) / sizeof(*prefix); i++)
+        if (!strncmp(f, prefix[i], strlen(prefix[i])))
+            return 1;
+    return 0;
 }
 
 static void parse_header(Header *h, const char *file) {
@@ -215,6 +236,8 @@ static void parse_header(Header *h, const char *file) {
             h->testing = 1;
         if (!strcmp(h->flags[i], "--build"))
             h->build = 1;
+        if (drives_output(h->flags[i]))
+            h->drives_output = 1;
     }
 }
 
@@ -664,42 +687,101 @@ static int lint(char **files, int n) {
 }
 
 int main(int argc, char **argv) {
-    int timeout = 600, a = 1;
+    int timeout = 600, native = 0, a = 1;
     setenv("CCCC_NO_CONFIG", "1", 1); // a developer's ~/.cccc.toml must not leak in
     if (a < argc && !strcmp(argv[a], "--lint"))
         return lint(argv + a + 1, argc - a - 1);
-    if (a + 1 < argc && !strcmp(argv[a], "--timeout")) {
-        timeout  = atoi(argv[a + 1]);
-        a       += 2;
+    for (;;) {
+        if (a + 1 < argc && !strcmp(argv[a], "--timeout")) {
+            timeout  = atoi(argv[a + 1]);
+            a       += 2;
+        } else if (a < argc && !strcmp(argv[a], "--native")) {
+            native = 1;
+            a++;
+        } else {
+            break;
+        }
     }
     if (argc - a != 2)
-        die("usage: testcheck [--timeout SECS] <cccc> <test.c> | --lint "
-            "<test.c>...");
+        die("usage: testcheck [--timeout SECS] [--native] <cccc> <test.c> | "
+            "--lint <test.c>...");
     const char *cccc = argv[a], *file = argv[a + 1];
 
     Header      h = {0};
     parse_header(&h, file);
+
+    if (native) {
+        const char *skip = h.native_skip     ? h.native_skip
+                           : h.compile_error ? "expects a compile error"
+                           : h.drives_output ? "picks its own output mode"
+                                             : NULL;
+        if (skip) {
+            printf("SKIP %s: %s\n", file, skip);
+            return 0;
+        }
+    }
+    // Outside --testing, a native test is built to `bin` and then run.
+    int  build_bin = native && !h.testing;
+    char bin[1024] = "";
+    if (build_bin) {
+        const char *tmp = getenv("TMPDIR");
+        snprintf(bin, sizeof(bin), "%s/testcheck-XXXXXX",
+                 tmp && *tmp ? tmp : "/tmp");
+        int fd = mkstemp(bin);
+        if (fd < 0)
+            die("mkstemp: %s", strerror(errno));
+        close(fd);
+    }
 
     char *args[MAX_ARGS * 2 + 8];
     int   n   = 0;
     args[n++] = (char *)cccc;
     args[n++] = "-I./include";
     for (int i = 0; i < h.nflags; i++)
-        args[n++] = h.flags[i];
+        args[n++] = native && !strcmp(h.flags[i], "--testing")
+                        ? "--testing=native"
+                        : h.flags[i];
+    if (build_bin) {
+        args[n++] = "-c=native";
+        args[n++] = "-o";
+        args[n++] = bin;
+    }
     args[n++] = (char *)file;
-    if (h.nrun_args) {
+    if (h.nrun_args && !build_bin) {
         args[n++] = "--";
         for (int i = 0; i < h.nrun_args; i++)
             args[n++] = h.run_args[i];
     }
-    args[n]         = NULL;
+    args[n] = NULL;
+
+    char *run[MAX_ARGS + 2];
+    int   m  = 0;
+    run[m++] = bin;
+    for (int i = 0; i < h.nrun_args; i++)
+        run[m++] = h.run_args[i];
+    run[m]          = NULL;
 
     Buf         out = {0}, err = {0};
-    int         status = run_capture(args, &out, &err, timeout);
+    const char *why     = NULL;
+    time_t      start   = time(NULL);
+    int         status  = run_capture(args, &out, &err, timeout);
+    int         ran_bin = 0;
+    if (build_bin && status != -1) {
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            why = "native compile failed";
+        } else {
+            long left = timeout - (long)(time(NULL) - start);
+            status    = left > 0 ? run_capture(run, &out, &err, (int)left) : -1;
+            ran_bin   = 1;
+        }
+    }
+    if (build_bin)
+        unlink(bin);
 
-    const char *why    = NULL;
-    int         code   = 0;
-    if (status == -1) {
+    int code = 0;
+    if (why) {
+        code = WIFEXITED(status) ? WEXITSTATUS(status) : 0;
+    } else if (status == -1) {
         why = "timed out";
     } else if (WIFSIGNALED(status)) {
         why  = "killed by a signal";
@@ -730,6 +812,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "command:");
         for (int i = 0; args[i]; i++)
             fprintf(stderr, " %s", args[i]);
+        if (ran_bin)
+            for (int i = 0; run[i]; i++)
+                fprintf(stderr, "%s %s", i ? "" : " &&", run[i]);
         fputc('\n', stderr);
         print_tail("stdout", &out);
         print_tail("stderr", &err);

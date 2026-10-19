@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: -3
 // Ticket #756: a UAF safety check was bypassed (host SIGSEGV in op_CALL_fn
 // instead of a controlled TEMPORAL SAFETY VIOLATION trap) when a nested call

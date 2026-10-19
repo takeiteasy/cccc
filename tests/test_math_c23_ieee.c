@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: macOS libm lacks the C23 functions the VM provides (#1712)
 // Regression test for #774: C23 IEC 60559:2020 interchange/classification
 // functions (fmaximum/fminimum family, totalorder, canonicalize,
 // getpayload/setpayload, llogb, fromfp/ufromfp, issignaling/iseqsig)

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native has no setup/teardown hooks
 // Ticket #515: once+inherit hook fires exactly once even when the parent suite
 // is re-entered after a nested child block (declaration order: a, a/b, a).
 // Verifies no-double-fire on re-entry: once_count stays 1 for all three tests.

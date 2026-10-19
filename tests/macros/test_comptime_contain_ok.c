@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: -c=native rejects FFI policy options
 // CCCC_FLAGS: --disable-ffi
 // Comptime reads and writes of VM memory and builtin results stay allowed.
 

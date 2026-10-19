@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --thread-safety is VM-only
 // CCCC_FLAGS: --thread-safety
 // Expected return: 42
 // #623 regression guard: the recursive-mutex bypass added to

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native refuses --test-timeout
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^ok 1 - starts
 // CCCC_EXPECT_STDERR: ^worker finished

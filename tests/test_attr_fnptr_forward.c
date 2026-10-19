@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --format-string-checks is VM-only
 // Function attributes on a function-pointer declarator apply to the pointee,
 // so calls through the pointer are checked like direct calls.
 // CCCC_FLAGS: --format-string-checks -Wnonnull -Wnodiscard

@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --testing=native refuses --test-timeout
 // CCCC_FLAGS: --testing --test-timeout=5
 // CCCC_EXPECT_STDERR: ^not ok 1 - fails
 // CCCC_EXPECT_STDERR: ^# test 1: 1 guest thread\(s\) still blocked

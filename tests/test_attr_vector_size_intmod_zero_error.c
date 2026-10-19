@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: integer division traps are VM-only (NATIVE.md divergences)
 // EXPECT_RUNTIME_ERROR
 // GNU vector_size integer lane modulo (tracker #715): per-lane trap on a
 // zero divisor, same policy as vector integer division.

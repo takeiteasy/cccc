@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --type-checks
 // Ticket #769: qsort() on a heap array used to force a whole-allocation
 // shadow clear (an unclassified FFI call), losing all type-confusion

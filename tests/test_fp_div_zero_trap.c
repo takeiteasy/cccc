@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: VM-only safety check
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --trap-fp-divzero
 // #773: --trap-fp-divzero opts back into the pre-#773 behavior of aborting
 // on any float division by zero, for debugging code that assumes it is

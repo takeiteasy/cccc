@@ -1,3 +1,4 @@
+// CCCC_NATIVE_SKIP: --thread-safety is VM-only
 // CCCC_FLAGS: --thread-safety
 // CCCC_EXPECT_STDERR: discards '_Atomic'
 // Warn when a cast strips the _Atomic qualifier from a pointer type.
