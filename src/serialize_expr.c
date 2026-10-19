@@ -22,6 +22,7 @@
 // literal escaping, block-capture/nested-env references, atomics,
 // comma chains, _BitInt masking (#1150).
 #include "./codegen_internal.h" // is_extern_func_name (#1155)
+#include "./parse_internal.h"   // node_has_side_effects
 #include "./serialize_internal.h"
 
 // Operator precedence (higher = binds tighter)
@@ -1604,6 +1605,161 @@ static void serialize_assign_target(FILE *f, VirtualMachine *vm,
                    parent_prec);
 }
 
+// --checked-pointers lowering: each check codegen emits as a CHK* opcode is
+// emitted as a call into the checked shims (src/shims/checked/runtime.c),
+// from the same parse-time Node fields.
+
+static void serialize_checked_ptr(FILE *f, VirtualMachine *vm,
+                                  SerializeContext *ctx, Node *e) {
+    fprintf(f, "(const volatile void *)(");
+    serialize_expr(f, vm, ctx, e, 0);
+    fprintf(f, ")");
+}
+
+// The checked upper bound, preceded by the member-object hoist it may read
+// through (gen_checked_nt_hi's counterpart).
+static void serialize_checked_hi(FILE *f, VirtualMachine *vm,
+                                 SerializeContext *ctx, Node *n) {
+    if (!n->checked_bounds_obj_init) {
+        serialize_checked_ptr(f, vm, ctx, n->checked_bounds_hi);
+        return;
+    }
+    fprintf(f, "((void)(");
+    serialize_expr(f, vm, ctx, n->checked_bounds_obj_init, 0);
+    fprintf(f, "), ");
+    serialize_checked_ptr(f, vm, ctx, n->checked_bounds_hi);
+    fprintf(f, ")");
+}
+
+// CHKR/CHKRO: `*p` -> `(*(P)(__cccc_chkr(p, lo, hi, size, optional)))`, still
+// an lvalue, with the address evaluated once. An address with side effects
+// (a propagation snapshot assigns a temp lo/hi read back) is evaluated first
+// in a statement expression, since call arguments are unsequenced.
+static void serialize_checked_deref(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Node *node) {
+    Type *pty       = node->lhs->ty && node->lhs->ty->kind == TY_PTR
+                          ? node->lhs->ty
+                          : pointer_to(vm, node->ty);
+    bool  sequenced = node_has_side_effects(node->lhs);
+    int   seq       = sequenced ? ctx->checked_seq++ : 0;
+    if (sequenced) {
+        fprintf(f, "(*({ __typeof__(");
+        serialize_type(f, ctx, pty);
+        fprintf(f, ") __cccc_chka%d = ", seq);
+        serialize_expr(f, vm, ctx, node->lhs, 2);
+        fprintf(f, "; ");
+    }
+    fprintf(f, sequenced ? "(" : "(*(");
+    serialize_type(f, ctx, pty);
+    fprintf(f, ")(");
+    if (node->checked_bounds_obj_init) {
+        fprintf(f, "(void)(");
+        serialize_expr(f, vm, ctx, node->checked_bounds_obj_init, 0);
+        fprintf(f, "), ");
+    }
+    fprintf(f, "__cccc_chkr(");
+    if (sequenced)
+        fprintf(f, "__cccc_chka%d", seq);
+    else
+        serialize_expr(f, vm, ctx, node->lhs, 2);
+    fprintf(f, ", ");
+    serialize_checked_ptr(f, vm, ctx, node->checked_bounds_lo);
+    fprintf(f, ", ");
+    serialize_checked_ptr(f, vm, ctx, node->checked_bounds_hi);
+    fprintf(f, ", %lldLL, %d))%s", (long long)node->checked_access_size,
+            node->checked_bounds_optional ? 1 : 0, sequenced ? "; }))" : ")");
+}
+
+static bool checked_deref_lowered(VirtualMachine *vm, Node *node) {
+    return node->kind == ND_DEREF && node->checked_bounds_lo &&
+           node->checked_bounds_hi && serialize_lowers_checks(vm);
+}
+
+static bool checked_nt_store(Node *lhs) {
+    return lhs->kind == ND_DEREF && lhs->checked_nt_terminator &&
+           lhs->checked_bounds_hi;
+}
+
+static bool checked_assign_lowered(VirtualMachine *vm, Node *node) {
+    return (checked_nt_store(node->lhs) || node->checked_assign_dst_lo) &&
+           serialize_lowers_checks(vm);
+}
+
+// CHKNT/CHKNTZ run before the store (the terminator slot must never hold a
+// non-zero value), CHKAB after it (the target's bounds read the stored
+// value), so the assignment becomes a statement expression yielding the
+// stored value (none when `discard`, so no unused-value warning).
+static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
+                                     SerializeContext *ctx, Node *node,
+                                     bool discard) {
+    int   seq = ctx->checked_seq++;
+    Node *lhs = node->lhs;
+    bool  nt  = checked_nt_store(lhs);
+    fprintf(f, "({ ");
+    if (nt || !discard) {
+        fprintf(f, "__typeof__(");
+        serialize_type(f, ctx, lhs->ty);
+        fprintf(f, ") __cccc_chkv%d = ", seq);
+    }
+    if (nt) {
+        Type *ty = lhs->ty;
+        bool  scalar =
+            ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->size <= 8;
+        serialize_value_expr(f, vm, ctx, node->rhs, 2);
+        fprintf(f, "; __typeof__(");
+        serialize_type(f, ctx, pointer_to(vm, ty));
+        fprintf(f, ") __cccc_chka%d = &", seq);
+        serialize_expr(f, vm, ctx, lhs, 14);
+        fprintf(f, "; __cccc_chknt(__cccc_chka%d, ", seq);
+        serialize_checked_hi(f, vm, ctx, lhs);
+        fprintf(f,
+                ", &__cccc_chkv%d, %lldLL, %d); *__cccc_chka%d = "
+                "__cccc_chkv%d; ",
+                seq, (long long)lhs->checked_access_size, scalar ? 1 : 0, seq,
+                seq);
+    } else {
+        fprintf(f, "(");
+        serialize_assign_target(f, vm, ctx, lhs, 2);
+        fprintf(f, " = ");
+        serialize_value_expr(f, vm, ctx, node->rhs, 2);
+        fprintf(f, "); ");
+    }
+    if (node->checked_assign_dst_lo) {
+        if (node->checked_assign_dst_obj_init) {
+            serialize_expr(f, vm, ctx, node->checked_assign_dst_obj_init, 0);
+            fprintf(f, "; ");
+        }
+        Node *dst[2] = {node->checked_assign_dst_lo,
+                        node->checked_assign_dst_hi};
+        for (int is_hi = 0; is_hi < 2; is_hi++) {
+            fprintf(f, "__cccc_chkab(");
+            serialize_checked_ptr(f, vm, ctx, dst[is_hi]);
+            fprintf(f, ", ");
+            serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_lo);
+            fprintf(f, ", ");
+            serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_hi);
+            fprintf(f, ", %d); ", is_hi);
+        }
+    }
+    if (discard)
+        fprintf(f, "})");
+    else
+        fprintf(f, "__cccc_chkv%d; })", seq);
+}
+
+// True when `node` is a lowered checked store, or a compiler comma chain with
+// one, whose value serialize_discard_expr() can drop.
+static bool has_discardable_checked_store(VirtualMachine *vm, Node *node) {
+    if (!node)
+        return false;
+    if (node->kind == ND_ASSIGN)
+        return checked_assign_lowered(vm, node);
+    return node->kind == ND_COMMA && !is_noop_expr(node->lhs) &&
+           !is_noop_expr(node->rhs) &&
+           (has_discardable_checked_store(vm, node->lhs) ||
+            has_discardable_checked_store(vm, node->rhs));
+}
+
 // Serialize an expression
 static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                                SerializeContext *ctx, Node *node,
@@ -2079,6 +2235,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             break;
 
         case ND_ASSIGN:
+            if (checked_assign_lowered(vm, node)) {
+                serialize_checked_assign(f, vm, ctx, node, false);
+                break;
+            }
             serialize_assign_target(f, vm, ctx, node->lhs, node_prec);
             fprintf(f, " %s ", get_binary_op_str(node->kind));
             serialize_value_expr(f, vm, ctx, node->rhs, node_prec + 1);
@@ -2110,6 +2270,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 if (opaque_bitfield_assign(node->lhs)) // value is discarded
                     serialize_opaque_bitfield_write(f, vm, ctx, node->lhs,
                                                     true);
+                else if (has_discardable_checked_store(vm, node->lhs))
+                    serialize_discard_expr(f, vm, ctx, node->lhs, node_prec);
                 else
                     serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, " , ");
@@ -2122,6 +2284,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
         case ND_BITNOT:
         case ND_ADDR:
         case ND_DEREF: {
+            if (checked_deref_lowered(vm, node)) {
+                serialize_checked_deref(f, vm, ctx, node);
+                break;
+            }
             // #1102: & never distributes over a comma chain -- C's comma
             // operator yields an rvalue even when its last operand is an
             // lvalue, so the naive spelling of `&(struct P){30, 12}`
@@ -2762,11 +2928,15 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             break;
 
         case ND_DYNAMIC_CHECK:
-            // Only built when CCCC_CHECKED_BOUNDS was set at parse time, which
-            // every serialized-output mode drops before parse, so normally
-            // unreachable; strip to a no-op like every other checked-pointer
-            // construct.
-            fprintf(f, "((void)0)");
+            // Only built under --checked-pointers; --emit-cccc keeps the
+            // checks out of its output.
+            if (!serialize_lowers_checks(vm)) {
+                fprintf(f, "((void)0)");
+                break;
+            }
+            fprintf(f, "__cccc_chkdc(!!(");
+            serialize_expr(f, vm, ctx, node->lhs, 0);
+            fprintf(f, "), %dLL)", node->tok->line_no);
             break;
 
         case ND_UNREACHABLE:
@@ -2944,10 +3114,28 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, ", __ATOMIC_SEQ_CST)");
             break;
 
-        case ND_CAS:
+        case ND_CAS: {
             // (obj, *expected, desired) -> bool, matching codegen's ACAS
             // contract: cas_old is a *pointer* to the expected value, as
             // __atomic_compare_ exchange_n also takes. weak = 0.
+            // An _Atomic ntarray element's RMW store checks its terminator
+            // slot first (CHKNT); cas_addr is to_assign()'s side-effect-free
+            // temp, so reading it twice is safe.
+            bool nt  = node->checked_nt_terminator && node->checked_bounds_hi &&
+                       serialize_lowers_checks(vm);
+            int  seq = nt ? ctx->checked_seq++ : 0;
+            if (nt) {
+                fprintf(f, "({ __typeof__(");
+                serialize_type(f, ctx, node->cas_new->ty);
+                fprintf(f, ") __cccc_chkv%d = ", seq);
+                serialize_expr(f, vm, ctx, node->cas_new, 2);
+                fprintf(f, "; __cccc_chknt(");
+                serialize_checked_ptr(f, vm, ctx, node->cas_addr);
+                fprintf(f, ", ");
+                serialize_checked_hi(f, vm, ctx, node);
+                fprintf(f, ", &__cccc_chkv%d, %lldLL, 1); ", seq,
+                        (long long)node->checked_access_size);
+            }
             fprintf(f, "__atomic_compare_exchange_n(");
             // #1101: strip _Atomic from both pointer operands' static types
             // (the address, and the pointer to the expected value -- the
@@ -2956,9 +3144,15 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, ", ");
             serialize_atomic_addr(f, vm, ctx, node->cas_old);
             fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->cas_new, 2);
+            if (nt)
+                fprintf(f, "__cccc_chkv%d", seq);
+            else
+                serialize_expr(f, vm, ctx, node->cas_new, 2);
             fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
+            if (nt)
+                fprintf(f, "; })");
             break;
+        }
 
         case ND_LABEL_VAL:
             // [GNU] labels-as-values. node->label is the source identifier, the
@@ -3384,6 +3578,23 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     }
     if (opaque_bitfield_assign(node)) {
         serialize_opaque_bitfield_write(f, vm, ctx, node, true);
+        return;
+    }
+    if (node && node->kind == ND_ASSIGN && checked_assign_lowered(vm, node)) {
+        serialize_checked_assign(f, vm, ctx, node, true);
+        return;
+    }
+    if (node && node->kind == ND_COMMA &&
+        has_discardable_checked_store(vm, node)) {
+        bool parens = parent_prec > get_precedence(ND_COMMA);
+        if (parens)
+            fprintf(f, "(");
+        serialize_discard_expr(f, vm, ctx, node->lhs, get_precedence(ND_COMMA));
+        fprintf(f, " , ");
+        serialize_discard_expr(f, vm, ctx, node->rhs,
+                               get_precedence(ND_COMMA) + 1);
+        if (parens)
+            fprintf(f, ")");
         return;
     }
     // Both operands of a source-level `a, b` are discarded here.

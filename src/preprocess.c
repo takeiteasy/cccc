@@ -5820,13 +5820,20 @@ static bool pragma_config_read_bool(Token *tok, bool *out) {
     return false;
 }
 
+// True when a serialized-output mode honours `bit`: -c=native and -m lower
+// checked-pointer checks into the emitted C (main.c's warn_ignored_vm_flags).
+static bool pragma_config_serialized_keeps(VirtualMachine *vm, uint32_t bit) {
+    return bit == CCCC_CHECKED_BOUNDS &&
+           strcmp(vm->compiler.vm_flags_ignored_in, "-c=generated");
+}
+
 // Sets or clears a single CCCCFlags bit for `#pragma cccc config(...)`,
 // respecting CLI precedence (#357: CLI-set bits always win) and skipping
-// the change entirely in serialized-output modes (config() flags only affect
-// VM codegen).
+// the change in serialized-output modes for a flag only the VM enforces.
 static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit,
                                    bool enable) {
-    if (vm->compiler.vm_flags_ignored_in)
+    if (vm->compiler.vm_flags_ignored_in &&
+        !pragma_config_serialized_keeps(vm, bit))
         return;
     if (vm->compiler.cli_flags_mask & bit)
         return;
@@ -5853,11 +5860,13 @@ static void pragma_config_set_safety(VirtualMachine *vm, int level) {
 // `value` is NULL for a bare key. Unknown keys and invalid values are hard
 // errors, matching existing #pragma cccc diagnostic style.
 static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
-    // Every key only configures the VM, so the pragma is a no-op in a
-    // serialized-output mode; say so, matching main.c's
+    // Every key but checked_pointers only configures the VM, so the pragma is
+    // a no-op in a serialized-output mode; say so, matching main.c's
     // warn_ignored_vm_flags for the CLI spelling. Fires before key
     // validation: even a malformed value is still a no-op here.
-    if (vm->compiler.vm_flags_ignored_in)
+    if (vm->compiler.vm_flags_ignored_in &&
+        !(equal(key, "checked_pointers") &&
+          pragma_config_serialized_keeps(vm, CCCC_CHECKED_BOUNDS)))
         warn_tok(
             vm, key, CCCC_WARN_IGNORED_FEATURES,
             "#pragma cccc config(%.*s) has no effect in %s mode "

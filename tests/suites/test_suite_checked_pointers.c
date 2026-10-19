@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing --checked-pointers
-// CCCC_NATIVE_SKIP: traps are VM-only runtime errors (exit 255)
 // Checked C-style spatial-safety layer (#770/#482/#483/#484): checked
 // pointer types ([[cccc::single/array/ntarray]]), bounds declarations
 // (count()/byte_count()/bounds()), and their CHKR runtime lowering.

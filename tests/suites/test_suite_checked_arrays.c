@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing --checked-pointers
-// CCCC_NATIVE_SKIP: traps are VM-only runtime errors (exit 255)
 // Checked C-style checked ARRAYS (#487): an array declaration whose extent
 // becomes part of its checked type, so CHKR checks it the same way it
 // checks a checked pointer's count(n) -- no new opcode or codegen, just

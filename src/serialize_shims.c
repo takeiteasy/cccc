@@ -1824,6 +1824,19 @@ void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog) {
     fprintf(f, "    return 0;\n}\n");
 }
 
+bool serialize_lowers_checks(VirtualMachine *vm) {
+    return (vm->flags & CCCC_CHECKED_BOUNDS) && !vm->compiler.emit_cccc;
+}
+
+// --checked-pointers: the helpers serialize_expr.c's lowered checks call.
+// Emitted without a usage scan; unused static inline functions don't warn.
+void serialize_checked_shims(FILE *f, VirtualMachine *vm) {
+    if (!serialize_lowers_checks(vm))
+        return;
+    fprintf(f, "%s", CCCC_SHIM_checked_includes);
+    fprintf(f, "%s", CCCC_SHIM_checked_runtime);
+}
+
 // The lock functions take omp_lock_t, which the serializer emits next to the
 // first function that uses it, so their definitions come after every
 // function.

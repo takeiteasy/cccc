@@ -1928,8 +1928,8 @@ typedef enum {
             // lhs = cond (side-effect-free, checked at parse time); ty =
             // void. Built only when CCCC_CHECKED_BOUNDS is set -- with the
             // flag off, parsing yields plain ND_NULL_EXPR instead (same
-            // convention as __builtin_assume), so this kind is never
-            // reachable from -c=native/-m/-c=generated. Lowers to CHKDC.
+            // convention as __builtin_assume). Lowers to CHKDC, or to
+            // __cccc_chkdc() in -c=native/-m output.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.

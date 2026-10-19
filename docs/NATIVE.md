@@ -162,7 +162,10 @@ That spelling is chosen by probing the host `cc`:
 VM-only options have no meaning once a host compiler takes over and are
 rejected: bytecode output, the disassembler (`-d`), the debugger (`-g`), the
 REPL (`-r`), and the `-0`…`-3` safety levels. Run those against the default
-VM build. `--vm-profile` is accepted and reports only the comptime code that
+VM build. The VM's runtime safety options (`--bounds-checks`,
+`--uaf-detection`, …) are dropped with a warning; `--checked-pointers` is
+the exception and is enforced in the emitted C under `-c=native` and `-m` —
+see [SAFETY.md](SAFETY.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
 ran during the build — see
 [Profiling comptime code](MACROS.md#profiling-comptime-code).
 

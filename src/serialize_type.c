@@ -2420,11 +2420,11 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
         fprintf(f, "volatile ");
 
     // Deliberately no output for ty->checked_kind (#770/#482-484): a
-    // checked pointer's [[cccc::single/array/ntarray]] qualifier is a
-    // cccc-internal VM-side check, not a real C construct -- gcc/clang would
-    // reject the attribute names outright, and #488 requires -E/-c=generated
-    // native output to be unchanged for a checked declaration ("no change to
-    // ABI or to unchecked callers"). This isn't affected by #1295's
+    // checked pointer's [[cccc::single/array/ntarray]] qualifier is not a
+    // real C construct -- gcc/clang would reject the attribute names
+    // outright, and #488 requires a checked declaration's ABI to be
+    // unchanged. --checked-pointers lowers the checks at the access sites
+    // instead (serialize_expr.c). This isn't affected by #1295's
     // const/volatile/restrict/_Atomic generalization below/above -- the
     // checked-pointer attribute is printed by
     // format_checked_ptr_qualifier(), a separate --emit-cccc-gated function,

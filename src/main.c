@@ -1375,13 +1375,14 @@ static char **build_source_argv(int *prog_argc, int argc, const char *argv[],
 
 // VM-only runtime flags (safety instrumentation + debug support) and their
 // CLI spelling, for the "-c=native"/"-m"/"-c=generated ignores these" warning
-// below (#924). Deliberately excludes CCCC_VM_HEAP (forcing the VM-managed heap
-// allocator is meaningless outside the VM -- it was never one of these
-// bits) and CCCC_FFI_ERRORS_FATAL (already has its own dedicated hard error
-// in the "-c=native cannot be combined with CCCC FFI policy options" check,
-// keyed off the ffi_errors_fatal bool rather than this flags word -- listing
-// it here too would claim it's merely "ignored" when it actually still
-// errors).
+// below (#924). --checked-pointers is only VM-only for -c=generated, which
+// emits no user functions to lower the checks into. Deliberately excludes
+// CCCC_VM_HEAP (forcing the VM-managed heap allocator is meaningless outside
+// the VM -- it was never one of these bits) and CCCC_FFI_ERRORS_FATAL (already
+// has its own dedicated hard error in the "-c=native cannot be combined with
+// CCCC FFI policy options" check, keyed off the ffi_errors_fatal bool rather
+// than this flags word -- listing it here too would claim it's merely "ignored"
+// when it actually still errors).
 static const struct {
     uint32_t    bit;
     const char *name;
@@ -1425,6 +1426,8 @@ static uint32_t warn_ignored_vm_flags(uint32_t flags, const char *context) {
          i < sizeof(ignored_vm_flag_names) / sizeof(ignored_vm_flag_names[0]);
          i++)
         relevant |= ignored_vm_flag_names[i].bit;
+    if (strcmp(context, "-c=generated"))
+        relevant &= ~(uint32_t)CCCC_CHECKED_BOUNDS;
     if (!(flags & relevant))
         return flags;
     fprintf(stderr, "warning: %s ignores VM runtime safety/debug options (",
@@ -2680,16 +2683,12 @@ int main(int argc, const char *argv[]) {
             usage(argv[0], 1);
         }
         // #924: VM-only safety/debug flags used to be a hard error here.
-        // -c=native hands off to the host toolchain and genuinely cannot
-        // enforce them (there is no equivalent of e.g. CHKR in the
-        // serialized C), but that's true of every other mode that can't
-        // honour a runtime-only flag too -- warn and drop the bits instead
-        // of refusing to compile, consistent with 1b/1c below. Skipped
-        // under --test-run: those bits are for the VM smoke-test phase, not
-        // the native compile, and the native serializer works from the AST
-        // (never looks at vm.flags), so carrying them costs nothing and the
-        // warning would be spurious noise about a flag that's genuinely in
-        // effect.
+        // -c=native hands off to the host toolchain and cannot enforce them
+        // (--checked-pointers excepted, which the serializer lowers) -- warn
+        // and drop the bits instead of refusing to compile, consistent with
+        // 1b/1c below. Skipped under --test-run: those bits are for the VM
+        // smoke-test phase, and the warning would be spurious noise about a
+        // flag that's genuinely in effect.
         if (!test_run_mode)
             flags = warn_ignored_vm_flags(flags, "-c=native");
         if (ffi_allow_args_count || ffi_deny_args_count || disable_all_ffi ||
@@ -2742,8 +2741,9 @@ int main(int argc, const char *argv[]) {
         }
     }
 
-    // Dropped before parse, as for -c=native: --checked-pointers' parse-time
-    // rewrites would otherwise leak their temporaries into the output.
+    // Dropped before parse, as for -c=native: -c=generated's --checked-pointers
+    // parse-time rewrites would otherwise leak their temporaries into the
+    // output.
     if (dump_expanded_only)
         flags = warn_ignored_vm_flags(
             flags, emit_generated_only ? "-c=generated" : "-m");

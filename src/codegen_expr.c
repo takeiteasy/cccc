@@ -523,10 +523,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // dynamic_check(cond) (#486): only ever built when
             // CCCC_CHECKED_BOUNDS was set at parse time (see parse_postfix.c
             // -- the flag off case parses to plain ND_NULL_EXPR instead), so
-            // no runtime flag check is needed here, unlike CHKR/CHKAB's own
-            // opcodes which re-check the flag themselves for the
-            // -c=native/-m warn-and-drop path (this node never reaches that
-            // path at all).
+            // no runtime flag check is needed here.
             int r_cond = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_cond);
             emit_chkdc(vm, r_cond, (long long)node->tok->line_no);

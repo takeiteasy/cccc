@@ -294,6 +294,7 @@ typedef struct {
     // shadowing -- same reasoning as va_fwd_seq above, and for the same
     // reason (these constructs nest: e.g. a masked cast of a binop result).
     int wide_bitint_seq;
+    int checked_seq; // names lowered checked-store temps, which nest
 } SerializeContext;
 
 typedef struct {
@@ -455,6 +456,9 @@ void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
 void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog,
                               bool generated_only);
+// True when --checked-pointers checks are lowered into the emitted C.
+bool serialize_lowers_checks(VirtualMachine *vm);
+void serialize_checked_shims(FILE *f, VirtualMachine *vm);
 void serialize_type(FILE *f, SerializeContext *ctx, Type *ty);
 // #1283: dumps same_type_or_origin() call-cost counters to stderr when
 // CCCC_TYPE_STATS is set; no-op otherwise. Called once at the end of

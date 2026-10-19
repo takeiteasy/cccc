@@ -20,6 +20,7 @@
 //   pool             thread pool and barrier shared by omp and kernel
 //   omp              OpenMP runtime on the pool
 //   kernel           cccc_* work-item builtins and launcher on the pool
+//   checked          --checked-pointers checks (CHKR/CHKNT/CHKAB/CHKDC)
 //
 // wide_bitint's one chunk is src/stdlib/wide_bitint/runtime.c (also compiled
 // into the VM); it is declared by hand below.
@@ -154,7 +155,9 @@
     X(omp, nest_locks)                                                         \
     X(omp, api)                                                                \
     X(kernel, includes)                                                        \
-    X(kernel, runtime)
+    X(kernel, runtime)                                                         \
+    X(checked, includes)                                                       \
+    X(checked, runtime)
 
 #define CCCC_SHIM_DECL(group, name)                                            \
     extern const char CCCC_SHIM_##group##_##name[]                             \

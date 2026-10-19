@@ -5738,6 +5738,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     if (!generated_only)
         serialize_threads_shims(f, vm, prog);
     serialize_threaded_shims(f, vm, prog, false); // #1368, #1394
+    serialize_checked_shims(f, vm);
 
     // #1141: real definitions for <uchar.h>'s mbrtoc16/c16rtomb/mbrtoc32/
     // c32rtomb/mbrtoc8/c8rtomb -- same placement rationale (and the same

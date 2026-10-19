@@ -170,7 +170,9 @@ appear multiple times in a file — later pragmas win for the same key
 - **Ignored in serialized-output modes.** With `-c=native`,
   `-m`/`--dump-expanded` or `-c=generated`, `config(...)` has no effect on
   `vm->flags` (the output is C for the system `cc`, which has its own
-  sanitizer flags). This
+  sanitizer flags). The exception is `checked_pointers`, which `-c=native`
+  and `-m` enforce in their output (see
+  [Native and serialized output](#checked-pointers)). This
   prints a `-Wignored-features` warning (on by default under `-Wall`) naming
   the pragma; it is otherwise silent by default, the same as every other
   `-Wignored-features` diagnostic (`_Atomic`, etc.). Unknown keys and invalid
@@ -475,6 +477,8 @@ Current PC:    0x8c5400140 (offset: 40)
 - CHKR opcode validates `addr != 0 && lo <= addr && addr + size <= hi` on
   every checked dereference, where `[lo, hi)` is recomputed from the
   declaration at each access
+- Also enforced in `-c=native` and `-m` output (see
+  [Checked Pointers](#checked-pointers))
 - Not part of any `-0`/`-1`/`-2`/`-3` safety preset; opt in explicitly
 - [Checked regions](#checked-regions) (`[[cccc::checked]]`/
   `[[cccc::unchecked]]`, `#pragma cccc checked/unchecked begin/end`) are a
@@ -2054,10 +2058,10 @@ v1 scope, all deliberate:
 spelled `__builtin_cccc_dynamic_check(cond)` or, for source compatibility,
 `_Dynamic_check(cond)` (recognized positionally, an identifier not already
 in scope immediately followed by `(`, so it never shadows a real function
-of that name) — traps via the new `CHKDC` opcode when `cond` is false,
-under `--checked-pointers`; a no-op otherwise (parses to a plain
-`ND_NULL_EXPR`, the same convention `__builtin_assume` uses, so it never
-reaches native/serialized output). `cond` must be side-effect-free, same
+of that name) — traps when `cond` is false, under `--checked-pointers`
+(the VM's `CHKDC` opcode, or `__cccc_chkdc` in `-c=native`/`-m` output); a
+no-op otherwise (parses to a plain `ND_NULL_EXPR`, the same convention
+`__builtin_assume` uses). `cond` must be side-effect-free, same
 rationale as a `count()`/`byte_count()`/`bounds()` expression: it is only
 evaluated under the flag today, and a planned static-elision analysis is
 expected to consume `dynamic_check` facts as proven truths without ever
@@ -2070,21 +2074,38 @@ sound.
 checking, the arithmetic-rejection diagnostic on `single`) are always on
 regardless of this flag — only the `CHKR` runtime check itself is gated.
 
-**Native and serialized output.** `CHKR` enforcement is VM-only, by design —
-the same as every other runtime safety flag in this document; there is no
-equivalent check emitted into `-c=native`, `-m`/`--dump-expanded`, or
-`-c=generated` output. `--checked-pointers` is accepted in those
-modes but has no effect there — a `-c=native`/`-m`/`-c=generated ignores VM runtime
-safety/debug options` warning is printed and the flag is dropped, it does
-not error. The `[[cccc::single/array/ntarray]]`/`count`/`byte_count`/`bounds`
-attributes themselves are always stripped from `-E`/`-m`/`-c=generated`/`-c=native`
-output regardless of the flag (ABI-transparent, no change to unchecked
-callers), so native builds compile and run declarations
-carrying checked-pointer attributes, they just get zero bounds enforcement
-from them. The compile-time contract checks — `single`-pointer arithmetic
-rejection, bounds side-effect rejection, a member bounds expression naming
-an enclosing local or a bit-field sibling — are frontend checks independent
-of `--checked-pointers` and still apply in every mode, including native.
+**Native and serialized output.** `-c=native` and `-m`/`--dump-expanded`
+enforce `--checked-pointers` (or `config(checked_pointers)`) in the C they
+emit: each check becomes a call to a small helper emitted at the top of the
+output (`__cccc_chkr`, `__cccc_chknt`, `__cccc_chkab`, `__cccc_chkdc`). A
+failed check prints the same banner as the VM, without the `PC:` line, and
+exits with status 255:
+
+```
+$ ./cccc -c=native --checked-pointers -o oob oob.c && ./oob; echo $?
+
+========== CHECKED BOUNDS VIOLATION ==========
+Checked-pointer access out of declared bounds
+Address:       0x16d63a454
+Access size:   4 bytes
+Declared bounds: [0x16d63a448, 0x16d63a454)
+================================================
+255
+```
+
+Without the flag the output carries no checks, helpers or temporaries.
+Comptime code still runs in the VM, so under the flag its checked accesses
+are enforced there too.
+
+`-c=generated` emits only macro-generated code, so it has no user accesses
+to check: it prints a `-c=generated ignores VM runtime safety/debug options`
+warning and drops the flag. The `[[cccc::single/array/ntarray]]`/`count`/
+`byte_count`/`bounds` attributes themselves are always stripped from
+`-E`/`-m`/`-c=generated`/`-c=native` output (ABI-transparent, no change to
+unchecked callers). The compile-time contract checks — `single`-pointer
+arithmetic rejection, bounds side-effect rejection, a member bounds
+expression naming an enclosing local or a bit-field sibling — are frontend
+checks independent of `--checked-pointers` and apply in every mode.
 
 **Why this exists**: `CHKB` (`--bounds-checks`) derives its bound from
 `AllocHeader.size`, which only exists for VM-heap allocations — it has no
