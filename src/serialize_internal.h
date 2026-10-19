@@ -411,8 +411,7 @@ void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 void serialize_native_accessor_shims(FILE *f, Obj *prog);
 void serialize_reallocarray_shim(FILE *f, Obj *prog);
 void serialize_posix_compat_shims(FILE *f, VirtualMachine *vm, Obj *prog);
-void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm,
-                                Obj *prog); // #1195
+void serialize_c23_math_shims(FILE *f, VirtualMachine *vm, Obj *prog);
 // #1123: emits the __cccc_biK container typedef(s) and the wide-_BitInt
 // (N>128) runtime helper functions whenever any are reachable from `prog` --
 // see the function's own comment (src/serialize_shims.c) for the collection

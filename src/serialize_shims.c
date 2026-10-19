@@ -1316,156 +1316,41 @@ void serialize_dlfcn_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     fprintf(f, "\n");
 }
 
-// #1195: real definitions for the C23 IEC 60559 fromfp/ufromfp/fromfpx/
-// ufromfpx family (int-rounding functions, C23 7.12.9.6-9) under
-// -c=native -- CCCC's bundled include/math.h (forced into scope for every
-// -c=native/-m TU by the #1143 math.h/float.h substitution,
-// serialize_program.c) declares these with the signature `intmax_t
-// fromfp(double, int, unsigned int)`, matching the historical TS 18661-1 /
-// glibc <= 2.42 entry point (`fromfp@GLIBC_2.25`). glibc 2.43 changed
-// what the plain, undecorated `fromfp` symbol resolves to: the new
-// default (`fromfp@@GLIBC_2.43`) is the C23-standardized signature, which
-// instead RETURNS double. Both entry points still exist side by side
-// (confirmed via `nm -D libm.so.6`), so this is neither a link failure
-// nor a compile failure -- a call written against CCCC's own
-// (old-signature) declaration silently reads its return value out of the
-// wrong ABI register (an integer callee return in rax vs a
-// floating-point return in xmm0), i.e. garbage (#1195, confirmed
-// directly in the cccc-linux-amd64 Colima container against real Ubuntu
-// 26.04/glibc 2.43). Darwin's libm exports none of this family at all,
-// unconditionally -- the permanent #1037 gap this shim does not attempt
-// to close (see test_math_c23_ieee in tests/); only
-// #1195's own actual failure (fromfp/ufromfp/fromfpx/ufromfpx, the one
-// sub-family with a Linux round-trip bug, not the wider "Darwin has none
-// of this at all" gap) is shimmed here.
-//
-// Fixed with a self-contained shim, near-verbatim ports of the VM's own
-// cccc_fromfp_impl/cccc_fromfp*/cccc_ufromfp*/cccc_fromfpx*/
-// cccc_ufromfpx* (src/stdlib/math.c) -- this never calls the host's own
-// fromfp* at all, so it is immune to the glibc version split entirely
-// (and would work identically on a host with no fromfp* symbol
-// whatsoever). Renamed to __cccc_native_<name> via
-// rename_bundled_extern_for_native_shim so every guest call site routes
-// here instead of the host's own (whichever ABI it happens to resolve
-// to) -- same shape as serialize_dlfcn_shims'/serialize_posix_compat_
-// shims' dlopen/aio_fsync shims just above. `l` (long double) variants
-// narrow to double like the VM's own (#491: CCCC's guest long double is
-// modeled as an 8-byte double, so this only reproduces the VM's own
-// existing precision contract, not a new loss).
-void serialize_c23_fromfp_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+// C23 <math.h> functions under -c=native: the shared runtime
+// (src/stdlib/c23_math/runtime.c) the VM also runs. Every guest call is
+// renamed to __cccc_native_<name> and the runtime is emitted on every host,
+// since host libms differ (macOS has none of these, glibc gained fmaximum in
+// 2.35 and the pi-trig family in 2.41, glibc 2.43 changed fromfp's return
+// type) and their long double prototypes don't match CCCC's double model.
+void serialize_c23_math_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    // Each family also has `f` and `l` variants.
+    // clang-format off
+    static const char *const families[] = {
+        "exp10",            "sinpi",            "cospi",
+        "tanpi",            "asinpi",           "acospi",
+        "atanpi",           "atan2pi",          "fmaximum",
+        "fminimum",         "fmaximum_num",     "fminimum_num",
+        "fmaximum_mag",     "fminimum_mag",     "fmaximum_mag_num",
+        "fminimum_mag_num", "totalorder",       "totalordermag",
+        "canonicalize",     "getpayload",       "setpayload",
+        "setpayloadsig",    "llogb",            "fromfp",
+        "ufromfp",          "fromfpx",          "ufromfpx",
+    };
+    // clang-format on
+    static const char *const suffixes[] = {"", "f", "l"};
     if (vm->compiler.emit_cccc)
         return;
 
-    bool use_fromfp   = bundled_shim_fn_is_used(vm, prog, "fromfp", "math.h");
-    bool use_fromfpf  = bundled_shim_fn_is_used(vm, prog, "fromfpf", "math.h");
-    bool use_fromfpl  = bundled_shim_fn_is_used(vm, prog, "fromfpl", "math.h");
-    bool use_ufromfp  = bundled_shim_fn_is_used(vm, prog, "ufromfp", "math.h");
-    bool use_ufromfpf = bundled_shim_fn_is_used(vm, prog, "ufromfpf", "math.h");
-    bool use_ufromfpl = bundled_shim_fn_is_used(vm, prog, "ufromfpl", "math.h");
-    bool use_fromfpx  = bundled_shim_fn_is_used(vm, prog, "fromfpx", "math.h");
-    bool use_fromfpxf = bundled_shim_fn_is_used(vm, prog, "fromfpxf", "math.h");
-    bool use_fromfpxl = bundled_shim_fn_is_used(vm, prog, "fromfpxl", "math.h");
-    bool use_ufromfpx = bundled_shim_fn_is_used(vm, prog, "ufromfpx", "math.h");
-    bool use_ufromfpxf =
-        bundled_shim_fn_is_used(vm, prog, "ufromfpxf", "math.h");
-    bool use_ufromfpxl =
-        bundled_shim_fn_is_used(vm, prog, "ufromfpxl", "math.h");
-    bool any = use_fromfp || use_fromfpf || use_fromfpl || use_ufromfp ||
-               use_ufromfpf || use_ufromfpl || use_fromfpx || use_fromfpxf ||
-               use_fromfpxl || use_ufromfpx || use_ufromfpxf || use_ufromfpxl;
-    if (!any)
-        return;
-
-    if (use_fromfp)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfp", "math.h");
-    if (use_fromfpf)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfpf", "math.h");
-    if (use_fromfpl)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfpl", "math.h");
-    if (use_ufromfp)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfp", "math.h");
-    if (use_ufromfpf)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfpf", "math.h");
-    if (use_ufromfpl)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfpl", "math.h");
-    if (use_fromfpx)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfpx", "math.h");
-    if (use_fromfpxf)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfpxf", "math.h");
-    if (use_fromfpxl)
-        rename_bundled_extern_for_native_shim(vm, prog, "fromfpxl", "math.h");
-    if (use_ufromfpx)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfpx", "math.h");
-    if (use_ufromfpxf)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfpxf", "math.h");
-    if (use_ufromfpxl)
-        rename_bundled_extern_for_native_shim(vm, prog, "ufromfpxl", "math.h");
-
-    // Deliberately does NOT `#include <math.h>` itself, unlike
-    // serialize_threads_shims'/serialize_dlfcn_shims' own self-contained
-    // #includes -- ceil/floor/trunc/round/rint/ldexp are already in scope
-    // by construction (fromfp/ufromfp/etc can only be *used* here if the
-    // guest itself declared them, which only exists in CCCC's own bundled
-    // math.h, forced into scope ahead of this shim by the #1143
-    // substitution in the include-replay loop above). A bare `#include
-    // <math.h>` here would resolve differently: unlike a CAPTURED
-    // `#include <math.h>` line (rewritten to an absolute quoted include of
-    // CCCC's own copy by that same #1143 substitution), a literal
-    // `#include <math.h>` in emitted shim text is angle-bracket,
-    // unsubstituted, ordinary host header search -- and CCCC's bundled
-    // include dir is demoted to `-idirafter` (#1143), so it resolves to
-    // the REAL host math.h instead, which reintroduces the exact
-    // guard-name mismatch #1143's own comment (further up this file)
-    // documents for math.h/tgmath.h -- confirmed directly: this doubled
-    // math.h include broke both the FP_INFINITE enum (CCCC's own #define
-    // colliding with the real header's enumerator of the same name) and
-    // fromfp's own declaration (a second, real-glibc-signature
-    // declaration conflicting with CCCC's) in the cccc-linux-amd64
-    // container. <fenv.h>/<stdint.h> have no such substitution and are
-    // safe to include normally -- harmless if already replayed (include
-    // guards make a repeat #include a no-op).
-    //
-    // Also deliberately does NOT write the plain `isnan`/`isinf` names --
-    // #1021's own comment just above (native_accessor_shims) explains why:
-    // once CCCC's math.h is in scope, those are `_Generic`-dispatching
-    // macros to __cccc_isnan_f/_d (accessor shims gated on a GUEST
-    // reference to that exact name, per native_accessor_shims' own
-    // matching loop -- this shim body's internal use doesn't create one,
-    // so the helper the macro expands to is never actually emitted,
-    // confirmed directly: "undeclared identifier '__cccc_isnan_f'" in the
-    // cccc-linux-amd64 container). __builtin_isnan/__builtin_isinf are the
-    // same portable clang/gcc intrinsics #1021's shims themselves use, no
-    // such indirection.
-    fprintf(f, "%s", CCCC_SHIM_c23_fromfp_impl);
-
-    if (use_fromfp)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfp);
-    if (use_ufromfp)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfp);
-    if (use_fromfpx)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfpx);
-    if (use_ufromfpx)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfpx);
-
-    if (use_fromfpf)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfpf);
-    if (use_ufromfpf)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfpf);
-    if (use_fromfpxf)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfpxf);
-    if (use_ufromfpxf)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfpxf);
-
-    if (use_fromfpl)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfpl);
-    if (use_ufromfpl)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfpl);
-    if (use_fromfpxl)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_fromfpxl);
-    if (use_ufromfpxl)
-        fprintf(f, "%s", CCCC_SHIM_c23_fromfp_ufromfpxl);
-
-    fprintf(f, "\n");
+    bool any = false;
+    for (size_t i = 0; i < sizeof(families) / sizeof(families[0]); i++)
+        for (size_t j = 0; j < 3; j++) {
+            char name[32];
+            snprintf(name, sizeof(name), "%s%s", families[i], suffixes[j]);
+            any |=
+                rename_bundled_extern_for_native_shim(vm, prog, name, "math.h");
+        }
+    if (any)
+        fprintf(f, "%s\n", CCCC_SHIM_c23_math_runtime);
 }
 
 // ---------- #1123: wide _BitInt (N>128) multi-word lowering ----------
@@ -1629,9 +1514,7 @@ static void wide_bitint_scan_node(Node *node, WideBitintNeed *need,
 // needs one instance per K. No fine-grained "which of the ~26 functions does
 // this TU actually call" gate: they're small, always emitted together, and
 // the native/generated build has no -Werror to make an unused one costly
-// (mirrors this file's own `any`-gated whole-block shape, just without the
-// per-function split serialize_c23_fromfp_shims above needs because *those*
-// functions aren't all mutually width-generic call targets of one lowering).
+// (the same `any`-gated whole-block shape as serialize_c23_math_shims).
 //
 // Called from the accessor-shim slot in cc_serialize_program
 // (serialize_program.c), before serialize_type_defs_for_owner -- a struct

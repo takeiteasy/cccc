@@ -16,14 +16,13 @@
 //   posix_compat     --posix-emulation: ppoll, sched_*, gethostbyname_r, aio_fsync, in6_pktinfo
 //   canonical_const  canonical-to-host constants: nl_langinfo, setlocale, sched_*, sysconf, pathconf
 //   dlfcn            <dlfcn.h> over the VM's library registry
-//   c23_fromfp       C23 fromfp/ufromfp/fromfpx/ufromfpx
 //   pool             thread pool and barrier shared by omp and kernel
 //   omp              OpenMP runtime on the pool
 //   kernel           cccc_* work-item builtins and launcher on the pool
 //   checked          --checked-pointers checks (CHKR/CHKNT/CHKAB/CHKDC)
 //
-// wide_bitint's one chunk is src/stdlib/wide_bitint/runtime.c (also compiled
-// into the VM); it is declared by hand below.
+// wide_bitint and c23_math each have one chunk, src/stdlib/<group>/runtime.c,
+// also compiled into the VM; they are declared by hand below.
 // clang-format on
 
 #ifndef CCCC_SHIMS_H
@@ -133,19 +132,6 @@
     X(dlfcn, dlsym)                                                            \
     X(dlfcn, dlclose)                                                          \
     X(dlfcn, dlerror)                                                          \
-    X(c23_fromfp, impl)                                                        \
-    X(c23_fromfp, fromfp)                                                      \
-    X(c23_fromfp, ufromfp)                                                     \
-    X(c23_fromfp, fromfpx)                                                     \
-    X(c23_fromfp, ufromfpx)                                                    \
-    X(c23_fromfp, fromfpf)                                                     \
-    X(c23_fromfp, ufromfpf)                                                    \
-    X(c23_fromfp, fromfpxf)                                                    \
-    X(c23_fromfp, ufromfpxf)                                                   \
-    X(c23_fromfp, fromfpl)                                                     \
-    X(c23_fromfp, ufromfpl)                                                    \
-    X(c23_fromfp, fromfpxl)                                                    \
-    X(c23_fromfp, ufromfpxl)                                                   \
     X(pool, includes)                                                          \
     X(pool, runtime)                                                           \
     X(omp, includes)                                                           \
@@ -164,6 +150,7 @@
         __attribute__((visibility("hidden")));
 SHIMS(CCCC_SHIM_DECL)
 CCCC_SHIM_DECL(wide_bitint, runtime)
+CCCC_SHIM_DECL(c23_math, runtime)
 #undef CCCC_SHIM_DECL
 
 #endif

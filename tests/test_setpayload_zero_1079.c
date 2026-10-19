@@ -1,9 +1,6 @@
-// CCCC_NATIVE_SKIP: macOS libm lacks the C23 functions the VM provides (#1712)
-// Regression test for #1079: cccc_setpayload_impl/cccc_setpayloadf_impl
-// (src/stdlib/math.c) used to leave the destination completely untouched
-// on a failed setpayload/setpayloadsig call. Real glibc -- and the
-// documented setpayload(3) contract -- instead zero the destination when
-// the payload wasn't installed ("if the payload was not successfully
+// A failed setpayload/setpayloadsig call zeroes the destination, as real
+// glibc and the documented setpayload(3) contract do when the payload
+// wasn't installed ("if the payload was not successfully
 // installed, zero is stored in *cx"). Covers all six entry points
 // (setpayload/f/l, setpayloadsig/f/l) and every distinct failure reason
 // (negative payload, non-integral payload, out-of-range payload, and a

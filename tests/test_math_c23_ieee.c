@@ -1,10 +1,9 @@
-// CCCC_NATIVE_SKIP: macOS libm lacks the C23 functions the VM provides (#1712)
 // Regression test for #774: C23 IEC 60559:2020 interchange/classification
 // functions (fmaximum/fminimum family, totalorder, canonicalize,
 // getpayload/setpayload, llogb, fromfp/ufromfp, issignaling/iseqsig)
-// were missing entirely. Implemented in software in src/stdlib/math.c
-// (bit-pattern based, not FFI) since several are absent from Darwin's
-// libm and glibc only gained fmaximum/fminimum in 2.35.
+// were missing entirely. Implemented in software in
+// src/stdlib/c23_math/runtime.c (bit-pattern based, not FFI) since several are
+// absent from Darwin's libm and glibc only gained fmaximum/fminimum in 2.35.
 //
 // (Previously avoided bare-exponent float literals like `1e10` here due
 // to a separate tokenizer bug -- see test_float_literal_exponent.c for

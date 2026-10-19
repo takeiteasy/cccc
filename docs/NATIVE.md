@@ -89,6 +89,11 @@ about the generated C are silenced. Host errors still show. A `#warning` is
 likewise reported (or silenced by `-Wno-cpp`) by the front end and is not
 copied into the generated C.
 
+A program that defines its own function with a library name, such as
+`double fabs(double)`, also gets `-fno-builtin-<name>`, so calls reach the
+program's definition as they do in the VM rather than the host compiler's
+builtin. Compiling `-m` output by hand needs the same flags.
+
 `--link-arg=ARG` (repeatable, `-c=native` only) passes `ARG` verbatim to the
 host link line, after `-L`/`-l` and before the automatic `-lm`/`-pthread`. Use it
 for what `-l` cannot name: a `.o` or `.a`, `-framework X`, `-Wl,...`.
@@ -272,6 +277,16 @@ exactly (the container is size- and alignment-identical to CCCC's own
 `_BitInt(N>128)` representation, unlike clang's or gcc's own native
 `_BitInt`, which neither accepts this width range on every target this
 project supports nor agrees with CCCC's layout where it does).
+
+The C23 `<math.h>` functions that host libms lack or declare differently
+(`exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi`,
+the `fmaximum`/`fminimum` family, `totalorder`/`totalordermag`,
+`canonicalize`, `getpayload`/`setpayload`/`setpayloadsig`, `llogb` and the
+`fromfp`/`ufromfp`/`fromfpx`/`ufromfpx` family, with their `f`/`l`
+variants) are emitted as `static` functions named `__cccc_native_<name>`,
+on every host. They are the same code the VM runs
+(`src/stdlib/c23_math/runtime.c`), so results match the VM exactly; `l`
+variants compute in `double`, like the VM's `long double`.
 
 ### Wide `_BitInt` bit-fields
 

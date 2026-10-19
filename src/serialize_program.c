@@ -3634,6 +3634,59 @@ static bool line_macro_name_is_non_ascii(const char *line) {
     return false;
 }
 
+// The macro name of a captured `#define`/`#undef` line, or NULL for any
+// other line; *len gets its length and *is_define which directive it is.
+static const char *directive_macro_name(const char *line, bool *is_define,
+                                        int *len) {
+    if (!line_is_define_or_undef_directive(line))
+        return NULL;
+    const char *p = line + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    *is_define  = p[0] == 'd';
+    p          += *is_define ? strlen("define") : strlen("undef");
+    while (*p == ' ' || *p == '\t')
+        p++;
+    const char *end = p;
+    while (isalnum((unsigned char)*end) || *end == '_' ||
+           (unsigned char)*end >= 0x80)
+        end++;
+    *len = (int)(end - p);
+    return *len ? p : NULL;
+}
+
+// A user macro still defined after the include replay would rewrite every
+// later line of the output, which is already macro-expanded: `#define int
+// long long` turns a serialized `int main(int argc, ...)` into an invalid
+// main, and the synthesized includes and shims after it expand it too.
+// Reserved names (_X..., __...) stay defined, since feature-test macros
+// such as _GNU_SOURCE must still configure the headers included later.
+static void undef_live_user_macros(FILE *f, char **lines, int n) {
+    HashMap live = {0}; // name -> (void *)1 defined, (void *)2 undefined
+    for (int i = 0; i < n; i++) {
+        bool        is_define;
+        int         len;
+        const char *name = directive_macro_name(lines[i], &is_define, &len);
+        if (name)
+            hashmap_put2(&live, name, len,
+                         (void *)(intptr_t)(is_define ? 1 : 2));
+    }
+    for (int i = 0; i < n; i++) {
+        bool        is_define;
+        int         len;
+        const char *name = directive_macro_name(lines[i], &is_define, &len);
+        bool reserved    = name && name[0] == '_' &&
+                           (name[1] == '_' || isupper((unsigned char)name[1]));
+        if (!name || reserved)
+            continue;
+        if (hashmap_get2(&live, name, len) != (void *)1)
+            continue;
+        fprintf(f, "#undef %.*s\n", len, name);
+        hashmap_put2(&live, name, len, (void *)2);
+    }
+    hashmap_deinit(&live);
+}
+
 // #1184-adjacent (found verifying #1157 on real sr.ht Linux hardware): a
 // captured `#define once_flag ...`/`#define ONCE_FLAG_INIT ...`/
 // `#define call_once ...` line from include/threads.h's own #1183/#1184
@@ -5515,6 +5568,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 hashmap_put(&candidate_index, key, (void *)(intptr_t)(i + 1));
         }
     }
+    char **macro_lines =
+        calloc(vm->compiler.emit_directives.len + 1, sizeof(char *));
+    int macro_lines_len = 0;
     for (int i = 0; i < vm->compiler.emit_directives.len; i++) {
         char *line     = vm->compiler.emit_directives.data[i];
         char *resolved = hashmap_get(&vm->compiler.emit_include_paths, line);
@@ -5694,6 +5750,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         if (resolved)
             prelude_emit(f, &ctx, &prelude, resolved);
         fprintf(f, "%s\n", line);
+        if (line_is_define_or_undef_directive(line))
+            macro_lines[macro_lines_len++] = line;
         if (resolved)
             prelude_note_replayed(&prelude, resolved);
         // On Linux, a replayed `#include <sys/mount.h>` does NOT bring
@@ -5755,6 +5813,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         }
     }
     prelude_check(vm, &prelude);
+    undef_live_user_macros(f, macro_lines, macro_lines_len);
+    free(macro_lines);
     free(prelude.refs);
     free(prelude.replayed);
     if (vm->compiler.emit_directives.len > 0)
@@ -5844,12 +5904,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     if (!generated_only)
         serialize_posix_compat_shims(f, vm, prog);
 
-    // #1195: same placement rationale as serialize_posix_compat_shims just
-    // above -- math.h is a real host header CCCC merely bundles its own
-    // copy of (forced into scope by the #1143 substitution), no dependency
-    // on serialize_type_defs_for_owner.
+    // Same placement as serialize_posix_compat_shims: after the include
+    // replay, no dependency on serialize_type_defs_for_owner.
     if (!generated_only)
-        serialize_c23_fromfp_shims(f, vm, prog);
+        serialize_c23_math_shims(f, vm, prog);
 
     // #1146: same placement rationale as serialize_posix_compat_shims just
     // above (struct/typedef visibility from the #include replay, no

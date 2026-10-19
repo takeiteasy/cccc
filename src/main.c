@@ -148,6 +148,9 @@ static int push_input_dir_i(char *key, int keylen, void *val, void *user_data) {
     return 0;
 }
 
+// Defined in src/codegen_regalloc.c, declared in codegen_internal.h.
+int find_ffi_function(VirtualMachine *vm, const char *name);
+
 // #1065: argv_push() (src/exec.c) stores the pointer it's given, it does
 // not copy the string -- so a flag assembled into a stack buffer (as
 // run_native_backend() used to do for -std/-D/-U/-l) is either out of
@@ -481,6 +484,13 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // The front end already diagnosed the program under cccc's own -W
     // options; host warnings about the generated C are noise.
     argv_push(&cc_args, "-w");
+    // A program's own definition of a library function such as fabs replaces
+    // the library one in the VM; the host compiler would otherwise still
+    // expand calls to it as its builtin.
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->body && !obj->is_static &&
+            find_ffi_function(vm, obj->name) >= 0)
+            push_owned_flag(&cc_args, &owned, "-fno-builtin-", obj->name);
     // #1159: -O<n> used to be a hard error under -c=native (it tunes the VM's
     // own bytecode pipeline, which the native path never runs), so the host
     // cc always built at its own default (-O0 for both clang and gcc) --

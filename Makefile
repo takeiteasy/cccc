@@ -26,7 +26,7 @@ UNAME_S := $(shell uname -s)
 # Every bundled header and -c=native shim chunk is embedded into the binary
 # (src/std_table.c, src/shim_table.c), so an edit to any of them relinks.
 HEADERS := $(wildcard include/*.h include/*/*.h)
-SHIMS := $(wildcard src/shims/*/*.c src/stdlib/wide_bitint/*.c)
+SHIMS := $(wildcard src/shims/*/*.c src/stdlib/wide_bitint/*.c src/stdlib/c23_math/*.c)
 SRCS := $(filter-out src/ops.c, $(wildcard src/*.c src/stdlib/*.c))
 
 # MODE=release optimizes the binary itself (mirrors build.c's release target).

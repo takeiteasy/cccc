@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: the host builtin replaces a user fabs (#1715)
 // A program's own fabs coexists with __builtin_fabs, which reaches libm.
 
 double fabs(double x) {
