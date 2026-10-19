@@ -2742,6 +2742,12 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    // Dropped before parse, as for -c=native: --checked-pointers' parse-time
+    // rewrites would otherwise leak their temporaries into the output.
+    if (dump_expanded_only)
+        flags = warn_ignored_vm_flags(
+            flags, emit_generated_only ? "-c=generated" : "-m");
+
     // Auto-enable the interactive debugger when running interactively, so a
     // fatal runtime error traps into the debugger instead of just exiting
     // (ticket #405). Excluded for --testing/--test/--test-suite since those
@@ -2764,6 +2770,10 @@ int main(int argc, const char *argv[]) {
     vm.compiler.cli_flags_mask          = cli_flags_mask;
     vm.kernel_max_group                 = kernel_max_group;
     vm.compiler.native_mode             = (compile_format == COMPILE_NATIVE);
+    vm.compiler.vm_flags_ignored_in =
+        compile_format == COMPILE_NATIVE ? "-c=native"
+        : dump_expanded_only ? (emit_generated_only ? "-c=generated" : "-m")
+                             : NULL;
     // --testing[=vm] runs the program in the VM, which has no thread pool.
     vm.compiler.omp_threaded =
         (flags & CCCC_OPENMP) &&
@@ -3407,15 +3417,6 @@ int main(int argc, const char *argv[]) {
             exit_code = 1;
             goto BAIL;
         }
-        // #924: checked here (post-preprocess) rather than in the CLI-only
-        // validation block above so a flag set via `#pragma cccc
-        // config(...)` -- not just the CLI spelling -- is caught too;
-        // vm.flags reflects both by this point. Warn, don't error: the
-        // attributes these flags gate are already unconditionally stripped
-        // from serialized output (#482/#488 ABI transparency), so the flag
-        // is genuinely a no-op here, not a conflict.
-        vm.flags = warn_ignored_vm_flags(
-            vm.flags, emit_generated_only ? "-c=generated" : "-m");
         // #999: this path (-m / -c=generated) bails out before cc_compile()
         // ever runs, so vm.compiler.globals still holds whatever the *last*
         // TU's own parse() call left it as (each TU's parse() resets it to

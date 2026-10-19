@@ -167,13 +167,14 @@ appear multiple times in a file — later pragmas win for the same key
   passed on the command line (`-0`/`-1`/`-2`/`-3`, `--safety=...`,
   `--bounds-checks`, etc.), `config(...)` silently has no effect on that
   setting — the CLI value is kept.
-- **Ignored in native mode.** When compiling with `-c=native`, `config(...)`
-  has no effect on `vm->flags` (native output is handed to the system `cc`,
-  which has its own sanitizer flags). This
+- **Ignored in serialized-output modes.** With `-c=native`,
+  `-m`/`--dump-expanded` or `-c=generated`, `config(...)` has no effect on
+  `vm->flags` (the output is C for the system `cc`, which has its own
+  sanitizer flags). This
   prints a `-Wignored-features` warning (on by default under `-Wall`) naming
   the pragma; it is otherwise silent by default, the same as every other
   `-Wignored-features` diagnostic (`_Atomic`, etc.). Unknown keys and invalid
-  values are still hard errors in native mode.
+  values are still hard errors in these modes.
 - **Unknown keys and out-of-range values are hard compile errors**, e.g.
   `config(frobnicate = 1)` or `config(safety = 9)`.
 

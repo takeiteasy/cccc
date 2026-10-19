@@ -4631,8 +4631,10 @@ typedef struct Compiler {
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask; // CCCCFlags bits explicitly set on the CLI; these
                              // win over `#pragma cccc config(...)` (#357)
-    bool     native_mode;    // True when compile_format == COMPILE_NATIVE;
-                             // config()'s flag effects are skipped
+    bool        native_mode; // True when compile_format == COMPILE_NATIVE
+    const char *vm_flags_ignored_in; // "-c=native", "-m" or "-c=generated":
+                                     // the mode that drops VM-only flags, so
+                                     // config()'s flag effects are skipped
     bool     serializes_output; // -c=native, -m or -c=generated: the AST is
                                 // emitted as C, not run by the VM
     bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:

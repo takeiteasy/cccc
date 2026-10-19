@@ -2762,15 +2762,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             break;
 
         case ND_DYNAMIC_CHECK:
-            // dynamic_check(cond) (#486) is only ever built when
-            // CCCC_CHECKED_BOUNDS was set at parse time -- normally
-            // unreachable here, since -c=native drops the flag before
-            // parse. -m/-c=generated currently drop it only after parse
-            // (a pre-existing asymmetry, see the follow-up filed against
-            // src/main.c), so an explicitly-flagged run of either can still
-            // reach this case; strip to a no-op rather than emitting
-            // anything CHKDC-shaped, matching every other checked-pointer
-            // construct's native/serialized-output treatment.
+            // Only built when CCCC_CHECKED_BOUNDS was set at parse time, which
+            // every serialized-output mode drops before parse, so normally
+            // unreachable; strip to a no-op like every other checked-pointer
+            // construct.
             fprintf(f, "((void)0)");
             break;
 

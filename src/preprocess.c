@@ -5822,10 +5822,11 @@ static bool pragma_config_read_bool(Token *tok, bool *out) {
 
 // Sets or clears a single CCCCFlags bit for `#pragma cccc config(...)`,
 // respecting CLI precedence (#357: CLI-set bits always win) and skipping
-// the change entirely in native mode (config() flags only affect VM codegen).
+// the change entirely in serialized-output modes (config() flags only affect
+// VM codegen).
 static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit,
                                    bool enable) {
-    if (vm->compiler.native_mode)
+    if (vm->compiler.vm_flags_ignored_in)
         return;
     if (vm->compiler.cli_flags_mask & bit)
         return;
@@ -5838,7 +5839,7 @@ static void pragma_config_set_flag(VirtualMachine *vm, uint32_t bit,
 // Applies `safety = N` (0..3): clears/sets exactly the bits the corresponding
 // -0/-1/-2/-3 preset would touch, except bits the CLI already pinned.
 static void pragma_config_set_safety(VirtualMachine *vm, int level) {
-    if (vm->compiler.native_mode)
+    if (vm->compiler.vm_flags_ignored_in)
         return;
     uint32_t preset    = level == 0   ? 0u
                          : level == 1 ? (uint32_t)CCCC_SAFETY_BASIC
@@ -5852,21 +5853,16 @@ static void pragma_config_set_safety(VirtualMachine *vm, int level) {
 // `value` is NULL for a bare key. Unknown keys and invalid values are hard
 // errors, matching existing #pragma cccc diagnostic style.
 static void pragma_config_apply(VirtualMachine *vm, Token *key, Token *value) {
-    // #924: every key this function handles (safety/individual flag) only ever
-    // touches VM bytecode generation or runtime behavior --
-    // pragma_config_set_flag/_safety both early-return under native_mode
-    // already (see their own comments), so the pragma is silently a no-op
-    // there. Surface that instead of
-    // staying quiet about it, matching -c=native/-m/-c=generated's CLI-flag
-    // warning for the same reason (main.c's warn_ignored_vm_flags). Fires
-    // before key validation below: even a malformed value is still a no-op
-    // here.
-    if (vm->compiler.native_mode)
+    // Every key only configures the VM, so the pragma is a no-op in a
+    // serialized-output mode; say so, matching main.c's
+    // warn_ignored_vm_flags for the CLI spelling. Fires before key
+    // validation: even a malformed value is still a no-op here.
+    if (vm->compiler.vm_flags_ignored_in)
         warn_tok(
             vm, key, CCCC_WARN_IGNORED_FEATURES,
-            "#pragma cccc config(%.*s) has no effect in -c=native mode "
+            "#pragma cccc config(%.*s) has no effect in %s mode "
             "-- it configures VM bytecode generation/runtime behavior only",
-            (int)key->len, key->loc);
+            (int)key->len, key->loc, vm->compiler.vm_flags_ignored_in);
     if (equal(key, "safety")) {
         long level = 0;
         if (!value || !pragma_config_read_int(value, &level) || level < 0 ||
