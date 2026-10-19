@@ -322,6 +322,7 @@ static BuildTarget *embed_lib(Builder *ctx, BuildTarget *bt) {
         AddInput(lib, shims[i]);
     AddInput(lib, "src/stdlib/wide_bitint/runtime.c");
     AddInput(lib, "src/stdlib/c23_math/runtime.c");
+    AddInput(lib, "src/stdlib/c23_mem/runtime.c");
     return lib;
 }
 

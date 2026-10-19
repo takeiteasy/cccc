@@ -1312,6 +1312,22 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
 // stop -- the replayed #include binds AA textually inside the header's own
 // code, and renaming it there breaks the header (the same failure #1014
 // verified by hand-compiling a renamed header-exposed tag).
+static void add_enum_rename(VirtualMachine *vm, SerializeContext *ctx,
+                            Type *rep, const char *name) {
+    if (ctx->enum_renames_len >= ctx->enum_renames_cap) {
+        ctx->enum_renames_cap =
+            ctx->enum_renames_cap ? ctx->enum_renames_cap * 2 : 8;
+        ctx->enum_renames = realloc(
+            ctx->enum_renames, sizeof(EnumConstRename) * ctx->enum_renames_cap);
+    }
+    ctx->enum_renames[ctx->enum_renames_len++] = (EnumConstRename){
+        .rep      = rep,
+        .orig     = (char *)name,
+        .new_name = arena_format(vm, "%s__cccc_dup%d", name,
+                                 ctx->anon_global_counter++),
+    };
+}
+
 static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                                             SerializeContext *ctx) {
     typedef struct {
@@ -1556,19 +1572,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
                 }
                 continue;
             }
-            char *new_name = arena_format(vm, "%s__cccc_dup%d", name,
-                                          ctx->anon_global_counter++);
-            if (ctx->enum_renames_len >= ctx->enum_renames_cap) {
-                ctx->enum_renames_cap =
-                    ctx->enum_renames_cap ? ctx->enum_renames_cap * 2 : 8;
-                ctx->enum_renames =
-                    realloc(ctx->enum_renames,
-                            sizeof(EnumConstRename) * ctx->enum_renames_cap);
-            }
-            ctx->enum_renames[ctx->enum_renames_len].rep      = groups[idx].rep;
-            ctx->enum_renames[ctx->enum_renames_len].orig     = (char *)name;
-            ctx->enum_renames[ctx->enum_renames_len].new_name = new_name;
-            ctx->enum_renames_len++;
+            add_enum_rename(vm, ctx, groups[idx].rep, name);
         }
     }
 
@@ -4996,6 +5000,71 @@ static void rename_colliding_local_type_names(VirtualMachine   *vm,
     }
 }
 
+typedef struct {
+    Type *rep;
+    Obj  *fn;
+} LocalEnum;
+
+// TODO(#1719): O(local enums x (enumerators + locals + typedefs)) scan; share
+// the name -> records map once local type names become common.
+static bool local_enum_name_taken(VirtualMachine *vm, SerializeContext *ctx,
+                                  LocalEnum *groups, int g, const char *name) {
+    Obj *fn = groups[g].fn;
+    for (int h = 0; h < g; h++) {
+        if (groups[h].fn != fn)
+            continue;
+        for (EnumConstant *ec = groups[h].rep->enum_constants; ec;
+             ec               = ec->next)
+            if (ec->name && strcmp(ec->name, name) == 0)
+                return true;
+    }
+    for (Obj *var = fn->locals; var; var = var->next)
+        if (var->name && strcmp(var->name, name) == 0)
+            return true;
+    size_t len = strlen(name);
+    for (int i = 0; i < ctx->typedefs_len; i++)
+        if (ctx->typedefs[i].owner_fn == fn &&
+            (size_t)ctx->typedefs[i].name_len == len &&
+            strncmp(ctx->typedefs[i].name, name, len) == 0)
+            return true;
+    ensure_global_name_index(vm, ctx);
+    return hashmap_get(&ctx->global_names, (char *)name) != NULL;
+}
+
+// Block-scope enumerators are declared at the top of their function with the
+// other local types, so one whose name is already visible there (another
+// block's enumerator, a local, a local typedef or a global) is renamed.
+// References print as integer literals, so only the definition changes.
+static void rename_colliding_local_enum_constants(VirtualMachine   *vm,
+                                                  SerializeContext *ctx) {
+    LocalEnum *groups     = NULL;
+    int        groups_len = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        TypeName *recs     = pass == 0 ? ctx->tags : ctx->typedefs;
+        int       recs_len = pass == 0 ? ctx->tags_len : ctx->typedefs_len;
+        for (int i = recs_len - 1; i >= 0; i--) {
+            TypeName *rec = &recs[i];
+            if (!rec->owner_fn || !rec->ty || rec->ty->kind != TY_ENUM ||
+                !type_is_complete_tagged(rec->ty))
+                continue;
+            bool found = false;
+            for (int g = 0; g < groups_len && !found; g++)
+                found = groups[g].fn == rec->owner_fn &&
+                        same_type_strong(groups[g].rep, rec->ty);
+            if (found)
+                continue;
+            groups = realloc(groups, sizeof(LocalEnum) * (groups_len + 1));
+            groups[groups_len++] = (LocalEnum){rec->ty, rec->owner_fn};
+        }
+    }
+    for (int g = 0; g < groups_len; g++)
+        for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+             ec               = ec->next)
+            if (ec->name && local_enum_name_taken(vm, ctx, groups, g, ec->name))
+                add_enum_rename(vm, ctx, groups[g].rep, ec->name);
+    free(groups);
+}
+
 void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                           bool generated_only, bool emit_test_harness,
                           bool no_emit_tests) {
@@ -5041,6 +5110,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_colliding_local_type_names(vm, &ctx, ctx.tags, ctx.tags_len, true);
     rename_colliding_local_type_names(vm, &ctx, ctx.typedefs, ctx.typedefs_len,
                                       false);
+    rename_colliding_local_enum_constants(vm, &ctx);
     // #1283: build the type-name candidate index only now -- the passes above
     // mutate Type.struct_tag (an index key) and TypeName.name in place. Reset
     // here rather than before collect_scope_names so a lazy build triggered
@@ -5906,8 +5976,10 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
 
     // Same placement as serialize_posix_compat_shims: after the include
     // replay, no dependency on serialize_type_defs_for_owner.
-    if (!generated_only)
+    if (!generated_only) {
         serialize_c23_math_shims(f, vm, prog);
+        serialize_c23_mem_shims(f, vm, prog);
+    }
 
     // #1146: same placement rationale as serialize_posix_compat_shims just
     // above (struct/typedef visibility from the #include replay, no

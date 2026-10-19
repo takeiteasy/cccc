@@ -453,10 +453,10 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 
 | Function(s) | Source file | Reason for shim | Native availability | Removal condition |
 |---|---|---|---|---|
-| `memset_explicit` | `string.c` | C23 addition not yet exposed consistently by supported host headers | Portable volatile-write shim on macOS and glibc | When supported host headers provide a portable native declaration |
+| `memset_explicit` | `c23_mem/runtime.c` | C23 addition; macOS lacks it | glibc 2.43+, macOS absent | When macOS adds it and glibc 2.43 is the minimum |
 | `aligned_alloc` | `stdlib.c` | macOS before 10.15 lacked `aligned_alloc`; shimmed via `posix_memalign` | macOS 10.15+, glibc 2.16+ | Already available on current macOS; shim is a safe no-op candidate |
-| `free_sized`, `free_aligned_sized` | `stdlib.c` | C23 addition; no host libc exposes these yet | Nowhere yet | When host libc adds them |
-| `memalignment` | `stdlib.c` | C23 addition; no host libc equivalent | Nowhere yet | When host libc adds it |
+| `free_sized`, `free_aligned_sized` | `c23_mem/runtime.c` | C23 addition; macOS lacks them | glibc 2.43+, macOS absent | When macOS adds them and glibc 2.43 is the minimum |
+| `memalignment` | `c23_mem/runtime.c` | C23 addition; macOS lacks it | glibc 2.43+, macOS absent | When macOS adds it and glibc 2.43 is the minimum |
 | `strtol`, `strtoll`, `strtoul`, `strtoull` | `stdlib.c` | C23 adds `0b`/`0B` binary prefix for base 0/2; not in host libc | Nowhere yet | When host libc C23 `strtol` is available |
 | `mbrtoc16`, `c16rtomb` | `wide.c` | macOS lacks `<uchar.h>`; shimmed via `mbrtowc`/`wcrtomb` with `wchar_t` cast | glibc 2.16+, macOS absent | When macOS SDK adds `<uchar.h>` |
 | `mbrtoc32`, `c32rtomb` | `wide.c` | Same as above; assumes UCS-4 = UTF-32 on all platforms | glibc 2.16+, macOS absent | When macOS SDK adds `<uchar.h>` |

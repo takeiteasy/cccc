@@ -21,7 +21,8 @@
 //   kernel           cccc_* work-item builtins and launcher on the pool
 //   checked          --checked-pointers checks (CHKR/CHKNT/CHKAB/CHKDC)
 //
-// wide_bitint and c23_math each have one chunk, src/stdlib/<group>/runtime.c,
+// wide_bitint, c23_math and c23_mem each have one chunk,
+// src/stdlib/<group>/runtime.c,
 // also compiled into the VM; they are declared by hand below.
 // clang-format on
 
@@ -151,6 +152,7 @@
 SHIMS(CCCC_SHIM_DECL)
 CCCC_SHIM_DECL(wide_bitint, runtime)
 CCCC_SHIM_DECL(c23_math, runtime)
+CCCC_SHIM_DECL(c23_mem, runtime)
 #undef CCCC_SHIM_DECL
 
 #endif

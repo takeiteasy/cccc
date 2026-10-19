@@ -1353,6 +1353,24 @@ void serialize_c23_math_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         fprintf(f, "%s\n", CCCC_SHIM_c23_math_runtime);
 }
 
+// C23 memory functions under -c=native: the shared runtime
+// (src/stdlib/c23_mem/runtime.c) the VM also runs, emitted on every host since
+// macOS declares none of them and glibc only from 2.43.
+void serialize_c23_mem_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (vm->compiler.emit_cccc)
+        return;
+    bool any = rename_bundled_extern_for_native_shim(
+        vm, prog, "memset_explicit", "string.h");
+    any |= rename_bundled_extern_for_native_shim(vm, prog, "memalignment",
+                                                 "stdlib.h");
+    any |= rename_bundled_extern_for_native_shim(vm, prog, "free_sized",
+                                                 "stdlib.h");
+    any |= rename_bundled_extern_for_native_shim(vm, prog, "free_aligned_sized",
+                                                 "stdlib.h");
+    if (any)
+        fprintf(f, "%s\n", CCCC_SHIM_c23_mem_runtime);
+}
+
 // ---------- #1123: wide _BitInt (N>128) multi-word lowering ----------
 
 // A visited-set of Type pointers, threaded through the scans below. A depth

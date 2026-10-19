@@ -38,16 +38,6 @@ static void *cccc_shim_memmove(void *dst, const void *src, size_t n) {
     return r;
 }
 
-// C23 memset_explicit: like memset, but guaranteed not to be optimized away.
-// Current Apple and glibc headers do not expose a portable native declaration,
-// so keep the VM registration independent of host libc version.
-static void *cccc_memset_explicit(void *s, int c, size_t n) {
-    volatile unsigned char *p = (volatile unsigned char *)s;
-    for (size_t i = 0; i < n; i++)
-        p[i] = (unsigned char)c;
-    return s;
-}
-
 // Register all string.h functions
 void register_string_functions(VirtualMachine *vm) {
     // Memory operations
@@ -57,8 +47,6 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "memcmp", (void *)wrap_memcmp, 3, 0);
     cc_register_cfunc(vm, "memccpy", (void *)memccpy, 4, 0);
     cc_register_cfunc(vm, "memchr", (void *)memchr, 3, 0);
-    cc_register_cfunc(vm, "memset_explicit", (void *)cccc_memset_explicit, 3,
-                      0);
 
     // String length
     cc_register_cfunc(vm, "strlen", (void *)strlen, 1, 0);

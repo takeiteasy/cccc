@@ -11,3 +11,4 @@ SHIMS(EMBED_SHIM)
 #undef EMBED_SHIM
 EMBED_ASM(CCCC_SHIM_wide_bitint_runtime, "src/stdlib/wide_bitint/runtime.c");
 EMBED_ASM(CCCC_SHIM_c23_math_runtime, "src/stdlib/c23_math/runtime.c");
+EMBED_ASM(CCCC_SHIM_c23_mem_runtime, "src/stdlib/c23_mem/runtime.c");

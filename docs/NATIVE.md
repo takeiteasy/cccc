@@ -288,6 +288,10 @@ on every host. They are the same code the VM runs
 (`src/stdlib/c23_math/runtime.c`), so results match the VM exactly; `l`
 variants compute in `double`, like the VM's `long double`.
 
+The C23 memory functions `memset_explicit`, `memalignment`, `free_sized` and
+`free_aligned_sized` (absent on macOS, declared by glibc only from 2.43) are
+emitted the same way, from `src/stdlib/c23_mem/runtime.c`.
+
 ### Wide `_BitInt` bit-fields
 
 A bit-field whose declared type is a `_BitInt` wider than 128 bits has no C

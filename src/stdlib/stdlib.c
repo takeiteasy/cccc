@@ -479,28 +479,11 @@ static long long wrap_lldiv(long long numer, long long denom) {
     return (long long)(intptr_t)slot;
 }
 
-// C23: free_sized/free_aligned_sized - a conforming implementation may
-// simply call free(), ignoring the size/alignment hints. Taken as a
-// function-pointer value and called indirectly, these have the exact same
-// #865 exposure as free() itself (codegen's direct-call routing to MFRE is
-// bypassed), so they go through cccc_ffi_free rather than raw free().
-static void cccc_free_sized(void *ptr, size_t size) {
-    (void)size;
-    cccc_ffi_free(ptr);
-}
-
-static void cccc_free_aligned_sized(void *ptr, size_t alignment, size_t size) {
-    (void)alignment;
-    (void)size;
-    cccc_ffi_free(ptr);
-}
-
-// C23: memalignment - the largest power-of-two alignment satisfied by p.
-static size_t cccc_memalignment(const void *p) {
-    if (!p)
-        return 0;
-    return (size_t)1 << __builtin_ctzll((unsigned long long)(uintptr_t)p);
-}
+// C23 memory functions shared with -c=native output. free_sized/
+// free_aligned_sized called through a function pointer bypass codegen's MFRE
+// routing, so they free through cccc_ffi_free like free() itself.
+#define __CCCC_C23_FREE cccc_ffi_free
+#include "c23_mem/runtime.c"
 
 // C23: strtol/strtoll/strtoul/strtoull accept an optional "0b"/"0B" prefix
 // when base is 0 or 2.
@@ -626,16 +609,19 @@ void register_stdlib_functions(VirtualMachine *vm) {
                       0);
     cc_register_cfunc(vm, "calloc", (void *)cccc_ffi_calloc, 2, 0);
     cc_register_cfunc(vm, "free", (void *)cccc_ffi_free, 1, 0);
-    cc_register_cfunc(vm, "free_sized", (void *)cccc_free_sized, 2, 0);
-    cc_register_cfunc(vm, "free_aligned_sized", (void *)cccc_free_aligned_sized,
-                      3, 0);
+    cc_register_cfunc(vm, "free_sized", (void *)__cccc_native_free_sized, 2, 0);
+    cc_register_cfunc(vm, "free_aligned_sized",
+                      (void *)__cccc_native_free_aligned_sized, 3, 0);
     cc_register_cfunc(vm, "malloc", (void *)cccc_ffi_malloc, 1, 0);
     cc_register_cfunc(vm, "realloc", (void *)cccc_ffi_realloc, 2, 0);
     cc_register_cfunc(vm, "reallocarray", (void *)cccc_ffi_reallocarray, 3,
                       0); // Portable polyfill (#699)
     cc_register_cfunc(vm, "posix_memalign", (void *)cccc_ffi_posix_memalign, 3,
                       0);
-    cc_register_cfunc(vm, "memalignment", (void *)cccc_memalignment, 1, 0);
+    cc_register_cfunc(vm, "memalignment", (void *)__cccc_native_memalignment, 1,
+                      0);
+    cc_register_cfunc(vm, "memset_explicit",
+                      (void *)__cccc_native_memset_explicit, 3, 0);
 
     // Process control
     cc_register_cfunc(vm, "abort", (void *)abort, 0, 0);
