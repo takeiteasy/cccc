@@ -286,7 +286,9 @@ extern "C" {
                       Reads AllocHeader.requested_size for VM heap                   \
                       allocations; falls back to (size_t)-1 (type 0/1) or 0          \
                       (type 2/3) for non-heap, freed, or unknown pointers.           \
-                      Format: [DYNOBJSZ][rd:8|rs:8|unused:48][type:i64] */           \
+                      Format: [DYNOBJSZ][rd:8|rs:8|roff:8|unused:8][type:i64];       \
+                      DYNOBJSZ_SUBOBJECT in type caps the result at                  \
+                      (type >> 8) - regs[roff], the rest of a member. */             \
     /* SIMD vector registers, 128/256/512-bit (tracker #72/#463, widened by          \
        #722). The lane type is carried by the opcode, mirroring the                  \
        FADD3/FADD3_F32 scalar split; the register itself (VReg) is a raw             \
@@ -1888,7 +1890,9 @@ typedef enum {
     ND_DYNOBJ_SIZE =
         60, // __builtin_dynamic_object_size(ptr, type) — runtime heap size.
             // lhs = ptr expr (evaluated at runtime); val = type arg (0-3);
-            // ty = size_t (ulong).  Emits DYNOBJSZ opcode.
+            // ty = size_t (ulong).  Emits DYNOBJSZ opcode. For a type 1/3
+            // query into a member, member is set and lhs is evaluated as
+            // cond (the member's address) + rhs (byte offset into it).
     ND_CONVERTVECTOR = 61, // __builtin_convertvector(expr, type) (tracker
                            // #715). lhs = source vector expr (already
                            // add_type'd at parse time); ty = target vector type

@@ -174,6 +174,9 @@ static inline bool obj_is_inline_only(const Obj *fn) {
         rs3 = ((operands) >> 24) & 0xFF;                                       \
     } while (0)
 
+// DYNOBJSZ type-word flag: cap at the member, see the opcode's comment.
+#define DYNOBJSZ_SUBOBJECT 4
+
 // RR format: [rd:8|rs1:8|unused:16]
 #define ENCODE_RR(rd, rs1) ((InstrWord)(rd) | ((InstrWord)(rs1) << 8))
 #define DECODE_RR(operands, rd, rs1)                                           \

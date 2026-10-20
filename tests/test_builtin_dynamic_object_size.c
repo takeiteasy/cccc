@@ -601,3 +601,108 @@ void test_dynobj_longjmp_across_nonpushing_frames(void) {
     size_t sz = param_obj_size(buf);
     AssertEq((unsigned long long)sz, 40ULL);
 }
+
+// ---------------------------------------------------------------------------
+// Subobject queries (type 1/3) into a member whose object is only known at
+// runtime: the answer is the smaller of what is left of the object and what
+// is left of the member the expression names.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    char x[6];
+    int  y;
+} DynobjInner;
+
+typedef struct {
+    int         a;
+    char        buf[8];
+    DynobjInner in;
+    char        tail[4];
+} DynobjOuter;
+
+typedef union {
+    char c[3];
+    long l;
+} DynobjUnion;
+
+static size_t member_type1(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->buf, 1);
+}
+static size_t member_type3(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->buf, 3);
+}
+static size_t member_type0(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->buf, 0);
+}
+static size_t member_plus3(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->buf + 3, 1);
+}
+static size_t member_index(DynobjOuter *p, int i) {
+    return __builtin_dynamic_object_size(&p->buf[i], 1);
+}
+static size_t member_nested(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->in.x, 1);
+}
+static size_t member_struct(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(&p->in, 1);
+}
+static size_t member_trailing(DynobjOuter *p) {
+    return __builtin_dynamic_object_size(p->tail, 1);
+}
+static size_t member_union(DynobjUnion *u) {
+    return __builtin_dynamic_object_size(u->c, 1);
+}
+
+[[cccc::test]]
+void test_dynobj_subobject_heap(void) {
+    DynobjOuter *p = malloc(sizeof *p);
+    AssertEq((unsigned long long)member_type1(p), 8ULL);
+    AssertEq((unsigned long long)member_type3(p), 8ULL);
+    AssertEq((unsigned long long)member_type0(p),
+             (unsigned long long)(sizeof *p - offsetof(DynobjOuter, buf)));
+    AssertEq((unsigned long long)member_plus3(p), 5ULL);
+    AssertEq((unsigned long long)member_index(p, 2), 6ULL);
+    AssertEq((unsigned long long)member_index(p, 10), 0ULL);
+    AssertEq((unsigned long long)member_nested(p), 6ULL);
+    AssertEq((unsigned long long)member_struct(p),
+             (unsigned long long)sizeof(DynobjInner));
+    // The last array member may be used as a flexible array, so only the
+    // allocation bounds it.
+    AssertEq((unsigned long long)member_trailing(p), 4ULL);
+    free(p);
+}
+
+[[cccc::test]]
+void test_dynobj_subobject_truncated_allocation(void) {
+    DynobjOuter *p = malloc(offsetof(DynobjOuter, buf) + 2);
+    AssertEq((unsigned long long)member_type1(p), 2ULL);
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(p->buf + 1, 1),
+             1ULL);
+    free(p);
+}
+
+[[cccc::test]]
+void test_dynobj_subobject_stack(void) {
+    DynobjOuter s;
+    AssertEq((unsigned long long)member_type1(&s), 8ULL);
+    AssertEq((unsigned long long)member_index(&s, 7), 1ULL);
+    DynobjUnion u;
+    AssertEq((unsigned long long)member_union(&u), 3ULL);
+}
+
+[[cccc::test]]
+void test_dynobj_subobject_unknown_object(void) {
+    DynobjOuter *p = (DynobjOuter *)(size_t)0x1000;
+    AssertEq((unsigned long long)member_type1(p), 8ULL);
+    AssertEq((unsigned long long)member_type3(p), 8ULL);
+}
+
+[[cccc::test]]
+void test_dynobj_subobject_index_evaluated_once(void) {
+    DynobjOuter *p = malloc(sizeof *p);
+    int          i = 1;
+    AssertEq((unsigned long long)__builtin_dynamic_object_size(&p->buf[i++], 1),
+             7ULL);
+    AssertEq(i, 2);
+    free(p);
+}

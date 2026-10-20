@@ -919,6 +919,76 @@ bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r) {
                 return true;
             }
             return false; // pointer variable or unknown → bail
+        case ND_MEMBER:
+            // An array member decays the same way.
+            if (node->ty->kind == TY_ARRAY)
+                return objsize_resolve_lvalue(vm, node, r);
+            return false;
+        default:
+            return false;
+    }
+}
+
+// An array member that ends its struct, and every enclosing struct, may be
+// used as a flexible array, so it bounds nothing.
+static bool objsize_member_is_trailing_array(Node *member) {
+    if (member->ty->kind != TY_ARRAY)
+        return false;
+    bool in_struct = false;
+    for (Node *n = member; n->kind == ND_MEMBER; n = n->lhs) {
+        if (n->lhs->ty->kind == TY_UNION)
+            continue;
+        if (n->member->next)
+            return false;
+        in_struct = true;
+    }
+    return in_struct;
+}
+
+static bool objsize_subobject_member(VirtualMachine *vm, Node *lv, Node *addr,
+                                     Member **mem, Node **base, Node **offset) {
+    Member *m = lv->member;
+    if (!m || m->is_bitfield || !m->ty || m->ty->size <= 0 ||
+        objsize_member_is_trailing_array(lv))
+        return false;
+    *mem    = m;
+    *base   = addr;
+    *offset = new_long(vm, 0, addr->tok);
+    return true;
+}
+
+// Resolve the member a pointer expression points into, whatever its base
+// object: `p->buf`, `&p->in.x`, `&p->buf[i]`, `p->buf + k`. *base is the
+// member's address and *offset the byte offset from it; both share subtrees
+// with `node`, and together they evaluate to `node`.
+bool objsize_resolve_subobject(VirtualMachine *vm, Node *node, Member **mem,
+                               Node **base, Node **offset) {
+    add_type(vm, node);
+    switch (node->kind) {
+        case ND_CAST:
+            return objsize_resolve_subobject(vm, node->lhs, mem, base, offset);
+        case ND_ADD:
+        case ND_SUB:
+            if (node->ty->kind != TY_PTR || node->lhs->ty->kind == TY_VECTOR ||
+                !objsize_resolve_subobject(vm, node->lhs, mem, base, offset))
+                return false;
+            *offset = new_binary(vm, node->kind, *offset,
+                                 new_cast(vm, node->rhs, ty_long), node->tok);
+            add_type(vm, *offset);
+            return true;
+        case ND_ADDR:
+            if (node->lhs->kind == ND_DEREF)
+                return objsize_resolve_subobject(vm, node->lhs->lhs, mem, base,
+                                                 offset);
+            if (node->lhs->kind == ND_MEMBER)
+                return objsize_subobject_member(vm, node->lhs, node, mem, base,
+                                                offset);
+            return false;
+        case ND_MEMBER:
+            if (node->ty->kind == TY_ARRAY)
+                return objsize_subobject_member(vm, node, node, mem, base,
+                                                offset);
+            return false;
         default:
             return false;
     }

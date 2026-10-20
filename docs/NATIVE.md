@@ -249,7 +249,7 @@ left to be discovered:
 | file-scope `asm("...");` | no-op (`-Wignored-features`); `--asm-passthru` assembles it into the host library, whose symbols the VM cannot reference | emitted verbatim as `__asm__("...");` (see [INLINE_ASM.md](INLINE_ASM.md#file-scope-asm)) |
 | extended `asm(... : outputs : inputs : clobbers : labels)` | no-op: outputs keep their value, `asm goto` never jumps; `--asm-passthru` runs it on the host with operands passed by address (see [INLINE_ASM.md](INLINE_ASM.md)) | emitted verbatim with its qualifiers (`volatile`, `inline`, `goto`), operands, clobbers and labels; executed by the host binary |
 | `__builtin_return_address(n)` | a VM bytecode offset cast to `void*` | a real host return address — same meaning, unrelated numeric value |
-| `__builtin_dynamic_object_size` | reads the VM allocation header, always exact | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown" |
+| `__builtin_dynamic_object_size` | reads the VM allocation header, always exact; `type` 1/3 also caps at the named member, including a union member or a struct's last array | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown"; `type` 1/3 caps at the named member, but a union member or a struct's last array is "unknown" |
 | `__builtin_unreachable` / `__builtin_trap` / `__builtin_debugtrap` | all trap | all emit `__builtin_trap()` |
 | a call through an invalid function pointer | reports `invalid indirect call target`, exits 255 | the host process crashes with a signal (`SIGSEGV`/`SIGBUS`) |
 | integer division by zero, with no safety flags | reports `DIVISION BY ZERO`, exits 255 | host-defined: aarch64 yields 0 and continues, x86_64 raises `SIGFPE` |

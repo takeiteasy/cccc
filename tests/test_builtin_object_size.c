@@ -916,3 +916,38 @@ void test_object_size_array_base_type1(void) {
     // type 1: nearest subobject -- for a plain array, whole == subobject.
     AssertEq((unsigned long long)__builtin_object_size(q, 1), 56ULL);
 }
+
+typedef struct {
+    int  a;
+    char b[4];
+    int  z;
+} ObjszMembers;
+
+[[cccc::test]]
+void test_object_size_member_array_decay(void) {
+    ObjszMembers s;
+    AssertEq((unsigned long long)__builtin_object_size(s.b, 1), 4ULL);
+    AssertEq((unsigned long long)__builtin_object_size(&s.b[0], 1), 4ULL);
+    AssertEq((unsigned long long)__builtin_object_size(s.b + 1, 0),
+             (unsigned long long)(sizeof s - offsetof(ObjszMembers, b) - 1));
+}
+
+static size_t member_bos1(ObjszMembers *p) {
+    return __builtin_object_size(p->b, 1);
+}
+static size_t member_bos3(ObjszMembers *p) {
+    return __builtin_object_size(p->b + 1, 3);
+}
+static size_t member_bos0(ObjszMembers *p) {
+    return __builtin_object_size(p->b, 0);
+}
+
+[[cccc::test]]
+void test_object_size_member_of_unknown_object(void) {
+    ObjszMembers s;
+    AssertEq((unsigned long long)member_bos1(&s), 4ULL);
+    AssertEq((unsigned long long)member_bos3(&s), 3ULL);
+    // The whole object stays unknown.
+    AssertEq((unsigned long long)member_bos0(&s),
+             (unsigned long long)(size_t)-1);
+}

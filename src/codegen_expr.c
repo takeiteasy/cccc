@@ -3501,8 +3501,25 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // DYNOBJSZ which reads AllocHeader.requested_size for VM heap base
             // pointers.
             int ptr_reg = alloc_temp_reg();
-            gen_expr(vm, node->lhs, ptr_reg);
-            emit_rri(vm, DYNOBJSZ, dest_reg, ptr_reg, node->val);
+            if (!node->member) {
+                gen_expr(vm, node->lhs, ptr_reg);
+                emit_rri(vm, DYNOBJSZ, dest_reg, ptr_reg, node->val);
+                free_temp_reg(ptr_reg);
+                return;
+            }
+            // Subobject query: pass the offset into the member too.
+            gen_expr(vm, node->cond, ptr_reg);
+            emit_psh3(vm, ptr_reg);
+            int off_reg = alloc_temp_reg();
+            gen_expr(vm, node->rhs, off_reg);
+            mark_temp_reg_used(off_reg);
+            mark_temp_reg_used(ptr_reg);
+            emit_pop3(vm, ptr_reg);
+            emit_rrr(vm, ADD3, ptr_reg, ptr_reg, off_reg);
+            emit_rrrs_i(vm, DYNOBJSZ, dest_reg, ptr_reg, off_reg, 0,
+                        node->val | DYNOBJSZ_SUBOBJECT |
+                            ((long long)node->member->ty->size << 8));
+            free_temp_reg(off_reg);
             free_temp_reg(ptr_reg);
             return;
         }

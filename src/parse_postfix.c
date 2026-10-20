@@ -3036,8 +3036,19 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             }
         } else {
             ObjSizeInfo info;
-            if (objsize_resolve_ptr(vm, ptr, &info))
+            Member     *m;
+            Node       *sub_base, *sub_off;
+            if (objsize_resolve_ptr(vm, ptr, &info)) {
                 result = OBJSZ_REMAINING(info);
+            } else if ((type_arg & 1) &&
+                       objsize_resolve_subobject(vm, ptr, &m, &sub_base,
+                                                 &sub_off) &&
+                       is_const_expr(vm, sub_off)) {
+                // The member bounds the answer even when its object doesn't.
+                int64_t off = eval(vm, sub_off);
+                if (off >= 0 && off <= m->ty->size)
+                    result = (size_t)(m->ty->size - off);
+            }
         }
 
 #undef OBJSZ_REMAINING
@@ -3124,8 +3135,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // AllocHeader.requested_size - offset; for all other pointers it returns
     // the conservative fallback.
     //
-    // Scope limitations (v1):
-    //   - stack/VLA/alloca buffers: no AllocHeader → conservative.
+    // Type 1/3 never folds a member whose object is unknown: the runtime
+    // answer for the whole object can be smaller than the member (a truncated
+    // allocation), so DYNOBJSZ takes the minimum of the two.
     if (equal(tok, "__builtin_dynamic_object_size")) {
         tok                = skip(vm, tok->next, "(");
         Node *ptr          = assign(vm, &tok, tok);
@@ -3180,6 +3192,16 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->lhs  = ptr;
         node->val  = type_arg;
         node->ty   = ty_ulong;
+        // Codegen evaluates `ptr` as cond + rhs, keeping the offset into the
+        // member.
+        Member *m;
+        Node   *sub_base, *sub_off;
+        if ((type_arg & 1) &&
+            objsize_resolve_subobject(vm, ptr, &m, &sub_base, &sub_off)) {
+            node->member = m;
+            node->cond   = sub_base;
+            node->rhs    = sub_off;
+        }
         return node;
     }
 

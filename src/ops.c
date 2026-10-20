@@ -4561,15 +4561,21 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
     // alloca()/VLA buffers need no separate handling here: both lower to
     // MALC (a VM heap bump allocation with an AllocHeader), so they already
     // resolve through the heap path above (#648).
+    //
+    // With DYNOBJSZ_SUBOBJECT, imm >> 8 is the size of the member ptr points
+    // into and regs[roff] the byte offset into it; the answer is capped at
+    // what is left of the member, and an unknown object gives that remainder.
     long long operands = cc_read_word(vm);
-    int       rd, rs;
-    DECODE_RR(operands, rd, rs);
+    int       rd, rs, roff, unused;
+    DECODE_RRRS(operands, rd, rs, roff, unused);
+    (void)unused;
     long long type = cc_read_i64(vm);
+    bool      sub  = type & DYNOBJSZ_SUBOBJECT;
 
     long long ptr  = vm->regs[rs];
 
     // Conservative fallback depends on the type argument (bit 1).
-    size_t result   = (type & 2) ? 0 : (size_t)-1;
+    size_t result   = (type & 2) && !sub ? 0 : (size_t)-1;
     bool   resolved = false;
 
     // Only VM heap pointers have a tracked allocation.
@@ -4605,6 +4611,14 @@ static inline int op_DYNOBJSZ_fn(VirtualMachine *vm) {
             hashmap_get_int(&vm->live_epochs, (long long)iv_epoch)) {
             result = (size_t)(hi - ptr);
         }
+    }
+
+    if (sub) {
+        uint64_t sub_size = (uint64_t)type >> 8;
+        uint64_t off      = (uint64_t)vm->regs[roff];
+        uint64_t sub_rem  = off <= sub_size ? sub_size - off : 0;
+        if (sub_rem < result)
+            result = sub_rem;
     }
 
     if (rd != REG_ZERO)
