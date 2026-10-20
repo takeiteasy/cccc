@@ -45,6 +45,7 @@ typedef struct {
     size_t   global[3];
     size_t   local[3];
     size_t   groups[3];
+    size_t   arg_off[8]; // thunk form: offset of each CCCC_LOCAL argument
 } KernelLaunch;
 
 typedef struct {
@@ -233,6 +234,70 @@ static void run_group_threads(VirtualMachine *vm, long long fn,
                      group[1], group[2]);
 }
 
+// Validates the ranges and the work-group size; returns the items per group.
+static size_t begin_launch(VirtualMachine *vm, KernelLaunch *launch,
+                           long long globalp, long long localp) {
+    unsigned local_dims;
+    read_range((const GuestRange *)globalp, "global", &launch->dims,
+               launch->global);
+    read_range((const GuestRange *)localp, "local", &local_dims, launch->local);
+    if (local_dims != launch->dims)
+        kernel_fatal("global range has %u dimension(s), local range has %u",
+                     launch->dims, local_dims);
+
+    size_t group_items = 1;
+    for (int d = 0; d < 3; d++) {
+        if (launch->global[d] % launch->local[d])
+            kernel_fatal("local size %zu does not divide global size %zu in "
+                         "dimension %d",
+                         launch->local[d], launch->global[d], d);
+        launch->groups[d]  = launch->global[d] / launch->local[d];
+        group_items       *= launch->local[d];
+    }
+    size_t max_group = vm->kernel_max_group > 0 ? (size_t)vm->kernel_max_group
+                                                : KERNEL_DEFAULT_MAX_GROUP;
+    if (group_items > max_group)
+        kernel_fatal("work-group of %zu items exceeds the limit of %zu "
+                     "(--kernel-max-group-size)",
+                     group_items, max_group);
+    return group_items;
+}
+
+static char *alloc_group_local(VirtualMachine *vm, size_t total) {
+    if (!total)
+        return NULL;
+    char *group_local = cccc_vm_heap_malloc(vm, (long long)total);
+    if (!group_local)
+        kernel_fatal("out of memory for work-group local memory");
+    return group_local;
+}
+
+static void run_groups(VirtualMachine *vm, const KernelMeta *meta, long long fn,
+                       const long long *iargs, int nint, const double *fargs,
+                       int nflt, const KernelLaunch *launch, size_t group_items,
+                       char *group_local, size_t total) {
+    size_t group[3];
+    for (group[2] = 0; group[2] < launch->groups[2]; group[2]++)
+        for (group[1] = 0; group[1] < launch->groups[1]; group[1]++)
+            for (group[0] = 0; group[0] < launch->groups[0]; group[0]++) {
+                if (group_local)
+                    memset(group_local, 0, total);
+                if (meta->uses_barrier)
+                    run_group_threads(vm, fn, iargs, nint, fargs, nflt, launch,
+                                      group, group_items, group_local);
+                else
+                    run_group_loop(vm, fn, iargs, nint, fargs, nflt, launch,
+                                   group, group_items, group_local);
+            }
+}
+
+static KernelMeta *find_meta(VirtualMachine *vm, long long kernel) {
+    KernelMeta *meta = hashmap_get_int(&vm->compiler.kernel_meta, kernel);
+    if (!meta)
+        kernel_fatal("launching a function that is not a [[cccc::kernel]]");
+    return meta;
+}
+
 // __cccc_launch(kernel, global, local, int_args, float_args, nint, nfloat,
 //               local_arg_mask)
 // Emitted by __builtin_kernel_launch. A set bit i of local_arg_mask marks
@@ -243,34 +308,9 @@ static long long wrap_launch(long long kernel, long long globalp,
                              long long float_argsp, long long nint,
                              long long nflt, long long local_mask) {
     VirtualMachine *vm   = cccc_current_ffi_vm();
-    KernelMeta     *meta = hashmap_get_int(&vm->compiler.kernel_meta, kernel);
-    if (!meta)
-        kernel_fatal("launching a function that is not a [[cccc::kernel]]");
-
-    KernelLaunch launch;
-    unsigned     local_dims;
-    read_range((const GuestRange *)globalp, "global", &launch.dims,
-               launch.global);
-    read_range((const GuestRange *)localp, "local", &local_dims, launch.local);
-    if (local_dims != launch.dims)
-        kernel_fatal("global range has %u dimension(s), local range has %u",
-                     launch.dims, local_dims);
-
-    size_t group_items = 1;
-    for (int d = 0; d < 3; d++) {
-        if (launch.global[d] % launch.local[d])
-            kernel_fatal("local size %zu does not divide global size %zu in "
-                         "dimension %d",
-                         launch.local[d], launch.global[d], d);
-        launch.groups[d]  = launch.global[d] / launch.local[d];
-        group_items      *= launch.local[d];
-    }
-    size_t max_group = vm->kernel_max_group > 0 ? (size_t)vm->kernel_max_group
-                                                : KERNEL_DEFAULT_MAX_GROUP;
-    if (group_items > max_group)
-        kernel_fatal("work-group of %zu items exceeds the limit of %zu "
-                     "(--kernel-max-group-size)",
-                     group_items, max_group);
+    KernelMeta     *meta = find_meta(vm, kernel);
+    KernelLaunch    launch;
+    size_t          group_items = begin_launch(vm, &launch, globalp, localp);
 
     long long iargs[8];
     double    fargs[8];
@@ -281,12 +321,7 @@ static long long wrap_launch(long long kernel, long long globalp,
     for (int i = 0; i < nint; i++)
         if (local_mask & (1LL << i))
             total += align_up((size_t)iargs[i], KERNEL_LOCAL_ALIGN);
-    char *group_local = NULL;
-    if (total) {
-        group_local = cccc_vm_heap_malloc(vm, (long long)total);
-        if (!group_local)
-            kernel_fatal("out of memory for work-group local memory");
-    }
+    char  *group_local = alloc_group_local(vm, total);
 
     size_t offset = align_up((size_t)meta->local_bytes, KERNEL_LOCAL_ALIGN);
     for (int i = 0; i < nint; i++) {
@@ -297,25 +332,49 @@ static long long wrap_launch(long long kernel, long long globalp,
         offset      += size;
     }
 
-    size_t group[3];
-    for (group[2] = 0; group[2] < launch.groups[2]; group[2]++)
-        for (group[1] = 0; group[1] < launch.groups[1]; group[1]++)
-            for (group[0] = 0; group[0] < launch.groups[0]; group[0]++) {
-                if (group_local)
-                    memset(group_local, 0, total);
-                if (meta->uses_barrier)
-                    run_group_threads(vm, kernel, iargs, (int)nint, fargs,
-                                      (int)nflt, &launch, group, group_items,
-                                      group_local);
-                else
-                    run_group_loop(vm, kernel, iargs, (int)nint, fargs,
-                                   (int)nflt, &launch, group, group_items,
-                                   group_local);
-            }
-
+    run_groups(vm, meta, kernel, iargs, (int)nint, fargs, (int)nflt, &launch,
+               group_items, group_local, total);
     if (group_local)
         cccc_vm_heap_free(vm, group_local);
     return 0;
+}
+
+// __cccc_kernel_launch_vm(thunk, env, kernel, global, local, nlocal, sizes)
+// --test-run's form of a cccc_launch: the thunk is the outlined body that calls
+// the kernel with its saved arguments, env its static link. CCCC_LOCAL sizes
+// come in sizes[0..nlocal); the thunk fetches each pointer through
+// __cccc_kernel_local_arg.
+static long long wrap_kernel_launch_vm(long long thunk, long long env,
+                                       long long kernel, long long globalp,
+                                       long long localp, long long nlocal,
+                                       long long sizesp) {
+    VirtualMachine *vm   = cccc_current_ffi_vm();
+    KernelMeta     *meta = find_meta(vm, kernel);
+    KernelLaunch    launch;
+    size_t          group_items = begin_launch(vm, &launch, globalp, localp);
+
+    if (nlocal < 0 || nlocal > 8)
+        kernel_fatal("too many CCCC_LOCAL arguments");
+    const long *sizes = (const long *)sizesp;
+    size_t      total = align_up((size_t)meta->local_bytes, KERNEL_LOCAL_ALIGN);
+    for (long i = 0; i < nlocal; i++) {
+        launch.arg_off[i]  = total;
+        total             += align_up((size_t)sizes[i], KERNEL_LOCAL_ALIGN);
+    }
+    char *group_local = alloc_group_local(vm, total);
+
+    run_groups(vm, meta, thunk, &env, 1, NULL, 0, &launch, group_items,
+               group_local, total);
+    if (group_local)
+        cccc_vm_heap_free(vm, group_local);
+    return 0;
+}
+
+static long long wrap_kernel_local_arg(long long i) {
+    KernelItem *item = current_item(cccc_current_ffi_vm());
+    if (!item || i < 0 || i >= 8)
+        kernel_fatal("CCCC_LOCAL argument used outside a launch");
+    return (long long)(item->group_local + item->launch->arg_off[i]);
 }
 
 static void **direct_blocks;
@@ -374,5 +433,9 @@ void register_kernel_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "cccc_work_dim", (void *)wrap_cccc_work_dim, 0, 0);
     cc_register_cfunc(vm, "cccc_barrier", (void *)wrap_cccc_barrier, 1, 0);
     cc_register_cfunc(vm, "__cccc_launch", (void *)wrap_launch, 8, 0);
+    cc_register_cfunc(vm, "__cccc_kernel_launch_vm",
+                      (void *)wrap_kernel_launch_vm, 7, 0);
+    cc_register_cfunc(vm, "__cccc_kernel_local_arg",
+                      (void *)wrap_kernel_local_arg, 1, 0);
     cc_register_cfunc(vm, "__cccc_local_base", (void *)wrap_local_base, 3, 0);
 }

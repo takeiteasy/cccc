@@ -18,6 +18,7 @@
 */
 
 #include "./codegen_internal.h"
+#include "./parse_internal.h"
 
 // ========== GNU vector_size Expressions (tracker #72) ==========
 //
@@ -2334,6 +2335,29 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (is_complex(arg->ty))
                     error_tok(vm, arg->tok,
                               "complex function argument ABI is not supported");
+
+            // --test-run: a cccc_launch thunk call becomes a call to the VM
+            // launcher with the thunk's address and this frame as its env.
+            if (node->lhs->kind == ND_VAR && node->lhs->var->is_kernel_thunk &&
+                node->lhs->var->kernel_vm_launch) {
+                Token *tok   = node->tok;
+                Obj   *thunk = node->lhs->var;
+                Node  *addr =
+                    new_unary(vm, ND_ADDR, new_var_node(vm, thunk, tok), tok);
+                Node *env  = new_node(vm, ND_FRAME_ADDR, tok);
+                env->ty    = pointer_to(vm, ty_void);
+                addr->next = env;
+                env->next  = node->args;
+                Node *call = new_unary(
+                    vm, ND_FUNCALL,
+                    new_var_node(vm, thunk->kernel_vm_launch, tok), tok);
+                call->func_ty = thunk->kernel_vm_launch->ty;
+                call->ty      = ty_void;
+                call->args    = addr;
+                add_type(vm, addr);
+                gen_expr(vm, call, dest_reg);
+                return;
+            }
 
             // Check if this is a builtin alloca call (used for VLAs, and for an
             // explicit __builtin_alloca)

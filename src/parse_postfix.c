@@ -1226,6 +1226,11 @@ static Node *kernel_launch_thunk(VirtualMachine *vm, Token *start, Node *kernel,
                       arena_format(vm, "__kernel_launch_%d",
                                    vm->compiler.unique_name_counter++));
     r.fn->is_kernel_thunk = true;
+    if (vm->compiler.kernel_test_run)
+        r.fn->kernel_vm_launch = declare_runtime_fn(
+            vm, "__cccc_kernel_launch_vm",
+            "void __cccc_kernel_launch_vm(void *, void *, void *, void *, "
+            "void *, long, void *);");
     Node  head            = {};
     Node *cur             = &head;
     int   i               = 0;
@@ -1284,8 +1289,6 @@ static Node *kernel_launch_thunk(VirtualMachine *vm, Token *start, Node *kernel,
 
 static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
-    if (vm->compiler.kernel_test_run && vm->compiler.kernel_native)
-        error_tok(vm, start, "cccc_launch is not supported with --test-run");
     tok          = skip(vm, tok->next, "(");
 
     Node *kernel = assign(vm, &tok, tok);

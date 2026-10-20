@@ -2481,6 +2481,8 @@ struct Obj {
     bool is_gnu_inline; // GNU extern-inline definition: emitted only if called
     bool is_kernel_thunk; // outlined cccc_launch body; a call to it serializes
                           // as __cccc_kernel_launch (see parse_postfix.c)
+    struct Obj *kernel_vm_launch; // --test-run: the VM cfunc a call to this
+                                  // thunk is routed to (codegen_expr.c)
     bool is_kernel_local_obj; // [[cccc::local]] object in a kernel entry's body,
                               // stored in work-group memory at kernel_local_off
     int  kernel_local_off;
@@ -4646,8 +4648,8 @@ typedef struct Compiler {
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
     bool     kernel_used;    // a native kernel launch or builtin was lowered
     bool     opencl;         // the translation unit in flight is OpenCL C
-    bool     kernel_test_run;  // --test-run: its VM smoke phase cannot run a
-                               // native-lowered launch
+    bool     kernel_test_run;  // --test-run: a launch thunk is also routed
+                               // to the VM launcher
     int      kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
 
     // Tail-call context (used during codegen for return f(args) TCO)

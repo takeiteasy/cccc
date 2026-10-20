@@ -150,13 +150,11 @@ Arguments, ranges and group limits are checked as in the VM. A launch that
 breaks a range rule stops the program with the same `error: cccc_launch:`
 message and exit status 255.
 
-`--test-run` rejects `cccc_launch`; launch from a program built with
-`-c=native` or run under the VM instead.[^testrun]
+`--test-run` runs the launch in its VM smoke phase before the native build,
+so a faulting launch stops the compile.
 
 ## Limitations
 
-- `--test-run` rejects `cccc_launch`, because its VM smoke phase cannot run
-  the native lowering ([#1406](https://todo.sr.ht/~takeiteasy/cccc/1406)).
 - `-c=generated` has no kernel runtime.
 - A native barrier kernel creates and joins a thread per work-item for every
   group ([#1385](https://todo.sr.ht/~takeiteasy/cccc/1385)).
@@ -175,7 +173,3 @@ message and exit status 255.
 [^threads]: The threads are ordinary VM threads under the global interpreter
     lock; the barrier releases the lock while a work-item waits. See
     [THREADING.md](THREADING.md).
-
-[^testrun]: `--test-run` runs the program in the VM and then compiles it
-    natively from the same parse. The native lowering of a launch is a call the
-    VM does not know how to run.
