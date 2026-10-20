@@ -2449,9 +2449,8 @@ never reclaimed until the process exits. `alloca`/VLA backing storage
 #### Heap Reclamation
 
 `alloca`/VLA storage would otherwise grow the VM heap without bound in a
-long-running loop or recursive function (the symptom was filed for),
-since already excludes it from the `malloc`/`free` leak-tracking model
-entirely — there was nothing that could ever reclaim it. It is now
+long-running loop or recursive function, since it is outside the
+`malloc`/`free` leak-tracking model and nothing else frees it. It is
 reclaimed, but **only** when doing so cannot desync any other safety
 feature: reclaiming an address means a *later* allocation can be handed
 that same address back, which every address-keyed feature below (bounds
@@ -2459,13 +2458,12 @@ checks, UAF/dangling-pointer/type checks, memory tagging, uninitialized-
 read detection, leak detection, heap canaries) assumes never happens.
 
 - **When it runs:** only at `-0` (or any explicit flag combination that
-  happens not to set the features above), single-threaded (no pthread has
-  been created), and only for `alloca`/VLA storage — never a genuine
-  `malloc`, never a `__block` box (`Block_copy` is expected to let one
-  legitimately outlive its declaring frame).
-- **When it doesn't:** at `-1`/`-2`/`-3`, under any of the flags listed
-  above individually, or once any thread exists — the heap simply keeps
-  growing as it always did, trading unbounded growth for keeping every
+  happens not to set the features above), and only for `alloca`/VLA
+  storage — never a genuine `malloc`, never a `__block` box (`Block_copy`
+  is expected to let one legitimately outlive its declaring frame).
+- **When it doesn't:** at `-1`/`-2`/`-3`, or under any of the flags listed
+  above individually — the heap simply keeps growing as it always did,
+  trading unbounded growth for keeping every
   other safety feature's tracking fully sound. This is a deliberate
   tradeoff, not an oversight: reclamation was designed from the start to
   never have to choose between the two.
@@ -2475,18 +2473,16 @@ read detection, leak detection, heap canaries) assumes never happens.
   storage is reclaimed only at frame exit, since (unlike a VLA) its
   lifetime extends to the whole function, not just the block it was called
   in.
+- **Threads:** each thread reclaims only its own storage. The VM heap is
+  one arena shared by every thread, so another thread's allocation sitting
+  above a block's or frame's starting point stops the rewind there, and
+  that storage is reclaimed only partially. A thread that ends through
+  `pthread_exit`/`thrd_exit` has its outstanding storage reclaimed when it
+  ends.
 
 The opcode-level mechanics (`HMRK`/`HREL`, the `ALCA`/`ALCV`/`ALCB` split,
 `heap_rewind_to`'s pinning behavior, and the `CALLT`/`longjmp` interaction)
 live with the VM internals.
-
-**Known residual:** reclamation is disabled entirely once any thread has
-been created, rather than attempted per-thread — the VM heap is one global
-arena shared by every thread (unlike the per-thread dangling-pointer
-bookkeeping), and `AllocHeader` has no spare room left to tag an owning
-thread without growing past its current 56-byte size. A threaded program
-simply keeps the the earlier unbounded-growth behavior. Tracked as a
-follow-up.
 
 - `-V` / `--no-vm-heap` **turns the VM heap off**, reverting all of the above to the host allocator
   via FFI. It is only valid at safety level 0 (default or explicit `-0`) with none of

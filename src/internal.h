@@ -1240,6 +1240,8 @@ typedef struct ExecState {
     HashMap            live_epochs;
     HashMap            stack_ptr_epochs;
     StackIntervals     stack_intervals;
+    HeapMarks          heap_marks;
+    unsigned           heap_owner;
     // Set by the POSIX blocking helpers (posix_util.c) so a thread resuming
     // from a blocking call gets back its own active thread and TLS.
     void *gil_active_thread;
@@ -1250,6 +1252,9 @@ void cccc_exec_state_save(VirtualMachine *vm, ExecState *state);
 void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state);
 int cccc_exec_state_alloc_stack(VirtualMachine *vm, ExecState *state);
 void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state);
+// Reclaims the heap marks of a worker whose frames were abandoned without
+// LEV3 (pthread_exit, thrd_exit).
+void cccc_heap_marks_unwind_thread(VirtualMachine *vm);
 void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state,
                                   Pc entry, long long arg);
 void cccc_gil_init(VirtualMachine *vm);

@@ -1044,12 +1044,9 @@ static inline int op_ENT3_fn(VirtualMachine *vm) {
     // unconditionally -- unlike frame_epoch_push above, there's no #703-
     // style "only if a local escapes" pruning available here, since any
     // VLA-declaring block anywhere in this frame's body needs a target to
-    // rewind to at LEV3/HREL. Gated on both halves of the design: the VM-
-    // wide reclaim gate (vm->heap_reclaim_enabled, which folds in whether
-    // any address-keyed safety feature is on, or a thread has been created; the
-    // heap is one global arena, not per-thread -- see HeapMarks' own
-    // comment, src/cccc.h). Cheap to check unconditionally: both are a
-    // single field read, no allocation happens unless both pass.
+    // rewind to at LEV3/HREL. Gated on the VM-wide reclaim gate
+    // (vm->heap_reclaim_enabled, which folds in whether any address-keyed
+    // safety feature is on) -- a single field read.
     if (vm->heap_reclaim_enabled)
         heap_marks_push(vm, vm->bp, -1);
 
@@ -3543,46 +3540,49 @@ static inline int op_ZX4_fn(VirtualMachine *vm) {
 // base address is >= target visits exactly the contiguous suffix of
 // allocations made since the mark was taken -- no binary search needed,
 // this *is* a linear scan of that suffix. The scan stops at (does not
-// consume) the first entry whose kind isn't in the sweep set: that
-// allocation -- a genuine malloc/calloc (ALLOC_KIND_USER), a __block box
-// (ALLOC_KIND_BLOCK_BOX), or (at block exit only) a bare alloca
-// (ALLOC_KIND_ALLOCA) -- pins the bump pointer at its own end instead of
-// wherever `target` asked for, giving a correct *partial* rewind rather
-// than giving up on the whole mark.
+// consume) the first entry it may not sweep: a genuine malloc/calloc
+// (ALLOC_KIND_USER), a __block box (ALLOC_KIND_BLOCK_BOX), (at block exit
+// only) a bare alloca (ALLOC_KIND_ALLOCA), or another thread's storage.
+// The bump pointer then rewinds no further than the end of the highest
+// kept entry. That also covers a mark gone stale under threads: another
+// thread can rewind below this thread's mark and allocate live storage
+// across it, which a rewind to the mark itself would overwrite.
+//
+// TODO(#1724): another thread's allocation above the mark pins the rewind,
+// so contended threads reclaim only partially; per-thread arenas would make
+// reclamation exact.
 static void heap_rewind_to(VirtualMachine *vm, char *target,
                            HeapSweepSet sweep) {
     if (!vm->heap_reclaim_enabled)
         return;
     if (!target || (char *)vm->heap_ptr <= target)
-        return;                  // nothing above the mark to reclaim
+        return; // nothing above the mark to reclaim
 
-    int stop =
-        vm->sorted_allocs.count; // index of the first entry kept (exclusive
-                                 // upper bound of the swept suffix)
-    char *effective_target = target;
+    // First entry kept (exclusive bound of the swept suffix).
+    int stop = vm->sorted_allocs.count;
     while (stop > 0) {
-        char *base = (char *)vm->sorted_allocs.addresses[stop - 1];
-        if (base < target)
-            break; // below the mark: predates it, not part of this suffix
+        char        *base      = (char *)vm->sorted_allocs.addresses[stop - 1];
         AllocHeader *h         = vm->sorted_allocs.headers[stop - 1];
-        bool         sweepable = (h->kind == ALLOC_KIND_FRAME) ||
-                                 (sweep == HEAP_SWEEP_FRAME_AND_ALLOCA &&
-                                  h->kind == ALLOC_KIND_ALLOCA);
-        if (!sweepable) {
-            // Pinning entry: the bump pointer can rewind no further than
-            // wherever it stood right after this allocation, i.e. base +
-            // its own total footprint (size, plus the trailing heap-canary
-            // word when enabled -- mirrors vm_heap_bump_alloc_ex's own
-            // total_size computation below).
-            size_t footprint = h->size;
-            if (vm->flags & CCCC_HEAP_CANARIES)
-                footprint += sizeof(long long);
-            char *pin_end = base + footprint;
-            if (pin_end > effective_target)
-                effective_target = pin_end;
+        bool         sweepable = h->owner == vm->heap_owner &&
+                                 (h->kind == ALLOC_KIND_FRAME ||
+                                  (sweep == HEAP_SWEEP_FRAME_AND_ALLOCA &&
+                                   h->kind == ALLOC_KIND_ALLOCA));
+        if (base < target || !sweepable)
             break;
-        }
         stop--;
+    }
+
+    char *effective_target = target;
+    if (stop > 0) {
+        // End of the kept entry: its size plus the trailing heap-canary word
+        // when enabled (mirrors vm_heap_bump_alloc_ex's total_size).
+        AllocHeader *h    = vm->sorted_allocs.headers[stop - 1];
+        size_t       foot = h->size;
+        if (vm->flags & CCCC_HEAP_CANARIES)
+            foot += sizeof(long long);
+        char *kept_end = (char *)vm->sorted_allocs.addresses[stop - 1] + foot;
+        if (kept_end > effective_target)
+            effective_target = kept_end;
     }
 
     if (effective_target >= (char *)vm->heap_ptr)
@@ -3633,6 +3633,8 @@ static void sorted_allocs_insert(VirtualMachine *vm, void *user_ptr,
             // value. Capacity is left unchanged, and whichever of the two
             // arrays *did* reallocate successfully above has already been
             // written back, so both pointers remain valid to free later.
+            // TODO(#1725): heap_rewind_to cannot see an untracked
+            // allocation, so a reclamation rewind can reuse its live bytes.
             return;
         }
         vm->sorted_allocs.capacity = new_cap;
@@ -3711,7 +3713,7 @@ static inline void *vm_heap_bump_alloc_ex(VirtualMachine *vm,
     header->magic               = 0xDEADBEEF;
     header->freed               = 0;
     header->generation          = 0;
-    header->creation_generation = 0;
+    header->owner               = vm->heap_owner;
     header->kind                = kind;
     header->canary              = 0;
     header->alloc_pc            = vm->text_seg ? (long long)vm->pc : 0;

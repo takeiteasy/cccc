@@ -243,11 +243,9 @@ static void acquire_and_restore_gil(VirtualMachine *vm, const GilPause *pause) {
         _cccc_any_pending = 1;
 }
 
-// Heap reclamation goes off for the rest of the run: a frame that pushed no
-// mark must not pop one after a worker unlinks itself.
 static void link_thread(VirtualMachine *vm, ThreadRecord *rec) {
-    vm->heap_reclaim_enabled = false;
-    rec->next          = vm->thread_records;
+    rec->exec.heap_owner = ++vm->next_heap_owner;
+    rec->next            = vm->thread_records;
     vm->thread_records = rec;
 }
 
@@ -422,6 +420,7 @@ static void *vm_thread_start(void *arg) {
     // Before kernel_exit and the TSS destructors, which call back into the
     // guest.
     cccc_thread_exit_end();
+    cccc_heap_marks_unwind_thread(vm);
     rec->vm_rc  = vm->pc == CCCC_INVALID_PC ? 0 : (rc ? rc : -1);
     // pthread_exit recorded its value; REG_A0 may be a restored callback
     // frame's.

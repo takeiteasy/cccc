@@ -3517,23 +3517,22 @@ typedef struct AllocHeader {
                     alignment */
     size_t requested_size; /**< Original requested size (for bounds checking) */
     int    magic; /**< Magic number (0xDEADBEEF) for detecting corruption. */
+    unsigned owner;   /**< Heap owner id of the allocating thread
+                         (vm->heap_owner); a reclamation rewind never sweeps
+                         another thread's storage. */
     long long canary; /**< Front canary value for heap overflow detection (when
                          enabled) */
     int freed;        /**< Flag indicating if this block has been freed (for UAF
                          detection) */
     int generation;   /**< Generation counter incremented on each free (for UAF
                          detection) */
-    int       creation_generation; // Generation when pointer was created (for
-                                   // temporal safety)
-    AllocKind kind; /**< What kind of storage this is -- see AllocKind.
-                          Still tracked by sorted_allocs/CHKB/CHKBN/CHKP3/
-                          DYNOBJSZ like any other allocation regardless of
-                          kind; only leak detection (and, eventually,
-                          #981's reclamation) distinguishes them. Placed
-                          here (not after alloc_pc), same as the
-                          `is_internal` bool it replaces, to fill this
-                          struct's existing 4-byte tail pad instead of
-                          growing sizeof(AllocHeader). */
+    AllocKind kind;   /**< What kind of storage this is -- see AllocKind.
+                            Still tracked by sorted_allocs/CHKB/CHKBN/CHKP3/
+                            DYNOBJSZ like any other allocation regardless of
+                            kind; only leak detection and #981's
+                            reclamation distinguish them. The 4 bytes after
+                            it are padding, free for the next field without
+                            growing sizeof(AllocHeader). */
     long long
         alloc_pc;   /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
@@ -4750,14 +4749,11 @@ typedef struct {
 
 // Heap-reclamation mark stack (#981): one entry per HMRK (block-scoped VLA
 // storage) or ENT3 (frame-scoped, depth == -1), truncated/rewound by HREL,
-// LEV3, and LONGJMP. VM-level, NOT per-thread like FrameEpochs/
-// StackIntervals above -- the heap it guards (vm->heap_ptr) is a single
-// VM-wide arena, and heap reclamation is disabled for the rest of the run
-// the moment a guest thread is created (see vm->heap_reclaim_enabled,
-// cleared by link_thread in src/stdlib/pthread.c): two threads' allocations interleave in that one
-// arena, so a
-// per-frame LIFO rewind on one thread could otherwise sweep another
-// thread's still-live VLA. Indexed by (bp, depth) rather than a plain
+// LEV3, and LONGJMP. Per-thread like FrameEpochs/StackIntervals above
+// (ExecState carries each thread's copy), while the heap it guards
+// (vm->heap_ptr) is one VM-wide arena: threads' allocations interleave in
+// it, so heap_rewind_to only sweeps storage tagged with the rewinding
+// thread's AllocHeader.owner. Indexed by (bp, depth) rather than a plain
 // parallel-to-FrameEpochs stack because a block's mark must survive
 // sibling blocks at the same depth within one frame (loop iterations,
 // re-entry via a backward goto) without being confused for each other --
@@ -4882,7 +4878,7 @@ struct VirtualMachine {
                               // recursive calls of the same function don't
                               // collide the way a single scope_id-keyed bp
                               // field would (#671).
-    HashMap ptr_tags; // ptr address → creation_generation (CCCC_MEMORY_TAGGING)
+    HashMap ptr_tags; // ptr address → tag generation (CCCC_MEMORY_TAGGING)
 
     // Per-frame liveness epochs for dangling-stack-pointer detection through
     // a deeper call (#673). Mirrors the heap temporal-safety scheme (ptr_tags
@@ -4967,13 +4963,16 @@ struct VirtualMachine {
         int           capacity;  // Allocated array capacity
     } sorted_allocs;
 
-    // #981 heap-reclamation mark stack and its precomputed gate -- see
-    // HeapMarks' own comment above for why this is VM-level rather than a
-    // per-thread ExecState field. heap_reclaim_enabled is computed once,
+    // #981 heap-reclamation mark stack and its precomputed gate. heap_marks
+    // and heap_owner are the running thread's (swapped with ExecState like
+    // frame_epochs; main is owner 0, workers take ++next_heap_owner).
+    // heap_reclaim_enabled is computed once,
     // right after cccc_vm_scan_dynobjsz sets dynobjsz_present (vm.c), and
     // re-read (never recomputed) at every ENT3/LEV3/HMRK/HREL/CALLT/
     // LONGJMP site -- see heap_rewind_to and its callers in src/ops.c.
     HeapMarks heap_marks;
+    unsigned  heap_owner;
+    unsigned  next_heap_owner;
     bool      heap_reclaim_enabled;
 
     // Segment growth tracking (reserve-and-commit scheme)

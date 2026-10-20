@@ -936,6 +936,8 @@ void cccc_exec_state_save(VirtualMachine *vm, ExecState *state) {
     state->live_epochs         = vm->live_epochs;
     state->stack_ptr_epochs    = vm->stack_ptr_epochs;
     state->stack_intervals     = vm->stack_intervals;
+    state->heap_marks          = vm->heap_marks;
+    state->heap_owner          = vm->heap_owner;
 }
 
 void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
@@ -960,6 +962,8 @@ void cccc_exec_state_restore(VirtualMachine *vm, const ExecState *state) {
     vm->live_epochs         = state->live_epochs;
     vm->stack_ptr_epochs    = state->stack_ptr_epochs;
     vm->stack_intervals     = state->stack_intervals;
+    vm->heap_marks          = state->heap_marks;
+    vm->heap_owner          = state->heap_owner;
 }
 
 int cccc_exec_state_alloc_stack(VirtualMachine *vm, ExecState *state) {
@@ -1026,6 +1030,9 @@ void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state) {
     free(state->frame_epochs.bps);
     free(state->frame_epochs.epochs);
     free(state->stack_intervals.iv);
+    free(state->heap_marks.bps);
+    free(state->heap_marks.depths);
+    free(state->heap_marks.marks);
     state->frame_epochs.bps         = NULL;
     state->frame_epochs.epochs      = NULL;
     state->frame_epochs.count       = 0;
@@ -1033,8 +1040,14 @@ void cccc_exec_state_release_stack(VirtualMachine *vm, ExecState *state) {
     state->stack_intervals.iv       = NULL;
     state->stack_intervals.count    = 0;
     state->stack_intervals.capacity = 0;
+    state->heap_marks               = (HeapMarks){0};
     state->stack_seg                = NULL;
     state->shadow_stack             = NULL;
+}
+
+void cccc_heap_marks_unwind_thread(VirtualMachine *vm) {
+    if (vm->heap_reclaim_enabled)
+        heap_marks_truncate_to(vm, vm->initial_bp);
 }
 
 void cccc_exec_state_prepare_call(VirtualMachine *vm, ExecState *state,
@@ -2453,8 +2466,7 @@ static int cc_run_at_regs(VirtualMachine *vm, Pc entry, long long a0,
     if (vm->gil_depth == 1)
         cccc_pthread_main_reclaim(vm);
     vm->heap_reclaim_enabled =
-        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present &&
-        !vm->thread_records;
+        cc_heap_reclaim_flags_ok(vm->flags) && !vm->dynobjsz_present;
     vm->dbg.host_fault_signal = 0;
     // #1013: clear the previous run's fault marker so each cc_run_at cycle
     // starts clean -- otherwise a fault from an earlier call (e.g. a prior
