@@ -1,7 +1,15 @@
 // testcheck -- run one loose test file against a cccc binary.
 //
-//   testcheck [--timeout SECS] [--native] <cccc> <test.c>
+//   testcheck [--timeout SECS] [--native | --leaks] [--suite] <cccc> <test.c>
 //   testcheck --lint <test.c>...        compile every pattern, run nothing
+//
+// --suite treats the file as a tests/suites/ suite: no CCCC_FLAGS means
+// `--testing`.
+//
+// --leaks reruns a passing test under `leaks -atExit` (macOS) or valgrind
+// (elsewhere) and fails on a leak in cccc itself; --testing children are not
+// followed. Guest malloc is made visible with -V unless the test needs the VM
+// heap (a safety flag, --testing, or CCCC_LEAKS_KEEP_VM_HEAP).
 //
 // --native builds the test with -c=native and runs the binary (a --testing
 // test runs as --testing=native). It skips tests that expect a compile error,
@@ -18,6 +26,9 @@
 //   EXPECT_COMPILE_ERROR           cccc fails with a diagnostic
 //   EXPECT_RUNTIME_ERROR           the program exits 255
 //   CCCC_NATIVE_SKIP[: reason]     left out of the --native pass
+//   CCCC_EXPECT_LEAK[: reason]     a leak found by --leaks is not a failure
+//   CCCC_LEAKS_KEEP_VM_HEAP        --leaks does not inject -V
+//   CCCC_LEAKS_SKIP: reason        left out of the --leaks pass
 // Otherwise the program must exit 42 (see pass_rule()).
 //
 // EXPECT patterns for TAP `ok N` lines are written `^ok N`; an unanchored `ok`
@@ -57,7 +68,8 @@ typedef struct {
     int   nexpect_out, nreject_out, nexpect_err, nreject_err;
     int   compile_error, runtime_error;
     int   testing, build, drives_output;
-    char *native_skip;
+    char *native_skip, *leaks_skip;
+    int   expect_leak, leaks_keep_vm_heap;
 } Header;
 
 typedef struct {
@@ -164,6 +176,18 @@ static char *apply_directive(Header *h, char *p, const char *file) {
             h->native_skip = strdup(*v ? v : "CCCC_NATIVE_SKIP");
             return NULL;
         }
+        if (!strcmp(name, "CCCC_LEAKS_SKIP")) {
+            h->leaks_skip = strdup(*v ? v : "CCCC_LEAKS_SKIP");
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_EXPECT_LEAK")) {
+            h->expect_leak = 1;
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_LEAKS_KEEP_VM_HEAP")) {
+            h->leaks_keep_vm_heap = 1;
+            return NULL;
+        }
         if (!strcmp(name, "EXPECT_COMPILE_ERROR")) {
             h->compile_error = 1;
             return NULL;
@@ -178,6 +202,14 @@ static char *apply_directive(Header *h, char *p, const char *file) {
     }
     if (*e && !isspace((unsigned char)*e))
         return NULL;
+    if (!strcmp(name, "CCCC_EXPECT_LEAK")) {
+        h->expect_leak = 1;
+        return e;
+    }
+    if (!strcmp(name, "CCCC_LEAKS_KEEP_VM_HEAP")) {
+        h->leaks_keep_vm_heap = 1;
+        return e;
+    }
     if (!strcmp(name, "EXPECT_COMPILE_ERROR")) {
         h->compile_error = 1;
         return e;
@@ -481,7 +513,7 @@ static int run_capture(char *const argv[], Buf *out, Buf *err, int timeout) {
         close(po[1]);
         close(pe[0]);
         close(pe[1]);
-        execv(argv[0], argv);
+        execvp(argv[0], argv);
         fprintf(stderr, "exec %s: %s\n", argv[0], strerror(errno));
         _exit(127);
     }
@@ -686,8 +718,99 @@ static int lint(char **files, int n) {
     return bad ? 1 : 0;
 }
 
+// ---- --leaks ---------------------------------------------------------------
+
+static int uses_vm_heap(const Header *h) {
+    static const char *const flags[] = {"--bounds-checks",
+                                        "-B",
+                                        "--uaf-detection",
+                                        "--type-checks",
+                                        "--heap-canaries",
+                                        "-M",
+                                        "--memory-leak-detection",
+                                        "--memory-tagging",
+                                        "-P",
+                                        "--pointer-sanitizer",
+                                        "-1",
+                                        "-2",
+                                        "-3",
+                                        "--safety=basic",
+                                        "--safety=standard",
+                                        "--safety=max",
+                                        "-V"};
+    for (int i = 0; i < h->nflags; i++)
+        for (size_t j = 0; j < sizeof(flags) / sizeof(*flags); j++)
+            if (!strcmp(h->flags[i], flags[j]))
+                return 1;
+    return 0;
+}
+
+// Reruns `args` under the platform's leak tool. Returns 1 on a leak (or a
+// tool failure, with *why set).
+static int leak_pass(const Header *h, char *const *args, int timeout,
+                     const char **why, Buf *out, Buf *err) {
+    char *argv[MAX_ARGS * 2 + 16];
+    int   n = 0;
+#ifdef __APPLE__
+    argv[n++] = "/usr/bin/leaks";
+    argv[n++] = "-atExit";
+    argv[n++] = "--";
+#else
+    argv[n++] = "valgrind";
+    argv[n++] = "--leak-check=full";
+    argv[n++] = "--errors-for-leak-kinds=definite,indirect,possible";
+    argv[n++] = "--error-exitcode=99";
+    argv[n++] = "--quiet";
+#endif
+    argv[n++] = args[0];
+    if (!h->testing && !h->leaks_keep_vm_heap && !uses_vm_heap(h))
+        argv[n++] = "-V";
+    for (int i = 1; args[i]; i++)
+        argv[n++] = args[i];
+    argv[n]    = NULL;
+
+    int status = run_capture(argv, out, err, timeout);
+    if (status == -1) {
+        *why = "timed out under the leak tool";
+        return 1;
+    }
+#ifdef __APPLE__
+    Buf both = {0};
+    buf_add(&both, out->data ? out->data : "", out->len);
+    buf_add(&both, err->data ? err->data : "", err->len);
+    regex_t    re;
+    regmatch_t m[2];
+    int        leaks = -1;
+    if (!regcomp(&re, "([0-9]+) leaks? for [0-9]+ total leaked bytes",
+                 REG_EXTENDED)) {
+        if (!regexec(&re, both.data, 2, m, 0))
+            leaks = atoi(both.data + m[1].rm_so);
+        regfree(&re);
+    }
+    free(both.data);
+    if (leaks < 0) {
+        *why = "leak tool error (no leaks report)";
+        return 1;
+    }
+    if (leaks) {
+        *why = "memory leak";
+        return 1;
+    }
+#else
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 99) {
+        *why = "memory leak";
+        return 1;
+    }
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
+        *why = "leak tool error (valgrind not runnable)";
+        return 1;
+    }
+#endif
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    int timeout = 600, native = 0, a = 1;
+    int timeout = 600, native = 0, leaks = 0, suite = 0, a = 1;
     setenv("CCCC_NO_CONFIG", "1", 1); // a developer's ~/.cccc.toml must not leak in
     if (a < argc && !strcmp(argv[a], "--lint"))
         return lint(argv + a + 1, argc - a - 1);
@@ -698,17 +821,33 @@ int main(int argc, char **argv) {
         } else if (a < argc && !strcmp(argv[a], "--native")) {
             native = 1;
             a++;
+        } else if (a < argc && !strcmp(argv[a], "--leaks")) {
+            leaks = 1;
+            a++;
+        } else if (a < argc && !strcmp(argv[a], "--suite")) {
+            suite = 1;
+            a++;
         } else {
             break;
         }
     }
     if (argc - a != 2)
-        die("usage: testcheck [--timeout SECS] [--native] <cccc> <test.c> | "
-            "--lint <test.c>...");
+        die("usage: testcheck [--timeout SECS] [--native | --leaks] [--suite] "
+            "<cccc> <test.c> | --lint <test.c>...");
+    if (native && leaks)
+        die("testcheck: --native and --leaks are exclusive");
     const char *cccc = argv[a], *file = argv[a + 1];
 
     Header      h = {0};
     parse_header(&h, file);
+    if (suite && !h.nflags) {
+        h.flags[h.nflags++] = strdup("--testing");
+        h.testing           = 1;
+    }
+    if (leaks && h.leaks_skip) {
+        printf("SKIP %s: %s\n", file, h.leaks_skip);
+        return 0;
+    }
 
     if (native) {
         const char *skip = h.native_skip     ? h.native_skip
@@ -808,6 +947,17 @@ int main(int argc, char **argv) {
         why = "";
     if (!why && h.testing && !check_failure_lines(&h, &out, &err, file))
         why = "";
+    if (!why && leaks) {
+        Buf lout = {0}, lerr = {0};
+        if (leak_pass(&h, args, timeout, &why, &lout, &lerr)) {
+            if (h.expect_leak && !strcmp(why, "memory leak")) {
+                why = NULL;
+            } else {
+                out = lout;
+                err = lerr;
+            }
+        }
+    }
     if (why) {
         if (*why)
             fprintf(stderr, "FAIL %s: %s (exit %d)\n", file, why, code);

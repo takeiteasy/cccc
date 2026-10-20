@@ -1,3 +1,4 @@
+// CCCC_LEAKS_SKIP: forks that hang under leaks -atExit
 // CCCC_FLAGS: --testing --posix-emulation
 // Consolidated suite: POSIX: unistd, dirent, glob, regex, socket, mman, etc.
 // Source tests: test_posix_arpa_inet, test_posix_dirent, test_posix_extra_ffi,

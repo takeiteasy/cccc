@@ -1,3 +1,4 @@
+// CCCC_LEAKS_KEEP_VM_HEAP
 // CCCC_NATIVE_SKIP: __builtin_dynamic_object_size reads the VM allocation header (NATIVE.md divergences)
 // CCCC_FLAGS: --testing
 // Not run natively: __builtin_dynamic_object_size lowers to clang's own

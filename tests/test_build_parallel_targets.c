@@ -1,3 +1,4 @@
+// CCCC_LEAKS_SKIP: forks that hang under leaks -atExit
 // CCCC_FLAGS: --build --build-out-dir=build/test_par_out --build-jobs=2
 // CCCC_EXPECT_STDOUT: build succeeded \(3 targets, 0 errors\)
 //

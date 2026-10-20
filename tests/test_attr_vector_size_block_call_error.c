@@ -1,3 +1,4 @@
+// CCCC_EXPECT_LEAK: compiler exits before gen_function's post-pass cleanup of the ensure_local_set hashmap
 // EXPECT_COMPILE_ERROR
 // Vector-by-value
 // through a GNU/Apple block invocation (ND_BLOCK_CALL) is not supported

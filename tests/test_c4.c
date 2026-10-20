@@ -1,3 +1,4 @@
+// CCCC_EXPECT_LEAK: c4's own sym/e/data/sp interpreter buffers are malloc'd
 // c4.c - C in four functions
 // CCCC_RUN_ARGS: tests/test_fortytwo.c
 

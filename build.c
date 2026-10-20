@@ -17,6 +17,7 @@
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
 //   clean, host_tests (also run by test), fuzz_replay, comptime_native_smoke,
+//   test_leaks,
 //   test / test_vm /
 //   test_native / test_release / test_msan / test_ubsan / test_asan /
 //   test_tsan; test_extra (the loose tests) =
@@ -823,11 +824,17 @@ static BuildTarget *make_testcheck(Builder *ctx) {
     return t;
 }
 
-// `native` runs each test through `testcheck --native` (-c=native).
+// `native` runs each test through `testcheck --native` (-c=native); `leaks`
+// through `testcheck --leaks`.
+enum { LOOSE_VM, LOOSE_NATIVE, LOOSE_LEAKS };
+
 static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
-                                    BuildTarget *check, int area, int native) {
+                                    BuildTarget *check, int area, int mode) {
     char agg_name[64];
-    snprintf(agg_name, sizeof(agg_name), "%s%s", native ? "native-loose-" : "",
+    snprintf(agg_name, sizeof(agg_name), "%s%s",
+             mode == LOOSE_NATIVE  ? "native-loose-"
+             : mode == LOOSE_LEAKS ? "leaks-"
+                                   : "",
              AREAS[area].target);
     BuildTarget *agg     = RunCustom(ctx, agg_name, "true");
     const char  *globs[] = {"tests/test_*.c", "tests/macros/test_*.c"};
@@ -840,7 +847,10 @@ static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
             base             = base ? base + 1 : files[i];
             char cmd[1024], name[192];
             snprintf(cmd, sizeof(cmd), "\"%s\"%s \"%s\" %s",
-                     TargetOutput(check), native ? " --native" : "",
+                     TargetOutput(check),
+                     mode == LOOSE_NATIVE  ? " --native"
+                     : mode == LOOSE_LEAKS ? " --leaks"
+                                           : "",
                      TargetOutput(cccc), files[i]);
             snprintf(name, sizeof(name), "%s-%s", agg_name, base);
             BuildTarget *step = RunCustom(ctx, name, cmd);
@@ -855,7 +865,7 @@ static BuildTarget *area_tests_with(Builder *ctx, BuildTarget *cccc,
 static BuildTarget *area_tests(Builder *ctx, int area) {
     BuildTarget *bt   = make_libbacktrace(ctx);
     BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
-    return area_tests_with(ctx, cccc, make_testcheck(ctx), area, 0);
+    return area_tests_with(ctx, cccc, make_testcheck(ctx), area, LOOSE_VM);
 }
 
 // Every area's loose tests built and run with -c=native.
@@ -863,7 +873,7 @@ static BuildTarget *native_loose_tests(Builder *ctx, BuildTarget *cccc,
                                        BuildTarget *check) {
     BuildTarget *all = RunCustom(ctx, "test-native-loose", "true");
     for (int i = 0; i < NAREAS; i++)
-        DependsOn(all, area_tests_with(ctx, cccc, check, i, 1));
+        DependsOn(all, area_tests_with(ctx, cccc, check, i, LOOSE_NATIVE));
     return all;
 }
 
@@ -909,9 +919,51 @@ BuildTarget *test_extra(Builder *ctx) {
     BuildTarget *check = make_testcheck(ctx);
     BuildTarget *all   = RunCustom(ctx, "test-extra", "true");
     for (int i = 0; i < NAREAS; i++)
-        DependsOn(all, area_tests_with(ctx, cccc, check, i, 0));
+        DependsOn(all, area_tests_with(ctx, cccc, check, i, LOOSE_VM));
     DependsOn(all, native_loose_tests(ctx, cccc, check));
     DependsOn(all, make_native_smoke(ctx, cccc));
+    return all;
+}
+
+// ---- test_leaks ------------------------------------------------------------
+// Every suite and loose test under `leaks -atExit` (macOS) or valgrind. Only
+// cccc's own process is checked, not the children a --testing run forks; see
+// tools/testcheck.c.
+
+static BuildTarget *leak_suite_tests(Builder *ctx, BuildTarget *cccc,
+                                     BuildTarget *check) {
+    BuildTarget *agg   = RunCustom(ctx, "leaks-suites", "true");
+    const char **files = GlobFiles(ctx, "tests/suites/test_*.c");
+    for (int i = 0; files[i]; i++) {
+        const char *base = strrchr(files[i], '/');
+        base             = base ? base + 1 : files[i];
+        char cmd[1024], name[160];
+        snprintf(cmd, sizeof(cmd), "\"%s\" --leaks --suite \"%s\" %s",
+                 TargetOutput(check), TargetOutput(cccc), files[i]);
+        snprintf(name, sizeof(name), "leaks-suites-%s", base);
+        BuildTarget *step = RunCustom(ctx, name, cmd);
+        DependsOn(step, cccc);
+        DependsOn(step, check);
+        DependsOn(agg, step);
+    }
+    return agg;
+}
+
+[[cccc::build_target]]
+BuildTarget *test_leaks(Builder *ctx) {
+    const char *tool =
+        strcmp(BuildHost(ctx), "darwin") == 0 ? "leaks" : "valgrind";
+    if (!HaveTool(ctx, tool)) {
+        fprintf(stderr, "build: test_leaks needs %s\n", tool);
+        return RunCustom(ctx, "test-leaks", "true");
+    }
+    BuildTarget *bt    = make_libbacktrace(ctx);
+    BuildTarget *cccc  = make_cccc_exe_named(ctx, bt, "cccc");
+    BuildTarget *check = make_testcheck(ctx);
+    BuildTarget *all   = RunCustom(ctx, "test-leaks", "true");
+    DependsOn(all, leak_suite_tests(ctx, cccc, check));
+    for (int i = 0; i < NAREAS; i++)
+        DependsOn(all, area_tests_with(ctx, cccc, check, i, LOOSE_LEAKS));
     return all;
 }
 
