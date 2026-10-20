@@ -7,6 +7,21 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-10-20
+
+- Fixed: threaded programs reclaim `alloca`/VLA storage at block and frame
+  exit (reclamation previously stopped once any thread was created). Each
+  thread reclaims only its own storage, and a thread ending through
+  `pthread_exit`/`thrd_exit` has its outstanding storage reclaimed.
+- Fixed: `__builtin_object_size` and `__builtin_dynamic_object_size` types
+  1 and 3 bound the answer by the member the pointer names (`p->buf`,
+  `&p->in.x`, `&p->buf[i]`, `p->buf + k`), matching gcc/clang; a struct's
+  last array member counts as flexible. Array members that decay without
+  `&` fold statically.
+- Tests: thread-interleaving suite covering `_Thread_local`, `tss` and
+  thread identity across `thrd_sleep`, mutex, condition-variable and join
+  hand-offs.
+
 ## [0.19.1] - 2026-10-19
 
 - Fixed: `<string.h>` declares size arguments and the `strlen`/`strspn`/
