@@ -485,68 +485,9 @@ static long long wrap_lldiv(long long numer, long long denom) {
 #define __CCCC_C23_FREE cccc_ffi_free
 #include "c23_mem/runtime.c"
 
-// C23: strtol/strtoll/strtoul/strtoull accept an optional "0b"/"0B" prefix
-// when base is 0 or 2.
-static long long cccc_strtoll(const char *nptr, char **endptr, int base) {
-    if (base == 0 || base == 2) {
-        const char *p = nptr;
-        while (isspace((unsigned char)*p))
-            p++;
-        const char *digits = p;
-        if (*digits == '+' || *digits == '-')
-            digits++;
-        if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
-            (digits[2] == '0' || digits[2] == '1')) {
-            size_t prefix_len = (size_t)(digits - p);
-            size_t rest_len   = strlen(digits + 2);
-            char  *tmp        = malloc(prefix_len + rest_len + 1);
-            memcpy(tmp, p, prefix_len);
-            memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
-            char     *tmp_end;
-            long long result = strtoll(tmp, &tmp_end, 2);
-            if (endptr)
-                *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
-            free(tmp);
-            return result;
-        }
-    }
-    return strtoll(nptr, endptr, base);
-}
-
-static unsigned long long cccc_strtoull(const char *nptr, char **endptr,
-                                        int base) {
-    if (base == 0 || base == 2) {
-        const char *p = nptr;
-        while (isspace((unsigned char)*p))
-            p++;
-        const char *digits = p;
-        if (*digits == '+' || *digits == '-')
-            digits++;
-        if (digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B') &&
-            (digits[2] == '0' || digits[2] == '1')) {
-            size_t prefix_len = (size_t)(digits - p);
-            size_t rest_len   = strlen(digits + 2);
-            char  *tmp        = malloc(prefix_len + rest_len + 1);
-            memcpy(tmp, p, prefix_len);
-            memcpy(tmp + prefix_len, digits + 2, rest_len + 1);
-            char              *tmp_end;
-            unsigned long long result = strtoull(tmp, &tmp_end, 2);
-            if (endptr)
-                *endptr = (char *)p + (size_t)(tmp_end - tmp) + 2;
-            free(tmp);
-            return result;
-        }
-    }
-    return strtoull(nptr, endptr, base);
-}
-
-static long cccc_strtol(const char *nptr, char **endptr, int base) {
-    return (long)cccc_strtoll(nptr, endptr, base);
-}
-
-static unsigned long cccc_strtoul(const char *nptr, char **endptr, int base) {
-    return (unsigned long)cccc_strtoull(nptr, endptr, base);
-}
+// C23: strtol/strtoll/strtoul/strtoull accept an optional "0b"/"0B" prefix;
+// shared with -c=native output.
+#include "c23_strtol/runtime.c"
 
 // #1229: bind the real host strtold but narrow its result to `double` in C,
 // the same double-precision-shim convention the math.h `...l` family follows
@@ -584,10 +525,10 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strtof", (void *)strtof, 2, 2); // returns float
     cc_register_cfunc(vm, "strtold", (void *)cccc_strtold, 2,
                       1); // #1229: double-narrowing shim, see cccc_strtold
-    cc_register_cfunc(vm, "strtol", (void *)cccc_strtol, 3, 0);
-    cc_register_cfunc(vm, "strtoll", (void *)cccc_strtoll, 3, 0);
-    cc_register_cfunc(vm, "strtoul", (void *)cccc_strtoul, 3, 0);
-    cc_register_cfunc(vm, "strtoull", (void *)cccc_strtoull, 3, 0);
+    cc_register_cfunc(vm, "strtol", (void *)__cccc_native_strtol, 3, 0);
+    cc_register_cfunc(vm, "strtoll", (void *)__cccc_native_strtoll, 3, 0);
+    cc_register_cfunc(vm, "strtoul", (void *)__cccc_native_strtoul, 3, 0);
+    cc_register_cfunc(vm, "strtoull", (void *)__cccc_native_strtoull, 3, 0);
     cc_register_cfunc(vm, "__cccc_dec_strtod", (void *)wrap_dec_strtod, 4,
                       0); // #832
 

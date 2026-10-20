@@ -1371,6 +1371,22 @@ void serialize_c23_mem_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
         fprintf(f, "%s\n", CCCC_SHIM_c23_mem_runtime);
 }
 
+// C23 strtol family "0b" prefix under -c=native: the shared runtime
+// (src/stdlib/c23_strtol/runtime.c) the VM also runs, emitted on every host
+// since libcs differ on the prefix (macOS and glibc before 2.38 reject it).
+void serialize_c23_strtol_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
+    if (vm->compiler.emit_cccc)
+        return;
+    bool                     any     = false;
+    static const char *const names[] = {"strtol", "strtoll", "strtoul",
+                                        "strtoull"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
+        any |= rename_bundled_extern_for_native_shim(vm, prog, names[i],
+                                                     "stdlib.h");
+    if (any)
+        fprintf(f, "%s\n", CCCC_SHIM_c23_strtol_runtime);
+}
+
 // ---------- #1123: wide _BitInt (N>128) multi-word lowering ----------
 
 // A visited-set of Type pointers, threaded through the scans below. A depth

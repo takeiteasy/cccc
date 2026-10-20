@@ -5979,6 +5979,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     if (!generated_only) {
         serialize_c23_math_shims(f, vm, prog);
         serialize_c23_mem_shims(f, vm, prog);
+        serialize_c23_strtol_shims(f, vm, prog);
     }
 
     // #1146: same placement rationale as serialize_posix_compat_shims just

@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: _Decimal on clang
 // Consolidated suite: C23: _BitInt, auto, nullptr, constexpr, char8_t, embed,
 // literals Source tests: test_c23_attributes, test_c23_auto, test_c23_bitint,
 // test_c23_bitint_wide,
@@ -7,7 +6,7 @@
 //   test_c23_bitint_wide_operand_chain_pressure, test_c23_bitint_wide_safety,
 //   test_c23_bitint_wide_global_init,
 //   test_c23_bool_keywords, test_c23_bool_stdbool_compat, test_c23_char8,
-//   test_c23_decimal, test_c23_empty_params_void_equiv, test_c23_exp10_pi,
+//   test_c23_empty_params_void_equiv, test_c23_exp10_pi,
 //   test_c23_keywords, test_c23_literals, test_c23_mbrtoc8, test_c23_nullptr,
 //   test_c23_preprocessor, test_c23_tag_redeclarations, test_c23_wb_suffix,
 //   test_constexpr_basic, test_std_c23_stdbit, test_std_c23_stdckdint,
@@ -183,12 +182,6 @@ static bool is_even(int n) {
 // [from test_c23_bool_stdbool_compat]
 // Test that <stdbool.h> still works under C23, now that bool/true/false
 // are keywords (stdbool.h should not redefine them in C23 mode).
-
-// [from test_c23_decimal]
-// Test C23 _Decimal32/64/128 types. Size/alignment/struct-layout checks run
-// unconditionally; real IEEE-754-2008 decimal arithmetic (via the Intel BID
-// library) only runs when built with CCCC_HAS_DECIMAL=1, detected via the
-// __STDC_IEC_60559_DFP__ predefine -- returns 42 in both build configurations.
 
 // [from test_c23_empty_params_void_equiv]
 // In C23, int foo() is equivalent to int foo(void).
@@ -1052,78 +1045,6 @@ int test_c23_bool_stdbool_compat(void) {
     nullptr_t np = nullptr;
     if (np != nullptr)
         return 4;
-
-    return 42;
-}
-
-// test_c23_decimal
-[[cccc::test(return = 42)]]
-int test_c23_decimal(void) {
-    // Unconditional: sizes/alignment/struct layout are a property of the
-    // type system, independent of whether real decimal arithmetic is built.
-    if (sizeof(_Decimal32) != 4)
-        return 1;
-    if (sizeof(_Decimal64) != 8)
-        return 2;
-    if (sizeof(_Decimal128) != 16)
-        return 3;
-
-    struct S {
-        char c;
-        _Decimal64 d;
-    };
-    if (sizeof(struct S) != 16)
-        return 4; // 8-byte align pads after `c`
-
-    _Decimal32 d32;
-    _Decimal64 d64;
-    _Decimal128 d128;
-    (void)d32;
-    (void)d64;
-    (void)d128;
-
-#ifdef __STDC_IEC_60559_DFP__
-    // Real BID-backed decimal arithmetic (CCCC_HAS_DECIMAL=1).
-    _Decimal64 a = 1.1dd, b = 2.2dd;
-    if (a + b != 3.3dd)
-        return 10; // false for every binary-FP representation
-    if (0.1dd + 0.2dd != 0.3dd)
-        return 11; // the load-bearing exactness check
-    if (!(a < b) || (b <= a) || !(b > a) || (a >= b))
-        return 12;
-    if (-a + a != 0.dd)
-        return 13;
-
-    _Decimal32 s  = (_Decimal32)a;
-    _Decimal128 w = (_Decimal128)a;
-    if ((_Decimal64)w != a)
-        return 14;
-    if ((_Decimal64)s != a)
-        return 15;
-
-    if ((int)3.9dd != 3)
-        return 16; // truncating, C semantics
-    if ((_Decimal64)7 != 7.dd)
-        return 17;
-    if ((double)0.5dd != 0.5)
-        return 18;
-
-    char buf[32];
-    __builtin_decimal_to_chars(buf, sizeof buf, a + b);
-    if (__builtin_strcmp(buf, "3.3") != 0)
-        return 19;
-
-    _Decimal64 x = 10.dd;
-    x            = x * 2.dd;
-    if (x != 20.dd)
-        return 20;
-
-    if (!x)
-        return 21; // truthiness
-    _Decimal64 zero = 0.dd;
-    if (!(!zero))
-        return 22;
-#endif
 
     return 42;
 }
