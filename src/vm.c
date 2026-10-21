@@ -1805,6 +1805,10 @@ void cc_destroy(VirtualMachine *vm) {
         free(framework_dirs[k]->data);
     }
 
+    for (int i = 0; i < vm->compiler.framework_hit_paths.len; i++)
+        free(vm->compiler.framework_hit_paths.data[i]);
+    free(vm->compiler.framework_hit_paths.data);
+
     // Free input files array
     if (vm->compiler.input_files)
         free(vm->compiler.input_files);

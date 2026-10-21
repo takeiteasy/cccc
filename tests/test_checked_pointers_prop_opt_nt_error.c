@@ -1,4 +1,5 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
+// CCCC_LEAKS_SKIP: a runtime-error exit skips teardown
 // #943: CHKNT propagation also holds for an OPT (path-sensitive, #942)
 // candidate, not just a FULL one -- on the run where `q` actually got
 // rooted in the ntarray source `s`, a non-null write to the terminator

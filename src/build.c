@@ -3773,6 +3773,7 @@ static void teardown_builder_ctx(Builder *ctx) {
     for (int i = 0; i < ctx->targets_count; i++)
         free_target(ctx->targets[i]);
     free(ctx->targets);
+    free(ctx->root);
     free(ctx->out_dir);
     free(ctx->cache_dir);
     free((char *)ctx->cccc_self);

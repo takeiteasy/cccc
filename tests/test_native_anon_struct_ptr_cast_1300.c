@@ -16,5 +16,7 @@ int main(void) {
         return 1;
     g.patches[0].loc = 40;
     g.patches[0].fn  = 2;
-    return (int)g.patches[0].loc + g.patches[0].fn;
+    int r = (int)g.patches[0].loc + g.patches[0].fn;
+    free(g.patches);
+    return r;
 }

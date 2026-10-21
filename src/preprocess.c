@@ -3080,14 +3080,17 @@ static bool wants_builtin_header(VirtualMachine *vm, bool is_std, bool owned) {
     return owned || (is_std && !vm->compiler.no_builtin_includes);
 }
 
-static char *probe_framework_dir(const char *dir, const char *name,
-                                 int name_len, const char *rest) {
+static char *probe_framework_dir(VirtualMachine *vm, const char *dir,
+                                 const char *name, int name_len,
+                                 const char *rest) {
     static const char *const subdirs[] = {"Headers", "PrivateHeaders"};
     for (int i = 0; i < 2; i++) {
         char *path = format("%s/%.*s.framework/%s/%s", dir, name_len, name,
                             subdirs[i], rest);
-        if (file_exists(path))
+        if (file_exists(path)) {
+            strarray_push(&vm->compiler.framework_hit_paths, path);
             return path;
+        }
         free(path);
     }
     return NULL;
@@ -3114,7 +3117,7 @@ static char *search_framework_paths(VirtualMachine *vm, const char *filename,
             char *dir =
                 format("%.*s/Frameworks",
                        (int)(p - includer) + (int)sizeof(suffix) - 1, includer);
-            char *path = probe_framework_dir(dir, filename, name_len, rest);
+            char *path = probe_framework_dir(vm, dir, filename, name_len, rest);
             free(dir);
             if (path)
                 return path;
@@ -3125,7 +3128,7 @@ static char *search_framework_paths(VirtualMachine *vm, const char *filename,
                             &vm->compiler.system_framework_paths};
     for (int k = 0; k < 2; k++) {
         for (int i = 0; i < lists[k]->len; i++) {
-            char *path = probe_framework_dir(lists[k]->data[i], filename,
+            char *path = probe_framework_dir(vm, lists[k]->data[i], filename,
                                              name_len, rest);
             if (path)
                 return path;
@@ -3424,7 +3427,7 @@ static char *search_include_next(VirtualMachine *vm, char *filename,
     int          base    = npaths + vm->compiler.system_include_paths.len;
     for (int k = 0; k < 2; k++) {
         for (int i = start > base ? start - base : 0; i < lists[k]->len; i++) {
-            char *path = probe_framework_dir(lists[k]->data[i], filename,
+            char *path = probe_framework_dir(vm, lists[k]->data[i], filename,
                                              name_len, rest);
             if (path)
                 return path;

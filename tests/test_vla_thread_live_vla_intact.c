@@ -1,4 +1,5 @@
 // CCCC_NATIVE_SKIP: checks the VM heap allocator
+// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 // A block-exit rewind on one thread never overwrites another thread's live
 // VLA. B's block mark is taken while A's first VLA sits below it; A then
 // frees that VLA and allocates a larger one across B's mark. B's rewind to

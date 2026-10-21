@@ -1,4 +1,5 @@
 // CCCC_NATIVE_SKIP: checks the VM heap allocator
+// CCCC_LEAKS_SKIP: deliberately passes invalid alignments, which valgrind reports as misuse
 // Ticket #668: aligned_alloc must be routed through the VM heap's
 // alignment-aware bump allocator (MALCA) so it gets an AllocHeader like
 // malloc/calloc/realloc, instead of falling through to the host allocator

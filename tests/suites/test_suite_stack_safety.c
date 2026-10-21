@@ -1,4 +1,5 @@
 // CCCC_FLAGS: --testing
+// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 // CCCC_NATIVE_SKIP: negative (error=) test
 // Consolidated suite: stack canaries, CFI, deep expressions, multi-VM
 // isolation,

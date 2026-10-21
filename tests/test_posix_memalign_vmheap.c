@@ -1,4 +1,5 @@
 // Ticket #668: posix_memalign must be routed through the VM heap's
+// CCCC_LEAKS_SKIP: deliberately passes invalid alignments, which valgrind reports as misuse
 // alignment-aware bump allocator (PMEMA) so it gets an AllocHeader like
 // malloc/calloc/realloc. Verify success returns 0 and an aligned pointer,
 // invalid alignment returns EINVAL, and free() finds the header afterwards.

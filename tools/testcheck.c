@@ -9,7 +9,8 @@
 // --leaks reruns a passing test under `leaks -atExit` (macOS) or valgrind
 // (elsewhere) and fails on a leak in cccc itself; --testing children are not
 // followed. Guest malloc is made visible with -V unless the test needs the VM
-// heap (a safety flag, --testing, or CCCC_LEAKS_KEEP_VM_HEAP).
+// heap (a safety flag, --testing, or CCCC_LEAKS_KEEP_VM_HEAP). An
+// EXPECT_COMPILE_ERROR test is not rerun: error() exits without teardown.
 //
 // --native builds the test with -c=native and runs the binary (a --testing
 // test runs as --testing=native). It skips tests that expect a compile error,
@@ -852,7 +853,9 @@ static int leak_pass(const Header *h, char *const *args, int timeout,
     }
 #else
     if (WIFEXITED(status) && WEXITSTATUS(status) == 99) {
-        *why = "memory leak";
+        *why = err->data && strstr(err->data, "lost in loss record")
+                   ? "memory leak"
+                   : "valgrind error (not a leak)";
         return 1;
     }
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
@@ -1041,7 +1044,7 @@ int main(int argc, char **argv) {
             err = cerr_;
         }
     }
-    if (!why && leaks) {
+    if (!why && leaks && !h.compile_error) {
         Buf lout = {0}, lerr = {0};
         if (leak_pass(&h, args, timeout, &why, &lout, &lerr)) {
             if (h.expect_leak && !strcmp(why, "memory leak")) {

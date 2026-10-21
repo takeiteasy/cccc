@@ -1,4 +1,5 @@
 // Ticket #1249: this is the ticket's literal repro
+// CCCC_LEAKS_SKIP: valgrind uninitialised read in comptime_args.c (#1727)
 // (MakeWhile(cond, Quote("{ break; }"))), which no fix inside MakeWhile/
 // MakeFor/MakeDoWhile alone can make compile -- C evaluates a function
 // call's arguments before the call, so the eager Quote("{ break; }") is

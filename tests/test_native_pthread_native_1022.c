@@ -1,4 +1,5 @@
 // pthread types and a thread-local round-trip under -c=native.
+// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 #include <pthread.h>
 static pthread_mutex_t mutex   = PTHREAD_MUTEX_INITIALIZER;
 _Thread_local int      tls_val = 0;

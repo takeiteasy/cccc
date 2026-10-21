@@ -4088,7 +4088,7 @@ static inline int op_MCPY_fn(VirtualMachine *vm) {
     size_t count = (size_t)vm->regs[REG_A2];
     COMPTIME_CONTAIN(vm, src, count, false);
     COMPTIME_CONTAIN(vm, dest, count, true);
-    memcpy(dest, src, count);
+    memmove(dest, src, count); // self-assignment passes dest == src
     // Propagate effective type along with the bytes (C11 6.5p6): backs
     // struct/union assignment and the restrict memcpy-loop lowering, so
     // e.g. `struct S a = b;` keeps both members' shadow entries correct

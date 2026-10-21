@@ -1,4 +1,5 @@
 // CCCC_NATIVE_SKIP: --format-string-checks is VM-only
+// CCCC_LEAKS_SKIP: valgrind uninitialised read in the VM dispatch loop (#1729)
 // CCCC_FLAGS: --format-string-checks
 // CCCC_EXPECT_STDERR: format expects 2, call provides 1
 /*

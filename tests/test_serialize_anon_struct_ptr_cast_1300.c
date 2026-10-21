@@ -40,7 +40,9 @@ static int grow_and_fill(void) {
     h.patches[0].location = 40;
     h.patches[0].function = 2;
     h.count               = 1;
-    return (int)h.patches[0].location + h.patches[0].function;
+    int r = (int)h.patches[0].location + h.patches[0].function;
+    free(h.patches);
+    return r;
 }
 
 int main(void) {

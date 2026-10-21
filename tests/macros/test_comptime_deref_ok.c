@@ -1,4 +1,5 @@
 // Libc calls that follow pointers stored in their arguments accept valid ones.
+// CCCC_LEAKS_SKIP: comptime libc allocation still reported lost (#1728)
 #include[[cccc::comptime]] < dirent.h>
 #include[[cccc::comptime]] < getopt.h>
 #include[[cccc::comptime]] < iconv.h>

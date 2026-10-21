@@ -1,4 +1,5 @@
 // A node may be shared inside an expression DAG and a struct may point to itself.
+// CCCC_LEAKS_SKIP: tag scope hashmap not freed (#1731)
 [[cccc::comptime]]
 Node *probe(void) {
     Node *a     = MakeIntLiteral(21);

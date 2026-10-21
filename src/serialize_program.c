@@ -5453,6 +5453,11 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         free(ctx.hoisted.data);
         free(ctx.emitted_defs.data);
         free(ctx.file_typedef_done);
+        hashmap_deinit(&ctx.global_names);
+        hashmap_deinit(&ctx.file_typedef_names);
+        hashmap_deinit(&ctx.path_key_memo);
+        free(ctx.label_owners);
+        free(ctx.deferred_label_statics);
         return;
     }
 
@@ -5771,6 +5776,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 path_basename_is(resolved, "math.h") ? "math.h" : "float.h");
             if (bundled_path) {
                 fprintf(f, "#include \"%s\"\n", bundled_path);
+                free(bundled_path);
                 continue;
             }
         }
@@ -5885,6 +5891,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     prelude_check(vm, &prelude);
     undef_live_user_macros(f, macro_lines, macro_lines_len);
     free(macro_lines);
+    hashmap_deinit(&candidate_index);
     free(prelude.refs);
     free(prelude.replayed);
     if (vm->compiler.emit_directives.len > 0)
@@ -6294,4 +6301,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     free(ctx.emitted_defs.data);
     free(ctx.file_typedef_done);
     free(ctx.enum_renames); // #1016: was missing from this list
+    hashmap_deinit(&ctx.global_names);
+    hashmap_deinit(&ctx.file_typedef_names);
+    hashmap_deinit(&ctx.path_key_memo);
+    free(ctx.label_owners);
+    free(ctx.deferred_label_statics);
 }

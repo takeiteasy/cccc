@@ -4358,6 +4358,7 @@ typedef struct Compiler {
     StringArray system_include_paths; // System header search paths for <...>
     StringArray framework_paths; // -F: <Name/X.h> -> Name.framework/Headers
     StringArray system_framework_paths; // --iframework, --sysroot: as above
+    StringArray framework_hit_paths;    // resolved framework headers (owned)
     HashMap     include_cache;        // Cache for search_include_paths
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
