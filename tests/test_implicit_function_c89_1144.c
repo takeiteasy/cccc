@@ -12,5 +12,6 @@
 int main(void) {
     locale_t l = newlocale(LC_ALL_MASK, "C", (locale_t)0);
     int      r = isalpha_l('a', l);
+    freelocale(l);
     return r ? 42 : 0;
 }
