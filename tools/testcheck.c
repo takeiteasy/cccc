@@ -1053,6 +1053,7 @@ int main(int argc, char **argv) {
 #ifdef __APPLE__
             // A forked child that exit()s stops itself under `leaks -atExit`
             // and never resumes, so a timeout here is not a cccc hang.
+            // TODO: fork sites _exit() instead; then drop this (#1732).
             if (!strcmp(why, "timed out under the leak tool")) {
                 printf("SKIP %s: forked children stop at exit under leaks\n",
                        file);

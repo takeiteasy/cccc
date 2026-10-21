@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-10-21
+
+- Fixed: the compiler frees its exit-time state (include and framework
+  paths, serialize tables, file-scope asm and comptime records, the builder
+  root), so a run is clean under valgrind and `leaks`.
+- Fixed: assigning an anonymous aggregate to itself no longer overlaps its
+  own copy.
+- Added: `--test-run` runs `cccc_launch` in the VM smoke phase.
+- Tests: `test_leaks` target runs every suite and loose test under `leaks`
+  (macOS) or valgrind (Linux); comptime native smoke checks ported to loose
+  tests and `tests/smoke` scripts; `test_suite_c23` runs under `-c=native`.
+
 ## [0.19.2] - 2026-10-20
 
 - Fixed: threaded programs reclaim `alloca`/VLA storage at block and frame
