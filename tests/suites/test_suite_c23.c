@@ -33,6 +33,7 @@
 #include <stdbit.h>
 #include <stdckdint.h>
 #include <limits.h>
+#include <time.h>
 #include <stdlib.h>
 
 // [from test_c23_attributes]
