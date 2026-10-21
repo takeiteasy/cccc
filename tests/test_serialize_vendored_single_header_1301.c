@@ -21,9 +21,9 @@
 // functions via src/internal.h. Before the fix, v1301_add() was
 // re-serialized independently in THIS TU's own output on top of the
 // replayed #include, a host "redefinition of 'v1301_add'" error --
-// confirmed pre-fix. tools/comptime_native_smoke.py's
-// case_vendored_single_header_1301 is the load-bearing VM-42-to-native-42
-// proof; this file's own -m shape assertion can't see a link failure.
+// confirmed pre-fix. tests/test_native_vendored_single_header_1301.c is the
+// load-bearing VM-42-to-native-42 proof; this file's own -m shape assertion
+// can't see a link failure.
 // CCCC_FLAGS: tests/fixtures/vendored_1301_b.c
 #define VENDORED_1301_IMPLEMENTATION
 #include "fixtures/vendored_1301_lib.h"

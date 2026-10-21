@@ -1,0 +1,4 @@
+#ifndef TRANSITIVE_BUNDLED_CAPTURE_1297_H
+#define TRANSITIVE_BUNDLED_CAPTURE_1297_H
+#include <nl_types.h>
+#endif

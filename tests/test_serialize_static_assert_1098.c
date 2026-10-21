@@ -15,8 +15,8 @@
 // The condition below (`>= 8`, not `==`) is deliberately true against
 // both CCCC's own ~56-byte guest projection of `struct statfs` and the
 // real host's (much larger) one, so this test exercises the RE-EMISSION
-// itself (see tools/comptime_native_smoke.py's own text assertion on `-m`
-// output for that), not a projection-vs-real-layout mismatch -- if the
+// itself (see tests/test_serialize_static_assert_1098_m.c's text assertion on
+// `-m` output for that), not a projection-vs-real-layout mismatch -- if the
 // gate were somehow bypassed and the wrong value got re-checked, this
 // program would still pass either way, which is intentional: a test that
 // only passes when the fix DOESN'T do its job would be a bad regression

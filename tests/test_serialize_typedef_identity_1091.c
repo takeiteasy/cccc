@@ -26,8 +26,8 @@
 // function's return, matching the shape #1090's own repro needed) so a
 // pre-fix build fails outright under -c=native (redefinition or "assigning
 // to X from incompatible type Y" from the host compiler), not just prints
-// wrong text -- this is the round-trip proof, see tools/
-// comptime_native_smoke.py case 129 for the -m text assertions.
+// wrong text -- this is the round-trip proof, see
+// tests/test_serialize_typedef_identity_1091_m.c for the -m text assertions.
 
 typedef struct {
     int a, b;

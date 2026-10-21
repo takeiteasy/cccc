@@ -16,7 +16,7 @@
 // mis-spelled `int (*)[m]` as `int *[m]` (serialize_type_decl's TY_PTR
 // branch parenthesized only for TY_ARRAY/TY_FUNC bases, not TY_VLA). Both
 // are now fixed, so this program round-trips as real, compilable C -- see
-// tools/comptime_native_smoke.py's VLA cases for the VM-vs-native assertion.
+// tests/test_native_vla_*.c for the VM-vs-native assertion.
 
 int main(void) {
     int n = 2, m = 3;

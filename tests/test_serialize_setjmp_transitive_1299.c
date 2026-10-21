@@ -18,8 +18,8 @@
 // these synth declarations both reached the same output, a host
 // "conflicting types for '_setjmp'" error. This test only checks -m's
 // shape (the synth declarations must not appear when setjmp.h is
-// reachable this way); tools/comptime_native_smoke.py's case is what
-// proves the resulting -c=native output actually links.
+// reachable this way); tests/test_native_setjmp_transitive_header_1299.c is
+// what proves the resulting -c=native output actually links.
 #include "fixtures/setjmp_transitive_1299.h"
 
 static jmp_buf env;

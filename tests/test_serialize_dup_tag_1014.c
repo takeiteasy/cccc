@@ -29,7 +29,7 @@
 // and test_serialize_dup_tag_1014_pureuse.c for the companion
 // find_tag_name() lookup fix this required. Verified this exact program
 // printed two identically-named `struct DyGC1014 { ... };` bodies before
-// the fix. tools/comptime_native_smoke.py's case is the load-bearing proof
+// the fix. tests/test_native_dup_tag_1014_*.c are the load-bearing proof
 // the resulting native binary actually links and runs, since a dropped/
 // colliding struct definition is a host *compile* failure no -m shape
 // assertion alone can see.

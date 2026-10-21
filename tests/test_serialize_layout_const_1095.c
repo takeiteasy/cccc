@@ -36,7 +36,7 @@
 // succeeding, since the real write is roughly 40x the buffer's folded
 // size; the deterministic half of this file's coverage is the enum/case
 // checks above and the -m text assertion in
-// tools/comptime_native_smoke.py.
+// tests/test_serialize_layout_const_sites_1095_m.c.
 #include <sys/mount.h>
 
 enum { N = sizeof(struct statfs) };
@@ -58,7 +58,8 @@ int main(void) {
     // Sanity: the uninitialized global at least exists and is nameable at
     // its real size (a stale ~56-byte guest projection would still link
     // and run, so this isn't load-bearing on its own -- the real assertion
-    // is the -m text check in tools/comptime_native_smoke.py).
+    // is the -m text check in
+    // tests/test_serialize_layout_const_sites_1095_m.c).
     if (sizeof(g_uninit) == 0)
         return 3;
 

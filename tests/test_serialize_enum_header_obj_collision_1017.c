@@ -42,8 +42,8 @@
 // firing. Both call sites now print (and, for run_native_backend, clear)
 // vm->errors right after the call.
 //
-// This warning does not appear in tools/comptime_native_smoke.py: those
-// cases assert VM 42 -> native 42, but this collision's whole point is
+// This warning does not appear in tests/test_native_dup_enum_*.c: those
+// round trips assert VM 42 -> native 42, but this collision's whole point is
 // that the generated output does *not* compile, so there is nothing to
 // link or run. See docs/NATIVE.md's #1017 paragraph for the residual this
 // leaves for the host compiler to report, and the neighbouring #1016 tests

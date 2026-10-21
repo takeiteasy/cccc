@@ -30,9 +30,8 @@
 // exercise no longer fires here at all. This program now instead proves
 // the replayed real declarations alone are enough for a native build to
 // accept every one of these calls; the parenthesized-declarator fix
-// itself stays covered by tools/comptime_native_smoke.py's
-// case_bundled_chain_macro_shadow_1294 (a bundled->bundled chain #1297
-// deliberately leaves uncaptured).
+// itself stays covered by tests/test_native_bundled_chain_macro_shadow_1294.c
+// (a bundled->bundled chain #1297 deliberately leaves uncaptured).
 #include "native_libc_macro_shadow_1294.h"
 
 static volatile int g_never = 0;

@@ -119,8 +119,8 @@ int test_atomic_ops_functional(void) {
 // test, not a proof of correctness -- on x86-64's TSO memory model, and
 // under the VM's GIL, this would compile and return 42 even with the old
 // no-op fence macros. The actual proof that a real __atomic_*_fence is
-// emitted lives in tools/comptime_native_smoke.py, which greps the -m
-// output. This test only confirms every memory_order value, plus a
+// emitted lives in tests/test_serialize_atomic_fence_1188_m.c, which greps the
+// -m output. This test only confirms every memory_order value, plus a
 // non-constant order (C11 does not require order to be a constant
 // expression), compiles and runs on both backends.
 [[cccc::test(return = 42)]]

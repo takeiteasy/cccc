@@ -16,13 +16,13 @@
 //
 // This test can't assert a specific byte count for `sizeof(sigset_t)` --
 // legitimately 4 under the VM and platform-dependent under -c=native (4 on
-// macOS, 128 on glibc) -- see tools/comptime_native_smoke.py's own case for
-// the output-text assertion that is the real regression guard for the fix
-// itself. What this test can and does assert, on both backends alike: a
-// buffer sized off `sizeof(sigset_t)` is exactly big enough for every
-// `sig*set()` call to touch, with no overrun into a trailing canary region --
-// the same "undersized buffer" shape test_serialize_layout_const_1031.c uses
-// for pthread_mutex_t.
+// macOS, 128 on glibc) -- see
+// tests/test_serialize_scalar_host_divergent_1169_m.c for the output-text
+// assertion that is the real regression guard for the fix itself. What this
+// test can and does assert, on both backends alike: a buffer sized off
+// `sizeof(sigset_t)` is exactly big enough for every `sig*set()` call to touch,
+// with no overrun into a trailing canary region -- the same "undersized buffer"
+// shape test_serialize_layout_const_1031.c uses for pthread_mutex_t.
 
 #include <signal.h>
 

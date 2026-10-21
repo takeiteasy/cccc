@@ -12,7 +12,7 @@
 // This file's VM run can't see the bug at all (CCCC's own tokenizer never
 // goes through the stub's macro-expansion path); only its --native run
 // exercises it, which is why the regression guard lives in
-// tools/comptime_native_smoke.py case 115, not here -- this file exists so
+// tests/test_native_attr_after_stdio_1083.c, not here -- this file exists so
 // the --native suite carries the shape by name.
 //
 // Fixed by guarding both include/Availability.h's own CCCC-flavored body

@@ -15,7 +15,7 @@
 // types" error). rename_colliding_type_tags()'s tier-1 header_exposed
 // check (src/serialize.c) is what keeps this test passing regardless of
 // creation order -- it must win over the plain first-seen tie-break.
-// tools/comptime_native_smoke.py's case is the load-bearing proof the
+// tests/test_native_dup_tag_1014_*.c are the load-bearing proof the
 // resulting native binary actually links and runs.
 #include "fixtures/dup_tag_1014.h"
 

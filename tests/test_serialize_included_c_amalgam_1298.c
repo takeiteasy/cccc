@@ -11,7 +11,7 @@
 // the replayed #include and the re-serialized definition both reached the
 // output. This test only checks -m's shape (the definition must not appear
 // a second time in this TU's own output, since the replayed #include already
-// supplies it); tools/comptime_native_smoke.py's multi-TU case is what proves
+// supplies it); tests/test_native_included_c_amalgam_1298.c is what proves
 // the resulting -c=native output actually links.
 #include "fixtures/amalgam_1298_ops.c"
 

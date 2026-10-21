@@ -15,9 +15,9 @@
 // first place. This asserts both halves of the fix landed: the enum's
 // definition is present, and its own #include is replayed ahead of it (the
 // #include is otherwise unused here -- <stdlib.h> just stands in for "some
-// header this non-primary TU needs"). tools/comptime_native_smoke.py's
-// case is the load-bearing proof the resulting native binary actually
-// links and runs.
+// header this non-primary TU needs"). tests/test_native_multi_tu_typedef_1006.c
+// is the load-bearing proof the resulting native binary actually links and
+// runs.
 #include <stdlib.h>
 typedef enum { MULTI_TU_1006_ONE, MULTI_TU_1006_TWO } MultiTu1006Thing;
 

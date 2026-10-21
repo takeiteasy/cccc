@@ -31,7 +31,7 @@
 //     hoisted local silently shadows the global for the rest of the
 //     function, so `a + local_shadows_global_1302_g` after the `if` reads
 //     the local's last value instead of the global. See
-//     tools/comptime_native_smoke.py's case_local_shadows_global_1302 for
+//     tests/test_native_local_shadows_global_1302.c for
 //     the full VM-vs-native divergence this produces end to end (a wrong
 //     answer, not a compile error, so it needs the smoke test's exit-code
 //     comparison, not this file's -m shape check, to actually catch it).

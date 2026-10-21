@@ -24,7 +24,7 @@
 // is a full `expression` in the grammar and legitimately may be a comma
 // expression without parens).
 //
-// tools/comptime_native_smoke.py's case_assert_ternary_comma_1305 is the
+// tests/test_native_assert_ternary_comma_1305.c is the
 // load-bearing VM-42-to-native-42 proof: pre-fix the native binary aborts
 // (exit 134) on a *passing* assert, which no -m shape assertion can see.
 

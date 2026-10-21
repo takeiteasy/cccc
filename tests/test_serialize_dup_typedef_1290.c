@@ -35,11 +35,10 @@
 // deliberately not by structure -- a structural match would misfire the
 // same way find_generated_uncaptured_typedef()'s own #1168/#1169 comment
 // warns against (a same-representation scalar typedef structurally matching
-// an unrelated header typedef). tools/comptime_native_smoke.py's
-// case_dup_typedef_1290_native_round_trip is the load-bearing proof the
-// resulting native binary actually links and runs, since a duplicated
-// struct definition is a host *compile* failure no -m shape assertion
-// alone can see.
+// an unrelated header typedef). tests/test_native_dup_typedef_1290.c is the
+// load-bearing proof the resulting native binary actually links and runs, since
+// a duplicated struct definition is a host *compile* failure no -m shape
+// assertion alone can see.
 typedef struct {
     int a;
     int b;

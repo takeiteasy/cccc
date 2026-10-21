@@ -18,7 +18,7 @@
 // routes this incomplete record to the correct (plain, header-exposed)
 // group instead -- this is the one test that exercises that lookup change;
 // test_serialize_dup_tag_1014.c/_rev.c both only ever see complete
-// aggregates. tools/comptime_native_smoke.py's case is the load-bearing
+// aggregates. tests/test_native_dup_tag_1014_*.c are the load-bearing
 // proof the resulting native binary actually links and runs.
 extern int use_it_1014(void);
 

@@ -26,6 +26,14 @@
 //   EXPECT_COMPILE_ERROR           cccc fails with a diagnostic
 //   EXPECT_RUNTIME_ERROR           the program exits 255
 //   CCCC_NATIVE_SKIP[: reason]     left out of the --native pass
+//   CCCC_VM_SKIP: reason           left out of the default (VM) pass; only
+//                                  --native runs it
+//   CCCC_ENV: NAME=value           environment variable for cccc and the
+//                                  program (repeatable)
+//   CCCC_NO_INCLUDE_DIR            do not pass -I./include (headers come from
+//                                  the embedded table, as under --native)
+//   CCCC_HOST_CC[: flags]          the stdout (-m, -c=generated -o /dev/stdout)
+//                                  must compile as C with $CC (default cc)
 //   CCCC_EXPECT_LEAK[: reason]     a leak found by --leaks is not a failure
 //   CCCC_LEAKS_KEEP_VM_HEAP        --leaks does not inject -V
 //   CCCC_LEAKS_SKIP: reason        left out of the --leaks pass
@@ -68,7 +76,11 @@ typedef struct {
     int   nexpect_out, nreject_out, nexpect_err, nreject_err;
     int   compile_error, runtime_error;
     int   testing, build, drives_output;
-    char *native_skip, *leaks_skip;
+    char *native_skip, *leaks_skip, *vm_skip;
+    char *host_cc[MAX_ARGS];
+    int   nhost_cc, host_cc_check, no_include_dir;
+    char *env[MAX_ARGS];
+    int   nenv;
     int   expect_leak, leaks_keep_vm_heap;
 } Header;
 
@@ -176,6 +188,27 @@ static char *apply_directive(Header *h, char *p, const char *file) {
             h->native_skip = strdup(*v ? v : "CCCC_NATIVE_SKIP");
             return NULL;
         }
+        if (!strcmp(name, "CCCC_NO_INCLUDE_DIR")) {
+            h->no_include_dir = 1;
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_HOST_CC")) {
+            h->host_cc_check = 1;
+            split_words(h->host_cc, &h->nhost_cc, v);
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_VM_SKIP")) {
+            h->vm_skip = strdup(*v ? v : "CCCC_VM_SKIP");
+            return NULL;
+        }
+        if (!strcmp(name, "CCCC_ENV")) {
+            if (!strchr(v, '=') || *v == '=')
+                die("%s: CCCC_ENV wants NAME=value", file);
+            if (h->nenv >= MAX_ARGS)
+                die("%s: too many CCCC_ENV lines", file);
+            h->env[h->nenv++] = strdup(v);
+            return NULL;
+        }
         if (!strcmp(name, "CCCC_LEAKS_SKIP")) {
             h->leaks_skip = strdup(*v ? v : "CCCC_LEAKS_SKIP");
             return NULL;
@@ -204,6 +237,14 @@ static char *apply_directive(Header *h, char *p, const char *file) {
         return NULL;
     if (!strcmp(name, "CCCC_EXPECT_LEAK")) {
         h->expect_leak = 1;
+        return e;
+    }
+    if (!strcmp(name, "CCCC_HOST_CC")) {
+        h->host_cc_check = 1;
+        return e;
+    }
+    if (!strcmp(name, "CCCC_NO_INCLUDE_DIR")) {
+        h->no_include_dir = 1;
         return e;
     }
     if (!strcmp(name, "CCCC_LEAKS_KEEP_VM_HEAP")) {
@@ -298,7 +339,8 @@ static void str_addc(Str *o, char c) {
 // Translates Python-style escapes into POSIX ERE. Returns NULL and sets *err
 // for anything it cannot express (lookahead, \b, ...), so such patterns get
 // rewritten in the test rather than silently changing meaning.
-//   outside [...]: \s \S \d \D \w \W \n \t \A \Z, (?:, lazy quantifiers,
+//   outside [...]: \s \S \d \D \w \W \n \t \A \Z \1-\9 (back-references),
+//                  (?:, lazy quantifiers,
 //                  and, when `multiline`, ^/$ matching at line boundaries
 //   inside  [...]: \s \d \w \n \t and backslash-escaped punctuation
 //   [\s\S]       : any character including newline
@@ -413,6 +455,18 @@ static char *translate_pattern(const char *p, int multiline, const char **err) {
                     break;
                 case 'Z':
                     str_addc(&o, '$');
+                    break;
+                case '1':
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                case '6':
+                case '7':
+                case '8':
+                case '9':
+                    str_addc(&o, '\\');
+                    str_addc(&o, e);
                     break;
                 case '\0':
                     *err = "trailing backslash";
@@ -849,6 +903,16 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    for (int i = 0; i < h.nenv; i++) {
+        char *eq = strchr(h.env[i], '=');
+        *eq      = '\0';
+        setenv(h.env[i], eq + 1, 1);
+    }
+    if (!native && h.vm_skip) {
+        printf("SKIP %s: %s\n", file, h.vm_skip);
+        return 0;
+    }
+
     if (native) {
         const char *skip = h.native_skip     ? h.native_skip
                            : h.compile_error ? "expects a compile error"
@@ -876,7 +940,7 @@ int main(int argc, char **argv) {
     int   n   = 0;
     args[n++] = (char *)cccc;
     // The embedded headers resolve without it.
-    if (!native)
+    if (!native && !h.no_include_dir)
         args[n++] = "-I./include";
     for (int i = 0; i < h.nflags; i++)
         args[n++] = native && !strcmp(h.flags[i], "--testing")
@@ -947,6 +1011,36 @@ int main(int argc, char **argv) {
         why = "";
     if (!why && h.testing && !check_failure_lines(&h, &out, &err, file))
         why = "";
+    if (!why && h.host_cc_check && !native) {
+        char       *cc = getenv("CC");
+        char        src[1024], *cargv[MAX_ARGS + 8];
+        const char *tmp = getenv("TMPDIR");
+        snprintf(src, sizeof(src), "%s/testcheck-cc-XXXXXX.c",
+                 tmp && *tmp ? tmp : "/tmp");
+        int fd = mkstemps(src, 2);
+        if (fd < 0)
+            die("mkstemps: %s", strerror(errno));
+        if (write(fd, out.data ? out.data : "", out.len) < 0)
+            die("write: %s", strerror(errno));
+        close(fd);
+        int k      = 0;
+        cargv[k++] = cc && *cc ? cc : "cc";
+        cargv[k++] = "-c";
+        cargv[k++] = "-o";
+        cargv[k++] = "/dev/null";
+        for (int i = 0; i < h.nhost_cc; i++)
+            cargv[k++] = h.host_cc[i];
+        cargv[k++] = src;
+        cargv[k]   = NULL;
+        Buf cout_ = {0}, cerr_ = {0};
+        int cstat = run_capture(cargv, &cout_, &cerr_, timeout);
+        unlink(src);
+        if (cstat == -1 || !WIFEXITED(cstat) || WEXITSTATUS(cstat) != 0) {
+            why = "the host compiler rejected the output";
+            out = cout_;
+            err = cerr_;
+        }
+    }
     if (!why && leaks) {
         Buf lout = {0}, lerr = {0};
         if (leak_pass(&h, args, timeout, &why, &lout, &lerr)) {

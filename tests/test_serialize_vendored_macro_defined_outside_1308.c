@@ -33,8 +33,7 @@
 // branch would ask, instead of a stricter one only the is_static branch
 // used to redo for itself.
 //
-// tools/comptime_native_smoke.py's
-// case_vendored_macro_defined_outside_1308 is the load-bearing
+// tests/test_native_vendored_macro_defined_outside_1308.c is the load-bearing
 // VM-42-to-native-42 proof -- a plain -m shape assertion alone doesn't
 // invoke the host compiler and can't see the "redefinition" this fixes.
 // CCCC_FLAGS: tests/fixtures/vendored_macro_defined_outside_1308_b.c

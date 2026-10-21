@@ -38,7 +38,7 @@
 // see tests/test_serialize_vendored_multi_tu_include_1304.c, re-verified
 // green by this fix.
 //
-// tools/comptime_native_smoke.py's case_shared_header_unrelated_define_1305
+// tests/test_native_shared_header_unrelated_define_1305.c
 // is the load-bearing VM-42-to-native-42 proof -- a plain -m shape
 // assertion alone doesn't invoke the host compiler and can't see the
 // "undeclared identifier" this fix prevents.

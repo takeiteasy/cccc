@@ -11,7 +11,7 @@
 // "redefinition" error from the downstream host compiler. This test only
 // checks -m's shape (the definition must not appear at all in this TU's
 // portion of the output, since the header's own #include already supplies
-// it); tools/comptime_native_smoke.py's dandy-pattern case is what proves
+// it); tests/test_native_dandy_vtable_999.c is what proves
 // the resulting -c=native output actually links.
 #include "fixtures/header_static_skip_999.h"
 

@@ -17,8 +17,8 @@
 // tv_sec/tv_nsec, etc.) untouched; see
 // expr_roots_at_opaque_member()'s own comment (src/serialize.c) for why
 // the fix is scoped that narrowly, and
-// tools/comptime_native_smoke.py's own `struct timespec nap = {0,
-// 20000000}` case for the regression that a broader "any host-owned
+// tests/test_native_threads_native_1088.c's `struct timespec nap = {0,
+// 20000000}` for the regression that a broader "any host-owned
 // member" version of this fix introduced and this scoping avoids.
 #include <wchar.h>
 

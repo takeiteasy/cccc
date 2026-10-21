@@ -12,7 +12,7 @@
 // Only the *type* is asserted here (-m does not build/run the output). The
 // full round trip -- the ND_VLA_PTR expression case, declaration-hoisting
 // order, and the subscript pointer-arithmetic fix -- is covered end-to-end
-// by tools/comptime_native_smoke.py's vla_964 case (#964).
+// by tests/test_native_vla_964.c.
 
 int main(void) {
     int n = 4;

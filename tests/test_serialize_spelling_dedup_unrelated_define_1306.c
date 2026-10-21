@@ -43,8 +43,7 @@
 // tests/test_serialize_vendored_multi_tu_include_1304.c's spelling variant,
 // re-verified green by this fix.
 //
-// tools/comptime_native_smoke.py's
-// case_spelling_dedup_unrelated_define_1306 is the load-bearing
+// tests/test_native_spelling_dedup_unrelated_define_1306.c is the load-bearing
 // VM-42-to-native-42 proof -- a plain -m shape assertion alone doesn't
 // invoke the host compiler and can't see the "unknown type name" this
 // fixes.

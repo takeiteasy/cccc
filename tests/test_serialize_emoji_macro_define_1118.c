@@ -21,7 +21,7 @@
 // macro names defined AND undefined at file scope, used in between. The
 // block-scope variant lives on through tests/suites/test_suite_misc.c's
 // worm/snake test, which is back on the native corpus since this fix.
-// See tools/comptime_native_smoke.py case 131 for the -m-output assertion.
+// See tests/test_serialize_emoji_macro_1118_m.c for the -m-output assertion.
 
 #define 🪱 - ~
 #define 🐍 ~-

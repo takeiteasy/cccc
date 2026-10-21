@@ -36,7 +36,7 @@
 //
 // This fixture pair covers all three Obj shapes verified reproducing
 // during investigation: a `static` variable, an external-linkage global,
-// and a function. tools/comptime_native_smoke.py's case 77 is the
+// and a function. tests/test_native_dup_enum_obj_1016_*.c are the
 // load-bearing proof that the resulting native binary actually links and
 // runs, since a colliding enumerator/identifier is a host *compile*
 // failure no -m shape assertion alone can see.

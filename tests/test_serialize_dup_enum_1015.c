@@ -24,7 +24,7 @@
 // Verified this exact program printed `AA1015` unrenamed under both enums
 // before this fix -- a host "redefinition of enumerator" compile error,
 // even though #1014 had already renamed the colliding tag apart
-// (`enum E1015__cccc_dup0`). tools/comptime_native_smoke.py's case 76 is
+// (`enum E1015__cccc_dup0`). tests/test_native_dup_enum_1015_*.c are
 // the load-bearing proof that the resulting native binary actually links
 // and runs, since a colliding enumerator is a host *compile* failure no -m
 // shape assertion alone can see.

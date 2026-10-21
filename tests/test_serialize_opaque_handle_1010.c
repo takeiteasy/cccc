@@ -18,8 +18,8 @@
 // definition available. Fixed via TypeNameRecord.defines_type +
 // find_tag_name_for_provenance() (src/serialize.c). Verified this exact
 // program printed no `struct DyAtoms1010` definition anywhere before the
-// fix. tools/comptime_native_smoke.py's case is the load-bearing proof the
-// resulting native binary actually links and runs.
+// fix. tests/test_native_opaque_handle_multi_tu_1010_*.c are the load-bearing
+// proof the resulting native binary actually links and runs.
 #include "fixtures/opaque_handle_1010.h"
 
 int main(void) {

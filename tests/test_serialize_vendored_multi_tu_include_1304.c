@@ -20,7 +20,7 @@
 // between -- see push_emit_directive's own comment. This file's own #include
 // (never defining the macro) is deliberately listed first on the command
 // line so the dedup hit lands here, exercising the relocation directly.
-// tools/comptime_native_smoke.py's case_vendored_multi_tu_include_1304 is
+// tests/test_native_vendored_multi_tu_include_1304.c is
 // the load-bearing VM-42-to-native-42 proof -- this file's own -m shape
 // assertion can't see a link failure any more than #1301's own test could.
 // CCCC_FLAGS: tests/fixtures/vendored_1304_b.c

@@ -23,7 +23,7 @@
 // first, so native even compiles a variadic *definition*) -- it instead
 // asserts the guest-folded constant itself is comfortably >= every
 // measured host size, on both the VM path (this file) and -m's printed
-// text (tools/comptime_native_smoke.py case 97).
+// text (tests/test_serialize_va_list_size_1059_m.c).
 
 #include "stdarg.h"
 

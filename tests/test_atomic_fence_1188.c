@@ -12,8 +12,8 @@
 // loads), and the VM's GIL makes the VM side trivially ordered regardless.
 // It only demonstrates the classic publish/subscribe pattern compiles and
 // runs correctly on both backends. The actual proof that a real fence
-// instruction is emitted lives in tools/comptime_native_smoke.py, which
-// asserts on the -m output text.
+// instruction is emitted lives in tests/test_serialize_atomic_fence_1188_m.c,
+// which asserts on the -m output text.
 #include <threads.h>
 #include <stdatomic.h>
 

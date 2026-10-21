@@ -9,9 +9,9 @@
 // `break`), in reverse source order, with `default:` always forced last
 // (destroying fallthrough), and with GNU case ranges collapsed to their
 // start value. This asserts the fix's source-order/multi-statement/case-
-// range/non-last-default shape directly on -m output; #1005's smoke case in
-// tools/comptime_native_smoke.py is the load-bearing proof that the
-// resulting program actually returns the right answer natively.
+// range/non-last-default shape directly on -m output;
+// tests/test_native_switch_break_continue_1005.c is the load-bearing proof that
+// the resulting program actually returns the right answer natively.
 int main(void) {
     int r = 0;
     int x = 1;

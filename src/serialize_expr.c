@@ -278,8 +278,8 @@ bool is_noop_expr(Node *node) {
 // the host header too (member ACCESS already re-resolves correctly for
 // those, see type_def_is_from_include_suppressed()'s own comment), so a
 // plain member-path store to one of those is fine exactly as emitted --
-// see tools/comptime_native_smoke.py's own `struct timespec nap = {0,
-// 20000000}` case, which a broader "any member of a host-owned type"
+// see tests/test_native_threads_native_1088.c's `struct timespec nap = {0,
+// 20000000}`, which a broader "any member of a host-owned type"
 // check wrongly flagged as an unrepresentable non-zero store. `__opaque`
 // is CCCC's own invention and never exists on the host, so storing
 // through it is the only shape that's actually unrepresentable once the

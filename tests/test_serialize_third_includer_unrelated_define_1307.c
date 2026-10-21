@@ -38,8 +38,7 @@
 // own scenarios all still relocate/don't-relocate correctly under this
 // narrower check -- their own tests are re-verified green by this fix.
 //
-// tools/comptime_native_smoke.py's
-// case_third_includer_unrelated_define_1307 is the load-bearing
+// tests/test_native_third_includer_unrelated_define_1307.c is the load-bearing
 // VM-42-to-native-42 proof -- a plain -m shape assertion alone doesn't
 // invoke the host compiler and can't see the "undeclared identifier"
 // this fixes.

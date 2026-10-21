@@ -13,10 +13,9 @@
 // Since every such cast is an implicit conversion from `void *` (which
 // converts to any object pointer with no cast at all), the ND_CAST case
 // now emits the operand bare when the destination is a pointer to an
-// anonymous aggregate. tools/comptime_native_smoke.py's
-// case_anon_struct_ptr_cast_1300 is the load-bearing check: it asserts the
-// -m output carries no synthesized `(struct {` cast and compiles clean
-// under -Werror=incompatible-pointer-types.
+// anonymous aggregate. tests/test_serialize_anon_struct_ptr_cast_1300_m.c is
+// the load-bearing check: it asserts the -m output carries no synthesized
+// `(struct {` cast and compiles clean under -Werror=incompatible-pointer-types.
 
 #include <stdlib.h>
 

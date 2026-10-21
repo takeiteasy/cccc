@@ -16,7 +16,7 @@
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
 //   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
-//   clean, host_tests (also run by test), fuzz_replay, comptime_native_smoke,
+//   clean, host_tests (also run by test), fuzz_replay, test_smoke,
 //   test_leaks,
 //   test / test_vm /
 //   test_native / test_release / test_msan / test_ubsan / test_asan /
@@ -761,24 +761,35 @@ BuildTarget *fuzz_replay(Builder *ctx) {
     return step;
 }
 
-// ---- comptime_native_smoke -------------------------------------------------
-// -m / -c=generated / -c=native serializer regressions (tools/
-// comptime_native_smoke.py).
+// ---- test_smoke ------------------------------------------------------------
+// Multi-step checks of the -m / -c=generated / -c=native output that a single
+// testcheck run cannot express (host compiler argv, artifacts written or not,
+// linking generated output): one tests/smoke/*.sh script per step, each given
+// the cccc binary.
 
-static BuildTarget *make_native_smoke(Builder *ctx, BuildTarget *cccc) {
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "python3 tools/comptime_native_smoke.py --binary %s",
-             TargetOutput(cccc));
-    BuildTarget *step = RunCustom(ctx, "comptime-native-smoke", cmd);
-    DependsOn(step, cccc);
-    return step;
+static BuildTarget *make_smoke(Builder *ctx, BuildTarget *cccc) {
+    BuildTarget *agg   = RunCustom(ctx, "smoke", "true");
+    const char **files = GlobFiles(ctx, "tests/smoke/*.sh");
+    for (int i = 0; files[i]; i++) {
+        if (strstr(files[i], "/lib.sh"))
+            continue;
+        const char *base = strrchr(files[i], '/');
+        base             = base ? base + 1 : files[i];
+        char cmd[512], name[160];
+        snprintf(cmd, sizeof(cmd), "sh \"%s\" \"%s\"", files[i],
+                 TargetOutput(cccc));
+        snprintf(name, sizeof(name), "smoke-%s", base);
+        BuildTarget *step = RunCustom(ctx, name, cmd);
+        DependsOn(step, cccc);
+        DependsOn(agg, step);
+    }
+    return agg;
 }
 
 [[cccc::build_target]]
-BuildTarget *comptime_native_smoke(Builder *ctx) {
+BuildTarget *test_smoke(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
-    return make_native_smoke(ctx, make_cccc_exe_named(ctx, bt, "cccc"));
+    return make_smoke(ctx, make_cccc_exe_named(ctx, bt, "cccc"));
 }
 
 // ---- area tests ------------------------------------------------------------
@@ -922,7 +933,7 @@ BuildTarget *test_extra(Builder *ctx) {
     for (int i = 0; i < NAREAS; i++)
         DependsOn(all, area_tests_with(ctx, cccc, check, i, LOOSE_VM));
     DependsOn(all, native_loose_tests(ctx, cccc, check));
-    DependsOn(all, make_native_smoke(ctx, cccc));
+    DependsOn(all, make_smoke(ctx, cccc));
     return all;
 }
 

@@ -12,14 +12,14 @@
 //
 // src/codegen_func.c packs `spill_param_count` (an `int`) into the ENT3
 // instruction operand's high word exactly this way:
-//   ent3_operand = (long long)stack_size | ((long long)spill_param_count << 32);
+//   ent3_operand = (long long)stack_size | ((long long)spill_param_count <<
+//   32);
 // With the cast dropped the shift ran in 32 bits, the high word came out
 // zero, op_ENT3_fn read `spill_param_count == 0`, and no argument register
 // was ever spilled to its parameter slot -- so every parameter read back as
 // its zero-initialised slot. No -m shape assertion catches it; only running
 // the -c=native output does (this file, under the suite's --native round
-// trip, plus tools/comptime_native_smoke.py's
-// case_widening_cast_shift_1312).
+// trip, plus tests/test_serialize_widening_cast_shift_1312_m.c).
 //
 // Fixed by serialize_shift_operand() in serialize_expr.c: a shift operand
 // that is a would-be-suppressed widening cast past `int` now keeps its

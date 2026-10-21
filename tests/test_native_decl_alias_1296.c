@@ -31,8 +31,8 @@
 // proves the replayed real declarations alone are enough for a native
 // build to accept every one of these calls; the id_t-parameter and
 // alias-preservation fixes themselves stay covered by
-// tools/comptime_native_smoke.py's case_bundled_chain_prototype_still_
-// emitted_1297 and case_bundled_ptr_typedef_alias_1296 (bundled->bundled
+// tests/test_serialize_bundled_chain_prototype_1297_m.c and
+// tests/test_serialize_bundled_ptr_typedef_alias_1296_m.c (bundled->bundled
 // chains #1297 deliberately leaves uncaptured).
 #include "native_decl_alias_1296.h"
 

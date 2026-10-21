@@ -18,8 +18,8 @@
 // member type the incomplete stub never referenced is still collected
 // ahead of its user). Verified this exact program printed a bare
 // `struct DyAtoms1010;` (no members) before the fix.
-// tools/comptime_native_smoke.py's case is the load-bearing proof the
-// resulting native binary actually links and runs.
+// tests/test_native_opaque_handle_multi_tu_1010_*.c are the load-bearing proof
+// the resulting native binary actually links and runs.
 #include "fixtures/opaque_handle_1010.h"
 
 struct DyAtoms1010 {

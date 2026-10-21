@@ -277,7 +277,8 @@ area:
 | `test_parallel` | `test_kernel_*`, `test_opencl_*`, `test_openmp_*` |
 | `test_macros` | `tests/macros/` |
 | `test_misc` | everything else |
-| `test_extra` | all of the above plus `comptime_native_smoke` |
+| `test_smoke` | `tests/smoke/*.sh` multi-step checks |
+| `test_extra` | all of the above plus `test_smoke` |
 
 ```bash
 ./cccc --build build.c --build-target=test_warnings --build-jobs=8

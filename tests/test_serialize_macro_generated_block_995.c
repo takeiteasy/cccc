@@ -18,7 +18,7 @@
 //
 // Not runnable end-to-end under -m (no -c=native link step here; the
 // end-to-end VM 42 -> native 42 round trip lives in
-// tools/comptime_native_smoke.py case 65), so this is a pure shape
+// tests/smoke/generated_block_links.sh), so this is a pure shape
 // assertion.
 
 [[cccc::comptime]]

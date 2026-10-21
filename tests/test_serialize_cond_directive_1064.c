@@ -24,7 +24,7 @@
 // path, so this file's only job is to keep exiting 42 there while giving
 // a standing regression guard
 // for the shape: a taken #ifdef branch defining a macro a later #ifndef
-// depends on. See tools/comptime_native_smoke.py case 105 for the
+// depends on. See tests/test_serialize_cond_directive_1064_m.c for the
 // -m-output-has-no-conditional-line assertion.
 
 #ifdef __CCCC__

@@ -3333,7 +3333,7 @@ TypeName *find_generated_uncaptured_typedef(SerializeContext *ctx, Type *ty) {
 // padded literal with whatever the real host's own (possibly smaller, via
 // the header's own #include_next hand-off) va_list/jmp_buf size happens
 // to be, defeating the padding #1054/#1059 built specifically to avoid
-// depending on that. (Found via comptime_native_smoke.py's own case 97
+// depending on that. (Found via tests/test_serialize_va_list_size_1059_m.c
 // regressing when this exclusion was missing -- its "-m folds
 // sizeof(va_list) to exactly 64" assertion is exactly this invariant.)
 static bool type_header_is_compiler_owned(SerializeContext *ctx, Type *ty) {

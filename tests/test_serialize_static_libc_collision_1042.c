@@ -20,7 +20,8 @@
 // safe: it's file-local, and every reference goes through the same Obj,
 // so correctness survives the rename regardless of what name it lands on
 // -- this test checks the computed VALUE, not the emitted symbol name
-// (tools/comptime_native_smoke.py's own case checks the -m text directly).
+// (tests/test_serialize_static_libc_collision_1042_m.c checks the -m text
+// directly).
 //
 // `index` (a legacy BSD string function CCCC's own bundled string.h does
 // NOT declare, unlike `getmode`/<unistd.h> which the real harness's

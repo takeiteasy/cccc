@@ -6,7 +6,7 @@
 // each stub's `const void *` parameter must copy ty_void before marking it
 // const, not mutate the shared singleton in place (a first attempt at this
 // did exactly that and corrupted every plain `void` in the rest of the
-// compile, caught by this suite's own comptime_native_smoke ctor/dtor case
+// compile, caught by tests/test_native_ctor_dtor_native_1020.c
 // turning `void plain_ctor` into `const void plain_ctor`).
 //
 // No #include <string.h> anywhere in this file, deliberately: the VM path
