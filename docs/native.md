@@ -174,9 +174,9 @@ REPL (`-r`), and the `-0`…`-3` safety levels. Run those against the default
 VM build. The VM's runtime safety options (`--bounds-checks`,
 `--uaf-detection`, …) are dropped with a warning; `--checked-pointers` is
 the exception and is enforced in the emitted C under `-c=native` and `-m` —
-see [safety.md](safety.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
+see [safety.md](safety-checked-pointers.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
 ran during the build — see
-[Profiling comptime code](macros.md#profiling-comptime-code).
+[Profiling comptime code](macros-debugging.md#profiling-comptime-code).
 
 Plain runtime `#include <stdio.h>` and other real system headers work here —
 see [headers.md](headers.md) for how header resolution and host-header

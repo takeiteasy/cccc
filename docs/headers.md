@@ -239,7 +239,7 @@ real host compiler, so header handling shifts:
   qualifies; one reached only via `#include @comptime`/`@build`/`@test`
   does not, and `-c=generated` reports a compile error rather than writing
   C nothing declares the type in. See
-  [macros.md](macros.md#emit-directives-and-includes-in-generated-output).
+  [macros.md](macros-global.md#emit-directives-and-includes-in-generated-output).
 - A header reached through a chain of captured, ordinary (non-bundled)
   `#include`s is treated as captured too, however many hops the chain
   runs — a user header's own `#include "helper.h"`, whose own

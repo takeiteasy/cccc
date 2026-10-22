@@ -80,7 +80,7 @@ included. Pointer members are copied as raw pointer bytes. Padding is not
 written, and `Point_deserialize` zeroes the padding of the value it returns.
 
 The `Serialize(type, expr, buf)` and `Deserialize(type, buf)` builders behind
-these attributes are described in [macros.md](macros.md#macro-standard-library).
+these attributes are described in [macros.md](macros-stdlib.md#macro-standard-library).
 
 ## Enum Strings
 
@@ -591,7 +591,7 @@ without the include), replaces the built-in one.
 
 A handler for a struct reads the attributes on its members with
 `MemberHasAttr` and `MemberAttrArg`; see
-[Member attributes](macros.md#member-attributes).
+[Member attributes](macros-attributes.md#member-attributes).
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
 

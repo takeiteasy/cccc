@@ -84,10 +84,10 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
-| `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](safety.md#checked-pointers) |
-| `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [safety.md](safety.md#checked-pointers)) |
-| `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](safety.md#checked-pointers) |
-| `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](safety.md#checked-regions) |
+| `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](safety-checked-pointers.md#checked-pointers) |
+| `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [safety.md](safety-checked-pointers.md#checked-pointers)) |
+| `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](safety-checked-pointers.md#checked-pointers) |
+| `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](safety-checked-regions.md#checked-regions) |
 | `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
 | `global` / `local` / `constant` / `private` / `generic` | CCCC (declaration specifiers) | ✓ | Marks the address space a pointer refers to, or an object lives in, for `[[cccc::kernel]]` code; see [Address Spaces](#address-spaces) |
 | `vector_size(N)` | GNU | ✓ | Makes the declared scalar type an `N`-byte vector (16, 32 or 64); see [Vector Size](#vector-size) |
@@ -941,13 +941,13 @@ the bounds-carry-within-an-expression semantics, the whole-function
 propagation rule that lets an interior pointer assigned into a plain local
 (`int *q = p + k;`) stay checked too (#919), and why this exists
 (`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
-array): [safety.md § Checked Pointers](safety.md#checked-pointers).
+array): [safety.md § Checked Pointers](safety-checked-pointers.md#checked-pointers).
 
 Enforcement is VM-only: `-c=native`/`-m`/`-c=generated` warn and drop
 `--checked-pointers` rather than enforcing it, but the six attributes are
 always parsed, type-checked, and stripped from that output regardless (ABI-
 transparent, #482/#488) — see [safety.md § Checked
-Pointers](safety.md#checked-pointers) for the full native/serialized-output
+Pointers](safety-checked-pointers.md#checked-pointers) for the full native/serialized-output
 note.
 
 **Bounds-safe interfaces** (#488): annotating a *parameter* with any of
@@ -959,7 +959,7 @@ CCCC verifies (via the same `CHKAB` opcode above, under
 `--checked-pointers`) that the argument's own bounds imply the parameter's
 declared bounds evaluated with that call's actual arguments — closing the
 one caller-side gap this layer otherwise left. See [safety.md § Bounds-safe
-interfaces](safety.md#checked-pointers) for the full reference, including
+interfaces](safety-checked-pointers.md#checked-pointers) for the full reference, including
 the substitutability rule for non-trivial arguments and the same-TU
 callee-body caveat.
 
@@ -968,7 +968,7 @@ directly — `int a _Checked[10]` / `char s _Nt_checked[11]` — so an array's o
 extent is checked the same way a checked pointer's `count(n)` is, with no new
 opcode. These are keyword-positional suffixes (like `_Checked { ... }`/
 `_Unchecked { ... }` below), not attributes, so they have no `[[cccc::...]]`
-spelling. See [safety.md § Checked Arrays](safety.md#checked-arrays) for the
+spelling. See [safety.md § Checked Arrays](safety-checked-types.md#checked-arrays) for the
 full reference.
 
 ### `assume` / `dynamic` (CCCC-specific)
@@ -997,7 +997,7 @@ bounds to check against (`use 'assume' ... or give the source a bounds
 declaration`), rather than silently falling back to `--bounds-checks`,
 which has no upper bound at all for a stack or global source (see "Why
 this exists" in [safety.md § Checked
-Pointers](safety.md#checked-pointers)).
+Pointers](safety-checked-pointers.md#checked-pointers)).
 
 Both require a checked kind (`single`/`array`/`ntarray`); with `array`/
 `ntarray` a bounds form is also required (`bounds(unknown)` is accepted for
@@ -1011,7 +1011,7 @@ same way as the rest of runtime enforcement: with `--checked-pointers` off,
 an annotated cast stays a plain cast. Full reference, including the
 compiler-generated-temp desugaring and the v1 scope (a cast expression
 only, not a function argument or return value): [safety.md § Checked
-Pointers § Bounds casts](safety.md#checked-pointers).
+Pointers § Bounds casts](safety-checked-pointers.md#checked-pointers).
 
 ### `dynamic_check` (CCCC-specific)
 
@@ -1028,7 +1028,7 @@ consume it as a proven fact without evaluating it at all (tracked as a
 follow-up). `_Dynamic_check` is recognized positionally (an identifier not
 already in scope, immediately followed by `(`), so it never shadows a real
 function of that name. Full reference: [safety.md § Checked Pointers §
-`dynamic_check`](safety.md#checked-pointers).
+`dynamic_check`](safety-checked-pointers.md#checked-pointers).
 
 ### `checked` / `unchecked` (CCCC-specific)
 
@@ -1063,7 +1063,7 @@ fire in `-c=native` too; the attributes themselves are stripped from
 `-E`/`-m`/`-c=generated`/`-c=native` output the same way the six
 checked-pointer attributes are. Full reference, including the exact v1 ban
 list and the header-contamination exemption: [safety.md § Checked
-Regions](safety.md#checked-regions).
+Regions](safety-checked-regions.md#checked-regions).
 
 ---
 
@@ -1176,8 +1176,8 @@ Custom comptime attributes run on file-scope declarations (types, typedefs,
 functions, and globals) and on members of file-scope structs and unions. Their
 arguments are parsed as expression AST nodes and passed to the registered
 handler after the decorated target has been built; the handler reads them with
-`StringLiteralValue` and `ConstIntValue` ([macros.md](macros.md#custom-attributes)). Member attributes are
-described in [macros.md](macros.md#member-attributes). An `@name` with no
+`StringLiteralValue` and `ConstIntValue` ([macros.md](macros-attributes.md#custom-attributes)). Member attributes are
+described in [macros.md](macros-attributes.md#member-attributes). An `@name` with no
 registered handler is dropped with a `-Wunknown-attributes` warning, which is
 on by default ([warnings.md](warnings.md)).
 `__declspec` (Windows) is reserved as a future fourth fallback category.

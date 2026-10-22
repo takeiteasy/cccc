@@ -480,7 +480,7 @@ expansion has one. What generated code does carry is an **expansion
 origin**: the chain of macro calls / attribute handlers / file-scope
 generation that produced it, walked by the diagnostic printer to render
 the `note: in expansion of ...` chain described in
-[macros.md § Expansion backtrace](macros.md#expansion-backtrace). This is
+[macros.md § Expansion backtrace](macros-debugging.md#expansion-backtrace). This is
 compiler-diagnostics plumbing, not part of the source-map/PC-symbolization
 API above — it isn't queryable through `cc_pc_to_source`/
 `cc_get_source_location`, only surfaced on a compile error or warning.
