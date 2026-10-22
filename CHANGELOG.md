@@ -7,11 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-10-22
+
 - Added: debugger `reload` and `fix` expand calls to comptime functions in a
   live session, including from `--watch`. A reload also accepts changed or new
   comptime functions and variables: matching variables and statics keep their
   values, and the file's functions that call comptime code expand again.
-  File-scope comptime calls are still refused.
+  File-scope comptime calls in the reloaded file run again, and the
+  functions they generate are redefined.
 - Fixed: a `fix` or `reload` whose source ends inside a call's arguments is
   reported as an error instead of exiting the process.
 
