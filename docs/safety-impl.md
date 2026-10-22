@@ -32,3 +32,24 @@ Enforced in `CHKP3`, the gate before every dereference under `--pointer-checks` 
 **Lazy per-function push.** `ENT3` pushes an epoch only when the body emits `STKTAG` or a recorded `LEA3`. `LEV3` and `CALLT` retire an epoch only when the top entry's saved `bp` matches the unwinding frame, so no per-frame flag is needed. Sparing use of `__builtin_dynamic_object_size` costs only the functions on the path to its buffer.
 
 An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and aborted at function exit, which confused "address taken" with "escaped" and flagged benign code. It was removed.
+
+## Terminator guard
+
+- `CHKNT` traps a store of a non-zero value into the widened slot, keyed off the `[lo, hi)` `CHKR` already computed (`addr == hi - elem_size && val != 0`). `CHKNTZ` traps a non-all-zero-bytes store for pointees whose store never goes through one value register; it scans the source bytes before the `memcpy` runs, so the slot is never clobbered.
+- Floating-point values move into an integer register first (`FR2R`, `FR2R_F32`), so `-0.0` is non-zero. `long double` is unguarded because its slot is 16 bytes but the store is an 8-byte flat-double `FSTR`; vectors and `_Complex` have no opcode that reads their full representation.
+- `s[n] += 1` and `s[n]++` desugar in `to_assign()` to `tmp = &s[n]; *tmp = *tmp + 1`, and the synthesized store carries the same `checked_bounds_lo/hi` and `checked_nt_terminator`. An `_Atomic` element takes the CAS-loop desugar and gets its own `CHKNT` ahead of `ACAS`, checking the desired value. `CHKNTZ` has no CAS counterpart because C has no compound assignment on aggregates.
+- Gap: `tbl[n].a = 1` stores through an `ND_MEMBER` lvalue, and `set_checked_deref_bounds()`/`checked_prop_attach_scan()` stamp `checked_nt_terminator` only on the outer `ND_DEREF`.
+- Presence validation is not implemented: `count(n)` is a lower bound in Checked C, and locating the real terminator needs a read past `hi`.
+
+## Type shadow
+
+- A byte-granular shadow keyed by `(char*)ptr - vm->heap_seg`; `CHKT3` checks, stamps and clears. Allocations resolve through `vm->sorted_allocs`, the same binary search as `--bounds-checks`, so interior pointers work.
+- Globals need no lifetime tracking, since `data_seg` is never reused; only the struct-return buffer pool is cleared on each hand-out. The stack is excluded because slot reuse would need liveness tracking to avoid the false positives that the dangling-pointer bookkeeping exists to prevent.
+- The VM has no optimiser, so every dereference takes the ordinary `emit_load`/`emit_store` path and its `CHKT3`.
+- **Host-call backstop.** Indirect calls (function pointer, `dlsym`) are covered too. `ffi_shadow_clear_extent` (`src/ops.c`) clears a heap address by allocation extent and a data-segment address from the pointer to the end of the segment. Classification tiers only ever reduce clearing relative to an unclassified name: read-only (no clear), bounded-write (clear the statically known extent through the receiving argument; other pointer arguments get the default clear unless the rule marks them read-only, as for `strto*` `nptr`), and the printf family (read-only except the output buffer, falling back to the default when the format is unreadable, non-literal, truncated or contains `%n`). Format strings are read directly from the guest pointer.
+- **`qsort`.** It only permutes whole elements, so a uniform shadow pattern survives. The check runs before and, unconditionally, after the host call, because the comparator is guest code whose stores can stamp a stale position even on an already-cleared range. A non-uniform range clears exactly `[base, base+nmemb*size)`. `bsearch` writes nothing and is read-only.
+- **Sparse page table.** Shadow pages (64 KiB) are allocated on first stamp and freed when a single clear zeroes one. Pages reaching zero through several partial clears are queued for an amortized sweep, rate-limited by the VM cycle counter. A missing page already means "no effective type", so freeing is unobservable. `--vm-profile` reports `shadow_sweeps`, `shadow_pages_swept` and `shadow_pages_live`.
+
+## Uninitialized detection
+
+`MARKI` marks a variable initialized after assignment and `CHKI` validates before a read, keyed by BP address plus offset. A scalar local with `Obj.addr_taken`, `is_captured` or `is_block_var` is exempt.
