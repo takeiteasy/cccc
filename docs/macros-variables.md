@@ -80,7 +80,7 @@ array members are not accessible this way.
   marked `[[cccc::comptime]]` (or written inside a `#pragma cccc comptime
   begin/end` region) declares no object at all, including a function-pointer
   typedef, and is unaffected — see
-  [Pre-parse macro declaration context](macros-execution.md#pre-parse-macro-declaration-context).
+  [Pre-parse macro declaration context](macros-execution.md#what-comptime-code-can-see).
 
 ### constexpr variables
 

@@ -67,7 +67,7 @@ with a diagnostic: `test_setup`/`test_teardown` hooks and negative tests
 return assertions are individually `SKIP`ped in the TAP output. A suite using
 any of these carries `CCCC_NATIVE_SKIP` or accepts the skips. Known
 VM-versus-native divergences are in
-[native.md](native.md#serialized-output-divergences).
+[native.md](native-differences.md#behaviour-differences).
 
 To reproduce a native divergence against a specific host compiler, set
 `CCCC_NATIVE_CC` (a real gcc on macOS needs installing separately, e.g.

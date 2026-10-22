@@ -226,7 +226,7 @@ The canonical form used in this document and in CCCC examples is `[[cccc::compti
   comptime code, and a body that fails to compile in the isolated comptime
   context is a compile error. A constant-initialized global declared in the
   main source file is visible (its snapshot value, not a live reference — see
-  [Pre-parse macro declaration context](macros-execution.md#pre-parse-macro-declaration-context));
+  [Pre-parse macro declaration context](macros-execution.md#what-comptime-code-can-see));
   any other initialized global is not.
 - Global-generation macros run before the main parse, so generated definitions
   are visible everywhere. Inline macros expand at the call site and follow

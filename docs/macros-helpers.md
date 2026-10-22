@@ -121,7 +121,7 @@ regular `#include`: a plain, unrouted `#include`d header's **declarations**
 (types, tags, prototypes, enum constants) already reach the comptime pass on
 demand, whether or not that header defines any `[[cccc::comptime]]` code of
 its own — see
-[Pre-parse macro declaration context](macros-execution.md#pre-parse-macro-declaration-context).
+[Pre-parse macro declaration context](macros-execution.md#what-comptime-code-can-see).
 `@comptime`/`@shared` are still necessary for a header's `#define` macros
 (never forwarded to comptime automatically) and for keeping a comptime-only
 header out of the runtime TU entirely; they are **not** needed just to make a
@@ -178,7 +178,7 @@ int main(void) {
 ```
 
 `@shared` is valid on `#include` and `#define` (see
-[Macro isolation between comptime functions](macros-execution.md#macro-isolation-between-comptime-functions)
+[Macro isolation between comptime functions](macros-execution.md#macro-isolation)
 for `#define @shared`'s per-macro semantics). Applying it to any other
 directive (e.g. `#undef @shared`, `#ifdef @shared`) is a compile error.
 

@@ -164,7 +164,7 @@ investigation found `include/sys/statvfs.h` missing the same
 for #1031, fixed to match. One methodological note worth keeping: `-E` is
 the wrong probe for this class (it shows raw preprocessed text, before
 serialization resolves the sentinel/layout) — use `-m` instead. See
-[headers.md](headers-native.md#host-owned-typestruct-layout-under-self-hosting).
+[headers.md](native-impl.md#host-owned-layouts-under-self-hosting).
 
 <details>
 <summary>Round 17 and earlier history</summary>

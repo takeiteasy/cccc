@@ -113,7 +113,7 @@ runs them on its own thread pool.
     [headers.md](headers.md).
 [^2]: The host's own `<threads.h>` is never used: Darwin has none, and glibc's
     error codes differ from CCCC's. `call_once` is a real function on both back
-    ends. See [Serialized-output divergences](native.md#serialized-output-divergences).
+    ends. See [Serialized-output divergences](native-differences.md#behaviour-differences).
 [^3]: Signal handlers and `SIGEV_THREAD` notifications (`<aio.h>`, `<mqueue.h>`)
     run on a VM thread at a safe point in the dispatch loop. They never start a
     guest-visible pthread.

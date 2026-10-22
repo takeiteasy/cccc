@@ -39,7 +39,7 @@ table — neither exists natively, so both are a hard compile error under
 `-c=native`/`-m`/`-c=generated`. `__builtin_return_address` alone still
 serializes and runs there, mapping to a real host return address instead of a
 VM bytecode offset — see [native.md § Serialized-output
-divergences](native.md#serialized-output-divergences).
+divergences](native-differences.md#behaviour-differences).
 
 ### Embedder C API
 

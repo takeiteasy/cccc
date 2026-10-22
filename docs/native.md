@@ -1,327 +1,80 @@
 # Native Compilation (`-c=native`)
 
-By default CCCC compiles your program to bytecode and runs it in the built-in
-VM. `-c=native` instead serializes the fully-resolved program back to portable
-C and hands it to a real host compiler, producing a normal native executable —
-full toolchain performance, real system libraries, no VM overhead.
+Serialize the resolved program back to portable C and build it with a real host compiler: full toolchain speed, real system libraries, no VM.
 
-The front end (preprocessor, parser, compile-time macros) is identical to a
-normal VM build. Only what happens *after* the AST is resolved changes.
+The front end (preprocessor, parser, comptime) is the same as a VM build; only what happens after the AST is resolved changes. Hosts: macOS (aarch64), Linux (aarch64, x86_64).
 
-Supported host platforms: macOS (aarch64) and Linux (aarch64, x86_64).
+## Output modes
 
-## The output modes
-
-| Flag | What it does | Typical use |
+| Flag | Does | Use |
 |---|---|---|
-| *(none)* | Compile to VM bytecode, run it in the interpreter | Default: portability, the debugger, the safety suite, iteration with no system compiler |
-| `-m` / `--dump-expanded` | Serialize the AST to portable C, print to stdout; don't compile | Seeing what CCCC would hand a host compiler |
-| `-c=generated` | Serialize to C, write to a file (`-o`, default `./a.gen.c`); don't compile | Build systems that drive their own `cc` |
-| `-c=native` | Serialize to C, compile + link a real executable (`-o`, default `./a.out`) | The production path |
-| `-c=object` | Serialize to C, compile to an object file without linking (`-o`, default `<input>.o`) | Libraries, or linking with other objects yourself |
+| *(none)* | Compile to bytecode, run in the VM | Default: debugger, safety suite, no system compiler needed |
+| `-m` / `--dump-expanded` | Print the serialized C to stdout | See what the host compiler would get |
+| `-c=generated` | Write C to `-o` (default `./a.gen.c`) | Build systems that run their own `cc` |
+| `-c=native` | Compile and link (`-o`, default `./a.out`) | The production path |
+| `-c=object` | Compile to an object (`-o`, default `<input>.o`) | Libraries, custom linking |
 
-All three serializing modes run the same tree walk and are subject to
-everything in this document identically — "under `-c=native`" below means all
-three unless stated otherwise.
+The serializing modes all follow the rules on this page and in [native-differences.md](native-differences.md). `--emit-cccc` keeps CCCC-only syntax (`@` shorthand, checked-pointer qualifiers) instead of lowering it, which needs `CCCC_NATIVE_CC` set to a `cccc`-aware compiler.
 
-`--emit-cccc` is a dialect switch layered on top: by default the serializer
-strips CCCC-only syntax (`@`-attribute shorthand, checked-pointer qualifiers,
-…) down to portable C; `--emit-cccc` preserves it, for round-tripping CCCC's
-own extended syntax back through its own front end. `-c=native --emit-cccc`
-therefore needs `CCCC_NATIVE_CC` pointed at a `cccc`-aware compiler.
-
-## Invoking it
+## Invoking
 
 ```sh
 cccc -c=native -o program program.c
 CCCC_NATIVE_CC=clang cccc -c=native -o program program.c
-cccc -c=native -o program a.c b.c c.c   # multiple inputs, one program
+cccc -c=native -o program a.c b.c c.c      # several inputs, one program
 ```
 
-`-c=native` is whole-program: pass any number of source files in one
-invocation and the front end links their ASTs into a single program before
-serializing one temporary `.c` and spawning the host `cc` once. This is the
-shape a [`CcccExecutable` build target](build-targets.md#target-kinds) drives.
+The program is whole: all inputs are linked into one AST, serialized to one temporary `.c`, and the host compiler runs once. The host is `CCCC_NATIVE_CC`, else the first of `cc`, `clang`, `gcc` on `PATH`.
 
-The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
-`gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
+## Flags
 
-### `[[cccc::test]]`/`[[cccc::build]]` alongside `main()`
+| Flag | Effect |
+|---|---|
+| `-I`, `-i`/`--isystem`, `-F`, `--iframework`, `-D`, `-U`, `-L`, `-l`, `-O<n>` | Forwarded to the host compiler |
+| `--std=` | Only picks the `-std=` spelling forwarded ([native-std.md](native-std.md)); the output is always GNU C11 |
+| `--link-arg=ARG` | Appended verbatim to the link line (repeatable; `-c=native` only) |
+| `--deps-file=PATH` | Writes a make-style dependency rule for every file the front end opened[^deps] |
+| `--no-emit-tests` | Drops `[[cccc::test]]` bodies from the output |
 
-A program compiled with `-c=native` (or `-m`/`-c=generated`) may also carry
-its own inline `[[cccc::test]]` functions and/or a
-`[[cccc::build]]`/`[[cccc::build_target]]` recipe — see
-[build.md's Build recipes in a program file](build-recipes.md#build-recipes-in-a-program-file)
-and [testing.md](testing.md). Under plain `-c=native` (not
-`--testing=native`) the two kinds are treated differently:
-
-- `[[cccc::test]]` bodies **are emitted**, alongside the same
-  `__builtin_assert_*` runtime `--testing=native`'s generated harness uses —
-  but with no harness driving them, each assertion call is inert (it prints
-  "called outside a test run" and returns). Pass `--no-emit-tests` to drop
-  the bodies entirely instead.
-- `[[cccc::build]]`/`[[cccc::build_target]]` bodies are **always dropped**,
-  regardless of `--no-emit-tests` — the build runtime's `__builtin_build_*`
-  calls are host-side only (see `cc_load_build_runtime`) and have no native
-  lowering, so emitting them would fail to link.
-
-### `--deps-file=PATH`
-
-`--deps-file=PATH` writes a make-style dependency rule — `<output>: <source>
-<source> <resolved-#include> …` — listing every file the front end opened:
-the command-line sources, any `-include` files, and every `#include` it
-resolved from disk (`cccc`'s own bundled standard headers, served from an
-in-memory table, do not appear). It is accepted only alongside `-c=native`,
-`-m`, or `-c=generated`, and never runs the program. A build system reads it
-to know which headers a `-c=native` compile depends on, the same way it would
-read a host `cc`'s `-MMD` output; `--build` mode uses it internally to give
-[`CcccExecutable` targets](build-incremental.md#incremental-builds-and-header-dependencies)
-automatic header-dependency tracking.
-
-### Flags forwarded to the host compiler
-
-`-I`, `-i`/`--isystem`, `-F`, `--iframework`, `-D`, `-U`, `-L`, `-l`, `--std=`, and `-O<n>` are
-passed through the front end to the host `cc`. `-c=native` additionally always
-adds `-lm`, `-pthread`, `-fsigned-char` (CCCC models `char` as signed on
-every target, so the host build must match), and `-w`: warnings come from
-CCCC's own front end under its `-W` options, so the host compiler's warnings
-about the generated C are silenced. Host errors still show. A `#warning` is
-likewise reported (or silenced by `-Wno-cpp`) by the front end and is not
-copied into the generated C.
-
-A program that defines its own function with a library name, such as
-`double fabs(double)`, also gets `-fno-builtin-<name>`, so calls reach the
-program's definition as they do in the VM rather than the host compiler's
-builtin. Compiling `-m` output by hand needs the same flags.
-
-`--link-arg=ARG` (repeatable, `-c=native` only) passes `ARG` verbatim to the
-host link line, after `-L`/`-l` and before the automatic `-lm`/`-pthread`. Use it
-for what `-l` cannot name: a `.o` or `.a`, `-framework X`, `-Wl,...`.
+Always added: `-lm`, `-pthread`, `-fsigned-char` (CCCC's `char` is signed everywhere) and `-w`. Warnings come from CCCC's `-W` options, not the host. A program defining its own library-named function (`double fabs(double)`) also gets `-fno-builtin-fabs`, as do the same flags when compiling `-m` output by hand.
 
 ```sh
 cccc -c=native main.c --link-arg=helper.o -o app
 cccc -c=native main.c --link-arg=-framework --link-arg=CoreServices -o app
 ```
 
-Giving `--link-arg` without `-c=native` is an error.
-
 ### Object files
 
-`-c=object` (aliases `obj`, `o`) compiles with the host `cc -c` and stops
-before linking, so a file without `main` works.
-
 ```sh
-cccc -c=object lib.c                 # writes ./lib.o
+cccc -c=object lib.c                 # ./lib.o
 cccc -c=object a.c b.c -o ab.o       # several inputs need -o
 cc main.c lib.o -o app
 ```
 
-`-l`, `-L` and `--link-arg` are errors, and `#pragma cccc link` libraries are
-dropped; pass them when linking the object. `--test-run` and
-`--testing=native` need an executable and cannot be combined with it.
-Repeating `-c` with a different format (`-c=native -c=object`) is an error.
-A `--build` script gets the same output from a
-[`CcccObject` target](build-targets.md#target-kinds).
+`-l`, `-L` and `--link-arg` are errors with `-c=object`, `#pragma cccc link` libraries are dropped, and `--test-run`/`--testing=native` cannot be combined with it. A `--build` script gets objects from a [`CcccObject` target](build-targets.md#target-kinds).
 
-### How `--std=` is handled
+## Tests and build recipes in the same file
 
-The emitted C is a fixed **GNU C11** floor regardless of what `--std=` you
-pass — the front end accepts the whole C23 superset and the serializer lowers
-everything past C11 (`auto` → the resolved concrete type, single-argument
-`static_assert` → two-argument `_Static_assert`, `nullptr` → `void *`,
-`_BitInt(N)` → a fixed integer container, `[[gnu::…]]` → `__attribute__`, digit
-separators and binary literals folded away). So `--std=` never changes what is
-emitted; it only decides which `-std=` *spelling* to forward to the host
-compiler, so that host doesn't choke on that fixed-floor output.
+| Under plain `-c=native` | Behaviour |
+|---|---|
+| `[[cccc::test]]` bodies | Emitted, but each `Assert*` prints "called outside a test run" and returns |
+| `[[cccc::build]]` / `[[cccc::build_target]]` | Always dropped |
 
-That spelling is chosen by probing the host `cc`:
+See [build-recipes.md](build-recipes.md#build-recipes-in-a-program-file) and [testing.md](testing.md).
 
-- The `gnu<NN>` spelling of a standard is always tried before the strict ISO
-  `c<NN>` one. The serializer emits GNU constructs (statement expressions,
-  `__int128`, `case A ... B` range labels, `__asm__`) unconditionally, and a
-  strict `-std=c<NN>` rejects them — CCCC's own front end only pedantic-warns.
-- The probe never resolves to anything **older than C11** — the emitted C11
-  floor (`_Atomic`, `_Thread_local`, `_Alignas`/`_Alignof`, `_Static_assert`,
-  `_Complex`, all unconditional) needs at least that. A `--std=` naming an
-  older standard (`c99`, `c89`, and their `gnu` spellings) still has its
-  probe run, but against C11's own spellings instead — `--std=c99` forwards
-  `-std=gnu11` (or the newest C11 spelling the host accepts), not a spelling
-  of C99. This describes the emitted file honestly: it is C11 regardless of
-  what `--std=` you passed, so the older standard's spelling would be a lie
-  about the file the host is about to see.
-- With an explicit `--std=` naming C11 or later, the probe only tries
-  spellings of *that* standard (`c23`/`gnu23`/`c2x`/`gnu2x` for C23, and so
-  on) — it never silently descends to an older standard than the one you
-  named. With no `--std=` at all, it descends the ladder toward older
-  standards (bottoming out at C11) and forwards the newest rung the host
-  accepts, or nothing if the host has no usable `-std=` at all.
-- If you pass an explicit `--std=` and the host compiler accepts **none** of
-  the resulting standard's spellings (C11's, for a `--std=` naming C99 or
-  C89), `-c=native` fails with an error naming the compiler and the
-  spellings tried, rather than compiling for a different dialect.
-- With no explicit `--std=`, a host that accepts no `-std=` spelling at all
-  still gets nothing forwarded — but its own *default* dialect is then
-  checked against the same C11 floor (one extra probe, only reached when the
-  ladder already found nothing to forward), and `-c=native` fails rather
-  than handing the emitted file to a host whose default dialect cannot
-  parse it.
+## Options that do not apply
 
-### Rejected in this mode
+| Option | In native modes |
+|---|---|
+| `-d`, `-g`, `-r`, `-0`…`-3`, bytecode output | Rejected: run these on the VM build |
+| `--bounds-checks`, `--uaf-detection`, other VM runtime checks | Dropped with a warning |
+| `--checked-pointers` | Enforced in the emitted C ([safety-checked-interfaces.md](safety-checked-interfaces.md#native-output)) |
+| `--vm-profile` | Reports only comptime code that ran during the build ([macros-debugging.md](macros-debugging.md#profiling-comptime-code)) |
 
-VM-only options have no meaning once a host compiler takes over and are
-rejected: bytecode output, the disassembler (`-d`), the debugger (`-g`), the
-REPL (`-r`), and the `-0`…`-3` safety levels. Run those against the default
-VM build. The VM's runtime safety options (`--bounds-checks`,
-`--uaf-detection`, …) are dropped with a warning; `--checked-pointers` is
-the exception and is enforced in the emitted C under `-c=native` and `-m` —
-see [safety.md](safety-checked-pointers.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
-ran during the build — see
-[Profiling comptime code](macros-debugging.md#profiling-comptime-code).
-
-Plain runtime `#include <stdio.h>` and other real system headers work here —
-see [headers.md](headers.md) for how header resolution and host-header
-hand-off change under native mode. A URL `#include` (curl-enabled builds
-only), anywhere in the include graph, resolves against a `-idirafter`
-CCCC forwards automatically — see
-[headers.md's URL includes section](headers-native.md#url-includes-under--cnative-m-cgenerated).
-
-## What `-c=native` refuses to lower
-
-Where a construct has genuine VM-specific semantics with no faithful host
-translation, CCCC emits a diagnosed compile error rather than silently
-divergent C. The main cases:
-
-- A global initializer holding a pointer inside a union, or at a misaligned
-  offset, of a struct/union with a `_BitInt(N>128)` bit-field; see
-  [Wide `_BitInt` bit-fields](#wide-_bitint-bit-fields).
-- `__builtin_decimal_to_chars` and `#include <decimal_math.h>`; any decimal
-  construct at all in a `CCCC_HAS_DECIMAL=0` build.
-- The VM-only source-map builtins `__builtin_pc_function_name` /
-  `__builtin_pc_source_location`.
-
-`_Decimal32/64/128` themselves pass through as GNU decimal syntax, which gcc
-accepts and clang does not; CCCC emits a guarded `#error` preamble so clang
-gives a clear diagnostic instead of a confusing one.
-
-## Local variable hoisting
-
-The emitted C flattens every local variable of a function to one C89-style
-declaration list at the top of that function, with any initializer split out
-into a separate assignment where it originally appeared. Block structure
-(braces) is otherwise preserved, purely for readability — it carries no
-scoping weight in the output.
-
-If a local's source name happens to collide with a global (a variable,
-function, or an FFI/host-library function) or a file-scope `typedef` that the
-same function refers to elsewhere, CCCC renames the *local* — never the
-global or the typedef, which may already have other references emitted
-elsewhere — by appending a `__cccc_N` suffix. This means `-m`/`-c=generated`
-output is not guaranteed to preserve every local's exact source spelling; if
-you are diffing or grepping generated output for a local variable by name and
-it doesn't appear verbatim, check for this suffix.
-
-## Anonymous structs and unions
-
-A struct or union with no tag and no typedef name gets a synthesized tag
-`__cccc_anon<N>` in `-m` and `-c=native` output, so every use names the same
-type:
-
-```c
-static struct { int loc; void *fn; } buf[4];   // source
-static struct __cccc_anon0 buf[4];             // output, one shared definition
-```
-
-A C11 anonymous member (a struct or union written without a declarator inside
-another one) and the members of a header-owned type keep their inline
-spelling. `-c=generated` output keeps every anonymous aggregate inline. A
-`static` local whose type is declared inside the function is defined inside
-that function, after the type.
-
-## Serialized-output divergences
-
-Everywhere else the rule is that the emitted C behaves as the VM behaves. A
-handful of constructs cannot fully honour that and are listed here rather than
-left to be discovered:
-
-| Construct | Under the VM | Under `-c=native` |
-|---|---|---|
-| `asm(...)` | no-op by default; `--asm-passthru` compiles + calls via FFI | emitted verbatim and executed by the host binary |
-| file-scope `asm("...");` | no-op (`-Wignored-features`); `--asm-passthru` assembles it into the host library, whose symbols the VM cannot reference | emitted verbatim as `__asm__("...");` (see [inline-asm.md](inline-asm.md#file-scope-asm)) |
-| extended `asm(... : outputs : inputs : clobbers : labels)` | no-op: outputs keep their value, `asm goto` never jumps; `--asm-passthru` runs it on the host with operands passed by address (see [inline-asm.md](inline-asm.md)) | emitted verbatim with its qualifiers (`volatile`, `inline`, `goto`), operands, clobbers and labels; executed by the host binary |
-| `__builtin_return_address(n)` | a VM bytecode offset cast to `void*` | a real host return address — same meaning, unrelated numeric value |
-| `__builtin_dynamic_object_size` | reads the VM allocation header, always exact; `type` 1/3 also caps at the named member, including a union member or a struct's last array | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown"; `type` 1/3 caps at the named member, but a union member or a struct's last array is "unknown" |
-| `__builtin_unreachable` / `__builtin_trap` / `__builtin_debugtrap` | all trap | all emit `__builtin_trap()` |
-| a call through an invalid function pointer | reports `invalid indirect call target`, exits 255 | the host process crashes with a signal (`SIGSEGV`/`SIGBUS`) |
-| integer division by zero, with no safety flags | reports `DIVISION BY ZERO`, exits 255 | host-defined: aarch64 yields 0 and continues, x86_64 raises `SIGFPE` |
-| `__builtin_alloca` sharing a block with a real VLA, in a loop | each call gets a fresh address, live until the frame returns | host-compiler-defined; clang -O0 may reuse one slot per iteration |
-| tail calls (`CALLT`) | guaranteed constant stack space | best-effort — the host cc's own heuristic; pass `-O2` to rely on it |
-| a `void` entry function falling off its end | always exits 0 | exit status is whatever the ABI left in the return register |
-| `%L` length modifier on an integer conversion | `L` == `ll`, a 64-bit slot (glibc rule) | the host libc decides — glibc agrees; BSD/Apple libc treats it as a 32-bit slot |
-| a zero-sized union passed through varargs | consumes no argument slot; reads as `0` | the host ABI passes it in a register; the conversion reads garbage |
-| `ioctl` request codes | rejected unless on an explicit allowlist | the real host `ioctl`, no allowlist |
-| `__attribute__((constructor(N)))` priority | honoured in init/fini ordering | honoured by clang and by gcc on Linux; rejected by Homebrew gcc on macOS |
-| `sizeof`/`_Alignof` of a host-header type reached through a bitfield width or an initialized global's byte image | folds against CCCC's type projection | stays folded (re-materializing it could desync the host's layout of the same struct) |
-
-`_BitInt(65..128)` is aligned 16 on every target (matching the `__int128` it
-lowers to), which differs from clang's/gcc's own native `_BitInt` alignment on
-x86_64 — so don't assume a cccc-compiled and a clang-compiled `_BitInt(65..128)`
-object share layout on that target. `__int128` itself has no such divergence.
-
-`_BitInt(N)` with `N > 128` lowers to an emitted `struct { unsigned long long
-w[K]; }` container (`K` = `sizeof`/8) plus the same runtime helper functions
-the VM itself uses for every width past 64 bits (`src/stdlib/wide_bitint.c`,
-shared verbatim with the emitted output — see that file's own comment for
-how) — every arithmetic/bitwise/comparison/cast operation lowers to a GNU
-statement expression calling into it. `sizeof`/`_Alignof` match the VM
-exactly (the container is size- and alignment-identical to CCCC's own
-`_BitInt(N>128)` representation, unlike clang's or gcc's own native
-`_BitInt`, which neither accepts this width range on every target this
-project supports nor agrees with CCCC's layout where it does).
-
-The C23 `<math.h>` functions that host libms lack or declare differently
-(`exp10`, `sinpi`/`cospi`/`tanpi`, `asinpi`/`acospi`/`atanpi`/`atan2pi`,
-the `fmaximum`/`fminimum` family, `totalorder`/`totalordermag`,
-`canonicalize`, `getpayload`/`setpayload`/`setpayloadsig`, `llogb` and the
-`fromfp`/`ufromfp`/`fromfpx`/`ufromfpx` family, with their `f`/`l`
-variants) are emitted as `static` functions named `__cccc_native_<name>`,
-on every host. They are the same code the VM runs
-(`src/stdlib/c23_math/runtime.c`), so results match the VM exactly; `l`
-variants compute in `double`, like the VM's `long double`.
-
-The C23 memory functions `memset_explicit`, `memalignment`, `free_sized` and
-`free_aligned_sized` (absent on macOS, declared by glibc only from 2.43) are
-emitted the same way, from `src/stdlib/c23_mem/runtime.c`.
-
-### Wide `_BitInt` bit-fields
-
-A bit-field whose declared type is a `_BitInt` wider than 128 bits has no C
-spelling (`struct T f : 193;` is as illegal as it looks), so a struct or union
-holding one is emitted as a byte array in CCCC's own layout, and every member
-of it is read and written at its CCCC offset:
-
-```c
-struct S { int tag; _BitInt(256) f : 193; };
-struct S s;
-s.f = 3;   // __cccc_bitfield_insert(...) on the bytes of s
-s.tag = 7; // (*(int *)((unsigned char *)&s + 0)) = 7
-```
-
-`sizeof`, `_Alignof` and member offsets match the VM, including under
-`packed`. `&s.tag` (including on a block-scope compound literal), struct
-copies, by-value arguments and returns, nested structs, anonymous
-struct/union members, flexible array members, and global initializers (a byte
-image, with each pointer kept as a relocation) work as for any other struct. Narrow bit-fields in the same struct
-use the same byte-granular path.
-
-**Limitations:**
-
-- A global initializer holding a pointer inside a union, or at a misaligned
-  (`packed`) offset, is refused
-  ([#1472](https://todo.sr.ht/~takeiteasy/cccc/1472)).
+System headers and URL includes work as described in [headers.md](headers.md) and [headers-native.md](headers-native.md).
 
 ## See also
 
-- [headers.md](headers.md) — header resolution and host-header hand-off.
-- [coverage.md](coverage.md) — the C language surface CCCC accepts.
-- [build.md](build.md) — `--build` scripts can produce native
-  targets, and a `CcccExecutable` target drives `-c=native` directly.
+[native-differences.md](native-differences.md) · [native-std.md](native-std.md) · [headers.md](headers.md) · [coverage.md](coverage.md) · [build.md](build.md)
+
+[^deps]: Lists command-line sources, `-include` files and every `#include` resolved from disk; bundled headers served from memory do not appear. It never runs the program, and `--build` uses it for `CcccExecutable` header tracking ([build-incremental.md](build-incremental.md#incremental-builds-and-header-dependencies)).

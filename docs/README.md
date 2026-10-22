@@ -75,3 +75,6 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [vm.md](vm.md) | *hub* — VM architecture, encoding, execution model, opcode reference |
 | [comptime-builtins.md](comptime-builtins.md) | Declaring and registering comptime builtins |
 | [checked-interfaces-impl.md](checked-interfaces-impl.md) | How checked-pointer call checks and bounds casts are implemented |
+| [macros-impl.md](macros-impl.md) | Comptime visibility and forwarding rules |
+| [safety-impl.md](safety-impl.md) | Bounds propagation, `CHKAB` and dangling-pointer internals |
+| [native-impl.md](native-impl.md) | Replayed includes, host-owned layouts, shared runtimes |
