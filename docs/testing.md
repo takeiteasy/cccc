@@ -6,9 +6,6 @@ CCCC includes a built-in test framework for writing tests directly in C,
 using the `[[cccc::test]]` attribute to mark test functions and `Assert*`
 macros for assertions. This is a guide to writing and running them.
 
-Internal notes on the test directory layout, audit harnesses, the native
-round-trip serializer test, and CI live in the internal `internal-testing.md`.
-
 ## Writing Tests
 
 Mark a function as a test with `[[cccc::test]]`, `__attribute__((test))`,

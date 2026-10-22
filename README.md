@@ -1,32 +1,29 @@
-
 # cccc
 
 > **WARNING!** Work in progress. The interpreter and compile times are *long*. But it is able to fully compile itself
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
 
-## Introduction
+CCCC adds compile-time macro expansion and AST building on top of the existing toolchain: functions marked `@comptime` run inside the VM during compilation, and the result can be forwarded to your native compiler. A test framework and a build system are built in, so a project needs no external test runner or build tool.
 
-CCCC adds compile-time macro expansion and AST building capabilities on top of the existing toolchain by adding a new 'comptime' pass that runs between the preprocessor and the AST parser. Functions marked with `[[cccc::comptime]]` are run and expanded inside the VM during compilation and can then be forwarded to your native compiler. Included with the compile-time pass are a built-in testing framework and build system, so a project needs no external test runner or build tool. For a longer list of features see [below](#features).
+Targets **macOS** (aarch64) and **Linux** (aarch64/x86_64). Release builds: [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases). Generated API docs for the public headers: [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
-Currently targets **MacOS** (aarch64) and **Linux** (aarch64/x86_64). Windows support is planned but not started. Release builds are published at [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases).
+## Examples
 
-Generated API docs for the public headers (`building.h`, `reflection.h`, `testing.h`, `kernel.h`, `opencl.h`, `omp.h`) are published at [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
+### Compile-time macros, tests and build recipes
 
-## Example
-
-A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), and emit whole declarations into the program:
+A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can fold constants, build AST fragments with `Quote(...)` templates (`$1` splices an argument in), and emit whole declarations into the program. Tests and build recipes live in the same file.
 
 ```c
 #include <stdio.h>
 
-// (1) A call-site macro: the call below is replaced by this template.
+// A call-site macro: the call is replaced by the returned template.
 @comptime Node *square(Node *x) { return Quote("($1) * ($1)", x); }
 
-// (2) A comptime helper in a global initializer — folded to a constant.
+// A comptime function in a global initializer folds to a constant.
 @comptime Node *pow2(Node *k) { return Quote("1 << ($1)", k); }
 
-// (3) A file-scope macro that emits real declarations into the program.
+// A file-scope macro that emits real declarations into the program.
 @comptime Node *emit_vec2(void) {
     return Quote("{ struct Vec2 { int x, y; };"
                  "  int vec2_dot(struct Vec2 a, struct Vec2 b) {"
@@ -34,100 +31,250 @@ A `@comptime` function is ordinary C that CCCC runs *during* compilation. It can
 }
 emit_vec2();
 
-int TABLE_SIZE = pow2(8);              // 256, computed at compile time
+int TABLE_SIZE = pow2(8);                  // 256, computed at compile time
 
 int main(void) {
     struct Vec2 a = { 3, 4 };
-    struct Vec2 b = { square(2), 5 };  // square(2) -> (2) * (2)
-    printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // prints: 256 32
+    struct Vec2 b = { square(2), 5 };      // square(2) -> (2) * (2)
+    printf("%d %d\n", TABLE_SIZE, vec2_dot(a, b));   // 256 32
     return 0;
 }
 
-// (4) A test — discovered and run by `cccc --testing demo.c`.
+// Discovered and run by `cccc --testing comptime.c`.
 @test void dot_product(void) {
     struct Vec2 a = { 3, 4 }, b = { square(2), 5 };
     AssertEq(vec2_dot(a, b), 32);
 }
 
-// (5) A build recipe — run by `cccc --build demo.c`.
+// Run by `cccc --build comptime.c`.
 @build_target BuildTarget *demo(Builder *ctx) {
-    BuildTarget *t = Executable(ctx, "demo");
-    AddSource(t, "demo.c");
+    BuildTarget *t = CcccExecutable(ctx, "demo");
+    AddSource(t, "comptime.c");
     return t;
 }
 ```
 
-All five items live in one file: `cccc demo.c` runs `main()` on the VM (the `@test` is inert), `cccc -c=native -o demo demo.c` lowers it to a native binary (same inert `@test`), `cccc --testing demo.c` discovers and runs the `@test`, and `cccc --build demo.c` runs the `@build_target` (`main()` is ignored). See [TEST_MODE.md](docs/TEST_MODE.md) and [BUILD_MODE.md](docs/BUILD_MODE.md) for the full detail on running tests/build recipes inline like this, and [MACROS.md](docs/MACROS.md) for the full comptime API.
+`cccc comptime.c` runs `main()` on the VM, `cccc -c=native -o demo comptime.c` builds a native binary, `cccc --testing comptime.c` runs the `@test`, and `cccc --build comptime.c` runs the `@build_target`. See [docs/macros.md](docs/macros.md), [docs/testing.md](docs/testing.md) and [docs/build.md](docs/build.md).
+
+### Derived code
+
+Attributes on a type generate functions for it at compile time:
+
+```c
+#include <stdio.h>
+#include <string.h>
+#include <cccc/derive.h>
+#include <cccc/json.h>
+
+@enum_to_string
+@enum_from_string
+typedef enum { RED, GREEN, BLUE } Color;
+
+@to_json
+@from_json
+@equals
+@ctor
+typedef struct {
+    int id;
+    char name[16];
+    Color favourite;
+} User;
+
+int main(void) {
+    User u = User_new(7, "ann", GREEN);
+
+    char buf[128];
+    User_to_json(&u, buf, sizeof buf);
+    puts(buf);                                // {"id":7,"name":"ann","favourite":1}
+
+    User v;
+    if (User_from_json(&v, buf) != 0 || !User_equals(&u, &v))
+        return 1;
+
+    printf("%s\n", Color_to_string(v.favourite));   // GREEN
+    return 42;
+}
+```
+
+Output:
+
+```text
+{"id":7,"name":"ann","favourite":1}
+GREEN
+```
+
+More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [docs/derive.md](docs/derive.md).
 
 ## Features
 
-- **Compile-time macros** — C functions annotated with `[[cccc::comptime]]`, `__attribute__((comptime))`, the `@comptime` shorthand, or the `__comptime`/`__comptime__` keywords that CCCC compiles and runs during compilation to generate functions, globals, and types or rewrite call sites (see [MACROS.md](docs/MACROS.md))
-  - Global generation via file-scope calls (run before the main parse; generated definitions are auto-forward-declared) and call-site expansion via inline `Node *` macros (replace the call with a returned AST during macro expansion)
-  - Custom attribute handlers (`@comptime(attribute("name"))`) that run when a file-scope declaration is parsed
-  - Backtick quasi-quoting with `${...}` interpolation, `Quote(...)`/`QuoteN(...)` templates with `$1`/`$$`/`$@` splicing, the `$identifier` reflect operator, `Gensym`, and a full AST builder API (`MakeFunction`, `MakeVarRef`, `MakeLocalVarUnique`, ...)
-  - `#pragma cccc comptime begin/end` blocks, `@comptime`/`@shared`/`@emit` include and `#define` routing, comptime variables, C23 `constexpr` readback, and a bundled macro standard library in `reflection.h`
-- **Native compilation pipeline** — `-c=native` runs the CCCC frontend (preprocessor, compile-time macros) and hands the resulting C to `CCCC_NATIVE_CC` (or `cc` / `clang` / `gcc`) for an actual native build (see [NATIVE.md](docs/NATIVE.md))
-  - This is the production path: full toolchain performance, system libraries, no VM overhead
-  - `-o <file>` names the produced executable; defaults to `./a.out` if omitted. The temporary C source is removed after the build
-  - `-I`, `-i`, `-D`, `-U`, `-L`, `-l`, and `--std=` are forwarded to the underlying compiler
-- **Memory safety suite** — runtime detection of common C bugs (see [SAFETY.md](docs/SAFETY.md))
-  - Four preset levels (`-0` through `-3`): zero overhead to paranoid mode
-  - Covers use-after-free, buffer overflows, dangling pointers, uninitialized reads, integer overflow, CFI, and more
-  - `--test-run[=LEVEL]` smoke-tests the program under the VM at a safety preset and refuses to compile on a crash/safety violation (see [SAFETY.md](docs/SAFETY.md))
-- **Interactive debugger** — GDB-like source-level debugging (see [DEBUGGER.md](docs/DEBUGGER.md))
-  - Breakpoints (line, function, conditional), watchpoints, register and memory inspection
-  - Source map export API for IDE integrations (`cc_output_source_map_json`)
-- **Interactive REPL** — top-level read-eval-print loop for declarations and expressions (see [REPL.md](docs/REPL.md))
-  - `-r`/`--repl`; declarations persist and compile incrementally across the session, expressions print a typed result
-  - Multi-line continuation, `:type`/`:load`/`:help`/`:quit` session commands, optional readline history
-- **URL includes & embeds** — fetch headers and data directly from URLs with `#include <https://...>` and `#embed <https://...>`; build with `CCCC_HAS_CURL=1 ./cccc --build build.c` (optional, requires libcurl)
-- **Real IEEE-754-2008 decimal floating-point** — `_Decimal32/64/128` arithmetic, `<decimal_math.h>` transcendentals (`sqrtd64`, `powd128`, ...), `strtod32/64/128`, `fesetround()`-aware rounding and `fetestexcept()`-visible exceptions, and compile-time constant folding, via the Intel BID library; build with `tools/fetch_intel_bid.sh && CCCC_HAS_DECIMAL=1 ./cccc --build build.c` (optional, never vendored; see [STDLIB.md](docs/STDLIB.md)).
-- **Built-in test framework** — `[[cccc::test]]`, `__attribute__((test))`, or `@test` attribute and `Assert*` macros for writing tests in C (see [TEST_MODE.md](docs/TEST_MODE.md))
-  - Run with `--testing`; outputs TAP 13 format; no external dependencies or includes needed
-  - `#include [[cccc::test]] "fixtures.h"` conditionally includes a file only in `--testing` mode
-- **Mode predefined macros** — `__CCCC_BUILD_MODE__`, `__CCCC_TEST_MODE__`, or `__CCCC_COMP_MODE__` is defined at compile time to reflect the active execution mode, enabling `#ifdef`-based mode branching
-- **Attribute support** — GNU `__attribute__((...))`, C23 `[[...]]`, and `@name` shorthand with partial semantic support (see [ATTRIBUTES.md](docs/ATTRIBUTES.md))
-  - Covers `packed`, `aligned`, `unused`/`maybe_unused`, `deprecated`, and CCCC-specific `comptime`/`test` (the `macro` alias is deprecated)
-  - `@comptime`, `@test`, `@packed`, `@nodiscard`, etc. are sugar for the longer attribute forms
-  - `-E`/`-m`/`-c=generated`/`-c=native` strip CCCC-only syntax to portable C by default; `--emit-cccc` preserves it instead (dialect round-tripping, testing, checked-pointer qualifiers)
-- **Warning controls** — gcc/clang-style `-W` categories and `-Werror` promotion (see [WARNINGS.md](docs/WARNINGS.md))
-  - Warnings are disabled by default and can be enabled with `-Wall`, `-Wextra`, or individual categories
-- **JSON reflection output** — dump all function, struct, union, enum, and global definitions
-  - `./cccc --ffi-decls -o lib.json lib.h` — useful for generating FFI wrappers
-- **VM heap** — built-in allocator that intercepts `malloc`/`free`/`calloc`/`realloc` at compile time
-  - On by default at every safety level, including `-0`; pass `-V`/`--no-vm-heap` to opt back into the
-    host allocator (only valid at safety level 0 — `-1`/`-2`/`-3` require the VM heap)
+### Language
 
-## Manuals
+| Feature | Details |
+|---|---|
+| **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](docs/macros.md)) |
+| **Derive attributes** | `@serialize`, `@to_json`, `@enum_to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
+| **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
+| **C23 and extensions** | C89 through C23, GNU and MS extensions ([coverage.md](docs/coverage.md)) |
+| **Decimal floating point** | `_Decimal32/64/128` via the Intel BID library, opt-in ([install.md](docs/install.md)) |
+| **Kernels** | `[[cccc::kernel]]` and OpenCL C 1.2 over a grid of work-items; `-fopenmp` ([kernels.md](docs/kernels.md), [opencl.md](docs/opencl.md), [openmp.md](docs/openmp.md)) |
 
-Manuals live in [`docs/`](docs/):
+### Tooling
+
+| Feature | Details |
+|---|---|
+| **Testing** | `@test` and `Assert*` in the same file as `main()`, TAP output ([testing.md](docs/testing.md)) |
+| **Build system** | `--build` scripts written in C, with targets, profiles, cross-compilation and caching ([build.md](docs/build.md)) |
+| **Debugger** | GDB-like breakpoints, watchpoints, edit-and-continue, debug-on-crash ([debugger.md](docs/debugger.md)) |
+| **REPL** | Declarations persist across the session; expressions print a typed result ([repl.md](docs/repl.md)) |
+| **Watch** | `--watch` reloads a program or rebuilds on save ([watch.md](docs/watch.md)) |
+| **Config files** | `.cccc.toml` with a trust prompt ([config.md](docs/config.md)) |
+| **Warnings** | gcc/clang-style `-W` categories and `-Werror` ([warnings.md](docs/warnings.md)) |
+| **URL includes** | `#include <https://...>` and `#embed <https://...>`, opt-in ([headers-native.md](docs/headers-native.md)) |
+| **JSON reflection** | `--ffi-decls` dumps declarations for FFI wrapper generators |
+
+### Safety
+
+| Feature | Details |
+|---|---|
+| **Safety levels** | `-0` to `-3`, from zero overhead to maximum checking ([safety.md](docs/safety.md)) |
+| **Detectors** | Use-after-free, overflows, dangling pointers, uninitialized reads, integer overflow, CFI ([safety-memory.md](docs/safety-memory.md), [safety-pointers.md](docs/safety-pointers.md)) |
+| **Checked pointers** | Bounds carried by the pointer declaration ([safety-checked-pointers.md](docs/safety-checked-pointers.md)) |
+| **Sandboxing** | `--sandbox` and comptime policy for untrusted code ([security.md](docs/security.md), [comptime-policy.md](docs/comptime-policy.md)) |
+
+### Output
+
+| Feature | Details |
+|---|---|
+| **Native compilation** | `-c=native` hands the compiled program to a host compiler as portable C ([native.md](docs/native.md)) |
+| **Source maps** | JSON export for IDE integrations ([debugger-source-map.md](docs/debugger-source-map.md)) |
+
+## Getting started
+
+Install `cccc`, run a C file on the VM, and pick a mode.
+
+### Install
+
+Download a release build from [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases), or build from source (needs a C compiler, `make` and libffi):
+
+```sh
+git clone --recurse-submodules https://github.com/takeiteasy/cccc
+cd cccc && make        # produces ./cccc
+```
+
+Supported: macOS (aarch64) and Linux (aarch64, x86_64). See [install.md](docs/install.md) for optional dependencies.
+
+### Run a file
+
+`cccc file.c` compiles to bytecode and runs `main()` on the built-in VM. The process exit code is `main`'s return value.
+
+```c
+#include <stdio.h>
+int main(void) { puts("hello"); return 0; }
+```
+
+```sh
+./cccc hello.c        # hello
+```
+
+### Four ways to run one file
+
+| Command | What happens |
+|---|---|
+| `cccc file.c` | Run `main()` on the VM |
+| `cccc -c=native -o out file.c` | Lower to C and build a native binary with `cc` ([native.md](docs/native.md)) |
+| `cccc --testing file.c` | Run the `@test` functions ([testing.md](docs/testing.md)) |
+| `cccc --build file.c` | Run the `@build_target` recipes ([build.md](docs/build.md)) |
+
+All four work on the same file: tests, build recipes and `main()` live side by side. `--run` runs `main()` after a passing `--testing` or `--build`.
+
+### Compile-time code
+
+A function marked `@comptime` is ordinary C that runs *while compiling*. Call sites can be rewritten, and whole declarations generated. See [macros.md](docs/macros.md).
+
+### Safety checks
+
+Runtime checks are on a scale from `-0` (none) to `-3` (maximum):
+
+```sh
+./cccc -2 file.c       # use-after-free, overflows, uninitialized reads, ...
+```
+
+See [safety.md](docs/safety.md).
+
+### Next
+
+| To... | Read |
+|---|---|
+| Generate code from a type definition | [derive.md](docs/derive.md) |
+| Write tests | [testing.md](docs/testing.md) |
+| Replace `make` for your project | [build.md](docs/build.md) |
+| Explore interactively | [repl.md](docs/repl.md), [debugger.md](docs/debugger.md) |
+| Set defaults per project | [config.md](docs/config.md) |
+
+## Documentation
+
+Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
+
+**Start here**
 
 | Guide | Covers |
 |---|---|
-| [BUILD.md](docs/BUILD.md) | Building `cccc` itself — `make`, the `build.c` targets, `CCCC_HAS_*` feature knobs |
-| [WATCH.md](docs/WATCH.md) | `--watch`: hot-reload a program or rebuild a `--build` script when a file is saved |
-| [BUILD_MODE.md](docs/BUILD_MODE.md) | The embedded `--build` system: writing `build.c` scripts, the builder API, targets, profiles, cross-compilation |
-| [MACROS.md](docs/MACROS.md) | Compile-time macros — `[[cccc::comptime]]` functions that run in the VM during compilation, AST building, quasi-quoting |
-| [DERIVE.md](docs/DERIVE.md) | Built-in comptime attributes that generate code for a type — `@serialize`, `@enum_to_string`, `@accessors`, ... |
-| [CONFIG.md](docs/CONFIG.md) | `.cccc.toml` config files, which options they can set, the trust prompt for project grants, and pinning an approval by hash |
-| [COMPTIME_POLICY.md](docs/COMPTIME_POLICY.md) | What comptime code may call by default and how `--comptime-allow=fs,exec,...` grants more |
-| [SECURITY.md](docs/SECURITY.md) | What runs or downloads while compiling, who can allow it, `--sandbox`, and compiling untrusted code |
-| [INLINE_ASM.md](docs/INLINE_ASM.md) | Inline `asm`: VM behaviour, `--asm-passthru` running asm on the host with operands, `-c=native` hand-off |
-| [NATIVE.md](docs/NATIVE.md) | `-c=native` — serialising the compiled program back to portable C and handing it to a real host compiler |
-| [HEADERS.md](docs/HEADERS.md) | `#include` resolution: CCCC's bundled headers, project headers, `--use-system-headers`, host-header hand-off |
-| [SAFETY.md](docs/SAFETY.md) | The runtime memory-safety suite — safety levels `-0`…`-3` and the individual detectors |
-| [TEST_MODE.md](docs/TEST_MODE.md) | Writing tests in C with `[[cccc::test]]` and the `Assert*` macros |
-| [DEBUGGER.md](docs/DEBUGGER.md) | The interactive source-level debugger (`-g`), auto-debug-on-crash, the source-map API |
-| [REPL.md](docs/REPL.md) | The interactive read-eval-print loop (`-r`) |
-| [WARNINGS.md](docs/WARNINGS.md) | `-W` warning categories, `-Werror`, pragma suppression, machine-readable output |
-| [COVERAGE.md](docs/COVERAGE.md) | C language coverage (C89–C23, GNU/MS extensions) — a support table |
-| [ATTRIBUTES.md](docs/ATTRIBUTES.md) | `__attribute__`, `[[...]]`, and `@name` attribute support |
-| [KERNELS.md](docs/KERNELS.md) | Running `[[cccc::kernel]]` functions over a grid of work-items, in the VM or on CPU threads with `-c=native`: `cccc_launch`, work-item builtins, local memory, barriers |
-| [OPENCL.md](docs/OPENCL.md) | Reading OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model: qualifiers, work-item functions, atomics, vector types, swizzles and vector literals |
-| [OPENMP.md](docs/OPENMP.md) | `-fopenmp`: `#pragma omp` directives and clauses, run on one thread in the VM or on real threads with `-c=native`, and `<omp.h>` |
-| [THREADING.md](docs/THREADING.md) | Threads in the VM and native output: the global lock, which calls release it, `<pthread.h>`, `<threads.h>`, thread-local storage and atomics |
-| [STDLIB.md](docs/STDLIB.md) | Standard-library and POSIX header coverage — a support table |
-| [TYPES.md](docs/TYPES.md) | Type compatibility, `__builtin_types_compatible_p`, `_Generic` arm selection, and the `--compiler-family` gcc/clang policy switch |
+| [getting-started.md](docs/getting-started.md) | Install, first run, and the four ways to run a file |
+| [features.md](docs/features.md) | What CCCC does, one line per feature |
+| [install.md](docs/install.md) | Building `cccc` from source: dependencies, `make`, `CCCC_HAS_*` options |
+| [config.md](docs/config.md) | `.cccc.toml` files, the trust prompt, pinning an approval by hash |
+
+**Compile-time macros**
+
+| Guide | Covers |
+|---|---|
+| [macros.md](docs/macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
+| [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@enum_to_string`, ... |
+| [comptime-policy.md](docs/comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
+| [security.md](docs/security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |
+
+**Testing and building**
+
+| Guide | Covers |
+|---|---|
+| [testing.md](docs/testing.md) | *hub* — `@test`, suites, assertions, hooks, filtering |
+| [build.md](docs/build.md) | *hub* — `--build` scripts: targets, profiles, cross-compilation |
+| [watch.md](docs/watch.md) | `--watch`: reload a program or rebuild when a file is saved |
+| [repl.md](docs/repl.md) | The interactive read-eval-print loop |
+| [debugger.md](docs/debugger.md) | *hub* — the source-level debugger, crash handling, the source-map API |
+
+**Runtime safety**
+
+| Guide | Covers |
+|---|---|
+| [safety.md](docs/safety.md) | *hub* — safety levels `-0`…`-3` and the individual detectors |
+| [warnings.md](docs/warnings.md) | `-W` categories, `-Werror`, pragma suppression |
+| [threading.md](docs/threading.md) | Threads, the global lock, `<pthread.h>`, `<threads.h>`, atomics |
+
+**Native output and headers**
+
+| Guide | Covers |
+|---|---|
+| [native.md](docs/native.md) | `-c=native`: lowering to portable C and handing it to a host compiler |
+| [headers.md](docs/headers.md) | *hub* — `#include` resolution, system headers, host-header hand-off |
+| [inline-asm.md](docs/inline-asm.md) | Inline `asm` in the VM, `--asm-passthru`, native hand-off |
+
+**Parallel code**
+
+| Guide | Covers |
+|---|---|
+| [kernels.md](docs/kernels.md) | `[[cccc::kernel]]` over a grid of work-items |
+| [opencl.md](docs/opencl.md) | Reading OpenCL C 1.2 kernels |
+| [openmp.md](docs/openmp.md) | `-fopenmp` directives and `<omp.h>` |
+
+**Reference**
+
+| Guide | Covers |
+|---|---|
+| [attributes.md](docs/attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [types.md](docs/types.md) | Type compatibility, `_Generic`, `--compiler-family` |
+| [coverage.md](docs/coverage.md) | C89–C23 and extension support table |
+| [stdlib.md](docs/stdlib.md) | Standard-library and POSIX header support table |
 
 ## Usage
 
@@ -176,7 +323,7 @@ Options:
 	                         compiler that understands the dialect explicitly
 	   --no-layout-guards    Suppress the _Static_assert layout guards emitted next to
 	                         every aggregate definition in -m/-c=generated/-c=native
-	                         output (see docs/NATIVE.md); on by default
+	                         output (see docs/native.md); on by default
 	-j/--json                Emit JSON for all eligible output (diagnostics, header declarations, etc.)
 	-J/--ffi-decls           Emit parsed function/struct/enum declarations as JSON (for FFI wrapper generation)
 	-X/--no-preprocess       Disable preprocessing step
@@ -225,7 +372,7 @@ Testing Options:
 	                         harness itself and runs
 	                         it as a standalone binary via CCCC_NATIVE_CC (implies -c=native;
 	                         [[cccc::test_setup/teardown]] hooks and negative tests are not
-	                         supported under =native, see docs/TEST_MODE.md)
+	                         supported under =native, see docs/testing.md)
 	   --test=GLOB           Run only tests whose name matches GLOB (implies --testing)
 	   --test-suite=NAME     Run tests in NAME and its sub-suites (prefix match);
 	                         glob metacharacters (*?[) switch to fnmatch (implies --testing)
@@ -339,7 +486,7 @@ FFI Safety Options:
 	   --ffi-errors-fatal     Abort execution on FFI policy violations
 	   --ffi-type-checking    Validate registered FFI call arity at runtime
 
-Configuration (see docs/CONFIG.md):
+Configuration (see docs/config.md):
 	   --no-config            Ignore ~/.config/cccc/config.toml and .cccc.toml files
 	   --show-config          Print the config files read and the options they add
 	   --trust[=path]         Approve a project .cccc.toml's capability grants
