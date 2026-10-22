@@ -1186,7 +1186,7 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
     bool seen_stmt = false;
     bool scope_has_cleanup =
         false; // true once first cleanup var is seen in this scope
-    while (!equal(tok, "}")) {
+    while (!equal(tok, "}") && !omp_at_section(vm, tok)) {
         if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
                 warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
@@ -1250,7 +1250,7 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
     node->body = head.next;
     if (close_tok)
         *close_tok = tok;
-    *rest = tok->next;
+    *rest = equal(tok, "}") ? tok->next : tok;
     return node;
 }
 

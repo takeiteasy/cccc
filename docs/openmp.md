@@ -56,10 +56,14 @@ a team of one.
 | `single` | One thread runs the block; the others wait unless `nowait` |
 | `master`, `masked` | Thread 0 runs the block |
 | `simd`, `for simd` | Runs the block; the hint is ignored |
+| `sections`, `parallel sections` | VM: runs the `section` blocks in order. Native: splits the blocks across the team |
+| `task` | Runs the block immediately on the thread that meets it |
+| `taskwait`, `taskyield` | No effect |
+| `taskgroup` | Runs the block |
 | `ordered` | VM only |
 
-`task`, `taskwait`, `sections`, `target`, `teams`, `threadprivate` and
-`declare` are errors. A directive at file scope is an error.
+`target`, `teams`, `threadprivate` and `declare` are errors. A directive at
+file scope is an error.
 
 Native loops use the canonical OpenMP form: an integer variable, a bound
 compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
@@ -80,8 +84,22 @@ or `v = x op= e`.
 | `copyprivate(x)` | On `single`: the value from the thread that ran the block is copied to every thread's `x`. Not allowed with `nowait` |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
 | `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size |
+| `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
+| `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
 | `schedule(...)`, `proc_bind(...)` | Parsed and ignored |
 | `nowait` | Skips the barrier at the end of `for` and `single` (native) |
+
+A `task` works on its own copy of a local variable it uses and does not list,
+unless an enclosing `parallel` region shares the variable. `default(firstprivate)`
+and `default(private)` apply to every unlisted local; `default(shared)` shares
+them. A task's copy is initialised when the task starts:
+
+```c
+int x = 1;
+#pragma omp task
+x = 2;
+// x is still 1 here
+```
 
 Reduction operators are `+ - * & | ^ && || max min`. `&`, `|` and `^` need an
 integer variable; the others need an arithmetic one.
@@ -157,7 +175,9 @@ or another OpenMP compiler. Building the native output with
   single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
 - `copyin`, `linear` and `threadprivate`.
-- `task`, `taskwait` and `sections`.
+- Tasks run inline, so they never overlap (#1743).
+- A `task` that contains a `parallel` region shares the variables it uses from
+  outside the task (#1744).
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,

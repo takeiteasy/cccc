@@ -3939,7 +3939,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
         if (vm->compiler.omp_frames && !vm->compiler.unevaluated)
-            omp_note_use(vm, tok, sc);
+            sc = omp_note_use(vm, tok, sc);
 
         *rest        = tok->next;
 

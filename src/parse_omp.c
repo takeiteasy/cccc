@@ -82,7 +82,7 @@ static Obj *clause_var(VirtualMachine *vm, Token *tok, const char *clause) {
         error_tok(vm, tok, "'%.*s' in '%s' clause is not a variable", tok->len,
                   tok->loc, clause);
     if (vm->compiler.omp_frames)
-        omp_note_use(vm, tok, sc);
+        sc = omp_note_use(vm, tok, sc);
     return sc->var;
 }
 
@@ -94,9 +94,19 @@ static Obj *clause_var(VirtualMachine *vm, Token *tok, const char *clause) {
 // reports the first one when it ends. Checking at resolution covers the
 // threaded lowering too, where nested regions live in outlined functions.
 
+// `#pragma omp section`, which ends a block while a sections body is parsed.
+static bool section_marker(Token *tok) {
+    return equal(tok, "__cccc_omp") && equal(tok->next, "(") &&
+           is_word(tok->next->next, "section") &&
+           equal(tok->next->next->next, ")");
+}
+
+bool omp_at_section(VirtualMachine *vm, Token *tok) {
+    return vm->compiler.omp_sections && section_marker(tok);
+}
+
 static const char *omp_directive_word(OmpKind kind) {
-    return kind == OMP_PARALLEL || kind == OMP_PARALLEL_FOR ? "parallel"
-                                                            : "task";
+    return kind == OMP_TASK ? "task" : "parallel";
 }
 
 static bool names_var(OmpDirective *d, Obj *var) {
@@ -118,21 +128,84 @@ static bool found_inside(VirtualMachine *vm, Token *tok, Scope *boundary) {
     return false;
 }
 
-void omp_note_use(VirtualMachine *vm, Token *tok, VarScope *sc) {
+static void record_violation(VirtualMachine *vm, OmpFrame *f, Token *tok,
+                             Obj *var) {
+    OmpViolation *v     = arena_alloc(&vm->compiler.parser_arena, sizeof(*v));
+    v->var              = var;
+    v->tok              = tok;
+    OmpViolation **tail = &f->violations;
+    while (*tail)
+        tail = &(*tail)->next;
+    *tail = v;
+}
+
+static void task_body_push(VirtualMachine *vm, OmpFrame *f, Node *node) {
+    body_push(vm, f->body, node);
+}
+
+// A task copies an outer automatic into its own variable on first use: always
+// under default(firstprivate), and by default when the variable is not shared
+// by the enclosing parallel region.
+// TODO: a parallel region nested in a task is outlined, so its uses stay shared
+// (#1744).
+static bool task_privatises(VirtualMachine *vm, OmpFrame *f, Token *tok,
+                            Obj *var) {
+    OmpDirective *d = f->dir;
+    if (d->kind != OMP_TASK || d->default_shared || !var->is_local ||
+        var->is_static || f->fn != vm->compiler.current_fn)
+        return false;
+    return d->default_firstprivate || d->default_private || !f->parallel ||
+           found_inside(vm, tok, f->parallel);
+}
+
+static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
+                           Obj *var) {
+    int       id            = vm->compiler.unique_name_counter++;
+    char     *name          = tok_text(vm, tok);
+    Scope    *saved_scope   = vm->compiler.scope;
+    OmpFrame *saved_frames  = vm->compiler.omp_frames;
+    vm->compiler.scope      = f->boundary;
+    vm->compiler.omp_frames = NULL;
+    task_body_push(vm, f,
+                   snippet(vm, "typeof_unqual(%s) *__omp_%d_%s = &%s;", name,
+                           id, name, name));
+    task_body_push(vm, f, snippet(vm, "typeof_unqual(%s) %s;", name, name));
+    if (!f->dir->default_private)
+        task_body_push(vm, f,
+                       snippet(vm,
+                               "__builtin_memcpy(&%s, __omp_%d_%s, "
+                               "sizeof(%s));",
+                               name, id, name, name));
+    vm->compiler.scope      = saved_scope;
+    vm->compiler.omp_frames = saved_frames;
+    (void)var;
+}
+
+// Frames are visited outermost first, so a variable a nested task copies is
+// the enclosing task's copy.
+static VarScope *note_frames(VirtualMachine *vm, Token *tok, VarScope *sc,
+                             OmpFrame *f) {
+    if (f->next)
+        sc = note_frames(vm, tok, sc, f->next);
+    Obj *var = sc->var;
+    if (found_inside(vm, tok, f->boundary) || names_var(f->dir, var))
+        return sc;
+    if (f->dir->default_none) {
+        record_violation(vm, f, tok, var);
+        return sc;
+    }
+    if (task_privatises(vm, f, tok, var)) {
+        make_task_copy(vm, f, tok, var);
+        return find_var(vm, tok);
+    }
+    return sc;
+}
+
+VarScope *omp_note_use(VirtualMachine *vm, Token *tok, VarScope *sc) {
     if (!sc || !sc->var || sc->var->is_function || sc->var->is_tls ||
         !strncmp(tok->loc, "__omp", 5) || !strncmp(tok->loc, "__cccc", 6))
-        return;
-    for (OmpFrame *f = vm->compiler.omp_frames; f; f = f->next) {
-        if (found_inside(vm, tok, f->boundary) || names_var(f->dir, sc->var))
-            continue;
-        OmpViolation *v = arena_alloc(&vm->compiler.parser_arena, sizeof(*v));
-        v->var          = sc->var;
-        v->tok          = tok;
-        OmpViolation **tail = &f->violations;
-        while (*tail)
-            tail = &(*tail)->next;
-        *tail = v;
-    }
+        return sc;
+    return note_frames(vm, tok, sc, vm->compiler.omp_frames);
 }
 
 // A loop variable of a worksharing loop is private to it, so it never needs a
@@ -158,7 +231,16 @@ static void exempt_loop_vars(VirtualMachine *vm, Node *loop, int depth) {
     }
 }
 
-static void frame_push(VirtualMachine *vm, OmpFrame *f, OmpDirective *d) {
+// Scope of the innermost enclosing parallel directive, if it is still open.
+static Scope *parallel_scope(VirtualMachine *vm) {
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next)
+        if (sc == vm->compiler.omp_parallel)
+            return sc;
+    return NULL;
+}
+
+static void frame_push(VirtualMachine *vm, OmpFrame *f, OmpDirective *d,
+                       void *body) {
     // A frame left behind by an aborted parse has a scope that no longer
     // exists.
     while (vm->compiler.omp_frames) {
@@ -171,6 +253,9 @@ static void frame_push(VirtualMachine *vm, OmpFrame *f, OmpDirective *d) {
     }
     f->dir                  = d;
     f->boundary             = vm->compiler.scope;
+    f->parallel             = parallel_scope(vm);
+    f->fn                   = vm->compiler.current_fn;
+    f->body                 = body;
     f->next                 = vm->compiler.omp_frames;
     vm->compiler.omp_frames = f;
 }
@@ -271,10 +356,14 @@ typedef enum {
     CL_LOOP     = 1 << 2, // schedule/collapse/ordered
     CL_NOWAIT   = 1 << 3,
     CL_SIMD     = 1 << 4, // simdlen/safelen
-    CL_FIRSTPRIVATE_ONLY = 1 << 5, // single: private/firstprivate only
+    CL_FIRSTPRIVATE_ONLY = 1 << 5,  // single: private/firstprivate only
     CL_LASTPRIVATE       = 1 << 6,
     CL_COPYPRIVATE       = 1 << 7,
-    CL_DEFAULT           = 1 << 8, // default(shared|none)
+    CL_DEFAULT           = 1 << 8,  // default(shared|none)
+    CL_TASK_DATA         = 1 << 9,  // task: private/firstprivate/shared
+    CL_TASK_EXPR         = 1 << 10, // task: if/final/priority
+    CL_TASK_FLAG         = 1 << 11, // task: untied/mergeable
+    CL_DEPEND            = 1 << 12,
 } ClauseSet;
 
 static int clauses_allowed(OmpKind kind) {
@@ -290,6 +379,15 @@ static int clauses_allowed(OmpKind kind) {
             return CL_FIRSTPRIVATE_ONLY | CL_NOWAIT | CL_COPYPRIVATE;
         case OMP_SIMD:
             return CL_SIMD | CL_LOOP;
+        case OMP_SECTIONS:
+            return CL_DATA | CL_NOWAIT | CL_LASTPRIVATE;
+        case OMP_PARALLEL_SECTIONS:
+            return CL_DATA | CL_PARALLEL | CL_LASTPRIVATE | CL_DEFAULT;
+        case OMP_TASK:
+            return CL_TASK_DATA | CL_DEFAULT | CL_TASK_EXPR | CL_TASK_FLAG |
+                   CL_DEPEND;
+        case OMP_TASKWAIT:
+            return CL_DEPEND;
         default:
             return 0;
     }
@@ -319,6 +417,9 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
             tok     = tok->next;
             if (is_word(tok, "simd"))
                 tok = tok->next;
+        } else if (is_word(tok, "sections")) {
+            d->kind = OMP_PARALLEL_SECTIONS;
+            tok     = tok->next;
         } else {
             d->kind = OMP_PARALLEL;
         }
@@ -364,6 +465,25 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
         tok     = tok->next;
     } else if (is_word(tok, "simd")) {
         d->kind = OMP_SIMD;
+        tok     = tok->next;
+    } else if (is_word(tok, "sections")) {
+        d->kind = OMP_SECTIONS;
+        tok     = tok->next;
+    } else if (is_word(tok, "section")) {
+        error_tok(vm, name,
+                  "'#pragma omp section' may only be used in '#pragma omp "
+                  "sections' construct");
+    } else if (is_word(tok, "task")) {
+        d->kind = OMP_TASK;
+        tok     = tok->next;
+    } else if (is_word(tok, "taskwait")) {
+        d->kind = OMP_TASKWAIT;
+        tok     = tok->next;
+    } else if (is_word(tok, "taskgroup")) {
+        d->kind = OMP_TASKGROUP;
+        tok     = tok->next;
+    } else if (is_word(tok, "taskyield")) {
+        d->kind = OMP_TASKYIELD;
         tok     = tok->next;
     } else if (is_word(tok, "ordered")) {
         if (vm->compiler.omp_threaded)
@@ -414,10 +534,12 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                        is_word(name, "firstprivate") ||
                        is_word(name, "shared") || is_word(name, "reduction");
         if (is_data) {
-            bool ok =
-                (allowed & CL_DATA) ||
-                ((allowed & CL_FIRSTPRIVATE_ONLY) &&
-                 (is_word(name, "private") || is_word(name, "firstprivate")));
+            bool simple =
+                is_word(name, "private") || is_word(name, "firstprivate");
+            bool ok = (allowed & CL_DATA) ||
+                      ((allowed & CL_FIRSTPRIVATE_ONLY) && simple) ||
+                      ((allowed & CL_TASK_DATA) &&
+                       (simple || is_word(name, "shared")));
             if (!ok)
                 error_tok(vm, name, "'%.*s' clause is not allowed here",
                           name->len, name->loc);
@@ -439,9 +561,26 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             tok = skip(vm, tok, "(");
             if (is_word(tok, "none"))
                 d->default_none = true;
-            else if (!is_word(tok, "shared"))
+            else if (is_word(tok, "shared"))
+                d->default_shared = true;
+            else if (d->kind == OMP_TASK && is_word(tok, "firstprivate"))
+                d->default_firstprivate = true;
+            else if (d->kind == OMP_TASK && is_word(tok, "private"))
+                d->default_private = true;
+            else
                 error_tok(vm, tok, "expected 'shared' or 'none'");
             tok = skip(vm, tok->next, ")");
+        } else if ((equal(name, "if") || is_word(name, "final") ||
+                    is_word(name, "priority")) &&
+                   (allowed & CL_TASK_EXPR)) {
+            tok     = skip(vm, tok, "(");
+            Node *e = expr(vm, &tok, tok);
+            tok     = skip(vm, tok, ")");
+            body_push(vm, body, new_unary(vm, ND_EXPR_STMT, e, name));
+        } else if ((is_word(name, "untied") || is_word(name, "mergeable")) &&
+                   (allowed & CL_TASK_FLAG)) {
+        } else if (is_word(name, "depend") && (allowed & CL_DEPEND)) {
+            tok = skip_balanced_parens(vm, tok);
         } else if ((is_word(name, "num_threads") || equal(name, "if")) &&
                    (allowed & CL_PARALLEL)) {
             tok = skip(vm, tok, "(");
@@ -652,6 +791,44 @@ static void check_atomic(VirtualMachine *vm, Node *stmt, Token *tok) {
         error_tok(vm, tok,
                   "the statement after '#pragma omp atomic' must update a "
                   "variable");
+}
+
+// The blocks of `{ [section] stmts (section stmts)* }`, one per section.
+static Node **sections_body(VirtualMachine *vm, Token **rest, Token *tok,
+                            int *count) {
+    tok = skip(vm, tok, "{");
+    if (section_marker(tok))
+        tok = tok->next->next->next->next;
+    int    cap  = 4;
+    Node **secs = arena_alloc(&vm->compiler.parser_arena, cap * sizeof(*secs));
+    int    n    = 0;
+    char  *saved_brk  = vm->compiler.brk_label;
+    char  *saved_cont = vm->compiler.cont_label;
+    vm->compiler.omp_sections++;
+    for (;;) {
+        // break and continue cannot leave a section.
+        vm->compiler.brk_label  = NULL;
+        vm->compiler.cont_label = NULL;
+        Token *close;
+        Node  *block = compound_stmt(vm, &tok, tok, &close);
+        if (n == cap) {
+            Node **grown = arena_alloc(&vm->compiler.parser_arena,
+                                       2 * cap * sizeof(*grown));
+            memcpy(grown, secs, n * sizeof(*secs));
+            secs  = grown;
+            cap  *= 2;
+        }
+        secs[n++] = block;
+        if (equal(close, "}"))
+            break;
+        tok = tok->next->next->next->next;
+    }
+    vm->compiler.omp_sections--;
+    vm->compiler.brk_label  = saved_brk;
+    vm->compiler.cont_label = saved_cont;
+    *rest                   = tok;
+    *count                  = n;
+    return secs;
 }
 
 // ---- Threaded lowering (-c=native, -m, -c=generated) ----
@@ -1288,6 +1465,60 @@ static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
     return snippet(vm, "%s", stmt_text);
 }
 
+static Node *find_node(Node *n, NodeKind kind) {
+    while (n && n->kind != kind)
+        n = n->kind == ND_BLOCK ? n->body : NULL;
+    return n;
+}
+
+// Sections as a worksharing loop over the section index; the thread that runs
+// the last index copies lastprivate values back.
+static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
+                              OmpBody *body, int id, Node **secs, int n,
+                              Token *start, bool with_barrier) {
+    body_push(vm, body, snippet(vm, "long __omp%d_b, __omp%d_e;", id, id));
+    body_push(vm, body,
+              snippet(vm,
+                      "__cccc_omp_static_range(%d, &__omp%d_b, &__omp%d_e);", n,
+                      id, id));
+    body_push(vm, body, snippet(vm, "long __omp%d_k;", id));
+    Node *loop = snippet(vm,
+                         "for (__omp%d_k = __omp%d_b; __omp%d_k < __omp%d_e; "
+                         "__omp%d_k++) ;",
+                         id, id, id, id, id);
+    Node *for_node = find_node(loop, ND_FOR);
+    if (!for_node)
+        error_tok(vm, start, "internal error: omp sections shape");
+    Node    head = {};
+    OmpBody it   = {&head, &head};
+    for (int j = 0; j < n; j++) {
+        Node *guarded = snippet(vm, "if (__omp%d_k == %d) ;", id, j);
+        Node *ifn     = find_node(guarded, ND_IF);
+        if (!ifn)
+            error_tok(vm, start, "internal error: omp sections shape");
+        ifn->then = secs[j];
+        body_push(vm, &it, guarded);
+    }
+    Node *iter_block = new_node(vm, ND_BLOCK, start);
+    iter_block->body = head.next;
+    for_node->then   = iter_block;
+    body_push(vm, body, loop);
+
+    char *copy = arena_strdup(vm, "");
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_LASTPRIVATE)
+            copy = arena_format(
+                vm, "%s __builtin_memcpy(__omp_%d_%s, &%s, sizeof(%s));", copy,
+                id, c->name, c->name, c->name);
+    if (*copy)
+        body_push(vm, body,
+                  snippet(vm,
+                          "if (__omp%d_b < __omp%d_e && __omp%d_e == %d) {%s}",
+                          id, id, id, n, copy));
+    if (with_barrier && !d->nowait)
+        body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
+}
+
 static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                                 Node *block, OmpBody *body, Token **rest,
                                 Token *tok, Token *start) {
@@ -1298,7 +1529,32 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             *rest = tok;
             return block;
 
+        case OMP_TASKWAIT:
+        case OMP_TASKYIELD:
+            *rest = tok;
+            return block;
+
+        case OMP_TASK: {
+            capture_pointers(vm, d, body, id);
+            shadow_decls(vm, d, body, id);
+            body_push(vm, body, stmt(vm, rest, tok));
+            return block;
+        }
+
+        case OMP_SECTIONS: {
+            capture_pointers(vm, d, body, id);
+            shadow_decls(vm, d, body, id);
+            int    n;
+            Node **secs = sections_body(vm, rest, tok, &n);
+            threaded_sections(vm, d, body, id, secs, n, start, true);
+            merges(vm, d, body, id);
+            if (!d->nowait)
+                body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
+            return block;
+        }
+
         case OMP_PARALLEL:
+        case OMP_PARALLEL_SECTIONS:
         case OMP_PARALLEL_FOR: {
             body_push(vm, body,
                       snippet(vm, "int __omp%d_nt = %s;", id,
@@ -1320,6 +1576,10 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             shadow_decls(vm, d, &rbody, id);
             if (d->kind == OMP_PARALLEL_FOR) {
                 tok = threaded_for(vm, d, &rbody, id, tok, false);
+            } else if (d->kind == OMP_PARALLEL_SECTIONS) {
+                int    n;
+                Node **secs = sections_body(vm, &tok, tok, &n);
+                threaded_sections(vm, d, &rbody, id, secs, n, start, false);
             } else {
                 Node *inner = stmt(vm, &tok, tok);
                 body_push(vm, &rbody, inner);
@@ -1456,27 +1716,48 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     tok          = clauses(vm, d, &body, tok);
     tok          = skip(vm, tok, ")");
 
-    OmpFrame frame = {};
-    if (d->default_none)
-        frame_push(vm, &frame, d);
+    OmpFrame frame  = {};
+    bool     framed = d->default_none || d->kind == OMP_TASK;
+    if (framed)
+        frame_push(vm, &frame, d, &body);
+    Scope *saved_parallel = vm->compiler.omp_parallel;
+    if (d->kind == OMP_PARALLEL || d->kind == OMP_PARALLEL_FOR ||
+        d->kind == OMP_PARALLEL_SECTIONS)
+        vm->compiler.omp_parallel = vm->compiler.scope;
 
     if (vm->compiler.omp_threaded) {
         runtime_decls(vm);
         threaded_directive(vm, d, block, &body, rest, tok, start);
-        if (d->default_none)
+        vm->compiler.omp_parallel = saved_parallel;
+        if (framed)
             frame_pop(vm, &frame);
         leave_scope(vm);
         block->body = head.next;
         return block;
     }
 
-    if (d->kind == OMP_BARRIER) {
+    if (d->kind == OMP_BARRIER || d->kind == OMP_TASKWAIT ||
+        d->kind == OMP_TASKYIELD) {
         leave_scope(vm);
         *rest = tok;
         return block;
     }
 
     int    id       = shadows(vm, d, &body);
+
+    if (d->kind == OMP_SECTIONS || d->kind == OMP_PARALLEL_SECTIONS) {
+        int    n;
+        Node **secs = sections_body(vm, rest, tok, &n);
+        for (int j = 0; j < n; j++)
+            body_push(vm, &body, secs[j]);
+        merges(vm, d, &body, id);
+        vm->compiler.omp_parallel = saved_parallel;
+        if (framed)
+            frame_pop(vm, &frame);
+        leave_scope(vm);
+        block->body = head.next;
+        return block;
+    }
 
     Token *body_tok = tok;
     Node  *inner    = stmt(vm, rest, tok);
@@ -1493,7 +1774,8 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     body_push(vm, &body, inner);
     merges(vm, d, &body, id);
 
-    if (d->default_none)
+    vm->compiler.omp_parallel = saved_parallel;
+    if (framed)
         frame_pop(vm, &frame);
     leave_scope(vm);
     block->body = head.next;

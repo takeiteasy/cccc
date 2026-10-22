@@ -1981,6 +1981,12 @@ typedef enum {
     OMP_MASKED,
     OMP_SIMD,
     OMP_ORDERED,
+    OMP_TASK,
+    OMP_TASKWAIT,
+    OMP_TASKGROUP,
+    OMP_TASKYIELD,
+    OMP_SECTIONS,
+    OMP_PARALLEL_SECTIONS,
 } OmpKind;
 
 typedef enum {
@@ -2009,6 +2015,9 @@ typedef struct OmpDirective {
     int        collapse;      // loop depth the directive covers (default 1)
     bool       nowait;
     bool       default_none;
+    bool       default_shared;       // task default(shared)
+    bool       default_firstprivate; // task default(firstprivate)
+    bool       default_private;      // task default(private)
     int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
     char      *num_threads_text; // threaded lowering: clause expressions
     char      *if_text;
@@ -2027,6 +2036,9 @@ typedef struct OmpFrame {
     struct OmpFrame *next;
     OmpDirective    *dir;
     Scope           *boundary; // the directive's own scope; outer is beyond it
+    Scope           *parallel; // task: innermost enclosing parallel, or NULL
+    Obj             *fn;       // task: the function the task is parsed in
+    void            *body;     // task: where implicit-firstprivate copies go
     OmpViolation    *violations;
 } OmpFrame;
 
@@ -4671,7 +4683,9 @@ typedef struct Compiler {
     bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
                              // regions are outlined onto the thread pool
     bool     omp_used;       // a threaded OpenMP directive was lowered
-    struct OmpFrame *omp_frames;     // active default(none) directives
+    struct OmpFrame *omp_frames;     // active default(none) and task directives
+    Scope           *omp_parallel; // scope of the innermost enclosing parallel
+    int omp_sections; // inside a sections body: `section` ends a block
     int              unevaluated;    // inside sizeof/_Alignof/typeof operand
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
     bool     kernel_used;    // a native kernel launch or builtin was lowered

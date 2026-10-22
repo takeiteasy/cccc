@@ -249,6 +249,114 @@ int test_omp_default_none(void) {
     return total == 4 * 8 + 28 && r == 3 ? 42 : 1;
 }
 
+static int omp_fib(int n) {
+    if (n < 2)
+        return n;
+    int a, b;
+#pragma omp task shared(a)
+    a = omp_fib(n - 1);
+#pragma omp task shared(b)
+    b = omp_fib(n - 2);
+#pragma omp taskwait
+    return a + b;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_tasks(void) {
+    int x = 1, y = 5, g = 0, f = 0, z = 7, w = 0;
+    // A task works on its own copies of variables it does not share.
+#pragma omp task
+    {
+        x  = 2;
+        y += x;
+    }
+#pragma omp task firstprivate(z) shared(w)
+    {
+        z++;
+        w = z;
+    }
+#pragma omp taskwait
+#pragma omp parallel shared(f) num_threads(4)
+#pragma omp single
+    f = omp_fib(10);
+#pragma omp taskgroup
+    {
+#pragma omp task shared(g) if (1) final(0) priority(1) untied mergeable
+        g = 3;
+#pragma omp taskyield
+    }
+    return x == 1 && y == 5 && z == 7 && w == 8 && g == 3 && f == 55 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_in_region(void) {
+    int outer = 10, inner_ok = 0, shared_seen = 0;
+#pragma omp parallel num_threads(2) shared(outer, shared_seen, inner_ok)
+    {
+        int local = 5;
+#pragma omp single
+        {
+#pragma omp task shared(outer, shared_seen)
+            {
+                outer++;
+                shared_seen = 1;
+            }
+#pragma omp task
+            {
+                local = 99;
+            }
+#pragma omp taskwait
+            inner_ok = local == 5;
+        }
+    }
+    return outer == 11 && shared_seen && inner_ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_sections(void) {
+    int sum = 0, last = 0, a = 0, b = 0, c = 0;
+#pragma omp parallel sections num_threads(3) reduction(+ : sum)                \
+    lastprivate(last)
+    {
+#pragma omp section
+        {
+            sum  += 1;
+            last  = 1;
+        }
+#pragma omp section
+        {
+            sum  += 10;
+            last  = 2;
+        }
+#pragma omp section
+        {
+            sum  += 100;
+            last  = 3;
+        }
+    }
+#pragma omp parallel num_threads(4)
+    {
+#pragma omp sections nowait
+        {
+            {
+#pragma omp atomic
+                a++;
+            }
+#pragma omp section
+            {
+#pragma omp atomic
+                b++;
+            }
+#pragma omp section
+            {
+#pragma omp atomic
+                c++;
+            }
+        }
+    }
+    return sum == 111 && last == 3 && a == 1 && b == 1 && c == 1 ? 42 : 1;
+}
+
 [[cccc::comptime]]
 void gen_quote_omp_sum(void) {
     Obj *fn = MakeFunction("quote_omp_sum", GetType("int"));

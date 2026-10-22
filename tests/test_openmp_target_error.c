@@ -2,7 +2,8 @@
 // CCCC_FLAGS: -fopenmp
 // CCCC_EXPECT_STDERR: unsupported OpenMP directive
 int main(void) {
-#pragma omp task
-    { }
+#pragma omp target
+    {
+    }
     return 42;
 }
