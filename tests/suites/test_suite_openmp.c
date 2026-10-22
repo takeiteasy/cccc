@@ -145,6 +145,29 @@ int test_openmp_runtime(void) {
     return ok ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_default_none(void) {
+    int  n = 8, i, r = 0;
+    long total = 0;
+    int  a[8]  = {0};
+#pragma omp parallel default(none) shared(a, n) private(i)
+    {
+#pragma omp for
+        for (i = 0; i < n; i++)
+            a[i] = (int)sizeof(n) + i;
+    }
+#pragma omp parallel for default(none) shared(a, n) reduction(+ : total)
+    for (int k = 0; k < n; k++)
+        total += a[k];
+#pragma omp parallel default(none) shared(r)
+    {
+        int n = 3;
+#pragma omp single
+        r = n;
+    }
+    return total == 4 * 8 + 28 && r == 3 ? 42 : 1;
+}
+
 [[cccc::comptime]]
 void gen_quote_omp_sum(void) {
     Obj *fn = MakeFunction("quote_omp_sum", GetType("int"));

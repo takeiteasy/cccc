@@ -65,6 +65,12 @@ typedef struct {
     Node *cur;
 } OmpBody;
 
+static Node *single_stmt(Node *block) {
+    if (block->kind == ND_BLOCK && block->body && !block->body->next)
+        return block->body;
+    return block;
+}
+
 static void body_push(VirtualMachine *vm, OmpBody *body, Node *node) {
     add_type(vm, node);
     body->cur = body->cur->next = node;
@@ -75,7 +81,107 @@ static Obj *clause_var(VirtualMachine *vm, Token *tok, const char *clause) {
     if (!sc || !sc->var)
         error_tok(vm, tok, "'%.*s' in '%s' clause is not a variable", tok->len,
                   tok->loc, clause);
+    if (vm->compiler.omp_frames)
+        omp_note_use(vm, tok, sc);
     return sc->var;
+}
+
+// ---- default(none) ----
+//
+// A frame is active while the body of a default(none) directive is parsed.
+// Identifier resolution (omp_note_use) records every variable declared outside
+// the frame's scope that no clause of the directive names, and the directive
+// reports the first one when it ends. Checking at resolution covers the
+// threaded lowering too, where nested regions live in outlined functions.
+
+static const char *omp_directive_word(OmpKind kind) {
+    return kind == OMP_PARALLEL || kind == OMP_PARALLEL_FOR ? "parallel"
+                                                            : "task";
+}
+
+static bool names_var(OmpDirective *d, Obj *var) {
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->orig == var)
+            return true;
+    return false;
+}
+
+// True when the lookup of `tok` finds its variable at or inside `boundary`.
+static bool found_inside(VirtualMachine *vm, Token *tok, Scope *boundary) {
+    bool passed = false;
+    for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
+        if (scope_find_var(sc, tok->loc, tok->len))
+            return !passed;
+        if (sc == boundary)
+            passed = true;
+    }
+    return false;
+}
+
+void omp_note_use(VirtualMachine *vm, Token *tok, VarScope *sc) {
+    if (!sc || !sc->var || sc->var->is_function || sc->var->is_tls ||
+        !strncmp(tok->loc, "__omp", 5) || !strncmp(tok->loc, "__cccc", 6))
+        return;
+    for (OmpFrame *f = vm->compiler.omp_frames; f; f = f->next) {
+        if (found_inside(vm, tok, f->boundary) || names_var(f->dir, sc->var))
+            continue;
+        OmpViolation *v = arena_alloc(&vm->compiler.parser_arena, sizeof(*v));
+        v->var          = sc->var;
+        v->tok          = tok;
+        OmpViolation **tail = &f->violations;
+        while (*tail)
+            tail = &(*tail)->next;
+        *tail = v;
+    }
+}
+
+// A loop variable of a worksharing loop is private to it, so it never needs a
+// clause.
+static void exempt_loop_var(VirtualMachine *vm, Obj *var) {
+    for (OmpFrame *f = vm->compiler.omp_frames; f; f = f->next)
+        for (OmpViolation **v = &f->violations; *v;) {
+            if ((*v)->var == var)
+                *v = (*v)->next;
+            else
+                v = &(*v)->next;
+        }
+}
+
+static void exempt_loop_vars(VirtualMachine *vm, Node *loop, int depth) {
+    for (int level = 0; loop && level < depth; level++) {
+        Node *init = loop->kind == ND_FOR ? loop->init : NULL;
+        if (init && init->kind == ND_EXPR_STMT && init->lhs &&
+            init->lhs->kind == ND_ASSIGN && init->lhs->lhs &&
+            init->lhs->lhs->kind == ND_VAR)
+            exempt_loop_var(vm, init->lhs->lhs->var);
+        loop = loop->kind == ND_FOR ? single_stmt(loop->then) : NULL;
+    }
+}
+
+static void frame_push(VirtualMachine *vm, OmpFrame *f, OmpDirective *d) {
+    // A frame left behind by an aborted parse has a scope that no longer
+    // exists.
+    while (vm->compiler.omp_frames) {
+        bool live = false;
+        for (Scope *sc = vm->compiler.scope; sc && !live; sc = sc->next)
+            live = sc == vm->compiler.omp_frames->boundary;
+        if (live)
+            break;
+        vm->compiler.omp_frames = vm->compiler.omp_frames->next;
+    }
+    f->dir                  = d;
+    f->boundary             = vm->compiler.scope;
+    f->next                 = vm->compiler.omp_frames;
+    vm->compiler.omp_frames = f;
+}
+
+static void frame_pop(VirtualMachine *vm, OmpFrame *f) {
+    vm->compiler.omp_frames = f->next;
+    if (f->violations)
+        error_tok(vm, f->violations->tok,
+                  "'%.*s' not specified in enclosing '%s'",
+                  f->violations->tok->len, f->violations->tok->loc,
+                  omp_directive_word(f->dir->kind));
 }
 
 static const char *const reduction_ops[] = {"+", "-",  "*",  "&",   "|",
@@ -168,16 +274,18 @@ typedef enum {
     CL_FIRSTPRIVATE_ONLY = 1 << 5, // single: private/firstprivate only
     CL_LASTPRIVATE       = 1 << 6,
     CL_COPYPRIVATE       = 1 << 7,
+    CL_DEFAULT           = 1 << 8, // default(shared|none)
 } ClauseSet;
 
 static int clauses_allowed(OmpKind kind) {
     switch (kind) {
         case OMP_PARALLEL:
-            return CL_DATA | CL_PARALLEL;
+            return CL_DATA | CL_PARALLEL | CL_DEFAULT;
         case OMP_FOR:
             return CL_DATA | CL_LOOP | CL_NOWAIT | CL_LASTPRIVATE;
         case OMP_PARALLEL_FOR:
-            return CL_DATA | CL_PARALLEL | CL_LOOP | CL_LASTPRIVATE;
+            return CL_DATA | CL_PARALLEL | CL_LOOP | CL_LASTPRIVATE |
+                   CL_DEFAULT;
         case OMP_SINGLE:
             return CL_FIRSTPRIVATE_ONLY | CL_NOWAIT | CL_COPYPRIVATE;
         case OMP_SIMD:
@@ -327,9 +435,8 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                 tok =
                     var_list(vm, d, OMP_CLAUSE_REDUCTION, "reduction", op, tok);
             }
-        } else if (is_word(name, "default") && (allowed & CL_DATA)) {
+        } else if (is_word(name, "default") && (allowed & CL_DEFAULT)) {
             tok = skip(vm, tok, "(");
-            // TODO: default(none) is recorded but not enforced.
             if (is_word(tok, "none"))
                 d->default_none = true;
             else if (!is_word(tok, "shared"))
@@ -527,11 +634,6 @@ static void merges(VirtualMachine *vm, OmpDirective *d, OmpBody *body, int id) {
         body_push(vm, body, snippet(vm, "__cccc_omp_reduce_unlock();"));
 }
 
-static Node *single_stmt(Node *block) {
-    if (block->kind == ND_BLOCK && block->body && !block->body->next)
-        return block->body;
-    return block;
-}
 
 static void check_loop(VirtualMachine *vm, Node *loop, int depth, Token *tok) {
     for (int level = 0; level < depth; level++) {
@@ -1354,9 +1456,15 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     tok          = clauses(vm, d, &body, tok);
     tok          = skip(vm, tok, ")");
 
+    OmpFrame frame = {};
+    if (d->default_none)
+        frame_push(vm, &frame, d);
+
     if (vm->compiler.omp_threaded) {
         runtime_decls(vm);
         threaded_directive(vm, d, block, &body, rest, tok, start);
+        if (d->default_none)
+            frame_pop(vm, &frame);
         leave_scope(vm);
         block->body = head.next;
         return block;
@@ -1378,12 +1486,15 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
                       "the statement after '#pragma omp for' must be a for "
                       "loop");
         check_loop(vm, inner, d->collapse, body_tok);
+        exempt_loop_vars(vm, inner, d->collapse);
     } else if (d->kind == OMP_ATOMIC) {
         check_atomic(vm, inner, body_tok);
     }
     body_push(vm, &body, inner);
     merges(vm, d, &body, id);
 
+    if (d->default_none)
+        frame_pop(vm, &frame);
     leave_scope(vm);
     block->body = head.next;
     return block;

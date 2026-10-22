@@ -75,6 +75,7 @@ or `v = x op= e`.
 | `private(x)` | The region gets its own uninitialised `x` |
 | `firstprivate(x)` | The region gets its own `x`, copied from the original; arrays are copied whole |
 | `shared(x)`, `default(shared)` | No change |
+| `default(none)` | On `parallel` and `parallel for`: every variable from outside the region that the body uses needs a data-sharing clause, else an error. Loop variables, `sizeof` operands, `threadprivate` variables and variables declared inside the region are exempt |
 | `lastprivate(x)` | On `for` and `parallel for`: like `private`, then the value from the last iteration is copied back to the original; combines with `firstprivate` on the same variable |
 | `copyprivate(x)` | On `single`: the value from the thread that ran the block is copied to every thread's `x`. Not allowed with `nowait` |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
@@ -149,23 +150,14 @@ or another OpenMP compiler. Building the native output with
 
 ## Limitations
 
-- Native output uses pthreads, so Windows has no OpenMP
- .
-- `ordered` is rejected under native
- .
-- `schedule(dynamic|guided)` run as static
- .
+- Native output uses pthreads, so Windows has no OpenMP.
+- `ordered` is rejected under native.
+- `schedule(dynamic|guided)` run as static.
 - Native loops need an integer loop variable, and `atomic capture` needs a
-  single statement
- .
-- `#pragma omp` inside a `#pragma cccc emit` block is rejected
- .
-- `copyin`, `linear` and `threadprivate`
- .
-- `default(none)` is parsed but not enforced
- .
-- `task`, `taskwait` and `sections`
- .
+  single statement.
+- `#pragma omp` inside a `#pragma cccc emit` block is rejected.
+- `copyin`, `linear` and `threadprivate`.
+- `task`, `taskwait` and `sections`.
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,

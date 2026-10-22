@@ -2015,6 +2015,21 @@ typedef struct OmpDirective {
     Obj       *region_fn; // threaded parallel: the outlined region function
 } OmpDirective;
 
+// Outer variable used inside a default(none) region without a clause.
+typedef struct OmpViolation {
+    struct OmpViolation *next;
+    Obj                 *var;
+    Token               *tok;
+} OmpViolation;
+
+// An active default(none) directive while its body is parsed (parse_omp.c).
+typedef struct OmpFrame {
+    struct OmpFrame *next;
+    OmpDirective    *dir;
+    Scope           *boundary; // the directive's own scope; outer is beyond it
+    OmpViolation    *violations;
+} OmpFrame;
+
 typedef struct SwizzleStore SwizzleStore;
 
 /*! @brief One operand of a GNU extended asm statement. */
@@ -4656,6 +4671,8 @@ typedef struct Compiler {
     bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
                              // regions are outlined onto the thread pool
     bool     omp_used;       // a threaded OpenMP directive was lowered
+    struct OmpFrame *omp_frames;     // active default(none) directives
+    int              unevaluated;    // inside sizeof/_Alignof/typeof operand
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
     bool     kernel_used;    // a native kernel launch or builtin was lowered
     bool     opencl;         // the translation unit in flight is OpenCL C

@@ -2032,7 +2032,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "sizeof")) {
+        vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
+        vm->compiler.unevaluated--;
         add_type(vm, node);
         if (node->ty->kind == TY_VLA) {
             Node *size = new_var_node(vm, node->ty->vla_size, tok);
@@ -2064,7 +2066,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "_Alignof") || is_gnu_alignof) {
+        vm->compiler.unevaluated++;
         Node *node = unary(vm, rest, tok->next);
+        vm->compiler.unevaluated--;
         add_type(vm, node);
         int align = type_alignof(node->ty);
         if (node->kind == ND_VAR && node->var && node->var->align > align)
@@ -3934,6 +3938,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
+        if (vm->compiler.omp_frames && !vm->compiler.unevaluated)
+            omp_note_use(vm, tok, sc);
 
         *rest        = tok->next;
 

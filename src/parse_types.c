@@ -1861,7 +1861,9 @@ static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     if (is_typename(vm, tok)) {
         ty = typename(vm, &tok, tok);
     } else {
+        vm->compiler.unevaluated++;
         Node *node = expr(vm, &tok, tok);
+        vm->compiler.unevaluated--;
         add_type(vm, node);
         ty = node->ty;
     }
