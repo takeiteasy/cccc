@@ -41,7 +41,7 @@ cccc -c=native -o program a.c b.c c.c   # multiple inputs, one program
 `-c=native` is whole-program: pass any number of source files in one
 invocation and the front end links their ASTs into a single program before
 serializing one temporary `.c` and spawning the host `cc` once. This is the
-shape a [`CcccExecutable` build target](build.md#target-kinds) drives.
+shape a [`CcccExecutable` build target](build-targets.md#target-kinds) drives.
 
 The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 `gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
@@ -51,7 +51,7 @@ The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 A program compiled with `-c=native` (or `-m`/`-c=generated`) may also carry
 its own inline `[[cccc::test]]` functions and/or a
 `[[cccc::build]]`/`[[cccc::build_target]]` recipe — see
-[build.md's Build recipes in a program file](build.md#build-recipes-in-a-program-file)
+[build.md's Build recipes in a program file](build-recipes.md#build-recipes-in-a-program-file)
 and [testing.md](testing.md). Under plain `-c=native` (not
 `--testing=native`) the two kinds are treated differently:
 
@@ -75,7 +75,7 @@ in-memory table, do not appear). It is accepted only alongside `-c=native`,
 `-m`, or `-c=generated`, and never runs the program. A build system reads it
 to know which headers a `-c=native` compile depends on, the same way it would
 read a host `cc`'s `-MMD` output; `--build` mode uses it internally to give
-[`CcccExecutable` targets](build.md#incremental-builds-and-header-dependencies)
+[`CcccExecutable` targets](build-incremental.md#incremental-builds-and-header-dependencies)
 automatic header-dependency tracking.
 
 ### Flags forwarded to the host compiler
@@ -121,7 +121,7 @@ dropped; pass them when linking the object. `--test-run` and
 `--testing=native` need an executable and cannot be combined with it.
 Repeating `-c` with a different format (`-c=native -c=object`) is an error.
 A `--build` script gets the same output from a
-[`CcccObject` target](build.md#target-kinds).
+[`CcccObject` target](build-targets.md#target-kinds).
 
 ### How `--std=` is handled
 
