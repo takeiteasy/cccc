@@ -1,5 +1,4 @@
 // CCCC_NATIVE_SKIP: --format-string-checks is VM-only
-// CCCC_LEAKS_SKIP: valgrind uninitialised read in the VM dispatch loop (#1729)
 // CCCC_FLAGS: --format-string-checks
 // CCCC_EXPECT_STDERR: format expects 2, call provides 1
 /*
@@ -13,10 +12,11 @@
 int main() {
     printf("Valid call first\n");
 
-    // This should trigger format string mismatch error:
-    // Format string expects 2 args, but we provide only 1
-    printf("Missing argument: %d %d\n", 42);
+    // Checked but never run: the missing argument is undefined to read.
+    if (0) {
+        // Format string expects 2 args, but we provide only 1
+        printf("Missing argument: %d %d\n", 42);
+    }
 
-    printf("This should not be reached\n");
     return 42;
 }

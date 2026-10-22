@@ -1,5 +1,4 @@
 // CCCC_NATIVE_SKIP: --format-string-checks is VM-only
-// CCCC_LEAKS_SKIP: valgrind uninitialised read in the VM dispatch loop (#1729)
 // CCCC_FLAGS: --format-string-checks
 // CCCC_EXPECT_STDERR: expected type 'long'
 // CCCC_EXPECT_STDERR: expected type 'unsigned long'
@@ -21,11 +20,14 @@
 #include "stdio.h"
 
 int main() {
-    // %Ld expects long; a double argument is incompatible.
-    printf("%Ld\n", 3.14);
+    // Checked but never run: the mismatched arguments are undefined to read.
+    if (0) {
+        // %Ld expects long; a double argument is incompatible.
+        printf("%Ld\n", 3.14);
 
-    // %Lx expects unsigned long; a double argument is incompatible.
-    printf("%Lx\n", 3.14);
+        // %Lx expects unsigned long; a double argument is incompatible.
+        printf("%Lx\n", 3.14);
+    }
 
     return 42;
 }
