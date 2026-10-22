@@ -68,7 +68,7 @@ These are the first-class equivalents of the `__CCCC_TEST_MODE__` guard style:
 ## Optional feature build matrix
 
 Tests that exercise an opt-in feature must pass in **both** configurations.
-Decimal floating-point (#402, `CCCC_HAS_DECIMAL=1`) is the current example:
+Decimal floating-point (`CCCC_HAS_DECIMAL=1`) is the current example:
 `tests/suites/test_suite_decimal.c` and `test_suite_c23.c`'s
 `test_c23_decimal` guard everything except size/alignment/struct-layout
 checks behind `#ifdef __STDC_IEC_60559_DFP__`, so the same file returns 42
@@ -88,7 +88,7 @@ run every test against whichever single `cccc` binary already exists —
 there's no per-test build-config selector yet. Verify those by hand against
 each build instead.
 
-`tests/test_decimal_fold_clean_fenv.c` (#832) is deliberately a standalone
+`tests/test_decimal_fold_clean_fenv.c` is deliberately a standalone
 file with a plain `main()`, not a `[[cccc::test]]` case inside
 `test_suite_decimal.c`: it asserts `fetestexcept(FE_ALL_EXCEPT) == 0` as the
 very first statement, guarding against compile-time decimal constant folding

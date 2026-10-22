@@ -106,7 +106,7 @@ runs them on its own thread pool.
 ## Limitations
 
 - A thread that spins without calling anything that blocks hangs in the VM
-  ([#1417](https://todo.sr.ht/~takeiteasy/cccc/1417)).
+ .
 
 [^1]: `include/pthread.h` hands off to the host header, so the compiled program
     calls host pthread functions directly with no VM layer. See

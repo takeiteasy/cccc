@@ -2,7 +2,7 @@
 
 Contributor notes moved from the user guide `safety-checked-interfaces.md`: how call-argument checks, bounds casts and `dynamic_check` are implemented.
 
-**Bounds-safe interfaces (#488)**. An annotated pointer parameter is itself
+**Bounds-safe interfaces**. An annotated pointer parameter is itself
 the bounds-safe interface Checked C calls an `itype` — no separate marker is
 needed, because a checked attribute already imposes zero restriction on an
 unchecked caller:
@@ -45,7 +45,7 @@ sink(small, 8);   // traps: small's own bounds (2) don't imply the call's
 A call gets no check at all unless **both** hold:
 
 - The argument is itself a **directly declared-checked** source
-  (`find_checked_base()` + `checked_base_is_declared()` — #944's own "kind
+  (`find_checked_base()` + `checked_base_is_declared()` — the "kind
   1", not a propagated local, which can hold the OPT sentinel range `CHKAB`
   has no sentinel-aware variant for). An ordinary unchecked `int *raw`
   argument gets no check — unchecked-to-unchecked interop is unaffected.
@@ -61,8 +61,7 @@ A call gets no check at all unless **both** hold:
   price for a check.
 
 `[[cccc::single]]`'s implicit `[p, p + sizeof(T))` needs no parameter
-substitution at all and still gets a real caller-side check. A `#487`
-`_Checked[N]` array argument decays into an ordinary declared-checked
+substitution at all and still gets a real caller-side check. A `_Checked[N]` array argument decays into an ordinary declared-checked
 pointer before this rewrite ever runs, so it is covered with no special
 casing. A prototype and a later definition declaring **different** bounds
 for the same parameter is accepted silently in v1 — whichever declaration
@@ -75,7 +74,7 @@ never runs, so `-m`/`-c=native`/`-c=generated` output is unaffected — no new
 attribute, no new type spelling, nothing new for the serializer to strip.
 
 An annotated **same-TU** function's own body stays `CHKR`-checked against
-its own declared bounds, unchanged from #482–#484 — this can newly trap
+its own declared bounds, unchanged — this can newly trap
 code that was never touched by an unchecked caller, since the callee is
 violating its own declared contract regardless of who calls it. This is a
 stated v1 decision, not gated off: the callee's checks use its *own*
@@ -87,14 +86,10 @@ Out of scope for v1, filed as follow-ups: return-position bounds
 (`int * [[cccc::array, cccc::count(4)]] f(void);` parses today and is
 entirely unconsumed); non-trivial-argument coverage via pre-call hoisting;
 a warning when a check is silently declined; a prototype/definition
-bounds-disagreement diagnostic; a `#941`-propagated argument (excluded for
+bounds-disagreement diagnostic; a propagated argument (excluded for
 the same sentinel reason `verify_checked_assign_bounds()` excludes one);
-struct-field bounds interfaces; and an annotated libc/POSIX bounds table
-(cross-referencing #429/#430) as the adoption path that would make this
-useful for `memcpy`/`fread`/etc. out of the box. The checked-region
-call-boundary ban this ticket's own text sketched is **#1336**'s, not
-this feature's — with no ban existing, an annotated prototype was already
-callable from a checked region; #488 only adds the enforcement.
+struct-field bounds interfaces; and an annotated libc/POSIX bounds table as the adoption path that would make this
+useful for `memcpy`/`fread`/etc. out of the box. No call-boundary ban exists, so an annotated prototype was already callable from a checked region; this feature only adds the enforcement.
 
 **Bounds casts**. Every mechanism above assumes a pointer is *already*
 declared checked — none of them explain how an unchecked pointer gets into
@@ -184,7 +179,7 @@ needs no `[[cccc::unchecked]] { ... }` wrapper.
 v1 scope, all deliberate:
 
 - A cast expression only — a checked-annotated function argument or return
-  value is not covered (same boundary `CHKAB`/#944 itself has).
+  value is not covered (the same boundary `CHKAB` has).
 - The cast must appear inside a function body; `vm->compiler.current_fn`
   must be non-`NULL` for `__cv` to have somewhere to live (a compile error
   at file scope, e.g. a global initializer).

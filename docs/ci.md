@@ -53,19 +53,18 @@ there legitimately reports `aarch64` — that is not a misconfiguration. Only
 nerdctl -- run --platform linux/amd64 cccc-linux-amd64 uname -m`) is expected
 to report `x86_64`. Ad-hoc verification probes (e.g. offsetof/sizeof checks
 against a real header) that just `colima ssh` into this profile are silently
-checking aarch64 twice, not x86_64 (#796) — run them inside the
+checking aarch64 twice, not x86_64 — run them inside the
 amd64-platform container instead.
 
 **Not a perfect proxy for sr.ht:** a Rosetta-emulated x86_64 container is
 the only *local* way to reproduce Linux-specific behavior, but it is not
 guaranteed to match sr.ht's own build environment's glibc exactly. Directly
-observed during #1183's follow-up fix: the `test_serialize_*` round trips
+observed during an earlier fix: the `test_serialize_*` round trips
 passed inside this container, then failed on the very next real sr.ht push
 with a distinct (if related) glibc symbol collision the container's own
 glibc version apparently didn't trigger. Treat a container-green result as
 "passes on at least one Linux/glibc combination," not "passes on sr.ht" —
-the real push is still the acceptance test, not a substitute for it. Also
-see #1185: the old Python runner hung once inside this same container under
+the real push is still the acceptance test, not a substitute for it. Also, the old Python runner hung once inside this same container under
 `-j8` (a thread deadlock, not reproduced natively on macOS or confirmed on
 sr.ht's own hardware) — a second, independent reason a container run isn't
 interchangeable with a real push.
@@ -97,8 +96,8 @@ legitimate writes made inside those uninstrumented calls read back as
 building against an MSan-instrumented libc/libffi sysroot (see
 [MemorySanitizerLibcxxHowTo](https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo)
 for the general approach), which does not exist yet — until then,
-`linux_amd64_msan_test` is excluded from release-gating and its (~262/700,
-#844) failures should be treated as expected noise, not investigated as
+`linux_amd64_msan_test` is excluded from release-gating and its (~262/700)
+failures should be treated as expected noise, not investigated as
 regressions.
 
 ### Linux/aarch64 native
@@ -130,7 +129,7 @@ runs `./cccc --build build.c --build-target=test --build-jobs=8
 **macOS arm64 (native):** the `test` target (every suite, VM and native) passes.
 
 **Linux x86_64 (VZ/Rosetta, linux/amd64 container):** the `test` target
-passes. The x86_64 `struct stat` layout fix (#499) corrects the field
+passes. The x86_64 `struct stat` layout fix corrects the field
 ordering for glibc x86_64.
 
 **Linux aarch64 (native arm64 container):** the `test` target passes at
@@ -174,7 +173,7 @@ sr.ht, but a regression specific to aarch64/macOS is only caught when a
 release is cut, not on the commit that introduced it.
 
 Doxygen HTML docs (`docs` build target, docs/install.md) used to be a
-`.builds/linux-amd64.yml` task (through #909-#911), dropped after sr.ht's
+`.builds/linux-amd64.yml` task (for a time), dropped after sr.ht's
 `ubuntu/lts` image started shipping a doxygen version that hangs (rather
 than warning) when `graphviz`'s `dot` binary is absent, timing out every
 job's docs step regardless of what the commit touched. Docs generation now
@@ -217,7 +216,7 @@ GitHub's `release.yml` jobs (Linux x86_64, Linux aarch64, macOS arm64) run
 `test_release` (the suites against the `-O2` release binary) and then
 `test_extra` (all loose-test area targets plus `test_smoke`),
 with `--build-jobs=4` — hosted runners have fewer cores than the sr.ht
-builder, and parallel-load timing sensitivity is exactly what surfaced #853.
+builder, and parallel-load timing sensitivity is exactly what surfaced the flaky signal tests.
 The area targets and smoke scripts therefore run only at release time, so run
 the matching area target locally when touching that area.
 
@@ -225,8 +224,8 @@ the matching area target locally when touching that area.
 explicitly for the `linux-aarch64` job (and are, in
 `.github/workflows/release.yml`'s `env:`): Ubuntu's plain `cc` resolves to
 gcc, which rejects `-std=c23` (though a `-c=native` compile — with no
-explicit `--std=`, or with one, as of #1073 — no longer *fails* outright on
-such a host, since #1053's `-std` ladder now probes both the
+explicit `--std=`, or with one — no longer *fails* outright on
+such a host, since the `-std` ladder now probes both the
 implicit-default and explicit-`--std=` cases; see native.md's
 "Serialized-output divergences" section for the ladder it falls back
 through). These are three separate compiler-selection mechanisms — `CC` for
@@ -238,10 +237,10 @@ generated C to, exercised here by the native pass of the suites.
 All three ignore `CC` (and each other) entirely and otherwise try `{cc,
 clang, gcc}` on `PATH` in that order. `CCCC_BUILD_CC` and `CCCC_NATIVE_CC`
 used to be one conflated env var (`CCCC_NATIVE_CC` alone drove both) until
-#1198 split them — pointing `CCCC_NATIVE_CC` at a different compiler family
+they were split — pointing `CCCC_NATIVE_CC` at a different compiler family
 to exercise `-c=native` used to silently retarget the compiler that builds
 cccc itself too, and a real gcc pointed at `CCCC_BUILD_CC` used to fail to
-link on macOS (53 duplicate ctype/wctype symbols, #1199, fixed by a guard
+link on macOS (53 duplicate ctype/wctype symbols, fixed by a guard
 in `src/internal.h`). GitHub's
 `ubuntu-24.04-arm` runner ships a pre-installed `cc` (→ gcc), which wins
 that fallback unless overridden. macOS runners don't need any of the
@@ -255,14 +254,13 @@ under *severe* CPU contention — confirmed by directly reproducing it: running
 8 copies of the compiled test binary concurrently on a resource-constrained
 container reproduces the failure in roughly half of repeated trials, and
 different subtests fail from run to run (not always the same one). This is
-scheduler starvation, not a VM signal-dispatch defect — investigated per
-#853 and ruled out as a `_cccc_pending`/dispatch-loop drop path; a plain
+scheduler starvation, not a VM signal-dispatch defect — investigated and ruled out as a `_cccc_pending`/dispatch-loop drop path; a plain
 sequential run never fails.
 
 **Mitigation:** none in the harness; each suite is its own build target, so
 reduce `--build-jobs` (or rerun the one suite) to remove contention. This
 is a CI-determinism concern, not a fix to the underlying VM signal-dispatch
-responsiveness under host load, which is tracked in #858.
+responsiveness under host load, which is tracked.
 
 ### macOS aio slot exhaustion under host contention
 
@@ -295,7 +293,7 @@ exception: `test_aio_sigev_thread`'s `SIGEV_THREAD` submission tolerates a
 *persistent* `EAGAIN` (after retries) as a pass, because some hosts reject
 `SIGEV_THREAD` outright and there is nothing left to verify at that point —
 that's a different, structural cause from transient slot contention, and
-predates #929.
+is long-standing.
 
 `test_aio_slot_exhaustion` (macOS-only, `#ifdef __APPLE__`) deterministically
 submits into slot exhaustion, asserts the failure is `EAGAIN`, reaps

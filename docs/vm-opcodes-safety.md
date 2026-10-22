@@ -9,22 +9,22 @@ These opcodes implement the C standard library heap (the default; `-V`/`--no-vm-
 | Opcode | Arguments | Description |
 |--------|-----------|-------------|
 | `MALC` | `REG_A0` = size | Allocate; pointer returned in `REG_A0` |
-| `ALCA` | `REG_A0` = size | Allocate a bare `__builtin_alloca` call's storage (automatic, **frame**-scoped — lives until the function returns); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_ALLOCA` excludes it from leak-detection's `AllocRecord` list (#979) — it is never meant to be freed by the guest program. Reclaimed only at frame exit (`LEV3`, never `HREL`) — see the Heap Reclamation section below |
-| `ALCV` | `REG_A0` = size | Allocate a VLA's backing storage (automatic, **block**-scoped — lives until the end of the declaring block, C11 6.8.3); pointer returned in `REG_A0`. Identical shape to `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_FRAME` instead. Split from `ALCA` (#981) specifically because the two have different lifetimes: reusing one `AllocKind` for both would let a block-exit reclaim (`HREL`) sweep a still-live bare-`alloca`'d block declared in the same block, corrupting it the moment the address was reused. `Node.is_vla_alloca_call` (set only by `new_alloca()`, `src/parse_init.c` — reached only through a VLA declaration's lowering, `ND_ASSIGN(ND_VLA_PTR, alloca(...))`) is what tells codegen which of `ALCA`/`ALCV` to emit for a given `alloca(...)` call |
-| `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`/`ALCV`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode (#981's prerequisite) so heap reclamation targeting `ALLOC_KIND_FRAME`/`ALLOC_KIND_ALLOCA` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
-| `HMRK` | `depth` (i32 immediate) | Heap-reclamation watermark (#981): push `{vm->bp, depth, vm->heap_ptr}` onto `vm->heap_marks`, truncating any stale entry for this `(bp, depth)` first (loop re-entry, backward `goto`). Emitted at the start of any block that declares a VLA, only when reclamation could apply (see the Heap Reclamation section below). Identical single-word-immediate shape to `SCOPEIN` |
+| `ALCA` | `REG_A0` = size | Allocate a bare `__builtin_alloca` call's storage (automatic, **frame**-scoped — lives until the function returns); pointer returned in `REG_A0`. Identical register/ABI shape and `AllocHeader`/`sorted_allocs` tracking to `MALC` (so `CHKB`/`CHKBN`/`CHKP3`/`DYNOBJSZ` see it exactly like any other allocation) but the resulting `AllocHeader.kind = ALLOC_KIND_ALLOCA` excludes it from leak-detection's `AllocRecord` list — it is never meant to be freed by the guest program. Reclaimed only at frame exit (`LEV3`, never `HREL`) — see the Heap Reclamation section below |
+| `ALCV` | `REG_A0` = size | Allocate a VLA's backing storage (automatic, **block**-scoped — lives until the end of the declaring block, C11 6.8.3); pointer returned in `REG_A0`. Identical shape to `ALCA`, tagged `AllocHeader.kind = ALLOC_KIND_FRAME` instead. Split from `ALCA` specifically because the two have different lifetimes: reusing one `AllocKind` for both would let a block-exit reclaim (`HREL`) sweep a still-live bare-`alloca`'d block declared in the same block, corrupting it the moment the address was reused. `Node.is_vla_alloca_call` (set only by `new_alloca()`, `src/parse_init.c` — reached only through a VLA declaration's lowering, `ND_ASSIGN(ND_VLA_PTR, alloca(...))`) is what tells codegen which of `ALCA`/`ALCV` to emit for a given `alloca(...)` call |
+| `ALCB` | `REG_A0` = size | Allocate a `__block` variable's heap box; pointer returned in `REG_A0`. Same shape as `ALCA`/`ALCV`, tagged `AllocHeader.kind = ALLOC_KIND_BLOCK_BOX` instead — split into its own opcode so heap reclamation targeting `ALLOC_KIND_FRAME`/`ALLOC_KIND_ALLOCA` storage can never sweep a `__block` box, which `Block_copy` is expected to let legitimately outlive its declaring frame. Before this split, `ALCA` alone backed both under a single `AllocHeader.is_internal` bool |
+| `HMRK` | `depth` (i32 immediate) | Heap-reclamation watermark: push `{vm->bp, depth, vm->heap_ptr}` onto `vm->heap_marks`, truncating any stale entry for this `(bp, depth)` first (loop re-entry, backward `goto`). Emitted at the start of any block that declares a VLA, only when reclamation could apply (see the Heap Reclamation section below). Identical single-word-immediate shape to `SCOPEIN` |
 | `HREL` | `depth` (i32 immediate) | The matching block-exit release for `HMRK`: find this `(bp, depth)`'s mark and rewind `vm->heap_ptr` to it, sweeping only `ALLOC_KIND_FRAME` (VLA) storage — never a bare alloca or a `__block` box. Emitted at the natural (fall-through) exit of the same block `HMRK` was emitted for; a `break`/`continue`/`goto`/`return` out of the block skips it, which only forfeits that block's reclamation (never over-reclaims) |
 | `MFRE` | `REG_A0` = ptr | Free pointer (detects double-free) |
 | `MCPY` | `REG_A0` = dest, `REG_A1` = src, `REG_A2` = count | `memcpy` |
 | `MSET` | `REG_A0` = dest, `REG_A2` = count | `memset` to 0; backs `ND_MEMZERO` (pre-zero for partial aggregate initialisers) |
 | `REALC` | `REG_A0` = ptr, `REG_A1` = new_size | `realloc` |
 | `CALC` | `REG_A0` = nmemb, `REG_A1` = size | `calloc` |
-| `REALCA` | `REG_A0` = ptr, `REG_A1` = nmemb, `REG_A2` = size | `reallocarray`; overflow-checked `nmemb * size` delegates to `REALC`'s logic, returning `NULL` (original allocation untouched) on overflow rather than truncating (#699) |
+| `REALCA` | `REG_A0` = ptr, `REG_A1` = nmemb, `REG_A2` = size | `reallocarray`; overflow-checked `nmemb * size` delegates to `REALC`'s logic, returning `NULL` (original allocation untouched) on overflow rather than truncating |
 | `MALCA` | `REG_A0` = size, `REG_A1` = alignment | `aligned_alloc`; pointer returned in `REG_A0` (`NULL` if `alignment` isn't a power of two) |
 | `PMEMA` | `REG_A0` = memptr, `REG_A1` = alignment, `REG_A2` = size | `posix_memalign`; status (`0`/`EINVAL`/`ENOMEM`) returned in `REG_A0`, allocated pointer written through `memptr` |
 
 `MALC`/`CALC`/`REALC` allocate with the default 8-byte alignment; `MALCA`/`PMEMA`
-(#668) pad the bump pointer *before* the `AllocHeader` so the returned user
+ pad the bump pointer *before* the `AllocHeader` so the returned user
 pointer lands on the requested alignment, while every consumer that recovers
 the header via `((AllocHeader*)ptr) - 1` (`MFRE`, `REALC`, `DYNOBJSZ`, `CHKB`,
 `CHKBN`, `CHKP3`, `CHKT3`) keeps working unmodified. Padding is only ever added
@@ -34,9 +34,9 @@ tagging tail via a common `vm_heap_bump_alloc_ex` helper, so `aligned_alloc` and
 `posix_memalign` allocations get the same heap safety coverage as `malloc`.
 `ALCA`/`ALCV`/`ALCB` share the same helper with `AllocHeader.kind` set to
 `ALLOC_KIND_ALLOCA`/`ALLOC_KIND_FRAME`/`ALLOC_KIND_BLOCK_BOX` respectively —
-the sole difference from `MALC` (`ALLOC_KIND_USER`) (#979/#981).
+the sole difference from `MALC` (`ALLOC_KIND_USER`).
 
-### Heap Reclamation (#981)
+### Heap Reclamation
 
 The VM heap is a pure bump allocator — `heap_ptr` only ever advances, and
 `MFRE` never moves it back (it only sets `AllocHeader.freed`). `HMRK`/`HREL`
@@ -70,7 +70,7 @@ down for `alloca`/VLA storage specifically, when doing so is provably safe:
   of the highest kept entry. A worker ending through `pthread_exit`/
   `thrd_exit` has its leftover marks truncated in `vm_thread_start`
   (`cccc_heap_marks_unwind_thread`). Contended threads reclaim only
-  partially (#1724).
+  partially.
 - **Mechanism.** `heap_rewind_to` (`src/ops.c`) scans `vm->sorted_allocs`
   backward from the top while each entry's base address is at or above the
   target watermark — this is exactly the contiguous suffix of allocations
@@ -101,8 +101,8 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 
 | Opcode | Description | Controlled by |
 |--------|-------------|---------------|
-| `CHKB` | Array bounds check on `base + scaled_offset` (`p + n`, and via subscript desugaring `*(a+i)`, `a[i]` too), resolving `base` (exact or interior pointer) via `vm->sorted_allocs`. **Formation-time** check only (#983): a result exactly one past the allocation's end (`eff == size`) is allowed, since forming such a pointer is legal C — see `CHKD` below for the dereference-time check that catches an actual out-of-bounds access | `CCCC_BOUNDS_CHECKS` |
-| `CHKBN` | Array bounds check on `base - scaled_offset` (`p - n`) — `CHKB`'s subtracting-form sibling (#982); same operand shape, resolution, and one-past-the-end formation allowance (#983), opposite sign. Never emitted for a pointer *difference* (`&a - &b`, result type `ptrdiff_t`/`long`) — `scaled_offset` there is `new_sub`'s ptr-ptr divide result, not a scaled byte offset, so bounds-checking it would compare an unrelated value against the allocation's size | `CCCC_BOUNDS_CHECKS` |
+| `CHKB` | Array bounds check on `base + scaled_offset` (`p + n`, and via subscript desugaring `*(a+i)`, `a[i]` too), resolving `base` (exact or interior pointer) via `vm->sorted_allocs`. **Formation-time** check only: a result exactly one past the allocation's end (`eff == size`) is allowed, since forming such a pointer is legal C — see `CHKD` below for the dereference-time check that catches an actual out-of-bounds access | `CCCC_BOUNDS_CHECKS` |
+| `CHKBN` | Array bounds check on `base - scaled_offset` (`p - n`) — `CHKB`'s subtracting-form sibling; same operand shape, resolution, and one-past-the-end formation allowance, opposite sign. Never emitted for a pointer *difference* (`&a - &b`, result type `ptrdiff_t`/`long`) — `scaled_offset` there is `new_sub`'s ptr-ptr divide result, not a scaled byte offset, so bounds-checking it would compare an unrelated value against the allocation's size | `CCCC_BOUNDS_CHECKS` |
 | `CHKI` | Uninitialised-variable read check (`bp+offset`) | `CCCC_UNINIT_DETECTION` |
 | `MARKI` | Mark variable at `bp+offset` as initialised | `CCCC_UNINIT_DETECTION` |
 | `CHKPA` | Validate pointer arithmetic against provenance | `CCCC_INVALID_ARITH` + `CCCC_PROVENANCE_TRACK` |
@@ -111,31 +111,31 @@ These are emitted by the compiler when the corresponding safety flag is set.  At
 | `CHKA3` | Pointer alignment check | `CCCC_ALIGNMENT_CHECKS` |
 | `CHKT3` | Heap type-tag check on dereference (effective-type model), resolving the base pointer via `vm->sorted_allocs` | `CCCC_TYPE_CHECKS` |
 | `CHKR` | Checked-pointer range check (`[[cccc::single/array/ntarray]]`): traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
-| `CHKRO` | Optional checked-pointer range check (#942): identical to `CHKR`, except the sentinel `lo == (char*)-1 && hi == (char*)0` is a no-op instead of a violation | `CCCC_CHECKED_BOUNDS` |
+| `CHKRO` | Optional checked-pointer range check: identical to `CHKR`, except the sentinel `lo == (char*)-1 && hi == (char*)0` is a no-op instead of a violation | `CCCC_CHECKED_BOUNDS` |
 | `CHKNT` | Checked-pointer null-terminator guard for `[[cccc::ntarray]]` (`count()`/`byte_count()`/`bounds()`): traps a store of a non-zero value into the widened terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
-| `CHKNTZ` | Checked-pointer null-terminator guard (#939) for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
-| `CHKAB` | Checked-pointer assignment-time bounds implication (#944): traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
-| `CHKDC` | `dynamic_check(cond)` (#486, `__builtin_cccc_dynamic_check`/`_Dynamic_check`): traps unless `regs[rs_val] != 0` | `CCCC_CHECKED_BOUNDS` |
+| `CHKNTZ` | Checked-pointer null-terminator guard for the memcpy-lowered `ntarray` pointees `CHKNT` cannot reach (struct/union, wide `_BitInt`/`_Decimal`): traps unless every byte at the source address is zero, checked before the `MCPY` it guards | `CCCC_CHECKED_BOUNDS` |
+| `CHKAB` | Checked-pointer assignment-time bounds implication: traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
+| `CHKDC` | `dynamic_check(cond)` (`__builtin_cccc_dynamic_check`/`_Dynamic_check`): traps unless `regs[rs_val] != 0` | `CCCC_CHECKED_BOUNDS` |
 | `CHKBS` | Static-size array bounds check: traps unless `0 <= regs[rs_off] <= limit` (immediate). The limit is the array's byte size, less the accessed bytes when the add is dereferenced at once. Covers the stack/global arrays `CHKB` cannot resolve. Format `[CHKBS][rs_off:8|unused:8][limit:i64]`; gated on `CCCC_BOUNDS_CHECKS`. |
 | `HOLE` | Fills reclaimed text inside live code so instruction walkers stay aligned. Executing it is a runtime error. Format `[HOLE]`. |
-| `CHKD` | **Dereference-time** bounds check (#983), `CHKB`/`CHKBN`'s formation-time counterpart: traps unless `off + access_size <= header->size`, resolving the dereferenced address via `vm->sorted_allocs` the same way `CHKB`/`CHKP3` do. Emitted at every load/store site that reaches memory: scalar loads/stores, struct/union/wide-`_BitInt`/`_Decimal` `MCPY` copies, vector `VLDR`/`VSTR`, and (#985) the atomic ops `ALDR`/`ASTR`/`AXCHG`/`ACAS` (`ACAS` gets two — object pointer and `expected` pointer). Silently passes for a NULL pointer (`CHKP3`'s job) or a non-heap address (no bound known, same limitation `CHKB`/`CHKBN` already have) | `CCCC_BOUNDS_CHECKS` |
+| `CHKD` | **Dereference-time** bounds check, `CHKB`/`CHKBN`'s formation-time counterpart: traps unless `off + access_size <= header->size`, resolving the dereferenced address via `vm->sorted_allocs` the same way `CHKB`/`CHKP3` do. Emitted at every load/store site that reaches memory: scalar loads/stores, struct/union/wide-`_BitInt`/`_Decimal` `MCPY` copies, vector `VLDR`/`VSTR`, and the atomic ops `ALDR`/`ASTR`/`AXCHG`/`ACAS` (`ACAS` gets two — object pointer and `expected` pointer). Silently passes for a NULL pointer (`CHKP3`'s job) or a non-heap address (no bound known, same limitation `CHKB`/`CHKBN` already have) | `CCCC_BOUNDS_CHECKS` |
 
 `CHKB`/`CHKBN` and `CHKP3` resolve their pointer's containing allocation via
-the same `sorted_allocs_find` binary search `DYNOBJSZ` uses (#647): the
+the same `sorted_allocs_find` binary search `DYNOBJSZ` uses: the
 largest tracked base address ≤ the pointer. This lets both checks recognise
 **interior pointers** (`p = q + k`) into a heap allocation, not only exact
 base pointers — an out-of-bounds index or a use-after-free reached through
-an interior pointer is now caught (#650). `CHKB`/`CHKBN`'s bound is
+an interior pointer is now caught. `CHKB`/`CHKBN`'s bound is
 `AllocHeader.size` (the aligned/usable size); a negative effective offset is
 only rejected once it steps before the *resolved allocation's* start, so
 `p[-1]` on an interior pointer that stays within the allocation is valid.
 Note the gaps this leaves: `AllocHeader` only exists for VM-heap
 allocations, so **`CHKB`/`CHKBN` have no bound at all for a stack or global
 base**, and reject nothing there. Subscripts and pointer-adds directly over a
-fixed-size array are covered instead by `CHKBS` (#1452), whose limit is known
+fixed-size array are covered instead by `CHKBS`, whose limit is known
 at compile time.
 
-**Formation vs. dereference (#983).** Forming a one-past-the-end pointer on
+**Formation vs. dereference.** Forming a one-past-the-end pointer on
 heap memory (`p + n` where `n == size`) is legal C — only dereferencing it
 is undefined. `CHKB`/`CHKBN` allow it (`eff == size` is not an error) since
 they run at pointer *formation*; `CHKD` is a separate check that runs at
@@ -150,11 +150,11 @@ its rejection condition, not `off >= h->size`), which is what lets `CHKD`
 reliably resolve the allocation an exactly-one-past address belongs to.
 `CHKD` has the same "no bound known" gap as `CHKB`/`CHKBN` for a stack or
 global array (no `AllocHeader` to resolve against). It is also emitted
-ahead of the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`, #985) — this was
+ahead of the atomic ops (`ALDR`/`ASTR`/`AXCHG`/`ACAS`) — this was
 initially deferred because `AXCHG`/`ACAS`'s own operand words carry the
-#497 register-aliasing hazard, but a standalone `CHKD` instruction emitted
+register-aliasing hazard, but a standalone `CHKD` instruction emitted
 ahead of them never touches that word, so it doesn't reopen it. `CHKR`
-(#770/#482-484) closes the upper-bound
+closes the upper-bound
 gap generally: its
 `[lo, hi)` bounds come from the checked pointer's declaration
 (`count()`/`byte_count()`/`bounds()`, or the implicit `[p, p+sizeof(T))` for
@@ -163,17 +163,17 @@ gap generally: its
 unlike every other opcode in this table. See
 [safety.md](safety-checked-pointers.md#checked-pointers) for the full attribute/lowering
 reference. Like every opcode in this table, `CHKR` has no equivalent in
-`-c=native`/`-m`/`-c=generated` output — VM-only by design (#924); those modes warn
+`-c=native`/`-m`/`-c=generated` output — VM-only by design; those modes warn
 and ignore `--checked-pointers` rather than emitting an inline check.
 `CHKA3` is unaffected — alignment is pure address arithmetic and was already
 correct for interior pointers.
 
-`CHKRO` (#942) is `CHKR`'s sibling for a checked-pointer-bounds-propagation
+`CHKRO` is `CHKR`'s sibling for a checked-pointer-bounds-propagation
 candidate (`src/parse_checked.c`'s `propagate_checked_bounds()`) that is only
 checked-rooted on *some* paths, not every path — "OPT" in
 [safety.md](safety-checked-pointers.md#checked-pointers)'s propagation writeup, as opposed to
 a "FULL" candidate (every store checked-rooted), which still emits plain
-`CHKR` with identical codegen to before #942. An OPT candidate's snapshot
+`CHKR` with identical codegen to before OPT candidates existed. An OPT candidate's snapshot
 temps are refreshed at every assignment, rooted or not — a non-rooted store
 writes the `[lo=-1, hi=0)` sentinel instead of skipping the refresh, and the
 temps are also seeded with it at function entry — so whichever store
@@ -186,7 +186,7 @@ the runs where `c` took the `q = p` branch. Wire format is identical to
 `CHKR` (`op_CHKR_fn`/`op_CHKRO_fn` in `src/ops.c` share one `chkr_common()`
 body, differing only in whether the sentinel short-circuits).
 
-`CHKNT` (#923/#938) covers the one gap `CHKR`'s bounds widening for
+`CHKNT` covers the one gap `CHKR`'s bounds widening for
 `[[cccc::ntarray]]` opens: `count()`/`byte_count()`/`bounds()` all widen the
 checked range by one element (`sizeof(T)` bytes at the declared end of the
 range) so the terminator slot is a legal write target (`CHKR` already
@@ -194,7 +194,7 @@ enforces this), but nothing stopped that write from putting a non-null value
 there and silently destroying the invariant the widening exists to serve.
 `CHKNT` is emitted from the store path (`src/codegen_expr.c`'s `ND_ASSIGN` case),
 not from `gen_addr` alongside `CHKR`, because it needs the value being
-stored, which `gen_addr` never sees. A second emission site (#937) sits in
+stored, which `gen_addr` never sees. A second emission site sits in
 the `ND_CAS` case: `to_assign()` (`src/parse_expr.c`) desugars a read-modify-write
 (`s[n] += 1`, `s[n]++`) into a synthesized store deref that now carries the
 same checked-pointer fields as the original access, so it reaches the
@@ -210,7 +210,7 @@ terminator would require reading past `hi` — exactly the unbounded read this
 feature exists to prevent. See [safety.md](safety-checked-pointers.md#checked-pointers)'s
 "Terminator invariant" section for the full reasoning and its known gaps.
 
-`CHKNT` also propagates (#943) across a `CHKR`/`CHKRO` bounds-propagation
+`CHKNT` also propagates across a `CHKR`/`CHKRO` bounds-propagation
 candidate (`src/parse_checked.c`'s `propagate_checked_bounds()`): `Obj.checked_prop_
 nt_elem` carries the terminator-slot fact (non-zero iff every checked-rooted
 store into the candidate was `ntarray`-rooted at the same pointee element
@@ -223,7 +223,7 @@ at parse time (before propagation has resolved anything) so the propagation
 pass's attach walk can find and stamp the synthesized RMW store node once
 its bounds are known.
 
-`CHKNTZ` (#939) covers the pointee types `CHKNT` structurally cannot: a
+`CHKNTZ` covers the pointee types `CHKNT` structurally cannot: a
 struct/union or wide `_BitInt`/`_Decimal` assignment never puts its value in
 a single register at all — `ND_ASSIGN`'s codegen routes these through a
 dedicated memcpy branch (`src/codegen_expr.c`, ahead of the generic scalar-store
@@ -250,21 +250,21 @@ direct-access site (`compute_checked_bounds()`) and the propagation
 attach site (`checked_prop_attach_scan()`) call it, so `CHKNT`/`CHKNTZ`
 selection and propagation agree on exactly the same supported-pointee set.
 
-`CHKAB` (#944) is `CHKR`'s counterpart for the *opposite* trust direction.
+`CHKAB` is `CHKR`'s counterpart for the *opposite* trust direction.
 Where propagation only ever widens trust
 into a previously-unchecked target, `CHKAB` *verifies* trust when assigning
 into a target that is itself already declared checked: `src/parse_checked.c`'s
 `verify_checked_assign_bounds()` rewrites `q = E;` (both `q` and `E`
-declared-checked, `E` a direct source, not a #941-propagated one) into
+declared-checked, `E` a direct source, not a propagated one) into
 `(temp = E's own bounds), (q = E)`, and codegen emits `CHKAB` twice after the
 store — once against `q`'s own declared lower bound, once against its upper
 bound — enforcing that `E`'s bounds imply `q`'s. `q`'s own bounds are
 evaluated *after* the store (self-referencing on `q`'s own value, e.g.
 `[q, q + m*sizeof(T))` for `count(m)`); the source's bounds are snapshotted
 into temps *before* it, the inverse of `CHKR`'s own propagation-snapshot
-ordering. `CHKAB` is reused, unmodified, by #486's `[[cccc::dynamic]]`
+ordering. `CHKAB` is reused, unmodified, by the `[[cccc::dynamic]]`
 bounds cast (its desugar produces exactly this `q = E` shape against a
-compiler-generated target), and again by #488's caller-side bounds-safe
+compiler-generated target), and again by the caller-side bounds-safe
 interface check (`rewrite_checked_call_args()`, src/parse_checked.c),
 which rewrites a qualifying call argument into `(__ca = arg, __ca)` against
 a hidden declared-checked local carrying the callee's own parameter bounds
@@ -274,7 +274,7 @@ arg` assignment is then picked up by the *same*, unmodified
 code path of its own. See [safety.md](safety-checked-pointers.md#checked-pointers) for the
 full writeup of all three.
 
-`CHKDC` (#486) is `dynamic_check(cond)`'s runtime half: a single register
+`CHKDC` is `dynamic_check(cond)`'s runtime half: a single register
 read, no address or allocation lookup at all, so it needs no
 `sorted_allocs`/provenance resolution the way every other `CHK*` opcode in
 this table does. Built only when `CCCC_CHECKED_BOUNDS` was already set at
@@ -283,7 +283,7 @@ plain `ND_NULL_EXPR` otherwise, the same convention `__builtin_assume`
 uses), so it never reaches `-c=native`/`-m`/`-c=generated` serialization in
 the default build.
 
-`CHKT3` is live (#651, extended to byte granularity by #653). It is emitted
+`CHKT3` is live (extended to byte granularity). It is emitted
 by `emit_load_ex`/`emit_store_ex` (`src/codegen_emit.c`) right after `CHKP3`,
 carrying the pointee's static `TypeKind` and size, and a 3-way mode:
 `[rs:8|mode:8]` in the operand word, `[(size<<8)|expected_type:64]` as the
@@ -295,7 +295,7 @@ trailing immediate. `mode` is `CHKT3Mode` (`src/cccc.h`):
 | `CHKT3_MODE_STAMP` (1) | a store | establishes `expected_type` as the effective type for `[ptr, ptr+size)` |
 | `CHKT3_MODE_CLEAR` (2) | a union member store | erases (rather than stamps) `[ptr, ptr+size)`, so a later access through a different union member doesn't false-positive |
 
-Type tracking (#653) is a **byte-granular shadow** (`vm->type_shadow_pages`,
+Type tracking is a **byte-granular shadow** (`vm->type_shadow_pages`,
 logically one byte per heap byte, indexed by `(char*)ptr - vm->heap_seg`,
 physically a sparse page table of 64 KiB pages — see below), replacing the
 earlier one-`type_kind`-per-allocation model — this is what lets a struct
@@ -308,13 +308,13 @@ treated as no-info rather than guessed at. `char`-typed accesses are always
 legal (§6.5p7): a `char` load never checks, and a `char` store clears rather
 than stamps. `CHKT3` resolves the containing allocation via the same
 `heap_alloc_for_ptr`/`sorted_allocs_find` helper as `CHKB` and `CHKP3`
-(#650's pattern) purely to find the allocation's liveness (`freed`) and
+purely to find the allocation's liveness (`freed`) and
 range — the type information itself lives in the shadow, not in
 `AllocHeader`.
 
 There are two shadow instances (`TypeShadowSeg`, `src/cccc.h`), one per
-tracked segment: `vm->heap_shadow` (the original #653 scope) and
-`vm->data_shadow`, covering globals (`static`/file-scope variables, #752).
+tracked segment: `vm->heap_shadow` (the original scope) and
+`vm->data_shadow`, covering globals (`static`/file-scope variables).
 `type_shadow_locate` (`src/ops.c`) resolves which segment (if either) a
 given `[ptr, ptr+len)` range falls wholly inside; `op_CHKT3_fn` itself
 still gates on `heap_alloc_for_ptr`/`sorted_allocs_find` exactly as before
@@ -363,7 +363,7 @@ live in `data_seg` and rotate between every struct-returning call, so
 without the clear a slot would carry a stale stamp from whichever struct
 type was returned through it last.
 
-`op_CALLF_fn`'s clear is classified per host function by name (#751,
+`op_CALLF_fn`'s clear is classified per host function by name (
 `ffi_shadow_classify`/`ffi_shadow_rules`, `src/ops.c`), recovering coverage
 the blanket clear used to destroy for functions whose write behavior is
 statically known:
@@ -382,7 +382,7 @@ Since an unclassified name behaves exactly as before, adding or widening a
 rule can only ever reduce clearing relative to today's behavior, never
 introduce a false positive.
 
-`qsort` (#769) is `HANDLED` by `wrap_qsort` (`src/stdlib/stdlib.c`) rather
+`qsort` is `HANDLED` by `wrap_qsort` (`src/stdlib/stdlib.c`) rather
 than by a table entry, since narrowing its clear needs runtime information
 (the actual pre/post shadow contents) a static rule can't express: `qsort`
 only reorders whole `size`-byte elements, never rewrites their bytes, so if

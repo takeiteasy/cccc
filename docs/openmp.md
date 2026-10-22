@@ -150,22 +150,22 @@ or another OpenMP compiler. Building the native output with
 ## Limitations
 
 - Native output uses pthreads, so Windows has no OpenMP
-  ([#1402](https://todo.sr.ht/~takeiteasy/cccc/1402)).
+ .
 - `ordered` is rejected under native
-  ([#1401](https://todo.sr.ht/~takeiteasy/cccc/1401)).
+ .
 - `schedule(dynamic|guided)` run as static
-  ([#1403](https://todo.sr.ht/~takeiteasy/cccc/1403)).
+ .
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement
-  ([#1404](https://todo.sr.ht/~takeiteasy/cccc/1404)).
+ .
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected
-  ([#1415](https://todo.sr.ht/~takeiteasy/cccc/1415)).
+ .
 - `copyin`, `linear` and `threadprivate`
-  ([#1400](https://todo.sr.ht/~takeiteasy/cccc/1400)).
+ .
 - `default(none)` is parsed but not enforced
-  ([#1398](https://todo.sr.ht/~takeiteasy/cccc/1398)).
+ .
 - `task`, `taskwait` and `sections`
-  ([#1399](https://todo.sr.ht/~takeiteasy/cccc/1399)).
+ .
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,

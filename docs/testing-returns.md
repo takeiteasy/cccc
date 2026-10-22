@@ -151,7 +151,7 @@ union Val make_val(void) {
 
 - *Bitfields* — a bitfield member is compared as its whole storage unit, not its individual bit-width.
 - *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
-- *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [ticket #349](https://todo.sr.ht/~takeiteasy/cccc/349)).
+- *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [the earlier work](https://todo.sr.ht/~takeiteasy/cccc/349)).
 
 **Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
 

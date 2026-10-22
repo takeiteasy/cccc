@@ -188,20 +188,20 @@ enforced; the launch's local size is the one that applies.
 ## Limitations
 
 - Vectors smaller than 16 bytes (`float2`, `int2`, `char4`, ...) do not exist
-  ([#1407](https://todo.sr.ht/~takeiteasy/cccc/1407)).
+ .
 - 128-byte vectors (`long16`, `ulong16`) do not exist
-  ([#1408](https://todo.sr.ht/~takeiteasy/cccc/1408)).
+ .
 - The OpenCL built-in library (`sqrt`, `min`, `max`, `clamp`, `mad`, `dot`,
   `native_*`, ...) is not provided, and a kernel cannot call libm
-  ([#1409](https://todo.sr.ht/~takeiteasy/cccc/1409)).
+ .
 - `half` is not provided
-  ([#1410](https://todo.sr.ht/~takeiteasy/cccc/1410)).
+ .
 - A compound assignment to a swizzle of several lanes (`v.lo += x`) is rejected
-  ([#1412](https://todo.sr.ht/~takeiteasy/cccc/1412)).
+ .
 - `get_global_offset` is always 0
-  ([#1413](https://todo.sr.ht/~takeiteasy/cccc/1413)).
+ .
 - The OpenCL host API (`clCreateBuffer`, `clEnqueueNDRangeKernel`, ...) is not
-  emulated ([#1387](https://todo.sr.ht/~takeiteasy/cccc/1387),
+  emulated (
   [#1388](https://todo.sr.ht/~takeiteasy/cccc/1388)).
 - Images and samplers are not supported.
 - `double` is rejected in kernel code, as in

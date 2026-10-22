@@ -46,7 +46,7 @@ binary a user hands back a crash report from is still debuggable locally.
 
 ## Audit gate
 
-Before tagging, run the full matrix that ticket #883 established:
+Before tagging, run the full matrix that the earlier work established:
 
 ```
 ./cccc --build build.c --build-target=test         # baseline

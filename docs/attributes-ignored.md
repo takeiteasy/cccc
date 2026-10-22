@@ -19,19 +19,19 @@ Ignored attributes include (but are not limited to):
 | Attribute | Syntax | Tracking |
 |-----------|--------|----------|
 | `no_unique_address` | C23 | Parsed but ignored — VM optimisation deferred |
-| `visibility` | GNU | Recognized by `__has_attribute` (no ELF, so no-op) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `section` | GNU | Recognized by `__has_attribute` (no object-file sections) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `weak` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `visibility` | GNU | Recognized by `__has_attribute` (no ELF, so no-op) |
+| `section` | GNU | Recognized by `__has_attribute` (no object-file sections) |
+| `weak` | GNU | Recognized by `__has_attribute` (no linker) |
 | `weakref` | GNU | |
-| `alias` | GNU | Recognized by `__has_attribute` (no linker) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `alias` | GNU | Recognized by `__has_attribute` (no linker) |
+| `target` | GNU | Recognized by `__has_attribute` (no per-function ISA codegen) |
+| `hot` / `cold` | GNU | Recognized by `__has_attribute` (no branch-temperature layout) |
+| `always_inline` / `flatten` / `noinline` | GNU | Recognized by `__has_attribute` (no inliner in the JIT) |
 | `gnu_inline` | GNU | On an `extern inline` definition: inline-only, compiled only when called. A later non-inline definition in the same file, or a real definition in another file, takes precedence. `-c=native` gives a called one a weak out-of-line copy |
-| `used` | GNU | Recognized by `__has_attribute` (no symbol-level DCE) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
-| `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) — [#657](https://todo.sr.ht/~takeiteasy/cccc/657) |
+| `used` | GNU | Recognized by `__has_attribute` (no symbol-level DCE) |
+| `may_alias` | GNU | Recognized by `__has_attribute` (no strict-aliasing optimizer) |
+| `mode` | GNU | Recognized by `__has_attribute` (no machine-mode type system) |
+| `transparent_union` | GNU | Recognized by `__has_attribute` (no union-arg coercion modeling) |
 | `alloc_align` | GNU | |
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
@@ -42,4 +42,3 @@ Ignored attributes include (but are not limited to):
 | # | Attribute | Priority | Description |
 |---|-----------|----------|-------------|
 | [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |
-| [#657](https://todo.sr.ht/~takeiteasy/cccc/657) | 14 architecturally-inert GNU attributes | low | Register in `known_attrs[]` for `__has_attribute` (done) |

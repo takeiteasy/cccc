@@ -157,12 +157,12 @@ so a faulting launch stops the compile.
 
 - `-c=generated` has no kernel runtime.
 - A native barrier kernel creates and joins a thread per work-item for every
-  group ([#1385](https://todo.sr.ht/~takeiteasy/cccc/1385)).
+  group.
 - Structs, unions and vectors as kernel arguments, and more than 8 integer or
-  8 float arguments ([#1395](https://todo.sr.ht/~takeiteasy/cccc/1395)).
+  8 float arguments.
 - Id queries and local-memory accesses are host calls, and a barrier kernel
   starts a thread per work-item for each group, so large launches are slow
-  ([#1396](https://todo.sr.ht/~takeiteasy/cccc/1396)).
+ .
 
 ---
 

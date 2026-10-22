@@ -6,9 +6,9 @@ Stack instrumentation, jumps, linking, FFI and traps.
 
 | Opcode | Description |
 |--------|-------------|
-| `SCOPEIN` | Activate variables belonging to a lexical scope; records each variable's runtime liveness by actual address (bp+offset), not just its declaration record (#671) |
-| `SCOPEOUT` | Deactivate variables (see #669 for why this no longer also aborts on tracked stack addresses — that check is detection-only, see `docs/safety.md`) |
-| `CHKL` | Check variable liveness before access (use-after-scope / use-after-return), keyed by runtime address so cross-function offset collisions and recursive re-entry don't produce false positives (#671) |
+| `SCOPEIN` | Activate variables belonging to a lexical scope; records each variable's runtime liveness by actual address (bp+offset), not just its declaration record |
+| `SCOPEOUT` | Deactivate variables (it no longer aborts on tracked stack addresses: that check is detection-only, see [safety-dangling.md](safety-dangling.md)) |
+| `CHKL` | Check variable liveness before access (use-after-scope / use-after-return), keyed by runtime address so cross-function offset collisions and recursive re-entry don't produce false positives |
 | `MARKR` | Record a read access to a stack variable |
 | `MARKW` | Record a write access; marks variable as initialised |
 
@@ -59,7 +59,7 @@ output), any queued libraries are re-emitted at the top of the output as
 `#pragma cccc link("name")` — CCCC's own spelling, ignored as a harmless
 unknown pragma by a plain downstream `cc` but parsed back into
 `pragma_link_libs` if the output is ever re-fed to cccc itself, so the
-requirement round-trips (#1149). `-c=native` emits neither spelling: the
+requirement round-trips. `-c=native` emits neither spelling: the
 library already reaches the host linker directly via the `-l` merge above,
 so re-stating it as a pragma in the temporary source would be redundant.
 
@@ -86,11 +86,11 @@ so re-stating it as a pragma in the temporary source would be redundant.
 |--------|-------------|
 | `RETBUF` | Return the next buffer from the rotating pool (for non-scalar returns) |
 
-The pool itself (`alloc_return_buffer_pool`, `src/codegen_func.c`) is allocated in the data segment at `CCCC_MAX_DATA_ALIGN` (64-byte) alignment (#1136), covering the widest by-value return this convention carries — a 512-bit vector (#722).
+The pool itself (`alloc_return_buffer_pool`, `src/codegen_func.c`) is allocated in the data segment at `CCCC_MAX_DATA_ALIGN` (64-byte) alignment, covering the widest by-value return this convention carries — a 512-bit vector.
 
 A registered FFI cfunc (`cc_register_cfunc`) must honor this convention on
 both ends, not just the host C ABI's own: a struct/union argument arrives as
-a pointer to the *caller's own* storage (#714/#1078 — no scratch copy is
+a pointer to the *caller's own* storage (no scratch copy is
 made for a struct/union the way there is for a vector/decimal arg, see the
 by-value ABI writeups above), and a struct/union return must go back as a
 pointer, not the host ABI's in-register struct return. Registering a raw
@@ -98,10 +98,10 @@ host symbol whose own C ABI takes or returns an aggregate by value (rather
 than a small `wrap_*` marshalling function) silently breaks this — a guest
 argument's address gets read as if it were the struct's own first word, or
 REG_A0 gets treated as a struct pointer when it's actually raw return-register
-bytes. Found auditing #1087: `inet_ntoa(struct in_addr)` (by-value argument)
+bytes. Found in an audit: `inet_ntoa(struct in_addr)` (by-value argument)
 and `div`/`ldiv`/`lldiv` (by-value return) were both registered raw; fixed
 with wrapper functions (`wrap_inet_ntoa`, `wrap_div`/`wrap_ldiv`/`wrap_lldiv`)
-that marshal explicitly, `src/stdlib/posix_net.c`/`stdlib.c` (#1090).
+that marshal explicitly, `src/stdlib/posix_net.c`/`stdlib.c`.
 
 ## Trap / Debugger
 

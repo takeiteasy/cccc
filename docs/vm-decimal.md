@@ -38,7 +38,7 @@ their storage sized directly from `ty->size` like any other type.
 
 All twelve decimal opcodes share one convention: **zero operand words,
 fixed argument registers** (`REG_A0`–`REG_A3`), identical in shape to the
-`WIDE_ADD`/`WIDE_SUB`/… family (#456) used for wide `_BitInt`. Arguments are
+`WIDE_ADD`/`WIDE_SUB`/… family used for wide `_BitInt`. Arguments are
 loaded into place with ordinary `MOV3`/`LEA3`/`LI3` immediately beforehand;
 the opcode itself just performs the operation. No decimal op is ever
 RRRS-operand-decoded.
@@ -69,7 +69,7 @@ even when one operand is NaN; `>`/`>=` never reach codegen as distinct
 opcodes — like binary float, they're normalized to a swapped `<`/`<=` at
 parse time.
 
-**Clobber contract (#838):** every `D*` opcode and every `WIDE_*` opcode
+**Clobber contract:** every `D*` opcode and every `WIDE_*` opcode
 reads/writes only `REG_A0`–`REG_A5` and the fixed-A-register block's opaque
 side effects (`emit_wide_op`, `src/codegen_emit.c`) — none of them touch a `T`
 register, and codegen relies on this: the decimal and wide-`_BitInt` binop
@@ -79,7 +79,7 @@ the temp-register allocator the way a real call does. This differs from
 `AND`/`OR`/`XOR`/comparison wide-`_BitInt` ops and any decimal op reached
 through a genuine FFI call path (`emit_wide_helper`'s `CALLF`), which *do*
 clobber caller-saved `T` registers like any other call and must reset the
-allocator accordingly. Before #838, `emit_wide_op` also called
+allocator accordingly. Previously, `emit_wide_op` also called
 `reset_temp_regs()` defensively; that was removed because no `op_*_fn` handler
 for a `D*`/`WIDE_*` opcode (`src/ops.c`) ever reads or writes a `REG_T*` slot,
 and the reset was unsound — it silently freed a live temp belonging to an
@@ -90,7 +90,7 @@ one.
 and always produces BID's canonical shortest-form string (no flags, width, or
 precision — that's its whole contract).
 
-### `printf`/`scanf` integration (#829)
+### `printf`/`scanf` integration
 
 `%Hf`/`%Df`/`%DDf` (`_Decimal32`/`_Decimal64`/`_Decimal128`) work with the
 `f`/`F`/`e`/`E`/`g`/`G` conversions, including flags (`- + space # 0`), field
@@ -118,12 +118,12 @@ conversion character literally rather than formatting the argument), so a
 `snprintf` through the custom `stb_sprintf`-derived engine
 (`src/stdlib/format_printf.c`) regardless of `CCCC_HAVE_NATIVE_PCT_B` — the
 same reasoning that already makes the `scanf` family route through the custom
-engine unconditionally (#728).
+engine unconditionally.
 
 **Variadic ABI.** A decimal argument in the variadic tail of a call — the
 `x` in `printf("%Df", x)` — is passed **by pointer** to a caller-frame
 scratch copy (`gen_decimal_arg_ptr`, `src/codegen_emit.c`), mirroring the
-vector-variadic convention (#721, see the "ABI" subsection below).
+vector-variadic convention (see the "ABI" subsection below).
 `_Decimal32/64/128` isn't
 subject to default argument promotion (unlike `float`→`double`), which is
 why three distinct length modifiers exist; the by-pointer convention keeps
@@ -151,7 +151,7 @@ detects the by-pointer case via `__builtin_classify_type`, extended with a
 second discriminant (`CCCC_DECIMAL_TYPE_CLASS = 98`, alongside vector's
 `99`) folded into the same by-pointer `va_arg` arm.
 
-### `<math.h>` transcendentals (#828)
+### `<math.h>` transcendentals
 
 `sqrt`/`exp`/`log`/`pow`/`sin`/`cos`/... for `_Decimal32/64/128` (`<decimal_math.h>`,
 opt-in with `CCCC_HAS_DECIMAL=1`; see [coverage.md](coverage.md)'s C23 header
@@ -165,7 +165,7 @@ op-dispatch entry points, each taking raw byte addresses (same "no BID type in
 a VM header" convention as the `cccc_dec_*` shim functions above) rather than
 through a dedicated opcode.
 
-### `strtod32`/`strtod64`/`strtod128` (#832)
+### `strtod32`/`strtod64`/`strtod128`
 
 Parsing a decimal from a *runtime* string (as opposed to a compile-time
 literal) adds **no new opcode**, following the `<math.h>` precedent directly
@@ -181,10 +181,10 @@ no-conversion (`+0`, `endptr == s`) case match C's `strtod()` contract.
 Decimal **return by value** from a guest `static inline` function is already
 supported (the struct-ABI reuse described below) — this is exactly what
 every `<decimal_math.h>` wrapper already does, so no decimal value ever
-crosses the FFI boundary itself. `#830`'s restriction (decimal rejected as a
+crosses the FFI boundary itself. The restriction (decimal rejected as a
 *fixed* FFI parameter or return) doesn't apply here for that reason.
 
-### `<fenv.h>` rounding and exception flags (#832)
+### `<fenv.h>` rounding and exception flags
 
 Phase 1 hard-wired every arithmetic/conversion entry point in
 `src/stdlib/decimal.c` and `src/stdlib/decimal_math.c` to
@@ -262,7 +262,7 @@ reset happens only once at the top, not before every `cc_run_at()` cycle —
 while whatever the *compile* phase left dirty never reaches the guest at
 all.
 
-### Compile-time constant folding (#832)
+### Compile-time constant folding
 
 `static _Decimal64 x = 1.1dd + 2.2dd;` used to be a hard diagnostic — only a
 bare literal (or a cast of one) was accepted as a decimal static/global
@@ -288,16 +288,16 @@ folding static initializers didn't require.
 ### ABI
 
 By-value decimal arguments and returns reuse the vector-by-value struct-ABI
-machinery (#714): a caller-frame scratch-slot copy for arguments, `RETBUF`
+machinery: a caller-frame scratch-slot copy for arguments, `RETBUF`
 + copy for returns. `CALLT` (tail-call optimization) is excluded for any
 call with a decimal return *or* a decimal argument, for the same frame-reuse
-hazard reason vector returns/args are (#716) — the value's scratch slot
+hazard reason vector returns/args are — the value's scratch slot
 lives in the caller's or callee's own frame, so a tail call reusing that
 frame would return or read through a dangling pointer.
 
 A decimal value through the **variadic tail** of a call is passed by
-pointer (#829, see above) — this covers `printf`/`scanf` and any other
+pointer (see above) — this covers `printf`/`scanf` and any other
 variadic call whose receiving side reads it back via `va_arg`. A decimal
 value as a **fixed** parameter or return through a **native FFI call**
 remains rejected with a diagnostic: `libffi` has no decimal `ffi_type`, so
-neither has a sound by-value marshalling convention yet (tracked as #830).
+neither has a sound by-value marshalling convention yet (not yet supported).
