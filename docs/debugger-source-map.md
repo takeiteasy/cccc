@@ -1,106 +1,78 @@
 # Source Map API
 
-Map program counters to source locations, and export maps for IDEs.
+Map program counters to source locations, and export maps for IDEs and tools.
 
-## Source Map API
+| Need | Use |
+|---|---|
+| Symbolize a PC from a bytecode program | `__builtin_pc_function_name`, `__builtin_pc_source_location` |
+| Symbolize a PC from an embedder | `cc_pc_to_name`, `cc_pc_to_source` |
+| Raw file, line and column | `cc_get_source_location` |
+| Export everything as JSON | `cc_output_source_map_json` |
 
-CCCC provides a programmatic API for accessing source location information, which is useful for building custom debugging tools or IDE integrations.
+File and line need `-g`; a function name does not.
 
-### Symbolizing a PC from User Code
+## From a program
 
-Two builtins compose with `__builtin_return_address` to produce human-readable symbolization from within bytecode programs:
+Both builtins compose with `__builtin_return_address`:
 
 ```c
 #include <stdio.h>
 
 void print_caller_info(void) {
-    // Capture the return address (= a VM bytecode offset, not a host address).
-    void *ra = __builtin_return_address(0);
+    void *ra = __builtin_return_address(0);          // a VM bytecode offset, not a host address
+    const char *fn = __builtin_pc_function_name(ra); // no -g needed
 
-    // Map to the enclosing function name — always available, no -g required.
-    const char *fn = __builtin_pc_function_name(ra);
-
-    // Map to file/line — requires -g; gracefully returns NULL/0 without it.
     const char *file = NULL;
     int line = 0;
-    __builtin_pc_source_location(ra, &file, &line);
+    __builtin_pc_source_location(ra, &file, &line);  // needs -g; NULL/0 without it
 
-    if (file)
-        printf("called from %s at %s:%d\n", fn ? fn : "?", file, line);
-    else
-        printf("called from %s\n", fn ? fn : "?");
+    if (file) printf("called from %s at %s:%d\n", fn ? fn : "?", file, line);
+    else      printf("called from %s\n", fn ? fn : "?");
 }
 ```
 
-This pipeline is **VM only**. `__builtin_pc_function_name` and
-`__builtin_pc_source_location` both lower to a call into a VM-internal FFI
-shim that resolves a VM bytecode offset through the VM's own symbol/source-map
-table — neither exists natively, so both are a hard compile error under
-`-c=native`/`-m`/`-c=generated`. `__builtin_return_address` alone still
-serializes and runs there, mapping to a real host return address instead of a
-VM bytecode offset — see [native.md § Serialized-output
-divergences](native-differences.md#behaviour-differences).
+The two `__builtin_pc_*` builtins are VM only: both are a compile error under `-c=native`, `-m` and `-c=generated`. `__builtin_return_address` alone still works there, returning a real host address ([native-differences.md](native-differences.md#behaviour-differences)).
 
-### Embedder C API
-
-The same lookups are available to embedders through `cccc.h`:
+## From an embedder
 
 ```c
-// Map a bytecode PC to the enclosing function name.
-// Does NOT require -g. Returns NULL if not found.
+// Function name for a PC; no -g needed; NULL if not found.
 const char *cc_pc_to_name(VirtualMachine *vm, Pc pc);
 
-// Map a bytecode PC to a source file name and 1-based line number.
-// Requires -g. Returns 1 on success (sets *out_file, *out_line);
-// returns 0 and zeros the outputs on failure.
+// File and 1-based line; needs -g. Returns 1 on success, else 0 and zeroed outputs.
 int cc_pc_to_source(VirtualMachine *vm, Pc pc, const char **out_file, int *out_line);
-```
 
-Example:
-
-```c
-// Symbolize the current PC from the embedder side.
 const char *name = cc_pc_to_name(&vm, vm.pc);
 const char *file = NULL;
 int line = 0;
 cc_pc_to_source(&vm, vm.pc, &file, &line);
-if (name) printf("in %s", name);
-if (file) printf(" (%s:%d)", file, line);
-putchar('\n');
 ```
 
-### Getting Source Location (low-level)
+The low-level form also gives the column (needs `-g`):
 
 ```c
-// Get source file location for a given PC address (requires -g).
 File *file = NULL;
-int line_no = 0;
-int col_no = 0;
-
-if (cc_get_source_location(&vm, vm.pc, &file, &line_no, &col_no)) {
+int line_no = 0, col_no = 0;
+if (cc_get_source_location(&vm, vm.pc, &file, &line_no, &col_no))
     printf("At %s:%d:%d\n", file->name, line_no, col_no);
-}
 ```
 
-### Exporting Source Maps
-
-Source maps can be exported to JSON format for use with external tools:
+## Exporting JSON
 
 ```c
-// Export source map to JSON
 FILE *f = fopen("sourcemap.json", "w");
 cc_output_source_map_json(&vm, f);
 fclose(f);
 ```
 
-The JSON output includes:
-- **pc**: Bytecode offset
-- **file**: Source file name
-- **line**: Line number (1-based)
-- **col**: Starting column number (1-based, UTF-8 aware)
-- **end_col**: Ending column number (1-based)
+| Field | Meaning |
+|---|---|
+| `pc` | Bytecode offset |
+| `file` | Source file name |
+| `line` | 1-based line |
+| `col` | 1-based start column, UTF-8 aware |
+| `end_col` | 1-based end column |
 
-Example output:
 ```json
 {
   "version": 3,
@@ -111,34 +83,8 @@ Example output:
 }
 ```
 
-### Generated Code
+## Generated code
 
-Code produced by a comptime macro, an `@attr` handler, or file-scope
-generation carries its own synthetic file/line (e.g. `<cccc macro:
-label>:1:1` for `SyntheticToken`, or the macro's call-site location by
-default) rather than a location in the real source file — there is no
-line-for-line mapping back to a template the way a preprocessor macro
-expansion has one. What generated code does carry is an **expansion
-origin**: the chain of macro calls / attribute handlers / file-scope
-generation that produced it, walked by the diagnostic printer to render
-the `note: in expansion of ...` chain described in
-[macros.md § Expansion backtrace](macros-debugging.md#expansion-backtrace). This is
-compiler-diagnostics plumbing, not part of the source-map/PC-symbolization
-API above — it isn't queryable through `cc_pc_to_source`/
-`cc_get_source_location`, only surfaced on a compile error or warning.
+Code from a comptime macro, an attribute handler or file-scope generation carries a synthetic location (such as `<cccc macro: label>:1:1`, or the macro's call site) rather than a line in a real file. It also carries an **expansion origin**, the chain of macro calls that produced it, which the diagnostic printer renders as `note: in expansion of ...` ([macros-debugging.md](macros-debugging.md#expansion-backtrace)). That chain is for diagnostics only and is not reachable through the source-map functions.
 
-### Instruction Encoding
-
-The VM text segment uses 32-bit instruction words. Operands that need 64 bits,
-such as C integer immediates and text/data byte offsets, are encoded as two
-consecutive 32-bit words. Direct branch and call targets are instruction
-indexes, while C-visible function and label values are byte offsets from the
-text segment base.
-
-Floating-point bytecode uses a tagged register file. `FLDR`/`FSTR` load and
-store `double` values tagged as f64, while `FLDR_F32`/`FSTR_F32` load and store
-C `float` values tagged as f32. Arithmetic and comparison opcodes without a
-suffix operate as f64; `_F32` opcodes operate in f32 precision. `FROUND_F32`
-converts a floating register to f32 and tags the destination as f32. Raw-bit
-moves are typed: `FR2R`/`R2FR` move f64 payloads, and `FR2R_F32`/`R2FR_F32`
-move f32 payloads.
+The instruction word format is described in [vm.md](vm.md).

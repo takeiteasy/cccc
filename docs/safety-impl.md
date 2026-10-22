@@ -53,3 +53,10 @@ An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and abo
 ## Uninitialized detection
 
 `MARKI` marks a variable initialized after assignment and `CHKI` validates before a read, keyed by BP address plus offset. A scalar local with `Obj.addr_taken`, `is_captured` or `is_block_var` is exempt.
+
+## Bounds checks
+
+- `CHKB`/`CHKBN` validate a pointer value as `p + n` / `p - n` forms it and allow one-past-the-end, since `a[i]` desugars to `*(a+i)` and `CHKD` is the real dereference check. A pointer difference is a raw ptr-ptr subtraction, not a scaled offset, so it is not checked.
+- `CHKD` precedes every load, store, struct/union copy and vector access. For `ALDR`/`ASTR`/`AXCHG`/`ACAS` it is a standalone instruction emitted ahead, which avoids the register-aliasing hazard in the atomics' operand words; `ACAS` gets two (a failed compare-exchange reads and writes through `expected`). Emission is unconditional under `CCCC_BOUNDS_CHECKS`: these addresses are pointer-valued expressions, so the `addr_is_local_frame` classifier would never apply.
+- Interior pointers resolve through `vm->sorted_allocs`; a negative offset is rejected only once it steps before the resolved allocation's start.
+- Two lookups per scalar heap access (`CHKB` and `CHKD`), on top of `CHKP3`'s own.

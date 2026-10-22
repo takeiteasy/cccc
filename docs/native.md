@@ -77,4 +77,4 @@ System headers and URL includes work as described in [headers.md](headers.md) an
 
 [native-differences.md](native-differences.md) · [native-std.md](native-std.md) · [headers.md](headers.md) · [coverage.md](coverage.md) · [build.md](build.md)
 
-[^deps]: Lists command-line sources, `-include` files and every `#include` resolved from disk; bundled headers served from memory do not appear. It never runs the program, and `--build` uses it for `CcccExecutable` header tracking ([build-incremental.md](build-incremental.md#incremental-builds-and-header-dependencies)).
+[^deps]: Lists command-line sources, `-include` files and every `#include` resolved from disk; bundled headers served from memory do not appear. It never runs the program, and `--build` uses it for `CcccExecutable` header tracking ([build-incremental.md](build-incremental.md#ccccexecutable-and-ccccobject)).

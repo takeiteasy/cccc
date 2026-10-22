@@ -81,7 +81,7 @@ A **`CcccExecutable`** target is compiled by the running `cccc` itself, not a
 system `cc`: one whole-program `cccc --compile=native <sources...> -o
 bin/<name>` invocation, so its sources may contain `[[cccc::comptime]]`. It has
 no per-source object files — it caches per target, not per source (see
-[Incremental builds](build-incremental.md#incremental-builds-and-header-dependencies) below) — and
+[Incremental builds](build-incremental.md#ccccexecutable-and-ccccobject) below) — and
 accepts only the flags `cccc --compile=native` understands:
 `-I`/`-isystem`/`-D`/`-U`/`-L`/`-l`/`--std=`/`--link-arg`. `AddLdFlag` and
 `AddFramework` are sent as `--link-arg` to the host link line; add an object
