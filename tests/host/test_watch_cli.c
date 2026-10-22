@@ -148,6 +148,39 @@ static const char *LOOP_F = "#include <stdio.h>\n#include <unistd.h>\n"
                             "    return 0;\n"
                             "}\n";
 
+// A saved change that calls an unchanged comptime function is expanded in the
+// running program; a changed comptime function is refused.
+static void test_comptime_reload(const char *dir) {
+    static const char *FMT =
+        "#include <stdio.h>\n#include <unistd.h>\n"
+        "@comptime Node *val(void) { return MakeIntLiteral(%d); }\n"
+        "int f(void) { return %s; }\n"
+        "int main(void) {\n"
+        "    for (int i = 0; i < 400; i++) {\n"
+        "        printf(\"c=%%d\\n\", f());\n"
+        "        fflush(stdout);\n"
+        "        usleep(50000);\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n";
+    char src[2048];
+    snprintf(src, sizeof src, FMT, 42, "1");
+    write_file(dir, "ct.c", src);
+    char *argv[] = {cccc, "--watch", "ct.c", NULL};
+    Child c;
+    spawn(&c, dir, argv);
+    long at = EXPECT(&c, "c=1\n", 0, "comptime reload: first run");
+    snprintf(src, sizeof src, FMT, 42, "val() + 1");
+    write_file(dir, "ct.c", src);
+    at = EXPECT(&c, "c=43\n", (size_t)at, "comptime reload: call expands");
+    snprintf(src, sizeof src, FMT, 7, "val() + 1");
+    write_file(dir, "ct.c", src);
+    at = EXPECT(&c, "restart to apply it", (size_t)at,
+                "comptime reload: changed comptime refused");
+    EXPECT(&c, "c=43\n", (size_t)at, "comptime reload: old code keeps running");
+    reap(&c);
+}
+
 static void test_hot_reload(const char *dir) {
     char src[2048];
     snprintf(src, sizeof src, LOOP_F, 1);
@@ -429,6 +462,7 @@ int main(void) {
 
     test_hot_reload(root);
     test_refused_reload(root);
+    test_comptime_reload(root);
     test_header_reload(root);
     test_repl_watch(root, false);
     test_repl_watch(root, true);

@@ -434,6 +434,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // Initialize text pointer - text_seg[0] is reserved for main entry point
     vm->text_ptr = 0;
+    // The comptime code compiled before this point is about to be overwritten.
+    vm->compiler.macro_code_stale = true;
 
     // Initialize global variables in data segment (TLS vars go into
     // tls_template) Zero the template so uninitialised TLS vars start at 0
@@ -1073,6 +1075,37 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head) {
     cc_repl_compile_new_marked(vm, old_head, NULL);
 }
 
+void cc_code_mark_begin(VirtualMachine *vm, CcCodeMark *mark) {
+    Pc    hole_start = mark->hole_start, hole_end = mark->hole_end;
+    char *data_hole_start = mark->data_hole_start,
+         *data_hole_end   = mark->data_hole_end;
+    *mark = (CcCodeMark){.started          = true,
+                         .text_start       = vm->text_ptr,
+                         .data_start       = vm->data_ptr,
+                         .global_labels    = num_global_labels,
+                         .last_file        = vm->dbg.last_debug_file,
+                         .last_line        = vm->dbg.last_debug_line,
+                         .last_col         = vm->dbg.last_debug_col,
+                         .hole_start       = hole_start,
+                         .hole_end         = hole_end,
+                         .data_hole_start  = data_hole_start,
+                         .data_hole_end    = data_hole_end,
+                         .saved_top        = vm->text_ptr,
+                         .saved_source_map = vm->dbg.source_map_count};
+}
+
+void cc_code_mark_end(VirtualMachine *vm, CcCodeMark *mark, int new_fns,
+                      int new_vars) {
+    mark->ended = true;
+    if (!mark->in_hole)
+        mark->text_end = vm->text_ptr;
+    if (!mark->data_in_hole)
+        mark->data_end = vm->data_ptr;
+    mark->global_labels_end = num_global_labels;
+    mark->new_fns           = new_fns;
+    mark->new_vars          = new_vars;
+}
+
 void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                                 CcCodeMark *mark) {
     cc_reset_intrinsic_stubs();
@@ -1104,24 +1137,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
     cc_alloc_return_buffer_pool(vm);
 
     // After the RETBUF pool, which a later release must not take back.
-    if (mark) {
-        Pc hole_start = mark->hole_start, hole_end = mark->hole_end;
-        char *data_hole_start = mark->data_hole_start,
-             *data_hole_end   = mark->data_hole_end;
-        *mark = (CcCodeMark){.started          = true,
-                             .text_start       = vm->text_ptr,
-                             .data_start       = vm->data_ptr,
-                             .global_labels    = num_global_labels,
-                             .last_file        = vm->dbg.last_debug_file,
-                             .last_line        = vm->dbg.last_debug_line,
-                             .last_col         = vm->dbg.last_debug_col,
-                             .hole_start       = hole_start,
-                             .hole_end         = hole_end,
-                             .data_hole_start  = data_hole_start,
-                             .data_hole_end    = data_hole_end,
-                             .saved_top        = vm->text_ptr,
-                             .saved_source_map = vm->dbg.source_map_count};
-    }
+    if (mark)
+        cc_code_mark_begin(vm, mark);
 
     // Count and collect the new non-function globals, oldest-first (the list
     // is built by prepending, so walking old_head..globals gives newest-first).
@@ -1303,16 +1320,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
     cc_build_source_index(vm);
 
-    if (mark) {
-        mark->ended                 = true;
-        if (!mark->in_hole)
-            mark->text_end = vm->text_ptr;
-        if (!mark->data_in_hole)
-            mark->data_end = vm->data_ptr;
-        mark->global_labels_end = num_global_labels;
-        mark->new_fns           = num_new_fns;
-        mark->new_vars          = num_new_vars;
-    }
+    if (mark)
+        cc_code_mark_end(vm, mark, num_new_fns, num_new_vars);
 }
 
 int cc_code_release(VirtualMachine *vm, CcCodeMark *m) {

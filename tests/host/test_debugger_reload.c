@@ -227,8 +227,8 @@ static void test_running_program(void) {
     cc_destroy(&vm);
 }
 
-// The comptime function's compiled code is gone once the program runs, so a
-// reload keeps the live comptime definitions and refuses what needs them.
+// The comptime code is regenerated for each expansion, so a reload or fix can
+// call a live comptime function; changed or new comptime code is refused.
 static const char *ct_path;
 
 static void write_ct(const char *comptime, const char *f, const char *g,
@@ -254,9 +254,11 @@ static long long ct_hook(void) {
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "reloads again");
 
     write_ct(val42, "val() + 1", "3", "");
-    CHECK(cc_debug_reload(&vm, ct_path) != 0, "new comptime call refused");
-    CHECK(cc_redefine_function(&vm, "int f(void) { return val() + 5; }") != 0,
-          "fix with a comptime call refused");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "new comptime call expands");
+    CHECK(cc_redefine_function(&vm, "int f(void) { return val() + 5; }") == 0,
+          "fix with a comptime call expands");
+    CHECK(cc_redefine_function(&vm, "int f(void) { return val() + ; }") != 0,
+          "fix with a parse error refused");
     write_ct("@comptime Node *val(void) { return MakeIntLiteral(7); }", "val()",
              "3", "");
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "changed comptime refused");
@@ -268,8 +270,10 @@ static long long ct_hook(void) {
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "parse error refused");
     CHECK(vm.error_count == 0, "diagnostics are cleared");
 
-    write_ct(val42, "val()", "4", "");
+    write_ct(val42, "val() + 1", "4", "");
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "reload after refusals");
+    CHECK(cc_redefine_function(&vm, "int g(void) { return val() + 5; }") == 0,
+          "fix after refusals");
     return 0;
 }
 
@@ -293,7 +297,66 @@ static void test_comptime(void) {
     cc_compile(&vm, merged);
 
     int rc = cc_run_at(&vm, (Pc)vm.text_seg[0], 0, NULL);
-    CHECK(rc == 42 + 4, "program result %d", rc);
+    CHECK(rc == (42 + 1) + (42 + 5), "program result %d", rc);
+    cc_destroy(&vm);
+}
+
+// Comptime globals keep their values between expansions, a function pointer
+// held in one follows the regenerated code, and the paused frames below the
+// expansion keep their locals.
+static const char *state_path;
+
+static long long state_hook(void) {
+    CHECK(cc_redefine_function(&vm, "int b(void) { return next(); }") == 0,
+          "first fix expands");
+    CHECK(cc_redefine_function(&vm, "int b(void) { return next(); }") == 0,
+          "second fix expands");
+    CHECK(cc_redefine_function(&vm, "int c(void) { return bad(); }") != 0,
+          "fix whose expansion fails refused");
+    CHECK(cc_redefine_function(&vm, "int c(void) { return viaptr(); }") == 0,
+          "fix through a function pointer table expands");
+    CHECK(cc_redefine_function(&vm, "int d(void) { return next() +; }") != 0,
+          "failed fix refused");
+    return 0;
+}
+
+static void test_comptime_state(void) {
+    state_path = write_file(
+        "state.c",
+        "@comptime Node *next(void) { static int n = 100; "
+        "return MakeIntLiteral(n++); }\n"
+        "@comptime Node *one(void) { return MakeIntLiteral(1); }\n"
+        "@comptime Node *bad(void) { return 0; }\n"
+        "@comptime Node *viaptr(void) { static Node *(*t[1])(void) = { one }; "
+        "return t[0](); }\n"
+        "int a(void) { return next(); }\n"
+        "int b(void) { return 0; }\n"
+        "int c(void) { return 0; }\n"
+        "int reload_hook(void);\n"
+        "int deep(int x) { int y = x * 2; reload_hook(); return y + x; }\n"
+        "int main(void) {\n"
+        "  int keep = 7;\n"
+        "  int r = deep(5);\n"
+        "  return a() + b() + c() + r + keep;\n"
+        "}\n");
+
+    cc_init(&vm, CCCC_CFI | CCCC_STACK_CANARIES | CCCC_DANGLING_DETECT);
+    vm.collect_errors           = true;
+    vm.compiler.compiler_family = CCCC_COMPILER_FAMILY_GCC;
+    init_mode_macros(&vm);
+    register_stdlib_functions(&vm);
+    cc_register_cfunc(&vm, "reload_hook", (void *)state_hook, 0, 0);
+
+    Token *tok = cc_preprocess(&vm, state_path);
+    CHECK(tok != NULL, "preprocess");
+    Obj *prog   = cc_parse(&vm, tok);
+    Obj *merged = cc_link_progs(&vm, &prog, 1);
+    cc_expand_macros(&vm, merged);
+    cc_compile(&vm, merged);
+
+    // a = 100, b = 101 then 102, c = 1, deep(5) = 15, keep = 7.
+    int rc = cc_run_at(&vm, (Pc)vm.text_seg[0], 0, NULL);
+    CHECK(rc == 100 + 102 + 1 + 15 + 7, "program result %d", rc);
     cc_destroy(&vm);
 }
 
@@ -316,6 +379,7 @@ int main(void) {
     cc_destroy(&vm);
     test_running_program();
     test_comptime();
+    test_comptime_state();
 
     if (!failed)
         printf("PASS: debugger reload\n");

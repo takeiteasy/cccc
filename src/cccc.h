@@ -4095,6 +4095,10 @@ typedef struct Compiler {
     int               ctx_stack_len; // Number of entries in ctx_stack
     int               ctx_stack_cap; // Allocated capacity of ctx_stack
     bool macro_fns_compiled;         // True after compile_all_macros has run
+    struct Obj *macro_prog;          // The compiled comptime program, kept so a
+                                     // live session can regenerate its code
+    bool comptime_on_live_stack;     // Run comptime on top of the paused stack
+    bool macro_code_stale;           // gen() has overwritten the comptime code
     // Holds a copy of the hashmap_snapshot taken by compile_macro_program.
     // The snapshot is heap-allocated and must survive a longjmp exit.
     // cc_destroy frees it when has_macro_snapshot is true; normal paths
@@ -5709,6 +5713,16 @@ Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt);
 void cc_expand_macros(VirtualMachine *vm, Obj *prog);
 
 /*!
+ @brief Expand the comptime calls in the definitions a live session just
+        parsed (those from `old_head` to the head of the globals list).
+ @details Regenerates the comptime code above the live code, runs the macros on
+          top of the live stack, and gives the code back before returning.
+          Longjmps after cleaning up on an error.
+ @return true on success or when there is nothing to expand.
+*/
+bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head);
+
+/*!
  @brief Find a call to a comptime function in a token range.
  @param from First token to look at.
  @param to Last token to look at, or NULL to stop at the end of the stream.
@@ -5832,6 +5846,20 @@ void cc_repl_compile_new(VirtualMachine *vm, Obj *old_head);
 */
 void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                                 CcCodeMark *mark);
+
+/*!
+ @brief Start recording a compile in `mark` (hole fields set beforehand are
+        kept).
+*/
+void cc_code_mark_begin(VirtualMachine *vm, CcCodeMark *mark);
+
+/*!
+ @brief Finish the compile recorded by cc_code_mark_begin.
+ @param new_fns Functions the compile added.
+ @param new_vars Globals the compile added.
+*/
+void cc_code_mark_end(VirtualMachine *vm, CcCodeMark *mark, int new_fns,
+                      int new_vars);
 
 /*!
  @brief Give back the code and data of a throw-away wrapper compile.

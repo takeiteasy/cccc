@@ -24,9 +24,10 @@
 // becomes a hot-reload redefinition (Obj.reload_of); an unchanged function or
 // a kept global is not compiled again (Obj.reuse_of). Every check runs before
 // code is generated, and the new code is linked in one step, so a failed
-// reload leaves the session as it was. Comptime code is not part of the running
-// program, so a file that changes or adds a comptime function or variable,
-// calls one at file scope, or calls one from a changed function is refused.
+// reload leaves the session as it was. A changed function's calls to comptime
+// functions are expanded against the session's retained comptime program; a
+// file that changes or adds a comptime function or variable, or calls one at
+// file scope, is refused.
 
 #include "internal.h"
 #include "parse_internal.h"
@@ -289,25 +290,6 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st) {
     return true;
 }
 
-// Refuses a new or changed definition that calls a comptime function: there is
-// no compiled comptime code to expand it with.
-static bool no_comptime_calls(VirtualMachine *vm, Obj *old_head) {
-    for (Obj *nw = vm->compiler.globals; nw != old_head; nw = nw->next) {
-        if (!is_file_scope_obj(nw) || nw->reuse_of)
-            continue;
-        if (nw->has_pending_macro_init ||
-            (nw->is_function && nw->body &&
-             cc_find_comptime_call(vm, nw->def_begin, nw->def_end))) {
-            reload_fail(vm,
-                        "'%s' calls a comptime function; restart to apply "
-                        "the change",
-                        nw->name, NULL);
-            return false;
-        }
-    }
-    return true;
-}
-
 // Old definitions from `key` that the new file no longer defines.
 static void note_removed(VirtualMachine *vm, Obj *old_head, const char *key,
                          const char *path, ReloadStats *st) {
@@ -439,8 +421,7 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
         }
         if (!match_objects(vm, old_head, &st))
             goto refused;
-        if (!no_comptime_calls(vm, old_head))
-            goto refused;
+        cc_session_expand_macros(vm, old_head);
 
         vm->compiler.current_fn = NULL;
         vm->compiler.locals     = NULL;

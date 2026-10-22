@@ -202,15 +202,12 @@ The reload is refused, with nothing changed, if the file
   type of a global;
 - changes the value of a `constexpr` object;
 - adds or changes a `[[cccc::comptime]]` function or variable, or calls one at
-  file scope;
-- has a new or changed function (or global initializer) that calls a comptime
-  function.
+  file scope.[^comptime-reload]
 
-Comptime code is not part of the running program, so a call to it cannot be
-expanded in a live session. A function that calls one reloads only while it is
-unchanged; edit it and restart. `fix` refuses such a call too. Like `fix`, the
-command reaches the last file's scope. Embedders call
-`cc_debug_reload(vm, path)`.
+A new or changed function may call an unchanged comptime function, in `reload`
+and in `fix`: the call is expanded when the change is applied, and the
+comptime variables keep the values they hold. Like `fix`, the command reaches
+the last file's scope. Embedders call `cc_debug_reload(vm, path)`.
 
 `cccc --watch` runs this reload on every save, without the debugger; see
 [WATCH.md](WATCH.md).
@@ -545,3 +542,12 @@ Pass `CCCC_HAS_BACKTRACE=0` to `make` to build without libbacktrace:
 ```bash
 make CCCC_HAS_BACKTRACE=0
 ```
+
+[^comptime-reload]: Expansion regenerates the comptime code above the running
+    program, runs it on top of the paused stack with the debugger off, and
+    gives the code back before the new functions are compiled. A changed or new
+    comptime function or variable and a file-scope comptime call need a restart
+    (see [#1735](https://todo.sr.ht/~takeiteasy/cccc/1735) and
+    [#1736](https://todo.sr.ht/~takeiteasy/cccc/1736)). A pointer to a comptime
+    function that comptime code stored while running is not moved
+    ([#1737](https://todo.sr.ht/~takeiteasy/cccc/1737)).

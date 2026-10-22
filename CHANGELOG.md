@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: debugger `reload` and `fix` expand calls to an unchanged comptime
+  function in a live session, including from `--watch`. Changed or new
+  comptime functions and variables and file-scope comptime calls are still
+  refused.
+
 ## [0.19.4] - 2026-10-22
 
 - Fixed: mutex and condition handles a guest never destroys are freed at

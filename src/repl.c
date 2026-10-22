@@ -610,15 +610,9 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
 
     if (setjmp(jb) == 0) {
         Token *tok = tokenize_string(vm, repl_unit_name, text);
-        if (expand_macros) {
+        if (expand_macros)
             tok = cc_expand_macros_only(vm, tok);
-            Token *call = cc_find_comptime_call(vm, tok, NULL);
-            if (call)
-                error_tok(vm, call,
-                          "comptime function '%.*s' cannot be expanded in a "
-                          "live session",
-                          call->len, call->loc);
-        } else
+        else
             convert_pp_tokens(vm, tok);
 
         Node        *expr_node = NULL;
@@ -629,6 +623,8 @@ static int repl_run_unit(VirtualMachine *vm, const char *text, bool decls_only,
                 break;
 
             case REPL_UNIT_DECL:
+                if (expand_macros)
+                    cc_session_expand_macros(vm, snap.globals_head);
                 cc_repl_compile_new(vm, snap.globals_head);
                 break;
 

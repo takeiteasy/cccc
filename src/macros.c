@@ -165,6 +165,8 @@ static void register_reflection_ffi(VirtualMachine *vm) {
 }
 
 static void init_vm_segments_for_macros(VirtualMachine *vm);
+static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
+                            bool stmt_pos);
 
 static Token *copy_macro_token(VirtualMachine *vm, Token *tok) {
     Token *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
@@ -2381,6 +2383,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
     vm->compiler.has_macro_snapshot    = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
+    vm->compiler.macro_prog = macro_prog;
     // #1049: each ComptimeVar's shadow Obj (cv->ptr_obj,
     // make_comptime_shadow_obj above) used to be prepended here onto
     // vm->compiler.globals -- the *scratch* per-TU list, not the durable
@@ -2464,6 +2467,160 @@ static void compile_all_macros(VirtualMachine *vm) {
         fprintf(stderr, "Warning: Failed to compile macro functions\n");
 }
 
+// A comptime global's function-pointer slot, noted before the comptime code
+// moves so the slot can follow it.
+typedef struct {
+    long long *slot;
+    long long  old_value;
+    Obj       *target;
+    long long  addend;
+} MacroFnSlot;
+
+// Generate the retained comptime program's code again, at the top of the text
+// segment and under `mark`. The globals keep their storage and values; only
+// function-pointer slots that still hold a function's old address follow it.
+// Returns the number of functions generated.
+static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
+    Obj *prog       = vm->compiler.macro_prog;
+
+    int  slot_count = 0;
+    for (Obj *var = prog; var; var = var->next)
+        if (!var->is_function)
+            for (Relocation *rel = var->rel; rel; rel = rel->next)
+                slot_count++;
+    MacroFnSlot *slots = alloca((size_t)(slot_count + 1) * sizeof *slots);
+    int          nslots = 0;
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function)
+            continue;
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            Obj *target = rel->label && *rel->label
+                              ? find_macro_obj(prog, *rel->label)
+                              : NULL;
+            if (!target || !target->is_function || !target->body)
+                continue;
+            long long *slot = (long long *)(vm->data_seg + var->offset +
+                                            rel->offset);
+            slots[nslots++] = (MacroFnSlot){
+                slot,
+                cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend,
+                target, rel->addend};
+        }
+    }
+
+    Obj   *saved_locals                = vm->compiler.locals;
+    Obj   *saved_current_fn            = vm->compiler.current_fn;
+    Obj   *saved_globals               = vm->compiler.globals;
+    int    saved_num_call_patches      = vm->compiler.num_call_patches;
+    int    saved_num_func_addr_patches = vm->compiler.num_func_addr_patches;
+    bool   saved_in_macro_mode         = vm->compiler.in_macro_mode;
+    vm->compiler.in_macro_mode         = true;
+    vm->compiler.locals                = NULL;
+    vm->compiler.globals               = NULL;
+    vm->compiler.num_call_patches      = 0;
+    vm->compiler.num_func_addr_patches = 0;
+
+    *mark                              = (CcCodeMark){0};
+    cc_code_mark_begin(vm, mark);
+    int fns = 0;
+    for (Obj *fn = prog; fn; fn = fn->next) {
+        if (fn->is_function && fn->body) {
+            gen_function(vm, fn);
+            fns++;
+        }
+    }
+    cc_asm_passthru_flush(vm);
+    patch_macro_call_addresses(vm, prog);
+    for (int i = 0; i < nslots; i++)
+        if (*slots[i].slot == slots[i].old_value)
+            *slots[i].slot = cc_pc_to_byte_offset((Pc)slots[i].target->code_addr) +
+                             slots[i].addend;
+    cc_code_mark_end(vm, mark, fns, 0);
+    // Nothing outside the comptime program holds an address into this code,
+    // and the pointer slots above were moved with it.
+    mark->confined                     = true;
+
+    vm->compiler.in_macro_mode         = saved_in_macro_mode;
+    vm->compiler.locals                = saved_locals;
+    vm->compiler.current_fn            = saved_current_fn;
+    vm->compiler.globals               = saved_globals;
+    vm->compiler.num_call_patches      = saved_num_call_patches;
+    vm->compiler.num_func_addr_patches = saved_num_func_addr_patches;
+    return fns;
+}
+
+// A new definition in the session that holds a comptime call to expand.
+static bool session_needs_expansion(VirtualMachine *vm, Obj *old_head) {
+    for (Obj *o = vm->compiler.globals; o != old_head; o = o->next) {
+        if (!!o->reuse_of)
+            continue;
+        if (o->has_pending_macro_init ||
+            (o->is_function && o->body &&
+             cc_find_comptime_call(vm, o->def_begin, o->def_end)))
+            return true;
+    }
+    return false;
+}
+
+bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head) {
+    if (vm->compiler.no_comptime || !vm->compiler.macro_fns ||
+        !session_needs_expansion(vm, old_head))
+        return true;
+    if (!vm->compiler.macro_prog) {
+        error("comptime functions are not compiled in this session");
+        return false;
+    }
+
+    CcCodeMark         mark = {0};
+    jmp_buf            jb;
+    jmp_buf           *saved_jb = vm->error_jmp_buf;
+    Obj               *saved_fn     = vm->compiler.current_fn;
+    Obj               *saved_locals = vm->compiler.locals;
+    vm->error_jmp_buf = &jb;
+
+    if (setjmp(jb) == 0) {
+        regen_macro_program(vm, &mark);
+        vm->compiler.in_macro_expansion     = true;
+        vm->compiler.comptime_on_live_stack = true;
+
+        Obj *new_head = vm->compiler.globals;
+        for (Obj *fn = new_head; fn != old_head; fn = fn->next) {
+            if (!!fn->reuse_of || !fn->is_function || !fn->body)
+                continue;
+            vm->compiler.current_fn = fn;
+            vm->compiler.locals     = fn->locals;
+            fn->body                = transform_node(vm, fn->body, 0, false);
+            cc_resolve_body_label_refs(vm, fn);
+            fn->locals = vm->compiler.locals;
+        }
+        cc_flush_deferred_unused_labels(vm);
+        vm->compiler.locals     = NULL;
+        vm->compiler.current_fn = NULL;
+        for (Obj *var = new_head; var != old_head; var = var->next) {
+            if (!var->is_function && var->init_expr && !var->reuse_of)
+                var->init_expr = transform_node(vm, var->init_expr, 0, false);
+        }
+        cc_finalize_macro_gvar_inits(vm, new_head);
+
+        vm->compiler.comptime_on_live_stack = false;
+        vm->compiler.in_macro_expansion     = false;
+        cc_code_discard(vm, &mark);
+        vm->error_jmp_buf       = saved_jb;
+        vm->compiler.current_fn = saved_fn;
+        vm->compiler.locals     = saved_locals;
+        return true;
+    }
+
+    vm->compiler.comptime_on_live_stack = false;
+    vm->compiler.in_macro_expansion     = false;
+    if (mark.started)
+        cc_code_discard(vm, &mark);
+    vm->error_jmp_buf       = saved_jb;
+    vm->compiler.current_fn = saved_fn;
+    vm->compiler.locals     = saved_locals;
+    longjmp(*saved_jb, 1);
+}
+
 static void setup_macro_call_slots(VirtualMachine *vm, long long *fixed_args,
                                    int fixed_count) {
     for (int i = fixed_count - 1; i >= 8; i--)
@@ -2489,6 +2646,12 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
                                  const ExpansionFrameHint *hint) {
     if (!pm || !pm->is_compiled || !pm->compiled_fn)
         return NULL;
+
+    if (vm->compiler.macro_code_stale && !vm->compiler.comptime_on_live_stack)
+        error_tok(vm, call_tok,
+                  "comptime function '%s' cannot be expanded in a live "
+                  "session here",
+                  pm->name);
 
     if (pm->is_variadic && arg_count < pm->fixed_param_count)
         error_tok(vm, call_tok,
@@ -2547,9 +2710,30 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     }
     vm->compiler.macro_call_tok = stamped_call_tok;
 
-    // Reset stack for macro execution
-    vm->sp = vm->initial_sp;
-    vm->bp = vm->initial_bp;
+    // A live session's own frames occupy the stack, so the macro runs below
+    // them and leaves the debugger out of it.
+    bool       live = vm->compiler.comptime_on_live_stack;
+    FReg       saved_fregs[NUM_REGS];
+    long long *saved_shadow_sp = vm->shadow_sp;
+    uint32_t   saved_flags     = vm->flags;
+    int        saved_single_step = vm->dbg.single_step;
+    int        saved_step_over   = vm->dbg.step_over;
+    int        saved_step_out    = vm->dbg.step_out;
+    int        saved_attached    = vm->dbg.debugger_attached;
+    if (live) {
+        memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
+        vm->flags                 &= ~CCCC_ENABLE_DEBUGGER;
+        vm->dbg.single_step        = 0;
+        vm->dbg.step_over          = 0;
+        vm->dbg.step_out           = 0;
+        vm->dbg.debugger_attached  = 0;
+        if (vm->flags & CCCC_CFI)
+            *--vm->shadow_sp = 0;
+        vm->dbg.cond_depth++;
+    } else {
+        vm->sp = vm->initial_sp;
+        vm->bp = vm->initial_bp;
+    }
 
     // Pass fixed arguments using the VM calling convention.
     // Inline macro arguments are Node* pointers to the AST nodes. Global
@@ -2634,6 +2818,16 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     vm->sp = saved_sp;
     vm->bp = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    if (live) {
+        memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
+        vm->shadow_sp             = saved_shadow_sp;
+        vm->flags                 = saved_flags;
+        vm->dbg.single_step       = saved_single_step;
+        vm->dbg.step_over         = saved_step_over;
+        vm->dbg.step_out          = saved_step_out;
+        vm->dbg.debugger_attached = saved_attached;
+        vm->dbg.cond_depth--;
+    }
     vm->compiler.current_fn               = saved_current_fn;
     vm->compiler.macro_call_tok           = saved_macro_call_tok;
     vm->compiler.expansion_stack          = saved_expansion_stack;
