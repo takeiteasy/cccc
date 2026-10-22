@@ -7,6 +7,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-23
+
+- Added: `-fopenmp` runs `task`, `taskwait`, `taskgroup`, `taskyield`,
+  `sections` and `parallel sections`. A task runs where it is met and works on
+  its own copy of the locals it uses; native `sections` are split across the
+  team.
+- Added: `threadprivate`, `copyin` and `linear` (on `for`, `parallel for` and
+  `simd`).
+- Changed: `default(none)` is enforced, and `default` on a plain `omp for` is
+  an error.
+- Fixed: under `-c=native`, `firstprivate` with `lastprivate` on one variable
+  could start a thread from the value another thread had written back.
+
 ## [0.20.1] - 2026-10-22
 
 - Changed: a checked-pointer bound on a prototype, typedef, function pointer
