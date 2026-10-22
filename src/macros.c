@@ -1239,7 +1239,7 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
                                             ComptimeVar **vars, int count) {
     bool has_any = false;
     for (int i = 0; i < count; i++) {
-        if (comptime_var_uses_init_fn(vars[i])) {
+        if (comptime_var_uses_init_fn(vars[i]) && !vars[i]->keep_value) {
             has_any = true;
             break;
         }
@@ -1255,7 +1255,7 @@ static Token *build_comptime_init_fn_tokens(VirtualMachine *vm,
 
     for (int i = 0; i < count; i++) {
         ComptimeVar *cv = vars[i];
-        if (!comptime_var_uses_init_fn(cv))
+        if (!comptime_var_uses_init_fn(cv) || cv->keep_value)
             continue;
 
         Token *eq = find_top_level_eq(cv->decl_tokens);
@@ -1603,6 +1603,44 @@ static Obj *make_comptime_shadow_obj(VirtualMachine *vm, Obj *src) {
     return dst;
 }
 
+// A live session's own frames occupy the stack, so comptime code runs on top
+// of them with the debugger left out of it.
+typedef struct {
+    FReg       fregs[NUM_REGS];
+    long long *shadow_sp;
+    uint32_t   flags;
+    int        single_step, step_over, step_out, attached;
+} LiveStackSave;
+
+static void live_stack_enter(VirtualMachine *vm, LiveStackSave *s) {
+    memcpy(s->fregs, vm->fregs, sizeof(s->fregs));
+    s->shadow_sp               = vm->shadow_sp;
+    s->flags                   = vm->flags;
+    s->single_step             = vm->dbg.single_step;
+    s->step_over               = vm->dbg.step_over;
+    s->step_out                = vm->dbg.step_out;
+    s->attached                = vm->dbg.debugger_attached;
+    vm->flags                 &= ~CCCC_ENABLE_DEBUGGER;
+    vm->dbg.single_step        = 0;
+    vm->dbg.step_over          = 0;
+    vm->dbg.step_out           = 0;
+    vm->dbg.debugger_attached  = 0;
+    if (vm->flags & CCCC_CFI)
+        *--vm->shadow_sp = 0;
+    vm->dbg.cond_depth++;
+}
+
+static void live_stack_leave(VirtualMachine *vm, const LiveStackSave *s) {
+    memcpy(vm->fregs, s->fregs, sizeof(s->fregs));
+    vm->shadow_sp             = s->shadow_sp;
+    vm->flags                 = s->flags;
+    vm->dbg.single_step       = s->single_step;
+    vm->dbg.step_over         = s->step_over;
+    vm->dbg.step_out          = s->step_out;
+    vm->dbg.debugger_attached = s->attached;
+    vm->dbg.cond_depth--;
+}
+
 // Execute the synthesized __builtin_comptime_init function (if present) to
 // evaluate scalar comptime variable initializers that call comptime
 // functions. Must be called after gen_function + patch_macro_call_addresses
@@ -1626,8 +1664,14 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     memcpy(saved_regs, vm->regs, sizeof(saved_regs));
     Obj *saved_current_fn = vm->compiler.current_fn;
 
-    vm->sp                = vm->initial_sp;
-    vm->bp                = vm->initial_bp;
+    bool          live    = vm->compiler.comptime_on_live_stack;
+    LiveStackSave live_save;
+    if (live)
+        live_stack_enter(vm, &live_save);
+    else {
+        vm->sp = vm->initial_sp;
+        vm->bp = vm->initial_bp;
+    }
     *(--vm->sp)           = 0; // sentinel return address
 
     vm->pc                = (Pc)init_fn->code_addr;
@@ -1658,6 +1702,8 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->sp               = saved_sp;
     vm->bp               = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
+    if (live)
+        live_stack_leave(vm, &live_save);
     vm->compiler.current_fn = saved_current_fn;
 
     if (eval_rc == CCCC_HOST_SIGNAL_RC) {
@@ -1793,6 +1839,23 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
     }
 }
 
+// Data segment storage for one comptime-program global, with its constant
+// initializer bytes.
+static void alloc_macro_global(VirtualMachine *vm, Obj *var) {
+    long long offset = vm->data_ptr - vm->data_seg;
+    offset           = (offset + 7) & ~7;
+    vm->data_ptr     = vm->data_seg + offset;
+    if (vm_data_ensure(vm, var->ty->size) != 0)
+        error("codegen: data segment overflow (limit: %d bytes)",
+              vm->poolsize_max);
+    var->offset = vm->data_ptr - vm->data_seg;
+
+    if (var->init_data)
+        memcpy(vm->data_ptr, var->init_data, var->ty->size);
+
+    vm->data_ptr += var->ty->size;
+}
+
 static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
     int num_globals = 0;
     for (Obj *var = macro_prog; var; var = var->next) {
@@ -1810,22 +1873,75 @@ static void init_macro_globals(VirtualMachine *vm, Obj *macro_prog) {
             globals_arr[idx--] = var;
     }
 
-    for (int i = 0; i < num_globals; i++) {
-        Obj      *var    = globals_arr[i];
+    for (int i = 0; i < num_globals; i++)
+        alloc_macro_global(vm, globals_arr[i]);
+}
 
-        long long offset = vm->data_ptr - vm->data_seg;
-        offset           = (offset + 7) & ~7;
-        vm->data_ptr     = vm->data_seg + offset;
-        if (vm_data_ensure(vm, var->ty->size) != 0)
-            error("codegen: data segment overflow (limit: %d bytes)",
-                  vm->poolsize_max);
-        var->offset = vm->data_ptr - vm->data_seg;
+// Whether `a` and `b` are the same comptime-program storage: a named global,
+// or a static of the same function with the same name and layout.
+static bool same_macro_storage(Obj *a, Obj *b) {
+    if (a->is_function || b->is_function || !a->ty || !b->ty ||
+        !types_same_layout(a->ty, b->ty))
+        return false;
+    if (a->static_owner || b->static_owner)
+        return a->static_owner && b->static_owner &&
+               !strcmp(a->static_owner->name, b->static_owner->name) &&
+               a->display_name && b->display_name &&
+               !strcmp(a->display_name, b->display_name);
+    return a->name && b->name && a->name[0] != '.' && !strcmp(a->name, b->name);
+}
 
-        if (var->init_data)
-            memcpy(vm->data_ptr, var->init_data, var->ty->size);
+static ComptimeVar *find_comptime_var_named(VirtualMachine *vm,
+                                            const char     *name) {
+    for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next)
+        if (!strcmp(cv->name, name))
+            return cv;
+    return NULL;
+}
 
-        vm->data_ptr += var->ty->size;
+// Storage for a rebuilt comptime program: what matches a global of `old_prog`
+// keeps its offset, and so its value; the rest is allocated and initialized.
+// Returns the kept globals through `kept` (arena-allocated) and their count.
+static int rebuild_macro_globals(VirtualMachine *vm, Obj *new_prog,
+                                 Obj *old_prog, Obj ***kept) {
+    int n_old = 0, n_new = 0;
+    for (Obj *o = old_prog; o; o = o->next)
+        n_old += !o->is_function;
+    for (Obj *o = new_prog; o; o = o->next)
+        n_new += !o->is_function;
+    Obj **old_arr = alloca((size_t)(n_old + 1) * sizeof(Obj *));
+    Obj **new_arr = alloca((size_t)(n_new + 1) * sizeof(Obj *));
+    bool *used    = alloca((size_t)(n_old + 1) * sizeof(bool));
+    int   i       = 0;
+    for (Obj *o = old_prog; o; o = o->next)
+        if (!o->is_function)
+            old_arr[i++] = o;
+    i = n_new;
+    for (Obj *o = new_prog; o; o = o->next)
+        if (!o->is_function)
+            new_arr[--i] = o;
+    memset(used, 0, (size_t)(n_old + 1) * sizeof(bool));
+
+    *kept       = arena_alloc(&vm->compiler.parser_arena,
+                              (size_t)(n_new + 1) * sizeof(Obj *));
+    int n_kept  = 0;
+    for (i = 0; i < n_new; i++) {
+        Obj         *nv = new_arr[i];
+        ComptimeVar *cv = nv->name ? find_comptime_var_named(vm, nv->name)
+                                   : NULL;
+        bool         is_kept = false;
+        if (!cv || cv->keep_value)
+            for (int j = n_old - 1; j >= 0 && !is_kept; j--)
+                if (!used[j] && same_macro_storage(old_arr[j], nv)) {
+                    nv->offset    = old_arr[j]->offset;
+                    used[j]       = true;
+                    is_kept       = true;
+                    (*kept)[n_kept++] = nv;
+                }
+        if (!is_kept)
+            alloc_macro_global(vm, nv);
     }
+    return n_kept;
 }
 
 // Defined in src/codegen_regalloc.c (declared in codegen_internal.h for the
@@ -1844,9 +1960,15 @@ const char *obj_external_name(Obj *obj);
 // and never touches vm->compiler.data_relocs — these relocations are
 // VM-internal and must not pollute the runtime bytecode relocation table.
 static void apply_macro_global_relocations(VirtualMachine *vm,
-                                           Obj            *macro_prog) {
+                                           Obj *macro_prog, Obj **skip,
+                                           int nskip) {
     for (Obj *var = macro_prog; var; var = var->next) {
         if (var->is_function)
+            continue;
+        bool skipped = false;
+        for (int i = 0; i < nskip && !skipped; i++)
+            skipped = skip[i] == var;
+        if (skipped)
             continue;
 
         for (Relocation *rel = var->rel; rel; rel = rel->next) {
@@ -2170,6 +2292,39 @@ static int undefine_guard_macro_iter(char *key, int keylen, void *val,
     return 0; // continue
 }
 
+// A comptime global's function-pointer slot, noted before the comptime code
+// moves so the slot can follow it.
+typedef struct {
+    long long *slot;
+    long long  old_value;
+    Obj       *target;
+    long long  addend;
+} MacroFnSlot;
+
+// The function-pointer slots of `prog`'s globals that hold a function's
+// current address. With `out` NULL, only counts.
+static int collect_fn_slots(VirtualMachine *vm, Obj *prog, MacroFnSlot *out) {
+    int n = 0;
+    for (Obj *var = prog; var; var = var->next) {
+        if (var->is_function)
+            continue;
+        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+            Obj *target = rel->label && *rel->label
+                              ? find_macro_obj(prog, *rel->label)
+                              : NULL;
+            if (!target || !target->is_function || !target->body)
+                continue;
+            if (out)
+                out[n] = (MacroFnSlot){
+                    (long long *)(vm->data_seg + var->offset + rel->offset),
+                    cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend,
+                    target, rel->addend};
+            n++;
+        }
+    }
+    return n;
+}
+
 // Compile all macro functions and comptime helpers as one compile-time program
 // so macro bytecode can make ordinary function calls across the whole set.
 // Shared failure-path teardown for compile_macro_program: unwinds every bit
@@ -2201,7 +2356,11 @@ static void restore_macro_compile_state(VirtualMachine *vm, Obj *saved_locals,
     hashmap_restore(&vm->compiler.macros, saved_macros);
 }
 
-static bool compile_macro_program(VirtualMachine *vm) {
+// With `rl`, rebuilds the program of a live session: its globals keep their
+// storage where they match the old program, and the code made for the
+// initializers is given back. Installs the new program as macro_prog.
+static bool compile_macro_program_ex(VirtualMachine    *vm,
+                                     CcComptimeReload *rl) {
     int count = 0;
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next)
         count++;
@@ -2336,7 +2495,25 @@ static bool compile_macro_program(VirtualMachine *vm) {
 
     // Step 1: allocate data segment storage for all globals and memcpy any
     //         constant initializer bytes (init_data path).
-    init_macro_globals(vm, macro_prog);
+    Obj **kept   = NULL;
+    int   n_kept = 0;
+    if (rl)
+        n_kept = rebuild_macro_globals(vm, macro_prog, rl->prog, &kept);
+    else
+        init_macro_globals(vm, macro_prog);
+
+    // Function-pointer slots of the globals that are kept follow the code to
+    // its new place.
+    MacroFnSlot *old_slots = NULL;
+    int          n_slots   = 0;
+    CcCodeMark   mark      = {0};
+    if (rl) {
+        int n_old = collect_fn_slots(vm, rl->prog, NULL);
+        old_slots = alloca((size_t)(n_old + 1) * sizeof *old_slots);
+        n_slots   = collect_fn_slots(vm, rl->prog, old_slots);
+        cc_code_mark_begin(vm, &mark);
+        vm->compiler.comptime_on_live_stack = true;
+    }
 
     // The RETBUF pool must exist before any comptime function body executes a
     // struct/union/vector/wide-_BitInt-returning call or return statement.
@@ -2360,7 +2537,7 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // Step 3: apply global relocations now that every macro function has a
     //         code_addr, so static initializer tables can reference comptime
     //         function addresses (ticket #309).
-    apply_macro_global_relocations(vm, macro_prog);
+    apply_macro_global_relocations(vm, macro_prog, kept, n_kept);
 
     // Step 4: patch call addresses so __builtin_comptime_init can call comptime
     // fns.
@@ -2374,6 +2551,21 @@ static bool compile_macro_program(VirtualMachine *vm) {
     // Step 6: read comptime var values out of the data segment.
     evaluate_comptime_vars(vm, macro_prog);
 
+    if (rl) {
+        for (int i = 0; i < n_slots; i++) {
+            Obj *target = find_macro_obj(macro_prog, old_slots[i].target->name);
+            if (*old_slots[i].slot == old_slots[i].old_value && target &&
+                target->is_function && target->body)
+                *old_slots[i].slot =
+                    cc_pc_to_byte_offset((Pc)target->code_addr) +
+                    old_slots[i].addend;
+        }
+        cc_code_mark_end(vm, &mark, count, 0);
+        mark.confined                       = true;
+        vm->compiler.comptime_on_live_stack = false;
+        cc_code_discard(vm, &mark);
+    }
+
     vm->compiler.locals                = saved_locals;
     vm->compiler.current_fn            = saved_current_fn;
     vm->compiler.globals               = saved_globals;
@@ -2384,6 +2576,22 @@ static bool compile_macro_program(VirtualMachine *vm) {
     vm->compiler.has_macro_snapshot    = false;
     hashmap_restore(&vm->compiler.macros, saved_macros);
     vm->compiler.macro_prog = macro_prog;
+    if (rl) {
+        // A new shadow reaches the runtime data with the definitions the
+        // reload compiles.
+        for (ComptimeVar *cv = vm->compiler.comptime_vars; cv; cv = cv->next) {
+            Obj *shadow = cv->ptr_obj;
+            if (!shadow || shadow->next || !shadow->is_macro_generated)
+                continue;
+            bool known = false;
+            for (int i = 0; i < rl->var_count && !known; i++)
+                known = rl->var_saved[i].ptr_obj == shadow;
+            if (known)
+                continue;
+            shadow->next         = vm->compiler.globals;
+            vm->compiler.globals = shadow;
+        }
+    }
     // #1049: each ComptimeVar's shadow Obj (cv->ptr_obj,
     // make_comptime_shadow_obj above) used to be prepended here onto
     // vm->compiler.globals -- the *scratch* per-TU list, not the durable
@@ -2404,6 +2612,10 @@ static bool compile_macro_program(VirtualMachine *vm) {
     }
 
     return true;
+}
+
+static bool compile_macro_program(VirtualMachine *vm) {
+    return compile_macro_program_ex(vm, NULL);
 }
 
 // #884: a bodyless `[[cccc::comptime]] ret name(params);` declaration is a
@@ -2467,15 +2679,6 @@ static void compile_all_macros(VirtualMachine *vm) {
         fprintf(stderr, "Warning: Failed to compile macro functions\n");
 }
 
-// A comptime global's function-pointer slot, noted before the comptime code
-// moves so the slot can follow it.
-typedef struct {
-    long long *slot;
-    long long  old_value;
-    Obj       *target;
-    long long  addend;
-} MacroFnSlot;
-
 // Generate the retained comptime program's code again, at the top of the text
 // segment and under `mark`. The globals keep their storage and values; only
 // function-pointer slots that still hold a function's old address follow it.
@@ -2483,30 +2686,9 @@ typedef struct {
 static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
     Obj *prog       = vm->compiler.macro_prog;
 
-    int  slot_count = 0;
-    for (Obj *var = prog; var; var = var->next)
-        if (!var->is_function)
-            for (Relocation *rel = var->rel; rel; rel = rel->next)
-                slot_count++;
-    MacroFnSlot *slots = alloca((size_t)(slot_count + 1) * sizeof *slots);
-    int          nslots = 0;
-    for (Obj *var = prog; var; var = var->next) {
-        if (var->is_function)
-            continue;
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
-            Obj *target = rel->label && *rel->label
-                              ? find_macro_obj(prog, *rel->label)
-                              : NULL;
-            if (!target || !target->is_function || !target->body)
-                continue;
-            long long *slot = (long long *)(vm->data_seg + var->offset +
-                                            rel->offset);
-            slots[nslots++] = (MacroFnSlot){
-                slot,
-                cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend,
-                target, rel->addend};
-        }
-    }
+    int          slot_count = collect_fn_slots(vm, prog, NULL);
+    MacroFnSlot *slots      = alloca((size_t)(slot_count + 1) * sizeof *slots);
+    int          nslots     = collect_fn_slots(vm, prog, slots);
 
     Obj   *saved_locals                = vm->compiler.locals;
     Obj   *saved_current_fn            = vm->compiler.current_fn;
@@ -2621,6 +2803,225 @@ bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head) {
     longjmp(*saved_jb, 1);
 }
 
+static bool tokens_same(const Token *a, const Token *b) {
+    for (; a && b; a = a->next, b = b->next) {
+        if (a->kind != b->kind || a->len != b->len ||
+            memcmp(a->loc, b->loc, (size_t)a->len))
+            return false;
+        if (a->kind == TK_EOF)
+            return true;
+    }
+    return false;
+}
+
+// Re-preprocessing a file queues its comptime includes again.
+static void dedupe_pending_includes(VirtualMachine *vm, int from) {
+    StringArray *p   = &vm->compiler.comptime_pending_includes;
+    int          out = from;
+    for (int i = from; i < p->len; i++) {
+        bool seen = false;
+        for (int j = 0; j < out && !seen; j++)
+            seen = !strcmp(p->data[j], p->data[i]);
+        if (!seen)
+            p->data[out++] = p->data[i];
+    }
+    p->len = out;
+}
+
+static void reload_note(const char *kind, const char *name, bool is_new) {
+    printf("note: comptime %s '%s' %s\n", kind, name,
+           is_new ? "is new" : "changed");
+}
+
+bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
+                        ComptimeVar *old_vars, int old_pending,
+                        CcComptimeReload *st) {
+    *st = (CcComptimeReload){0};
+    dedupe_pending_includes(vm, old_pending);
+
+    // A copy of what is already live is dropped; a changed one updates the
+    // live entry in place, so the old state can be put back.
+    int n_fn = 0, n_var = 0;
+    for (MacroFn *m = old_fns; m; m = m->next)
+        n_fn++;
+    for (ComptimeVar *c = old_vars; c; c = c->next)
+        n_var++;
+    st->fn_nodes   = arena_alloc(&vm->compiler.parser_arena,
+                                 (size_t)(n_fn + 1) * sizeof(MacroFn *));
+    st->fn_saved   = arena_alloc(&vm->compiler.parser_arena,
+                                 (size_t)(n_fn + 1) * sizeof(MacroFn));
+    st->var_nodes  = arena_alloc(&vm->compiler.parser_arena,
+                                 (size_t)(n_var + 1) * sizeof(ComptimeVar *));
+    st->var_saved  = arena_alloc(&vm->compiler.parser_arena,
+                                 (size_t)(n_var + 1) * sizeof(ComptimeVar));
+    int i = 0;
+    for (MacroFn *m = old_fns; m; m = m->next, i++) {
+        st->fn_nodes[i] = m;
+        st->fn_saved[i] = *m;
+    }
+    st->fn_count = n_fn;
+    i            = 0;
+    for (ComptimeVar *c = old_vars; c; c = c->next, i++) {
+        st->var_nodes[i] = c;
+        st->var_saved[i] = *c;
+    }
+    st->var_count   = n_var;
+    st->prog        = vm->compiler.macro_prog;
+    st->context_scope = vm->compiler.macro_context_scope;
+    st->data_ptr    = vm->data_ptr;
+    st->pending_len = old_pending;
+
+    bool changed = false;
+    for (MacroFn **link = &vm->compiler.macro_fns; *link != old_fns;) {
+        MacroFn *nw  = *link;
+        MacroFn *old = NULL;
+        for (MacroFn *m = old_fns; m && !old; m = m->next)
+            if (!strcmp(m->name, nw->name))
+                old = m;
+        if (old && tokens_same(old->body_tokens, nw->body_tokens)) {
+            *link = nw->next;
+            continue;
+        }
+        changed = true;
+        reload_note("function", nw->name, !old);
+        if (old) {
+            old->body_tokens          = nw->body_tokens;
+            old->is_macro_entry       = nw->is_macro_entry;
+            old->is_void_macro        = nw->is_void_macro;
+            old->is_variadic          = nw->is_variadic;
+            old->is_attribute_handler = nw->is_attribute_handler;
+            old->attribute_name       = nw->attribute_name;
+            old->fixed_param_count    = nw->fixed_param_count;
+            *link                     = nw->next;
+        } else
+            link = &nw->next;
+    }
+    for (ComptimeVar *c = old_vars; c; c = c->next)
+        c->keep_value = true;
+    for (ComptimeVar **link = &vm->compiler.comptime_vars; *link != old_vars;) {
+        ComptimeVar *nw  = *link;
+        ComptimeVar *old = NULL;
+        for (ComptimeVar *c = old_vars; c && !old; c = c->next)
+            if (!strcmp(c->name, nw->name))
+                old = c;
+        if (old && tokens_same(old->decl_tokens, nw->decl_tokens)) {
+            *link = nw->next;
+            continue;
+        }
+        changed = true;
+        reload_note("variable", nw->name, !old);
+        if (old) {
+            old->decl_tokens  = nw->decl_tokens;
+            old->keep_value   = false;
+            old->is_evaluated = false;
+            old->is_struct    = false;
+            old->members      = NULL;
+            *link             = nw->next;
+        } else
+            link = &nw->next;
+    }
+    if (!changed)
+        return true;
+
+    if (vm->compiler.no_comptime || !vm->compiler.macro_prog) {
+        cc_comptime_reload_rollback(vm, st);
+        fprintf(stderr, "error: reload: comptime code is not compiled in this "
+                        "session\n");
+        return false;
+    }
+
+    jmp_buf  jb;
+    jmp_buf *saved_jb  = vm->error_jmp_buf;
+    Obj     *saved_fn  = vm->compiler.current_fn;
+    Obj     *saved_loc = vm->compiler.locals;
+    vm->error_jmp_buf = &jb;
+
+    // What a compile error that unwinds out of the rebuild leaves behind.
+    // parse() also starts the declaration map and the comptime file scope
+    // afresh.
+    Scope   *saved_scope      = vm->compiler.scope;
+    Obj     *saved_globals    = vm->compiler.globals;
+    int      saved_calls      = vm->compiler.num_call_patches;
+    int      saved_func_addrs = vm->compiler.num_func_addr_patches;
+    uint64_t saved_warnings   = vm->compiler.warnings;
+    uint64_t saved_werror     = vm->compiler.warning_errors;
+    HashMap  saved_macros     = hashmap_snapshot(&vm->compiler.macros);
+    HashMap  saved_decls = hashmap_snapshot(&vm->compiler.global_decl_map);
+    HashMap  saved_once   = vm->compiler.pragma_once;
+    HashMap  saved_guards = vm->compiler.include_guards;
+    Scope   *saved_file_scope = vm->compiler.macro_file_scope;
+    if (setjmp(jb) == 0) {
+        int errors = vm->error_count;
+        bool ok    = compile_macro_program_ex(vm, st);
+        vm->error_jmp_buf = saved_jb;
+        hashmap_deinit(&saved_macros);
+        hashmap_restore(&vm->compiler.global_decl_map, saved_decls);
+        vm->compiler.macro_file_scope = saved_file_scope;
+        if (ok && vm->error_count == errors) {
+            st->rebuilt             = true;
+            vm->compiler.current_fn = saved_fn;
+            vm->compiler.locals     = saved_loc;
+            return true;
+        }
+        cc_comptime_reload_rollback(vm, st);
+        fprintf(stderr, "error: reload: the comptime code does not compile\n");
+        return false;
+    }
+    for (Scope *sc = vm->compiler.scope; sc && sc != saved_scope;
+         sc        = sc->next) {
+        hashmap_deinit_borrowed(&sc->var_map);
+        hashmap_deinit_borrowed(&sc->tag_map);
+    }
+    vm->compiler.scope                 = saved_scope;
+    vm->compiler.globals               = saved_globals;
+    vm->compiler.locals                = saved_loc;
+    vm->compiler.current_fn            = saved_fn;
+    vm->compiler.num_call_patches      = saved_calls;
+    vm->compiler.num_func_addr_patches = saved_func_addrs;
+    vm->compiler.warnings              = saved_warnings;
+    vm->compiler.warning_errors        = saved_werror;
+    vm->compiler.in_macro_expansion    = false;
+    if (vm->compiler.pragma_once.buckets != saved_once.buckets) {
+        hashmap_deinit(&vm->compiler.pragma_once);
+        vm->compiler.pragma_once = saved_once;
+    }
+    if (vm->compiler.include_guards.buckets != saved_guards.buckets) {
+        hashmap_deinit(&vm->compiler.include_guards);
+        vm->compiler.include_guards = saved_guards;
+    }
+    if (vm->compiler.has_macro_snapshot) {
+        hashmap_deinit(&vm->compiler.macro_snapshot_backup);
+        vm->compiler.has_macro_snapshot = false;
+    }
+    hashmap_restore(&vm->compiler.macros, saved_macros);
+    hashmap_restore(&vm->compiler.global_decl_map, saved_decls);
+    vm->compiler.macro_file_scope = saved_file_scope;
+    cc_comptime_reload_rollback(vm, st);
+    vm->error_jmp_buf = saved_jb;
+    longjmp(*saved_jb, 1);
+}
+
+void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st) {
+    if (!st->fn_nodes)
+        return;
+    for (int i = 0; i < st->fn_count; i++)
+        *st->fn_nodes[i] = st->fn_saved[i];
+    for (int i = 0; i < st->var_count; i++)
+        *st->var_nodes[i] = st->var_saved[i];
+    vm->compiler.macro_prog          = st->prog;
+    vm->compiler.macro_context_scope = st->context_scope;
+    vm->data_ptr                     = st->data_ptr;
+    vm->compiler.comptime_pending_includes.len = st->pending_len;
+    vm->compiler.comptime_on_live_stack        = false;
+    vm->compiler.in_macro_mode                 = false;
+    if (vm->compiler.has_macro_snapshot) {
+        hashmap_restore(&vm->compiler.macros,
+                        vm->compiler.macro_snapshot_backup);
+        vm->compiler.has_macro_snapshot = false;
+    }
+    st->fn_nodes = NULL;
+}
+
 static void setup_macro_call_slots(VirtualMachine *vm, long long *fixed_args,
                                    int fixed_count) {
     for (int i = fixed_count - 1; i >= 8; i--)
@@ -2710,27 +3111,11 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     }
     vm->compiler.macro_call_tok = stamped_call_tok;
 
-    // A live session's own frames occupy the stack, so the macro runs below
-    // them and leaves the debugger out of it.
-    bool       live = vm->compiler.comptime_on_live_stack;
-    FReg       saved_fregs[NUM_REGS];
-    long long *saved_shadow_sp = vm->shadow_sp;
-    uint32_t   saved_flags     = vm->flags;
-    int        saved_single_step = vm->dbg.single_step;
-    int        saved_step_over   = vm->dbg.step_over;
-    int        saved_step_out    = vm->dbg.step_out;
-    int        saved_attached    = vm->dbg.debugger_attached;
-    if (live) {
-        memcpy(saved_fregs, vm->fregs, sizeof(saved_fregs));
-        vm->flags                 &= ~CCCC_ENABLE_DEBUGGER;
-        vm->dbg.single_step        = 0;
-        vm->dbg.step_over          = 0;
-        vm->dbg.step_out           = 0;
-        vm->dbg.debugger_attached  = 0;
-        if (vm->flags & CCCC_CFI)
-            *--vm->shadow_sp = 0;
-        vm->dbg.cond_depth++;
-    } else {
+    bool          live = vm->compiler.comptime_on_live_stack;
+    LiveStackSave live_save;
+    if (live)
+        live_stack_enter(vm, &live_save);
+    else {
         vm->sp = vm->initial_sp;
         vm->bp = vm->initial_bp;
     }
@@ -2818,16 +3203,8 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     vm->sp = saved_sp;
     vm->bp = saved_bp;
     memcpy(vm->regs, saved_regs, sizeof(saved_regs));
-    if (live) {
-        memcpy(vm->fregs, saved_fregs, sizeof(saved_fregs));
-        vm->shadow_sp             = saved_shadow_sp;
-        vm->flags                 = saved_flags;
-        vm->dbg.single_step       = saved_single_step;
-        vm->dbg.step_over         = saved_step_over;
-        vm->dbg.step_out          = saved_step_out;
-        vm->dbg.debugger_attached = saved_attached;
-        vm->dbg.cond_depth--;
-    }
+    if (live)
+        live_stack_leave(vm, &live_save);
     vm->compiler.current_fn               = saved_current_fn;
     vm->compiler.macro_call_tok           = saved_macro_call_tok;
     vm->compiler.expansion_stack          = saved_expansion_stack;

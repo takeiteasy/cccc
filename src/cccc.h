@@ -3228,6 +3228,7 @@ typedef struct ComptimeVar {
     int64_t int_val;   // Scalar integer value (or 0 for structs)
     double  float_val; // Scalar float/double value
     Obj    *ptr_obj;   // Parent-side shadow object for $get_comptime_ptr
+    bool keep_value;   // A reload keeps the live storage and value
     ComptimeVarMember
         *members;      // Per-field values for struct vars (NULL for scalars)
     struct ComptimeVar *next;
@@ -5721,6 +5722,47 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog);
  @return true on success or when there is nothing to expand.
 */
 bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head);
+
+/*!
+ @brief What a reload needs to undo a rebuild of the comptime program.
+*/
+typedef struct CcComptimeReload {
+    bool         rebuilt;  /**< The comptime program was rebuilt. */
+    Obj         *prog;     /**< The comptime program before the rebuild. */
+    Scope       *context_scope;
+    MacroFn    **fn_nodes;
+    MacroFn     *fn_saved;
+    int          fn_count;
+    ComptimeVar **var_nodes;
+    ComptimeVar  *var_saved;
+    int           var_count;
+    char         *data_ptr;     /**< Data segment top before fresh storage. */
+    int           pending_len;  /**< Queued comptime includes before the reload. */
+} CcComptimeReload;
+
+/*!
+ @brief Apply the comptime functions and variables a reload just
+        re-registered.
+ @details Unchanged ones are dropped. If any changed or is new, the comptime
+          program is built again: variables and statics that still match keep
+          their storage and value, a variable whose declaration changed and a
+          new one are initialized, and the code is generated above the live
+          code only for the initializers and then given back.
+ @param old_fns Head of the function list before the file was preprocessed.
+ @param old_vars Head of the variable list before the file was preprocessed.
+ @param old_pending Number of queued comptime includes before the file was
+        preprocessed.
+ @return false, with the session unchanged and the reason printed, if the
+         rebuild fails. Longjmps after the same cleanup on a compile error.
+*/
+bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
+                        ComptimeVar *old_vars, int old_pending,
+                        CcComptimeReload *st);
+
+/*!
+ @brief Put back the comptime program that cc_comptime_reload replaced.
+*/
+void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st);
 
 /*!
  @brief Find a call to a comptime function in a token range.

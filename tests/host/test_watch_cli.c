@@ -148,8 +148,8 @@ static const char *LOOP_F = "#include <stdio.h>\n#include <unistd.h>\n"
                             "    return 0;\n"
                             "}\n";
 
-// A saved change that calls an unchanged comptime function is expanded in the
-// running program; a changed comptime function is refused.
+// A saved change that calls a comptime function is expanded in the running
+// program, and so is the function that calls one that changed.
 static void test_comptime_reload(const char *dir) {
     static const char *FMT =
         "#include <stdio.h>\n#include <unistd.h>\n"
@@ -175,9 +175,8 @@ static void test_comptime_reload(const char *dir) {
     at = EXPECT(&c, "c=43\n", (size_t)at, "comptime reload: call expands");
     snprintf(src, sizeof src, FMT, 7, "val() + 1");
     write_file(dir, "ct.c", src);
-    at = EXPECT(&c, "restart to apply it", (size_t)at,
-                "comptime reload: changed comptime refused");
-    EXPECT(&c, "c=43\n", (size_t)at, "comptime reload: old code keeps running");
+    at = EXPECT(&c, "c=8\n", (size_t)at,
+                "comptime reload: changed comptime expands");
     reap(&c);
 }
 

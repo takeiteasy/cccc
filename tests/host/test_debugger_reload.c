@@ -228,12 +228,14 @@ static void test_running_program(void) {
 }
 
 // The comptime code is regenerated for each expansion, so a reload or fix can
-// call a live comptime function; changed or new comptime code is refused.
+// call a live comptime function. A reload that changes or adds comptime code
+// builds the comptime program again: statics and variables that still match
+// keep their values, and the functions that call comptime code expand again.
 static const char *ct_path;
 
 static void write_ct(const char *comptime, const char *f, const char *g,
                      const char *extra) {
-    char text[1024];
+    char text[2048];
     snprintf(text, sizeof(text),
              "%s\n"
              "int f(void) { return %s; }\n"
@@ -245,9 +247,11 @@ static void write_ct(const char *comptime, const char *f, const char *g,
     write_file("ct.c", text);
 }
 
+#define VAL(n)                                                                 \
+    "@comptime Node *val(void) { return MakeIntLiteral(" #n "); }\n"
+
 static long long ct_hook(void) {
-    const char *val42 =
-        "@comptime Node *val(void) { return MakeIntLiteral(42); }";
+    const char *val42 = VAL(42);
     write_ct(val42, "val()", "2", "");
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "unchanged comptime reloads");
     write_ct(val42, "val()", "3", "");
@@ -255,20 +259,83 @@ static long long ct_hook(void) {
 
     write_ct(val42, "val() + 1", "3", "");
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "new comptime call expands");
+    CHECK(eval("f()") == 43, "f is val() + 1");
     CHECK(cc_redefine_function(&vm, "int f(void) { return val() + 5; }") == 0,
           "fix with a comptime call expands");
+    CHECK(eval("f()") == 47, "f is val() + 5");
     CHECK(cc_redefine_function(&vm, "int f(void) { return val() + ; }") != 0,
           "fix with a parse error refused");
-    write_ct("@comptime Node *val(void) { return MakeIntLiteral(7); }", "val()",
-             "3", "");
-    CHECK(cc_debug_reload(&vm, ct_path) != 0, "changed comptime refused");
-    write_ct(val42, "val()", "3", "@comptime int extra(void) { return 1; }");
-    CHECK(cc_debug_reload(&vm, ct_path) != 0, "new comptime refused");
+
+    write_ct(VAL(7), "val()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "changed comptime reloads");
+    CHECK(eval("f()") == 7, "f expands the new body");
+    CHECK(eval("g()") == 3, "g does not call comptime");
+
+    write_ct(val42, "val()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "comptime changes back");
+    CHECK(eval("f()") == 42, "an unchanged caller expands again");
+
+    char both[512];
+    snprintf(both, sizeof(both),
+             "%s@comptime Node *extra(void) { return MakeIntLiteral(1); }",
+             val42);
+    write_ct(both, "val() + extra()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "new comptime function");
+    CHECK(eval("f()") == 43, "f calls the new function");
+
+    char tick[512];
+    snprintf(tick, sizeof(tick),
+             "%s@comptime Node *tick(void) { static int n = 10; "
+             "return MakeIntLiteral(n++); }",
+             val42);
+    write_ct(tick, "tick()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "new comptime static");
+    CHECK(eval("f()") == 10, "a new static is initialized");
+    snprintf(tick, sizeof(tick),
+             "%s@comptime Node *tick(void) { static int n = 10; n += 5; "
+             "return MakeIntLiteral(n); }",
+             val42);
+    write_ct(tick, "tick()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "changed comptime static");
+    CHECK(eval("f()") == 16, "a static keeps its value: %lld", eval("f()"));
+
+    char var[512];
+    snprintf(var, sizeof(var),
+             "%s[[cccc::comptime]] int base = 100;\n"
+             "@comptime Node *getbase(void) { return "
+             "MakeIntLiteral(GetComptimeInt(\"base\")); }",
+             val42);
+    write_ct(var, "getbase()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "new comptime variable");
+    CHECK(eval("f()") == 100, "a new variable is initialized");
+    snprintf(var, sizeof(var),
+             "%s[[cccc::comptime]] int base = 200;\n"
+             "@comptime Node *getbase(void) { return "
+             "MakeIntLiteral(GetComptimeInt(\"base\")); }",
+             val42);
+    write_ct(var, "getbase()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "changed comptime variable");
+    CHECK(eval("f()") == 200, "an edited variable is initialized again");
+
+    snprintf(var, sizeof(var),
+             "%s[[cccc::comptime]] int th = 42;\n"
+             "@comptime Node *thp(void) { return GetComptimePtr(\"th\"); }",
+             val42);
+    write_ct(var, "*(int *)thp()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "comptime pointer reloads");
+    CHECK(eval("f()") == 42, "a new variable has a shadow");
+
     write_ct(val42, "val()", "3", "val();");
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "file-scope call refused");
     write_ct(val42, "val()", "3 +", "");
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "parse error refused");
     CHECK(vm.error_count == 0, "diagnostics are cleared");
+    snprintf(both, sizeof(both),
+             "%s@comptime Node *bad(void) { return +; }", val42);
+    write_ct(both, "val()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "broken comptime refused");
+    CHECK(vm.error_count == 0, "diagnostics are cleared");
+    CHECK(eval("f()") == 42, "the session is as it was");
 
     write_ct(val42, "val() + 1", "4", "");
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "reload after refusals");

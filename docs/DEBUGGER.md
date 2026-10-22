@@ -201,13 +201,27 @@ The reload is refused, with nothing changed, if the file
 - changes the layout of a struct, union, enum or typedef it defines, or the
   type of a global;
 - changes the value of a `constexpr` object;
-- adds or changes a `[[cccc::comptime]]` function or variable, or calls one at
-  file scope.[^comptime-reload]
+- calls a `[[cccc::comptime]]` function at file scope;
+- has a comptime function or variable that does not compile.[^comptime-reload]
 
-A new or changed function may call an unchanged comptime function, in `reload`
-and in `fix`: the call is expanded when the change is applied, and the
-comptime variables keep the values they hold. Like `fix`, the command reaches
-the last file's scope. Embedders call `cc_debug_reload(vm, path)`.
+### Comptime code
+
+A new or changed function may call a comptime function, in `reload` and in
+`fix`: the call is expanded when the change is applied. `reload` also accepts
+a file that adds or edits comptime code:
+
+| Comptime part | After a reload |
+|---|---|
+| New function or variable | Added and initialized. |
+| Changed function | Replaced. Its `static` locals that still match by name and type keep their values. |
+| Variable with an edited declaration | Initialized again. |
+| Unchanged variable | Keeps its value. |
+| Function that calls comptime code, in the reloaded file | Expanded again, even when its own text is unchanged. |
+| Function that calls comptime code, in another file | Keeps its old expansion; reload that file. |
+| Comptime code removed from the file | Stays, with no note. |
+
+`fix` does not accept comptime definitions. Like `fix`, the command reaches the
+last file's scope. Embedders call `cc_debug_reload(vm, path)`.
 
 `cccc --watch` runs this reload on every save, without the debugger; see
 [WATCH.md](WATCH.md).
@@ -545,9 +559,11 @@ make CCCC_HAS_BACKTRACE=0
 
 [^comptime-reload]: Expansion regenerates the comptime code above the running
     program, runs it on top of the paused stack with the debugger off, and
-    gives the code back before the new functions are compiled. A changed or new
-    comptime function or variable and a file-scope comptime call need a restart
-    (see [#1735](https://todo.sr.ht/~takeiteasy/cccc/1735) and
-    [#1736](https://todo.sr.ht/~takeiteasy/cccc/1736)). A pointer to a comptime
+    gives the code back before the new functions are compiled. A reload that
+    changes comptime code builds the comptime program again the same way and
+    runs only the initializers that are new or edited; an initializer that
+    already ran is not undone when the reload is refused later. A file-scope
+    comptime call needs a restart
+    ([#1736](https://todo.sr.ht/~takeiteasy/cccc/1736)). A pointer to a comptime
     function that comptime code stored while running is not moved
     ([#1737](https://todo.sr.ht/~takeiteasy/cccc/1737)).

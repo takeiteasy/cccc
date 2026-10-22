@@ -130,8 +130,8 @@ These calls do nothing without `--watch`.
 `-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
 
 A reload follows the rules in [DEBUGGER.md](DEBUGGER.md#reloading-a-file): no
-layout changes, and functions that call `[[cccc::comptime]]` code are not
-reloaded once edited.
+layout changes, and no `[[cccc::comptime]]` call at file scope. Edited comptime
+code is applied, and the functions of the file that call it are expanded again.
 
 [^gil]: Only one guest thread runs at a time, and a reload runs between two
     instructions of the thread that holds the interpreter lock. A thread blocked
