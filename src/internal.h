@@ -1192,6 +1192,7 @@ long long wrap_fwrite(long long ptr, long long size, long long nmemb,
 //
 
 void gen_function(VirtualMachine *vm, Obj *fn);
+void cc_free_local_sets(Obj *prog);
 void gen(VirtualMachine *vm, Obj *prog);
 // Note: gen_expr is now static in codegen.c with signature:
 // static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);

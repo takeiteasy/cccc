@@ -2148,6 +2148,10 @@ Scope *cc_parse_file_isolated(VirtualMachine *vm, Token *tok) {
     vm->error_jmp_buf = saved_jb;
 
     hashmap_restore(&vm->compiler.global_decl_map, saved_decls);
+    // An error leaves its block scopes open above the file scope.
+    if (failed)
+        for (Scope *sc = vm->compiler.scope; sc; sc = sc->next)
+            free_scope_maps(sc);
     vm->compiler.scope      = saved_scope;
     vm->compiler.current_fn = saved_fn;
     vm->compiler.locals     = saved_locals;

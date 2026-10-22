@@ -91,10 +91,14 @@ static void warn_unused_scope(VirtualMachine *vm, Scope *sc) {
     }
 }
 
+void free_scope_maps(Scope *sc) {
+    hashmap_deinit_borrowed(&sc->var_map);
+    hashmap_deinit_borrowed(&sc->tag_map);
+}
+
 void leave_scope(VirtualMachine *vm) {
     warn_unused_scope(vm, vm->compiler.scope);
-    hashmap_deinit_borrowed(&vm->compiler.scope->var_map);
-    hashmap_deinit_borrowed(&vm->compiler.scope->tag_map);
+    free_scope_maps(vm->compiler.scope);
     vm->compiler.scope = vm->compiler.scope->next;
 }
 

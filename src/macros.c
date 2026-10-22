@@ -2345,8 +2345,7 @@ static void restore_macro_compile_state(VirtualMachine *vm, Obj *saved_locals,
     vm->compiler.current_fn = saved_current_fn;
     vm->compiler.globals    = saved_globals;
     for (Scope *sc = vm->compiler.scope; sc != saved_scope; sc = sc->next) {
-        hashmap_deinit_borrowed(&sc->var_map);
-        hashmap_deinit_borrowed(&sc->tag_map);
+        free_scope_maps(sc);
     }
     vm->compiler.scope                 = saved_scope;
     vm->compiler.in_macro_mode         = false;
@@ -2533,6 +2532,7 @@ static bool compile_macro_program_ex(VirtualMachine    *vm,
             gen_function(vm, fn);
     }
     cc_asm_passthru_flush(vm);
+    cc_free_local_sets(macro_prog);
 
     // Step 3: apply global relocations now that every macro function has a
     //         code_addr, so static initializer tables can reference comptime
@@ -2712,6 +2712,7 @@ static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
         }
     }
     cc_asm_passthru_flush(vm);
+    cc_free_local_sets(prog);
     patch_macro_call_addresses(vm, prog);
     for (int i = 0; i < nslots; i++)
         if (*slots[i].slot == slots[i].old_value)
@@ -2969,8 +2970,7 @@ bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
     }
     for (Scope *sc = vm->compiler.scope; sc && sc != saved_scope;
          sc        = sc->next) {
-        hashmap_deinit_borrowed(&sc->var_map);
-        hashmap_deinit_borrowed(&sc->tag_map);
+        free_scope_maps(sc);
     }
     vm->compiler.scope                 = saved_scope;
     vm->compiler.globals               = saved_globals;
@@ -3001,6 +3001,12 @@ bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
     longjmp(*saved_jb, 1);
 }
 
+void cc_comptime_reload_commit(CcComptimeReload *st) {
+    if (st->rebuilt && st->context_scope)
+        free_scope_maps(st->context_scope);
+    st->fn_nodes = NULL;
+}
+
 void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st) {
     if (!st->fn_nodes)
         return;
@@ -3008,6 +3014,9 @@ void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st) {
         *st->fn_nodes[i] = st->fn_saved[i];
     for (int i = 0; i < st->var_count; i++)
         *st->var_nodes[i] = st->var_saved[i];
+    if (vm->compiler.macro_context_scope &&
+        vm->compiler.macro_context_scope != st->context_scope)
+        free_scope_maps(vm->compiler.macro_context_scope);
     vm->compiler.macro_prog          = st->prog;
     vm->compiler.macro_context_scope = st->context_scope;
     vm->data_ptr                     = st->data_ptr;

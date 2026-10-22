@@ -412,6 +412,7 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
             printf("reloaded %s: %d changed, %d unchanged, %d new\n", path,
                    st.changed, st.unchanged, st.added);
         cc_deps_commit(vm);
+        cc_comptime_reload_commit(&ctr);
         rc = 0;
         goto done;
     }

@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a debugger `reload` or `--watch` save no longer leaks the parser scopes
+  of a rebuilt comptime program, a refused parse or the comptime code it
+  generates.
+
 ## [0.19.5] - 2026-10-22
 
 - Added: debugger `reload` and `fix` expand calls to comptime functions in a

@@ -419,6 +419,7 @@ bool is_function_decl_list(VirtualMachine *vm, Token *tok, Type *basety);
 bool is_typename(VirtualMachine *vm, Token *tok);
 bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice);
 void leave_scope(VirtualMachine *vm);
+void free_scope_maps(Scope *sc); // buckets only; the Scope is arena-owned
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
 void mark_addr_escapes(Node *node, Obj *fn);
 void mark_nested_captures(Obj *fn, Node *node);

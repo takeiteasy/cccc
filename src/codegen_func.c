@@ -80,6 +80,18 @@ void cc_reject_setjmp_address(VirtualMachine *vm, Node *node) {
 
 // ========== Function Generation ==========
 
+// Frees the per-function local_set tables belongs_to_outer_function builds
+// lazily while code is generated. A table lives on the enclosing function,
+// which a block adopted by a generated function may not share a list with.
+void cc_free_local_sets(Obj *prog) {
+    for (Obj *fn = prog; fn; fn = fn->next)
+        for (Obj *o = fn; o; o = o->parent_fn)
+            if (o->local_set_built) {
+                hashmap_deinit_borrowed(&o->local_set);
+                o->local_set_built = false;
+            }
+}
+
 void gen_function(VirtualMachine *vm, Obj *fn) {
     if (!fn->is_function || !fn->body)
         return;
@@ -526,14 +538,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     }
     cc_asm_passthru_flush(vm);
 
-    // Free per-function local_set hash tables built lazily by
-    // belongs_to_outer_function during the pass above. (#165)
-    for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->local_set_built) {
-            hashmap_deinit_borrowed(&fn->local_set);
-            fn->local_set_built = false;
-        }
-    }
+    cc_free_local_sets(prog);
 
     HashMap fn_defs     = {};
     HashMap static_defs = {};

@@ -5763,6 +5763,12 @@ bool cc_comptime_reload(VirtualMachine *vm, MacroFn *old_fns,
                         CcComptimeReload *st);
 
 /*!
+ @brief Release what a rebuilt comptime program replaced, once the reload is
+        past the point where it can be undone.
+*/
+void cc_comptime_reload_commit(CcComptimeReload *st);
+
+/*!
  @brief Put back the comptime program that cc_comptime_reload replaced.
 */
 void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st);
