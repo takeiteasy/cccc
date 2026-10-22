@@ -21,7 +21,7 @@ Macros advertising what CCCC does not implement stay undefined, whatever `--comp
 | Situation | Behaviour |
 |---|---|
 | `defined(...)` or `__has_*(...)` produced by a macro expansion (macOS `<pthread.h>`, `<secure/_string.h>`) | Recognised wherever it lands in the `#if` expression |
-| An unrecognised `__has_*` operator (`__has_declspec_attribute`, `__has_warning`) | Evaluates to 0 with a `-Wcpp` warning naming it ([attributes.md](attributes.md#feature-test-preprocessor-operators)) |
+| An unrecognised `__has_*` operator (`__has_declspec_attribute`, `__has_warning`) | Evaluates to 0 with a `-Wcpp` warning naming it ([attributes.md](attributes-feature-tests.md)) |
 | Host header named like a CCCC one (SDK `Availability.h`) | Replayed as a host header; only a file whose bytes equal CCCC's copy counts as CCCC's own |
 | Apple's fortified `strcpy`/`memcpy` (`__builtin___*_chk`) | Pass `-D_FORTIFY_SOURCE=0` |
 | `-c=native` with a real `<unistd.h>` using fixed-width names | `#include <stdint.h>` is added automatically when nothing includes it |
