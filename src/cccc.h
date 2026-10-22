@@ -2749,6 +2749,7 @@ struct Obj {
                                 address in the text segment. */
     long long code_end_addr; // Address after function code in text segment
     Token    *def_begin, *def_end; // source span of a file-scope definition
+    Token    *gen_site; // file-scope comptime call that generated this Obj
 
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
@@ -4186,6 +4187,8 @@ typedef struct Compiler {
     bool       comptime_splice_active;
     Obj       *macro_globals; // Globals defined by inline macros (injected into
                               // the final program before codegen)
+    bool reload_file_scope_calls; // File-scope calls run by a reload: the live
+                                  // Objs they generated earlier may be redone
     EmitEvent *emit_events_head; // Ordered generated-output events
     EmitEvent *emit_events_tail;
     bool macro_emit_recording;   // True while a macro call records generated
@@ -5773,11 +5776,13 @@ void cc_comptime_reload_rollback(VirtualMachine *vm, CcComptimeReload *st);
 Token *cc_find_comptime_call(VirtualMachine *vm, Token *from, Token *to);
 
 /*!
- @brief Find a file-scope call to a comptime function in a token stream.
- @details These are the calls cc_execute_inline_macros runs before parsing.
- @return The call's name token, or NULL.
+ @brief Run the file-scope comptime calls of a token stream in a live session.
+ @details Removes the calls from the stream and prepends declarations of what
+          they generate. A call that fails longjmps to the caller's error
+          handler, which must restore vm->compiler.macro_globals.
+ @return The definitions the calls generate, or NULL.
 */
-Token *cc_find_file_scope_comptime_call(VirtualMachine *vm, Token *tok);
+Obj *cc_run_file_scope_calls(VirtualMachine *vm, Token **tok);
 
 /*!
  @brief Expand a single ND_MACRO_CALL node using the already-compiled macros.

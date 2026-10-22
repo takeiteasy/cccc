@@ -28,7 +28,9 @@
 // functions are expanded against the session's retained comptime program. A
 // file that changes or adds a comptime function or variable builds that program
 // again first (cc_comptime_reload), and the file's functions that call
-// comptime code are expanded again. A comptime call at file scope is refused.
+// comptime code are expanded again. Its file-scope comptime calls run again
+// (cc_run_file_scope_calls) and what they generate is matched like the file's
+// own definitions.
 
 #include "internal.h"
 #include "parse_internal.h"
@@ -50,8 +52,10 @@ static char *file_key(const File *f) {
     return strdup(realpath(f->name, buf) ? buf : f->name);
 }
 
-// The file a file-scope Obj was written in.
+// The file a file-scope Obj was written in, or whose comptime call made it.
 static const File *obj_file(const Obj *o) {
+    if (o->gen_site)
+        return o->gen_site->file;
     if (o->def_begin && o->def_begin->file)
         return o->def_begin->file;
     return o->tok ? o->tok->file : NULL;
@@ -201,9 +205,12 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st,
                 reload_fail(vm, "'%s' changes its signature", nw->name, NULL);
                 return false;
             }
-            // A rebuilt comptime program can change what a call expands to.
-            bool stale = comptime_rebuilt && nw->def_begin &&
-                         cc_find_comptime_call(vm, nw->def_begin, nw->def_end);
+            // A rebuilt comptime program can change what a call expands to, and
+            // a generated function has no source to compare.
+            bool stale =
+                nw->gen_site ||
+                (comptime_rebuilt && nw->def_begin &&
+                 cc_find_comptime_call(vm, nw->def_begin, nw->def_end));
             if (bodies_equal(old, nw) && !stale) {
                 nw->reuse_of = old;
                 st->unchanged++;
@@ -343,6 +350,7 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
     int           old_pending        = vm->compiler.comptime_pending_includes.len;
     CcComptimeReload ctr             = {0};
     ComptimeVar  *old_vars           = vm->compiler.comptime_vars;
+    Obj             *old_macro_globals  = vm->compiler.macro_globals;
     CompileError *err_tail           = vm->errors_tail;
     int           err_count          = vm->error_count;
     CcCodeMark    mark               = {0};
@@ -360,18 +368,20 @@ static int reload_file(VirtualMachine *vm, const char *path, bool quiet_noop) {
 
         if (!cc_comptime_reload(vm, old_fns, old_vars, old_pending, &ctr))
             goto refused;
-        Token *call = cc_find_file_scope_comptime_call(vm, tok);
-        if (call) {
-            char *name = strndup(call->loc, (size_t)call->len);
-            reload_fail(vm, "file-scope comptime call '%s' cannot be reloaded",
-                        name, NULL);
-            free(name);
-            goto refused;
-        }
-
-        fresh = cc_parse_file_isolated(vm, tok);
+        Obj *generated = cc_run_file_scope_calls(vm, &tok);
+        // The parse resolves the generated globals' extern declarations.
+        vm->compiler.macro_globals = generated;
+        fresh                      = cc_parse_file_isolated(vm, tok);
+        vm->compiler.macro_globals = old_macro_globals;
         if (vm->error_count > err_count)
             goto refused;
+        if (generated) {
+            Obj *tail = generated;
+            while (tail->next)
+                tail = tail->next;
+            tail->next           = vm->compiler.globals;
+            vm->compiler.globals = generated;
+        }
 
         const char *kind = NULL;
         char       *name =
@@ -424,6 +434,7 @@ refused:
     vm->compiler.globals       = old_head;
     vm->compiler.macro_fns     = old_fns;
     vm->compiler.comptime_vars = old_vars;
+    vm->compiler.macro_globals = old_macro_globals;
 done:
     flush_errors(vm, err_tail, err_count);
     vm->error_jmp_buf       = saved_jb;

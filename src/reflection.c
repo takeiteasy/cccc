@@ -2566,6 +2566,14 @@ void __builtin_ensure_string_h_decls(void) {
     ensure_libc_fn_decl(vm, "strcmp", ty_int, (Type *[]){charp, charp2}, 2);
 }
 
+// A reload runs a file's file-scope calls again. The Objs an earlier run
+// generated (Obj.gen_site) are replaced, not collisions, and a live
+// declaration is left alone: the reload pairs the new definition with it.
+static bool superseded_by_reload(VirtualMachine *vm, const Obj *obj) {
+    return vm->compiler.reload_file_scope_calls &&
+           (obj->gen_site || !obj->is_definition);
+}
+
 CC_BUILTIN(__builtin_ast_function, 2);
 Obj *__builtin_ast_function(const char *name, Type *return_type) {
     VirtualMachine *vm = __builtin_current_vm;
@@ -2579,6 +2587,8 @@ Obj *__builtin_ast_function(const char *name, Type *return_type) {
     Obj   *lists[]  = {vm->compiler.globals, vm->compiler.macro_globals};
     for (int i = 0; i < 2 && !existing; i++) {
         for (Obj *obj = lists[i]; obj; obj = obj->next) {
+            if (i == 0 && superseded_by_reload(vm, obj))
+                continue;
             if (obj->is_function && strlen(obj->name) == name_len &&
                 strncmp(obj->name, name, name_len) == 0) {
                 existing = obj;
@@ -3131,6 +3141,8 @@ Obj *__builtin_ast_global_var(const char *name, Type *ty) {
     // Reuse an existing forward declaration if present (same logic as
     // __builtin_ast_function).
     for (Obj *obj = vm->compiler.globals; obj; obj = obj->next) {
+        if (superseded_by_reload(vm, obj))
+            continue;
         if (!obj->is_function && strlen(obj->name) == name_len &&
             strncmp(obj->name, name, name_len) == 0) {
             if (obj->is_definition)
@@ -3355,7 +3367,8 @@ static bool generated_fn_defined(VirtualMachine *vm, const char *name) {
     for (int i = 0; i < 2; i++)
         for (Obj *obj = lists[i]; obj; obj = obj->next)
             if (obj->is_function && obj->is_definition &&
-                obj->is_macro_generated && !strcmp(obj->name, name))
+                obj->is_macro_generated && !strcmp(obj->name, name) &&
+                !(i == 0 && superseded_by_reload(vm, obj)))
                 return true;
     return false;
 }

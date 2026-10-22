@@ -3986,35 +3986,6 @@ Token *cc_find_comptime_call(VirtualMachine *vm, Token *from, Token *to) {
     return NULL;
 }
 
-// The first file-scope `macro(...);` statement in `tok` that
-// scan_and_execute_global_calls would run, or NULL. Runs nothing.
-Token *cc_find_file_scope_comptime_call(VirtualMachine *vm, Token *tok) {
-    int  brace_depth = 0;
-    int  paren_depth = 0;
-    bool in_init     = false;
-
-    for (; tok && tok->kind != TK_EOF; tok = tok->next) {
-        if (equal(tok, "{"))
-            brace_depth++;
-        else if (equal(tok, "}")) {
-            if (--brace_depth == 0)
-                in_init = false;
-        } else if (equal(tok, "("))
-            paren_depth++;
-        else if (equal(tok, ")"))
-            paren_depth--;
-        else if (equal(tok, ";") && brace_depth == 0)
-            in_init = false;
-        else if (equal(tok, "=") && brace_depth == 0 && paren_depth == 0)
-            in_init = true;
-
-        if (!brace_depth && !paren_depth && !in_init &&
-            is_comptime_entry_call(vm, tok))
-            return tok;
-    }
-    return NULL;
-}
-
 // Scan a single token stream for file-scope calls to non-inline macros,
 // execute them, collect generated definitions, and remove the call tokens.
 // Newly generated Obj definitions are drained into vm->compiler.macro_globals
@@ -4316,6 +4287,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                         while (o && o != globals_before) {
                             Obj *next_obj = o->next;
                             cc_record_emit_object(vm, o);
+                            o->gen_site = tok;
                             o->next = vm->compiler.macro_globals;
                             vm->compiler.macro_globals = o;
                             o                          = next_obj;
@@ -4338,6 +4310,117 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
         prev = tok;
         tok  = tok->next;
     }
+}
+
+static void prepend_generated_decls(VirtualMachine *vm, Obj *generated,
+                                    Token **input_tokens, int count) {
+    // Synthesize forward declarations for every generated function and
+    // extern declarations for every generated global variable, prepending
+    // them to all input token streams so the parser can resolve references.
+    for (Obj *o = generated; o; o = o->next) {
+        // #928/#995: an anon gvar or a lifted block function (dotted
+        // `.L..N` name -- reflect_new_anon_gvar/block_literal's
+        // new_unique_name, reflection.c/parse.c) is referenced directly
+        // through the Obj pointer already embedded in its ND_VAR/
+        // ND_BLOCK_LITERAL node, never by re-parsed textual reference, and
+        // doesn't get a real identifier until rename_anon_globals() renames
+        // it at serialization time (long after this pre-parse pass runs).
+        // Synthesizing `extern T .L..N;`/`static T .L..N(...);` here is
+        // both unnecessary and invalid C -- skip it. #995 gave a lifted
+        // block function is_macro_generated for the first time, so the
+        // is_fn_def arm needed the same `name[0] != '.'` guard #928 already
+        // gave is_gvar_def.
+        bool is_fn_def   = o->is_function && o->body && o->is_macro_generated &&
+                           o->name[0] != '.';
+        bool is_gvar_def = !o->is_function && o->is_definition &&
+                           o->is_macro_generated && o->name[0] != '.';
+        if (!is_fn_def && !is_gvar_def)
+            continue;
+
+        for (int fi = 0; fi < count; fi++) {
+            if (!input_tokens[fi])
+                continue;
+            Token *decl = is_fn_def ? synthesize_forward_decl_tokens(vm, o)
+                                    : synthesize_global_decl_tokens(vm, o);
+            if (!decl)
+                continue;
+            Token *tail = decl;
+            while (tail->next && tail->next->kind != TK_EOF)
+                tail = tail->next;
+            tail->next       = input_tokens[fi];
+            input_tokens[fi] = decl;
+        }
+    }
+}
+
+// Runs the file-scope calls in `*tok` against the live comptime program, for a
+// reload. Returns the definitions they generate; macro_globals is untouched.
+Obj *cc_run_file_scope_calls(VirtualMachine *vm, Token **tok) {
+    if (vm->compiler.no_comptime || !vm->compiler.macro_fns)
+        return NULL;
+    if (!vm->compiler.macro_prog)
+        error("comptime functions are not compiled in this session");
+
+    // The calls run in a scope of their own: the live scope is reachable from
+    // macro_context_scope, so chaining that onto it would make a cycle, and
+    // names the calls publish stay out of the session.
+    Scope *scope = vm->compiler.scope;
+    Scope *temp  = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+    memset(temp, 0, sizeof(*temp));
+    temp->next                    = scope;
+    Obj       *saved_globals_list = vm->compiler.macro_globals;
+    Node     **saved_nodes        = vm->compiler.macro_vararg_nodes;
+    char     **saved_strs         = vm->compiler.macro_vararg_strs;
+    int        saved_count        = vm->compiler.macro_vararg_count;
+    bool       saved_string_mode  = vm->compiler.macro_vararg_string_mode;
+    bool       saved_recording    = vm->compiler.macro_emit_recording;
+    Obj       *saved_fn           = vm->compiler.current_fn;
+    Obj       *saved_locals       = vm->compiler.locals;
+
+    CcCodeMark mark               = {0};
+    jmp_buf    jb;
+    jmp_buf   *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf   = &jb;
+    if (setjmp(jb) == 0) {
+        regen_macro_program(vm, &mark);
+        vm->compiler.in_macro_expansion      = true;
+        vm->compiler.comptime_on_live_stack  = true;
+        vm->compiler.macro_globals           = NULL;
+        vm->compiler.scope                   = temp;
+        vm->compiler.reload_file_scope_calls = true;
+        scan_and_execute_global_calls(vm, tok);
+        vm->compiler.reload_file_scope_calls = false;
+        vm->compiler.scope                   = scope;
+        hashmap_deinit_borrowed(&temp->var_map);
+        hashmap_deinit_borrowed(&temp->tag_map);
+        Obj *generated                      = vm->compiler.macro_globals;
+        vm->compiler.macro_globals          = saved_globals_list;
+        vm->compiler.comptime_on_live_stack = false;
+        vm->compiler.in_macro_expansion     = false;
+        cc_code_discard(vm, &mark);
+        vm->error_jmp_buf = saved_jb;
+        prepend_generated_decls(vm, generated, tok, 1);
+        return generated;
+    }
+
+    vm->compiler.scope = scope;
+    hashmap_deinit_borrowed(&temp->var_map);
+    hashmap_deinit_borrowed(&temp->tag_map);
+    vm->compiler.macro_globals            = saved_globals_list;
+    vm->compiler.macro_vararg_nodes       = saved_nodes;
+    vm->compiler.macro_vararg_strs        = saved_strs;
+    vm->compiler.macro_vararg_count       = saved_count;
+    vm->compiler.macro_vararg_string_mode = saved_string_mode;
+    vm->compiler.macro_emit_recording     = saved_recording;
+    vm->compiler.current_fn               = saved_fn;
+    vm->compiler.locals                   = saved_locals;
+    vm->compiler.comptime_on_live_stack   = false;
+    vm->compiler.in_macro_expansion       = false;
+    vm->compiler.reload_file_scope_calls  = false;
+    if (mark.started)
+        cc_code_discard(vm, &mark);
+    vm->error_jmp_buf = saved_jb;
+    longjmp(*saved_jb, 1);
 }
 
 // Execute file-scope calls to non-inline macros before the main parse.
@@ -4467,43 +4550,8 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
         scan_and_execute_global_calls(vm, &input_tokens[fi]);
     }
 
-    // Synthesize forward declarations for every generated function and
-    // extern declarations for every generated global variable, prepending
-    // them to all input token streams so the parser can resolve references.
-    for (Obj *o = vm->compiler.macro_globals; o; o = o->next) {
-        // #928/#995: an anon gvar or a lifted block function (dotted
-        // `.L..N` name -- reflect_new_anon_gvar/block_literal's
-        // new_unique_name, reflection.c/parse.c) is referenced directly
-        // through the Obj pointer already embedded in its ND_VAR/
-        // ND_BLOCK_LITERAL node, never by re-parsed textual reference, and
-        // doesn't get a real identifier until rename_anon_globals() renames
-        // it at serialization time (long after this pre-parse pass runs).
-        // Synthesizing `extern T .L..N;`/`static T .L..N(...);` here is
-        // both unnecessary and invalid C -- skip it. #995 gave a lifted
-        // block function is_macro_generated for the first time, so the
-        // is_fn_def arm needed the same `name[0] != '.'` guard #928 already
-        // gave is_gvar_def.
-        bool is_fn_def   = o->is_function && o->body && o->is_macro_generated &&
-                           o->name[0] != '.';
-        bool is_gvar_def = !o->is_function && o->is_definition &&
-                           o->is_macro_generated && o->name[0] != '.';
-        if (!is_fn_def && !is_gvar_def)
-            continue;
-
-        for (int fi = 0; fi < count; fi++) {
-            if (!input_tokens[fi])
-                continue;
-            Token *decl = is_fn_def ? synthesize_forward_decl_tokens(vm, o)
-                                    : synthesize_global_decl_tokens(vm, o);
-            if (!decl)
-                continue;
-            Token *tail = decl;
-            while (tail->next && tail->next->kind != TK_EOF)
-                tail = tail->next;
-            tail->next       = input_tokens[fi];
-            input_tokens[fi] = decl;
-        }
-    }
+    prepend_generated_decls(vm, vm->compiler.macro_globals, input_tokens,
+                            count);
 
     if (vm->debug_vm)
         printf("Pre-parse global macro execution complete.\n");

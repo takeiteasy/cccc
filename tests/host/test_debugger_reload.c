@@ -325,8 +325,32 @@ static long long ct_hook(void) {
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "comptime pointer reloads");
     CHECK(eval("f()") == 42, "a new variable has a shadow");
 
-    write_ct(val42, "val()", "3", "val();");
-    CHECK(cc_debug_reload(&vm, ct_path) != 0, "file-scope call refused");
+    char gen[1024];
+    snprintf(gen, sizeof(gen),
+             "%s@comptime void mk(void) { Obj *fn = MakeFunction(\"gen_v\", "
+             "GetType(\"int\")); WithFn(fn) { FunctionSetBody(fn, MakeReturn("
+             "MakeIntLiteral(%%d))); } PublishNode(fn); }\n",
+             val42);
+    char gen7[1024], gen8[1024], genbad[1024];
+    snprintf(gen7, sizeof(gen7), gen, 7);
+    snprintf(gen8, sizeof(gen8), gen, 8);
+    snprintf(genbad, sizeof(genbad),
+             "%s@comptime void mk(void) { Obj *fn = MakeFunction(\"gen_v\", "
+             "GetType(\"long\")); WithFn(fn) { FunctionSetBody(fn, MakeReturn("
+             "MakeIntLiteral(1))); } PublishNode(fn); }\n",
+             val42);
+    write_ct(gen7, "val()", "3", "mk();");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "file-scope call runs");
+    CHECK(eval("gen_v()") == 7, "a generated function is added");
+    write_ct(gen8, "val()", "3", "mk();");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "file-scope call runs again");
+    CHECK(eval("gen_v()") == 8, "a generated function is redefined");
+    write_ct(genbad, "val()", "3", "mk();");
+    CHECK(cc_debug_reload(&vm, ct_path) != 0, "generated signature change");
+    CHECK(eval("gen_v()") == 8, "the generated function is as it was");
+    write_ct(gen8, "val()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "call dropped");
+    CHECK(eval("gen_v()") == 8, "the old generated function is kept");
     write_ct(val42, "val()", "3 +", "");
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "parse error refused");
     CHECK(vm.error_count == 0, "diagnostics are cleared");

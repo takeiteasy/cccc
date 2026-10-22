@@ -201,7 +201,6 @@ The reload is refused, with nothing changed, if the file
 - changes the layout of a struct, union, enum or typedef it defines, or the
   type of a global;
 - changes the value of a `constexpr` object;
-- calls a `[[cccc::comptime]]` function at file scope;
 - has a comptime function or variable that does not compile.[^comptime-reload]
 
 ### Comptime code
@@ -219,6 +218,7 @@ a file that adds or edits comptime code:
 | Function that calls comptime code, in the reloaded file | Expanded again, even when its own text is unchanged. |
 | Function that calls comptime code, in another file | Keeps its old expansion; reload that file. |
 | Comptime code removed from the file | Stays, with no note. |
+| Comptime call at file scope (`gen();`) | Runs again.[^file-scope-calls] |
 
 `fix` does not accept comptime definitions. Like `fix`, the command reaches the
 last file's scope. Embedders call `cc_debug_reload(vm, path)`.
@@ -562,8 +562,13 @@ make CCCC_HAS_BACKTRACE=0
     gives the code back before the new functions are compiled. A reload that
     changes comptime code builds the comptime program again the same way and
     runs only the initializers that are new or edited; an initializer that
-    already ran is not undone when the reload is refused later. A file-scope
-    comptime call needs a restart
-    ([#1736](https://todo.sr.ht/~takeiteasy/cccc/1736)). A pointer to a comptime
-    function that comptime code stored while running is not moved
+    already ran is not undone when the reload is refused later. A pointer to a
+    comptime function that comptime code stored while running is not moved
     ([#1737](https://todo.sr.ht/~takeiteasy/cccc/1737)).
+
+[^file-scope-calls]: Every file-scope call in the reloaded file runs, so its side
+    effects repeat on each reload. A function it generates replaces the live
+    function of the same name, even when the text is identical, and must keep
+    that function's signature. A generated function that a later reload no
+    longer produces stays, with a note. A generator that picks names from a
+    counter produces new names each time.
