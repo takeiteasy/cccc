@@ -70,7 +70,7 @@ void check_data_capacity(VirtualMachine *vm, long long needed) {
 // CCCC_MAX_DATA_ALIGN (64), the widest alignment any *type* requests today
 // (64-byte vectors, #722). An explicit _Alignas(N) with N > 64 is accepted
 // by the parser but only gets 64-byte placement from this allocator, not
-// the full N -- a documented limitation (see docs/internal-vm.md), not a silent
+// the full N -- a documented limitation (see docs/vm.md), not a silent
 // truncation bug: the object is still more correctly placed than the
 // pre-#1136 hardcoded 8-byte rounding.
 int cc_effective_align(int obj_align, int ty_align) {

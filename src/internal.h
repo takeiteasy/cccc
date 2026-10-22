@@ -97,7 +97,7 @@ static inline bool obj_is_inline_only(const Obj *fn) {
 // the TLS per-thread/per-copy base allocation) will honour -- the widest
 // alignment any type requests today (64-byte vectors, #722). An explicit
 // _Alignas(N) with N > this is placed at this alignment, not N; see
-// cc_effective_align() (src/codegen_emit.c) and docs/internal-vm.md.
+// cc_effective_align() (src/codegen_emit.c) and docs/vm.md.
 #define CCCC_MAX_DATA_ALIGN 64
 
 #define REG_ZERO            0 // Always zero (writes discarded)

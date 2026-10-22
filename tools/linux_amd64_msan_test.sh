@@ -5,7 +5,7 @@
 # Colima container, using `./cccc --build build.c --build-target=test_msan`.
 #
 # NOTE (#844): MSan reports ~262/700 known false positives from an
-# uninstrumented libc/libffi blind spot, documented in docs/internal-testing.md. A
+# uninstrumented libc/libffi blind spot, documented in docs/test-infrastructure.md. A
 # nonzero exit here is expected, not on its own a regression signal --
 # compare the failure count/names against that documented baseline.
 set -e

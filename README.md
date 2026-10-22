@@ -276,6 +276,19 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [coverage.md](docs/coverage.md) | C89–C23 and extension support table |
 | [stdlib.md](docs/stdlib.md) | Standard-library and POSIX header support table |
 
+**Contributing**
+
+| Guide | Covers |
+|---|---|
+| [test-infrastructure.md](docs/test-infrastructure.md) | Test layout, suites, loose tests and harnesses |
+| [ci.md](docs/ci.md) | Per-architecture workflows and continuous integration |
+| [selfhosting.md](docs/selfhosting.md) | Compiling cccc with itself |
+| [releasing.md](docs/releasing.md) | Cutting a release: version stamping, tags, release automation |
+| [fuzzing.md](docs/fuzzing.md) | AFL++ and libFuzzer harnesses |
+| [vm.md](docs/vm.md) | *hub* — VM architecture, encoding, execution model, opcode reference |
+| [comptime-builtins.md](docs/comptime-builtins.md) | Declaring and registering comptime builtins |
+| [checked-interfaces-impl.md](docs/checked-interfaces-impl.md) | How checked-pointer call checks and bounds casts are implemented |
+
 ## Usage
 
 ```text
