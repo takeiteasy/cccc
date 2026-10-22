@@ -2098,6 +2098,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             // #485: reject an unchecked pointer member in a checked region.
             cc_check_checked_scope_decl(vm, mem->ty, mem->name,
                                         "struct member");
+            resolve_type_checked_bounds(vm, mem->ty);
             mem->explicit_align = explicit_decl_align(
                 vm, mem->name ? mem->name : tok, mem->ty, &attr);
             mem->align = mem->explicit_align > mem->ty->align

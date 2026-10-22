@@ -111,6 +111,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
             ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
         drop_cleanup_attr(vm, ty, attr, ty->name);
+        resolve_type_checked_bounds(vm, ty);
         char *name = get_ident(vm, ty->name);
         check_typedef_redefinition(vm, ty, name);
         VarScope *sc       = push_scope(vm, name, ty->name->len);
@@ -346,6 +347,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
 
     char *name_str = get_ident(vm, ty->name);
     check_sentinel_variadic(vm, ty);
+    resolve_type_checked_bounds(vm, ty);
 
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
@@ -728,6 +730,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         cccc_builtin_note_signature(name_str, fn->ty, ty->name->file->name);
 
     if (consume(vm, &tok, tok, ";")) {
+        resolve_type_checked_bounds(vm, ty);
         // #485: [[cccc::checked]]/[[cccc::unchecked]] applies to a
         // function's *body* -- a bodyless declaration has nothing for it to
         // take effect over.
@@ -1224,6 +1227,7 @@ Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
         // #485: reject an unchecked pointer global in a checked region.
         cc_check_checked_scope_decl(vm, ty, ty->name, "global variable");
         drop_cleanup_attr(vm, ty, attr, attr->is_extern ? NULL : ty->name);
+        resolve_type_checked_bounds(vm, ty);
 
         if (type_has_vla(ty))
             error_tok(vm, ty->name, "variably modified '%s' at file scope",

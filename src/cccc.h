@@ -1732,7 +1732,8 @@ struct Type {
     // (above) are raw, unresolved token spans (a prototype has no body scope
     // for resolve_checked_bounds() to resolve them into -- see that
     // function's comment in src/parse_core.c). resolve_param_checked_bounds()
-    // (src/parse_checked.c) resolves them ONCE, lazily, on first call, into a
+    // (src/parse_core.c) resolves them ONCE, when the declaration that spells
+    // the function type is parsed (resolve_type_checked_bounds()), into a
     // TEMPLATE expression pinned to file scope: each reference to a sibling
     // parameter resolves to a placeholder Obj (Obj.checked_self_param_idx)
     // rather than a real value, and clone_param_bounds_node() substitutes
@@ -1743,9 +1744,9 @@ struct Type {
     // ->params list); checked_param_tmpl_done lives on the TY_FUNC type
     // itself and marks the whole parameter list as already resolved, so
     // resolve_param_checked_bounds() only walks ->params once per distinct
-    // function type no matter how many call sites reference it. NULL/NULL
-    // (and checked_param_tmpl_done left false) for CB_NONE/CB_UNKNOWN or an
-    // unnamed parameter, same as the ordinary declaration/member paths above.
+    // function type. NULL/NULL for CB_NONE/CB_UNKNOWN, same as the ordinary
+    // declaration/member paths above; an unnamed parameter is resolved like a
+    // named one.
     // Appended at the very end for the same positional-initializer reason as
     // decl_align/pack_align/checked_cast_kind/checked_array_extent above.
     struct Node *checked_param_bounds_lo;

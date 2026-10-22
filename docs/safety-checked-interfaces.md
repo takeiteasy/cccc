@@ -30,6 +30,12 @@ A call is checked when both hold:
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
 
+The bounds are resolved where the prototype is declared, so a bound naming an undeclared identifier, or a global declared after the prototype, is an error there. A bound on an unnamed pointer parameter is enforced the same as on a named one:
+
+```c
+void sink(int * [[cccc::array, cccc::count(n)]], int n);
+```
+
 The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved.
 
 ## Bounds casts

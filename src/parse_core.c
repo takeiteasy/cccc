@@ -1163,27 +1163,24 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
     check_param_bounds_template(vm, n->els, tok);
 }
 
-// #488: resolves a callee's checked-pointer PARAMETER bounds expressions
-// into a reusable TEMPLATE, once per distinct function Type, for
+// #488: resolves a function type's checked-pointer PARAMETER bounds
+// expressions into a reusable TEMPLATE, once per distinct function Type, for
 // rewrite_checked_call_args() (src/parse_checked.c) to substitute at every
 // call site. A prototype-only declaration never resolves its parameters'
-// bounds tokens at all (resolve_checked_bounds() is never called for one --
-// see its own comment -- because it has no body scope to resolve into and
-// no accesses of its own to check); this is what finally consumes those
-// token spans, deferred exactly so a caller could someday do so.
+// bounds tokens through resolve_checked_bounds() (it has no body scope to
+// resolve into and no accesses of its own to check); this consumes those
+// token spans instead. resolve_type_checked_bounds() calls it where the
+// declaration is parsed, so a bad bound is diagnosed there; the call in
+// rewrite_checked_call_args() only covers function types no declaration hook
+// reached (a cast, a K&R definition's patched parameters).
 //
 // Mirrors resolve_member_checked_bounds() immediately above -- same
 // synthetic-scope-of-placeholders shape -- with one deliberate difference:
 // this scope is pinned to FILE scope before entering it (walking
 // vm->compiler.scope up via ->next), not left at whatever scope happens to
-// be current. Resolving at an arbitrary call site's scope would let a bound
-// naming a global bind to a global declared AFTER the callee's own
-// declaration -- a silent divergence from every other bounds resolution in
-// the compiler, which always resolves in the scope live at the declaration
-// being resolved, not the scope live at first use. Pinning to file scope
-// also happens to make this correct regardless of how early or late the
-// first call site is (a prototype's very first call may be lexically
-// before, after, or in a wholly different function to its declaration).
+// be current, so a bound naming a global binds to the globals declared before
+// the function type, the same as every other bounds resolution in the
+// compiler.
 //
 // Idempotent and cheap to over-call: checked_param_tmpl_done (on the
 // TY_FUNC type itself, not on any one parameter) is set unconditionally
@@ -1200,7 +1197,7 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
 
     bool any                       = false;
     for (Type *p = fn_ty->params; p; p = p->next)
-        if (p->name && p->checked_bounds_form != CB_NONE &&
+        if (p->checked_bounds_form != CB_NONE &&
             p->checked_bounds_form != CB_UNKNOWN) {
             any = true;
             break;
@@ -1228,17 +1225,34 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
     }
 
     for (Type *p = fn_ty->params; p; p = p->next) {
-        if (!p->name || p->checked_bounds_form == CB_NONE ||
+        if (p->checked_bounds_form == CB_NONE ||
             p->checked_bounds_form == CB_UNKNOWN)
             continue;
+        Token *err_tok = p->name ? p->name : p->checked_bounds_arg1;
         resolve_bounds_tokens(vm, p, &p->checked_param_bounds_lo,
                               &p->checked_param_bounds_hi);
-        check_param_bounds_template(vm, p->checked_param_bounds_lo, p->name);
-        check_param_bounds_template(vm, p->checked_param_bounds_hi, p->name);
+        check_param_bounds_template(vm, p->checked_param_bounds_lo, err_tok);
+        check_param_bounds_template(vm, p->checked_param_bounds_hi, err_tok);
     }
 
     leave_scope(vm);
     vm->compiler.scope = saved_scope;
+}
+
+// Resolves the parameter bounds templates of every function type reachable
+// from `ty` through pointers, arrays and function parameters/returns, so a bad
+// bound is diagnosed at the declaration that spells it. Struct members are
+// resolved at their own declaration.
+void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty) {
+    while (ty &&
+           (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA))
+        ty = ty->base;
+    if (!ty || ty->kind != TY_FUNC)
+        return;
+    resolve_param_checked_bounds(vm, ty);
+    for (Type *p = ty->params; p; p = p->next)
+        resolve_type_checked_bounds(vm, p);
+    resolve_type_checked_bounds(vm, ty->return_ty);
 }
 
 // Create a function Obj that is NOT in the global scope or globals list.

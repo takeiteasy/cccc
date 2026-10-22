@@ -2397,3 +2397,42 @@ void test_checked_call_arg_global_bound_trap(void) {
     int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
     checked_call_arg_global_sink(small); // only 2 elements -- traps
 }
+
+static int unnamed_param_sum(int *[[cccc::array, cccc::count(n)]], int n);
+
+[[cccc::test]]
+void test_checked_call_arg_unnamed_param_pass(void) {
+    int *[[cccc::array, cccc::count(4)]] big = (int[4]){1, 2, 3, 4};
+    AssertEq(unnamed_param_sum(big, 4), 10);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_unnamed_param_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    unnamed_param_sum(small, 4);
+}
+
+static int unnamed_param_sum(int *p, int n) {
+    int s = 0;
+    for (int i = 0; i < n; i++)
+        s += p[i];
+    return s;
+}
+
+static int callback_apply(int (*cb)(int *[[cccc::array, cccc::count(n)]] p,
+                                    int n)) {
+    int *[[cccc::array, cccc::count(3)]] v = (int[3]){1, 2, 3};
+    return cb(v, 3);
+}
+
+static int callback_sum(int *p, int n) {
+    int s = 0;
+    for (int i = 0; i < n; i++)
+        s += p[i];
+    return s;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_callback_param_pass(void) {
+    AssertEq(callback_apply(callback_sum), 6);
+}
