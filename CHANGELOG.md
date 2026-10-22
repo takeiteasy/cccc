@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-10-22
+
+- Fixed: mutex and condition handles a guest never destroys are freed at
+  exit, so threaded programs are clean under valgrind and `leaks`.
+- Fixed: comptime `malloc`/`calloc`/`realloc` use the VM heap under `-V`
+  (a `strcpy` into the result no longer faults).
+- Tests: leak skips lifted from the pthread and comptime tests.
+
 ## [0.19.3] - 2026-10-21
 
 - Fixed: the compiler frees its exit-time state (include and framework

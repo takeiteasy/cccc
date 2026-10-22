@@ -1,6 +1,6 @@
 // CCCC_FLAGS: --testing
 // CCCC_NATIVE_SKIP: negative (error=) test
-// CCCC_LEAKS_SKIP: the leak-detection test deliberately leaves a malloc unfreed
+// CCCC_LEAKS_SKIP: the leak-detection test deliberately leaves a malloc unfreed (#1734)
 // Consolidated suite: stack canaries, CFI, deep expressions, multi-VM
 // isolation,
 //   heap canaries, memory leak detection, memory poisoning, memory tagging,
