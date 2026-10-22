@@ -1483,43 +1483,6 @@ static void watch_begin(VirtualMachine *vm, const CcWatchOptions *wo,
                         "watched\n");
 }
 
-static int free_value_iter(char *key, int keylen, void *val, void *user_data) {
-    free(val);
-    return 0;
-}
-
-// Frees the malloc-owned compiler state that outlives a run, so leak checkers
-// see only real leaks. Arena-owned values need no freeing.
-static void free_compiler_exit_state(Compiler *c) {
-    if (c->has_cli_macro_snapshot)
-        hashmap_deinit(&c->cli_macro_snapshot);
-    hashmap_deinit(&c->cccc_only_files);
-    hashmap_deinit(&c->include_children);
-    hashmap_deinit(&c->cccc_bundled_files);
-    hashmap_deinit(&c->cccc_bundled_include_dirs);
-    hashmap_deinit(&c->captured_include_targets);
-    hashmap_deinit(&c->emit_include_paths);
-    hashmap_deinit(&c->comptime_decl_index);
-    hashmap_deinit(&c->comptime_tag_index);
-    hashmap_foreach(&c->kernel_meta, free_value_iter, NULL);
-    hashmap_deinit(&c->kernel_meta);
-    hashmap_deinit(&c->kernel_direct_local);
-    free(c->checked_scope_stack);
-    for (FileAsmRecord *a = c->file_asms, *next; a; a = next) {
-        next = a->next;
-        free(a);
-    }
-    for (ComptimeDeclRecord *d = c->comptime_decls, *next; d; d = next) {
-        next = d->next;
-        free(d->name);
-        free(d);
-    }
-    for (StaticAssertRecord *s = c->static_asserts, *next; s; s = next) {
-        next = s->next;
-        free(s);
-    }
-}
-
 int main(int argc, const char *argv[]) {
     /* Initialise and install libbacktrace crash handler as early as possible
      * so that any fault during parse/codegen/VM produces a symbolic host
@@ -4034,7 +3997,5 @@ BAIL:
     for (int i = 0; i < sys_fw_paths_count; i++)
         free((void *)sys_fw_paths[i]);
     free(sys_fw_paths);
-    free_compiler_exit_state(&vm.compiler);
-    cccc_comptime_registry_free(&vm);
     return exit_code;
 }

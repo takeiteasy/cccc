@@ -544,7 +544,7 @@ int cc_repl_load_file(VirtualMachine *vm, const char *path) {
 
     LineSource src = {.next = repl_read_file_line, .ctx = f};
     // Files keep the name for the life of the session.
-    repl_unit_name = strdup(path);
+    repl_unit_name = arena_strdup(vm, path);
     for (;;) {
         char *unit = repl_read_unit(&src, /*interactive=*/false,
                                     /*allow_commands=*/false);

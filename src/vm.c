@@ -1503,6 +1503,11 @@ void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
     cccc_gil_release_to(vm, p->gil_depth);
 }
 
+static int free_value_iter(char *key, int keylen, void *val, void *user_data) {
+    free(val);
+    return 0;
+}
+
 void cc_destroy(VirtualMachine *vm) {
     if (!vm)
         return;
@@ -1861,6 +1866,35 @@ void cc_destroy(VirtualMachine *vm) {
     free(vm->compiler.link_progs);
     free(vm->compiler.global_aliases);
     hashmap_deinit(&vm->compiler.global_decl_map);
+
+    Compiler *c = &vm->compiler;
+    if (c->has_cli_macro_snapshot)
+        hashmap_deinit(&c->cli_macro_snapshot);
+    hashmap_deinit(&c->cccc_only_files);
+    hashmap_deinit(&c->include_children);
+    hashmap_deinit(&c->cccc_bundled_files);
+    hashmap_deinit(&c->cccc_bundled_include_dirs);
+    hashmap_deinit(&c->captured_include_targets);
+    hashmap_deinit(&c->emit_include_paths);
+    hashmap_deinit(&c->comptime_decl_index);
+    hashmap_deinit(&c->comptime_tag_index);
+    hashmap_foreach(&c->kernel_meta, free_value_iter, NULL);
+    hashmap_deinit(&c->kernel_meta);
+    hashmap_deinit(&c->kernel_direct_local);
+    free(c->checked_scope_stack);
+    for (FileAsmRecord *a = c->file_asms, *next; a; a = next) {
+        next = a->next;
+        free(a);
+    }
+    for (ComptimeDeclRecord *d = c->comptime_decls, *next; d; d = next) {
+        next = d->next;
+        free(d->name);
+        free(d);
+    }
+    for (StaticAssertRecord *s = c->static_asserts, *next; s; s = next) {
+        next = s->next;
+        free(s);
+    }
 
     // Free source map and index (debugger)
     free(vm->compiler.dead_marks);
