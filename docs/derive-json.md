@@ -55,7 +55,7 @@ A prefix names the functions `<prefix>_<Type>_to_json` and
 
 ### Owned members
 
-An `@owned` member (see [Owned memory](derive-values.md#owned-memory)) is written as its
+An `@owned` member (see [Owned memory](derive-owned.md#owned-memory)) is written as its
 content, and `T_from_json` allocates it with `malloc`:
 
 ```c

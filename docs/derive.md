@@ -204,4 +204,6 @@ A handler for a struct reads the attributes on its members with
 | Page | Covers |
 |---|---|
 | [derive-json.md](derive-json.md) | `@to_json` and `@from_json` |
-| [derive-values.md](derive-values.md) | Equality, hashing, dumping, owned memory, ordering, validation and bit flags |
+| [derive-equality.md](derive-equality.md) | `@equals`, `@hash`, `@dump`, `@compare` |
+| [derive-owned.md](derive-owned.md) | `@owned`, `@clone`, `@destroy` |
+| [derive-validate.md](derive-validate.md) | `@range`, `@validate`, `@clamp`, `@bitflags` |
