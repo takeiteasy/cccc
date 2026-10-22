@@ -1,5 +1,4 @@
 // Libc calls on VM memory and on host pointers libc returns stay allowed.
-// CCCC_LEAKS_SKIP: comptime libc allocation still reported lost (#1728)
 #include[[cccc::comptime]] < math.h>
 #include[[cccc::comptime]] < stdio.h>
 #include[[cccc::comptime]] < stdlib.h>

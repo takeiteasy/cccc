@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing
-// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 // Suite: per-thread state across real thread interleaving. Every blocking
 // primitive (thrd_sleep, mtx_lock, cnd_wait, the pthread equivalents, join)
 // hands the VM to another thread; after each one returns, the thread must see

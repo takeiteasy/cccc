@@ -1,5 +1,4 @@
 // Tickets #232 and #297: scoped AST builder helpers and generated switch cases.
-// CCCC_LEAKS_SKIP: valgrind uninitialised read in comptime_args.c (#1727)
 
 [[cccc::comptime]]
 Node *make_scoped_switch(void) {

@@ -1474,6 +1474,7 @@ typedef struct Node             Node;
 typedef struct Obj              Obj;
 typedef struct Scope            Scope;
 typedef struct ThreadRecord     ThreadRecord;
+typedef struct SyncHandle       SyncHandle;
 typedef struct PthreadKeyRecord PthreadKeyRecord;
 typedef struct PthreadState     PthreadState;
 
@@ -5135,6 +5136,7 @@ struct VirtualMachine {
     int   kernel_max_group;  // --kernel-max-group-size (0 = default 256)
     ThreadRecord     *active_thread;
     ThreadRecord     *thread_records;
+    SyncHandle       *sync_handles; // live host mutex/cond handles
     PthreadKeyRecord *pthread_keys;
     int               pthread_next_key;
     PthreadState     *pthread_state;

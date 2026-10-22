@@ -317,9 +317,15 @@ static void *cccc_reallocarray(void *ptr, size_t nmemb, size_t size) {
 // any VM context, which can't happen for a call reached through the VM's own
 // dispatch loop, but is handled defensively (falls back to the host
 // allocator) rather than assumed away.
+// Comptime always allocates from the VM heap so its containment check accepts
+// the result, whatever -V says for the program.
+static bool ffi_vm_heap(const VirtualMachine *vm) {
+    return vm && ((vm->flags & CCCC_VM_HEAP) || vm->comptime_depth);
+}
+
 static void *cccc_ffi_malloc(size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_malloc(vm, (long long)size);
     return malloc(size);
 }
@@ -347,21 +353,21 @@ static void cccc_ffi_free(void *ptr) {
 
 static void *cccc_ffi_calloc(size_t nmemb, size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_calloc(vm, (long long)nmemb, (long long)size);
     return calloc(nmemb, size);
 }
 
 static void *cccc_ffi_realloc(void *ptr, size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_realloc(vm, ptr, (long long)size);
     return cccc_realloc(ptr, size);
 }
 
 static void *cccc_ffi_reallocarray(void *ptr, size_t nmemb, size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_reallocarray(vm, ptr, (long long)nmemb,
                                          (long long)size);
     return cccc_reallocarray(ptr, nmemb, size);
@@ -369,7 +375,7 @@ static void *cccc_ffi_reallocarray(void *ptr, size_t nmemb, size_t size) {
 
 static void *cccc_ffi_aligned_alloc(size_t alignment, size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_malloc_aligned(vm, (long long)size, alignment);
 #ifdef CCCC_HAVE_NATIVE_ALIGNED_ALLOC
     return aligned_alloc(alignment, size);
@@ -381,7 +387,7 @@ static void *cccc_ffi_aligned_alloc(size_t alignment, size_t size) {
 static int cccc_ffi_posix_memalign(void **memptr, size_t alignment,
                                    size_t size) {
     VirtualMachine *vm = cccc_current_ffi_vm();
-    if (vm && (vm->flags & CCCC_VM_HEAP))
+    if (ffi_vm_heap(vm))
         return cccc_vm_heap_posix_memalign(vm, memptr, alignment,
                                            (long long)size);
     return posix_memalign(memptr, alignment, size);

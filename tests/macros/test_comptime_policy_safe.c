@@ -1,5 +1,4 @@
 // Comptime reaches string, snprintf and malloc without --comptime-allow.
-// CCCC_LEAKS_SKIP: comptime libc allocation still reported lost (#1728)
 #include[[cccc::comptime]] <stdio.h>
 #include[[cccc::comptime]] <stdlib.h>
 #include[[cccc::comptime]] <string.h>

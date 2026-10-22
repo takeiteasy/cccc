@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing --test-timeout=5
-// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 // CCCC_EXPECT_STDERR: ^not ok 1 - fails
 // CCCC_EXPECT_STDERR: ^ok 2 - after
 // A worker released to spin as its test fails is stopped: it neither holds

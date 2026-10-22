@@ -2489,7 +2489,8 @@ live with the VM internals.
   `--bounds-checks`/`--uaf-detection`/`--type-checks`/`--heap-canaries`/
   `--memory-leak-detection`/`--memory-tagging`/`--pointer-sanitizer` set; combining it with any
   of those, `-1`/`-2`/`-3`, or `--safety=basic/standard/max` is a hard compile-time error since
-  they all require the VM heap.
+  they all require the VM heap. It affects the compiled program only: `[[cccc::comptime]]` code
+  always allocates from the VM heap.
 - `free_sized`/`free_aligned_sized` (C23) are routed through the same `MFRE` opcode as `free`,
   so a VM-heap-allocated pointer freed through either call is handled correctly.
 - `aligned_alloc`/`posix_memalign` are intercepted the same way as `malloc`/`calloc`, via

@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: --testing=native refuses --test-timeout
-// CCCC_LEAKS_SKIP: guest pthread handles are never released (#1730)
 // CCCC_FLAGS: --testing --test-timeout=5
+// CCCC_LEAKS_SKIP: an abandoned thread still blocked at exit keeps its host stack
 // CCCC_EXPECT_STDERR: ^not ok 1 - fails
 // CCCC_EXPECT_STDERR: ^# test 1: 1 guest thread\(s\) still blocked
 // CCCC_EXPECT_STDERR: ^ok 2 - after

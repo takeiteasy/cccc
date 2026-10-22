@@ -593,13 +593,48 @@ static long long wrap_pthread_equal(long long a, long long b) {
     return a == b;
 }
 
+// Host mutex/cond behind a guest handle. Linked per VM so teardown can free
+// the ones the guest never destroyed. The union is first, so a handle pointer
+// is also the node. Only touched under the GIL.
+struct SyncHandle {
+    union {
+        pthread_mutex_t mutex;
+        pthread_cond_t  cond;
+    };
+    SyncHandle *prev, *next;
+};
+
+static SyncHandle *sync_handle_new(VirtualMachine *vm) {
+    SyncHandle *h = calloc(1, sizeof(*h));
+    if (!h)
+        return NULL;
+    h->next = vm->sync_handles;
+    if (h->next)
+        h->next->prev = h;
+    vm->sync_handles = h;
+    return h;
+}
+
+static void sync_handle_free(VirtualMachine *vm, void *handle) {
+    SyncHandle *h = handle;
+    if (h->prev)
+        h->prev->next = h->next;
+    else
+        vm->sync_handles = h->next;
+    if (h->next)
+        h->next->prev = h->prev;
+    free(h);
+}
+
 static pthread_mutex_t *ensure_mutex(CCCCUserMutex *mutex) {
     if (!mutex)
         return NULL;
     if (!mutex->handle) {
-        pthread_mutex_t *host = malloc(sizeof(*host));
-        if (!host)
+        VirtualMachine *vm   = current_vm();
+        SyncHandle     *node = vm ? sync_handle_new(vm) : NULL;
+        if (!node)
             return NULL;
+        pthread_mutex_t    *host = &node->mutex;
         pthread_mutexattr_t attr;
         pthread_mutexattr_init(&attr);
         if (mutex->type != 0)
@@ -607,7 +642,7 @@ static pthread_mutex_t *ensure_mutex(CCCCUserMutex *mutex) {
         int rc = pthread_mutex_init(host, &attr);
         pthread_mutexattr_destroy(&attr);
         if (rc != 0) {
-            free(host);
+            sync_handle_free(vm, node);
             return NULL;
         }
         mutex->handle = host;
@@ -620,11 +655,13 @@ static pthread_cond_t *ensure_cond(CCCCUserCond *cond) {
     if (!cond)
         return NULL;
     if (!cond->handle) {
-        pthread_cond_t *host = malloc(sizeof(*host));
-        if (!host)
+        VirtualMachine *vm   = current_vm();
+        SyncHandle     *node = vm ? sync_handle_new(vm) : NULL;
+        if (!node)
             return NULL;
+        pthread_cond_t *host = &node->cond;
         if (pthread_cond_init(host, NULL) != 0) {
-            free(host);
+            sync_handle_free(vm, node);
             return NULL;
         }
         cond->handle = host;
@@ -651,7 +688,7 @@ static long long wrap_pthread_mutex_destroy(long long mutexp) {
         return EINVAL;
     int rc = pthread_mutex_destroy((pthread_mutex_t *)mutex->handle);
     if (rc == 0) {
-        free(mutex->handle);
+        sync_handle_free(current_vm(), mutex->handle);
         mutex->handle = NULL;
         mutex->state  = 0;
     }
@@ -761,7 +798,7 @@ static long long wrap_pthread_cond_destroy(long long condp) {
         return EINVAL;
     int rc = pthread_cond_destroy((pthread_cond_t *)cond->handle);
     if (rc == 0) {
-        free(cond->handle);
+        sync_handle_free(current_vm(), cond->handle);
         cond->handle = NULL;
         cond->state  = 0;
     }
@@ -1271,14 +1308,16 @@ static pthread_mutex_t *ensure_mtx(CCCCUserMtx *mtx) {
     pthread_mutexattr_init(&attr);
     if (mtx->__type == 1) // mtx_recursive
         pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_t *host = malloc(sizeof(*host));
-    if (!host) {
+    VirtualMachine *vm   = current_vm();
+    SyncHandle     *node = vm ? sync_handle_new(vm) : NULL;
+    if (!node) {
         pthread_mutexattr_destroy(&attr);
         return NULL;
     }
+    pthread_mutex_t *host = &node->mutex;
     if (pthread_mutex_init(host, &attr) != 0) {
         pthread_mutexattr_destroy(&attr);
-        free(host);
+        sync_handle_free(vm, node);
         return NULL;
     }
     pthread_mutexattr_destroy(&attr);
@@ -1397,7 +1436,7 @@ static long long wrap_mtx_destroy(long long mtxp) {
     if (!mtx || !mtx->__handle)
         return 0;
     pthread_mutex_destroy((pthread_mutex_t *)mtx->__handle);
-    free(mtx->__handle);
+    sync_handle_free(current_vm(), mtx->__handle);
     mtx->__handle = NULL;
     mtx->__state  = 0;
     return 0;
@@ -1675,6 +1714,19 @@ void cccc_pthread_cleanup(VirtualMachine *vm) {
     vm->test_threads  = NULL;
     ThreadRecord *main_thread =
         vm->pthread_state ? &vm->pthread_state->main_thread : NULL;
+    bool live_threads = false;
+    for (ThreadRecord *t = vm->thread_records; t; t = t->next)
+        if (t != main_thread && !t->exited)
+            live_threads = true;
+    // A still-running thread may be blocked on a handle, so leave them.
+    SyncHandle *handle = vm->sync_handles;
+    while (handle && !live_threads) {
+        SyncHandle *next = handle->next;
+        free(handle);
+        handle = next;
+    }
+    vm->sync_handles  = NULL;
+
     ThreadRecord *rec = vm->thread_records;
     while (rec) {
         ThreadRecord *next = rec->next;

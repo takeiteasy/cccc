@@ -1,5 +1,4 @@
 // Search-table entries and tree nodes libc owns are readable at comptime.
-// CCCC_LEAKS_KEEP_VM_HEAP
 #include[[cccc::comptime]] < search.h>
 #include[[cccc::comptime]] < stdlib.h>
 #include[[cccc::comptime]] < string.h>
