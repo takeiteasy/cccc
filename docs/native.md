@@ -183,7 +183,7 @@ see [headers.md](headers.md) for how header resolution and host-header
 hand-off change under native mode. A URL `#include` (curl-enabled builds
 only), anywhere in the include graph, resolves against a `-idirafter`
 CCCC forwards automatically — see
-[headers.md's URL includes section](headers.md#url-includes-under--cnative-m-cgenerated).
+[headers.md's URL includes section](headers-native.md#url-includes-under--cnative-m-cgenerated).
 
 ## What `-c=native` refuses to lower
 

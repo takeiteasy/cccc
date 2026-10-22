@@ -63,7 +63,7 @@ See [threading.md](threading.md). Per-feature rows are below and in [stdlib.md](
 | K&R-style function definitions | ✓ | |
 | Trigraphs | ✗ | Removed in C23; intentionally not supported |
 | Digraphs (`<:` `:>` `<%` `%>` `%:` `%:%:`) | ✓ | Equivalent to `[` `]` `{` `}` `#` `##` (C23 §6.4.6); original spelling preserved during stringification |
-| `#include`, `#define`, `#undef` | ✓ | `#include` also accepts URLs (`#include <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into a cache (`--url-cache-dir`) that also mirrors each fetch under a URL-shaped path so the raw directive resolves anywhere in the include graph; under `-c=native`/`-m`/`-c=generated` a captured top-level URL `#include` additionally replays as an `#include` of its resolved cache path — see [headers.md](headers.md#url-includes-under--cnative-m-cgenerated) |
+| `#include`, `#define`, `#undef` | ✓ | `#include` also accepts URLs (`#include <https://...>`) in curl-enabled builds (optional, `CCCC_HAS_CURL=1`), fetched into a cache (`--url-cache-dir`) that also mirrors each fetch under a URL-shaped path so the raw directive resolves anywhere in the include graph; under `-c=native`/`-m`/`-c=generated` a captured top-level URL `#include` additionally replays as an `#include` of its resolved cache path — see [headers.md](headers-native.md#url-includes-under--cnative-m-cgenerated) |
 | `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif` | ✓ | |
 | CCCC-routed preprocessor directives | ✓ | `@emit` routes directives to generated output; `@comptime` routes directives to the comptime stream |
 | `#error` | ✓ | |
