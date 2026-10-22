@@ -58,7 +58,7 @@ The reload is refused, with nothing changed, if the file:
 - changes a function's signature (return type, parameters, `static`)
 - changes the layout of a struct, union, enum or typedef it defines, or the type of a global
 - changes the value of a `constexpr` object
-- has a comptime function or variable that does not compile
+- has a comptime function or variable that does not compile[^comptime-reload]
 
 Embedders call `cc_debug_reload(vm, path)`. `cccc --watch` runs this reload on every save without the debugger ([watch.md](watch.md)).
 
@@ -75,6 +75,7 @@ A new or changed function may call a comptime function, in `reload` and `fix`; t
 | Function that calls comptime code, in the reloaded file | Expanded again, even if its own text is unchanged |
 | Same, in another file | Keeps its old expansion; reload that file |
 | Comptime code removed | Stays, with no note |
-| File-scope comptime call (`gen();`) | Runs again[^again] |
+| File-scope comptime call (`gen();`) | Runs again[^file-scope-calls] |
 
-[^again]: Functions that call comptime code in the reloaded file are expanded again, and the functions a file-scope call generates are redefined.
+[^comptime-reload]: Expansion regenerates the comptime code above the running program, runs it on top of the paused stack with the debugger off, and gives the code back before the new functions are compiled. A reload that changes comptime code builds the comptime program again the same way and runs only the initializers that are new or edited; an initializer that already ran is not undone when the reload is refused later. A comptime global, static, struct member or array element of function-pointer type that holds a comptime function follows the regenerated code. A pointer kept in heap memory or in a `void *` or integer is not moved.
+[^file-scope-calls]: Every file-scope call in the reloaded file runs, so its side effects repeat on each reload. A function it generates replaces the live function of the same name, even when the text is identical, and must keep that function's signature. A generated function that a later reload no longer produces stays, with a note. A generator that picks names from a counter produces new names each time.

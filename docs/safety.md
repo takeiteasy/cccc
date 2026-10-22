@@ -1,204 +1,94 @@
 # Memory Safety
 
-Runtime detection of common C bugs, from zero-overhead to maximum paranoia.
+Runtime detection of common C bugs, from zero overhead to maximum checking.
 
-CCCC includes a suite of powerful memory safety features designed to detect common C programming errors at runtime. These features can be enabled individually or together to provide comprehensive protection against bugs like buffer overflows, use-after-free, and type confusion.
-
-## Safety Levels (Quick Start)
-
-CCCC provides preset safety levels that make it easy to choose the right combination of features without needing to understand every individual flag. Each level builds on the previous one, adding more comprehensive checks with increasing performance overhead.
-
-### Level 0: None (`-0` or `--safety=none`)
-**Purpose:** Maximum performance, no safety *checks*
-**Overhead:** ~0% for checks; `malloc`/`free`/`calloc`/`realloc` still route through the VM heap by default (see below)
-**Use when:** You've thoroughly tested your code and need maximum speed, or when running in a trusted/controlled environment
-
-```bash
-./cccc -0 program.c
-./cccc --safety=none program.c
+```sh
+./cccc -2 program.c          # or --safety=standard
 ```
 
-**Enabled features:** None. The VM heap allocator is still active by default at every level (add `-V`/`--no-vm-heap` to opt back into the host allocator); see [VM Heap Allocator](safety-vm-heap.md#vm-heap-allocator) below.
+## Levels
 
----
+Each level adds checks and cost. **`-2` is the recommended default for development and testing.**
 
-### Level 1: Basic (`-1` or `--safety=basic`)
-**Purpose:** Essential "smoke alarm" checks with minimal overhead
-**Overhead:** ~5-10%
-**Use when:** Running production code where you want essential safety without significant performance impact
+| Level | Flags | Overhead | Use when |
+|---|---|---|---|
+| 0 none | `-0`, `--safety=none` | about 0% | Validated code that needs full speed |
+| 1 basic | `-1`, `--safety=basic` | 5 to 10% | Production with a safety net |
+| 2 standard | `-2`, `--safety=standard` | 20 to 40% | Development and testing |
+| 3 max | `-3`, `--safety=max` | 60 to 100%+ | Debugging corruption, security-critical code |
 
-```bash
-./cccc -1 program.c
-./cccc --safety=basic program.c
-```
+| Check | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| Stack canaries | | yes | yes | yes |
+| Heap canaries | | yes | yes | yes |
+| Memory leak detection | | yes | yes | yes |
+| Integer overflow checks | | yes | yes | yes |
+| Format string validation | | yes | yes | yes |
+| Pointer sanitizer (bounds, use-after-free, type checks) | | | yes | yes |
+| Uninitialized variable detection | | | yes | yes |
+| Memory poisoning (`0xCD` allocated, `0xDD` freed) | | | yes | yes |
+| Control flow integrity | | | | yes |
+| Memory tagging | | | | yes |
+| Dangling stack pointers | | | | yes |
+| Alignment, provenance, invalid arithmetic | | | | yes |
+| Stack instrumentation | | | | yes |
+| Random canaries | | | | yes |
 
-**Enabled features:**
-- Stack canaries (stack overflow protection)
-- Heap canaries (heap overflow protection)
-- Memory leak detection
-- Integer overflow checks
-- Format string validation
-- VM heap mode (required for heap safety features)
+The VM heap is on at every level; `-V`/`--no-vm-heap` turns it off ([safety-vm-heap.md](safety-vm-heap.md)). Level 1 catches stack overruns that reach the canary or return address (reported when the function returns); level 3 also catches dereferences of pointers into returned frames, including interior pointers with runtime offsets ([safety-dangling.md](safety-dangling.md)). Checked pointers are opt-in at every level.
 
-**Detects:** Stack overruns that reach the canary or return address (reported when the function returns), heap buffer overflows, memory leaks, integer overflow/underflow, format string bugs
+### Adding single flags
 
----
+Levels are additive:
 
-### Level 2: Standard (`-2` or `--safety=standard`) — **Recommended Default**
-**Purpose:** Comprehensive development and testing safety
-**Overhead:** ~20-40%
-**Use when:** Developing, testing, or running code where safety is more important than raw performance
-
-```bash
-./cccc -2 program.c
-./cccc --safety=standard program.c
-```
-
-**Enabled features:**
-- **All Level 1 features** plus:
-- Pointer sanitizer (bounds checks, use-after-free detection, type checks)
-- Uninitialized variable detection
-- Memory poisoning (0xCD for allocated, 0xDD for freed memory)
-
-**Detects:** Everything in Level 1 plus use-after-free, out-of-bounds array access, type confusion, uninitialized variable reads, double-free
-
----
-
-### Level 3: Maximum (`-3` or `--safety=max`)
-**Purpose:** Paranoid mode for debugging hard-to-find bugs
-**Overhead:** ~60-100%+
-**Use when:** Debugging mysterious crashes, memory corruption, or security-critical code
-
-```bash
-./cccc -3 program.c
-./cccc --safety=max program.c
-```
-
-**Enabled features:**
-- **All safety features** including:
-  - Control flow integrity (CFI) with shadow stack
-  - Temporal memory tagging (generation-based UAF detection)
-  - Dangling stack pointer detection (dereference-time range check plus
-    per-frame epoch liveness tracking plus interior interval-stabbing; see
-    [Advanced pointer tracking](safety-pointers.md)
-    for what it catches)
-  - Alignment checks
-  - Provenance tracking (pointer origin validation)
-  - Invalid pointer arithmetic detection
-  - Stack variable instrumentation (per-activation liveness tracking,
-    read/write counts — see below for what it does and doesn't catch)
-  - Random canaries (unpredictable stack protection)
-
-**Detects:** Most memory safety bugs CCCC can catch, including dereferencing a
-stack pointer whose owning frame has already returned -- whether the
-dereference happens in the frame that got control back or one or more calls
-*deeper* than that, including
-through an interior pointer with a runtime-computed offset (e.g. `&arr[i]`
-for non-constant `i`) whose owning array/struct escapes its frame
-
----
-
-### Combining Safety Levels with Individual Flags
-
-Safety levels are **additive** - you can combine a preset level with individual flags to customize your safety profile:
-
-```bash
-# Level 2 + temporal tagging (not in Level 2 by default)
-./cccc -2 --memory-tagging program.c
-
-# Level 1 + control flow integrity
+```sh
+./cccc -2 --memory-tagging program.c        # level 2 plus temporal tagging
 ./cccc -1 --control-flow-integrity program.c
-
-# Level 3 is already maximum, so additional flags are redundant
-./cccc -3 program.c  # Already includes everything
+./cccc -3 program.c                          # already everything: extra flags are redundant
 ```
 
-### Quick Reference
+## Smoke-testing before a compile
 
-| Level | Flags | Overhead | Best For |
-|-------|-------|----------|----------|
-| 0 (none) | - | 0% | Production (validated code) |
-| 1 (basic) | `-1` or `--safety=basic` | ~5-10% | Production (with safety net) |
-| 2 (standard) | `-2` or `--safety=standard` | ~20-40% | Development & Testing |
-| 3 (max) | `-3` or `--safety=max` | ~60-100%+ | Debugging & Security Analysis |
+`--test-run[=LEVEL]` runs the program once under the VM's safety instrumentation and refuses to continue if it crashes or trips a check. `LEVEL` is `none`/`basic`/`standard`/`max` or `0` to `3`, default `max`. Use it as a cheap CI gate before a native build, for example `--test-run=1`, without writing a test suite ([testing-running.md](testing-running.md#--test-runlevel-smoke-test-the-program-itself-before-compiling)).
 
-### Smoke-testing before a real compile: `--test-run[=LEVEL]`
+## Configuring from source
 
-`--test-run[=LEVEL]` (see [testing.md](testing-running.md#--test-runlevel-smoke-test-the-program-itself-before-compiling)) reuses these same preset names/levels (`LEVEL` accepts `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`, defaulting to `max`) to run the program once under the VM's safety instrumentation before handing it to `-c=native`. It's a way to get this level's crash/safety-violation coverage as a pre-compile gate — e.g. `-1`/`--safety=basic`'s low-overhead checks as a cheap CI smoke test before every native build — without needing a `[[cccc::test]]` suite.
-
----
-
-## Configuring Safety from Source: `#pragma cccc config(...)`
-
-`#pragma cccc config(key = value, ...)` is a file-scope pragma that sets
-safety levels and individual safety-check flags directly from source,
-without needing matching command-line flags. It is useful for self-contained
-test files and examples that must run with a specific safety profile
-regardless of how they're invoked.
+`#pragma cccc config(key = value, ...)` sets safety options for a self-contained file:
 
 ```c
 #pragma cccc config(safety = 2)
 #pragma cccc config(bounds_checks = true, memory_tagging = false)
-#pragma cccc config(overflow_checks) // bare key is shorthand for "= true"
+#pragma cccc config(overflow_checks)     // a bare key means "= true"
 ```
 
-### Keys
+| Key | Values | Same as |
+|---|---|---|
+| `safety` | `0` to `3` | `-0` to `-3` |
+| `bounds_checks`, `uaf_detection`, `type_checks`, `overflow_checks`, `stack_canaries`, `heap_canaries`, `memory_leak_detection`, `pointer_sanitizer`, `memory_tagging`, `checked_pointers` | `true`/`false` (or `1`/`0`) | `--` followed by the name with `-` |
 
-| Key | Values | Effect |
-|-----|--------|--------|
-| `safety` | `0`-`3` | Same as `-0`/`-1`/`-2`/`-3` (none/basic/standard/max) |
-| `bounds_checks` | `true`/`false` (or `1`/`0`) | `--bounds-checks` |
-| `uaf_detection` | `true`/`false` | `--uaf-detection` |
-| `type_checks` | `true`/`false` | `--type-checks` |
-| `overflow_checks` | `true`/`false` | `--overflow-checks` |
-| `stack_canaries` | `true`/`false` | `--stack-canaries` |
-| `heap_canaries` | `true`/`false` | `--heap-canaries` |
-| `memory_leak_detection` | `true`/`false` | `--memory-leak-detection` |
-| `pointer_sanitizer` | `true`/`false` | `--pointer-sanitizer` |
-| `memory_tagging` | `true`/`false` | `--memory-tagging` |
-| `checked_pointers` | `true`/`false` | `--checked-pointers` |
+Several keys can share one pragma and the pragma can repeat; the last write to a key wins.
 
-A bare key with no `= value` (e.g. `config(bounds_checks)`) is shorthand for
-`= true`. Multiple keys can be set in one `config(...)`, and the pragma can
-appear multiple times in a file — later pragmas win for the same key
-("last write wins"), the same as combining individual CLI flags.
+| Precedence rule | |
+|---|---|
+| Command-line flags win | An explicit `-N`, `--safety=` or individual flag silently overrides `config(...)` for that setting |
+| Native and serialized output | Under `-c=native`, `-m` and `-c=generated`, `config(...)` does not change VM flags (the C is built by `cc`, which has its own sanitizers) and prints a `-Wignored-features` warning. `checked_pointers` is the exception: `-c=native` and `-m` enforce it ([safety-checked-interfaces.md](safety-checked-interfaces.md#native-output)) |
+| Unknown keys, out-of-range values | Always hard errors, in every mode |
 
-### Precedence
-
-- **Command-line flags always win.** If a safety setting was explicitly
-  passed on the command line (`-0`/`-1`/`-2`/`-3`, `--safety=...`,
-  `--bounds-checks`, etc.), `config(...)` silently has no effect on that
-  setting — the CLI value is kept.
-- **Ignored in serialized-output modes.** With `-c=native`,
-  `-m`/`--dump-expanded` or `-c=generated`, `config(...)` has no effect on
-  `vm->flags` (the output is C for the system `cc`, which has its own
-  sanitizer flags). The exception is `checked_pointers`, which `-c=native`
-  and `-m` enforce in their output (see
-  [Native and serialized output](safety-checked-pointers.md#checked-pointers)). This
-  prints a `-Wignored-features` warning (on by default under `-Wall`) naming
-  the pragma; it is otherwise silent by default, the same as every other
-  `-Wignored-features` diagnostic (`_Atomic`, etc.). Unknown keys and invalid
-  values are still hard errors in these modes.
-- **Unknown keys and out-of-range values are hard compile errors**, e.g.
-  `config(frobnicate = 1)` or `config(safety = 9)`.
-
----
-
-## Guide pages
+## Pages
 
 | Page | Covers |
 |---|---|
-| [safety-memory.md](safety-memory.md) | Stack/heap canaries, poisoning, leak, use-after-free and double-free detection |
+| [safety-memory.md](safety-memory.md) | Canaries, poisoning, leaks, use-after-free, double free |
 | [safety-bounds.md](safety-bounds.md) | Runtime array bounds checks |
-| [safety-type-checks.md](safety-type-checks.md) | Pointer type checks and uninitialized-read detection |
-| [safety-overflow.md](safety-overflow.md) | Signed integer overflow detection |
-| [safety-threads.md](safety-threads.md) | Thread safety and floating-point traps |
-| [safety-dangling.md](safety-dangling.md) | Dangling stack pointer detection |
-| [safety-pointers.md](safety-pointers.md) | Alignment, provenance, tagging, format strings and control-flow integrity |
-| [safety-checked-pointers.md](safety-checked-pointers.md) | Checked-pointer syntax and bounds declarations |
-| [safety-checked-propagation.md](safety-checked-propagation.md) | How bounds propagate across assignments |
-| [safety-checked-interfaces.md](safety-checked-interfaces.md) | Bounds-safe interfaces, bounds casts and enforcement |
-| [safety-checked-types.md](safety-checked-types.md) | `ntarray`, guarded pointee types and checked arrays |
-| [safety-checked-regions.md](safety-checked-regions.md) | `_Checked`/`_Unchecked` regions |
+| [safety-type-checks.md](safety-type-checks.md) | Pointer type checks, uninitialized reads |
+| [safety-overflow.md](safety-overflow.md) | Signed integer overflow |
+| [safety-threads.md](safety-threads.md) | Thread safety, floating-point traps |
+| [safety-dangling.md](safety-dangling.md) | Dangling stack pointers |
+| [safety-pointers.md](safety-pointers.md) | Alignment, provenance, tagging, format strings, CFI |
+| [safety-checked-pointers.md](safety-checked-pointers.md) | Checked-pointer declarations and bounds |
+| [safety-checked-propagation.md](safety-checked-propagation.md) | Bounds following assignments |
+| [safety-checked-interfaces.md](safety-checked-interfaces.md) | Annotated parameters, bounds casts |
+| [safety-checked-types.md](safety-checked-types.md) | Terminator guard, checked arrays |
+| [safety-checked-regions.md](safety-checked-regions.md) | `_Checked` / `_Unchecked` regions |
 | [safety-vm-heap.md](safety-vm-heap.md) | The VM heap allocator |
-| [safety-ffi.md](safety-ffi.md) | Allow/deny lists and type checking for FFI calls |
+| [safety-ffi.md](safety-ffi.md) | FFI allow/deny lists and type checking |
+| [safety-impl.md](safety-impl.md) | Implementation notes for contributors |
