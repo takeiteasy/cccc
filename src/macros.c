@@ -2315,8 +2315,8 @@ static void add_fn_slot(VirtualMachine *vm, FnSlotScan *sc, long long *slot,
             return;
     if (sc->count == sc->cap) {
         int          cap = sc->cap ? sc->cap * 2 : 16;
-        MacroFnSlot *n   = arena_alloc(&vm->compiler.parser_arena,
-                                       (size_t)cap * sizeof *n);
+        MacroFnSlot *n =
+            arena_alloc(&vm->compiler.parser_arena, (size_t)cap * sizeof *n);
         if (sc->count)
             memcpy(n, sc->slots, (size_t)sc->count * sizeof *n);
         sc->slots = n;
@@ -2332,30 +2332,31 @@ static void scan_fn_ptr_words(VirtualMachine *vm, FnSlotScan *sc, Type *ty,
     if (!ty)
         return;
     switch (ty->kind) {
-    case TY_PTR:
-        if (ty->base && ty->base->kind == TY_FUNC) {
-            long long *slot = (long long *)addr;
-            for (int i = 0; i < sc->nfns; i++)
-                if (*slot == cc_pc_to_byte_offset((Pc)sc->fns[i]->code_addr)) {
-                    add_fn_slot(vm, sc, slot, *slot, sc->fns[i], 0);
-                    break;
-                }
-        }
-        break;
-    case TY_ARRAY:
-        if (ty->base && ty->base->size > 0)
-            for (int i = 0; i < ty->array_len; i++)
-                scan_fn_ptr_words(vm, sc, ty->base,
-                                  addr + (long long)i * ty->base->size);
-        break;
-    case TY_STRUCT:
-    case TY_UNION:
-        for (Member *m = ty->members; m; m = m->next)
-            if (!m->is_bitfield)
-                scan_fn_ptr_words(vm, sc, m->ty, addr + m->offset);
-        break;
-    default:
-        break;
+        case TY_PTR:
+            if (ty->base && ty->base->kind == TY_FUNC) {
+                long long *slot = (long long *)addr;
+                for (int i = 0; i < sc->nfns; i++)
+                    if (*slot ==
+                        cc_pc_to_byte_offset((Pc)sc->fns[i]->code_addr)) {
+                        add_fn_slot(vm, sc, slot, *slot, sc->fns[i], 0);
+                        break;
+                    }
+            }
+            break;
+        case TY_ARRAY:
+            if (ty->base && ty->base->size > 0)
+                for (int i = 0; i < ty->array_len; i++)
+                    scan_fn_ptr_words(vm, sc, ty->base,
+                                      addr + (long long)i * ty->base->size);
+            break;
+        case TY_STRUCT:
+        case TY_UNION:
+            for (Member *m = ty->members; m; m = m->next)
+                if (!m->is_bitfield)
+                    scan_fn_ptr_words(vm, sc, m->ty, addr + m->offset);
+            break;
+        default:
+            break;
     }
 }
 
@@ -2370,7 +2371,7 @@ static MacroFnSlot *collect_fn_slots(VirtualMachine *vm, Obj *prog, int *n) {
         sc.nfns += fn->is_function && fn->body;
     sc.fns = arena_alloc(&vm->compiler.parser_arena,
                          (size_t)(sc.nfns + 1) * sizeof *sc.fns);
-    int i = 0;
+    int i  = 0;
     for (Obj *fn = prog; fn; fn = fn->next)
         if (fn->is_function && fn->body)
             sc.fns[i++] = fn;
@@ -2755,8 +2756,8 @@ static void compile_all_macros(VirtualMachine *vm) {
 static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
     Obj *prog       = vm->compiler.macro_prog;
 
-    int          nslots = 0;
-    MacroFnSlot *slots  = collect_fn_slots(vm, prog, &nslots);
+    int          nslots     = 0;
+    MacroFnSlot *slots      = collect_fn_slots(vm, prog, &nslots);
 
     Obj   *saved_locals                = vm->compiler.locals;
     Obj   *saved_current_fn            = vm->compiler.current_fn;
