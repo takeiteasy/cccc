@@ -351,6 +351,21 @@ static long long ct_hook(void) {
     write_ct(gen8, "val()", "3", "");
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "call dropped");
     CHECK(eval("gen_v()") == 8, "the old generated function is kept");
+
+    char quote[1024];
+    snprintf(quote, sizeof(quote),
+             "%s@comptime Node *mkq(void) { return Quote(\"{ int qv(void) { "
+             "return %%d; } }\"); }\n",
+             val42);
+    char quote5[1024], quote6[1024];
+    snprintf(quote5, sizeof(quote5), quote, 5);
+    snprintf(quote6, sizeof(quote6), quote, 6);
+    write_ct(quote5, "val()", "3", "mkq();");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "spliced call runs");
+    CHECK(eval("qv()") == 5, "a spliced function is added");
+    write_ct(quote6, "val()", "3", "mkq();");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "spliced call runs again");
+    CHECK(eval("qv()") == 6, "a spliced function is redefined");
     write_ct(val42, "val()", "3 +", "");
     CHECK(cc_debug_reload(&vm, ct_path) != 0, "parse error refused");
     CHECK(vm.error_count == 0, "diagnostics are cleared");
