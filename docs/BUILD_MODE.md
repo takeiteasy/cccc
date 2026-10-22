@@ -246,6 +246,7 @@ int main(void) {
 | `cccc demo.c` | Runs `main()` on the VM. The build recipe compiles but is never invoked. |
 | `cccc -c=native -o demo demo.c` | Native binary of `main()`. The `[[cccc::build_target]]`/`[[cccc::build]]` bodies are never emitted — see [NATIVE.md](NATIVE.md). |
 | `cccc --build demo.c` | Runs the build recipe (here, the entry-less factory fallback above). `main()` is ignored. |
+| `cccc --build --run demo.c` | Runs the build recipe, then `main()` on the VM if the build succeeded. A failed build skips `main()` and exits nonzero. |
 
 `building.h` (the `Builder`/`BuildTarget` types and every `Build*`/`Executable`/
 etc. macro) is injected automatically whenever the file's own source carries a

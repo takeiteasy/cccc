@@ -714,6 +714,10 @@ static void usage(const char *argv0, int exit_code) {
         "#includes`)\n");
     printf("\t                         to PATH, for a build system to track "
            "header deps.\n");
+    printf(
+        "\t   --run                 Run main() in the VM (the default); after "
+        "--testing or\n");
+    printf("\t                         --build, runs only if they succeed.\n");
     printf("\t   --test-run[=LEVEL]    Run the program under the VM "
            "(safety=max by default; LEVEL\n");
     printf("\t                         accepts none/basic/standard/max or "
@@ -1559,6 +1563,7 @@ int main(int argc, const char *argv[]) {
     int      emit_cccc_mode        = 0;                     // --emit-cccc
     int      no_layout_guards_mode = 0; // --no-layout-guards (#1172)
     int      test_run_mode         = 0; // --test-run[=LEVEL]
+    int      run_mode              = 0; // --run
     uint64_t test_run_flags =
         0;                // safety preset bits for --test-run's VM smoke test
     int native_object = 0; // -c=object: native compile, stop before linking
@@ -2410,6 +2415,9 @@ int main(int argc, const char *argv[]) {
                 watch_clear = true;
                 watch       = true;
                 break;
+            case 1151: // --run
+                run_mode = 1;
+                break;
             case 1133: // --watch-restart
                 watch_restart = true;
                 watch         = true;
@@ -2534,6 +2542,24 @@ int main(int argc, const char *argv[]) {
         usage((char *)argv[0], 1);
     }
 
+    if (run_mode) {
+        if (repl_mode || test_run_mode || compile_format != COMPILE_NONE ||
+            testing_backend == TESTING_BACKEND_NATIVE || disassemble ||
+            preprocess_only || dump_expanded_only || print_tokens ||
+            output_json || output_ffi_decls || dump_ast) {
+            fprintf(stderr, "error: --run runs the program in the VM; it "
+                            "cannot be combined with --repl, --test-run, -c, "
+                            "--testing=native, -d, -E, -m, -p, --ast, -j or "
+                            "-J\n");
+            usage(argv[0], 1);
+        }
+        if (build_mode && watch) {
+            fprintf(stderr, "error: --watch cannot be combined with "
+                            "--build --run\n");
+            usage(argv[0], 1);
+        }
+    }
+
     if (test_run_mode) {
         // --test-run runs a VM smoke test before compiling, so it needs a
         // real compile/run pipeline to slot into -- reject every mode that
@@ -2584,7 +2610,8 @@ int main(int argc, const char *argv[]) {
 
     if (watch) {
         // A file that carries its own [[cccc::build]] is rebuilt, not run.
-        for (int i = 0; !build_mode && i < input_files_count; i++) {
+        for (int i = 0; !build_mode && !run_mode && i < input_files_count;
+             i++) {
             bool wants_test = false, wants_build = false;
             cc_scan_source_for_mode_attrs(input_files[i], &wants_test,
                                           &wants_build);
@@ -3631,7 +3658,8 @@ int main(int argc, const char *argv[]) {
         // artifact once any test has failed. This is deliberately independent
         // of --fail-fast, which only stops the test *run* early; a red suite
         // never reaches the compile step.
-        if ((!build_mode && compile_format != COMPILE_NATIVE) || exit_code != 0)
+        if (exit_code != 0 || (run_mode && list_tests) ||
+            (!build_mode && !run_mode && compile_format != COMPILE_NATIVE))
             goto BAIL;
     }
 
@@ -3709,7 +3737,8 @@ int main(int argc, const char *argv[]) {
             cc_watch_reexec();
         }
 
-        goto BAIL;
+        if (!run_mode || exit_code != 0)
+            goto BAIL;
     }
 
     if (compile_format == COMPILE_NATIVE) {

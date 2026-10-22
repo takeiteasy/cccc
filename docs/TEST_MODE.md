@@ -1116,6 +1116,22 @@ The gate is independent of `--fail-fast`: that flag only stops the test
 regardless. The same guard applies to `--testing --build` — a build script
 whose suite fails is refused before any target compiles.
 
+### `--run`: run the program after the suite
+
+`--run` runs `main()` on the VM, which is what a plain `cccc file.c` already
+does. After `--testing` it makes the suite a gate in front of the run: `main()`
+runs only if every test passes.
+
+```
+./cccc --testing --run myfile.c     # tests, then main() if all passed
+./cccc --build --run myfile.c       # build recipe, then main() if it succeeded
+```
+
+A failing gate exits nonzero without running `main()`. `--list-tests --run`
+lists the tests and stops. `--run` cannot be combined with `-c`,
+`--testing=native`, `--repl`, `--test-run`, `-d`, `-E`, `-m`, `-p`, `--ast`,
+`-j` or `-J`, and `--build --run` cannot be combined with `--watch`.
+
 `--testing=native` is unaffected by all this (that combination is
 `--testing`'s own compile-and-run-the-harness mode, not a VM pre-pass in
 front of a separate `-c=native`). `-c=generated` also combines with

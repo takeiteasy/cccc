@@ -60,6 +60,7 @@ static const struct {
     {"build-install", CFG_CLI_ONLY},
     {"test", CFG_CLI_ONLY},
     {"test-run", CFG_CLI_ONLY},
+    {"run", CFG_CLI_ONLY},
     {"test-suite", CFG_CLI_ONLY},
     {"list-tests", CFG_CLI_ONLY},
     {"testing", CFG_CLI_ONLY},

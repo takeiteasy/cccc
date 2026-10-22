@@ -140,6 +140,7 @@ const struct option cccc_long_options[] = {
     {"watch-debounce", required_argument, 0, 1131},
     {"watch-clear", no_argument, 0, 1132},
     {"watch-restart", no_argument, 0, 1133},
+    {"run", no_argument, 0, 1151},
     // System-header mode
     {"use-system-headers", no_argument, 0, 1112},
     {"no-builtin-includes", no_argument, 0, 1113},
