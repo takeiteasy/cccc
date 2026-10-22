@@ -7,6 +7,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-22
+
+- Changed: a checked-pointer bound on a prototype, typedef, function pointer
+  or struct member parameter is resolved where it is declared. A bound naming
+  an undeclared identifier, or a global declared after the declaration, is an
+  error there in every mode, instead of at the first call under
+  `--checked-pointers`.
+- Fixed: a checked-pointer bound on an unnamed prototype parameter, such as
+  `void f(int *[[cccc::array, cccc::count(n)]], int n);`, is resolved and
+  enforced at calls.
+
 ## [0.20.0] - 2026-10-22
 
 - Changed: the guides in `docs/` are lowercase-kebab pages of about 100–400
