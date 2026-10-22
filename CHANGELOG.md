@@ -7,6 +7,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-22
+
+- Changed: the guides in `docs/` are lowercase-kebab pages of about 100–400
+  lines. The large topics (macros, safety, testing, attributes, build, derive,
+  debugger, headers) are a hub page plus `<topic>-*.md` sub-pages, and
+  `docs/README.md` indexes them all. `docs/getting-started.md` and
+  `docs/features.md` are new. `testing.md` replaces `TEST_MODE.md`, `build.md`
+  replaces `BUILD_MODE.md` and `install.md` replaces `BUILD.md`.
+- Changed: the README is generated from the docs index, getting-started,
+  features and tested examples in `examples/readme/`.
 - Fixed: a comptime function pointer that comptime code stores in a global,
   static, struct member or array element stays valid across debugger `reload`,
   `fix` and `--watch` expansions.
