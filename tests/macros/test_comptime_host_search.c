@@ -1,5 +1,5 @@
 // Search-table entries and tree nodes libc owns are readable at comptime.
-// CCCC_LEAKS_SKIP: glibc hdestroy leaves the key allocated and macOS frees it, so the test cannot free it portably (#1728)
+// CCCC_LEAKS_KEEP_VM_HEAP
 #include[[cccc::comptime]] < search.h>
 #include[[cccc::comptime]] < stdlib.h>
 #include[[cccc::comptime]] < string.h>
@@ -32,6 +32,10 @@ int probe(void) {
     found->data         = (void *)9;
     bad                += (long)hsearch(it, FIND)->data != 9;
     hdestroy();
+    // macOS hdestroy frees the keys; glibc leaves them to the caller.
+#ifndef __APPLE__
+    free(key);
+#endif
 
     static int keys[3]  = {2, 1, 3};
     void      *root     = NULL;

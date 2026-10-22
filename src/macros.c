@@ -2802,6 +2802,27 @@ static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
     return NULL;
 }
 
+// A call node's macro_scope was left by the parser, so its hashmaps are empty
+// and a builtin that declares a tag or typedef would allocate buckets nothing
+// frees. Lookups fall back to the linked lists once the maps are dropped.
+static Node *execute_in_macro_scope(VirtualMachine *vm, MacroFn *pm,
+                                    Node *node) {
+    Scope *saved     = vm->compiler.scope;
+    Scope *sc        = node->macro_scope;
+    bool   vars_cold = sc && !sc->var_map.buckets;
+    bool   tags_cold = sc && !sc->tag_map.buckets;
+    if (sc)
+        vm->compiler.scope = sc;
+    Node *result = execute_macro_fn(vm, pm, node->tok, node->args,
+                                    node->macro_arg_count, NULL, 0);
+    if (vars_cold)
+        hashmap_deinit_borrowed(&sc->var_map);
+    if (tags_cold)
+        hashmap_deinit_borrowed(&sc->tag_map);
+    vm->compiler.scope = saved;
+    return result;
+}
+
 // Ticket #277: Lisp-style single-step macro expansion (macroexpand-1).
 // Expands the outermost ND_MACRO_CALL exactly once; identity for anything else.
 CC_BUILTIN(__builtin_macroexpand_1, 1);
@@ -2814,12 +2835,7 @@ Node *__builtin_macroexpand_1(Node *node) {
     MacroFn *pm = find_macro_fn_by_name(vm, node->macro_name);
     if (!pm || !pm->is_compiled)
         return node;
-    Scope *saved_scope = vm->compiler.scope;
-    if (node->macro_scope)
-        vm->compiler.scope = node->macro_scope;
-    Node *result       = execute_macro_fn(vm, pm, node->tok, node->args,
-                                          node->macro_arg_count, NULL, 0);
-    vm->compiler.scope = saved_scope;
+    Node *result = execute_in_macro_scope(vm, pm, node);
     return result ? result : node;
 }
 
@@ -2943,12 +2959,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
         if (vm->debug_vm)
             printf("  Executing macro '%s'...\n", pm->name);
 
-        Scope *saved_scope = vm->compiler.scope;
-        if (node->macro_scope)
-            vm->compiler.scope = node->macro_scope;
-        Node *result       = execute_macro_fn(vm, pm, node->tok, node->args,
-                                              node->macro_arg_count, NULL, 0);
-        vm->compiler.scope = saved_scope;
+        Node *result = execute_in_macro_scope(vm, pm, node);
 
         if (vm->debug_vm)
             printf("  Macro returned %p (kind=%d)\n", (void *)result,

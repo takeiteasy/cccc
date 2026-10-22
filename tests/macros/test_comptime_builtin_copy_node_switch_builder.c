@@ -1,5 +1,4 @@
 // A switch built with MakeSwitch copies with its cases and default. Cases
-// CCCC_LEAKS_SKIP: valgrind uninitialised read in comptime_args.c (#1727)
 // are laid out in order and do not break, so case 2 is last.
 int g;
 

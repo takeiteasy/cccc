@@ -539,7 +539,7 @@ static const char *handle_kind_name(int kind) {
 
 void cccc_comptime_handle_add(VirtualMachine *vm, const void *p, int kind) {
     Registry *r = vm->comptime_registry;
-    if (!p || !r || kind == CC_H_NONE)
+    if (kind == CC_H_NONE || !p || !r)
         return;
     pthread_mutex_lock(&r->lock);
     hashmap_put_int(&r->handles, (long long)(uintptr_t)p,
@@ -728,7 +728,8 @@ int cccc_comptime_check_builtin(VirtualMachine *vm, const CcBuiltin *b,
 
 void cccc_comptime_note_builtin_result(VirtualMachine *vm, const CcBuiltin *b,
                                        long long result) {
-    if (!result || !b->sig_ready)
+    // A void builtin leaves `result` undefined, so test the kind first.
+    if (!b->sig_ready || b->ret_kind == CC_H_NONE || !result)
         return;
     int kind = b->ret_kind;
     if (kind & CC_H_ARRAY)
