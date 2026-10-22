@@ -44,7 +44,7 @@ are available without an `#include`.[^prelude]
 ## Qualifiers
 
 Both spellings of each qualifier work. They map onto the attributes in
-[Address Spaces](attributes.md#address-spaces), whose rules apply unchanged.
+[Address Spaces](attributes-kernel.md#address-spaces), whose rules apply unchanged.
 
 | OpenCL C | cccc |
 |---|---|
@@ -205,7 +205,7 @@ enforced; the launch's local size is the one that applies.
   [#1388](https://todo.sr.ht/~takeiteasy/cccc/1388)).
 - Images and samplers are not supported.
 - `double` is rejected in kernel code, as in
-  [GPU Kernel Subset](attributes.md#gpu-kernel-subset).
+  [GPU Kernel Subset](attributes-kernel.md).
 
 ---
 

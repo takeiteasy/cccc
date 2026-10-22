@@ -23,7 +23,7 @@ int main(void) {
 ```
 
 The function body is checked as described in
-[GPU Kernel Subset](attributes.md#gpu-kernel-subset); this guide covers
+[GPU Kernel Subset](attributes-kernel.md); this guide covers
 running it. Kernels written in OpenCL C run the same way; see
 [opencl.md](opencl.md).
 
