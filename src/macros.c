@@ -2301,10 +2301,80 @@ typedef struct {
     long long  addend;
 } MacroFnSlot;
 
+typedef struct {
+    MacroFnSlot *slots;
+    int          count, cap;
+    Obj        **fns; // `prog`'s defined functions, for matching stored values
+    int          nfns;
+} FnSlotScan;
+
+static void add_fn_slot(VirtualMachine *vm, FnSlotScan *sc, long long *slot,
+                        long long old_value, Obj *target, long long addend) {
+    for (int i = 0; i < sc->count; i++)
+        if (sc->slots[i].slot == slot)
+            return;
+    if (sc->count == sc->cap) {
+        int          cap = sc->cap ? sc->cap * 2 : 16;
+        MacroFnSlot *n   = arena_alloc(&vm->compiler.parser_arena,
+                                       (size_t)cap * sizeof *n);
+        if (sc->count)
+            memcpy(n, sc->slots, (size_t)sc->count * sizeof *n);
+        sc->slots = n;
+        sc->cap   = cap;
+    }
+    sc->slots[sc->count++] = (MacroFnSlot){slot, old_value, target, addend};
+}
+
+// Notes every function-pointer-typed word of an object of type `ty` at `addr`
+// that holds a function's entry address, however it got there.
+static void scan_fn_ptr_words(VirtualMachine *vm, FnSlotScan *sc, Type *ty,
+                              char *addr) {
+    if (!ty)
+        return;
+    switch (ty->kind) {
+    case TY_PTR:
+        if (ty->base && ty->base->kind == TY_FUNC) {
+            long long *slot = (long long *)addr;
+            for (int i = 0; i < sc->nfns; i++)
+                if (*slot == cc_pc_to_byte_offset((Pc)sc->fns[i]->code_addr)) {
+                    add_fn_slot(vm, sc, slot, *slot, sc->fns[i], 0);
+                    break;
+                }
+        }
+        break;
+    case TY_ARRAY:
+        if (ty->base && ty->base->size > 0)
+            for (int i = 0; i < ty->array_len; i++)
+                scan_fn_ptr_words(vm, sc, ty->base,
+                                  addr + (long long)i * ty->base->size);
+        break;
+    case TY_STRUCT:
+    case TY_UNION:
+        for (Member *m = ty->members; m; m = m->next)
+            if (!m->is_bitfield)
+                scan_fn_ptr_words(vm, sc, m->ty, addr + m->offset);
+        break;
+    default:
+        break;
+    }
+}
+
 // The function-pointer slots of `prog`'s globals that hold a function's
-// current address. With `out` NULL, only counts.
-static int collect_fn_slots(VirtualMachine *vm, Obj *prog, MacroFnSlot *out) {
-    int n = 0;
+// current address: those an initializer relocated, and any other pointer of
+// function type, struct member or array element that comptime code stored
+// while running. A pointer kept as another type, or in the heap, is not
+// found. Arena-allocated; returns the count through `n`.
+static MacroFnSlot *collect_fn_slots(VirtualMachine *vm, Obj *prog, int *n) {
+    FnSlotScan sc = {0};
+    for (Obj *fn = prog; fn; fn = fn->next)
+        sc.nfns += fn->is_function && fn->body;
+    sc.fns = arena_alloc(&vm->compiler.parser_arena,
+                         (size_t)(sc.nfns + 1) * sizeof *sc.fns);
+    int i = 0;
+    for (Obj *fn = prog; fn; fn = fn->next)
+        if (fn->is_function && fn->body)
+            sc.fns[i++] = fn;
+
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
             continue;
@@ -2314,15 +2384,16 @@ static int collect_fn_slots(VirtualMachine *vm, Obj *prog, MacroFnSlot *out) {
                               : NULL;
             if (!target || !target->is_function || !target->body)
                 continue;
-            if (out)
-                out[n] = (MacroFnSlot){
-                    (long long *)(vm->data_seg + var->offset + rel->offset),
-                    cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend,
-                    target, rel->addend};
-            n++;
+            add_fn_slot(vm, &sc,
+                        (long long *)(vm->data_seg + var->offset + rel->offset),
+                        cc_pc_to_byte_offset((Pc)target->code_addr) +
+                            rel->addend,
+                        target, rel->addend);
         }
+        scan_fn_ptr_words(vm, &sc, var->ty, vm->data_seg + var->offset);
     }
-    return n;
+    *n = sc.count;
+    return sc.slots;
 }
 
 // Compile all macro functions and comptime helpers as one compile-time program
@@ -2507,9 +2578,7 @@ static bool compile_macro_program_ex(VirtualMachine    *vm,
     int          n_slots   = 0;
     CcCodeMark   mark      = {0};
     if (rl) {
-        int n_old = collect_fn_slots(vm, rl->prog, NULL);
-        old_slots = alloca((size_t)(n_old + 1) * sizeof *old_slots);
-        n_slots   = collect_fn_slots(vm, rl->prog, old_slots);
+        old_slots = collect_fn_slots(vm, rl->prog, &n_slots);
         cc_code_mark_begin(vm, &mark);
         vm->compiler.comptime_on_live_stack = true;
     }
@@ -2686,9 +2755,8 @@ static void compile_all_macros(VirtualMachine *vm) {
 static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
     Obj *prog       = vm->compiler.macro_prog;
 
-    int          slot_count = collect_fn_slots(vm, prog, NULL);
-    MacroFnSlot *slots      = alloca((size_t)(slot_count + 1) * sizeof *slots);
-    int          nslots     = collect_fn_slots(vm, prog, slots);
+    int          nslots = 0;
+    MacroFnSlot *slots  = collect_fn_slots(vm, prog, &nslots);
 
     Obj   *saved_locals                = vm->compiler.locals;
     Obj   *saved_current_fn            = vm->compiler.current_fn;

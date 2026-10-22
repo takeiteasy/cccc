@@ -352,6 +352,34 @@ static long long ct_hook(void) {
     CHECK(cc_debug_reload(&vm, ct_path) == 0, "call dropped");
     CHECK(eval("gen_v()") == 8, "the old generated function is kept");
 
+    // Pointers comptime code stored while running follow the regenerated code.
+    char ptr[1024], ptr2[1100];
+    snprintf(ptr, sizeof(ptr),
+             "%s@comptime int helper(void) { return 21; }\n"
+             "@comptime Node *viaptr(void) {\n"
+             "  static int (*hp)(void);\n"
+             "  static struct { int (*fn)(void); } b;\n"
+             "  static int (*arr[2])(void);\n"
+             "  if (!hp) { hp = helper; b.fn = helper; arr[1] = helper; }\n"
+             "  return MakeIntLiteral(hp() + b.fn() + arr[1]());\n"
+             "}\n",
+             val42);
+    const char *pad = "int pad_a(void) { return 1; }\n"
+                      "int pad_b(void) { return 2; }\n";
+    write_ct(ptr, "viaptr()", "3", "");
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "pointer stored by comptime");
+    CHECK(eval("f()") == 63, "stored pointers call");
+    write_ct(ptr, "viaptr() + 1", "3", pad);
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "regenerated code moved");
+    CHECK(eval("f()") == 64, "stored pointers follow a regeneration: %lld",
+          eval("f()"));
+    snprintf(ptr2, sizeof(ptr2), "%s@comptime int noise(void) { return 0; }\n",
+             ptr);
+    write_ct(ptr2, "viaptr() + 2", "3", pad);
+    CHECK(cc_debug_reload(&vm, ct_path) == 0, "comptime rebuilt");
+    CHECK(eval("f()") == 65, "stored pointers follow a rebuild: %lld",
+          eval("f()"));
+
     char quote[1024];
     snprintf(quote, sizeof(quote),
              "%s@comptime Node *mkq(void) { return Quote(\"{ int qv(void) { "

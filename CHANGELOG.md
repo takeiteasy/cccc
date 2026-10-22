@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a comptime function pointer that comptime code stores in a global,
+  static, struct member or array element stays valid across debugger `reload`,
+  `fix` and `--watch` expansions.
 - Fixed: a debugger `reload` or `--watch` save no longer leaks the parser scopes
   of a rebuilt comptime program, a refused parse or the comptime code it
   generates.

@@ -562,9 +562,10 @@ make CCCC_HAS_BACKTRACE=0
     gives the code back before the new functions are compiled. A reload that
     changes comptime code builds the comptime program again the same way and
     runs only the initializers that are new or edited; an initializer that
-    already ran is not undone when the reload is refused later. A pointer to a
-    comptime function that comptime code stored while running is not moved
-    ([#1737](https://todo.sr.ht/~takeiteasy/cccc/1737)).
+    already ran is not undone when the reload is refused later. A comptime
+    global, static, struct member or array element of function-pointer type
+    that holds a comptime function follows the regenerated code. A pointer
+    kept in heap memory or in a `void *` or integer is not moved.
 
 [^file-scope-calls]: Every file-scope call in the reloaded file runs, so its side
     effects repeat on each reload. A function it generates replaces the live
