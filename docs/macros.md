@@ -143,7 +143,7 @@ expression position — see
 [Deferred templates with `QuoteLazy`](#deferred-templates-with-quotelazy).
 
 A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
-[OpenMP](OPENMP.md#generated-code).
+[OpenMP](openmp.md#generated-code).
 
 ## Execution Model
 
@@ -811,7 +811,7 @@ controls a different axis entirely: *whether the captured/serialized output
 keeps CCCC dialect syntax* (`[[cccc::...]]` attributes, checked-pointer
 qualifiers, cccc-only `#include`s) or gets stripped to portable C, across
 `-E`/`-m`/`-c=generated`/`-c=native`. See
-[COVERAGE.md](COVERAGE.md#attributes) for the full `--emit-cccc` contract.
+[coverage.md](coverage.md#attributes) for the full `--emit-cccc` contract.
 
 For several raw preprocessor directives, use an emit block. Emit blocks require
 an enclosing comptime context and act as a runtime escape hatch: ordinary C
@@ -1138,7 +1138,7 @@ int helper = 7;                // comptime variable
 int main(void) { ... }
 ```
 
-The `glob` call above reads the filesystem, so it needs `--comptime-allow=fs` (see [COMPTIME_POLICY.md](COMPTIME_POLICY.md)).
+The `glob` call above reads the filesystem, so it needs `--comptime-allow=fs` (see [comptime-policy.md](comptime-policy.md)).
 
 Inside a comptime block:
 - `#include` directives are queued as comptime-only includes — invisible to the runtime translation unit.
@@ -2231,7 +2231,7 @@ gen_lookup();
 macro-author tasks. Because reflection.h is implicitly included in every
 macro/comptime TU, these are available without any extra `#include`. The
 ready-made attributes built on them (`@serialize`, `@enum_to_string`,
-`@accessors`, ...) are covered in [DERIVE.md](DERIVE.md).
+`@accessors`, ...) are covered in [derive.md](derive.md).
 
 ### String and Memory Wrappers
 

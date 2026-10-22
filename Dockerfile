@@ -21,7 +21,7 @@ WORKDIR /workspace/cccc
 
 COPY . .
 
-# `make` builds ./cccc, the only compiler binary (see docs/BUILD.md);
+# `make` builds ./cccc, the only compiler binary (see docs/install.md);
 # mirrors the `build` step in .builds/linux-amd64.yml.
 RUN make
 

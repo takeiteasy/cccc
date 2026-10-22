@@ -21,7 +21,7 @@
  * @file opencl.h
  * @brief Maps OpenCL C 1.2 onto the kernel model of <cccc/kernel.h>. Included
  * automatically ahead of every input read as OpenCL C (`-x cl`, `.cl`). See
- * docs/OPENCL.md.
+ * docs/opencl.md.
  */
 
 #ifndef CCCC_OPENCL_H

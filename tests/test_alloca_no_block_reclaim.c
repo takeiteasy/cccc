@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: alloca lifetime beside a VLA is host-defined (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: alloca lifetime beside a VLA is host-defined (native.md divergences)
 // #981: a bare __builtin_alloca in the
 // SAME block as a VLA declaration must NOT be reclaimed at that block's exit --
 // only the VLA's own storage (ALLOC_KIND_FRAME) dies at block exit; a bare

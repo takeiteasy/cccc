@@ -89,7 +89,7 @@ agree everywhere else, including on a function *parameter*'s `_Atomic`,
 which is significant, and its `const`, which is not.)
 
 `--compiler-family` does not change the predefined macro set (see
-[HEADERS.md](HEADERS.md#real-sdk-headers-under---use-system-headers--sysroot)).
+[headers.md](headers.md#real-sdk-headers-under---use-system-headers--sysroot)).
 
 `--compiler-family=FAM` selects the reading:
 
@@ -112,7 +112,7 @@ clang" split.
 One more family-dependent answer is not a `__builtin_types_compatible_p` one:
 on Linux x86_64, C11 `_Alignof(type)` and `_Alignas(type)` of a 32- or
 64-byte vector cap at 16 under `gcc` and give the vector's size under
-`clang` (see [ATTRIBUTES.md](ATTRIBUTES.md#vector-size)).
+`clang` (see [attributes.md](attributes.md#vector-size)).
 
 A cast to a typedef with `aligned(N)` is the other: `_Alignof((i64)x)` is the
 plain type's alignment under `gcc` and `N` under `clang`.

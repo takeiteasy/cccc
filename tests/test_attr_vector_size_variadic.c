@@ -10,7 +10,7 @@
 // slot instead of reading it directly. Verified against gcc/clang: both
 // accept a vector_size vector through '...' and read it back correctly, so
 // this mirrors their behavior (CCCC's own ABI on both ends, not the
-// platform ABI -- see COVERAGE.md).
+// platform ABI -- see coverage.md).
 //
 // See tests/test_attr_vector_size_variadic_ffi_error.c for the still-
 // rejected case (vector through variadic FFI/libffi calls, out of scope;

@@ -139,7 +139,7 @@ cccc --trust        # once per clone, after reading the file
 cccc prog.c         # comptime fopen/glob now work
 ```
 
-See [COMPTIME_POLICY.md](COMPTIME_POLICY.md) for the capability classes.
+See [comptime-policy.md](comptime-policy.md) for the capability classes.
 
 [^1]: TOML escapes such as `"\u001b"` are decoded before the control-character check, which also rejects DEL, NUL and the C1 range (`U+0080`–`U+009F`). A key or value that could rewrite the trust prompt or an error message never reaches the terminal. The parser is the vendored [tomlc17](https://github.com/cktan/tomlc17) in `src/tomlc17.c`.
 

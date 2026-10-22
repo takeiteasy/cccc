@@ -1,8 +1,8 @@
-// CCCC_NATIVE_SKIP: %L on an integer is host-libc-defined (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: %L on an integer is host-libc-defined (native.md divergences)
 // Not run natively: %Ld/%Li/%Lu/%Lo/%Lx/%Ln treating `L` as `ll` on an
 // integer conversion is a glibc extension (the C standard leaves `L` on `d`
 // etc. undefined); BSD/Apple libc reads/writes a 32-bit slot instead, so the
-// -c=native round-trip output is host-libc-dependent -- see docs/NATIVE.md
+// -c=native round-trip output is host-libc-dependent -- see docs/native.md
 // "Serialized-output divergences" and #1170. The VM formatter deliberately
 // follows glibc here.
 /*

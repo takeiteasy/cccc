@@ -9,7 +9,7 @@
 // no-op in the default (decimal-off) build -- test_c23_decimal at the end
 // is the basic smoke test that runs in both builds.
 //
-// See docs/COVERAGE.md and docs/VM.md for the opcode/ABI design notes.
+// See docs/coverage.md and docs/internal-vm.md for the opcode/ABI design notes.
 
 #include <float.h>
 #include <string.h>

@@ -32,7 +32,7 @@ struct lg1172_with_ts {
 struct lg1172_with_ts g_ts;
 
 // A truly tagless, alias-less aggregate has no name to write the assert
-// with at all -- documented residual, docs/NATIVE.md. Used only via a
+// with at all -- documented residual, docs/native.md. Used only via a
 // pointer here so it still needs a real (inline, unnamed) definition.
 struct lg1172_holds_anon {
     struct {

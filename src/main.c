@@ -177,7 +177,7 @@ static void push_owned_flag(ArgVec *cc_args, StringArray *owned,
 // rationale comment above build_std_candidates() there. The two call sites
 // below always pass CCCC_STD_PROBE_PREFER_GNU | CCCC_STD_PROBE_C11_FLOOR:
 // -c=native's serializer emits GNU constructs and a fixed GNU C11 floor
-// unconditionally, regardless of --std= (docs/NATIVE.md).
+// unconditionally, regardless of --std= (docs/native.md).
 #define NATIVE_STD_PROBE_FLAGS                                                 \
     (CCCC_STD_PROBE_PREFER_GNU | CCCC_STD_PROBE_C11_FLOOR)
 
@@ -216,7 +216,7 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
 
     // #1218: resolve the target dialect BEFORE serializing, not after. The
     // serializer itself is std-agnostic (fixed GNU C11 floor -- see
-    // docs/NATIVE.md), so this does not change what gets emitted; it exists
+    // docs/native.md), so this does not change what gets emitted; it exists
     // so an explicit --std= the host cc cannot honour is a plain CCCC error
     // here, rather than a confusing host-compiler failure later. The
     // resolver memoizes its probe, so the call at the -std= forwarding site
@@ -374,7 +374,7 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // only compilers cccc_find_native_cc targets) instead of `-I`/
     // `-isystem`, so the real host header always wins the search while a
     // header the host genuinely lacks still resolves as a last resort.
-    // Matches the policy docs/HEADERS.md already documents ("CCCC's own
+    // Matches the policy docs/headers.md already documents ("CCCC's own
     // bundled include directory is never forwarded to the native
     // compiler") for the case that policy didn't actually cover: the
     // directory named by a *user* -I, not cccc's own builtin_include_dir.
@@ -479,7 +479,7 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // a spawn per native compile with nothing plausible to fall back to.
     // Scope: this only covers the compile -c=native drives itself -- -m/
     // -c=generated output compiled by hand still needs the flag passed
-    // explicitly (documented in docs/NATIVE.md).
+    // explicitly (documented in docs/native.md).
     argv_push(&cc_args, "-fsigned-char");
     // The front end already diagnosed the program under cccc's own -W
     // options; host warnings about the generated C are noise.
@@ -508,7 +508,7 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // line means opt_level == 0 and nothing is forwarded, so the host's own
     // default (-O0) is unchanged from before this fix -- every existing
     // divergence this project documents as depending on that default (e.g.
-    // __builtin_dynamic_object_size, docs/NATIVE.md) keeps its meaning.
+    // __builtin_dynamic_object_size, docs/native.md) keeps its meaning.
     if (opt_level != 0) {
         char buf[2] = {(char)('0' + opt_level), '\0'};
         push_owned_flag(&cc_args, &owned, "-O", buf);
@@ -673,7 +673,7 @@ static void usage(const char *argv0, int exit_code) {
            "guards emitted next to\n");
     printf("\t                         every aggregate definition in "
            "-m/-c=generated/-c=native\n");
-    printf("\t                         output (see docs/NATIVE.md); on by "
+    printf("\t                         output (see docs/native.md); on by "
            "default\n");
     printf("\t-j/--json                Emit JSON for all eligible output "
            "(diagnostics, header declarations, etc.)\n");
@@ -764,7 +764,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t                         [[cccc::test_setup/teardown]] hooks "
            "and negative tests are not\n");
     printf("\t                         supported under =native, see "
-           "docs/TEST_MODE.md)\n");
+           "docs/testing.md)\n");
     printf("\t   --test=GLOB           Run only tests whose name matches GLOB "
            "(implies --testing)\n");
     printf("\t   --test-suite=NAME     Run tests in NAME and its sub-suites "
@@ -949,7 +949,7 @@ static void usage(const char *argv0, int exit_code) {
            "violations\n");
     printf("\t   --ffi-type-checking    Validate registered FFI call arity at "
            "runtime\n");
-    printf("\nConfiguration (see docs/CONFIG.md):\n");
+    printf("\nConfiguration (see docs/config.md):\n");
     printf("\t   --no-config            Ignore ~/.config/cccc/config.toml and "
            ".cccc.toml files\n");
     printf("\t   --show-config          Print the config files read and the "
@@ -2695,7 +2695,7 @@ int main(int argc, const char *argv[]) {
         usage(argv[0], 1);
     }
 
-    // #1320: documented (usage text above, docs/HEADERS.md) but never
+    // #1320: documented (usage text above, docs/headers.md) but never
     // enforced -- --no-builtin-includes alone silently did a partial,
     // confusing thing (search_include_paths()'s force_cccc still won for std
     // headers) instead of the clear failure the docs promise.
@@ -3077,7 +3077,7 @@ int main(int argc, const char *argv[]) {
     // CCCC's standard library header directory is no longer pushed as an
     // -I entry here: search_include_paths() resolves standard headers from
     // the embedded src/std_table.c table first, with vm->compiler.builtin_include_dir
-    // (set in cc_init) as an on-disk fallback. See docs/HEADERS.md.
+    // (set in cc_init) as an on-disk fallback. See docs/headers.md.
 
     // Add user-specified include paths (these take precedence via search order)
     for (int i = 0; i < inc_paths_count; i++)
@@ -3600,7 +3600,7 @@ int main(int argc, const char *argv[]) {
             test_run_ok = false;
         } else if (WIFEXITED(status) && WEXITSTATUS(status) == 255) {
             // 255 is CCCC's own runtime/safety-error exit convention (see
-            // docs/TEST_MODE.md's EXPECT_RUNTIME_ERROR), delivered as a normal
+            // docs/testing.md's EXPECT_RUNTIME_ERROR), delivered as a normal
             // process exit rather than a host signal -- a VM-detected
             // safety violation (bounds/UAF/CFI/uninit/etc.) reaches here,
             // not WIFSIGNALED above, so it needs its own check.
@@ -3667,7 +3667,7 @@ int main(int argc, const char *argv[]) {
         // #1272: main(), if present, is simply ignored under --build --
         // cc_run_build() below never calls it, only the resolved build
         // entry/factory. This lets a single file carry both a runnable
-        // main() and its own build recipe (see docs/BUILD_MODE.md).
+        // main() and its own build recipe (see docs/build.md).
         CcNativeCompileArgs build_defaults = {
             .inc_paths           = inc_paths,
             .inc_paths_count     = inc_paths_count,

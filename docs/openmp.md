@@ -4,7 +4,7 @@
 runs on one thread, which OpenMP allows. With `-c=native` and `-m` the regions
 run on real threads.
 `-c=generated` does too, for the regions in macro-generated code. Threads and
-the VM's global lock are in [THREADING.md](THREADING.md).
+the VM's global lock are in [threading.md](threading.md).
 
 ```c
 #include <omp.h>

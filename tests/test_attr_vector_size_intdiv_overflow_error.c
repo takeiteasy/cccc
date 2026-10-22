@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: integer division traps are VM-only (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: integer division traps are VM-only (native.md divergences)
 // EXPECT_RUNTIME_ERROR
 // GNU vector_size integer lane division (tracker #715): per-lane trap on
 // INT_MIN / -1 overflow, mirroring scalar DIVC's overflow trap.

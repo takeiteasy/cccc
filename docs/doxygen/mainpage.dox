@@ -14,14 +14,14 @@ This site documents the public headers. The user guides live in
 
 | Header | Use it to | Guide |
 |---|---|---|
-| @ref building.h "cccc/building.h" | Write `--build` scripts: targets, profiles, cross-compilation | [BUILD_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/BUILD_MODE.md) |
-| @ref reflection.h "cccc/reflection.h" | Write comptime macros: inspect, build and quote AST nodes | [MACROS](https://github.com/takeiteasy/cccc/blob/trunk/docs/MACROS.md) |
-| @ref testing.h "cccc/testing.h" | Write `[[cccc::test]]` tests with the `Assert*` macros | [TEST_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/TEST_MODE.md) |
-| @ref kernel.h "cccc/kernel.h" | Launch `[[cccc::kernel]]` functions over a grid of work-items | [KERNELS](https://github.com/takeiteasy/cccc/blob/trunk/docs/KERNELS.md) |
-| @ref omp.h "omp.h" | Call the OpenMP runtime API under `-fopenmp` | [OPENMP](https://github.com/takeiteasy/cccc/blob/trunk/docs/OPENMP.md) |
-| @ref opencl.h "cccc/opencl.h" | Read OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model | [OPENCL](https://github.com/takeiteasy/cccc/blob/trunk/docs/OPENCL.md) |
-| `cccc/derive.h` | Generate serializers, accessors, equality, JSON and more with attributes such as `@serialize` and `@to_json` | [DERIVE](https://github.com/takeiteasy/cccc/blob/trunk/docs/DERIVE.md) |
-| `cccc/json.h` | Runtime behind `@to_json` / `@from_json`; include it next to `derive.h` | [DERIVE](https://github.com/takeiteasy/cccc/blob/trunk/docs/DERIVE.md) |
+| @ref building.h "cccc/building.h" | Write `--build` scripts: targets, profiles, cross-compilation | [BUILD_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/build.md) |
+| @ref reflection.h "cccc/reflection.h" | Write comptime macros: inspect, build and quote AST nodes | [MACROS](https://github.com/takeiteasy/cccc/blob/trunk/docs/macros.md) |
+| @ref testing.h "cccc/testing.h" | Write `[[cccc::test]]` tests with the `Assert*` macros | [TEST_MODE](https://github.com/takeiteasy/cccc/blob/trunk/docs/testing.md) |
+| @ref kernel.h "cccc/kernel.h" | Launch `[[cccc::kernel]]` functions over a grid of work-items | [KERNELS](https://github.com/takeiteasy/cccc/blob/trunk/docs/kernels.md) |
+| @ref omp.h "omp.h" | Call the OpenMP runtime API under `-fopenmp` | [OPENMP](https://github.com/takeiteasy/cccc/blob/trunk/docs/openmp.md) |
+| @ref opencl.h "cccc/opencl.h" | Read OpenCL C 1.2 kernels (`.cl`, `-x cl`) onto the kernel model | [OPENCL](https://github.com/takeiteasy/cccc/blob/trunk/docs/opencl.md) |
+| `cccc/derive.h` | Generate serializers, accessors, equality, JSON and more with attributes such as `@serialize` and `@to_json` | [DERIVE](https://github.com/takeiteasy/cccc/blob/trunk/docs/derive.md) |
+| `cccc/json.h` | Runtime behind `@to_json` / `@from_json`; include it next to `derive.h` | [DERIVE](https://github.com/takeiteasy/cccc/blob/trunk/docs/derive.md) |
 
 `testing.h`, `building.h` and `opencl.h` are injected automatically in their
 modes. `reflection.h` is available to comptime code without an include. `derive.h` and

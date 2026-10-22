@@ -1,5 +1,5 @@
 // GNU __builtin_shuffle (tracker #715), restricted to a compile-time-constant
-// brace-enclosed index mask (CCCC's constant-mask form -- see COVERAGE.md for
+// brace-enclosed index mask (CCCC's constant-mask form -- see coverage.md for
 // how this differs from upstream GCC's general vector-typed mask argument).
 // Covers the 1-vector (permute) and 2-vector (blend) forms.
 

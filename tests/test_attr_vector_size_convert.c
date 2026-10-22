@@ -1,7 +1,7 @@
 // GNU __builtin_convertvector (tracker #715): cross-lane-family element
 // conversion between vectors with the same lane count. Restricted to
 // int32<->float32 and int64<->float64 pairs (the only pairs representable
-// within the 16-byte VM vector register -- see COVERAGE.md). Integer
+// within the 16-byte VM vector register -- see coverage.md). Integer
 // conversion truncates toward zero (C cast semantics, matches GCC).
 
 typedef int    v4si __attribute__((vector_size(16)));

@@ -85,7 +85,7 @@ with the usual destructors.
 
 `--thread-safety` turns on VM diagnostics for double-locks, lock-order
 inversion, unsynchronised access from two threads and mixing atomic with plain
-access. See [SAFETY.md](SAFETY.md#threading-safety).
+access. See [safety.md](safety.md#threading-safety).
 
 The VM hides many races because only one thread runs at a time. Code that
 passes in the VM can still race under `-c=native`. Build the native output with
@@ -95,10 +95,10 @@ passes in the VM can still race under `-c=native`. Build the native output with
 
 | Feature | Guide |
 |---|---|
-| `#pragma omp` parallel regions | [OPENMP.md](OPENMP.md) |
-| `[[cccc::kernel]]` work-items | [KERNELS.md](KERNELS.md) |
-| `<pthread.h>`, `<threads.h>` and `<stdatomic.h>` coverage | [STDLIB.md](STDLIB.md) |
-| `_Thread_local`, `_Atomic` coverage | [COVERAGE.md](COVERAGE.md) |
+| `#pragma omp` parallel regions | [openmp.md](openmp.md) |
+| `[[cccc::kernel]]` work-items | [kernels.md](kernels.md) |
+| `<pthread.h>`, `<threads.h>` and `<stdatomic.h>` coverage | [stdlib.md](stdlib.md) |
+| `_Thread_local`, `_Atomic` coverage | [coverage.md](coverage.md) |
 
 OpenMP regions and kernel launches run on one thread in the VM. Native output
 runs them on its own thread pool.
@@ -110,10 +110,10 @@ runs them on its own thread pool.
 
 [^1]: `include/pthread.h` hands off to the host header, so the compiled program
     calls host pthread functions directly with no VM layer. See
-    [HEADERS.md](HEADERS.md).
+    [headers.md](headers.md).
 [^2]: The host's own `<threads.h>` is never used: Darwin has none, and glibc's
     error codes differ from CCCC's. `call_once` is a real function on both back
-    ends. See [Serialized-output divergences](NATIVE.md#serialized-output-divergences).
+    ends. See [Serialized-output divergences](native.md#serialized-output-divergences).
 [^3]: Signal handlers and `SIGEV_THREAD` notifications (`<aio.h>`, `<mqueue.h>`)
     run on a VM thread at a safe point in the dispatch loop. They never start a
     guest-visible pthread.

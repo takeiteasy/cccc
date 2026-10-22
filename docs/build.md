@@ -10,11 +10,11 @@ A target can also be built by `cccc` itself — a `CcccExecutable` (see
 
 There is no DSL and no separate config language: the build script is C, compiled
 by the same preprocessor / parser / VM as every other CCCC source file. The mode
-mirrors `--testing` (see [TEST_MODE.md](TEST_MODE.md)) and reuses the
-`[[cccc::comptime]]` interception machinery (see [MACROS.md](MACROS.md)).
+mirrors `--testing` (see [testing.md](testing.md)) and reuses the
+`[[cccc::comptime]]` interception machinery (see [macros.md](macros.md)).
 
 This guide is about writing `build.c` scripts for your own project. To build
-`cccc` itself, see [BUILD.md](BUILD.md).
+`cccc` itself, see [install.md](install.md).
 
 ## Quick start
 
@@ -244,7 +244,7 @@ int main(void) {
 | Command | Behaviour |
 |---|---|
 | `cccc demo.c` | Runs `main()` on the VM. The build recipe compiles but is never invoked. |
-| `cccc -c=native -o demo demo.c` | Native binary of `main()`. The `[[cccc::build_target]]`/`[[cccc::build]]` bodies are never emitted — see [NATIVE.md](NATIVE.md). |
+| `cccc -c=native -o demo demo.c` | Native binary of `main()`. The `[[cccc::build_target]]`/`[[cccc::build]]` bodies are never emitted — see [native.md](native.md). |
 | `cccc --build demo.c` | Runs the build recipe (here, the entry-less factory fallback above). `main()` is ignored. |
 | `cccc --build --run demo.c` | Runs the build recipe, then `main()` on the VM if the build succeeded. A failed build skips `main()` and exits nonzero. |
 
@@ -1180,13 +1180,13 @@ if (triple && strstr(triple, "aarch64"))
 
 `cccc --watch build.c` runs the build again whenever a source, header or other
 input changes. The script can add to the watch set with `Watch`, `WatchGlob` and
-`IgnoreWatch`, and ask `BuildWatching`. See [WATCH.md](WATCH.md).
+`IgnoreWatch`, and ask `BuildWatching`. See [watch.md](watch.md).
 
 ## Bootstrapping
 
 `make` builds `./cccc`; `--build` then drives everything else for CCCC itself.
 That path and the full target list `build.c` exposes are covered in
-[BUILD.md](BUILD.md).
+[install.md](install.md).
 
 ## Tool allowlist (`--build-tool-allow`)
 
@@ -1226,10 +1226,10 @@ are not redistributed between a parallel target build and its children (see
 
 ## See also
 
-- [BUILD.md](BUILD.md) — building `cccc` itself (`make` and the `build.c` targets).
-- [WATCH.md](WATCH.md) — `--watch`: rebuild on save.
-- [TEST_MODE.md](TEST_MODE.md) — `--testing` mode, the working analog this mode mirrors.
-- [MACROS.md](MACROS.md) — the `[[cccc::comptime]]` system reused for interception.
-- [COVERAGE.md](COVERAGE.md) — the C surface a build script can use.
-- [NATIVE.md](NATIVE.md) — `-c=native` lowering scope and limitations; the
+- [install.md](install.md) — building `cccc` itself (`make` and the `build.c` targets).
+- [watch.md](watch.md) — `--watch`: rebuild on save.
+- [testing.md](testing.md) — `--testing` mode, the working analog this mode mirrors.
+- [macros.md](macros.md) — the `[[cccc::comptime]]` system reused for interception.
+- [coverage.md](coverage.md) — the C surface a build script can use.
+- [native.md](native.md) — `-c=native` lowering scope and limitations; the
   backend a `CcccExecutable` target uses.

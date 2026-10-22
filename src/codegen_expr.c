@@ -732,7 +732,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // Accepted cost: a genuinely-uninitialized address-taken
                     // local is no longer caught here. Deliberately does not
                     // affect CHKL/MARKR above/below (CCCC_STACK_INSTR is an
-                    // unrelated feature). See docs/SAFETY.md.
+                    // unrelated feature). See docs/safety.md.
                     if ((vm->flags & CCCC_UNINIT_DETECTION) &&
                         !node->var->addr_taken && !node->var->is_captured &&
                         !node->var->is_block_var)
@@ -811,7 +811,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // This deliberately skips the MARKP provenance emission below:
             // VLA/alloca storage carries a real AllocHeader resolved via
             // sorted_allocs/DYNOBJSZ (see __builtin_dynamic_object_size in
-            // STDLIB.md), not provenance tracking, and the skipped MARKP
+            // stdlib.md), not provenance tracking, and the skipped MARKP
             // would have fired on the wrong address (the slot) with the wrong
             // size (8, the pointer's own size) anyway.
             if (node->lhs->ty && node->lhs->ty->kind == TY_VLA) {

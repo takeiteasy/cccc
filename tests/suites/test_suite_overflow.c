@@ -1,5 +1,5 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: div-by-zero and invalid indirect-call traps are VM-only (NATIVE.md divergences); the --overflow-checks tests are flags= deltas
+// CCCC_NATIVE_SKIP: div-by-zero and invalid indirect-call traps are VM-only (native.md divergences); the --overflow-checks tests are flags= deltas
 // Consolidated suite: integer overflow detection, div-by-zero, invalid call
 // Source tests: test_overflow_{add,sub,mul,div,div_signed,opt_add,none},
 //               test_dlfcn_invalid_call, test_optimizer_trap_preservation

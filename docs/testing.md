@@ -5,7 +5,7 @@ using the `[[cccc::test]]` attribute to mark test functions and `Assert*`
 macros for assertions. This is a guide to writing and running them.
 
 Internal notes on the test directory layout, audit harnesses, the native
-round-trip serializer test, and CI live in the internal `TESTING.md`.
+round-trip serializer test, and CI live in the internal `internal-testing.md`.
 
 ## Writing Tests
 
@@ -85,7 +85,7 @@ What each invocation does with that file:
 | Command | Behaviour |
 |---|---|
 | `cccc demo.c` | Runs `main()` on the VM. `it_works` compiles but is never run. |
-| `cccc -c=native -o demo demo.c` | Native binary of `main()`. `it_works` is emitted (inert) alongside the assert runtime — see [NATIVE.md](NATIVE.md). |
+| `cccc -c=native -o demo demo.c` | Native binary of `main()`. `it_works` is emitted (inert) alongside the assert runtime — see [native.md](native.md). |
 | `cccc --testing demo.c` | Discovers and runs `it_works`, exactly as if it were the whole file. |
 
 This is demand-driven, not unconditional: a file with no `@test`/
@@ -146,7 +146,7 @@ gen_tests();
 
 For error patterns, return assertions, and per-test compiler flags, use the
 full `[[cccc::test(...)]]` attribute string inside `AddAttribute` — all options
-from the attribute syntax are available. See [MACROS.md](MACROS.md) for details.
+from the attribute syntax are available. See [macros.md](macros.md) for details.
 
 ### Custom display names
 
@@ -655,7 +655,7 @@ expected exit_code 139, got 0
 
 A runtime safety violation inside an ordinary (non-`exit_code`) `[[cccc::test]]`
 body — an uninitialized read, a bounds error, use-after-free, and the other
-checks documented in [SAFETY.md](SAFETY.md) — aborts the test function
+checks documented in [safety.md](safety.md) — aborts the test function
 mid-body and reports `not ok`, with a message naming the opcode that
 aborted:
 
@@ -1319,7 +1319,7 @@ configuration.
 ### Interaction with `#pragma cccc config(...)`
 
 `flags=` is for one-off per-test overrides. `#pragma cccc config(...)` (see
-[SAFETY.md](SAFETY.md)) is the file-scope mechanism for declaring common
+[safety.md](safety.md)) is the file-scope mechanism for declaring common
 options. Both can coexist: per-test `flags=` takes precedence over
 `#pragma config` for that test.
 

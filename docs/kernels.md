@@ -23,9 +23,9 @@ int main(void) {
 ```
 
 The function body is checked as described in
-[GPU Kernel Subset](ATTRIBUTES.md#gpu-kernel-subset); this guide covers
+[GPU Kernel Subset](attributes.md#gpu-kernel-subset); this guide covers
 running it. Kernels written in OpenCL C run the same way; see
-[OPENCL.md](OPENCL.md).
+[opencl.md](opencl.md).
 
 ## Launching
 
@@ -143,7 +143,7 @@ source runs on CPU threads. A program gives the same results as in the VM.
 | Barrier | Work-groups run one at a time; each work-item of a group is its own thread |
 
 The pool has one thread per core. `OMP_NUM_THREADS` sets its size, as it does
-for [OpenMP](OPENMP.md). A launch from inside a `#pragma omp parallel` region
+for [OpenMP](openmp.md). A launch from inside a `#pragma omp parallel` region
 runs its barrier-free groups on the calling thread.
 
 Arguments, ranges and group limits are checked as in the VM. A launch that
@@ -172,4 +172,4 @@ so a faulting launch stops the compile.
 
 [^threads]: The threads are ordinary VM threads under the global interpreter
     lock; the barrier releases the lock while a work-item waits. See
-    [THREADING.md](THREADING.md).
+    [threading.md](threading.md).

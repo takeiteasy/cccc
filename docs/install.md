@@ -1,7 +1,7 @@
 # Building CCCC
 
 How to build the `cccc` binary from a source checkout. For writing `build.c`
-scripts for your *own* projects, see [BUILD_MODE.md](BUILD_MODE.md).
+scripts for your *own* projects, see [build.md](build.md).
 
 ## Prerequisites
 

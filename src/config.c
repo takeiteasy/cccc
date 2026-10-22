@@ -20,7 +20,7 @@
 // Config files: ~/.config/cccc/config.toml (or $XDG_CONFIG_HOME) /
 // ~/.cccc.toml, and the nearest .cccc.toml above the working directory. Each
 // top-level key becomes command-line options placed before the real
-// arguments. See docs/CONFIG.md.
+// arguments. See docs/config.md.
 
 #include "config.h"
 #include "sha256.h"

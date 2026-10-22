@@ -36,7 +36,7 @@ name, matching real GCC/Clang so headers that feature-test on them don't
 diverge; genuinely unrecognized attributes return `0`.
 `__has_c_attribute` returns the C23 version date (`202311L`) for standard C23
 attributes (C23 N3220 §6.10.10.2), `1` for CCCC vendor attributes (including the
-[`<cccc/derive.h>`](DERIVE.md) ones such as `cccc::accessors`, whether
+[`<cccc/derive.h>`](derive.md) ones such as `cccc::accessors`, whether
 or not the header is included), and `1`
 for any attribute `__has_attribute` recognizes when it is written in the `gnu`
 or `__gnu__` scope (`__has_c_attribute(gnu::cold)`); unsupported or unknown
@@ -66,8 +66,8 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `maybe_unused` | C23 | ✓ | Suppresses `-Wunused` warnings |
 | `deprecated` | C23 | ✓ | Emits `-Wdeprecated` warnings |
 | `deprecated("msg")` | C23 | ✓ | Emits `-Wdeprecated` with custom message |
-| `macro` | GNU | ✓ | CCCC-specific; compile-time macro (see [MACROS.md](MACROS.md)) |
-| `comptime` | GNU | ✓ | CCCC-specific; compile-time variable evaluation (see [MACROS.md](MACROS.md)) |
+| `macro` | GNU | ✓ | CCCC-specific; compile-time macro (see [macros.md](macros.md)) |
+| `comptime` | GNU | ✓ | CCCC-specific; compile-time variable evaluation (see [macros.md](macros.md)) |
 | `format(printf/scanf, …)` | GNU | ✓ | Type-check printf/scanf format strings at compile time, including length-modifier-aware argument type validation (`%ld` → `long`, `%zu` → `unsigned long`, `%Lf` → `long double`); gated by `--format-string-checks`. On an *integer* conversion (`%Ld`/`%Li`/`%Lu`/`%Lo`/`%Lx`) the `L` modifier is accepted as the GNU pre-C99 spelling of `ll` and checked as `long`/`unsigned long`, matching glibc and gcc/clang `-Wformat` — the runtime formatter treats it the same way, in both `printf` and `scanf` directions. The `%n` conversion is length-modifier-aware too (`%hhn` → `char *`, `%hn` → `short *`, `%ln`/`%lln`/`%Ln`/`%jn`/`%zn`/`%tn` → an 8-byte integer pointer of *either* signedness — `%n` has no signed/unsigned split, so `long *` and `unsigned long *` are interchangeable, matching gcc/clang; bare `%n` stays lenient); the runtime `%n` store follows the modifier's width on both sides — `printf` writes exactly a `signed char`/`short`/`long`/`long long`/`intmax_t`/`size_t`/`ptrdiff_t`, matching glibc and Apple libc. A `long double` passed to a plain `%f`/`%e`/`%g` (no `L`) is now a width mismatch, not a promotion — the runtime marshals a variadic `long double` as a real `long double` (see the `<float.h>` note and design note below), so the argument frame would desync, matching gcc/clang `-Wformat`. The `%L` conversions themselves are performed at `double` precision, like all `long double` arithmetic. Only `printf` (plus `gnu_printf`, `printf0`) and `scanf` (plus `gnu_scanf`) are checked, each also with `__x__` decoration. `strftime`, `strfmon`, `os_log`, `os_trace`, `NSString`, `CFString`, `kprintf`, `syslog` and the `ms_*` archetypes are accepted without validation. Any other archetype gives a `-Wattributes` warning and is likewise unchecked |
 | `nodiscard` | C23 | ✓ | Warns on discarded return values (`-Wnodiscard`, part of `-Wall`) |
 | `fallthrough` | C23 | ✓ | Suppresses fallthrough warning in switch cases (`-Wfallthrough`, part of `-Wextra`) |
@@ -84,10 +84,10 @@ function" error a raw, unhandled `__has_foo(...)` would otherwise produce.
 | `sentinel` / `sentinel(N)` | GNU (C23: `[[gnu::sentinel]]`) | ✓ | Warns at each call site when the expected trailing variadic argument is not a literal, pointer-typed `NULL` (`-Wsentinel`, part of `-Wall`); static syntactic check only, no runtime enforcement. Applying it to a non-variadic function warns under `-Wattributes` instead |
 | `alloc_size(n)` / `alloc_size(n,m)` | GNU (C23: `[[gnu::alloc_size]]`) | ✓ | Marks a function as an allocator whose return value has a compile-time-computable byte size: argument `n` (1-based) for the single-index form, or the product of arguments `n` and `m` for the two-index (calloc-style) form. Consulted by `__builtin_object_size`/`__builtin_dynamic_object_size` heap-allocation sizing (see below) — the sole recognition mechanism, superseding earlier hardcoded name matching |
 | `malloc` | GNU (C23: `[[gnu::malloc]]`) | ~ | Parsed and stored (self-describes a fresh, non-aliasing allocator, matching libc's `malloc`/`calloc`/`aligned_alloc`) but not yet wired to any aliasing optimization or nonnull inference — informational only; the aliasing optimizations GCC uses it for need a memory-dependency pass the VM optimizer doesn't have yet (see `__attribute__((malloc))` below) |
-| `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](SAFETY.md#checked-pointers) |
-| `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [SAFETY.md](SAFETY.md#checked-pointers)) |
-| `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](SAFETY.md#checked-pointers) |
-| `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](SAFETY.md#checked-regions) |
+| `single` / `array` / `ntarray` | CCCC (post-`*` position only) | ✓ | Checked C-style checked-pointer kind (#770/#482); see [Checked Pointers](safety.md#checked-pointers) |
+| `count(n)` / `byte_count(n)` / `bounds(lo,hi)` / `bounds(unknown)` | CCCC (post-`*` position only) | ✓ | Checked-pointer bounds declaration (#770/#483); enforced at runtime under `--checked-pointers` (see [safety.md](safety.md#checked-pointers)) |
+| `assume` / `dynamic` | CCCC (post-`*` position, cast type-name only) | ✓ | Converts an unchecked pointer into a checked one: `assume` trusts the claim, `dynamic` verifies it against the source's own bounds; see [Checked Pointers § Bounds casts](safety.md#checked-pointers) |
+| `checked` / `unchecked` | CCCC (function definition or compound statement) | ✓ | Opens a checked/unchecked region: within it, an unchecked pointer declaration or an unsafe pointer cast is a compile error, always on regardless of `--checked-pointers`; see [Checked Regions](safety.md#checked-regions) |
 | `kernel` | CCCC (function) | ✓ | Rejects the function, and everything it calls, if it uses something a Metal or CUDA kernel cannot run; see [GPU Kernel Subset](#gpu-kernel-subset) |
 | `global` / `local` / `constant` / `private` / `generic` | CCCC (declaration specifiers) | ✓ | Marks the address space a pointer refers to, or an object lives in, for `[[cccc::kernel]]` code; see [Address Spaces](#address-spaces) |
 | `vector_size(N)` | GNU | ✓ | Makes the declared scalar type an `N`-byte vector (16, 32 or 64); see [Vector Size](#vector-size) |
@@ -152,7 +152,7 @@ int [[deprecated]] legacy_var;
 
 ### `__attribute__((comptime))` / `[[cccc::comptime]]` (CCCC-specific)
 
-These are CCCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [MACROS.md](MACROS.md) for details.
+These are CCCC's own extensions for compile-time metaprogramming. They are intercepted by the preprocessor and do not reach the general attribute parser. See [macros.md](macros.md) for details.
 
 ```c
 [[cccc::comptime]] int square(int x) { return x * x; }
@@ -176,7 +176,7 @@ Use this when a `[[cccc::comptime]]` helper needs a dependency (e.g.
 int glob_struct_size(void) { return (int)sizeof(glob_t); }
 ```
 
-See [MACROS.md — Comptime-only includes](MACROS.md) for full documentation.
+See [macros.md — Comptime-only includes](macros.md) for full documentation.
 
 ### Preprocessor `[[cccc::emit]]` / `@emit` / `__attribute__((emit))` (CCCC-specific)
 
@@ -210,7 +210,7 @@ int win_helper(void);    // compiled into runtime TU and emitted
 #pragma cccc comptime end
 ```
 
-See [MACROS.md — Emit directives and includes in generated output](MACROS.md) for full documentation.
+See [macros.md — Emit directives and includes in generated output](macros.md) for full documentation.
 
 ### Preprocessor `[[cccc::comptime]]` / `@comptime` / `__attribute__((comptime))` (CCCC-specific)
 
@@ -229,8 +229,8 @@ runtime source:
 `[[cccc::kernel]]` checks that a function could run as a GPU kernel. The check
 runs on the normal CPU build, so kernel-shaped code is caught without a GPU
 toolchain. It does not generate GPU code. To run a kernel over a grid of
-work-items in the VM, see [KERNELS.md](KERNELS.md); for OpenCL C source, see
-[OPENCL.md](OPENCL.md).
+work-items in the VM, see [kernels.md](kernels.md); for OpenCL C source, see
+[opencl.md](opencl.md).
 
 ```c
 #include <stdatomic.h>
@@ -321,7 +321,7 @@ to global `int`. After the `*` it is an error.
 `kernel`, `global`, `local`, `constant`, `private` and `generic` also accept the
 spelling `__name__`, as in `[[cccc::__global__]]`. The two mean the same; the
 underscored one cannot be rewritten by a macro called `global`, which is what
-[OpenCL C](OPENCL.md) defines.
+[OpenCL C](opencl.md) defines.
 
 **Unmarked pointers.** An unmarked pointer parameter of a kernel entry points
 to global memory. An unmarked pointer parameter of a helper takes the space its
@@ -410,7 +410,7 @@ Use `__alignof__(type)` when checking where a vector-bearing member lands.
 
 `__attribute__((cccc_visible_lanes(N)))` on a `vector_size` typedef makes the
 vector store all its lanes but expose only the first `N` to swizzles and
-vector literals. Both exist only in an [OpenCL C](OPENCL.md) input, so the
+vector literals. Both exist only in an [OpenCL C](opencl.md) input, so the
 attribute has no visible effect in plain C. `N` must be less than the lane
 count, or it is ignored. OpenCL C uses it for the three-lane types:
 
@@ -941,13 +941,13 @@ the bounds-carry-within-an-expression semantics, the whole-function
 propagation rule that lets an interior pointer assigned into a plain local
 (`int *q = p + k;`) stay checked too (#919), and why this exists
 (`--bounds-checks`/`CHKB` has no upper bound at all for a stack or global
-array): [SAFETY.md § Checked Pointers](SAFETY.md#checked-pointers).
+array): [safety.md § Checked Pointers](safety.md#checked-pointers).
 
 Enforcement is VM-only: `-c=native`/`-m`/`-c=generated` warn and drop
 `--checked-pointers` rather than enforcing it, but the six attributes are
 always parsed, type-checked, and stripped from that output regardless (ABI-
-transparent, #482/#488) — see [SAFETY.md § Checked
-Pointers](SAFETY.md#checked-pointers) for the full native/serialized-output
+transparent, #482/#488) — see [safety.md § Checked
+Pointers](safety.md#checked-pointers) for the full native/serialized-output
 note.
 
 **Bounds-safe interfaces** (#488): annotating a *parameter* with any of
@@ -958,8 +958,8 @@ interface. At every call site whose argument is itself declared-checked,
 CCCC verifies (via the same `CHKAB` opcode above, under
 `--checked-pointers`) that the argument's own bounds imply the parameter's
 declared bounds evaluated with that call's actual arguments — closing the
-one caller-side gap this layer otherwise left. See [SAFETY.md § Bounds-safe
-interfaces](SAFETY.md#checked-pointers) for the full reference, including
+one caller-side gap this layer otherwise left. See [safety.md § Bounds-safe
+interfaces](safety.md#checked-pointers) for the full reference, including
 the substitutability rule for non-trivial arguments and the same-TU
 callee-body caveat.
 
@@ -968,7 +968,7 @@ directly — `int a _Checked[10]` / `char s _Nt_checked[11]` — so an array's o
 extent is checked the same way a checked pointer's `count(n)` is, with no new
 opcode. These are keyword-positional suffixes (like `_Checked { ... }`/
 `_Unchecked { ... }` below), not attributes, so they have no `[[cccc::...]]`
-spelling. See [SAFETY.md § Checked Arrays](SAFETY.md#checked-arrays) for the
+spelling. See [safety.md § Checked Arrays](safety.md#checked-arrays) for the
 full reference.
 
 ### `assume` / `dynamic` (CCCC-specific)
@@ -996,8 +996,8 @@ declared-checked bounds — a compile error if the source has no verifiable
 bounds to check against (`use 'assume' ... or give the source a bounds
 declaration`), rather than silently falling back to `--bounds-checks`,
 which has no upper bound at all for a stack or global source (see "Why
-this exists" in [SAFETY.md § Checked
-Pointers](SAFETY.md#checked-pointers)).
+this exists" in [safety.md § Checked
+Pointers](safety.md#checked-pointers)).
 
 Both require a checked kind (`single`/`array`/`ntarray`); with `array`/
 `ntarray` a bounds form is also required (`bounds(unknown)` is accepted for
@@ -1010,8 +1010,8 @@ ban, no `[[cccc::unchecked]] { ... }` escape needed around them. Gated the
 same way as the rest of runtime enforcement: with `--checked-pointers` off,
 an annotated cast stays a plain cast. Full reference, including the
 compiler-generated-temp desugaring and the v1 scope (a cast expression
-only, not a function argument or return value): [SAFETY.md § Checked
-Pointers § Bounds casts](SAFETY.md#checked-pointers).
+only, not a function argument or return value): [safety.md § Checked
+Pointers § Bounds casts](safety.md#checked-pointers).
 
 ### `dynamic_check` (CCCC-specific)
 
@@ -1027,8 +1027,8 @@ it is only evaluated under the flag, and a future static-elision pass may
 consume it as a proven fact without evaluating it at all (tracked as a
 follow-up). `_Dynamic_check` is recognized positionally (an identifier not
 already in scope, immediately followed by `(`), so it never shadows a real
-function of that name. Full reference: [SAFETY.md § Checked Pointers §
-`dynamic_check`](SAFETY.md#checked-pointers).
+function of that name. Full reference: [safety.md § Checked Pointers §
+`dynamic_check`](safety.md#checked-pointers).
 
 ### `checked` / `unchecked` (CCCC-specific)
 
@@ -1062,8 +1062,8 @@ enables are **always on** — never gated behind `--checked-pointers` — and
 fire in `-c=native` too; the attributes themselves are stripped from
 `-E`/`-m`/`-c=generated`/`-c=native` output the same way the six
 checked-pointer attributes are. Full reference, including the exact v1 ban
-list and the header-contamination exemption: [SAFETY.md § Checked
-Regions](SAFETY.md#checked-regions).
+list and the header-contamination exemption: [safety.md § Checked
+Regions](safety.md#checked-regions).
 
 ---
 
@@ -1122,7 +1122,7 @@ the canonical attribute form before parsing:
 | `@name` (custom comptime) | handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 
 The ready-made custom attributes (`@serialize`, `@enum_to_string`,
-`@accessors`, ...) are listed in [DERIVE.md](DERIVE.md).
+`@accessors`, ...) are listed in [derive.md](derive.md).
 
 Resolution order: CCCC-specific attributes are checked first (they become
 `[[cccc::name(...)]]`), then standard C23 attributes (they become
@@ -1176,10 +1176,10 @@ Custom comptime attributes run on file-scope declarations (types, typedefs,
 functions, and globals) and on members of file-scope structs and unions. Their
 arguments are parsed as expression AST nodes and passed to the registered
 handler after the decorated target has been built; the handler reads them with
-`StringLiteralValue` and `ConstIntValue` ([MACROS.md](MACROS.md#custom-attributes)). Member attributes are
-described in [MACROS.md](MACROS.md#member-attributes). An `@name` with no
+`StringLiteralValue` and `ConstIntValue` ([macros.md](macros.md#custom-attributes)). Member attributes are
+described in [macros.md](macros.md#member-attributes). An `@name` with no
 registered handler is dropped with a `-Wunknown-attributes` warning, which is
-on by default ([WARNINGS.md](WARNINGS.md)).
+on by default ([warnings.md](warnings.md)).
 `__declspec` (Windows) is reserved as a future fourth fallback category.
 
 ## Position in Grammar

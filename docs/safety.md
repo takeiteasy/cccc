@@ -122,7 +122,7 @@ Safety levels are **additive** - you can combine a preset level with individual 
 
 ### Smoke-testing before a real compile: `--test-run[=LEVEL]`
 
-`--test-run[=LEVEL]` (see [TEST_MODE.md](TEST_MODE.md#--test-runlevel-smoke-test-the-program-itself-before-compiling)) reuses these same preset names/levels (`LEVEL` accepts `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`, defaulting to `max`) to run the program once under the VM's safety instrumentation before handing it to `-c=native`. It's a way to get this level's crash/safety-violation coverage as a pre-compile gate — e.g. `-1`/`--safety=basic`'s low-overhead checks as a cheap CI smoke test before every native build — without needing a `[[cccc::test]]` suite.
+`--test-run[=LEVEL]` (see [testing.md](testing.md#--test-runlevel-smoke-test-the-program-itself-before-compiling)) reuses these same preset names/levels (`LEVEL` accepts `none`/`basic`/`standard`/`max` or `0`/`1`/`2`/`3`, defaulting to `max`) to run the program once under the VM's safety instrumentation before handing it to `-c=native`. It's a way to get this level's crash/safety-violation coverage as a pre-compile gate — e.g. `-1`/`--safety=basic`'s low-overhead checks as a cheap CI smoke test before every native build — without needing a `[[cccc::test]]` suite.
 
 ---
 
@@ -903,7 +903,7 @@ $ echo $?
 
 ### Threading Safety
 
-The VM runs one guest thread at a time under a global lock; see [THREADING.md](THREADING.md). The following threading-aware features are available:
+The VM runs one guest thread at a time under a global lock; see [threading.md](threading.md). The following threading-aware features are available:
 
 **GIL release around blocking POSIX calls**
 
@@ -1078,7 +1078,7 @@ Enable with `--thread-safety`. Intended for development and testing — not enab
   array/struct/union reached through an opaque pointer, using the exact
   same max-epoch resolution and live-epoch trust check as layer 3 above.
   Using that builtin anywhere in the program activates this bookkeeping on
-  its own, independently of `-1`/`-2`/`-3` — see [STDLIB.md](STDLIB.md)'s
+  its own, independently of `-1`/`-2`/`-3` — see [stdlib.md](stdlib.md)'s
   `__builtin_dynamic_object_size` entry.
 - **Lazy per-function push:** activation is scoped to the functions
   that actually need it, not every call in the program. `ENT3` pushes a
@@ -1919,7 +1919,7 @@ A call gets no check at all unless **both** hold:
   must have no side effects" reason. `sink(small, 8)` (a literal) and
   `sink(small, len)` (a plain variable) both qualify; `sink(small, f())` and
   `sink(small, i++)` are silently declined — exactly the same trade-off
-  `docs/SAFETY.md`'s member-bounds section already makes for `f()->p[i]`: an
+  `docs/safety.md`'s member-bounds section already makes for `f()->p[i]`: an
   extra evaluation of a side-effecting expression is not an acceptable
   price for a check.
 
@@ -2121,7 +2121,7 @@ a[n]; // traps under --checked-pointers; CHKB cannot catch this at all
 ```
 
 **Terminator invariant**. `ntarray`'s bounds widening
-(`docs/SAFETY.md`'s `ntarray` row above) makes a one-element terminator slot
+(`docs/safety.md`'s `ntarray` row above) makes a one-element terminator slot
 writable at the end of the declared range, but it says nothing about what
 may legally be written there. Two opcodes close the soundly-checkable part
 of that gap: `CHKNT` traps a store of a **non-zero** value into the widened
@@ -2508,7 +2508,7 @@ The allow/deny/disable policy applies to registered FFI calls and runtime
 native symbols returned by VM-managed `dlsym`.
 
 Comptime code has its own capability classes on top of these flags; see
-[COMPTIME_POLICY.md](COMPTIME_POLICY.md).
+[comptime-policy.md](comptime-policy.md).
 
 
 ### `--ffi-allow=func1,func2` — FFI function whitelist
@@ -2583,7 +2583,7 @@ PC offset:  12
 - `dlopen` returns `NULL` and `dlerror()` reports the flag
 - Overrides both allow and deny lists
 - Compiler builtins used by `[[cccc::comptime]]` code stay callable
-- Not a sandbox: see [SECURITY.md](SECURITY.md) for the whole model and `--sandbox`
+- Not a sandbox: see [security.md](security.md) for the whole model and `--sandbox`
 
 #### Example
 

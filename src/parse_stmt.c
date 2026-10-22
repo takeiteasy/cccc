@@ -1011,7 +1011,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             // #1249: an eager Quote()/QuoteN() template is parsed
             // immediately, at the Quote() call site, against whatever loop
             // context happens to be live there -- not the loop it is later
-            // spliced/attached into (see docs/MACROS.md, "Deferred templates
+            // spliced/attached into (see docs/macros.md, "Deferred templates
             // with QuoteLazy"). Point at the fix instead of leaving the
             // reporter to wonder why a `break` inside what looks like a loop
             // body is "stray".
@@ -1093,7 +1093,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     // either spelling is never reclassified this way, at the cost of not
     // covering declarator-suffix position (`void f(void) _Checked { ... }`,
     // already covered by [[cccc::checked]]) in this pass. See
-    // docs/SAFETY.md's Checked Regions section.
+    // docs/safety.md's Checked Regions section.
     if (tok->kind == TK_IDENT && equal(tok->next, "{") &&
         (equal(tok, "_Checked") || equal(tok, "_Unchecked"))) {
         CheckedScope want =

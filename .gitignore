@@ -31,7 +31,4 @@ tools/*.zip
 build/intel-bid/
 # Internal docs: kept on disk for contributors, not part of the published
 # user-facing guide set. See CLAUDE.md's Documentation section.
-/docs/TESTING.md
-/docs/VM.md
-/docs/RELEASING.md
-/docs/FUZZING.md
+/docs/internal-*.md

@@ -61,7 +61,7 @@ A project can list the classes it needs in its `.cccc.toml` instead of repeating
 comptime-allow = ["fs", "exec"]
 ```
 
-cccc applies the line only after you approve it (`cccc --trust`, or `y` at the prompt), and prints what it grants. A line in your own user config applies without approval. See [CONFIG.md](CONFIG.md).
+cccc applies the line only after you approve it (`cccc --trust`, or `y` at the prompt), and prints what it grants. A line in your own user config applies without approval. See [config.md](config.md).
 
 ## Combining with the FFI flags
 
@@ -175,7 +175,7 @@ error: node is already in another list; use CopyNode to build a separate node fo
 
 `CopyNode` copies expressions, calls, `if`, loops, `switch` with its cases, labels and `goto`, `return`, expression statements and blocks, including their declarations (`cleanup` variables and variable-length arrays too).[^2] Each copy has its own labels, `break`/`continue` targets, local variables, cleanup handlers and array sizes. A node in an expression tree can still be shared without a copy.
 
-Libc calls you grant with `--comptime-allow` and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [SECURITY.md](SECURITY.md).
+Libc calls you grant with `--comptime-allow` and pointers stored inside the buffers of calls not listed above are still trusted, so compile untrusted code with `--sandbox`. See [security.md](security.md).
 
 [^1]: The check runs on each native call by name, in `cccc_check_ffi_policy` and the `dlopen`/`dlsym` opcodes. Names live in `src/comptime_policy.c`, and each safe name's pointer arguments in `src/comptime_args.c`; a new libc binding needs a row in both, which `tests/host/test_comptime_policy.c` enforces.
 [^2]: A copy that declares or needs a local (a variable, a compound assignment, a struct-returning call) must run inside a function (use `WithFn` otherwise). A `goto` to a label outside the copy is bound again by name where the copy is placed. `static` locals and checked-pointer declarations are refused. A copy that only reads an enclosing variable-length array shares its size.

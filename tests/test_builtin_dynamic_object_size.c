@@ -1,5 +1,5 @@
 // CCCC_LEAKS_KEEP_VM_HEAP
-// CCCC_NATIVE_SKIP: __builtin_dynamic_object_size reads the VM allocation header (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: __builtin_dynamic_object_size reads the VM allocation header (native.md divergences)
 // CCCC_FLAGS: --testing
 // Not run natively: __builtin_dynamic_object_size lowers to clang's own
 // builtin natively, which lacks CCCC's VM-level frame-epoch/AllocHeader
@@ -444,7 +444,7 @@ void test_dynobj_stack_dangling_conservative(void) {
 // that tail-call shape lets the optimizer lower it to CALLT, which retires
 // *this* frame's epoch before the callee runs (correct: TCO hands this
 // frame's stack memory to the callee immediately, so a still-live epoch
-// here would be a lie -- see docs/SAFETY.md's #675 interval note). A
+// here would be a lie -- see docs/safety.md's #675 interval note). A
 // non-tail-call keeps this frame nested and its epoch live for the
 // duration of the call, which is what this test means to exercise.
 static size_t recurse_and_size(int depth) {

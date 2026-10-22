@@ -3,7 +3,7 @@
 The CCCC VM includes an interactive, source-level debugger for step-by-step
 program execution and inspection, plus an auto-debug-on-crash mode and a
 programmatic source-map API. For the top-level read-eval-print loop, see
-[REPL.md](REPL.md).
+[repl.md](repl.md).
 
 **Enable with:** `-g` or `--debug` flags
 
@@ -26,7 +26,7 @@ When enabled, the debugger provides a powerful GDB-like interface for controllin
     - `rwatch <addr>`: Break on read.
     - `awatch <addr>`: Break on read or write.
 - **Execution Control**: Full control over program flow with commands to step into (`step`), step over (`next`), and step out of (`finish`) functions.
-- **State Inspection**: Inspect VM registers, the call stack, and raw memory at any address. The debugger tracks local and global variable names, allowing them to be used in expressions. `print <variable>` resolves a live local or global by name and formats its value the same way the [REPL](REPL.md#result-formatting)'s expression results are formatted -- scalars directly, and struct/union/array/vector values recursively, field by field, in lldb-style multi-line braces (both share the `cc_dump_value` formatter in `src/dump.c`).
+- **State Inspection**: Inspect VM registers, the call stack, and raw memory at any address. The debugger tracks local and global variable names, allowing them to be used in expressions. `print <variable>` resolves a live local or global by name and formats its value the same way the [REPL](repl.md#result-formatting)'s expression results are formatted -- scalars directly, and struct/union/array/vector values recursively, field by field, in lldb-style multi-line braces (both share the `cc_dump_value` formatter in `src/dump.c`).
 
 ## Debugger Commands
 
@@ -224,13 +224,13 @@ a file that adds or edits comptime code:
 last file's scope. Embedders call `cc_debug_reload(vm, path)`.
 
 `cccc --watch` runs this reload on every save, without the debugger; see
-[WATCH.md](WATCH.md).
+[watch.md](watch.md).
 
 ## `print` and live-stack address validation
 
 `print`/`p` (and the recursive struct/union/array/vector formatting it uses)
 shares the same pointer-validation check the REPL's
-[result formatting](REPL.md#result-formatting) relies on: every address is checked
+[result formatting](repl.md#result-formatting) relies on: every address is checked
 against the VM's live text/data/heap/stack segments before being
 dereferenced, so an uninitialized or garbage member prints as a bare hex
 address instead of crashing the debugger session.
@@ -396,8 +396,8 @@ shim that resolves a VM bytecode offset through the VM's own symbol/source-map
 table — neither exists natively, so both are a hard compile error under
 `-c=native`/`-m`/`-c=generated`. `__builtin_return_address` alone still
 serializes and runs there, mapping to a real host return address instead of a
-VM bytecode offset — see [NATIVE.md § Serialized-output
-divergences](NATIVE.md#serialized-output-divergences).
+VM bytecode offset — see [native.md § Serialized-output
+divergences](native.md#serialized-output-divergences).
 
 ### Embedder C API
 
@@ -480,7 +480,7 @@ expansion has one. What generated code does carry is an **expansion
 origin**: the chain of macro calls / attribute handlers / file-scope
 generation that produced it, walked by the diagnostic printer to render
 the `note: in expansion of ...` chain described in
-[MACROS.md § Expansion backtrace](MACROS.md#expansion-backtrace). This is
+[macros.md § Expansion backtrace](macros.md#expansion-backtrace). This is
 compiler-diagnostics plumbing, not part of the source-map/PC-symbolization
 API above — it isn't queryable through `cc_pc_to_source`/
 `cc_get_source_location`, only surfaced on a compile error or warning.

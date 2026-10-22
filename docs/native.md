@@ -41,7 +41,7 @@ cccc -c=native -o program a.c b.c c.c   # multiple inputs, one program
 `-c=native` is whole-program: pass any number of source files in one
 invocation and the front end links their ASTs into a single program before
 serializing one temporary `.c` and spawning the host `cc` once. This is the
-shape a [`CcccExecutable` build target](BUILD_MODE.md#target-kinds) drives.
+shape a [`CcccExecutable` build target](build.md#target-kinds) drives.
 
 The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 `gcc` found on `PATH`. To run the result, invoke it directly: `./program`.
@@ -51,8 +51,8 @@ The host compiler is `CCCC_NATIVE_CC` if set, else the first of `cc`, `clang`,
 A program compiled with `-c=native` (or `-m`/`-c=generated`) may also carry
 its own inline `[[cccc::test]]` functions and/or a
 `[[cccc::build]]`/`[[cccc::build_target]]` recipe — see
-[BUILD_MODE.md's Build recipes in a program file](BUILD_MODE.md#build-recipes-in-a-program-file)
-and [TEST_MODE.md](TEST_MODE.md). Under plain `-c=native` (not
+[build.md's Build recipes in a program file](build.md#build-recipes-in-a-program-file)
+and [testing.md](testing.md). Under plain `-c=native` (not
 `--testing=native`) the two kinds are treated differently:
 
 - `[[cccc::test]]` bodies **are emitted**, alongside the same
@@ -75,7 +75,7 @@ in-memory table, do not appear). It is accepted only alongside `-c=native`,
 `-m`, or `-c=generated`, and never runs the program. A build system reads it
 to know which headers a `-c=native` compile depends on, the same way it would
 read a host `cc`'s `-MMD` output; `--build` mode uses it internally to give
-[`CcccExecutable` targets](BUILD_MODE.md#incremental-builds-and-header-dependencies)
+[`CcccExecutable` targets](build.md#incremental-builds-and-header-dependencies)
 automatic header-dependency tracking.
 
 ### Flags forwarded to the host compiler
@@ -121,7 +121,7 @@ dropped; pass them when linking the object. `--test-run` and
 `--testing=native` need an executable and cannot be combined with it.
 Repeating `-c` with a different format (`-c=native -c=object`) is an error.
 A `--build` script gets the same output from a
-[`CcccObject` target](BUILD_MODE.md#target-kinds).
+[`CcccObject` target](build.md#target-kinds).
 
 ### How `--std=` is handled
 
@@ -174,16 +174,16 @@ REPL (`-r`), and the `-0`…`-3` safety levels. Run those against the default
 VM build. The VM's runtime safety options (`--bounds-checks`,
 `--uaf-detection`, …) are dropped with a warning; `--checked-pointers` is
 the exception and is enforced in the emitted C under `-c=native` and `-m` —
-see [SAFETY.md](SAFETY.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
+see [safety.md](safety.md#checked-pointers). `--vm-profile` is accepted and reports only the comptime code that
 ran during the build — see
-[Profiling comptime code](MACROS.md#profiling-comptime-code).
+[Profiling comptime code](macros.md#profiling-comptime-code).
 
 Plain runtime `#include <stdio.h>` and other real system headers work here —
-see [HEADERS.md](HEADERS.md) for how header resolution and host-header
+see [headers.md](headers.md) for how header resolution and host-header
 hand-off change under native mode. A URL `#include` (curl-enabled builds
 only), anywhere in the include graph, resolves against a `-idirafter`
 CCCC forwards automatically — see
-[HEADERS.md's URL includes section](HEADERS.md#url-includes-under--c=native-m-c=generated).
+[headers.md's URL includes section](headers.md#url-includes-under--cnative-m-cgenerated).
 
 ## What `-c=native` refuses to lower
 
@@ -246,8 +246,8 @@ left to be discovered:
 | Construct | Under the VM | Under `-c=native` |
 |---|---|---|
 | `asm(...)` | no-op by default; `--asm-passthru` compiles + calls via FFI | emitted verbatim and executed by the host binary |
-| file-scope `asm("...");` | no-op (`-Wignored-features`); `--asm-passthru` assembles it into the host library, whose symbols the VM cannot reference | emitted verbatim as `__asm__("...");` (see [INLINE_ASM.md](INLINE_ASM.md#file-scope-asm)) |
-| extended `asm(... : outputs : inputs : clobbers : labels)` | no-op: outputs keep their value, `asm goto` never jumps; `--asm-passthru` runs it on the host with operands passed by address (see [INLINE_ASM.md](INLINE_ASM.md)) | emitted verbatim with its qualifiers (`volatile`, `inline`, `goto`), operands, clobbers and labels; executed by the host binary |
+| file-scope `asm("...");` | no-op (`-Wignored-features`); `--asm-passthru` assembles it into the host library, whose symbols the VM cannot reference | emitted verbatim as `__asm__("...");` (see [inline-asm.md](inline-asm.md#file-scope-asm)) |
+| extended `asm(... : outputs : inputs : clobbers : labels)` | no-op: outputs keep their value, `asm goto` never jumps; `--asm-passthru` runs it on the host with operands passed by address (see [inline-asm.md](inline-asm.md)) | emitted verbatim with its qualifiers (`volatile`, `inline`, `goto`), operands, clobbers and labels; executed by the host binary |
 | `__builtin_return_address(n)` | a VM bytecode offset cast to `void*` | a real host return address — same meaning, unrelated numeric value |
 | `__builtin_dynamic_object_size` | reads the VM allocation header, always exact; `type` 1/3 also caps at the named member, including a union member or a struct's last array | the host builtin — exact only when the host optimizer can see the allocation (`-O2`), else "unknown"; `type` 1/3 caps at the named member, but a union member or a struct's last array is "unknown" |
 | `__builtin_unreachable` / `__builtin_trap` / `__builtin_debugtrap` | all trap | all emit `__builtin_trap()` |
@@ -321,7 +321,7 @@ use the same byte-granular path.
 
 ## See also
 
-- [HEADERS.md](HEADERS.md) — header resolution and host-header hand-off.
-- [COVERAGE.md](COVERAGE.md) — the C language surface CCCC accepts.
-- [BUILD_MODE.md](BUILD_MODE.md) — `--build` scripts can produce native
+- [headers.md](headers.md) — header resolution and host-header hand-off.
+- [coverage.md](coverage.md) — the C language surface CCCC accepts.
+- [build.md](build.md) — `--build` scripts can produce native
   targets, and a `CcccExecutable` target drives `-c=native` directly.

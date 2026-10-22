@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: __builtin_return_address is a VM bytecode offset (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: __builtin_return_address is a VM bytecode offset (native.md divergences)
 // CCCC_FLAGS: --testing
 // Not run natively: asserts cc_run_at's sentinel-0 outermost-frame value and
 // a level-9999 walk returning NULL -- both are VM frame semantics; natively

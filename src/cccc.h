@@ -515,7 +515,7 @@ extern "C" {
                     free declaration; scanning [lo,hi) would false-positive          \
                     on it, and finding the *real* terminator requires                \
                     reading past hi, the exact unbounded read this feature           \
-                    exists to prevent). See docs/SAFETY.md's Checked Pointers        \
+                    exists to prevent). See docs/safety.md's Checked Pointers        \
                     section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */          \
     X(CHKNTZ, 3) /* Checked-pointer null-terminator guard for the                    \
                    memcpy-lowered [[cccc::ntarray]] pointees CHKNT cannot            \
@@ -579,7 +579,7 @@ extern "C" {
                     now-updated, value) -- the inverse ordering from CHKR's          \
                     snapshot-before-store propagation temps. Only emitted            \
                     for a declared-checked (not #941-propagated) rhs; see            \
-                    docs/SAFETY.md's Checked Pointers section for the v1             \
+                    docs/safety.md's Checked Pointers section for the v1             \
                     scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */            \
     /* #982: appended (never interleaved -- see the rule stated above CHKR)          \
        so no existing opcode renumbers. */                                           \
@@ -1441,7 +1441,7 @@ typedef enum {
 
 // Which bounds form a CHECKED_ARRAY/CHECKED_NTARRAY pointer's declaration
 // used, all desugared to a single [lo, hi) range at the checked-access site
-// (src/parse.c) -- see docs/SAFETY.md for the desugaring table. CB_UNKNOWN is
+// (src/parse.c) -- see docs/safety.md for the desugaring table. CB_UNKNOWN is
 // the bounds(unknown) escape hatch: the checked kind is recorded but no
 // runtime check is ever emitted for it.
 typedef enum {
@@ -1459,7 +1459,7 @@ typedef enum {
 // (a declarator with a non-CC_NONE kind is a compile error, caught in
 // declarator()'s post-pointers() check, src/parse_types.c). Both are
 // the sanctioned way to move an unchecked pointer into the checked world;
-// see docs/SAFETY.md's "Bounds casts" section for the full semantics.
+// see docs/safety.md's "Bounds casts" section for the full semantics.
 typedef enum {
     CC_NONE = 0, // not a bounds cast (the ordinary case)
     CC_ASSUME,   // [[cccc::assume]]  -- take the claimed bounds on trust,
@@ -2310,7 +2310,7 @@ struct Node {
     // store deref/ND_CAS node described above -- still never propagated
     // across an ordinary assignment by #919's propagate_checked_bounds()
     // (checked_prop_attach_scan() leaves it false), which is a separate,
-    // still-open gap (docs/SAFETY.md).
+    // still-open gap (docs/safety.md).
     bool checked_nt_terminator;
 
     // #942: true when checked_bounds_lo/hi were attached by
@@ -2523,7 +2523,7 @@ struct Obj {
     // (safe: LEA3 records into vm->stack_ptr_epochs unless this is proven
     // true) -- any address-of this scan fails to classify simply stays
     // recorded, so under-approximation here can only cost a wasted hashmap
-    // entry, never reintroduce the #673 false negative. See docs/SAFETY.md.
+    // entry, never reintroduce the #673 false negative. See docs/safety.md.
     bool addr_escapes;
 
     // Uninitialized-variable-read false-positive fix (#1008). Set by the
@@ -2540,7 +2540,7 @@ struct Obj {
     // struct/union/array/wide-_BitInt/_Decimal locals there (#402/#457).
     // Defaults to false; under-marking here just leaves the false positive
     // in place, over-marking costs an accepted false negative. See
-    // docs/SAFETY.md.
+    // docs/safety.md.
     bool addr_taken;
 
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
@@ -4001,7 +4001,7 @@ typedef enum {
  qualifiers (see is_compatible_qualified(), src/type.c). Default is gcc --
  today's behaviour, unchanged for anyone who does nothing. `AUTO` is resolved
  before parsing (from CCCC_NATIVE_CC's family) and never stored. See
- docs/TYPES.md.
+ docs/types.md.
 */
 typedef enum {
     CCCC_COMPILER_FAMILY_GCC,
@@ -5686,7 +5686,7 @@ char *new_unique_name(VirtualMachine *vm);
 // (which owns the index's data structures); cc_parse_splice_range is
 // defined in src/parse.c (which owns the reentrant declaration parser) and
 // called back into from macros.c's resolvers below. See "Pre-parse macro
-// declaration context" in docs/MACROS.md.
+// declaration context" in docs/macros.md.
 bool cc_parse_splice_range(VirtualMachine *vm, Token *tok);
 bool cc_comptime_resolve_typename(VirtualMachine *vm, Token *name_tok);
 bool cc_comptime_resolve_tag(VirtualMachine *vm, Token *name_tok);

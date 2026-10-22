@@ -80,7 +80,7 @@ included. Pointer members are copied as raw pointer bytes. Padding is not
 written, and `Point_deserialize` zeroes the padding of the value it returns.
 
 The `Serialize(type, expr, buf)` and `Deserialize(type, buf)` builders behind
-these attributes are described in [MACROS.md](MACROS.md#macro-standard-library).
+these attributes are described in [macros.md](macros.md#macro-standard-library).
 
 ## Enum Strings
 
@@ -584,14 +584,14 @@ single-bit constant names (0x4)`) and a struct or union target. A prefix names t
 ## Writing your own
 
 Handlers for your own attributes use the same mechanism
-(`@comptime(attribute("name"))`); see [ATTRIBUTES.md](ATTRIBUTES.md) and
-[MACROS.md](MACROS.md). The first handler registered for a name wins, so a
+(`@comptime(attribute("name"))`); see [attributes.md](attributes.md) and
+[macros.md](macros.md). The first handler registered for a name wins, so a
 handler you define for a name above, before `#include <cccc/derive.h>` (or
 without the include), replaces the built-in one.
 
 A handler for a struct reads the attributes on its members with
 `MemberHasAttr` and `MemberAttrArg`; see
-[Member attributes](MACROS.md#member-attributes).
+[Member attributes](macros.md#member-attributes).
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
 

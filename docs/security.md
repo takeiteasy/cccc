@@ -17,7 +17,7 @@ Grants come from the command line or from a config you approved. Source code, at
 
 | Path | Needs | Notes |
 |---|---|---|
-| Comptime `fopen`, `system`, `socket`, `getenv`, `dlopen`, … | `--comptime-allow=fs,exec,net,env,dlopen` | See [COMPTIME_POLICY.md](COMPTIME_POLICY.md) |
+| Comptime `fopen`, `system`, `socket`, `getenv`, `dlopen`, … | `--comptime-allow=fs,exec,net,env,dlopen` | See [comptime-policy.md](comptime-policy.md) |
 | `asm` statements under `--asm-passthru` | `--comptime-allow=all` at comptime | Thunks run host assembly |
 | `#include`/`#embed <https://…>` | `--allow-url` | A URL already in the cache resolves without it; `__has_include` never downloads without it |
 | `dlopen` in the running program | Not being under `--disable-ffi` | `--disable-ffi` makes it return `NULL` |
@@ -63,7 +63,7 @@ cccc --sandbox --sandbox-read=/data prog.c     # also let the run read /data
 - `--sandbox` cannot be combined with `--allow-url`.
 - If the platform cannot enforce the sandbox, cccc stops with `error: --sandbox unavailable: …` rather than running unconfined.[^1]
 
-Put `sandbox = true` in `~/.config/cccc/config.toml` to confine every run. A project config can turn it on but cannot turn it off. See [CONFIG.md](CONFIG.md).
+Put `sandbox = true` in `~/.config/cccc/config.toml` to confine every run. A project config can turn it on but cannot turn it off. See [config.md](config.md).
 
 ## Running an untrusted repository
 

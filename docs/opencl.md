@@ -1,7 +1,7 @@
 # OpenCL C
 
 `cccc kernel.cl` reads OpenCL C 1.2 kernels and runs them on the
-[kernel model](KERNELS.md): in the VM with its bounds and safety checks, or on
+[kernel model](kernels.md): in the VM with its bounds and safety checks, or on
 CPU threads under `-c=native`. Host code in the same file starts a kernel with
 `cccc_launch`.
 
@@ -44,7 +44,7 @@ are available without an `#include`.[^prelude]
 ## Qualifiers
 
 Both spellings of each qualifier work. They map onto the attributes in
-[Address Spaces](ATTRIBUTES.md#address-spaces), whose rules apply unchanged.
+[Address Spaces](attributes.md#address-spaces), whose rules apply unchanged.
 
 | OpenCL C | cccc |
 |---|---|
@@ -141,7 +141,7 @@ __kernel void count(__global int *total, __global int *first) {
 
 A three-lane type is stored as four lanes, so `sizeof(float3)` is 16, and it
 exposes three. Arithmetic, comparisons and a scalar broadcast follow the GNU
-vector rules in [COVERAGE.md](COVERAGE.md).
+vector rules in [coverage.md](coverage.md).
 
 ### Components
 
@@ -205,7 +205,7 @@ enforced; the launch's local size is the one that applies.
   [#1388](https://todo.sr.ht/~takeiteasy/cccc/1388)).
 - Images and samplers are not supported.
 - `double` is rejected in kernel code, as in
-  [GPU Kernel Subset](ATTRIBUTES.md#gpu-kernel-subset).
+  [GPU Kernel Subset](attributes.md#gpu-kernel-subset).
 
 ---
 

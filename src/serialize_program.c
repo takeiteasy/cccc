@@ -93,7 +93,7 @@ static void serialize_decimal_native_guard(FILE *f, SerializeContext *ctx) {
     fprintf(f, "#if !defined(__DEC64_MAX__)\n"
                "#error \"cccc: _Decimal32/64/128 has no native/-m lowering "
                "on this host compiler (GNU decimal extension; gcc only). "
-               "See docs/NATIVE.md.\"\n"
+               "See docs/native.md.\"\n"
                "#endif\n\n");
 }
 
@@ -876,7 +876,7 @@ static bool type_reaches_group(Type *ty, Type *group_ty) {
 // renaming; this pass still renames deterministically (first-created wins)
 // rather than leaving the collision maximally ambiguous, and the host
 // compiler is left to report whatever residual conflict remains (see
-// docs/NATIVE.md's serialized-output-divergences section).
+// docs/native.md's serialized-output-divergences section).
 //
 // Renames every non-keeper group's records -- both in ctx->tags (spelling)
 // and in ctx->typedefs (a `typedef struct DyGC DyGC;` written in the .c
@@ -1538,7 +1538,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             // already established). The residual Obj-vs-header conflict is
             // genuinely unrepresentable in flat C (neither name can be
             // renamed without breaking something else) and is left for the
-            // host compiler to report; see docs/NATIVE.md. #1017: at
+            // host compiler to report; see docs/native.md. #1017: at
             // least point at it first, since the host compiler's own
             // diagnostic names a deleted /tmp temp file under -c=native
             // with no indication cccc's renamer is involved. Guard
@@ -4170,7 +4170,7 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           // #1033: when -I./include is on the compile line (as
           // the test targets always pass it), CCCC's own bundled
           // signal.h/sys/wait.h -- polyfills for VM-internal use, see
-          // docs/HEADERS.md -- shadow the real host headers. That's merely
+          // docs/headers.md -- shadow the real host headers. That's merely
           // inconvenient for the missing kill() prototype below, but
           // outright breaks the build under a per-test `--std=c89
           // -Wpedantic`: the bundled signal.h uses the C99 `restrict`

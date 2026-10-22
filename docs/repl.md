@@ -2,7 +2,7 @@
 
 CCCC includes an interactive top-level read-eval-print loop for typing C
 declarations and expressions directly at a prompt, distinct from the
-breakpoint-time [interactive debugger](DEBUGGER.md) (which
+breakpoint-time [interactive debugger](debugger.md) (which
 inspects an already-running program, not a persistent session of its own).
 
 **Enable with:** `-r` or `--repl` (takes no input file). Note that `-r` was
@@ -57,8 +57,8 @@ session:
 | `:help` | Show session commands. |
 | `:type <expr>` | Print the type of `<expr>` without evaluating it. |
 | `:load <file>` | Read declarations/expressions from `<file>`, one logical unit at a time. |
-| `:reload <file>` | Re-read a file loaded with `:load` after editing it, redefining the functions that changed. Rules as in [Reloading a file](DEBUGGER.md#reloading-a-file). |
-| `:quit` | Exit the REPL. With `--watch`, files read by `:load` reload when saved; see [WATCH.md](WATCH.md#in-the-repl). |
+| `:reload <file>` | Re-read a file loaded with `:load` after editing it, redefining the functions that changed. Rules as in [Reloading a file](debugger.md#reloading-a-file). |
+| `:quit` | Exit the REPL. With `--watch`, files read by `:load` reload when saved; see [watch.md](watch.md#in-the-repl). |
 
 ## Result formatting
 
@@ -137,7 +137,7 @@ session back like any other failing line.
 Each call to a redefined function costs one extra jump.[^jump]
 
 The debugger redefines functions of a program stopped under `-g` the same way:
-see [Edit and continue](DEBUGGER.md#edit-and-continue).
+see [Edit and continue](debugger.md#edit-and-continue).
 
 ### Embedding
 

@@ -1,6 +1,6 @@
 /*!
  * @file omp.h
- * @brief OpenMP runtime API for `-fopenmp`. See docs/OPENMP.md.
+ * @brief OpenMP runtime API for `-fopenmp`. See docs/openmp.md.
  *
  * In the VM parallel regions run on one thread, so the team is always the
  * initial thread and locks cannot contend. `-c=native`, `-m` and

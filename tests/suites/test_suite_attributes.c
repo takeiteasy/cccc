@@ -828,7 +828,7 @@ int test_attr_format_spellings(void) {
 #error expected __has_attribute(fallthrough)
 #endif
 // Negative pins: these correctly report 0, matching GCC/Clang exactly —
-// "usable attribute" (COVERAGE.md Quick Reference ✓) is not the same claim
+// "usable attribute" (coverage.md Quick Reference ✓) is not the same claim
 // as __has_attribute==1.
 #if __has_attribute(nodiscard)
 #error __has_attribute(nodiscard) should be 0 (C23-only, no GNU form in GCC/Clang)

@@ -1,4 +1,4 @@
-// CCCC_NATIVE_SKIP: a void main's exit status is host-defined (NATIVE.md divergences)
+// CCCC_NATIVE_SKIP: a void main's exit status is host-defined (native.md divergences)
 // CCCC_EXPECT_STDOUT: hello world
 // Tests: non-standard "void main() void;" forward declaration and a
 // free-standing "void; { ... }" block that acts as the function body.

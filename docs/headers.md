@@ -123,7 +123,7 @@ Other constructs:
   cleanly.
 - **An `__has_*`-shaped operator CCCC doesn't recognize** (real SDK headers
   use `__has_declspec_attribute`/`__has_warning` —
-  see [ATTRIBUTES.md](ATTRIBUTES.md#feature-test-preprocessor-operators))
+  see [attributes.md](attributes.md#feature-test-preprocessor-operators))
   evaluates to `0` and emits a `-Wcpp` warning naming it, whether it's
   written literally or reached through a macro expansion, rather than the
   confusing "not a function" error a raw, unhandled `__has_foo(...)` would
@@ -233,13 +233,13 @@ real host compiler, so header handling shifts:
   real system headers in a native build.
 - The `--std=` value is forwarded only as a flag-spelling probe; the
   emitted dialect is a fixed GNU C11 floor regardless (see
-  [NATIVE.md](NATIVE.md)).
+  [native.md](native.md)).
 - A comptime-generated declaration's type must come from a header that is
   actually captured into the output — an `#include @shared`d header
   qualifies; one reached only via `#include @comptime`/`@build`/`@test`
   does not, and `-c=generated` reports a compile error rather than writing
   C nothing declares the type in. See
-  [MACROS.md](MACROS.md#emit-directives-and-includes-in-generated-output).
+  [macros.md](macros.md#emit-directives-and-includes-in-generated-output).
 - A header reached through a chain of captured, ordinary (non-bundled)
   `#include`s is treated as captured too, however many hops the chain
   runs — a user header's own `#include "helper.h"`, whose own
@@ -377,12 +377,12 @@ recognized and re-emitted as the bare identifier by a dedicated
 sentinel can look wrong there. Check `-m` (or `-c=native`'s actual output)
 instead.
 
-See [NATIVE.md](NATIVE.md) for the native pipeline itself.
+See [native.md](native.md) for the native pipeline itself.
 
 ## URL includes under `-c=native`/`-m`/`-c=generated`
 
 A URL `#include`/`#embed` (curl-enabled builds only — see
-[BUILD.md](BUILD.md)) downloads only when `--allow-url` is passed; a URL
+[install.md](install.md)) downloads only when `--allow-url` is passed; a URL
 already in the cache resolves without it, and `__has_include`/`__has_embed`
 never download without it. Downloads go into a shared on-disk cache
 (`--url-cache-dir`, default `$TMPDIR/.cccc`) on every path, VM included. Every
@@ -427,6 +427,6 @@ them; the public spelling, if you ever need it directly, is
 
 `include/cccc/kernel.h` is a public header, included as
 `#include <cccc/kernel.h>`: it declares the work-item builtins and `cccc_launch`
-described in [KERNELS.md](KERNELS.md). `include/cccc/opencl.h` maps OpenCL C
+described in [kernels.md](kernels.md). `include/cccc/opencl.h` maps OpenCL C
 onto it and is included automatically before an OpenCL input
-([OPENCL.md](OPENCL.md)). Both are embedded, so they resolve with no `-I`.
+([opencl.md](opencl.md)). Both are embedded, so they resolve with no `-I`.
