@@ -231,6 +231,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [macros.md](docs/macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
 | [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@enum_to_string`, ... |
 | [comptime-policy.md](docs/comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
+| [comptime-limits.md](docs/comptime-limits.md) | Memory confinement and node-list checks for comptime code |
 | [security.md](docs/security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |
 
 **Testing and building**
@@ -288,6 +289,9 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [vm.md](docs/vm.md) | *hub* — VM architecture, encoding, execution model, opcode reference |
 | [comptime-builtins.md](docs/comptime-builtins.md) | Declaring and registering comptime builtins |
 | [checked-interfaces-impl.md](docs/checked-interfaces-impl.md) | How checked-pointer call checks and bounds casts are implemented |
+| [macros-impl.md](docs/macros-impl.md) | Comptime visibility and forwarding rules |
+| [safety-impl.md](docs/safety-impl.md) | Bounds propagation, `CHKAB` and dangling-pointer internals |
+| [native-impl.md](docs/native-impl.md) | Replayed includes, host-owned layouts, shared runtimes |
 
 ## Usage
 
