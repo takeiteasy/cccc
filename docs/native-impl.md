@@ -22,4 +22,4 @@ Check `-m` or the `-c=native` output when debugging this class: `-E` shows pre-s
 
 ## Shared runtimes
 
-`wide_bitint`, `c23_math`, `c23_mem` and `c23_strtol` each have one `runtime.c` that is both compiled into the VM and emitted verbatim as the native shim, so both agree by construction. See the project `CLAUDE.md` for the layout rules.
+`wide_bitint`, `c23_math`, `c23_mem` and `c23_strtol` each have one `runtime.c` that is both compiled into the VM and emitted verbatim as the native shim, so both agree by construction.

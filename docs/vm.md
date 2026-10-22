@@ -239,7 +239,7 @@ the interpreter honest rather than fast:
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
 3. **Tail-call elimination** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above). This one is not a speed knob: deep-recursion correctness depends on it, so it is unconditional.
 
-The dominant cost is the interpreter itself; see benchmark notes (SCRATCH.md) for numbers and [TOOLING.md](../SCRATCH.md) for analysis tooling.
+The dominant cost is the interpreter itself.
 
 ## Guide pages
 

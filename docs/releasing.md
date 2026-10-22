@@ -83,8 +83,7 @@ commands — it does **not** push anything itself.
 
 The clean-tree check is `git status --porcelain`, which flags *untracked*
 files too, not just uncommitted changes — a stray scratch file left in the
-repo root (nothing unusual, since `CLAUDE.md`/`AGENTS.md` and other
-gitignored working files live there) blocks tagging even though nothing is
+repo root blocks tagging even though nothing is
 actually pending. Move such files outside the repo temporarily rather than
 `git clean -f`, which can just as easily eat something someone meant to
 keep; move them back once the tag exists.
@@ -98,8 +97,7 @@ git push origin v0.1.0
 git push mirror v0.1.0
 ```
 
-(`origin` is github, `mirror` is sr.ht — see [CLAUDE.md](../CLAUDE.md)'s
-Branching notes.) `trunk` is pushed to both remotes on every ordinary push
+(`origin` is github, `mirror` is sr.ht.) `trunk` is pushed to both remotes on every ordinary push
 too, not just at release time — `origin` needs to stay current since it hosts
 the Doxygen docs (GitHub Pages, via `.github/workflows/ci.yml`, deployed on
 every push to `trunk`). What's release-specific here is the **tag** push:
