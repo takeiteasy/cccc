@@ -1996,6 +1996,8 @@ typedef enum {
     OMP_CLAUSE_REDUCTION,
     OMP_CLAUSE_LASTPRIVATE,
     OMP_CLAUSE_COPYPRIVATE,
+    OMP_CLAUSE_LINEAR,
+    OMP_CLAUSE_COPYIN,
 } OmpClauseKind;
 
 typedef struct OmpClause OmpClause;
@@ -2005,6 +2007,8 @@ struct OmpClause {
     Obj          *orig;
     char         *reduction_op; // "+", "-", "*", "&", "|", "^", "&&", "||",
                                 // "max", "min"; NULL for other clauses
+    char         *step;         // linear: step expression text
+    bool          snap; // threaded parallel: read the original before the fork
     OmpClause    *next;
 };
 

@@ -60,10 +60,11 @@ a team of one.
 | `task` | Runs the block immediately on the thread that meets it |
 | `taskwait`, `taskyield` | No effect |
 | `taskgroup` | Runs the block |
+| `threadprivate(x, ...)` | Gives each thread its own copy of a global or `static` variable; allowed at file scope and in a function |
 | `ordered` | VM only |
 
-`target`, `teams`, `threadprivate` and `declare` are errors. A directive at
-file scope is an error.
+`target`, `teams` and `declare` are errors. Other directives at file scope are
+errors.
 
 Native loops use the canonical OpenMP form: an integer variable, a bound
 compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
@@ -82,6 +83,8 @@ or `v = x op= e`.
 | `default(none)` | On `parallel` and `parallel for`: every variable from outside the region that the body uses needs a data-sharing clause, else an error. Loop variables, `sizeof` operands, `threadprivate` variables and variables declared inside the region are exempt |
 | `lastprivate(x)` | On `for` and `parallel for`: like `private`, then the value from the last iteration is copied back to the original; combines with `firstprivate` on the same variable |
 | `copyprivate(x)` | On `single`: the value from the thread that ran the block is copied to every thread's `x`. Not allowed with `nowait` |
+| `linear(x : step)` | On `for`, `parallel for` and `simd`: `x` is `base + i * step` in iteration `i` (step defaults to 1; `x` is an integer or pointer), and the value from the last iteration is copied back |
+| `copyin(x)` | On `parallel` directives: every thread's copy of the `threadprivate` variable `x` starts with the primary thread's value |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
 | `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size |
 | `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
@@ -110,8 +113,6 @@ int p = 5;
 { p = 100; }
 // p is still 5 here
 ```
-
-`copyin` and `linear` are errors.
 
 ## Runtime functions
 
@@ -174,7 +175,6 @@ or another OpenMP compiler. Building the native output with
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
-- `copyin`, `linear` and `threadprivate`.
 - Tasks run inline, so they never overlap (#1743).
 - A `task` that contains a `parallel` region shares the variables it uses from
   outside the task (#1744).

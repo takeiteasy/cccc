@@ -344,9 +344,36 @@ static Token *var_list(VirtualMachine *vm, OmpDirective *d, OmpClauseKind kind,
             error_tok(vm, tok,
                       "reduction operator '%s' does not apply to '%.*s'", op,
                       tok->len, tok->loc);
+        if (kind == OMP_CLAUSE_COPYIN && !var->is_tls)
+            error_tok(vm, tok, "'%.*s' in 'copyin' clause is not threadprivate",
+                      tok->len, tok->loc);
         add_clause(vm, d, kind, var, tok, op);
         tok = tok->next;
     } while (consume(vm, &tok, tok, ","));
+    return skip(vm, tok, ")");
+}
+
+// linear(list [: step]), after its "(".
+static Token *linear_list(VirtualMachine *vm, OmpDirective *d, Token *tok) {
+    do {
+        Obj *var = clause_var(vm, tok, "linear");
+        if (!is_integer(var->ty) && var->ty->kind != TY_PTR)
+            error_tok(vm, tok,
+                      "'%.*s' in 'linear' clause must be an integer or a "
+                      "pointer",
+                      tok->len, tok->loc);
+        add_clause(vm, d, OMP_CLAUSE_LINEAR, var, tok, NULL);
+        tok = tok->next;
+    } while (consume(vm, &tok, tok, ","));
+    char *step = "1";
+    if (consume(vm, &tok, tok, ":")) {
+        Token *end = scan_expr_end(tok, false);
+        step       = tokens_text(vm, tok, end);
+        tok        = end;
+    }
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_LINEAR && !c->step)
+            c->step = step;
     return skip(vm, tok, ")");
 }
 
@@ -364,25 +391,28 @@ typedef enum {
     CL_TASK_EXPR         = 1 << 10, // task: if/final/priority
     CL_TASK_FLAG         = 1 << 11, // task: untied/mergeable
     CL_DEPEND            = 1 << 12,
+    CL_LINEAR            = 1 << 13,
+    CL_COPYIN            = 1 << 14,
 } ClauseSet;
 
 static int clauses_allowed(OmpKind kind) {
     switch (kind) {
         case OMP_PARALLEL:
-            return CL_DATA | CL_PARALLEL | CL_DEFAULT;
+            return CL_DATA | CL_PARALLEL | CL_DEFAULT | CL_COPYIN;
         case OMP_FOR:
-            return CL_DATA | CL_LOOP | CL_NOWAIT | CL_LASTPRIVATE;
+            return CL_DATA | CL_LOOP | CL_NOWAIT | CL_LASTPRIVATE | CL_LINEAR;
         case OMP_PARALLEL_FOR:
             return CL_DATA | CL_PARALLEL | CL_LOOP | CL_LASTPRIVATE |
-                   CL_DEFAULT;
+                   CL_DEFAULT | CL_LINEAR | CL_COPYIN;
         case OMP_SINGLE:
             return CL_FIRSTPRIVATE_ONLY | CL_NOWAIT | CL_COPYPRIVATE;
         case OMP_SIMD:
-            return CL_SIMD | CL_LOOP;
+            return CL_SIMD | CL_LOOP | CL_LINEAR;
         case OMP_SECTIONS:
             return CL_DATA | CL_NOWAIT | CL_LASTPRIVATE;
         case OMP_PARALLEL_SECTIONS:
-            return CL_DATA | CL_PARALLEL | CL_LASTPRIVATE | CL_DEFAULT;
+            return CL_DATA | CL_PARALLEL | CL_LASTPRIVATE | CL_DEFAULT |
+                   CL_COPYIN;
         case OMP_TASK:
             return CL_TASK_DATA | CL_DEFAULT | CL_TASK_EXPR | CL_TASK_FLAG |
                    CL_DEPEND;
@@ -628,9 +658,12 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             tok = skip(vm, tok, "(");
             tok = var_list(vm, d, OMP_CLAUSE_COPYPRIVATE, "copyprivate", NULL,
                            tok);
-        } else if (is_word(name, "copyin") || is_word(name, "linear")) {
-            error_tok(vm, name, "unsupported OpenMP clause '%.*s'", name->len,
-                      name->loc);
+        } else if (is_word(name, "copyin") && (allowed & CL_COPYIN)) {
+            tok = skip(vm, tok, "(");
+            tok = var_list(vm, d, OMP_CLAUSE_COPYIN, "copyin", NULL, tok);
+        } else if (is_word(name, "linear") && (allowed & CL_LINEAR)) {
+            tok = skip(vm, tok, "(");
+            tok = linear_list(vm, d, tok);
         } else {
             error_tok(vm, name, "'%.*s' clause is not allowed here", name->len,
                       name->loc);
@@ -662,7 +695,60 @@ static void capture_pointers(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         body_push(vm, body,
                   snippet(vm, "typeof_unqual(%s) *__omp_%d_%s = &%s;", c->name,
                           id, c->name, c->name));
+        if (c->kind == OMP_CLAUSE_LINEAR && c->snap) {
+            body_push(vm, body,
+                      snippet(vm, "typeof_unqual(%s) __omp_%d_%s_base = %s;",
+                              c->name, id, c->name, c->name));
+            body_push(vm, body,
+                      snippet(vm, "long __omp_%d_%s_step = (long)(%s);", id,
+                              c->name, c->step));
+        } else if (c->snap) {
+            body_push(vm, body,
+                      snippet(vm, "typeof_unqual(%s) __omp_%d_%s_snap;",
+                              c->name, id, c->name));
+            body_push(vm, body,
+                      snippet(vm,
+                              "__builtin_memcpy(&__omp_%d_%s_snap, &%s, "
+                              "sizeof(%s));",
+                              id, c->name, c->name, c->name));
+        }
     }
+}
+
+static bool copyin_follows(OmpClause *c) {
+    for (c = c->next; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_COPYIN)
+            return true;
+    return false;
+}
+
+// Where a firstprivate copy reads the original from.
+static const char *first_source(VirtualMachine *vm, OmpClause *c, int id) {
+    return c->snap ? arena_format(vm, "&__omp_%d_%s_snap", id, c->name)
+                   : arena_format(vm, "__omp_%d_%s", id, c->name);
+}
+
+// A variable read at region entry and written back at its end races unless the
+// original is read first: firstprivate with lastprivate, and linear.
+static bool reads_and_writes_back(OmpDirective *d, OmpClause *c) {
+    return c->kind == OMP_CLAUSE_LINEAR ||
+           ((c->kind == OMP_CLAUSE_FIRSTPRIVATE ||
+             c->kind == OMP_CLAUSE_LASTPRIVATE) &&
+            has_clause(d, c->name, OMP_CLAUSE_FIRSTPRIVATE) &&
+            has_clause(d, c->name, OMP_CLAUSE_LASTPRIVATE));
+}
+
+static bool has_race_prone_clause(OmpDirective *d) {
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (reads_and_writes_back(d, c))
+            return true;
+    return false;
+}
+
+// A parallel region reads the originals in the parent, before the fork.
+static void mark_snapshots(OmpDirective *d) {
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        c->snap = reads_and_writes_back(d, c);
 }
 
 static void shadow_decls(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -679,11 +765,42 @@ static void shadow_decls(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                     vm, body,
                     snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
                 if (has_clause(d, c->name, OMP_CLAUSE_FIRSTPRIVATE))
+                    body_push(
+                        vm, body,
+                        snippet(vm, "__builtin_memcpy(&%s, %s, sizeof(%s));",
+                                c->name, first_source(vm, c, id), c->name));
+                break;
+            case OMP_CLAUSE_LINEAR:
+                // The step is evaluated before the private copy hides the
+                // names it may use.
+                if (!c->snap) {
                     body_push(vm, body,
                               snippet(vm,
+                                      "typeof_unqual(%s) __omp_%d_%s_base = "
+                                      "*__omp_%d_%s;",
+                                      c->name, id, c->name, id, c->name));
+                    body_push(vm, body,
+                              snippet(vm, "long __omp_%d_%s_step = (long)(%s);",
+                                      id, c->name, c->step));
+                }
+                body_push(
+                    vm, body,
+                    snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
+                break;
+            case OMP_CLAUSE_COPYIN:
+                // The primary thread's copy is read by every other thread, and
+                // the primary thread must not change it first.
+                if (vm->compiler.omp_threaded) {
+                    body_push(vm, body,
+                              snippet(vm,
+                                      "if (__cccc_omp_thread_num() != 0) "
                                       "__builtin_memcpy(&%s, __omp_%d_%s, "
                                       "sizeof(%s));",
                                       c->name, id, c->name, c->name));
+                    if (!copyin_follows(c))
+                        body_push(vm, body,
+                                  snippet(vm, "__cccc_omp_barrier();"));
+                }
                 break;
             case OMP_CLAUSE_PRIVATE:
                 body_push(
@@ -697,10 +814,8 @@ static void shadow_decls(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                     vm, body,
                     snippet(vm, "typeof_unqual(%s) %s;", c->name, c->name));
                 body_push(vm, body,
-                          snippet(vm,
-                                  "__builtin_memcpy(&%s, __omp_%d_%s, "
-                                  "sizeof(%s));",
-                                  c->name, id, c->name, c->name));
+                          snippet(vm, "__builtin_memcpy(&%s, %s, sizeof(%s));",
+                                  c->name, first_source(vm, c, id), c->name));
                 break;
             case OMP_CLAUSE_REDUCTION: {
                 bool extremum = !strcmp(c->reduction_op, "max") ||
@@ -731,16 +846,72 @@ static void shadow_decls(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     }
 }
 
+// Linear variables are set from an iteration counter at the top of the loop
+// body; the serial lowering counts the iterations itself.
+static void linear_prologue(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
+                            int id) {
+    if (has_clause(d, NULL, OMP_CLAUSE_LINEAR))
+        body_push(vm, body, snippet(vm, "long __omp_%d_k = 0;", id));
+}
+
 static int shadows(VirtualMachine *vm, OmpDirective *d, OmpBody *body) {
     int id = vm->compiler.unique_name_counter++;
     capture_pointers(vm, d, body, id);
     shadow_decls(vm, d, body, id);
+    linear_prologue(vm, d, body, id);
     return id;
+}
+
+static char *linear_assign(VirtualMachine *vm, OmpClause *c, int id,
+                           const char *iteration) {
+    return arena_format(vm,
+                        "%s = (typeof_unqual(%s))(__omp_%d_%s_base + "
+                        "(long)(%s) * __omp_%d_%s_step);",
+                        c->name, c->name, id, c->name, iteration, id, c->name);
+}
+
+// The innermost loop of a collapse(depth) nest.
+static Node *innermost_loop(Node *loop, int depth) {
+    for (int level = 1; level < depth; level++)
+        loop = single_stmt(loop->then);
+    return loop;
+}
+
+// Prepends the linear assignments to the body of the serial loop.
+static void linear_inject(VirtualMachine *vm, OmpDirective *d, int id,
+                          Node *loop, Token *tok) {
+    Node *inner = innermost_loop(loop, d->collapse);
+    if (inner->kind != ND_FOR)
+        error_tok(vm, tok, "'linear' needs a for loop");
+    Node    head = {};
+    OmpBody it   = {&head, &head};
+    body_push(vm, &it, snippet(vm, "long __omp_%d_it = __omp_%d_k++;", id, id));
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_LINEAR)
+            body_push(
+                vm, &it,
+                snippet(vm, "%s",
+                        linear_assign(vm, c, id,
+                                      arena_format(vm, "__omp_%d_it", id))));
+    body_push(vm, &it, inner->then);
+    Node *block = new_node(vm, ND_BLOCK, tok);
+    block->body = head.next;
+    inner->then = block;
 }
 
 static void merges(VirtualMachine *vm, OmpDirective *d, OmpBody *body, int id) {
     bool locked = false;
     for (OmpClause *c = d->clauses; c; c = c->next) {
+        bool serial = !vm->compiler.omp_threaded || d->kind == OMP_SIMD;
+        if (c->kind == OMP_CLAUSE_LINEAR) {
+            if (serial)
+                body_push(vm, body,
+                          snippet(vm,
+                                  "if (__omp_%d_k > 0) __builtin_memcpy("
+                                  "__omp_%d_%s, &%s, sizeof(%s));",
+                                  id, id, c->name, c->name, c->name));
+            continue;
+        }
         if (c->kind == OMP_CLAUSE_LASTPRIVATE && vm->compiler.omp_threaded)
             continue;
         if (c->kind == OMP_CLAUSE_REDUCTION && vm->compiler.omp_threaded &&
@@ -1210,6 +1381,13 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             body_push(vm, &it,
                       snippet(vm, "__omp%d_i /= __omp%d_n%d;", id, id, j));
     }
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_LINEAR)
+            body_push(
+                vm, &it,
+                snippet(vm, "%s",
+                        linear_assign(vm, c, id,
+                                      arena_format(vm, "__omp%d_k", id))));
     body_push(vm, &it, inner);
     Node *iter_block = new_node(vm, ND_BLOCK, for_tok);
     iter_block->body = head.next;
@@ -1220,11 +1398,13 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     // its values back; a loop variable ends one step past the last iteration.
     bool any_last = false;
     for (OmpClause *c = d->clauses; c; c = c->next)
-        any_last |= c->kind == OMP_CLAUSE_LASTPRIVATE;
+        any_last |=
+            c->kind == OMP_CLAUSE_LASTPRIVATE || c->kind == OMP_CLAUSE_LINEAR;
     if (any_last) {
         char *copy = arena_strdup(vm, "");
         for (OmpClause *c = d->clauses; c; c = c->next) {
-            if (c->kind != OMP_CLAUSE_LASTPRIVATE)
+            if (c->kind != OMP_CLAUSE_LASTPRIVATE &&
+                c->kind != OMP_CLAUSE_LINEAR)
                 continue;
             for (int j = 0; j < m; j++)
                 if (!strcmp(lv[j].name, c->name))
@@ -1465,6 +1645,40 @@ static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
     return snippet(vm, "%s", stmt_text);
 }
 
+// `threadprivate(list)` with `tok` on the word; returns the token after the
+// directive. Marking the variable thread-local gives each thread its own copy.
+static Token *threadprivate_list(VirtualMachine *vm, Token *tok) {
+    tok = skip(vm, tok->next, "(");
+    do {
+        VarScope *sc = tok->kind == TK_IDENT ? find_var(vm, tok) : NULL;
+        if (!sc || !sc->var || sc->var->is_function)
+            error_tok(vm, tok, "'%.*s' in 'threadprivate' is not a variable",
+                      tok->len, tok->loc);
+        Obj *var = sc->var;
+        if (var->is_local && !var->is_static)
+            error_tok(vm, tok,
+                      "'%.*s' in 'threadprivate' must be a global or static "
+                      "variable",
+                      tok->len, tok->loc);
+        if (var->is_used)
+            error_tok(vm, tok,
+                      "'%.*s' declared 'threadprivate' after first use",
+                      tok->len, tok->loc);
+        var->is_tls = true;
+        tok         = tok->next;
+    } while (consume(vm, &tok, tok, ","));
+    tok = skip(vm, tok, ")");
+    return skip(vm, tok, ")");
+}
+
+// File-scope `#pragma omp`: only threadprivate has an effect there.
+Token *omp_file_scope(VirtualMachine *vm, Token *tok) {
+    Token *word = tok->next->next;
+    if (!is_word(word, "threadprivate"))
+        error_tok(vm, tok, "OpenMP directive at file scope is not supported");
+    return threadprivate_list(vm, word);
+}
+
 static Node *find_node(Node *n, NodeKind kind) {
     while (n && n->kind != kind)
         n = n->kind == ND_BLOCK ? n->body : NULL;
@@ -1544,6 +1758,8 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
         case OMP_SECTIONS: {
             capture_pointers(vm, d, body, id);
             shadow_decls(vm, d, body, id);
+            if (has_race_prone_clause(d))
+                body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
             int    n;
             Node **secs = sections_body(vm, rest, tok, &n);
             threaded_sections(vm, d, body, id, secs, n, start, true);
@@ -1568,6 +1784,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                          tokenize_string(vm, "<omp>",
                                          arena_format(vm, "__omp%d_nt", id)))
                     ->var;
+            mark_snapshots(d);
             capture_pointers(vm, d, body, id);
 
             OutlineRegion r     = region_begin(vm, start, id, nt);
@@ -1597,6 +1814,8 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
         case OMP_FOR: {
             capture_pointers(vm, d, body, id);
             shadow_decls(vm, d, body, id);
+            if (has_race_prone_clause(d))
+                body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
             tok = threaded_for(vm, d, body, id, tok, true);
             merges(vm, d, body, id);
             if (!d->nowait)
@@ -1687,7 +1906,19 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             body_push(vm, body, threaded_atomic(vm, d, rest, tok));
             return block;
 
-        default: { // simd: a hint
+        case OMP_SIMD: {
+            capture_pointers(vm, d, body, id);
+            shadow_decls(vm, d, body, id);
+            linear_prologue(vm, d, body, id);
+            Node *inner = stmt(vm, rest, tok);
+            if (has_clause(d, NULL, OMP_CLAUSE_LINEAR))
+                linear_inject(vm, d, id, inner, start);
+            body_push(vm, body, inner);
+            merges(vm, d, body, id);
+            return block;
+        }
+
+        default: {
             Node *inner = stmt(vm, rest, tok);
             body_push(vm, body, inner);
             return block;
@@ -1712,6 +1943,11 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     OmpBody body = {&head, &head};
 
     tok          = skip(vm, tok->next, "(");
+    if (is_word(tok, "threadprivate")) {
+        *rest = threadprivate_list(vm, tok);
+        leave_scope(vm);
+        return block;
+    }
     tok          = directive_name(vm, d, tok);
     tok          = clauses(vm, d, &body, tok);
     tok          = skip(vm, tok, ")");
@@ -1768,6 +2004,11 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
                       "loop");
         check_loop(vm, inner, d->collapse, body_tok);
         exempt_loop_vars(vm, inner, d->collapse);
+        if (has_clause(d, NULL, OMP_CLAUSE_LINEAR))
+            linear_inject(vm, d, id, inner, body_tok);
+    } else if (d->kind == OMP_SIMD && has_clause(d, NULL, OMP_CLAUSE_LINEAR)) {
+        check_loop(vm, inner, d->collapse, body_tok);
+        linear_inject(vm, d, id, inner, body_tok);
     } else if (d->kind == OMP_ATOMIC) {
         check_atomic(vm, inner, body_tok);
     }

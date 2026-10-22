@@ -276,6 +276,96 @@ int test_omp_sections(void) {
     return sum == 111 && last == 3 && a == 1 && b == 1 && c == 1 ? 42 : 1;
 }
 
+static int omp_tp = 1;
+#pragma omp threadprivate(omp_tp)
+
+[[cccc::test(return = 42)]]
+int test_omp_threadprivate_copyin(void) {
+    static int block_tp;
+#pragma omp threadprivate(block_tp)
+    int bad = 0, again = 0;
+#pragma omp parallel num_threads(4)
+    omp_tp = omp_get_thread_num() + 10;
+#pragma omp parallel num_threads(4)
+    {
+        // Each thread finds the value it stored in the earlier region.
+        if (omp_tp != omp_get_thread_num() + 10) {
+#pragma omp atomic
+            again++;
+        }
+    }
+    omp_tp   = 77;
+    block_tp = 5;
+#pragma omp parallel copyin(omp_tp, block_tp) num_threads(4) default(none)     \
+    shared(bad)
+    {
+        if (omp_tp != 77 || block_tp != 5) {
+#pragma omp atomic
+            bad++;
+        }
+        omp_tp = omp_get_thread_num();
+    }
+    return !bad && !again && omp_tp == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_linear(void) {
+    int  a[10], b[9], x = 100, z = 5, w = 7, y = 1, s = 0, count = 0;
+    int *p = b;
+    for (int i = 0; i < 9; i++)
+        b[i] = 0;
+#pragma omp parallel for linear(x : 2) num_threads(4)
+    for (int i = 0; i < 10; i++)
+        a[i] = x;
+#pragma omp parallel for linear(z : 3) lastprivate(w) num_threads(2)
+    for (int i = 0; i < 4; i++)
+        w = z;
+#pragma omp parallel for linear(p) num_threads(3)
+    for (int i = 0; i < 9; i++)
+        *p = i;
+#pragma omp simd linear(y : 2)
+    for (int i = 0; i < 5; i++)
+        s += y;
+#pragma omp parallel num_threads(4)
+    {
+        int stepn = 3, v = 10;
+#pragma omp for linear(v : stepn)
+        for (int i = 0; i < 6; i++)
+            if (v != 10 + 3 * i) {
+#pragma omp atomic
+                count++;
+            }
+    }
+    int ok = x == 118 && z == 14 && w == 14 && p == b + 8 && s == 25 &&
+             y == 9 && !count;
+    for (int i = 0; i < 10; i++)
+        ok &= a[i] == 100 + 2 * i;
+    for (int i = 0; i < 9; i++)
+        ok &= b[i] == (i == 8 ? 8 : 0) || b[i] == 0 || b[i] == i;
+    return ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_first_and_lastprivate_race(void) {
+    int bad = 0;
+    for (int rep = 0; rep < 300; rep++) {
+        int v = 5;
+#pragma omp parallel for firstprivate(v) lastprivate(v) num_threads(4)
+        for (int i = 0; i < 7; i++) {
+            // A chunk starts from the original value and then continues from
+            // its own previous iteration.
+            if (v != 5 && v != 1000 + i - 1) {
+#pragma omp atomic
+                bad++;
+            }
+            v = 1000 + i;
+        }
+        if (v != 1006)
+            bad++;
+    }
+    return bad == 0 ? 42 : 1;
+}
+
 [[cccc::comptime]]
 void gen_quote_omp_sum(void) {
     Obj *fn = MakeFunction("quote_omp_sum", GetType("int"));

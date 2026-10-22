@@ -1883,9 +1883,10 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             continue;
         }
 
-        if (equal(tok, "__cccc_omp"))
-            error_tok(vm, tok,
-                      "OpenMP directive at file scope is not supported");
+        if (equal(tok, "__cccc_omp")) {
+            tok = omp_file_scope(vm, tok);
+            continue;
+        }
 
         if (is_file_scope_asm(tok)) {
             tok = file_scope_asm(vm, tok);

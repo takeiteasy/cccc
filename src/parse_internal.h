@@ -354,6 +354,7 @@ Obj *declare_runtime_fn(VirtualMachine *vm, const char *name,
 Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok);
 VarScope *omp_note_use(VirtualMachine *vm, Token *tok, VarScope *sc);
 bool omp_at_section(VirtualMachine *vm, Token *tok);
+Token *omp_file_scope(VirtualMachine *vm, Token *tok);
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);
