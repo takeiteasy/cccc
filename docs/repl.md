@@ -57,7 +57,7 @@ session:
 | `:help` | Show session commands. |
 | `:type <expr>` | Print the type of `<expr>` without evaluating it. |
 | `:load <file>` | Read declarations/expressions from `<file>`, one logical unit at a time. |
-| `:reload <file>` | Re-read a file loaded with `:load` after editing it, redefining the functions that changed. Rules as in [Reloading a file](debugger.md#reloading-a-file). |
+| `:reload <file>` | Re-read a file loaded with `:load` after editing it, redefining the functions that changed. Rules as in [Reloading a file](debugger-edit.md#reloading-a-file). |
 | `:quit` | Exit the REPL. With `--watch`, files read by `:load` reload when saved; see [watch.md](watch.md#in-the-repl). |
 
 ## Result formatting
@@ -137,7 +137,7 @@ session back like any other failing line.
 Each call to a redefined function costs one extra jump.[^jump]
 
 The debugger redefines functions of a program stopped under `-g` the same way:
-see [Edit and continue](debugger.md#edit-and-continue).
+see [Edit and continue](debugger-edit.md).
 
 ### Embedding
 

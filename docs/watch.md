@@ -19,7 +19,7 @@ cccc --watch build.c          # build.c has [[cccc::build]]: rebuild on every sa
 
 The program starts as usual. When a watched file is saved, the VM reloads it at
 its next instruction, with the same rules as the debugger's
-[`reload`](debugger.md#reloading-a-file): changed functions are redefined,
+[`reload`](debugger-edit.md#reloading-a-file): changed functions are redefined,
 globals and statics keep their values, and a frame already inside an old body
 finishes in it.
 
@@ -129,7 +129,7 @@ These calls do nothing without `--watch`.
 `--watch` cannot be combined with `--testing`, `--test-run`, `-c`, `-d`, `-E`,
 `-m`, `-p`, `--ast`, `--vm-profile` or `-o`, and cannot read standard input.
 
-A reload follows the rules in [debugger.md](debugger.md#reloading-a-file): no
+A reload follows the rules in [debugger.md](debugger-edit.md#reloading-a-file): no
 layout changes. Edited comptime code is applied, the functions of the file that
 call it are expanded again, and its file-scope comptime calls run again.
 

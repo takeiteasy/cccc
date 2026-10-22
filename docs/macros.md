@@ -107,7 +107,7 @@ instead, as above.
 
 The same rule applies to `QuoteLazy()`/`QuoteLazyN()` fragments spliced in
 expression position — see
-[Deferred templates with `QuoteLazy`](macros-templates.md#deferred-templates-with-quotelazy).
+[Deferred templates with `QuoteLazy`](macros-templates.md#deferred-templates-quotelazy).
 
 A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
 [OpenMP](openmp.md#generated-code).
