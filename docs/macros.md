@@ -121,7 +121,8 @@ A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
 | [macros-global.md](macros-global.md) | File-scope generation, comptime in initializers and constants |
 | [macros-emit.md](macros-emit.md) | Emitting directives, emit blocks, attributes on generated functions |
 | [macros-call-site.md](macros-call-site.md) | Call-site expansion with `Node *` macros |
-| [macros-helpers.md](macros-helpers.md) | Comptime blocks, include scoping, `@build`/`@test` directives |
+| [macros-helpers.md](macros-helpers.md) | Helper functions and comptime blocks |
+| [macros-includes.md](macros-includes.md) | Include routing (`@comptime`, `@shared`) and `@build`/`@test` directives |
 | [macros-variables.md](macros-variables.md) | Comptime variables and `constexpr` readback |
 | [macros-quoting.md](macros-quoting.md) | `Quote`, `QuoteN` and splicing |
 | [macros-templates.md](macros-templates.md) | Templates in generated bodies, `QuoteLazy`, labels |
