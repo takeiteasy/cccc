@@ -182,6 +182,7 @@ void test_add_commutative(void) {
 |---|---|
 | [testing-suites.md](testing-suites.md) | Suites and test-file header directives |
 | [testing-negative.md](testing-negative.md) | Negative tests, exit-code tests and runtime safety violations |
+| [testing-returns.md](testing-returns.md) | `return = value` assertions |
 | [testing-asserts.md](testing-asserts.md) | Assertion macros, and asserts in threads and callbacks |
 | [testing-hooks.md](testing-hooks.md) | Setup/teardown hooks and global state reset |
 | [testing-conditional.md](testing-conditional.md) | Mode macros, `@test` directives and the feature build matrix |
