@@ -1,69 +1,36 @@
 # Threads and Floating-Point Traps
 
-Thread safety and floating-point division traps.
+Thread-aware safety, `--thread-safety` diagnostics, and `--trap-fp-divzero`.
 
-## Threading Safety
+## Threads
 
-The VM runs one guest thread at a time under a global lock; see [threading.md](threading.md). The following threading-aware features are available:
+The VM runs one guest thread at a time under a global lock ([threading.md](threading.md)).
 
-**GIL release around blocking POSIX calls**
+| Feature | Behaviour |
+|---|---|
+| Blocking POSIX calls | `read`, `write`, `pread`, `pwrite`, `readv`, `writev`, `preadv`, `pwritev`, `poll`, `accept`, `connect`, `wait`, `waitpid`, `sleep`, `usleep` release the lock while blocked. Non-blocking calls (`close`, `lseek`, `stat`, `open`, most socket control calls) hold it |
+| Stack canaries | Each thread has its own stack state, so canary slots are isolated and stay on under `pthread_create` |
+| Dangling-pointer bookkeeping | Isolated per thread the same way. A pointer escaping *across* threads (a worker's local address dereferenced by another thread after the worker exits) is not detected |
 
-Blocking calls — `read`, `write`, `pread`, `pwrite`, `readv`, `writev`, `preadv`, `pwritev`, `poll`, `accept`, `connect`, `wait`, `waitpid`, `sleep`, `usleep` — release the GIL while blocked so other VM threads can make progress. Non-blocking calls (`close`, `lseek`, `stat`, `open`, and most control-plane socket calls) intentionally hold the GIL.
+## `--thread-safety`
 
-**Thread-aware stack canaries**
+Off by default and not part of any preset; for development and testing.
 
-Stack canary checks work correctly under threading. Each VM thread runs with its own `bp`/`sp`/`stack_seg` via `ExecState` (saved and restored on every GIL hand-off), so canary slots are isolated per thread. Stack canary protection enabled with `-1` or `--stack-canaries` is not disabled when `pthread_create` is used.
+| Check | Reported as |
+|---|---|
+| A thread locks a non-recursive mutex it already holds | `====== DEADLOCK: double-lock detected ======` |
+| Locks acquired in the opposite order to one seen before | `====== LOCK ORDER INVERSION detected ======` |
+| Two threads access an address without a mutex (pointer dereference and indexed array access; globals are not tracked yet) | `====== DATA RACE DETECTED ======` |
+| A cast strips `_Atomic` from a pointer | Compile-time: `warning: cast discards '_Atomic' qualifier from pointer type; non-atomic access to atomic object may cause data races` |
+| A plain access to an address another thread accessed atomically, without a mutex | `====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======` |
 
-**Dangling-pointer detection under threading**
+```
+====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======
+Address 0x... was accessed atomically by thread 0x... and is now read non-atomically by thread 0x... without a mutex
+```
 
-`--dangling-pointers`'s per-frame liveness bookkeeping (`frame_epochs`/`live_epochs`/`stack_ptr_epochs`/`stack_intervals`, see below) is isolated per thread the same way stack canaries are: each field lives in `ExecState` and is swapped in/out on every GIL hand-off, so a worker thread's own `ENT3`/`LEV3` bookkeeping is never compared against another thread's unrelated stack. Before this, running any worker thread at `-3`/`--dangling-pointers` while another thread had an outstanding escaping local (e.g. simply because `main` took `&thread_id` for `pthread_create`'s out-parameter) would assert almost immediately. Detection of a pointer escaping **across** threads (a worker's local address stored somewhere and dereferenced by a different thread after the worker has exited) is not implemented — each thread's liveness bookkeeping is discarded when that thread exits, so such a dereference is a real, undetected use-after-free rather than a diagnosed one.
+Mixed-access detection is forward-only: the atomic access must come first. `atomic_load`, `atomic_store` and the `_explicit` forms tag the address, as do `atomic_fetch_add/sub/or/xor/and` (a compare-exchange loop) and `atomic_exchange` / `atomic_compare_exchange`, so mixing those on one address across threads is tracked.
 
-**`--thread-safety` diagnostics** _(off by default; enables the checks below)_
+## `--trap-fp-divzero`
 
-Enable with `--thread-safety`. Intended for development and testing — not enabled by preset safety levels.
-
-- **Double-lock detection**: Diagnoses when a thread attempts to lock a non-recursive mutex it already holds.
-  ```
-  ====== DEADLOCK: double-lock detected ======
-  ```
-
-- **Lock-order inversion detection**: Builds a lock-acquisition graph at runtime. When a thread acquires locks in the opposite order seen previously, a potential deadlock is reported.
-  ```
-  ====== LOCK ORDER INVERSION detected ======
-  ```
-
-- **Data race detection**: Tracks the last thread to write each address without holding a mutex (shadow-map approach). When a second thread accesses the same address also without a mutex, a potential race is reported. Detection covers pointer-dereference and indexed array access; global-variable access tracking is planned for a future release.
-  ```
-  ====== DATA RACE DETECTED ======
-  ```
-
-- **`_Atomic` cast warning**: Warns at compile time when a cast strips the `_Atomic` qualifier from a pointer type, producing a plain pointer to an atomic object.
-  ```
-  warning: cast discards '_Atomic' qualifier from pointer type; non-atomic access to atomic object may cause data races
-  ```
-
-- **Mixed atomic/non-atomic access detection**: `atomic_load`/`atomic_store` (and `atomic_load_explicit`/`atomic_store_explicit`) emit dedicated `ALDR`/`ASTR` opcodes that tag a per-address `atomic_shadow` map with the accessing thread id. If a second thread performs a plain (non-atomic) memory access to the same address without holding a mutex, a diagnostic is printed at runtime. Forward-only detection: the atomic access must occur before the non-atomic one to be detected.
-  ```
-  ====== MIXED ATOMIC/NON-ATOMIC ACCESS DETECTED ======
-  Address 0x... was accessed atomically by thread 0x... and is now read non-atomically by thread 0x... without a mutex
-  ```
-  `atomic_fetch_add`/`sub`/`or`/`xor`/`and` route through a CAS retry loop over the same `ACAS` opcode `atomic_compare_exchange_*` uses, so they set the atomic tag exactly as `atomic_load`/`atomic_store` do — mixing `atomic_fetch_*` with `atomic_store`/`atomic_load` on the same address across threads is correctly tracked, not a known limitation.
-
-- **`atomic_exchange` and `atomic_compare_exchange`**: These operations compile to dedicated `AXCHG`/`ACAS` opcodes and are correctly handled as atomic accesses in the shadow map. The VM GIL ensures atomicity with respect to other VM threads.
-
-
-## Floating-Point Behavior
-
-
-### `--trap-fp-divzero` — Abort on float division by zero
-
-- By default, `float`/`double` division by zero follows IEEE-754: a
-  finite value divided by `0.0` produces a correctly-signed infinity
-  (and raises `FE_DIVBYZERO`, observable via `<fenv.h>`), and `0.0/0.0`
-  produces NaN (raises `FE_INVALID`). Neither is undefined behavior,
-  unlike integer division by zero, so this is not gated by any `-0`
-  through `-3` safety tier and is not part of `CCCC_ALL_SAFETY`.
-- With this flag, any zero divisor in a float/double division aborts
-  execution with the same `DIVISION BY ZERO` diagnostic used by integer
-  division and `--overflow-checks`, for debugging code that assumes
-  division by zero is always a bug.
+By default float and double division follows IEEE-754: a finite value over `0.0` gives a correctly signed infinity (and raises `FE_DIVBYZERO`), `0.0/0.0` gives NaN (and raises `FE_INVALID`). Neither is undefined behaviour, so this is not in any safety level. With the flag, a zero divisor aborts with the same `DIVISION BY ZERO` diagnostic as integer division and `--overflow-checks`.

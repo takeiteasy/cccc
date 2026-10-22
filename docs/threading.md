@@ -85,7 +85,7 @@ with the usual destructors.
 
 `--thread-safety` turns on VM diagnostics for double-locks, lock-order
 inversion, unsynchronised access from two threads and mixing atomic with plain
-access. See [safety.md](safety-threads.md#threading-safety).
+access. See [safety.md](safety-threads.md#threads).
 
 The VM hides many races because only one thread runs at a time. Code that
 passes in the VM can still race under `-c=native`. Build the native output with
