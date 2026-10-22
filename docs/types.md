@@ -89,7 +89,7 @@ agree everywhere else, including on a function *parameter*'s `_Atomic`,
 which is significant, and its `const`, which is not.)
 
 `--compiler-family` does not change the predefined macro set (see
-[headers.md](headers.md#real-sdk-headers-under---use-system-headers--sysroot)).
+[headers.md](headers-sdk.md)).
 
 `--compiler-family=FAM` selects the reading:
 

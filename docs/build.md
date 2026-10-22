@@ -159,6 +159,7 @@ wrote*, not serializer output — there is no fixed dialect floor to protect, so
 | [build-sources.md](build-sources.md) | Target outputs and source-set helpers |
 | [build-incremental.md](build-incremental.md) | Parallel and incremental builds, header dependencies |
 | [build-env.md](build-env.md) | Environment, files, toolchain probing, options and arguments |
-| [build-profiles.md](build-profiles.md) | Install steps, profiles and custom steps |
+| [build-profiles.md](build-profiles.md) | Install steps and profiles |
+| [build-steps.md](build-steps.md) | Custom steps and the command shell |
 | [build-cross.md](build-cross.md) | Cross-compilation |
 | [build-policy.md](build-policy.md) | Watching, bootstrapping, tool allowlist, FFI policy and limits |

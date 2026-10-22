@@ -20,7 +20,7 @@ CCCC re-emits the source's top-level `#include` lines into the generated C and f
 | `extern inline __attribute__((gnu_inline))` function called from a user header | Also gets a weak out-of-line definition |
 | Function an input declares before a replayed `#include`, called by that header's bodies | Prototyped ahead of the `#include` |
 
-A comptime-generated declaration must use a type from a header that is captured into the output. `#include @shared` qualifies; `@comptime`, `@build` and `@test` do not, and `-c=generated` reports an error rather than write C nothing declares the type in. See [macros-global.md](macros-global.md#emit-directives-and-includes-in-generated-output).
+A comptime-generated declaration must use a type from a header that is captured into the output. `#include @shared` qualifies; `@comptime`, `@build` and `@test` do not, and `-c=generated` reports an error rather than write C nothing declares the type in. See [macros-global.md](macros-emit.md#what--cgenerated-captures).
 
 ### Single-header libraries
 

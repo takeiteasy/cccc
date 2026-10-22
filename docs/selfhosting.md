@@ -101,7 +101,7 @@ both since fixed: parsing the real SDK's `secure/_string.h` hit the same
 longer to work around a preprocessor bug), and `-c=native` emitting invalid
 C from the real SDK `<unistd.h>` (`unknown type name 'uint32_t'`) is fixed
 via a compensating `#include <stdint.h>` (see
-[headers.md](headers.md#real-sdk-headers-under---use-system-headers--sysroot)).
+[headers.md](headers-sdk.md)).
 This was never a blocker for #1315 (fixed a different, narrower way), and
 remains filed for awareness as the more general fix for that class of
 problem — these two gaps closing doesn't mean every real-SDK-header quirk

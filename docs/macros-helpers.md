@@ -213,7 +213,7 @@ needing per-include/per-macro `@shared` annotations.
 
 **Emit includes** — `#include [[cccc::emit]]` routes an include to serialized
 generated output only (see
-[Emit directives and includes in generated output](macros-global.md#emit-directives-and-includes-in-generated-output)).
+[Emit directives and includes in generated output](macros-emit.md#what--cgenerated-captures)).
 
 > **Note:** `@comptime` on non-include directives (e.g. `#define`, `#ifdef`)
 > continues to work as before, routing the directive to the comptime

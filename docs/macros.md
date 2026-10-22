@@ -46,7 +46,7 @@ on which execution form you use.
 | Call context | Return value |
 |--------------|--------------|
 | Expression position (`int x = mac()`) | Must return a non-NULL `Node *` that is itself an **expression** node. NULL is a compile error, and so is a statement-kind return (see [Statement returns in expression position](#statement-returns-in-expression-position) below). |
-| Global variable initializer (`int G = mac()`) | Must return a `Node *` that evaluates to an integer or float constant. Pointer/struct results are not supported. See [Comptime functions in global initializers](macros-global.md#comptime-functions-in-global-initializers). |
+| Global variable initializer (`int G = mac()`) | Must return a `Node *` that evaluates to an integer or float constant. Pointer/struct results are not supported. See [Comptime functions in global initializers](macros-global.md#comptime-in-global-initializers). |
 | Declaration position (file-scope `mac();`) | Returning NULL or `void` is legal — means "I only emitted definitions." |
 
 For definition-only macros, declare the return type `void`. This is
@@ -118,7 +118,8 @@ A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
 |---|---|
 | [macros-execution.md](macros-execution.md) | When comptime code runs, what it can see, isolation and cross-file calls |
 | [macros-attributes.md](macros-attributes.md) | Custom attribute handlers and member attributes |
-| [macros-global.md](macros-global.md) | File-scope generation, comptime in initializers, emit directives |
+| [macros-global.md](macros-global.md) | File-scope generation, comptime in initializers and constants |
+| [macros-emit.md](macros-emit.md) | Emitting directives, emit blocks, attributes on generated functions |
 | [macros-call-site.md](macros-call-site.md) | Call-site expansion with `Node *` macros |
 | [macros-helpers.md](macros-helpers.md) | Comptime blocks, include scoping, `@build`/`@test` directives |
 | [macros-variables.md](macros-variables.md) | Comptime variables and `constexpr` readback |
