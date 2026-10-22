@@ -317,6 +317,12 @@ static long long state_hook(void) {
           "fix through a function pointer table expands");
     CHECK(cc_redefine_function(&vm, "int d(void) { return next() +; }") != 0,
           "failed fix refused");
+    CHECK(cc_redefine_function(&vm, "int d(void) { return next(") != 0,
+          "truncated comptime call refused");
+    CHECK(cc_redefine_function(&vm, "int d(void) { return deep(") != 0,
+          "truncated call refused");
+    CHECK(cc_redefine_function(&vm, "int c(void) { return viaptr(); }") == 0,
+          "session survives truncated input");
     return 0;
 }
 

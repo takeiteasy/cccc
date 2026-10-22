@@ -4306,8 +4306,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return node;
     }
 
-    // Try error recovery if enabled
-    if (vm->collect_errors &&
+    // Recovery skips the bad token; there is nothing past the end to resume at.
+    if (vm->collect_errors && tok->kind != TK_EOF &&
         error_tok_recover(vm, tok, "expected an expression, found '%.*s'",
                           tok->len, tok->loc)) {
         // Skip the invalid token and return error placeholder

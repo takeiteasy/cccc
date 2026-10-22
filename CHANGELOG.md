@@ -11,6 +11,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   function in a live session, including from `--watch`. Changed or new
   comptime functions and variables and file-scope comptime calls are still
   refused.
+- Fixed: a `fix` or `reload` whose source ends inside a call's arguments is
+  reported as an error instead of exiting the process.
 
 ## [0.19.4] - 2026-10-22
 

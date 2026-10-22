@@ -816,8 +816,13 @@ bool equal(Token *tok, const char *op) {
 
 // Ensure that the current token is `op`.
 Token *skip(VirtualMachine *vm, Token *tok, char *op) {
-    if (!tok)
+    if (!tok) {
+        if (vm && vm->error_jmp_buf) {
+            fprintf(stderr, "expected '%s'\n", op);
+            longjmp(*vm->error_jmp_buf, 1);
+        }
         error("expected '%s'", op);
+    }
     if (!equal(tok, op))
         error_tok(vm, tok, "expected '%s'", op);
     return tok->next;
