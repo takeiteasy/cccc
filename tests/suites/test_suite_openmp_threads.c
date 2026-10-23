@@ -1646,4 +1646,127 @@ int test_omp_task_priority_and_untied_accepted(void) {
     return v == 1 ? 42 : 1;
 }
 
+static long task_fib(int n) {
+    if (n < 2)
+        return n;
+    long a, b;
+#pragma omp task shared(a) firstprivate(n)
+    a = task_fib(n - 1);
+#pragma omp task shared(b) firstprivate(n)
+    b = task_fib(n - 2);
+#pragma omp taskwait
+    return a + b;
+}
+
+// No cutoff: steals, ring reuse and the last-task race between owner and thief.
+[[cccc::test(return = 42)]]
+int test_omp_task_fib_without_cutoff(void) {
+    long r = 0;
+#pragma omp parallel num_threads(4) shared(r)
+#pragma omp single
+    r = task_fib(22);
+    return r == 17711 ? 42 : 1;
+}
+
+// One producer queues more tasks than a deque ring holds, so it grows while
+// the other threads steal.
+[[cccc::test(return = 42)]]
+int test_omp_task_many_from_one_producer(void) {
+    long total = 0;
+#pragma omp parallel num_threads(4) shared(total)
+#pragma omp single
+    {
+        for (int i = 1; i <= 20000; i++) {
+#pragma omp task firstprivate(i) shared(total)
+            {
+#pragma omp atomic
+                total += i;
+            }
+        }
+    }
+    return total == 200010000L ? 42 : 1;
+}
+
+static long tree_sum(int depth, long base) {
+    if (depth == 0)
+        return base;
+    long l, r;
+#pragma omp task shared(l) firstprivate(depth, base)
+    l = tree_sum(depth - 1, base * 2);
+#pragma omp task shared(r) firstprivate(depth, base)
+    r = tree_sum(depth - 1, base * 2 + 1);
+#pragma omp taskwait
+    return l + r;
+}
+
+// A taskwait in every task, inside a taskgroup that also holds tasks created
+// by the descendants.
+[[cccc::test(return = 42)]]
+int test_omp_task_nested_waits_in_taskgroup(void) {
+    long s = 0, n = 0;
+#pragma omp parallel num_threads(4) shared(s, n)
+#pragma omp single
+    {
+#pragma omp taskgroup
+        {
+#pragma omp task shared(s)
+            s = tree_sum(10, 1);
+#pragma omp task shared(n)
+            {
+#pragma omp task shared(n)
+                {
+                    busy_for(0.01);
+#pragma omp atomic
+                    n += 1;
+                }
+            }
+        }
+    }
+    // The leaves are 1024..2047.
+    return s == 1024L * 3071 / 2 && n == 1 ? 42 : 1;
+}
+
+// Each link is released by a task that may run on another thread than the
+// creator, which waits for the whole chain.
+[[cccc::test(return = 42)]]
+int test_omp_task_depend_chain_released_elsewhere(void) {
+    int x = 0;
+#pragma omp parallel num_threads(4) shared(x)
+#pragma omp single
+    {
+        for (int i = 0; i < 300; i++) {
+#pragma omp task depend(inout : x) shared(x)
+            x += 1;
+        }
+#pragma omp taskwait
+    }
+    return x == 300 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_priority_among_many(void) {
+    long total = 0;
+#pragma omp parallel num_threads(4) shared(total)
+#pragma omp single
+    {
+        for (int i = 1; i <= 500; i++) {
+            if (i % 5 == 0) {
+#pragma omp task priority(3) firstprivate(i) shared(total)
+                {
+#pragma omp atomic
+                    total += i;
+                }
+            } else {
+#pragma omp task firstprivate(i) shared(total)
+                {
+#pragma omp atomic
+                    total += i;
+                }
+            }
+        }
+#pragma omp taskwait
+    }
+    return total == 125250 ? 42 : 1;
+}
+
 #pragma cccc suite end

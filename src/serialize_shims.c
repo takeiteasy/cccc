@@ -1703,10 +1703,7 @@ void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
     fprintf(f, "%s", CCCC_SHIM_pool_runtime);
     if (omp) {
         fprintf(f, "%s", CCCC_SHIM_omp_includes);
-        // TODO: one locked queue per team; per-thread work-stealing deques
-        // scale fine-grained tasks better (#1763). The bound of 64 queued
-        // tasks per thread is fixed (#1764) and dependences are found by a
-        // linear search (#1765).
+        // TODO: dependences are found by a linear search (#1765).
         fprintf(f, "%s", CCCC_SHIM_omp_tasks);
         fprintf(f, "%s", CCCC_SHIM_omp_runtime);
         fprintf(f, "%s", CCCC_SHIM_omp_api);

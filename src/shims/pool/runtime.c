@@ -43,6 +43,8 @@ __attribute__((unused)) static void __cccc_barrier_leave(__cccc_barrier_t *b) {
     pthread_mutex_unlock(&b->m);
 }
 
+struct __cccc_taskrt;
+
 struct __cccc_team {
     int              n;
     __cccc_barrier_t bar;
@@ -53,11 +55,14 @@ struct __cccc_team {
     struct __cccc_doacross *da; // doacross loops in progress, under om
     pthread_mutex_t  om;
     pthread_cond_t   oc;
-    // Deferred tasks (omp/tasks.c): tm guards the queues and counters.
+    // Deferred tasks (omp/tasks.c). tm guards the dependence graph, the
+    // priority list, the barrier and the idle threads' sleep on tc.
     pthread_mutex_t  tm;
     pthread_cond_t   tc;
-    struct __cccc_task *hq, *hqt, *lq, *lqt;
-    int              live, queued, barrived, waiting;
+    struct __cccc_task   *hq, *hqt;
+    struct __cccc_taskrt *rt; // deques and wait slots, made by the first deferred task
+    void (*rt_free)(struct __cccc_team *);
+    int              live, nhigh, sleepers, nwait, starved, barrived;
     unsigned         bgen;
     void (*fn)(void *);
     void *env;
@@ -167,8 +172,10 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
     pthread_cond_init(&t.oc, 0);
     pthread_mutex_init(&t.tm, 0);
     pthread_cond_init(&t.tc, 0);
-    t.hq = t.hqt = t.lq = t.lqt = 0;
-    t.live = t.queued = t.barrived = t.waiting = 0;
+    t.hq = t.hqt = 0;
+    t.rt         = 0;
+    t.rt_free    = 0;
+    t.live = t.nhigh = t.sleepers = t.nwait = t.starved = t.barrived = 0;
     t.bgen        = 0;
     t.fn          = fn;
     t.env         = env;
@@ -195,6 +202,8 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
             pthread_cond_wait(&__cccc_pool.done, &__cccc_pool.m);
         pthread_mutex_unlock(&__cccc_pool.m);
     }
+    if (t.rt_free)
+        t.rt_free(&t);
     __cccc_barrier_destroy(&t.bar);
     pthread_mutex_destroy(&t.om);
     pthread_cond_destroy(&t.oc);

@@ -288,7 +288,7 @@ or another OpenMP compiler. Building the native output with
 - An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
 - A task cannot have its own copy of a variable-length array under `-c=native`; name it in `shared` (#1766).
-- A thread waiting at `taskwait` or the end of a `taskgroup` runs only the tasks it created; other threads run the rest.
+- A thread waiting at `taskwait` or the end of a `taskgroup` runs only tasks created under its current task and does not steal; other threads run the rest.
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,
@@ -315,12 +315,14 @@ or another OpenMP compiler. Building the native output with
     so memory follows the number of chunks, not the trip count.
 
 [^tasks]: A task is a nested function with its own copies of the variables it
-    privatises, stored with the task when it is created. Tasks wait in one
-    queue per team, oldest first for idle threads and newest first for a
-    thread waiting on its own tasks. A task that is not deferred, runs in a
-    team of one thread, or is met while more than 64 tasks per thread are
-    queued runs at once on the thread that meets it. Parallel regions drain
-    the queue before they end.
+    privatises, stored with the task when it is created. Each thread has a
+    deque of queued tasks: it takes its newest, and idle threads steal the
+    oldest. A task that is not deferred, runs in a team of one thread, or is
+    met while its thread has its bound of tasks queued runs at once on the
+    thread that meets it. The bound starts at 8, doubles when a thread finds
+    nothing to steal, and halves after a stretch of spawns with nothing
+    stolen, within 4 to 1024. Parallel regions drain the deques before they
+    end.
 [^compare]: `x` is on the left of `==`; `<` and `>` take `x` on either side
     (`<=` and `>=` are not accepted). `capture` also takes
     `{ if (...) {...} v = x; }` (the new value),
