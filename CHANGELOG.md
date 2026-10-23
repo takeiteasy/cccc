@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-10-23
+
 - Changed: under `-c=native`, `-m` and `-c=generated`, `task` queues its block
   for the team instead of running it where it is met. Queued tasks run at a
   barrier, at `taskwait`, at the end of a `taskgroup`, at the end of a
@@ -15,8 +17,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   tasks in order.
 - Changed: `depend(depobj: ...)` and the `iterator` modifier of `depend` are
   compile errors.
-- Changed: under `-c=native`, a task cannot copy a variable-length array;
-  name it in `shared`.
+- Changed: under `-c=native`, a task can have its own copy of a
+  one-dimensional variable-length array; a multi-dimensional one must be named
+  in `shared`.
+- Fixed: under `-c=native`, a nested function's local declared with an
+  enclosing function's variable-length array type (`typeof` or a typedef) is
+  emitted with its length instead of as `int x[]`.
 
 ## [0.21.2] - 2026-10-23
 
