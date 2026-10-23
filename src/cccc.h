@@ -2053,6 +2053,8 @@ typedef struct OmpDirective {
     bool       default_firstprivate; // task default(firstprivate)
     bool       default_private;      // task default(private)
     int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
+    bool       atomic_compare; // atomic compare clause
+    bool       atomic_weak;    // atomic weak clause
     char      *num_threads_text; // threaded lowering: clause expressions
     char      *if_text;
     int        sched_kind;  // schedule kind (omp_sched_t, 0x10 runtime); 0 none

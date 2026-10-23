@@ -52,7 +52,7 @@ a team of one.
 | `parallel` | VM: runs the block once. Native: runs it on every thread of the team |
 | `for`, `parallel for` | VM: runs the loop once. Native: splits the iterations across the team; `collapse(n)` merges `n` nested loops |
 | `critical`, `critical(name)` | One thread at a time; one lock per name |
-| `atomic` (`read`, `write`, `update`, `capture`) | Atomic update of one variable |
+| `atomic` (`read`, `write`, `update`, `capture`, `compare`, `fail`, `weak`) | Atomic update of one variable |
 | `barrier` | Waits for the team |
 | `single` | One thread runs the block; the others wait unless `nowait` |
 | `master`, `masked` | Thread 0 runs the block |
@@ -82,6 +82,21 @@ or `v = x op= e`; `atomic capture` also takes a two-statement block:
 #pragma omp atomic capture
 { v = x; x += 1; }   // also { x op= e; v = x; } and { v = x; x = e; }
 ```
+
+`atomic compare` takes a conditional store, alone or with `capture`:
+
+```c
+#pragma omp atomic compare
+if (x == e) { x = d; }   // also x = x == e ? d : x;
+
+#pragma omp atomic compare
+if (x < e) { x = e; }    // also x = x < e ? e : x; and the `>` forms
+
+#pragma omp atomic compare capture
+{ v = x; if (x == e) { x = d; } }   // v is the old value
+```
+
+The accepted forms are listed in a footnote.[^compare]
 
 ## Clauses
 
@@ -238,3 +253,12 @@ or another OpenMP compiler. Building the native output with
     holding its iteration has passed it. A waiting thread spins briefly, then
     sleeps until a post wakes it. Every schedule keeps one counter per chunk,
     so memory follows the number of chunks, not the trip count.
+
+[^compare]: `x` is on the left of `==`; `<` and `>` take `x` on either side
+    (`<=` and `>=` are not accepted). `capture` also takes
+    `{ if (...) {...} v = x; }` (the new value),
+    `if (x == e) { x = d; } else { v = x; }` and
+    `{ r = x == e; if (r) { x = d; } [else { v = x; }] }`. `x == e` compares
+    the stored bits, so `-0.0` does not match `0.0`. `weak` needs `==`;
+    `fail(seq_cst|acquire|relaxed)` is checked and every `atomic` is a strong
+    `seq_cst` operation.

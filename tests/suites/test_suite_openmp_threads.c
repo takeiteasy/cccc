@@ -1316,4 +1316,53 @@ int test_omp_threads_atomic_capture_block(void) {
     return ok ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_threads_atomic_compare(void) {
+    int    nt = team_size(), mx = -1, mn = 1000, owner = -1, winners = 0;
+    int    ok = 1;
+    double dmin = 100.0;
+#pragma omp parallel num_threads(4)
+    {
+        int tid = omp_get_thread_num(), won = 0;
+#pragma omp atomic compare
+        if (mx < tid) { mx = tid; }
+#pragma omp atomic compare
+        mn = tid < mn ? tid : mn;
+#pragma omp atomic compare
+        if (dmin > tid + 0.5) { dmin = tid + 0.5; }
+#pragma omp atomic compare capture
+        { won = owner == -1; if (won) { owner = tid; } }
+        if (won)
+#pragma omp atomic
+            winners++;
+    }
+    ok &= mx == nt - 1 && mn == 0 && dmin == 0.5;
+    ok &= winners == 1 && owner >= 0 && owner < nt;
+
+    int    x = 5, v = 0, r = 0;
+    double dz = -0.0;
+#pragma omp atomic compare capture
+    { v = x; if (x == 5) { x = 6; } }
+    ok &= x == 6 && v == 5;
+#pragma omp atomic compare capture
+    { if (x == 7) { x = 8; } v = x; }
+    ok &= x == 6 && v == 6;
+#pragma omp atomic compare capture
+    if (x == 7) { x = 8; } else { v = x; }
+    ok &= x == 6 && v == 6;
+#pragma omp atomic capture compare
+    { x = x > 3 ? 3 : x; v = x; }
+    ok &= x == 3 && v == 3;
+#pragma omp atomic compare update weak fail(acquire)
+    x = x == 3 ? 4 : x;
+    ok &= x == 4;
+#pragma omp atomic compare capture weak fail(relaxed)
+    { r = x == 4; if (r) { x = 10; } else { v = x; } }
+    ok &= x == 10 && r == 1;
+#pragma omp atomic compare
+    if (dz == 0.0) { dz = 1.0; }
+    ok &= 1.0 / dz < 0; // -0.0 is not bitwise-equal to 0.0
+    return ok ? 42 : 1;
+}
+
 #pragma cccc suite end

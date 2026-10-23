@@ -503,17 +503,43 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
     } else if (is_word(tok, "atomic")) {
         d->kind = OMP_ATOMIC;
         tok     = tok->next;
+        Token *fail = NULL;
         while (is_word(tok, "read") || is_word(tok, "write") ||
                is_word(tok, "update") || is_word(tok, "capture") ||
-               is_word(tok, "seq_cst")) {
+               is_word(tok, "seq_cst") || is_word(tok, "compare") ||
+               is_word(tok, "weak") || is_word(tok, "fail")) {
             if (is_word(tok, "read"))
                 d->atomic_kind = 1;
             else if (is_word(tok, "write"))
                 d->atomic_kind = 2;
             else if (is_word(tok, "capture"))
                 d->atomic_kind = 3;
+            else if (is_word(tok, "compare"))
+                d->atomic_compare = true;
+            else if (is_word(tok, "weak"))
+                d->atomic_weak = true;
+            else if (is_word(tok, "fail")) {
+                fail = tok;
+                tok  = skip(vm, tok->next, "(");
+                if (!is_word(tok, "seq_cst") && !is_word(tok, "acquire") &&
+                    !is_word(tok, "relaxed"))
+                    error_tok(vm, tok,
+                              "expected 'seq_cst', 'acquire' or 'relaxed'");
+                tok = skip(vm, tok->next, ")");
+                continue;
+            }
             tok = tok->next;
         }
+        // Every atomic is a strong seq_cst operation, which already satisfies
+        // 'weak' and any 'fail' order.
+        if (d->atomic_compare && (d->atomic_kind == 1 || d->atomic_kind == 2))
+            error_tok(vm, name,
+                      "'compare' clause is incompatible with 'read' or "
+                      "'write' clauses");
+        if (fail && !d->atomic_compare)
+            error_tok(vm, fail, "'fail' clause requires 'compare' clause");
+        if (d->atomic_weak && !d->atomic_compare)
+            error_tok(vm, name, "'weak' clause requires 'compare' clause");
     } else if (is_word(tok, "barrier")) {
         d->kind = OMP_BARRIER;
         tok     = tok->next;
@@ -1903,6 +1929,10 @@ typedef struct {
     bool  pre, post, reversed;
     bool  swap; // `x = e`: the new value is e, not an update of x
     bool  old;  // capture: v gets the value before the update
+    // compare: `x == e` stores d; `x < e` / `x > e` store e
+    char *cmp, *d, *r; // r: the `r = x == e;` success flag
+    bool  x_left;      // x is the left operand of `<` / `>`
+    bool  v_on_fail;   // `else { v = x; }`: v gets x only when nothing is stored
 } OmpAtomic;
 
 static bool is_update_op(Token *t) {
@@ -2107,8 +2137,276 @@ static Token *atomic_capture_block(VirtualMachine *vm, Token *tok,
     return NULL;
 }
 
+// The closing token of the group opened at `open`, or NULL.
+static Token *group_close(Token *open) {
+    int depth = 0;
+    for (Token *t = open; t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "(") || equal(t, "[") || equal(t, "{"))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]") || equal(t, "}")) {
+            if (--depth == 0)
+                return t;
+        }
+    }
+    return NULL;
+}
+
+// The token after the compare statement at `s`: an `if` with its braced
+// bodies (and `else` body), otherwise the token after the `;`.
+static Token *compare_stmt_end(Token *s) {
+    if (!equal(s, "if")) {
+        Token *semi = statement_end(s);
+        return semi ? semi->next : NULL;
+    }
+    Token *t = equal(s->next, "(") ? group_close(s->next) : NULL;
+    t        = t && equal(t->next, "{") ? group_close(t->next) : NULL;
+    if (!t)
+        return NULL;
+    t = t->next;
+    if (equal(t, "else")) {
+        t = equal(t->next, "{") ? group_close(t->next) : NULL;
+        return t ? t->next : NULL;
+    }
+    return t;
+}
+
+// `{ lhs = rhs; }` with `open` on the `{`.
+static bool braced_assign(VirtualMachine *vm, Token *open, char **lhs,
+                          char **rhs) {
+    Token *s    = open->next;
+    Token *semi = statement_end(s);
+    if (!semi || group_close(open) != semi->next)
+        return false;
+    Token *eq = plain_assign(s, semi);
+    if (!eq || eq == s || eq->next == semi)
+        return false;
+    *lhs = tokens_text(vm, s, eq);
+    *rhs = tokens_text(vm, eq->next, semi);
+    return true;
+}
+
+// The single top-level `==`, `<` or `>` of `[s, end)`.
+static bool split_comparison(VirtualMachine *vm, Token *s, Token *end,
+                             char **l, char **op, char **r) {
+    int    depth = 0;
+    Token *at    = NULL;
+    for (Token *t = s; t != end; t = t->next) {
+        if (equal(t, "(") || equal(t, "["))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]"))
+            depth--;
+        else if (depth == 0 && (equal(t, "==") || equal(t, "<") || equal(t, ">"))) {
+            if (at)
+                return false;
+            at = t;
+        }
+    }
+    if (!at || at == s || at->next == end)
+        return false;
+    *l  = tokens_text(vm, s, at);
+    *op = tok_text(vm, at);
+    *r  = tokens_text(vm, at->next, end);
+    return true;
+}
+
+// Sets a->cmp, a->e and a->x_left from `l op r` and the variable a->x.
+static bool compare_operands(OmpAtomic *a, char *l, char *op, char *r) {
+    if (!strcmp(l, a->x)) {
+        a->x_left = true;
+        a->e      = r;
+    } else if (strcmp(op, "==") && !strcmp(r, a->x)) {
+        a->e = l;
+    } else {
+        return false;
+    }
+    a->cmp = op;
+    return true;
+}
+
+// The value stored when the comparison holds: d for `==`, e for `<` and `>`.
+static bool compare_store(OmpAtomic *a, char *val) {
+    if (!strcmp(a->cmp, "==")) {
+        a->d = val;
+        return true;
+    }
+    return !strcmp(val, a->e);
+}
+
+// `if (x == e) { x = d; } [else { v = x; }]`, `if (x < e) { x = e; }` or the
+// `?:` equivalent in `[s, end)`.
+static bool compare_update(VirtualMachine *vm, Token *s, Token *end,
+                           OmpAtomic *a, bool allow_else) {
+    char *l, *op, *r, *val;
+    if (equal(s, "if")) {
+        Token *rp = equal(s->next, "(") ? group_close(s->next) : NULL;
+        Token *lb = rp ? rp->next : NULL;
+        if (!lb || !equal(lb, "{") || !braced_assign(vm, lb, &a->x, &val) ||
+            !split_comparison(vm, s->next->next, rp, &l, &op, &r) ||
+            !compare_operands(a, l, op, r) || !compare_store(a, val))
+            return false;
+        Token *after = group_close(lb)->next;
+        if (after == end)
+            return true;
+        if (!allow_else || strcmp(a->cmp, "==") || !equal(after, "else") ||
+            !equal(after->next, "{") ||
+            group_close(after->next)->next != end ||
+            !braced_assign(vm, after->next, &a->v, &val) || strcmp(val, a->x))
+            return false;
+        a->v_on_fail = true;
+        return true;
+    }
+    Token *semi = statement_end(s);
+    Token *eq   = semi && semi->next == end ? plain_assign(s, semi) : NULL;
+    if (!eq || eq == s || equal(s, "{"))
+        return false;
+    a->x = tokens_text(vm, s, eq);
+    int    depth = 0;
+    Token *q = NULL, *colon = NULL;
+    for (Token *t = eq->next; t != semi; t = t->next) {
+        if (equal(t, "(") || equal(t, "["))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]"))
+            depth--;
+        else if (depth == 0 && equal(t, "?") && !q)
+            q = t;
+        else if (depth == 0 && equal(t, ":") && q)
+            colon = t;
+    }
+    if (!q || !colon || q == eq->next || colon == q->next ||
+        colon->next == semi || strcmp(tokens_text(vm, colon->next, semi), a->x) ||
+        !split_comparison(vm, eq->next, q, &l, &op, &r) ||
+        !compare_operands(a, l, op, r))
+        return false;
+    return compare_store(a, tokens_text(vm, q->next, colon));
+}
+
+static void compare_form_error(VirtualMachine *vm, Token *tok) {
+    error_tok(vm, tok,
+              "unsupported '#pragma omp atomic compare' statement: expected "
+              "'if (x == e) { x = d; }', 'x = x == e ? d : x;', 'if (x < e) { "
+              "x = e; }' or 'x = x > e ? e : x;' (in a capture, also "
+              "'{ v = x; <update> }', '{ <update> v = x; }', 'if (x == e) { x = "
+              "d; } else { v = x; }' or '{ r = x == e; if (r) { x = d; } "
+              "[else { v = x; }] }')");
+}
+
+// `{ r = x == e; if (r) { x = d; } [else { v = x; }] }` of `[s, end)`, where
+// `s1` is `r = x == e;` ending before `s2`.
+static bool compare_flag_block(VirtualMachine *vm, Token *s1, Token *s2,
+                               Token *end, OmpAtomic *a) {
+    Token *semi = statement_end(s1);
+    Token *eq   = semi ? plain_assign(s1, semi) : NULL;
+    char  *l, *op, *r, *val;
+    if (!eq || eq == s1 || !equal(s2, "if") || !equal(s2->next, "(") ||
+        !split_comparison(vm, eq->next, semi, &l, &op, &r) || strcmp(op, "=="))
+        return false;
+    a->r = tokens_text(vm, s1, eq);
+    a->x = l;
+    if (!compare_operands(a, l, op, r))
+        return false;
+    Token *rp = group_close(s2->next);
+    Token *lb = rp->next;
+    if (strcmp(tokens_text(vm, s2->next->next, rp), a->r) || !equal(lb, "{") ||
+        !braced_assign(vm, lb, &val, &a->d) || strcmp(val, a->x))
+        return false;
+    Token *after = group_close(lb)->next;
+    if (after == end)
+        return true;
+    if (!equal(after, "else") || !equal(after->next, "{") ||
+        group_close(after->next)->next != end ||
+        !braced_assign(vm, after->next, &a->v, &val) || strcmp(val, a->x))
+        return false;
+    a->v_on_fail = true;
+    return true;
+}
+
+// A capture block with `tok` on the `{`; returns the token after the `}`.
+static Token *atomic_compare_block(VirtualMachine *vm, Token *tok,
+                                   OmpAtomic *a) {
+    Token *s1 = tok->next, *s2 = compare_stmt_end(s1);
+    Token *e2 = s2 ? compare_stmt_end(s2) : NULL;
+    Token *close = group_close(tok);
+    if (!e2 || !close || e2 != close)
+        compare_form_error(vm, tok);
+    // { v = x; <update> }
+    Token *semi1 = equal(s1, "if") ? NULL : statement_end(s1);
+    char  *x     = semi1 ? capture_read(vm, s1, semi1, a) : NULL;
+    if (x && compare_update(vm, s2, e2, a, false) && !strcmp(a->x, x)) {
+        a->old = true;
+        return close->next;
+    }
+    // { <update> v = x; }
+    *a = (OmpAtomic){};
+    Token *semi2 = equal(s2, "if") ? NULL : statement_end(s2);
+    if (semi2 && compare_update(vm, s1, s2, a, false)) {
+        char *x2 = capture_read(vm, s2, semi2, a);
+        if (x2 && !strcmp(x2, a->x))
+            return close->next;
+    }
+    // { r = x == e; if (r) { x = d; } [else { v = x; }] }
+    *a = (OmpAtomic){};
+    if (compare_flag_block(vm, s1, s2, e2, a))
+        return close->next;
+    compare_form_error(vm, tok);
+    return NULL;
+}
+
+static Node *atomic_compare_stmt(VirtualMachine *vm, OmpDirective *d,
+                                 Token **rest, Token *tok) {
+    OmpAtomic a       = {};
+    bool      capture = d->atomic_kind == 3;
+    if (capture && equal(tok, "{")) {
+        *rest = atomic_compare_block(vm, tok, &a);
+    } else {
+        Token *end = equal(tok, "{") ? NULL : compare_stmt_end(tok);
+        if (!end || !compare_update(vm, tok, end, &a, capture) ||
+            (capture && !a.v_on_fail))
+            compare_form_error(vm, tok);
+        *rest = end;
+    }
+    if (d->atomic_weak && strcmp(a.cmp, "=="))
+        error_tok(vm, tok, "'weak' clause requires atomic equality comparison");
+
+    const char *c    = atomic_container(vm, tok, a.x);
+    const char *T    = arena_format(vm, "typeof_unqual(%s)", a.x);
+    const char *load = arena_format(vm, "(%s *)&(%s)", c, a.x);
+    const char *caps = "";
+    if (!strcmp(a.cmp, "==")) {
+        if (a.r)
+            caps = arena_format(vm, "%s = __ok;", a.r);
+        if (a.v && a.v_on_fail)
+            caps = arena_format(vm, "%sif (!__ok) %s = __o;", caps, a.v);
+        else if (a.v)
+            caps = arena_format(vm, "%s = %s;", a.v,
+                                a.old ? "__o" : "__ok ? __d : __o");
+        return snippet(
+            vm,
+            "{ %s __e = (%s), __d = (%s); %s __eb, __db; %s __o; "
+            "__builtin_memcpy(&__eb, &__e, sizeof(__e)); "
+            "__builtin_memcpy(&__db, &__d, sizeof(__d)); "
+            "_Bool __ok = __atomic_compare_exchange_n(%s, &__eb, __db, 0, 5, "
+            "5); __builtin_memcpy(&__o, &__eb, sizeof(__o)); %s }",
+            T, a.e, a.d, c, T, load, caps);
+    }
+    if (a.v)
+        caps = arena_format(vm, "%s = %s;", a.v,
+                            a.old ? "__o" : "__st ? __e : __o");
+    const char *cond = a.x_left ? arena_format(vm, "__o %s __e", a.cmp)
+                                : arena_format(vm, "__e %s __o", a.cmp);
+    return snippet(
+        vm,
+        "{ %s __e = (%s); %s __ob = __atomic_load_n(%s, 5), __eb; %s __o; "
+        "_Bool __st = 0; __builtin_memcpy(&__eb, &__e, sizeof(__e)); "
+        "for (;;) { __builtin_memcpy(&__o, &__ob, sizeof(__o)); if (!(%s)) "
+        "break; if (__atomic_compare_exchange_n(%s, &__ob, __eb, 0, 5, 5)) { "
+        "__st = 1; break; } } %s }",
+        T, a.e, c, load, T, cond, load, caps);
+}
+
 static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
                              Token *tok) {
+    if (d->atomic_compare)
+        return atomic_compare_stmt(vm, d, rest, tok);
     OmpAtomic a = {};
     char     *stmt_text;
     if (d->atomic_kind == 3 && equal(tok, "{")) {
@@ -2635,7 +2933,9 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     int    nloops   = d->ordered_n > d->collapse ? d->ordered_n : d->collapse;
     char  *saved_omp_brk         = vm->compiler.omp_loop_brk;
     vm->compiler.omp_assoc_loops = is_loop ? nloops : 0;
-    Node *inner                  = stmt(vm, rest, tok);
+    Node *inner = d->kind == OMP_ATOMIC && d->atomic_compare
+                      ? threaded_atomic(vm, d, rest, tok)
+                      : stmt(vm, rest, tok);
     vm->compiler.omp_assoc_loops = 0;
     vm->compiler.omp_loop_brk    = saved_omp_brk;
     if (d->kind == OMP_FOR || d->kind == OMP_PARALLEL_FOR) {
@@ -2650,7 +2950,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     } else if (d->kind == OMP_SIMD && has_clause(d, NULL, OMP_CLAUSE_LINEAR)) {
         check_loop(vm, inner, d->collapse, body_tok);
         linear_inject(vm, d, id, inner, body_tok);
-    } else if (d->kind == OMP_ATOMIC) {
+    } else if (d->kind == OMP_ATOMIC && !d->atomic_compare) {
         check_atomic(vm, d, inner, body_tok);
     }
     body_push(vm, &body, inner);
