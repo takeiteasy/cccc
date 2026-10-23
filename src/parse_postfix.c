@@ -972,6 +972,179 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 }
 
 // funcall = (assign ("," assign)*)? ")"
+// Checks one call argument against the next parameter and returns it converted
+// to that parameter's type, or NULL to drop it (too many arguments under error
+// recovery). Advances *param_ty.
+static Node *check_call_arg(VirtualMachine *vm, Type *ty, Type **param_ty_p,
+                            Node *arg, Token *tok) {
+    Type *param_ty = *param_ty_p;
+    if (!param_ty && !ty->is_variadic) {
+        if (vm->collect_errors &&
+            error_tok_recover(vm, tok, "too many arguments")) {
+            return NULL;
+        }
+        error_tok(vm, tok, "too many arguments");
+    }
+
+    if (param_ty) {
+        // [static N] minimum-size check: only enforceable when the
+        // argument is a compile-time-sized array; bare pointers are
+        // best-effort.
+        if (param_ty->static_min > 0 && arg->ty->kind == TY_ARRAY &&
+            arg->ty->array_len >= 0 &&
+            arg->ty->array_len < param_ty->static_min) {
+            warn_tok(vm, tok, CCCC_WARN_STATIC_ARRAY_SIZE,
+                     "array argument has %d element%s but parameter "
+                     "requires at least %d",
+                     arg->ty->array_len, arg->ty->array_len == 1 ? "" : "s",
+                     param_ty->static_min);
+        }
+
+        if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
+            warn_implicit_conversion(vm, arg, param_ty, tok);
+            arg = new_cast(vm, arg, param_ty);
+        }
+        param_ty = param_ty->next;
+    } else if (arg->ty->kind == TY_FLOAT) {
+        // If parameter type is omitted (e.g. in "..."), float
+        // arguments are promoted to double.
+        arg = new_cast(vm, arg, ty_double);
+    }
+    *param_ty_p = param_ty;
+    return arg;
+}
+
+// Arity check and call-site validation of an already-checked argument list
+// (`head` = first argument, `param_ty` = first unconsumed parameter), then
+// builds the ND_FUNCALL.
+static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
+                         Node *head_next, Type *param_ty, Token *tok,
+                         bool deferred_splice) {
+    Node  head = {.next = head_next};
+    Node *cur  = &head;
+    while (cur->next)
+        cur = cur->next;
+
+    if (!deferred_splice && param_ty) {
+        if (vm->collect_errors &&
+            error_tok_recover(vm, tok, "too few arguments")) {
+            // Create placeholder arguments for missing parameters
+            while (param_ty) {
+                Node *placeholder = new_node(vm, ND_NUM, tok);
+                placeholder->ty   = param_ty;
+                placeholder->val  = 0;
+                cur = cur->next = placeholder;
+                param_ty        = param_ty->next;
+            }
+        } else {
+            error_tok(vm, tok, "too few arguments");
+        }
+    }
+    head_next = head.next;
+
+    // __attribute__((error("msg"))): emit a compile-time error on every live
+    // call. Suppressed when dead_code_depth > 0, i.e. the call site is inside a
+    // statically-dead branch identified by static_branch_value() at the
+    // enclosing if-statement.  Under collect_errors recovery a live error_tok
+    // may longjmp past the decrement — but dead branches never trigger
+    // error_tok, so the counter stays balanced.
+    if (ty->attr_error_msg && vm->compiler.dead_code_depth == 0)
+        error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
+
+    // __attribute__((warning("msg"))): emit a compile-time warning on every
+    // live call.
+    if (ty->attr_warning_msg && vm->compiler.dead_code_depth == 0)
+        warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
+
+    // Validate format string arguments when -F is active
+    if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
+        validate_format_call(vm, tok, ty, head_next);
+
+    // __attribute__((nonnull)): warn on statically-provable-null arguments.
+    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
+        (vm->compiler.warnings & CCCC_WARN_NONNULL))
+        validate_nonnull_call(vm, ty, head_next);
+
+    // __attribute__((sentinel)): warn on a missing/non-literal NULL terminator.
+    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
+        (vm->compiler.warnings & CCCC_WARN_SENTINEL))
+        validate_sentinel_call(vm, tok, ty, head_next);
+
+    if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
+        !deferred_splice && fn->kind == ND_VAR && fn->var && fn->var->name) {
+        const char *fname = fn->var->name;
+        if (strcmp(fname, "memset") == 0 || strcmp(fname, "memcpy") == 0 ||
+            strcmp(fname, "memmove") == 0 || strcmp(fname, "memcmp") == 0) {
+            Node *a = head_next;
+            for (int i = 0; a && i < 2; i++)
+                a = a->next;
+            // strip any implicit cast to the parameter type to reach the sizeof
+            // node
+            Node *inner = a;
+            while (inner && inner->kind == ND_CAST)
+                inner = inner->lhs;
+            if (inner && inner->is_sizeof_ptr_expr)
+                warn_tok(vm, fn->tok, CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
+                         "argument to '%s' is the size of a pointer; "
+                         "use sizeof(*ptr) or sizeof(pointed-to type) instead",
+                         fname);
+        }
+    }
+
+    // #488: bounds-safe interfaces -- caller-side verification of a checked
+    // pointer parameter's declared bounds against the actual argument
+    // expressions. Must run after every other argument-list validation
+    // above (which all expect the plain, unwrapped argument nodes they were
+    // written against) and before ND_FUNCALL is built. Skipped for a
+    // deferred splice ($@k) the same as every other per-argument check
+    // above -- positional param<->arg pairing is meaningless once arity
+    // itself is deferred.
+    if (!deferred_splice)
+        rewrite_checked_call_args(vm, ty, head_next, tok);
+
+    Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
+    node->func_ty        = ty;
+    node->ty             = unqualified(vm, ty->return_ty);
+    node->args           = head_next;
+    node->has_splice_arg = deferred_splice;
+    if (is_float16(node->ty))
+        error_float16_unsupported(vm, fn->tok);
+    for (Node *a = head_next; a; a = a->next)
+        if (a->ty && is_float16(a->ty))
+            error_float16_unsupported(vm, a->tok);
+
+    // If a function returns a struct, it is caller's responsibility
+    // to allocate a space for the return value.
+    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
+        node->ret_buffer                = new_lvar(vm, "", 0, node->ty);
+        node->ret_buffer->is_ret_buffer = true;
+    }
+    return node;
+}
+
+// Builds a call to `fn` from already-parsed arguments, applying the same
+// arity, conversion and call-site checks as a written call.
+Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
+               Token *tok) {
+    add_type(vm, fn);
+    if (fn->ty->kind != TY_FUNC &&
+        (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
+        error_tok(vm, fn->tok, "not a function");
+
+    Type *ty       = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
+    Type *param_ty = ty->params;
+    Node  head     = {};
+    Node *cur      = &head;
+    for (int i = 0; i < nargs; i++) {
+        Node *arg = args[i];
+        add_type(vm, arg);
+        arg = check_call_arg(vm, ty, &param_ty, arg, tok);
+        if (arg)
+            cur = cur->next = arg;
+    }
+    return finish_call(vm, fn, ty, head.next, param_ty, tok, false);
+}
+
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     add_type(vm, fn);
 
@@ -1000,141 +1173,17 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
             deferred_splice = true;
 
         if (!deferred_splice) {
-            if (!param_ty && !ty->is_variadic) {
-                if (vm->collect_errors &&
-                    error_tok_recover(vm, tok, "too many arguments")) {
-                    // Continue parsing to find more errors, but don't add this
-                    // arg
-                    continue;
-                }
-                error_tok(vm, tok, "too many arguments");
-            }
-
-            if (param_ty) {
-                // [static N] minimum-size check: only enforceable when the
-                // argument is a compile-time-sized array; bare pointers are
-                // best-effort.
-                if (param_ty->static_min > 0 && arg->ty->kind == TY_ARRAY &&
-                    arg->ty->array_len >= 0 &&
-                    arg->ty->array_len < param_ty->static_min) {
-                    warn_tok(vm, tok, CCCC_WARN_STATIC_ARRAY_SIZE,
-                             "array argument has %d element%s but parameter "
-                             "requires at least %d",
-                             arg->ty->array_len,
-                             arg->ty->array_len == 1 ? "" : "s",
-                             param_ty->static_min);
-                }
-
-                if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
-                    warn_implicit_conversion(vm, arg, param_ty, tok);
-                    arg = new_cast(vm, arg, param_ty);
-                }
-                param_ty = param_ty->next;
-            } else if (arg->ty->kind == TY_FLOAT) {
-                // If parameter type is omitted (e.g. in "..."), float
-                // arguments are promoted to double.
-                arg = new_cast(vm, arg, ty_double);
-            }
+            arg = check_call_arg(vm, ty, &param_ty, arg, tok);
+            if (!arg)
+                continue;
         }
 
         cur = cur->next = arg;
     }
 
-    if (!deferred_splice && param_ty) {
-        if (vm->collect_errors &&
-            error_tok_recover(vm, tok, "too few arguments")) {
-            // Create placeholder arguments for missing parameters
-            while (param_ty) {
-                Node *placeholder = new_node(vm, ND_NUM, tok);
-                placeholder->ty   = param_ty;
-                placeholder->val  = 0;
-                cur = cur->next = placeholder;
-                param_ty        = param_ty->next;
-            }
-        } else {
-            error_tok(vm, tok, "too few arguments");
-        }
-    }
-
-    // __attribute__((error("msg"))): emit a compile-time error on every live
-    // call. Suppressed when dead_code_depth > 0, i.e. the call site is inside a
-    // statically-dead branch identified by static_branch_value() at the
-    // enclosing if-statement.  Under collect_errors recovery a live error_tok
-    // may longjmp past the decrement — but dead branches never trigger
-    // error_tok, so the counter stays balanced.
-    if (ty->attr_error_msg && vm->compiler.dead_code_depth == 0)
-        error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
-
-    // __attribute__((warning("msg"))): emit a compile-time warning on every
-    // live call.
-    if (ty->attr_warning_msg && vm->compiler.dead_code_depth == 0)
-        warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
-
-    // Validate format string arguments when -F is active
-    if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
-        validate_format_call(vm, tok, ty, head.next);
-
-    // __attribute__((nonnull)): warn on statically-provable-null arguments.
-    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
-        (vm->compiler.warnings & CCCC_WARN_NONNULL))
-        validate_nonnull_call(vm, ty, head.next);
-
-    // __attribute__((sentinel)): warn on a missing/non-literal NULL terminator.
-    if (!deferred_splice && vm->compiler.dead_code_depth == 0 &&
-        (vm->compiler.warnings & CCCC_WARN_SENTINEL))
-        validate_sentinel_call(vm, tok, ty, head.next);
-
-    if ((vm->compiler.warnings & CCCC_WARN_SIZEOF_POINTER_MEMACCESS) &&
-        !deferred_splice && fn->kind == ND_VAR && fn->var && fn->var->name) {
-        const char *fname = fn->var->name;
-        if (strcmp(fname, "memset") == 0 || strcmp(fname, "memcpy") == 0 ||
-            strcmp(fname, "memmove") == 0 || strcmp(fname, "memcmp") == 0) {
-            Node *a = head.next;
-            for (int i = 0; a && i < 2; i++)
-                a = a->next;
-            // strip any implicit cast to the parameter type to reach the sizeof
-            // node
-            Node *inner = a;
-            while (inner && inner->kind == ND_CAST)
-                inner = inner->lhs;
-            if (inner && inner->is_sizeof_ptr_expr)
-                warn_tok(vm, fn->tok, CCCC_WARN_SIZEOF_POINTER_MEMACCESS,
-                         "argument to '%s' is the size of a pointer; "
-                         "use sizeof(*ptr) or sizeof(pointed-to type) instead",
-                         fname);
-        }
-    }
-
-    // #488: bounds-safe interfaces -- caller-side verification of a checked
-    // pointer parameter's declared bounds against the actual argument
-    // expressions. Must run after every other argument-list validation
-    // above (which all expect the plain, unwrapped argument nodes they were
-    // written against) and before ND_FUNCALL is built. Skipped for a
-    // deferred splice ($@k) the same as every other per-argument check
-    // above -- positional param<->arg pairing is meaningless once arity
-    // itself is deferred.
-    if (!deferred_splice)
-        rewrite_checked_call_args(vm, ty, head.next, tok);
-
-    *rest                = skip(vm, tok, ")");
-
-    Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
-    node->func_ty        = ty;
-    node->ty             = unqualified(vm, ty->return_ty);
-    node->args           = head.next;
-    node->has_splice_arg = deferred_splice;
-    if (is_float16(node->ty))
-        error_float16_unsupported(vm, fn->tok);
-    for (Node *a = head.next; a; a = a->next)
-        if (a->ty && is_float16(a->ty))
-            error_float16_unsupported(vm, a->tok);
-
-    // If a function returns a struct, it is caller's responsibility
-    // to allocate a space for the return value.
-    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
-        node->ret_buffer                = new_lvar(vm, "", 0, node->ty);
-        node->ret_buffer->is_ret_buffer = true;
-    }
+    Node *node =
+        finish_call(vm, fn, ty, head.next, param_ty, tok, deferred_splice);
+    *rest = skip(vm, tok, ")");
     return node;
 }
 

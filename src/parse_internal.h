@@ -426,6 +426,8 @@ Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
 void mark_addr_escapes(Node *node, Obj *fn);
 void mark_nested_captures(Obj *fn, Node *node);
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
+Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
+               Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                  Token *tok);
