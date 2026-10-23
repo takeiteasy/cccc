@@ -196,7 +196,7 @@ language coverage figures apply.
 | Nested functions | ✓ | Access to parent-scope variables via static link. Serializes under `-c=native`/`-m`/`-c=generated` too — see [Serialized-output divergences](native-differences.md#behaviour-differences) for the lowering shape and its residual gaps |
 | Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. [^n17] |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](stdlib.md#built-in-functions) |
-| `__atomic_*` / `__sync_*` builtins | ✓ | All sequentially consistent on 1/2/4/8-byte integers and pointers; see [Atomic Operations](stdlib.md#atomic-operations) |
+| `__atomic_*` / `__sync_*` builtins | ✓ | 1/2/4/8-byte integers and pointers; sequentially consistent in the VM, memory orders honoured by `-c=native`; see [Atomic Operations](stdlib.md#atomic-operations) |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage. Accepted under every `--std` |
 | `__restrict` / `__restrict__` | ✓ | Spelling aliases for `restrict` (see `restrict` entry above). Accepted under every `--std`, including `c89` |
 | `__inline` / `__inline__` | ✓ | Spelling aliases for `inline`; recognized as GCC keyword aliases (GCC compatibility). Accepted under every `--std`, including `c89`; plain `inline` is accepted under `gnu89` and rejected only under strict `c89` |

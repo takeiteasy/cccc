@@ -2055,6 +2055,8 @@ typedef struct OmpDirective {
     int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
     bool       atomic_compare; // atomic compare clause
     bool       atomic_weak;    // atomic weak clause
+    int           atomic_order; // resolved memory order (__ATOMIC_* numbering)
+    int           atomic_fail;  // compare: failure order
     char      *num_threads_text; // threaded lowering: clause expressions
     char      *if_text;
     int        sched_kind;  // schedule kind (omp_sched_t, 0x10 runtime); 0 none
@@ -2269,6 +2271,12 @@ struct Node {
     struct Node *cas_addr;
     struct Node *cas_old;
     struct Node *cas_new;
+
+    // Memory order of an __atomic_* builtin (ND_ALOAD/ASTORE/EXCH/CAS), stored
+    // as order + 1 so zero means seq_cst; the serializer emits it, the VM
+    // ignores it. A CAS failure order and the weak flag ride along.
+    uint8_t atomic_mo, atomic_mo_fail;
+    bool    atomic_weak;
 
     // Atomic op= operators
     Obj         *atomic_addr;

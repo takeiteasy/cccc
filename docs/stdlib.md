@@ -130,7 +130,7 @@ These require `ap` to be of type `va_list` (the struct defined in `<stdarg.h>`).
 | `__builtin_atomic_thread_fence(order)` | Cross-thread memory fence; no VM opcode, lowers to `__atomic_thread_fence(order)` under `-c=native` |
 | `__builtin_atomic_signal_fence(order)` | Compiler-only (signal-handler) fence; no VM opcode, lowers to `__atomic_signal_fence(order)` under `-c=native` |
 
-GCC's `__atomic_*` and legacy `__sync_*` builtins work on 1/2/4/8-byte integer and pointer objects. Every operation is sequentially consistent: `__atomic_*` accepts and ignores its memory-order arguments, and `__sync_*` takes optional trailing arguments that are evaluated and discarded.
+GCC's `__atomic_*` and legacy `__sync_*` builtins work on 1/2/4/8-byte integer and pointer objects. The VM runs every operation sequentially consistent. `-c=native` and `-m` emit the constant memory-order and `weak` arguments of `__atomic_*` (an order the builtin rejects, such as a release load, becomes `seq_cst`, as does a computed one); `__sync_*` takes optional trailing arguments that are evaluated and discarded.
 
 | Builtin | Description |
 |---------|-------------|

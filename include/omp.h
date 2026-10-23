@@ -27,6 +27,23 @@ typedef enum omp_sched_t {
  */
 #define omp_sched_monotonic ((omp_sched_t)0x80000000u)
 
+/*! @brief Hints for `#pragma omp atomic hint(...)`; or them together, but not
+    contended with uncontended or speculative with nonspeculative. */
+typedef enum omp_sync_hint_t {
+    omp_sync_hint_none           = 0,
+    omp_sync_hint_uncontended    = 1,
+    omp_sync_hint_contended      = 2,
+    omp_sync_hint_nonspeculative = 4,
+    omp_sync_hint_speculative    = 8
+} omp_sync_hint_t;
+
+typedef omp_sync_hint_t omp_lock_hint_t;
+#define omp_lock_hint_none           omp_sync_hint_none
+#define omp_lock_hint_uncontended    omp_sync_hint_uncontended
+#define omp_lock_hint_contended      omp_sync_hint_contended
+#define omp_lock_hint_nonspeculative omp_sync_hint_nonspeculative
+#define omp_lock_hint_speculative    omp_sync_hint_speculative
+
 #ifdef __CCCC_OMP_THREADED__
 
 /* -c=native, -m and -c=generated run parallel regions on real threads; the

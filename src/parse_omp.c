@@ -38,6 +38,21 @@ static bool is_word(Token *tok, const char *word) {
            equal(tok, (char *)word);
 }
 
+// The memory order an `atomic` clause names, numbered like __ATOMIC_*, or -1.
+static int atomic_order_word(Token *tok) {
+    static const char *const names[] = {"relaxed", NULL,      "acquire",
+                                        "release", "acq_rel", "seq_cst"};
+    for (int i = 0; i < 6; i++)
+        if (names[i] && is_word(tok, names[i]))
+            return i;
+    return -1;
+}
+
+// The order a failed compare-and-swap or the load of a retry loop uses.
+static int omp_load_order(int order) {
+    return order == 4 ? 2 : order == 3 ? 0 : order;
+}
+
 static Node *snippet(VirtualMachine *vm, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 static Node *snippet(VirtualMachine *vm, const char *fmt, ...) {
@@ -503,35 +518,59 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
     } else if (is_word(tok, "atomic")) {
         d->kind = OMP_ATOMIC;
         tok     = tok->next;
-        Token *fail = NULL;
-        while (is_word(tok, "read") || is_word(tok, "write") ||
-               is_word(tok, "update") || is_word(tok, "capture") ||
-               is_word(tok, "seq_cst") || is_word(tok, "compare") ||
-               is_word(tok, "weak") || is_word(tok, "fail")) {
-            if (is_word(tok, "read"))
+        Token *fail = NULL, *order_tok = NULL;
+        int    fail_order = -1, hints = 0;
+        d->atomic_order = -1;
+        for (;;) {
+            int order = atomic_order_word(tok);
+            if (order >= 0) {
+                if (order_tok)
+                    error_tok(vm, tok, "too many memory order clauses");
+                order_tok       = tok;
+                d->atomic_order = order;
+            } else if (is_word(tok, "read")) {
                 d->atomic_kind = 1;
-            else if (is_word(tok, "write"))
+            } else if (is_word(tok, "write")) {
                 d->atomic_kind = 2;
-            else if (is_word(tok, "capture"))
+            } else if (is_word(tok, "update")) {
+            } else if (is_word(tok, "capture")) {
                 d->atomic_kind = 3;
-            else if (is_word(tok, "compare"))
+            } else if (is_word(tok, "compare")) {
                 d->atomic_compare = true;
-            else if (is_word(tok, "weak"))
+            } else if (is_word(tok, "weak")) {
                 d->atomic_weak = true;
-            else if (is_word(tok, "fail")) {
+            } else if (is_word(tok, "hint")) {
+                Token *hint = tok;
+                tok         = skip(vm, tok->next, "(");
+                Node *n     = conditional(vm, &tok, tok);
+                add_type(vm, n);
+                if (!is_const_expr(vm, n))
+                    error_tok(vm, hint,
+                              "expected a constant integer expression in "
+                              "'hint' clause");
+                int64_t v  = eval(vm, n);
+                hints     |= v & 15;
+                if (v < 0 || v > 15 || (hints & 3) == 3 || (hints & 12) == 12)
+                    error_tok(vm, hint, "invalid sync hint value");
+                tok = skip(vm, tok, ")");
+                consume(vm, &tok, tok, ",");
+                continue;
+            } else if (is_word(tok, "fail")) {
                 fail = tok;
                 tok  = skip(vm, tok->next, "(");
-                if (!is_word(tok, "seq_cst") && !is_word(tok, "acquire") &&
-                    !is_word(tok, "relaxed"))
+                fail_order = atomic_order_word(tok);
+                if (fail_order != 0 && fail_order != 2 && fail_order != 5)
                     error_tok(vm, tok,
                               "expected 'seq_cst', 'acquire' or 'relaxed'");
                 tok = skip(vm, tok->next, ")");
+                consume(vm, &tok, tok, ",");
                 continue;
+            } else {
+                break;
             }
             tok = tok->next;
+            consume(vm, &tok, tok, ",");
         }
-        // Every atomic is a strong seq_cst operation, which already satisfies
-        // 'weak' and any 'fail' order.
         if (d->atomic_compare && (d->atomic_kind == 1 || d->atomic_kind == 2))
             error_tok(vm, name,
                       "'compare' clause is incompatible with 'read' or "
@@ -540,6 +579,23 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
             error_tok(vm, fail, "'fail' clause requires 'compare' clause");
         if (d->atomic_weak && !d->atomic_compare)
             error_tok(vm, name, "'weak' clause requires 'compare' clause");
+        // No clause is relaxed; an acq_rel read acquires and an acq_rel write
+        // releases.
+        int order = d->atomic_order < 0 ? 0 : d->atomic_order;
+        if (d->atomic_kind == 1 && order == 3)
+            error_tok(vm, order_tok,
+                      "'#pragma omp atomic read' incompatible with 'release' "
+                      "clause");
+        if (d->atomic_kind == 2 && order == 2)
+            error_tok(vm, order_tok,
+                      "'#pragma omp atomic write' incompatible with "
+                      "'acquire' clause");
+        if (order == 4 && d->atomic_kind == 1)
+            order = 2;
+        else if (order == 4 && d->atomic_kind == 2)
+            order = 3;
+        d->atomic_order = order;
+        d->atomic_fail  = fail_order >= 0 ? fail_order : omp_load_order(order);
     } else if (is_word(tok, "barrier")) {
         d->kind = OMP_BARRIER;
         tok     = tok->next;
@@ -1133,25 +1189,6 @@ static void check_loop(VirtualMachine *vm, Node *loop, int depth, Token *tok) {
         if (level + 1 < depth)
             loop = single_stmt(loop->then);
     }
-}
-
-static void check_atomic(VirtualMachine *vm, OmpDirective *d, Node *stmt,
-                         Token *tok) {
-    if (d->atomic_kind == 3 && stmt->kind == ND_BLOCK) {
-        int n = 0;
-        for (Node *s = stmt->body; s; s = s->next, n++)
-            if (s->kind != ND_EXPR_STMT)
-                n = 99;
-        if (n == 2)
-            return;
-        error_tok(vm, tok,
-                  "the block after '#pragma omp atomic capture' must hold two "
-                  "expression statements");
-    }
-    if (stmt->kind != ND_EXPR_STMT || !node_has_side_effects(stmt->lhs))
-        error_tok(vm, tok,
-                  "the statement after '#pragma omp atomic' must update a "
-                  "variable");
 }
 
 // The blocks of `{ [section] stmts (section stmts)* }`, one per section.
@@ -1944,6 +1981,59 @@ static bool is_update_op(Token *t) {
     return false;
 }
 
+// Binding strength of the binary operator `t` (higher binds tighter; 0 for
+// `?:`, assignment and `,`), or -1 when `t` is not one.
+static int binary_prec(Token *t) {
+    static const struct {
+        const char *op;
+        int         prec;
+    } ops[] = {{"*", 10}, {"/", 10}, {"%", 10}, {"+", 9}, {"-", 9},  {"<<", 8},
+               {">>", 8}, {"<", 7},  {"<=", 7}, {">", 7}, {">=", 7}, {"==", 6},
+               {"!=", 6}, {"&", 5},  {"^", 4},  {"|", 3}, {"&&", 2}, {"||", 1},
+               {"?", 0},  {":", 0},  {",", 0},  {"=", 0}};
+    for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
+        if (equal(t, (char *)ops[i].op))
+            return ops[i].prec;
+    return is_update_op(t) ? 0 : -1;
+}
+
+// The operators `x = x op e` may use.
+static int update_op_prec(Token *t) {
+    static const char *const ops[] = {"+", "-", "*",  "/", "&",
+                                      "^", "|", "<<", ">>"};
+    for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
+        if (equal(t, (char *)ops[i]))
+            return binary_prec(t);
+    return -1;
+}
+
+static bool ends_operand(Token *t) {
+    return t->kind != TK_PUNCT || equal(t, ")") || equal(t, "]");
+}
+
+// Whether `[s, end)` is one operand of a binary operator of strength `prec`:
+// no top-level operator of that strength or looser (looser than it when
+// `left`, since equal strength groups to the left).
+static bool binds_tighter(Token *s, Token *end, int prec, bool left) {
+    int    depth = 0;
+    Token *prev = NULL, *prev2 = NULL;
+    for (Token *t = s; t != end; prev2 = prev, prev = t, t = t->next) {
+        if (equal(t, "(") || equal(t, "[") || equal(t, "{")) {
+            depth++;
+        } else if (equal(t, ")") || equal(t, "]") || equal(t, "}")) {
+            depth--;
+        } else if (depth == 0 && prev) {
+            bool binary = ends_operand(prev) ||
+                          ((equal(prev, "++") || equal(prev, "--")) && prev2 &&
+                           ends_operand(prev2));
+            int  p      = binary ? binary_prec(t) : -1;
+            if (p >= 0 && (left ? p < prec : p <= prec))
+                return false;
+        }
+    }
+    return true;
+}
+
 static bool atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
                                OmpAtomic *a) {
     if (equal(s, "++") || equal(s, "--")) {
@@ -1989,6 +2079,9 @@ static bool atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
             memcmp(t1->loc, t2->loc, t1->len))
             lead = false;
     if (lead && t2 != end) {
+        int prec = update_op_prec(t2);
+        if (prec < 0 || !binds_tighter(t2->next, end, prec, false))
+            return false;
         a->op = tok_text(vm, t2);
         a->e  = tokens_text(vm, t2->next, end);
         return true;
@@ -2012,6 +2105,9 @@ static bool atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
     Token *opt = rhs;
     for (int i = 0; i < n - nx - 1; i++)
         opt = opt->next;
+    int prec = update_op_prec(opt);
+    if (prec < 0 || !binds_tighter(rhs, opt, prec, true))
+        return false;
     a->reversed = true;
     a->op       = tok_text(vm, opt);
     a->e        = tokens_text(vm, rhs, opt);
@@ -2384,9 +2480,10 @@ static Node *atomic_compare_stmt(VirtualMachine *vm, OmpDirective *d,
             "{ %s __e = (%s), __d = (%s); %s __eb, __db; %s __o; "
             "__builtin_memcpy(&__eb, &__e, sizeof(__e)); "
             "__builtin_memcpy(&__db, &__d, sizeof(__d)); "
-            "_Bool __ok = __atomic_compare_exchange_n(%s, &__eb, __db, 0, 5, "
-            "5); __builtin_memcpy(&__o, &__eb, sizeof(__o)); %s }",
-            T, a.e, a.d, c, T, load, caps);
+            "_Bool __ok = __atomic_compare_exchange_n(%s, &__eb, __db, %d, %d, "
+            "%d); __builtin_memcpy(&__o, &__eb, sizeof(__o)); %s }",
+            T, a.e, a.d, c, T, load, d->atomic_weak ? 1 : 0, d->atomic_order,
+            d->atomic_fail, caps);
     }
     if (a.v)
         caps = arena_format(vm, "%s = %s;", a.v,
@@ -2395,12 +2492,13 @@ static Node *atomic_compare_stmt(VirtualMachine *vm, OmpDirective *d,
                                 : arena_format(vm, "__e %s __o", a.cmp);
     return snippet(
         vm,
-        "{ %s __e = (%s); %s __ob = __atomic_load_n(%s, 5), __eb; %s __o; "
+        "{ %s __e = (%s); %s __ob = __atomic_load_n(%s, %d), __eb; %s __o; "
         "_Bool __st = 0; __builtin_memcpy(&__eb, &__e, sizeof(__e)); "
         "for (;;) { __builtin_memcpy(&__o, &__ob, sizeof(__o)); if (!(%s)) "
-        "break; if (__atomic_compare_exchange_n(%s, &__ob, __eb, 0, 5, 5)) { "
-        "__st = 1; break; } } %s }",
-        T, a.e, c, load, T, cond, load, caps);
+        "break; if (__atomic_compare_exchange_n(%s, &__ob, __eb, 0, %d, %d)) "
+        "{ __st = 1; break; } } %s }",
+        T, a.e, c, load, d->atomic_fail, T, cond, load, d->atomic_order,
+        d->atomic_fail, caps);
 }
 
 static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
@@ -2469,44 +2567,46 @@ static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
     const char *evalue = a.e ? a.e : "1";
 
     if (d->atomic_kind == 1) {
-        stmt_text = arena_format(
-            vm,
-            "{ %s __b = __atomic_load_n(%s, 5); %s __t; __builtin_memcpy(&__t, "
-            "&__b, sizeof(__t)); %s = __t; }",
-            c, load, T, a.v);
+        stmt_text = arena_format(vm,
+                                 "{ %s __b = __atomic_load_n(%s, %d); %s __t; "
+                                 "__builtin_memcpy(&__t, "
+                                 "&__b, sizeof(__t)); %s = __t; }",
+                                 c, load, d->atomic_order, T, a.v);
     } else if (d->atomic_kind == 2) {
         stmt_text = arena_format(
             vm,
             "{ %s __t = (%s); %s __b; __builtin_memcpy(&__b, &__t, "
-            "sizeof(__t)); __atomic_store_n(%s, __b, 5); }",
-            T, a.e, c, load);
+            "sizeof(__t)); __atomic_store_n(%s, __b, %d); }",
+            T, a.e, c, load, d->atomic_order);
     } else if (a.swap) {
         stmt_text = arena_format(
             vm,
             "{ %s __t = (%s); %s __nb, __ob; __builtin_memcpy(&__nb, &__t, "
-            "sizeof(__t)); __ob = __atomic_exchange_n(%s, __nb, 5); %s __o; "
+            "sizeof(__t)); __ob = __atomic_exchange_n(%s, __nb, %d); %s __o; "
             "__builtin_memcpy(&__o, &__ob, sizeof(__o)); %s = __o; }",
-            T, a.e, c, load, T, a.v);
+            T, a.e, c, load, d->atomic_order, T, a.v);
     } else if (fetch && d->atomic_kind != 3) {
-        stmt_text = arena_format(vm, "__atomic_fetch_%s(&(%s), (%s), 5);",
-                                 fetch, x, evalue);
+        stmt_text = arena_format(vm, "__atomic_fetch_%s(&(%s), (%s), %d);",
+                                 fetch, x, evalue, d->atomic_order);
     } else if (fetch && a.old) {
-        stmt_text = arena_format(vm, "%s = __atomic_fetch_%s(&(%s), (%s), 5);",
-                                 a.v, fetch, x, evalue);
+        stmt_text = arena_format(vm, "%s = __atomic_fetch_%s(&(%s), (%s), %d);",
+                                 a.v, fetch, x, evalue, d->atomic_order);
     } else if (fetch) {
-        stmt_text = arena_format(vm, "%s = __atomic_%s_fetch(&(%s), (%s), 5);",
-                                 a.v, fetch, x, evalue);
+        stmt_text = arena_format(vm, "%s = __atomic_%s_fetch(&(%s), (%s), %d);",
+                                 a.v, fetch, x, evalue, d->atomic_order);
     } else {
         const char *newv = a.reversed ? arena_format(vm, "__e %s __o", a.op)
                                       : arena_format(vm, "__o %s __e", a.op);
         stmt_text        = arena_format(
             vm,
-            "{ typeof_unqual(%s) __e = (%s); %s __ob = __atomic_load_n(%s, 5), "
+            "{ typeof_unqual(%s) __e = (%s); %s __ob = __atomic_load_n(%s, "
+            "%d), "
             "__nb; %s __o, __n; for (;;) { __builtin_memcpy(&__o, &__ob, "
             "sizeof(__o)); __n = %s; __builtin_memcpy(&__nb, &__n, "
             "sizeof(__n)); if (__atomic_compare_exchange_n(%s, &__ob, __nb, "
-            "0, 5, 5)) break; } %s }",
-            evalue, evalue, c, load, T, newv, load,
+            "0, %d, %d)) break; } %s }",
+            evalue, evalue, c, load, omp_load_order(d->atomic_order), T, newv,
+            load, d->atomic_order, omp_load_order(d->atomic_order),
             d->atomic_kind == 3
                 ? arena_format(vm, "%s = %s;", a.v, a.old ? "__o" : "__n")
                 : "");
@@ -2933,9 +3033,8 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     int    nloops   = d->ordered_n > d->collapse ? d->ordered_n : d->collapse;
     char  *saved_omp_brk         = vm->compiler.omp_loop_brk;
     vm->compiler.omp_assoc_loops = is_loop ? nloops : 0;
-    Node *inner = d->kind == OMP_ATOMIC && d->atomic_compare
-                      ? threaded_atomic(vm, d, rest, tok)
-                      : stmt(vm, rest, tok);
+    Node *inner = d->kind == OMP_ATOMIC ? threaded_atomic(vm, d, rest, tok)
+                                        : stmt(vm, rest, tok);
     vm->compiler.omp_assoc_loops = 0;
     vm->compiler.omp_loop_brk    = saved_omp_brk;
     if (d->kind == OMP_FOR || d->kind == OMP_PARALLEL_FOR) {
@@ -2950,8 +3049,6 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     } else if (d->kind == OMP_SIMD && has_clause(d, NULL, OMP_CLAUSE_LINEAR)) {
         check_loop(vm, inner, d->collapse, body_tok);
         linear_inject(vm, d, id, inner, body_tok);
-    } else if (d->kind == OMP_ATOMIC && !d->atomic_compare) {
-        check_atomic(vm, d, inner, body_tok);
     }
     body_push(vm, &body, inner);
     merges(vm, d, &body, id);

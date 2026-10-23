@@ -734,6 +734,30 @@ static const char *atomic_order_name(long long order) {
     }
 }
 
+// A load takes no release half and a store no acquire half; the builtins would
+// otherwise warn and fall back to seq_cst themselves.
+const char *atomic_mo_name(uint8_t mo, int kind) {
+    long long order = mo ? mo - 1 : 5;
+    if (kind == 0 && (order == 3 || order == 4))
+        order = 5;
+    if (kind == 1 && (order == 1 || order == 2 || order == 4))
+        order = 5;
+    return atomic_order_name(order);
+}
+
+void atomic_cas_mo_names(Node *cas, const char **succ, const char **fail) {
+    long long s = cas->atomic_mo ? cas->atomic_mo - 1 : 5;
+    long long f = cas->atomic_mo_fail ? cas->atomic_mo_fail - 1 : 5;
+    if (f == 3 || f == 4)
+        f = 5;
+    if (f == 5)
+        s = 5;
+    else if (f == 2 || f == 1)
+        s = s == 0 || s == 1 ? 2 : s == 3 ? 4 : s;
+    *succ = atomic_order_name(s);
+    *fail = atomic_order_name(f);
+}
+
 // #1101: an address operand handed to a __atomic_* builtin must not carry
 // the _Atomic qualifier in its static type -- clang rejects
 // `__atomic_store_n(&x, ...)` outright when x is spelled through a host
@@ -3065,7 +3089,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "__atomic_load_n(");
                 // #1101: strip _Atomic from the operand's static type.
                 serialize_atomic_addr(f, vm, ctx, node->lhs);
-                fprintf(f, ", __ATOMIC_SEQ_CST)");
+                fprintf(f, ", %s)", atomic_mo_name(node->atomic_mo, 0));
             } else {
                 fprintf(f, "(*(");
                 serialize_expr(f, vm, ctx, node->lhs, 0);
@@ -3088,8 +3112,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "); __atomic_store_n(");
                 // #1101: strip _Atomic from the operand's static type.
                 serialize_atomic_addr(f, vm, ctx, node->lhs);
-                fprintf(f, ", __cccc_astore_v, __ATOMIC_SEQ_CST); "
-                           "__cccc_astore_v; })");
+                fprintf(f, ", __cccc_astore_v, %s); __cccc_astore_v; })",
+                        atomic_mo_name(node->atomic_mo, 1));
             } else {
                 fprintf(f, "(*(");
                 serialize_expr(f, vm, ctx, node->lhs, 0);
@@ -3111,13 +3135,13 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             serialize_atomic_addr(f, vm, ctx, node->lhs);
             fprintf(f, ", ");
             serialize_expr(f, vm, ctx, node->rhs, 2);
-            fprintf(f, ", __ATOMIC_SEQ_CST)");
+            fprintf(f, ", %s)", atomic_mo_name(node->atomic_mo, 2));
             break;
 
         case ND_CAS: {
             // (obj, *expected, desired) -> bool, matching codegen's ACAS
             // contract: cas_old is a *pointer* to the expected value, as
-            // __atomic_compare_ exchange_n also takes. weak = 0.
+            // __atomic_compare_ exchange_n also takes.
             // An _Atomic ntarray element's RMW store checks its terminator
             // slot first (CHKNT); cas_addr is to_assign()'s side-effect-free
             // temp, so reading it twice is safe.
@@ -3148,7 +3172,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "__cccc_chkv%d", seq);
             else
                 serialize_expr(f, vm, ctx, node->cas_new, 2);
-            fprintf(f, ", 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)");
+            const char *succ, *fail;
+            atomic_cas_mo_names(node, &succ, &fail);
+            fprintf(f, ", %d, %s, %s)", node->atomic_weak ? 1 : 0, succ, fail);
             if (nt)
                 fprintf(f, "; })");
             break;

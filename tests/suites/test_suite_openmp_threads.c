@@ -1365,4 +1365,69 @@ int test_omp_threads_atomic_compare(void) {
     return ok ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_threads_atomic_order(void) {
+    int    ok = 1, x = 0, v = 0, y = 0, flag = 0, data = 0, got = 0, n = 0;
+    double d = 1.5;
+#pragma omp atomic relaxed
+    x += 2;
+#pragma omp atomic update, acq_rel
+    x += 3;
+#pragma omp atomic seq_cst hint(omp_sync_hint_contended |                      \
+                                    omp_sync_hint_speculative)
+    x++;
+#pragma omp atomic hint(omp_sync_hint_uncontended), release
+    d  += 1.0;
+    ok &= x == 6 && d == 2.5;
+#pragma omp atomic read acquire
+    v = x;
+#pragma omp atomic read acq_rel
+    y = x;
+#pragma omp atomic write release
+    x = 20;
+#pragma omp atomic write acq_rel
+    d   = 4.0;
+    ok &= v == 6 && y == 6 && x == 20 && d == 4.0;
+#pragma omp atomic capture acq_rel
+    v = x++;
+#pragma omp atomic capture relaxed
+    {
+        y  = x;
+        x *= 2;
+    }
+    ok &= v == 20 && y == 21 && x == 42;
+#pragma omp atomic compare release fail(acquire)
+    if (x == 42) {
+        x = 7;
+    }
+#pragma omp atomic compare weak acquire
+    if (x == 7) {
+        x = 8;
+    }
+#pragma omp atomic compare acq_rel
+    if (x < 9) {
+        x = 9;
+    }
+    ok &= x == 9;
+
+#pragma omp parallel num_threads(2)
+    {
+        if (omp_get_thread_num() == 0) {
+            n    = omp_get_num_threads();
+            data = 42;
+#pragma omp atomic write release
+            flag = 1;
+        } else {
+            int f = 0;
+            while (!f) {
+#pragma omp atomic read acquire
+                f = flag;
+            }
+            got = data;
+        }
+    }
+    ok &= n < 2 || got == 42;
+    return ok ? 42 : 1;
+}
+
 #pragma cccc suite end

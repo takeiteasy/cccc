@@ -1,6 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_FLAGS: -fopenmp
-// CCCC_EXPECT_STDERR: must hold two expression statements
+// CCCC_EXPECT_STDERR: unsupported .#pragma omp atomic capture. block
 int main(void) {
     int x = 0, v;
 #pragma omp parallel

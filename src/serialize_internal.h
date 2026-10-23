@@ -317,6 +317,13 @@ typedef struct {
 // src/serialize.c).
 
 bool atomic_serializable_pointee(Node *addr);
+
+// The __ATOMIC_* name for a node's atomic_mo, weakened or raised to an order
+// the builtin accepts (kind: 0 load, 1 store, 2 read-modify-write).
+const char *atomic_mo_name(uint8_t mo, int kind);
+// The success and failure names of a compare-and-swap; the failure order is
+// never stronger than the success order.
+void atomic_cas_mo_names(Node *cas, const char **succ, const char **fail);
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj);
 bool gnu_inline_needs_body(Obj *fn);

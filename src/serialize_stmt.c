@@ -551,7 +551,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 serialize_atomic_addr(f, vm, ctx, node->lhs);
                 fprintf(f, ", ");
                 serialize_expr(f, vm, ctx, node->rhs, 2);
-                fprintf(f, ", __ATOMIC_SEQ_CST);\n");
+                fprintf(f, ", %s);\n", atomic_mo_name(node->atomic_mo, 1));
             } else {
                 fprintf(f, "*(");
                 serialize_expr(f, vm, ctx, node->lhs, 0);

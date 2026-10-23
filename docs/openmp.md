@@ -52,7 +52,7 @@ a team of one.
 | `parallel` | VM: runs the block once. Native: runs it on every thread of the team |
 | `for`, `parallel for` | VM: runs the loop once. Native: splits the iterations across the team; `collapse(n)` merges `n` nested loops |
 | `critical`, `critical(name)` | One thread at a time; one lock per name |
-| `atomic` (`read`, `write`, `update`, `capture`, `compare`, `fail`, `weak`) | Atomic update of one variable |
+| `atomic` (`read`, `write`, `update`, `capture`, `compare`, `fail`, `weak`, a memory order, `hint`) | Atomic update of one variable. A memory order is `relaxed` (the default), `acquire`, `release`, `acq_rel` or `seq_cst` |
 | `barrier` | Waits for the team |
 | `single` | One thread runs the block; the others wait unless `nowait` |
 | `master`, `masked` | Thread 0 runs the block |
@@ -75,13 +75,29 @@ Native loops use the canonical OpenMP form: an integer or object-pointer
 variable (`for (int *p = a; p < a + n; p++)`), a bound compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
 `i = i + n` or the decrementing equivalents. `collapse` needs perfectly nested,
 rectangular loops. `return` inside a parallel region is an error. An
-`atomic` statement is one of `x op= e`, `x++`, `x = x op e`, `v = x`, `x = e`
-or `v = x op= e`; `atomic capture` also takes a two-statement block:
+`atomic` statement, in the VM too, is one of `x op= e`, `x++`, `x = x op e`
+(`op` is `+ - * / & ^ | << >>`, and `e` has no operator that binds as loosely),
+`v = x`, `x = e` or `v = x op= e`; `atomic capture` also takes a two-statement
+block:
 
 ```c
 #pragma omp atomic capture
 { v = x; x += 1; }   // also { x op= e; v = x; } and { v = x; x = e; }
 ```
+
+Clauses may be separated by commas. The memory order reaches `-c=native`
+as the order of the emitted `__atomic` operations, and the VM runs every
+atomic as `seq_cst`:
+
+```c
+#pragma omp atomic write release
+flag = 1;
+#pragma omp atomic read acquire
+f = flag;
+```
+
+`hint(e)` takes a constant, such as `omp_sync_hint_contended` from `omp.h`,
+and is checked then ignored.
 
 `atomic compare` takes a conditional store, alone or with `capture`:
 
@@ -259,6 +275,9 @@ or another OpenMP compiler. Building the native output with
     `{ if (...) {...} v = x; }` (the new value),
     `if (x == e) { x = d; } else { v = x; }` and
     `{ r = x == e; if (r) { x = d; } [else { v = x; }] }`. `x == e` compares
-    the stored bits, so `-0.0` does not match `0.0`. `weak` needs `==`;
-    `fail(seq_cst|acquire|relaxed)` is checked and every `atomic` is a strong
-    `seq_cst` operation.
+    the stored bits, so `-0.0` does not match `0.0`. `weak` needs `==` and
+    makes the exchange weak. `fail(seq_cst|acquire|relaxed)` sets the order of
+    a failed exchange; without it that is the success order minus its release
+    half. `read` rejects `release` and `write` rejects `acquire`; `acq_rel`
+    acquires on a `read` and releases on a `write`. A failure order stronger
+    than the success order raises the success order.

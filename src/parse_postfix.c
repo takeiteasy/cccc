@@ -1800,6 +1800,31 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
     return postfix(vm, rest, head.next);
 }
 
+// A constant memory-order argument as order + 1; 0 (seq_cst) when it is
+// computed or out of range.
+static uint8_t atomic_order_arg(VirtualMachine *vm, Token **rest, Token *tok) {
+    Node *n = assign(vm, rest, tok);
+    add_type(vm, n);
+    if (!is_const_expr(vm, n))
+        return 0;
+    int64_t order = eval(vm, n);
+    return order >= 0 && order <= 5 ? order + 1 : 0;
+}
+
+static bool atomic_weak_arg(VirtualMachine *vm, Token **rest, Token *tok) {
+    Node *n = assign(vm, rest, tok);
+    add_type(vm, n);
+    return is_const_expr(vm, n) && eval(vm, n) != 0;
+}
+
+// The load half of a read-modify-write order: what a CAS failure and the
+// initial load of a retry loop may use.
+static uint8_t atomic_load_order(uint8_t mo) {
+    return mo == 5   ? 3
+           : mo == 4 ? 1
+                     : mo; // acq_rel -> acquire, release -> relaxed
+}
+
 // #1282: shared CAS-retry-loop desugar for the __atomic_fetch_*/
 // __atomic_*_fetch builtin family (primary()'s "__atomic_fetch_{add,sub,and,
 // or,xor,nand}"/"__atomic_{add,sub,and,or,xor,nand}_fetch" arms below). Same
@@ -1821,7 +1846,7 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
 // same invariant include/stdatomic.h's __cccc_atomic_fetch_op documents.
 static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
                                    Node *valexpr, NodeKind op_kind,
-                                   bool is_nand, bool want_old) {
+                                   bool is_nand, bool want_old, uint8_t mo) {
     add_type(vm, obj);
     if (!obj->ty || obj->ty->kind != TY_PTR)
         error_tok(vm, tok, "atomic builtin: first argument must be a pointer");
@@ -1846,6 +1871,7 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     // thread's CAS.
     Node *first_load = new_node(vm, ND_ALOAD, tok);
     first_load->lhs  = new_var_node(vm, addr, tok);
+    first_load->atomic_mo = atomic_load_order(mo);
     cur = cur->next = new_unary(
         vm, ND_EXPR_STMT,
         new_binary(vm, ND_ASSIGN, new_var_node(vm, old, tok), first_load, tok),
@@ -1873,6 +1899,8 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     cas->cas_addr    = new_var_node(vm, addr, tok);
     cas->cas_old     = new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
     cas->cas_new     = new_var_node(vm, newv, tok);
+    cas->atomic_mo      = mo;
+    cas->atomic_mo_fail = atomic_load_order(mo);
     loop->cond       = new_unary(vm, ND_NOT, cas, tok);
 
     cur = cur->next = loop;
@@ -2594,17 +2622,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // directly, not through <stdatomic.h>'s __builtin_* spellings above).
     // Every memory-order argument is parsed as a full assignment expression
     // (not const_expr -- C11 makes these functions, matching the reasoning
-    // on __builtin_atomic_thread_fence just above) then discarded: every
-    // operation here is unconditionally seq_cst regardless of the requested
-    // order, exactly like every operation on stdatomic.h's own page (see
-    // that file's #1184 comment) -- conforming, since seq_cst is stronger
-    // than any order a caller can request, never weaker.
+    // on __builtin_atomic_thread_fence just above). A constant order is kept
+    // on the node for the -c=native serializer; a computed one, and the VM,
+    // are seq_cst, which is never weaker than any order a caller can request.
     if (equal(tok, "__atomic_load_n")) {
         Node *node = new_node(vm, ND_ALOAD, tok);
         tok        = skip(vm, tok->next, "(");
         node->lhs  = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        node->atomic_mo = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2616,7 +2642,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok, ",");
         node->rhs  = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        node->atomic_mo = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2628,7 +2654,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok, ",");
         node->rhs  = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        node->atomic_mo = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2648,11 +2674,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok            = skip(vm, tok, ",");
         node->cas_new  = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // weak, discarded
+        node->atomic_weak    = atomic_weak_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order_success, discarded
+        node->atomic_mo      = atomic_order_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order_failure, discarded
+        node->atomic_mo_fail = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2681,10 +2707,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok, ",");
         Node *retp = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        uint8_t mo      = atomic_order_arg(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         Node *load = new_node(vm, ND_ALOAD, tok);
         load->lhs  = ptr;
+        load->atomic_mo = mo;
         return new_binary(vm, ND_ASSIGN, new_unary(vm, ND_DEREF, retp, tok),
                           load, tok);
     }
@@ -2695,10 +2722,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok, ",");
         Node *valp = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        uint8_t mo      = atomic_order_arg(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_ASTORE, tok);
         node->lhs  = ptr;
+        node->atomic_mo = mo;
         node->rhs  = new_unary(vm, ND_DEREF, valp, tok);
         return node;
     }
@@ -2711,10 +2739,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok, ",");
         Node *retp = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        uint8_t mo      = atomic_order_arg(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         Node *exch = new_node(vm, ND_EXCH, tok);
         exch->lhs  = ptr;
+        exch->atomic_mo = mo;
         exch->rhs  = new_unary(vm, ND_DEREF, valp, tok);
         return new_binary(vm, ND_ASSIGN, new_unary(vm, ND_DEREF, retp, tok),
                           exch, tok);
@@ -2734,11 +2763,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok            = skip(vm, tok, ",");
         node->cas_new  = new_unary(vm, ND_DEREF, assign(vm, &tok, tok), tok);
         tok            = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // weak, discarded
+        node->atomic_weak    = atomic_weak_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order_success, discarded
+        node->atomic_mo      = atomic_order_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order_failure, discarded
+        node->atomic_mo_fail = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2752,7 +2781,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->lhs  = assign(vm, &tok, tok);
         node->rhs  = new_num(vm, 1, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        node->atomic_mo = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2765,7 +2794,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         node->lhs  = assign(vm, &tok, tok);
         node->rhs  = new_num(vm, 0, tok);
         tok        = skip(vm, tok, ",");
-        assign(vm, &tok, tok); // order, discarded
+        node->atomic_mo = atomic_order_arg(vm, &tok, tok);
         *rest = skip(vm, tok, ")");
         return node;
     }
@@ -2889,16 +2918,17 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             Node *obj     = assign(vm, &tok, tok);
             tok           = skip(vm, tok, ",");
             Node *valexpr = assign(vm, &tok, tok);
+            uint8_t mo      = 0;
             if (is_sync) {
                 tok = skip_sync_tail(vm, tok);
             } else {
                 tok = skip(vm, tok, ",");
-                assign(vm, &tok, tok); // order, discarded
+                mo  = atomic_order_arg(vm, &tok, tok);
             }
             *rest = skip(vm, tok, ")");
             return build_atomic_fetch_op(vm, tok, obj, valexpr,
                                          fetch_ops[i].op_kind,
-                                         fetch_ops[i].is_nand, want_old);
+                                         fetch_ops[i].is_nand, want_old, mo);
         }
     }
 
