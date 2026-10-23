@@ -85,9 +85,12 @@ int test_atomic_ops_functional(void) {
     if (r || expected != 42 || atomic_load(&x) != 42)
         return 5;
 
-    // compare_exchange_weak: success case
+    // compare_exchange_weak: success case (a weak exchange may fail
+    // spuriously, so retry)
     expected = 42;
-    r        = atomic_compare_exchange_weak(&x, &expected, 10);
+    do {
+        r = atomic_compare_exchange_weak(&x, &expected, 10);
+    } while (!r && expected == 42);
     if (!r || atomic_load(&x) != 10)
         return 6;
 
@@ -373,6 +376,79 @@ int test_has_builtin_atomics(void) {
         !__has_builtin(__atomic_load_n) ||
         !__has_builtin(__atomic_compare_exchange_n))
         return 1;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_atomic_pointer_fetch_scaling(void) {
+    int            a[4] = {};
+    _Atomic(int *) p    = a;
+    int           *old  = atomic_fetch_add(&p, 2);
+    if (old != a || p != a + 2)
+        return 1;
+    old = atomic_fetch_sub_explicit(&p, 1, memory_order_relaxed);
+    if (old != a + 2 || p != a + 1)
+        return 2;
+
+    // GCC's builtins move a pointer by bytes.
+    int *q = a;
+    if (__atomic_fetch_add(&q, 4, __ATOMIC_SEQ_CST) != a || q != a + 1)
+        return 3;
+    if (__atomic_sub_fetch(&q, 4, __ATOMIC_SEQ_CST) != a || q != a)
+        return 4;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_atomic_fetch_op_types(void) {
+    atomic_char  c = 250;
+    atomic_short s = 1000;
+    atomic_long  l = 1L << 40;
+    atomic_uint  u = 7;
+    if (atomic_fetch_add(&c, 10) != (char)250 || c != (char)260)
+        return 1;
+    if (atomic_fetch_sub_explicit(&s, 1, memory_order_acquire) != 1000 ||
+        s != 999)
+        return 2;
+    if (atomic_fetch_or(&l, 1) != (1L << 40) || l != ((1L << 40) | 1))
+        return 3;
+    if (atomic_fetch_and_explicit(&u, 3u, memory_order_release) != 7u ||
+        u != 3u)
+        return 4;
+    if (atomic_fetch_xor(&u, 1u) != 3u || u != 2u)
+        return 5;
+    int n = 6;
+    if (__atomic_nand_fetch(&n, 3, __ATOMIC_SEQ_CST) != ~(6 & 3) ||
+        __atomic_fetch_nand(&n, 1, __ATOMIC_RELAXED) != ~(6 & 3))
+        return 6;
+    atomic_bool b = 0;
+    if (atomic_fetch_or(&b, 1) != 0 || !b)
+        return 7;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_atomic_compare_exchange_explicit(void) {
+    atomic_int x        = 5;
+    int        expected = 5;
+    if (!atomic_compare_exchange_strong_explicit(
+            &x, &expected, 6, memory_order_acq_rel, memory_order_acquire) ||
+        x != 6)
+        return 1;
+    expected = 0;
+    if (atomic_compare_exchange_strong_explicit(
+            &x, &expected, 7, memory_order_seq_cst, memory_order_relaxed) ||
+        expected != 6)
+        return 2;
+    // A weak exchange may fail spuriously, so retry.
+    int tries = 0;
+    expected  = 6;
+    while (!atomic_compare_exchange_weak_explicit(
+               &x, &expected, 8, memory_order_release, memory_order_relaxed) &&
+           expected == 6 && ++tries < 1000000)
+        ;
+    if (x != 8)
+        return 3;
     return 42;
 }
 

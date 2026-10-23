@@ -8001,13 +8001,9 @@ void init_macros(VirtualMachine *vm) {
 #endif
     define_macro(vm, "__STDC_UTF_16__", "1");
     define_macro(vm, "__STDC_UTF_32__", "1");
-    // #1282: GCC's real __ATOMIC_* memory-order values, for the __atomic_*
-    // builtin family (src/parse_postfix.c) -- every operation using them
-    // discards the requested order and runs seq_cst regardless (see that
-    // file's own comment), but the values still need to match GCC's so a
-    // guest program that inspects/compares them (rather than just passing
-    // them straight to an __atomic_* call) sees the same constants a real
-    // compiler would.
+    // GCC's real __ATOMIC_* memory-order values, so a guest that compares them
+    // sees what a real compiler gives. The VM runs every operation seq_cst;
+    // -c=native emits a constant order.
     define_macro(vm, "__ATOMIC_RELAXED", "0");
     define_macro(vm, "__ATOMIC_CONSUME", "1");
     define_macro(vm, "__ATOMIC_ACQUIRE", "2");

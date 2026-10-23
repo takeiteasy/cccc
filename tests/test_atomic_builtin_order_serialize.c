@@ -6,7 +6,7 @@
 // CCCC_EXPECT_STDOUT: &e, 3, 1, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE\)
 // CCCC_EXPECT_STDOUT: &e, 3, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST\)
 // CCCC_EXPECT_STDOUT: &e, 3, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED\)
-// CCCC_EXPECT_STDOUT: , 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE\)\);
+// CCCC_EXPECT_STDOUT: __atomic_add_fetch\(.*&x, 1, __ATOMIC_ACQ_REL\)
 //
 // A constant order on an __atomic_* builtin is emitted; one the builtin would
 // reject is raised to seq_cst (a release load, an acquire store, a release

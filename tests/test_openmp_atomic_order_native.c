@@ -2,15 +2,15 @@
 // CCCC_EXPECT_STDOUT: __atomic_load_n\(\(unsigned int \*\)&r, __ATOMIC_ACQUIRE\)
 // CCCC_EXPECT_STDOUT: __atomic_store_n\(\(unsigned int \*\)&w, [a-z_0-9]+, __ATOMIC_RELEASE\)
 // CCCC_EXPECT_STDOUT: __atomic_store_n\(\(unsigned int \*\)&w, [a-z_0-9]+, __ATOMIC_RELAXED\)
-// CCCC_EXPECT_STDOUT: , 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED\)\);
-// CCCC_EXPECT_STDOUT: , 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE\)\);
-// CCCC_EXPECT_STDOUT: , 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST\)\);
 // CCCC_EXPECT_STDOUT: __db, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE\)
 // CCCC_EXPECT_STDOUT: __db[a-z_0-9]*, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED\)
+// CCCC_EXPECT_STDOUT: __atomic_fetch_add\(\(int \*\)&u, 1, __ATOMIC_RELAXED\)
+// CCCC_EXPECT_STDOUT: __atomic_fetch_add\(\(int \*\)&u, 1, __ATOMIC_ACQ_REL\)
+// CCCC_EXPECT_STDOUT: __atomic_fetch_add\(\(int \*\)&u, 1, __ATOMIC_SEQ_CST\)
 //
 // The memory-order clauses of `omp atomic` reach the emitted __atomic builtins;
 // with no clause an atomic is relaxed, `read acq_rel` acquires and
-// `write acq_rel` releases.
+// `write acq_rel` releases. An update is a single fetch-and-op builtin.
 
 int r, w, u, e, d = 1;
 

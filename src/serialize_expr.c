@@ -709,6 +709,60 @@ bool atomic_serializable_pointee(Node *addr) {
            base->size == 8;
 }
 
+// The host builtin a fetch-and-op node lowers to, or NULL when its operand is
+// one a host compiler rejects (_Bool, float, _BitInt, 16 bytes, and and/or/xor
+// on a pointer): those keep the CAS loop. Fills the address, value and the
+// byte multiplier a scaled pointer op needs.
+static const char *atomic_fetch_builtin(Node *n, Node **obj, Node **val,
+                                        long long *scale) {
+    if (!n->atomic_fetch_op || !n->body || !n->body->next)
+        return NULL;
+    *obj = n->body->lhs->rhs;
+    *val = n->body->next->lhs->rhs;
+    if (!(*obj)->ty || (*obj)->ty->kind != TY_PTR || !(*obj)->ty->base)
+        return NULL;
+    Type *pt     = (*obj)->ty->base;
+    *scale       = 1;
+    bool add_sub = !n->atomic_fetch_nand && (n->atomic_fetch_op == ND_ADD ||
+                                             n->atomic_fetch_op == ND_SUB);
+    if (pt->kind == TY_PTR) {
+        if (!add_sub)
+            return NULL;
+        if (n->atomic_fetch_scaled) {
+            if (!pt->base || pt->base->kind == TY_VLA || pt->base->size <= 0)
+                return NULL;
+            *scale = pt->base->size;
+        }
+    } else if (pt->kind == TY_BOOL || pt->kind == TY_BITINT || is_flonum(pt) ||
+               !is_integer(pt) ||
+               (pt->size != 1 && pt->size != 2 && pt->size != 4 &&
+                pt->size != 8)) {
+        return NULL;
+    }
+    switch (n->atomic_fetch_op) {
+        case ND_ADD:
+            return n->atomic_fetch_old ? "__atomic_fetch_add"
+                                       : "__atomic_add_fetch";
+        case ND_SUB:
+            return n->atomic_fetch_old ? "__atomic_fetch_sub"
+                                       : "__atomic_sub_fetch";
+        case ND_BITAND:
+            if (n->atomic_fetch_nand)
+                return n->atomic_fetch_old ? "__atomic_fetch_nand"
+                                           : "__atomic_nand_fetch";
+            return n->atomic_fetch_old ? "__atomic_fetch_and"
+                                       : "__atomic_and_fetch";
+        case ND_BITOR:
+            return n->atomic_fetch_old ? "__atomic_fetch_or"
+                                       : "__atomic_or_fetch";
+        case ND_BITXOR:
+            return n->atomic_fetch_old ? "__atomic_fetch_xor"
+                                       : "__atomic_xor_fetch";
+        default:
+            return NULL;
+    }
+}
+
 // #1188: cccc's memory_order enum (include/stdatomic.h) is declared in the
 // same relaxed/consume/acquire/release/acq_rel/seq_cst order as glibc's, so
 // its values already coincide with GCC/Clang's __ATOMIC_* numbering -- but
@@ -2909,13 +2963,29 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // which the host compiler rejects outright.
             break;
 
-        case ND_STMT_EXPR:
+        case ND_STMT_EXPR: {
+            Node       *fobj, *fval;
+            long long   scale;
+            const char *fetch =
+                atomic_fetch_builtin(node, &fobj, &fval, &scale);
+            if (fetch) {
+                fprintf(f, "%s(", fetch);
+                serialize_atomic_addr(f, vm, ctx, fobj);
+                fprintf(f, ", ");
+                serialize_expr(f, vm, ctx, fval,
+                               scale != 1 ? get_precedence(ND_CAST) : 2);
+                if (scale != 1)
+                    fprintf(f, " * %lldLL", scale);
+                fprintf(f, ", %s)", atomic_mo_name(node->atomic_mo, 2));
+                break;
+            }
             fprintf(f, "({\n");
             for (Node *s = node->body; s; s = s->next) {
                 serialize_stmt(f, vm, ctx, s, 1);
             }
             fprintf(f, "})");
             break;
+        }
 
         case ND_MEMZERO:
             if (node->var && node->var->is_block_var)

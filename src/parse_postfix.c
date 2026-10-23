@@ -1846,17 +1846,24 @@ static uint8_t atomic_load_order(uint8_t mo) {
 // same invariant include/stdatomic.h's __cccc_atomic_fetch_op documents.
 static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
                                    Node *valexpr, NodeKind op_kind,
-                                   bool is_nand, bool want_old, uint8_t mo) {
+                                   bool is_nand, bool want_old, bool scaled,
+                                   uint8_t mo) {
     add_type(vm, obj);
     if (!obj->ty || obj->ty->kind != TY_PTR)
         error_tok(vm, tok, "atomic builtin: first argument must be a pointer");
-    Type *pointee = without_addr_space(vm, obj->ty->base);
+    // A typedef spelling such as atomic_char would keep _Atomic on the
+    // temporaries.
+    Type *pointee =
+        copy_type(vm, unqualified(vm, without_addr_space(vm, obj->ty->base)));
+    pointee->origin = NULL;
+    bool  is_ptr    = pointee->kind == TY_PTR;
+    Type *val_ty    = is_ptr ? ty_long : pointee;
 
     Node  head    = {};
     Node *cur     = &head;
 
     Obj  *addr    = new_lvar(vm, "", 0, obj->ty);
-    Obj  *val     = new_lvar(vm, "", 0, pointee);
+    Obj  *val       = new_lvar(vm, "", 0, val_ty);
     Obj  *old     = new_lvar(vm, "", 0, pointee);
     Obj  *newv    = new_lvar(vm, "", 0, pointee);
 
@@ -1869,8 +1876,8 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
         tok);
     // The first read must itself be atomic: a plain read races with another
     // thread's CAS.
-    Node *first_load = new_node(vm, ND_ALOAD, tok);
-    first_load->lhs  = new_var_node(vm, addr, tok);
+    Node *first_load      = new_node(vm, ND_ALOAD, tok);
+    first_load->lhs       = new_var_node(vm, addr, tok);
     first_load->atomic_mo = atomic_load_order(mo);
     cur = cur->next = new_unary(
         vm, ND_EXPR_STMT,
@@ -1881,14 +1888,29 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     loop->brk_label  = new_unique_name(vm);
     loop->cont_label = new_unique_name(vm);
 
+    Node *oldv       = new_var_node(vm, old, tok);
+    Node *valv       = new_var_node(vm, val, tok);
     Node *combined;
-    if (is_nand) {
-        Node *andv = new_binary(vm, ND_BITAND, new_var_node(vm, old, tok),
-                                new_var_node(vm, val, tok), tok);
+    if (is_ptr && !is_nand && (op_kind == ND_ADD || op_kind == ND_SUB)) {
+        // C11 scales by the pointee; GCC's builtins move bytes.
+        Node *base =
+            scaled ? oldv : new_cast(vm, oldv, pointer_to(vm, ty_char));
+        combined = op_kind == ND_ADD ? new_add(vm, base, valv, tok)
+                                     : new_sub(vm, base, valv, tok);
+        combined = new_cast(vm, combined, pointee);
+    } else if (is_ptr) {
+        // and/or/xor/nand on the pointer's integer value.
+        Node *oldi = new_cast(vm, oldv, ty_long);
+        combined =
+            is_nand ? new_unary(vm, ND_BITNOT,
+                                new_binary(vm, ND_BITAND, oldi, valv, tok), tok)
+                    : new_binary(vm, op_kind, oldi, valv, tok);
+        combined = new_cast(vm, combined, pointee);
+    } else if (is_nand) {
+        Node *andv = new_binary(vm, ND_BITAND, oldv, valv, tok);
         combined   = new_unary(vm, ND_BITNOT, andv, tok);
     } else {
-        combined = new_binary(vm, op_kind, new_var_node(vm, old, tok),
-                              new_var_node(vm, val, tok), tok);
+        combined = new_binary(vm, op_kind, oldv, valv, tok);
     }
     Node *body =
         new_binary(vm, ND_ASSIGN, new_var_node(vm, newv, tok), combined, tok);
@@ -1901,7 +1923,7 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     cas->cas_new     = new_var_node(vm, newv, tok);
     cas->atomic_mo      = mo;
     cas->atomic_mo_fail = atomic_load_order(mo);
-    loop->cond       = new_unary(vm, ND_NOT, cas, tok);
+    loop->cond          = new_unary(vm, ND_NOT, cas, tok);
 
     cur = cur->next = loop;
     cur = cur->next = new_unary(
@@ -1909,6 +1931,13 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
 
     Node *node = new_node(vm, ND_STMT_EXPR, tok);
     node->body = head.next;
+    // The serializer reads the first two statements back: the address and
+    // value hoists.
+    node->atomic_fetch_op     = op_kind;
+    node->atomic_fetch_nand   = is_nand;
+    node->atomic_fetch_old    = want_old;
+    node->atomic_fetch_scaled = scaled;
+    node->atomic_mo           = mo;
     return node;
 }
 
@@ -2661,11 +2690,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (equal(tok, "__atomic_compare_exchange_n")) {
         // (obj, *expected, desired, weak, order_success, order_failure) ->
-        // bool. `weak` is discarded along with the two orders: like
-        // stdatomic.h's atomic_compare_exchange_weak/strong (#1184),
-        // __builtin_compare_and_swap is a single-attempt CAS with no
-        // spurious-failure path, conforming either way C11 permits an
-        // implementation of the weak form that never spuriously fails.
+        // bool. The VM's CAS never fails spuriously, so weak is strong there;
+        // -c=native emits the recorded flag and orders.
         Node *node     = new_node(vm, ND_CAS, tok);
         tok            = skip(vm, tok->next, "(");
         node->cas_addr = assign(vm, &tok, tok);
@@ -2884,27 +2910,35 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             const char *op_fetch_name;    // __atomic_OP_fetch
             const char *sync_fetch_first; // __sync_fetch_and_OP
             const char *sync_op_fetch;    // __sync_OP_and_fetch
+            const char *c11_fetch_first;  // __c11_atomic_fetch_OP
             NodeKind    op_kind;          // ignored when is_nand
             bool        is_nand;
         } fetch_ops[] = {
             {"__atomic_fetch_add", "__atomic_add_fetch", "__sync_fetch_and_add",
-             "__sync_add_and_fetch", ND_ADD, false},
+             "__sync_add_and_fetch", "__c11_atomic_fetch_add", ND_ADD, false},
             {"__atomic_fetch_sub", "__atomic_sub_fetch", "__sync_fetch_and_sub",
-             "__sync_sub_and_fetch", ND_SUB, false},
+             "__sync_sub_and_fetch", "__c11_atomic_fetch_sub", ND_SUB, false},
             {"__atomic_fetch_and", "__atomic_and_fetch", "__sync_fetch_and_and",
-             "__sync_and_and_fetch", ND_BITAND, false},
+             "__sync_and_and_fetch", "__c11_atomic_fetch_and", ND_BITAND,
+             false},
             {"__atomic_fetch_or", "__atomic_or_fetch", "__sync_fetch_and_or",
-             "__sync_or_and_fetch", ND_BITOR, false},
+             "__sync_or_and_fetch", "__c11_atomic_fetch_or", ND_BITOR, false},
             {"__atomic_fetch_xor", "__atomic_xor_fetch", "__sync_fetch_and_xor",
-             "__sync_xor_and_fetch", ND_BITXOR, false},
+             "__sync_xor_and_fetch", "__c11_atomic_fetch_xor", ND_BITXOR,
+             false},
             {"__atomic_fetch_nand", "__atomic_nand_fetch",
-             "__sync_fetch_and_nand", "__sync_nand_and_fetch", ND_BITAND, true},
+             "__sync_fetch_and_nand", "__sync_nand_and_fetch", NULL, ND_BITAND,
+             true},
         };
         for (size_t i = 0; i < sizeof(fetch_ops) / sizeof(fetch_ops[0]); i++) {
             bool want_old;
             bool is_sync = false;
+            bool scaled  = false;
             if (equal(tok, (char *)fetch_ops[i].fetch_first_name))
                 want_old = true;
+            else if (fetch_ops[i].c11_fetch_first &&
+                     equal(tok, (char *)fetch_ops[i].c11_fetch_first))
+                want_old = scaled = true;
             else if (equal(tok, (char *)fetch_ops[i].op_fetch_name))
                 want_old = false;
             else if (equal(tok, (char *)fetch_ops[i].sync_fetch_first))
@@ -2926,9 +2960,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 mo  = atomic_order_arg(vm, &tok, tok);
             }
             *rest = skip(vm, tok, ")");
-            return build_atomic_fetch_op(vm, tok, obj, valexpr,
-                                         fetch_ops[i].op_kind,
-                                         fetch_ops[i].is_nand, want_old, mo);
+            return build_atomic_fetch_op(
+                vm, tok, obj, valexpr, fetch_ops[i].op_kind,
+                fetch_ops[i].is_nand, want_old, scaled, mo);
         }
     }
 

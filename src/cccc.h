@@ -2496,6 +2496,14 @@ struct Node {
     // discard context drops that trailing read.
     bool is_atomic_rmw;
 
+    // ND_STMT_EXPR that build_atomic_fetch_op() builds for a fetch-and-op
+    // builtin: the op (0 = not one), nand, whether it yields the old value, and
+    // whether a pointer operand scales by its pointee (C11) rather than moving
+    // bytes (GCC). The order is atomic_mo. The VM runs the CAS loop; the
+    // serializer emits the host builtin instead when it accepts the operand.
+    NodeKind atomic_fetch_op;
+    bool     atomic_fetch_nand, atomic_fetch_old, atomic_fetch_scaled;
+
     // ND_COMMA written as `a, b` in source (not a compiler desugar such as a
     // compound literal): its value is an rvalue, never an assignment target.
     bool is_user_comma;
