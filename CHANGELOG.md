@@ -23,6 +23,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: under `-c=native`, a nested function's local declared with an
   enclosing function's variable-length array type (`typeof` or a typedef) is
   emitted with its length instead of as `int x[]`.
+- Fixed: under `-c=native`, a `parallel` region could hang when a smaller team
+  ran between larger ones, because an idle pool thread read the finished
+  team's size from a stack frame that had returned.
 
 ## [0.21.2] - 2026-10-23
 
