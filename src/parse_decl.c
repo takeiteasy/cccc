@@ -418,6 +418,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_inline = attr->is_inline;
         fn->asm_label = ty->asm_label;
     }
+    if (ty->operator_sym)
+        register_operator(vm, fn, ty, tok);
 
     fn->is_root = !obj_is_inline_only(fn);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
@@ -715,6 +717,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_inline = attr->is_inline;
         fn->asm_label = ty->asm_label;
     }
+    if (ty->operator_sym)
+        register_operator(vm, fn, ty, tok);
 
     // GNU89 `extern inline`, or C99 with gnu_inline: an inline-only
     // definition, never emitted as an external symbol. Judged per definition,

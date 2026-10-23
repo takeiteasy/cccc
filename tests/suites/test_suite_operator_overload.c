@@ -1,0 +1,155 @@
+// CCCC_FLAGS: --testing
+// Suite: [[cccc::operator(...)]] binds a built-in operator to a function for
+// struct operands.
+#pragma cccc suite begin "operator_overload"
+
+typedef struct {
+    int x, y;
+} Vec2;
+
+typedef struct {
+    int n;
+} Counter;
+
+[[cccc::operator(+)]]
+Vec2 vec2_add(Vec2 a, Vec2 b) {
+    return (Vec2){a.x + b.x, a.y + b.y};
+}
+
+[[cccc::operator(-)]]
+Vec2 vec2_sub(const Vec2 *a, const Vec2 *b) {
+    return (Vec2){a->x - b->x, a->y - b->y};
+}
+
+[[cccc::operator(*)]]
+Vec2 vec2_scale(Vec2 a, int k) {
+    return (Vec2){a.x * k, a.y * k};
+}
+
+[[cccc::operator(*)]]
+Vec2 scale_vec2(int k, Vec2 a) {
+    return (Vec2){a.x * k, a.y * k};
+}
+
+[[cccc::operator(/)]]
+Vec2 vec2_div(Vec2 a, int k) {
+    return (Vec2){a.x / k, a.y / k};
+}
+
+[[cccc::operator(%)]]
+Vec2 vec2_mod(Vec2 a, int k) {
+    return (Vec2){a.x % k, a.y % k};
+}
+
+[[cccc::operator(==)]]
+bool vec2_eq(Vec2 a, Vec2 b) {
+    return a.x == b.x && a.y == b.y;
+}
+
+[[cccc::operator(!=)]]
+bool vec2_ne(Vec2 a, Vec2 b) {
+    return !(a.x == b.x && a.y == b.y);
+}
+
+[[cccc::operator(<)]]
+int counter_lt(Counter a, Counter b) {
+    return a.n < b.n;
+}
+
+[[cccc::operator(<=)]]
+int counter_le(Counter a, Counter b) {
+    return a.n <= b.n;
+}
+
+[[cccc::operator(>)]]
+int counter_gt(Counter a, Counter b) {
+    return a.n > b.n;
+}
+
+[[cccc::operator(>=)]]
+int counter_ge(Counter a, Counter b) {
+    return a.n >= b.n;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_arithmetic(void) {
+    Vec2 a = {10, 20}, b = {1, 2};
+    Vec2 s = a + b;
+    Vec2 d = a - b;
+    if (s.x != 11 || s.y != 22)
+        return 1;
+    if (d.x != 9 || d.y != 18)
+        return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_mixed_operand_types(void) {
+    Vec2 a = {2, 3};
+    Vec2 l = a * 4;
+    Vec2 r = 4 * a;
+    Vec2 q = l / 2;
+    Vec2 m = l % 5;
+    if (l.x != 8 || l.y != 12 || r.x != 8 || r.y != 12)
+        return 1;
+    if (q.x != 4 || q.y != 6)
+        return 2;
+    if (m.x != 3 || m.y != 2)
+        return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_chain_and_rvalue_operands(void) {
+    Vec2 a = {1, 1}, b = {2, 2}, c = {3, 3};
+    Vec2 s = a + b + c;
+    Vec2 t = (a + b) * 2 + c;
+    if (s.x != 6 || s.y != 6)
+        return 1;
+    if (t.x != 9 || t.y != 9)
+        return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_comparisons(void) {
+    Vec2    a = {1, 2}, b = {1, 2}, c = {3, 4};
+    Counter lo = {1}, hi = {2};
+    if (!(a == b) || a != b || !(a != c) || a == c)
+        return 1;
+    if (!(lo < hi) || hi < lo || !(lo <= lo))
+        return 2;
+    if (!(hi > lo) || lo > hi || !(hi >= hi) || lo >= hi)
+        return 3;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_compound_assignment(void) {
+    Vec2 v[2]  = {{1, 1}, {10, 10}};
+    Vec2 d     = {1, 2};
+    int  i     = 0;
+    v[i++]    += d;
+    v[1]      += v[0];
+    if (i != 1)
+        return 1;
+    if (v[0].x != 2 || v[0].y != 3)
+        return 2;
+    if (v[1].x != 12 || v[1].y != 13)
+        return 3;
+    v[0] = v[0] * 3;
+    if (v[0].x != 6 || v[0].y != 9)
+        return 4;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_in_conditions_and_arguments(void) {
+    Vec2 a = {1, 2}, b = {3, 4};
+    Vec2 sum = vec2_add(a, b);
+    if (sum == a + b)
+        return 42;
+    return 1;
+}
+
+#pragma cccc suite end

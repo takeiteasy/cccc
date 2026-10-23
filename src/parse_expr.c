@@ -414,7 +414,42 @@ void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out) {
 // However, if a given expression is of form `A.x op= C`, the input is
 // converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
 // to bitfields.
+// `A op= B` where op is an overloaded operator (binary is the call): A = op(A,
+// B), with A evaluated once.
+static Node *overloaded_assign(VirtualMachine *vm, Node *call, bool yield_old) {
+    Token *tok = call->tok;
+    if (yield_old)
+        error_tok(vm, tok, "operator functions do not support ++ or --");
+    Node *first = call->args;
+    Node *addr  = first;
+    while (addr->kind == ND_CAST)
+        addr = addr->lhs;
+    bool  by_addr = addr->kind == ND_ADDR;
+    Node *lv      = by_addr ? addr->lhs : addr;
+    add_type(vm, lv);
+    if (!is_compatible(unqualified(vm, call->ty), unqualified(vm, lv->ty)))
+        error_tok(vm, tok,
+                  "the operator returns a different type than the left "
+                  "operand, so it cannot be used with an assignment");
+
+    Obj  *p   = new_lvar(vm, "", 0, pointer_to(vm, lv->ty));
+    Node *arg = new_var_node(vm, p, tok);
+    if (!by_addr)
+        arg = new_unary(vm, ND_DEREF, arg, tok);
+    arg         = new_cast(vm, arg, first->ty);
+    arg->next   = first->next;
+    call->args  = arg;
+    Node *set   = new_binary(vm, ND_ASSIGN, new_var_node(vm, p, tok),
+                             new_unary(vm, ND_ADDR, lv, tok), tok);
+    Node *store = new_binary(
+        vm, ND_ASSIGN, new_unary(vm, ND_DEREF, new_var_node(vm, p, tok), tok),
+        call, tok);
+    return new_binary(vm, ND_COMMA, set, store, tok);
+}
+
 static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
+    if (binary->kind == ND_FUNCALL)
+        return overloaded_assign(vm, binary, yield_old);
     add_type(vm, binary->lhs);
     add_type(vm, binary->rhs);
     Token *tok = binary->tok;
@@ -1003,7 +1038,10 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            node = new_binary(vm, ND_EQ, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "==", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_EQ, node, rhs, start);
+            }
             continue;
         }
 
@@ -1033,7 +1071,10 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            node = new_binary(vm, ND_NE, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "!=", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_NE, node, rhs, start);
+            }
             continue;
         }
 
@@ -1077,7 +1118,10 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            node = new_binary(vm, ND_LT, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "<", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_LT, node, rhs, start);
+            }
             continue;
         }
 
@@ -1102,7 +1146,10 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            node = new_binary(vm, ND_LE, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "<=", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_LE, node, rhs, start);
+            }
             continue;
         }
 
@@ -1133,7 +1180,10 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             // note: a > b is stored as b < a
-            node = new_binary(vm, ND_LT, rhs, node, start);
+            {
+                Node *ov = try_overloaded_op(vm, ">", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_LT, rhs, node, start);
+            }
             continue;
         }
 
@@ -1164,7 +1214,10 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             // note: a >= b is stored as b <= a
-            node = new_binary(vm, ND_LE, rhs, node, start);
+            {
+                Node *ov = try_overloaded_op(vm, ">=", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_LE, rhs, node, start);
+            }
             continue;
         }
 
@@ -1291,6 +1344,104 @@ static Node *sequence_after(VirtualMachine *vm, Node *prefix, Node *result,
     return prefix ? new_binary(vm, ND_COMMA, prefix, result, tok) : result;
 }
 
+static const char *const overloadable_ops[] = {
+    "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="};
+
+// The operator [[cccc::operator(...)]] names at tok, or NULL if it cannot be
+// overloaded.
+const char *overloadable_operator(Token *tok) {
+    for (size_t i = 0; i < sizeof(overloadable_ops) / sizeof(*overloadable_ops);
+         i++)
+        if (equal(tok, overloadable_ops[i]))
+            return overloadable_ops[i];
+    return NULL;
+}
+
+static bool is_aggregate(Type *ty) {
+    return ty->kind == TY_STRUCT || ty->kind == TY_UNION;
+}
+
+// A pointer-to-aggregate parameter takes its operand by address.
+static Type *operator_operand(VirtualMachine *vm, Type *param, bool *by_addr) {
+    *by_addr =
+        param->kind == TY_PTR && is_aggregate(unqualified(vm, param->base));
+    return unqualified(vm, *by_addr ? param->base : param);
+}
+
+void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
+    Compiler *c = &vm->compiler;
+    for (int i = 0; i < c->noperators; i++)
+        if (c->operators[i].fn == fn)
+            return;
+
+    Type *lp = ty->params;
+    Type *rp = lp ? lp->next : NULL;
+    if (!rp || rp->next || ty->is_variadic)
+        error_tok(vm, tok, "operator function '%s' must take two parameters",
+                  fn->name);
+
+    OperatorEntry e = {.sym = ty->operator_sym, .fn = fn};
+    e.lhs           = operator_operand(vm, lp, &e.lhs_ptr);
+    e.rhs           = operator_operand(vm, rp, &e.rhs_ptr);
+    if (!is_aggregate(e.lhs) && !is_aggregate(e.rhs))
+        error_tok(vm, tok,
+                  "operator function '%s' needs a struct or union operand",
+                  fn->name);
+
+    bool comparison = e.sym[0] == '=' || e.sym[0] == '!' || e.sym[0] == '<' ||
+                      e.sym[0] == '>';
+    if (comparison && !is_integer(ty->return_ty))
+        error_tok(vm, tok,
+                  "comparison operator function '%s' must return an integer "
+                  "or bool",
+                  fn->name);
+
+    for (int i = 0; i < c->noperators; i++)
+        if (!strcmp(c->operators[i].sym, e.sym) &&
+            is_compatible(c->operators[i].lhs, e.lhs) &&
+            is_compatible(c->operators[i].rhs, e.rhs))
+            error_tok(vm, tok,
+                      "operator '%s' is already defined for these "
+                      "operand types",
+                      e.sym);
+
+    if (c->noperators == c->operators_cap) {
+        int            cap = c->operators_cap ? c->operators_cap * 2 : 8;
+        OperatorEntry *n   = arena_alloc(&c->parser_arena, cap * sizeof(*n));
+        if (c->noperators)
+            memcpy(n, c->operators, c->noperators * sizeof(*n));
+        c->operators     = n;
+        c->operators_cap = cap;
+    }
+    c->operators[c->noperators++] = e;
+}
+
+// A call to the function bound to sym for these operands, or NULL when neither
+// operand is a struct/union or none matches exactly.
+Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
+                        Node *rhs, Token *tok) {
+    if (!vm->compiler.noperators)
+        return NULL;
+    add_type(vm, lhs);
+    add_type(vm, rhs);
+    if (!is_aggregate(lhs->ty) && !is_aggregate(rhs->ty))
+        return NULL;
+    Type *lt = unqualified(vm, lhs->ty);
+    Type *rt = unqualified(vm, rhs->ty);
+    for (int i = 0; i < vm->compiler.noperators; i++) {
+        OperatorEntry *e = &vm->compiler.operators[i];
+        if (strcmp(e->sym, sym) || !is_compatible(e->lhs, lt) ||
+            !is_compatible(e->rhs, rt))
+            continue;
+        Node *args[2] = {
+            e->lhs_ptr ? new_unary(vm, ND_ADDR, lhs, tok) : lhs,
+            e->rhs_ptr ? new_unary(vm, ND_ADDR, rhs, tok) : rhs,
+        };
+        return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
+    }
+    return NULL;
+}
+
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     add_type(vm, lhs);
     add_type(vm, rhs);
@@ -1303,6 +1454,10 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     }
     if (is_float16(lhs->ty) || is_float16(rhs->ty))
         error_float16_unsupported(vm, tok);
+
+    Node *ov = try_overloaded_op(vm, "+", lhs, rhs, tok);
+    if (ov)
+        return ov;
 
     // Checked C-style checked-pointer arithmetic rule (#770/#482-484): a
     // [[cccc::single]] pointer represents exactly one object and rejects all
@@ -1385,6 +1540,10 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     }
     if (is_float16(lhs->ty) || is_float16(rhs->ty))
         error_float16_unsupported(vm, tok);
+
+    Node *ov = try_overloaded_op(vm, "-", lhs, rhs, tok);
+    if (ov)
+        return ov;
 
     // Checked-pointer arithmetic rule -- see the matching comment in
     // new_add() above.
@@ -1531,7 +1690,10 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            node = new_binary(vm, ND_MUL, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "*", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_MUL, node, rhs, start);
+            }
             continue;
         }
 
@@ -1545,7 +1707,10 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            node = new_binary(vm, ND_DIV, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "/", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_DIV, node, rhs, start);
+            }
             continue;
         }
 
@@ -1559,7 +1724,10 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            node = new_binary(vm, ND_MOD, node, rhs, start);
+            {
+                Node *ov = try_overloaded_op(vm, "%", node, rhs, start);
+                node     = ov ? ov : new_binary(vm, ND_MOD, node, rhs, start);
+            }
             continue;
         }
 

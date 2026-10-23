@@ -1596,6 +1596,8 @@ struct Type {
     bool is_func_const;   // __attribute__((const)): no side effects, no global
                           // reads
     bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
+    const char
+             *operator_sym; // [[cccc::operator(+)]]: the operator it implements
     bool      is_gnu_inline; // __attribute__((gnu_inline)): `extern inline` is
                              // inline-only, never an external definition
     AddrSpace addr_space; // [[cccc::global]] etc: space of the pointed-to or
@@ -4134,6 +4136,16 @@ typedef struct {
     int       seq;       // Declaration order, for a stable sort tie-break
 } CCCCInitEntry;
 
+// A function bound to a built-in operator by [[cccc::operator(sym)]]. The
+// operand types are the parameter types, minus the pointer when a parameter is
+// taken by address.
+typedef struct {
+    const char *sym;
+    Type       *lhs, *rhs;
+    bool        lhs_ptr, rhs_ptr;
+    Obj        *fn;
+} OperatorEntry;
+
 typedef struct Compiler {
     // Preprocessor state
     bool      skip_preprocess; // Skip preprocessing step
@@ -4396,6 +4408,8 @@ typedef struct Compiler {
                                // then starts an attribute, not a subscript.
     Obj   *current_fn;         // Function being parsed
     PendingMemberAttrs *pending_member_attrs; // FIFO head; tail via _tail
+    OperatorEntry      *operators;
+    int                 noperators, operators_cap;
     PendingMemberAttrs *pending_member_attrs_tail;
     bool                draining_member_attrs;
     int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)

@@ -273,6 +273,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [attributes.md](docs/attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [operators.md](docs/operators.md) | `[[cccc::operator(...)]]` operator overloading for structs |
 | [types.md](docs/types.md) | Type compatibility, `_Generic`, `--compiler-family` |
 | [coverage.md](docs/coverage.md) | C89–C23 and extension support table |
 | [stdlib.md](docs/stdlib.md) | Standard-library and POSIX header support table |

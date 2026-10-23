@@ -18,6 +18,7 @@ Status: **yes** has full semantics, **~** is parsed and mostly informational.
 | `noreturn` | C23, GNU | yes | `BTRAP` after calls; warns on returns |
 | `error("msg")`, `warning("msg")` | GNU | yes | Compile-time error or warning when called, suppressed in statically dead code (dead `if`/`else` branches, `while(0)` bodies, short-circuit operands, ternary and elvis branches), which enables the `_FORTIFY_SOURCE` `__chk_fail` idiom |
 | `nonnull`, `returns_nonnull` | GNU, C23 | yes | [attributes-nonnull.md](attributes-nonnull.md) |
+| `operator(sym)` | CCCC | yes | Operator overloading for structs ([operators.md](operators.md)) |
 | `cleanup(fn)`, `constructor`, `destructor` | GNU | yes | [attributes-cleanup.md](attributes-cleanup.md) |
 | `sentinel`, `alloc_size`, `designated_init` | GNU | yes | [attributes-gnu.md](attributes-gnu.md) |
 | `pure`, `const`, `malloc` | GNU | ~ | Informational in the VM, forwarded under `-c=native` ([attributes-gnu.md](attributes-gnu.md)) |

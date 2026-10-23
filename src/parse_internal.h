@@ -100,6 +100,7 @@ typedef struct {
     bool           is_func_const;
     bool           is_gnu_inline;
     bool           is_kernel;
+    const char    *operator_sym;
     char          *deprecated_msg;
     char          *nodiscard_msg;
     char          *attr_error_msg;   // __attribute__((error("msg")))
@@ -428,6 +429,10 @@ void mark_nested_captures(Obj *fn, Node *node);
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
                Token *tok);
+const char *overloadable_operator(Token *tok);
+void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
+Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
+                        Node *rhs, Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                  Token *tok);

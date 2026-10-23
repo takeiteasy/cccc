@@ -2289,8 +2289,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
-         !attr->is_gnu_inline && !attr->is_kernel && !attr->format_style &&
-         !attr->cleanup_fn && !attr->attr_error_msg &&
+         !attr->is_gnu_inline && !attr->is_kernel && !attr->operator_sym &&
+         !attr->format_style && !attr->cleanup_fn && !attr->attr_error_msg &&
          !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
          !attr->returns_nonnull && !attr->is_constructor &&
          !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
@@ -2315,6 +2315,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_gnu_inline = true;
     if (attr->is_kernel && ty->kind == TY_FUNC)
         ty->is_kernel = true;
+    if (attr->operator_sym && ty->kind == TY_FUNC)
+        ty->operator_sym = attr->operator_sym;
     if (attr->format_style && ty->kind == TY_FUNC) {
         ty->format_style         = attr->format_style;
         ty->format_string_index  = attr->format_string_index;
@@ -2367,6 +2369,8 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_func_const   |= src->is_func_const;
     dst->is_gnu_inline   |= src->is_gnu_inline;
     dst->is_kernel       |= src->is_kernel;
+    if (src->operator_sym)
+        dst->operator_sym = src->operator_sym;
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
     if (!dst->nodiscard_msg)
@@ -3411,6 +3415,21 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                         attr->is_destructor = true;
                     attr->init_priority = priority;
                 }
+                continue;
+            }
+
+            // [[cccc::operator(+)]]
+            if (cccc_scoped && attr_is(name_tok, "operator")) {
+                tok             = skip(vm, tok, "(");
+                const char *sym = overloadable_operator(tok);
+                if (!sym)
+                    error_tok(vm, tok, "cannot overload '%.*s'", tok->len,
+                              tok->loc);
+                tok = skip(vm, tok->next, ")");
+                if (ty && ty->kind == TY_FUNC)
+                    ty->operator_sym = sym;
+                if (attr)
+                    attr->operator_sym = sym;
                 continue;
             }
 
