@@ -34,7 +34,7 @@ spelling.
 | Team size | 1 | `num_threads(n)`, else `omp_set_num_threads`, else `OMP_NUM_THREADS`, else the CPU count |
 | Synchronisation | No-ops | Real mutexes, barrier and atomics |
 | Races | Hidden | Real |
-| `schedule` | Ignored | Static; `dynamic`, `guided` and `auto` run as static |
+| `schedule` | Ignored | `static`, `static,n`, `dynamic`, `guided`, `auto` (static) and `runtime`[^4] |
 | `ordered` | Runs in order | Runs in iteration order[^3] |
 
 Native output carries its own runtime: a thread pool that starts on the first
@@ -90,7 +90,8 @@ or `v = x op= e`.
 | `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
 | `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
 | `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` is an error under native |
-| `schedule(...)`, `proc_bind(...)` | Parsed and ignored |
+| `schedule(kind[, n])` | VM: checked, then ignored. Native: `static` splits the loop into one block per thread, `static, n` deals chunks of `n` round-robin, `dynamic` and `guided` hand out chunks on demand, `auto` is `static`, and `runtime` reads `omp_set_schedule`, else `OMP_SCHEDULE`, else `static`. `monotonic`, `nonmonotonic` and `simd` modifiers are accepted and ignored |
+| `proc_bind(...)` | Parsed and ignored |
 | `nowait` | Skips the barrier at the end of `for` and `single` (native) |
 
 A `task` works on its own copy of a local variable it uses and does not list,
@@ -128,6 +129,7 @@ int p = 5;
 | `omp_get_num_procs` | Host CPU count | Host CPU count |
 | `omp_set_num_threads` | No effect | Team size of later regions |
 | `omp_set_dynamic`, `omp_get_dynamic` | No effect | No effect |
+| `omp_set_schedule`, `omp_get_schedule` | Stores and returns the value | Sets and returns the schedule of `schedule(runtime)` loops |
 | `omp_get_wtime`, `omp_get_wtick` | Monotonic seconds, tick of 1 ns | Same |
 | `omp_init_lock`, `omp_set_lock`, `omp_unset_lock`, `omp_test_lock`, `omp_destroy_lock` | Simple lock | Simple lock |
 | The same with `_nest_lock` | Nestable lock | Nestable lock |
@@ -172,9 +174,8 @@ or another OpenMP compiler. Building the native output with
 
 - Native output uses pthreads, so Windows has no OpenMP.
 - Doacross `ordered(n)` is rejected under native (#1747).
-- Ordered loops run close to serial (#1746).
+- An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
 - `continue` in the body of a native `for` loop is rejected (#1748).
-- `schedule(dynamic|guided)` run as static.
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
@@ -189,7 +190,13 @@ or another OpenMP compiler. Building the native output with
     the output only when a directive or an `omp_*` function is used.
 [^2]: `CCCC_NATIVE_CC` can point at a wrapper script that adds
     `-fsanitize=thread` to the host compiler command.
-[^3]: Each thread waits for the iterations before its chunk before its first
-    `ordered` region and hands over when its chunk ends. `ordered` outside a
-    loop with the `ordered` clause is a compile error unless it is in a
-    function of its own.
+[^3]: Each thread waits for the iterations before a chunk before its first
+    `ordered` region in it and hands over when the chunk ends. `ordered`
+    outside a loop with the `ordered` clause is a compile error unless it is in
+    a function of its own.
+[^4]: `OMP_SCHEDULE` takes `kind` or `kind,n`, for example `dynamic,4`. A chunk
+    size of `0` or less means `1` for `dynamic` and `guided`, and no chunk for
+    `static`. The chunk size is evaluated once, before the region starts, so a
+    variable it names is read from outside the region. `auto` and `runtime`
+    take no chunk size. Named `critical` sections have no limit on the number
+    of names.

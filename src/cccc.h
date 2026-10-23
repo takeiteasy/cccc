@@ -2026,6 +2026,8 @@ typedef struct OmpDirective {
     int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
     char      *num_threads_text; // threaded lowering: clause expressions
     char      *if_text;
+    int        sched_kind;  // schedule kind (omp_sched_t, 0x10 runtime); 0 none
+    char      *sched_chunk; // threaded lowering: the chunk expression, or NULL
     Obj       *region_fn; // threaded parallel: the outlined region function
 } OmpDirective;
 

@@ -15,6 +15,18 @@
 #include <time.h>
 #include <unistd.h>
 
+/*! @brief Loop schedule kinds for omp_set_schedule() and omp_get_schedule(). */
+typedef enum omp_sched_t {
+    omp_sched_static  = 1,
+    omp_sched_dynamic = 2,
+    omp_sched_guided  = 3,
+    omp_sched_auto    = 4
+} omp_sched_t;
+
+/*! @brief Modifier bit that may be or'ed into a schedule kind; it is ignored.
+ */
+#define omp_sched_monotonic ((omp_sched_t)0x80000000u)
+
 #ifdef __CCCC_OMP_THREADED__
 
 /* -c=native, -m and -c=generated run parallel regions on real threads; the
@@ -40,6 +52,8 @@ void   omp_set_dynamic(int on);
 int    omp_get_dynamic(void);
 double omp_get_wtime(void);
 double omp_get_wtick(void);
+void omp_set_schedule(omp_sched_t kind, int chunk);
+void omp_get_schedule(omp_sched_t *kind, int *chunk);
 
 void omp_init_lock(omp_lock_t *lock);
 void omp_destroy_lock(omp_lock_t *lock);
@@ -86,6 +100,25 @@ static inline void omp_set_num_threads(int n) { (void)n; }
 static inline void omp_set_dynamic(int on) { (void)on; }
 /*! @brief Whether dynamic team sizing is on (always 0 in the VM). */
 static inline int omp_get_dynamic(void) { return 0; }
+
+static inline int *__omp_schedule_icv(void) {
+    static int icv[2] = {omp_sched_static, 0};
+    return icv;
+}
+/*! @brief Sets the schedule `schedule(runtime)` loops use. The VM only stores
+ * it. */
+static inline void omp_set_schedule(omp_sched_t kind, int chunk) {
+    int k = (int)kind & 0x7fffffff;
+    if (k >= omp_sched_static && k <= omp_sched_auto) {
+        __omp_schedule_icv()[0] = k;
+        __omp_schedule_icv()[1] = chunk;
+    }
+}
+/*! @brief Reads the schedule `schedule(runtime)` loops use. */
+static inline void omp_get_schedule(omp_sched_t *kind, int *chunk) {
+    *kind  = (omp_sched_t)__omp_schedule_icv()[0];
+    *chunk = __omp_schedule_icv()[1];
+}
 
 /*! @brief Monotonic wall-clock time in seconds. */
 static inline double omp_get_wtime(void) {

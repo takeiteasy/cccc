@@ -4,6 +4,7 @@
 // suite passes in both.
 
 #include <omp.h>
+#include <string.h>
 
 #pragma cccc suite begin "openmp_threads"
 
@@ -588,6 +589,286 @@ int test_omp_ordered_with_reduction_and_lastprivate(void) {
                    last == N - 1
                ? 42
                : 1;
+}
+
+#define PRAGMA(...) _Pragma(#__VA_ARGS__)
+
+enum { COVER_MAX = 1100 };
+static int cover_hits[COVER_MAX];
+
+static int cover_ok(int n, long sum) {
+    for (int i = 0; i < n; i++)
+        if (cover_hits[i] != 1)
+            return 0;
+    return sum == (long)n * (n - 1) / 2;
+}
+
+#define COVER_FN(NAME, CLAUSE)                                                 \
+    static int NAME(int n) {                                                   \
+        memset(cover_hits, 0, sizeof cover_hits);                              \
+        long sum = 0;                                                          \
+        PRAGMA(omp parallel for num_threads(4) CLAUSE reduction(+ : sum))      \
+        for (int i = 0; i < n; i++) {                                          \
+            cover_hits[i]++;                                                   \
+            sum += i;                                                          \
+        }                                                                      \
+        return cover_ok(n, sum);                                               \
+    }
+
+COVER_FN(cover_none, )
+COVER_FN(cover_static, schedule(static))
+COVER_FN(cover_static3, schedule(static, 3))
+COVER_FN(cover_dynamic, schedule(dynamic))
+COVER_FN(cover_dynamic4, schedule(dynamic, 4))
+COVER_FN(cover_guided, schedule(guided))
+COVER_FN(cover_guided7, schedule(guided, 7))
+COVER_FN(cover_auto, schedule(auto))
+COVER_FN(cover_modifiers, schedule(nonmonotonic : dynamic, 2))
+COVER_FN(cover_runtime, schedule(runtime))
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_kinds_cover_every_iteration(void) {
+    static const int sizes[] = {0, 1, 3, 4, 7, 64, 1003};
+    for (int k = 0; k < 7; k++) {
+        int n = sizes[k];
+        if (!cover_none(n) || !cover_static(n) || !cover_static3(n) ||
+            !cover_dynamic(n) || !cover_dynamic4(n) || !cover_guided(n) ||
+            !cover_guided7(n) || !cover_auto(n) || !cover_modifiers(n) ||
+            !cover_runtime(n))
+            return 100 + k;
+    }
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_stepped_and_collapsed_loops(void) {
+    long down = 0, guided = 0, chunked = 0;
+#pragma omp parallel for num_threads(4) schedule(dynamic, 3) reduction(+ : down)
+    for (int i = 100; i > 0; i -= 7)
+        down += i;
+#pragma omp parallel for collapse(2) num_threads(4) schedule(guided, 2)        \
+    reduction(+ : guided)
+    for (int i = 0; i < 9; i++)
+        for (int j = 0; j < 11; j++)
+            guided += i * 100 + j;
+#pragma omp parallel for collapse(2) num_threads(4) schedule(static, 5)        \
+    reduction(+ : chunked)
+    for (int i = 0; i < 9; i++)
+        for (int j = 0; j < 11; j++)
+            chunked += i * 100 + j;
+    return down == 765 && guided == 40095 && chunked == 40095 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_ordered(void) {
+    enum { N = 64 };
+    int out[N], pos = 0, ok = 1;
+#pragma omp parallel for ordered schedule(static, 1) num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    ok  &= pos == N && is_sequence(out, N);
+    pos  = 0;
+#pragma omp parallel for ordered schedule(dynamic, 2) num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    ok  &= pos == N && is_sequence(out, N);
+    pos  = 0;
+#pragma omp parallel for ordered schedule(guided) num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    ok  &= pos == N && is_sequence(out, N);
+    pos  = 0;
+#pragma omp parallel for ordered schedule(dynamic, 3) num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+        if (i % 3 == 0) {
+#pragma omp ordered
+            out[pos++] = i;
+        }
+    }
+    int seen = (N + 2) / 3;
+    for (int i = 0; i < seen; i++)
+        ok &= out[i] == i * 3;
+    ok         &= pos == seen;
+    pos         = 0;
+    orphan_pos  = 0;
+#pragma omp parallel for ordered schedule(static, 2) num_threads(4)
+    for (int i = 0; i < 64; i++) {
+        spin(64 - i);
+        orphan_record(i);
+    }
+    ok &= orphan_pos == 64 && is_sequence(orphan_out, 64);
+    return ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_lastprivate_and_linear(void) {
+    enum { N = 50 };
+    int a[N], last = -1, x = 100, ok = 1;
+#pragma omp parallel for schedule(dynamic, 3) lastprivate(last) linear(x : 2)  \
+    num_threads(4)
+    for (int i = 0; i < N; i++) {
+        a[i] = x;
+        last = i;
+    }
+    for (int i = 0; i < N; i++)
+        ok &= a[i] == 100 + 2 * i;
+    ok   &= last == N - 1 && x == 100 + 2 * (N - 1);
+    last  = -1;
+#pragma omp parallel for schedule(guided) lastprivate(last) num_threads(4)
+    for (int i = 0; i < N; i++)
+        last = i;
+    ok   &= last == N - 1;
+    last  = -1;
+#pragma omp parallel for schedule(static, 4) lastprivate(last) num_threads(4)
+    for (int i = 0; i < N; i++)
+        last = i;
+    ok &= last == N - 1;
+    return ok ? 42 : 1;
+}
+
+static int back_hits[4][200];
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_back_to_back_nowait_loops(void) {
+    enum { N = 200 };
+    memset(back_hits, 0, sizeof back_hits);
+#pragma omp parallel num_threads(4)
+    {
+#pragma omp for schedule(dynamic, 3) nowait
+        for (int i = 0; i < N; i++)
+            back_hits[0][i]++;
+#pragma omp for schedule(guided) nowait
+        for (int i = 0; i < N; i++)
+            back_hits[1][i]++;
+#pragma omp for schedule(static)
+        for (int i = 0; i < N; i++)
+            back_hits[2][i]++;
+#pragma omp for schedule(dynamic) nowait
+        for (int i = 0; i < N; i++)
+            back_hits[3][i]++;
+    }
+    for (int l = 0; l < 4; l++)
+        for (int i = 0; i < N; i++)
+            if (back_hits[l][i] != 1)
+                return 10 + l;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_dynamic_balances_work(void) {
+    enum { N = 64 };
+    int done = 0, nt = team_size(), first_waited = 0;
+    // Iteration 0 waits for all the others. Under a static schedule the
+    // iterations after it in its own chunk could never run.
+#pragma omp parallel for num_threads(4) schedule(dynamic, 1)
+    for (int i = 0; i < N; i++) {
+        if (i == 0 && nt > 1) {
+            while (__atomic_load_n(&done, __ATOMIC_ACQUIRE) < N - 1)
+                spin(1);
+            first_waited = 1;
+        } else {
+            __atomic_fetch_add(&done, 1, __ATOMIC_ACQ_REL);
+        }
+    }
+    return done == (nt > 1 ? N - 1 : N) && first_waited == (nt > 1) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_chunk_expression(void) {
+    volatile int cv = 3;
+    int          c = cv, ok = 1;
+    long         sum = 0, csum = 0;
+    memset(cover_hits, 0, sizeof cover_hits);
+#pragma omp parallel for num_threads(4) schedule(dynamic, c) private(c)        \
+    reduction(+ : sum)
+    for (int i = 0; i < 100; i++) {
+        cover_hits[i]++;
+        sum += i;
+    }
+    ok &= cover_ok(100, sum);
+    memset(cover_hits, 0, sizeof cover_hits);
+#pragma omp parallel for num_threads(4) schedule(guided, c + 1)                \
+    firstprivate(c) reduction(+ : csum)
+    for (int i = 0; i < 100; i++) {
+        cover_hits[i]++;
+        csum += c;
+    }
+    ok            &= csum == 300;
+    int local[64]  = {0};
+#pragma omp parallel for num_threads(4) default(none) shared(local)            \
+    schedule(static, c)
+    for (int i = 0; i < 64; i++)
+        local[i]++;
+    for (int i = 0; i < 64; i++)
+        ok &= local[i] == 1;
+    return ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_schedule_runtime(void) {
+    omp_sched_t kind;
+    int         chunk, ok = 1;
+    omp_set_schedule(omp_sched_dynamic, 2);
+    omp_get_schedule(&kind, &chunk);
+    ok &= kind == omp_sched_dynamic && chunk == 2;
+    ok &= cover_runtime(1003);
+    omp_set_schedule(omp_sched_guided, 5);
+    omp_get_schedule(&kind, &chunk);
+    ok &= kind == omp_sched_guided && chunk == 5;
+    ok &= cover_runtime(1003);
+    omp_set_schedule(omp_sched_static, 4);
+    ok &= cover_runtime(1003);
+    omp_set_schedule(omp_sched_auto, 0);
+    omp_get_schedule(&kind, &chunk);
+    ok &= kind == omp_sched_auto;
+    ok &= cover_runtime(1003);
+    omp_set_schedule(omp_sched_static, 0);
+    return ok ? 42 : 1;
+}
+
+enum { CRIT_NAMES = 70, CRIT_REPS = 200 };
+static int crit_cnt[CRIT_NAMES];
+static int crit_shared;
+
+#define CRIT(N) PRAGMA(omp critical(crit_##N)) crit_cnt[N]++;
+#define CRIT10(T)                                                              \
+    CRIT(T##0)                                                                 \
+    CRIT(T##1) CRIT(T##2) CRIT(T##3) CRIT(T##4) CRIT(T##5) CRIT(T##6)          \
+        CRIT(T##7) CRIT(T##8) CRIT(T##9)
+
+[[cccc::test(return = 42)]]
+int test_omp_critical_many_names(void) {
+    int nt = team_size();
+    memset(crit_cnt, 0, sizeof crit_cnt);
+    crit_shared = 0;
+#pragma omp parallel num_threads(4)
+    {
+        for (int rep = 0; rep < CRIT_REPS; rep++) {
+            CRIT(0)
+            CRIT(1) CRIT(2) CRIT(3) CRIT(4) CRIT(5) CRIT(6) CRIT(7) CRIT(8)
+                CRIT(9) CRIT10(1) CRIT10(2) CRIT10(3) CRIT10(4) CRIT10(5)
+                    CRIT10(6)
+#pragma omp critical(shared_name)
+                        crit_shared++;
+            spin(1);
+#pragma omp critical(shared_name)
+            crit_shared++;
+        }
+    }
+    for (int i = 0; i < CRIT_NAMES; i++)
+        if (crit_cnt[i] != nt * CRIT_REPS)
+            return 100 + i;
+    return crit_shared == 2 * nt * CRIT_REPS ? 42 : 1;
 }
 
 [[cccc::comptime]]

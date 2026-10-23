@@ -1703,8 +1703,6 @@ void serialize_threaded_shims(FILE *f, VirtualMachine *vm, Obj *prog,
     fprintf(f, "%s", CCCC_SHIM_pool_runtime);
     if (omp) {
         fprintf(f, "%s", CCCC_SHIM_omp_includes);
-        // TODO: critical-section names are looked up linearly, a hash table if
-        // programs use many names (#1403).
         fprintf(f, "%s", CCCC_SHIM_omp_runtime);
         fprintf(f, "%s", CCCC_SHIM_omp_api);
     }
@@ -1769,4 +1767,7 @@ void serialize_omp_lock_shims(FILE *f, VirtualMachine *vm, Obj *prog,
         fprintf(f, "%s", CCCC_SHIM_omp_locks);
     if (any_nest)
         fprintf(f, "%s", CCCC_SHIM_omp_nest_locks);
+    if (omp_fn_used(vm, prog, "omp_set_schedule", generated_only) ||
+        omp_fn_used(vm, prog, "omp_get_schedule", generated_only))
+        fprintf(f, "%s", CCCC_SHIM_omp_schedule);
 }

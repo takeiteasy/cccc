@@ -129,6 +129,57 @@ int test_openmp_pragma_operator(void) {
 }
 
 [[cccc::test(return = 42)]]
+int test_openmp_schedule_clause_forms(void) {
+    int c = 2, total = 0;
+#pragma omp parallel for schedule(static) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(static, 3) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(dynamic) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(dynamic, c + 1) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(guided, c) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(auto) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(runtime) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(monotonic : static, 2) reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp parallel for schedule(nonmonotonic, simd : dynamic)                \
+    reduction(+ : total)
+    for (int i = 0; i < 4; i++)
+        total += i;
+#pragma omp for schedule(dynamic, 2) ordered
+    for (int i = 0; i < 4; i++) {
+#pragma omp ordered
+        total += i;
+    }
+    return total == 60 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_openmp_schedule_api(void) {
+    omp_sched_t kind;
+    int         chunk;
+    omp_set_schedule(omp_sched_guided, 6);
+    omp_get_schedule(&kind, &chunk);
+    int ok = kind == omp_sched_guided && chunk == 6;
+    omp_set_schedule(omp_sched_static, 0);
+    omp_get_schedule(&kind, &chunk);
+    return ok && kind == omp_sched_static && chunk == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
 int test_openmp_runtime(void) {
     int ok = 1;
 #pragma omp parallel

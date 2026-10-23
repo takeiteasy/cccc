@@ -545,6 +545,52 @@ static bool owns_shadow(OmpDirective *d, OmpClause *c) {
     return true;
 }
 
+// schedule([modifier[, modifier]:] kind[, chunk]), after its "(". The
+// monotonic, nonmonotonic and simd modifiers are accepted and ignored.
+static Token *schedule_clause(VirtualMachine *vm, OmpDirective *d,
+                              OmpBody *body, Token *name, Token *tok) {
+    while (is_word(tok, "monotonic") || is_word(tok, "nonmonotonic") ||
+           is_word(tok, "simd")) {
+        tok = tok->next;
+        if (equal(tok, ":")) {
+            tok = tok->next;
+            break;
+        }
+        tok = skip(vm, tok, ",");
+    }
+    static const struct {
+        const char *word;
+        int         kind;
+    } kinds[]       = {{"static", 1},
+                       {"dynamic", 2},
+                       {"guided", 3},
+                       {"auto", 4},
+                       {"runtime", 0x10}};
+    Token *kind_tok = tok;
+    for (size_t i = 0; i < sizeof(kinds) / sizeof(*kinds); i++)
+        if (is_word(tok, kinds[i].word))
+            d->sched_kind = kinds[i].kind;
+    if (!d->sched_kind)
+        error_tok(vm, kind_tok, "unknown schedule kind '%.*s'", kind_tok->len,
+                  kind_tok->loc);
+    tok = tok->next;
+    if (equal(tok, ",")) {
+        if (d->sched_kind == 4 || d->sched_kind == 0x10)
+            error_tok(vm, name, "schedule(%.*s) takes no chunk size",
+                      kind_tok->len, kind_tok->loc);
+        tok = tok->next;
+        if (vm->compiler.omp_threaded) {
+            Token *end     = scan_expr_end(tok, false);
+            d->sched_chunk = tokens_text(vm, tok, end);
+            tok            = end;
+        } else {
+            Node *e = expr(vm, &tok, tok);
+            body_push(vm, body, new_unary(vm, ND_EXPR_STMT, e, name));
+        }
+    }
+    return skip(vm, tok, ")");
+}
+
 // Parses the clauses up to the wrapper's closing ")" and appends the
 // expressions that must still be evaluated once (num_threads, if) to body.
 static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -628,7 +674,7 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         } else if (is_word(name, "proc_bind") && (allowed & CL_PARALLEL)) {
             tok = skip_balanced_parens(vm, tok);
         } else if (is_word(name, "schedule") && (allowed & CL_LOOP)) {
-            tok = skip_balanced_parens(vm, tok);
+            tok = schedule_clause(vm, d, body, name, skip(vm, tok, "("));
         } else if (is_word(name, "collapse") && (allowed & CL_LOOP)) {
             tok         = skip(vm, tok, "(");
             Node *n     = conditional(vm, &tok, tok);
@@ -1056,13 +1102,18 @@ static void runtime_decls(VirtualMachine *vm) {
         {"__cccc_omp_reduce_lock", "void __cccc_omp_reduce_lock(void);"},
         {"__cccc_omp_reduce_unlock", "void __cccc_omp_reduce_unlock(void);"},
         {"__cccc_omp_critical_enter",
-         "void __cccc_omp_critical_enter(const char *);"},
-        {"__cccc_omp_critical_exit",
-         "void __cccc_omp_critical_exit(const char *);"},
+         "void *__cccc_omp_critical_enter(void **, const char *);"},
+        {"__cccc_omp_critical_exit", "void __cccc_omp_critical_exit(void *);"},
+        {"__cccc_omp_loop_begin", "void __cccc_omp_loop_begin(int *, long *);"},
+        {"__cccc_omp_loop_next",
+         "int __cccc_omp_loop_next(int, long, long, long *, long *, long *);"},
+        {"__cccc_omp_loop_end", "void __cccc_omp_loop_end(int, long);"},
         {"__cccc_omp_ordered_start", "void __cccc_omp_ordered_start(long);"},
         {"__cccc_omp_ordered_begin", "void __cccc_omp_ordered_begin(void);"},
-        {"__cccc_omp_ordered_finish",
-         "void __cccc_omp_ordered_finish(long, long);"},
+        {"__cccc_omp_ordered_chunk_end",
+         "void __cccc_omp_ordered_chunk_end(long);"},
+        {"__cccc_omp_ordered_loop_end",
+         "void __cccc_omp_ordered_loop_end(long);"},
     };
     for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++)
         declare_runtime_fn(vm, rt[i].name, rt[i].proto);
@@ -1302,6 +1353,27 @@ static char *iter_count(VirtualMachine *vm, int id, int j, OmpLoopLevel *lv) {
     return arena_format(vm, "%s ? (%s + %s - 1) / %s : 0", guard, span, st, st);
 }
 
+// The loop statement a snippet parsed to, which may sit in a block.
+static Node *first_loop(Node *n) {
+    while (n && n->kind != ND_FOR)
+        n = n->kind == ND_BLOCK ? n->body : NULL;
+    return n;
+}
+
+// The schedule chunk size is evaluated once, outside the region, so it reads
+// the original of a variable the directive also privatises.
+// The directive's own default(none) does not apply to it.
+static void chunk_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
+                       int id) {
+    OmpFrame *saved = vm->compiler.omp_frames;
+    if (saved && saved->dir == d)
+        vm->compiler.omp_frames = saved->next;
+    body_push(vm, body,
+              snippet(vm, "long __omp%d_cs = (long)(%s);", id,
+                      d->sched_chunk ? d->sched_chunk : "0"));
+    vm->compiler.omp_frames = saved;
+}
+
 // The worksharing loop. `tok` is on the `for`; the body statement follows the
 // collapsed headers. Shadows have already been declared by the caller.
 static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -1340,15 +1412,17 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     for (int j = 1; j < m; j++)
         total = arena_format(vm, "%s * __omp%d_n%d", total, id, j);
     body_push(vm, body, snippet(vm, "long __omp%d_n = %s;", id, total));
-    body_push(vm, body, snippet(vm, "long __omp%d_b, __omp%d_e;", id, id));
     body_push(vm, body,
               snippet(vm,
-                      "__cccc_omp_static_range(__omp%d_n, &__omp%d_b, "
-                      "&__omp%d_e);",
-                      id, id, id));
-    if (d->ordered)
-        body_push(vm, body,
-                  snippet(vm, "__cccc_omp_ordered_start(__omp%d_b);", id));
+                      "long __omp%d_b, __omp%d_e, __omp%d_c = 0, __omp%d_ch = "
+                      "__omp%d_cs;",
+                      id, id, id, id, id));
+    body_push(vm, body,
+              snippet(vm, "int __omp%d_sk = %d, __omp%d_last = 0;", id,
+                      d->sched_kind ? d->sched_kind : 1, id));
+    body_push(vm, body,
+              snippet(vm, "__cccc_omp_loop_begin(&__omp%d_sk, &__omp%d_ch);",
+                      id, id));
 
     // Loop variables: declared by the header, or private copies of existing
     // ones.
@@ -1370,9 +1444,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                          "for (__omp%d_k = __omp%d_b; __omp%d_k < __omp%d_e; "
                          "__omp%d_k++) ;",
                          id, id, id, id, id);
-    Node *for_node = loop;
-    while (for_node && for_node->kind != ND_FOR)
-        for_node = for_node->kind == ND_BLOCK ? for_node->body : NULL;
+    Node *for_node = first_loop(loop);
     if (!for_node)
         error_tok(vm, for_tok, "internal error: omp loop shape");
 
@@ -1401,12 +1473,41 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     Node *iter_block = new_node(vm, ND_BLOCK, for_tok);
     iter_block->body = head.next;
     for_node->then   = iter_block;
-    body_push(vm, body, loop);
+
+    // One pass of the outer loop is one chunk; a static loop without a chunk
+    // size has a single one.
+    Node *chunks = snippet(vm,
+                           "while (__cccc_omp_loop_next(__omp%d_sk, "
+                           "__omp%d_ch, __omp%d_n, &__omp%d_c, &__omp%d_b, "
+                           "&__omp%d_e)) ;",
+                           id, id, id, id, id, id);
+    Node *chunks_node = first_loop(chunks);
+    if (!chunks_node)
+        error_tok(vm, for_tok, "internal error: omp loop shape");
+    Node    chead = {};
+    OmpBody cb    = {&chead, &chead};
+    if (d->ordered)
+        body_push(vm, &cb,
+                  snippet(vm, "__cccc_omp_ordered_start(__omp%d_b);", id));
+    body_push(vm, &cb, loop);
+    if (d->ordered)
+        body_push(vm, &cb,
+                  snippet(vm, "__cccc_omp_ordered_chunk_end(__omp%d_e);", id));
+    body_push(vm, &cb,
+              snippet(vm,
+                      "__omp%d_last |= __omp%d_b < __omp%d_e && __omp%d_e == "
+                      "__omp%d_n;",
+                      id, id, id, id, id));
+    Node *chunk_block = new_node(vm, ND_BLOCK, for_tok);
+    chunk_block->body = chead.next;
+    chunks_node->then = chunk_block;
+    body_push(vm, body, chunks);
+    body_push(
+        vm, body,
+        snippet(vm, "__cccc_omp_loop_end(__omp%d_sk, __omp%d_n);", id, id));
     if (d->ordered)
         body_push(vm, body,
-                  snippet(vm,
-                          "__cccc_omp_ordered_finish(__omp%d_e, __omp%d_n);",
-                          id, id));
+                  snippet(vm, "__cccc_omp_ordered_loop_end(__omp%d_n);", id));
 
     // lastprivate: the thread that ran the sequentially last iteration copies
     // its values back; a loop variable ends one step past the last iteration.
@@ -1432,11 +1533,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                 vm, "%s __builtin_memcpy(__omp_%d_%s, &%s, sizeof(%s));", copy,
                 id, c->name, c->name, c->name);
         }
-        body_push(vm, body,
-                  snippet(vm,
-                          "if (__omp%d_b < __omp%d_e && __omp%d_e == "
-                          "__omp%d_n) { %s }",
-                          id, id, id, id, copy));
+        body_push(vm, body, snippet(vm, "if (__omp%d_last) { %s }", id, copy));
     }
     if (with_barrier && !d->nowait)
         body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
@@ -1699,6 +1796,8 @@ static Node *find_node(Node *n, NodeKind kind) {
     return n;
 }
 
+// TODO: sections are split into one contiguous run per thread; claim them
+// one at a time like a dynamic loop (#1750).
 // Sections as a worksharing loop over the section index; the thread that runs
 // the last index copies lastprivate values back.
 static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
@@ -1786,6 +1885,8 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
         case OMP_PARALLEL:
         case OMP_PARALLEL_SECTIONS:
         case OMP_PARALLEL_FOR: {
+            // TODO: num_threads and if are checked against this directive's
+            // own default(none) (#1749); chunk_decl shows the fix.
             body_push(vm, body,
                       snippet(vm, "int __omp%d_nt = %s;", id,
                               d->num_threads_text ? d->num_threads_text : "0"));
@@ -1793,6 +1894,8 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                 body_push(
                     vm, body,
                     snippet(vm, "if (!(%s)) __omp%d_nt = 1;", d->if_text, id));
+            if (d->kind == OMP_PARALLEL_FOR)
+                chunk_decl(vm, d, body, id);
             Obj *nt =
                 find_var(vm,
                          tokenize_string(vm, "<omp>",
@@ -1826,6 +1929,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
         }
 
         case OMP_FOR: {
+            chunk_decl(vm, d, body, id);
             capture_pointers(vm, d, body, id);
             shadow_decls(vm, d, body, id);
             if (has_race_prone_clause(d))
@@ -1895,13 +1999,18 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             Node *inner = stmt(vm, rest, tok);
             if (d->kind == OMP_CRITICAL) {
                 const char *name = d->critical_name ? d->critical_name : "";
-                body_push(
-                    vm, body,
-                    snippet(vm, "__cccc_omp_critical_enter(\"%s\");", name));
+                body_push(vm, body,
+                          snippet(vm, "static void *__omp%d_cm;", id));
+                body_push(vm, body,
+                          snippet(vm,
+                                  "void *__omp%d_m = "
+                                  "__cccc_omp_critical_enter(&__omp%d_cm, "
+                                  "\"%s\");",
+                                  id, id, name));
                 body_push(vm, body, inner);
                 body_push(
                     vm, body,
-                    snippet(vm, "__cccc_omp_critical_exit(\"%s\");", name));
+                    snippet(vm, "__cccc_omp_critical_exit(__omp%d_m);", id));
             } else {
                 Node *guarded =
                     snippet(vm, "if (__cccc_omp_thread_num() == 0) ;");

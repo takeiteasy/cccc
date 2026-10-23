@@ -140,6 +140,7 @@
     X(omp, lock_core)                                                          \
     X(omp, locks)                                                              \
     X(omp, nest_locks)                                                         \
+    X(omp, schedule)                                                           \
     X(omp, api)                                                                \
     X(kernel, includes)                                                        \
     X(kernel, runtime)                                                         \

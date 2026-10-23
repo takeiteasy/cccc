@@ -49,6 +49,7 @@ struct __cccc_team {
     int              single_done;
     void            *copyprivate;
     long             ordered; // iterations whose ordered regions have finished
+    long             dyn_next; // next unclaimed index across dynamic/guided loops
     pthread_mutex_t  om;
     pthread_cond_t   oc;
     void (*fn)(void *);
@@ -60,6 +61,7 @@ static __thread int                 __cccc_tls_tid;
 static __thread int                 __cccc_tls_single;
 static __thread long                __cccc_tls_ordered_base;
 static __thread long                __cccc_tls_ordered_from = -1;
+static __thread long                __cccc_tls_dyn_base;
 
 static struct {
     pthread_mutex_t     m;
@@ -93,17 +95,20 @@ static void __cccc_team_run(struct __cccc_team *t, int tid) {
     int                 saved_single = __cccc_tls_single;
     long                saved_obase  = __cccc_tls_ordered_base;
     long                saved_ofrom  = __cccc_tls_ordered_from;
+    long                saved_dbase  = __cccc_tls_dyn_base;
     __cccc_tls_team                  = t;
     __cccc_tls_tid                   = tid;
     __cccc_tls_single                = 0;
     __cccc_tls_ordered_base          = 0;
     __cccc_tls_ordered_from          = -1;
+    __cccc_tls_dyn_base              = 0;
     t->fn(t->env);
     __cccc_tls_team   = saved_team;
     __cccc_tls_tid    = saved_tid;
     __cccc_tls_single = saved_single;
     __cccc_tls_ordered_base = saved_obase;
     __cccc_tls_ordered_from = saved_ofrom;
+    __cccc_tls_dyn_base     = saved_dbase;
 }
 
 static void *__cccc_pool_worker(void *arg) {
@@ -137,6 +142,7 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
     t.single_done = 0;
     t.copyprivate = 0;
     t.ordered     = 0;
+    t.dyn_next    = 0;
     pthread_mutex_init(&t.om, 0);
     pthread_cond_init(&t.oc, 0);
     t.fn          = fn;
