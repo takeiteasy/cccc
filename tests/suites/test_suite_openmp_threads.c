@@ -1430,4 +1430,220 @@ int test_omp_threads_atomic_order(void) {
     return ok ? 42 : 1;
 }
 
+static void busy_for(double seconds) {
+    double t = omp_get_wtime();
+    while (omp_get_wtime() - t < seconds)
+        ;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_firstprivate_in_loop(void) {
+    int out[8] = {0};
+#pragma omp parallel num_threads(4) shared(out)
+#pragma omp single
+    {
+        for (int i = 0; i < 8; i++) {
+#pragma omp task firstprivate(i) shared(out)
+            out[i] = i * i + 1;
+        }
+#pragma omp taskwait
+    }
+    int ok = 1;
+    for (int i = 0; i < 8; i++)
+        ok &= out[i] == i * i + 1;
+    return ok ? 42 : 1;
+}
+
+// The creating function returns before its tasks have run.
+static void spawn_store(int *slot, int v) {
+#pragma omp task firstprivate(slot, v)
+    *slot = v;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_outlives_creator(void) {
+    int out[6] = {0};
+#pragma omp parallel num_threads(4) shared(out)
+#pragma omp single nowait
+    {
+        for (int i = 0; i < 6; i++)
+            spawn_store(&out[i], i + 10);
+    }
+    int ok = 1;
+    for (int i = 0; i < 6; i++)
+        ok &= out[i] == i + 10;
+    return ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_depend_chain(void) {
+    int x = 0, y = 0;
+#pragma omp parallel num_threads(4) shared(x, y)
+#pragma omp single
+    {
+#pragma omp task depend(out : x) shared(x)
+        {
+            busy_for(0.05);
+            x = 1;
+        }
+#pragma omp task depend(in : x) depend(out : y) shared(x, y)
+        y = x + 1;
+#pragma omp task depend(inout : y) shared(y)
+        y *= 10;
+    }
+    return x == 1 && y == 20 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_depend_array_section(void) {
+    int a[4] = {0}, sum = 0;
+#pragma omp parallel num_threads(4) shared(a, sum)
+#pragma omp single
+    {
+#pragma omp task depend(out : a[0 : 4]) shared(a)
+        {
+            busy_for(0.03);
+            for (int i = 0; i < 4; i++)
+                a[i] = i + 1;
+        }
+#pragma omp task depend(in : a[0 : 4]) shared(a, sum)
+        for (int i = 0; i < 4; i++)
+            sum += a[i];
+    }
+    return sum == 10 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_if_false_is_complete_on_return(void) {
+    int v = 0, seen = -1;
+#pragma omp parallel num_threads(2) shared(v, seen)
+#pragma omp single
+    {
+#pragma omp task if (0) shared(v)
+        {
+            busy_for(0.02);
+            v = 7;
+        }
+        seen = v;
+    }
+    return seen == 7 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_final(void) {
+    int f1 = -1, f2 = -1, f3 = -1;
+#pragma omp parallel num_threads(2) shared(f1, f2, f3)
+#pragma omp single
+    {
+#pragma omp task final(1) shared(f1, f2)
+        {
+            f1 = omp_in_final();
+#pragma omp task shared(f2)
+            f2 = omp_in_final();
+        }
+#pragma omp task shared(f3)
+        f3 = omp_in_final();
+#pragma omp taskwait
+    }
+#ifdef __CCCC_OMP_THREADED__
+    return f1 == 1 && f2 == 1 && f3 == 0 ? 42 : 1;
+#else
+    return 42;
+#endif
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_taskgroup_waits_for_descendants(void) {
+    int n = 0, seen = -1;
+#pragma omp parallel num_threads(4) shared(n, seen)
+#pragma omp single
+    {
+#pragma omp taskgroup
+        {
+#pragma omp task shared(n)
+            {
+#pragma omp task shared(n)
+                {
+                    busy_for(0.03);
+#pragma omp atomic
+                    n += 1;
+                }
+            }
+        }
+        seen = n;
+    }
+    return seen == 1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_finishes_before_region_ends(void) {
+    int total = 0;
+#pragma omp parallel num_threads(4) shared(total)
+    {
+        int local = 5;
+#pragma omp single nowait
+        {
+            for (int i = 0; i < 8; i++) {
+#pragma omp task shared(local, total)
+                {
+                    busy_for(0.005);
+#pragma omp atomic
+                    total += local;
+                }
+            }
+        }
+    }
+    return total == 40 ? 42 : 1;
+}
+
+#ifdef __CCCC_OMP_THREADED__
+// Two tasks that wait for each other only finish when they run at once.
+[[cccc::test(return = 42)]]
+int test_omp_tasks_overlap(void) {
+    int a = 0, b = 0, got_a = 0, got_b = 0;
+    if (team_size() < 2)
+        return 42;
+#pragma omp parallel num_threads(2) shared(a, b, got_a, got_b)
+#pragma omp single
+    {
+#pragma omp task shared(a, b, got_a)
+        {
+#pragma omp atomic write
+            a     = 1;
+            int v = 0;
+            while (!v) {
+#pragma omp atomic read
+                v = b;
+            }
+            got_a = 1;
+        }
+#pragma omp task shared(a, b, got_b)
+        {
+#pragma omp atomic write
+            b     = 1;
+            int v = 0;
+            while (!v) {
+#pragma omp atomic read
+                v = a;
+            }
+            got_b = 1;
+        }
+    }
+    return got_a && got_b ? 42 : 1;
+}
+#endif
+
+[[cccc::test(return = 42)]]
+int test_omp_task_priority_and_untied_accepted(void) {
+    int v = 0;
+#pragma omp parallel num_threads(2) shared(v)
+#pragma omp single
+    {
+#pragma omp task priority(5) untied mergeable shared(v)
+        v = 1;
+#pragma omp taskwait
+    }
+    return v == 1 ? 42 : 1;
+}
+
 #pragma cccc suite end

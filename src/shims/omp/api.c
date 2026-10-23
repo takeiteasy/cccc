@@ -3,6 +3,7 @@ int omp_get_thread_num(void) { return __cccc_omp_thread_num(); }
 int omp_get_max_threads(void) { return __cccc_pool_default_threads(); }
 int omp_get_thread_limit(void) { return __cccc_pool_default_threads(); }
 int omp_in_parallel(void) { return __cccc_omp_num_threads() > 1; }
+int omp_in_final(void) { return __cccc_omp_in_final(); }
 
 int omp_get_num_procs(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);

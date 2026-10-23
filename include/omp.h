@@ -63,6 +63,7 @@ int    omp_get_max_threads(void);
 int    omp_get_thread_num(void);
 int    omp_get_thread_limit(void);
 int    omp_in_parallel(void);
+int omp_in_final(void);
 int    omp_get_num_procs(void);
 void   omp_set_num_threads(int n);
 void   omp_set_dynamic(int on);
@@ -106,6 +107,10 @@ static inline int omp_get_thread_num(void) { return 0; }
 static inline int omp_get_thread_limit(void) { return 1; }
 /*! @brief Non-zero inside a parallel region (always 0 in the VM). */
 static inline int omp_in_parallel(void) { return 0; }
+/*! @brief Non-zero inside a final task (always 0 in the VM). */
+static inline int omp_in_final(void) {
+    return 0;
+}
 /*! @brief Online processors on the host. */
 static inline int omp_get_num_procs(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);

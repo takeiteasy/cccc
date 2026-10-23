@@ -136,6 +136,7 @@
     X(pool, includes)                                                          \
     X(pool, runtime)                                                           \
     X(omp, includes)                                                           \
+    X(omp, tasks)                                                              \
     X(omp, runtime)                                                            \
     X(omp, lock_core)                                                          \
     X(omp, locks)                                                              \

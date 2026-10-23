@@ -58,9 +58,10 @@ a team of one.
 | `master`, `masked` | Thread 0 runs the block |
 | `simd`, `for simd` | Runs the block; the hint is ignored |
 | `sections`, `parallel sections` | VM: runs the `section` blocks in order. Native: each thread takes the next unclaimed block |
-| `task` | Runs the block immediately on the thread that meets it |
-| `taskwait`, `taskyield` | No effect |
-| `taskgroup` | Runs the block |
+| `task` | VM: runs the block where it is met. Native: queues the block for the team; see [tasks](#tasks) |
+| `taskwait` | Native: waits for the tasks the current task created. VM: no effect |
+| `taskyield` | No effect |
+| `taskgroup` | Native: waits at the end of the block for the tasks created in it and their descendants. VM: runs the block |
 | `threadprivate(x, ...)` | Gives each thread its own copy of a global or `static` variable; allowed at file scope and in a function |
 | `ordered` | Runs the block in loop-iteration order; allowed inside a loop with the `ordered` clause, or in a function called from one |
 | `ordered depend(sink: ...)`, `ordered depend(source)` | Standalone directive inside a loop with `ordered(n)`; see [doacross loops](#doacross-loops) |
@@ -128,8 +129,8 @@ The accepted forms are listed in a footnote.[^compare]
 | `copyin(x)` | On `parallel` directives: every thread's copy of the `threadprivate` variable `x` starts with the primary thread's value |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
 | `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size. Variables in these clauses need no data-sharing clause under `default(none)` |
-| `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
-| `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
+| `if(c)`, `final(c)`, `priority(n)`, `depend(...)` on `task` | VM: evaluated once or parsed, then ignored. Native: see [tasks](#tasks) |
+| `untied`, `mergeable` on `task` | Parsed and ignored |
 | `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` makes a [doacross loop](#doacross-loops) |
 | `schedule(kind[, n])` | VM: checked, then ignored. Native: `static` splits the loop into one block per thread, `static, n` deals chunks of `n` round-robin, `dynamic` and `guided` hand out chunks on demand, `auto` is `static`, and `runtime` reads `omp_set_schedule`, else `OMP_SCHEDULE`, else `static`. `monotonic`, `nonmonotonic` and `simd` modifiers are accepted and ignored |
 | `proc_bind(...)` | Parsed and ignored |
@@ -138,7 +139,7 @@ The accepted forms are listed in a footnote.[^compare]
 A `task` works on its own copy of a local variable it uses and does not list,
 unless an enclosing `parallel` region shares the variable. `default(firstprivate)`
 and `default(private)` apply to every unlisted local; `default(shared)` shares
-them. A task's copy is initialised when the task starts:
+them. A task's copy takes the value the variable has when the task is created:
 
 ```c
 int x = 1;
@@ -156,6 +157,47 @@ int p = 5;
 { p = 100; }
 // p is still 5 here
 ```
+
+## Tasks
+
+Native tasks run on the threads of the team; the VM runs each task where it
+is met. Queued tasks run at a barrier, at `taskwait`, at the end of a
+`taskgroup`, at the end of the `parallel` region, and on any thread that has
+nothing else to do.[^tasks]
+
+```c
+long fib(int n) {
+    if (n < 2) return n;
+    long a, b;
+#pragma omp task shared(a) firstprivate(n)
+    a = fib(n - 1);
+#pragma omp task shared(b) firstprivate(n)
+    b = fib(n - 2);
+#pragma omp taskwait
+    return a + b;
+}
+
+#pragma omp parallel
+#pragma omp single
+r = fib(40);
+```
+
+A task pays off when it does real work. Give small ones a cutoff, for example
+`if(n > 25)`, or call a serial function below it.
+
+| Clause | Native |
+|---|---|
+| `if(0)` | The task runs at once on the thread that meets it, which waits until it is done |
+| `final(c)` | When true the task and every task it creates run at once; `omp_in_final()` is `1` inside |
+| `priority(n)` | A task with `n > 0` is taken before tasks without a priority |
+| `depend(in: x)` | Waits for the earlier sibling tasks that have `x` in an `out` or `inout` |
+| `depend(out: x)`, `depend(inout: x)` | Waits for the earlier sibling tasks that have `x` in any `depend` |
+| `depend(mutexinoutset: x)`, `depend(inoutset: x)` | Treated as `inout` |
+
+A `depend` item is a variable, an element, or an array section `a[lo:len]`;
+two items are the same dependence when their first addresses match.
+`depend(depobj: ...)` and the `iterator` modifier are errors. `taskwait
+depend(...)` waits for every task the current task created.
 
 ## Doacross loops
 
@@ -195,6 +237,7 @@ has because the offset is not a multiple of the step, is ignored with a
 | `omp_get_max_threads`, `omp_get_thread_limit` | `1` | Default team size |
 | `omp_get_thread_num` | `0` | Thread index in the team |
 | `omp_in_parallel` | `0` | `1` inside a team of more than one thread |
+| `omp_in_final` | `0` | `1` inside a final task |
 | `omp_get_num_procs` | Host CPU count | Host CPU count |
 | `omp_set_num_threads` | No effect | Team size of later regions |
 | `omp_set_dynamic`, `omp_get_dynamic` | No effect | No effect |
@@ -244,7 +287,8 @@ or another OpenMP compiler. Building the native output with
 - Native output uses pthreads, so Windows has no OpenMP.
 - An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
-- Tasks run inline, so they never overlap (#1743).
+- A task cannot have its own copy of a variable-length array under `-c=native`; name it in `shared` (#1766).
+- A thread waiting at `taskwait` or the end of a `taskgroup` runs only the tasks it created; other threads run the rest.
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,
@@ -270,6 +314,13 @@ or another OpenMP compiler. Building the native output with
     sleeps until a post wakes it. Every schedule keeps one counter per chunk,
     so memory follows the number of chunks, not the trip count.
 
+[^tasks]: A task is a nested function with its own copies of the variables it
+    privatises, stored with the task when it is created. Tasks wait in one
+    queue per team, oldest first for idle threads and newest first for a
+    thread waiting on its own tasks. A task that is not deferred, runs in a
+    team of one thread, or is met while more than 64 tasks per thread are
+    queued runs at once on the thread that meets it. Parallel regions drain
+    the queue before they end.
 [^compare]: `x` is on the left of `==`; `<` and `>` take `x` on either side
     (`<=` and `>=` are not accepted). `capture` also takes
     `{ if (...) {...} v = x; }` (the new value),

@@ -18,7 +18,7 @@ static void __cccc_barrier_destroy(__cccc_barrier_t *b) {
     pthread_cond_destroy(&b->c);
 }
 
-static void __cccc_barrier_wait(__cccc_barrier_t *b) {
+__attribute__((unused)) static void __cccc_barrier_wait(__cccc_barrier_t *b) {
     pthread_mutex_lock(&b->m);
     unsigned gen = b->gen;
     if (++b->waiting == b->n) {
@@ -32,7 +32,7 @@ static void __cccc_barrier_wait(__cccc_barrier_t *b) {
     pthread_mutex_unlock(&b->m);
 }
 
-static void __cccc_barrier_leave(__cccc_barrier_t *b) {
+__attribute__((unused)) static void __cccc_barrier_leave(__cccc_barrier_t *b) {
     pthread_mutex_lock(&b->m);
     b->n--;
     if (b->n > 0 && b->waiting == b->n) {
@@ -53,6 +53,12 @@ struct __cccc_team {
     struct __cccc_doacross *da; // doacross loops in progress, under om
     pthread_mutex_t  om;
     pthread_cond_t   oc;
+    // Deferred tasks (omp/tasks.c): tm guards the queues and counters.
+    pthread_mutex_t  tm;
+    pthread_cond_t   tc;
+    struct __cccc_task *hq, *hqt, *lq, *lqt;
+    int              live, queued, barrived, waiting;
+    unsigned         bgen;
     void (*fn)(void *);
     void *env;
 };
@@ -65,6 +71,7 @@ static __thread long                __cccc_tls_ordered_from = -1;
 static __thread long                __cccc_tls_dyn_base;
 static __thread long                __cccc_tls_da_seq;
 static __thread struct __cccc_doacross *__cccc_tls_da;
+static __thread struct __cccc_task *__cccc_tls_task;
 
 static struct {
     pthread_mutex_t     m;
@@ -101,6 +108,7 @@ static void __cccc_team_run(struct __cccc_team *t, int tid) {
     long                saved_dbase  = __cccc_tls_dyn_base;
     long                saved_dseq   = __cccc_tls_da_seq;
     struct __cccc_doacross *saved_da = __cccc_tls_da;
+    struct __cccc_task     *saved_task = __cccc_tls_task;
     __cccc_tls_team                  = t;
     __cccc_tls_tid                   = tid;
     __cccc_tls_single                = 0;
@@ -109,6 +117,7 @@ static void __cccc_team_run(struct __cccc_team *t, int tid) {
     __cccc_tls_dyn_base              = 0;
     __cccc_tls_da_seq                = 0;
     __cccc_tls_da                    = 0;
+    __cccc_tls_task                  = 0;
     t->fn(t->env);
     __cccc_tls_team   = saved_team;
     __cccc_tls_tid    = saved_tid;
@@ -118,6 +127,7 @@ static void __cccc_team_run(struct __cccc_team *t, int tid) {
     __cccc_tls_dyn_base     = saved_dbase;
     __cccc_tls_da_seq       = saved_dseq;
     __cccc_tls_da           = saved_da;
+    __cccc_tls_task         = saved_task;
 }
 
 static void *__cccc_pool_worker(void *arg) {
@@ -155,6 +165,11 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
     t.da          = 0;
     pthread_mutex_init(&t.om, 0);
     pthread_cond_init(&t.oc, 0);
+    pthread_mutex_init(&t.tm, 0);
+    pthread_cond_init(&t.tc, 0);
+    t.hq = t.hqt = t.lq = t.lqt = 0;
+    t.live = t.queued = t.barrived = t.waiting = 0;
+    t.bgen        = 0;
     t.fn          = fn;
     t.env         = env;
     __cccc_barrier_init(&t.bar, n);
@@ -183,4 +198,6 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
     __cccc_barrier_destroy(&t.bar);
     pthread_mutex_destroy(&t.om);
     pthread_cond_destroy(&t.oc);
+    pthread_mutex_destroy(&t.tm);
+    pthread_cond_destroy(&t.tc);
 }

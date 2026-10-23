@@ -2868,6 +2868,14 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 fprintf(f, "__cccc_pool_run((void (*)(void *))%s, ",
                         node->lhs->var->name);
             } else if (node->lhs && node->lhs->kind == ND_VAR &&
+                       node->lhs->var && node->lhs->var->is_omp_task) {
+                // The task's environment is copied into the task record, so
+                // it outlives this frame.
+                fprintf(f,
+                        "__cccc_omp_task_spawn((void (*)(void *))%s, "
+                        "sizeof(__cccc_nenv), ",
+                        node->lhs->var->name);
+            } else if (node->lhs && node->lhs->kind == ND_VAR &&
                        node->lhs->var && node->lhs->var->is_kernel_thunk) {
                 // #1394: a cccc_launch runs its outlined thunk once per
                 // work-item; the env pointer and launch arguments follow.

@@ -1,8 +1,3 @@
-void __cccc_omp_barrier(void) {
-    if (__cccc_tls_team && __cccc_tls_team->n > 1)
-        __cccc_barrier_wait(&__cccc_tls_team->bar);
-}
-
 int __cccc_omp_thread_num(void) { return __cccc_tls_tid; }
 
 int __cccc_omp_num_threads(void) {

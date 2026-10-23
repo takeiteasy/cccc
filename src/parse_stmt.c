@@ -553,10 +553,12 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "return")) {
-        if (vm->compiler.current_fn && vm->compiler.current_fn->is_omp_region)
+        if (vm->compiler.current_fn &&
+            (vm->compiler.current_fn->is_omp_region ||
+             vm->compiler.current_fn->is_omp_task))
             error_tok(vm, tok,
                       "'return' is not allowed inside an OpenMP parallel "
-                      "region");
+                      "region or task");
         Node *node              = new_node(vm, ND_RETURN, tok);
         node->cleanup_seq_limit = vm->compiler.cleanup_seq + 1;
 

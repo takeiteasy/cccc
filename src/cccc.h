@@ -2036,6 +2036,21 @@ typedef struct OmpSink {
     long            off[8];
 } OmpSink;
 
+// A task's copy of an outer variable, kept in the payload the task is spawned
+// with (threaded lowering).
+typedef struct OmpTaskCopy {
+    struct OmpTaskCopy *next;
+    char               *name;
+    int                 off;
+} OmpTaskCopy;
+
+// One address a task depends on.
+typedef struct OmpDepend {
+    struct OmpDepend *next;
+    char             *addr; // expression for the address
+    bool              write;
+} OmpDepend;
+
 typedef struct OmpDirective {
     OmpKind    kind;
     char      *critical_name; // critical(name); NULL when anonymous
@@ -2062,6 +2077,13 @@ typedef struct OmpDirective {
     int        sched_kind;  // schedule kind (omp_sched_t, 0x10 runtime); 0 none
     char      *sched_chunk; // threaded lowering: the chunk expression, or NULL
     Obj       *region_fn; // threaded parallel: the outlined region function
+    char        *final_text;     // threaded task: clause expressions
+    char        *priority_text;
+    OmpDepend   *depends;        // threaded task: depend clause addresses
+    bool         task_outlined;  // threaded task: copies live in the payload
+    bool         task_data_decl; // the task function has read its payload
+    int          task_size;      // payload bytes
+    OmpTaskCopy *copies;
 } OmpDirective;
 
 // Outer variable used inside a default(none) region without a clause.
@@ -2766,6 +2788,8 @@ struct Obj {
     // Nested function support (GNU C extension)
     struct Obj *parent_fn;           // Enclosing function (NULL if top-level)
     bool        is_nested;           // True if defined inside another function
+    bool        is_omp_task;         // Outlined #pragma omp task body; a call
+                                     // to it serializes as a task spawn
     bool        is_omp_region;       // Outlined #pragma omp parallel body; a
                                      // call to it serializes as a thread-pool
                                      // fork (see parse_omp.c)

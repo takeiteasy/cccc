@@ -162,9 +162,10 @@ static void task_body_push(VirtualMachine *vm, OmpFrame *f, Node *node) {
 // NULL when the parse is not inside OpenMP regions only.
 static Obj *region_child_of(VirtualMachine *vm, Obj *fn) {
     for (Obj *cur = vm->compiler.current_fn; cur; cur = cur->parent_fn) {
+        bool outlined = cur->is_omp_region || cur->is_omp_task;
         if (cur->parent_fn == fn)
-            return cur->is_omp_region ? cur : NULL;
-        if (!cur->is_omp_region)
+            return outlined ? cur : NULL;
+        if (!outlined)
             return NULL;
     }
     return NULL;
@@ -183,6 +184,42 @@ static bool task_privatises(VirtualMachine *vm, OmpFrame *f, Token *tok,
         return false;
     return d->default_firstprivate || d->default_private || !f->parallel ||
            found_inside(vm, tok, f->parallel);
+}
+
+// Declares the task's own variable `name`. A copy is read out of the payload
+// the spawning code fills in; a private variable is only declared.
+static void task_copy_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *b,
+                           Token *tok, const char *name, Type *ty, bool copy) {
+    // TODO: a variable-length array declared in the outlined function is
+    // emitted without its length (#1766).
+    if (ty->kind == TY_VLA)
+        error_tok(vm, tok,
+                  "a task cannot have its own copy of the variable-length "
+                  "array '%s'; use shared(%s)",
+                  name, name);
+    int id = d->omp_id;
+    if (copy && !d->task_data_decl) {
+        body_push(vm, b,
+                  snippet(vm,
+                          "char *__omp%d_dt = (char *)__cccc_omp_task_data();",
+                          id));
+        d->task_data_decl = true;
+    }
+    body_push(vm, b, snippet(vm, "typeof_unqual(%s) %s;", name, name));
+    if (!copy)
+        return;
+    OmpTaskCopy *c = arena_alloc(&vm->compiler.parser_arena, sizeof(*c));
+    memset(c, 0, sizeof(*c));
+    c->name             = arena_strdup(vm, name);
+    c->off              = d->task_size;
+    d->task_size       += ty->size;
+    OmpTaskCopy **tail  = &d->copies;
+    while (*tail)
+        tail = &(*tail)->next;
+    *tail = c;
+    body_push(vm, b,
+              snippet(vm, "__builtin_memcpy(&%s, __omp%d_dt + %d, sizeof(%s));",
+                      name, id, c->off, name));
 }
 
 static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
@@ -205,16 +242,21 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
     }
     vm->compiler.scope      = f->boundary;
     vm->compiler.omp_frames = NULL;
-    task_body_push(vm, f,
-                   snippet(vm, "typeof_unqual(%s) *__omp_%d_%s = &%s;", name,
-                           id, name, name));
-    task_body_push(vm, f, snippet(vm, "typeof_unqual(%s) %s;", name, name));
-    if (!f->dir->default_private)
+    if (f->dir->task_outlined) {
+        task_copy_decl(vm, f->dir, f->body, tok, name, var->ty,
+                       !f->dir->default_private);
+    } else {
         task_body_push(vm, f,
-                       snippet(vm,
-                               "__builtin_memcpy(&%s, __omp_%d_%s, "
-                               "sizeof(%s));",
+                       snippet(vm, "typeof_unqual(%s) *__omp_%d_%s = &%s;",
                                name, id, name, name));
+        task_body_push(vm, f, snippet(vm, "typeof_unqual(%s) %s;", name, name));
+        if (!f->dir->default_private)
+            task_body_push(vm, f,
+                           snippet(vm,
+                                   "__builtin_memcpy(&%s, __omp_%d_%s, "
+                                   "sizeof(%s));",
+                                   name, id, name, name));
+    }
     if (child) {
         child->block_outer_locals     = vm->compiler.locals;
         vm->compiler.current_fn       = saved_fn;
@@ -767,6 +809,109 @@ static Token *doacross_clause(VirtualMachine *vm, OmpDirective *d, Token *name,
     return skip(vm, tok, ")");
 }
 
+// The end of one `depend` list item: the next top-level `,` or `)`.
+static Token *depend_item_end(Token *tok) {
+    int depth = 0;
+    for (; tok->kind != TK_EOF; tok = tok->next) {
+        if (equal(tok, "(") || equal(tok, "[") || equal(tok, "{"))
+            depth++;
+        else if (equal(tok, ")") || equal(tok, "]") || equal(tok, "}")) {
+            if (depth == 0)
+                return tok;
+            depth--;
+        } else if (depth == 0 && equal(tok, ","))
+            return tok;
+    }
+    return tok;
+}
+
+// The address a `depend` item stands for. An array section `a[lo:len]` is the
+// address of `a[lo]`; two items are the same dependence when the addresses
+// match.
+static char *depend_address(VirtualMachine *vm, Token *from, Token *to) {
+    int depth = 0;
+    for (Token *t = from; t != to; t = t->next) {
+        if (equal(t, "[") && depth == 0) {
+            int    inner = 0, ternary = 0;
+            Token *colon = NULL, *close = NULL;
+            for (Token *u = t->next; u != to && !close; u = u->next) {
+                if (equal(u, "(") || equal(u, "[") || equal(u, "{"))
+                    inner++;
+                else if (equal(u, ")") || equal(u, "]") || equal(u, "}")) {
+                    if (inner-- == 0)
+                        close = u;
+                } else if (inner == 0 && equal(u, "?"))
+                    ternary++;
+                else if (inner == 0 && equal(u, ":") && !colon) {
+                    if (ternary)
+                        ternary--;
+                    else
+                        colon = u;
+                }
+            }
+            if (!close)
+                error_tok(vm, t, "unterminated array section");
+            if (colon) {
+                if (close->next != to)
+                    error_tok(vm, close->next,
+                              "only a one-dimensional array section is "
+                              "supported in 'depend'");
+                char *lo =
+                    colon == t->next ? "0" : tokens_text(vm, t->next, colon);
+                return arena_format(vm, "&(%s[%s])", tokens_text(vm, from, t),
+                                    lo);
+            }
+            t = close;
+            continue;
+        }
+        if (equal(t, "(") || equal(t, "{"))
+            depth++;
+        else if (equal(t, ")") || equal(t, "}"))
+            depth--;
+    }
+    return arena_format(vm, "&(%s)", tokens_text(vm, from, to));
+}
+
+// depend([in|out|inout|mutexinoutset|inoutset] : list), after the clause name.
+// Only a threaded task acts on it; the VM runs tasks in order.
+static Token *depend_clause(VirtualMachine *vm, OmpDirective *d, Token *tok) {
+    tok = skip(vm, tok, "(");
+    if (is_word(tok, "iterator"))
+        error_tok(vm, tok,
+                  "the 'iterator' modifier of 'depend' is not supported");
+    if (is_word(tok, "depobj"))
+        error_tok(vm, tok, "'depend(depobj: ...)' is not supported");
+    bool write;
+    if (is_word(tok, "in"))
+        write = false;
+    else if (is_word(tok, "out") || is_word(tok, "inout") ||
+             is_word(tok, "mutexinoutset") || is_word(tok, "inoutset"))
+        write = true;
+    else
+        error_tok(vm, tok,
+                  "expected a dependence type: in, out, inout, "
+                  "mutexinoutset or inoutset");
+    tok = skip(vm, tok->next, ":");
+    do {
+        Token *end = depend_item_end(tok);
+        if (end == tok)
+            error_tok(vm, tok, "expected a list item in 'depend'");
+        if (vm->compiler.omp_threaded && d->kind == OMP_TASK) {
+            OmpDepend *dep =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(*dep));
+            memset(dep, 0, sizeof(*dep));
+            dep->addr        = depend_address(vm, tok, end);
+            dep->write       = write;
+            OmpDepend **tail = &d->depends;
+            while (*tail)
+                tail = &(*tail)->next;
+            *tail = dep;
+        }
+        tok = end;
+    } while (consume(vm, &tok, tok, ","));
+    return skip(vm, tok, ")");
+}
+
 // Parses the clauses up to the wrapper's closing ")" and appends the
 // expressions that must still be evaluated once (num_threads, if) to body.
 static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -823,17 +968,32 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         } else if ((equal(name, "if") || is_word(name, "final") ||
                     is_word(name, "priority")) &&
                    (allowed & CL_TASK_EXPR)) {
-            tok     = skip(vm, tok, "(");
-            Node *e = expr(vm, &tok, tok);
-            tok     = skip(vm, tok, ")");
-            body_push(vm, body, new_unary(vm, ND_EXPR_STMT, e, name));
+            tok = skip(vm, tok, "(");
+            if (vm->compiler.omp_threaded) {
+                if (equal(name, "if") && is_word(tok, "task") &&
+                    equal(tok->next, ":"))
+                    tok = tok->next->next;
+                Token *end = scan_expr_end(tok, false);
+                char  *txt = tokens_text(vm, tok, end);
+                if (equal(name, "if"))
+                    d->if_text = txt;
+                else if (is_word(name, "final"))
+                    d->final_text = txt;
+                else
+                    d->priority_text = txt;
+                tok = skip(vm, end, ")");
+            } else {
+                Node *e = expr(vm, &tok, tok);
+                tok     = skip(vm, tok, ")");
+                body_push(vm, body, new_unary(vm, ND_EXPR_STMT, e, name));
+            }
         } else if ((is_word(name, "untied") || is_word(name, "mergeable")) &&
                    (allowed & CL_TASK_FLAG)) {
         } else if ((is_word(name, "depend") || is_word(name, "doacross")) &&
                    (allowed & CL_DOACROSS)) {
             tok = doacross_clause(vm, d, name, tok);
         } else if (is_word(name, "depend") && (allowed & CL_DEPEND)) {
-            tok = skip_balanced_parens(vm, tok);
+            tok = depend_clause(vm, d, tok);
         } else if ((is_word(name, "num_threads") || equal(name, "if")) &&
                    (allowed & CL_PARALLEL)) {
             tok = skip(vm, tok, "(");
@@ -1300,6 +1460,15 @@ static void runtime_decls(VirtualMachine *vm) {
         {"__cccc_omp_doacross_post", "void __cccc_omp_doacross_post(long);"},
         {"__cccc_omp_doacross_done", "void __cccc_omp_doacross_done(long);"},
         {"__cccc_omp_doacross_wait", "void __cccc_omp_doacross_wait(long);"},
+        {"__cccc_omp_task_alloc", "void *__cccc_omp_task_alloc(long);"},
+        {"__cccc_omp_task_stage",
+         "void __cccc_omp_task_stage(void *, int, void **, int);"},
+        {"__cccc_omp_task_data", "void *__cccc_omp_task_data(void);"},
+        {"__cccc_omp_task_drain", "void __cccc_omp_task_drain(void);"},
+        {"__cccc_omp_taskwait", "void __cccc_omp_taskwait(void);"},
+        {"__cccc_omp_taskgroup_begin",
+         "void *__cccc_omp_taskgroup_begin(void);"},
+        {"__cccc_omp_taskgroup_end", "void __cccc_omp_taskgroup_end(void *);"},
     };
     for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++)
         declare_runtime_fn(vm, rt[i].name, rt[i].proto);
@@ -2716,6 +2885,74 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
         body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
 }
 
+// A task becomes a nested function, like a parallel region. Its copies of
+// outer variables are read from a payload that the spawning code fills in and
+// the runtime frees, so the task can run after the code that created it has
+// moved on.
+static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
+                          Token **rest, Token *tok, Token *start, int id) {
+    OutlineRegion r =
+        outline_begin(vm, start, arena_format(vm, "__omp_task_%d", id));
+    r.fn->is_omp_task = true;
+    d->task_outlined  = true;
+
+    Node     thead    = {};
+    OmpBody  tbody    = {&thead, &thead};
+    OmpFrame frame    = {};
+    frame_push(vm, &frame, d, &tbody);
+    for (OmpClause *c = d->clauses; c; c = c->next)
+        if (c->kind == OMP_CLAUSE_PRIVATE || c->kind == OMP_CLAUSE_FIRSTPRIVATE)
+            task_copy_decl(vm, d, &tbody, start, c->name, c->orig->ty,
+                           c->kind == OMP_CLAUSE_FIRSTPRIVATE);
+    body_push(vm, &tbody, stmt(vm, rest, tok));
+    frame_pop(vm, &frame);
+    Node *task_body = new_node(vm, ND_BLOCK, start);
+    task_body->body = thead.next;
+    outline_end(vm, &r, task_body);
+
+    // In the spawning code, with the task's frame gone.
+    char *flags = arena_strdup(vm, "0");
+    if (d->if_text)
+        flags = arena_format(vm, "%s | (!(%s) ? 1 : 0)", flags, d->if_text);
+    if (d->final_text)
+        flags = arena_format(vm, "%s | ((%s) ? 2 : 0)", flags, d->final_text);
+    if (d->priority_text)
+        flags = arena_format(vm, "%s | ((%s) > 0 ? 4 : 0)", flags,
+                             d->priority_text);
+    body_push(vm, body, snippet(vm, "int __omp%d_fl = %s;", id, flags));
+
+    int ndeps = 0;
+    for (OmpDepend *dep = d->depends; dep; dep = dep->next)
+        ndeps++;
+    if (ndeps) {
+        char *init = arena_strdup(vm, "");
+        for (OmpDepend *dep = d->depends; dep; dep = dep->next)
+            init = arena_format(vm, "%s%s%s, (void *)%d", init,
+                                *init ? ", " : "", dep->addr, dep->write);
+        body_push(vm, body,
+                  snippet(vm, "void *__omp%d_dep[] = {%s};", id, init));
+    }
+
+    if (d->task_size) {
+        body_push(vm, body,
+                  snippet(vm, "char *__omp%d_d = __cccc_omp_task_alloc(%d);",
+                          id, d->task_size));
+        for (OmpTaskCopy *c = d->copies; c; c = c->next)
+            body_push(vm, body,
+                      snippet(vm,
+                              "__builtin_memcpy(__omp%d_d + %d, &%s, "
+                              "sizeof(%s));",
+                              id, c->off, c->name, c->name));
+    }
+    body_push(
+        vm, body,
+        snippet(vm, "__cccc_omp_task_stage(%s, __omp%d_fl, %s, %d);",
+                d->task_size ? arena_format(vm, "__omp%d_d", id) : "(void *)0",
+                id, ndeps ? arena_format(vm, "__omp%d_dep", id) : "(void **)0",
+                ndeps));
+    body_push(vm, body, snippet(vm, "%s();", r.fn->name));
+}
+
 static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                                 Node *block, OmpBody *body, Token **rest,
                                 Token *tok, Token *start) {
@@ -2728,16 +2965,27 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             return block;
 
         case OMP_TASKWAIT:
+            body_push(vm, body, snippet(vm, "__cccc_omp_taskwait();"));
+            *rest = tok;
+            return block;
+
         case OMP_TASKYIELD:
             *rest = tok;
             return block;
 
-        case OMP_TASK: {
-            capture_pointers(vm, d, body, id);
-            shadow_decls(vm, d, body, id);
+        case OMP_TASKGROUP:
+            body_push(
+                vm, body,
+                snippet(vm, "void *__omp%d_tg = __cccc_omp_taskgroup_begin();",
+                        id));
             body_push(vm, body, stmt(vm, rest, tok));
+            body_push(vm, body,
+                      snippet(vm, "__cccc_omp_taskgroup_end(__omp%d_tg);", id));
             return block;
-        }
+
+        case OMP_TASK:
+            threaded_task(vm, d, body, rest, tok, start, id);
+            return block;
 
         case OMP_SECTIONS: {
             capture_pointers(vm, d, body, id);
@@ -2793,6 +3041,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                 Node *inner = stmt(vm, &tok, tok);
                 body_push(vm, &rbody, inner);
             }
+            body_push(vm, &rbody, snippet(vm, "__cccc_omp_task_drain();"));
             merges(vm, d, &rbody, id);
             Node *region_body = new_node(vm, ND_BLOCK, start);
             region_body->body = rhead.next;
@@ -2984,6 +3233,9 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
 
     OmpFrame frame  = {};
     bool     framed = d->default_none || d->kind == OMP_TASK;
+    // A threaded task pushes its own frame inside the function it outlines.
+    if (d->kind == OMP_TASK && vm->compiler.omp_threaded)
+        framed = false;
     if (framed)
         frame_push(vm, &frame, d, &body);
     Scope *saved_parallel = vm->compiler.omp_parallel;

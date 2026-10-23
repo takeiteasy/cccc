@@ -7,6 +7,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: under `-c=native`, `-m` and `-c=generated`, `task` queues its block
+  for the team instead of running it where it is met. Queued tasks run at a
+  barrier, at `taskwait`, at the end of a `taskgroup`, at the end of a
+  `parallel` region and on idle threads. `if`, `final`, `priority` and
+  `depend` are honoured, and `omp_in_final()` is added. The VM still runs
+  tasks in order.
+- Changed: `depend(depobj: ...)` and the `iterator` modifier of `depend` are
+  compile errors.
+- Changed: under `-c=native`, a task cannot copy a variable-length array;
+  name it in `shared`.
+
 ## [0.21.2] - 2026-10-23
 
 - Added: `omp atomic` takes a memory order (`relaxed`, `acquire`, `release`,
