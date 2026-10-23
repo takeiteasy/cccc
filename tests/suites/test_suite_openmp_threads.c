@@ -316,6 +316,45 @@ int test_omp_task_in_region(void) {
 }
 
 [[cccc::test(return = 42)]]
+int test_omp_task_nested_parallel_firstprivate(void) {
+    int x = 5, seen = 0;
+#pragma omp task shared(seen)
+    {
+#pragma omp parallel num_threads(2) shared(seen)
+        {
+#pragma omp single
+            {
+                seen = x;
+                x = 99;
+            }
+        }
+    }
+#pragma omp taskwait
+    return x == 5 && seen == 5 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_two_nested_parallels(void) {
+    int x = 7, seen = 0;
+#pragma omp task shared(seen)
+    {
+#pragma omp parallel num_threads(1) shared(seen)
+        {
+#pragma omp parallel num_threads(2) shared(seen)
+            {
+#pragma omp single
+                {
+                    seen = x;
+                    x = 99;
+                }
+            }
+        }
+    }
+#pragma omp taskwait
+    return x == 7 && seen == 7 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
 int test_omp_sections(void) {
     int sum = 0, last = 0, a = 0, b = 0, c = 0;
 #pragma omp parallel sections num_threads(3) reduction(+ : sum)                \

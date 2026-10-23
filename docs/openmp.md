@@ -211,8 +211,6 @@ or another OpenMP compiler. Building the native output with
   single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
 - Tasks run inline, so they never overlap (#1743).
-- A `task` that contains a `parallel` region shares the variables it uses from
-  outside the task (#1744).
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it
     reads and writes are captured by reference, which is `shared`; `private`,

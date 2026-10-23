@@ -338,7 +338,6 @@ void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok);
 // enclosing function's locals are captured by reference through the env.
 typedef struct {
     Obj                 *fn, *parent;
-    Obj                 *saved_locals;
     int                  saved_depth;
     struct ObjSizeQuery *saved_queries;
     char                *saved_brk, *saved_cont;

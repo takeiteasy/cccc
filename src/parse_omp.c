@@ -143,16 +143,28 @@ static void task_body_push(VirtualMachine *vm, OmpFrame *f, Node *node) {
     body_push(vm, f->body, node);
 }
 
+// The outlined parallel region directly inside `fn` that the parse is in, or
+// NULL when the parse is not inside OpenMP regions only.
+static Obj *region_child_of(VirtualMachine *vm, Obj *fn) {
+    for (Obj *cur = vm->compiler.current_fn; cur; cur = cur->parent_fn) {
+        if (cur->parent_fn == fn)
+            return cur->is_omp_region ? cur : NULL;
+        if (!cur->is_omp_region)
+            return NULL;
+    }
+    return NULL;
+}
+
 // A task copies an outer automatic into its own variable on first use: always
 // under default(firstprivate), and by default when the variable is not shared
 // by the enclosing parallel region.
-// TODO: a parallel region nested in a task is outlined, so its uses stay shared
-// (#1744).
 static bool task_privatises(VirtualMachine *vm, OmpFrame *f, Token *tok,
                             Obj *var) {
     OmpDirective *d = f->dir;
     if (d->kind != OMP_TASK || d->default_shared || !var->is_local ||
-        var->is_static || f->fn != vm->compiler.current_fn)
+        var->is_static)
+        return false;
+    if (f->fn != vm->compiler.current_fn && !region_child_of(vm, f->fn))
         return false;
     return d->default_firstprivate || d->default_private || !f->parallel ||
            found_inside(vm, tok, f->parallel);
@@ -164,6 +176,18 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
     char     *name          = tok_text(vm, tok);
     Scope    *saved_scope   = vm->compiler.scope;
     OmpFrame *saved_frames  = vm->compiler.omp_frames;
+    Obj      *saved_fn      = vm->compiler.current_fn;
+    Obj      *saved_locals  = vm->compiler.locals;
+    int       saved_depth   = vm->compiler.fn_nesting_depth;
+    // From inside a nested region the copy still belongs to the task's
+    // function; the region sees it through its snapshot of that function's
+    // locals.
+    Obj *child = saved_fn != f->fn ? region_child_of(vm, f->fn) : NULL;
+    if (child) {
+        vm->compiler.current_fn       = f->fn;
+        vm->compiler.locals           = child->block_outer_locals;
+        vm->compiler.fn_nesting_depth = f->fn->nesting_depth;
+    }
     vm->compiler.scope      = f->boundary;
     vm->compiler.omp_frames = NULL;
     task_body_push(vm, f,
@@ -176,6 +200,12 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
                                "__builtin_memcpy(&%s, __omp_%d_%s, "
                                "sizeof(%s));",
                                name, id, name, name));
+    if (child) {
+        child->block_outer_locals     = vm->compiler.locals;
+        vm->compiler.current_fn       = saved_fn;
+        vm->compiler.locals           = saved_locals;
+        vm->compiler.fn_nesting_depth = saved_depth;
+    }
     vm->compiler.scope      = saved_scope;
     vm->compiler.omp_frames = saved_frames;
     (void)var;
@@ -1206,7 +1236,6 @@ OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
     r.parent    = vm->compiler.current_fn;
     if (!r.parent)
         error_tok(vm, tok, "'#pragma omp' must be inside a function");
-    r.saved_locals  = vm->compiler.locals;
     r.saved_depth   = vm->compiler.fn_nesting_depth;
     r.saved_queries = vm->compiler.objsize_queries;
     r.saved_brk     = vm->compiler.brk_label;
@@ -1227,7 +1256,7 @@ OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
     fn->tok                        = tok;
     fn->parent_fn                  = r.parent;
     fn->nesting_depth              = r.saved_depth + 1;
-    fn->block_outer_locals         = r.saved_locals;
+    fn->block_outer_locals         = vm->compiler.locals;
     fn->next_nested_sibling        = r.parent->nested_children;
     r.parent->nested_children      = fn;
     r.fn                           = fn;
@@ -1264,7 +1293,7 @@ void outline_end(VirtualMachine *vm, OutlineRegion *r, Node *body) {
     mark_nested_captures(fn, fn->body);
 
     vm->compiler.current_fn         = r->parent;
-    vm->compiler.locals             = r->saved_locals;
+    vm->compiler.locals             = fn->block_outer_locals;
     vm->compiler.fn_nesting_depth   = r->saved_depth;
     vm->compiler.objsize_queries    = r->saved_queries;
     vm->compiler.brk_label          = r->saved_brk;
