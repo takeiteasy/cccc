@@ -7,6 +7,24 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-10-23
+
+- Added: `omp atomic` takes a memory order (`relaxed`, `acquire`, `release`,
+  `acq_rel`, `seq_cst`) and `hint()`, plus the `compare`, `fail` and `weak`
+  clauses and `capture` blocks. `-c=native` emits the order.
+- Added: `atomic_compare_exchange_strong_explicit` and
+  `atomic_compare_exchange_weak_explicit`.
+- Changed: the `<stdatomic.h>` `_explicit` operations and weak compare-exchange
+  pass a constant order and the weak flag to `-c=native` and `-m`; the VM stays
+  sequentially consistent.
+- Changed: under `-c=native`, `__atomic_fetch_*`, `__atomic_*_fetch` and the
+  `<stdatomic.h>` fetch operations emit the single host builtin (one `ldadd` on
+  arm64) for 1/2/4/8-byte integers and pointer add/sub, instead of a
+  compare-exchange loop.
+- Fixed: `atomic_fetch_add` and `atomic_fetch_sub` on an `_Atomic` pointer
+  return the old pointer rather than a truncated `int`, and
+  `__atomic_fetch_add` on an `int **` compiles under `-c=native`.
+
 - Fixed: under `-c=native`, a `parallel` region inside a `task` gives the
   variables it uses the task's `firstprivate` copies instead of sharing the
   originals.
