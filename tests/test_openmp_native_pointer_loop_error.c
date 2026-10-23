@@ -1,10 +1,10 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_FLAGS: -fopenmp -c=native
-// CCCC_EXPECT_STDERR: must be an integer
+// CCCC_EXPECT_STDERR: integer or a pointer to an object type
 int main(void) {
-    int a[4];
+    char a[4];
 #pragma omp parallel for
-    for (int *p = a; p < a + 4; p++)
-        *p = 1;
+    for (void *p = a; p < (void *)(a + 4); p = (char *)p + 1)
+        ;
     return 42;
 }

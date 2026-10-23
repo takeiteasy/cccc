@@ -1208,4 +1208,112 @@ int test_omp_doacross_back_to_back_loops(void) {
     return a[N] == N + 1 && b[N] == 3 * N + 1 ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_threads_pointer_loop(void) {
+    int a[16] = {0}, b[16] = {0}, c[4][8] = {0}, d[16] = {0};
+#pragma omp parallel for num_threads(4)
+    for (int *p = a; p < a + 16; p++)
+        *p += 1;
+#pragma omp parallel for num_threads(4)
+    for (int *p = b + 15; p >= b; p -= 3)
+        *p += 1;
+    int *q;
+    int *end = 0;
+#pragma omp parallel for num_threads(4) lastprivate(q)
+    for (q = d; q != d + 16; q += 2)
+        *q += 1;
+    end = q;
+    int *row = c[0];
+#pragma omp parallel for collapse(2) num_threads(4)
+    for (int i = 0; i < 4; i++)
+        for (int *p = row; p < row + 8; p++)
+            c[i][p - row] = i + 1;
+    int ok = 1;
+    for (int i = 0; i < 16; i++) {
+        ok &= a[i] == 1;
+        ok &= b[i] == (i % 3 == 0);
+        ok &= d[i] == (i % 2 == 0);
+    }
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 8; j++)
+            ok &= c[i][j] == i + 1;
+    return ok && end == d + 16 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_threads_pointer_loop_doacross(void) {
+    enum { N = 40 };
+    long a[N + 1] = {1};
+#pragma omp parallel num_threads(4)
+    {
+#pragma omp for ordered(1) schedule(static, 1)
+        for (long *p = a + 1; p <= a + N; p++) {
+            spin(N - (int)(p - a));
+#pragma omp ordered depend(sink : p - 1)
+            *p = p[-1] + 1;
+#pragma omp ordered depend(source)
+        }
+    }
+    return a[N] == N + 1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_threads_atomic_capture_block(void) {
+    int    x = 0, y = 5, w = 0, seen[256] = {0}, ok = 1;
+    double dx = 1.0, dv = 0.0;
+    int    sw = 7, so = 0;
+    int    nt = team_size();
+#pragma omp parallel num_threads(4)
+    {
+        int v;
+#pragma omp atomic capture
+        {
+            v  = x;
+            x += 1;
+        }
+        seen[v & 255] = 1;
+    }
+    int distinct = 0;
+    for (int i = 0; i < 256; i++)
+        distinct += seen[i];
+    ok &= distinct == nt && x == nt;
+#pragma omp atomic capture
+    {
+        y *= 2;
+        w  = y;
+    }
+    ok &= y == 10 && w == 10;
+#pragma omp atomic capture
+    {
+        w = y;
+        y = y * 3;
+    }
+    ok &= y == 30 && w == 10;
+#pragma omp atomic capture
+    {
+        dv = dx;
+        dx = dx * 4.0;
+    }
+    ok &= dx == 4.0 && dv == 1.0;
+#pragma omp atomic capture
+    {
+        so = sw;
+        sw = 99;
+    }
+    ok &= sw == 99 && so == 7;
+#pragma omp atomic capture
+    {
+        w = y;
+        ++y;
+    }
+    ok &= y == 31 && w == 30;
+#pragma omp atomic capture
+    {
+        y--;
+        w = y;
+    }
+    ok &= y == 30 && w == 30;
+    return ok ? 42 : 1;
+}
+
 #pragma cccc suite end

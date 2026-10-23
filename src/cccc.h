@@ -2021,6 +2021,7 @@ typedef struct OmpLoopLevel {
     Type *ty;
     bool  declared; // `for (int i = ...)` rather than an existing variable
     bool  up;
+    bool  ptr; // a pointer variable: counted in elements from a base pointer
     char *lb, *ub, *step, *rel;
 } OmpLoopLevel;
 

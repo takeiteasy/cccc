@@ -71,12 +71,17 @@ errors.
 `break` out of the loop of `for` and `parallel for` is an error; `continue`
 ends the iteration.
 
-Native loops use the canonical OpenMP form: an integer variable, a bound
-compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
+Native loops use the canonical OpenMP form: an integer or object-pointer
+variable (`for (int *p = a; p < a + n; p++)`), a bound compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
 `i = i + n` or the decrementing equivalents. `collapse` needs perfectly nested,
 rectangular loops. `return` inside a parallel region is an error. An
 `atomic` statement is one of `x op= e`, `x++`, `x = x op e`, `v = x`, `x = e`
-or `v = x op= e`.
+or `v = x op= e`; `atomic capture` also takes a two-statement block:
+
+```c
+#pragma omp atomic capture
+{ v = x; x += 1; }   // also { x op= e; v = x; } and { v = x; x = e; }
+```
 
 ## Clauses
 
@@ -207,8 +212,6 @@ or another OpenMP compiler. Building the native output with
 
 - Native output uses pthreads, so Windows has no OpenMP.
 - An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
-- Native loops need an integer loop variable, and `atomic capture` needs a
-  single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
 - Tasks run inline, so they never overlap (#1743).
 

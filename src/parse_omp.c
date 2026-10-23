@@ -1109,7 +1109,19 @@ static void check_loop(VirtualMachine *vm, Node *loop, int depth, Token *tok) {
     }
 }
 
-static void check_atomic(VirtualMachine *vm, Node *stmt, Token *tok) {
+static void check_atomic(VirtualMachine *vm, OmpDirective *d, Node *stmt,
+                         Token *tok) {
+    if (d->atomic_kind == 3 && stmt->kind == ND_BLOCK) {
+        int n = 0;
+        for (Node *s = stmt->body; s; s = s->next, n++)
+            if (s->kind != ND_EXPR_STMT)
+                n = 99;
+        if (n == 2)
+            return;
+        error_tok(vm, tok,
+                  "the block after '#pragma omp atomic capture' must hold two "
+                  "expression statements");
+    }
     if (stmt->kind != ND_EXPR_STMT || !node_has_side_effects(stmt->lhs))
         error_tok(vm, tok,
                   "the statement after '#pragma omp atomic' must update a "
@@ -1354,10 +1366,13 @@ static Token *loop_header(VirtualMachine *vm, Token *tok, OmpLoopLevel *lv) {
             bad_loop(vm, start);
         lv->ty = sc->var->ty;
     }
-    if (!is_integer(lv->ty))
+    lv->ptr = lv->ty->kind == TY_PTR;
+    if (!is_integer(lv->ty) &&
+        !(lv->ptr && lv->ty->base->kind != TY_VOID &&
+          lv->ty->base->kind != TY_FUNC && lv->ty->base->size > 0))
         error_tok(vm, name,
                   "the loop variable of '#pragma omp for' must be an integer "
-                  "with -c=native");
+                  "or a pointer to an object type with -c=native");
     tok      = skip(vm, tok, "=");
     Token *e = scan_expr_end(tok, false);
     lv->lb   = tokens_text(vm, tok, e);
@@ -1509,15 +1524,35 @@ static void ordered_levels(VirtualMachine *vm, OmpDirective *d, Token *tok) {
     }
 }
 
+// The loop variable of level j as a long: an offset from the base pointer for
+// a pointer variable.
+static char *level_long(VirtualMachine *vm, int id, int j, OmpLoopLevel *lv) {
+    if (lv->ptr)
+        return arena_format(vm, "(%s - __omp%d_p%d)", lv->name, id, j);
+    return arena_format(vm, "(long)(%s)", lv->name);
+}
+
+// The value of level j's loop variable at `offset` past the bound it starts at.
+static char *level_value(VirtualMachine *vm, int id, int j, OmpLoopLevel *lv,
+                         const char *offset) {
+    char sign = lv->up ? '+' : '-';
+    if (lv->ptr)
+        return arena_format(vm, "__omp%d_p%d + (__omp%d_lb%d %c (%s))", id, j,
+                            id, j, sign, offset);
+    return arena_format(vm, "(typeof_unqual(%s))(__omp%d_lb%d %c (%s))",
+                        lv->name, id, j, sign, offset);
+}
+
 // The iteration number of level j's loop variable, counted from the first.
 static char *level_index(VirtualMachine *vm, OmpDirective *loop, int j) {
     OmpLoopLevel *lv = &loop->levels[j];
     int           id = loop->omp_id;
+    char         *v  = level_long(vm, id, j, lv);
     if (lv->up)
-        return arena_format(vm, "((long)(%s) - __omp%d_lb%d) / __omp%d_st%d",
-                            lv->name, id, j, id, j);
-    return arena_format(vm, "(__omp%d_lb%d - (long)(%s)) / __omp%d_st%d", id, j,
-                        lv->name, id, j);
+        return arena_format(vm, "(%s - __omp%d_lb%d) / __omp%d_st%d", v, id, j,
+                            id, j);
+    return arena_format(vm, "(__omp%d_lb%d - %s) / __omp%d_st%d", id, j, v, id,
+                        j);
 }
 
 // The position of the current iteration in the flattened iteration space.
@@ -1666,11 +1701,24 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         lv[j] = d->levels[j];
 
     for (int j = 0; j < nlev; j++) {
-        body_push(vm, body,
-                  snippet(vm,
-                          "long __omp%d_lb%d = (long)(%s), __omp%d_ub%d = "
-                          "(long)(%s), __omp%d_st%d = (long)(%s);",
-                          id, j, lv[j].lb, id, j, lv[j].ub, id, j, lv[j].step));
+        if (lv[j].ptr) {
+            body_push(vm, body,
+                      snippet(vm, "typeof_unqual(&*(%s)) __omp%d_p%d = (%s);",
+                              lv[j].lb, id, j, lv[j].lb));
+            body_push(vm, body,
+                      snippet(vm,
+                              "long __omp%d_lb%d = 0, __omp%d_ub%d = (%s) - "
+                              "__omp%d_p%d, __omp%d_st%d = (long)(%s);",
+                              id, j, id, j, lv[j].ub, id, j, id, j,
+                              lv[j].step));
+        } else {
+            body_push(vm, body,
+                      snippet(vm,
+                              "long __omp%d_lb%d = (long)(%s), __omp%d_ub%d = "
+                              "(long)(%s), __omp%d_st%d = (long)(%s);",
+                              id, j, lv[j].lb, id, j, lv[j].ub, id, j,
+                              lv[j].step));
+        }
         body_push(vm, body,
                   snippet(vm, "long __omp%d_n%d = %s;", id, j,
                           iter_count(vm, id, j, &lv[j])));
@@ -1757,11 +1805,12 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     body_push(vm, &it, snippet(vm, "long __omp%d_i = __omp%d_k;", id, id));
     for (int j = m - 1; j >= 0; j--) {
         body_push(vm, &it,
-                  snippet(vm,
-                          "%s = (typeof_unqual(%s))(__omp%d_lb%d %c "
-                          "(__omp%d_i %% __omp%d_n%d) * __omp%d_st%d);",
-                          lv[j].name, lv[j].name, id, j, lv[j].up ? '+' : '-',
-                          id, id, j, id, j));
+                  snippet(vm, "%s = %s;", lv[j].name,
+                          level_value(vm, id, j, &lv[j],
+                                      arena_format(vm,
+                                                   "(__omp%d_i %% __omp%d_n%d) "
+                                                   "* __omp%d_st%d",
+                                                   id, id, j, id, j))));
         if (j)
             body_push(vm, &it,
                       snippet(vm, "__omp%d_i /= __omp%d_n%d;", id, id, j));
@@ -1830,11 +1879,11 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             for (int j = 0; j < m; j++)
                 if (!strcmp(lv[j].name, c->name))
                     copy = arena_format(
-                        vm,
-                        "%s %s = (typeof_unqual(%s))(__omp%d_lb%d %c "
-                        "__omp%d_n%d * __omp%d_st%d);",
-                        copy, c->name, c->name, id, j, lv[j].up ? '+' : '-', id,
-                        j, id, j);
+                        vm, "%s %s = %s;", copy, c->name,
+                        level_value(vm, id, j, &lv[j],
+                                    arena_format(vm,
+                                                 "__omp%d_n%d * __omp%d_st%d",
+                                                 id, j, id, j)));
             copy = arena_format(
                 vm, "%s __builtin_memcpy(__omp_%d_%s, &%s, sizeof(%s));", copy,
                 id, c->name, c->name, c->name);
@@ -1852,6 +1901,8 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
 typedef struct {
     char *x, *v, *op, *e;
     bool  pre, post, reversed;
+    bool  swap; // `x = e`: the new value is e, not an update of x
+    bool  old;  // capture: v gets the value before the update
 } OmpAtomic;
 
 static bool is_update_op(Token *t) {
@@ -1863,13 +1914,13 @@ static bool is_update_op(Token *t) {
     return false;
 }
 
-static void atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
+static bool atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
                                OmpAtomic *a) {
     if (equal(s, "++") || equal(s, "--")) {
         a->pre = true;
         a->op  = equal(s, "++") ? "+" : "-";
         a->x   = tokens_text(vm, s->next, end);
-        return;
+        return true;
     }
     int    depth = 0;
     Token *p     = s;
@@ -1883,18 +1934,18 @@ static void atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
             break;
     }
     if (p == end)
-        error_tok(vm, s, "unsupported '#pragma omp atomic' statement");
+        return false;
     a->x = tokens_text(vm, s, p);
     if (equal(p, "++") || equal(p, "--")) {
         a->post = true;
         a->op   = equal(p, "++") ? "+" : "-";
-        return;
+        return true;
     }
     if (is_update_op(p)) {
         a->op                    = tok_text(vm, p);
         a->op[strlen(a->op) - 1] = '\0';
         a->e                     = tokens_text(vm, p->next, end);
-        return;
+        return true;
     }
     // x = x op e  /  x = e op x
     Token *rhs = p->next;
@@ -1910,7 +1961,7 @@ static void atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
     if (lead && t2 != end) {
         a->op = tok_text(vm, t2);
         a->e  = tokens_text(vm, t2->next, end);
-        return;
+        return true;
     }
     Token *last = rhs;
     int    n    = 0;
@@ -1927,13 +1978,14 @@ static void atomic_update_form(VirtualMachine *vm, Token *s, Token *end,
     }
     (void)last;
     if (!match)
-        error_tok(vm, s, "unsupported '#pragma omp atomic' statement");
+        return false;
     Token *opt = rhs;
     for (int i = 0; i < n - nx - 1; i++)
         opt = opt->next;
     a->reversed = true;
     a->op       = tok_text(vm, opt);
     a->e        = tokens_text(vm, rhs, opt);
+    return true;
 }
 
 static const char *atomic_container(VirtualMachine *vm, Token *tok,
@@ -1967,38 +2019,133 @@ static bool atomic_is_integer(VirtualMachine *vm, const char *x) {
     return is_integer(n->ty);
 }
 
+// The `;` ending the statement that starts at `s`, or NULL.
+static Token *statement_end(Token *s) {
+    int depth = 0;
+    for (Token *t = s; t->kind != TK_EOF; t = t->next) {
+        if (equal(t, "(") || equal(t, "[") || equal(t, "{"))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]") || equal(t, "}")) {
+            if (--depth < 0)
+                return NULL;
+        } else if (depth == 0 && equal(t, ";"))
+            return t;
+    }
+    return NULL;
+}
+
+// The top-level `=` of `[s, end)` that is a plain assignment, or NULL.
+static Token *plain_assign(Token *s, Token *end) {
+    int depth = 0;
+    for (Token *t = s; t != end; t = t->next) {
+        if (equal(t, "(") || equal(t, "["))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]"))
+            depth--;
+        else if (depth == 0 && equal(t, "="))
+            return t;
+    }
+    return NULL;
+}
+
+// `v = r;` of a capture block: sets a->v and returns the text of r.
+static char *capture_read(VirtualMachine *vm, Token *s, Token *end,
+                          OmpAtomic *a) {
+    Token *eq = plain_assign(s, end);
+    if (!eq || eq == s || eq->next == end)
+        return NULL;
+    a->v = tokens_text(vm, s, eq);
+    return tokens_text(vm, eq->next, end);
+}
+
+// The update statement `[s, end)` of a capture block, on the variable `r`.
+static bool capture_update(VirtualMachine *vm, Token *s, Token *end,
+                           const char *r, bool allow_swap, OmpAtomic *a) {
+    OmpAtomic u = {};
+    if (atomic_update_form(vm, s, end, &u) && !strcmp(u.x, r)) {
+        a->x        = u.x;
+        a->op       = u.op;
+        a->e        = u.e;
+        a->pre      = u.pre;
+        a->post     = u.post;
+        a->reversed = u.reversed;
+        return true;
+    }
+    Token *eq = plain_assign(s, end);
+    if (!allow_swap || !eq || eq == s || eq->next == end ||
+        strcmp(tokens_text(vm, s, eq), r))
+        return false;
+    a->x    = tokens_text(vm, s, eq);
+    a->e    = tokens_text(vm, eq->next, end);
+    a->swap = true;
+    return true;
+}
+
+// `{ v = x; x op= e; }`, `{ x op= e; v = x; }` or `{ v = x; x = e; }` with
+// `tok` on the `{`; returns the token after the `}`.
+static Token *atomic_capture_block(VirtualMachine *vm, Token *tok,
+                                   OmpAtomic *a) {
+    Token *s1 = tok->next, *e1 = statement_end(s1);
+    Token *s2 = e1 ? e1->next : NULL, *e2 = s2 ? statement_end(s2) : NULL;
+    if (!e2 || !equal(e2->next, "}"))
+        error_tok(vm, tok,
+                  "unsupported '#pragma omp atomic capture' block: expected "
+                  "two statements");
+    char *r = capture_read(vm, s1, e1, a);
+    if (r && capture_update(vm, s2, e2, r, true, a)) {
+        a->old = true;
+        return e2->next->next;
+    }
+    *a = (OmpAtomic){};
+    r  = capture_read(vm, s2, e2, a);
+    if (r && capture_update(vm, s1, e1, r, false, a))
+        return e2->next->next;
+    error_tok(vm, tok,
+              "unsupported '#pragma omp atomic capture' block: expected "
+              "'{ v = x; x op= e; }', '{ x op= e; v = x; }' or '{ v = x; x = "
+              "e; }'");
+    return NULL;
+}
+
 static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
                              Token *tok) {
-    Token *end = tok;
-    while (!equal(end, ";")) {
-        if (end->kind == TK_EOF || equal(end, "{"))
-            error_tok(vm, tok,
-                      "unsupported '#pragma omp atomic' statement (capture "
-                      "blocks are not supported with -c=native)");
-        end = end->next;
-    }
-    *rest       = end->next;
-
     OmpAtomic a = {};
     char     *stmt_text;
-    if (d->atomic_kind == 1 || d->atomic_kind == 2 || d->atomic_kind == 3) {
-        Token *eq = tok;
-        while (eq != end && !equal(eq, "="))
-            eq = eq->next;
-        if (eq == end)
-            error_tok(vm, tok, "unsupported '#pragma omp atomic' statement");
-        if (d->atomic_kind == 1) {
-            a.v = tokens_text(vm, tok, eq);
-            a.x = tokens_text(vm, eq->next, end);
-        } else if (d->atomic_kind == 2) {
-            a.x = tokens_text(vm, tok, eq);
-            a.e = tokens_text(vm, eq->next, end);
-        } else {
-            a.v = tokens_text(vm, tok, eq);
-            atomic_update_form(vm, eq->next, end, &a);
-        }
+    if (d->atomic_kind == 3 && equal(tok, "{")) {
+        *rest = atomic_capture_block(vm, tok, &a);
     } else {
-        atomic_update_form(vm, tok, end, &a);
+        Token *end = tok;
+        while (!equal(end, ";")) {
+            if (end->kind == TK_EOF || equal(end, "{"))
+                error_tok(vm, tok,
+                          "unsupported '#pragma omp atomic' statement");
+            end = end->next;
+        }
+        *rest = end->next;
+
+        if (d->atomic_kind == 1 || d->atomic_kind == 2 || d->atomic_kind == 3) {
+            Token *eq = tok;
+            while (eq != end && !equal(eq, "="))
+                eq = eq->next;
+            if (eq == end)
+                error_tok(vm, tok,
+                          "unsupported '#pragma omp atomic' statement");
+            if (d->atomic_kind == 1) {
+                a.v = tokens_text(vm, tok, eq);
+                a.x = tokens_text(vm, eq->next, end);
+            } else if (d->atomic_kind == 2) {
+                a.x = tokens_text(vm, tok, eq);
+                a.e = tokens_text(vm, eq->next, end);
+            } else {
+                a.v = tokens_text(vm, tok, eq);
+                if (!atomic_update_form(vm, eq->next, end, &a))
+                    error_tok(vm, tok,
+                              "unsupported '#pragma omp atomic' statement");
+                a.old = a.post;
+            }
+        } else if (!atomic_update_form(vm, tok, end, &a)) {
+            error_tok(vm, tok, "unsupported '#pragma omp atomic' statement");
+        }
     }
 
     const char *x = a.x;
@@ -2035,10 +2182,17 @@ static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
             "{ %s __t = (%s); %s __b; __builtin_memcpy(&__b, &__t, "
             "sizeof(__t)); __atomic_store_n(%s, __b, 5); }",
             T, a.e, c, load);
+    } else if (a.swap) {
+        stmt_text = arena_format(
+            vm,
+            "{ %s __t = (%s); %s __nb, __ob; __builtin_memcpy(&__nb, &__t, "
+            "sizeof(__t)); __ob = __atomic_exchange_n(%s, __nb, 5); %s __o; "
+            "__builtin_memcpy(&__o, &__ob, sizeof(__o)); %s = __o; }",
+            T, a.e, c, load, T, a.v);
     } else if (fetch && d->atomic_kind != 3) {
         stmt_text = arena_format(vm, "__atomic_fetch_%s(&(%s), (%s), 5);",
                                  fetch, x, evalue);
-    } else if (fetch && a.post) {
+    } else if (fetch && a.old) {
         stmt_text = arena_format(vm, "%s = __atomic_fetch_%s(&(%s), (%s), 5);",
                                  a.v, fetch, x, evalue);
     } else if (fetch) {
@@ -2056,7 +2210,7 @@ static Node *threaded_atomic(VirtualMachine *vm, OmpDirective *d, Token **rest,
             "0, 5, 5)) break; } %s }",
             evalue, evalue, c, load, T, newv, load,
             d->atomic_kind == 3
-                ? arena_format(vm, "%s = %s;", a.v, a.post ? "__o" : "__n")
+                ? arena_format(vm, "%s = %s;", a.v, a.old ? "__o" : "__n")
                 : "");
     }
     return snippet(vm, "%s", stmt_text);
@@ -2497,7 +2651,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
         check_loop(vm, inner, d->collapse, body_tok);
         linear_inject(vm, d, id, inner, body_tok);
     } else if (d->kind == OMP_ATOMIC) {
-        check_atomic(vm, inner, body_tok);
+        check_atomic(vm, d, inner, body_tok);
     }
     body_push(vm, &body, inner);
     merges(vm, d, &body, id);
