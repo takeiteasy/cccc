@@ -275,6 +275,66 @@ void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx) {
     free(seen.slots);
 }
 
+typedef struct {
+    Node *n;
+    char *brk, *cont; // innermost enclosing C break/continue targets
+} JumpWalkItem;
+
+// Marks every break/continue whose target is not the innermost enclosing C
+// loop (continue) or loop/switch (break). Frames mirror serialize_stmt's.
+void serialize_collect_outer_jumps(SerializeContext *ctx, Node *body) {
+    JumpWalkItem *stack = NULL;
+    int           len = 0, cap = 0;
+    NodeSet       seen = {0};
+#define JUMP_WALK_PUSH(child, b, c)                                            \
+    do {                                                                       \
+        Node *__c = (child);                                                   \
+        if (__c) {                                                             \
+            if (len == cap) {                                                  \
+                cap   = cap ? cap * 2 : 256;                                   \
+                stack = realloc(stack, cap * sizeof(*stack));                  \
+            }                                                                  \
+            stack[len++] = (JumpWalkItem){__c, (b), (c)};                      \
+        }                                                                      \
+    } while (0)
+
+    JUMP_WALK_PUSH(body, NULL, NULL);
+    while (len > 0) {
+        JumpWalkItem it = stack[--len];
+        Node        *n  = it.n;
+        if (!node_set_add(&seen, n))
+            continue;
+        if (n->kind == ND_GOTO && !n->label && n->unique_label &&
+            n->unique_label != it.brk && n->unique_label != it.cont)
+            hashmap_put(&ctx->outer_jumps, n->unique_label, (void *)1);
+        char *brk  = it.brk;
+        char *cont = it.cont;
+        if (n->kind == ND_FOR || n->kind == ND_DO) {
+            brk  = n->brk_label;
+            cont = n->cont_label;
+        } else if (n->kind == ND_SWITCH) {
+            brk = n->brk_label;
+        }
+        bool scoped = n->kind == ND_FOR || n->kind == ND_DO ||
+                      n->kind == ND_SWITCH;
+        JUMP_WALK_PUSH(n->lhs, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->rhs, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->cond, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->then, scoped ? brk : it.brk,
+                       scoped ? cont : it.cont);
+        JUMP_WALK_PUSH(n->els, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->init, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->inc, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->body, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->args, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->atomic_expr, it.brk, it.cont);
+        JUMP_WALK_PUSH(n->next, it.brk, it.cont);
+    }
+#undef JUMP_WALK_PUSH
+    free(stack);
+    free(seen.slots);
+}
+
 // #1253: a Quote()/QuoteLazy() template that defines a label is hygienic --
 // two expansions of it in one function each get their own ND_LABEL with a
 // distinct `unique_label` but the *same* source spelling. That is fine for
@@ -5454,6 +5514,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         free(ctx.emitted_defs.data);
         free(ctx.file_typedef_done);
         hashmap_deinit(&ctx.global_names);
+        hashmap_deinit(&ctx.outer_jumps);
         hashmap_deinit(&ctx.file_typedef_names);
         hashmap_deinit(&ctx.path_key_memo);
         free(ctx.label_owners);

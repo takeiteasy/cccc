@@ -159,6 +159,46 @@ void serialize_asm_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 }
 
 // Serialize a statement
+// A break/continue whose target is not the innermost C construct jumps to a
+// label spelled from its ".L..N" unique name.
+static bool is_outer_jump(SerializeContext *ctx, const char *label) {
+    return label && hashmap_get(&ctx->outer_jumps, label);
+}
+
+static void print_jump_label(FILE *f, const char *label) {
+    fprintf(f, "__cccc_jmp_%s", label + (strncmp(label, ".L..", 4) ? 0 : 4));
+}
+
+// `continue` target: the end of the loop body.
+static void serialize_loop_body(FILE *f, VirtualMachine *vm,
+                                SerializeContext *ctx, Node *node,
+                                int indent) {
+    SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
+    ctx->jumps         = &frame;
+    if (is_outer_jump(ctx, node->cont_label)) {
+        print_indent_level(f, indent);
+        fprintf(f, "{\n");
+        serialize_stmt(f, vm, ctx, node->then, indent + 1);
+        print_jump_label(f, node->cont_label);
+        fprintf(f, ": ;\n");
+        print_indent_level(f, indent);
+        fprintf(f, "}\n");
+    } else {
+        serialize_stmt(f, vm, ctx, node->then, indent + 1);
+    }
+    ctx->jumps = frame.parent;
+}
+
+// `break` target: just after the construct.
+static void serialize_break_label(FILE *f, SerializeContext *ctx,
+                                  const char *label, int indent) {
+    if (!is_outer_jump(ctx, label))
+        return;
+    print_indent_level(f, indent);
+    print_jump_label(f, label);
+    fprintf(f, ": ;\n");
+}
+
 void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     Node *node, int indent) {
     if (!node)
@@ -354,38 +394,28 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // `+ -1` term a postfix `i++` would otherwise leave here.
                 serialize_discard_expr(f, vm, ctx, node->inc, 0);
             fprintf(f, ")\n");
-            {
-                // #1005: push a jump frame so a break/continue in the body
-                // resolves back to this loop -- see the ND_GOTO arm below.
-                SerJumpFrame frame = {ctx->jumps, node->brk_label,
-                                      node->cont_label};
-                ctx->jumps         = &frame;
-                serialize_stmt(f, vm, ctx, node->then, indent + 1);
-                ctx->jumps = frame.parent;
-            }
+            // #1005: a jump frame lets a break/continue in the body resolve
+            // back to this loop -- see the ND_GOTO arm below.
+            serialize_loop_body(f, vm, ctx, node, indent);
             if (vla_init) {
                 print_indent_level(f, --indent);
                 fprintf(f, "}\n");
             }
+            serialize_break_label(f, ctx, node->brk_label, indent);
             break;
         }
 
         case ND_DO:
             print_indent_level(f, indent);
             fprintf(f, "do\n");
-            {
-                SerJumpFrame frame = {ctx->jumps, node->brk_label,
-                                      node->cont_label};
-                ctx->jumps         = &frame;
-                serialize_stmt(f, vm, ctx, node->then, indent + 1);
-                ctx->jumps = frame.parent;
-            }
+            serialize_loop_body(f, vm, ctx, node, indent);
             print_indent_level(f, indent);
             fprintf(f, "while (");
             // #1123: a wide-_BitInt cond can't appear bare here.
             if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
                 serialize_expr(f, vm, ctx, node->cond, 0);
             fprintf(f, ");\n");
+            serialize_break_label(f, ctx, node->brk_label, indent);
             break;
 
         case ND_SWITCH:
@@ -417,6 +447,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 ctx->cur_switch = saved_switch;
                 ctx->jumps      = frame.parent;
             }
+            serialize_break_label(f, ctx, node->brk_label, indent);
             break;
 
         case ND_GOTO:
@@ -434,8 +465,14 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // targets by walking the jump-frame stack built above (pointer
                 // identity, matching parse.c's own nn_find_target) and emit the
                 // real C keyword instead of a (nonexistent) label reference.
-                // TODO: the keyword binds to the innermost C loop or switch,
-                // which need not be the matched frame (#1753).
+                // The keyword binds to the innermost C loop or switch, so a
+                // target further out is reached with a goto instead.
+                if (is_outer_jump(ctx, node->unique_label)) {
+                    fprintf(f, "goto ");
+                    print_jump_label(f, node->unique_label);
+                    fprintf(f, ";\n");
+                    break;
+                }
                 const char *kw = NULL;
                 for (SerJumpFrame *fr = ctx->jumps; fr && !kw;
                      fr               = fr->parent) {

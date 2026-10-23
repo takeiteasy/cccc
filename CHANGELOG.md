@@ -10,6 +10,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: under `-c=native`, a `parallel` region inside a `task` gives the
   variables it uses the task's `firstprivate` copies instead of sharing the
   originals.
+- Fixed: `-c=native`, `-m` and `-c=generated` emit a `goto` for a `break` or
+  `continue` whose loop or switch is not the innermost one around it, instead of
+  a keyword that bound to the wrong construct.
 - Added: `-fopenmp` supports doacross loops: `ordered(n)` with
   `depend(sink: ...)`, `depend(source)` and the `doacross` spelling. Under
   `-c=native` a sink waits for the iteration it names.

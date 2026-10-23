@@ -240,6 +240,12 @@ typedef struct {
     // ND_FOR/ND_DO/ND_SWITCH bodies in serialize_stmt.
     SerJumpFrame *jumps;
     Node         *cur_switch;
+    // Break/continue labels whose target is not the innermost C loop or
+    // switch around the jump. They print as a goto to a label placed after
+    // the construct (break) or at the end of the loop body (continue); the C
+    // keyword would bind to the wrong construct. Filled per function by
+    // serialize_collect_outer_jumps().
+    HashMap outer_jumps;
     // #1014: set by rename_colliding_type_tags() iff it actually renamed a
     // colliding struct/union/enum tag -- gates find_tag_name()'s extra
     // completeness-preferring scan so a program with no collision is
@@ -399,6 +405,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 // recursion. Shared between serialize_program.c's label/var-ref passes and
 // serialize_decl.c's hoisted-local-vs-referenced-global collision check.
 void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx);
+void serialize_collect_outer_jumps(SerializeContext *ctx, Node *body);
 // #1253: give a fresh source spelling to each duplicate ND_LABEL a hygienic
 // Quote() template produced in `body`, rewriting references keyed by
 // unique_label. Called once per function body before it is emitted.

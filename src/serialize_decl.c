@@ -518,6 +518,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         // #1253: rename duplicate labels a hygienic Quote() template left in
         // this body so the emitted C has no repeated label in one function.
         serialize_dedupe_function_labels(vm, fn->body);
+        serialize_collect_outer_jumps(ctx, fn->body);
 
         fprintf(f, " {\n");
         Obj *saved_fn   = ctx->current_fn;
