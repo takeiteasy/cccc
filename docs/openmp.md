@@ -56,7 +56,7 @@ a team of one.
 | `single` | One thread runs the block; the others wait unless `nowait` |
 | `master`, `masked` | Thread 0 runs the block |
 | `simd`, `for simd` | Runs the block; the hint is ignored |
-| `sections`, `parallel sections` | VM: runs the `section` blocks in order. Native: splits the blocks across the team |
+| `sections`, `parallel sections` | VM: runs the `section` blocks in order. Native: each thread takes the next unclaimed block |
 | `task` | Runs the block immediately on the thread that meets it |
 | `taskwait`, `taskyield` | No effect |
 | `taskgroup` | Runs the block |
@@ -86,7 +86,7 @@ or `v = x op= e`.
 | `linear(x : step)` | On `for`, `parallel for` and `simd`: `x` is `base + i * step` in iteration `i` (step defaults to 1; `x` is an integer or pointer), and the value from the last iteration is copied back |
 | `copyin(x)` | On `parallel` directives: every thread's copy of the `threadprivate` variable `x` starts with the primary thread's value |
 | `reduction(op : x)` | The region gets its own `x` starting at the identity of `op`; the result is combined into the original at the end |
-| `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size |
+| `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size. Variables in these clauses need no data-sharing clause under `default(none)` |
 | `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
 | `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
 | `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` is an error under native |

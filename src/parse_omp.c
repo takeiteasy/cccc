@@ -1360,18 +1360,26 @@ static Node *first_loop(Node *n) {
     return n;
 }
 
-// The schedule chunk size is evaluated once, outside the region, so it reads
-// the original of a variable the directive also privatises.
-// The directive's own default(none) does not apply to it.
-static void chunk_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
-                       int id) {
+// A clause expression is evaluated once, outside the region, so it reads the
+// original of a variable the directive also privatises. The directive's own
+// default(none) does not apply to it.
+static Node *outer_snippet(VirtualMachine *vm, OmpDirective *d,
+                           const char *text) {
     OmpFrame *saved = vm->compiler.omp_frames;
     if (saved && saved->dir == d)
         vm->compiler.omp_frames = saved->next;
-    body_push(vm, body,
-              snippet(vm, "long __omp%d_cs = (long)(%s);", id,
-                      d->sched_chunk ? d->sched_chunk : "0"));
+    Node *n                 = snippet(vm, "%s", text);
     vm->compiler.omp_frames = saved;
+    return n;
+}
+
+static void chunk_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
+                       int id) {
+    body_push(
+        vm, body,
+        outer_snippet(vm, d,
+                      arena_format(vm, "long __omp%d_cs = (long)(%s);", id,
+                                   d->sched_chunk ? d->sched_chunk : "0")));
 }
 
 // The worksharing loop. `tok` is on the `for`; the body statement follows the
@@ -1796,19 +1804,17 @@ static Node *find_node(Node *n, NodeKind kind) {
     return n;
 }
 
-// TODO: sections are split into one contiguous run per thread; claim them
-// one at a time like a dynamic loop (#1750).
-// Sections as a worksharing loop over the section index; the thread that runs
-// the last index copies lastprivate values back.
+// Sections as a worksharing loop over the section index: each claim takes one
+// section from the team's dynamic counter, and the thread that claims the last
+// index copies lastprivate values back.
 static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
                               OmpBody *body, int id, Node **secs, int n,
                               Token *start, bool with_barrier) {
-    body_push(vm, body, snippet(vm, "long __omp%d_b, __omp%d_e;", id, id));
     body_push(vm, body,
               snippet(vm,
-                      "__cccc_omp_static_range(%d, &__omp%d_b, &__omp%d_e);", n,
-                      id, id));
-    body_push(vm, body, snippet(vm, "long __omp%d_k;", id));
+                      "long __omp%d_b, __omp%d_e, __omp%d_c = 0, __omp%d_k;",
+                      id, id, id, id));
+    body_push(vm, body, snippet(vm, "int __omp%d_last = 0;", id));
     Node *loop = snippet(vm,
                          "for (__omp%d_k = __omp%d_b; __omp%d_k < __omp%d_e; "
                          "__omp%d_k++) ;",
@@ -1829,7 +1835,24 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
     Node *iter_block = new_node(vm, ND_BLOCK, start);
     iter_block->body = head.next;
     for_node->then   = iter_block;
-    body_push(vm, body, loop);
+
+    Node *claims = snippet(vm,
+                           "while (__cccc_omp_loop_next(2, 1, %d, &__omp%d_c, "
+                           "&__omp%d_b, &__omp%d_e)) ;",
+                           n, id, id, id);
+    Node *claims_node = find_node(claims, ND_FOR);
+    if (!claims_node)
+        error_tok(vm, start, "internal error: omp sections shape");
+    Node    chead = {};
+    OmpBody cb    = {&chead, &chead};
+    body_push(vm, &cb, loop);
+    body_push(vm, &cb,
+              snippet(vm, "__omp%d_last |= __omp%d_e == %d;", id, id, n));
+    Node *claim_block = new_node(vm, ND_BLOCK, start);
+    claim_block->body = chead.next;
+    claims_node->then = claim_block;
+    body_push(vm, body, claims);
+    body_push(vm, body, snippet(vm, "__cccc_omp_loop_end(2, %d);", n));
 
     char *copy = arena_strdup(vm, "");
     for (OmpClause *c = d->clauses; c; c = c->next)
@@ -1838,10 +1861,7 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
                 vm, "%s __builtin_memcpy(__omp_%d_%s, &%s, sizeof(%s));", copy,
                 id, c->name, c->name, c->name);
     if (*copy)
-        body_push(vm, body,
-                  snippet(vm,
-                          "if (__omp%d_b < __omp%d_e && __omp%d_e == %d) {%s}",
-                          id, id, id, n, copy));
+        body_push(vm, body, snippet(vm, "if (__omp%d_last) {%s}", id, copy));
     if (with_barrier && !d->nowait)
         body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
 }
@@ -1885,15 +1905,19 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
         case OMP_PARALLEL:
         case OMP_PARALLEL_SECTIONS:
         case OMP_PARALLEL_FOR: {
-            // TODO: num_threads and if are checked against this directive's
-            // own default(none) (#1749); chunk_decl shows the fix.
             body_push(vm, body,
-                      snippet(vm, "int __omp%d_nt = %s;", id,
-                              d->num_threads_text ? d->num_threads_text : "0"));
+                      outer_snippet(vm, d,
+                                    arena_format(vm, "int __omp%d_nt = %s;", id,
+                                                 d->num_threads_text
+                                                     ? d->num_threads_text
+                                                     : "0")));
             if (d->if_text)
-                body_push(
-                    vm, body,
-                    snippet(vm, "if (!(%s)) __omp%d_nt = 1;", d->if_text, id));
+                body_push(vm, body,
+                          outer_snippet(vm, d,
+                                        arena_format(vm,
+                                                     "if (!(%s)) __omp%d_nt = "
+                                                     "1;",
+                                                     d->if_text, id)));
             if (d->kind == OMP_PARALLEL_FOR)
                 chunk_decl(vm, d, body, id);
             Obj *nt =

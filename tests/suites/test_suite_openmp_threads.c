@@ -358,6 +358,64 @@ int test_omp_sections(void) {
     return sum == 111 && last == 3 && a == 1 && b == 1 && c == 1 ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_sections_claimed_dynamically(void) {
+    // With two threads a static split would give thread 0 sections 0 and 1, so
+    // section 0 would wait on section 1 forever; claiming one at a time lets
+    // the other thread run 1 to 3.
+    int teamed = 0, done = 0, stuck = 0;
+#pragma omp parallel sections num_threads(2) shared(teamed, done, stuck)
+    {
+#pragma omp section
+        {
+            teamed = omp_get_num_threads() > 1;
+            for (long spin = 0;
+                 teamed && __atomic_load_n(&done, __ATOMIC_ACQUIRE) < 3; spin++)
+                if (spin > 2000000000L) {
+                    stuck = 1;
+                    break;
+                }
+        }
+#pragma omp section
+        __atomic_fetch_add(&done, 1, __ATOMIC_ACQ_REL);
+#pragma omp section
+        __atomic_fetch_add(&done, 1, __ATOMIC_ACQ_REL);
+#pragma omp section
+        __atomic_fetch_add(&done, 1, __ATOMIC_ACQ_REL);
+    }
+    return !stuck && done == 3 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_clause_expressions_default_none(void) {
+    int n = 4, s = 0, t = 0, u = 0, ok = 1;
+#pragma omp parallel for default(none) shared(s) num_threads(n) reduction(+ : s)
+    for (int i = 0; i < 8; i++)
+        s += i;
+    ok &= s == 28;
+#pragma omp parallel default(none) shared(t) if (n > 1) num_threads(n)
+    {
+#pragma omp atomic
+        t++;
+    }
+    ok &= t >= 1 && t <= n;
+#pragma omp parallel sections default(none) shared(u) num_threads(n)
+    {
+#pragma omp section
+        {
+#pragma omp atomic
+            u++;
+        }
+#pragma omp section
+        {
+#pragma omp atomic
+            u++;
+        }
+    }
+    ok &= u == 2;
+    return ok ? 42 : 1;
+}
+
 static int omp_tp = 1;
 #pragma omp threadprivate(omp_tp)
 
