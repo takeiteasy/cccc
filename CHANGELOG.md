@@ -7,6 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-23
+
+- Fixed: under `-c=native`, `num_threads` and `if` expressions may use variables
+  that `default(none)` on the same directive does not list.
+- Changed: under `-c=native`, `sections` and `parallel sections` hand out one
+  section at a time, so a free thread takes the next unclaimed block.
+
 ## [0.21.0] - 2026-10-23
 
 - Added: `-fopenmp` runs `task`, `taskwait`, `taskgroup`, `taskyield`,

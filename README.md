@@ -6,7 +6,7 @@
 
 CCCC adds compile-time macro expansion and AST building on top of the existing toolchain: functions marked `@comptime` run inside the VM during compilation, and the result can be forwarded to your native compiler. A test framework and a build system are built in, so a project needs no external test runner or build tool.
 
-Targets **macOS** (aarch64) and **Linux** (aarch64/x86_64). Release builds: [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases). Generated API docs for the public headers: [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
+Targets **macOS** (aarch64) and **Linux** (aarch64/x86_64). Release builds: [github.com/takeiteasy/cccc/releases](https://github.com/takeiteasy/cccc/releases). Issue tracker: [todo.sr.ht/~takeiteasy/cccc](https://todo.sr.ht/~takeiteasy/cccc). Generated API docs for the public headers: [takeiteasy.github.io/cccc](https://takeiteasy.github.io/cccc/).
 
 ## Examples
 
