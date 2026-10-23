@@ -1,6 +1,6 @@
 # Warnings and Diagnostics
 
-gcc/clang-style warning categories. Everything is off by default except `-Wunknown-attributes`.
+gcc/clang-style warning categories. Everything is off by default except `-Wunknown-attributes` and `-Wopenmp`.
 
 ## Controls
 
@@ -80,6 +80,7 @@ Group: **A** is in `-Wall`, **E** in `-Wextra`, **D** on by default, blank is st
 | `ignored-features` | A | A construct the VM does not honour: `_Atomic`, ignored attributes, file-scope `asm`, extended `asm` with outputs or `goto` labels (not raised under `-c=native`/`-m`/`-c=generated`, where the asm runs) |
 | `attributes` | A | Unknown attribute names (names `__has_attribute` knows are silent), and misuse such as `sentinel` on a non-variadic function |
 | `unknown-attributes` | D | An `@name` with no registered handler (`@json_skp`). `[[name]]` and `__attribute__((name))` report under `attributes`. Silence with `-Wno-unknown-attributes` |
+| `openmp` | D | An `ordered depend(sink: ...)` that waits on the current or a later iteration, or on one the loop never runs; the sink is ignored ([openmp.md](openmp.md#doacross-loops)). Silence with `-Wno-openmp` |
 | `nodiscard` | A | Discarding a `nodiscard` result |
 | `fallthrough` | E | Implicit switch fallthrough |
 | `strict-prototypes` | E | A function declared without a prototype |

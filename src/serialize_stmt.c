@@ -434,6 +434,8 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // targets by walking the jump-frame stack built above (pointer
                 // identity, matching parse.c's own nn_find_target) and emit the
                 // real C keyword instead of a (nonexistent) label reference.
+                // TODO: the keyword binds to the innermost C loop or switch,
+                // which need not be the matched frame (#1753).
                 const char *kw = NULL;
                 for (SerJumpFrame *fr = ctx->jumps; fr && !kw;
                      fr               = fr->parent) {

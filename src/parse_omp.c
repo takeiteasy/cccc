@@ -393,6 +393,7 @@ typedef enum {
     CL_DEPEND            = 1 << 12,
     CL_LINEAR            = 1 << 13,
     CL_COPYIN            = 1 << 14,
+    CL_DOACROSS          = 1 << 15, // ordered: depend/doacross sink and source
 } ClauseSet;
 
 static int clauses_allowed(OmpKind kind) {
@@ -418,6 +419,8 @@ static int clauses_allowed(OmpKind kind) {
                    CL_DEPEND;
         case OMP_TASKWAIT:
             return CL_DEPEND;
+        case OMP_ORDERED:
+            return CL_DOACROSS;
         default:
             return 0;
     }
@@ -591,6 +594,67 @@ static Token *schedule_clause(VirtualMachine *vm, OmpDirective *d,
     return skip(vm, tok, ")");
 }
 
+// A sink offset: an optional `+ c` or `- c` after a name, c a constant.
+static long sink_offset(VirtualMachine *vm, Token **rest, Token *tok) {
+    if (!equal(tok, "+") && !equal(tok, "-")) {
+        *rest = tok;
+        return 0;
+    }
+    bool  neg = equal(tok, "-");
+    Node *n   = conditional(vm, &tok, tok->next);
+    long  c   = (long)eval(vm, n);
+    *rest     = tok;
+    return neg ? -c : c;
+}
+
+// depend(source), depend(sink: vec), doacross(source:) and doacross(sink: vec),
+// after the clause name.
+static Token *doacross_clause(VirtualMachine *vm, OmpDirective *d, Token *name,
+                              Token *tok) {
+    bool is_depend = is_word(name, "depend");
+    tok            = skip(vm, tok, "(");
+    if (is_word(tok, "source")) {
+        tok = tok->next;
+        if (!is_depend) {
+            tok = skip(vm, tok, ":");
+            if (is_word(tok, "omp_cur_iteration"))
+                tok = tok->next;
+        }
+        if (d->source)
+            error_tok(vm, name, "'source' appears more than once");
+        d->source = true;
+        return skip(vm, tok, ")");
+    }
+    if (!is_word(tok, "sink"))
+        error_tok(vm, tok, "expected 'sink' or 'source'");
+    OmpSink *s = arena_alloc(&vm->compiler.parser_arena, sizeof(*s));
+    memset(s, 0, sizeof(*s));
+    s->tok = name;
+    tok    = skip(vm, tok->next, ":");
+    if (is_word(tok, "omp_cur_iteration")) {
+        if (is_depend)
+            error_tok(vm, tok, "'omp_cur_iteration' needs the doacross clause");
+        s->prev   = true;
+        s->n      = 1;
+        s->off[0] = sink_offset(vm, &tok, tok->next);
+    } else {
+        do {
+            if (s->n == 8)
+                error_tok(vm, tok, "a 'sink' vector is limited to 8 elements");
+            if (tok->kind != TK_IDENT)
+                error_tok(vm, tok, "expected a loop variable in 'sink'");
+            s->name[s->n] = tok_text(vm, tok);
+            s->off[s->n]  = sink_offset(vm, &tok, tok->next);
+            s->n++;
+        } while (consume(vm, &tok, tok, ","));
+    }
+    OmpSink **tail = &d->sinks;
+    while (*tail)
+        tail = &(*tail)->next;
+    *tail = s;
+    return skip(vm, tok, ")");
+}
+
 // Parses the clauses up to the wrapper's closing ")" and appends the
 // expressions that must still be evaluated once (num_threads, if) to body.
 static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -653,6 +717,9 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             body_push(vm, body, new_unary(vm, ND_EXPR_STMT, e, name));
         } else if ((is_word(name, "untied") || is_word(name, "mergeable")) &&
                    (allowed & CL_TASK_FLAG)) {
+        } else if ((is_word(name, "depend") || is_word(name, "doacross")) &&
+                   (allowed & CL_DOACROSS)) {
+            tok = doacross_clause(vm, d, name, tok);
         } else if (is_word(name, "depend") && (allowed & CL_DEPEND)) {
             tok = skip_balanced_parens(vm, tok);
         } else if ((is_word(name, "num_threads") || equal(name, "if")) &&
@@ -683,12 +750,17 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             if (d->collapse < 1)
                 error_tok(vm, name, "collapse argument must be positive");
         } else if (is_word(name, "ordered") && (allowed & CL_LOOP)) {
+            if (d->ordered || d->ordered_n)
+                error_tok(vm, name, "'ordered' appears more than once");
             if (equal(tok, "(")) {
-                if (vm->compiler.omp_threaded)
-                    error_tok(vm, name,
-                              "doacross 'ordered(n)' is not supported with "
-                              "-c=native");
-                tok = skip_balanced_parens(vm, tok);
+                tok          = skip(vm, tok, "(");
+                Node *n      = conditional(vm, &tok, tok);
+                tok          = skip(vm, tok, ")");
+                d->ordered_n = (int)eval(vm, n);
+                if (d->ordered_n < 1)
+                    error_tok(vm, name, "ordered argument must be positive");
+                if (d->ordered_n > 8)
+                    error_tok(vm, name, "ordered is limited to 8 loops");
             } else {
                 d->ordered = true;
             }
@@ -717,6 +789,9 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         }
         consume(vm, &tok, tok, ",");
     }
+    if (d->ordered_n && d->ordered_n < d->collapse)
+        error_tok(vm, tok, "ordered(%d) is smaller than collapse(%d)",
+                  d->ordered_n, d->collapse);
     if (d->nowait && has_clause(d, NULL, OMP_CLAUSE_COPYPRIVATE))
         error_tok(vm, tok, "'copyprivate' cannot be combined with 'nowait'");
     return tok;
@@ -1114,6 +1189,12 @@ static void runtime_decls(VirtualMachine *vm) {
          "void __cccc_omp_ordered_chunk_end(long);"},
         {"__cccc_omp_ordered_loop_end",
          "void __cccc_omp_ordered_loop_end(long);"},
+        {"__cccc_omp_doacross_init",
+         "void __cccc_omp_doacross_init(long, long, int, long);"},
+        {"__cccc_omp_doacross_fini", "void __cccc_omp_doacross_fini(void);"},
+        {"__cccc_omp_doacross_post", "void __cccc_omp_doacross_post(long);"},
+        {"__cccc_omp_doacross_done", "void __cccc_omp_doacross_done(long);"},
+        {"__cccc_omp_doacross_wait", "void __cccc_omp_doacross_wait(long);"},
     };
     for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++)
         declare_runtime_fn(vm, rt[i].name, rt[i].proto);
@@ -1201,14 +1282,6 @@ static OutlineRegion region_begin(VirtualMachine *vm, Token *tok, int id,
     r.fn->omp_nt_var    = nt_var;
     return r;
 }
-
-typedef struct {
-    char *name;
-    Type *ty;
-    bool  declared; // `for (int i = ...)` rather than an existing variable
-    bool  up;
-    char *lb, *ub, *step, *rel;
-} OmpLoopLevel;
 
 static void bad_loop(VirtualMachine *vm, Token *tok) {
     error_tok(vm, tok,
@@ -1382,6 +1455,159 @@ static void chunk_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                                    d->sched_chunk ? d->sched_chunk : "0")));
 }
 
+// Reads the headers of the `ordered(n)` nest without consuming them.
+static void ordered_levels(VirtualMachine *vm, OmpDirective *d, Token *tok) {
+    int n = d->ordered_n;
+    d->levels =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(OmpLoopLevel) * n);
+    memset(d->levels, 0, sizeof(OmpLoopLevel) * n);
+    Token *start = tok;
+    for (int j = 0; j < n; j++) {
+        while (j && equal(tok, "{"))
+            tok = tok->next;
+        if (!equal(tok, "for"))
+            error_tok(vm, tok,
+                      "ordered(%d) needs %d perfectly nested for loops", n, n);
+        tok = loop_header(vm, tok, &d->levels[j]);
+        for (int i = 0; i < j; i++)
+            if (mentions(d->levels[j].lb, d->levels[i].name) ||
+                mentions(d->levels[j].ub, d->levels[i].name) ||
+                mentions(d->levels[j].step, d->levels[i].name))
+                error_tok(vm, start,
+                          "ordered loops must be rectangular: the bounds of an "
+                          "inner loop cannot use '%s'",
+                          d->levels[i].name);
+    }
+}
+
+// The iteration number of level j's loop variable, counted from the first.
+static char *level_index(VirtualMachine *vm, OmpDirective *loop, int j) {
+    OmpLoopLevel *lv = &loop->levels[j];
+    int           id = loop->omp_id;
+    if (lv->up)
+        return arena_format(vm, "((long)(%s) - __omp%d_lb%d) / __omp%d_st%d",
+                            lv->name, id, j, id, j);
+    return arena_format(vm, "(__omp%d_lb%d - (long)(%s)) / __omp%d_st%d", id, j,
+                        lv->name, id, j);
+}
+
+// The position of the current iteration in the flattened iteration space.
+static char *current_flat(VirtualMachine *vm, OmpDirective *loop) {
+    char *flat = level_index(vm, loop, 0);
+    for (int j = 1; j < loop->ordered_n; j++)
+        flat = arena_format(vm, "(%s) * __omp%d_n%d + %s", flat, loop->omp_id,
+                            j, level_index(vm, loop, j));
+    return flat;
+}
+
+// True when a constant step does not divide the offset.
+static bool step_misses(OmpLoopLevel *lv, long delta) {
+    char *end;
+    long  st = strtol(lv->step, &end, 0);
+    return !*end && st > 0 && delta % st;
+}
+
+// Warns about a sink that waits on the current or a later iteration, or on one
+// the loop never runs, and reports whether it must be dropped.
+static bool sink_dropped(VirtualMachine *vm, OmpDirective *loop, OmpSink *s) {
+    const char *why = NULL;
+    if (s->prev) {
+        if (s->off[0] >= 0)
+            why = "waits for the current or a later iteration";
+    } else {
+        int first = -1;
+        for (int j = 0; j < s->n && first < 0; j++)
+            if (s->off[j])
+                first = j;
+        long ahead = first < 0                ? 0
+                     : loop->levels[first].up ? s->off[first]
+                                              : -s->off[first];
+        if (first < 0 || ahead > 0)
+            why = "waits for the current or a later iteration";
+        for (int j = 0; j < s->n && !why; j++)
+            if (step_misses(&loop->levels[j], s->off[j]))
+                why = "refers to an iteration the loop never runs";
+    }
+    if (why)
+        warn_tok(vm, s->tok, CCCC_WARN_OPENMP, "'sink' %s; ignored", why);
+    return why != NULL;
+}
+
+// Checks an `ordered` with sink/source clauses against its loop.
+static void doacross_check(VirtualMachine *vm, OmpDirective *d,
+                           OmpDirective *loop, Token *start) {
+    bool in_loop = loop &&
+                   (loop->kind == OMP_FOR || loop->kind == OMP_PARALLEL_FOR) &&
+                   loop->ordered_n;
+    if (!in_loop)
+        error_tok(vm, start,
+                  "'ordered' with 'sink' or 'source' must be closely nested "
+                  "inside a loop region with an 'ordered(n)' clause");
+    if (d->source && d->sinks)
+        error_tok(vm, start,
+                  "'source' and 'sink' cannot be on the same 'ordered' "
+                  "directive");
+    for (OmpSink *s = d->sinks; s; s = s->next) {
+        if (s->prev)
+            continue;
+        if (s->n != loop->ordered_n)
+            error_tok(vm, s->tok,
+                      "'sink' vector has %d element(s), but the loop has "
+                      "ordered(%d)",
+                      s->n, loop->ordered_n);
+        for (int j = 0; j < s->n; j++)
+            if (strcmp(s->name[j], loop->levels[j].name))
+                error_tok(vm, s->tok,
+                          "element %d of the 'sink' vector must be '%s'", j + 1,
+                          loop->levels[j].name);
+    }
+}
+
+// Lowers sink and source: a sink waits for the iteration it names, if the loop
+// runs one; a source posts the current iteration.
+static void doacross_lower(VirtualMachine *vm, OmpDirective *d,
+                           OmpDirective *loop, OmpBody *body) {
+    int id = loop->omp_id;
+    for (OmpSink *s = d->sinks; s; s = s->next) {
+        if (sink_dropped(vm, loop, s) || !vm->compiler.omp_threaded)
+            continue;
+        if (s->prev) {
+            body_push(vm, body,
+                      snippet(vm,
+                              "{ long __da_f = %s + (%ld); if (__da_f >= 0) "
+                              "__cccc_omp_doacross_wait(__da_f); }",
+                              current_flat(vm, loop), s->off[0]));
+            continue;
+        }
+        char *text =
+            arena_format(vm, "{ long __da_f = 0, __da_i; int __da_ok = 1;");
+        for (int j = 0; j < s->n; j++) {
+            long delta = loop->levels[j].up ? s->off[j] : -s->off[j];
+            if (delta)
+                text = arena_format(
+                    vm,
+                    "%s if ((%ld) %% __omp%d_st%d) __da_ok = 0; __da_i = %s + "
+                    "(%ld) / __omp%d_st%d; if (__da_i < 0 || __da_i >= "
+                    "__omp%d_n%d) __da_ok = 0; __da_f = __da_f * __omp%d_n%d + "
+                    "__da_i;",
+                    text, delta, id, j, level_index(vm, loop, j), delta, id, j,
+                    id, j, id, j);
+            else
+                text =
+                    arena_format(vm, "%s __da_f = __da_f * __omp%d_n%d + %s;",
+                                 text, id, j, level_index(vm, loop, j));
+        }
+        body_push(vm, body,
+                  snippet(vm,
+                          "%s if (__da_ok) __cccc_omp_doacross_wait(__da_f); }",
+                          text));
+    }
+    if (d->source && vm->compiler.omp_threaded)
+        body_push(vm, body,
+                  snippet(vm, "__cccc_omp_doacross_post(%s);",
+                          current_flat(vm, loop)));
+}
+
 // The worksharing loop. `tok` is on the `for`; the body statement follows the
 // collapsed headers. Shadows have already been declared by the caller.
 static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
@@ -1406,7 +1632,11 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                           lv[i].name);
     }
 
-    for (int j = 0; j < m; j++) {
+    int nlev = d->ordered_n > m ? d->ordered_n : m;
+    for (int j = m; j < nlev; j++)
+        lv[j] = d->levels[j];
+
+    for (int j = 0; j < nlev; j++) {
         body_push(vm, body,
                   snippet(vm,
                           "long __omp%d_lb%d = (long)(%s), __omp%d_ub%d = "
@@ -1420,6 +1650,12 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     for (int j = 1; j < m; j++)
         total = arena_format(vm, "%s * __omp%d_n%d", total, id, j);
     body_push(vm, body, snippet(vm, "long __omp%d_n = %s;", id, total));
+    if (d->ordered_n) {
+        char *inner = "1";
+        for (int j = m; j < nlev; j++)
+            inner = arena_format(vm, "%s * __omp%d_n%d", inner, id, j);
+        body_push(vm, body, snippet(vm, "long __omp%d_in = %s;", id, inner));
+    }
     body_push(vm, body,
               snippet(vm,
                       "long __omp%d_b, __omp%d_e, __omp%d_c = 0, __omp%d_ch = "
@@ -1431,6 +1667,12 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     body_push(vm, body,
               snippet(vm, "__cccc_omp_loop_begin(&__omp%d_sk, &__omp%d_ch);",
                       id, id));
+    if (d->ordered_n)
+        body_push(vm, body,
+                  snippet(vm,
+                          "__cccc_omp_doacross_init(__omp%d_n, __omp%d_in, "
+                          "__omp%d_sk, __omp%d_ch);",
+                          id, id, id, id));
 
     // Loop variables: declared by the header, or private copies of existing
     // ones.
@@ -1443,18 +1685,43 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                 snippet(vm, "typeof_unqual(%s) %s;", lv[j].name, lv[j].name));
     }
 
-    // TODO: a `continue` in the body is a stray continue here (#1748).
-    Node *inner = stmt(vm, &tok, tok);
-    (void)for_tok;
+    // The body is parsed before the chunk loop exists, so it gets labels of
+    // its own: `continue` ends the iteration, `break` is not allowed.
+    char *saved_brk        = vm->compiler.brk_label;
+    char *saved_cont       = vm->compiler.cont_label;
+    char *saved_omp_brk    = vm->compiler.omp_loop_brk;
+    int   saved_brk_cld    = vm->compiler.brk_cleanup_depth;
+    int   saved_cont_cld   = vm->compiler.cont_cleanup_depth;
+    char *body_cont        = new_unique_name(vm);
+    vm->compiler.brk_label = vm->compiler.omp_loop_brk = new_unique_name(vm);
+    vm->compiler.cont_label                            = body_cont;
+    vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
+    vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
+    vm->compiler.omp_assoc_loops    = nlev - m;
+    Node *inner                     = stmt(vm, &tok, tok);
+    vm->compiler.omp_assoc_loops    = 0;
+    vm->compiler.brk_label          = saved_brk;
+    vm->compiler.cont_label         = saved_cont;
+    vm->compiler.omp_loop_brk       = saved_omp_brk;
+    vm->compiler.brk_cleanup_depth  = saved_brk_cld;
+    vm->compiler.cont_cleanup_depth = saved_cont_cld;
 
     body_push(vm, body, snippet(vm, "long __omp%d_k;", id));
-    Node *loop = snippet(vm,
-                         "for (__omp%d_k = __omp%d_b; __omp%d_k < __omp%d_e; "
-                         "__omp%d_k++) ;",
-                         id, id, id, id, id);
+    Node *loop =
+        d->ordered_n
+            ? snippet(vm,
+                      "for (__omp%d_k = __omp%d_b; __omp%d_k < "
+                      "__omp%d_e; __cccc_omp_doacross_done(__omp%d_k), "
+                      "__omp%d_k++) ;",
+                      id, id, id, id, id, id)
+            : snippet(vm,
+                      "for (__omp%d_k = __omp%d_b; __omp%d_k < "
+                      "__omp%d_e; __omp%d_k++) ;",
+                      id, id, id, id, id);
     Node *for_node = first_loop(loop);
     if (!for_node)
         error_tok(vm, for_tok, "internal error: omp loop shape");
+    for_node->cont_label = body_cont;
 
     Node    head = {};
     OmpBody it   = {&head, &head};
@@ -1510,6 +1777,8 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     chunk_block->body = chead.next;
     chunks_node->then = chunk_block;
     body_push(vm, body, chunks);
+    if (d->ordered_n)
+        body_push(vm, body, snippet(vm, "__cccc_omp_doacross_fini();"));
     body_push(
         vm, body,
         snippet(vm, "__cccc_omp_loop_end(__omp%d_sk, __omp%d_n);", id, id));
@@ -1869,7 +2138,8 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
 static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                                 Node *block, OmpBody *body, Token **rest,
                                 Token *tok, Token *start) {
-    int id = vm->compiler.unique_name_counter++;
+    int id    = vm->compiler.unique_name_counter++;
+    d->omp_id = id;
     switch (d->kind) {
         case OMP_BARRIER:
             body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
@@ -2104,7 +2374,25 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     tok          = clauses(vm, d, &body, tok);
     tok          = skip(vm, tok, ")");
 
+    if (d->ordered_n && (d->kind == OMP_FOR || d->kind == OMP_PARALLEL_FOR))
+        ordered_levels(vm, d, tok);
+
     OmpDirective *enclosing = vm->compiler.omp_enclosing;
+    if (d->kind == OMP_ORDERED && (d->source || d->sinks)) {
+        doacross_check(vm, d, enclosing, start);
+        if (vm->compiler.omp_threaded)
+            runtime_decls(vm);
+        doacross_lower(vm, d, enclosing, &body);
+        *rest = tok;
+        leave_scope(vm);
+        block->body = head.next;
+        return block;
+    }
+    if (d->kind == OMP_ORDERED && enclosing && enclosing->ordered_n &&
+        (enclosing->kind == OMP_FOR || enclosing->kind == OMP_PARALLEL_FOR))
+        error_tok(vm, start,
+                  "'ordered' region cannot be used in a loop with "
+                  "'ordered(n)'; use 'sink' and 'source'");
     if (d->kind == OMP_ORDERED && enclosing &&
         !((enclosing->kind == OMP_FOR || enclosing->kind == OMP_PARALLEL_FOR) &&
           enclosing->ordered))
@@ -2160,14 +2448,20 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     Token *body_tok = tok;
-    Node  *inner    = stmt(vm, rest, tok);
+    bool   is_loop  = d->kind == OMP_FOR || d->kind == OMP_PARALLEL_FOR;
+    int    nloops   = d->ordered_n > d->collapse ? d->ordered_n : d->collapse;
+    char  *saved_omp_brk         = vm->compiler.omp_loop_brk;
+    vm->compiler.omp_assoc_loops = is_loop ? nloops : 0;
+    Node *inner                  = stmt(vm, rest, tok);
+    vm->compiler.omp_assoc_loops = 0;
+    vm->compiler.omp_loop_brk    = saved_omp_brk;
     if (d->kind == OMP_FOR || d->kind == OMP_PARALLEL_FOR) {
         if (!equal(body_tok, "for"))
             error_tok(vm, body_tok,
                       "the statement after '#pragma omp for' must be a for "
                       "loop");
-        check_loop(vm, inner, d->collapse, body_tok);
-        exempt_loop_vars(vm, inner, d->collapse);
+        check_loop(vm, inner, nloops, body_tok);
+        exempt_loop_vars(vm, inner, nloops);
         if (has_clause(d, NULL, OMP_CLAUSE_LINEAR))
             linear_inject(vm, d, id, inner, body_tok);
     } else if (d->kind == OMP_SIMD && has_clause(d, NULL, OMP_CLAUSE_LINEAR)) {

@@ -218,6 +218,113 @@ void __cccc_omp_ordered_loop_end(long n) {
     __cccc_tls_ordered_from = -1;
 }
 
+// Doacross loops (`ordered(n)` with sink/source). A loop's iterations are
+// numbered in one flat space, `flat = outer * inner + position inside the
+// outer iteration`, where `outer` is the collapsed index the schedule hands
+// out. Chunks run their iterations in order on one thread, so one counter per
+// chunk is enough: it holds the last flat position posted plus one. Loop state
+// lives in a list on the team, found by a per-thread sequence number, and is
+// freed by the last thread to leave the loop.
+struct __cccc_doacross {
+    struct __cccc_doacross *next;
+    long                    seq, n, inner, chunk, nent;
+    int                     kind, nt, left;
+    long                   *ent;
+};
+
+void __cccc_omp_doacross_init(long n, long inner, int kind, long chunk) {
+    struct __cccc_team *t = __cccc_tls_team;
+    __cccc_tls_da         = 0;
+    if (!t || t->n == 1)
+        return;
+    long seq = ++__cccc_tls_da_seq;
+    pthread_mutex_lock(&t->om);
+    struct __cccc_doacross *d = t->da;
+    while (d && d->seq != seq)
+        d = d->next;
+    if (!d) {
+        d = calloc(1, sizeof(*d));
+        if (!d)
+            __builtin_trap();
+        d->seq   = seq;
+        d->n     = n;
+        d->inner = inner > 0 ? inner : 1;
+        d->kind  = kind;
+        d->chunk = chunk;
+        d->nt    = t->n;
+        d->left  = t->n;
+        // TODO: guided loops keep a counter per outer iteration, so memory
+        // grows with the trip count (#1751).
+        d->nent = kind == 3 ? n : (kind == 1 && !chunk) ? t->n : (n + chunk - 1) / chunk;
+        d->ent  = calloc(d->nent > 0 ? d->nent : 1, sizeof(long));
+        if (!d->ent)
+            __builtin_trap();
+        d->next = t->da;
+        t->da   = d;
+    }
+    pthread_mutex_unlock(&t->om);
+    __cccc_tls_da = d;
+}
+
+void __cccc_omp_doacross_fini(void) {
+    struct __cccc_team *t = __cccc_tls_team;
+    struct __cccc_doacross *d = __cccc_tls_da;
+    __cccc_tls_da         = 0;
+    if (!d)
+        return;
+    pthread_mutex_lock(&t->om);
+    if (--d->left == 0) {
+        struct __cccc_doacross **p = &t->da;
+        while (*p != d)
+            p = &(*p)->next;
+        *p = d->next;
+        free(d->ent);
+        free(d);
+    }
+    pthread_mutex_unlock(&t->om);
+}
+
+static long *__cccc_omp_doacross_slot(struct __cccc_doacross *d, long flat) {
+    long k = flat / d->inner, e;
+    if (d->kind == 3)
+        e = k;
+    else if (d->chunk)
+        e = k / d->chunk;
+    else {
+        long q = d->n / d->nt, r = d->n % d->nt, cut = r * (q + 1);
+        e = k < cut ? k / (q + 1) : r + (k - cut) / q;
+    }
+    return &d->ent[e];
+}
+
+void __cccc_omp_doacross_post(long flat) {
+    struct __cccc_doacross *d = __cccc_tls_da;
+    if (!d)
+        return;
+    long *slot = __cccc_omp_doacross_slot(d, flat);
+    if (*slot < flat + 1)
+        __atomic_store_n(slot, flat + 1, __ATOMIC_RELEASE);
+}
+
+// Posts the end of outer iteration k, so a `continue` past the source (or a
+// body without one) never leaves a waiter behind.
+void __cccc_omp_doacross_done(long k) {
+    struct __cccc_doacross *d = __cccc_tls_da;
+    if (d)
+        __cccc_omp_doacross_post((k + 1) * d->inner - 1);
+}
+
+// TODO: the wait spins, which wastes CPU while a thread is far behind
+// (#1752).
+void __cccc_omp_doacross_wait(long flat) {
+    struct __cccc_doacross *d = __cccc_tls_da;
+    if (!d)
+        return;
+    long *slot = __cccc_omp_doacross_slot(d, flat);
+    while (__atomic_load_n(slot, __ATOMIC_ACQUIRE) <= flat)
+        sched_yield();
+}
+
 static void *__cccc_omp_cp_solo;
 
 void __cccc_omp_copyprivate_set(void *slots) {

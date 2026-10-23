@@ -995,7 +995,10 @@ typedef enum {
     CCCC_WARN_STRINGOP_OVERFLOW   = CCCC_WARN_NULL_DEREFERENCE,
     CCCC_WARN_STRINGOP_TRUNCATION = CCCC_WARN_NULL_DEREFERENCE,
     // An unregistered @name attribute (on by default)
-    CCCC_WARN_UNKNOWN_ATTRIBUTES  = (1ULL << 26),
+    CCCC_WARN_UNKNOWN_ATTRIBUTES = (1ULL << 26),
+    // A doacross `sink` that waits on the current or a later iteration, or on
+    // one outside the loop (on by default)
+    CCCC_WARN_OPENMP              = (1ULL << 27),
     CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
     CCCC_WARN_DUPLICATED_COND =
         (1ULL << 31), // same condition repeated in if/else-if chain
@@ -2012,6 +2015,26 @@ struct OmpClause {
     OmpClause    *next;
 };
 
+// One loop of an `ordered(n)` nest, in the form the threaded lowering needs.
+typedef struct OmpLoopLevel {
+    char *name;
+    Type *ty;
+    bool  declared; // `for (int i = ...)` rather than an existing variable
+    bool  up;
+    char *lb, *ub, *step, *rel;
+} OmpLoopLevel;
+
+// A doacross `sink` vector: one `name [+-] constant` element per loop, or
+// `omp_cur_iteration - constant` (prev) over the flattened iteration space.
+typedef struct OmpSink {
+    struct OmpSink *next;
+    Token          *tok;
+    bool            prev;
+    int             n;
+    char           *name[8];
+    long            off[8];
+} OmpSink;
+
 typedef struct OmpDirective {
     OmpKind    kind;
     char      *critical_name; // critical(name); NULL when anonymous
@@ -2019,6 +2042,11 @@ typedef struct OmpDirective {
     int        collapse;      // loop depth the directive covers (default 1)
     bool       nowait;
     bool       ordered;       // the `ordered` clause on a loop
+    int           ordered_n;     // `ordered(n)`: doacross loops covered, else 0
+    OmpLoopLevel *levels;        // ordered_n: the loops of the nest
+    OmpSink      *sinks;         // `ordered` with sink clauses
+    bool          source;        // `ordered` with a source clause
+    int           omp_id; // threaded lowering: number in __omp<id>_ names
     bool       default_none;
     bool       default_shared;       // task default(shared)
     bool       default_firstprivate; // task default(firstprivate)
@@ -4695,6 +4723,9 @@ typedef struct Compiler {
     struct OmpDirective
         *omp_enclosing;            // innermost directive whose body is open
     int omp_sections; // inside a sections body: `section` ends a block
+    int  omp_assoc_loops; // for loops of the open `omp for` still to be entered
+    char *omp_loop_brk;   // break label of the innermost associated loop, which
+                          // `break` may not target
     int              unevaluated;    // inside sizeof/_Alignof/typeof operand
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
     bool     kernel_used;    // a native kernel launch or builtin was lowered

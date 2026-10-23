@@ -947,4 +947,181 @@ int test_omp_quote_pragma_operator(void) {
     return quote_omp_sum() == 45 ? 42 : 1;
 }
 
+[[cccc::test(return = 42)]]
+int test_omp_for_continue(void) {
+    int sum = 0;
+#pragma omp parallel for reduction(+ : sum) num_threads(4)
+    for (int i = 0; i < 100; i++) {
+        if (i % 2)
+            continue;
+        sum += i;
+    }
+    return sum == 2450 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_for_continue_in_user_loop(void) {
+    int sum = 0;
+    for (int r = 0; r < 3; r++) {
+#pragma omp parallel num_threads(4)
+        {
+#pragma omp for reduction(+ : sum) schedule(dynamic, 3)
+            for (int i = 0; i < 40; i++) {
+                if (i == 7 || i == 20)
+                    continue;
+                sum += 1;
+            }
+        }
+    }
+    return sum == 3 * 38 ? 42 : 1;
+}
+
+// Doacross: ordered(n) with sink/source. The early iterations sleep longest, so
+// a missing wait gives a wrong chain.
+#define DOACROSS_PREFIX(name, sched)                                           \
+    [[cccc::test(return = 42)]]                                                \
+    int name(void) {                                                           \
+        enum { N = 64 };                                                       \
+        long a[N + 1] = {1};                                                   \
+        _Pragma(sched) for (int i = 1; i <= N; i++) {                          \
+            spin(N - i);                                                       \
+            _Pragma("omp ordered depend(sink: i - 1)") a[i] = a[i - 1] + 1;    \
+            _Pragma("omp ordered depend(source)")                              \
+        }                                                                      \
+        return a[N] == N + 1 ? 42 : 1;                                         \
+    }
+
+DOACROSS_PREFIX(test_omp_doacross_static,
+                "omp parallel for ordered(1) num_threads(4)")
+DOACROSS_PREFIX(
+    test_omp_doacross_static_chunk,
+    "omp parallel for ordered(1) num_threads(4) schedule(static, 3)")
+DOACROSS_PREFIX(
+    test_omp_doacross_static_one,
+    "omp parallel for ordered(1) num_threads(4) schedule(static, 1)")
+DOACROSS_PREFIX(
+    test_omp_doacross_dynamic,
+    "omp parallel for ordered(1) num_threads(4) schedule(dynamic, 2)")
+DOACROSS_PREFIX(test_omp_doacross_guided,
+                "omp parallel for ordered(1) num_threads(4) schedule(guided)")
+
+static void wavefront_reference(int r, int c, int *g) {
+    for (int i = 0; i < r; i++)
+        for (int j = 0; j < c; j++)
+            g[i * c + j] =
+                (i ? g[(i - 1) * c + j] : 0) + (j ? g[i * c + j - 1] : 0) + 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_wavefront(void) {
+    enum { R = 9, C = 7 };
+    int g[R * C] = {0}, ref[R * C];
+    wavefront_reference(R, C, ref);
+#pragma omp parallel for ordered(2) num_threads(4) schedule(static, 1)
+    for (int i = 0; i < R; i++)
+        for (int j = 0; j < C; j++) {
+            spin(R * C - (i * C + j));
+#pragma omp ordered depend(sink : i - 1, j) depend(sink : i, j - 1)
+            g[i * C + j] =
+                (i ? g[(i - 1) * C + j] : 0) + (j ? g[i * C + j - 1] : 0) + 1;
+#pragma omp ordered depend(source)
+        }
+    return memcmp(g, ref, sizeof g) == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_collapse(void) {
+    enum { R = 6, C = 8 };
+    int g[R * C] = {0}, ref[R * C];
+    wavefront_reference(R, C, ref);
+#pragma omp parallel for collapse(2) ordered(2) num_threads(4) schedule(dynamic)
+    for (int i = 0; i < R; i++)
+        for (int j = 0; j < C; j++) {
+            spin(R * C - (i * C + j));
+#pragma omp ordered depend(sink : i - 1, j) depend(sink : i, j - 1)
+            g[i * C + j] =
+                (i ? g[(i - 1) * C + j] : 0) + (j ? g[i * C + j - 1] : 0) + 1;
+#pragma omp ordered depend(source)
+        }
+    return memcmp(g, ref, sizeof g) == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_5_2_spelling(void) {
+    enum { N = 48 };
+    long a[N + 1] = {1}, b[N + 1] = {1};
+#pragma omp parallel for ordered(1) num_threads(4) schedule(static, 2)
+    for (int i = 1; i <= N; i++) {
+        spin(N - i);
+#pragma omp ordered doacross(sink : i - 1)
+        a[i] = a[i - 1] + 1;
+#pragma omp ordered doacross(source:)
+    }
+#pragma omp parallel for ordered(1) num_threads(4) schedule(dynamic)
+    for (int i = 1; i <= N; i++) {
+        spin(N - i);
+#pragma omp ordered doacross(sink : omp_cur_iteration - 1)
+        b[i] = b[i - 1] + 2;
+#pragma omp ordered doacross(source : omp_cur_iteration)
+    }
+    return a[N] == N + 1 && b[N] == 2 * N + 1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_down_step(void) {
+    long a[36] = {0};
+    a[34]      = 1;
+#pragma omp parallel for ordered(1) num_threads(4) schedule(static, 1)
+    for (int i = 32; i >= 0; i -= 2) {
+        spin(i);
+#pragma omp ordered depend(sink : i + 2)
+        a[i] = a[i + 2] + 1;
+#pragma omp ordered depend(source)
+    }
+    return a[0] == 18 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_continue(void) {
+    enum { N = 60 };
+    long a[N + 1] = {0}, ref[N + 1] = {0};
+    for (int i = 1; i <= N; i++)
+        if (i % 3)
+            ref[i] = ref[i - 1] + 1;
+#pragma omp parallel for ordered(1) num_threads(4) schedule(static, 2)
+    for (int i = 1; i <= N; i++) {
+        spin(N - i);
+        if (i % 3 == 0)
+            continue;
+#pragma omp ordered depend(sink : i - 1)
+        a[i] = a[i - 1] + 1;
+#pragma omp ordered depend(source)
+    }
+    return memcmp(a, ref, sizeof a) == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_back_to_back_loops(void) {
+    enum { N = 40 };
+    long a[N + 1] = {1}, b[N + 1] = {1};
+#pragma omp parallel              num_threads(4)
+    {
+#pragma omp for ordered(1) nowait schedule(static, 1)
+        for (int i = 1; i <= N; i++) {
+            spin(N - i);
+#pragma omp ordered depend(sink : i - 1)
+            a[i] = a[i - 1] + 1;
+#pragma omp ordered depend(source)
+        }
+#pragma omp for ordered(1) schedule(dynamic)
+        for (int i = 1; i <= N; i++) {
+            spin(N - i);
+#pragma omp ordered depend(sink : i - 1)
+            b[i] = b[i - 1] + 3;
+#pragma omp ordered depend(source)
+        }
+    }
+    return a[N] == N + 1 && b[N] == 3 * N + 1 ? 42 : 1;
+}
+
 #pragma cccc suite end

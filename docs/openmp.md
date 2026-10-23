@@ -36,6 +36,7 @@ spelling.
 | Races | Hidden | Real |
 | `schedule` | Ignored | `static`, `static,n`, `dynamic`, `guided`, `auto` (static) and `runtime`[^4] |
 | `ordered` | Runs in order | Runs in iteration order[^3] |
+| `ordered(n)` with `sink`/`source` | No waiting needed | Waits for the named iterations[^5] |
 
 Native output carries its own runtime: a thread pool that starts on the first
 parallel region and is reused, a barrier, named critical sections and the
@@ -62,9 +63,13 @@ a team of one.
 | `taskgroup` | Runs the block |
 | `threadprivate(x, ...)` | Gives each thread its own copy of a global or `static` variable; allowed at file scope and in a function |
 | `ordered` | Runs the block in loop-iteration order; allowed inside a loop with the `ordered` clause, or in a function called from one |
+| `ordered depend(sink: ...)`, `ordered depend(source)` | Standalone directive inside a loop with `ordered(n)`; see [doacross loops](#doacross-loops) |
 
 `target`, `teams` and `declare` are errors. Other directives at file scope are
 errors.
+
+`break` out of the loop of `for` and `parallel for` is an error; `continue`
+ends the iteration.
 
 Native loops use the canonical OpenMP form: an integer variable, a bound
 compared with `<`, `<=`, `>`, `>=` or `!=`, and a step written `i++`, `i += n`,
@@ -89,7 +94,7 @@ or `v = x op= e`.
 | `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size. Variables in these clauses need no data-sharing clause under `default(none)` |
 | `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
 | `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
-| `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` is an error under native |
+| `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` makes a [doacross loop](#doacross-loops) |
 | `schedule(kind[, n])` | VM: checked, then ignored. Native: `static` splits the loop into one block per thread, `static, n` deals chunks of `n` round-robin, `dynamic` and `guided` hand out chunks on demand, `auto` is `static`, and `runtime` reads `omp_set_schedule`, else `OMP_SCHEDULE`, else `static`. `monotonic`, `nonmonotonic` and `simd` modifiers are accepted and ignored |
 | `proc_bind(...)` | Parsed and ignored |
 | `nowait` | Skips the barrier at the end of `for` and `single` (native) |
@@ -115,6 +120,34 @@ int p = 5;
 { p = 100; }
 // p is still 5 here
 ```
+
+## Doacross loops
+
+`ordered(n)` on a loop nest of `n` loops lets an iteration wait for earlier
+ones. `sink` names the iteration to wait for and `source` marks the current
+one as done:
+
+```c
+long a[65] = {1};
+#pragma omp parallel for ordered(1)
+for (int i = 1; i <= 64; i++) {
+    long x = expensive(i);              // runs in parallel
+#pragma omp ordered depend(sink : i - 1)
+    a[i] = a[i - 1] + x;                // after iteration i - 1 is done
+#pragma omp ordered depend(source)
+}
+```
+
+A sink vector has one `name ± constant` element per loop, so a two-loop nest
+writes `depend(sink : i - 1, j)`. Several `sink` clauses wait for all of their
+iterations. An iteration that does not exist, such as `i - 1` in the first
+iteration, is not waited for. `doacross(sink : ...)`, `doacross(source :)` and
+`doacross(sink : omp_cur_iteration - 1)` are the OpenMP 5.2 spellings.
+
+A sink that names the current or a later iteration, or one that no iteration
+has because the offset is not a multiple of the step, is ignored with a
+`-Wopenmp` warning (on by default). An iteration that ends without reaching its
+`source`, for example through `continue`, still counts as done.
 
 ## Runtime functions
 
@@ -173,9 +206,7 @@ or another OpenMP compiler. Building the native output with
 ## Limitations
 
 - Native output uses pthreads, so Windows has no OpenMP.
-- Doacross `ordered(n)` is rejected under native (#1747).
 - An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
-- `continue` in the body of a native `for` loop is rejected (#1748).
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
@@ -200,3 +231,8 @@ or another OpenMP compiler. Building the native output with
     variable it names is read from outside the region. `auto` and `runtime`
     take no chunk size. Named `critical` sections have no limit on the number
     of names.
+[^5]: Iterations are numbered across the whole nest. A thread posts the last
+    iteration it finished in a counter for each chunk, since a chunk runs its
+    iterations in order, and a `sink` waits until the counter of the chunk
+    holding its iteration has passed it. Waiting spins and yields. Under
+    `schedule(guided)` the counters are one per outer iteration.

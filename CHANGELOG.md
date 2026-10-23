@@ -7,6 +7,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `-fopenmp` supports doacross loops: `ordered(n)` with
+  `depend(sink: ...)`, `depend(source)` and the `doacross` spelling. Under
+  `-c=native` a sink waits for the iteration it names.
+- Added: `-Wopenmp` (on by default) for a `sink` that waits on the current or a
+  later iteration, or on one the loop never runs; the sink is ignored.
+- Fixed: under `-c=native`, `continue` in the body of `for` and `parallel for`
+  is accepted instead of being a stray `continue`.
+- Changed: `break` out of the loop of `for` and `parallel for` is an error in
+  the VM and under `-c=native`.
+
 ## [0.21.1] - 2026-10-23
 
 - Fixed: under `-c=native`, `num_threads` and `if` expressions may use variables
