@@ -1,7 +1,8 @@
 // CCCC_FLAGS: -m
-// CCCC_EXPECT_STDOUT: __atomic_compare_exchange_n
+// CCCC_EXPECT_STDOUT: __atomic_fetch_add
+// CCCC_EXPECT_STDOUT: __atomic_fetch_sub
 // CCCC_REJECT_STDOUT: __atomic_store_n
-// -m output lowers atomic_fetch_* to a compare-exchange loop, not a
+// -m output lowers atomic_fetch_* to one fetch-and-op builtin, not a
 // load-then-store.
 #include <stdatomic.h>
 int main(void) {

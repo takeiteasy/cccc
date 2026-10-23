@@ -398,6 +398,16 @@ static void walk_node(KernelCtx *ctx, Node *node) {
             }
             break;
         }
+        case ND_CAS:
+            if (node->cas_addr &&
+                pointee_space(node->cas_addr->ty) == AS_CONSTANT)
+                kernel_error(ctx, node->tok, "writing to constant memory");
+            break;
+        case ND_EXCH:
+        case ND_ASTORE:
+            if (node->lhs && pointee_space(node->lhs->ty) == AS_CONSTANT)
+                kernel_error(ctx, node->tok, "writing to constant memory");
+            break;
         case ND_RETURN: {
             Type *ret = ctx->top->fn->ty ? ctx->top->fn->ty->return_ty : NULL;
             if (node->lhs && ret && ret->kind == TY_PTR &&
