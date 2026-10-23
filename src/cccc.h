@@ -2018,6 +2018,7 @@ typedef struct OmpDirective {
     OmpClause *clauses;
     int        collapse;      // loop depth the directive covers (default 1)
     bool       nowait;
+    bool       ordered;       // the `ordered` clause on a loop
     bool       default_none;
     bool       default_shared;       // task default(shared)
     bool       default_firstprivate; // task default(firstprivate)
@@ -4689,6 +4690,8 @@ typedef struct Compiler {
     bool     omp_used;       // a threaded OpenMP directive was lowered
     struct OmpFrame *omp_frames;     // active default(none) and task directives
     Scope           *omp_parallel; // scope of the innermost enclosing parallel
+    struct OmpDirective
+        *omp_enclosing;            // innermost directive whose body is open
     int omp_sections; // inside a sections body: `section` ends a block
     int              unevaluated;    // inside sizeof/_Alignof/typeof operand
     bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C

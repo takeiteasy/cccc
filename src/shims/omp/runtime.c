@@ -29,6 +29,47 @@ int __cccc_omp_single_begin(void) {
     return 0;
 }
 
+// Ordered regions run in iteration order by passing a baton between the static
+// chunks: a thread waits for every earlier iteration before its first ordered
+// region and hands over at the end of its chunk. `ordered` only grows; each
+// thread adds the loop's trip count to its base so later loops need no reset.
+// TODO: contiguous chunks make an ordered loop near-serial; round-robin chunks
+// would overlap the unordered parts (#1746).
+void __cccc_omp_ordered_start(long b) {
+    __cccc_tls_ordered_from = __cccc_tls_ordered_base + b;
+}
+
+static void __cccc_omp_ordered_wait(struct __cccc_team *t) {
+    pthread_mutex_lock(&t->om);
+    while (t->ordered < __cccc_tls_ordered_from)
+        pthread_cond_wait(&t->oc, &t->om);
+    pthread_mutex_unlock(&t->om);
+}
+
+void __cccc_omp_ordered_begin(void) {
+    struct __cccc_team *t = __cccc_tls_team;
+    if (!t || t->n == 1 || __cccc_tls_ordered_from < 0)
+        return;
+    __cccc_omp_ordered_wait(t);
+}
+
+void __cccc_omp_ordered_finish(long e, long n) {
+    struct __cccc_team *t = __cccc_tls_team;
+    if (t && t->n > 1 && __cccc_tls_ordered_from >= 0) {
+        long start = __cccc_tls_ordered_from;
+        long end   = __cccc_tls_ordered_base + e;
+        if (end > start) {
+            __cccc_omp_ordered_wait(t);
+            pthread_mutex_lock(&t->om);
+            t->ordered = end;
+            pthread_cond_broadcast(&t->oc);
+            pthread_mutex_unlock(&t->om);
+        }
+    }
+    __cccc_tls_ordered_base += n;
+    __cccc_tls_ordered_from = -1;
+}
+
 static void *__cccc_omp_cp_solo;
 
 void __cccc_omp_copyprivate_set(void *slots) {

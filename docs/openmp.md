@@ -35,7 +35,7 @@ spelling.
 | Synchronisation | No-ops | Real mutexes, barrier and atomics |
 | Races | Hidden | Real |
 | `schedule` | Ignored | Static; `dynamic`, `guided` and `auto` run as static |
-| `ordered` | Runs in order | Error |
+| `ordered` | Runs in order | Runs in iteration order[^3] |
 
 Native output carries its own runtime: a thread pool that starts on the first
 parallel region and is reused, a barrier, named critical sections and the
@@ -61,7 +61,7 @@ a team of one.
 | `taskwait`, `taskyield` | No effect |
 | `taskgroup` | Runs the block |
 | `threadprivate(x, ...)` | Gives each thread its own copy of a global or `static` variable; allowed at file scope and in a function |
-| `ordered` | VM only |
+| `ordered` | Runs the block in loop-iteration order; allowed inside a loop with the `ordered` clause, or in a function called from one |
 
 `target`, `teams` and `declare` are errors. Other directives at file scope are
 errors.
@@ -89,6 +89,7 @@ or `v = x op= e`.
 | `num_threads(n)`, `if(c)` | VM: evaluated once, then ignored. Native: set the team size |
 | `if(c)`, `final(c)`, `priority(n)` on `task` | Evaluated once, then ignored |
 | `untied`, `mergeable`, `depend(...)` on `task` | Parsed and ignored |
+| `ordered` | On `for` and `parallel for`: `ordered` regions in the body run in iteration order. `ordered(n)` is an error under native |
 | `schedule(...)`, `proc_bind(...)` | Parsed and ignored |
 | `nowait` | Skips the barrier at the end of `for` and `single` (native) |
 
@@ -170,7 +171,9 @@ or another OpenMP compiler. Building the native output with
 ## Limitations
 
 - Native output uses pthreads, so Windows has no OpenMP.
-- `ordered` is rejected under native.
+- Doacross `ordered(n)` is rejected under native (#1747).
+- Ordered loops run close to serial (#1746).
+- `continue` in the body of a native `for` loop is rejected (#1748).
 - `schedule(dynamic|guided)` run as static.
 - Native loops need an integer loop variable, and `atomic capture` needs a
   single statement.
@@ -186,3 +189,7 @@ or another OpenMP compiler. Building the native output with
     the output only when a directive or an `omp_*` function is used.
 [^2]: `CCCC_NATIVE_CC` can point at a wrapper script that adds
     `-fsanitize=thread` to the host compiler command.
+[^3]: Each thread waits for the iterations before its chunk before its first
+    `ordered` region and hands over when its chunk ends. `ordered` outside a
+    loop with the `ordered` clause is a compile error unless it is in a
+    function of its own.

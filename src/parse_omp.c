@@ -516,8 +516,6 @@ static Token *directive_name(VirtualMachine *vm, OmpDirective *d, Token *tok) {
         d->kind = OMP_TASKYIELD;
         tok     = tok->next;
     } else if (is_word(tok, "ordered")) {
-        if (vm->compiler.omp_threaded)
-            error_tok(vm, tok, "'ordered' is not supported with -c=native");
         d->kind = OMP_ORDERED;
         tok     = tok->next;
     } else {
@@ -639,12 +637,15 @@ static Token *clauses(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
             if (d->collapse < 1)
                 error_tok(vm, name, "collapse argument must be positive");
         } else if (is_word(name, "ordered") && (allowed & CL_LOOP)) {
-            // TODO: native ordered needs an iteration ticket lock (#1401).
-            if (vm->compiler.omp_threaded)
-                error_tok(vm, name,
-                          "'ordered' is not supported with -c=native");
-            if (equal(tok, "("))
+            if (equal(tok, "(")) {
+                if (vm->compiler.omp_threaded)
+                    error_tok(vm, name,
+                              "doacross 'ordered(n)' is not supported with "
+                              "-c=native");
                 tok = skip_balanced_parens(vm, tok);
+            } else {
+                d->ordered = true;
+            }
         } else if (is_word(name, "nowait") && (allowed & CL_NOWAIT)) {
             d->nowait = true;
         } else if ((is_word(name, "simdlen") || is_word(name, "safelen")) &&
@@ -1058,6 +1059,10 @@ static void runtime_decls(VirtualMachine *vm) {
          "void __cccc_omp_critical_enter(const char *);"},
         {"__cccc_omp_critical_exit",
          "void __cccc_omp_critical_exit(const char *);"},
+        {"__cccc_omp_ordered_start", "void __cccc_omp_ordered_start(long);"},
+        {"__cccc_omp_ordered_begin", "void __cccc_omp_ordered_begin(void);"},
+        {"__cccc_omp_ordered_finish",
+         "void __cccc_omp_ordered_finish(long, long);"},
     };
     for (size_t i = 0; i < sizeof(rt) / sizeof(*rt); i++)
         declare_runtime_fn(vm, rt[i].name, rt[i].proto);
@@ -1341,6 +1346,9 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                       "__cccc_omp_static_range(__omp%d_n, &__omp%d_b, "
                       "&__omp%d_e);",
                       id, id, id));
+    if (d->ordered)
+        body_push(vm, body,
+                  snippet(vm, "__cccc_omp_ordered_start(__omp%d_b);", id));
 
     // Loop variables: declared by the header, or private copies of existing
     // ones.
@@ -1353,6 +1361,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                 snippet(vm, "typeof_unqual(%s) %s;", lv[j].name, lv[j].name));
     }
 
+    // TODO: a `continue` in the body is a stray continue here (#1748).
     Node *inner = stmt(vm, &tok, tok);
     (void)for_tok;
 
@@ -1393,6 +1402,11 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     iter_block->body = head.next;
     for_node->then   = iter_block;
     body_push(vm, body, loop);
+    if (d->ordered)
+        body_push(vm, body,
+                  snippet(vm,
+                          "__cccc_omp_ordered_finish(__omp%d_e, __omp%d_n);",
+                          id, id));
 
     // lastprivate: the thread that ran the sequentially last iteration copies
     // its values back; a loop variable ends one step past the last iteration.
@@ -1906,6 +1920,11 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
             body_push(vm, body, threaded_atomic(vm, d, rest, tok));
             return block;
 
+        case OMP_ORDERED:
+            body_push(vm, body, snippet(vm, "__cccc_omp_ordered_begin();"));
+            body_push(vm, body, stmt(vm, rest, tok));
+            return block;
+
         case OMP_SIMD: {
             capture_pointers(vm, d, body, id);
             shadow_decls(vm, d, body, id);
@@ -1952,6 +1971,15 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     tok          = clauses(vm, d, &body, tok);
     tok          = skip(vm, tok, ")");
 
+    OmpDirective *enclosing = vm->compiler.omp_enclosing;
+    if (d->kind == OMP_ORDERED && enclosing &&
+        !((enclosing->kind == OMP_FOR || enclosing->kind == OMP_PARALLEL_FOR) &&
+          enclosing->ordered))
+        error_tok(vm, start,
+                  "'ordered' region must be closely nested inside a loop "
+                  "region with an 'ordered' clause");
+    vm->compiler.omp_enclosing = d;
+
     OmpFrame frame  = {};
     bool     framed = d->default_none || d->kind == OMP_TASK;
     if (framed)
@@ -1965,6 +1993,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
         runtime_decls(vm);
         threaded_directive(vm, d, block, &body, rest, tok, start);
         vm->compiler.omp_parallel = saved_parallel;
+        vm->compiler.omp_enclosing = enclosing;
         if (framed)
             frame_pop(vm, &frame);
         leave_scope(vm);
@@ -1974,6 +2003,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (d->kind == OMP_BARRIER || d->kind == OMP_TASKWAIT ||
         d->kind == OMP_TASKYIELD) {
+        vm->compiler.omp_enclosing = enclosing;
         leave_scope(vm);
         *rest = tok;
         return block;
@@ -1988,6 +2018,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
             body_push(vm, &body, secs[j]);
         merges(vm, d, &body, id);
         vm->compiler.omp_parallel = saved_parallel;
+        vm->compiler.omp_enclosing = enclosing;
         if (framed)
             frame_pop(vm, &frame);
         leave_scope(vm);
@@ -2016,6 +2047,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     merges(vm, d, &body, id);
 
     vm->compiler.omp_parallel = saved_parallel;
+    vm->compiler.omp_enclosing = enclosing;
     if (framed)
         frame_pop(vm, &frame);
     leave_scope(vm);

@@ -447,6 +447,149 @@ int test_omp_first_and_lastprivate_race(void) {
     return bad == 0 ? 42 : 1;
 }
 
+static void spin(int n) {
+    volatile int sink = 0;
+    for (int k = 0; k < n * 2000; k++)
+        sink += k;
+}
+
+static int is_sequence(const int *a, int n) {
+    for (int i = 0; i < n; i++)
+        if (a[i] != i)
+            return 0;
+    return 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_loop(void) {
+    enum { N = 64 };
+    int out[N], pos = 0;
+#pragma omp parallel for ordered num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    return pos == N && is_sequence(out, N) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_skipped_iterations(void) {
+    enum { N = 90 };
+    int out[N], pos = 0;
+#pragma omp parallel for ordered num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+        if (i % 3 == 0) {
+#pragma omp ordered
+            out[pos++] = i / 3;
+        }
+    }
+    return pos == N / 3 && is_sequence(out, N / 3) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_fewer_iterations_than_threads(void) {
+    int out[4], pos = 0;
+#pragma omp parallel for ordered num_threads(4)
+    for (int i = 0; i < 2; i++) {
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    return pos == 2 && is_sequence(out, 2) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_back_to_back_loops(void) {
+    enum { N = 40 };
+    int a[N], b[N], pa = 0, pb = 0;
+#pragma omp parallel num_threads(4)
+    {
+#pragma omp for ordered nowait
+        for (int i = 0; i < N; i++) {
+            spin(N - i);
+#pragma omp ordered
+            a[pa++] = i;
+        }
+#pragma omp for ordered
+        for (int i = 0; i < N; i++) {
+            spin(N - i);
+#pragma omp ordered
+            b[pb++] = i;
+        }
+    }
+    return pa == N && pb == N && is_sequence(a, N) && is_sequence(b, N) ? 42
+                                                                       : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_collapse(void) {
+    enum { R = 6, C = 7 };
+    int out[R * C], pos = 0;
+#pragma omp parallel for ordered collapse(2) num_threads(4)
+    for (int i = 0; i < R; i++)
+        for (int j = 0; j < C; j++) {
+            spin(R * C - (i * C + j));
+#pragma omp ordered
+            out[pos++] = i * C + j;
+        }
+    return pos == R * C && is_sequence(out, R * C) ? 42 : 1;
+}
+
+static int  orphan_out[64], orphan_pos;
+static void orphan_record(int i) {
+#pragma omp ordered
+    orphan_out[orphan_pos++] = i;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_orphaned(void) {
+    orphan_pos = 0;
+#pragma omp parallel for ordered num_threads(4)
+    for (int i = 0; i < 64; i++) {
+        spin(64 - i);
+        orphan_record(i);
+    }
+    return orphan_pos == 64 && is_sequence(orphan_out, 64) ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_nested_team_of_one(void) {
+    enum { N = 32 };
+    int out[N], pos = 0, inner = 0;
+#pragma omp parallel for ordered num_threads(4)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp parallel num_threads(3)
+        {
+#pragma omp critical(inner_count)
+            inner++;
+        }
+#pragma omp ordered
+        out[pos++] = i;
+    }
+    return pos == N && is_sequence(out, N) && inner >= N ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_ordered_with_reduction_and_lastprivate(void) {
+    enum { N = 48 };
+    int  out[N], pos = 0, last = -1;
+    long sum = 0;
+#pragma omp parallel for ordered num_threads(4) reduction(+ : sum) lastprivate(last)
+    for (int i = 0; i < N; i++) {
+        spin(N - i);
+#pragma omp ordered
+        out[pos++] = i;
+        sum += i;
+        last = i;
+    }
+    return pos == N && is_sequence(out, N) && sum == N * (N - 1) / 2 &&
+                   last == N - 1
+               ? 42
+               : 1;
+}
+
 [[cccc::comptime]]
 void gen_quote_omp_sum(void) {
     Obj *fn = MakeFunction("quote_omp_sum", GetType("int"));

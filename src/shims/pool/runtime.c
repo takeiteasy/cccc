@@ -48,6 +48,9 @@ struct __cccc_team {
     __cccc_barrier_t bar;
     int              single_done;
     void            *copyprivate;
+    long             ordered; // iterations whose ordered regions have finished
+    pthread_mutex_t  om;
+    pthread_cond_t   oc;
     void (*fn)(void *);
     void *env;
 };
@@ -55,6 +58,8 @@ struct __cccc_team {
 static __thread struct __cccc_team *__cccc_tls_team;
 static __thread int                 __cccc_tls_tid;
 static __thread int                 __cccc_tls_single;
+static __thread long                __cccc_tls_ordered_base;
+static __thread long                __cccc_tls_ordered_from = -1;
 
 static struct {
     pthread_mutex_t     m;
@@ -86,13 +91,19 @@ static void __cccc_team_run(struct __cccc_team *t, int tid) {
     struct __cccc_team *saved_team   = __cccc_tls_team;
     int                 saved_tid    = __cccc_tls_tid;
     int                 saved_single = __cccc_tls_single;
+    long                saved_obase  = __cccc_tls_ordered_base;
+    long                saved_ofrom  = __cccc_tls_ordered_from;
     __cccc_tls_team                  = t;
     __cccc_tls_tid                   = tid;
     __cccc_tls_single                = 0;
+    __cccc_tls_ordered_base          = 0;
+    __cccc_tls_ordered_from          = -1;
     t->fn(t->env);
     __cccc_tls_team   = saved_team;
     __cccc_tls_tid    = saved_tid;
     __cccc_tls_single = saved_single;
+    __cccc_tls_ordered_base = saved_obase;
+    __cccc_tls_ordered_from = saved_ofrom;
 }
 
 static void *__cccc_pool_worker(void *arg) {
@@ -125,6 +136,9 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
     t.n           = n;
     t.single_done = 0;
     t.copyprivate = 0;
+    t.ordered     = 0;
+    pthread_mutex_init(&t.om, 0);
+    pthread_cond_init(&t.oc, 0);
     t.fn          = fn;
     t.env         = env;
     __cccc_barrier_init(&t.bar, n);
@@ -151,4 +165,6 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
         pthread_mutex_unlock(&__cccc_pool.m);
     }
     __cccc_barrier_destroy(&t.bar);
+    pthread_mutex_destroy(&t.om);
+    pthread_cond_destroy(&t.oc);
 }
