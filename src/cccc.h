@@ -2042,6 +2042,8 @@ typedef struct OmpTaskCopy {
     struct OmpTaskCopy *next;
     char               *name;
     int                 off;
+    bool vla;  // `off` is a {count, data offset} slot; the data follows
+    bool copy; // the data is copied in (firstprivate)
 } OmpTaskCopy;
 
 // One address a task depends on.

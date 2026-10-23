@@ -187,36 +187,62 @@ static bool task_privatises(VirtualMachine *vm, OmpFrame *f, Token *tok,
 }
 
 // Declares the task's own variable `name`. A copy is read out of the payload
-// the spawning code fills in; a private variable is only declared.
+// the spawning code fills in; a private variable is only declared. A
+// variable-length array's element count is also read from the payload, so the
+// task never reads the extent from the spawning function.
 static void task_copy_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *b,
                            Token *tok, const char *name, Type *ty, bool copy) {
-    // TODO: a variable-length array declared in the outlined function is
-    // emitted without its length (#1766).
-    if (ty->kind == TY_VLA)
+    bool vla = ty->kind == TY_VLA;
+    // TODO: runtime inner extents would also have to travel in the payload
+    // (#1767).
+    if (vla && type_contains_vla(ty->base))
         error_tok(vm, tok,
-                  "a task cannot have its own copy of the variable-length "
-                  "array '%s'; use shared(%s)",
+                  "a task cannot have its own copy of the multi-dimensional "
+                  "variable-length array '%s'; use shared(%s)",
                   name, name);
     int id = d->omp_id;
-    if (copy && !d->task_data_decl) {
+    if ((copy || vla) && !d->task_data_decl) {
         body_push(vm, b,
                   snippet(vm,
                           "char *__omp%d_dt = (char *)__cccc_omp_task_data();",
                           id));
         d->task_data_decl = true;
     }
-    body_push(vm, b, snippet(vm, "typeof_unqual(%s) %s;", name, name));
-    if (!copy)
+    if (!copy && !vla) {
+        body_push(vm, b, snippet(vm, "typeof_unqual(%s) %s;", name, name));
         return;
+    }
     OmpTaskCopy *c = arena_alloc(&vm->compiler.parser_arena, sizeof(*c));
     memset(c, 0, sizeof(*c));
     c->name             = arena_strdup(vm, name);
     c->off              = d->task_size;
-    d->task_size       += ty->size;
+    c->vla               = vla;
+    c->copy              = copy;
+    d->task_size        += vla ? 2 * (int)sizeof(unsigned long) : ty->size;
     OmpTaskCopy **tail  = &d->copies;
     while (*tail)
         tail = &(*tail)->next;
     *tail = c;
+    if (vla) {
+        body_push(vm, b,
+                  snippet(vm, "unsigned long __omp%d_%s_vs[2];", id, name));
+        body_push(vm, b,
+                  snippet(vm,
+                          "__builtin_memcpy(__omp%d_%s_vs, __omp%d_dt + %d, "
+                          "sizeof(__omp%d_%s_vs));",
+                          id, name, id, c->off, id, name));
+        body_push(vm, b,
+                  snippet(vm, "typeof_unqual(%s[0]) %s[__omp%d_%s_vs[0]];",
+                          name, name, id, name));
+        if (copy)
+            body_push(vm, b,
+                      snippet(vm,
+                              "__builtin_memcpy(%s, __omp%d_dt + "
+                              "__omp%d_%s_vs[1], sizeof(%s));",
+                              name, id, id, name, name));
+        return;
+    }
+    body_push(vm, b, snippet(vm, "typeof_unqual(%s) %s;", name, name));
     body_push(vm, b,
               snippet(vm, "__builtin_memcpy(&%s, __omp%d_dt + %d, sizeof(%s));",
                       name, id, c->off, name));
@@ -2934,15 +2960,44 @@ static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     }
 
     if (d->task_size) {
-        body_push(vm, body,
-                  snippet(vm, "char *__omp%d_d = __cccc_omp_task_alloc(%d);",
-                          id, d->task_size));
+        // Variable-length array data follows the fixed-size area, in order.
+        char *total = arena_strdup(vm, "");
         for (OmpTaskCopy *c = d->copies; c; c = c->next)
+            if (c->vla && c->copy)
+                total = arena_format(vm, "%s + sizeof(%s)", total, c->name);
+        body_push(vm, body,
+                  snippet(vm, "char *__omp%d_d = __cccc_omp_task_alloc(%d%s);",
+                          id, d->task_size, total));
+        char *extra = arena_strdup(vm, "");
+        for (OmpTaskCopy *c = d->copies; c; c = c->next) {
+            if (!c->vla) {
+                body_push(vm, body,
+                          snippet(vm,
+                                  "__builtin_memcpy(__omp%d_d + %d, &%s, "
+                                  "sizeof(%s));",
+                                  id, c->off, c->name, c->name));
+                continue;
+            }
             body_push(vm, body,
                       snippet(vm,
-                              "__builtin_memcpy(__omp%d_d + %d, &%s, "
-                              "sizeof(%s));",
-                              id, c->off, c->name, c->name));
+                              "unsigned long __omp%d_%s_vs[2] = "
+                              "{sizeof(%s) / sizeof(%s[0]), %d%s};",
+                              id, c->name, c->name, c->name, d->task_size,
+                              extra));
+            body_push(vm, body,
+                      snippet(vm,
+                              "__builtin_memcpy(__omp%d_d + %d, "
+                              "__omp%d_%s_vs, sizeof(__omp%d_%s_vs));",
+                              id, c->off, id, c->name, id, c->name));
+            if (!c->copy)
+                continue;
+            body_push(vm, body,
+                      snippet(vm,
+                              "__builtin_memcpy(__omp%d_d + __omp%d_%s_vs[1], "
+                              "%s, sizeof(%s));",
+                              id, id, c->name, c->name, c->name));
+            extra = arena_format(vm, "%s + sizeof(%s)", extra, c->name);
+        }
     }
     body_push(
         vm, body,

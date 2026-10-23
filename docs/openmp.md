@@ -287,7 +287,7 @@ or another OpenMP compiler. Building the native output with
 - Native output uses pthreads, so Windows has no OpenMP.
 - An `ordered` loop without a `schedule` clause runs close to serial; `schedule(static, 1)` or `schedule(dynamic)` lets the work outside the `ordered` region overlap.
 - `#pragma omp` inside a `#pragma cccc emit` block is rejected.
-- A task cannot have its own copy of a variable-length array under `-c=native`; name it in `shared` (#1766).
+- A task cannot have its own copy of a multi-dimensional variable-length array (`int v[n][m]`); name it in `shared` (#1767).
 - A thread waiting at `taskwait` or the end of a `taskgroup` runs only tasks created under its current task and does not steal; other threads run the rest.
 
 [^1]: Each parallel region becomes a nested function. The enclosing locals it

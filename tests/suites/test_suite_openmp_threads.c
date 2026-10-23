@@ -1769,4 +1769,67 @@ int test_omp_task_priority_among_many(void) {
     return total == 125250 ? 42 : 1;
 }
 
+// A task's own copy of a variable-length array is sized when the task is
+// created, whatever the spawning code does afterwards.
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_copies(void) {
+    int n = 4, ok = 0, priv_n = 0, two = 0;
+    int v[n];
+    for (int i = 0; i < n; i++)
+        v[i] = i + 1;
+#pragma omp task firstprivate(v) shared(ok)
+    {
+        v[0] = 100;
+        ok   = v[3] == 4 && sizeof(v) == 4 * sizeof(int);
+    }
+    v[3] = 99;
+#pragma omp task private(v) shared(priv_n)
+    {
+        for (int i = 0; i < 4; i++)
+            v[i] = i;
+        priv_n = (int)(sizeof(v) / sizeof(int)) + v[3];
+    }
+    int  m = 3, s = 5;
+    long w[m];
+    for (int i = 0; i < m; i++)
+        w[i] = 10 * (i + 1);
+#pragma omp task firstprivate(v, s, w) shared(two)
+    two = v[3] == 99 && s == 5 && w[2] == 30 && sizeof(w) == 3 * sizeof(long);
+#pragma omp taskwait
+    return ok && v[0] == 1 && priv_n == 7 && two ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_copy_in_spawn_loop(void) {
+    int total = 0;
+    for (int n = 1; n <= 6; n++) {
+        int v[n];
+        for (int i = 0; i < n; i++)
+            v[i] = n;
+#pragma omp task firstprivate(v) shared(total)
+        {
+            int sum = 0;
+            for (int i = 0; i < (int)(sizeof(v) / sizeof(int)); i++)
+                sum += v[i];
+#pragma omp atomic
+            total += sum;
+        }
+    }
+#pragma omp taskwait
+    return total == 91 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_default_firstprivate(void) {
+    int n = 5, got = 0;
+    int v[n];
+    for (int i = 0; i < n; i++)
+        v[i] = i;
+#pragma omp task default(firstprivate) shared(got)
+    got  = v[4] + (int)(sizeof(v) / sizeof(int)) * 7 - 3;
+    v[4] = 0;
+#pragma omp taskwait
+    return got == 36 ? 42 : 1;
+}
+
 #pragma cccc suite end

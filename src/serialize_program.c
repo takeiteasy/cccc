@@ -2882,6 +2882,16 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
     }
 }
 
+// A nested function's local declared with an enclosing function's VLA type
+// (typeof or a typedef) spells that type's length temporary in its declarator,
+// which no AST node reads, so capture it as an upvar here.
+static void collect_vla_extent_refs(VirtualMachine *vm, SerializeContext *ctx,
+                                    Obj *fn, Type *ty) {
+    for (; ty && (ty->kind == TY_VLA || ty->kind == TY_ARRAY); ty = ty->base)
+        if (ty->kind == TY_VLA)
+            collect_nested_refs(vm, ctx, fn, ty->vla_len);
+}
+
 // A static that stays at file scope although its type is declared inside a
 // function (another function refers to it, see
 // collect_deferred_local_type_statics()) needs that type promoted to file
@@ -2994,6 +3004,10 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
         // loop never runs, `owner` stays NULL, record_nested_upvar()
         // returns immediately) so this is safe to run unconditionally.
         collect_nested_refs(vm, ctx, obj, obj->body);
+        if (obj->is_nested && !obj->is_block)
+            for (Obj *var = obj->locals; var; var = var->next)
+                if (!var->is_param)
+                    collect_vla_extent_refs(vm, ctx, obj, var->ty);
     }
 
     for (int i = 0; i < ctx->nested_envs_len; i++)

@@ -658,4 +658,43 @@ int test_comma_constants_fold(void) {
     return 2;
 }
 
+// A nested function spells the enclosing function's VLA type.
+[[cccc::test(return = 42)]]
+int test_vla_type_in_nested_function(void) {
+    int n = 4;
+    int a[n];
+    a[3] = 30;
+    typedef int T[n];
+    int by_typeof(void) {
+        typeof_unqual(a) x;
+        x[3] = 6;
+        return x[3] + (int)(sizeof(x) / sizeof(int));
+    }
+    int by_typedef(void) {
+        T  x;
+        T *p = &a;
+        x[2] = 1;
+        return x[2] + (*p)[3] + (int)(sizeof(T) / sizeof(int)) - 31;
+    }
+    int in_loop(void) {
+        int sum = 0;
+        for (int i = 0; i < 3; i++) {
+            typeof_unqual(a) y;
+            y[0]  = i;
+            sum  += y[0];
+        }
+        return sum;
+    }
+    int outer(void) {
+        int deeper(void) {
+            T z;
+            z[1] = 2;
+            return z[1] + (int)(sizeof(z) / sizeof(int));
+        }
+        return deeper();
+    }
+    // 10 + 4 = 10, 1 + 30 + 4 - 31 = 4, 3, 2 + 4 = 6
+    return by_typeof() + by_typedef() + in_loop() + outer() == 23 ? 42 : 1;
+}
+
 #pragma cccc suite end
