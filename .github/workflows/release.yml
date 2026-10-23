@@ -24,6 +24,10 @@ on:
       tag:
         description: "Existing tag to build and publish (e.g. v0.1.0)"
         required: true
+      publish:
+        description: "Publish the release when every platform is green"
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -59,14 +63,29 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           submodules: true
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3
+        run: sudo apt-get update && sudo apt-get install -y clang make pkg-config libffi-dev python3 gdb
       - name: Build ./cccc
         run: make
       - name: Build release
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
-        run: ./cccc --build build.c --build-target=test_release --build-jobs=4
+        timeout-minutes: 20
+        # After 10 minutes, print every thread's stack of the cccc processes
+        # still running, so a hung suite shows where it is stuck.
+        run: |
+          (
+            sleep 600
+            echo "::group::hang watchdog"
+            for p in $(pgrep -f 'cccc-native|cccc-release'); do
+              echo "== pid $p: $(tr '\0' ' ' < /proc/$p/cmdline | cut -c1-200)"
+              sudo gdb -p "$p" -batch -ex 'thread apply all bt' 2>&1 | tail -80
+            done
+            echo "::endgroup::"
+          ) &
+          trap 'pkill -P $! 2>/dev/null; kill $! 2>/dev/null' EXIT
+          ./cccc --build build.c --build-target=test_release --build-jobs=4
       - name: Test loose tests
+        timeout-minutes: 30
         run: ./cccc --build build.c --build-target=test_extra --build-jobs=4 --build-keep-going
       - name: Package
         run: |
@@ -155,6 +174,7 @@ jobs:
 
   publish:
     needs: [linux-amd64, linux-aarch64, macos-arm64]
+    if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-24.04
     # Repo default workflow token permission is read-only; softprops/
     # action-gh-release needs contents:write to create the release.
