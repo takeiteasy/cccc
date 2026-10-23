@@ -782,6 +782,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             bool saved_is_const    = ty2->is_const;
             bool saved_is_volatile = ty2->is_volatile;
             bool saved_is_restrict = ty2->is_restrict;
+            bool saved_is_atomic   = ty2->is_atomic;
             // #487: a checked array parameter (`void f(int a _Checked[10])`)
             // carries its checked_kind/checked_bounds_form/checked_array_
             // extent across this same adjustment, same as static_min/const/
@@ -801,6 +802,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             ty2->is_const                        = saved_is_const;
             ty2->is_volatile                     = saved_is_volatile;
             ty2->is_restrict                     = saved_is_restrict;
+            ty2->is_atomic                       = saved_is_atomic;
             ty2->checked_kind                    = saved_checked_kind;
             ty2->checked_bounds_form             = saved_bounds_form;
             ty2->checked_array_extent            = saved_array_extent;
@@ -867,6 +869,7 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
     bool saw_const    = false;
     bool saw_volatile = false;
     bool saw_restrict = false;
+    bool saw_atomic   = false;
     while (equal(tok, "static") || equal(tok, "restrict") ||
            equal(tok, "const") || equal(tok, "volatile") ||
            equal(tok, "_Atomic")) {
@@ -878,6 +881,8 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
             saw_volatile = true;
         if (equal(tok, "restrict"))
             saw_restrict = true;
+        if (equal(tok, "_Atomic"))
+            saw_atomic = true;
         tok = tok->next;
     }
 
@@ -890,6 +895,8 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
             arr->is_volatile = true;
         if (saw_restrict)
             arr->is_restrict = true;
+        if (saw_atomic)
+            arr->is_atomic = true;
         return arr;
     }
 
@@ -926,6 +933,8 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
         arr->is_volatile = true;
     if (saw_restrict)
         arr->is_restrict = true;
+    if (saw_atomic)
+        arr->is_atomic = true;
     return arr;
 }
 
@@ -961,7 +970,7 @@ Token *asm_label(VirtualMachine *vm, Token *tok, char **label) {
     return skip(vm, tok->next, ")");
 }
 
-// pointers = ("*" ("const" | "volatile" | "restrict" |
+// pointers = ("*" ("const" | "volatile" | "restrict" | "_Atomic" |
 //                   checked-pointer-attribute)*)*
 // A GNU cleanup after a `*` is the declared variable's, handed back through
 // `cleanup_fn` (NULL for a type-name, where it warns instead).
@@ -1029,12 +1038,17 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
         // Handle const/volatile qualification on the pointer itself
         // Example: "int *const p" makes the pointer const, not the pointee
         // Example: "int *volatile p" makes the pointer volatile
+        // `_Atomic (` is the type-specifier form, never a qualifier.
         while (equal(tok, "const") || equal(tok, "volatile") ||
                equal(tok, "restrict") || equal(tok, "__restrict") ||
-               equal(tok, "__restrict__")) {
+               equal(tok, "__restrict__") ||
+               (equal(tok, "_Atomic") && !equal(tok->next, "("))) {
             if (equal(tok, "const")) {
                 ty           = copy_type(vm, ty);
                 ty->is_const = true;
+            } else if (equal(tok, "_Atomic")) {
+                ty            = copy_type(vm, ty);
+                ty->is_atomic = true;
             } else if (equal(tok, "volatile")) {
                 ty              = copy_type(vm, ty);
                 ty->is_volatile = true;

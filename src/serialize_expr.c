@@ -713,10 +713,17 @@ bool atomic_serializable_pointee(Node *addr) {
 // one a host compiler rejects (_Bool, float, _BitInt, 16 bytes, and and/or/xor
 // on a pointer): those keep the CAS loop. Fills the address, value and the
 // byte multiplier a scaled pointer op needs.
-static const char *atomic_fetch_builtin(Node *n, Node **obj, Node **val,
-                                        long long *scale) {
+static const char *atomic_fetch_builtin(VirtualMachine *vm, Node *n, Node **obj,
+                                        Node **val, long long *scale) {
     if (!n->atomic_fetch_op || !n->body || !n->body->next)
         return NULL;
+    // An `_Atomic` ntarray element's update keeps the loop: its compare-
+    // exchange carries the terminator check.
+    for (Node *s = n->body; s; s = s->next)
+        if (s->kind == ND_DO && s->cond && s->cond->lhs &&
+            s->cond->lhs->checked_nt_terminator &&
+            s->cond->lhs->checked_bounds_hi && serialize_lowers_checks(vm))
+            return NULL;
     *obj = n->body->lhs->rhs;
     *val = n->body->next->lhs->rhs;
     if (!(*obj)->ty || (*obj)->ty->kind != TY_PTR || !(*obj)->ty->base)
@@ -2967,7 +2974,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             Node       *fobj, *fval;
             long long   scale;
             const char *fetch =
-                atomic_fetch_builtin(node, &fobj, &fval, &scale);
+                atomic_fetch_builtin(vm, node, &fobj, &fval, &scale);
             if (fetch) {
                 fprintf(f, "%s(", fetch);
                 serialize_atomic_addr(f, vm, ctx, fobj);
@@ -3664,7 +3671,10 @@ void serialize_discard_expr(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             return;
         }
     }
-    if (node && node->kind == ND_STMT_EXPR && node->is_atomic_rmw) {
+    Node     *fetch_obj, *fetch_val;
+    long long fetch_scale;
+    if (node && node->kind == ND_STMT_EXPR && node->is_atomic_rmw &&
+        !atomic_fetch_builtin(vm, node, &fetch_obj, &fetch_val, &fetch_scale)) {
         // The last two statements only copy out and read back the result.
         fprintf(f, "({\n");
         for (Node *s = node->body; s && s->next && s->next->next; s = s->next)

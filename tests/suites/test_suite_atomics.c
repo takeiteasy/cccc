@@ -452,4 +452,68 @@ int test_atomic_compare_exchange_explicit(void) {
     return 42;
 }
 
+// An _Atomic qualifier after '*' qualifies the pointer.
+[[cccc::test(return = 42)]]
+int test_atomic_pointer_qualifier(void) {
+    int arr[4]           = {0};
+    int *_Atomic p       = arr;
+    int *const _Atomic q = arr;
+    int *_Atomic *pp     = &p;
+    if (!__builtin_types_compatible_p(__typeof__(p), _Atomic(int *)))
+        return 1;
+    if (sizeof(int *_Atomic) != sizeof(int *))
+        return 2;
+    p += 2;
+    p++;
+    if (p != arr + 3 || *pp != p || q != arr)
+        return 3;
+    return 42;
+}
+
+static int atomic_param_qualifier(int a[_Atomic 4]) {
+    return __builtin_types_compatible_p(__typeof__(a), int *_Atomic);
+}
+
+[[cccc::test(return = 42)]]
+int test_atomic_array_param_qualifier(void) {
+    int arr[4] = {0};
+    return atomic_param_qualifier(arr) ? 42 : 1;
+}
+
+struct atomic_member {
+    _Atomic int c;
+};
+
+// A member of an _Atomic type updates through the atomic read-modify-write.
+[[cccc::test(return = 42)]]
+int test_atomic_member_compound_assign(void) {
+    struct atomic_member s  = {0};
+    s.c                    += 40;
+    s.c++;
+    s.c |= 3;
+    return s.c == 43 ? 42 : s.c;
+}
+
+// Compound assignment and ++/-- on an _Atomic scalar.
+[[cccc::test(return = 42)]]
+int test_atomic_compound_ops(void) {
+    _Atomic int  x  = 5;
+    _Atomic char ch = 120;
+    int          arr[4];
+    int *_Atomic p  = arr;
+    x              -= 1;
+    x              &= 6;
+    x              |= 8;
+    x              ^= 1;
+    ch             += 10;
+    p              += 2;
+    p++;
+    x       *= 3;
+    int old  = x++;
+    int nw   = ++x;
+    x       += 1.5;
+    return x == 42 && ch == -126 && p == arr + 3 && old == 39 && nw == 41 ? 42
+                                                                          : 1;
+}
+
 #pragma cccc suite end

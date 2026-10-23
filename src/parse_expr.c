@@ -435,35 +435,8 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         return err_node;
     }
 
-    // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
-    if (binary->lhs->kind == ND_MEMBER) {
-        Obj  *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->lhs->ty));
-
-        Node *member_addr = new_unary(vm, ND_ADDR, binary->lhs->lhs, tok);
-        member_addr->rmw_addr_feeds_temp = true;
-        Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
-                                 member_addr, tok);
-
-        Node *expr2 = new_unary(
-            vm, ND_MEMBER,
-            new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
-        expr2->member          = binary->lhs->member;
-        expr2->lhs->rmw_lvalue = binary->lhs->lhs;
-
-        Node *expr3            = new_unary(
-            vm, ND_MEMBER,
-            new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
-        expr3->member          = binary->lhs->member;
-        expr3->lhs->rmw_lvalue = binary->lhs->lhs;
-
-        Node *expr4   = new_binary(
-            vm, ND_ASSIGN, expr2,
-            new_binary(vm, binary->kind, expr3, binary->rhs, tok), tok);
-
-        return new_binary(vm, ND_COMMA, expr1, expr4, tok);
-    }
-
-    // If A is an atomic type, Convert `A op= B` to
+    // If A is an atomic type (a member too: an atomic bit-field is invalid C),
+    // convert `A op= B` to
     //
     // ({
     //   T1 *addr = &A; T2 val = (B); T1 old = *addr; T1 new;
@@ -578,7 +551,46 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         Node *node          = new_node(vm, ND_STMT_EXPR, tok);
         node->body          = head.next;
         node->is_atomic_rmw = true;
+        // + - & | ^ on an integer operand are one host fetch-and-op builtin
+        // under -c=native; the serializer still gates on the operand type.
+        // A pointer's operand is already scaled to bytes, as GCC's builtin
+        // takes it.
+        if ((binary->kind == ND_ADD || binary->kind == ND_SUB ||
+             binary->kind == ND_BITAND || binary->kind == ND_BITOR ||
+             binary->kind == ND_BITXOR) &&
+            is_integer(binary->rhs->ty) && binary->rhs->ty->kind != TY_BITINT) {
+            node->atomic_fetch_op  = binary->kind;
+            node->atomic_fetch_old = yield_old;
+        }
         return node;
+    }
+
+    // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
+    if (binary->lhs->kind == ND_MEMBER) {
+        Obj  *var = new_lvar(vm, "", 0, pointer_to(vm, binary->lhs->lhs->ty));
+
+        Node *member_addr = new_unary(vm, ND_ADDR, binary->lhs->lhs, tok);
+        member_addr->rmw_addr_feeds_temp = true;
+        Node *expr1 = new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
+                                 member_addr, tok);
+
+        Node *expr2 = new_unary(
+            vm, ND_MEMBER,
+            new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
+        expr2->member          = binary->lhs->member;
+        expr2->lhs->rmw_lvalue = binary->lhs->lhs;
+
+        Node *expr3            = new_unary(
+            vm, ND_MEMBER,
+            new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
+        expr3->member          = binary->lhs->member;
+        expr3->lhs->rmw_lvalue = binary->lhs->lhs;
+
+        Node *expr4            = new_binary(
+            vm, ND_ASSIGN, expr2,
+            new_binary(vm, binary->kind, expr3, binary->rhs, tok), tok);
+
+        return new_binary(vm, ND_COMMA, expr1, expr4, tok);
     }
 
     // Convert `A op= B` to ``tmp = &A, *tmp = *tmp op B`.
