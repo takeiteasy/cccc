@@ -14,6 +14,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
   later iteration, or on one the loop never runs; the sink is ignored.
 - Fixed: under `-c=native`, `continue` in the body of `for` and `parallel for`
   is accepted instead of being a stray `continue`.
+- Fixed: under `-c=native`, a doacross loop with `schedule(guided)` keeps one
+  counter per chunk instead of one per iteration, and a `sink` waiting on a
+  slow iteration sleeps instead of spinning.
 - Changed: `break` out of the loop of `for` and `parallel for` is an error in
   the VM and under `-c=native`.
 

@@ -234,5 +234,6 @@ or another OpenMP compiler. Building the native output with
 [^5]: Iterations are numbered across the whole nest. A thread posts the last
     iteration it finished in a counter for each chunk, since a chunk runs its
     iterations in order, and a `sink` waits until the counter of the chunk
-    holding its iteration has passed it. Waiting spins and yields. Under
-    `schedule(guided)` the counters are one per outer iteration.
+    holding its iteration has passed it. A waiting thread spins briefly, then
+    sleeps until a post wakes it. Every schedule keeps one counter per chunk,
+    so memory follows the number of chunks, not the trip count.

@@ -5,6 +5,8 @@
 
 #include <omp.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #pragma cccc suite begin "openmp_threads"
 
@@ -1004,6 +1006,12 @@ DOACROSS_PREFIX(
     "omp parallel for ordered(1) num_threads(4) schedule(dynamic, 2)")
 DOACROSS_PREFIX(test_omp_doacross_guided,
                 "omp parallel for ordered(1) num_threads(4) schedule(guided)")
+DOACROSS_PREFIX(
+    test_omp_doacross_guided_chunk3,
+    "omp parallel for ordered(1) num_threads(4) schedule(guided, 3)")
+DOACROSS_PREFIX(
+    test_omp_doacross_guided_chunk7,
+    "omp parallel for ordered(1) num_threads(4) schedule(guided, 7)")
 
 static void wavefront_reference(int r, int c, int *g) {
     for (int i = 0; i < r; i++)
@@ -1044,6 +1052,43 @@ int test_omp_doacross_collapse(void) {
 #pragma omp ordered depend(source)
         }
     return memcmp(g, ref, sizeof g) == 0 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_doacross_guided_collapse(void) {
+    enum { R = 13, C = 5 };
+    int g[R * C] = {0}, ref[R * C];
+    wavefront_reference(R, C, ref);
+#pragma omp parallel for collapse(2) ordered(2) num_threads(4)                 \
+    schedule(guided, 2)
+    for (int i = 0; i < R; i++)
+        for (int j = 0; j < C; j++) {
+            spin(R * C - (i * C + j));
+#pragma omp ordered depend(sink : i - 1, j) depend(sink : i, j - 1)
+            g[i * C + j] =
+                (i ? g[(i - 1) * C + j] : 0) + (j ? g[i * C + j - 1] : 0) + 1;
+#pragma omp ordered depend(source)
+        }
+    return memcmp(g, ref, sizeof g) == 0 ? 42 : 1;
+}
+
+// Threads waiting on a slow iteration sleep instead of spinning: spinning
+// would cost about 3 * 300 ms of CPU time.
+[[cccc::test(return = 42)]]
+int test_omp_doacross_wait_sleeps(void) {
+    enum { N = 8 };
+    long    a[N + 1] = {1};
+    clock_t t0       = clock();
+#pragma omp parallel for ordered(1) num_threads(4) schedule(static, 1)
+    for (int i = 1; i <= N; i++) {
+        if (i == 1)
+            usleep(300000);
+#pragma omp ordered depend(sink : i - 1)
+        a[i] = a[i - 1] + 1;
+#pragma omp ordered depend(source)
+    }
+    double cpu_ms = (double)(clock() - t0) * 1000.0 / CLOCKS_PER_SEC;
+    return a[N] == N + 1 && cpu_ms < 150.0 ? 42 : 1;
 }
 
 [[cccc::test(return = 42)]]

@@ -117,6 +117,11 @@ void __cccc_omp_loop_begin(int *kind, long *chunk) {
     *kind = k;
 }
 
+static long __cccc_omp_guided_size(long rem, long nt, long chunk) {
+    long g = (rem + nt - 1) / nt;
+    return g > chunk ? g : chunk;
+}
+
 int __cccc_omp_loop_next(int kind, long chunk, long n, long *st, long *b,
                          long *e) {
     struct __cccc_team *t = __cccc_tls_team;
@@ -152,12 +157,7 @@ int __cccc_omp_loop_next(int kind, long chunk, long n, long *st, long *b,
             return 0;
         if (cur < lo)
             __builtin_trap();
-        long size = chunk;
-        if (kind == 3) {
-            long g = (hi - cur + nt - 1) / nt;
-            if (g > size)
-                size = g;
-        }
+        long size = kind == 3 ? __cccc_omp_guided_size(hi - cur, nt, chunk) : chunk;
         long next = size > hi - cur ? hi : cur + size;
         if (__atomic_compare_exchange_n(&t->dyn_next, &cur, next, 0,
                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
@@ -222,14 +222,19 @@ void __cccc_omp_ordered_loop_end(long n) {
 // numbered in one flat space, `flat = outer * inner + position inside the
 // outer iteration`, where `outer` is the collapsed index the schedule hands
 // out. Chunks run their iterations in order on one thread, so one counter per
-// chunk is enough: it holds the last flat position posted plus one. Loop state
-// lives in a list on the team, found by a per-thread sequence number, and is
-// freed by the last thread to leave the loop.
+// chunk is enough: it holds the last flat position posted plus one. Guided
+// chunks are found by binary search in `start`, built from the same size rule
+// the claim path uses. A waiter spins briefly, then sleeps on `c`; a post wakes
+// sleepers only when `waiters` is non-zero. Loop state lives in a list on the
+// team, found by a per-thread sequence number, and is freed by the last thread
+// to leave the loop.
 struct __cccc_doacross {
     struct __cccc_doacross *next;
     long                    seq, n, inner, chunk, nent;
-    int                     kind, nt, left;
-    long                   *ent;
+    int                     kind, nt, left, waiters;
+    long                   *ent, *start;
+    pthread_mutex_t         m;
+    pthread_cond_t          c;
 };
 
 void __cccc_omp_doacross_init(long n, long inner, int kind, long chunk) {
@@ -253,12 +258,26 @@ void __cccc_omp_doacross_init(long n, long inner, int kind, long chunk) {
         d->chunk = chunk;
         d->nt    = t->n;
         d->left  = t->n;
-        // TODO: guided loops keep a counter per outer iteration, so memory
-        // grows with the trip count (#1751).
-        d->nent = kind == 3 ? n : (kind == 1 && !chunk) ? t->n : (n + chunk - 1) / chunk;
-        d->ent  = calloc(d->nent > 0 ? d->nent : 1, sizeof(long));
+        if (kind == 3) {
+            for (long cur = 0; cur < n; d->nent++)
+                cur += __cccc_omp_guided_size(n - cur, d->nt, chunk);
+        } else
+            d->nent = (kind == 1 && !chunk) ? t->n : (n + chunk - 1) / chunk;
+        d->ent = calloc(d->nent > 0 ? d->nent : 1, sizeof(long));
         if (!d->ent)
             __builtin_trap();
+        if (kind == 3) {
+            d->start = calloc(d->nent > 0 ? d->nent : 1, sizeof(long));
+            if (!d->start)
+                __builtin_trap();
+            long cur = 0;
+            for (long i = 0; cur < n; i++) {
+                d->start[i] = cur;
+                cur += __cccc_omp_guided_size(n - cur, d->nt, chunk);
+            }
+        }
+        pthread_mutex_init(&d->m, 0);
+        pthread_cond_init(&d->c, 0);
         d->next = t->da;
         t->da   = d;
     }
@@ -278,6 +297,9 @@ void __cccc_omp_doacross_fini(void) {
         while (*p != d)
             p = &(*p)->next;
         *p = d->next;
+        pthread_cond_destroy(&d->c);
+        pthread_mutex_destroy(&d->m);
+        free(d->start);
         free(d->ent);
         free(d);
     }
@@ -286,9 +308,17 @@ void __cccc_omp_doacross_fini(void) {
 
 static long *__cccc_omp_doacross_slot(struct __cccc_doacross *d, long flat) {
     long k = flat / d->inner, e;
-    if (d->kind == 3)
-        e = k;
-    else if (d->chunk)
+    if (d->kind == 3) {
+        long lo = 0, hi = d->nent - 1;
+        while (lo < hi) {
+            long mid = lo + (hi - lo + 1) / 2;
+            if (d->start[mid] <= k)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        e = lo;
+    } else if (d->chunk)
         e = k / d->chunk;
     else {
         long q = d->n / d->nt, r = d->n % d->nt, cut = r * (q + 1);
@@ -302,8 +332,14 @@ void __cccc_omp_doacross_post(long flat) {
     if (!d)
         return;
     long *slot = __cccc_omp_doacross_slot(d, flat);
-    if (*slot < flat + 1)
-        __atomic_store_n(slot, flat + 1, __ATOMIC_RELEASE);
+    if (*slot < flat + 1) {
+        __atomic_store_n(slot, flat + 1, __ATOMIC_SEQ_CST);
+        if (__atomic_load_n(&d->waiters, __ATOMIC_SEQ_CST)) {
+            pthread_mutex_lock(&d->m);
+            pthread_cond_broadcast(&d->c);
+            pthread_mutex_unlock(&d->m);
+        }
+    }
 }
 
 // Posts the end of outer iteration k, so a `continue` past the source (or a
@@ -314,15 +350,22 @@ void __cccc_omp_doacross_done(long k) {
         __cccc_omp_doacross_post((k + 1) * d->inner - 1);
 }
 
-// TODO: the wait spins, which wastes CPU while a thread is far behind
-// (#1752).
 void __cccc_omp_doacross_wait(long flat) {
     struct __cccc_doacross *d = __cccc_tls_da;
     if (!d)
         return;
     long *slot = __cccc_omp_doacross_slot(d, flat);
-    while (__atomic_load_n(slot, __ATOMIC_ACQUIRE) <= flat)
+    for (int i = 0; i < 64; i++) {
+        if (__atomic_load_n(slot, __ATOMIC_ACQUIRE) > flat)
+            return;
         sched_yield();
+    }
+    pthread_mutex_lock(&d->m);
+    __atomic_add_fetch(&d->waiters, 1, __ATOMIC_SEQ_CST);
+    while (__atomic_load_n(slot, __ATOMIC_SEQ_CST) <= flat)
+        pthread_cond_wait(&d->c, &d->m);
+    __atomic_sub_fetch(&d->waiters, 1, __ATOMIC_SEQ_CST);
+    pthread_mutex_unlock(&d->m);
 }
 
 static void *__cccc_omp_cp_solo;
