@@ -81,12 +81,13 @@ static __thread struct __cccc_task *__cccc_tls_task;
 static struct {
     pthread_mutex_t     m;
     pthread_cond_t      wake, done;
-    int                 started, pending;
+    int                 started, pending, n;
     unsigned            gen;
     struct __cccc_team *team;
 } __cccc_pool = {PTHREAD_MUTEX_INITIALIZER,
                  PTHREAD_COND_INITIALIZER,
                  PTHREAD_COND_INITIALIZER,
+                 0,
                  0,
                  0,
                  0,
@@ -144,8 +145,10 @@ static void *__cccc_pool_worker(void *arg) {
             pthread_cond_wait(&__cccc_pool.wake, &__cccc_pool.m);
         seen                  = __cccc_pool.gen;
         struct __cccc_team *t = __cccc_pool.team;
+        int                 n = __cccc_pool.n;
         pthread_mutex_unlock(&__cccc_pool.m);
-        if (id < t->n) {
+        // A worker outside the team is not waited for, so t may be gone.
+        if (id < n) {
             __cccc_team_run(t, id);
             pthread_mutex_lock(&__cccc_pool.m);
             if (--__cccc_pool.pending == 0)
@@ -190,6 +193,7 @@ void __cccc_pool_run(void (*fn)(void *), void *env, int n) {
             __cccc_pool.started++;
         }
         __cccc_pool.team    = &t;
+        __cccc_pool.n       = n;
         __cccc_pool.pending = n - 1;
         __cccc_pool.gen++;
         pthread_cond_broadcast(&__cccc_pool.wake);
