@@ -1832,4 +1832,72 @@ int test_omp_task_vla_default_firstprivate(void) {
     return got == 36 ? 42 : 1;
 }
 
+// Every extent of a multi-dimensional variable-length array travels with the
+// task, so its own copy keeps the full shape.
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_2d_copies(void) {
+    int n = 4, m = 3, ok = 0, priv = 0;
+    int v[n][m];
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < m; j++)
+            v[i][j] = i * m + j;
+#pragma omp task firstprivate(v) shared(ok)
+    {
+        v[3][2] += 100;
+        ok = v[3][2] == 111 && v[1][1] == 4 &&
+             sizeof(v) == (size_t)n * m * sizeof(int);
+    }
+    v[3][2] = -1;
+#pragma omp task private(v) shared(priv)
+    {
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 3; j++)
+                v[i][j] = 1;
+        priv = (int)(sizeof(v) / sizeof(int)) + v[3][2];
+    }
+#pragma omp taskwait
+    return ok && priv == 13 && v[3][2] == -1 ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_mixed_extents(void) {
+    int n = 4, m = 3, ok = 0;
+    long w[n][4][m];
+    int  x[n][m][2];
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < 4; k++)
+            for (int j = 0; j < m; j++)
+                w[i][k][j] = i + k + j;
+    x[3][2][1] = 7;
+#pragma omp task default(firstprivate) shared(ok)
+    ok = w[3][3][2] == 8 && sizeof(w) == (size_t)n * 4 * m * sizeof(long) &&
+         x[3][2][1] == 7 && sizeof(x) == (size_t)n * m * 2 * sizeof(int);
+    w[3][3][2] = 0;
+#pragma omp taskwait
+    return ok ? 42 : 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_omp_task_vla_2d_in_spawn_loop(void) {
+    int total = 0;
+    for (int n = 1; n <= 4; n++) {
+        int m = n + 1;
+        int v[n][m];
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < m; j++)
+                v[i][j] = n;
+#pragma omp task firstprivate(v) shared(total)
+        {
+            int sum = 0;
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < m; j++)
+                    sum += v[i][j];
+#pragma omp atomic
+            total += sum;
+        }
+    }
+#pragma omp taskwait
+    return total == 1 * 2 * 1 + 2 * 3 * 2 + 3 * 4 * 3 + 4 * 5 * 4 ? 42 : 1;
+}
+
 #pragma cccc suite end

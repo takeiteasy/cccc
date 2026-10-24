@@ -2049,7 +2049,8 @@ typedef struct OmpTaskCopy {
     struct OmpTaskCopy *next;
     char               *name;
     int                 off;
-    bool vla;  // `off` is a {count, data offset} slot; the data follows
+    int  dims; // variable-length array: `off` is an {extent per level,
+               // data offset} slot and the data follows; 0 otherwise
     bool copy; // the data is copied in (firstprivate)
 } OmpTaskCopy;
 

@@ -186,21 +186,35 @@ static bool task_privatises(VirtualMachine *vm, OmpFrame *f, Token *tok,
            found_inside(vm, tok, f->parallel);
 }
 
+// Array levels of `ty`, outermost first, down to the innermost variable-length
+// one. Every extent in that prefix travels in the task payload.
+static int vla_copy_dims(Type *ty) {
+    int dims = 0, depth = 0;
+    for (; ty->kind == TY_ARRAY || ty->kind == TY_VLA; ty = ty->base) {
+        depth++;
+        if (ty->kind == TY_VLA)
+            dims = depth;
+    }
+    return dims;
+}
+
+// `[0]` repeated `n` times: the element type after `n` levels of an array.
+static char *zero_subscripts(VirtualMachine *vm, int n) {
+    char *s = arena_strdup(vm, "");
+    for (int i = 0; i < n; i++)
+        s = arena_format(vm, "%s[0]", s);
+    return s;
+}
+
 // Declares the task's own variable `name`. A copy is read out of the payload
 // the spawning code fills in; a private variable is only declared. A
-// variable-length array's element count is also read from the payload, so the
-// task never reads the extent from the spawning function.
+// variable-length array's extents are also read from the payload, so the task
+// never reads them from the spawning function.
 static void task_copy_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *b,
-                           Token *tok, const char *name, Type *ty, bool copy) {
-    bool vla = ty->kind == TY_VLA;
-    // TODO: runtime inner extents would also have to travel in the payload
-    // (#1767).
-    if (vla && type_contains_vla(ty->base))
-        error_tok(vm, tok,
-                  "a task cannot have its own copy of the multi-dimensional "
-                  "variable-length array '%s'; use shared(%s)",
-                  name, name);
-    int id = d->omp_id;
+                           const char *name, Type *ty, bool copy) {
+    int  dims = vla_copy_dims(ty);
+    bool vla  = dims > 0;
+    int  id   = d->omp_id;
     if ((copy || vla) && !d->task_data_decl) {
         body_push(vm, b,
                   snippet(vm,
@@ -214,32 +228,37 @@ static void task_copy_decl(VirtualMachine *vm, OmpDirective *d, OmpBody *b,
     }
     OmpTaskCopy *c = arena_alloc(&vm->compiler.parser_arena, sizeof(*c));
     memset(c, 0, sizeof(*c));
-    c->name             = arena_strdup(vm, name);
-    c->off              = d->task_size;
-    c->vla               = vla;
-    c->copy              = copy;
-    d->task_size        += vla ? 2 * (int)sizeof(unsigned long) : ty->size;
-    OmpTaskCopy **tail  = &d->copies;
+    c->name = arena_strdup(vm, name);
+    c->off  = d->task_size;
+    c->dims = dims;
+    c->copy = copy;
+    d->task_size += vla ? (dims + 1) * (int)sizeof(unsigned long) : ty->size;
+    OmpTaskCopy **tail = &d->copies;
     while (*tail)
         tail = &(*tail)->next;
     *tail = c;
     if (vla) {
+        char *extents = arena_strdup(vm, "");
+        for (int i = 0; i < dims; i++)
+            extents =
+                arena_format(vm, "%s[__omp%d_%s_vs[%d]]", extents, id, name, i);
         body_push(vm, b,
-                  snippet(vm, "unsigned long __omp%d_%s_vs[2];", id, name));
+                  snippet(vm, "unsigned long __omp%d_%s_vs[%d];", id, name,
+                          dims + 1));
         body_push(vm, b,
                   snippet(vm,
                           "__builtin_memcpy(__omp%d_%s_vs, __omp%d_dt + %d, "
                           "sizeof(__omp%d_%s_vs));",
                           id, name, id, c->off, id, name));
         body_push(vm, b,
-                  snippet(vm, "typeof_unqual(%s[0]) %s[__omp%d_%s_vs[0]];",
-                          name, name, id, name));
+                  snippet(vm, "typeof_unqual(%s%s) %s%s;", name,
+                          zero_subscripts(vm, dims), name, extents));
         if (copy)
             body_push(vm, b,
                       snippet(vm,
                               "__builtin_memcpy(%s, __omp%d_dt + "
-                              "__omp%d_%s_vs[1], sizeof(%s));",
-                              name, id, id, name, name));
+                              "__omp%d_%s_vs[%d], sizeof(%s));",
+                              name, id, id, name, dims, name));
         return;
     }
     body_push(vm, b, snippet(vm, "typeof_unqual(%s) %s;", name, name));
@@ -269,7 +288,7 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
     vm->compiler.scope      = f->boundary;
     vm->compiler.omp_frames = NULL;
     if (f->dir->task_outlined) {
-        task_copy_decl(vm, f->dir, f->body, tok, name, var->ty,
+        task_copy_decl(vm, f->dir, f->body, name, var->ty,
                        !f->dir->default_private);
     } else {
         task_body_push(vm, f,
@@ -2928,7 +2947,7 @@ static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     frame_push(vm, &frame, d, &tbody);
     for (OmpClause *c = d->clauses; c; c = c->next)
         if (c->kind == OMP_CLAUSE_PRIVATE || c->kind == OMP_CLAUSE_FIRSTPRIVATE)
-            task_copy_decl(vm, d, &tbody, start, c->name, c->orig->ty,
+            task_copy_decl(vm, d, &tbody, c->name, c->orig->ty,
                            c->kind == OMP_CLAUSE_FIRSTPRIVATE);
     body_push(vm, &tbody, stmt(vm, rest, tok));
     frame_pop(vm, &frame);
@@ -2963,14 +2982,14 @@ static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
         // Variable-length array data follows the fixed-size area, in order.
         char *total = arena_strdup(vm, "");
         for (OmpTaskCopy *c = d->copies; c; c = c->next)
-            if (c->vla && c->copy)
+            if (c->dims && c->copy)
                 total = arena_format(vm, "%s + sizeof(%s)", total, c->name);
         body_push(vm, body,
                   snippet(vm, "char *__omp%d_d = __cccc_omp_task_alloc(%d%s);",
                           id, d->task_size, total));
         char *extra = arena_strdup(vm, "");
         for (OmpTaskCopy *c = d->copies; c; c = c->next) {
-            if (!c->vla) {
+            if (!c->dims) {
                 body_push(vm, body,
                           snippet(vm,
                                   "__builtin_memcpy(__omp%d_d + %d, &%s, "
@@ -2978,11 +2997,15 @@ static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                                   id, c->off, c->name, c->name));
                 continue;
             }
+            char *extents = arena_strdup(vm, "");
+            for (int i = 0; i < c->dims; i++)
+                extents = arena_format(
+                    vm, "%ssizeof(%s%s) / sizeof(%s%s), ", extents, c->name,
+                    zero_subscripts(vm, i), c->name, zero_subscripts(vm, i + 1));
             body_push(vm, body,
                       snippet(vm,
-                              "unsigned long __omp%d_%s_vs[2] = "
-                              "{sizeof(%s) / sizeof(%s[0]), %d%s};",
-                              id, c->name, c->name, c->name, d->task_size,
+                              "unsigned long __omp%d_%s_vs[%d] = {%s%d%s};",
+                              id, c->name, c->dims + 1, extents, d->task_size,
                               extra));
             body_push(vm, body,
                       snippet(vm,
@@ -2993,9 +3016,9 @@ static void threaded_task(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                 continue;
             body_push(vm, body,
                       snippet(vm,
-                              "__builtin_memcpy(__omp%d_d + __omp%d_%s_vs[1], "
+                              "__builtin_memcpy(__omp%d_d + __omp%d_%s_vs[%d], "
                               "%s, sizeof(%s));",
-                              id, id, c->name, c->name, c->name));
+                              id, id, c->name, c->dims, c->name, c->name));
             extra = arena_format(vm, "%s + sizeof(%s)", extra, c->name);
         }
     }
