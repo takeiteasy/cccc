@@ -439,6 +439,7 @@ void mark_function_referenced(VirtualMachine *vm, Obj *fn);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok);
+const char *operator_name(const char *sym);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);

@@ -1360,6 +1360,18 @@ const char *overloadable_operator(Token *tok) {
     return NULL;
 }
 
+// The name an in-struct `operator+` is mangled with: T_operator_add.
+const char *operator_name(const char *sym) {
+    static const char *const names[][2] = {
+        {"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"},
+        {"%", "mod"}, {"==", "eq"}, {"!=", "ne"}, {"<", "lt"},
+        {"<=", "le"}, {">", "gt"},  {">=", "ge"}};
+    for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
+        if (!strcmp(sym, names[i][0]))
+            return names[i][1];
+    return NULL;
+}
+
 static bool is_aggregate(Type *ty) {
     return ty->kind == TY_STRUCT || ty->kind == TY_UNION;
 }

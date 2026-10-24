@@ -3107,6 +3107,7 @@ typedef struct PendingMethod {
     Token                *start;        // first token of the declaration
     Token                *name;         // the function's name
     Token                *end;          // token after the closing `;` or `}`
+    const char           *operator_sym; // set for `operator+(...)`, else NULL
     bool                  has_body;
 } PendingMethod;
 

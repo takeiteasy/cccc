@@ -1914,13 +1914,12 @@ static Token *method_copy(VirtualMachine *vm, Token *t) {
 // [[cccc::method]]. A prototype ends after the parameter list; a bare `inline`
 // becomes `static inline` so the hoisted function links from a shared header.
 static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
-                          const char *recv, const char *mname,
-                          const char *fname, bool prototype) {
+                          const char *attr_text, const char *fname,
+                          bool prototype) {
     Token head = {};
     Token *cur = &head;
 
-    Token *attr = tokenize_string(
-        vm, "<method>", arena_format(vm, "[[cccc::method(%s, %s)]]", recv, mname));
+    Token *attr = tokenize_string(vm, "<method>", attr_text);
     convert_pp_tokens(vm, attr);
     Token *eof = attr;
     while (eof->kind != TK_EOF) {
@@ -1947,9 +1946,10 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
     name->col_no   = m->name->col_no;
     cur = cur->next = name;
 
-    Token *stop = m->end;
+    Token *params   = m->operator_sym ? m->name->next->next : m->name->next;
+    Token *stop     = m->end;
     if (prototype && m->has_body) {
-        stop = m->name->next;
+        stop      = params;
         int depth = 0;
         for (; stop->kind != TK_EOF; stop = stop->next) {
             depth += equal(stop, "(") - equal(stop, ")");
@@ -1959,13 +1959,26 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
             }
         }
     }
-    for (Token *t = m->name->next; t != stop; t = t->next)
+    for (Token *t = params; t != stop; t = t->next)
         cur = cur->next = method_copy(vm, t);
     if (prototype && m->has_body)
         cur = cur->next = method_token(vm, ";");
 
     cur->next = eof;
     return head.next;
+}
+
+// An operator written in a struct must take that struct as an operand.
+// parse_file_scope_decls has just registered it, as the newest table entry.
+static void check_operator_owner(VirtualMachine *vm, PendingMethod *m,
+                                 const char *bname) {
+    Compiler      *c = &vm->compiler;
+    OperatorEntry *e = c->noperators ? &c->operators[c->noperators - 1] : NULL;
+    if (e &&
+        (same_tag_type(e->lhs, m->owner) || same_tag_type(e->rhs, m->owner)))
+        return;
+    error_tok(vm, m->name, "operator '%s' in %s needs a %s or %s * operand",
+              m->operator_sym, bname, bname, bname);
 }
 
 // Declares every function written in a struct body as `T_f`, once the
@@ -1983,26 +1996,39 @@ void run_pending_methods(VirtualMachine *vm) {
         for (PendingMethod *m = list; m; m = m->next) {
             if (pass == 1 && !m->has_body)
                 continue;
-            Token *params = m->name->next->next;
-            if (equal(params, ")") ||
-                (equal(params, "void") && equal(params->next, ")")))
-                error_tok(vm, m->name,
-                          "method '%.*s' must take the receiver type as its "
-                          "first parameter",
-                          m->name->len, m->name->loc);
             Token *base = m->typedef_name ? m->typedef_name : m->tag;
+            const char *what = m->operator_sym ? "operators" : "methods";
             if (!base)
                 error_tok(vm, m->name,
-                          "a struct with methods needs a tag or a typedef name");
+                          "a struct with %s needs a tag or a typedef name",
+                          what);
             char *bname = arena_strndup(vm, base->loc, base->len);
-            char *mname = arena_strndup(vm, m->name->loc, m->name->len);
             const char *kw = m->owner->kind == TY_UNION ? "union" : "struct";
             const char *recv =
                 m->typedef_name ? bname : arena_format(vm, "%s %s", kw, bname);
-            Token *chain = method_decl(vm, m, recv, mname,
-                                       arena_format(vm, "%s_%s", bname, mname),
-                                       pass == 0);
+            const char *attr_text, *fname;
+            if (m->operator_sym) {
+                attr_text =
+                    arena_format(vm, "[[cccc::operator(%s)]]", m->operator_sym);
+                fname = arena_format(vm, "%s_operator_%s", bname,
+                                     operator_name(m->operator_sym));
+            } else {
+                Token *params = m->name->next->next;
+                if (equal(params, ")") ||
+                    (equal(params, "void") && equal(params->next, ")")))
+                    error_tok(vm, m->name,
+                              "method '%.*s' must take the receiver type as "
+                              "its first parameter",
+                              m->name->len, m->name->loc);
+                char *mname = arena_strndup(vm, m->name->loc, m->name->len);
+                attr_text =
+                    arena_format(vm, "[[cccc::method(%s, %s)]]", recv, mname);
+                fname = arena_format(vm, "%s_%s", bname, mname);
+            }
+            Token *chain = method_decl(vm, m, attr_text, fname, pass == 0);
             parse_file_scope_decls(vm, chain);
+            if (m->operator_sym && pass == 0)
+                check_operator_owner(vm, m, bname);
         }
     }
     c->draining_methods = false;

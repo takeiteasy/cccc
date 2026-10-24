@@ -56,7 +56,7 @@ Vec2_len(&v);    // the same function, callable and addressable by name
 | Block scope | not allowed: `methods are only allowed in file-scope structs and unions` |
 | No name | `a struct with methods needs a tag or a typedef name` |
 
-A function-pointer member (`int (*cb)(int);`) is still a member.
+A function-pointer member (`int (*cb)(int);`) is still a member. Operators are written the same way: [operators.md](operators.md#defining-in-the-struct).
 
 ## Receiver
 

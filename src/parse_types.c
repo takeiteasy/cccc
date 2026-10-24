@@ -2075,15 +2075,42 @@ static Token *skip_attribute(Token *tok) {
     return skip_balanced(tok->next, "(", ")");
 }
 
+// Operator spellings `operator` cannot name, so `operator&&(` is diagnosed
+// rather than parsed as a member.
+static bool is_unoverloadable_operator(Token *tok) {
+    static const char *const ops[] = {
+        "&&", "||", "=",  "!",  "~",  "&",  "|",  "^",  "<<", ">>",  "++", "--",
+        "->", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="};
+    for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
+        if (equal(tok, ops[i]))
+            return true;
+    return false;
+}
+
 // A function declaration or definition in a struct body: `... name(...) ;` or
 // `... name(...) { ... }`. A member never has that shape. On a match, *name is
-// the function's name, *end the token after the declaration.
-static bool member_is_method(Token *tok, Token **name, Token **end,
-                             bool *has_body) {
+// the function's name, *end the token after the declaration. An operator
+// `... operator+(...)` has *name at `operator` and *op set to the symbol.
+static bool member_is_method(VirtualMachine *vm, Token *tok, Token **name,
+                             Token **end, bool *has_body, const char **op) {
     Token *prev = NULL;
+    *op         = NULL;
     for (Token *t = tok; t->kind != TK_EOF;) {
         if (equal(t, ";") || equal(t, "{") || equal(t, "}"))
             return false;
+        if (equal(t, "operator") && t->next->kind == TK_PUNCT &&
+            equal(t->next->next, "(")) {
+            const char *sym = overloadable_operator(t->next);
+            if (!sym && is_unoverloadable_operator(t->next))
+                error_tok(vm, t->next, "cannot overload '%.*s'", t->next->len,
+                          t->next->loc);
+            if (sym) {
+                *op  = sym;
+                prev = t;
+                t    = t->next->next;
+                continue;
+            }
+        }
         if (is_attribute_start(t)) {
             t    = skip_attribute(t);
             prev = NULL;
@@ -2094,7 +2121,7 @@ static bool member_is_method(Token *tok, Token **name, Token **end,
             t    = t->next;
             continue;
         }
-        if (!prev || prev->kind != TK_IDENT || equal(t->next, "*") ||
+        if (!prev || prev->kind != TK_IDENT || (!*op && equal(t->next, "*")) ||
             equal(t->next, "^") || equal(prev, "static_assert") ||
             equal(prev, "_Static_assert") || equal(prev, "alignas") ||
             equal(prev, "_Alignas"))
@@ -2149,19 +2176,32 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
 
         Token *method_name, *method_end;
         bool   method_body;
-        if (member_is_method(tok, &method_name, &method_end, &method_body)) {
+        const char *method_op;
+        if (member_is_method(vm, tok, &method_name, &method_end, &method_body,
+                             &method_op)) {
             if (vm->compiler.current_fn)
                 error_tok(vm, method_name,
-                          "methods are only allowed in file-scope structs and "
-                          "unions");
+                          "%s are only allowed in file-scope structs and "
+                          "unions",
+                          method_op ? "operators" : "methods");
+            if (method_op)
+                for (PendingMethod *q = vm->compiler.pending_methods; q;
+                     q                = q->next)
+                    if (q->owner == ty && q->operator_sym == method_op)
+                        error_tok(vm, method_name,
+                                  "operator '%s' is already defined in this "
+                                  "struct; use [[cccc::operator]] on a free "
+                                  "function for more operand types",
+                                  method_op);
             PendingMethod *m =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(PendingMethod));
-            *m = (PendingMethod){.owner    = ty,
-                                 .tag      = ty->struct_tag,
-                                 .start    = tok,
-                                 .name     = method_name,
-                                 .end      = method_end,
-                                 .has_body = method_body};
+            *m = (PendingMethod){.owner        = ty,
+                                 .tag          = ty->struct_tag,
+                                 .start        = tok,
+                                 .name         = method_name,
+                                 .end          = method_end,
+                                 .has_body     = method_body,
+                                 .operator_sym = method_op};
             queue_method(vm, m);
             tok = method_end;
             continue;

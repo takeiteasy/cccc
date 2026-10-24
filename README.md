@@ -114,7 +114,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 | **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](docs/macros.md)) |
 | **Derive attributes** | `@serialize`, `@to_json`, `@enum_to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
-| **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to free functions on structs ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
+| **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **C23 and extensions** | C89 through C23, GNU and MS extensions ([coverage.md](docs/coverage.md)) |
 | **Decimal floating point** | `_Decimal32/64/128` via the Intel BID library, opt-in ([install.md](docs/install.md)) |
 | **Kernels** | `[[cccc::kernel]]` and OpenCL C 1.2 over a grid of work-items; `-fopenmp` ([kernels.md](docs/kernels.md), [opencl.md](docs/opencl.md), [openmp.md](docs/openmp.md)) |
