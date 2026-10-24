@@ -7,6 +7,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-24
+
+- Added: an operator written in a struct or union body is a function named
+  `T_operator_<name>`. See `docs/operators.md`.
+- Added: `_Static_assert` in a struct or union body.
+- Added: `-c=native` copies a multi-dimensional variable-length array into a
+  task.
+- Added: `@equals` binds `T_equals` as `==` for `(T, T)`, and an unbound
+  `a != b` is `!(a == b)`. See `docs/derive-equality.md`.
+- Changed: operator and method lookup is indexed by the aggregate type.
+- Fixed: comparing two structs or unions with no bound operator compiled and
+  returned an arbitrary value; it is now `invalid operands to ==`.
+
 ## [0.22.1] - 2026-10-24
 
 - Added: a function written in a struct or union body is a method named
