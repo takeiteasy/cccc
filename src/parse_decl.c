@@ -1946,7 +1946,9 @@ static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
     name->col_no   = m->name->col_no;
     cur = cur->next = name;
 
-    Token *params   = m->operator_sym ? m->name->next->next : m->name->next;
+    Token *params   = m->name->next;
+    if (m->operator_sym)
+        overloadable_operator(m->name->next, &params);
     Token *stop     = m->end;
     if (prototype && m->has_body) {
         stop      = params;

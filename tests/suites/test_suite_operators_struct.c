@@ -34,6 +34,22 @@ bool Vec2_operator_lt(Vec2 a, Vec2 b) {
     return a.x < b.x;
 }
 
+// clang-format off
+struct Ordered {
+    int v;
+    int operator<=>(const struct Ordered *a, const struct Ordered *b) {
+        return a->v - b->v;
+    }
+};
+// clang-format on
+
+[[cccc::test]] void test_in_struct_three_way(void) {
+    struct Ordered a = {1}, b = {2};
+    AssertEq(!!(a < b), 1);
+    AssertEq(!!(a >= b), 0);
+    AssertEq(Ordered_operator_cmp(&a, &b) < 0, 1);
+}
+
 struct Tagged {
     int           v;
     struct Tagged operator + (struct Tagged a, struct Tagged b) {

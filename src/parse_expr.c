@@ -1011,7 +1011,8 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok);
 static bool is_aggregate(Type *ty);
 
 // A comparison of lhs and rhs: the bound operator, `!(a == b)` for an unbound
-// `!=`, else the built-in node. A struct or union operand has no built-in
+// `!=`, `cmp(a, b) <op> 0` for an unbound relational operator with a `<=>`
+// function, else the built-in node. A struct or union operand has no built-in
 // comparison. `swap` stores `a > b` as `b < a`.
 static Node *new_comparison(VirtualMachine *vm, const char *sym, NodeKind kind,
                             bool swap, Node *lhs, Node *rhs, Token *tok) {
@@ -1025,6 +1026,14 @@ static Node *new_comparison(VirtualMachine *vm, const char *sym, NodeKind kind,
     }
     if (ov)
         return ov;
+    if (sym[0] == '<' || sym[0] == '>') {
+        Node *cmp = try_overloaded_op(vm, "<=>", lhs, rhs, tok);
+        if (cmp) {
+            Node *zero = new_num(vm, 0, tok);
+            return swap ? new_binary(vm, kind, zero, cmp, tok)
+                        : new_binary(vm, kind, cmp, zero, tok);
+        }
+    }
     if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
         error_tok(vm, tok, "invalid operands to %s", sym);
     return swap ? new_binary(vm, kind, rhs, lhs, tok)
@@ -1356,12 +1365,18 @@ static const char *const overloadable_ops[] = {
     "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="};
 
 // The operator [[cccc::operator(...)]] names at tok, or NULL if it cannot be
-// overloaded.
-const char *overloadable_operator(Token *tok) {
+// overloaded. *rest is the token after it. `<=>` is the two tokens `<=` `>`.
+const char *overloadable_operator(Token *tok, Token **rest) {
+    if (equal(tok, "<=") && equal(tok->next, ">") && !tok->next->has_space) {
+        *rest = tok->next->next;
+        return "<=>";
+    }
     for (size_t i = 0; i < sizeof(overloadable_ops) / sizeof(*overloadable_ops);
          i++)
-        if (equal(tok, overloadable_ops[i]))
+        if (equal(tok, overloadable_ops[i])) {
+            *rest = tok->next;
             return overloadable_ops[i];
+        }
     return NULL;
 }
 
@@ -1370,7 +1385,7 @@ const char *operator_name(const char *sym) {
     static const char *const names[][2] = {
         {"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"},
         {"%", "mod"}, {"==", "eq"}, {"!=", "ne"}, {"<", "lt"},
-        {"<=", "le"}, {">", "gt"},  {">=", "ge"}};
+        {"<=", "le"}, {">", "gt"},  {">=", "ge"}, {"<=>", "cmp"}};
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
         if (!strcmp(sym, names[i][0]))
             return names[i][1];

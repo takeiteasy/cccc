@@ -242,3 +242,46 @@ static void fill(struct Everything *e) {
     y.arr[1] = 1;
     AssertTrue(Layers_compare(&x, &y) > 0);
 }
+
+[[cccc::test]] void test_compare_binds_relational_operators(void) {
+    struct Inner       a = {1, "ab"};
+    struct Inner       b = {2, "ab"};
+    struct Inner       c = {1, "ab"};
+    const struct Inner k = a;
+    AssertEq(!!(a < b), 1);
+    AssertEq(!!(b < a), 0);
+    AssertEq(!!(a <= c), 1);
+    AssertEq(!!(b <= a), 0);
+    AssertEq(!!(b > a), 1);
+    AssertEq(!!(a > c), 0);
+    AssertEq(!!(a >= c), 1);
+    AssertEq(!!(a >= b), 0);
+    AssertEq(!!(k < b), 1);
+    AssertEq(!!((struct Inner){3, "ab"} > b), 1);
+}
+
+[[cccc::test]] void test_prefixed_compare_binds_relational_operators(void) {
+    struct Pair a = {1, 2};
+    struct Pair b = {1, 3};
+    AssertEq(!!(a < b), 1);
+    AssertEq(!!(a >= b), 0);
+}
+
+[[cccc::test]] void test_relational_operators_follow_compare_order(void) {
+    struct Layers x = {0}, y = {0};
+    y.high = 1;
+    AssertEq(!!(x < y), Layers_compare(&x, &y) < 0);
+    AssertEq(!!(x > y), Layers_compare(&x, &y) > 0);
+}
+
+static int counter;
+static struct Inner next_inner(int a) {
+    counter = counter * 10 + a;
+    return (struct Inner){a, "ab"};
+}
+
+[[cccc::test]] void test_relational_operands_evaluate_left_to_right(void) {
+    counter = 0;
+    AssertEq(!!(next_inner(1) > next_inner(2)), 0);
+    AssertEq(counter, 12);
+}

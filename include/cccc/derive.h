@@ -2587,7 +2587,8 @@
 // Foo_compare(a, b) == 0 exactly when Foo_equals(a, b). An @owned pointer
 // orders by content, NULL first; any other pointer or a union is a compile
 // error. A NaN member compares equal to everything.
-// @compare("P") publishes P_Foo_compare.
+// @compare("P") publishes P_Foo_compare. The function is also bound to `<=>`
+// for (Foo, Foo), and so to `<`, `<=`, `>` and `>=`.
 @comptime(attribute("compare")) void __builtin_attr_compare(AttrTarget *target,
                                                             ...) {
     Type       *ty     = __builtin_derive_struct_target(target, "@compare");
@@ -2610,6 +2611,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    AddAttribute(fn, "cccc::operator(<=>)");
 }
 
 // ---- @bitflags

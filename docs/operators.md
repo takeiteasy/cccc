@@ -11,8 +11,12 @@ Vec2 vec2_add(Vec2 a, Vec2 b) { return (Vec2){a.x + b.x, a.y + b.y}; }
 [[cccc::operator(==)]]
 bool vec2_eq(const Vec2 *a, const Vec2 *b) { return a->x == b->x && a->y == b->y; }
 
+[[cccc::operator(<=>)]]
+int vec2_cmp(const Vec2 *a, const Vec2 *b) { return a->x - b->x; }
+
 Vec2 c = a + b;       // vec2_add(a, b)
 bool same = a == b;   // vec2_eq(&a, &b)
+bool less = a < b;    // vec2_cmp(&a, &b) < 0
 ```
 
 ## Defining in the struct
@@ -33,7 +37,7 @@ typedef struct Vec2 {
 | `-` | `sub` | `!=` | `ne` |
 | `*` | `mul` | `<` `<=` | `lt` `le` |
 | `/` | `div` | `>` `>=` | `gt` `ge` |
-| `%` | `mod` | | |
+| `%` | `mod` | `<=>` | `cmp` |
 
 - Both parameters are explicit, and at least one is `T` or `T *`.
 - A struct has one function per symbol. `Vec2 * int` and `int * Vec2` need the free form.
@@ -46,6 +50,7 @@ typedef struct Vec2 {
 |---|---|
 | Arithmetic | `+` `-` `*` `/` `%` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
+| Three-way | `<=>` (binding only) |
 
 `&&`, `||`, `,`, `=` and the unary operators cannot be overloaded. Compound assignment (`a += b`) uses the binary operator and evaluates `a` once.
 
@@ -57,6 +62,9 @@ typedef struct Vec2 {
 - Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions.
 - A comparison returns an integer or `bool`.
 - `a != b` calls the `!=` function when one exists, else `!(a == b)` through the `==` function.
+- `a < b`, `a <= b`, `a > b` and `a >= b` call their own function when one exists, else the `<=>` function and compare its result with 0. `==` and `!=` never use `<=>`.
+- `<=>` is written without a space and is not an expression: it only binds a function that returns negative, zero or positive.
+- `@compare` binds its `T_compare` as `<=>` for `(T, T)` (see [derive-equality.md](derive-equality.md#ordering)).
 - `@equals` binds its `T_equals` as `==` for `(T, T)` (see [derive-equality.md](derive-equality.md#equality-hashing-and-dumping)).
 - The function is declared before the expression that uses it.
 - Two functions for the same operator and operand types are an error, including a hand-written `==` on a type with `@equals`.
@@ -73,6 +81,7 @@ typedef struct Vec2 {
 | Not two parameters | `operator function ... must take two parameters` |
 | No struct operand | `operator function ... needs a struct or union operand` |
 | In-struct operator without the struct as an operand | `operator '+' in Vec2 needs a Vec2 or Vec2 * operand` |
+| A second `<=>` for the same operand types | `operator '<=>' is already defined for these operand types` |
 | Two in-struct operators for one symbol | `operator '*' is already defined in this struct` |
 
 Diagnostics for an in-struct operator name the function `<T>_operator_<name>`.

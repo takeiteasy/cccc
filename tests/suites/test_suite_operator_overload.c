@@ -256,4 +256,46 @@ bool notch_ne(const Notch *a, const Notch *b) {
     AssertEq(!!(a != b), 1);
 }
 
+// clang-format off
+typedef struct {
+    int v;
+} Rank;
+
+typedef struct {
+    int v;
+} Strict;
+
+[[cccc::operator(<=>)]]
+int rank_cmp(const Rank *a, const Rank *b) {
+    return a->v - b->v;
+}
+
+[[cccc::operator(<=>)]]
+int strict_cmp(const Strict *a, const Strict *b) {
+    return a->v - b->v;
+}
+
+// clang-format on
+
+[[cccc::operator(<)]]
+bool strict_lt(const Strict *a, const Strict *b) {
+    return a->v > b->v;
+}
+
+[[cccc::test]] void test_relational_falls_back_to_three_way(void) {
+    Rank a = {1}, b = {2};
+    AssertEq(!!(a < b), 1);
+    AssertEq(!!(a <= b), 1);
+    AssertEq(!!(a > b), 0);
+    AssertEq(!!(a >= b), 0);
+    AssertEq(!!(b >= a), 1);
+}
+
+[[cccc::test]] void test_bound_lt_wins_over_three_way(void) {
+    Strict a = {1}, b = {2};
+    AssertEq(!!(a < b), 0);
+    AssertEq(!!(b < a), 1);
+    AssertEq(!!(a <= b), 1);
+}
+
 #pragma cccc suite end

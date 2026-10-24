@@ -2098,16 +2098,17 @@ static bool member_is_method(VirtualMachine *vm, Token *tok, Token **name,
     for (Token *t = tok; t->kind != TK_EOF;) {
         if (equal(t, ";") || equal(t, "{") || equal(t, "}"))
             return false;
-        if (equal(t, "operator") && t->next->kind == TK_PUNCT &&
-            equal(t->next->next, "(")) {
-            const char *sym = overloadable_operator(t->next);
-            if (!sym && is_unoverloadable_operator(t->next))
+        if (equal(t, "operator") && t->next->kind == TK_PUNCT) {
+            Token      *after = NULL;
+            const char *sym   = overloadable_operator(t->next, &after);
+            if (!sym && equal(t->next->next, "(") &&
+                is_unoverloadable_operator(t->next))
                 error_tok(vm, t->next, "cannot overload '%.*s'", t->next->len,
                           t->next->loc);
-            if (sym) {
+            if (sym && equal(after, "(")) {
                 *op  = sym;
                 prev = t;
-                t    = t->next->next;
+                t    = after;
                 continue;
             }
         }
@@ -3567,11 +3568,12 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // [[cccc::operator(+)]]
             if (cccc_scoped && attr_is(name_tok, "operator")) {
                 tok             = skip(vm, tok, "(");
-                const char *sym = overloadable_operator(tok);
+                Token      *after = NULL;
+                const char *sym   = overloadable_operator(tok, &after);
                 if (!sym)
                     error_tok(vm, tok, "cannot overload '%.*s'", tok->len,
                               tok->loc);
-                tok = skip(vm, tok->next, ")");
+                tok = skip(vm, after, ")");
                 if (ty && ty->kind == TY_FUNC)
                     ty->operator_sym = sym;
                 if (attr)
