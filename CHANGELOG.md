@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-24
+
+- Added: a function written in a struct or union body is a method named
+  `T_f`, hoisted to file scope. See `docs/methods.md`.
+- Changed: `s.f` naming a method without calling it is an error that says so.
+- Fixed: a `static inline` function reached only through method or operator
+  syntax was never emitted.
+
 ## [0.22.0] - 2026-10-24
 
 - Added: `[[cccc::operator(sym)]]` binds `+ - * / %` and `== != < <= > >=` to
