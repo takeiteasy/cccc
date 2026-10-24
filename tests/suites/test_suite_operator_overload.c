@@ -207,4 +207,18 @@ int test_operator_rvalue_to_mutable_pointer_discards_writes(void) {
     return 42;
 }
 
+[[cccc::operator(%)]]
+static inline Vec2 mod_vec2_inline(int k, Vec2 a) {
+    return (Vec2){k % a.x, k % a.y};
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_static_inline(void) {
+    Vec2 a = {4, 3};
+    Vec2 c = 9 % a;
+    if (c.x != 1 || c.y != 0)
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end

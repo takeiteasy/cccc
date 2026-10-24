@@ -3093,6 +3093,19 @@ typedef struct PendingMemberAttrs {
     Type                      *owner;
 } PendingMemberAttrs;
 
+// A function written in a struct/union body, kept as tokens until the
+// enclosing file-scope declaration is complete (see run_pending_methods).
+typedef struct PendingMethod {
+    struct PendingMethod *next;
+    Type                 *owner;
+    Token                *tag;          // the owner's tag, or NULL
+    Token                *typedef_name; // set by the typedef naming the owner
+    Token                *start;        // first token of the declaration
+    Token                *name;         // the function's name
+    Token                *end;          // token after the closing `;` or `}`
+    bool                  has_body;
+} PendingMethod;
+
 /*!
  @brief Represents a compile-time macro function.
  @details Macro functions are functions marked with [[cccc::comptime]] or
@@ -4423,6 +4436,9 @@ typedef struct Compiler {
     MethodEntry        *methods;
     int                 nmethods, methods_cap;
     PendingMemberAttrs *pending_member_attrs_tail;
+    PendingMethod      *pending_methods; // FIFO head; tail via _tail
+    PendingMethod      *pending_methods_tail;
+    bool                draining_methods;
     bool                draining_member_attrs;
     int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)
     bool   in_type_lookahead;  // Parsing a declarator only to classify it

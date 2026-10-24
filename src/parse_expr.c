@@ -1499,6 +1499,7 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
             e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,
             e->rhs_ptr ? addr_of_operand(vm, rhs, tok) : rhs,
         };
+        mark_function_referenced(vm, e->fn);
         return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
     }
     return NULL;

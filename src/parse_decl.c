@@ -1867,9 +1867,151 @@ static Token *file_scope_asm(VirtualMachine *vm, Token *tok) {
     return skip(vm, tok, ";");
 }
 
+static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok);
+
+void queue_method(VirtualMachine *vm, PendingMethod *m) {
+    if (vm->compiler.pending_methods_tail)
+        vm->compiler.pending_methods_tail->next = m;
+    else
+        vm->compiler.pending_methods = m;
+    vm->compiler.pending_methods_tail = m;
+}
+
+static bool same_tag_type(Type *a, Type *b) {
+    for (; a; a = a->origin)
+        for (Type *x = b; x; x = x->origin)
+            if (a == x)
+                return true;
+    return false;
+}
+
+// `typedef struct {...} Vec2;`: Vec2 names the methods defined in the body.
+void name_pending_methods(VirtualMachine *vm, Type *basety, Token *declarator) {
+    if (declarator->kind != TK_IDENT)
+        return;
+    for (PendingMethod *m = vm->compiler.pending_methods; m; m = m->next)
+        if (!m->typedef_name && same_tag_type(m->owner, basety))
+            m->typedef_name = declarator;
+}
+
+static Token *method_token(VirtualMachine *vm, const char *text) {
+    Token *t = tokenize_string(vm, "<method>", arena_strdup(vm, text));
+    convert_pp_tokens(vm, t);
+    Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    *copy       = *t;
+    copy->next  = NULL;
+    return copy;
+}
+
+static Token *method_copy(VirtualMachine *vm, Token *t) {
+    Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    *copy       = *t;
+    copy->next  = NULL;
+    return copy;
+}
+
+// The method as a file-scope declaration of `fname`, bound to `recv` by
+// [[cccc::method]]. A prototype ends after the parameter list; a bare `inline`
+// becomes `static inline` so the hoisted function links from a shared header.
+static Token *method_decl(VirtualMachine *vm, PendingMethod *m,
+                          const char *recv, const char *mname,
+                          const char *fname, bool prototype) {
+    Token head = {};
+    Token *cur = &head;
+
+    Token *attr = tokenize_string(
+        vm, "<method>", arena_format(vm, "[[cccc::method(%s, %s)]]", recv, mname));
+    convert_pp_tokens(vm, attr);
+    Token *eof = attr;
+    while (eof->kind != TK_EOF) {
+        cur = cur->next = method_copy(vm, eof);
+        eof = eof->next;
+    }
+
+    bool has_inline = false, has_linkage = false;
+    for (Token *t = m->start; t != m->name; t = t->next) {
+        has_inline  |= equal(t, "inline") || equal(t, "__inline") ||
+                       equal(t, "__inline__");
+        has_linkage |= equal(t, "static") || equal(t, "extern");
+    }
+    if (has_inline && !has_linkage)
+        cur = cur->next = method_token(vm, "static");
+
+    for (Token *t = m->start; t != m->name; t = t->next)
+        cur = cur->next = method_copy(vm, t);
+
+    Token *name = method_token(vm, fname);
+    name->file     = m->name->file;
+    name->filename = m->name->filename;
+    name->line_no  = m->name->line_no;
+    name->col_no   = m->name->col_no;
+    cur = cur->next = name;
+
+    Token *stop = m->end;
+    if (prototype && m->has_body) {
+        stop = m->name->next;
+        int depth = 0;
+        for (; stop->kind != TK_EOF; stop = stop->next) {
+            depth += equal(stop, "(") - equal(stop, ")");
+            if (depth == 0) {
+                stop = stop->next;
+                break;
+            }
+        }
+    }
+    for (Token *t = m->name->next; t != stop; t = t->next)
+        cur = cur->next = method_copy(vm, t);
+    if (prototype && m->has_body)
+        cur = cur->next = method_token(vm, ";");
+
+    cur->next = eof;
+    return head.next;
+}
+
+// Declares every function written in a struct body as `T_f`, once the
+// declaration holding the struct is complete so `T` is nameable. Prototypes
+// first, so a body can call a method defined after it.
+void run_pending_methods(VirtualMachine *vm) {
+    Compiler *c = &vm->compiler;
+    if (!c->pending_methods || c->in_macro_mode || c->draining_methods)
+        return;
+    PendingMethod *list = c->pending_methods;
+    c->pending_methods = c->pending_methods_tail = NULL;
+    c->draining_methods                          = true;
+
+    for (int pass = 0; pass < 2; pass++) {
+        for (PendingMethod *m = list; m; m = m->next) {
+            if (pass == 1 && !m->has_body)
+                continue;
+            Token *params = m->name->next->next;
+            if (equal(params, ")") ||
+                (equal(params, "void") && equal(params->next, ")")))
+                error_tok(vm, m->name,
+                          "method '%.*s' must take the receiver type as its "
+                          "first parameter",
+                          m->name->len, m->name->loc);
+            Token *base = m->typedef_name ? m->typedef_name : m->tag;
+            if (!base)
+                error_tok(vm, m->name,
+                          "a struct with methods needs a tag or a typedef name");
+            char *bname = arena_strndup(vm, base->loc, base->len);
+            char *mname = arena_strndup(vm, m->name->loc, m->name->len);
+            const char *kw = m->owner->kind == TY_UNION ? "union" : "struct";
+            const char *recv =
+                m->typedef_name ? bname : arena_format(vm, "%s %s", kw, bname);
+            Token *chain = method_decl(vm, m, recv, mname,
+                                       arena_format(vm, "%s_%s", bname, mname),
+                                       pass == 0);
+            parse_file_scope_decls(vm, chain);
+        }
+    }
+    c->draining_methods = false;
+}
+
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         run_pending_member_attrs(vm);
+        run_pending_methods(vm);
         // _Static_assert or static_assert (C23) - check before declspec
         if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
             Token *decl_tok = tok;
@@ -1935,6 +2077,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
 
         // Typedef
         if (attr.is_typedef) {
+            name_pending_methods(vm, basety, tok);
             tok = parse_typedef(vm, tok, basety, &attr, NULL);
             continue;
         }
@@ -1965,6 +2108,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         tok = global_variable(vm, tok, basety, &attr);
     }
     run_pending_member_attrs(vm);
+    run_pending_methods(vm);
     return tok;
 }
 

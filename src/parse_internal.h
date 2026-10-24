@@ -304,6 +304,9 @@ void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
 CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src);
 void queue_member_attrs(VirtualMachine *vm, Member *mem, Type *owner);
 void run_pending_member_attrs(VirtualMachine *vm);
+void queue_method(VirtualMachine *vm, PendingMethod *m);
+void name_pending_methods(VirtualMachine *vm, Type *basety, Token *declarator);
+void run_pending_methods(VirtualMachine *vm);
 Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Type *ty, const char *name);
 // #485: effective checked-region state at `tok` -- see cc_checked_scope_at()'s
@@ -432,6 +435,7 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
                Token *tok);
 Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok);
+void mark_function_referenced(VirtualMachine *vm, Obj *fn);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok);

@@ -2053,6 +2053,71 @@ static void collect_member_attrs(VirtualMachine *vm, Member *mem, VarAttr *attr,
 }
 
 // struct-members = (declspec declarator (","  declarator)* ";")*
+static Token *skip_balanced(Token *tok, const char *open, const char *close) {
+    int depth = 0;
+    for (; tok->kind != TK_EOF; tok = tok->next) {
+        if (equal(tok, open))
+            depth++;
+        else if (equal(tok, close) && --depth == 0)
+            return tok->next;
+    }
+    return tok;
+}
+
+static bool is_attribute_start(Token *tok) {
+    return equal(tok, "__attribute__") || equal(tok, "__attribute") ||
+           (equal(tok, "[") && equal(tok->next, "["));
+}
+
+static Token *skip_attribute(Token *tok) {
+    if (equal(tok, "["))
+        return skip_balanced(tok, "[", "]");
+    return skip_balanced(tok->next, "(", ")");
+}
+
+// A function declaration or definition in a struct body: `... name(...) ;` or
+// `... name(...) { ... }`. A member never has that shape. On a match, *name is
+// the function's name, *end the token after the declaration.
+static bool member_is_method(Token *tok, Token **name, Token **end,
+                             bool *has_body) {
+    Token *prev = NULL;
+    for (Token *t = tok; t->kind != TK_EOF;) {
+        if (equal(t, ";") || equal(t, "{") || equal(t, "}"))
+            return false;
+        if (is_attribute_start(t)) {
+            t    = skip_attribute(t);
+            prev = NULL;
+            continue;
+        }
+        if (!equal(t, "(")) {
+            prev = t;
+            t    = t->next;
+            continue;
+        }
+        if (!prev || prev->kind != TK_IDENT || equal(t->next, "*") ||
+            equal(t->next, "^") || equal(prev, "static_assert") ||
+            equal(prev, "_Static_assert") || equal(prev, "alignas") ||
+            equal(prev, "_Alignas"))
+            return false;
+        Token *after = skip_balanced(t, "(", ")");
+        while (is_attribute_start(after))
+            after = skip_attribute(after);
+        if (equal(after, ";")) {
+            *name     = prev;
+            *end      = after->next;
+            *has_body = false;
+            return true;
+        }
+        if (!equal(after, "{"))
+            return false;
+        *name     = prev;
+        *end      = skip_balanced(after, "{", "}");
+        *has_body = true;
+        return true;
+    }
+    return false;
+}
+
 static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                            Type *ty) {
     Member  head = {};
@@ -2070,6 +2135,26 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             error_tok(vm, tok,
                       "#pragma pack changed inside a struct/union body is "
                       "not supported -- move it outside the declaration");
+        Token *method_name, *method_end;
+        bool   method_body;
+        if (member_is_method(tok, &method_name, &method_end, &method_body)) {
+            if (vm->compiler.current_fn)
+                error_tok(vm, method_name,
+                          "methods are only allowed in file-scope structs and "
+                          "unions");
+            PendingMethod *m =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(PendingMethod));
+            *m = (PendingMethod){.owner    = ty,
+                                 .tag      = ty->struct_tag,
+                                 .start    = tok,
+                                 .name     = method_name,
+                                 .end      = method_end,
+                                 .has_body = method_body};
+            queue_method(vm, m);
+            tok = method_end;
+            continue;
+        }
+
         VarAttr attr   = {.in_member_list = true};
         Type   *basety = declspec(vm, &tok, tok, &attr);
         bool first = true;

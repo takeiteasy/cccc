@@ -278,14 +278,23 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 //              | "->" ident
 //              | "++"
 //              | "--"
+// A `static inline` function is only emitted once something references it.
+void mark_function_referenced(VirtualMachine *vm, Obj *fn) {
+    if (!fn->is_function)
+        return;
+    if (vm->compiler.current_fn)
+        arena_strarray_push(vm, &vm->compiler.current_fn->refs, fn->name);
+    else
+        fn->is_root = true;
+}
+
 // `base.name(...)` or `base->name(...)` where name is a method of base's type
 // and not a member: the call `fn(&base, ...)`. tok is the `.` or `->`. Returns
 // NULL when this is not a method call.
 static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
                          Token *tok) {
     Token *name = tok->next;
-    if (!vm->compiler.nmethods || name->kind != TK_IDENT ||
-        !equal(name->next, "("))
+    if (!vm->compiler.nmethods || name->kind != TK_IDENT)
         return NULL;
     bool arrow = equal(tok, "->");
     add_type(vm, base);
@@ -305,6 +314,11 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
     MethodEntry *m = find_method(vm, ty, name);
     if (!m)
         return NULL;
+    if (!equal(name->next, "("))
+        error_tok(vm, name,
+                  "'%.*s' is a method; call it as a method or name the "
+                  "function directly",
+                  name->len, name->loc);
 
     Node *recv = base;
     if (arrow && !m->recv_ptr) {
@@ -313,6 +327,7 @@ static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
     } else if (!arrow && m->recv_ptr) {
         recv = addr_of_operand(vm, base, tok);
     }
+    mark_function_referenced(vm, m->fn);
     return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
                    recv);
 }
@@ -4219,14 +4234,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             cc_comptime_resolve_var(vm, tok))
             sc = find_var(vm, tok);
 
-        // For "static inline" function
-        if (sc && sc->var && sc->var->is_function) {
-            if (vm->compiler.current_fn)
-                arena_strarray_push(vm, &vm->compiler.current_fn->refs,
-                                    sc->var->name);
-            else
-                sc->var->is_root = true;
-        }
+        if (sc && sc->var)
+            mark_function_referenced(vm, sc->var);
 
         if (sc) {
             if (sc->var) {

@@ -119,4 +119,17 @@ int test_member_function_pointer_wins(void) {
     return 42;
 }
 
+[[cccc::method(Vec2, ilen)]]
+static inline int vec2_ilen(Vec2 *self) {
+    return self->x + self->y + 1;
+}
+
+[[cccc::test(return = 42)]]
+int test_method_static_inline(void) {
+    Vec2 v = {1, 2};
+    if (v.ilen() != 4)
+        return 1;
+    return 42;
+}
+
 #pragma cccc suite end
