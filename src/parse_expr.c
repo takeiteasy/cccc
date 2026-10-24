@@ -427,6 +427,9 @@ static Node *overloaded_assign(VirtualMachine *vm, Node *call, bool yield_old) {
     bool  by_addr = addr->kind == ND_ADDR;
     Node *lv      = by_addr ? addr->lhs : addr;
     add_type(vm, lv);
+    if (addr->kind == ND_COMMA) // addr_of_operand's copy of an rvalue
+        error_tok(vm, tok, "expression is not assignable");
+    reject_rvalue(vm, lv, "expression is not assignable");
     if (!is_compatible(unqualified(vm, call->ty), unqualified(vm, lv->ty)))
         error_tok(vm, tok,
                   "the operator returns a different type than the left "
@@ -1434,8 +1437,8 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
             !is_compatible(e->rhs, rt))
             continue;
         Node *args[2] = {
-            e->lhs_ptr ? new_unary(vm, ND_ADDR, lhs, tok) : lhs,
-            e->rhs_ptr ? new_unary(vm, ND_ADDR, rhs, tok) : rhs,
+            e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,
+            e->rhs_ptr ? addr_of_operand(vm, rhs, tok) : rhs,
         };
         return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
     }

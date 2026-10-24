@@ -28,6 +28,7 @@ bool same = a == b;   // vec2_eq(&a, &b)
 
 - The function takes exactly two parameters, and at least one operand is a struct or union.
 - A parameter of type `T *` receives `&operand`; a `T` parameter receives the value.
+- An rvalue operand (`make() == b`, `(a + b) == b`) passed to a `T *` parameter is copied into a temporary first, so writes through the pointer are discarded.
 - Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions.
 - A comparison returns an integer or `bool`.
 - The function is declared before the expression that uses it.

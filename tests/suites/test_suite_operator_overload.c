@@ -152,4 +152,59 @@ int test_operator_in_conditions_and_arguments(void) {
     return 1;
 }
 
+typedef struct {
+    int n;
+} Cell;
+
+[[cccc::operator(==)]]
+bool cell_same(const Cell *a, const Cell *b) {
+    return a->n == b->n;
+}
+
+[[cccc::operator(<)]]
+bool cell_bump_less(Cell *a, const Cell *b) {
+    a->n += 100;
+    return a->n < b->n;
+}
+
+[[cccc::operator(+)]]
+Cell cell_add(const Cell *a, const Cell *b) {
+    return (Cell){a->n + b->n};
+}
+
+static Cell make_cell(int n) {
+    return (Cell){n};
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_rvalue_operand_takes_a_temporary(void) {
+    Cell a = {1}, b = {3};
+    int  flag = 1;
+    if (!(make_cell(1) == a))
+        return 1;
+    if (!(a + b == make_cell(4)))
+        return 2;
+    if (!((flag ? a : b) == a))
+        return 3;
+    if (!((0, a) == a))
+        return 4;
+    if (!((Cell)a == a))
+        return 5;
+    if (!(a == (Cell){1}))
+        return 6;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_rvalue_to_mutable_pointer_discards_writes(void) {
+    Cell a = {1};
+    if (!((Cell)a < make_cell(500)))
+        return 1;
+    if (make_cell(5) < make_cell(50))
+        return 2;
+    if (a.n != 1)
+        return 3;
+    return 42;
+}
+
 #pragma cccc suite end

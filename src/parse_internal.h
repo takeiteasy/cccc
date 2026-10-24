@@ -429,6 +429,7 @@ void mark_nested_captures(Obj *fn, Node *node);
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
                Token *tok);
+Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok);
 const char *overloadable_operator(Token *tok);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
