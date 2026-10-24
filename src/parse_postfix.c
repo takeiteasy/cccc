@@ -474,6 +474,12 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                 continue;
             }
 
+            Node *ov = overloaded_subscript(vm, node, idx, start);
+            if (ov) {
+                node = ov;
+                continue;
+            }
+
             {
                 Node *base_addr = node;
                 Node *deref = new_unary(vm, ND_DEREF,

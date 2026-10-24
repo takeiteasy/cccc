@@ -1,6 +1,8 @@
 // CCCC_FLAGS: --testing
 // Suite: [[cccc::operator(...)]] binds a built-in operator to a function for
 // struct operands.
+#include <stddef.h>
+
 #pragma cccc suite begin "operator_overload"
 
 typedef struct {
@@ -380,6 +382,68 @@ int test_operator_bitwise_in_struct(void) {
     if (Flags_operator_xor(c, (Flags){0}).f != 0x2a)
         return 1;
     return c.f == 0x2a ? 42 : 2;
+}
+
+typedef struct {
+    int data[4];
+} Buf;
+
+[[cccc::operator([])]]
+int *buf_at(Buf *b, size_t i) {
+    return &b->data[i];
+}
+
+static Buf make_buf(void) {
+    return (Buf){{1, 2, 3, 4}};
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_subscript_is_an_lvalue(void) {
+    Buf b  = {{1, 2, 3, 4}};
+    int i  = 0;
+    b[1]   = 40;
+    b[1]  += 2;
+    b[i++]++;
+    int *p = &b[3];
+    *p     = 7;
+    if (i != 1 || b[0] != 2 || b[3] != 7)
+        return 1;
+    return b[1];
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_subscript_rvalue_receiver_and_index_conversion(void) {
+    if (make_buf()[2] != 3)
+        return 1;
+    Buf  b = make_buf();
+    char c = 3;
+    if (b[c] != 4 || b[2u] != 3)
+        return 2;
+    return 42;
+}
+
+typedef struct Grid {
+    int  cells[3];
+    int *operator[](Grid *g, long i) {
+        return &g->cells[i];
+    }
+} Grid;
+
+[[cccc::test(return = 42)]]
+int test_operator_subscript_in_struct(void) {
+    Grid g = {{0, 5, 0}};
+    g[2]   = g[1] + 2;
+    if (Grid_operator_index(&g, 2) != &g.cells[2])
+        return 1;
+    return g.cells[2] == 7 ? 42 : 2;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_subscript_leaves_pointer_and_array_indexing(void) {
+    Buf  arr[2]  = {{{1, 2, 3, 4}}, {{5, 6, 7, 8}}};
+    Buf *p       = arr;
+    int  ints[2] = {40, 2};
+    return p[1][1] + ints[0] - 4 == 42 ? 42 : 1;
 }
 
 // clang-format off

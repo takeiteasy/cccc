@@ -1976,8 +1976,9 @@ static void check_operator_owner(VirtualMachine *vm, PendingMethod *m,
                                  const char *bname) {
     Compiler      *c = &vm->compiler;
     OperatorEntry *e = c->noperators ? &c->operators[c->noperators - 1] : NULL;
-    if (e &&
-        (same_tag_type(e->lhs, m->owner) || same_tag_type(e->rhs, m->owner)))
+    bool           subscript = !strcmp(m->operator_sym, "[]");
+    if (e && (same_tag_type(e->lhs, m->owner) ||
+              (!subscript && same_tag_type(e->rhs, m->owner))))
         return;
     error_tok(vm, m->name, "operator '%s' in %s needs a %s or %s * operand",
               m->operator_sym, bname, bname, bname);

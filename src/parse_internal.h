@@ -443,6 +443,8 @@ const char *operator_name(const char *sym);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);
+Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
+                           Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                  Token *tok);

@@ -1425,11 +1425,16 @@ static const char *const overloadable_ops[] = {
     "<<", ">>", "==", "!=", "<", "<=", ">", ">="};
 
 // The operator [[cccc::operator(...)]] names at tok, or NULL if it cannot be
-// overloaded. *rest is the token after it. `<=>` is the two tokens `<=` `>`.
+// overloaded. *rest is the token after it. `<=>` is the two tokens `<=` `>`,
+// `[]` the two tokens `[` `]`.
 const char *overloadable_operator(Token *tok, Token **rest) {
     if (equal(tok, "<=") && equal(tok->next, ">") && !tok->next->has_space) {
         *rest = tok->next->next;
         return "<=>";
+    }
+    if (equal(tok, "[") && equal(tok->next, "]")) {
+        *rest = tok->next->next;
+        return "[]";
     }
     for (size_t i = 0; i < sizeof(overloadable_ops) / sizeof(*overloadable_ops);
          i++)
@@ -1443,10 +1448,11 @@ const char *overloadable_operator(Token *tok, Token **rest) {
 // The name an in-struct `operator+` is mangled with: T_operator_add.
 const char *operator_name(const char *sym) {
     static const char *const names[][2] = {
-        {"+", "add"}, {"-", "sub"},  {"*", "mul"}, {"/", "div"},  {"%", "mod"},
-        {"&", "and"}, {"|", "or"},   {"^", "xor"}, {"<<", "shl"}, {">>", "shr"},
-        {"==", "eq"}, {"!=", "ne"},  {"<", "lt"},  {"<=", "le"},  {">", "gt"},
-        {">=", "ge"}, {"<=>", "cmp"}};
+        {"+", "add"},   {"-", "sub"},   {"*", "mul"}, {"/", "div"},
+        {"%", "mod"},   {"&", "and"},   {"|", "or"},  {"^", "xor"},
+        {"<<", "shl"},  {">>", "shr"},  {"==", "eq"}, {"!=", "ne"},
+        {"<", "lt"},    {"<=", "le"},   {">", "gt"},  {">=", "ge"},
+        {"<=>", "cmp"}, {"[]", "index"}};
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
         if (!strcmp(sym, names[i][0]))
             return names[i][1];
@@ -1527,9 +1533,21 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     OperatorEntry e = {.sym = ty->operator_sym, .fn = fn};
     e.lhs           = operator_operand(vm, lp, &e.lhs_ptr);
     e.rhs           = operator_operand(vm, rp, &e.rhs_ptr);
+    bool subscript  = !strcmp(e.sym, "[]");
+    if (subscript && !is_aggregate(e.lhs))
+        error_tok(vm, tok,
+                  "subscript operator function '%s' needs a struct or union "
+                  "first operand",
+                  fn->name);
     if (!is_aggregate(e.lhs) && !is_aggregate(e.rhs))
         error_tok(vm, tok,
                   "operator function '%s' needs a struct or union operand",
+                  fn->name);
+    if (subscript &&
+        (ty->return_ty->kind != TY_PTR || ty->return_ty->base->kind == TY_VOID))
+        error_tok(vm, tok,
+                  "subscript operator function '%s' must return a pointer to "
+                  "an object",
                   fn->name);
 
     bool shift      = !strcmp(e.sym, "<<") || !strcmp(e.sym, ">>");
@@ -1548,7 +1566,8 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         OperatorEntry *o = &c->operators[i - 1];
         if (o->fn == fn)
             return;
-        if (is_compatible(o->lhs, e.lhs) && is_compatible(o->rhs, e.rhs))
+        if (is_compatible(o->lhs, e.lhs) &&
+            (subscript || is_compatible(o->rhs, e.rhs)))
             error_tok(vm, tok,
                       "operator '%s' is already defined for these "
                       "operand types (by '%s')",
@@ -1645,6 +1664,29 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
         mark_function_referenced(vm, e->fn);
         return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
     }
+    return NULL;
+}
+
+// `base[idx]` for a struct or union base: `*f(&base, idx)` through the `[]`
+// function, whose result is an lvalue. NULL when base is not an aggregate.
+Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
+                           Token *tok) {
+    add_type(vm, base);
+    if (!is_aggregate(base->ty))
+        return NULL;
+    Type *bt   = unqualified(vm, base->ty);
+    int   head = binding_head(&vm->compiler, bt, 'o', "[]", 2);
+    for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
+        OperatorEntry *e = &vm->compiler.operators[i - 1];
+        if (!is_compatible(e->lhs, bt))
+            continue;
+        Node *args[2] = {e->lhs_ptr ? addr_of_operand(vm, base, tok) : base,
+                         idx};
+        mark_function_referenced(vm, e->fn);
+        Node *call = new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
+        return new_unary(vm, ND_DEREF, call, tok);
+    }
+    error_tok(vm, tok, "invalid operands to []");
     return NULL;
 }
 

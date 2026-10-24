@@ -41,7 +41,7 @@ typedef struct Vec2 {
 | `%` | `mod` | `<=>` | `cmp` |
 | `&` | `and` | `<<` | `shl` |
 | `\|` | `or` | `>>` | `shr` |
-| `^` | `xor` | | |
+| `^` | `xor` | `[]` | `index` |
 
 - Both parameters are explicit, and at least one is `T` or `T *`.
 - A struct has one function per symbol. `Vec2 * int` and `int * Vec2` need the free form.
@@ -56,8 +56,30 @@ typedef struct Vec2 {
 | Bitwise and shift | `&` `\|` `^` `<<` `>>` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
 | Three-way | `<=>` |
+| Subscript | `[]` |
 
 `&&`, `||`, `,`, `=` and the unary operators cannot be overloaded. Compound assignment (`+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`) uses the binary operator and evaluates `a` once.
+
+## Subscript
+
+`[[cccc::operator([])]]` binds `a[i]` for a struct or union `a`. The function returns a pointer, and the parser dereferences it, so `a[i]` is an lvalue.
+
+```c
+typedef struct { int data[4]; } Buf;
+
+[[cccc::operator([])]]
+int *buf_at(Buf *b, size_t i) { return &b->data[i]; }
+
+buf[1] = 40;         // *buf_at(&buf, 1) = 40
+buf[1] += 2;
+int *p = &buf[3];
+```
+
+- The first parameter is `T` or `T *`, and the function returns a pointer to an object (not `void *`).
+- The index converts like a function argument, so `buf[1]` and `buf[n]` work with a `size_t` parameter.
+- A type has one `[]` function. A second one is an error whatever its index type.
+- In a struct body it is `int *operator[](Buf *b, size_t i)`, named `Buf_operator_index`.
+- A pointer or array of structs (`p[i]`) indexes as usual.
 
 ## Rules
 
@@ -82,6 +104,10 @@ typedef struct Vec2 {
 | No function for the operand types | `invalid operands to +` (any arithmetic, bitwise or shift operator) |
 | Comparison of structs with no `==` / `!=` / `<` ... function | `invalid operands to ==` |
 | Operator not in the table above | `cannot overload '&&'` |
+| `[]` on a struct with no `[]` function | `invalid operands to []` |
+| `[]` function not returning a pointer to an object | `subscript operator function ... must return a pointer to an object` |
+| `[]` function without a struct or union first parameter | `subscript operator function ... needs a struct or union first operand` |
+| A second `[]` for the same struct | `operator '[]' is already defined for these operand types` |
 | Comparison returns a struct | `comparison operator function ... must return an integer or bool` |
 | Not two parameters | `operator function ... must take two parameters` |
 | No struct operand | `operator function ... needs a struct or union operand` |
