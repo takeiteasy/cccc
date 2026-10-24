@@ -101,13 +101,14 @@ error. `@compare("app")` publishes
 the `const void *` arguments.
 
 `@compare` also binds `T_compare` to `<=>` for `(T, T)`, so `a < b`, `a <= b`,
-`a > b` and `a >= b` work on the struct (see [operators.md](operators.md)).
+`a > b`, `a >= b` and `a <=> b` work on the struct (see [operators.md](operators.md)).
 `==` and `!=` need `@equals`. A hand-written `<=>` for the same type is a
 duplicate-operator error.
 
 ```c
 a < b;    // Version_compare(&a, &b) < 0
 a >= b;   // Version_compare(&a, &b) >= 0
+a <=> b;  // Version_compare(&a, &b)
 ```
 
 ### Choosing the order

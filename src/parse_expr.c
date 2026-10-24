@@ -1114,15 +1114,62 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
 
 static Node *shift(VirtualMachine *vm, Token **rest, Token *tok);
 
-// relational = shift ("<" shift | "<=" shift | ">" shift | ">=" shift)*
-static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
+static bool at_threeway(Token *tok) {
+    return equal(tok, "<=") && equal(tok->next, ">") && !tok->next->has_space;
+}
+
+// `a <=> b`: the bound `<=>` function for struct or union operands, else -1, 0
+// or 1 as `(a > b) - (a < b)` over temporaries so each operand is evaluated
+// once. A NaN operand gives 0.
+static Node *new_threeway(VirtualMachine *vm, Node *lhs, Node *rhs,
+                          Token *tok) {
+    add_type(vm, lhs);
+    add_type(vm, rhs);
+    Node *ov = try_overloaded_op(vm, "<=>", lhs, rhs, tok);
+    if (ov)
+        return ov;
+    bool lscalar = is_numeric(lhs->ty) || lhs->ty->kind == TY_PTR;
+    bool rscalar = is_numeric(rhs->ty) || rhs->ty->kind == TY_PTR;
+    if (!lscalar || !rscalar)
+        error_tok(vm, tok, "invalid operands to <=>");
+    Obj  *a   = new_lvar(vm, "", 0, unqualified(vm, lhs->ty));
+    Obj  *b   = new_lvar(vm, "", 0, unqualified(vm, rhs->ty));
+    Node *set = new_binary(
+        vm, ND_COMMA,
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, a, tok), lhs, tok),
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, b, tok), rhs, tok), tok);
+    Node *gt = new_binary(vm, ND_LT, new_var_node(vm, b, tok),
+                          new_var_node(vm, a, tok), tok);
+    Node *lt = new_binary(vm, ND_LT, new_var_node(vm, a, tok),
+                          new_var_node(vm, b, tok), tok);
+    return new_binary(vm, ND_COMMA, set, new_binary(vm, ND_SUB, gt, lt, tok),
+                      tok);
+}
+
+// threeway = shift ("<=>" shift)?
+// TODO(#1781): a declared operator symbol at the shift level.
+static Node *threeway(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = shift(vm, &tok, tok);
+    if (at_threeway(tok)) {
+        Token *start = tok;
+        Node  *rhs   = shift(vm, &tok, tok->next->next);
+        node         = new_threeway(vm, node, rhs, start);
+        if (at_threeway(tok))
+            error_tok(vm, tok, "<=> does not associate; parenthesize");
+    }
+    *rest = tok;
+    return node;
+}
+
+// relational = threeway ("<" threeway | "<=" shift | ">" shift | ">=" shift)*
+static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
+    Node *node = threeway(vm, &tok, tok);
 
     for (;;) {
         Token *start = tok;
 
         if (equal(tok, "<")) {
-            Node *rhs = shift(vm, &tok, tok->next);
+            Node *rhs = threeway(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
@@ -1152,7 +1199,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok, "<=")) {
-            Node *rhs = shift(vm, &tok, tok->next);
+            Node *rhs = threeway(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
@@ -1177,7 +1224,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok, ">")) {
-            Node *rhs = shift(vm, &tok, tok->next);
+            Node *rhs = threeway(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);
@@ -1208,7 +1255,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if (equal(tok, ">=")) {
-            Node *rhs = shift(vm, &tok, tok->next);
+            Node *rhs = threeway(vm, &tok, tok->next);
             if (vm->compiler.warnings & CCCC_WARN_TAUTOLOGICAL_COMPARE) {
                 add_type(vm, node);
                 add_type(vm, rhs);

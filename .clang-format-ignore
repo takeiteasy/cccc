@@ -1,3 +1,6 @@
 src/dmon.h
 src/tomlc17.c
 src/tomlc17.h
+tests/test_three_way_chain.c
+tests/test_three_way_unbound.c
+tests/test_derive_compare_operator_duplicate.c

@@ -275,8 +275,6 @@ int strict_cmp(const Strict *a, const Strict *b) {
     return a->v - b->v;
 }
 
-// clang-format on
-
 [[cccc::operator(<)]]
 bool strict_lt(const Strict *a, const Strict *b) {
     return a->v > b->v;
@@ -297,5 +295,43 @@ bool strict_lt(const Strict *a, const Strict *b) {
     AssertEq(!!(b < a), 1);
     AssertEq(!!(a <= b), 1);
 }
+
+[[cccc::test]] void test_three_way_on_structs_calls_the_bound_function(void) {
+    Rank a = {1}, b = {5};
+    AssertEq(a <=> b, -4);
+    AssertEq(b <=> a, 4);
+    AssertEq(a <=> a, 0);
+}
+
+[[cccc::test]] void test_three_way_on_scalars_is_minus_one_zero_one(void) {
+    AssertEq(1 <=> 2, -1);
+    AssertEq(2 <=> 1, 1);
+    AssertEq(3 <=> 3, 0);
+    AssertEq(-1 <=> 1u, 1);
+    AssertEq(1.5 <=> 2, -1);
+    double nan = 0.0 / (volatile double){0.0};
+    AssertEq(nan <=> 1.0, 0);
+    int arr[2];
+    AssertEq(&arr[0] <=> &arr[1], -1);
+}
+
+static int evals;
+static int tick(int v) {
+    evals++;
+    return v;
+}
+
+[[cccc::test]] void test_three_way_evaluates_operands_once(void) {
+    evals = 0;
+    AssertEq(tick(1) <=> tick(2), -1);
+    AssertEq(evals, 2);
+}
+
+[[cccc::test]] void test_three_way_binds_looser_than_shift_tighter_than_relational(void) {
+    AssertEq(1 << 1 <=> 3, -1);
+    AssertEq(!!(1 <=> 2 < 0), 1);
+    AssertEq(!!(0 < 1 <=> 0), 1);
+}
+// clang-format on
 
 #pragma cccc suite end

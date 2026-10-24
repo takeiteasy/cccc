@@ -17,6 +17,7 @@ int vec2_cmp(const Vec2 *a, const Vec2 *b) { return a->x - b->x; }
 Vec2 c = a + b;       // vec2_add(a, b)
 bool same = a == b;   // vec2_eq(&a, &b)
 bool less = a < b;    // vec2_cmp(&a, &b) < 0
+int order = a <=> b;  // vec2_cmp(&a, &b)
 ```
 
 ## Defining in the struct
@@ -50,7 +51,7 @@ typedef struct Vec2 {
 |---|---|
 | Arithmetic | `+` `-` `*` `/` `%` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
-| Three-way | `<=>` (binding only) |
+| Three-way | `<=>` |
 
 `&&`, `||`, `,`, `=` and the unary operators cannot be overloaded. Compound assignment (`a += b`) uses the binary operator and evaluates `a` once.
 
@@ -63,7 +64,7 @@ typedef struct Vec2 {
 - A comparison returns an integer or `bool`.
 - `a != b` calls the `!=` function when one exists, else `!(a == b)` through the `==` function.
 - `a < b`, `a <= b`, `a > b` and `a >= b` call their own function when one exists, else the `<=>` function and compare its result with 0. `==` and `!=` never use `<=>`.
-- `<=>` is written without a space and is not an expression: it only binds a function that returns negative, zero or positive.
+- `a <=> b` binds between shift and relational and does not chain (`a <=> b <=> c` is an error). On struct or union operands it calls the `<=>` function; on integers, floats and pointers it is `-1`, `0` or `1`, and a `NaN` operand gives `0`. It is written without a space.
 - `@compare` binds its `T_compare` as `<=>` for `(T, T)` (see [derive-equality.md](derive-equality.md#ordering)).
 - `@equals` binds its `T_equals` as `==` for `(T, T)` (see [derive-equality.md](derive-equality.md#equality-hashing-and-dumping)).
 - The function is declared before the expression that uses it.
