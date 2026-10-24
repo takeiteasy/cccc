@@ -1008,6 +1008,29 @@ static bool is_self_comparison(Node *a, Node *b) {
 
 static Node *relational(VirtualMachine *vm, Token **rest, Token *tok);
 
+static bool is_aggregate(Type *ty);
+
+// A comparison of lhs and rhs: the bound operator, `!(a == b)` for an unbound
+// `!=`, else the built-in node. A struct or union operand has no built-in
+// comparison. `swap` stores `a > b` as `b < a`.
+static Node *new_comparison(VirtualMachine *vm, const char *sym, NodeKind kind,
+                            bool swap, Node *lhs, Node *rhs, Token *tok) {
+    add_type(vm, lhs);
+    add_type(vm, rhs);
+    Node *ov = try_overloaded_op(vm, sym, lhs, rhs, tok);
+    if (!ov && !strcmp(sym, "!=")) {
+        Node *eq = try_overloaded_op(vm, "==", lhs, rhs, tok);
+        if (eq)
+            ov = new_unary(vm, ND_NOT, eq, tok);
+    }
+    if (ov)
+        return ov;
+    if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
+        error_tok(vm, tok, "invalid operands to %s", sym);
+    return swap ? new_binary(vm, kind, rhs, lhs, tok)
+                : new_binary(vm, kind, lhs, rhs, tok);
+}
+
 // equality = relational ("==" relational | "!=" relational)*
 static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = relational(vm, &tok, tok);
@@ -1041,10 +1064,7 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            {
-                Node *ov = try_overloaded_op(vm, "==", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_EQ, node, rhs, start);
-            }
+            node = new_comparison(vm, "==", ND_EQ, false, node, rhs, start);
             continue;
         }
 
@@ -1074,10 +1094,7 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            {
-                Node *ov = try_overloaded_op(vm, "!=", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_NE, node, rhs, start);
-            }
+            node = new_comparison(vm, "!=", ND_NE, false, node, rhs, start);
             continue;
         }
 
@@ -1121,10 +1138,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            {
-                Node *ov = try_overloaded_op(vm, "<", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_LT, node, rhs, start);
-            }
+            node = new_comparison(vm, "<", ND_LT, false, node, rhs, start);
             continue;
         }
 
@@ -1149,10 +1163,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              node->ty->enum_tag->len, node->ty->enum_tag->loc,
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
-            {
-                Node *ov = try_overloaded_op(vm, "<=", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_LE, node, rhs, start);
-            }
+            node = new_comparison(vm, "<=", ND_LE, false, node, rhs, start);
             continue;
         }
 
@@ -1183,10 +1194,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             // note: a > b is stored as b < a
-            {
-                Node *ov = try_overloaded_op(vm, ">", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_LT, rhs, node, start);
-            }
+            node = new_comparison(vm, ">", ND_LT, true, node, rhs, start);
             continue;
         }
 
@@ -1217,10 +1225,7 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                              rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
             }
             // note: a >= b is stored as b <= a
-            {
-                Node *ov = try_overloaded_op(vm, ">=", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_LE, rhs, node, start);
-            }
+            node = new_comparison(vm, ">=", ND_LE, true, node, rhs, start);
             continue;
         }
 
@@ -1383,13 +1388,61 @@ static Type *operator_operand(VirtualMachine *vm, Type *param, bool *by_addr) {
     return unqualified(vm, *by_addr ? param->base : param);
 }
 
+// Bindings are bucketed by the root of the aggregate's `origin` chain: two
+// struct/union types are compatible only when those roots are the same Type.
+static Type *aggregate_root(Type *ty) {
+    while (ty->origin)
+        ty = ty->origin;
+    return ty;
+}
+
+typedef struct {
+    char  stack[192];
+    char *data;
+    int   len;
+} BindingKey;
+
+static void binding_key(BindingKey *k, Type *agg, char space, const char *name,
+                        int name_len) {
+    Type *root = aggregate_root(agg);
+    k->len     = (int)sizeof(root) + 1 + name_len;
+    k->data    = k->len <= (int)sizeof(k->stack) ? k->stack : malloc(k->len);
+    memcpy(k->data, &root, sizeof(root));
+    k->data[sizeof(root)] = space;
+    memcpy(k->data + sizeof(root) + 1, name, name_len);
+}
+
+static void binding_key_free(BindingKey *k) {
+    if (k->data != k->stack)
+        free(k->data);
+}
+
+// The newest entry index + 1 for (agg, space, name), or 0.
+static int binding_head(Compiler *c, Type *agg, char space, const char *name,
+                        int name_len) {
+    BindingKey k;
+    binding_key(&k, agg, space, name, name_len);
+    int head = (int)(intptr_t)hashmap_get2(&c->binding_index, k.data, k.len);
+    binding_key_free(&k);
+    return head;
+}
+
+static void binding_set_head(Compiler *c, Type *agg, char space,
+                             const char *name, int name_len, int head) {
+    BindingKey k;
+    binding_key(&k, agg, space, name, name_len);
+    hashmap_put2(&c->binding_index, k.data, k.len, (void *)(intptr_t)head);
+    binding_key_free(&k);
+}
+
+// Operators are bucketed by their aggregate operand, lhs first.
+static Type *operator_bucket_type(Type *lhs, Type *rhs) {
+    return is_aggregate(lhs) ? lhs : rhs;
+}
+
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     Compiler *c = &vm->compiler;
-    for (int i = 0; i < c->noperators; i++)
-        if (c->operators[i].fn == fn)
-            return;
-
-    Type *lp = ty->params;
+    Type     *lp = ty->params;
     Type *rp = lp ? lp->next : NULL;
     if (!rp || rp->next || ty->is_variadic)
         error_tok(vm, tok, "operator function '%s' must take two parameters",
@@ -1411,14 +1464,19 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                   "or bool",
                   fn->name);
 
-    for (int i = 0; i < c->noperators; i++)
-        if (!strcmp(c->operators[i].sym, e.sym) &&
-            is_compatible(c->operators[i].lhs, e.lhs) &&
-            is_compatible(c->operators[i].rhs, e.rhs))
+    Type *bucket  = operator_bucket_type(e.lhs, e.rhs);
+    int   sym_len = (int)strlen(e.sym);
+    int   head    = binding_head(c, bucket, 'o', e.sym, sym_len);
+    for (int i = head; i; i = c->operators[i - 1].next) {
+        OperatorEntry *o = &c->operators[i - 1];
+        if (o->fn == fn)
+            return;
+        if (is_compatible(o->lhs, e.lhs) && is_compatible(o->rhs, e.rhs))
             error_tok(vm, tok,
                       "operator '%s' is already defined for these "
-                      "operand types",
-                      e.sym);
+                      "operand types (by '%s')",
+                      e.sym, o->fn->name);
+    }
 
     if (c->noperators == c->operators_cap) {
         int            cap = c->operators_cap ? c->operators_cap * 2 : 8;
@@ -1428,16 +1486,14 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         c->operators     = n;
         c->operators_cap = cap;
     }
+    e.next                        = head;
     c->operators[c->noperators++] = e;
+    binding_set_head(c, bucket, 'o', e.sym, sym_len, c->noperators);
 }
 
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
-    Compiler *c = &vm->compiler;
-    for (int i = 0; i < c->nmethods; i++)
-        if (c->methods[i].fn == fn)
-            return;
-
-    Type *recv = unqualified(vm, ty->method_of);
+    Compiler *c    = &vm->compiler;
+    Type     *recv = unqualified(vm, ty->method_of);
     if (!is_aggregate(recv))
         error_tok(vm, tok, "method receiver type must be a struct or union");
     Type *self = ty->params;
@@ -1457,11 +1513,14 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                   "parameter",
                   fn->name);
 
-    for (int i = 0; i < c->nmethods; i++)
-        if (!strcmp(c->methods[i].name, e.name) &&
-            is_compatible(c->methods[i].recv, recv))
-            error_tok(vm, tok, "method '%s' is already defined for this type",
-                      e.name);
+    int name_len = (int)strlen(e.name);
+    int existing = binding_head(c, recv, 'm', e.name, name_len);
+    if (existing) {
+        if (c->methods[existing - 1].fn == fn)
+            return;
+        error_tok(vm, tok, "method '%s' is already defined for this type",
+                  e.name);
+    }
 
     if (c->nmethods == c->methods_cap) {
         int          cap = c->methods_cap ? c->methods_cap * 2 : 8;
@@ -1472,22 +1531,16 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
         c->methods_cap = cap;
     }
     c->methods[c->nmethods++] = e;
+    binding_set_head(c, recv, 'm', e.name, name_len, c->nmethods);
 }
 
 // The method called `name` of struct/union type recv, or NULL.
-// TODO(#1776): linear scan; a hash keyed by (name, type) if tables grow large.
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name) {
     if (!vm->compiler.nmethods)
         return NULL;
-    recv = unqualified(vm, recv);
-    for (int i = 0; i < vm->compiler.nmethods; i++) {
-        MethodEntry *m = &vm->compiler.methods[i];
-        if (strlen(m->name) == (size_t)name->len &&
-            !strncmp(m->name, name->loc, name->len) &&
-            is_compatible(m->recv, recv))
-            return m;
-    }
-    return NULL;
+    recv     = unqualified(vm, recv);
+    int head = binding_head(&vm->compiler, recv, 'm', name->loc, name->len);
+    return head ? &vm->compiler.methods[head - 1] : NULL;
 }
 
 // A call to the function bound to sym for these operands, or NULL when neither
@@ -1502,10 +1555,11 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
         return NULL;
     Type *lt = unqualified(vm, lhs->ty);
     Type *rt = unqualified(vm, rhs->ty);
-    for (int i = 0; i < vm->compiler.noperators; i++) {
-        OperatorEntry *e = &vm->compiler.operators[i];
-        if (strcmp(e->sym, sym) || !is_compatible(e->lhs, lt) ||
-            !is_compatible(e->rhs, rt))
+    int   head = binding_head(&vm->compiler, operator_bucket_type(lt, rt), 'o',
+                              sym, (int)strlen(sym));
+    for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
+        OperatorEntry *e = &vm->compiler.operators[i - 1];
+        if (!is_compatible(e->lhs, lt) || !is_compatible(e->rhs, rt))
             continue;
         Node *args[2] = {
             e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,

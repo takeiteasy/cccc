@@ -424,7 +424,7 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
     bool has_std = attr.is_maybe_unused || attr.is_deprecated ||
                    attr.is_noreturn || attr.is_nodiscard || attr.is_pure ||
                    attr.is_func_const || attr.format_style || attr.cleanup_fn ||
-                   attr.align > 0;
+                   attr.align > 0 || attr.operator_sym || attr.method_of;
     bool has_custom = attr.custom_attrs != NULL;
 
     if (!has_std && !has_custom)
@@ -435,6 +435,10 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
         fn->ty = apply_var_attrs_to_type(vm, fn->ty, &attr);
         if (attr.align > 0)
             fn->align = attr.align;
+        if (fn->ty->operator_sym)
+            register_operator(vm, fn, fn->ty, site_tok);
+        if (fn->ty->method_of)
+            register_method(vm, fn, fn->ty, site_tok);
     }
     if (has_custom)
         run_decl_custom_attrs(vm, NULL, &attr, ATTR_TARGET_FUNCTION, fn->name,

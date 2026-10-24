@@ -32,6 +32,13 @@ Item_hash(&a) == Item_hash(&b); // 1
 Item_dump(&a, stdout);        // Item { id = 1, color = GREEN, name = "ann" }
 ```
 
+`@equals` also binds `T_equals` to `==` for `(T, T)`, so `a == b` and `a != b` work on the struct (`!=` is `!(a == b)`; see [operators.md](operators.md)). A hand-written `==` for the same type is a duplicate-operator error.
+
+```c
+a == b;  // Item_equals(&a, &b)
+a != b;  // !Item_equals(&a, &b)
+```
+
 A prefix names the functions `<prefix>_<Type>_equals` (likewise `_hash` and
 `_dump`): `@equals("app")` on `struct Pair` publishes `app_Pair_equals`.
 

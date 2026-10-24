@@ -56,8 +56,10 @@ typedef struct Vec2 {
 - An rvalue operand (`make() == b`, `(a + b) == b`) passed to a `T *` parameter is copied into a temporary first, so writes through the pointer are discarded.
 - Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions.
 - A comparison returns an integer or `bool`.
+- `a != b` calls the `!=` function when one exists, else `!(a == b)` through the `==` function.
+- `@equals` binds its `T_equals` as `==` for `(T, T)` (see [derive-equality.md](derive-equality.md#equality-hashing-and-dumping)).
 - The function is declared before the expression that uses it.
-- Two functions for the same operator and operand types are an error.
+- Two functions for the same operator and operand types are an error, including a hand-written `==` on a type with `@equals`.
 - `a += b` needs the operator to return the type of `a`.
 
 ## Errors
@@ -65,6 +67,7 @@ typedef struct Vec2 {
 | Case | Diagnostic |
 |---|---|
 | No function for the operand types | `invalid operands to +` |
+| Comparison of structs with no `==` / `!=` / `<` ... function | `invalid operands to ==` |
 | Operator not in the table above | `cannot overload '&&'` |
 | Comparison returns a struct | `comparison operator function ... must return an integer or bool` |
 | Not two parameters | `operator function ... must take two parameters` |

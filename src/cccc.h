@@ -4164,6 +4164,7 @@ typedef struct {
     Type       *lhs, *rhs;
     bool        lhs_ptr, rhs_ptr;
     Obj        *fn;
+    int         next; // Next entry in the same bucket, index + 1; 0 ends it
 } OperatorEntry;
 
 // A function bound to s.name(...) by [[cccc::method(T)]].
@@ -4440,6 +4441,7 @@ typedef struct Compiler {
     int                 noperators, operators_cap;
     MethodEntry        *methods;
     int                 nmethods, methods_cap;
+    HashMap             binding_index;   // (aggregate, symbol|name) -> entry
     PendingMemberAttrs *pending_member_attrs_tail;
     PendingMethod      *pending_methods; // FIFO head; tail via _tail
     PendingMethod      *pending_methods_tail;

@@ -1985,6 +1985,8 @@ void cc_destroy(VirtualMachine *vm) {
     }
     vm->compiler.build_target_fns = NULL;
 
+    hashmap_deinit(&vm->compiler.binding_index);
+
     // Destroy parser arena (frees all tokens, AST nodes, preprocessor state)
     arena_destroy(&vm->compiler.parser_arena);
 }

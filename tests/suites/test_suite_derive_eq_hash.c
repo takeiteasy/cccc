@@ -162,3 +162,24 @@ static void fill(struct Everything *e, int fill_byte) {
     AssertEq(!!(Grid_hash(&a) == Grid_hash(&b)), 1);
     AssertEq(!!(Grid_hash(&a) != Grid_hash(&c)), 1);
 }
+
+[[cccc::test]] void test_equals_binds_operators(void) {
+    struct Inner       a = {1, "ab"};
+    struct Inner       b = {1, "ab"};
+    struct Inner       c = {2, "ab"};
+    const struct Inner k = a;
+    AssertEq(!!(a == b), 1);
+    AssertEq(!!(a == c), 0);
+    AssertEq(!!(a != b), 0);
+    AssertEq(!!(a != c), 1);
+    AssertEq(!!(k == b), 1);
+    AssertEq(!!((struct Inner){2, "ab"} == c), 1);
+}
+
+[[cccc::test]] void test_prefixed_equals_binds_operators(void) {
+    struct Pair a = {1, 2};
+    struct Pair b = {1, 2};
+    struct Pair c = {1, 3};
+    AssertEq(!!(a == b), 1);
+    AssertEq(!!(a != c), 1);
+}

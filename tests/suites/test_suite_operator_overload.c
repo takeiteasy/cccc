@@ -221,4 +221,39 @@ int test_operator_static_inline(void) {
     return 42;
 }
 
+typedef struct {
+    int v;
+} Tile;
+
+[[cccc::operator(==)]]
+bool tile_eq(const Tile *a, const Tile *b) {
+    return a->v == b->v;
+}
+
+typedef struct {
+    int v;
+} Notch;
+
+[[cccc::operator(==)]]
+bool notch_eq(const Notch *a, const Notch *b) {
+    return a->v == b->v;
+}
+
+[[cccc::operator(!=)]]
+bool notch_ne(const Notch *a, const Notch *b) {
+    return a->v + 100 != b->v;
+}
+
+[[cccc::test]] void test_ne_falls_back_to_negated_eq(void) {
+    Tile a = {1}, b = {1}, c = {2};
+    AssertEq(!!(a != b), 0);
+    AssertEq(!!(a != c), 1);
+}
+
+[[cccc::test]] void test_bound_ne_wins_over_fallback(void) {
+    Notch a = {1}, b = {1};
+    AssertEq(!!(a == b), 1);
+    AssertEq(!!(a != b), 1);
+}
+
 #pragma cccc suite end

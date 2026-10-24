@@ -1758,7 +1758,8 @@
 // which compares the members one by one (padding is ignored): scalars and
 // pointers with ==, char[N] as a C string, other arrays element-wise, nested
 // structs member-wise. An @owned pointer compares by content (see
-// __builtin_equals_owned). @equals("P") publishes P_Foo_equals.
+// __builtin_equals_owned). @equals("P") publishes P_Foo_equals. The function
+// is also bound to `==` for (Foo, Foo), and so to `!=`.
 @comptime(attribute("equals")) void __builtin_attr_equals(AttrTarget *target,
                                                           ...) {
     Type       *ty     = __builtin_derive_struct_target(target, "@equals");
@@ -1781,6 +1782,7 @@
         FunctionSetBody(fn, block);
     }
     PublishNode(fn);
+    AddAttribute(fn, "cccc::operator(==)");
 }
 
 // @hash struct Foo {...}; publishes
