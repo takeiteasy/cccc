@@ -7,6 +7,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-24
+
+- Added: `<=>` binds a function as a three-way comparison, and `a <=> b` is an
+  expression between shift and relational: struct and union operands call the
+  bound function, integers, floats and pointers give -1, 0 or 1. See
+  `docs/operators.md`.
+- Added: `@compare` binds `T_compare` as `<=>` for `(T, T)`, so `a < b`,
+  `a <= b`, `a > b` and `a >= b` work on the struct. See
+  `docs/derive-equality.md`.
+
 ## [0.23.0] - 2026-10-24
 
 - Added: an operator written in a struct or union body is a function named
