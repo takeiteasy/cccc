@@ -256,6 +256,132 @@ bool notch_ne(const Notch *a, const Notch *b) {
     AssertEq(!!(a != b), 1);
 }
 
+typedef struct {
+    unsigned bits;
+} Mask;
+
+[[cccc::operator(&)]]
+Mask mask_and(Mask a, Mask b) {
+    return (Mask){a.bits & b.bits};
+}
+
+[[cccc::operator(|)]]
+Mask mask_or(const Mask *a, const Mask *b) {
+    return (Mask){a->bits | b->bits};
+}
+
+[[cccc::operator(^)]]
+Mask mask_xor(Mask a, unsigned k) {
+    return (Mask){a.bits ^ k};
+}
+
+[[cccc::operator(<<)]]
+Mask mask_shl(Mask a, int n) {
+    return (Mask){a.bits << n};
+}
+
+[[cccc::operator(>>)]]
+Mask mask_shr(Mask a, int n) {
+    return (Mask){a.bits >> n};
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_bitwise_and_shift(void) {
+    Mask a = {0xf0}, b = {0x3c};
+    if ((a & b).bits != 0x30)
+        return 1;
+    if ((a | b).bits != 0xfc)
+        return 2;
+    if ((a ^ 0xffu).bits != 0x0f)
+        return 3;
+    if ((a << 4).bits != 0xf00 || (a >> 4).bits != 0xf)
+        return 4;
+    if ((a & b | a >> 4).bits != 0x3f)
+        return 5;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_bitwise_compound_assignment(void) {
+    Mask m[2]  = {{0xff}, {0x0f}};
+    int  i     = 0;
+    m[i++]    &= m[1];
+    if (i != 1 || m[0].bits != 0x0f)
+        return 1;
+    m[0] |= m[1];
+    m[1] ^= 0x01u;
+    if (m[1].bits != 0x0e)
+        return 2;
+    m[1] <<= 2;
+    m[1] >>= 1;
+    if (m[1].bits != 0x1c)
+        return 3;
+    return 42;
+}
+
+typedef struct {
+    int n;
+} Fx;
+
+[[cccc::operator(*)]]
+Fx fx_mul(Fx a, Fx b) {
+    return (Fx){a.n * b.n};
+}
+
+[[cccc::operator(/)]]
+Fx fx_div(Fx a, int k) {
+    return (Fx){a.n / k};
+}
+
+[[cccc::operator(%)]]
+Fx fx_mod(Fx a, int k) {
+    return (Fx){a.n % k};
+}
+
+[[cccc::test(return = 42)]]
+int test_operator_mul_div_mod_compound_assignment(void) {
+    Fx  v[2]  = {{6}, {7}};
+    int i     = 0;
+    v[i++]   *= v[1];
+    if (i != 1 || v[0].n != 42)
+        return 1;
+    v[0] /= 2;
+    v[0] %= 5;
+    if (v[0].n != 1)
+        return 2;
+    return 42;
+}
+
+typedef struct Flags {
+    unsigned f;
+    Flags operator &(Flags a, Flags b) {
+        return (Flags){a.f & b.f};
+    }
+    Flags operator | (const Flags *a, const Flags *b) {
+        return (Flags){a->f | b->f};
+    }
+    Flags operator ^ (Flags a, Flags b) {
+        return (Flags){a.f ^ b.f};
+    }
+    Flags operator << (Flags a, int n) {
+        return (Flags){a.f << n};
+    }
+    Flags operator >> (Flags a, int n) {
+        return (Flags){a.f >> n};
+    }
+} Flags;
+
+[[cccc::test(return = 42)]]
+int test_operator_bitwise_in_struct(void) {
+    Flags a = {0x3f}, b = {0x2a};
+    Flags c  = (a & b) | b;
+    c        = (c << 2) >> 2;
+    c       ^= (Flags){0};
+    if (Flags_operator_xor(c, (Flags){0}).f != 0x2a)
+        return 1;
+    return c.f == 0x2a ? 42 : 2;
+}
+
 // clang-format off
 typedef struct {
     int v;

@@ -39,6 +39,9 @@ typedef struct Vec2 {
 | `*` | `mul` | `<` `<=` | `lt` `le` |
 | `/` | `div` | `>` `>=` | `gt` `ge` |
 | `%` | `mod` | `<=>` | `cmp` |
+| `&` | `and` | `<<` | `shl` |
+| `\|` | `or` | `>>` | `shr` |
+| `^` | `xor` | | |
 
 - Both parameters are explicit, and at least one is `T` or `T *`.
 - A struct has one function per symbol. `Vec2 * int` and `int * Vec2` need the free form.
@@ -50,10 +53,11 @@ typedef struct Vec2 {
 | Group | Symbols |
 |---|---|
 | Arithmetic | `+` `-` `*` `/` `%` |
+| Bitwise and shift | `&` `\|` `^` `<<` `>>` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
 | Three-way | `<=>` |
 
-`&&`, `||`, `,`, `=` and the unary operators cannot be overloaded. Compound assignment (`a += b`) uses the binary operator and evaluates `a` once.
+`&&`, `||`, `,`, `=` and the unary operators cannot be overloaded. Compound assignment (`+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`) uses the binary operator and evaluates `a` once.
 
 ## Rules
 
@@ -61,7 +65,7 @@ typedef struct Vec2 {
 - A parameter of type `T *` receives `&operand`; a `T` parameter receives the value.
 - An rvalue operand (`make() == b`, `(a + b) == b`) passed to a `T *` parameter is copied into a temporary first, so writes through the pointer are discarded.
 - Operand types match exactly. `Vec2 * int` and `int * Vec2` are two functions.
-- A comparison returns an integer or `bool`.
+- A comparison returns an integer or `bool`. Shifts are not comparisons.
 - `a != b` calls the `!=` function when one exists, else `!(a == b)` through the `==` function.
 - `a < b`, `a <= b`, `a > b` and `a >= b` call their own function when one exists, else the `<=>` function and compare its result with 0. `==` and `!=` never use `<=>`.
 - `a <=> b` binds between shift and relational and does not chain (`a <=> b <=> c` is an error). On struct or union operands it calls the `<=>` function; on integers, floats and pointers it is `-1`, `0` or `1`, and a `NaN` operand gives `0`. It is written without a space.
@@ -75,7 +79,7 @@ typedef struct Vec2 {
 
 | Case | Diagnostic |
 |---|---|
-| No function for the operand types | `invalid operands to +` |
+| No function for the operand types | `invalid operands to +` (any arithmetic, bitwise or shift operator) |
 | Comparison of structs with no `==` / `!=` / `<` ... function | `invalid operands to ==` |
 | Operator not in the table above | `cannot overload '&&'` |
 | Comparison returns a struct | `comparison operator function ... must return an integer or bool` |

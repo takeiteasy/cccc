@@ -716,6 +716,10 @@ Node *to_assign_post(VirtualMachine *vm, Node *binary) {
     return to_assign_impl(vm, binary, true);
 }
 
+static Node *binary_op(VirtualMachine *vm, NodeKind kind, const char *sym,
+                       Node *lhs, Node *rhs, Token *tok);
+static bool is_aggregate(Type *ty);
+
 // assign    = conditional (assign-op assign)?
 // assign-op = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
 //           | "<<=" | ">>="
@@ -758,36 +762,36 @@ Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
                          new_sub(vm, node, assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "*="))
-        return to_assign(
-            vm, new_binary(vm, ND_MUL, node, assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_MUL, "*", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "/="))
-        return to_assign(
-            vm, new_binary(vm, ND_DIV, node, assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_DIV, "/", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "%="))
-        return to_assign(
-            vm, new_binary(vm, ND_MOD, node, assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_MOD, "%", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "&="))
-        return to_assign(vm, new_binary(vm, ND_BITAND, node,
-                                        assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_BITAND, "&", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "|="))
-        return to_assign(vm, new_binary(vm, ND_BITOR, node,
-                                        assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_BITOR, "|", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "^="))
-        return to_assign(vm, new_binary(vm, ND_BITXOR, node,
-                                        assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_BITXOR, "^", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, "<<="))
-        return to_assign(
-            vm, new_binary(vm, ND_SHL, node, assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_SHL, "<<", node,
+                                       assign(vm, rest, tok->next), tok));
 
     if (equal(tok, ">>="))
-        return to_assign(
-            vm, new_binary(vm, ND_SHR, node, assign(vm, rest, tok->next), tok));
+        return to_assign(vm, binary_op(vm, ND_SHR, ">>", node,
+                                       assign(vm, rest, tok->next), tok));
 
     *rest = tok;
     return node;
@@ -961,8 +965,8 @@ static Node *bitor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitxor(vm, &tok, tok);
     while (equal(tok, "|")) {
         Token *start = tok;
-        node =
-            new_binary(vm, ND_BITOR, node, bitxor(vm, &tok, tok->next), start);
+        node = binary_op(vm, ND_BITOR, "|", node, bitxor(vm, &tok, tok->next),
+                         start);
     }
     *rest = tok;
     return node;
@@ -975,8 +979,8 @@ static Node *bitxor(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = bitand(vm, &tok, tok);
     while (equal(tok, "^")) {
         Token *start = tok;
-        node =
-            new_binary(vm, ND_BITXOR, node, bitand(vm, &tok, tok->next), start);
+        node = binary_op(vm, ND_BITXOR, "^", node, bitand(vm, &tok, tok->next),
+                         start);
     }
     *rest = tok;
     return node;
@@ -989,8 +993,8 @@ static Node *bitand(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = equality(vm, &tok, tok);
     while (equal(tok, "&")) {
         Token *start = tok;
-        node = new_binary(vm, ND_BITAND, node, equality(vm, &tok, tok->next),
-                          start);
+        node         = binary_op(vm, ND_BITAND, "&", node,
+                                 equality(vm, &tok, tok->next), start);
     }
     *rest = tok;
     return node;
@@ -1309,6 +1313,10 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
+            if (is_aggregate(node->ty) || is_aggregate(rhs->ty)) {
+                node = binary_op(vm, ND_SHL, "<<", node, rhs, start);
+                continue;
+            }
             if (is_const_expr(vm, rhs)) {
                 int64_t rv = eval(vm, rhs);
                 if ((vm->compiler.warnings & CCCC_WARN_SHIFT_NEGATIVE_VALUE) &&
@@ -1329,7 +1337,7 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
                             rv, bw);
                 }
             }
-            node = new_binary(vm, ND_SHL, node, rhs, start);
+            node = binary_op(vm, ND_SHL, "<<", node, rhs, start);
             continue;
         }
 
@@ -1341,6 +1349,10 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
             if (is_error_type(node->ty) || is_error_type(rhs->ty)) {
                 node     = new_binary(vm, ND_SHR, node, rhs, start);
                 node->ty = ty_error;
+                continue;
+            }
+            if (is_aggregate(node->ty) || is_aggregate(rhs->ty)) {
+                node = binary_op(vm, ND_SHR, ">>", node, rhs, start);
                 continue;
             }
             if (is_const_expr(vm, rhs)) {
@@ -1361,7 +1373,7 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
                                  rv, bw);
                 }
             }
-            node = new_binary(vm, ND_SHR, node, rhs, start);
+            node = binary_op(vm, ND_SHR, ">>", node, rhs, start);
             continue;
         }
 
@@ -1409,7 +1421,8 @@ static Node *sequence_after(VirtualMachine *vm, Node *prefix, Node *result,
 }
 
 static const char *const overloadable_ops[] = {
-    "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="};
+    "+",  "-",  "*",  "/",  "%", "&",  "|", "^",
+    "<<", ">>", "==", "!=", "<", "<=", ">", ">="};
 
 // The operator [[cccc::operator(...)]] names at tok, or NULL if it cannot be
 // overloaded. *rest is the token after it. `<=>` is the two tokens `<=` `>`.
@@ -1430,9 +1443,10 @@ const char *overloadable_operator(Token *tok, Token **rest) {
 // The name an in-struct `operator+` is mangled with: T_operator_add.
 const char *operator_name(const char *sym) {
     static const char *const names[][2] = {
-        {"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"},
-        {"%", "mod"}, {"==", "eq"}, {"!=", "ne"}, {"<", "lt"},
-        {"<=", "le"}, {">", "gt"},  {">=", "ge"}, {"<=>", "cmp"}};
+        {"+", "add"}, {"-", "sub"},  {"*", "mul"}, {"/", "div"},  {"%", "mod"},
+        {"&", "and"}, {"|", "or"},   {"^", "xor"}, {"<<", "shl"}, {">>", "shr"},
+        {"==", "eq"}, {"!=", "ne"},  {"<", "lt"},  {"<=", "le"},  {">", "gt"},
+        {">=", "ge"}, {"<=>", "cmp"}};
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
         if (!strcmp(sym, names[i][0]))
             return names[i][1];
@@ -1518,8 +1532,9 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                   "operator function '%s' needs a struct or union operand",
                   fn->name);
 
-    bool comparison = e.sym[0] == '=' || e.sym[0] == '!' || e.sym[0] == '<' ||
-                      e.sym[0] == '>';
+    bool shift      = !strcmp(e.sym, "<<") || !strcmp(e.sym, ">>");
+    bool comparison = !shift && (e.sym[0] == '=' || e.sym[0] == '!' ||
+                                 e.sym[0] == '<' || e.sym[0] == '>');
     if (comparison && !is_integer(ty->return_ty))
         error_tok(vm, tok,
                   "comparison operator function '%s' must return an integer "
@@ -1631,6 +1646,20 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
         return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
     }
     return NULL;
+}
+
+// The overloaded call for sym, else the built-in node. A struct or union
+// operand with no matching function is an error.
+static Node *binary_op(VirtualMachine *vm, NodeKind kind, const char *sym,
+                       Node *lhs, Node *rhs, Token *tok) {
+    Node *ov = try_overloaded_op(vm, sym, lhs, rhs, tok);
+    if (ov)
+        return ov;
+    add_type(vm, lhs);
+    add_type(vm, rhs);
+    if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
+        error_tok(vm, tok, "invalid operands to %s", sym);
+    return new_binary(vm, kind, lhs, rhs, tok);
 }
 
 Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
@@ -1881,10 +1910,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            {
-                Node *ov = try_overloaded_op(vm, "*", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_MUL, node, rhs, start);
-            }
+            node = binary_op(vm, ND_MUL, "*", node, rhs, start);
             continue;
         }
 
@@ -1898,10 +1924,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            {
-                Node *ov = try_overloaded_op(vm, "/", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_DIV, node, rhs, start);
-            }
+            node = binary_op(vm, ND_DIV, "/", node, rhs, start);
             continue;
         }
 
@@ -1915,10 +1938,7 @@ static Node *mul(VirtualMachine *vm, Token **rest, Token *tok) {
                 node->ty = ty_error;
                 continue;
             }
-            {
-                Node *ov = try_overloaded_op(vm, "%", node, rhs, start);
-                node     = ov ? ov : new_binary(vm, ND_MOD, node, rhs, start);
-            }
+            node = binary_op(vm, ND_MOD, "%", node, rhs, start);
             continue;
         }
 

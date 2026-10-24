@@ -2078,9 +2078,9 @@ static Token *skip_attribute(Token *tok) {
 // Operator spellings `operator` cannot name, so `operator&&(` is diagnosed
 // rather than parsed as a member.
 static bool is_unoverloadable_operator(Token *tok) {
-    static const char *const ops[] = {
-        "&&", "||", "=",  "!",  "~",  "&",  "|",  "^",  "<<", ">>",  "++", "--",
-        "->", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="};
+    static const char *const ops[] = {"&&", "||", "=",  "!",  "~",   "++",
+                                      "--", "->", "+=", "-=", "*=",  "/=",
+                                      "%=", "&=", "|=", "^=", "<<=", ">>="};
     for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
         if (equal(tok, ops[i]))
             return true;
