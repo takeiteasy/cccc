@@ -1436,6 +1436,8 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
             type_vec_remove_at(&ctx->defs, type_vec_find(&ctx->defs, ty));
             for (Member *m = ty->members; m; m = m->next)
                 collect_type(ctx, m->ty);
+            for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+                collect_static_assert_types(ctx, sa->cond);
             type_vec_push(&ctx->defs, ty);
         }
         return;
@@ -1444,6 +1446,8 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
 
     for (Member *m = ty->members; m; m = m->next)
         collect_type(ctx, m->ty);
+    for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+        collect_static_assert_types(ctx, sa->cond);
     // #1167: TY_ENUM has no ty->members (the loop above is a no-op for it),
     // so an enumerator's own folded sizeof/_Alignof (EnumConstant.layout_ty,
     // #1095), gated identically to serialize_layout_const()'s own check
@@ -2775,6 +2779,9 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     fprintf(f, " {\n");
     serialize_aggregate_members(f, ctx, ty);
+    for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+        serialize_static_assert(f, ctx->vm, ctx, sa->cond, sa->msg,
+                                sa->msg_len, sa->tok, 1);
     fprintf(f, "}");
     serialize_aggregate_attrs(f, ty);
 

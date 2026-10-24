@@ -119,7 +119,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Generic` type-generic expressions | ✓ | A controlling expression of enumerated type matches an association naming its implementation-defined underlying integer type, and vice versa (`_Generic((enum G){0}, unsigned int: …)` for an all-non-negative `enum G` whose enumerators fit `int`), matching GCC/clang; two separately declared enums stay mutually incompatible. [^n9] |
 | `_Alignof` | ✓ | |
 | `_Alignas` | ✓ | Can request more or less alignment than a declaration's own type, but never less than the type's own alignment — a request below that is a C17 6.7.5p4 constraint violation and a compile error, matching GCC/clang |
-| `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | |
+| `_Static_assert` (and `static_assert` via `<assert.h>`) | ✓ | At file, block and struct/union member scope; a member assertion adds no member |
 | `_Noreturn` | ✓ | Accepted via keyword, `__attribute__((noreturn))`, and `[[noreturn]]`; emits BTRAP after calls; warns on returns |
 | `_Thread_local` | ✓ | TLS segment; each thread receives a private copy from the template |
 | `_Atomic` types | ~ | Parser emits `-Wignored-features`; direct access to `_Atomic`-qualified variables uses plain load/store. [^n10] |

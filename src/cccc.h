@@ -1562,7 +1562,10 @@ struct Type {
 
     // Struct
     struct Member *members;
-    bool           is_flexible;
+    // `_Static_assert` written in the member list, in source order, for native
+    // re-emission inside the struct body.
+    struct StaticAssertRecord *member_asserts;
+    bool                       is_flexible;
     bool           is_packed;
     bool designated_init; // __attribute__((designated_init)): all initializers
                           // of this struct type must be designated (#659)

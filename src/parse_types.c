@@ -2123,6 +2123,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
     Member  head = {};
     Member *cur  = &head;
     int     idx  = 0;
+    StaticAssertRecord **asserts = &ty->member_asserts;
 
     while (!equal(tok, "}")) {
         // #1173: a `#pragma pack` between two members of one struct changes
@@ -2135,6 +2136,17 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
             error_tok(vm, tok,
                       "#pragma pack changed inside a struct/union body is "
                       "not supported -- move it outside the declaration");
+        if (equal(tok, "_Static_assert") || equal(tok, "static_assert")) {
+            StaticAssertRecord *rec = arena_alloc(&vm->compiler.parser_arena,
+                                                  sizeof(StaticAssertRecord));
+            *rec     = (StaticAssertRecord){.tok = tok};
+            tok      = static_assert_decl(vm, tok, &rec->cond, &rec->msg,
+                                          &rec->msg_len);
+            *asserts = rec;
+            asserts  = &rec->next;
+            continue;
+        }
+
         Token *method_name, *method_end;
         bool   method_body;
         if (member_is_method(tok, &method_name, &method_end, &method_body)) {

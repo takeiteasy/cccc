@@ -1323,4 +1323,32 @@ int test_tagless_member_beside_same_shape_tagged_typedef(void) {
     return h.u.str.len + f.str.len + s.len + l.len;
 }
 
+// A static assertion is a member-list item: it checks but adds no member.
+struct StructsAssertMember {
+    char c;
+    _Static_assert(sizeof(char) == 1, "char");
+    long l;
+    static_assert(sizeof(long) >= 4);
+};
+
+union StructsAssertUnion {
+    char c;
+    _Static_assert(sizeof(int) == 4, "int");
+    int  i;
+};
+
+[[cccc::test(return = 42)]]
+int test_static_assert_in_struct_body(void) {
+    struct StructsLocalAssert {
+        char c;
+        _Static_assert(_Alignof(int) == 4, "align");
+        int  d;
+    } loc = {1, 2};
+    if (offsetof(struct StructsAssertMember, l) != 8 ||
+        sizeof(struct StructsAssertMember) != 16 ||
+        sizeof(union StructsAssertUnion) != 4 || sizeof loc != 8)
+        return 1;
+    return 39 + loc.c + loc.d;
+}
+
 #pragma cccc suite end
