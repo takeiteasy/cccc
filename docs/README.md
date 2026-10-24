@@ -60,6 +60,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [attributes.md](attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [methods.md](methods.md) | `[[cccc::method(T)]]` struct methods: `s.f(x)` call-site lowering |
 | [operators.md](operators.md) | `[[cccc::operator(...)]]` operator overloading for structs |
 | [types.md](types.md) | Type compatibility, `_Generic`, `--compiler-family` |
 | [coverage.md](coverage.md) | C89–C23 and extension support table |

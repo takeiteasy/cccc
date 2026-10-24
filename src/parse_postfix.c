@@ -264,7 +264,8 @@ bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
     return false;
 }
 
-static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn);
+static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
+                     Node *recv);
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 
 // postfix = "(" type-name ")" "{" initializer-list "}"
@@ -277,6 +278,45 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
 //              | "->" ident
 //              | "++"
 //              | "--"
+// `base.name(...)` or `base->name(...)` where name is a method of base's type
+// and not a member: the call `fn(&base, ...)`. tok is the `.` or `->`. Returns
+// NULL when this is not a method call.
+static Node *method_call(VirtualMachine *vm, Token **rest, Node *base,
+                         Token *tok) {
+    Token *name = tok->next;
+    if (!vm->compiler.nmethods || name->kind != TK_IDENT ||
+        !equal(name->next, "("))
+        return NULL;
+    bool arrow = equal(tok, "->");
+    add_type(vm, base);
+    Type *ty = base->ty;
+    if (arrow) {
+        if (ty->kind != TY_PTR)
+            return NULL;
+        ty = ty->base;
+    }
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        return NULL;
+    while (ty->size < 0 && ty->origin &&
+           (ty->origin->kind == TY_STRUCT || ty->origin->kind == TY_UNION))
+        ty = ty->origin;
+    if (get_struct_member(ty, name))
+        return NULL;
+    MethodEntry *m = find_method(vm, ty, name);
+    if (!m)
+        return NULL;
+
+    Node *recv = base;
+    if (arrow && !m->recv_ptr) {
+        recv = new_unary(vm, ND_DEREF, base, tok);
+        set_checked_deref_bounds(vm, recv, base, tok);
+    } else if (!arrow && m->recv_ptr) {
+        recv = addr_of_operand(vm, base, tok);
+    }
+    return funcall(vm, rest, name->next->next, new_var_node(vm, m->fn, name),
+                   recv);
+}
+
 static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node;
 
@@ -358,7 +398,7 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                                  : ty_void;
                 node     = call;
             } else {
-                node = funcall(vm, &tok, tok->next, node);
+                node = funcall(vm, &tok, tok->next, node, NULL);
             }
             continue;
         }
@@ -431,15 +471,26 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (equal(tok, ".")) {
             add_type(vm, node);
-            if (vm->compiler.opencl && node->ty && is_vector(node->ty))
+            if (vm->compiler.opencl && node->ty && is_vector(node->ty)) {
                 node = opencl_swizzle(vm, node, tok->next);
-            else
+            } else {
+                Node *call = method_call(vm, &tok, node, tok);
+                if (call) {
+                    node = call;
+                    continue;
+                }
                 node = struct_ref(vm, node, tok->next);
+            }
             tok = tok->next->next;
             continue;
         }
 
         if (equal(tok, "->")) {
+            Node *call = method_call(vm, &tok, node, tok);
+            if (call) {
+                node = call;
+                continue;
+            }
             // x->y is short for (*x).y
             Node *base_addr = node;
             Node *deref     = new_unary(vm, ND_DEREF, node, tok);
@@ -1164,7 +1215,9 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
     return finish_call(vm, fn, ty, head.next, param_ty, tok, false);
 }
 
-static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
+// `recv`, when set, is an already-built first argument (a method receiver).
+static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
+                     Node *recv) {
     add_type(vm, fn);
 
     if (fn->ty->kind != TY_FUNC &&
@@ -1177,10 +1230,19 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn) {
     Node  head            = {};
     Node *cur             = &head;
     bool  deferred_splice = false;
+    bool  parsed_arg      = false;
+
+    if (recv) {
+        add_type(vm, recv);
+        recv = check_call_arg(vm, ty, &param_ty, recv, tok);
+        if (recv)
+            cur = cur->next = recv;
+    }
 
     while (!equal(tok, ")")) {
-        if (cur != &head)
+        if (parsed_arg)
             tok = skip(vm, tok, ",");
+        parsed_arg = true;
 
         Node *arg = assign(vm, &tok, tok);
         add_type(vm, arg);
@@ -1386,7 +1448,7 @@ static Node *kernel_launch(VirtualMachine *vm, Token **rest, Token *tok) {
         tok = skip(vm, tok, ",");
 
     vm->compiler.kernel_launch_depth++;
-    Node *call = funcall(vm, rest, tok, kernel);
+    Node *call = funcall(vm, rest, tok, kernel, NULL);
     vm->compiler.kernel_launch_depth--;
 
     bool native = vm->compiler.kernel_native;

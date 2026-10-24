@@ -101,6 +101,8 @@ typedef struct {
     bool           is_gnu_inline;
     bool           is_kernel;
     const char    *operator_sym;
+    Type          *method_of;
+    const char    *method_name;
     char          *deprecated_msg;
     char          *nodiscard_msg;
     char          *attr_error_msg;   // __attribute__((error("msg")))
@@ -430,6 +432,8 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok);
 Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
                Token *tok);
 Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok);
+void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
+MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,

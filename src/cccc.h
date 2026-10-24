@@ -1597,7 +1597,9 @@ struct Type {
                           // reads
     bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
     const char
-             *operator_sym; // [[cccc::operator(+)]]: the operator it implements
+         *operator_sym;   // [[cccc::operator(+)]]: the operator it implements
+    Type *method_of;      // [[cccc::method(T)]]: the receiver type T
+    const char *method_name;   // ...and the name s.name() calls it by
     bool      is_gnu_inline; // __attribute__((gnu_inline)): `extern inline` is
                              // inline-only, never an external definition
     AddrSpace addr_space; // [[cccc::global]] etc: space of the pointed-to or
@@ -4146,6 +4148,14 @@ typedef struct {
     Obj        *fn;
 } OperatorEntry;
 
+// A function bound to s.name(...) by [[cccc::method(T)]].
+typedef struct {
+    Type       *recv;
+    const char *name;
+    bool        recv_ptr;
+    Obj        *fn;
+} MethodEntry;
+
 typedef struct Compiler {
     // Preprocessor state
     bool      skip_preprocess; // Skip preprocessing step
@@ -4410,6 +4420,8 @@ typedef struct Compiler {
     PendingMemberAttrs *pending_member_attrs; // FIFO head; tail via _tail
     OperatorEntry      *operators;
     int                 noperators, operators_cap;
+    MethodEntry        *methods;
+    int                 nmethods, methods_cap;
     PendingMemberAttrs *pending_member_attrs_tail;
     bool                draining_member_attrs;
     int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)

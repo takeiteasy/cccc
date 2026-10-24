@@ -2290,11 +2290,12 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
          !attr->is_gnu_inline && !attr->is_kernel && !attr->operator_sym &&
-         !attr->format_style && !attr->cleanup_fn && !attr->attr_error_msg &&
-         !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
-         !attr->returns_nonnull && !attr->is_constructor &&
-         !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
-         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible))
+         !attr->method_of && !attr->format_style && !attr->cleanup_fn &&
+         !attr->attr_error_msg && !attr->attr_warning_msg &&
+         !attr->nonnull_all && !attr->nonnull_mask && !attr->returns_nonnull &&
+         !attr->is_constructor && !attr->is_destructor && !attr->is_sentinel &&
+         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size &&
+         !attr->vec_visible))
         return ty;
 
     if (attr->has_vector_size)
@@ -2317,6 +2318,10 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_kernel = true;
     if (attr->operator_sym && ty->kind == TY_FUNC)
         ty->operator_sym = attr->operator_sym;
+    if (attr->method_of && ty->kind == TY_FUNC) {
+        ty->method_of   = attr->method_of;
+        ty->method_name = attr->method_name;
+    }
     if (attr->format_style && ty->kind == TY_FUNC) {
         ty->format_style         = attr->format_style;
         ty->format_string_index  = attr->format_string_index;
@@ -2371,6 +2376,10 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_kernel       |= src->is_kernel;
     if (src->operator_sym)
         dst->operator_sym = src->operator_sym;
+    if (src->method_of) {
+        dst->method_of   = src->method_of;
+        dst->method_name = src->method_name;
+    }
     if (!dst->deprecated_msg)
         dst->deprecated_msg = src->deprecated_msg;
     if (!dst->nodiscard_msg)
@@ -3430,6 +3439,30 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     ty->operator_sym = sym;
                 if (attr)
                     attr->operator_sym = sym;
+                continue;
+            }
+
+            // [[cccc::method(T)]] or [[cccc::method(T, name)]]
+            if (cccc_scoped && attr_is(name_tok, "method")) {
+                tok              = skip(vm, tok, "(");
+                Type       *recv = typename(vm, &tok, tok);
+                const char *name = NULL;
+                if (equal(tok, ",")) {
+                    tok = tok->next;
+                    if (tok->kind != TK_IDENT)
+                        error_tok(vm, tok, "expected a method name");
+                    name = get_ident(vm, tok);
+                    tok  = tok->next;
+                }
+                tok = skip(vm, tok, ")");
+                if (ty && ty->kind == TY_FUNC) {
+                    ty->method_of   = recv;
+                    ty->method_name = name;
+                }
+                if (attr) {
+                    attr->method_of   = recv;
+                    attr->method_name = name;
+                }
                 continue;
             }
 

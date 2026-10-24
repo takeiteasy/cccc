@@ -1419,6 +1419,65 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     c->operators[c->noperators++] = e;
 }
 
+void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
+    Compiler *c = &vm->compiler;
+    for (int i = 0; i < c->nmethods; i++)
+        if (c->methods[i].fn == fn)
+            return;
+
+    Type *recv = unqualified(vm, ty->method_of);
+    if (!is_aggregate(recv))
+        error_tok(vm, tok, "method receiver type must be a struct or union");
+    Type *self = ty->params;
+    if (!self)
+        error_tok(vm, tok,
+                  "method '%s' must take the receiver type as its first "
+                  "parameter",
+                  fn->name);
+
+    MethodEntry e       = {.recv = recv,
+                           .name = ty->method_name ? ty->method_name : fn->name,
+                           .fn   = fn};
+    Type       *operand = operator_operand(vm, self, &e.recv_ptr);
+    if (!is_compatible(operand, recv))
+        error_tok(vm, tok,
+                  "method '%s' must take the receiver type as its first "
+                  "parameter",
+                  fn->name);
+
+    for (int i = 0; i < c->nmethods; i++)
+        if (!strcmp(c->methods[i].name, e.name) &&
+            is_compatible(c->methods[i].recv, recv))
+            error_tok(vm, tok, "method '%s' is already defined for this type",
+                      e.name);
+
+    if (c->nmethods == c->methods_cap) {
+        int          cap = c->methods_cap ? c->methods_cap * 2 : 8;
+        MethodEntry *n   = arena_alloc(&c->parser_arena, cap * sizeof(*n));
+        if (c->nmethods)
+            memcpy(n, c->methods, c->nmethods * sizeof(*n));
+        c->methods     = n;
+        c->methods_cap = cap;
+    }
+    c->methods[c->nmethods++] = e;
+}
+
+// The method called `name` of struct/union type recv, or NULL.
+// TODO(#1776): linear scan; a hash keyed by (name, type) if tables grow large.
+MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name) {
+    if (!vm->compiler.nmethods)
+        return NULL;
+    recv = unqualified(vm, recv);
+    for (int i = 0; i < vm->compiler.nmethods; i++) {
+        MethodEntry *m = &vm->compiler.methods[i];
+        if (strlen(m->name) == (size_t)name->len &&
+            !strncmp(m->name, name->loc, name->len) &&
+            is_compatible(m->recv, recv))
+            return m;
+    }
+    return NULL;
+}
+
 // A call to the function bound to sym for these operands, or NULL when neither
 // operand is a struct/union or none matches exactly.
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
