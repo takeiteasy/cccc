@@ -7,6 +7,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-24
+
+- Added: `[[cccc::operator(sym)]]` binds `+ - * / %` and `== != < <= > >=` to
+  a function for struct and union operands; `a op= b` uses the binary
+  operator. See `docs/operators.md`.
+- Added: `[[cccc::method(T)]]` and `[[cccc::method(T, name)]]` make a free
+  function callable as `s.f(x)` and `p->f(x)`. See `docs/methods.md`.
+- Fixed: an rvalue operand passed to a pointer parameter of an operator
+  function is copied into a temporary. `mk() == b` compiled in the VM but
+  failed under `-c=native`.
+
 ## [0.21.3] - 2026-10-23
 
 - Changed: under `-c=native`, `-m` and `-c=generated`, `task` queues its block
