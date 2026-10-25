@@ -1660,10 +1660,27 @@ static bool build_deferred_init_splice(VirtualMachine *vm, Initializer *init,
     return true;
 }
 
+// The initializer of `int a _Checked[] = {...}` replaces the array type with a
+// fresh complete one that carries no checked fields; put them back and
+// resolve the bounds now that the extent is known.
+static void restore_checked_array(VirtualMachine *vm, Obj *var) {
+    if (var->checked_kind == CHECKED_NONE || var->ty->kind != TY_ARRAY ||
+        var->ty->checked_kind != CHECKED_NONE)
+        return;
+    Type *ty                = copy_type(vm, var->ty);
+    ty->checked_kind        = var->checked_kind;
+    ty->checked_bounds_form = var->checked_bounds_form;
+    ty->checked_array_extent =
+        var->checked_kind == CHECKED_NTARRAY ? ty->array_len - 1 : ty->array_len;
+    var->ty = ty;
+    resolve_checked_bounds(vm, var);
+}
+
 Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     bool inferred_array = var->ty->kind == TY_ARRAY && var->ty->size < 0;
     Type        *declared_ty    = var->ty;
     Initializer *init   = initializer(vm, rest, tok, var->ty, &var->ty);
+    restore_checked_array(vm, var);
 
     if (declared_ty != var->ty &&
         (declared_ty->kind == TY_STRUCT || declared_ty->kind == TY_UNION) &&
@@ -1962,6 +1979,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     bool prev_in_const_gvar_init    = vm->compiler.in_const_gvar_init;
     vm->compiler.in_const_gvar_init = true;
     Initializer *init = initializer(vm, rest, tok, var->ty, &var->ty);
+    restore_checked_array(vm, var);
     vm->compiler.in_const_gvar_init = prev_in_const_gvar_init;
 
     // For constexpr variables, save the initializer expression for compile-time

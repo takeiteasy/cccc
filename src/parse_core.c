@@ -1012,6 +1012,11 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
         return;
     }
 
+    // An incomplete checked array (`int a _Checked[] = {...}`) has no extent
+    // until its initializer sizes it; the initializer path resolves again.
+    if (!ty->checked_bounds_arg1 && ty->checked_bounds_form == CB_COUNT)
+        return;
+
     Token *tok;
 
     if (ty->checked_bounds_form == CB_RANGE) {

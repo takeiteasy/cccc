@@ -164,3 +164,23 @@ void test_nt_checked_array_terminator_nonnull_trap(void) {
     volatile int i              = 5;
     s[i] = 'x'; // trap: non-null write to terminator slot
 }
+
+// ---------------------------------------------------------------------
+// Inferred extent: the initializer sizes the array.
+// ---------------------------------------------------------------------
+
+int g_inferred _Checked[] = {5, 6, 7};
+
+[[cccc::test]]
+void test_inferred_extent_global(void) {
+    AssertEq(g_inferred[2], 7);
+    AssertEq(sizeof(g_inferred) / sizeof(g_inferred[0]), 3);
+}
+
+[[cccc::test]]
+void test_inferred_extent_local(void) {
+    int a _Checked[] = {1, 2, 3, 4};
+    int *q           = a;
+    AssertEq(a[3], 4);
+    AssertEq(q[0], 1);
+}
