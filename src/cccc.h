@@ -124,10 +124,10 @@ extern "C" {
     X(SUB3, 1)  /* rd = rs1 - rs2 */                                                 \
     X(MUL3, 1)  /* rd = rs1 * rs2 */                                                 \
     X(DIV3, 1)  /* rd = rs1 / rs2 (signed) */                                        \
-    X(ADDC, 1)  /* checked signed add: rd = rs1 + rs2 */                             \
-    X(SUBC, 1)  /* checked signed sub: rd = rs1 - rs2 */                             \
-    X(MULC, 1)  /* checked signed mul: rd = rs1 * rs2 */                             \
-    X(DIVC, 1)  /* checked signed div: rd = rs1 / rs2 */                             \
+    X(ADDC, 1)  /* checked signed add, traps outside the width byte */               \
+    X(SUBC, 1)  /* checked signed sub, traps outside the width byte */               \
+    X(MULC, 1)  /* checked signed mul, traps outside the width byte */               \
+    X(DIVC, 1)  /* checked signed div, traps outside the width byte */               \
     X(UDIV3, 1) /* rd = rs1 / rs2 (unsigned) */                                      \
     X(MOD3, 1)  /* rd = rs1 % rs2 (signed) */                                        \
     X(UMOD3, 1) /* rd = rs1 % rs2 (unsigned) */                                      \

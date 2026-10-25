@@ -862,6 +862,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             gen_expr(vm, node->lhs, dest_reg);
             if (is_flonum(node->ty)) {
                 emit_frr(vm, fop_for_type(node->ty, FNEG3), dest_reg, dest_reg);
+            } else if ((vm->flags & CCCC_OVERFLOW_CHECKS) &&
+                       !node->ty->is_unsigned && !node->ty->base) {
+                emit_rrrs(vm, SUBC, dest_reg, REG_ZERO, dest_reg,
+                          checked_width(node->ty));
             } else {
                 emit_rr(vm, NEG3, dest_reg, dest_reg);
                 emit_int32_wrap(vm, node->ty, dest_reg);
@@ -1469,7 +1473,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     op = (node->kind == ND_LT) ? ULT3 : ULE3;
                 }
 
-                emit_rrr(vm, op, dest_reg, r_lhs_op, r_rhs_op);
+                if (op == ADDC || op == SUBC || op == MULC || op == DIVC)
+                    emit_rrrs(vm, op, dest_reg, r_lhs_op, r_rhs_op,
+                              checked_width(node->ty));
+                else
+                    emit_rrr(vm, op, dest_reg, r_lhs_op, r_rhs_op);
 
                 if (node->ty->kind == TY_BITINT)
                     emit_bitint_trunc(vm, node->ty, dest_reg);

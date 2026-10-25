@@ -77,7 +77,7 @@ so re-stating it as a pragma in the temporary source would be redundant.
 
 | Opcode | Description |
 |--------|-------------|
-| `ADDC` / `SUBC` / `MULC` / `DIVC` | Trapping signed arithmetic emitted for standard `+`, `-`, `*`, and `/` when `--overflow-checks` is enabled. |
+| `ADDC` / `SUBC` / `MULC` / `DIVC` | Trapping signed arithmetic emitted for `+`, `-`, `*`, `/` and unary `-` when `--overflow-checks` is enabled. The fourth operand byte is the operation type's signed bit width. |
 | `IOVFL` | Overflow-checked `add`/`sub`/`mul`.  Inputs in `REG_A0`/`REG_A1`, result pointer in `REG_A2`; overflow boolean returned in `REG_A0`.  Operand encodes `op_type`, width, and signedness. |
 
 ## Struct Return Buffers

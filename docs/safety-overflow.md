@@ -4,19 +4,18 @@
 
 | Operation | Trap when | Report |
 |---|---|---|
-| `+`, `-` | The result leaves `LLONG_MIN`..`LLONG_MAX` | `INTEGER OVERFLOW`, with operands |
-| `*` | The product overflows | `INTEGER OVERFLOW` |
+| `+`, `-`, `*`, unary `-` | The result leaves the range of the operation's signed type (`int`, `long long`, `_BitInt(N)` up to 64 bits) | `INTEGER OVERFLOW`, with operands and width |
 | `/` | The divisor is zero | `DIVISION BY ZERO` |
-| `/` | `LLONG_MIN / -1` | `INTEGER OVERFLOW` |
+| `/` | The type's minimum divided by `-1` | `INTEGER OVERFLOW` |
 
-Floating-point operations are not affected. The checks use dedicated opcodes (`ADDC`, `SUBC`, `MULC`, `DIVC`) that run instead of the plain ones.
+`++`, `--` and compound assignments (`+=`, `-=`, `*=`) are checked the same way. Unsigned arithmetic and floating-point operations are not affected. The checks use dedicated opcodes (`ADDC`, `SUBC`, `MULC`, `DIVC`) that run instead of the plain ones.
 
 ```c
 #include "limits.h"
 
 int main() {
-    long long x = LLONG_MAX;
-    long long result = x + 1;   // overflow
+    volatile int x = INT_MAX;
+    int result = x + 1;   // overflow
     return 42;
 }
 ```
@@ -26,7 +25,7 @@ $ ./cccc --overflow-checks test_overflow_add.c
 
 ========== INTEGER OVERFLOW ==========
 Addition overflow detected
-Operands: 9223372036854775807 + 1
+Operands: 2147483647 + 1 (32-bit)
 PC:       0x94e8000a0 (offset: 20)
 ======================================
 ```
@@ -35,18 +34,17 @@ Other reports:
 
 ```
 Subtraction overflow detected
-Operands: -9223372036854775808 - 1
+Operands: -2147483648 - 1 (32-bit)
 
 Multiplication overflow detected
-Operands: 9223372036854775807 * 2
+Operands: 9223372036854775807 * 2 (64-bit)
 
 ========== DIVISION BY ZERO ==========
 Attempted division by zero
 Operands: 42 / 0
 
 Division overflow detected
-Operands: -9223372036854775808 / -1
-Result would overflow (LLONG_MIN / -1 = LLONG_MAX + 1)
+Operands: -2147483648 / -1 (32-bit)
 ```
 
 Code that does not overflow runs normally and keeps its exit code.

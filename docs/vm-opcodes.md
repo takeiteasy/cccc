@@ -42,10 +42,10 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `SUB3` | `rd = rs1 - rs2` |
 | `MUL3` | `rd = rs1 * rs2` |
 | `DIV3` | `rd = rs1 / rs2` (signed; traps on divide-by-zero) |
-| `ADDC` | Checked signed addition; traps on overflow |
-| `SUBC` | Checked signed subtraction; traps on overflow |
-| `MULC` | Checked signed multiplication; traps on overflow |
-| `DIVC` | Checked signed division; traps on divide-by-zero or `LLONG_MIN / -1` |
+| `ADDC` | Checked signed addition; traps when the result leaves the signed width in the width byte |
+| `SUBC` | Checked signed subtraction (also unary `-` as `0 - x`); traps outside the width |
+| `MULC` | Checked signed multiplication; traps outside the width |
+| `DIVC` | Checked signed division; traps on divide-by-zero or `MIN / -1` of the width |
 | `UDIV3` | Unsigned division |
 | `MOD3` | Signed remainder (traps on modulo-by-zero) |
 | `UMOD3` | Unsigned remainder |

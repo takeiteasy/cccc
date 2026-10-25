@@ -943,6 +943,11 @@ void emit_int32_wrap(VirtualMachine *vm, Type *ty, int reg) {
         emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
 }
 
+// Signed bit width a checked arithmetic opcode (ADDC etc.) tests for `ty`.
+int checked_width(Type *ty) {
+    return ty->kind == TY_BITINT ? ty->bit_width : ty->size * 8;
+}
+
 // JZ3: if rs == 0, jump (returns patch location)
 Pc emit_jz3(VirtualMachine *vm, int rs) {
     emit(vm, JZ3);

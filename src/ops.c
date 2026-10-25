@@ -89,77 +89,51 @@ static inline int op_DIV3_fn(VirtualMachine *vm) {
     return 0;
 }
 
-static inline int op_ADDC_fn(VirtualMachine *vm) {
-    long long operands = cc_read_word(vm);
-    int       rd, rs1, rs2;
-    DECODE_RRR(operands, rd, rs1, rs2);
-    long long a = vm->regs[rs1];
-    long long b = vm->regs[rs2];
-
-    if ((b > 0 && a > LLONG_MAX - b) || (b < 0 && a < LLONG_MIN - b)) {
-        printf("\n========== INTEGER OVERFLOW ==========\n");
-        printf("Addition overflow detected\n");
-        printf("Operands: %lld + %lld\n", a, b);
-        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-               (long long)vm->pc);
-        printf("======================================\n");
-        return -1;
-    }
-
-    if (rd != REG_ZERO)
-        vm->regs[rd] = a + b;
-    return 0;
+// Signed range of a `width`-bit operation (width 64 is the full register).
+static inline bool fits_signed_width(long long v, int width) {
+    if (width <= 0 || width >= 64)
+        return true;
+    int shift = 64 - width;
+    return (long long)((unsigned long long)v << shift) >> shift == v;
 }
 
-static inline int op_SUBC_fn(VirtualMachine *vm) {
-    long long operands = cc_read_word(vm);
-    int       rd, rs1, rs2;
-    DECODE_RRR(operands, rd, rs1, rs2);
-    long long a = vm->regs[rs1];
-    long long b = vm->regs[rs2];
-
-    if ((b < 0 && a > LLONG_MAX + b) || (b > 0 && a < LLONG_MIN + b)) {
-        printf("\n========== INTEGER OVERFLOW ==========\n");
-        printf("Subtraction overflow detected\n");
-        printf("Operands: %lld - %lld\n", a, b);
-        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-               (long long)vm->pc);
-        printf("======================================\n");
-        return -1;
-    }
-
-    if (rd != REG_ZERO)
-        vm->regs[rd] = a - b;
-    return 0;
+static int report_checked_overflow(VirtualMachine *vm, const char *what,
+                                   long long a, char op, long long b,
+                                   int width) {
+    printf("\n========== INTEGER OVERFLOW ==========\n");
+    printf("%s overflow detected\n", what);
+    printf("Operands: %lld %c %lld (%d-bit)\n", a, op, b, width);
+    printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
+           (long long)vm->pc);
+    printf("======================================\n");
+    return -1;
 }
 
-static inline int op_MULC_fn(VirtualMachine *vm) {
-    long long operands = cc_read_word(vm);
-    int       rd, rs1, rs2;
-    DECODE_RRR(operands, rd, rs1, rs2);
-    long long a = vm->regs[rs1];
-    long long b = vm->regs[rs2];
-    long long result;
-
-    if (__builtin_mul_overflow(a, b, &result)) {
-        printf("\n========== INTEGER OVERFLOW ==========\n");
-        printf("Multiplication overflow detected\n");
-        printf("Operands: %lld * %lld\n", a, b);
-        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-               (long long)vm->pc);
-        printf("======================================\n");
-        return -1;
+// ADDC/SUBC/MULC/DIVC: [rd:8|rs1:8|rs2:8|width:8], width = signed bits of the
+// operation's type; the result must fit it.
+#define CHECKED_ARITH_OP(NAME, WHAT, SYM, BUILTIN)                             \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1, rs2, width;                                         \
+        DECODE_RRRS(operands, rd, rs1, rs2, width);                            \
+        long long a = vm->regs[rs1];                                           \
+        long long b = vm->regs[rs2];                                           \
+        long long result;                                                      \
+        if (BUILTIN(a, b, &result) || !fits_signed_width(result, width))       \
+            return report_checked_overflow(vm, WHAT, a, SYM, b, width);        \
+        if (rd != REG_ZERO)                                                    \
+            vm->regs[rd] = result;                                             \
+        return 0;                                                              \
     }
 
-    if (rd != REG_ZERO)
-        vm->regs[rd] = result;
-    return 0;
-}
+CHECKED_ARITH_OP(ADDC, "Addition", '+', __builtin_add_overflow)
+CHECKED_ARITH_OP(SUBC, "Subtraction", '-', __builtin_sub_overflow)
+CHECKED_ARITH_OP(MULC, "Multiplication", '*', __builtin_mul_overflow)
 
 static inline int op_DIVC_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
-    int       rd, rs1, rs2;
-    DECODE_RRR(operands, rd, rs1, rs2);
+    int       rd, rs1, rs2, width;
+    DECODE_RRRS(operands, rd, rs1, rs2, width);
     long long a = vm->regs[rs1];
     long long b = vm->regs[rs2];
 
@@ -173,16 +147,10 @@ static inline int op_DIVC_fn(VirtualMachine *vm) {
         return -1;
     }
 
-    if (a == LLONG_MIN && b == -1) {
-        printf("\n========== INTEGER OVERFLOW ==========\n");
-        printf("Division overflow detected\n");
-        printf("Operands: %lld / %lld\n", a, b);
-        printf("Result would overflow (LLONG_MIN / -1 = LLONG_MAX + 1)\n");
-        printf("PC:       0x%llx (offset: %lld)\n", (long long)vm->pc,
-               (long long)vm->pc);
-        printf("======================================\n");
-        return -1;
-    }
+    // MIN / -1 does not fit: LLONG_MIN at 64 bits, -(2^(width-1)) narrower.
+    if (b == -1 &&
+        (a == LLONG_MIN || (width < 64 && !fits_signed_width(-a, width))))
+        return report_checked_overflow(vm, "Division", a, '/', b, width);
 
     if (rd != REG_ZERO)
         vm->regs[rd] = a / b;

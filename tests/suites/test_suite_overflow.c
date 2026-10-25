@@ -76,6 +76,93 @@ void test_overflow_opt_add(void) {
     (void)result;
 }
 
+// ── 32-bit int: INT_MAX + 1 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_add(void) {
+    volatile int x      = INT_MAX;
+    int          result = x + 1;
+    (void)result;
+}
+
+// ── 32-bit int: INT_MIN - 1 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_sub(void) {
+    volatile int x      = INT_MIN;
+    int          result = x - 1;
+    (void)result;
+}
+
+// ── 32-bit int: 65536 * 65536 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_mul(void) {
+    volatile int x      = 65536;
+    int          result = x * x;
+    (void)result;
+}
+
+// ── 32-bit int: INT_MIN / -1 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_div(void) {
+    volatile int x      = INT_MIN;
+    int          result = x / -1;
+    (void)result;
+}
+
+// ── 32-bit int: -INT_MIN must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_neg(void) {
+    volatile int x      = INT_MIN;
+    int          result = -x;
+    (void)result;
+}
+
+// ── 64-bit: -LLONG_MIN must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_llong_neg(void) {
+    volatile long long x      = LLONG_MIN;
+    long long          result = -x;
+    (void)result;
+}
+
+// ── compound assignment: INT_MAX += 1 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_compound_add(void) {
+    volatile int x  = INT_MAX;
+    x              += 1;
+}
+
+// ── increment: INT_MAX++ must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_int_increment(void) {
+    volatile int x = INT_MAX;
+    x++;
+}
+
+// ── signed _BitInt(8): 127 + 1 must abort ──
+[[cccc::test(flags = "--overflow-checks", exit_code = 255)]]
+void test_overflow_bitint_add(void) {
+    volatile _BitInt(8) x = 127;
+    _BitInt(8) result     = x + (_BitInt(8))1;
+    (void)result;
+}
+
+// ── in-range results and non-signed types do not trap ──
+[[cccc::test(flags = "--overflow-checks")]]
+void test_overflow_checks_no_false_trap(void) {
+    volatile int x = INT_MAX;
+    AssertEq(x - 1 + 1, INT_MAX);
+    AssertEq(-x, -INT_MAX);
+    volatile unsigned u = UINT_MAX;
+    AssertEq(u + 1u, 0u);
+    volatile char c  = 127;
+    c               += 1;
+    AssertEq((int)c, -128);
+    volatile _BitInt(8) b = 126;
+    AssertEq((int)(b + (_BitInt(8))1), 127);
+    volatile long long big = 3000000000LL;
+    AssertEq(big * 3, 9000000000LL);
+}
+
 // ── test_optimizer_trap_preservation: div-by-zero trap survives -O3 ──
 [[cccc::test(exit_code = 255)]]
 void test_div_by_zero_optimized(void) {
