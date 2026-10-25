@@ -1752,8 +1752,17 @@ Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
     return NULL;
 }
 
-// The overloaded call for sym, else the built-in node. A struct or union
-// operand with no matching function is an error.
+// C requires arithmetic operands to `* /` and unary `+ -`, and integer
+// operands to `% & | ^ << >>` and `~`. Vector operands are checked in add_type.
+bool arith_operand_ok(Type *ty, bool integer_only) {
+    if (is_vector(ty) || is_error_type(ty))
+        return true;
+    return integer_only ? is_integer(ty) : is_numeric(ty);
+}
+
+// The overloaded call for sym, else the built-in node. An operand that is not
+// valid for the operator, or a struct or union with no matching function, is
+// an error.
 static Node *binary_op(VirtualMachine *vm, NodeKind kind, const char *sym,
                        Node *lhs, Node *rhs, Token *tok) {
     Node *ov = try_overloaded_op(vm, sym, lhs, rhs, tok);
@@ -1761,7 +1770,9 @@ static Node *binary_op(VirtualMachine *vm, NodeKind kind, const char *sym,
         return ov;
     add_type(vm, lhs);
     add_type(vm, rhs);
-    if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty))
+    if (is_aggregate(lhs->ty) || is_aggregate(rhs->ty) ||
+        !arith_operand_ok(lhs->ty, kind != ND_MUL && kind != ND_DIV) ||
+        !arith_operand_ok(rhs->ty, kind != ND_MUL && kind != ND_DIV))
         error_tok(vm, tok, "invalid operands to %s", sym);
     return new_binary(vm, kind, lhs, rhs, tok);
 }

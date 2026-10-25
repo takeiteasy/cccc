@@ -445,6 +445,7 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);
 Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
                            Token *tok);
+bool arith_operand_ok(Type *ty, bool integer_only);
 Node *overloaded_unary(VirtualMachine *vm, const char *sym, Node *operand,
                        Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);

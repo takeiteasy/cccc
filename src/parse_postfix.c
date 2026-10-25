@@ -25,6 +25,13 @@
 
 static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok);
 
+static void check_unary_operand(VirtualMachine *vm, const char *sym,
+                                Node *operand, bool integer_only, Token *tok) {
+    add_type(vm, operand);
+    if (!arith_operand_ok(operand->ty, integer_only))
+        error_tok(vm, tok, "invalid operand to unary %s", sym);
+}
+
 // unary = ("+" | "-" | "*" | "&" | "!" | "~") cast
 //       | ("++" | "--") unary
 //       | "&&" ident
@@ -43,6 +50,7 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *ov      = overloaded_unary(vm, "+", operand, tok);
         if (ov)
             return ov;
+        check_unary_operand(vm, "+", operand, false, tok);
         Node *promoted = promote_operand(vm, operand);
         // The result is a value, never an lvalue, even when no promotion
         // applies.
@@ -54,7 +62,10 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "-")) {
         Node *operand = cast(vm, rest, tok->next);
         Node *ov      = overloaded_unary(vm, "-", operand, tok);
-        return ov ? ov : new_unary(vm, ND_NEG, operand, tok);
+        if (ov)
+            return ov;
+        check_unary_operand(vm, "-", operand, false, tok);
+        return new_unary(vm, ND_NEG, operand, tok);
     }
 
     if (equal(tok, "&")) {
@@ -96,7 +107,10 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "~")) {
         Node *operand = cast(vm, rest, tok->next);
         Node *ov      = overloaded_unary(vm, "~", operand, tok);
-        return ov ? ov : new_unary(vm, ND_BITNOT, operand, tok);
+        if (ov)
+            return ov;
+        check_unary_operand(vm, "~", operand, true, tok);
+        return new_unary(vm, ND_BITNOT, operand, tok);
     }
 
     // Read ++i as i+=1, --i as i-=1
