@@ -2120,6 +2120,8 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what) {
     if (vm->compiler.in_type_lookahead || !ty || !name_tok)
         return;
+    while (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
+        ty = ty->base;
     if (ty->kind != TY_PTR)
         return;
     if (ty->base && ty->base->kind == TY_FUNC)

@@ -134,6 +134,24 @@ void test_assume_cast_allowed_in_region(void) {
     AssertEq(bounds_casts_allowed(3), 42);
 }
 
+int *[[cccc::single]] checked_return_type(int *[[cccc::single]] p);
+
+[[cccc::checked]]
+int checked_pointer_array(void) {
+    int *[[cccc::single]] slots[2] = {&g_one, NULL};
+    return *slots[0] + (slots[1] == NULL) + *checked_return_type(&g_one);
+}
+
+[[cccc::checked]] int *[[cccc::single]] checked_return_type(
+    int *[[cccc::single]] p) {
+    return p;
+}
+
+[[cccc::test]]
+void test_checked_arrays_and_return_types_allowed(void) {
+    AssertEq(checked_pointer_array(), 7 + 1 + 7);
+}
+
 [[cccc::checked]]
 int bounds_unknown_from_raw(void) {
     int *[[cccc::array, cccc::bounds(unknown)]] a = g_raw;

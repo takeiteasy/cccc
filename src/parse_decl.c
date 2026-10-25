@@ -443,6 +443,8 @@ Token *function_declaration_list(VirtualMachine *vm, Token *tok, Type *basety,
         if (ty->kind != TY_FUNC)
             error_tok(vm, ty->name ? ty->name : tok,
                       "expected function declaration");
+        cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+                                    "return type of function");
         declare_function_prototype(vm, ty, attr, tok);
     }
 
@@ -747,6 +749,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                       "'checked'/'unchecked' on a function declaration has "
                       "no effect -- it applies to a function definition's "
                       "body");
+        cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+                                    "return type of function");
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
                               fn->ty, fn, fn->tok);
         return tok;
@@ -846,6 +850,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // single restore point below, after the neg_rec/normal if/else merges).
     CheckedScope saved_checked_scope_attr = vm->compiler.checked_scope_attr;
     vm->compiler.checked_scope_attr       = attr->checked_scope;
+    cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
+                                "return type of function");
 
     // K&R declaration-list: type declarations between ')' and '{' that give
     // explicit types to the parameter names.  Update ty->params *before*

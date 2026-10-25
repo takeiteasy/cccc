@@ -44,7 +44,7 @@ Regions nest to any depth and the innermost wins, across all spellings. An attri
 
 | Rule | Example |
 |---|---|
-| A pointer-typed local, parameter, global or member with no checked kind | `int *p;` |
+| A pointer-typed local, parameter, global, member or function return type with no checked kind; arrays of such pointers count | `int *p;`, `int *a[2];`, `int *f(void);` |
 | An `array`/`ntarray` pointer with no bounds form | `int * [[cccc::array]] a;` |
 | A cast to an unchecked pointer type, or one that changes a checked pointer's kind (`array` to `single`) | `(int *)a` |
 | A cast from an unchecked pointer to a checked one | `(int * [[cccc::array, cccc::count(n)]])raw` |
@@ -79,4 +79,4 @@ int main(void) { printf("hi\n"); return 0; }
 
 The diagnostics are not gated by `--checked-pointers`, and they fire under `-c=native`, `-m` and `-c=generated`. The region attributes are stripped from that output.
 
-[^gaps]: Not enforced: call-boundary diagnostics between checked and unchecked code (an annotated prototype's own bounds are still checked at the call); a C23 `auto` local initialised from an unchecked pointer escapes the declaration ban, so give it an explicit type; global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion; and a mismatched `checked begin` / `unchecked end` pair is accepted, since `end` restores whatever state preceded its `begin`.
+[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); call-boundary diagnostics between checked and unchecked code (an annotated prototype's own bounds are still checked at the call); a C23 `auto` local initialised from an unchecked pointer escapes the declaration ban, so give it an explicit type; global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion; and a mismatched `checked begin` / `unchecked end` pair is accepted, since `end` restores whatever state preceded its `begin`.
