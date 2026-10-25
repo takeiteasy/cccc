@@ -24,7 +24,7 @@ int main(void) {
 | Attribute | Applies to | Generates |
 |---|---|---|
 | `@serialize` | struct/union | `int T_serialize(T *self, void *buf)`, `unsigned long T_serialize_size(const T *self)` |
-| `@deserialize` | struct/union | `T T_deserialize(void *buf)`, `unsigned long T_deserialize_read(T *out, void *buf)` |
+| `@deserialize` | struct/union | `T T_deserialize(void *buf)`, `int T_deserialize_into(T *out, const void *buf, unsigned long len)`, `unsigned long T_deserialize_read(T *out, void *buf)` |
 | `@to_string` | enum | `const char *T_to_string(T v)` |
 | `@to_string` | struct | `size_t T_to_string(const T *self, char *buf, size_t cap)` |
 | `@from_string` | enum | `T T_from_string(const char *s)` |
@@ -106,7 +106,11 @@ Config_destroy(&copy);
 
 `T_deserialize` allocates the owned members; release them with `@destroy`. It
 needs `#include <stdlib.h>` and `<string.h>`, trusts the buffer and does not
-report allocation failure. The buffer uses the host's byte order, so it is not
+report allocation failure. For a buffer that may be truncated or hostile, use
+`T_deserialize_into(&out, buf, len)`: it checks every length against `len`,
+returns `0` on success or `1` on a malformed buffer or failed allocation, and
+on failure frees what it allocated and leaves `*out` untouched. It needs
+`@destroy` on the struct and its pointees. The buffer uses the host's byte order, so it is not
 portable between machines.[^binary] A pointee that owns memory needs its own
 `@serialize` / `@deserialize` declared first, unless it is only forward-declared
 (see [forward declarations](derive-owned.md)). `@serialize_skip` leaves an owned member out too.

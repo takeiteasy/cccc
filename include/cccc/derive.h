@@ -367,6 +367,14 @@
     } else if (!strcmp(suffix, "_deserialize_read")) {
         __builtin_owned_proto(fname, GetType("unsigned long"), MakePointer(pt),
                               "out", MakePointer(GetType("void")), "buf");
+    } else if (!strcmp(suffix, "_deserialize_checked")) {
+        if (!FindGlobal(fname)) {
+            Obj *proto = FunctionPrototype(fname, GetType("long"));
+            FunctionAddParam(proto, "out", MakePointer(pt));
+            FunctionAddParam(proto, "buf", MakePointer(GetType("void")));
+            FunctionAddParam(proto, "len", GetType("unsigned long"));
+            PublishNode(proto);
+        }
     } else if (!strcmp(suffix, "_dump")) {
         __builtin_owned_proto(fname, GetType("void"),
                               MakePointer(MakeConst(pt)), "self",
@@ -442,6 +450,8 @@
         } else if (!strncmp(suffix, "_serialize", 10)) {
             strcpy(fix, "@serialize");
         } else if (!strcmp(suffix, "_deserialize_read")) {
+            strcpy(fix, "@deserialize");
+        } else if (!strcmp(suffix, "_deserialize_checked")) {
             strcpy(fix, "@deserialize");
         } else {
             strcpy(fix, "@");
@@ -2941,11 +2951,12 @@
 // unsigned long `cur` the bytes mode 0 writes, 2 reads through `cur` into
 // `obj`, allocating each member.
 @comptime void __builtin_binary_owned(Node *block, Type *ty, Node *obj,
-                                      Node *cur, int mode,
+                                      Node *cur, Node *end, Node *bad, int mode,
                                       const char *self_name, const char *path) {
-    static const char *attrs[3] = {"@serialize", "@serialize", "@deserialize"};
-    static const char *sufs[3]  = {"_serialize", "_serialize_size",
-                                   "_deserialize_read"};
+    static const char *attrs[4] = {"@serialize", "@serialize", "@deserialize",
+                                   "@deserialize"};
+    static const char *sufs[4]  = {"_serialize", "_serialize_size",
+                                   "_deserialize_read", "_deserialize_checked"};
     int                count    = StructMemberCount(ty);
     for (int i = 0; i < count; i++) {
         Member     *m     = StructMemberAt(ty, i);
@@ -2953,8 +2964,8 @@
         Type       *fty   = MemberType(m);
         if (!field) {
             if (GetTypeKind(fty) == TK_STRUCT)
-                __builtin_binary_owned(block, fty, obj, cur, mode, self_name,
-                                       path);
+                __builtin_binary_owned(block, fty, obj, cur, end, bad, mode,
+                                       self_name, path);
             continue;
         }
         if (MemberHasAttr(m, "serialize_skip"))
@@ -2970,13 +2981,13 @@
                 Node *idx  = MakeLocalVarUnique(GetType("int"));
                 Node *body = MakeBlock(NULL, 0);
                 __builtin_binary_owned(body, TypeBase(fty),
-                                       MakeSubscript(e, idx), cur, mode,
-                                       self_name, sub);
+                                       MakeSubscript(e, idx), cur, end, bad,
+                                       mode, self_name, sub);
                 BlockAddStmt(
                     block, __builtin_owned_loop(idx, TypeArrayLen(fty), body));
             } else {
-                __builtin_binary_owned(block, fty, e, cur, mode, self_name,
-                                       sub);
+                __builtin_binary_owned(block, fty, e, cur, end, bad, mode,
+                                       self_name, sub);
             }
             continue;
         }
@@ -2991,7 +3002,7 @@
             deep = 0;
         // A pointee that is not declared yet has no sizeof: T_clone_size gives
         // its size, and elements are reached through a char pointer.
-        char tmpl[1200];
+        char tmpl[3000];
         char sz[300];
         char el[100];
         char zdecl[330];
@@ -3054,6 +3065,60 @@
                 strcat(tmpl, "($1);");
             } else
                 strcat(tmpl, "$2 += sizeof(*$1);");
+        } else if (mode == 3) {
+            char zd[330];
+            strcpy(zd, "unsigned long z_ = ");
+            if (deep == 2) {
+                __builtin_json_fn_name(zd + strlen(zd), "", TypeName(pt),
+                                       "_clone_size");
+                strcat(zd, "(); ");
+            } else {
+                strcat(zd, "sizeof(*$1); ");
+            }
+            // Each step fails by setting $5; nothing runs once it is set.
+            strcat(tmpl, "if (!$5) { if ($4 == $2) $5 = 1; else { char f_ = "
+                         "*$2; $2 += 1; if (f_) { ");
+            if (shape == 1)
+                strcat(tmpl, "unsigned long l_; if ((unsigned long)($4 - $2) < "
+                             "sizeof l_) $5 = 1; else { memcpy(&l_, $2, sizeof "
+                             "l_); $2 += sizeof l_; if (l_ > (unsigned "
+                             "long)($4 - $2)) $5 = 1; else { $1 = malloc(l_ + "
+                             "1); if (!$1) $5 = 1; else { memcpy($1, $2, l_); "
+                             "$1[l_] = 0; $2 += l_; } } } ");
+            else if (shape == 2) {
+                strcat(tmpl, zd);
+                strcat(tmpl, "unsigned long n_ = $3 > 0 ? (unsigned long)$3 : "
+                             "0; if (n_ > (unsigned long)($4 - $2) / z_) $5 = "
+                             "1; else { $1 = calloc(n_ ? n_ : 1, z_); if (!$1) "
+                             "$5 = 1; else ");
+                if (deep) {
+                    strcat(tmpl, "for (unsigned long i_ = 0; i_ < n_ && !$5; "
+                                 "i_++) { long r_ = ");
+                    strcat(tmpl, fn);
+                    strcat(tmpl, "(");
+                    strcat(tmpl, el);
+                    strcat(tmpl, ", $2, (unsigned long)($4 - $2)); if (r_ < "
+                                 "0) $5 = 1; else $2 += r_; } ");
+                } else {
+                    strcat(tmpl, "{ memcpy($1, $2, n_ * z_); $2 += n_ * z_; } "
+                                 "");
+                }
+                strcat(tmpl, "} ");
+            } else {
+                strcat(tmpl, zd);
+                strcat(tmpl, "if (z_ > (unsigned long)($4 - $2)) $5 = 1; else "
+                             "{ $1 = calloc(1, z_); if (!$1) $5 = 1; else ");
+                if (deep) {
+                    strcat(tmpl, "{ long r_ = ");
+                    strcat(tmpl, fn);
+                    strcat(tmpl, "($1, $2, (unsigned long)($4 - $2)); if (r_ "
+                                 "< 0) $5 = 1; else $2 += r_; } ");
+                } else {
+                    strcat(tmpl, "{ memcpy($1, $2, z_); $2 += z_; } ");
+                }
+                strcat(tmpl, "} ");
+            }
+            strcat(tmpl, "} } }");
         } else {
             strcat(tmpl, "{ char f_ = *$2; $2 += 1; if (!f_) $1 = 0; else { ");
             if (shape == 1)
@@ -3088,8 +3153,9 @@
                              "sizeof(*$1)); $2 += sizeof(*$1); ");
             strcat(tmpl, "} }");
         }
-        BlockAddStmt(block,
-                     Quote(tmpl, e, cur, cname ? MakeMember(obj, cname) : e));
+        Node *cnt = cname ? MakeMember(obj, cname) : e;
+        BlockAddStmt(block, mode == 3 ? Quote(tmpl, e, cur, cnt, end, bad)
+                                      : Quote(tmpl, e, cur, cnt));
     }
 }
 
@@ -3134,7 +3200,8 @@
                          MakeExprStmt(MakeAssign(
                              cur, MakeBinary(NK_ADD, base,
                                              MakeIntLiteral(TypeSize(ty))))));
-            __builtin_binary_owned(block, ty, self, cur, 0, tname, tname);
+            __builtin_binary_owned(block, ty, self, cur, NULL, NULL, 0, tname,
+                                   tname);
             BlockAddStmt(block,
                          MakeReturn(MakeCast(MakeBinary(NK_SUB, cur, base),
                                              GetType("int"))));
@@ -3156,7 +3223,7 @@
                 block, ty,
                 MakeUnary(NK_DEREF,
                           __builtin_derive_const_param(size_fn, "self", ty)),
-                n, 1, tname, tname);
+                n, NULL, NULL, 1, tname, tname);
         BlockAddStmt(block, MakeReturn(n));
         FunctionSetBody(size_fn, block);
     }
@@ -3199,7 +3266,8 @@
                          MakeExprStmt(MakeAssign(
                              cur, MakeBinary(NK_ADD, base,
                                              MakeIntLiteral(TypeSize(ty))))));
-            __builtin_binary_owned(block, ty, out, cur, 2, tname, tname);
+            __builtin_binary_owned(block, ty, out, cur, NULL, NULL, 2, tname,
+                                   tname);
             BlockAddStmt(block,
                          MakeReturn(MakeCast(MakeBinary(NK_SUB, cur, base),
                                              GetType("unsigned long"))));
@@ -3209,6 +3277,82 @@
         FunctionSetBody(read_fn, block);
     }
     PublishNode(read_fn);
+
+    char cname[128];
+    char iname[128];
+    __builtin_json_fn_name(cname, "", tname, "_deserialize_checked");
+    __builtin_json_fn_name(iname, "", tname, "_deserialize_into");
+    __builtin_derive_pointee_proto("", ty, tname, "_deserialize_checked");
+    if (owned)
+        __builtin_derive_pointee_proto("", ty, tname, "_destroy");
+
+    Obj *checked = MakeFunction(cname, GetType("long"));
+    WithFn(checked) {
+        Node *out      = MakeUnary(NK_DEREF, MakeParamRef(checked, "out"));
+        Node *buf      = MakeParamRef(checked, "buf");
+        Node *len      = MakeParamRef(checked, "len");
+        Node *block    = MakeBlock(NULL, 0);
+        Node *tooshort = MakeBlock(NULL, 0);
+        BlockAddStmt(tooshort, MakeReturn(MakeIntLiteral(-1)));
+        BlockAddStmt(
+            block, MakeIf(MakeBinary(NK_LT, len, MakeIntLiteral(TypeSize(ty))),
+                          tooshort, NULL));
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(out, Deserialize(ty, buf))));
+        if (owned) {
+            Node *cur  = MakeLocalVarUnique(MakePointer(GetType("char")));
+            Node *end  = MakeLocalVarUnique(MakePointer(GetType("char")));
+            Node *bad  = MakeLocalVarUnique(GetType("int"));
+            Node *base = MakeCast(buf, MakePointer(GetType("char")));
+            BlockAddStmt(block,
+                         MakeExprStmt(MakeAssign(bad, MakeIntLiteral(0))));
+            BlockAddStmt(block,
+                         MakeExprStmt(MakeAssign(
+                             cur, MakeBinary(NK_ADD, base,
+                                             MakeIntLiteral(TypeSize(ty))))));
+            BlockAddStmt(block, MakeExprStmt(MakeAssign(
+                                    end, MakeBinary(NK_ADD, base, len))));
+            __builtin_owned_release(block, ty, out, true, "", tname,
+                                    "@deserialize", tname);
+            __builtin_binary_owned(block, ty, out, cur, end, bad, 3, tname,
+                                   tname);
+            Node *fail = MakeBlock(NULL, 0);
+            __builtin_owned_release(fail, ty, out, false, "", tname,
+                                    "@deserialize", tname);
+            BlockAddStmt(fail, MakeReturn(MakeIntLiteral(-1)));
+            BlockAddStmt(block, MakeIf(bad, fail, NULL));
+            BlockAddStmt(block,
+                         MakeReturn(MakeCast(MakeBinary(NK_SUB, cur, base),
+                                             GetType("long"))));
+        } else {
+            BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
+        }
+        FunctionSetBody(checked, block);
+    }
+    PublishNode(checked);
+
+    Obj *into = MakeFunction(iname, GetType("int"));
+    FunctionAddParam(into, "out", MakePointer(ty));
+    FunctionAddParam(into, "buf", MakePointer(MakeConst(GetType("void"))));
+    FunctionAddParam(into, "len", GetType("unsigned long"));
+    WithFn(into) {
+        Node *block   = MakeBlock(NULL, 0);
+        Node *r       = MakeLocalVarUnique(ty);
+        Node *used    = MakeLocalVarUnique(GetType("long"));
+        Node *args[3] = {MakeUnary(NK_ADDR, r), MakeParamRef(into, "buf"),
+                         MakeParamRef(into, "len")};
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(
+                         used, MakeFuncCall(MakeVarRef(cname), args, 3))));
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, used, MakeIntLiteral(0)),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(
+                         MakeUnary(NK_DEREF, MakeParamRef(into, "out")), r)));
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(into, block);
+    }
+    PublishNode(into);
 
     Obj *fn = MakeFunction(fname, ty);
     FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
