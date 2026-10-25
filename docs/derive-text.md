@@ -74,7 +74,7 @@ are zero after `T_from_string`. A pointer member that is not
 [`@owned`](derive-owned.md) is a compile error for `@from_string`; mark it
 `@to_string_skip` to leave it out. An `@owned` member is read into memory
 `T_from_string` allocates, so release it with `@destroy`. A pointee that is only
-forward-declared can be read if it also has `@clone`; `@to_string` rejects it.
+forward-declared needs `@clone` to be used in an `@owned("n")` array.
 
 ## Strings
 

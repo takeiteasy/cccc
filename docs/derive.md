@@ -216,7 +216,7 @@ A handler for a struct reads the attributes on its members with
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
 
-[^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. An `@owned("n")` array of such a struct is a compile error, because its element size is not known yet.
+[^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. `@to_json`, `@from_json`, `@dump`, `@to_string` and `@from_string` also step through an `@owned("n")` array of such a struct with `T_clone_size`, so it needs `@clone`; `@equals`, `@hash` and `@compare` reject that array.
 
 [^json]: `@to_json` and `@from_json` also publish `void T_json_write(const T *self, __cccc_json_w *w)` and `int T_json_read(T *out, __cccc_json_r *r)` (with the same prefix), the writer and reader behind the public functions. A struct that owns a pointer to a `T` calls them to write or read the pointee, which lets it nest and recurse without a second buffer.
 

@@ -85,8 +85,8 @@ A struct pointee that owns memory, or is the struct itself (a linked list), is
 written and read through its own `@to_json` / `@from_json`, so put those
 attributes on the pointee first. A struct that owns memory also needs
 `@destroy` before `@from_json`, which releases a failed read through it. A
-pointee that is only forward-declared can be read by `@from_json` if it also
-has `@clone`, which gives the reader its size; `@to_json` rejects it.[^json]
+pointee that is only forward-declared needs `@clone` to be used in an
+`@owned("n")` array, which gives the element size.[^json]
 
 ### Skipping and renaming members
 

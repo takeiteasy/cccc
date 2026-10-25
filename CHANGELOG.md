@@ -7,7 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
-- Fixed: `@from_json` and `@from_string` read an `@owned` member whose pointee struct is declared later (single object or `@owned("n")` array), stepping through it with `T_clone_size`.
+- Fixed: `@to_json`, `@from_json`, `@dump`, `@to_string` and `@from_string` handle an `@owned` member whose pointee struct is declared later (single object or `@owned("n")` array), stepping through it with `T_clone_size`.
 - Added: `@from_string` on a struct publishes `int T_from_string(T *out, const char *s)`, which reads the text `@to_string` writes. It needs `#include <cccc/text.h>`; `*out` is written only on success.
 - Changed: `@dump` and `@to_string` escape `"`, `\` and control bytes in strings and print a `long double` with 21 significant digits, so the text reads back exactly.
 - Added: bundle attributes `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable` and `@ordered`, each a pair of existing derives with one optional prefix.

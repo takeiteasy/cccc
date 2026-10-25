@@ -462,7 +462,10 @@
             __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
         } else {
             __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
-            if (!strcmp(suffix, "_json_read") || !strcmp(suffix, "_text_read"))
+            if (!strcmp(suffix, "_json_read") ||
+                !strcmp(suffix, "_text_read") ||
+                !strcmp(suffix, "_json_write") || !strcmp(suffix, "_dump") ||
+                !strcmp(suffix, "_to_string"))
                 __builtin_derive_pointee_proto(prefix, pt, pname,
                                                "_clone_size");
         }
@@ -687,27 +690,15 @@
                                           const char *path, const char *prefix,
                                           const char *self_name);
 
-// The generated function that writes/reads a struct pointee or element of an
-// @owned member, or 0 when the pointee is handled inline.
+// The generated function that writes/reads/dumps a struct pointee or element of
+// an @owned member, or 0 when the pointee is handled inline.
 @comptime int __builtin_json_content_fn(char *fn, Type *pt, int shape,
                                         const char *prefix,
                                         const char *self_name,
                                         const char *suffix, const char *attr,
                                         const char *path) {
-    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
-                                          attr, path);
-    // A reader steps through a not-yet-declared pointee with T_clone_size; a
-    // writer has no such path.
-    if (deep == 2 && strcmp(suffix, "_json_read") &&
-        strcmp(suffix, "_text_read"))
-        MacroErrorAt(MakeIntLiteral(0),
-                     shape == 2 ? "%s: owned member '%s' points to an array of "
-                                  "a struct that is not declared yet; declare "
-                                  "it first"
-                                : "%s: owned member '%s' points to a struct "
-                                  "that is not declared yet; declare it first",
-                     attr, path);
-    return deep;
+    return __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix, attr,
+                                      path);
 }
 
 // The byte size of one pointee of an @owned reader: sizeof, or T_clone_size()
@@ -770,9 +761,10 @@
         __builtin_json_put_ch(comma, w, ',');
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         if (deep)
-            BlockAddStmt(body,
-                         MakeExprStmt(__builtin_json_call2(
-                             fn, MakeUnary(NK_ADDR, MakeSubscript(p, i)), wp)));
+            BlockAddStmt(
+                body,
+                MakeExprStmt(__builtin_json_call2(
+                    fn, __builtin_read_elem(p, i, deep, prefix, pt), wp)));
         else
             __builtin_json_write_value(body, w, pt, MakeSubscript(p, i), attr,
                                        elem, prefix, self_name);
@@ -1247,8 +1239,9 @@
         Node *block = MakeBlock(NULL, 0);
         __builtin_json_write_value(
             block, MakeUnary(NK_DEREF, MakeParamRef(writer, "w")), ty,
-            MakeUnary(NK_DEREF, MakeParamRef(writer, "self")), "@to_json",
-            tname, prefix, tname);
+            MakeUnary(NK_DEREF,
+                      __builtin_derive_const_param(writer, "self", ty)),
+            "@to_json", tname, prefix, tname);
         FunctionSetBody(writer, block);
     }
     PublishNode(writer);
@@ -1960,9 +1953,9 @@
     int shape = __builtin_owned_shape(m, owner, __builtin_dump_attr(sink), path,
                                       &cname);
     char        fn[256];
-    int   deep  = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
-                                             __builtin_dump_suffix(sink),
-                                             __builtin_dump_attr(sink), path);
+    int   deep  = __builtin_json_content_fn(fn, pt, shape, prefix, self_name,
+                                            __builtin_dump_suffix(sink),
+                                            __builtin_dump_attr(sink), path);
     Node *inner = MakeBlock(NULL, 0);
     if (shape == 1) {
         __builtin_dump_escaped(inner, sink,
@@ -1977,7 +1970,7 @@
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         if (deep)
             __builtin_dump_call(body, sink, fn,
-                                MakeUnary(NK_ADDR, MakeSubscript(p, i)));
+                                __builtin_read_elem(p, i, deep, prefix, pt));
         else
             __builtin_dump_value(body, sink, pt, MakeSubscript(p, i), NULL,
                                  elem, prefix, self_name);
