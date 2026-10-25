@@ -1175,6 +1175,21 @@ static Type *with_cleanup(VirtualMachine *vm, Type *ty, Obj *cleanup_fn) {
 
 // declarator = attribute? pointers ("(" ident ")" | "(" declarator ")" | ident)
 // type-suffix attribute?
+// Every dimension of a checked array is itself a checked array, so a row
+// (`a[i]` of `int a _Checked[3][5]`) is checked against its own extent.
+static Type *checked_array_rows(VirtualMachine *vm, Type *ty) {
+    if (!ty || ty->kind != TY_ARRAY)
+        return ty;
+    ty       = copy_type(vm, ty);
+    ty->base = checked_array_rows(vm, ty->base);
+    if (ty->checked_kind == CHECKED_NONE) {
+        ty->checked_kind         = CHECKED_ARRAY;
+        ty->checked_bounds_form  = CB_COUNT;
+        ty->checked_array_extent = ty->array_len;
+    }
+    return ty;
+}
+
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before declarator
     VarAttr prefix_attr = {};
@@ -1308,10 +1323,19 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
             error_tok(vm, checked_array_tok,
                       "'%.*s' must be followed by an array declarator",
                       checked_array_tok->len, checked_array_tok->loc);
-        if (ty->base &&
-            (ty->base->kind == TY_ARRAY || ty->base->kind == TY_VLA))
-            error_tok(vm, checked_array_tok,
-                      "multidimensional checked arrays are not supported");
+        for (Type *row = ty->base; row; row = row->base) {
+            if (row->kind == TY_VLA)
+                error_tok(vm, checked_array_tok,
+                          "a checked array must have a constant extent -- "
+                          "variable-length checked arrays are not supported");
+            if (row->kind != TY_ARRAY)
+                break;
+            if (checked_array_kind == CHECKED_NTARRAY ||
+                row->checked_kind == CHECKED_NTARRAY)
+                error_tok(vm, checked_array_tok,
+                          "multidimensional '_Nt_checked' arrays are not "
+                          "supported");
+        }
         if (checked_array_kind == CHECKED_NTARRAY && ty->array_len < 1)
             error_tok(vm, checked_array_tok,
                       "an '_Nt_checked' array must declare at least 1 "
@@ -1328,6 +1352,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         // then treat this exactly like any other declared-checked base --
         // no new machinery.
         ty                       = copy_type(vm, ty);
+        ty->base                 = checked_array_rows(vm, ty->base);
         ty->checked_kind         = checked_array_kind;
         ty->checked_bounds_form  = CB_COUNT;
         ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY

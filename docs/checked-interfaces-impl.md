@@ -23,6 +23,7 @@ Other points:
 
 - `[[cccc::single]]` needs no parameter substitution, so it always gets a caller-side check.
 - A `_Checked[N]` argument decays to a declared-checked pointer before the rewrite runs, so it is covered.
+- A row of a multidimensional checked array (`a[1]` of `_Checked[3][5]`) is a third root kind: `find_checked_base()` returns `.row` for an `ND_DEREF` of checked array type, with the row expression in `.obj` and its extent from `Type.checked_array_extent`. It takes the member-root path (side-effect decline, `&row` hoist), so `f(a[1])` is covered.
 - A prototype and a later definition with different bounds for one parameter are accepted silently: the first one parsed is the type every template resolves against.
 - The pass is gated on `--checked-pointers` at parse time, like `verify_checked_assign_bounds()`. With the flag off `rewrite_checked_call_args()` never runs, so `-m`, `-c=native` and `-c=generated` output is unaffected.
 - An annotated same-TU function's own body stays `CHKR`-checked against its declared bounds. This can newly trap code no unchecked caller ever touched, since the callee breaks its own contract. It uses its own declared bound, not the caller's storage, so an unchecked caller passing a too-short buffer does not trap there: closing that gap at the call boundary is the point of the feature.

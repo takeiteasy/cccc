@@ -184,3 +184,161 @@ void test_inferred_extent_local(void) {
     AssertEq(a[3], 4);
     AssertEq(q[0], 1);
 }
+
+// ---------------------------------------------------------------------
+// Multidimensional: every dimension is checked.
+// ---------------------------------------------------------------------
+
+int g_grid _Checked[3][5];
+
+struct Grid {
+    int cells _Checked[3][5];
+};
+
+static int grid_param_at(int a _Checked[3][5], int i, int j) {
+    return a[i][j];
+}
+
+[[cccc::test]]
+void test_multidim_in_bounds(void) {
+    int a _Checked[3][5];
+    a[2][4] = 42;
+    a[0][0] = 1;
+    AssertEq(a[2][4], 42);
+    AssertEq(a[0][0], 1);
+}
+
+[[cccc::test]]
+void test_multidim_three_dimensions_in_bounds(void) {
+    int a _Checked[2][3][4];
+    a[1][2][3] = 7;
+    AssertEq(a[1][2][3], 7);
+}
+
+[[cccc::test]]
+void test_multidim_inferred_outer_extent(void) {
+    int a _Checked[][5] = {{1}, {2}, {3}};
+    AssertEq(a[2][0], 3);
+    AssertEq(sizeof(a) / sizeof(a[0]), 3);
+}
+
+[[cccc::test]]
+void test_multidim_global_member_param_in_bounds(void) {
+    struct Grid s = {0};
+    g_grid[1][4]  = 5;
+    s.cells[2][4] = 6;
+    AssertEq(g_grid[1][4], 5);
+    AssertEq(s.cells[2][4], 6);
+    AssertEq(grid_param_at(g_grid, 1, 4), 5);
+}
+
+[[cccc::test]]
+void test_multidim_row_pointer_compiles(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    p[1][4]              = 9;
+    AssertEq(a[1][4], 9);
+}
+
+[[cccc::test]]
+void test_multidim_row_decay_in_bounds(void) {
+    int a _Checked[3][5] = {{0}};
+    int *r               = a[1];
+    r[4]                 = 8;
+    AssertEq(a[1][4], 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_inner_oob(void) {
+    int a _Checked[3][5];
+    volatile int j = 5;
+    a[1][j]        = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_inner_oob_within_object(void) {
+    int a _Checked[3][5];
+    volatile int j = 5;
+    a[0][j]        = 1; // lands in row 1 -- inside the object, outside the row
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_outer_oob(void) {
+    int a _Checked[3][5];
+    volatile int i = 3;
+    a[i][0]        = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_three_dimensions_middle_oob(void) {
+    int a _Checked[2][3][4];
+    volatile int j = 3;
+    a[1][j][0]     = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_row_decay_oob(void) {
+    int a _Checked[3][5];
+    int *r         = a[1];
+    volatile int j = 5;
+    r[j]           = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_inferred_outer_extent_oob(void) {
+    int a _Checked[][5] = {{1}, {2}, {3}};
+    volatile int i      = 3;
+    int          x      = a[i][0];
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_global_inner_oob(void) {
+    volatile int j = 5;
+    g_grid[1][j]   = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_member_inner_oob(void) {
+    struct Grid  s = {0};
+    volatile int j = 5;
+    s.cells[1][j]  = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_param_inner_oob(void) {
+    int a _Checked[3][5] = {{0}};
+    (void)grid_param_at(a, 1, 5);
+}
+
+typedef int Row _Checked[5];
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_typedef_row_inner_oob(void) {
+    Row          a[3];
+    volatile int j = 5;
+    a[1][j]        = 1;
+}
+
+// ---------------------------------------------------------------------
+// Limits: a side-effecting row expression is not re-evaluated for its inner
+// check, and a pointer-to-row's element access has no checked root.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_multidim_side_effecting_row_evaluated_once(void) {
+    int a _Checked[3][5] = {{0}};
+    int i                = 0;
+    a[i++][1]            = 4;
+    AssertEq(i, 1);
+    AssertEq(a[0][1], 4);
+}
+
+[[cccc::test]]
+void test_multidim_pointer_to_row_element_is_unchecked(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    volatile int j       = 5;
+    p[0][j]              = 3; // lands in row 1 -- not trapped
+    AssertEq(a[1][0], 3);
+}

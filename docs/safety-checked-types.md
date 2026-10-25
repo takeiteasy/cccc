@@ -75,9 +75,30 @@ int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays c
 | Limit | Reason |
 |---|---|
 | The extent must be a compile-time constant | A VLA has no fixed extent |
-| One dimension only (`_Checked[3][5]` is an error) | An unchecked checked array would be worse than refusing it |
+| `_Nt_checked` is one dimension only (`_Nt_checked[3][10]` is an error, also through a typedef'd row) | Only a single terminator slot is modelled |
+
+## Multidimensional checked arrays
+
+`_Checked` applies to every dimension: each index is checked against its own extent, and a row decays to a pointer that keeps the row's bounds.
+
+```c
+int a _Checked[3][5];
+a[2][4] = 1;               // ok
+a[1][5] = 1;               // traps: past the row, though inside the object
+a[3][0] = 1;               // traps: past the last row
+int *r = a[1];             // r is checked against the 5 elements of row 1
+```
+
+Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`).
+
+| Case | Behavior |
+|---|---|
+| Row expression with side effects (`a[i++][j]`) | The outer index is checked; the inner index is not [^rows] |
+| Pointer to a row (`int (*p)[5] = a; p[0][7]`) | `p[0]` is checked, the element access is not |
+| Plain outer array of checked rows (`Row a[3]` with `typedef int Row _Checked[5]`) | Each row is checked; the outer index is not |
 
 A plain array inside a [checked region](safety-checked-regions.md) stays legal. Checked arrays serialize as ordinary arrays in `-m`/`-c=native`/`-c=generated` output.
 
+[^rows]: The row expression would be evaluated a second time to build the inner bounds, so the inner check is skipped rather than changing the program's side effects.
 [^bytes]: A `byte_count(n)` that is not a multiple of `sizeof(T)` widens by exactly `sizeof(T)` bytes, so the slot is misaligned and no element index reaches it; the guard has nothing to protect there.
 [^gaps]: A member-wise write into a struct terminator slot (`tbl[n].a = 1;`) is not guarded, because the guard attaches to whole-object stores through the pointer. Internals: [safety-impl.md](safety-impl.md#terminator-guard).

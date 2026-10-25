@@ -108,6 +108,7 @@ typedef struct {
     Obj    *var;
     Member *mem;
     Node   *obj; // member root's own object expression; NULL unless .mem is set
+    Type   *row; // row root's checked array type; .obj is the row expression
 } CheckedBase;
 
 static CheckedBase find_checked_base(Node *n) {
@@ -117,6 +118,13 @@ static CheckedBase find_checked_base(Node *n) {
                 return (CheckedBase){.var = n->var};
             case ND_MEMBER:
                 return (CheckedBase){.mem = n->member, .obj = n->lhs};
+            case ND_DEREF:
+                // A row of a multidimensional checked array (`a[i]` in
+                // `a[i][j]`).
+                if (n->ty && n->ty->kind == TY_ARRAY &&
+                    n->ty->checked_kind != CHECKED_NONE)
+                    return (CheckedBase){.row = n->ty, .obj = n};
+                return (CheckedBase){0};
             case ND_ADD:
             case ND_SUB:
             case ND_CAST:
@@ -168,12 +176,18 @@ static CheckedBase find_checked_deref_base(Node *n) {
     return (CheckedBase){0};
 }
 
+static Type *checked_base_type(CheckedBase base) {
+    return base.row ? base.row : base.var ? base.var->ty : base.mem->ty;
+}
+
 // True if `base` names a declared checked pointer (variable or member) --
 // i.e. find_checked_base() found a recognised root at all. Doesn't imply a
 // bounds *form* is present (CB_NONE/CB_UNKNOWN roots still count as
 // "declared checked" here; compute_checked_bounds() is what decides whether
 // there's anything to enforce).
 static bool checked_base_is_declared(CheckedBase base) {
+    if (base.row)
+        return true;
     if (base.var)
         return base.var->checked_kind != CHECKED_NONE;
     if (base.mem)
@@ -221,6 +235,11 @@ static Node *checked_array_decay(VirtualMachine *vm, Node *e, Token *tok) {
 
 static Node *checked_base_self_expr(VirtualMachine *vm, CheckedBase base,
                                     Token *tok) {
+    if (base.row) {
+        Node *row = clone_bounds_node(vm, base.obj);
+        add_type(vm, row);
+        return checked_array_decay(vm, row, tok);
+    }
     if (base.var) {
         Node *p = new_var_node(vm, base.var, tok);
         add_type(vm, p);
@@ -338,7 +357,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
     *out_nt = false;
     if (out_obj_init)
         *out_obj_init = NULL;
-    if (!base.var && !base.mem)
+    if (!base.var && !base.mem && !base.row)
         return;
 
     // #921/#948: an object expression with side effects (e.g. `f()->p[i]`)
@@ -353,7 +372,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
     // introduce over a default build. The multi-site re-emission contract
     // (Node.checked_bounds_obj_init, src/cccc.h) also relies on `obj` being
     // side-effect-free/idempotent by construction, not incidentally.
-    if (base.mem && node_has_side_effects(base.obj))
+    if ((base.mem || base.row) && node_has_side_effects(base.obj))
         return;
 
     // #945/#947: hoist a non-trivial object expression into a single
@@ -369,13 +388,16 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
     // and on `obj` being addressable (checked_obj_is_addressable() --
     // taking `&obj` is only well-formed for an lvalue; anything else falls
     // back to the original re-clone behavior, unchanged).
-    if (out_obj_init && base.mem && (vm->flags & CCCC_CHECKED_BOUNDS) &&
+    if (out_obj_init && (base.mem || base.row) &&
+        (vm->flags & CCCC_CHECKED_BOUNDS) &&
         (hoist_fn || vm->compiler.current_fn) &&
         !checked_obj_is_trivial(base.obj) &&
         checked_obj_is_addressable(base.obj)) {
         Obj  *t = hoist_fn ? new_checked_prop_temp(vm, hoist_fn,
                                                    pointer_to(vm, base.obj->ty))
                            : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
+        // TODO: for a row root the clone keeps its own CHKR fields, so the
+        // outer index is checked twice (#1797).
         Node *addr =
             new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
         add_type(vm, addr);
@@ -388,14 +410,24 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         base.obj = obj_temp;
     }
 
-    CheckedKind kind =
-        base.var ? base.var->checked_kind : base.mem->ty->checked_kind;
-    CheckedBoundsForm form = base.var ? base.var->checked_bounds_form
-                                      : base.mem->ty->checked_bounds_form;
+    CheckedKind kind = base.row   ? base.row->checked_kind
+                       : base.var ? base.var->checked_kind
+                                  : base.mem->ty->checked_kind;
+    CheckedBoundsForm form = base.row   ? base.row->checked_bounds_form
+                             : base.var ? base.var->checked_bounds_form
+                                        : base.mem->ty->checked_bounds_form;
     Node             *resolved_lo =
-        base.var ? base.var->checked_bounds_lo : base.mem->checked_bounds_lo;
-    Node *resolved_hi =
-        base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
+        base.var ? base.var->checked_bounds_lo
+        : base.mem ? base.mem->checked_bounds_lo
+                   : NULL;
+    Node *resolved_hi = NULL;
+    if (base.row) {
+        resolved_hi = new_long(vm, base.row->checked_array_extent, tok);
+        add_type(vm, resolved_hi);
+    } else {
+        resolved_hi =
+            base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
+    }
     Type   *base_ty   = access_ty->base;
     int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
 
@@ -517,7 +549,7 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
     CheckedBase base = find_checked_deref_base(addr);
     if (!checked_base_is_declared(base))
         return;
-    Type *pty                  = base.var ? base.var->ty : base.mem->ty;
+    Type *pty = checked_base_type(base);
     deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
     compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
                            &deref->checked_bounds_hi,
@@ -603,9 +635,9 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         *out_obj_init = NULL;
     CheckedBase base = find_checked_base(rhs);
     if (checked_base_is_declared(base)) {
-        if (base.mem && node_has_side_effects(base.obj))
+        if ((base.mem || base.row) && node_has_side_effects(base.obj))
             return false;
-        Type *pty = base.var ? base.var->ty : base.mem->ty;
+        Type *pty = checked_base_type(base);
         compute_checked_bounds(vm, base, pty, tok, out_lo, out_hi, out_nt,
                                out_obj_init, hoist_fn);
         if (!(*out_lo && *out_hi))
@@ -1428,7 +1460,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                 !(dst_base.var &&
                   dst_base.var->checked_cast_kind == CC_ASSUME)) {
                 Type *dst_pty =
-                    dst_base.var ? dst_base.var->ty : dst_base.mem->ty;
+                    checked_base_type(dst_base);
                 Node *dst_lo, *dst_hi;
                 bool  dst_nt;
                 // #947: probe with NULL first -- a failed test below (no
@@ -1936,7 +1968,7 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
     Node       *src_lo = NULL, *src_hi = NULL;
     bool        src_nt = false;
     if (checked_base_is_declared(src_base)) {
-        Type *src_pty = src_base.var ? src_base.var->ty : src_base.mem->ty;
+        Type *src_pty = checked_base_type(src_base);
         compute_checked_bounds(vm, src_base, src_pty, tok, &src_lo, &src_hi,
                                &src_nt, NULL, NULL);
     } else if (src_base.var && src_base.var->checked_prop_candidate &&
