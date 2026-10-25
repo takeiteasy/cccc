@@ -1972,9 +1972,10 @@ Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
 // definitions and compound statements) and #pragma cccc checked/unchecked
 // begin/end (a positional, file-scope-restricted TU default). Unlike the
 // checked-*pointer* attributes above, a region carries no Type/Obj/Node
-// state of its own -- it is purely two diagnostics (an unchecked pointer
-// declaration, and a cast to/between unchecked pointer kinds) that fire
-// while a region is in effect. Always on, independent of
+// state of its own -- it is purely diagnostics (an unchecked pointer
+// declaration, an array pointer with no bounds, and casts or implicit
+// conversions that drop or fabricate a checked kind) that fire while a
+// region is in effect. Always on, independent of
 // --checked-pointers -- same footing as the single-pointer-arithmetic ban
 // in parse_expr.c and the bounds side-effect rejection in parse_core.c.
 // ---------------------------------------------------------------------
@@ -1995,6 +1996,106 @@ CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.checked_scope_attr != CHECKED_SCOPE_UNSET)
         return vm->compiler.checked_scope_attr;
     return tok ? tok->checked_scope : CHECKED_SCOPE_UNSET;
+}
+
+static bool is_null_pointer_constant(Node *e) {
+    if (e && e->ty && e->ty->kind == TY_NULLPTR_T)
+        return true;
+    while (e && e->kind == ND_CAST)
+        e = e->lhs;
+    return e && e->kind == ND_NUM && e->ty && is_integer(e->ty) && e->val == 0;
+}
+
+// Whether `e` may flow into a checked pointer without fabricating bounds: a
+// null constant, an already-checked pointer, or (implicit conversions only,
+// `visible_ok`) an object whose extent the compiler can see.
+static bool checked_source_ok(Node *e, bool visible_ok) {
+    if (!e)
+        return true;
+    if (is_null_pointer_constant(e))
+        return true;
+    if (e->ty && e->ty->kind == TY_PTR && e->ty->checked_kind != CHECKED_NONE)
+        return true;
+    if (checked_base_is_declared(find_checked_deref_base(e)))
+        return true;
+    if (visible_ok && e->ty && e->ty->kind == TY_ARRAY)
+        return true;
+    switch (e->kind) {
+        case ND_ADDR:
+            return visible_ok;
+        case ND_COND:
+            return checked_source_ok(e->then, visible_ok) &&
+                   checked_source_ok(e->els, visible_ok);
+        case ND_COMMA:
+            return checked_source_ok(e->rhs, visible_ok);
+        case ND_ADD:
+        case ND_SUB:
+        case ND_CAST:
+            return checked_source_ok(e->lhs, visible_ok);
+        default:
+            return false;
+    }
+}
+
+static bool is_checked_ptr_target(Type *ty) {
+    return ty && ty->kind == TY_PTR && ty->checked_kind != CHECKED_NONE &&
+           !(ty->base && ty->base->kind == TY_FUNC);
+}
+
+// Explicit-cast ban list inside a checked region. Called from cast() for a
+// cast with no assume/dynamic annotation.
+void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
+                                 Token *tok) {
+    if (ty && ty->kind == TY_PTR && ty->checked_kind == CHECKED_NONE &&
+        !(ty->base && ty->base->kind == TY_FUNC)) {
+        if (is_null_pointer_constant(expr))
+            return;
+        error_tok(vm, tok,
+                  "cast to an unchecked pointer type is not allowed "
+                  "in a checked region -- wrap this code in "
+                  "[[cccc::unchecked]] { ... }");
+    }
+    if (!is_checked_ptr_target(ty))
+        return;
+    if (expr->ty && expr->ty->kind == TY_PTR &&
+        expr->ty->checked_kind != CHECKED_NONE &&
+        ty->checked_kind != expr->ty->checked_kind)
+        error_tok(vm, tok,
+                  "cast changes a pointer's checked kind in a "
+                  "checked region -- wrap this code in "
+                  "[[cccc::unchecked]] { ... }");
+    if (ty->checked_kind != CHECKED_SINGLE &&
+        ty->checked_bounds_form == CB_NONE)
+        error_tok(vm, tok,
+                  "cast to an array pointer with no bounds in a checked "
+                  "region -- add count(), byte_count() or bounds(), or "
+                  "bounds(unknown) to opt out");
+    if (ty->checked_bounds_form != CB_UNKNOWN &&
+        !checked_source_ok(expr, /*visible_ok=*/false))
+        error_tok(vm, tok,
+                  "cast from an unchecked pointer to a checked pointer "
+                  "type is not allowed in a checked region -- use "
+                  "[[cccc::dynamic]] or [[cccc::assume]], or wrap this code "
+                  "in [[cccc::unchecked]] { ... }");
+}
+
+// Implicit-conversion ban inside a checked region: init, assignment, call
+// argument and return into a checked pointer.
+void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
+                                 Token *tok) {
+    if (vm->compiler.in_type_lookahead || !src || !is_checked_ptr_target(to) ||
+        to->checked_bounds_form == CB_UNKNOWN)
+        return;
+    if (cc_checked_scope_at(vm, tok) != CHECKED_SCOPE_ON)
+        return;
+    add_type(vm, src);
+    if (checked_source_ok(src, /*visible_ok=*/true))
+        return;
+    error_tok(vm, tok,
+              "implicit conversion from an unchecked pointer to a checked "
+              "pointer is not allowed in a checked region -- cast with "
+              "[[cccc::assume]] or [[cccc::dynamic]], or move it into an "
+              "[[cccc::unchecked]] block");
 }
 
 // Declaration-ban diagnostic (#485 v1 ban list, item 1 of 2): a local,
@@ -2019,12 +2120,22 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what) {
     if (vm->compiler.in_type_lookahead || !ty || !name_tok)
         return;
-    if (ty->kind != TY_PTR || ty->checked_kind != CHECKED_NONE)
+    if (ty->kind != TY_PTR)
         return;
     if (ty->base && ty->base->kind == TY_FUNC)
         return;
     if (cc_checked_scope_at(vm, name_tok) != CHECKED_SCOPE_ON)
         return;
+    if (ty->checked_kind != CHECKED_NONE) {
+        if (ty->checked_kind != CHECKED_SINGLE &&
+            ty->checked_bounds_form == CB_NONE)
+            error_tok(vm, name_tok,
+                      "%s '%.*s' has no bounds in a checked region -- add "
+                      "count(), byte_count() or bounds(), or bounds(unknown) "
+                      "to opt out",
+                      what, name_tok->len, name_tok->loc);
+        return;
+    }
     error_tok(vm, name_tok,
               "unchecked pointer %s '%.*s' is not allowed in a checked "
               "region -- declare it [[cccc::single]], [[cccc::array]] or "

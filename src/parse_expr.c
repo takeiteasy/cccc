@@ -2151,31 +2151,16 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         // that is ultimately discarded. A function-pointer destination is
         // exempt, mirroring cc_check_checked_scope_decl()'s own exemption --
         // there is no bounds form that applies to it.
-        // #486: a bounds cast ([[cccc::assume]]/[[cccc::dynamic]]) IS the
-        // sanctioned way to change a pointer's checked kind inside a
-        // checked region -- it's the documented replacement for the launder
-        // cast #1332 flags, so it is exempt from both ban arms below rather
-        // than needing an [[cccc::unchecked]] { ... } escape too.
+        // #486: a bounds cast ([[cccc::assume]]/[[cccc::dynamic]]) is the
+        // sanctioned way to change a pointer's checked kind inside a checked
+        // region, so it is exempt from the bans rather than needing an
+        // [[cccc::unchecked]] { ... } escape too.
         if (!vm->compiler.in_type_lookahead &&
             cc_checked_scope_at(vm, start) == CHECKED_SCOPE_ON &&
             (!ty || ty->checked_cast_kind == CC_NONE)) {
             add_type(vm, expr);
-            if (ty && ty->kind == TY_PTR && ty->checked_kind == CHECKED_NONE &&
-                !(ty->base && ty->base->kind == TY_FUNC)) {
-                error_tok(vm, start,
-                          "cast to an unchecked pointer type is not allowed "
-                          "in a checked region -- wrap this code in "
-                          "[[cccc::unchecked]] { ... }");
-            } else if (ty && expr->ty && ty->kind == TY_PTR &&
-                       expr->ty->kind == TY_PTR &&
-                       expr->ty->checked_kind != CHECKED_NONE &&
-                       ty->checked_kind != CHECKED_NONE &&
-                       ty->checked_kind != expr->ty->checked_kind) {
-                error_tok(vm, start,
-                          "cast changes a pointer's checked kind in a "
-                          "checked region -- wrap this code in "
-                          "[[cccc::unchecked]] { ... }");
-            }
+            if (ty)
+                cc_check_checked_scope_cast(vm, expr, ty, start);
         }
 
         // type cast

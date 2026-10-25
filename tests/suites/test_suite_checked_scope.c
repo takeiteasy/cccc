@@ -50,8 +50,9 @@ int three_deep_nesting(void) {
     [[cccc::unchecked]] {
         int *p = &total;                 // fine -- unchecked block
         [[cccc::checked]] {
-            int *[[cccc::single]] q = p; // fine -- checked again
-            *q                      = 40;
+            int *[[cccc::single]] q =
+                (int *[[cccc::single, cccc::assume]])p; // fine -- assume
+            *q = 40;
         }
         *p += 2;
     }
@@ -67,16 +68,85 @@ void test_three_deep_alternating_nesting(void) {
 // What is explicitly NOT banned inside a checked region.
 // ---------------------------------------------------------------------
 
+#include <stddef.h>
+
+int *g_raw;
+int  g_one = 7;
+
 [[cccc::checked]]
-int array_kind_with_no_bounds_form(void) {
-    int arr[3]             = {1, 2, 3};
-    int *[[cccc::array]] a = arr; // legal-but-unchecked -- not banned
-    return a[0] + a[1] + a[2];
+int null_constants_allowed(void) {
+    int *[[cccc::single]] a                = NULL;
+    int *[[cccc::single]] b                = (int *[[cccc::single]])0;
+    int *[[cccc::array, cccc::count(0)]] c = nullptr;
+    return a == NULL && b == NULL && c == NULL ? 42 : 0;
 }
 
 [[cccc::test]]
-void test_array_kind_no_bounds_form_allowed(void) {
-    AssertEq(array_kind_with_no_bounds_form(), 6);
+void test_null_constants_allowed_in_region(void) {
+    AssertEq(null_constants_allowed(), 42);
+}
+
+[[cccc::checked]]
+int visible_objects_convert_implicitly(void) {
+    int arr[4]                                = {1, 2, 3, 4};
+    int *[[cccc::array, cccc::count(4)]] a    = arr;
+    int *[[cccc::array, cccc::count(3)]] b    = arr + 1;
+    int *[[cccc::array, cccc::count(2)]] c    = (int[2]){5, 6};
+    int *[[cccc::single]] d                   = &g_one;
+    char *[[cccc::ntarray, cccc::count(2)]] s = "hi";
+    int *[[cccc::array, cccc::count(3)]] e    = a + 1;
+    return a[0] + b[0] + c[0] + *d + s[0] - 'h' + e[0];
+}
+
+[[cccc::test]]
+void test_visible_objects_convert_in_region(void) {
+    AssertEq(visible_objects_convert_implicitly(), 1 + 2 + 5 + 7 + 0 + 2);
+}
+
+[[cccc::checked]]
+int take_array(int *[[cccc::array, cccc::count(n)]] p, int n) {
+    return p[n - 1];
+}
+
+[[cccc::checked]] int *[[cccc::single]] give_single(int *[[cccc::single]] p) {
+    return p;
+}
+
+[[cccc::test]]
+void test_checked_args_and_returns_in_region(void) {
+    int arr[3] = {1, 2, 3};
+    g_raw      = arr;
+    AssertEq(take_array(arr, 3), 3);
+    AssertEq(*give_single(&g_one), 7);
+}
+
+[[cccc::checked]]
+int bounds_casts_allowed(int n) {
+    int *[[cccc::array, cccc::count(n)]] a =
+        (int *[[cccc::array, cccc::count(n), cccc::assume]])g_raw;
+    return a[0];
+}
+
+[[cccc::test]]
+void test_assume_cast_allowed_in_region(void) {
+    int arr[3] = {42, 2, 3};
+    g_raw      = arr;
+    AssertEq(bounds_casts_allowed(3), 42);
+}
+
+[[cccc::checked]]
+int bounds_unknown_from_raw(void) {
+    int *[[cccc::array, cccc::bounds(unknown)]] a = g_raw;
+    int *[[cccc::array, cccc::bounds(unknown)]] b =
+        (int *[[cccc::array, cccc::bounds(unknown)]])g_raw;
+    return a[0] + b[0];
+}
+
+[[cccc::test]]
+void test_bounds_unknown_from_raw_allowed(void) {
+    int arr[2] = {21, 2};
+    g_raw      = arr;
+    AssertEq(bounds_unknown_from_raw(), 42);
 }
 
 [[cccc::checked]]
@@ -214,8 +284,9 @@ int underscore_three_deep_alternating_nesting(void) {
         _Unchecked {
             int *p = &total; // fine -- unchecked block
             _Checked {
-                int *[[cccc::single]] q = p; // fine -- checked again
-                *q                      = 40;
+                int *[[cccc::single]] q =
+                    (int *[[cccc::single, cccc::assume]])p; // fine -- assume
+                *q = 40;
             }
             *p += 2;
         }

@@ -24,7 +24,7 @@ char * [[cccc::ntarray, cccc::count(n)]]   s;  // _Nt_array_ptr<char>
 | `bounds(lo, hi)` | Explicit absolute range |
 | `bounds(unknown)` | Trust escape hatch: typed, but never range-checked |
 
-A bounds form needs `array` or `ntarray`; on `single` or with no kind it is an error. `array` or `ntarray` with no bounds form is legal but unchecked.
+A bounds form needs `array` or `ntarray`; on `single` or with no kind it is an error. `array` or `ntarray` with no bounds form is legal but unchecked outside a [checked region](safety-checked-regions.md), where it is an error.
 
 ## Bounds expressions
 

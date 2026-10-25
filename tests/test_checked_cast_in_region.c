@@ -7,7 +7,7 @@
 // `int *` (CHECKED_NONE), declared outside any region; without the
 // carve-out in cast() (src/parse_expr.c) casting it to a checked type
 // inside f's checked body would hit that ban. This is the documented
-// replacement for the launder cast #1332 flags.
+// replacement for the launder cast.
 
 int *g_raw;
 

@@ -1131,6 +1131,7 @@ static Node *check_call_arg(VirtualMachine *vm, Type *ty, Type **param_ty_p,
 
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
             warn_implicit_conversion(vm, arg, param_ty, tok);
+            cc_check_checked_scope_conv(vm, arg, param_ty, tok);
             arg = new_cast(vm, arg, param_ty);
         }
         param_ty = param_ty->next;

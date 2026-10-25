@@ -314,6 +314,10 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
 CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok);
 void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what);
+void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
+                                 Token *tok);
+void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
+                                 Token *tok);
 // #486: desugars a checked-annotated cast into `(__cv = (T)expr, __cv)` --
 // see checked_cast_desugar()'s own comment (src/parse_checked.c).
 Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,

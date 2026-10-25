@@ -21,6 +21,7 @@
 */
 
 #include "./internal.h"
+#include "./parse_internal.h"
 
 #if defined(__aarch64__) || defined(__APPLE__)
 #define CCCC_HOST_FULL_WIDTH_VECTORS 0
@@ -1331,6 +1332,8 @@ void add_type(VirtualMachine *vm, Node *node) {
                 node->lhs->ty->kind != TY_UNION) {
                 warn_implicit_conversion(vm, node->rhs, node->lhs->ty,
                                          node->lhs->tok);
+                cc_check_checked_scope_conv(vm, node->rhs, node->lhs->ty,
+                                            node->lhs->tok);
                 node->rhs = new_cast(vm, node->rhs, node->lhs->ty);
             }
             node->ty = unqualified(vm, node->lhs->ty);

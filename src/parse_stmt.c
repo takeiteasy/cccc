@@ -608,6 +608,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                          "void function should not return a value");
             } else if (ty->kind != TY_STRUCT && ty->kind != TY_UNION) {
                 warn_implicit_conversion(vm, exp, ty, node->tok);
+                cc_check_checked_scope_conv(vm, exp, ty, node->tok);
                 exp = new_cast(vm, exp, ty);
             }
             if (vm->compiler.current_fn->ty->returns_nonnull &&
