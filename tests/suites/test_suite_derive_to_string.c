@@ -143,3 +143,18 @@ enum Color { RED, GREEN, BLUE = 7 };
                          "inner = NULL }"),
              0);
 }
+
+@to_string @dump struct Quoted {
+    char  fixed[8];
+    char *dyn @owned;
+};
+
+[[cccc::test]] void test_to_string_escapes_strings(void) {
+    char          dyn[] = "q\"\\\n\x02";
+    struct Quoted q     = {.fixed = "a\"b\t\r\x7f", .dyn = dyn};
+    char          buf[128];
+    Quoted_to_string(&q, buf, sizeof buf);
+    AssertEq(strcmp(buf, "Quoted { fixed = \"a\\\"b\\t\\r\\177\", "
+                         "dyn = \"q\\\"\\\\\\n\\002\" }"),
+             0);
+}

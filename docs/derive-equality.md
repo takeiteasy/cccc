@@ -39,7 +39,7 @@ a == b;  // Item_equals(&a, &b)
 a != b;  // !Item_equals(&a, &b)
 ```
 
-`@to_string` writes the `@dump` text into a buffer instead of a `FILE`; see
+`@dump` writes strings with C escapes (`\"`, `\\`, `\n`, `\ooo`) and a `long double` with 21 significant digits, so [`@from_string`](derive-text.md) reads the text back. `@to_string` writes the `@dump` text into a buffer instead of a `FILE`; see
 [derive.md](derive.md#strings).
 
 A prefix names the functions `<prefix>_<Type>_equals` (likewise `_hash` and

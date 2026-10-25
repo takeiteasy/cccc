@@ -2598,10 +2598,16 @@ Obj *__builtin_ast_function(const char *name, Type *return_type) {
     }
 
     if (existing) {
-        if (existing->is_definition)
+        if (existing->is_definition) {
+            if (vm->compiler.macro_call_tok)
+                error_tok(vm, vm->compiler.macro_call_tok,
+                          "expected unique generated function name, got "
+                          "existing definition '%s'",
+                          name);
             error("expected unique generated function name, got existing "
                   "definition '%s'",
                   name);
+        }
 
         // Update existing forward declaration to be a definition
         existing->is_definition      = true;

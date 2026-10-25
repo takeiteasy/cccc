@@ -401,6 +401,9 @@
     } else if (!strcmp(suffix, "_json_read")) {
         __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
                               MakePointer(GetType("__cccc_json_r")), "r");
+    } else if (!strcmp(suffix, "_text_read")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
+                              MakePointer(GetType("__cccc_text_r")), "r");
     } else if (!strcmp(suffix, "_dump")) {
         __builtin_owned_proto(fname, GetType("void"),
                               MakePointer(MakeConst(pt)), "self",
@@ -459,6 +462,9 @@
             __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
         } else {
             __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
+            if (!strcmp(suffix, "_json_read") || !strcmp(suffix, "_text_read"))
+                __builtin_derive_pointee_proto(prefix, pt, pname,
+                                               "_clone_size");
         }
         return 2;
     }
@@ -470,6 +476,8 @@
             strcpy(fix, "@to_json");
         } else if (!strcmp(suffix, "_json_read")) {
             strcpy(fix, "@from_json");
+        } else if (!strcmp(suffix, "_text_read")) {
+            strcpy(fix, "@from_string");
         } else {
             strcpy(fix, "@");
             strcat(fix, suffix + 1);
@@ -686,14 +694,49 @@
                                         const char *self_name,
                                         const char *suffix, const char *attr,
                                         const char *path) {
-    int deep = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
-                                          suffix, attr, path);
-    if (deep == 2)
+    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
+                                          attr, path);
+    // A reader steps through a not-yet-declared pointee with T_clone_size; a
+    // writer has no such path.
+    if (deep == 2 && strcmp(suffix, "_json_read") &&
+        strcmp(suffix, "_text_read"))
         MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to a struct that is not "
-                     "declared yet; declare it first",
+                     shape == 2 ? "%s: owned member '%s' points to an array of "
+                                  "a struct that is not declared yet; declare "
+                                  "it first"
+                                : "%s: owned member '%s' points to a struct "
+                                  "that is not declared yet; declare it first",
                      attr, path);
     return deep;
+}
+
+// The byte size of one pointee of an @owned reader: sizeof, or T_clone_size()
+// when the pointee is not declared yet (deep == 2). `$1` is the member. The
+// templates hold it in a local first: the VM aborts on a guest call nested in
+// an FFI call's arguments.
+@comptime void __builtin_read_size(char *out, int deep, const char *prefix,
+                                   Type *pt) {
+    if (deep == 2) {
+        __builtin_json_fn_name(out, prefix, TypeName(pt), "_clone_size");
+        strcat(out, "()");
+    } else {
+        strcpy(out, "sizeof(*$1)");
+    }
+}
+
+// `&p[i]`, or the same address through a char pointer when `pt` is incomplete.
+@comptime Node *__builtin_read_elem(Node *p, Node *i, int deep,
+                                    const char *prefix, Type *pt) {
+    if (deep != 2)
+        return MakeUnary(NK_ADDR, MakeSubscript(p, i));
+    char szfn[256];
+    __builtin_json_fn_name(szfn, prefix, TypeName(pt), "_clone_size");
+    Node *sz = MakeFuncCall(MakeVarRef(szfn), NULL, 0);
+    return MakeCast(
+        MakeBinary(
+            NK_ADD, MakeCast(p, MakePointer(GetType("char"))),
+            MakeBinary(NK_MUL, MakeCast(i, GetType("unsigned long")), sz)),
+        MakePointer(pt));
 }
 
 // An @owned member is written as its content: a C string as a string, an
@@ -858,6 +901,18 @@
     int   deep  = __builtin_json_content_fn(fn, pt, shape, prefix, self_name,
                                             "_json_read", attr, path);
     Node *rp    = __builtin_json_addr(r);
+    char        sz[300];
+    char        calloc_one[400];
+    char        grow[800];
+    __builtin_read_size(sz, deep, prefix, pt);
+    strcpy(calloc_one, "{ unsigned long z_ = ");
+    strcat(calloc_one, sz);
+    strcat(calloc_one, "; $1 = calloc(1, z_); if (!$1) return 1; }");
+    strcpy(grow, "{ unsigned long z_ = ");
+    strcat(grow, sz);
+    strcat(grow, "; unsigned long c_ = $3 ? $3 * 2 : 4; void *t_ = realloc($1, "
+                 "c_ * z_); if (!t_) return 1; memset((char *)t_ + $3 * z_, 0, "
+                 "(c_ - $3) * z_); $1 = t_; $3 = c_; $2 = c_; }");
     Node *value = MakeBlock(NULL, 0);
     Node *none  = MakeBlock(NULL, 0);
     BlockAddStmt(none,
@@ -871,9 +926,7 @@
                                                     __builtin_json_addr(t)));
         BlockAddStmt(value, MakeExprStmt(MakeAssign(p, MakeCast(t, pty))));
     } else if (shape == 3) {
-        BlockAddStmt(value, Quote("$1 = calloc(1, sizeof(*$1)); if (!$1) "
-                                  "return 1;",
-                                  p));
+        BlockAddStmt(value, Quote(calloc_one, p));
         if (deep)
             __builtin_json_fail_if(value, __builtin_json_call2(fn, p, rp));
         else
@@ -895,19 +948,13 @@
         BlockAddStmt(value, MakeExprStmt(MakeAssign(cap, MakeIntLiteral(0))));
 
         Node *step = MakeBlock(NULL, 0);
-        BlockAddStmt(
-            step,
-            MakeIf(MakeBinary(NK_EQ, len, cap),
-                   Quote("{ unsigned long c_ = $3 ? $3 * 2 : 4; void *t_ = "
-                         "realloc($1, c_ * sizeof(*$1)); if (!t_) return 1; "
-                         "memset((char *)t_ + $3 * sizeof(*$1), 0, (c_ - $3) "
-                         "* sizeof(*$1)); $1 = t_; $3 = c_; $2 = c_; }",
-                         p, n, cap),
-                   NULL));
+        BlockAddStmt(step, MakeIf(MakeBinary(NK_EQ, len, cap),
+                                  Quote(grow, p, n, cap), NULL));
         if (deep)
             __builtin_json_fail_if(
-                step, __builtin_json_call2(
-                          fn, MakeUnary(NK_ADDR, MakeSubscript(p, len)), rp));
+                step,
+                __builtin_json_call2(
+                    fn, __builtin_read_elem(p, len, deep, prefix, pt), rp));
         else
             __builtin_json_read_value(step, r, pt, MakeSubscript(p, len), attr,
                                       elem, prefix, self_name);
@@ -929,9 +976,7 @@
         BlockAddStmt(reading, MakeExprStmt(MakeAssign(n, len)));
 
         Node *empty = MakeBlock(NULL, 0);
-        BlockAddStmt(empty, Quote("$1 = calloc(1, sizeof(*$1)); if (!$1) "
-                                  "return 1;",
-                                  p));
+        BlockAddStmt(empty, Quote(calloc_one, p));
         BlockAddStmt(value,
                      MakeIf(__builtin_json_call2("__cccc_json_r_open", rp,
                                                  MakeIntLiteral(']')),
@@ -1841,22 +1886,63 @@
                        sink[2], MakeVarRef(fn), p, sink[1], sink[0]));
 }
 
-// "%.<n>s": at most n bytes, stopping at a NUL. Written by hand so the handler
-// needs no stdio declarations.
-@comptime void __builtin_dump_string_format(char *out, int n) {
-    char digits[16];
-    int  len = 0;
-    do {
-        digits[len++]  = (char)('0' + n % 10);
-        n             /= 10;
-    } while (n > 0);
-    int pos    = 0;
-    out[pos++] = '%';
-    out[pos++] = '.';
-    while (len > 0)
-        out[pos++] = digits[--len];
-    out[pos++] = 's';
-    out[pos]   = 0;
+// Drops the @to_string_skip members from the collected member list, which
+// @dump_skip has already filtered.
+@comptime void __builtin_to_string_filter(Type *ty, const char **names,
+                                          Type **types, Node **exprs, int *n) {
+    int kept = 0;
+    for (int j = 0; j < *n; j++) {
+        Type   *owner = NULL;
+        Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
+        if (mem && MemberHasAttr(mem, "to_string_skip"))
+            continue;
+        names[kept]   = names[j];
+        types[kept]   = types[j];
+        exprs[kept++] = exprs[j];
+    }
+    *n = kept;
+}
+
+// Prints the C string `s` between the quotes, one byte at a time: `"` `\` and
+// the control bytes are escaped (\" \\ \n \t \r, other control bytes as \ooo)
+// so the text reads back exactly. A positive `limit` stops after that many
+// bytes (a char array), otherwise at the NUL.
+@comptime void __builtin_dump_escaped(Node *block, Node **sink, Node *s,
+                                      int limit) {
+    Node *i    = MakeLocalVarUnique(GetType("long"));
+    Node *c    = MakeLocalVarUnique(GetType("int"));
+    Node *body = MakeBlock(NULL, 0);
+    BlockAddStmt(
+        body, MakeExprStmt(MakeAssign(
+                  c, MakeCast(MakeSubscript(s, i), GetType("unsigned char")))));
+    Node *plain = MakeBlock(NULL, 0);
+    __builtin_dump_printf1(plain, sink, "%c", c);
+    Node *octal = MakeBlock(NULL, 0);
+    __builtin_dump_printf1(octal, sink, "\\%03o",
+                           MakeCast(c, GetType("unsigned int")));
+    Node *chain =
+        MakeIf(MakeBinary(NK_LOGOR, MakeBinary(NK_LT, c, MakeIntLiteral(32)),
+                          MakeBinary(NK_EQ, c, MakeIntLiteral(127))),
+               octal, plain);
+    const char *specials[5] = {"\\\"", "\\\\", "\\n", "\\t", "\\r"};
+    int         codes[5]    = {'"', '\\', '\n', '\t', '\r'};
+    for (int j = 4; j >= 0; j--) {
+        Node *hit = MakeBlock(NULL, 0);
+        __builtin_dump_text(hit, sink, specials[j]);
+        chain =
+            MakeIf(MakeBinary(NK_EQ, c, MakeIntLiteral(codes[j])), hit, chain);
+    }
+    BlockAddStmt(body, chain);
+    Node *cond = MakeSubscript(s, i);
+    if (limit > 0)
+        cond = MakeBinary(NK_LOGAND,
+                          MakeBinary(NK_LT, i, MakeIntLiteral(limit)), cond);
+    __builtin_dump_text(block, sink, "\"");
+    BlockAddStmt(
+        block,
+        MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))), cond,
+                MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))), body));
+    __builtin_dump_text(block, sink, "\"");
 }
 
 @comptime void __builtin_dump_value(Node *block, Node **sink, Type *ty, Node *e,
@@ -1879,10 +1965,8 @@
                                              __builtin_dump_attr(sink), path);
     Node *inner = MakeBlock(NULL, 0);
     if (shape == 1) {
-        __builtin_dump_text(inner, sink, "\"");
-        __builtin_dump_printf1(inner, sink, "%s",
-                               MakeCast(p, MakePointer(GetType("char"))));
-        __builtin_dump_text(inner, sink, "\"");
+        __builtin_dump_escaped(inner, sink,
+                               MakeCast(p, MakePointer(GetType("char"))), 0);
     } else if (shape == 2) {
         char elem[256];
         __builtin_derive_path(elem, path, "[]");
@@ -1946,7 +2030,7 @@
                                MakeCast(e, GetType("unsigned long long")));
     } else if (k == 3) {
         if (GetTypeKind(ty) == TK_LDOUBLE)
-            __builtin_dump_printf1(block, sink, "%Lg", e);
+            __builtin_dump_printf1(block, sink, "%.21Lg", e);
         else
             __builtin_dump_printf1(block, sink, "%.17g",
                                    MakeCast(e, GetType("double")));
@@ -1958,11 +2042,8 @@
         __builtin_dump_printf1(block, sink, "%p",
                                MakeCast(e, MakePointer(GetType("void"))));
     } else if (k == 5) {
-        __builtin_dump_text(block, sink, "\"");
-        char fmt[32];
-        __builtin_dump_string_format(fmt, TypeArrayLen(ty));
-        __builtin_dump_printf1(block, sink, fmt, __builtin_json_charp(e));
-        __builtin_dump_text(block, sink, "\"");
+        __builtin_dump_escaped(block, sink, __builtin_json_charp(e),
+                               TypeArrayLen(ty));
     } else if (k == 6) {
         char elem[256];
         __builtin_derive_path(elem, path, "[]");
@@ -1988,20 +2069,8 @@
         int         n = 0;
         __builtin_derive_collect(ty, e, __builtin_dump_attr(sink), "dump_skip",
                                  names, types, exprs, &n);
-        if (__builtin_dump_to_buffer(sink)) {
-            int kept = 0;
-            for (int j = 0; j < n; j++) {
-                Type   *skip_owner = NULL;
-                Member *skip_mem =
-                    __builtin_derive_find_member(ty, names[j], &skip_owner);
-                if (skip_mem && MemberHasAttr(skip_mem, "to_string_skip"))
-                    continue;
-                names[kept]   = names[j];
-                types[kept]   = types[j];
-                exprs[kept++] = exprs[j];
-            }
-            n = kept;
-        }
+        if (__builtin_dump_to_buffer(sink))
+            __builtin_to_string_filter(ty, names, types, exprs, &n);
         const char *label = tname ? tname : TypeName(ty);
         if (label && label[0]) {
             __builtin_dump_text(block, sink, label);
@@ -2129,16 +2198,451 @@
     PublishNode(fn);
 }
 
+// A struct's @from_string reads the text @to_string writes (and @dump prints):
+// an optional type name, then `{ member = value, ... }`. Members may come in
+// any order but each exactly once; arrays are `{ a, b }`, strings are quoted
+// with C escapes, an enum is a constant name or a number, and an @owned pointer
+// is its content or NULL. A member skipped by @dump_skip or @to_string_skip is
+// left zero. It needs #include <cccc/text.h>.
+
+@comptime void __builtin_text_require(void) {
+    if (!FindGlobal("__cccc_text_r_init"))
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@from_string needs #include <cccc/text.h>");
+}
+
+@comptime void __builtin_text_read_value(Node *block, Node *r, Type *ty,
+                                         Node *e, const char *path,
+                                         const char *prefix,
+                                         const char *self_name);
+
+// An @owned member read into memory it allocates, as for @from_json: NULL reads
+// as NULL, a string through new_str, an array that grows as elements arrive
+// (the length member follows it), anything else one calloc'd object. `have` is
+// nonzero when the length member's own key was read first, and must then agree
+// with the array.
+@comptime void __builtin_text_read_owned(Node *block, Node *r, Member *m,
+                                         Type *owner, Node *e, const char *path,
+                                         const char *prefix,
+                                         const char *self_name, Node *have) {
+    Type       *pty   = MemberType(m);
+    Node       *p     = MakeMember(e, MemberName(m));
+    Type       *pt    = TypeBase(pty);
+    const char *cname = NULL;
+    int   shape = __builtin_owned_shape(m, owner, "@from_string", path, &cname);
+    char  fn[256];
+    int   deep = __builtin_json_content_fn(fn, pt, shape, prefix, self_name,
+                                           "_text_read", "@from_string", path);
+    Node *rp   = __builtin_json_addr(r);
+    char  sz[300];
+    char  calloc_one[400];
+    char  grow[800];
+    __builtin_read_size(sz, deep, prefix, pt);
+    strcpy(calloc_one, "{ unsigned long z_ = ");
+    strcat(calloc_one, sz);
+    strcat(calloc_one, "; $1 = calloc(1, z_); if (!$1) return 1; }");
+    strcpy(grow, "{ unsigned long z_ = ");
+    strcat(grow, sz);
+    strcat(grow, "; unsigned long c_ = $3 ? $3 * 2 : 4; void *t_ = realloc($1, "
+                 "c_ * z_); if (!t_) return 1; memset((char *)t_ + $3 * z_, 0, "
+                 "(c_ - $3) * z_); $1 = t_; $3 = c_; $2 = c_; }");
+    Node *value = MakeBlock(NULL, 0);
+    Node *none  = MakeBlock(NULL, 0);
+    BlockAddStmt(none,
+                 MakeExprStmt(MakeAssign(p, MakeCast(MakeIntLiteral(0), pty))));
+    Node *len = MakeLocalVarUnique(GetType("long"));
+    Node *exp = MakeLocalVarUnique(GetType("long long"));
+    if (shape == 1) {
+        Node *t = MakeLocalVarUnique(MakePointer(GetType("char")));
+        __builtin_json_fail_if(value,
+                               __builtin_json_call2("__cccc_text_r_new_str", rp,
+                                                    __builtin_json_addr(t)));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(p, MakeCast(t, pty))));
+    } else if (shape == 3) {
+        BlockAddStmt(value, Quote(calloc_one, p));
+        if (deep)
+            __builtin_json_fail_if(value, __builtin_json_call2(fn, p, rp));
+        else
+            __builtin_text_read_value(value, r, pt, MakeUnary(NK_DEREF, p),
+                                      path, prefix, self_name);
+    } else {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *n    = MakeMember(e, cname);
+        Node *cap  = MakeLocalVarUnique(GetType("long"));
+        Node *more = MakeLocalVarUnique(GetType("int"));
+        BlockAddStmt(none, MakeExprStmt(MakeAssign(n, MakeIntLiteral(0))));
+        __builtin_json_fail_if(value,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral('{')));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(
+                                p, MakeCast(MakeIntLiteral(0), pty))));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(n, MakeIntLiteral(0))));
+        BlockAddStmt(value, MakeExprStmt(MakeAssign(cap, MakeIntLiteral(0))));
+
+        Node *step = MakeBlock(NULL, 0);
+        BlockAddStmt(step, MakeIf(MakeBinary(NK_EQ, len, cap),
+                                  Quote(grow, p, n, cap), NULL));
+        if (deep)
+            __builtin_json_fail_if(
+                step,
+                __builtin_json_call2(
+                    fn, __builtin_read_elem(p, len, deep, prefix, pt), rp));
+        else
+            __builtin_text_read_value(step, r, pt, MakeSubscript(p, len), elem,
+                                      prefix, self_name);
+        BlockAddStmt(step,
+                     MakeExprStmt(MakeAssign(
+                         len, MakeBinary(NK_ADD, len, MakeIntLiteral(1)))));
+        BlockAddStmt(step,
+                     MakeExprStmt(MakeAssign(
+                         more, MakeUnary(NK_NOT, __builtin_json_call2(
+                                                     "__cccc_text_r_open", rp,
+                                                     MakeIntLiteral(','))))));
+        Node *reading = MakeBlock(NULL, 0);
+        BlockAddStmt(reading,
+                     MakeExprStmt(MakeAssign(more, MakeIntLiteral(1))));
+        BlockAddStmt(reading, MakeWhile(more, step));
+        __builtin_json_fail_if(reading,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral('}')));
+        BlockAddStmt(reading, MakeExprStmt(MakeAssign(n, len)));
+
+        Node *empty = MakeBlock(NULL, 0);
+        BlockAddStmt(empty, Quote(calloc_one, p));
+        BlockAddStmt(value,
+                     MakeIf(__builtin_json_call2("__cccc_text_r_open", rp,
+                                                 MakeIntLiteral('}')),
+                            reading, empty));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(
+                                exp, MakeCast(n, GetType("long long")))));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(len, MakeIntLiteral(0))));
+    }
+    BlockAddStmt(block,
+                 MakeIf(MakeUnary(NK_NOT, __builtin_json_call2(
+                                              "__cccc_text_r_lit", rp,
+                                              MakeStringLiteral("NULL"))),
+                        none, value));
+    if (shape == 2 && have)
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LOGAND, have,
+                                              MakeBinary(NK_NE, exp, len)),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+}
+
+// An enum is a constant name or, when no constant matched on output, a number.
+@comptime void __builtin_text_read_enum(Node *block, Node *r, Type *ty,
+                                        Node *e) {
+    Node *rp  = __builtin_json_addr(r);
+    Node *id  = MakeLocalVarUnique(MakeArray(GetType("char"), 128));
+    Node *t   = MakeLocalVarUnique(GetType("long long"));
+    Node *idp = MakeCast(__builtin_json_addr(id), MakePointer(GetType("char")));
+    Node *num = MakeBlock(NULL, 0);
+    if (TypeIsUnsigned(ty)) {
+        // @to_string prints an unsigned enum's value as the large number it is.
+        Node *u = MakeLocalVarUnique(GetType("unsigned long long"));
+        __builtin_json_fail_if(
+            num, __builtin_json_call3("__cccc_text_r_uint", rp,
+                                      __builtin_json_addr(u),
+                                      MakeIntLiteral(TypeSize(ty))));
+        BlockAddStmt(num, MakeExprStmt(MakeAssign(
+                              t, MakeCast(u, GetType("long long")))));
+    } else {
+        __builtin_json_fail_if(
+            num, __builtin_json_call3("__cccc_text_r_int", rp,
+                                      __builtin_json_addr(t),
+                                      MakeIntLiteral(TypeSize(ty))));
+    }
+    Node *chain = MakeReturn(MakeIntLiteral(1));
+    for (int i = EnumValueCount(ty) - 1; i >= 0; i--) {
+        Node *hit =
+            MakeExprStmt(MakeAssign(t, MakeIntLiteral(EnumValue(ty, i))));
+        chain = MakeIf(
+            __builtin_json_call2("__cccc_text_key_is", idp,
+                                 MakeStringLiteral(EnumValueName(ty, i))),
+            hit, chain);
+    }
+    BlockAddStmt(block, MakeIf(MakeUnary(NK_NOT, __builtin_json_call3(
+                                                     "__cccc_text_r_ident", rp,
+                                                     idp, MakeIntLiteral(128))),
+                               chain, num));
+    BlockAddStmt(block, MakeExprStmt(MakeAssign(e, MakeCast(t, ty))));
+}
+
+@comptime void __builtin_text_read_value(Node *block, Node *r, Type *ty,
+                                         Node *e, const char *path,
+                                         const char *prefix,
+                                         const char *self_name) {
+    int k = __builtin_derive_kind(ty);
+    if (k == 0)
+        __builtin_derive_bad_member("@from_string", path);
+    if (k == 8)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@from_string: member '%s' is a pointer; mark it @owned "
+                     "or @to_string_skip",
+                     path);
+    Node *rp = __builtin_json_addr(r);
+    if (k == 1 && GetTypeKind(ty) == TK_ENUM) {
+        __builtin_text_read_enum(block, r, ty, e);
+    } else if (k >= 1 && k <= 4) {
+        const char *scalar =
+            k == 1   ? "long long"
+            : k == 2 ? "unsigned long long"
+            : k == 3
+                ? (GetTypeKind(ty) == TK_LDOUBLE ? "long double" : "double")
+                : "int";
+        const char *reader =
+            k == 1   ? "__cccc_text_r_int"
+            : k == 2 ? "__cccc_text_r_uint"
+            : k == 3 ? (GetTypeKind(ty) == TK_LDOUBLE ? "__cccc_text_r_ldouble"
+                                                      : "__cccc_text_r_f64")
+                     : "__cccc_text_r_bool";
+        Node *t = MakeLocalVarUnique(GetType(scalar));
+        Node *call =
+            (k == 1 || k == 2)
+                ? __builtin_json_call3(reader, rp, __builtin_json_addr(t),
+                                       MakeIntLiteral(TypeSize(ty)))
+                : __builtin_json_call2(reader, rp, __builtin_json_addr(t));
+        __builtin_json_fail_if(block, call);
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(e, MakeCast(t, ty))));
+    } else if (k == 5) {
+        __builtin_json_fail_if(
+            block, __builtin_json_call3("__cccc_text_r_str", rp,
+                                        MakeCast(__builtin_json_addr(e),
+                                                 MakePointer(GetType("char"))),
+                                        MakeIntLiteral(TypeArrayLen(ty))));
+    } else if (k == 6) {
+        char elem[256];
+        __builtin_derive_path(elem, path, "[]");
+        Node *i     = MakeLocalVarUnique(GetType("int"));
+        Node *body  = MakeBlock(NULL, 0);
+        Node *comma = MakeBlock(NULL, 0);
+        __builtin_json_fail_if(comma,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral(',')));
+        BlockAddStmt(body, MakeIf(i, comma, NULL));
+        __builtin_text_read_value(body, r, TypeBase(ty), MakeSubscript(e, i),
+                                  elem, prefix, self_name);
+        __builtin_json_fail_if(block,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral('{')));
+        BlockAddStmt(
+            block,
+            MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
+                    MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
+                    MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
+                    body));
+        __builtin_json_fail_if(block,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral('}')));
+    } else {
+        const char *names[128];
+        Type       *types[128];
+        Node       *exprs[128];
+        int         n = 0;
+        __builtin_derive_collect(ty, e, "@from_string", "dump_skip", names,
+                                 types, exprs, &n);
+        __builtin_to_string_filter(ty, names, types, exprs, &n);
+
+        // cidx[j]: the member holding the length of owned array j (or -1);
+        // counted[j]: the owned array whose length member j is (or -1).
+        Type   *owners[128];
+        Member *mems[128];
+        int     cidx[128];
+        int     counted[128];
+        for (int j = 0; j < n; j++) {
+            owners[j]  = NULL;
+            mems[j]    = __builtin_derive_find_member(ty, names[j], &owners[j]);
+            cidx[j]    = -1;
+            counted[j] = -1;
+        }
+        for (int j = 0; j < n; j++) {
+            if (!MemberHasAttr(mems[j], "owned") ||
+                MemberAttrArgCount(mems[j], "owned") != 1)
+                continue;
+            const char *cname =
+                StringLiteralValue(MemberAttrArg(mems[j], "owned", 0));
+            for (int c = 0; c < n; c++) {
+                if (strcmp(names[c], cname))
+                    continue;
+                if (counted[c] >= 0)
+                    MacroErrorAt(MakeIntLiteral(0),
+                                 "@from_string: two owned arrays share the "
+                                 "length member '%s'",
+                                 cname);
+                cidx[j]    = c;
+                counted[c] = j;
+            }
+        }
+
+        Node *seen =
+            MakeLocalVarUnique(MakeArray(GetType("unsigned char"), n ? n : 1));
+        Node *key     = MakeLocalVarUnique(MakeArray(GetType("char"), 128));
+        Node *first   = MakeLocalVarUnique(GetType("int"));
+        Node *next    = MakeLocalVarUnique(GetType("int"));
+        Node *uchar_p = MakePointer(GetType("unsigned char"));
+
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call1(
+                                "__cccc_text_r_label", rp)));
+        __builtin_json_fail_if(block,
+                               __builtin_json_call2("__cccc_text_r_open", rp,
+                                                    MakeIntLiteral('{')));
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_text_zero",
+                                MakeCast(__builtin_json_addr(seen), uchar_p),
+                                MakeIntLiteral(n ? n : 1))));
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(first, MakeIntLiteral(1))));
+
+        // if (key_is(key, "a")) {...} else if ... else return 1;
+        Node *chain = MakeReturn(MakeIntLiteral(1));
+        for (int j = n - 1; j >= 0; j--) {
+            char sub[256];
+            __builtin_derive_path(sub, path, ".");
+            strcat(sub, names[j]);
+            Node *member = MakeBlock(NULL, 0);
+            // A repeated name would leak an owned allocation and overwrite a
+            // value, so each member may appear once.
+            BlockAddStmt(member, MakeIf(MakeSubscript(seen, MakeIntLiteral(j)),
+                                        MakeReturn(MakeIntLiteral(1)), NULL));
+            if (MemberHasAttr(mems[j], "owned")) {
+                Node *have = NULL;
+                if (cidx[j] >= 0)
+                    have = MakeSubscript(seen, MakeIntLiteral(cidx[j]));
+                __builtin_text_read_owned(member, r, mems[j], owners[j], e, sub,
+                                          prefix, self_name, have);
+            } else if (counted[j] >= 0) {
+                // The length of an owned array: it must agree with the array.
+                Node *t = MakeLocalVarUnique(types[j]);
+                __builtin_text_read_value(member, r, types[j], t, sub, prefix,
+                                          self_name);
+                Node *array_seen =
+                    MakeSubscript(seen, MakeIntLiteral(counted[j]));
+                Node *agree = MakeBlock(NULL, 0);
+                BlockAddStmt(agree,
+                             MakeIf(MakeBinary(NK_NE, exprs[j], t),
+                                    MakeReturn(MakeIntLiteral(1)), NULL));
+                BlockAddStmt(member,
+                             MakeIf(array_seen, agree,
+                                    MakeExprStmt(MakeAssign(exprs[j], t))));
+            } else {
+                __builtin_text_read_value(member, r, types[j], exprs[j], sub,
+                                          prefix, self_name);
+            }
+            BlockAddStmt(member, MakeExprStmt(MakeAssign(
+                                     MakeSubscript(seen, MakeIntLiteral(j)),
+                                     MakeIntLiteral(1))));
+            Node *is_key = __builtin_json_call2("__cccc_text_key_is",
+                                                __builtin_json_charp(key),
+                                                MakeStringLiteral(names[j]));
+            chain        = MakeIf(is_key, member, chain);
+        }
+
+        Node *loop_cond = MakeBinary(
+            NK_LT, MakeIntLiteral(0),
+            MakeAssign(next,
+                       __builtin_json_call4(
+                           "__cccc_text_r_key", rp,
+                           MakeCast(__builtin_json_addr(key),
+                                    MakePointer(GetType("char"))),
+                           MakeIntLiteral(128), __builtin_json_addr(first))));
+        BlockAddStmt(block, MakeWhile(loop_cond, chain));
+        BlockAddStmt(block, MakeIf(MakeBinary(NK_LT, next, MakeIntLiteral(0)),
+                                   MakeReturn(MakeIntLiteral(1)), NULL));
+        BlockAddStmt(
+            block,
+            MakeIf(MakeUnary(NK_NOT,
+                             __builtin_json_call2(
+                                 "__cccc_text_all_set",
+                                 MakeCast(__builtin_json_addr(seen), uchar_p),
+                                 MakeIntLiteral(n))),
+                   MakeReturn(MakeIntLiteral(1)), NULL));
+    }
+}
+
+// @from_string struct Foo {...}; publishes
+//   int Foo_from_string(struct Foo *out, const char *s);
+// which reads the text @to_string writes into *out and returns 0, or nonzero
+// on malformed or trailing text, a missing, repeated or unknown member, or a
+// value that does not fit; *out is written only on success. Unions are
+// rejected and a non-@owned pointer member is an error.
+@comptime void __builtin_from_string_struct(Type *ty, const char *tname,
+                                            const char *prefix) {
+    __builtin_text_require();
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_from_string");
+
+    // The body lives in T_text_read so an owned pointee of this type can be
+    // read by the same function.
+    char rname[256];
+    __builtin_json_fn_name(rname, prefix, tname, "_text_read");
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_text_read");
+    Obj *reader = MakeFunction(rname, GetType("int"));
+    WithFn(reader) {
+        Node *block = MakeBlock(NULL, 0);
+        __builtin_text_read_value(
+            block, MakeUnary(NK_DEREF, MakeParamRef(reader, "r")), ty,
+            MakeUnary(NK_DEREF, MakeParamRef(reader, "out")), tname, prefix,
+            tname);
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(reader, block);
+    }
+    PublishNode(reader);
+
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    FunctionAddParam(fn, "out", MakePointer(ty));
+    FunctionAddParam(fn, "s", MakePointer(MakeConst(GetType("char"))));
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *r     = MakeLocalVarUnique(GetType("__cccc_text_r"));
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "__cccc_text_r_init", __builtin_json_addr(r),
+                                MakeParamRef(fn, "s"))));
+        // Read into a zeroed scratch copy, so *out is untouched on failure and
+        // the members the text leaves out are zero.
+        Node *dst = MakeLocalVarUnique(ty);
+        BlockAddStmt(block,
+                     Quote("__builtin_memset(&$1, 0, sizeof($1));", dst));
+        Node *failed = MakeBlock(NULL, 0);
+        if (__builtin_owned_has(ty))
+            __builtin_owned_release(failed, ty, dst, false, prefix, tname,
+                                    "@from_string", tname);
+        BlockAddStmt(failed, MakeReturn(MakeIntLiteral(1)));
+        Node *bad = MakeBinary(
+            NK_LOGOR,
+            __builtin_json_call2(rname, __builtin_json_addr(dst),
+                                 __builtin_json_addr(r)),
+            MakeUnary(NK_NOT, __builtin_json_call1("__cccc_text_r_at_end",
+                                                   __builtin_json_addr(r))));
+        BlockAddStmt(block, MakeIf(bad, failed, NULL));
+        BlockAddStmt(block, Quote("{ void *d_ = $1; __builtin_memcpy(d_, &$2, "
+                                  "sizeof($2)); }",
+                                  MakeParamRef(fn, "out"), dst));
+        BlockAddStmt(block, MakeReturn(MakeIntLiteral(0)));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
 // @from_string enum Color {...}; publishes
 //   enum Color Color_from_string(const char *s);
 // which compares s against each constant's name and returns the matching
-// value, or -1 if no constant matches. @from_string("P") publishes
-// P_Color_from_string.
+// value, or -1 if no constant matches. On a struct it publishes the reader
+// above. @from_string("P") publishes P_Color_from_string.
 @comptime(attribute("from_string")) void __builtin_attr_from_string(
     AttrTarget *target, ...) {
-    Type       *ty = __builtin_attr_type_target(target, "@from_string", true);
-    const char *tname  = __builtin_attr_type_name(target, "@from_string");
+    int kind = GetAttrTargetKind(target);
+    if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@from_string expects a type or typedef target");
     const char *prefix = __builtin_attr_prefix_arg("@from_string");
+    Type       *ty     = AttrTargetType(target);
+    if (!ty || GetTypeKind(ty) != TK_ENUM) {
+        ty = __builtin_derive_struct_target(target, "@from_string");
+        __builtin_from_string_struct(
+            ty, __builtin_attr_type_name(target, "@from_string"), prefix);
+        return;
+    }
+    const char *tname = __builtin_attr_type_name(target, "@from_string");
 
     char        fname[256];
     __builtin_json_fn_name(fname, prefix, tname, "_from_string");
@@ -2729,6 +3233,53 @@
     }
     PublishNode(fn);
     AddAttribute(fn, "cccc::operator(<=>)");
+}
+
+// ---- Bundles
+// ----------------------------------------------------------------- A bundle
+// runs a pair of attributes on the same type. The handlers read their optional
+// prefix argument from the bundle's own, so `@json("app")` names app_T_to_json
+// and app_T_from_json. A bundle that overlaps one of its parts
+// (`@json @to_json`) defines a function twice, which is an error.
+
+// @json = @to_json + @from_json.
+@comptime(attribute("json")) void __builtin_attr_json(AttrTarget *target, ...) {
+    __builtin_attr_to_json(target);
+    __builtin_attr_from_json(target);
+}
+
+// @text = @to_string + @from_string (an enum or a struct).
+@comptime(attribute("text")) void __builtin_attr_text(AttrTarget *target, ...) {
+    __builtin_attr_to_string(target);
+    __builtin_attr_from_string(target);
+}
+
+// @binary = @serialize + @deserialize.
+@comptime(attribute("binary")) void __builtin_attr_binary(AttrTarget *target,
+                                                          ...) {
+    __builtin_attr_serialize(target);
+    __builtin_attr_deserialize(target);
+}
+
+// @lifecycle = @clone + @destroy.
+@comptime(attribute("lifecycle")) void __builtin_attr_lifecycle(
+    AttrTarget *target, ...) {
+    __builtin_attr_clone(target);
+    __builtin_attr_destroy(target);
+}
+
+// @hashable = @equals + @hash.
+@comptime(attribute("hashable")) void __builtin_attr_hashable(
+    AttrTarget *target, ...) {
+    __builtin_attr_equals(target);
+    __builtin_attr_hash(target);
+}
+
+// @ordered = @equals + @compare.
+@comptime(attribute("ordered")) void __builtin_attr_ordered(AttrTarget *target,
+                                                            ...) {
+    __builtin_attr_equals(target);
+    __builtin_attr_compare(target);
 }
 
 // ---- @bitflags

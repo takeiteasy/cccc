@@ -7,6 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `@from_json` and `@from_string` read an `@owned` member whose pointee struct is declared later (single object or `@owned("n")` array), stepping through it with `T_clone_size`.
+- Added: `@from_string` on a struct publishes `int T_from_string(T *out, const char *s)`, which reads the text `@to_string` writes. It needs `#include <cccc/text.h>`; `*out` is written only on success.
+- Changed: `@dump` and `@to_string` escape `"`, `\` and control bytes in strings and print a `long double` with 21 significant digits, so the text reads back exactly.
+- Added: bundle attributes `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable` and `@ordered`, each a pair of existing derives with one optional prefix.
+- Fixed: the "expected unique generated function name" error names the attribute and its location.
 - Changed: `@enum_to_string` and `@enum_from_string` are now `@to_string` and `@from_string`; the old names are an undefined-attribute error. Enum behaviour is unchanged, and both take an optional name prefix.
 - Added: `@to_string` on a struct publishes `size_t T_to_string(const T *self, char *buf, size_t cap)`, writing the `@dump` text into a buffer (snprintf-style return). `@to_string_skip` leaves a member out of it; `@dump_skip` does too.
 - Added: a checked return type is verified at `return`. The value must root in a checked pointer or a local that inherits its bounds, and its bounds must imply the declared ones, which may name parameters.

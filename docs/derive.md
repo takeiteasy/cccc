@@ -28,6 +28,7 @@ int main(void) {
 | `@to_string` | enum | `const char *T_to_string(T v)` |
 | `@to_string` | struct | `size_t T_to_string(const T *self, char *buf, size_t cap)` |
 | `@from_string` | enum | `T T_from_string(const char *s)` |
+| `@from_string` | struct | `int T_from_string(T *out, const char *s)` |
 | `@getters` | struct/union | `get_<field>(T *self)` per member |
 | `@setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
 | `@accessors` | struct/union | getters and setters |
@@ -39,6 +40,7 @@ int main(void) {
 | `@dump` | struct | `void T_dump(const T *self, FILE *out)` |
 | `@clone` | struct | `int T_clone(T *out, const T *self)` |
 | `@destroy` | struct | `void T_destroy(T *self)` |
+| `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable`, `@ordered` | struct/union | a pair of the above, see [Bundles](#bundles) |
 | `@owned` / `@owned("n")` | member | marks a pointer member as heap memory for `@clone` / `@destroy`; `@equals`, `@hash`, `@dump`, `@compare`, `@to_json` and `@from_json` use its content |
 | `@default(expr)` | member | the value `T_new` gives the member instead of a parameter |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
@@ -88,40 +90,8 @@ these attributes are described in [macros.md](macros-stdlib.md#macro-standard-li
 
 ## Strings
 
-`@to_string` and `@from_string` convert an enum to its constant's name and back:
-
-```c
-@to_string
-@from_string
-typedef enum { RED, GREEN, BLUE } Color;
-
-// Color_to_string(GREEN)   -> "GREEN"
-// Color_to_string(99)      -> ""
-// Color_from_string("BLUE") -> BLUE
-// Color_from_string("nope") -> -1
-```
-
-Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
-
-On a struct, `@to_string` writes the text `@dump` prints into a buffer. It
-returns the length the whole text needs, like `snprintf`, and always
-NUL-terminates when `cap > 0`:
-
-```c
-@to_string
-typedef struct { int x; int y; } Point;
-
-char buf[32];
-Point_to_string(&p, buf, sizeof buf);   // "Point { x = 3, y = 4 }"
-Point_to_string(&p, NULL, 0);           // 22: the size to allocate, minus the NUL
-```
-
-The struct form needs `#include <stdio.h>`, rejects unions, and skips members
-marked `@dump_skip` or `@to_string_skip`. `@from_string` accepts enums only.
-An optional prefix names the functions `<prefix>_<T>_to_string` and
-`<prefix>_<T>_from_string`: `@to_string("app")` on `enum Color` publishes
-`app_Color_to_string`. Member rules (nested structs, arrays, `@owned`) are the
-same as for [`@dump`](derive-equality.md#equality-hashing-and-dumping).
+`@to_string` and `@from_string` convert an enum to its constant's name and back,
+and a struct to text and back. See [derive-text.md](derive-text.md).
 
 ## Skipping Members
 
@@ -206,6 +176,32 @@ struct Config {
 members, and a member cannot carry both `@default` and `@ctor_skip`.
 
 
+## Bundles
+
+A bundle runs a pair of attributes on one type, as `@accessors` runs
+`@getters` and `@setters`:
+
+| Bundle | Same as |
+|---|---|
+| `@json` | `@to_json` + `@from_json` |
+| `@text` | `@to_string` + `@from_string` |
+| `@binary` | `@serialize` + `@deserialize` |
+| `@lifecycle` | `@clone` + `@destroy` |
+| `@hashable` | `@equals` + `@hash` |
+| `@ordered` | `@equals` + `@compare` |
+
+```c
+@json("app")
+@lifecycle
+struct Config { int port; char *host @owned; };
+// app_Config_to_json, app_Config_from_json, Config_clone, Config_destroy
+```
+
+A bundle takes the optional prefix its parts take. Listing a bundle together
+with one of its parts (`@json @to_json`), or two bundles that share a part
+(`@hashable @ordered` both publish `T_equals`), is a compile error that names
+the duplicate function. Write `@hashable @compare` for both.
+
 ## Writing your own
 
 Handlers for your own attributes use the same mechanism
@@ -229,6 +225,7 @@ A handler for a struct reads the attributes on its members with
 | Page | Covers |
 |---|---|
 | [derive-json.md](derive-json.md) | `@to_json` and `@from_json` |
+| [derive-text.md](derive-text.md) | `@to_string` and `@from_string` |
 | [derive-equality.md](derive-equality.md) | `@equals`, `@hash`, `@dump`, `@compare` |
 | [derive-owned.md](derive-owned.md) | `@owned`, `@clone`, `@destroy` |
 | [derive-validate.md](derive-validate.md) | `@range`, `@validate`, `@clamp`, `@bitflags` |
