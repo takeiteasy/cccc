@@ -2042,6 +2042,34 @@ static bool is_checked_ptr_target(Type *ty) {
            !(ty->base && ty->base->kind == TY_FUNC);
 }
 
+// A region violation is a warning only when it has been explicitly demoted;
+// -Wno-checked-regions, or any pass that clears the masks, leaves it an error.
+static bool checked_region_demoted(VirtualMachine *vm, Token *tok) {
+    uint64_t mask     = CCCC_WARN_CHECKED_REGIONS;
+    uint64_t warnings = tok && tok->diag_warnings
+                            ? tok->diag_warnings & ~(1ULL << 63)
+                            : vm->compiler.warnings;
+    uint64_t werror = tok && tok->diag_werror ? tok->diag_werror & ~(1ULL << 63)
+                                              : vm->compiler.warning_errors;
+    if (!(warnings & mask) || (werror & mask))
+        return false;
+    return !(vm->warnings_as_errors &&
+             !(vm->compiler.warning_no_errors & mask));
+}
+
+static void checked_region_diag(VirtualMachine *vm, Token *tok, const char *fmt,
+                                ...) {
+    char    msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    if (checked_region_demoted(vm, tok))
+        warn_tok(vm, tok, CCCC_WARN_CHECKED_REGIONS, "%s", msg);
+    else
+        error_tok(vm, tok, "%s", msg);
+}
+
 // Explicit-cast ban list inside a checked region. Called from cast() for a
 // cast with no assume/dynamic annotation.
 void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
@@ -2050,33 +2078,39 @@ void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
         !(ty->base && ty->base->kind == TY_FUNC)) {
         if (is_null_pointer_constant(expr))
             return;
-        error_tok(vm, tok,
-                  "cast to an unchecked pointer type is not allowed "
-                  "in a checked region -- wrap this code in "
-                  "[[cccc::unchecked]] { ... }");
+        checked_region_diag(vm, tok,
+                            "cast to an unchecked pointer type is not allowed "
+                            "in a checked region -- wrap this code in "
+                            "[[cccc::unchecked]] { ... }");
+        return;
     }
     if (!is_checked_ptr_target(ty))
         return;
     if (expr->ty && expr->ty->kind == TY_PTR &&
         expr->ty->checked_kind != CHECKED_NONE &&
-        ty->checked_kind != expr->ty->checked_kind)
-        error_tok(vm, tok,
-                  "cast changes a pointer's checked kind in a "
-                  "checked region -- wrap this code in "
-                  "[[cccc::unchecked]] { ... }");
+        ty->checked_kind != expr->ty->checked_kind) {
+        checked_region_diag(vm, tok,
+                            "cast changes a pointer's checked kind in a "
+                            "checked region -- wrap this code in "
+                            "[[cccc::unchecked]] { ... }");
+        return;
+    }
     if (ty->checked_kind != CHECKED_SINGLE &&
-        ty->checked_bounds_form == CB_NONE)
-        error_tok(vm, tok,
-                  "cast to an array pointer with no bounds in a checked "
-                  "region -- add count(), byte_count() or bounds(), or "
-                  "bounds(unknown) to opt out");
+        ty->checked_bounds_form == CB_NONE) {
+        checked_region_diag(vm, tok,
+                            "cast to an array pointer with no bounds in a "
+                            "checked region -- add count(), byte_count() or "
+                            "bounds(), or bounds(unknown) to opt out");
+        return;
+    }
     if (ty->checked_bounds_form != CB_UNKNOWN &&
         !checked_source_ok(expr, /*visible_ok=*/false))
-        error_tok(vm, tok,
-                  "cast from an unchecked pointer to a checked pointer "
-                  "type is not allowed in a checked region -- use "
-                  "[[cccc::dynamic]] or [[cccc::assume]], or wrap this code "
-                  "in [[cccc::unchecked]] { ... }");
+        checked_region_diag(
+            vm, tok,
+            "cast from an unchecked pointer to a checked pointer "
+            "type is not allowed in a checked region -- use "
+            "[[cccc::dynamic]] or [[cccc::assume]], or wrap this code "
+            "in [[cccc::unchecked]] { ... }");
 }
 
 // Implicit-conversion ban inside a checked region: init, assignment, call
@@ -2091,11 +2125,12 @@ void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
     add_type(vm, src);
     if (checked_source_ok(src, /*visible_ok=*/true))
         return;
-    error_tok(vm, tok,
-              "implicit conversion from an unchecked pointer to a checked "
-              "pointer is not allowed in a checked region -- cast with "
-              "[[cccc::assume]] or [[cccc::dynamic]], or move it into an "
-              "[[cccc::unchecked]] block");
+    checked_region_diag(
+        vm, tok,
+        "implicit conversion from an unchecked pointer to a checked "
+        "pointer is not allowed in a checked region -- cast with "
+        "[[cccc::assume]] or [[cccc::dynamic]], or move it into an "
+        "[[cccc::unchecked]] block");
 }
 
 // Declaration-ban diagnostic (#485 v1 ban list, item 1 of 2): a local,
@@ -2131,17 +2166,18 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
     if (ty->checked_kind != CHECKED_NONE) {
         if (ty->checked_kind != CHECKED_SINGLE &&
             ty->checked_bounds_form == CB_NONE)
-            error_tok(vm, name_tok,
-                      "%s '%.*s' has no bounds in a checked region -- add "
-                      "count(), byte_count() or bounds(), or bounds(unknown) "
-                      "to opt out",
-                      what, name_tok->len, name_tok->loc);
+            checked_region_diag(
+                vm, name_tok,
+                "%s '%.*s' has no bounds in a checked region -- add "
+                "count(), byte_count() or bounds(), or bounds(unknown) "
+                "to opt out",
+                what, name_tok->len, name_tok->loc);
         return;
     }
-    error_tok(vm, name_tok,
-              "unchecked pointer %s '%.*s' is not allowed in a checked "
-              "region -- declare it [[cccc::single]], [[cccc::array]] or "
-              "[[cccc::ntarray]], or move it into an [[cccc::unchecked]] "
-              "block",
-              what, name_tok->len, name_tok->loc);
+    checked_region_diag(vm, name_tok,
+                        "unchecked pointer %s '%.*s' is not allowed in a "
+                        "checked region -- declare it [[cccc::single]], "
+                        "[[cccc::array]] or [[cccc::ntarray]], or move it "
+                        "into an [[cccc::unchecked]] block",
+                        what, name_tok->len, name_tok->loc);
 }

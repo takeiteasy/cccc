@@ -2,7 +2,7 @@
 
 Say "only checked pointers in here" for a block, a function or a stretch of file, so code can migrate piece by piece.
 
-Inside a checked region an unchecked pointer declaration or an unsafe pointer cast is a compile error.
+Inside a checked region an unchecked pointer declaration or an unsafe pointer cast is a compile error, or a warning once you [downgrade it](#downgrading-to-warnings).
 
 ## Opening a region
 
@@ -74,6 +74,27 @@ A region around an `#include` does not apply to the header's declarations, since
 int main(void) { printf("hi\n"); return 0; }
 #pragma cccc checked end
 ```
+
+## Downgrading to warnings
+
+A violation is an error by default and stops the build at the first one. To list them all and fix them at your own pace, make them warnings:
+
+```
+cccc -Wno-error=checked-regions app.c
+```
+
+```c
+#pragma GCC diagnostic warning "-Wchecked-regions"   // warnings from here on
+```
+
+| Setting | Violation is |
+|---|---|
+| Default, `-Werror` | An error |
+| `-Wno-error=checked-regions`, `-Werror -Wno-error=checked-regions` | A warning |
+| `#pragma GCC diagnostic warning "-Wchecked-regions"` | A warning in its extent |
+| `-Wno-checked-regions`, `#pragma GCC diagnostic ignored` | An error: a violation is never silenced |
+
+Malformed regions (a stray, unclosed or mismatched `#pragma cccc ... end`, or conflicting attributes) stay errors.
 
 ## Always on
 

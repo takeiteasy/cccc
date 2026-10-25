@@ -1207,8 +1207,9 @@ void cc_init(VirtualMachine *vm, uint32_t flags) {
     vm->compiler.tail_calls            = true;
 
     vm->compiler.macro_recursion_limit = 256;
-    vm->compiler.warnings = CCCC_WARN_UNKNOWN_ATTRIBUTES | CCCC_WARN_OPENMP;
-    vm->compiler.warning_errors        = 0;
+    vm->compiler.warnings = CCCC_WARN_UNKNOWN_ATTRIBUTES | CCCC_WARN_OPENMP |
+                            CCCC_WARN_CHECKED_REGIONS;
+    vm->compiler.warning_errors        = CCCC_WARN_CHECKED_REGIONS;
     vm->compiler.warning_no_errors     = 0;
 
     // Return buffer pool will be allocated in data segment during codegen

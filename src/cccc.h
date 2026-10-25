@@ -998,7 +998,12 @@ typedef enum {
     CCCC_WARN_UNKNOWN_ATTRIBUTES = (1ULL << 26),
     // A doacross `sink` that waits on the current or a later iteration, or on
     // one outside the loop (on by default)
-    CCCC_WARN_OPENMP              = (1ULL << 27),
+    CCCC_WARN_OPENMP = (1ULL << 27),
+    // A checked-region violation. An error unless demoted with
+    // -Wno-error=checked-regions or #pragma GCC diagnostic warning; ignoring
+    // it never silences the violation. The mask has no free bits left (bit 63
+    // is the per-token stamp marker).
+    CCCC_WARN_CHECKED_REGIONS     = (1ULL << 28),
     CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
     CCCC_WARN_DUPLICATED_COND =
         (1ULL << 31), // same condition repeated in if/else-if chain
