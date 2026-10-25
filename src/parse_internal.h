@@ -512,6 +512,10 @@ bool   node_assigns(const Node *n);
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
                      VarAttr *attr, Node **cur);
 void propagate_checked_bounds(VirtualMachine *vm, Obj *fn);
+void checked_tail_passes(VirtualMachine *vm, Obj *fn);
+void declare_checked_return_var(VirtualMachine *vm, Obj *fn);
+Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
+                             Token *tok);
 VarScope *push_scope(VirtualMachine *vm, char *name, int name_len);
 void push_tag_scope(VirtualMachine *vm, Token *tok, Type *ty);
 void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,

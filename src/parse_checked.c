@@ -1174,10 +1174,10 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
 // only ever widens trust for a previously-unchecked target.
 #define CHECKED_PROP_MAX_ROUNDS 32
 
-void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
-    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
-        return;
-
+// Phase A alone: classifies every candidate (NONE / FULL / OPT) without
+// allocating temps or rewriting anything, so it is safe to run with
+// --checked-pointers off (resolve_pending_dynamic_casts() does).
+static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
     // #941/#942 phase A: iterate checked_prop_poison_scan() to a fixpoint
     // over Obj.checked_prop_chain_src/checked_prop_optional, both seeded
     // false for every candidate -- so round 0 reproduces #919's original
@@ -1317,6 +1317,12 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
                 v->checked_prop_optional = true;
                 v->checked_prop_nt_elem  = 0;
             }
+}
+
+void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        return;
+    checked_prop_classify(vm, fn);
 
     // #941 phase B: allocate every survivor's snapshot temps up front (see
     // checked_prop_alloc_temps()'s comment for why this can no longer be
@@ -1401,8 +1407,8 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
 // #944 tree walk: finds every ND_ASSIGN whose lhs is a declared-checked
 // target (ND_VAR or a side-effect-free ND_MEMBER) with a resolvable bounds
 // form, and whose rhs is rooted at a declared-checked source with a
-// resolvable bounds form (checked_prop_source_bounds()'s kind 1 only -- see
-// verify_checked_assign_bounds()'s v1-scope comment), and rewrites it via
+// resolvable bounds form (a declared or FULL propagated source -- see
+// verify_checked_assign_bounds()'s scope comment), and rewrites it via
 // verify_checked_assign_rewrite(). Structurally the same shape as
 // checked_prop_rewrite_scan() -- recurse into rhs first, then rewrite, then
 // `continue` past the resulting ND_COMMA wrapper's own copy of this same
@@ -1432,16 +1438,16 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                 compute_checked_bounds(vm, dst_base, dst_pty, node->tok,
                                        &dst_lo, &dst_hi, &dst_nt, NULL, NULL);
                 if (dst_lo && dst_hi) {
-                    Node       *src_lo, *src_hi;
-                    bool        src_optional, src_nt;
-                    int64_t     src_nt_elem;
-                    CheckedBase src_base = find_checked_base(node->rhs);
-                    bool        is_source =
-                        checked_base_is_declared(src_base) &&
-                        checked_prop_source_bounds(
-                            vm, node->rhs, node->tok, &src_lo, &src_hi,
-                            &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
-                    if (is_source && src_lo && src_hi) {
+                    Node   *src_lo, *src_hi;
+                    bool    src_optional = false, src_nt;
+                    int64_t src_nt_elem;
+                    // An OPT propagated source can hold the sentinel range,
+                    // which CHKAB would read as a real (always-failing)
+                    // bound, so only declared and FULL sources are verified.
+                    bool is_source = checked_prop_source_bounds(
+                        vm, node->rhs, node->tok, &src_lo, &src_hi,
+                        &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
+                    if (is_source && !src_optional && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // #947: recompute both sides now with the hoist
                         // allocator live -- the probe above only proved
@@ -1493,20 +1499,22 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
 // this emits cost real stack slots and stores per checked assignment, only
 // worth paying when something might enforce them.
 //
-// v1 scope, all deliberate (see docs/safety.md for the user-facing writeup):
-//  - Source must be a directly DECLARED-checked base (find_checked_base() +
-//    checked_base_is_declared()), i.e. kind 1 of checked_prop_source_bounds()
-//    -- not a #941-propagated local, which can hold the OPT sentinel and
-//    would need a sentinel-aware variant of CHKAB. `q = r;` where `r` is
-//    itself only a propagation candidate is silently skipped, same as an
-//    unrecognised source.
+// Scope, all deliberate (see docs/safety-checked-interfaces.md for the
+// user-facing writeup):
+//  - Source must be a declared-checked base (find_checked_base() +
+//    checked_base_is_declared(), kind 1 of checked_prop_source_bounds()) or a
+//    #919-propagated local classified FULL (kind 2: its snapshot temps are
+//    the source range). An OPT local can hold the #942 sentinel range, which
+//    CHKAB would misread as a real bound, so `q = r;` with `r` OPT (or never
+//    rooted) is silently skipped, same as an unrecognised source.
 //  - Target must be ND_VAR or ND_MEMBER (side-effect-free object expression
 //    for the latter), declared checked, with a resolvable bounds form
 //    (compute_checked_bounds() returns non-NULL lo/hi) -- CB_NONE/
 //    CB_UNKNOWN targets are skipped, same rationale as propagation's
 //    identically-named source exclusion.
-//  - Function argument passing and return values are not covered -- only a
-//    direct `q = E;` ND_ASSIGN.
+//  - Call arguments and return values reach this pass as `__ca = arg`
+//    (rewrite_checked_call_args()) and `__cr = E` (rewrite_checked_return()),
+//    ordinary assignments to a declared-checked local.
 //
 // Ordering is the INVERSE of propagate_checked_bounds()'s snapshot: the
 // target's own declared bounds are self-referencing (`[q, q + m*sizeof(T))`
@@ -1716,12 +1724,14 @@ void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
         if (!has_form)
             continue;
 
-        // Gate: the argument itself must be checked-rooted (#944's "kind 1"
-        // source only -- a directly declared-checked var/member, never a
-        // #941-propagated local, which can hold the [lo=-1,hi=0) OPT
-        // sentinel CHKAB has no sentinel-aware variant for).
+        // Gate: the argument must be rooted at a declared-checked var/member
+        // or at a propagation candidate. Whether a candidate is FULL (verified)
+        // or NONE/OPT (the store stays unverified, as an unchecked argument
+        // would) is only known once the function body is parsed;
+        // verify_checked_assign_scan() decides then.
         CheckedBase src_base = find_checked_base(a);
-        if (!checked_base_is_declared(src_base))
+        if (!checked_base_is_declared(src_base) &&
+            !(src_base.var && src_base.var->checked_prop_candidate))
             continue;
 
         // Gate: every OTHER parameter this parameter's bounds template
@@ -1883,15 +1893,34 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
     return after;
 }
 
+typedef struct CheckedDynPending CheckedDynPending;
+struct CheckedDynPending {
+    CheckedDynPending *next;
+    Obj               *src;
+    Token             *tok;
+};
+
+static void dynamic_source_no_bounds_error(VirtualMachine *vm, Token *tok) {
+    error_tok(vm, tok,
+              "'dynamic' cast source has no known bounds to verify "
+              "against -- use 'assume' to take responsibility for this "
+              "conversion, or give the source a bounds declaration");
+}
+
 // #486: checks that a [[cccc::dynamic]] cast's SOURCE (`cast_node->lhs`,
-// the pre-cast expression) is rooted at a directly declared-checked base
-// (find_checked_base() + checked_base_is_declared(), kind 1 of
-// checked_prop_source_bounds() -- not a #919-propagated local, see the
-// follow-up filed for that) with a resolvable bounds form. Without that
-// there is nothing for #944's CHKAB to verify the claim against, and
-// falling back to CHKD/CHKB's allocation-derived bound would silently do
-// nothing for a stack or global source -- #770 documented they have no
-// upper bound at all for a non-heap base, the headline Checked C case.
+// the pre-cast expression) has bounds to verify the claim against: either a
+// declared-checked base with a resolvable bounds form (kind 1 of
+// checked_prop_source_bounds()), or an unchecked pointer local whose bounds
+// are propagated from one (#919). Without that there is nothing for #944's
+// CHKAB to verify the claim against, and falling back to CHKD/CHKB's
+// allocation-derived bound would silently do nothing for a stack or global
+// source -- #770 documented they have no upper bound at all for a non-heap
+// base, the headline Checked C case.
+//
+// A propagated source is only accepted if propagation classifies it FULL
+// (bounds known on every path), which isn't known until the function body is
+// parsed; it is queued on the function and settled by
+// resolve_pending_dynamic_casts().
 //
 // Deliberately independent of --checked-pointers/CCCC_CHECKED_BOUNDS (a
 // no-op for CC_ASSUME): called from cast() unconditionally, same footing as
@@ -1910,13 +1939,98 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
         Type *src_pty = src_base.var ? src_base.var->ty : src_base.mem->ty;
         compute_checked_bounds(vm, src_base, src_pty, tok, &src_lo, &src_hi,
                                &src_nt, NULL, NULL);
+    } else if (src_base.var && src_base.var->checked_prop_candidate &&
+               vm->compiler.current_fn) {
+        CheckedDynPending *p =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(*p));
+        p->src  = src_base.var;
+        p->tok  = tok;
+        p->next = vm->compiler.current_fn->checked_dynamic_pending;
+        vm->compiler.current_fn->checked_dynamic_pending = p;
+        return;
     }
     (void)src_nt;
     if (!src_lo || !src_hi)
-        error_tok(vm, tok,
-                  "'dynamic' cast source has no known bounds to verify "
-                  "against -- use 'assume' to take responsibility for this "
-                  "conversion, or give the source a bounds declaration");
+        dynamic_source_no_bounds_error(vm, tok);
+}
+
+// Settles the `dynamic` casts check_checked_cast_dynamic_source() queued on
+// `fn`, once its candidates are classified: only a FULL local of `fn` is a
+// source CHKAB can verify against. With --checked-pointers off nothing else
+// has classified them, so the classifier runs here, for functions that
+// need it only.
+static void resolve_pending_dynamic_casts(VirtualMachine *vm, Obj *fn) {
+    if (!fn->checked_dynamic_pending)
+        return;
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS))
+        checked_prop_classify(vm, fn);
+    for (CheckedDynPending *p = fn->checked_dynamic_pending; p; p = p->next) {
+        bool in_fn = false;
+        for (Obj *v = fn->locals; v && !in_fn; v = v->next)
+            in_fn = v == p->src;
+        if (!in_fn || !p->src->checked_prop_candidate ||
+            p->src->checked_prop_unsafe)
+            dynamic_source_no_bounds_error(vm, p->tok);
+        if (p->src->checked_prop_optional)
+            error_tok(vm, p->tok,
+                      "'dynamic' cast source has known bounds on only some "
+                      "paths -- use 'assume' to take responsibility for this "
+                      "conversion, or give the source a bounds declaration");
+    }
+    fn->checked_dynamic_pending = NULL;
+}
+
+// The tail passes of every function body, in order: propagation, the
+// pending `dynamic` casts it decides, then #944's assignment verification.
+void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
+    propagate_checked_bounds(vm, fn);
+    resolve_pending_dynamic_casts(vm, fn);
+    verify_checked_assign_bounds(vm, fn);
+}
+
+// Declares the local a checked return value is assigned through; see
+// rewrite_checked_return(). Called from function() once all parameters are
+// in scope, so a bound naming one (`count(n)`) resolves there and a body
+// local can't shadow it. Block literals infer their return type and are
+// not covered.
+void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
+    Type *rty = fn->ty->return_ty;
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !rty || rty->kind != TY_PTR ||
+        rty->checked_kind == CHECKED_NONE)
+        return;
+    bool has_form = rty->checked_kind == CHECKED_SINGLE ||
+                    (rty->checked_bounds_form != CB_NONE &&
+                     rty->checked_bounds_form != CB_UNKNOWN);
+    if (!has_form)
+        return;
+    Obj *var = new_lvar(vm, "", 0, rty);
+    resolve_checked_bounds(vm, var);
+    fn->checked_ret_var = var;
+}
+
+// `return E` in a function with a checked return type becomes
+// `return (__cr = E, __cr)` when E is rooted at a checked pointer or a
+// propagation candidate, the shape #944 already verifies for `q = E`: the
+// bounds are checked against the return type's, evaluated with the
+// parameters' values at the return.
+Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
+                             Token *tok) {
+    if (!fn || !fn->checked_ret_var)
+        return exp;
+    CheckedBase base = find_checked_base(exp);
+    if (!checked_base_is_declared(base) &&
+        !(base.var && base.var->checked_prop_candidate))
+        return exp;
+
+    Node *lhs = new_var_node(vm, fn->checked_ret_var, tok);
+    add_type(vm, lhs);
+    Node *store = new_binary(vm, ND_ASSIGN, lhs, exp, tok);
+    add_type(vm, store);
+    Node *result = new_var_node(vm, fn->checked_ret_var, tok);
+    add_type(vm, result);
+    Node *comma = new_binary(vm, ND_COMMA, store, result, tok);
+    add_type(vm, comma);
+    return comma;
 }
 
 // #486: desugars a checked-annotated cast -- `(T [[cccc::array,

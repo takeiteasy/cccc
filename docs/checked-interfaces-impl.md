@@ -16,7 +16,7 @@ A call is rewritten only when both hold:
 
 | Condition | Reason |
 |---|---|
-| The argument is a directly declared-checked source (`find_checked_base()` + `checked_base_is_declared()`) | A propagated local can hold the OPT sentinel range, and `CHKAB` has no sentinel-aware variant. An unchecked `int *raw` gets no check |
+| The argument is rooted at a declared-checked source (`find_checked_base()` + `checked_base_is_declared()`) or at a propagation candidate | A candidate's class (FULL, OPT, NONE) is only known once the body is parsed, so `__ca = arg` is built and the assignment scan verifies it only for a FULL source. An OPT one can hold the sentinel range, which `CHKAB` has no sentinel-aware variant for. An unchecked `int *raw` gets no check |
 | Every *other* parameter the bounds name is fed a side-effect-free argument (`node_has_side_effects()`, the predicate bounds resolution already uses) | The template is re-evaluated, and an extra evaluation of a side-effecting expression is not worth a check. `sink(small, 8)` and `sink(small, len)` qualify; `sink(small, f())` and `sink(small, i++)` are silently declined, as `f()->p[i]` is for member bounds |
 
 Other points:
@@ -37,11 +37,15 @@ Other points:
 | Desugar | `(__cv = (T [[...]])expr, __cv)`, where `__cv` is a fresh compiler-generated local declared with the cast's kind and bounds. Every other pass sees an ordinary declared-checked local, so `CHKR` emission, propagation and `CHKAB` verification are reused unchanged |
 | Direct dereference | `((T [[...]])q)[i]` with no assignment still finds `__cv`'s bounds through a narrow unwrap used only by the dereference-bounds attachment. It is deliberately hidden from propagation and `CHKAB`: those snapshot a source's bounds *before* the enclosing store, an ordering `__cv`'s own store (a side effect of the expression being snapshotted) would break |
 | Gate | `--checked-pointers` at parse time; with it off the cast stays a plain cast and native output is unaffected |
-| `dynamic` | `__cv = (T)expr` is exactly the `q = E` shape `verify_checked_assign_bounds()` recognises, so it reuses `CHKAB`. The source must be a directly declared-checked base with a resolvable bounds form (not propagated, which would need a sentinel-aware `CHKAB`, and not `bounds(unknown)`), or the cast is a compile error, always on. Falling back to `CHKB`/`CHKD` would silently check nothing for a stack or global source |
+| `dynamic` | `__cv = (T)expr` is exactly the `q = E` shape `verify_checked_assign_bounds()` recognises, so it reuses `CHKAB`. The source must be a declared-checked base with a resolvable bounds form (not `bounds(unknown)`), or a propagation candidate classified FULL, or the cast is a compile error, always on. A candidate is queued on the function (`Obj.checked_dynamic_pending`) and settled by `resolve_pending_dynamic_casts()` after propagation; with `--checked-pointers` off that function runs the classifier alone (`checked_prop_classify()`), which is why candidates are registered in every mode. NONE and OPT sources get distinct errors Falling back to `CHKB`/`CHKD` would silently check nothing for a stack or global source |
 | Second check | Assigning the cast's result into another declared-checked variable can trigger a second, independent `CHKAB` pair from the assignment scan (`__cv`'s bounds against the target's). It is a harmless, tighter restatement of the first |
 | `assume` | The assignment-scan pass skips `__cv = (T)expr` (`Obj.checked_cast_kind == CC_ASSUME` is tested before matching): no check of the claim. Every later access through `__cv` is still `CHKR`-checked |
 | Checked regions | Both are exempt from the region's cast ban: the sanctioned conversion, with no `unchecked` wrapper |
-| Scope | A cast expression only (not a checked-annotated argument or return), and only inside a function body: `vm->compiler.current_fn` must be non-NULL for `__cv` to have somewhere to live, so a file-scope initializer is a compile error. `dynamic`'s source must be directly declared-checked, not chained through propagation |
+| Scope | Only inside a function body: `vm->compiler.current_fn` must be non-NULL for `__cv` to have somewhere to live, so a file-scope initializer is a compile error. The desugar is an expression, so it works as a call argument or `return` value too |
+
+## Return values
+
+`declare_checked_return_var()` (`src/parse_decl.c`, once the parameters are in scope) gives a function whose return type is a checked pointer with a bounds form a hidden local `Obj.checked_ret_var`, so a bound naming a parameter resolves there and a body local can't shadow it. `rewrite_checked_return()` turns `return E` into `return (__cr = E, __cr)` when `E` roots in a declared-checked pointer or a propagation candidate, and the assignment scan emits the `CHKAB` pair as for `q = E`. Block literals infer their return type and have no such local.
 
 ## `dynamic_check`
 

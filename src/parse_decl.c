@@ -924,6 +924,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     //     new_lvar(vm, "", pointer_to(rty));
 
     fn->params = vm->compiler.locals;
+    declare_checked_return_var(vm, fn);
 
     if (ty->is_variadic)
         fn->va_area =
@@ -991,8 +992,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             resolve_goto_labels(vm, /*defer_unused=*/false);
             resolve_objsize_queries(vm, fn->body);
             mark_addr_escapes(fn->body, fn);
-            propagate_checked_bounds(vm, fn);
-            verify_checked_assign_bounds(vm, fn);
+            checked_tail_passes(vm, fn);
             // check_nonnull_flow() runs post-parse now (#688) -- see the
             // loop in parse() -- so a forward-referenced callee's summary
             // is available. This negative-test path nulls fn->body below
@@ -1102,8 +1102,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // its own mark_nested_captures() call (inside the compound_stmt()
         // above) and set is_captured on whichever of `fn`'s own locals it
         // touches, so propagate_checked_bounds() sees a complete picture.
-        propagate_checked_bounds(vm, fn);
-        verify_checked_assign_bounds(vm, fn);
+        checked_tail_passes(vm, fn);
         // #836: mark this nested function's captures on whichever enclosing
         // function(s) they belong to, so later analyses over those functions
         // see a complete picture of which locals a nested function mutates.

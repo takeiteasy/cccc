@@ -1577,8 +1577,7 @@ void outline_end(VirtualMachine *vm, OutlineRegion *r, Node *body) {
                          vm->compiler.labels, r->saved_labels, false, true);
     resolve_objsize_queries(vm, fn->body);
     mark_addr_escapes(fn->body, fn);
-    propagate_checked_bounds(vm, fn);
-    verify_checked_assign_bounds(vm, fn);
+    checked_tail_passes(vm, fn);
     mark_nested_captures(fn, fn->body);
 
     vm->compiler.current_fn         = r->parent;

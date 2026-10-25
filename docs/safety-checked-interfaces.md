@@ -5,6 +5,7 @@ Check what callers pass in, and move pointers into the checked world.
 | Feature | Use it to |
 |---|---|
 | [Annotated parameters](#annotated-parameters) | Trap a call whose arguments don't satisfy the callee's declared bounds |
+| [Checked return values](#checked-return-values) | Trap a `return` that doesn't satisfy the function's declared return bounds |
 | [`assume` / `dynamic` casts](#bounds-casts) | Turn an unchecked pointer into a checked one |
 | [`dynamic_check`](#dynamic_check) | Assert a condition, trapping when it is false |
 
@@ -25,7 +26,7 @@ A call is checked when both hold:
 
 | Condition | Example that qualifies | Example that is skipped |
 |---|---|---|
-| The argument is a directly declared-checked pointer | `small` | `int *raw` (unchecked to unchecked is untouched) |
+| The argument is a declared-checked pointer, or a local that [inherits its bounds](safety-checked-propagation.md) on every path | `small`, `q` after `int *q = small;` | `int *raw` (unchecked to unchecked is untouched) |
 | Every other parameter the bounds name has a side-effect-free argument | `sink(small, 8)`, `sink(small, len)` | `sink(small, f())`, `sink(small, i++)` |
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
@@ -39,6 +40,18 @@ void sink(int * [[cccc::array, cccc::count(n)]], int n);
 An annotated prototype is also what `-Wchecked-calls` accepts from a checked region ([safety-checked-regions.md](safety-checked-regions.md#call-boundaries)).
 
 The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved.
+
+## Checked return values
+
+A checked return type is verified at each `return` whose value roots in a checked pointer, or in a local that inherits its bounds. The bounds may name parameters, and are evaluated with their values at the `return`.
+
+```c
+int * [[cccc::array, cccc::count(n)]] pick(int * [[cccc::array, cccc::count(3)]] src, int n) {
+    return src;   // traps when n > 3
+}
+```
+
+A value with no known bounds (`int *raw`) is returned unchecked.[^ret]
 
 ## Bounds casts
 
@@ -60,7 +73,7 @@ p = (int * [[cccc::array, cccc::count(n), cccc::dynamic]])src;
 | | `assume` | `dynamic` |
 |---|---|---|
 | Checks the conversion | No | Yes, against the source's declared bounds |
-| Source must be | Anything | A directly declared-checked pointer with known bounds |
+| Source must be | Anything | A declared-checked pointer with known bounds, or a local that inherits bounds on every path |
 | `bounds(unknown)` | Accepted | Rejected |
 | Later accesses through the result | Checked | Checked |
 
@@ -73,6 +86,8 @@ error: 'dynamic' cast source has no known bounds to verify against --
   use 'assume' to take responsibility for this conversion, or give the
   source a bounds declaration
 ```
+
+A local whose bounds are known on only some paths (`int *q = raw; if (c) q = src;`) gets its own error, `'dynamic' cast source has known bounds on only some paths`. A cast works anywhere an expression does, including as a call argument or a `return` value.
 
 Inside a [checked region](safety-checked-regions.md) these are the sanctioned way to change a pointer's checked kind, with no `unchecked` wrapper needed.
 
@@ -111,5 +126,6 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
-[^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Return-position bounds (`int * [[cccc::array, cccc::count(4)]] f(void);`) parse but are not enforced. Skipped calls (side-effecting arguments) are skipped silently.
-[^cast]: A cast is the only form covered: checked-annotated arguments and return values are not. A `dynamic` source cannot be a pointer whose bounds were only propagated from another checked pointer.
+[^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Skipped calls (side-effecting arguments, or a propagated argument whose bounds are known on only some paths) are skipped silently.
+[^ret]: The bounds are verified inside the callee; the call site doesn't treat the returned pointer as checked. A block literal's inferred return type isn't verified.
+[^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

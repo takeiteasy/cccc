@@ -610,6 +610,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 warn_implicit_conversion(vm, exp, ty, node->tok);
                 cc_check_checked_scope_conv(vm, exp, ty, node->tok);
                 exp = new_cast(vm, exp, ty);
+                exp = rewrite_checked_return(vm, vm->compiler.current_fn, exp,
+                                             node->tok);
             }
             if (vm->compiler.current_fn->ty->returns_nonnull &&
                 (vm->compiler.warnings & CCCC_WARN_NONNULL) &&

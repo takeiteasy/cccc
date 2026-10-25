@@ -3059,6 +3059,15 @@ struct Obj {
     // with a clone of that call's actual argument expression before the
     // result is used.
     int checked_self_param_idx;
+
+    // On a function Obj: the `dynamic` casts whose source is a propagation
+    // candidate, resolved once propagate_checked_bounds() has classified it
+    // (resolve_pending_dynamic_casts(), src/parse_checked.c).
+    struct CheckedDynPending *checked_dynamic_pending;
+    // On a function Obj: the compiler-generated local `return E` is assigned
+    // through when the return type is a checked pointer with a bounds form
+    // (rewrite_checked_return(), src/parse_checked.c). NULL otherwise.
+    Obj *checked_ret_var;
 };
 
 /*!

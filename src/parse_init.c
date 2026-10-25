@@ -377,14 +377,12 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
         // state for the no-initializer case. Whether any particular store
         // (including the initializer, if present) is actually checked-rooted
         // is decided later by propagate_checked_bounds()'s classifier scan,
-        // which is also what actually reads checked_prop_candidate. Gating
-        // registration itself on CCCC_CHECKED_BOUNDS (rather than
-        // registering unconditionally and gating only the pass) keeps the
-        // cost symmetric with the rest of this parse-time-gated mechanism --
-        // see propagate_checked_bounds()'s comment for why this has no
-        // pragma-ordering caveat despite being a parse-time check.
-        if ((vm->flags & CCCC_CHECKED_BOUNDS) && var->ty->kind == TY_PTR &&
-            var->checked_kind == CHECKED_NONE)
+        // which is also what actually reads checked_prop_candidate. Registered
+        // whether or not --checked-pointers is on: a `dynamic` cast from a
+        // candidate is validated in every mode (resolve_pending_dynamic_casts(),
+        // src/parse_checked.c), which needs the classifier; the rewrites stay
+        // gated on the flag.
+        if (var->ty->kind == TY_PTR && var->checked_kind == CHECKED_NONE)
             var->checked_prop_candidate = true;
 
         if (equal(tok, "=")) {

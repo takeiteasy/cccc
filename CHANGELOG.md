@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a checked return type is verified at `return`. The value must root in a checked pointer or a local that inherits its bounds, and its bounds must imply the declared ones, which may name parameters.
+- Added: a `dynamic` bounds cast, a checked assignment and an annotated call argument accept a local that inherits its bounds (propagated from a checked pointer) as the source. A `dynamic` cast from a local whose bounds are known on only some paths is a compile error.
 - Fixed: a `#pragma cccc checked`/`unchecked` `end` must name the same keyword as its `begin`.
 - Added: `-Wchecked-regions`. Checked-region violations stay errors by default; `-Wno-error=checked-regions` or `#pragma GCC diagnostic warning "-Wchecked-regions"` turns them into warnings so a codebase can migrate piece by piece. `-Wno-checked-regions` does not silence them.
 - Added: `-Wchecked-calls` (opt-in) and `[[cccc::trusted]]`. A checked region reports a call to a prototype with unchecked pointers and a checked pointer passed to a raw parameter; header declarations and trusted prototypes are exempt.

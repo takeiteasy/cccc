@@ -81,8 +81,7 @@ q = p;   // traps: p's 4 elements don't cover q's declared 10
 
 | Covered | Not covered |
 |---|---|
-| `q = E;` where `E` roots in a directly declared checked pointer | A source that is itself only propagated |
-| | Function arguments and return values[^args] |
-| | A target with `bounds(unknown)` |
+| `q = E;` where `E` roots in a declared checked pointer, or in a propagated local that is not OPT | A source that is OPT or never rooted |
+| Call arguments and `return` values[^args] | A target with `bounds(unknown)` |
 
-[^args]: Call arguments to annotated parameters are checked separately; see [safety-checked-interfaces.md](safety-checked-interfaces.md). How the passes work: [safety-impl.md](safety-impl.md#bounds-propagation).
+[^args]: Arguments to annotated parameters and values returned from a checked return type are checked as assignments to a hidden local; see [safety-checked-interfaces.md](safety-checked-interfaces.md). How the passes work: [safety-impl.md](safety-impl.md#bounds-propagation).
