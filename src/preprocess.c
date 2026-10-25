@@ -1833,6 +1833,7 @@ static const AttrInfo known_attrs[] = {
     // @checked/@unchecked route to [[cccc::...]] the same way.
     {"checked", ATTR_CCCC, true, 1},
     {"unchecked", ATTR_CCCC, true, 1},
+    {"trusted", ATTR_CCCC, true, 1},
     {"kernel", ATTR_CCCC, true, 1},
     {"global", ATTR_CCCC, true, 1},
     {"local", ATTR_CCCC, true, 1},

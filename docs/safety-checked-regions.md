@@ -62,7 +62,41 @@ A `bounds(unknown)` target accepts any source, and `assume` and `dynamic` casts 
 }
 ```
 
-Not banned: address-of and array decay producing a plain `T *`, function-pointer pointees, and calling a function with an unchecked prototype (all of libc).[^gaps]
+Not banned: address-of and array decay producing a plain `T *`, function-pointer pointees, and calling a function with an unchecked prototype (all of libc), unless you opt in to [`-Wchecked-calls`](#call-boundaries).[^gaps]
+
+## Call boundaries
+
+`-Wchecked-calls` (off by default) reports calls that cross from a checked region into unchecked code:
+
+```c
+int  sink(int *p, int n);                    // unchecked prototype
+int *make(int n);
+
+[[cccc::checked]] void f(int * [[cccc::array, cccc::count(n)]] a, int n) {
+    sink(a, n);   // warning: checked pointer passed to unchecked parameter 1 of 'sink'
+    make(n);      // warning: call to 'make' returns an unchecked pointer
+}
+```
+
+| Report | When |
+|---|---|
+| Checked pointer passed to a raw parameter | A checked argument reaches an unchecked `T *` parameter, so its bounds are dropped; one warning per argument |
+| Call to an unchecked prototype | The callee has an unchecked pointer parameter or return type; skipped for a call that already reported an argument |
+
+These calls are never reported:
+
+| Callee | Why |
+|---|---|
+| Declared in a header (all of libc) | Same rule as [headers](#headers) |
+| Marked `[[cccc::trusted]]` (or `@trusted`) on any declaration | You vouch for the prototype |
+| A prototype whose pointers are all checked, including [annotated parameters](safety-checked-interfaces.md#annotated-parameters) | Nothing crosses unchecked |
+| Called through a function pointer | The callee is unknown |
+
+```c
+[[cccc::trusted]] int sink(int *p, int n);   // calls to sink stay quiet
+```
+
+`-Werror=checked-calls` makes the report an error.
 
 ## Headers
 
@@ -100,4 +134,4 @@ Malformed regions (a stray, unclosed or mismatched `#pragma cccc ... end`, or co
 
 The diagnostics are not gated by `--checked-pointers`, and they fire under `-c=native`, `-m` and `-c=generated`. The region attributes are stripped from that output.
 
-[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); call-boundary diagnostics between checked and unchecked code (an annotated prototype's own bounds are still checked at the call); global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion.
+[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); `-Wchecked-calls` does not follow calls through function pointers; global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion.

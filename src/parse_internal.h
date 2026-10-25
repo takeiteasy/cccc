@@ -100,6 +100,7 @@ typedef struct {
     bool           is_func_const;
     bool           is_gnu_inline;
     bool           is_kernel;
+    bool           is_trusted;
     const char    *operator_sym;
     Type          *method_of;
     const char    *method_name;
@@ -318,6 +319,23 @@ void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
                                  Token *tok);
 void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
                                  Token *tok);
+
+// -Wchecked-calls state for one call: `on` when the call is inside a checked
+// region and the callee is not trusted; `arg_warned` once a checked argument
+// has been reported, so the prototype-level warning stays quiet.
+typedef struct {
+    bool        on;
+    bool        arg_warned;
+    const char *callee;
+} CheckedCallWatch;
+
+CheckedCallWatch cc_checked_call_watch(VirtualMachine *vm, Node *fn,
+                                       Token *tok);
+void cc_check_checked_call_arg(VirtualMachine *vm, CheckedCallWatch *w,
+                               Node *arg, Type *param_ty, int index,
+                               Token *tok);
+void cc_check_checked_call(VirtualMachine *vm, CheckedCallWatch *w, Type *fn_ty,
+                           Token *tok);
 // #486: desugars a checked-annotated cast into `(__cv = (T)expr, __cv)` --
 // see checked_cast_desugar()'s own comment (src/parse_checked.c).
 Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,

@@ -2450,13 +2450,13 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (!attr ||
         (!attr->is_maybe_unused && !attr->is_deprecated && !attr->is_noreturn &&
          !attr->is_nodiscard && !attr->is_pure && !attr->is_func_const &&
-         !attr->is_gnu_inline && !attr->is_kernel && !attr->operator_sym &&
-         !attr->method_of && !attr->format_style && !attr->cleanup_fn &&
-         !attr->attr_error_msg && !attr->attr_warning_msg &&
-         !attr->nonnull_all && !attr->nonnull_mask && !attr->returns_nonnull &&
-         !attr->is_constructor && !attr->is_destructor && !attr->is_sentinel &&
-         !attr->alloc_size_idx && !attr->is_malloc && !attr->has_vector_size &&
-         !attr->vec_visible))
+         !attr->is_gnu_inline && !attr->is_kernel && !attr->is_trusted &&
+         !attr->operator_sym && !attr->method_of && !attr->format_style &&
+         !attr->cleanup_fn && !attr->attr_error_msg &&
+         !attr->attr_warning_msg && !attr->nonnull_all && !attr->nonnull_mask &&
+         !attr->returns_nonnull && !attr->is_constructor &&
+         !attr->is_destructor && !attr->is_sentinel && !attr->alloc_size_idx &&
+         !attr->is_malloc && !attr->has_vector_size && !attr->vec_visible))
         return ty;
 
     if (attr->has_vector_size)
@@ -2477,6 +2477,8 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty->is_gnu_inline = true;
     if (attr->is_kernel && ty->kind == TY_FUNC)
         ty->is_kernel = true;
+    if (attr->is_trusted && ty->kind == TY_FUNC)
+        ty->is_trusted = true;
     if (attr->operator_sym && ty->kind == TY_FUNC)
         ty->operator_sym = attr->operator_sym;
     if (attr->method_of && ty->kind == TY_FUNC) {
@@ -2535,6 +2537,7 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_func_const   |= src->is_func_const;
     dst->is_gnu_inline   |= src->is_gnu_inline;
     dst->is_kernel       |= src->is_kernel;
+    dst->is_trusted      |= src->is_trusted;
     if (src->operator_sym)
         dst->operator_sym = src->operator_sym;
     if (src->method_of) {
@@ -3337,6 +3340,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_gnu_inline_attr =
                 gnu_scoped && attr_is(name_tok, "gnu_inline");
             bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
+            bool is_trusted_attr = cccc_scoped && attr_is(name_tok, "trusted");
             bool is_addr_space_attr =
                 cccc_scoped &&
                 (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
@@ -3707,6 +3711,11 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     ty->is_kernel = true;
                 if (attr)
                     attr->is_kernel = true;
+            } else if (is_trusted_attr) {
+                if (ty)
+                    ty->is_trusted = true;
+                if (attr)
+                    attr->is_trusted = true;
             } else if (is_func_const_attr) {
                 if (ty)
                     ty->is_func_const = true;

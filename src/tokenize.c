@@ -115,6 +115,7 @@ static const WarningInfo warning_infos[] = {
     {"auto-declarator", CCCC_WARN_AUTO_DECLARATOR, false},
     {"openmp", CCCC_WARN_OPENMP, false},
     {"checked-regions", CCCC_WARN_CHECKED_REGIONS, false},
+    {"checked-calls", CCCC_WARN_CHECKED_CALLS, false},
     {"all", CCCC_WARN_ALL, true},
     {"extra", CCCC_WARN_EXTRA, true},
 };

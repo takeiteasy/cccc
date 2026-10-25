@@ -1104,8 +1104,9 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
 // Checks one call argument against the next parameter and returns it converted
 // to that parameter's type, or NULL to drop it (too many arguments under error
 // recovery). Advances *param_ty.
-static Node *check_call_arg(VirtualMachine *vm, Type *ty, Type **param_ty_p,
-                            Node *arg, Token *tok) {
+static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
+                            Type *ty, Type **param_ty_p, int *index, Node *arg,
+                            Token *tok) {
     Type *param_ty = *param_ty_p;
     if (!param_ty && !ty->is_variadic) {
         if (vm->collect_errors &&
@@ -1132,9 +1133,11 @@ static Node *check_call_arg(VirtualMachine *vm, Type *ty, Type **param_ty_p,
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
             warn_implicit_conversion(vm, arg, param_ty, tok);
             cc_check_checked_scope_conv(vm, arg, param_ty, tok);
+            cc_check_checked_call_arg(vm, watch, arg, param_ty, *index, tok);
             arg = new_cast(vm, arg, param_ty);
         }
         param_ty = param_ty->next;
+        ++*index;
     } else if (arg->ty->kind == TY_FLOAT) {
         // If parameter type is omitted (e.g. in "..."), float
         // arguments are promoted to double.
@@ -1149,7 +1152,7 @@ static Node *check_call_arg(VirtualMachine *vm, Type *ty, Type **param_ty_p,
 // builds the ND_FUNCALL.
 static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
                          Node *head_next, Type *param_ty, Token *tok,
-                         bool deferred_splice) {
+                         bool deferred_splice, CheckedCallWatch *watch) {
     Node  head = {.next = head_next};
     Node *cur  = &head;
     while (cur->next)
@@ -1229,8 +1232,10 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // deferred splice ($@k) the same as every other per-argument check
     // above -- positional param<->arg pairing is meaningless once arity
     // itself is deferred.
-    if (!deferred_splice)
+    if (!deferred_splice) {
+        cc_check_checked_call(vm, watch, ty, fn->tok);
         rewrite_checked_call_args(vm, ty, head_next, tok);
+    }
 
     Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
     node->func_ty        = ty;
@@ -1265,14 +1270,16 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
     Type *param_ty = ty->params;
     Node  head     = {};
     Node *cur      = &head;
+    CheckedCallWatch watch    = cc_checked_call_watch(vm, fn, tok);
+    int              index    = 1;
     for (int i = 0; i < nargs; i++) {
         Node *arg = args[i];
         add_type(vm, arg);
-        arg = check_call_arg(vm, ty, &param_ty, arg, tok);
+        arg = check_call_arg(vm, &watch, ty, &param_ty, &index, arg, tok);
         if (arg)
             cur = cur->next = arg;
     }
-    return finish_call(vm, fn, ty, head.next, param_ty, tok, false);
+    return finish_call(vm, fn, ty, head.next, param_ty, tok, false, &watch);
 }
 
 // `recv`, when set, is an already-built first argument (a method receiver).
@@ -1291,10 +1298,12 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
     Node *cur             = &head;
     bool  deferred_splice = false;
     bool  parsed_arg      = false;
+    CheckedCallWatch watch           = cc_checked_call_watch(vm, fn, tok);
+    int              index           = 1;
 
     if (recv) {
         add_type(vm, recv);
-        recv = check_call_arg(vm, ty, &param_ty, recv, tok);
+        recv = check_call_arg(vm, &watch, ty, &param_ty, &index, recv, tok);
         if (recv)
             cur = cur->next = recv;
     }
@@ -1314,7 +1323,7 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
             deferred_splice = true;
 
         if (!deferred_splice) {
-            arg = check_call_arg(vm, ty, &param_ty, arg, tok);
+            arg = check_call_arg(vm, &watch, ty, &param_ty, &index, arg, tok);
             if (!arg)
                 continue;
         }
@@ -1322,8 +1331,8 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
         cur = cur->next = arg;
     }
 
-    Node *node =
-        finish_call(vm, fn, ty, head.next, param_ty, tok, deferred_splice);
+    Node *node = finish_call(vm, fn, ty, head.next, param_ty, tok,
+                             deferred_splice, &watch);
     *rest = skip(vm, tok, ")");
     return node;
 }

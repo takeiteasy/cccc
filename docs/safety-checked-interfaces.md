@@ -36,6 +36,8 @@ The bounds are resolved where the prototype is declared, so a bound naming an un
 void sink(int * [[cccc::array, cccc::count(n)]], int n);
 ```
 
+An annotated prototype is also what `-Wchecked-calls` accepts from a checked region ([safety-checked-regions.md](safety-checked-regions.md#call-boundaries)).
+
 The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved.
 
 ## Bounds casts

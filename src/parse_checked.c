@@ -2181,3 +2181,69 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                         "into an [[cccc::unchecked]] block",
                         what, name_tok->len, name_tok->loc);
 }
+
+static bool is_unchecked_data_ptr(Type *ty) {
+    return ty && ty->kind == TY_PTR && ty->checked_kind == CHECKED_NONE &&
+           !(ty->base && ty->base->kind == TY_FUNC);
+}
+
+// A named function declared in a command-line input and not marked
+// [[cccc::trusted]]. Header declarations (all of libc) are never watched.
+// TODO(#1789): calls through a function pointer are not watched either.
+CheckedCallWatch cc_checked_call_watch(VirtualMachine *vm, Node *fn,
+                                       Token *tok) {
+    CheckedCallWatch w = {0};
+    if (vm->compiler.in_type_lookahead ||
+        cc_checked_scope_at(vm, tok) != CHECKED_SCOPE_ON)
+        return w;
+    if (fn->kind != ND_VAR || !fn->var || !fn->var->is_function ||
+        fn->var->is_trusted || !fn->var->tok || !fn->var->tok->file ||
+        !cc_file_is_command_line_input(vm, fn->var->tok->file->name))
+        return w;
+    w.on     = true;
+    w.callee = fn->var->name;
+    return w;
+}
+
+// A checked pointer argument reaching an unchecked pointer parameter.
+void cc_check_checked_call_arg(VirtualMachine *vm, CheckedCallWatch *w,
+                               Node *arg, Type *param_ty, int index,
+                               Token *tok) {
+    if (!w->on || !is_unchecked_data_ptr(param_ty))
+        return;
+    add_type(vm, arg);
+    bool checked = (arg->ty && arg->ty->kind == TY_PTR &&
+                    arg->ty->checked_kind != CHECKED_NONE) ||
+                   checked_base_is_declared(find_checked_deref_base(arg));
+    if (!checked)
+        return;
+    w->arg_warned = true;
+    warn_tok(vm, arg->tok ? arg->tok : tok, CCCC_WARN_CHECKED_CALLS,
+             "checked pointer passed to unchecked parameter %d of '%s' -- its "
+             "bounds are not carried across the call",
+             index, w->callee);
+}
+
+// A call into a prototype with an unchecked pointer parameter or return type.
+void cc_check_checked_call(VirtualMachine *vm, CheckedCallWatch *w, Type *fn_ty,
+                           Token *tok) {
+    if (!w->on || w->arg_warned)
+        return;
+    int index = 1;
+    for (Type *p = fn_ty->params; p; p = p->next, index++) {
+        if (!is_unchecked_data_ptr(p))
+            continue;
+        warn_tok(vm, tok, CCCC_WARN_CHECKED_CALLS,
+                 "call to '%s' with an unchecked pointer parameter %d -- "
+                 "mark the prototype [[cccc::trusted]] or give it checked "
+                 "pointer types",
+                 w->callee, index);
+        return;
+    }
+    if (is_unchecked_data_ptr(fn_ty->return_ty))
+        warn_tok(vm, tok, CCCC_WARN_CHECKED_CALLS,
+                 "call to '%s' returns an unchecked pointer -- mark the "
+                 "prototype [[cccc::trusted]] or give it a checked return "
+                 "type",
+                 w->callee);
+}

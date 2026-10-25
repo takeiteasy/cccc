@@ -1003,7 +1003,10 @@ typedef enum {
     // -Wno-error=checked-regions or #pragma GCC diagnostic warning; ignoring
     // it never silences the violation. The mask has no free bits left (bit 63
     // is the per-token stamp marker).
-    CCCC_WARN_CHECKED_REGIONS     = (1ULL << 28),
+    CCCC_WARN_CHECKED_REGIONS = (1ULL << 28),
+    // A call across the checked/unchecked boundary from a checked region
+    // (opt-in)
+    CCCC_WARN_CHECKED_CALLS       = (1ULL << 29),
     CCCC_WARN_DUPLICATED_BRANCHES = (1ULL << 30), // identical then/else bodies
     CCCC_WARN_DUPLICATED_COND =
         (1ULL << 31), // same condition repeated in if/else-if chain
@@ -1604,6 +1607,7 @@ struct Type {
     bool is_func_const;   // __attribute__((const)): no side effects, no global
                           // reads
     bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
+    bool is_trusted;      // [[cccc::trusted]]: exempt from -Wchecked-calls
     const char
          *operator_sym;   // [[cccc::operator(+)]]: the operator it implements
     Type *method_of;      // [[cccc::method(T)]]: the receiver type T
@@ -2598,6 +2602,7 @@ struct Obj {
     bool is_pure;
     bool is_func_const;
     bool is_kernel;
+    bool is_trusted;    // [[cccc::trusted]] on any declaration
     bool is_gnu_inline; // GNU extern-inline definition: emitted only if called
     bool is_kernel_thunk; // outlined cccc_launch body; a call to it serializes
                           // as __cccc_kernel_launch (see parse_postfix.c)

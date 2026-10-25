@@ -399,3 +399,24 @@ int _Checked_like_name_is_unaffected(void) {
 void test_underscore_name_not_reclassified(void) {
     AssertEq(_Checked_like_name_is_unaffected(), 42);
 }
+
+// ---------------------------------------------------------------------
+// [[cccc::trusted]] prototypes are callable from a region.
+// ---------------------------------------------------------------------
+
+[[cccc::trusted]] int trusted_first(int *p);
+
+int trusted_first(int *p) {
+    return p[0];
+}
+
+[[cccc::checked]]
+int call_trusted(void) {
+    int *[[cccc::array, cccc::count(1)]] a = (int[1]){7};
+    return trusted_first(a);
+}
+
+[[cccc::test]]
+void test_trusted_prototype(void) {
+    AssertEq(call_trusted(), 7);
+}

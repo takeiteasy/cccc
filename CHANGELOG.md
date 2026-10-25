@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a `#pragma cccc checked`/`unchecked` `end` must name the same keyword as its `begin`.
+- Added: `-Wchecked-regions`. Checked-region violations stay errors by default; `-Wno-error=checked-regions` or `#pragma GCC diagnostic warning "-Wchecked-regions"` turns them into warnings so a codebase can migrate piece by piece. `-Wno-checked-regions` does not silence them.
+- Added: `-Wchecked-calls` (opt-in) and `[[cccc::trusted]]`. A checked region reports a call to a prototype with unchecked pointers and a checked pointer passed to a raw parameter; header declarations and trusted prototypes are exempt.
+
 ## [0.25.1] - 2026-10-25
 
 - Fixed: `--overflow-checks` traps signed overflow at the width of the

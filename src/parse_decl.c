@@ -384,6 +384,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_pure         |= ty->is_pure;
         fn->is_func_const   |= ty->is_func_const;
         fn->is_kernel       |= ty->is_kernel;
+        fn->is_trusted      |= ty->is_trusted;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
@@ -687,6 +688,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_pure         |= ty->is_pure;
         fn->is_func_const   |= ty->is_func_const;
         fn->is_kernel       |= ty->is_kernel;
+        fn->is_trusted       |= ty->is_trusted;
         if (ty->asm_label)
             fn->asm_label = ty->asm_label;
         if (ty->deprecated_msg)
