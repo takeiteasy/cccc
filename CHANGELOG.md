@@ -7,6 +7,17 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-10-25
+
+- Fixed: `--overflow-checks` traps signed overflow at the width of the
+  operation's type, so `INT_MAX + 1`, `INT_MIN / -1`, `x++` and signed
+  `_BitInt(N)` of 64 bits or fewer report `INTEGER OVERFLOW`. Unary `-` is
+  checked too, including `-LLONG_MIN`. See `docs/safety-overflow.md`.
+- Fixed: results of `+ - * <<` and unary `-` and `~` on 32-bit `int`,
+  `unsigned` and enums are wrapped to their width, so widening casts,
+  conversion to float and `>>` no longer read stale high bits. `~` on a
+  `_Complex` value is the conjugate.
+
 ## [0.25.0] - 2026-10-25
 
 - Added: `[[cccc::operator(...)]]` binds `& | ^ << >>` and the unary `- + ~ !`
