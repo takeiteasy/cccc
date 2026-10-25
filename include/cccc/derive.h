@@ -660,9 +660,7 @@
 }
 
 // The byte size of one pointee of an @owned reader: sizeof, or T_clone_size()
-// when the pointee is not declared yet (deep == 2). `$1` is the member. The
-// templates hold it in a local first: the VM aborts on a guest call nested in
-// an FFI call's arguments.
+// when the pointee is not declared yet (deep == 2). `$1` is the member.
 @comptime void __builtin_read_size(char *out, int deep, const char *prefix,
                                    Type *pt) {
     if (deep == 2) {

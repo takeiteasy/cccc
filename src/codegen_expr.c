@@ -53,6 +53,22 @@ typedef enum {
     VLANE_I8
 } VecLaneFamily;
 
+// Evaluates `args[0..n)` into `regs[0..n)`. An argument holding a call
+// clobbers the registers before it, so those are saved around it.
+static void gen_args_to_regs(VirtualMachine *vm, Node **args, int n,
+                             const int *regs) {
+    for (int i = 0; i < n; i++) {
+        bool call = i > 0 && contains_funcall(args[i]);
+        if (call)
+            for (int j = i - 1; j >= 0; j--)
+                emit_psh3(vm, regs[j]);
+        gen_expr(vm, args[i], regs[i]);
+        if (call)
+            for (int j = 0; j < i; j++)
+                emit_pop3(vm, regs[j]);
+    }
+}
+
 static VecLaneFamily vector_lane_family(Type *elem) {
     if (is_flonum(elem))
         return elem->kind == TY_FLOAT ? VLANE_F32 : VLANE_F64;
@@ -2596,8 +2612,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         error_tok(vm, node->tok,
                                   "free_sized requires ptr and size arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);
-                    gen_expr(vm, node->args->next, REG_A1);
+                    Node *fs_args[] = {node->args, node->args->next};
+                    int   fs_regs[] = {REG_A0, REG_A1};
+                    gen_args_to_regs(vm, fs_args, 2, fs_regs);
                     emit(vm, MFRE);
                     return;
                 }
@@ -2608,9 +2625,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                   "free_aligned_sized requires ptr, alignment, "
                                   "and size arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);
-                    gen_expr(vm, node->args->next, REG_A1);
-                    gen_expr(vm, node->args->next->next, REG_A2);
+                    Node *fa_args[] = {node->args, node->args->next,
+                                       node->args->next->next};
+                    int   fa_regs[] = {REG_A0, REG_A1, REG_A2};
+                    gen_args_to_regs(vm, fa_args, 3, fa_regs);
                     emit(vm, MFRE);
                     return;
                 }
@@ -2619,8 +2637,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         error_tok(vm, node->tok,
                                   "calloc requires nmemb and size arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);
-                    gen_expr(vm, node->args->next, REG_A1);
+                    Node *ca_args[] = {node->args, node->args->next};
+                    int   ca_regs[] = {REG_A0, REG_A1};
+                    gen_args_to_regs(vm, ca_args, 2, ca_regs);
                     emit(vm, CALC);
                     if (dest_reg != REG_A0)
                         emit_mov3(vm, dest_reg, REG_A0);
@@ -2631,8 +2650,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         error_tok(vm, node->tok,
                                   "realloc requires ptr and size arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);
-                    gen_expr(vm, node->args->next, REG_A1);
+                    Node *re_args[] = {node->args, node->args->next};
+                    int   re_regs[] = {REG_A0, REG_A1};
+                    gen_args_to_regs(vm, re_args, 2, re_regs);
                     emit(vm, REALC);
                     if (dest_reg != REG_A0)
                         emit_mov3(vm, dest_reg, REG_A0);
@@ -2650,9 +2670,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                   "reallocarray requires ptr, nmemb, and size "
                                   "arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);
-                    gen_expr(vm, node->args->next, REG_A1);
-                    gen_expr(vm, node->args->next->next, REG_A2);
+                    Node *ra_args[] = {node->args, node->args->next,
+                                       node->args->next->next};
+                    int   ra_regs[] = {REG_A0, REG_A1, REG_A2};
+                    gen_args_to_regs(vm, ra_args, 3, ra_regs);
                     emit(vm, REALCA);
                     if (dest_reg != REG_A0)
                         emit_mov3(vm, dest_reg, REG_A0);
@@ -2672,8 +2693,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                   "aligned_alloc requires alignment and size "
                                   "arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args->next, REG_A0); // size
-                    gen_expr(vm, node->args, REG_A1);       // alignment
+                    Node *aa_args[] = {node->args->next, node->args};
+                    int   aa_regs[] = {REG_A0, REG_A1}; // size, alignment
+                    gen_args_to_regs(vm, aa_args, 2, aa_regs);
                     emit(vm, MALCA);
                     if (dest_reg != REG_A0)
                         emit_mov3(vm, dest_reg, REG_A0);
@@ -2686,9 +2708,12 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                   "posix_memalign requires memptr, alignment, "
                                   "and size arguments");
                     reset_temp_regs();
-                    gen_expr(vm, node->args, REG_A0);             // memptr
-                    gen_expr(vm, node->args->next, REG_A1);       // alignment
-                    gen_expr(vm, node->args->next->next, REG_A2); // size
+                    Node *pm_args[] = {node->args, node->args->next,
+                                       node->args->next->next};
+                    int   pm_regs[] = {REG_A0, REG_A1, REG_A2}; // memptr,
+                                                                // alignment,
+                                                                // size
+                    gen_args_to_regs(vm, pm_args, 3, pm_regs);
                     emit(vm, PMEMA);
                     if (dest_reg != REG_A0)
                         emit_mov3(vm, dest_reg, REG_A0);
