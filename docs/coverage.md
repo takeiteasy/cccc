@@ -87,7 +87,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `long long int` and `unsigned long long int` | ✓ | |
 | `_Bool` | ✓ | |
 | `_Float16` | ~ | Storage only: declarations, `sizeof`/`_Alignof` (2), struct layout, pointers, typedefs, `_Generic` and prototypes work, and `-c=native` spells it through. [^n3] |
-| `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality |
+| `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality; unary `~z` is the GNU conjugate (`double _Complex w = ~z;` is `conj(z)`) |
 | `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |

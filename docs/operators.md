@@ -127,7 +127,7 @@ bool zero = !a;       // vec2_is_zero(&a)
 |---|---|
 | No function for the operand types | `invalid operands to +` (any arithmetic, bitwise or shift operator) |
 | Pointer operand to `* / % & | ^ << >>` or unary `+ - ~` | `invalid operands to *`, `invalid operand to unary ~` |
-| Floating-point or `_Complex` operand to `% & | ^ << >>` or unary `~` | `invalid operands to %` |
+| Floating-point operand to `% & | ^ << >>` or unary `~`, or `_Complex` operand to `% & | ^ << >>` | `invalid operands to %` |
 | Comparison of structs with no `==` / `!=` / `<` ... function | `invalid operands to ==` |
 | Operator not in the table above | `cannot overload '&&'` |
 | `[]` on a struct with no `[]` function | `invalid operands to []` |

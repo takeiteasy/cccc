@@ -437,6 +437,11 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             reset_temp_regs();
             int r_val = alloc_temp_reg();
             gen_expr(vm, node->cond, r_val);
+            // Case values are held as int, so a 32-bit condition is compared
+            // as one.
+            if (node->cond->ty && node->cond->ty->size == 4 &&
+                node->cond->ty->is_unsigned && is_integer(node->cond->ty))
+                emit_rr(vm, SX4, r_val, r_val);
             // A call in the controlling expression resets the temp registers.
             mark_temp_reg_used(r_val);
 

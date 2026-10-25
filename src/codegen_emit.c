@@ -934,6 +934,15 @@ void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg) {
     free_temp_reg(tmp);
 }
 
+// Wrap a 32-bit int/enum arithmetic result to its width, so the 64-bit
+// register always holds the value the type denotes.
+// TODO: one extra opcode per 32-bit op; skip it when the consumer narrows
+// anyway (#1787).
+void emit_int32_wrap(VirtualMachine *vm, Type *ty, int reg) {
+    if (ty->size == 4 && (ty->kind == TY_INT || ty->kind == TY_ENUM))
+        emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
+}
+
 // JZ3: if rs == 0, jump (returns patch location)
 Pc emit_jz3(VirtualMachine *vm, int rs) {
     emit(vm, JZ3);

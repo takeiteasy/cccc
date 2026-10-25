@@ -864,6 +864,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_frr(vm, fop_for_type(node->ty, FNEG3), dest_reg, dest_reg);
             } else {
                 emit_rr(vm, NEG3, dest_reg, dest_reg);
+                emit_int32_wrap(vm, node->ty, dest_reg);
             }
             return;
 
@@ -885,6 +886,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
             gen_expr(vm, node->lhs, dest_reg);
             emit_rr(vm, BNOT3, dest_reg, dest_reg);
+            emit_int32_wrap(vm, node->ty, dest_reg);
             return;
 
         // Binary arithmetic operations
@@ -1456,9 +1458,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                              array_bound - node->deref_bytes);
 
                 // Unsigned 64-bit comparison: use dedicated ULT3/ULE3 opcodes.
-                // Shorter unsigned types (≤32-bit) are zero-extended in 64-bit
-                // registers so SLT3/SLE3 already give the correct signed
-                // result.
+                // Shorter types (≤32-bit) are kept zero/sign-extended in 64-bit
+                // registers (see emit_int32_wrap) so SLT3/SLE3 already give the
+                // correct result.
                 bool is_u64_cmp =
                     (node->kind == ND_LT || node->kind == ND_LE) &&
                     node->lhs->ty && node->lhs->ty->is_unsigned &&
@@ -1471,6 +1473,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
                 if (node->ty->kind == TY_BITINT)
                     emit_bitint_trunc(vm, node->ty, dest_reg);
+                else if (node->kind == ND_ADD || node->kind == ND_SUB ||
+                         node->kind == ND_MUL || node->kind == ND_SHL)
+                    emit_int32_wrap(vm, node->ty, dest_reg);
 
                 // #982: still gated on is_ptr_arith alone (not !is_ptr_diff) --
                 // narrowing this too was deliberately deferred rather than

@@ -207,6 +207,7 @@ void check_tls_capacity(VirtualMachine *vm, size_t needed);
 int cc_effective_align(int obj_align, int ty_align);
 void define_label(VirtualMachine *vm, char *name);
 void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
+void emit_int32_wrap(VirtualMachine *vm, Type *ty, int reg);
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
                 bool is_hi);
 void emit_chkdc(VirtualMachine *vm, int rs_val, long long line);

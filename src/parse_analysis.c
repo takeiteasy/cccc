@@ -323,6 +323,29 @@ static long long eval_wide_cmp(VirtualMachine *vm, Node *node) {
 // is a pointer to a global variable and n is a postiive/negative
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
+// Wrap v to the width and signedness of integer type ty.
+static int64_t wrap_to_int_type(Type *ty, int64_t v) {
+    if (!is_integer(ty))
+        return v;
+    // Separate returns: a ?: over uint32_t/int32_t would promote both to
+    // unsigned.
+    switch (ty->size) {
+        case 1:
+            if (ty->is_unsigned)
+                return (uint8_t)v;
+            return (int8_t)v;
+        case 2:
+            if (ty->is_unsigned)
+                return (uint16_t)v;
+            return (int16_t)v;
+        case 4:
+            if (ty->is_unsigned)
+                return (uint32_t)v;
+            return (int32_t)v;
+    }
+    return v;
+}
+
 int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
     add_type(vm, node);
 
@@ -365,11 +388,14 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
 
     switch (node->kind) {
         case ND_ADD:
-            return eval2(vm, node->lhs, label) + eval(vm, node->rhs);
+            return wrap_to_int_type(node->ty, eval2(vm, node->lhs, label) +
+                                                  eval(vm, node->rhs));
         case ND_SUB:
-            return eval2(vm, node->lhs, label) - eval(vm, node->rhs);
+            return wrap_to_int_type(node->ty, eval2(vm, node->lhs, label) -
+                                                  eval(vm, node->rhs));
         case ND_MUL:
-            return eval(vm, node->lhs) * eval(vm, node->rhs);
+            return wrap_to_int_type(node->ty,
+                                    eval(vm, node->lhs) * eval(vm, node->rhs));
         case ND_DIV: {
             int64_t rhs = eval(vm, node->rhs);
             if (rhs == 0)
@@ -380,7 +406,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
             return eval(vm, node->lhs) / rhs;
         }
         case ND_NEG:
-            return -eval(vm, node->lhs);
+            return wrap_to_int_type(node->ty, -eval(vm, node->lhs));
         case ND_MOD: {
             int64_t rhs = eval(vm, node->rhs);
             if (rhs == 0)
@@ -397,7 +423,8 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
         case ND_BITXOR:
             return eval(vm, node->lhs) ^ eval(vm, node->rhs);
         case ND_SHL:
-            return eval(vm, node->lhs) << eval(vm, node->rhs);
+            return wrap_to_int_type(node->ty, eval(vm, node->lhs)
+                                                  << eval(vm, node->rhs));
         case ND_SHR:
             if (node->ty->is_unsigned && node->ty->size == 8)
                 return (uint64_t)eval(vm, node->lhs) >> eval(vm, node->rhs);
@@ -439,7 +466,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 return !eval_wide_truthy(vm, node->lhs);
             return !eval(vm, node->lhs);
         case ND_BITNOT:
-            return ~eval(vm, node->lhs);
+            return wrap_to_int_type(node->ty, ~eval(vm, node->lhs));
         case ND_LOGAND:
             if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
                 return eval_wide_truthy(vm, node->lhs) &&
@@ -469,20 +496,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                     error_tok(vm, node->tok,
                               "_Decimal literals require a build with "
                               "CCCC_HAS_DECIMAL=1");
-                if (is_integer(node->ty)) {
-                    switch (node->ty->size) {
-                        case 1:
-                            return node->ty->is_unsigned ? (uint8_t)out
-                                                         : (int8_t)out;
-                        case 2:
-                            return node->ty->is_unsigned ? (uint16_t)out
-                                                         : (int16_t)out;
-                        case 4:
-                            return node->ty->is_unsigned ? (uint32_t)out
-                                                         : (int32_t)out;
-                    }
-                }
-                return out;
+                return wrap_to_int_type(node->ty, out);
             }
             if (is_flonum(node->lhs->ty) && is_integer(node->ty) &&
                 node->ty->is_unsigned && node->ty->size == 8)
@@ -491,21 +505,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 // to a bare flonum node above (which doesn't see this cast's
                 // destination type once we've recursed past it).
                 return (int64_t)cccc_f64_to_u64(eval_double(vm, node->lhs));
-            int64_t val = eval2(vm, node->lhs, label);
-            if (is_integer(node->ty)) {
-                switch (node->ty->size) {
-                    case 1:
-                        return node->ty->is_unsigned ? (uint8_t)val
-                                                     : (int8_t)val;
-                    case 2:
-                        return node->ty->is_unsigned ? (uint16_t)val
-                                                     : (int16_t)val;
-                    case 4:
-                        return node->ty->is_unsigned ? (uint32_t)val
-                                                     : (int32_t)val;
-                }
-            }
-            return val;
+            return wrap_to_int_type(node->ty, eval2(vm, node->lhs, label));
         }
         case ND_ADDR:
             return eval_rval(vm, node->lhs, label);

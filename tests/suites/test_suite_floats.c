@@ -369,6 +369,31 @@ int test_complex(void) {
     return 42;
 }
 
+// GNU: unary ~ on a _Complex value is the conjugate.
+[[cccc::test(return = 42)]]
+int test_complex_bitnot_conjugate(void) {
+    double complex z = CMPLX(1.0, 2.0);
+    double complex w = ~z;
+    if (creal(w) != 1.0 || cimag(w) != -2.0)
+        return 1;
+    if (~~z != z)
+        return 2;
+
+    float complex f = ~CMPLXF(3.0f, 4.0f);
+    if (crealf(f) != 3.0f || cimagf(f) != -4.0f)
+        return 3;
+
+    long double complex l = ~(5.0L + 6.0L * I);
+    if (creall(l) != 5.0L || cimagl(l) != -6.0L)
+        return 4;
+
+    const double complex c = CMPLX(7.0, 8.0);
+    if (cimag(~c) != -8.0)
+        return 5;
+
+    return 42;
+}
+
 // test_complex_tgmath
 [[cccc::test(return = 42)]]
 int test_complex_tgmath(void) {

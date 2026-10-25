@@ -109,6 +109,13 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *ov      = overloaded_unary(vm, "~", operand, tok);
         if (ov)
             return ov;
+        add_type(vm, operand);
+        if (is_complex(operand->ty)) {
+            Node *conj = new_unary(vm, ND_COMPLEX, operand, tok);
+            conj->val  = 3;
+            conj->ty   = unqualified(vm, operand->ty);
+            return conj;
+        }
         check_unary_operand(vm, "~", operand, true, tok);
         return new_unary(vm, ND_BITNOT, operand, tok);
     }

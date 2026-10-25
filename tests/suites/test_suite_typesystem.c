@@ -619,6 +619,7 @@ static _Complex float  g_cf_i = 1.5f + 2.5f * I;
 static long double _Complex g_cl_i = 5.0L + 6.0L * I;
 static _Complex double g_cd_mul    = (2.0 + 1.0 * I) * (3.0 + 4.0 * I);
 static _Complex double g_cd_conj   = conj(7.0 + 8.0 * I);
+static _Complex double g_cd_bnot   = ~(7.0 + 8.0 * I);
 // #1122: a *narrow* global whose initializer merely contains wide
 // arithmetic used to silently fold wrong -- eval2 evaluated the division in
 // 64 bits and got 2 instead of the correct value below.
@@ -722,6 +723,9 @@ int test_wide_global_init(void) {
         return 18;
     if (creal(g_cd_conj) != 7.0 || cimag(g_cd_conj) != -8.0)
         return 19;
+    if (creal(g_cd_bnot) != creal(g_cd_conj) ||
+        cimag(g_cd_bnot) != cimag(g_cd_conj))
+        return 20;
 
     return 42;
 }
@@ -1710,6 +1714,54 @@ int test_wide_bitfield_global_offset(void) {
         return 2;
 
     return 42;
+}
+
+// 32-bit int/unsigned/enum arithmetic results wrap to their width.
+_Static_assert((long long)(2u - 3) == 4294967295LL, "fold sub");
+_Static_assert((long long)~2u == 4294967293LL, "fold not");
+_Static_assert((long long)(0x80000000u * 2u) == 0, "fold mul");
+_Static_assert((long long)(0xFFFFFFFFu + 1u) == 0, "fold add");
+
+typedef enum { E_ONE = 1, E_TWO = 2 } WrapE;
+
+[[cccc::test]] void test_unsigned_int_results_wrap(void) {
+    volatile unsigned u = 2, z = 0, one = 1;
+    AssertEq((long long)(u - 3), 4294967295LL);
+    AssertEq((unsigned long long)(u * -1), 4294967294ULL);
+    AssertEq((long long)~u, 4294967293LL);
+    AssertEq((u - 3) >> 1, 0x7FFFFFFFu);
+    AssertEq((long long)(u << 31), 0);
+    AssertEq((long long)-one, 4294967295LL);
+    AssertEq((double)(u - 3), 4294967295.0);
+    AssertEq((long long)(u -= 3), 4294967295LL);
+    AssertEq((long long)(--z), 4294967295LL);
+}
+
+[[cccc::test]] void test_switch_on_wrapped_unsigned(void) {
+    volatile unsigned u   = 2;
+    int               hit = 0;
+    switch (u - 3) {
+        case 0xFFFFFFFFu:
+            hit = 1;
+            break;
+        default:
+            hit = 2;
+    }
+    AssertEq(hit, 1);
+}
+
+[[cccc::test]] void test_signed_int_results_wrap(void) {
+    volatile int i = 2147483647, m = -2147483647 - 1;
+    AssertEq((long long)(i + 1), -2147483647LL - 1);
+    AssertEq((long long)(m - 1), 2147483647LL);
+    AssertEq((long long)(i * 2), -2);
+    AssertEq((long long)-m, -2147483647LL - 1);
+}
+
+[[cccc::test]] void test_enum_complement_is_unsigned(void) {
+    WrapE e = E_TWO;
+    AssertEq(~e, ~2u);
+    AssertEq((long long)~e, 4294967293LL);
 }
 
 // #1124's own width-masking coverage lives in the standalone
