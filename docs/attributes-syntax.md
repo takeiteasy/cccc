@@ -23,7 +23,7 @@ void test_add(void) { AssertEq(1 + 1, 2); }
 struct @packed point { char x; int y; };
 ```
 
-The ready-made custom attributes (`@serialize`, `@enum_to_string`, `@accessors`, ...) are in [derive.md](derive.md). `@` is accepted wherever the canonical form is.
+The ready-made custom attributes (`@serialize`, `@to_string`, `@accessors`, ...) are in [derive.md](derive.md). `@` is accepted wherever the canonical form is.
 
 CCCC-specific attributes also accept `__comptime`, `__comptime__`, `__macro`, `__macro__`, `__test`, `__test__`, `__test_setup`, `__test_setup__`, `__test_teardown` and `__test_teardown__`. The plain names stay ordinary identifiers.
 

@@ -66,8 +66,8 @@ Attributes on a type generate functions for it at compile time:
 #include <cccc/derive.h>
 #include <cccc/json.h>
 
-@enum_to_string
-@enum_from_string
+@to_string
+@from_string
 typedef enum { RED, GREEN, BLUE } Color;
 
 @to_json
@@ -112,7 +112,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 | Feature | Details |
 |---|---|
 | **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](docs/macros.md)) |
-| **Derive attributes** | `@serialize`, `@to_json`, `@enum_to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
+| **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **C23 and extensions** | C89 through C23, GNU and MS extensions ([coverage.md](docs/coverage.md)) |
@@ -230,7 +230,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [macros.md](docs/macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
-| [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@enum_to_string`, ... |
+| [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@to_string`, ... |
 | [comptime-policy.md](docs/comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
 | [comptime-limits.md](docs/comptime-limits.md) | Memory confinement and node-list checks for comptime code |
 | [security.md](docs/security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |

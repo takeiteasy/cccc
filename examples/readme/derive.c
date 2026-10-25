@@ -3,8 +3,8 @@
 #include <cccc/derive.h>
 #include <cccc/json.h>
 
-@enum_to_string
-@enum_from_string
+@to_string
+@from_string
 typedef enum { RED, GREEN, BLUE } Color;
 
 @to_json

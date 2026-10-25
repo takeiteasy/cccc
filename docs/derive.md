@@ -25,8 +25,9 @@ int main(void) {
 |---|---|---|
 | `@serialize` | struct/union | `int T_serialize(T *self, void *buf)` |
 | `@deserialize` | struct/union | `T T_deserialize(void *buf)` |
-| `@enum_to_string` | enum | `const char *T_to_string(T v)` |
-| `@enum_from_string` | enum | `T T_from_string(const char *s)` |
+| `@to_string` | enum | `const char *T_to_string(T v)` |
+| `@to_string` | struct | `size_t T_to_string(const T *self, char *buf, size_t cap)` |
+| `@from_string` | enum | `T T_from_string(const char *s)` |
 | `@getters` | struct/union | `get_<field>(T *self)` per member |
 | `@setters` | struct/union | `set_<field>(T *self, <FieldType> value)` per member |
 | `@accessors` | struct/union | getters and setters |
@@ -48,7 +49,8 @@ int main(void) {
 | `@compare_order(N)` | member | compares the member before those without a key, ascending `N` |
 | `@compare_desc` | member | reverses the direction `@compare` orders the member in |
 | `@equals_skip` | member | leaves the member out of `@equals` and `@hash` |
-| `@dump_skip` | member | leaves the member out of `@dump` |
+| `@dump_skip` | member | leaves the member out of `@dump` and a struct's `@to_string` |
+| `@to_string_skip` | member | leaves the member out of a struct's `@to_string` |
 | `@serialize_skip` | member | leaves the member out of `@serialize` / `@deserialize` |
 | `@accessor_skip` | member | generates no getter or setter for the member |
 | `@ctor_skip` | member | drops the member from `@ctor`'s parameters; it stays zero |
@@ -84,11 +86,13 @@ written, and `Point_deserialize` zeroes the padding of the value it returns.
 The `Serialize(type, expr, buf)` and `Deserialize(type, buf)` builders behind
 these attributes are described in [macros.md](macros-stdlib.md#macro-standard-library).
 
-## Enum Strings
+## Strings
+
+`@to_string` and `@from_string` convert an enum to its constant's name and back:
 
 ```c
-@enum_to_string
-@enum_from_string
+@to_string
+@from_string
 typedef enum { RED, GREEN, BLUE } Color;
 
 // Color_to_string(GREEN)   -> "GREEN"
@@ -99,9 +103,29 @@ typedef enum { RED, GREEN, BLUE } Color;
 
 Enumerators that share a value (`enum { A, B, C = 1 }`) map to the first name.
 
+On a struct, `@to_string` writes the text `@dump` prints into a buffer. It
+returns the length the whole text needs, like `snprintf`, and always
+NUL-terminates when `cap > 0`:
+
+```c
+@to_string
+typedef struct { int x; int y; } Point;
+
+char buf[32];
+Point_to_string(&p, buf, sizeof buf);   // "Point { x = 3, y = 4 }"
+Point_to_string(&p, NULL, 0);           // 22: the size to allocate, minus the NUL
+```
+
+The struct form needs `#include <stdio.h>`, rejects unions, and skips members
+marked `@dump_skip` or `@to_string_skip`. `@from_string` accepts enums only.
+An optional prefix names the functions `<prefix>_<T>_to_string` and
+`<prefix>_<T>_from_string`: `@to_string("app")` on `enum Color` publishes
+`app_Color_to_string`. Member rules (nested structs, arrays, `@owned`) are the
+same as for [`@dump`](derive-equality.md#equality-hashing-and-dumping).
+
 ## Skipping Members
 
-`@serialize_skip`, `@accessor_skip` and `@ctor_skip` go on struct
+`@serialize_skip`, `@accessor_skip`, `@ctor_skip` and `@to_string_skip` go on struct
 members, take no arguments, and leave the member out of one family of
 generated functions:
 
@@ -122,6 +146,7 @@ struct Session {
 | `@serialize_skip` | The member's bytes are not written; `T_deserialize` leaves it zero. `T_serialize` still returns `sizeof(T)` and the other members keep their offsets. The `Serialize` / `Deserialize` builders skip it too. Not valid on a bit-field. |
 | `@accessor_skip` | No `get_<field>` or `set_<field>`. |
 | `@ctor_skip` | No `T_new` parameter; the member is zero-initialised. |
+| `@to_string_skip` | A struct's `@to_string` leaves the member out. `@dump_skip` does the same and also hides it from `@dump`. |
 
 ## Accessors and Constructors
 

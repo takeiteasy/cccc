@@ -1422,14 +1422,17 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
 // the attribute registry (__has_c_attribute, @name routing). Keep in sync with
 // that header (tests/host/test_derive_attr_list.c checks it).
 static const char *const derive_attr_names[] = {
-    "serialize",    "deserialize", "enum_to_string", "enum_from_string",
-    "getters",      "setters",     "accessors",      "ctor",
-    "default",      "to_json",     "from_json",      "json_skip",
-    "json_name",    "equals",      "hash",           "dump",
-    "equals_skip",  "dump_skip",   "serialize_skip", "accessor_skip",
-    "ctor_skip",    "bitflags",    "compare",        "compare_order",
-    "compare_desc", "range",       "validate",       "clamp",
-    "owned",        "clone",       "destroy",        NULL,
+    "serialize",     "deserialize",    "to_string",
+    "from_string",   "to_string_skip", "getters",
+    "setters",       "accessors",      "ctor",
+    "default",       "to_json",        "from_json",
+    "json_skip",     "json_name",      "equals",
+    "hash",          "dump",           "equals_skip",
+    "dump_skip",     "serialize_skip", "accessor_skip",
+    "ctor_skip",     "bitflags",       "compare",
+    "compare_order", "compare_desc",   "range",
+    "validate",      "clamp",          "owned",
+    "clone",         "destroy",        NULL,
 };
 
 const char *const *derive_builtin_attr_names(void) {

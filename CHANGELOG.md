@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: `@enum_to_string` and `@enum_from_string` are now `@to_string` and `@from_string`; the old names are an undefined-attribute error. Enum behaviour is unchanged, and both take an optional name prefix.
+- Added: `@to_string` on a struct publishes `size_t T_to_string(const T *self, char *buf, size_t cap)`, writing the `@dump` text into a buffer (snprintf-style return). `@to_string_skip` leaves a member out of it; `@dump_skip` does too.
 - Added: a checked return type is verified at `return`. The value must root in a checked pointer or a local that inherits its bounds, and its bounds must imply the declared ones, which may name parameters.
 - Added: a `dynamic` bounds cast, a checked assignment and an annotated call argument accept a local that inherits its bounds (propagated from a checked pointer) as the source. A `dynamic` cast from a local whose bounds are known on only some paths is a compile error.
 - Fixed: a `#pragma cccc checked`/`unchecked` `end` must name the same keyword as its `begin`.

@@ -275,7 +275,7 @@ Attribute support (`__attribute__((...))`, `[[...]]`, and the `@name`
 shorthand) has its own reference: [attributes.md](attributes.md).
 
 The built-in comptime attributes (`@serialize`, `@deserialize`,
-`@enum_to_string`, `@enum_from_string`, `@getters`,
+`@to_string`, `@from_string`, `@getters`,
 `@setters`, `@accessors`, `@ctor`,
 `@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@default`, `@validate`, `@clamp`, `@bitflags`) are CCCC extensions with no standard counterpart; see [derive.md](derive.md).
 

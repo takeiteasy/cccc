@@ -7,7 +7,7 @@ Ready-made macros bundled in `reflection.h`.
 `include/cccc/reflection.h` ships a bundled set of helpers for common
 macro-author tasks. Because reflection.h is implicitly included in every
 macro/comptime TU, these are available without any extra `#include`. The
-ready-made attributes built on them (`@serialize`, `@enum_to_string`,
+ready-made attributes built on them (`@serialize`, `@to_string`,
 `@accessors`, ...) are covered in [derive.md](derive.md).
 
 ### String and Memory Wrappers

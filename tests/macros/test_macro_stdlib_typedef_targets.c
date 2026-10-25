@@ -9,7 +9,7 @@
     int y;
 } Pt;
 
-@enum_to_string @enum_from_string typedef enum { RED, GREEN, BLUE } Color;
+@to_string @from_string typedef enum { RED, GREEN, BLUE } Color;
 
 @serialize @deserialize typedef struct Named {
     long a;

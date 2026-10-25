@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-@enum_to_string @enum_from_string enum Dup { A, B, C = 1, D = -5, E = -5 };
+@to_string @from_string enum Dup { A, B, C = 1, D = -5, E = -5 };
 
 int main(void) {
     if (strcmp(Dup_to_string(A), "A") != 0)

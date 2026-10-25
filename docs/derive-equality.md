@@ -39,6 +39,9 @@ a == b;  // Item_equals(&a, &b)
 a != b;  // !Item_equals(&a, &b)
 ```
 
+`@to_string` writes the `@dump` text into a buffer instead of a `FILE`; see
+[derive.md](derive.md#strings).
+
 A prefix names the functions `<prefix>_<Type>_equals` (likewise `_hash` and
 `_dump`): `@equals("app")` on `struct Pair` publishes `app_Pair_equals`.
 

@@ -17,7 +17,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Handlers for the built-in comptime attributes (@serialize, @enum_to_string,
+// Handlers for the built-in comptime attributes (@serialize, @to_string,
 // @getters, ...). A program that uses them includes this header; the
 // handlers run at compile time and add nothing to the program itself.
 
@@ -100,52 +100,6 @@
     WithFn(fn) {
         Node *buf = MakeParamRef(fn, "buf");
         FunctionSetBody(fn, MakeReturn(Deserialize(ty, buf)));
-    }
-    PublishNode(fn);
-}
-
-// @enum_to_string enum Color {...}; publishes
-//   const char *Color_to_string(enum Color v);
-// which switches over v and returns the matching constant's name, or "" if
-// no constant matches. Constants sharing a value return the first name.
-@comptime(attribute("enum_to_string")) void __builtin_attr_enum_to_string(
-    AttrTarget *target) {
-    Type *ty = __builtin_attr_type_target(target, "@enum_to_string", true);
-    const char *tname = __builtin_attr_type_name(target, "@enum_to_string");
-
-    char fname[128];
-    strcpy(fname, tname);
-    strcat(fname, "_to_string");
-
-    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
-    Obj  *fn      = MakeFunction(fname, cstr_ty);
-    FunctionAddParam(fn, "v", ty);
-    WithFn(fn) {
-        Node *v = MakeParamRef(fn, "v");
-        FunctionSetBody(fn, EnumToString(ty, v));
-    }
-    PublishNode(fn);
-}
-
-// @enum_from_string enum Color {...}; publishes
-//   enum Color Color_from_string(const char *s);
-// which compares s against each constant's name and returns the matching
-// value, or -1 if no constant matches.
-@comptime(attribute("enum_from_string")) void __builtin_attr_enum_from_string(
-    AttrTarget *target) {
-    Type *ty = __builtin_attr_type_target(target, "@enum_from_string", true);
-    const char *tname = __builtin_attr_type_name(target, "@enum_from_string");
-
-    char fname[128];
-    strcpy(fname, tname);
-    strcat(fname, "_from_string");
-
-    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
-    Obj  *fn      = MakeFunction(fname, ty);
-    FunctionAddParam(fn, "s", cstr_ty);
-    WithFn(fn) {
-        Node *s = MakeParamRef(fn, "s");
-        FunctionSetBody(fn, EnumFromString(ty, s));
     }
     PublishNode(fn);
 }
@@ -451,6 +405,14 @@
         __builtin_owned_proto(fname, GetType("void"),
                               MakePointer(MakeConst(pt)), "self",
                               MakePointer(GetType("FILE")), "out");
+    } else if (!strcmp(suffix, "_to_string") && !FindGlobal(fname)) {
+        Type *size_ty =
+            FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+        Obj *proto = FunctionPrototype(fname, size_ty);
+        FunctionAddParam(proto, "self", MakePointer(MakeConst(pt)));
+        FunctionAddParam(proto, "buf", MakePointer(GetType("char")));
+        FunctionAddParam(proto, "cap", size_ty);
+        PublishNode(proto);
     }
 }
 
@@ -1425,6 +1387,13 @@
     __builtin_derive_skip_target(target, "@dump_skip");
 }
 
+// @to_string_skip leaves a member out of a struct's @to_string (which also
+// honours @dump_skip).
+@comptime(attribute("to_string_skip")) void __builtin_attr_to_string_skip(
+    AttrTarget *target, ...) {
+    __builtin_derive_skip_target(target, "@to_string_skip");
+}
+
 // @serialize_skip leaves a member out of @serialize, @deserialize and the
 // Serialize/Deserialize builders, @accessor_skip out of the @getters,
 // @setters and @accessors functions, @ctor_skip out of @ctor.
@@ -1820,15 +1789,56 @@
     PublishNode(fn);
 }
 
-@comptime void __builtin_dump_text(Node *block, Node *out, const char *text) {
-    BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
-                            "fputs", MakeStringLiteral(text), out)));
+// The dump engine writes through a sink: sink[0] is the FILE * for @dump, or
+// the char buffer for @to_string, where sink[1] is its capacity and sink[2] the
+// running length (a size_t local). sink[1] == NULL selects the FILE form.
+@comptime int __builtin_dump_to_buffer(Node **sink) {
+    return sink[1] != NULL;
 }
 
-@comptime void __builtin_dump_printf1(Node *block, Node *out, const char *fmt,
+@comptime const char *__builtin_dump_attr(Node **sink) {
+    return sink[1] ? "@to_string" : "@dump";
+}
+
+@comptime const char *__builtin_dump_suffix(Node **sink) {
+    return sink[1] ? "_to_string" : "_dump";
+}
+
+@comptime void __builtin_dump_printf1(Node *block, Node **sink, const char *fmt,
                                       Node *a) {
-    BlockAddStmt(block, MakeExprStmt(__builtin_json_call3(
-                            "fprintf", out, MakeStringLiteral(fmt), a)));
+    if (!__builtin_dump_to_buffer(sink)) {
+        BlockAddStmt(block,
+                     MakeExprStmt(__builtin_json_call3(
+                         "fprintf", sink[0], MakeStringLiteral(fmt), a)));
+        return;
+    }
+    // Truncates at cap but keeps counting, so len is the size the whole text
+    // needs; a negative snprintf result adds nothing.
+    BlockAddStmt(block,
+                 Quote("{ int n_ = snprintf($1 < $2 ? $3 + $1 : 0, $1 < $2 ? "
+                       "$2 - $1 : 0, $4, $5); if (n_ > 0) $1 += n_; }",
+                       sink[2], sink[1], sink[0], MakeStringLiteral(fmt), a));
+}
+
+@comptime void __builtin_dump_text(Node *block, Node **sink, const char *text) {
+    if (__builtin_dump_to_buffer(sink))
+        __builtin_dump_printf1(block, sink, "%s", MakeStringLiteral(text));
+    else
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
+                                "fputs", MakeStringLiteral(text), sink[0])));
+}
+
+// Calls the generated dump/to_string function `fn` of a pointee `p`.
+@comptime void __builtin_dump_call(Node *block, Node **sink, const char *fn,
+                                   Node *p) {
+    if (!__builtin_dump_to_buffer(sink)) {
+        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(fn, p, sink[0])));
+        return;
+    }
+    BlockAddStmt(block,
+                 Quote("$1 += $2($3, $1 < $4 ? $5 + $1 : 0, $1 < $4 ? $4 - $1 "
+                       ": 0);",
+                       sink[2], MakeVarRef(fn), p, sink[1], sink[0]));
 }
 
 // "%.<n>s": at most n bytes, stopping at a NUL. Written by hand so the handler
@@ -1849,142 +1859,155 @@
     out[pos]   = 0;
 }
 
-@comptime void __builtin_dump_value(Node *block, Node *out, Type *ty, Node *e,
+@comptime void __builtin_dump_value(Node *block, Node **sink, Type *ty, Node *e,
                                     const char *tname, const char *path,
                                     const char *prefix, const char *self_name);
 
 // An @owned member prints its content: a C string as "...", an array as
 // { ... }, anything else as *p; NULL prints as NULL.
-@comptime void __builtin_dump_owned(Node *block, Node *out, Member *m,
+@comptime void __builtin_dump_owned(Node *block, Node **sink, Member *m,
                                     Type *owner, Node *e, const char *prefix,
                                     const char *self_name, const char *path) {
     Node       *p     = MakeMember(e, MemberName(m));
     Type       *pt    = TypeBase(MemberType(m));
     const char *cname = NULL;
-    int         shape = __builtin_owned_shape(m, owner, "@dump", path, &cname);
+    int shape = __builtin_owned_shape(m, owner, __builtin_dump_attr(sink), path,
+                                      &cname);
     char        fn[256];
     int   deep  = __builtin_owned_content_fn(fn, pt, shape, prefix, self_name,
-                                             "_dump", "@dump", path);
+                                             __builtin_dump_suffix(sink),
+                                             __builtin_dump_attr(sink), path);
     Node *inner = MakeBlock(NULL, 0);
     if (shape == 1) {
-        __builtin_dump_text(inner, out, "\"");
-        __builtin_dump_printf1(inner, out, "%s",
+        __builtin_dump_text(inner, sink, "\"");
+        __builtin_dump_printf1(inner, sink, "%s",
                                MakeCast(p, MakePointer(GetType("char"))));
-        __builtin_dump_text(inner, out, "\"");
+        __builtin_dump_text(inner, sink, "\"");
     } else if (shape == 2) {
         char elem[256];
         __builtin_derive_path(elem, path, "[]");
         Node *i     = MakeLocalVarUnique(GetType("long"));
         Node *body  = MakeBlock(NULL, 0);
         Node *comma = MakeBlock(NULL, 0);
-        __builtin_dump_text(comma, out, ", ");
+        __builtin_dump_text(comma, sink, ", ");
         BlockAddStmt(body, MakeIf(i, comma, NULL));
         if (deep)
-            BlockAddStmt(
-                body, MakeExprStmt(__builtin_json_call2(
-                          fn, MakeUnary(NK_ADDR, MakeSubscript(p, i)), out)));
+            __builtin_dump_call(body, sink, fn,
+                                MakeUnary(NK_ADDR, MakeSubscript(p, i)));
         else
-            __builtin_dump_value(body, out, pt, MakeSubscript(p, i), NULL, elem,
-                                 prefix, self_name);
-        __builtin_dump_text(inner, out, "{ ");
+            __builtin_dump_value(body, sink, pt, MakeSubscript(p, i), NULL,
+                                 elem, prefix, self_name);
+        __builtin_dump_text(inner, sink, "{ ");
         BlockAddStmt(
             inner,
             MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
                     MakeBinary(NK_LT, i, MakeMember(e, cname)),
                     MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
                     body));
-        __builtin_dump_text(inner, out, " }");
+        __builtin_dump_text(inner, sink, " }");
     } else if (deep) {
-        BlockAddStmt(inner, MakeExprStmt(__builtin_json_call2(fn, p, out)));
+        __builtin_dump_call(inner, sink, fn, p);
     } else {
-        __builtin_dump_value(inner, out, pt, MakeUnary(NK_DEREF, p), NULL, path,
-                             prefix, self_name);
+        __builtin_dump_value(inner, sink, pt, MakeUnary(NK_DEREF, p), NULL,
+                             path, prefix, self_name);
     }
     Node *none = MakeBlock(NULL, 0);
-    __builtin_dump_text(none, out, "NULL");
+    __builtin_dump_text(none, sink, "NULL");
     BlockAddStmt(block, MakeIf(p, inner, none));
 }
 
-@comptime void __builtin_dump_value(Node *block, Node *out, Type *ty, Node *e,
+@comptime void __builtin_dump_value(Node *block, Node **sink, Type *ty, Node *e,
                                     const char *tname, const char *path,
                                     const char *prefix, const char *self_name) {
     int k = __builtin_derive_kind(ty);
     if (k == 0)
-        __builtin_derive_bad_member("@dump", path);
+        __builtin_derive_bad_member(__builtin_dump_attr(sink), path);
     if (k == 1 && GetTypeKind(ty) == TK_ENUM) {
         // if (e == A) fputs("A"); else if ... else fprintf("%lld", e);
         // `e` is read by every comparison, so evaluate it once.
         Node *v = MakeLocalVarUnique(GetType("long long"));
         BlockAddStmt(block, MakeExprStmt(MakeAssign(v, e)));
         Node *chain = MakeBlock(NULL, 0);
-        __builtin_dump_printf1(chain, out, "%lld", v);
+        __builtin_dump_printf1(chain, sink, "%lld", v);
         Node *tail = chain;
         for (int i = EnumValueCount(ty) - 1; i >= 0; i--) {
             Node *hit = MakeBlock(NULL, 0);
-            __builtin_dump_text(hit, out, EnumValueName(ty, i));
+            __builtin_dump_text(hit, sink, EnumValueName(ty, i));
             tail =
                 MakeIf(MakeBinary(NK_EQ, v, MakeIntLiteral(EnumValue(ty, i))),
                        hit, tail);
         }
         BlockAddStmt(block, tail);
     } else if (k == 1) {
-        __builtin_dump_printf1(block, out, "%lld",
+        __builtin_dump_printf1(block, sink, "%lld",
                                MakeCast(e, GetType("long long")));
     } else if (k == 2) {
-        __builtin_dump_printf1(block, out, "%llu",
+        __builtin_dump_printf1(block, sink, "%llu",
                                MakeCast(e, GetType("unsigned long long")));
     } else if (k == 3) {
         if (GetTypeKind(ty) == TK_LDOUBLE)
-            __builtin_dump_printf1(block, out, "%Lg", e);
+            __builtin_dump_printf1(block, sink, "%Lg", e);
         else
-            __builtin_dump_printf1(block, out, "%.17g",
+            __builtin_dump_printf1(block, sink, "%.17g",
                                    MakeCast(e, GetType("double")));
     } else if (k == 4) {
-        BlockAddStmt(block, MakeExprStmt(__builtin_json_call2(
-                                "fputs",
-                                MakeCond(e, MakeStringLiteral("true"),
-                                         MakeStringLiteral("false")),
-                                out)));
+        __builtin_dump_printf1(
+            block, sink, "%s",
+            MakeCond(e, MakeStringLiteral("true"), MakeStringLiteral("false")));
     } else if (k == 8) {
-        __builtin_dump_printf1(block, out, "%p",
+        __builtin_dump_printf1(block, sink, "%p",
                                MakeCast(e, MakePointer(GetType("void"))));
     } else if (k == 5) {
-        __builtin_dump_text(block, out, "\"");
+        __builtin_dump_text(block, sink, "\"");
         char fmt[32];
         __builtin_dump_string_format(fmt, TypeArrayLen(ty));
-        __builtin_dump_printf1(block, out, fmt, __builtin_json_charp(e));
-        __builtin_dump_text(block, out, "\"");
+        __builtin_dump_printf1(block, sink, fmt, __builtin_json_charp(e));
+        __builtin_dump_text(block, sink, "\"");
     } else if (k == 6) {
         char elem[256];
         __builtin_derive_path(elem, path, "[]");
         Node *i     = MakeLocalVarUnique(GetType("int"));
         Node *body  = MakeBlock(NULL, 0);
         Node *comma = MakeBlock(NULL, 0);
-        __builtin_dump_text(comma, out, ", ");
+        __builtin_dump_text(comma, sink, ", ");
         BlockAddStmt(body, MakeIf(i, comma, NULL));
-        __builtin_dump_value(body, out, TypeBase(ty), MakeSubscript(e, i), NULL,
-                             elem, prefix, self_name);
-        __builtin_dump_text(block, out, "{ ");
+        __builtin_dump_value(body, sink, TypeBase(ty), MakeSubscript(e, i),
+                             NULL, elem, prefix, self_name);
+        __builtin_dump_text(block, sink, "{ ");
         BlockAddStmt(
             block,
             MakeFor(MakeExprStmt(MakeAssign(i, MakeIntLiteral(0))),
                     MakeBinary(NK_LT, i, MakeIntLiteral(TypeArrayLen(ty))),
                     MakeAssign(i, MakeBinary(NK_ADD, i, MakeIntLiteral(1))),
                     body));
-        __builtin_dump_text(block, out, " }");
+        __builtin_dump_text(block, sink, " }");
     } else {
         const char *names[128];
         Type       *types[128];
         Node       *exprs[128];
         int         n = 0;
-        __builtin_derive_collect(ty, e, "@dump", "dump_skip", names, types,
-                                 exprs, &n);
+        __builtin_derive_collect(ty, e, __builtin_dump_attr(sink), "dump_skip",
+                                 names, types, exprs, &n);
+        if (__builtin_dump_to_buffer(sink)) {
+            int kept = 0;
+            for (int j = 0; j < n; j++) {
+                Type   *skip_owner = NULL;
+                Member *skip_mem =
+                    __builtin_derive_find_member(ty, names[j], &skip_owner);
+                if (skip_mem && MemberHasAttr(skip_mem, "to_string_skip"))
+                    continue;
+                names[kept]   = names[j];
+                types[kept]   = types[j];
+                exprs[kept++] = exprs[j];
+            }
+            n = kept;
+        }
         const char *label = tname ? tname : TypeName(ty);
         if (label && label[0]) {
-            __builtin_dump_text(block, out, label);
-            __builtin_dump_text(block, out, n ? " { " : " {");
+            __builtin_dump_text(block, sink, label);
+            __builtin_dump_text(block, sink, n ? " { " : " {");
         } else {
-            __builtin_dump_text(block, out, n ? "{ " : "{");
+            __builtin_dump_text(block, sink, n ? "{ " : "{");
         }
         for (int j = 0; j < n; j++) {
             char sub[256];
@@ -1994,17 +2017,17 @@
             strcpy(head, j ? ", " : "");
             strcat(head, names[j]);
             strcat(head, " = ");
-            __builtin_dump_text(block, out, head);
+            __builtin_dump_text(block, sink, head);
             Type   *owner = NULL;
             Member *mem   = __builtin_derive_find_member(ty, names[j], &owner);
             if (mem && MemberHasAttr(mem, "owned"))
-                __builtin_dump_owned(block, out, mem, owner, e, prefix,
+                __builtin_dump_owned(block, sink, mem, owner, e, prefix,
                                      self_name, sub);
             else
-                __builtin_dump_value(block, out, types[j], exprs[j], NULL, sub,
+                __builtin_dump_value(block, sink, types[j], exprs[j], NULL, sub,
                                      prefix, self_name);
         }
-        __builtin_dump_text(block, out, n ? " }" : "}");
+        __builtin_dump_text(block, sink, n ? " }" : "}");
     }
 }
 
@@ -2026,12 +2049,106 @@
     __builtin_derive_pointee_proto(prefix, ty, tname, "_dump");
     Obj *fn = MakeFunction(fname, GetType("void"));
     WithFn(fn) {
-        Node *block = MakeBlock(NULL, 0);
+        Node *block   = MakeBlock(NULL, 0);
+        Node *sink[3] = {MakeParamRef(fn, "out"), NULL, NULL};
         __builtin_dump_value(
-            block, MakeParamRef(fn, "out"), ty,
+            block, sink, ty,
             MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "self", ty)),
             tname, tname, prefix, tname);
         FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// ---- @to_string / @from_string ----------------------------------------------
+
+// @to_string struct Foo {...}; publishes
+//   size_t Foo_to_string(const struct Foo *self, char *buf, size_t cap);
+// which writes the text @dump prints into buf, NUL-terminated and cut to cap,
+// and returns the length the whole text needs (snprintf style). Members with
+// @dump_skip or @to_string_skip are left out. Needs #include <stdio.h>.
+@comptime void __builtin_to_string_struct(Type *ty, const char *tname,
+                                          const char *prefix) {
+    if (!FindGlobal("snprintf"))
+        MacroErrorAt(MakeIntLiteral(0), "@to_string needs #include <stdio.h>");
+
+    char fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_to_string");
+
+    Type *size_ty =
+        FindType("size_t") ? GetType("size_t") : GetType("unsigned long");
+    __builtin_derive_pointee_proto(prefix, ty, tname, "_to_string");
+    Obj *fn = MakeFunction(fname, size_ty);
+    WithFn(fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *len     = MakeLocalVarUnique(size_ty);
+        Node *sink[3] = {MakeParamRef(fn, "buf"), MakeParamRef(fn, "cap"), len};
+        BlockAddStmt(block, MakeExprStmt(MakeAssign(len, MakeIntLiteral(0))));
+        __builtin_dump_value(
+            block, sink, ty,
+            MakeUnary(NK_DEREF, __builtin_derive_const_param(fn, "self", ty)),
+            tname, tname, prefix, tname);
+        BlockAddStmt(block, MakeReturn(len));
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+}
+
+// @to_string enum Color {...}; publishes
+//   const char *Color_to_string(enum Color v);
+// which switches over v and returns the matching constant's name, or "" if
+// no constant matches. Constants sharing a value return the first name. On a
+// struct it publishes the buffer form above. @to_string("P") publishes
+// P_Color_to_string.
+@comptime(attribute("to_string")) void __builtin_attr_to_string(
+    AttrTarget *target, ...) {
+    int kind = GetAttrTargetKind(target);
+    if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@to_string expects a type or typedef target");
+    const char *prefix = __builtin_attr_prefix_arg("@to_string");
+    Type       *ty     = AttrTargetType(target);
+    if (!ty || GetTypeKind(ty) != TK_ENUM) {
+        ty = __builtin_derive_struct_target(target, "@to_string");
+        __builtin_to_string_struct(
+            ty, __builtin_attr_type_name(target, "@to_string"), prefix);
+        return;
+    }
+    const char *tname = __builtin_attr_type_name(target, "@to_string");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_to_string");
+
+    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
+    Obj  *fn      = MakeFunction(fname, cstr_ty);
+    FunctionAddParam(fn, "v", ty);
+    WithFn(fn) {
+        Node *v = MakeParamRef(fn, "v");
+        FunctionSetBody(fn, EnumToString(ty, v));
+    }
+    PublishNode(fn);
+}
+
+// @from_string enum Color {...}; publishes
+//   enum Color Color_from_string(const char *s);
+// which compares s against each constant's name and returns the matching
+// value, or -1 if no constant matches. @from_string("P") publishes
+// P_Color_from_string.
+@comptime(attribute("from_string")) void __builtin_attr_from_string(
+    AttrTarget *target, ...) {
+    Type       *ty = __builtin_attr_type_target(target, "@from_string", true);
+    const char *tname  = __builtin_attr_type_name(target, "@from_string");
+    const char *prefix = __builtin_attr_prefix_arg("@from_string");
+
+    char        fname[256];
+    __builtin_json_fn_name(fname, prefix, tname, "_from_string");
+
+    Type *cstr_ty = MakePointer(MakeConst(GetType("char")));
+    Obj  *fn      = MakeFunction(fname, ty);
+    FunctionAddParam(fn, "s", cstr_ty);
+    WithFn(fn) {
+        Node *s = MakeParamRef(fn, "s");
+        FunctionSetBody(fn, EnumFromString(ty, s));
     }
     PublishNode(fn);
 }

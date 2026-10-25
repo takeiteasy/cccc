@@ -1,10 +1,10 @@
-// Ticket #235: @enum_to_string/@enum_from_string custom attributes.
+// @to_string / @from_string on an enum.
 
 #include <cccc/derive.h>
 
 #include <string.h>
 
-@enum_to_string @enum_from_string enum Color {
+@to_string @from_string enum Color {
     RED,
     GREEN,
     BLUE,
