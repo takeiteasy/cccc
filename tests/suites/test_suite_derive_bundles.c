@@ -53,10 +53,12 @@
 
 [[cccc::test]] void test_binary_pair(void) {
     struct Item a = {3, "z", NULL}, b;
-    char        buf[sizeof(struct Item)];
-    AssertEq(Item_serialize(&a, buf), (int)sizeof(struct Item));
+    char        buf[sizeof(struct Item) + 1];
+    AssertEq(Item_serialize_size(&a), sizeof buf);
+    AssertEq(Item_serialize(&a, buf), (int)sizeof buf);
     b = Item_deserialize(buf);
     AssertEq(b.id, 3);
+    AssertTrue(b.note == NULL);
 }
 
 [[cccc::test]] void test_lifecycle_pair(void) {

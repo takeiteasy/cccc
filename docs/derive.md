@@ -23,8 +23,8 @@ int main(void) {
 
 | Attribute | Applies to | Generates |
 |---|---|---|
-| `@serialize` | struct/union | `int T_serialize(T *self, void *buf)` |
-| `@deserialize` | struct/union | `T T_deserialize(void *buf)` |
+| `@serialize` | struct/union | `int T_serialize(T *self, void *buf)`, `unsigned long T_serialize_size(const T *self)` |
+| `@deserialize` | struct/union | `T T_deserialize(void *buf)`, `unsigned long T_deserialize_read(T *out, void *buf)` |
 | `@to_string` | enum | `const char *T_to_string(T v)` |
 | `@to_string` | struct | `size_t T_to_string(const T *self, char *buf, size_t cap)` |
 | `@from_string` | enum | `T T_from_string(const char *s)` |
@@ -82,8 +82,34 @@ typedef struct { int x; int y; } Point;
 
 Members are copied one by one, so the buffer needs no particular alignment.
 Nested structs, bit-fields and the fields of anonymous struct/union members are
-included. Pointer members are copied as raw pointer bytes. Padding is not
-written, and `Point_deserialize` zeroes the padding of the value it returns.
+included. Pointer members that are not [`@owned`](derive-owned.md) are copied as
+raw pointer bytes. Padding is not written, and `Point_deserialize` zeroes the
+padding of the value it returns.
+
+### Owned members
+
+A struct with [`@owned`](derive-owned.md) members also writes their content after
+the `sizeof(T)` fixed bytes, so the buffer holds the strings, arrays and
+pointees themselves. `T_serialize_size` gives the size to allocate, and
+`T_serialize` returns the bytes written:
+
+```c
+@serialize @deserialize @destroy
+struct Config { int n; char *host @owned; int *ports @owned("n"); };
+
+unsigned long size = Config_serialize_size(&cfg);
+char *buf = malloc(size);
+Config_serialize(&cfg, buf);
+struct Config copy = Config_deserialize(buf);   // allocates host and ports
+Config_destroy(&copy);
+```
+
+`T_deserialize` allocates the owned members; release them with `@destroy`. It
+needs `#include <stdlib.h>` and `<string.h>`, trusts the buffer and does not
+report allocation failure. The buffer uses the host's byte order, so it is not
+portable between machines.[^binary] A pointee that owns memory needs its own
+`@serialize` / `@deserialize` declared first; a forward-declared pointee is a
+compile error. `@serialize_skip` leaves an owned member out too.
 
 The `Serialize(type, expr, buf)` and `Deserialize(type, buf)` builders behind
 these attributes are described in [macros.md](macros-stdlib.md#macro-standard-library).
@@ -215,6 +241,8 @@ A handler for a struct reads the attributes on its members with
 [Member attributes](macros-attributes.md#member-attributes).
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
+
+[^binary]: Each owned member follows the fixed bytes in declaration order: a presence byte (`0` for `NULL`), then a string as an `unsigned long` length and its bytes, an array as its elements (the length member is in the fixed bytes), or one object. A pointee that owns memory is written through its own `T_serialize`; `T_deserialize_read` is the reader it uses.
 
 [^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. `@to_json`, `@from_json`, `@dump`, `@to_string` and `@from_string` also step through an `@owned("n")` array of such a struct with `T_clone_size`, so it needs `@clone`; `@equals`, `@hash` and `@compare` reject that array.
 

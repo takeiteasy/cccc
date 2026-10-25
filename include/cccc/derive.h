@@ -58,52 +58,6 @@
     return tname;
 }
 
-// @serialize struct Foo {...}; publishes
-//   int Foo_serialize(struct Foo *self, void *buf);
-// which copies *self into buf via Serialize and returns sizeof(struct Foo).
-@comptime(attribute("serialize")) void __builtin_attr_serialize(
-    AttrTarget *target) {
-    Type       *ty    = __builtin_attr_type_target(target, "@serialize", false);
-    const char *tname = __builtin_attr_type_name(target, "@serialize");
-
-    char fname[128];
-    strcpy(fname, tname);
-    strcat(fname, "_serialize");
-
-    Obj *fn = MakeFunction(fname, GetType("int"));
-    FunctionAddParam(fn, "self", MakePointer(ty));
-    FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
-    WithFn(fn) {
-        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
-        Node *buf   = MakeParamRef(fn, "buf");
-        Node *block = Serialize(ty, self, buf);
-        BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
-        FunctionSetBody(fn, block);
-    }
-    PublishNode(fn);
-}
-
-// @deserialize struct Foo {...}; publishes
-//   struct Foo Foo_deserialize(void *buf);
-// which reconstructs a struct Foo from buf via Deserialize.
-@comptime(attribute("deserialize")) void __builtin_attr_deserialize(
-    AttrTarget *target) {
-    Type       *ty = __builtin_attr_type_target(target, "@deserialize", false);
-    const char *tname = __builtin_attr_type_name(target, "@deserialize");
-
-    char fname[128];
-    strcpy(fname, tname);
-    strcat(fname, "_deserialize");
-
-    Obj *fn = MakeFunction(fname, ty);
-    FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
-    WithFn(fn) {
-        Node *buf = MakeParamRef(fn, "buf");
-        FunctionSetBody(fn, MakeReturn(Deserialize(ty, buf)));
-    }
-    PublishNode(fn);
-}
-
 // The optional name prefix passed as `@attr("Prefix")`: "" when absent.
 @comptime const char *__builtin_attr_prefix_arg(const char *attr) {
     if (VarargCount() == 0)
@@ -481,6 +435,10 @@
             strcpy(fix, "@from_json");
         } else if (!strcmp(suffix, "_text_read")) {
             strcpy(fix, "@from_string");
+        } else if (!strncmp(suffix, "_serialize", 10)) {
+            strcpy(fix, "@serialize");
+        } else if (!strcmp(suffix, "_deserialize_read")) {
+            strcpy(fix, "@deserialize");
         } else {
             strcpy(fix, "@");
             strcat(fix, suffix + 1);
@@ -2968,6 +2926,286 @@
         FunctionSetBody(size_fn, block);
     }
     PublishNode(size_fn);
+}
+
+// ---- @serialize / @deserialize ---------------------------------------------
+// The members are copied at their natural offsets (the Serialize/Deserialize
+// builders). A struct with @owned members then appends their content after
+// sizeof(T) bytes, in declaration order and in the host's byte order: a
+// presence byte (0 for NULL), then a C string as an unsigned long length and
+// its bytes, an array as its elements (the length member is in the fixed part),
+// anything else as one object. A pointee that owns memory is written through
+// its own functions. The helper functions below are published for it.
+//   int           T_serialize(T *self, void *buf)         bytes written
+//   unsigned long T_serialize_size(const T *self)         bytes T_serialize
+//   writes unsigned long T_deserialize_read(T *out, void *buf)   bytes read
+
+// What @serialize does with the @owned members of `obj`, a struct lvalue of
+// type `ty`: mode 0 writes through the char pointer `cur`, 1 adds to the
+// unsigned long `cur` the bytes mode 0 writes, 2 reads through `cur` into
+// `obj`, allocating each member.
+@comptime void __builtin_binary_owned(Node *block, Type *ty, Node *obj,
+                                      Node *cur, int mode,
+                                      const char *self_name, const char *path) {
+    static const char *attrs[3] = {"@serialize", "@serialize", "@deserialize"};
+    static const char *sufs[3]  = {"_serialize", "_serialize_size",
+                                   "_deserialize_read"};
+    int                count    = StructMemberCount(ty);
+    for (int i = 0; i < count; i++) {
+        Member     *m     = StructMemberAt(ty, i);
+        const char *field = MemberName(m);
+        Type       *fty   = MemberType(m);
+        if (!field) {
+            if (GetTypeKind(fty) == TK_STRUCT)
+                __builtin_binary_owned(block, fty, obj, cur, mode, self_name,
+                                       path);
+            continue;
+        }
+        if (MemberHasAttr(m, "serialize_skip"))
+            continue;
+        char sub[256];
+        __builtin_derive_path(sub, path, ".");
+        strcat(sub, field);
+        Node *e = MakeMember(obj, field);
+        if (!MemberHasAttr(m, "owned")) {
+            if (!__builtin_owned_has(fty))
+                continue;
+            if (GetTypeKind(fty) == TK_ARRAY) {
+                Node *idx  = MakeLocalVarUnique(GetType("int"));
+                Node *body = MakeBlock(NULL, 0);
+                __builtin_binary_owned(body, TypeBase(fty),
+                                       MakeSubscript(e, idx), cur, mode,
+                                       self_name, sub);
+                BlockAddStmt(
+                    block, __builtin_owned_loop(idx, TypeArrayLen(fty), body));
+            } else {
+                __builtin_binary_owned(block, fty, e, cur, mode, self_name,
+                                       sub);
+            }
+            continue;
+        }
+
+        const char *cname = NULL;
+        int   shape = __builtin_owned_shape(m, ty, attrs[mode], sub, &cname);
+        Type *pt    = TypeBase(fty);
+        char  fn[256];
+        int deep = __builtin_owned_pointee_fn(fn, pt, "", self_name, sufs[mode],
+                                              attrs[mode], sub);
+        if (deep == 2)
+            MacroErrorAt(MakeIntLiteral(0),
+                         "%s: owned member '%s' points to a struct that is "
+                         "not declared yet; declare it first",
+                         attrs[mode], sub);
+        if (shape == 1)
+            deep = 0;
+        char tmpl[900];
+        tmpl[0] = 0;
+        if (mode == 0) {
+            const char *none = " else { *$2 = 0; $2 += 1; }";
+            strcat(tmpl, "if ($1) { *$2 = 1; $2 += 1; ");
+            if (shape == 1)
+                strcat(tmpl, "unsigned long l_ = strlen($1); memcpy($2, &l_, "
+                             "sizeof l_); $2 += sizeof l_; memcpy($2, $1, "
+                             "l_); $2 += l_; }");
+            else if (shape == 2 && deep)
+                strcat(strcat(strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; "
+                                           "i_++) $2 += "),
+                              fn),
+                       "(&$1[i_], $2); }");
+            else if (shape == 2)
+                strcat(tmpl, "unsigned long b_ = $3 > 0 ? (unsigned long)$3 * "
+                             "sizeof(*$1) : 0; memcpy($2, $1, b_); $2 += b_; "
+                             "}");
+            else if (deep)
+                strcat(strcat(strcat(tmpl, "$2 += "), fn), "($1, $2); }");
+            else
+                strcat(tmpl, "memcpy($2, $1, sizeof(*$1)); $2 += "
+                             "sizeof(*$1); }");
+            strcat(tmpl, none);
+        } else if (mode == 1) {
+            strcat(tmpl, "$2 += 1; if ($1) ");
+            if (shape == 1)
+                strcat(tmpl, "$2 += sizeof(unsigned long) + strlen($1);");
+            else if (shape == 2 && deep)
+                strcat(strcat(strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; "
+                                           "i_++) $2 += "),
+                              fn),
+                       "(&$1[i_]);");
+            else if (shape == 2)
+                strcat(tmpl, "if ($3 > 0) $2 += (unsigned long)$3 * "
+                             "sizeof(*$1);");
+            else if (deep)
+                strcat(strcat(strcat(tmpl, "$2 += "), fn), "($1);");
+            else
+                strcat(tmpl, "$2 += sizeof(*$1);");
+        } else {
+            strcat(tmpl, "{ char f_ = *$2; $2 += 1; if (!f_) $1 = 0; else { ");
+            if (shape == 1)
+                strcat(tmpl, "unsigned long l_; memcpy(&l_, $2, sizeof l_); "
+                             "$2 += sizeof l_; $1 = malloc(l_ + 1); "
+                             "memcpy($1, $2, l_); $1[l_] = 0; $2 += l_; ");
+            else if (shape == 2 && deep)
+                strcat(strcat(strcat(tmpl, "unsigned long n_ = $3 > 0 ? "
+                                           "(unsigned long)$3 : 0; $1 = "
+                                           "calloc(n_ ? n_ : 1, sizeof(*$1)); "
+                                           "for (unsigned long i_ = 0; i_ < "
+                                           "n_; i_++) $2 += "),
+                              fn),
+                       "(&$1[i_], $2); ");
+            else if (shape == 2)
+                strcat(tmpl, "unsigned long n_ = $3 > 0 ? (unsigned long)$3 : "
+                             "0; $1 = calloc(n_ ? n_ : 1, sizeof(*$1)); "
+                             "memcpy($1, $2, n_ * sizeof(*$1)); $2 += n_ * "
+                             "sizeof(*$1); ");
+            else if (deep)
+                strcat(strcat(strcat(tmpl, "$1 = calloc(1, sizeof(*$1)); $2 "
+                                           "+= "),
+                              fn),
+                       "($1, $2); ");
+            else
+                strcat(tmpl, "$1 = calloc(1, sizeof(*$1)); memcpy($1, $2, "
+                             "sizeof(*$1)); $2 += sizeof(*$1); ");
+            strcat(tmpl, "} }");
+        }
+        BlockAddStmt(block,
+                     Quote(tmpl, e, cur, cname ? MakeMember(obj, cname) : e));
+    }
+}
+
+@comptime void __builtin_binary_require(const char *attr) {
+    __builtin_owned_require(attr);
+    if (!FindGlobal("strcpy"))
+        MacroErrorAt(MakeIntLiteral(0), "%s needs #include <string.h>", attr);
+}
+
+// @serialize struct Foo {...}; publishes
+//   int Foo_serialize(struct Foo *self, void *buf);
+//   unsigned long Foo_serialize_size(const struct Foo *self);
+// Foo_serialize copies *self into buf and returns the bytes written, which
+// Foo_serialize_size reports beforehand: sizeof(struct Foo), plus the content
+// of its @owned members.
+@comptime(attribute("serialize")) void __builtin_attr_serialize(
+    AttrTarget *target) {
+    Type       *ty    = __builtin_attr_type_target(target, "@serialize", false);
+    const char *tname = __builtin_attr_type_name(target, "@serialize");
+    bool        owned = GetTypeKind(ty) == TK_STRUCT && __builtin_owned_has(ty);
+    if (owned)
+        __builtin_binary_require("@serialize");
+
+    char fname[128];
+    char sname[128];
+    __builtin_json_fn_name(fname, "", tname, "_serialize");
+    __builtin_json_fn_name(sname, "", tname, "_serialize_size");
+    __builtin_owned_proto(fname, GetType("int"), MakePointer(ty), "self",
+                          MakePointer(GetType("void")), "buf");
+    __builtin_owned_proto(sname, GetType("unsigned long"),
+                          MakePointer(MakeConst(ty)), "self", NULL, NULL);
+
+    Obj *fn = MakeFunction(fname, GetType("int"));
+    WithFn(fn) {
+        Node *self  = MakeUnary(NK_DEREF, MakeParamRef(fn, "self"));
+        Node *buf   = MakeParamRef(fn, "buf");
+        Node *block = Serialize(ty, self, buf);
+        if (owned) {
+            Node *cur  = MakeLocalVarUnique(MakePointer(GetType("char")));
+            Node *base = MakeCast(buf, MakePointer(GetType("char")));
+            BlockAddStmt(block,
+                         MakeExprStmt(MakeAssign(
+                             cur, MakeBinary(NK_ADD, base,
+                                             MakeIntLiteral(TypeSize(ty))))));
+            __builtin_binary_owned(block, ty, self, cur, 0, tname, tname);
+            BlockAddStmt(block,
+                         MakeReturn(MakeCast(MakeBinary(NK_SUB, cur, base),
+                                             GetType("int"))));
+        } else {
+            BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
+        }
+        FunctionSetBody(fn, block);
+    }
+    PublishNode(fn);
+
+    Obj *size_fn = MakeFunction(sname, GetType("unsigned long"));
+    WithFn(size_fn) {
+        Node *block = MakeBlock(NULL, 0);
+        Node *n     = MakeLocalVarUnique(GetType("unsigned long"));
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(n, MakeIntLiteral(TypeSize(ty)))));
+        if (owned)
+            __builtin_binary_owned(
+                block, ty,
+                MakeUnary(NK_DEREF,
+                          __builtin_derive_const_param(size_fn, "self", ty)),
+                n, 1, tname, tname);
+        BlockAddStmt(block, MakeReturn(n));
+        FunctionSetBody(size_fn, block);
+    }
+    PublishNode(size_fn);
+}
+
+// @deserialize struct Foo {...}; publishes
+//   struct Foo Foo_deserialize(void *buf);
+//   unsigned long Foo_deserialize_read(struct Foo *out, void *buf);
+// Foo_deserialize reconstructs a struct Foo from what Foo_serialize wrote; the
+// memory of its @owned members is allocated, so release it with @destroy. The
+// buffer is trusted. Foo_deserialize_read writes into *out and returns the
+// bytes it read.
+@comptime(attribute("deserialize")) void __builtin_attr_deserialize(
+    AttrTarget *target) {
+    Type       *ty = __builtin_attr_type_target(target, "@deserialize", false);
+    const char *tname = __builtin_attr_type_name(target, "@deserialize");
+    bool        owned = GetTypeKind(ty) == TK_STRUCT && __builtin_owned_has(ty);
+    if (owned)
+        __builtin_binary_require("@deserialize");
+
+    char fname[128];
+    char rname[128];
+    __builtin_json_fn_name(fname, "", tname, "_deserialize");
+    __builtin_json_fn_name(rname, "", tname, "_deserialize_read");
+    __builtin_owned_proto(rname, GetType("unsigned long"), MakePointer(ty),
+                          "out", MakePointer(GetType("void")), "buf");
+
+    Obj *read_fn = MakeFunction(rname, GetType("unsigned long"));
+    WithFn(read_fn) {
+        Node *out   = MakeUnary(NK_DEREF, MakeParamRef(read_fn, "out"));
+        Node *buf   = MakeParamRef(read_fn, "buf");
+        Node *block = MakeBlock(NULL, 0);
+        BlockAddStmt(block,
+                     MakeExprStmt(MakeAssign(out, Deserialize(ty, buf))));
+        if (owned) {
+            Node *cur  = MakeLocalVarUnique(MakePointer(GetType("char")));
+            Node *base = MakeCast(buf, MakePointer(GetType("char")));
+            BlockAddStmt(block,
+                         MakeExprStmt(MakeAssign(
+                             cur, MakeBinary(NK_ADD, base,
+                                             MakeIntLiteral(TypeSize(ty))))));
+            __builtin_binary_owned(block, ty, out, cur, 2, tname, tname);
+            BlockAddStmt(block,
+                         MakeReturn(MakeCast(MakeBinary(NK_SUB, cur, base),
+                                             GetType("unsigned long"))));
+        } else {
+            BlockAddStmt(block, MakeReturn(MakeIntLiteral(TypeSize(ty))));
+        }
+        FunctionSetBody(read_fn, block);
+    }
+    PublishNode(read_fn);
+
+    Obj *fn = MakeFunction(fname, ty);
+    FunctionAddParam(fn, "buf", MakePointer(GetType("void")));
+    WithFn(fn) {
+        Node *buf = MakeParamRef(fn, "buf");
+        if (owned) {
+            Node *block   = MakeBlock(NULL, 0);
+            Node *r       = MakeLocalVarUnique(ty);
+            Node *args[2] = {MakeUnary(NK_ADDR, r), buf};
+            BlockAddStmt(
+                block, MakeExprStmt(MakeFuncCall(MakeVarRef(rname), args, 2)));
+            BlockAddStmt(block, MakeReturn(r));
+            FunctionSetBody(fn, block);
+        } else {
+            FunctionSetBody(fn, MakeReturn(Deserialize(ty, buf)));
+        }
+    }
+    PublishNode(fn);
 }
 
 // ---- @compare ------------------------------------------------------------------

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `@serialize` and `@deserialize` write and read the content of `@owned` members after the fixed bytes. `@serialize` also publishes `T_serialize_size`, and `@deserialize` publishes `T_deserialize_read`. Structs without `@owned` members serialize as before.
 - Fixed: `@to_json`, `@from_json`, `@dump`, `@to_string` and `@from_string` handle an `@owned` member whose pointee struct is declared later (single object or `@owned("n")` array), stepping through it with `T_clone_size`.
 - Added: `@from_string` on a struct publishes `int T_from_string(T *out, const char *s)`, which reads the text `@to_string` writes. It needs `#include <cccc/text.h>`; `*out` is written only on success.
 - Changed: `@dump` and `@to_string` escape `"`, `\` and control bytes in strings and print a `long double` with 21 significant digits, so the text reads back exactly.
