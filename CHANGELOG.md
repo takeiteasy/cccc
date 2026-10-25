@@ -7,6 +7,18 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-25
+
+- Added: `[[cccc::operator(...)]]` binds `& | ^ << >>` and the unary `- + ~ !`
+  for struct and union operands, `++` and `--` use the `T + int` and
+  `T - int` functions, and `[[cccc::operator([])]]` binds `a[i]`. Compound
+  `*=`, `/=` and `%=` on structs call the bound function. See
+  `docs/operators.md`.
+- Fixed: a pointer operand to `* / % & | ^ << >>` or unary `+ - ~`, and a
+  floating-point or `_Complex` operand to `% & | ^ << >>` or unary `~`, is a
+  located `invalid operands` error at parse time instead of compiling or
+  failing late in code generation. `~z` on a `_Complex` value is rejected.
+
 ## [0.24.0] - 2026-10-24
 
 - Added: `<=>` binds a function as a three-way comparison, and `a <=> b` is an
