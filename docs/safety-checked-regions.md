@@ -35,7 +35,7 @@ void g(void) {
 | Form | Scope | Notes |
 |---|---|---|
 | `[[cccc::checked]]` / `[[cccc::unchecked]]` | A function body or a `{ }` block | Also `__attribute__((checked))`, `__checked__`, `@checked` |
-| `#pragma cccc checked begin` / `end` (and `unchecked`) | From `begin` to `end` | A positional directive; an unclosed `begin` or stray `end` is an error |
+| `#pragma cccc checked begin` / `end` (and `unchecked`) | From `begin` to `end` | A positional directive; `end` must name the same keyword as its `begin`, and an unclosed `begin` or stray `end` is an error |
 | `_Checked { }` / `_Unchecked { }` | A block, as a statement | Checked C spelling; recognised by position, so the names are not reserved. Not valid as a declarator suffix (`void f(void) _Checked { }`): use the attribute |
 
 Regions nest to any depth and the innermost wins, across all spellings. An attribute or keyword region overrides a surrounding pragma region.
@@ -79,4 +79,4 @@ int main(void) { printf("hi\n"); return 0; }
 
 The diagnostics are not gated by `--checked-pointers`, and they fire under `-c=native`, `-m` and `-c=generated`. The region attributes are stripped from that output.
 
-[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); call-boundary diagnostics between checked and unchecked code (an annotated prototype's own bounds are still checked at the call); global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion; and a mismatched `checked begin` / `unchecked end` pair is accepted, since `end` restores whatever state preceded its `begin`.
+[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); call-boundary diagnostics between checked and unchecked code (an annotated prototype's own bounds are still checked at the call); global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion.

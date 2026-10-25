@@ -194,7 +194,8 @@ static void checked_scope_push(VirtualMachine *vm, CheckedScope state,
                         sizeof(*vm->compiler.checked_scope_stack));
     }
     vm->compiler.checked_scope_stack[vm->compiler.checked_scope_stack_len++] =
-        (struct CheckedScopeEntry){vm->compiler.checked_scope_pp, open_tok};
+        (struct CheckedScopeEntry){vm->compiler.checked_scope_pp, state,
+                                   open_tok};
     vm->compiler.checked_scope_pp = state;
 }
 
@@ -6305,6 +6306,19 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                               "stray #pragma cccc %s end without matching "
                               "begin",
                               is_checked ? "checked" : "unchecked");
+                struct CheckedScopeEntry *top =
+                    &vm->compiler.checked_scope_stack
+                         [vm->compiler.checked_scope_stack_len - 1];
+                CheckedScope want =
+                    is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
+                if (top->opened != want)
+                    error_tok(vm, tok,
+                              "#pragma cccc %s end does not match "
+                              "'#pragma cccc %s begin' at line %d",
+                              is_checked ? "checked" : "unchecked",
+                              is_checked ? "unchecked" : "checked",
+                              top->open_tok->line_no +
+                                  top->open_tok->file->line_delta);
                 checked_scope_pop(vm);
                 return skip_line(vm, after->next);
             } else {

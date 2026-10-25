@@ -4227,6 +4227,7 @@ typedef struct Compiler {
     // cc_checked_scope_at() (src/parse_checked.c).
     struct CheckedScopeEntry {
         CheckedScope prev;     // region state before this begin was pushed
+        CheckedScope opened;   // state this begin pushed (its keyword)
         Token       *open_tok; // token of the #pragma cccc checked/unchecked
                                // begin (for "unclosed" diagnostics)
     }           *checked_scope_stack;
