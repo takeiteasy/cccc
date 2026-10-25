@@ -202,6 +202,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                           decl_depth > 0 ? " " : "", stars);
             }
 
+            cc_check_checked_scope_decl(vm, deduced, name_tok,
+                                        "local variable");
+
             if (attr->is_static) {
                 warn_if_shadowing(vm, name_tok);
                 drop_cleanup_attr(vm, deduced, attr, name_tok);

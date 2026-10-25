@@ -153,6 +153,23 @@ void test_checked_arrays_and_return_types_allowed(void) {
 }
 
 [[cccc::checked]]
+int auto_locals_allowed(int *[[cccc::single]] s) {
+    auto n = 40;
+    auto c = s;
+    [[cccc::unchecked]] {
+        auto raw = g_raw;
+        (void)raw;
+    }
+    return n + *c;
+}
+
+[[cccc::test]]
+void test_auto_locals_in_region(void) {
+    int two = 2;
+    AssertEq(auto_locals_allowed(&two), 42);
+}
+
+[[cccc::checked]]
 int bounds_unknown_from_raw(void) {
     int *[[cccc::array, cccc::bounds(unknown)]] a = g_raw;
     int *[[cccc::array, cccc::bounds(unknown)]] b =
