@@ -108,8 +108,8 @@ Config_destroy(&copy);
 needs `#include <stdlib.h>` and `<string.h>`, trusts the buffer and does not
 report allocation failure. The buffer uses the host's byte order, so it is not
 portable between machines.[^binary] A pointee that owns memory needs its own
-`@serialize` / `@deserialize` declared first; a forward-declared pointee is a
-compile error. `@serialize_skip` leaves an owned member out too.
+`@serialize` / `@deserialize` declared first, unless it is only forward-declared
+(see [forward declarations](derive-owned.md)). `@serialize_skip` leaves an owned member out too.
 
 The `Serialize(type, expr, buf)` and `Deserialize(type, buf)` builders behind
 these attributes are described in [macros.md](macros-stdlib.md#macro-standard-library).
@@ -244,7 +244,7 @@ A handler for a struct reads the attributes on its members with
 
 [^binary]: Each owned member follows the fixed bytes in declaration order: a presence byte (`0` for `NULL`), then a string as an `unsigned long` length and its bytes, an array as its elements (the length member is in the fixed bytes), or one object. A pointee that owns memory is written through its own `T_serialize`; `T_deserialize_read` is the reader it uses.
 
-[^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. `@to_json`, `@from_json`, `@dump`, `@to_string` and `@from_string` also step through an `@owned("n")` array of such a struct with `T_clone_size`, so it needs `@clone`; `@equals`, `@hash` and `@compare` reject that array.
+[^forward]: A pointee that is only forward-declared is called through a prototype that is published for it, as for `@clone`, so it can be declared after its owner. Every derive that follows `@owned` members also steps through an `@owned("n")` array of such a struct with `T_clone_size`, so the pointee needs `@clone`.
 
 [^json]: `@to_json` and `@from_json` also publish `void T_json_write(const T *self, __cccc_json_w *w)` and `int T_json_read(T *out, __cccc_json_r *r)` (with the same prefix), the writer and reader behind the public functions. A struct that owns a pointer to a `T` calls them to write or read the pointee, which lets it nest and recurse without a second buffer.
 

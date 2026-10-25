@@ -46,7 +46,8 @@ whose pointee needs a missing function is a compile error that names it
 (`needs Inner_clone`).
 
 A pointee that is only forward-declared can be declared after its owner, which
-lets two structs own pointers to each other:
+lets two structs own pointers to each other. The forward-declared struct needs
+`@clone`, which gives the other derives its size for an `@owned("n")` array:
 
 ```c
 struct Leaf;

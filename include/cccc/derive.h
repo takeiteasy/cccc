@@ -358,6 +358,15 @@
     } else if (!strcmp(suffix, "_text_read")) {
         __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "out",
                               MakePointer(GetType("__cccc_text_r")), "r");
+    } else if (!strcmp(suffix, "_serialize")) {
+        __builtin_owned_proto(fname, GetType("int"), MakePointer(pt), "self",
+                              MakePointer(GetType("void")), "buf");
+    } else if (!strcmp(suffix, "_serialize_size")) {
+        __builtin_owned_proto(fname, GetType("unsigned long"),
+                              MakePointer(MakeConst(pt)), "self", NULL, NULL);
+    } else if (!strcmp(suffix, "_deserialize_read")) {
+        __builtin_owned_proto(fname, GetType("unsigned long"), MakePointer(pt),
+                              "out", MakePointer(GetType("void")), "buf");
     } else if (!strcmp(suffix, "_dump")) {
         __builtin_owned_proto(fname, GetType("void"),
                               MakePointer(MakeConst(pt)), "self",
@@ -416,12 +425,7 @@
             __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
         } else {
             __builtin_derive_pointee_proto(prefix, pt, pname, suffix);
-            if (!strcmp(suffix, "_json_read") ||
-                !strcmp(suffix, "_text_read") ||
-                !strcmp(suffix, "_json_write") || !strcmp(suffix, "_dump") ||
-                !strcmp(suffix, "_to_string"))
-                __builtin_derive_pointee_proto(prefix, pt, pname,
-                                               "_clone_size");
+            __builtin_derive_pointee_proto(prefix, pt, pname, "_clone_size");
         }
         return 2;
     }
@@ -514,14 +518,8 @@
                                          const char *self_name,
                                          const char *suffix, const char *attr,
                                          const char *path) {
-    int deep = __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix,
-                                          attr, path);
-    if (deep == 2 && shape == 2)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "%s: owned member '%s' points to an array of a struct "
-                     "that is not declared yet; declare it first",
-                     attr, path);
-    return deep;
+    return __builtin_owned_pointee_fn(fn, pt, prefix, self_name, suffix, attr,
+                                      path);
 }
 
 // ---- @to_json / @from_json
@@ -1450,8 +1448,8 @@
         Node *i    = MakeLocalVarUnique(GetType("long"));
         Node *body = MakeBlock(NULL, 0);
         if (deep) {
-            Node *ea = MakeUnary(NK_ADDR, MakeSubscript(pa, i));
-            Node *eb = MakeUnary(NK_ADDR, MakeSubscript(pb, i));
+            Node *ea = __builtin_read_elem(pa, i, deep, prefix, pt);
+            Node *eb = __builtin_read_elem(pb, i, deep, prefix, pt);
             BlockAddStmt(
                 body,
                 MakeIf(MakeUnary(NK_NOT, __builtin_json_call2(fn, ea, eb)),
@@ -1616,7 +1614,7 @@
             __builtin_hash_mix(
                 body, h,
                 MakeCast(__builtin_json_call1(
-                             fn, MakeUnary(NK_ADDR, MakeSubscript(p, i))),
+                             fn, __builtin_read_elem(p, i, deep, prefix, pt)),
                          u64));
         else
             __builtin_hash_value(body, h, pt, MakeSubscript(p, i), elem, prefix,
@@ -2989,52 +2987,72 @@
         char  fn[256];
         int deep = __builtin_owned_pointee_fn(fn, pt, "", self_name, sufs[mode],
                                               attrs[mode], sub);
-        if (deep == 2)
-            MacroErrorAt(MakeIntLiteral(0),
-                         "%s: owned member '%s' points to a struct that is "
-                         "not declared yet; declare it first",
-                         attrs[mode], sub);
         if (shape == 1)
             deep = 0;
-        char tmpl[900];
+        // A pointee that is not declared yet has no sizeof: T_clone_size gives
+        // its size, and elements are reached through a char pointer.
+        char tmpl[1200];
+        char sz[300];
+        char el[100];
+        char zdecl[330];
+        strcpy(sz, "sizeof(*$1)");
+        strcpy(el, "&$1[i_]");
+        zdecl[0] = 0;
+        if (deep == 2) {
+            __builtin_json_fn_name(sz, "", TypeName(pt), "_clone_size");
+            strcat(sz, "()");
+            strcpy(zdecl, "unsigned long z_ = ");
+            strcat(zdecl, sz);
+            strcat(zdecl, "; ");
+            strcpy(sz, "z_");
+            strcpy(el, "(void *)((char *)$1 + i_ * z_)");
+        }
         tmpl[0] = 0;
         if (mode == 0) {
-            const char *none = " else { *$2 = 0; $2 += 1; }";
             strcat(tmpl, "if ($1) { *$2 = 1; $2 += 1; ");
             if (shape == 1)
                 strcat(tmpl, "unsigned long l_ = strlen($1); memcpy($2, &l_, "
                              "sizeof l_); $2 += sizeof l_; memcpy($2, $1, "
                              "l_); $2 += l_; }");
-            else if (shape == 2 && deep)
-                strcat(strcat(strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; "
-                                           "i_++) $2 += "),
-                              fn),
-                       "(&$1[i_], $2); }");
-            else if (shape == 2)
+            else if (shape == 2 && deep) {
+                strcat(tmpl, zdecl);
+                strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; i_++) $2 += ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "(");
+                strcat(tmpl, el);
+                strcat(tmpl, ", $2); }");
+            } else if (shape == 2)
                 strcat(tmpl, "unsigned long b_ = $3 > 0 ? (unsigned long)$3 * "
                              "sizeof(*$1) : 0; memcpy($2, $1, b_); $2 += b_; "
                              "}");
-            else if (deep)
-                strcat(strcat(strcat(tmpl, "$2 += "), fn), "($1, $2); }");
-            else
+            else if (deep) {
+                strcat(tmpl, "$2 += ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "($1, $2); }");
+            } else
                 strcat(tmpl, "memcpy($2, $1, sizeof(*$1)); $2 += "
                              "sizeof(*$1); }");
-            strcat(tmpl, none);
+            strcat(tmpl, " else { *$2 = 0; $2 += 1; }");
         } else if (mode == 1) {
             strcat(tmpl, "$2 += 1; if ($1) ");
             if (shape == 1)
                 strcat(tmpl, "$2 += sizeof(unsigned long) + strlen($1);");
-            else if (shape == 2 && deep)
-                strcat(strcat(strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; "
-                                           "i_++) $2 += "),
-                              fn),
-                       "(&$1[i_]);");
-            else if (shape == 2)
+            else if (shape == 2 && deep) {
+                strcat(tmpl, "{ ");
+                strcat(tmpl, zdecl);
+                strcat(tmpl, "for (long i_ = 0; i_ < (long)$3; i_++) $2 += ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "(");
+                strcat(tmpl, el);
+                strcat(tmpl, "); }");
+            } else if (shape == 2)
                 strcat(tmpl, "if ($3 > 0) $2 += (unsigned long)$3 * "
                              "sizeof(*$1);");
-            else if (deep)
-                strcat(strcat(strcat(tmpl, "$2 += "), fn), "($1);");
-            else
+            else if (deep) {
+                strcat(tmpl, "$2 += ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "($1);");
+            } else
                 strcat(tmpl, "$2 += sizeof(*$1);");
         } else {
             strcat(tmpl, "{ char f_ = *$2; $2 += 1; if (!f_) $1 = 0; else { ");
@@ -3042,25 +3060,30 @@
                 strcat(tmpl, "unsigned long l_; memcpy(&l_, $2, sizeof l_); "
                              "$2 += sizeof l_; $1 = malloc(l_ + 1); "
                              "memcpy($1, $2, l_); $1[l_] = 0; $2 += l_; ");
-            else if (shape == 2 && deep)
-                strcat(strcat(strcat(tmpl, "unsigned long n_ = $3 > 0 ? "
-                                           "(unsigned long)$3 : 0; $1 = "
-                                           "calloc(n_ ? n_ : 1, sizeof(*$1)); "
-                                           "for (unsigned long i_ = 0; i_ < "
-                                           "n_; i_++) $2 += "),
-                              fn),
-                       "(&$1[i_], $2); ");
-            else if (shape == 2)
+            else if (shape == 2 && deep) {
+                strcat(tmpl, zdecl);
+                strcat(tmpl, "unsigned long n_ = $3 > 0 ? (unsigned long)$3 : "
+                             "0; $1 = calloc(n_ ? n_ : 1, ");
+                strcat(tmpl, sz);
+                strcat(tmpl, "); for (unsigned long i_ = 0; i_ < n_; i_++) $2 "
+                             "+= ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "(");
+                strcat(tmpl, el);
+                strcat(tmpl, ", $2); ");
+            } else if (shape == 2)
                 strcat(tmpl, "unsigned long n_ = $3 > 0 ? (unsigned long)$3 : "
                              "0; $1 = calloc(n_ ? n_ : 1, sizeof(*$1)); "
                              "memcpy($1, $2, n_ * sizeof(*$1)); $2 += n_ * "
                              "sizeof(*$1); ");
-            else if (deep)
-                strcat(strcat(strcat(tmpl, "$1 = calloc(1, sizeof(*$1)); $2 "
-                                           "+= "),
-                              fn),
-                       "($1, $2); ");
-            else
+            else if (deep) {
+                strcat(tmpl, zdecl);
+                strcat(tmpl, "$1 = calloc(1, ");
+                strcat(tmpl, sz);
+                strcat(tmpl, "); $2 += ");
+                strcat(tmpl, fn);
+                strcat(tmpl, "($1, $2); ");
+            } else
                 strcat(tmpl, "$1 = calloc(1, sizeof(*$1)); memcpy($1, $2, "
                              "sizeof(*$1)); $2 += sizeof(*$1); ");
             strcat(tmpl, "} }");
@@ -3257,8 +3280,8 @@
         if (deep)
             __builtin_compare_call(
                 body, __builtin_json_call2(
-                          fn, MakeUnary(NK_ADDR, MakeSubscript(pa, i)),
-                          MakeUnary(NK_ADDR, MakeSubscript(pb, i))));
+                          fn, __builtin_read_elem(pa, i, deep, prefix, pt),
+                          __builtin_read_elem(pb, i, deep, prefix, pt)));
         else
             __builtin_compare_value(body, pt, MakeSubscript(pa, i),
                                     MakeSubscript(pb, i), elem, prefix,
