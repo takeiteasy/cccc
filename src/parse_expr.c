@@ -417,9 +417,7 @@ void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out) {
 // `A op= B` where op is an overloaded operator (binary is the call): A = op(A,
 // B), with A evaluated once.
 static Node *overloaded_assign(VirtualMachine *vm, Node *call, bool yield_old) {
-    Token *tok = call->tok;
-    if (yield_old)
-        error_tok(vm, tok, "operator functions do not support ++ or --");
+    Token *tok  = call->tok;
     Node *first = call->args;
     Node *addr  = first;
     while (addr->kind == ND_CAST)
@@ -447,7 +445,20 @@ static Node *overloaded_assign(VirtualMachine *vm, Node *call, bool yield_old) {
     Node *store = new_binary(
         vm, ND_ASSIGN, new_unary(vm, ND_DEREF, new_var_node(vm, p, tok), tok),
         call, tok);
-    return new_binary(vm, ND_COMMA, set, store, tok);
+    if (!yield_old)
+        return new_binary(vm, ND_COMMA, set, store, tok);
+
+    // a++: the value before the store, read through p so `a` is evaluated once.
+    Obj  *old   = new_lvar(vm, "", 0, unqualified(vm, lv->ty));
+    Node *save  = new_binary(
+        vm, ND_ASSIGN, new_var_node(vm, old, tok),
+        new_unary(vm, ND_DEREF, new_var_node(vm, p, tok), tok), tok);
+    Node *seq = new_binary(vm, ND_COMMA, set, save, tok);
+    seq       = new_binary(vm, ND_COMMA, seq, store, tok);
+    return new_cast(vm,
+                    new_binary(vm, ND_COMMA, seq, new_var_node(vm, old, tok),
+                               tok),
+                    unqualified(vm, lv->ty));
 }
 
 static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
@@ -1422,7 +1433,7 @@ static Node *sequence_after(VirtualMachine *vm, Node *prefix, Node *result,
 
 static const char *const overloadable_ops[] = {
     "+",  "-",  "*",  "/",  "%", "&",  "|", "^",
-    "<<", ">>", "==", "!=", "<", "<=", ">", ">="};
+    "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "~", "!"};
 
 // The operator [[cccc::operator(...)]] names at tok, or NULL if it cannot be
 // overloaded. *rest is the token after it. `<=>` is the two tokens `<=` `>`,
@@ -1446,13 +1457,19 @@ const char *overloadable_operator(Token *tok, Token **rest) {
 }
 
 // The name an in-struct `operator+` is mangled with: T_operator_add.
-const char *operator_name(const char *sym) {
+const char *operator_name(const char *sym, bool unary) {
     static const char *const names[][2] = {
         {"+", "add"},   {"-", "sub"},   {"*", "mul"}, {"/", "div"},
         {"%", "mod"},   {"&", "and"},   {"|", "or"},  {"^", "xor"},
         {"<<", "shl"},  {">>", "shr"},  {"==", "eq"}, {"!=", "ne"},
         {"<", "lt"},    {"<=", "le"},   {">", "gt"},  {">=", "ge"},
         {"<=>", "cmp"}, {"[]", "index"}};
+    static const char *const unary_names[][2] = {
+        {"-", "neg"}, {"+", "pos"}, {"!", "not"}, {"~", "compl"}};
+    if (unary)
+        for (size_t i = 0; i < sizeof(unary_names) / sizeof(*unary_names); i++)
+            if (!strcmp(sym, unary_names[i][0]))
+                return unary_names[i][1];
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
         if (!strcmp(sym, names[i][0]))
             return names[i][1];
@@ -1525,21 +1542,43 @@ static Type *operator_bucket_type(Type *lhs, Type *rhs) {
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     Compiler *c = &vm->compiler;
     Type     *lp = ty->params;
-    Type *rp = lp ? lp->next : NULL;
-    if (!rp || rp->next || ty->is_variadic)
-        error_tok(vm, tok, "operator function '%s' must take two parameters",
+    Type     *rp = lp ? lp->next : NULL;
+    const char *sym = ty->operator_sym;
+    bool unary_only = !strcmp(sym, "~") || !strcmp(sym, "!");
+    bool either     = !strcmp(sym, "+") || !strcmp(sym, "-");
+    bool unary      = lp && !rp && (unary_only || either);
+    if (!unary && (!rp || rp->next || ty->is_variadic || unary_only))
+        error_tok(vm, tok,
+                  unary_only ? "operator function '%s' must take one parameter"
+                  : either   ? "operator function '%s' must take one or two "
+                               "parameters"
+                             : "operator function '%s' must take two "
+                               "parameters",
                   fn->name);
 
-    OperatorEntry e = {.sym = ty->operator_sym, .fn = fn};
+    OperatorEntry e = {.sym = sym, .fn = fn};
     e.lhs           = operator_operand(vm, lp, &e.lhs_ptr);
-    e.rhs           = operator_operand(vm, rp, &e.rhs_ptr);
-    bool subscript  = !strcmp(e.sym, "[]");
+    if (unary) {
+        if (ty->is_variadic || !is_aggregate(e.lhs))
+            error_tok(vm, tok,
+                      "operator function '%s' needs a struct or union "
+                      "operand",
+                      fn->name);
+        if (sym[0] == '!' && !is_integer(ty->return_ty) &&
+            !is_flonum(ty->return_ty) && ty->return_ty->kind != TY_PTR)
+            error_tok(vm, tok,
+                      "operator function '%s' must return a scalar",
+                      fn->name);
+    } else {
+        e.rhs = operator_operand(vm, rp, &e.rhs_ptr);
+    }
+    bool subscript = !strcmp(sym, "[]");
     if (subscript && !is_aggregate(e.lhs))
         error_tok(vm, tok,
                   "subscript operator function '%s' needs a struct or union "
                   "first operand",
                   fn->name);
-    if (!is_aggregate(e.lhs) && !is_aggregate(e.rhs))
+    if (!unary && !is_aggregate(e.lhs) && !is_aggregate(e.rhs))
         error_tok(vm, tok,
                   "operator function '%s' needs a struct or union operand",
                   fn->name);
@@ -1550,24 +1589,25 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                   "an object",
                   fn->name);
 
-    bool shift      = !strcmp(e.sym, "<<") || !strcmp(e.sym, ">>");
-    bool comparison = !shift && (e.sym[0] == '=' || e.sym[0] == '!' ||
-                                 e.sym[0] == '<' || e.sym[0] == '>');
+    bool shift      = !strcmp(sym, "<<") || !strcmp(sym, ">>");
+    bool comparison = !unary && !shift &&
+                      (sym[0] == '=' || sym[0] == '!' || sym[0] == '<' ||
+                       sym[0] == '>');
     if (comparison && !is_integer(ty->return_ty))
         error_tok(vm, tok,
                   "comparison operator function '%s' must return an integer "
                   "or bool",
                   fn->name);
 
-    Type *bucket  = operator_bucket_type(e.lhs, e.rhs);
+    Type *bucket  = unary ? e.lhs : operator_bucket_type(e.lhs, e.rhs);
     int   sym_len = (int)strlen(e.sym);
     int   head    = binding_head(c, bucket, 'o', e.sym, sym_len);
     for (int i = head; i; i = c->operators[i - 1].next) {
         OperatorEntry *o = &c->operators[i - 1];
         if (o->fn == fn)
             return;
-        if (is_compatible(o->lhs, e.lhs) &&
-            (subscript || is_compatible(o->rhs, e.rhs)))
+        if (!o->rhs == unary && is_compatible(o->lhs, e.lhs) &&
+            (subscript || unary || is_compatible(o->rhs, e.rhs)))
             error_tok(vm, tok,
                       "operator '%s' is already defined for these "
                       "operand types (by '%s')",
@@ -1655,7 +1695,8 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                               sym, (int)strlen(sym));
     for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
         OperatorEntry *e = &vm->compiler.operators[i - 1];
-        if (!is_compatible(e->lhs, lt) || !is_compatible(e->rhs, rt))
+        if (!e->rhs || !is_compatible(e->lhs, lt) ||
+            !is_compatible(e->rhs, rt))
             continue;
         Node *args[2] = {
             e->lhs_ptr ? addr_of_operand(vm, lhs, tok) : lhs,
@@ -1664,6 +1705,27 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
         mark_function_referenced(vm, e->fn);
         return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
     }
+    return NULL;
+}
+
+// `sym operand` for a struct or union operand: a call to the one-parameter
+// function bound to sym. NULL when the operand is not a struct or union.
+Node *overloaded_unary(VirtualMachine *vm, const char *sym, Node *operand,
+                       Token *tok) {
+    add_type(vm, operand);
+    if (!is_aggregate(operand->ty))
+        return NULL;
+    Type *ty   = unqualified(vm, operand->ty);
+    int   head = binding_head(&vm->compiler, ty, 'o', sym, (int)strlen(sym));
+    for (int i = head; i; i = vm->compiler.operators[i - 1].next) {
+        OperatorEntry *e = &vm->compiler.operators[i - 1];
+        if (e->rhs || !is_compatible(e->lhs, ty))
+            continue;
+        Node *arg = e->lhs_ptr ? addr_of_operand(vm, operand, tok) : operand;
+        mark_function_referenced(vm, e->fn);
+        return new_call(vm, new_var_node(vm, e->fn, tok), &arg, 1, tok);
+    }
+    error_tok(vm, tok, "invalid operand to unary %s", sym);
     return NULL;
 }
 

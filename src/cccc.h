@@ -3108,6 +3108,7 @@ typedef struct PendingMethod {
     Token                *name;         // the function's name
     Token                *end;          // token after the closing `;` or `}`
     const char           *operator_sym; // set for `operator+(...)`, else NULL
+    bool                  operator_unary; // one-parameter operator
     bool                  has_body;
 } PendingMethod;
 
@@ -4158,7 +4159,7 @@ typedef struct {
 
 // A function bound to a built-in operator by [[cccc::operator(sym)]]. The
 // operand types are the parameter types, minus the pointer when a parameter is
-// taken by address.
+// taken by address. A unary operator has rhs == NULL.
 typedef struct {
     const char *sym;
     Type       *lhs, *rhs;

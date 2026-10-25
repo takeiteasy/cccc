@@ -439,12 +439,14 @@ void mark_function_referenced(VirtualMachine *vm, Obj *fn);
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name);
 const char *overloadable_operator(Token *tok, Token **rest);
-const char *operator_name(const char *sym);
+const char *operator_name(const char *sym, bool unary);
 void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok);
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
                         Node *rhs, Token *tok);
 Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
                            Token *tok);
+Node *overloaded_unary(VirtualMachine *vm, const char *sym, Node *operand,
+                       Token *tok);
 Obj *new_anon_gvar(VirtualMachine *vm, Type *ty);
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                  Token *tok);

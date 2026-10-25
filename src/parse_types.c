@@ -2078,13 +2078,33 @@ static Token *skip_attribute(Token *tok) {
 // Operator spellings `operator` cannot name, so `operator&&(` is diagnosed
 // rather than parsed as a member.
 static bool is_unoverloadable_operator(Token *tok) {
-    static const char *const ops[] = {"&&", "||", "=",  "!",  "~",   "++",
-                                      "--", "->", "+=", "-=", "*=",  "/=",
-                                      "%=", "&=", "|=", "^=", "<<=", ">>="};
+    static const char *const ops[] = {"&&", "||", "=",  "++", "--", "->",
+                                      "+=", "-=", "*=", "/=", "%=", "&=",
+                                      "|=", "^=", "<<=", ">>="};
     for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
         if (equal(tok, ops[i]))
             return true;
     return false;
+}
+
+// Whether the `operator` token at name is followed by exactly one parameter.
+static bool operator_has_one_param(Token *name) {
+    Token *params;
+    overloadable_operator(name->next, &params);
+    Token *close = skip_balanced(params, "(", ")");
+    if (equal(params->next, ")") ||
+        (equal(params->next, "void") && equal(params->next->next, ")")))
+        return false;
+    int depth = 0;
+    for (Token *t = params; t != close; t = t->next) {
+        if (equal(t, "(") || equal(t, "[") || equal(t, "{"))
+            depth++;
+        else if (equal(t, ")") || equal(t, "]") || equal(t, "}"))
+            depth--;
+        else if (depth == 1 && equal(t, ","))
+            return false;
+    }
+    return true;
 }
 
 // A function declaration or definition in a struct body: `... name(...) ;` or
@@ -2185,10 +2205,12 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                           "%s are only allowed in file-scope structs and "
                           "unions",
                           method_op ? "operators" : "methods");
+            bool method_unary = method_op && operator_has_one_param(method_name);
             if (method_op)
                 for (PendingMethod *q = vm->compiler.pending_methods; q;
                      q                = q->next)
-                    if (q->owner == ty && q->operator_sym == method_op)
+                    if (q->owner == ty && q->operator_sym == method_op &&
+                        q->operator_unary == method_unary)
                         error_tok(vm, method_name,
                                   "operator '%s' is already defined in this "
                                   "struct; use [[cccc::operator]] on a free "
@@ -2202,7 +2224,8 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                                  .name         = method_name,
                                  .end          = method_end,
                                  .has_body     = method_body,
-                                 .operator_sym = method_op};
+                                 .operator_sym = method_op,
+                                 .operator_unary = method_unary};
             queue_method(vm, m);
             tok = method_end;
             continue;

@@ -39,7 +39,10 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (equal(tok, "+")) {
-        Node *operand  = cast(vm, rest, tok->next);
+        Node *operand = cast(vm, rest, tok->next);
+        Node *ov      = overloaded_unary(vm, "+", operand, tok);
+        if (ov)
+            return ov;
         Node *promoted = promote_operand(vm, operand);
         // The result is a value, never an lvalue, even when no promotion
         // applies.
@@ -48,8 +51,11 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         return new_cast(vm, promoted, unqualified(vm, promoted->ty));
     }
 
-    if (equal(tok, "-"))
-        return new_unary(vm, ND_NEG, cast(vm, rest, tok->next), tok);
+    if (equal(tok, "-")) {
+        Node *operand = cast(vm, rest, tok->next);
+        Node *ov      = overloaded_unary(vm, "-", operand, tok);
+        return ov ? ov : new_unary(vm, ND_NEG, operand, tok);
+    }
 
     if (equal(tok, "&")) {
         Node *lhs = cast(vm, rest, tok->next);
@@ -81,11 +87,17 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
         return deref;
     }
 
-    if (equal(tok, "!"))
-        return new_unary(vm, ND_NOT, cast(vm, rest, tok->next), tok);
+    if (equal(tok, "!")) {
+        Node *operand = cast(vm, rest, tok->next);
+        Node *ov      = overloaded_unary(vm, "!", operand, tok);
+        return ov ? ov : new_unary(vm, ND_NOT, operand, tok);
+    }
 
-    if (equal(tok, "~"))
-        return new_unary(vm, ND_BITNOT, cast(vm, rest, tok->next), tok);
+    if (equal(tok, "~")) {
+        Node *operand = cast(vm, rest, tok->next);
+        Node *ov      = overloaded_unary(vm, "~", operand, tok);
+        return ov ? ov : new_unary(vm, ND_BITNOT, operand, tok);
+    }
 
     // Read ++i as i+=1, --i as i-=1
     if (equal(tok, "++") || equal(tok, "--")) {
@@ -181,6 +193,11 @@ static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
                          int addend) {
     add_type(vm, node);
     reject_rvalue(vm, node, "expression is not assignable");
+    if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
+        Node *one = new_num(vm, 1, tok);
+        return to_assign_post(vm, addend > 0 ? new_add(vm, node, one, tok)
+                                             : new_sub(vm, node, one, tok));
+    }
     Node *rmw =
         to_assign_post(vm, new_add(vm, node, new_num(vm, addend, tok), tok));
     if (rmw->kind == ND_STMT_EXPR && rmw->is_atomic_rmw)

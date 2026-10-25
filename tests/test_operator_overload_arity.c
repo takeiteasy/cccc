@@ -4,8 +4,8 @@ typedef struct {
     int x;
 } A;
 
-[[cccc::operator(-)]]
-A neg(A a) {
+[[cccc::operator(*)]]
+A mul(A a) {
     return a;
 }
 

@@ -1978,7 +1978,7 @@ static void check_operator_owner(VirtualMachine *vm, PendingMethod *m,
     OperatorEntry *e = c->noperators ? &c->operators[c->noperators - 1] : NULL;
     bool           subscript = !strcmp(m->operator_sym, "[]");
     if (e && (same_tag_type(e->lhs, m->owner) ||
-              (!subscript && same_tag_type(e->rhs, m->owner))))
+              (!subscript && e->rhs && same_tag_type(e->rhs, m->owner))))
         return;
     error_tok(vm, m->name, "operator '%s' in %s needs a %s or %s * operand",
               m->operator_sym, bname, bname, bname);
@@ -2014,7 +2014,7 @@ void run_pending_methods(VirtualMachine *vm) {
                 attr_text =
                     arena_format(vm, "[[cccc::operator(%s)]]", m->operator_sym);
                 fname = arena_format(vm, "%s_operator_%s", bname,
-                                     operator_name(m->operator_sym));
+                                     operator_name(m->operator_sym, m->operator_unary));
             } else {
                 Token *params = m->name->next->next;
                 if (equal(params, ")") ||
