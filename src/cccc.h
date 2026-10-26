@@ -1788,6 +1788,14 @@ struct Type {
     // c11_alignof() (type.c). Appended at the end for the same
     // positional-initializer reason as decl_align above.
     bool user_align;
+
+    // On a TY_FUNC: the return type's bounds as a template over this
+    // function's parameters (Obj.checked_self_param_idx placeholders), resolved
+    // by resolve_param_checked_bounds(). Kept here rather than on return_ty
+    // because a typedef'd return type can be shared by functions whose
+    // parameters sit at different indices.
+    struct Node *checked_ret_bounds_lo;
+    struct Node *checked_ret_bounds_hi;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
@@ -3079,6 +3087,13 @@ struct Obj {
     // through when the return type is a checked pointer with a bounds form
     // (rewrite_checked_return(), src/parse_checked.c). NULL otherwise.
     Obj *checked_ret_var;
+    // On a function Obj: `__rp_k = param_k` entry stores for the parameters
+    // checked_ret_var's bounds name, so `return` is verified against the
+    // values a caller sees (declare_checked_return_var()).
+    struct Node *checked_ret_entry;
+    // Marks the compiler-generated local a call to a checked-return function
+    // is assigned through (split_checked_call_result()).
+    bool checked_call_result;
 };
 
 /*!

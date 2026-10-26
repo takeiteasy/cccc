@@ -146,6 +146,7 @@ static bool comma_yields_checked_var(Node *n) {
         n = n->rhs;
     return n && n->kind == ND_VAR &&
            (n->var->checked_cast_kind != CC_NONE ||
+            n->var->checked_call_result ||
             (n->var->ty->kind == TY_ARRAY &&
              n->var->ty->checked_kind != CHECKED_NONE));
 }
@@ -205,6 +206,74 @@ static bool checked_base_is_declared(CheckedBase base) {
     if (base.mem)
         return base.mem->ty->checked_kind != CHECKED_NONE;
     return false;
+}
+
+static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
+                                       Obj *alloc_fn);
+static bool checked_nt_pointee_supported(Type *base_ty);
+
+static bool checked_ret_form_ok(Type *ret) {
+    return ret && ret->kind == TY_PTR && ret->checked_kind != CHECKED_NONE &&
+           (ret->checked_kind == CHECKED_SINGLE ||
+            (ret->checked_bounds_form != CB_NONE &&
+             ret->checked_bounds_form != CB_UNKNOWN));
+}
+
+// True if every parameter the return-bounds template `n` names is a scalar
+// the call passes an argument for, i.e. one split_checked_call_result() can
+// hoist.
+static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
+    if (!n)
+        return true;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
+        int   k = n->var->checked_self_param_idx;
+        Type *p = params;
+        Node *a = args;
+        for (int i = 1; i < k && p && a; i++) {
+            p = p->next;
+            a = a->next;
+        }
+        return p && a && (is_integer(p) || p->kind == TY_PTR);
+    }
+    return checked_ret_tmpl_ok(n->lhs, params, args) &&
+           checked_ret_tmpl_ok(n->rhs, params, args) &&
+           checked_ret_tmpl_ok(n->cond, params, args) &&
+           checked_ret_tmpl_ok(n->then, params, args) &&
+           checked_ret_tmpl_ok(n->els, params, args);
+}
+
+// The call `n` roots in (through the same `+`, `-` and cast descent as
+// find_checked_base()) when its callee returns a checked pointer whose bounds
+// split_checked_call_result() can substitute. A pure predicate: it allocates
+// nothing and does not depend on --checked-pointers.
+static Node *checked_call_root(Node *n) {
+    while (n) {
+        switch (n->kind) {
+            case ND_ADD:
+            case ND_SUB:
+            case ND_CAST:
+                n = n->lhs;
+                continue;
+            case ND_FUNCALL: {
+                Type *fty = n->func_ty;
+                if (!fty || n->has_splice_arg ||
+                    !checked_ret_form_ok(fty->return_ty))
+                    return NULL;
+                if (fty->return_ty->checked_kind != CHECKED_SINGLE &&
+                    !fty->checked_ret_bounds_lo && !fty->checked_ret_bounds_hi)
+                    return NULL;
+                return checked_ret_tmpl_ok(fty->checked_ret_bounds_lo,
+                                           fty->params, n->args) &&
+                               checked_ret_tmpl_ok(fty->checked_ret_bounds_hi,
+                                                   fty->params, n->args)
+                           ? n
+                           : NULL;
+            }
+            default:
+                return NULL;
+        }
+    }
+    return NULL;
 }
 
 // Builds the self-referencing expression a checked base's own bounds
@@ -558,6 +627,22 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
 // propagate_checked_bounds() for the other caller of compute_checked_bounds().
 void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
                               Token *tok) {
+    // A dereference through a checked-return call: evaluate the call into its
+    // result local first, so the bounds read it after the call.
+    if ((vm->flags & CCCC_CHECKED_BOUNDS) && vm->compiler.current_fn) {
+        Node *croot = checked_call_root(addr);
+        if (croot) {
+            Node *store = split_checked_call_result(vm, croot, NULL);
+            Node *read  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+            *read       = *croot;
+            read->next  = NULL;
+            Node *comma = new_binary(vm, ND_COMMA, store, read, tok);
+            add_type(vm, comma);
+            Node *saved = croot->next;
+            *croot      = *comma;
+            croot->next = saved;
+        }
+    }
     CheckedBase base = find_checked_deref_base(addr);
     if (!checked_base_is_declared(base))
         return;
@@ -657,6 +742,18 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         *out_optional = false;
         Type *base_ty = pty->base;
         *out_nt_elem  = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
+        return true;
+    }
+    // A checked-return call is a source whose bounds exist only once the call
+    // is split into its result local (split_checked_call_result()); the
+    // classification probe needs just the fact and its terminator slot.
+    Node *croot = checked_call_root(rhs);
+    if (croot) {
+        Type *rt      = croot->func_ty->return_ty;
+        *out_optional = false;
+        *out_nt       = rt->checked_kind == CHECKED_NTARRAY &&
+                        checked_nt_pointee_supported(rt->base);
+        *out_nt_elem  = *out_nt ? get_vm_size(rt->base) : 0;
         return true;
     }
     // #941: kind 2 -- a chained propagation source. base.var is non-NULL
@@ -900,6 +997,12 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     Node   *lo, *hi, *src_obj_init;
     bool    src_optional, src_nt;
     int64_t src_nt_elem;
+    // A checked-return call source is evaluated into its result local first;
+    // the snapshot below reads that local's bounds after the call.
+    Node *cr_store = NULL;
+    Node *croot    = checked_call_root(assign_node->rhs);
+    if (croot)
+        cr_store = split_checked_call_result(vm, croot, fn);
     // NT-ness isn't needed here -- walk 3 (checked_prop_attach_scan())
     // consults the candidate's own frozen checked_prop_nt_elem directly,
     // rather than recomputing per-store like lo/hi -- so src_nt/src_nt_elem
@@ -931,6 +1034,11 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
         // refresh them. Poison here so that fails closed instead of
         // feeding CHKR/CHKRO a garbage range.
         var->checked_prop_unsafe = true;
+        if (cr_store) {
+            assign_node->rhs = new_binary(vm, ND_COMMA, cr_store,
+                                          assign_node->rhs, assign_node->tok);
+            add_type(vm, assign_node->rhs);
+        }
         return;
     }
 
@@ -950,6 +1058,10 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     // the un-hoisted lo/hi expressions were already evaluated at.
     if (src_obj_init) {
         snapshot = new_binary(vm, ND_COMMA, src_obj_init, snapshot, tok);
+        add_type(vm, snapshot);
+    }
+    if (cr_store) {
+        snapshot = new_binary(vm, ND_COMMA, cr_store, snapshot, tok);
         add_type(vm, snapshot);
     }
 
@@ -1410,7 +1522,7 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
                                           Node *assign_node, Node *dst_lo,
                                           Node *dst_hi, Node *src_lo,
                                           Node *src_hi, Node *src_obj_init,
-                                          Node *dst_obj_init) {
+                                          Node *dst_obj_init, Node *cr_store) {
     Token *tok     = assign_node->tok;
     Obj   *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
     Obj   *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
@@ -1427,6 +1539,10 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
     add_type(vm, snapshot);
     if (src_obj_init) {
         snapshot = new_binary(vm, ND_COMMA, src_obj_init, snapshot, tok);
+        add_type(vm, snapshot);
+    }
+    if (cr_store) {
+        snapshot = new_binary(vm, ND_COMMA, cr_store, snapshot, tok);
         add_type(vm, snapshot);
     }
 
@@ -1485,6 +1601,13 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                     Node   *src_lo, *src_hi;
                     bool    src_optional = false, src_nt;
                     int64_t src_nt_elem;
+                    // A checked-return call source is evaluated into its
+                    // result local first; the source bounds below are that
+                    // local's, snapshotted after the call.
+                    Node *cr_store = NULL;
+                    Node *croot    = checked_call_root(node->rhs);
+                    if (croot)
+                        cr_store = split_checked_call_result(vm, croot, fn);
                     // An OPT propagated source can hold the sentinel range,
                     // which CHKAB would read as a real (always-failing)
                     // bound, so only declared and FULL sources are verified.
@@ -1508,9 +1631,14 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                             &src_obj_init);
                         verify_checked_assign_rewrite(
                             vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
-                            src_obj_init, dst_obj_init);
+                            src_obj_init, dst_obj_init, cr_store);
                         continue; // node is now the wrapper; parts already
                                   // scanned
+                    }
+                    if (cr_store) {
+                        node->rhs = new_binary(vm, ND_COMMA, cr_store,
+                                               node->rhs, node->tok);
+                        add_type(vm, node->rhs);
                     }
                 }
             }
@@ -1708,6 +1836,108 @@ static Obj *new_checked_call_temp(VirtualMachine *vm, Type *ty) {
     return var;
 }
 
+// A scalar parameter's value as a plain local: a checked-annotated pointer
+// parameter is held as an ordinary pointer, so the copy carries no bounds of
+// its own.
+static Type *plain_value_type(VirtualMachine *vm, Type *ty) {
+    if (ty->kind == TY_PTR && ty->checked_kind != CHECKED_NONE)
+        return pointer_to(vm, ty->base);
+    return unqualified(vm, ty);
+}
+
+// Hoists, once each, the arguments the return-bounds template `n` names into
+// temps, rewriting the argument in place to `(__ak = ak)`. `reads[k-1]`
+// becomes a read of the temp.
+static void hoist_ret_bounds_args(VirtualMachine *vm, Node *n, Type *params,
+                                  Node *args, Node **reads, Obj *alloc_fn,
+                                  Token *tok) {
+    if (!n)
+        return;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
+        int k = n->var->checked_self_param_idx;
+        if (reads[k - 1])
+            return;
+        Type *p = params;
+        Node *a = args;
+        for (int i = 1; i < k; i++) {
+            p = p->next;
+            a = a->next;
+        }
+        Type *ty   = plain_value_type(vm, p);
+        Obj  *tmp  = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ty)
+                              : new_checked_call_temp(vm, ty);
+        Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+        *orig      = *a;
+        orig->next = NULL;
+        Node *lhs  = new_var_node(vm, tmp, tok);
+        add_type(vm, lhs);
+        Node *store = new_binary(vm, ND_ASSIGN, lhs, orig, tok);
+        add_type(vm, store);
+        Node *saved = a->next;
+        *a          = *store;
+        a->next     = saved;
+        Node *read  = new_var_node(vm, tmp, tok);
+        add_type(vm, read);
+        reads[k - 1] = read;
+        return;
+    }
+    hoist_ret_bounds_args(vm, n->lhs, params, args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, n->rhs, params, args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, n->cond, params, args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, n->then, params, args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, n->els, params, args, reads, alloc_fn, tok);
+}
+
+// Splits a call to a checked-return function (one checked_call_root()
+// accepted) into `__cr = call`: the call node becomes a read of the fresh
+// declared-checked local `__cr`, whose bounds are the callee's return-bounds
+// template with the arguments it names hoisted into temps (each evaluated once,
+// so the bounds hold the values the callee received). Returns the store, which
+// the caller must evaluate before anything that reads `__cr`. `alloc_fn` is
+// the enclosing function once its body is parsed (the tail passes), NULL while
+// it is being parsed.
+static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
+                                       Obj *alloc_fn) {
+    Type  *fty   = call->func_ty;
+    Type  *ret   = unqualified(vm, fty->return_ty);
+    Token *tok   = call->tok;
+
+    int    nargs = 0;
+    for (Node *a = call->args; a; a = a->next)
+        nargs++;
+    Node **reads =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * (nargs + 1));
+    for (int i = 0; i <= nargs; i++)
+        reads[i] = NULL;
+    hoist_ret_bounds_args(vm, fty->checked_ret_bounds_lo, fty->params,
+                          call->args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, fty->checked_ret_bounds_hi, fty->params,
+                          call->args, reads, alloc_fn, tok);
+
+    Obj *cr = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ret)
+                       : new_checked_call_temp(vm, ret);
+    cr->checked_call_result = true;
+    cr->checked_bounds_lo   = clone_param_bounds_node(
+        vm, fty->checked_ret_bounds_lo, reads, nargs, 0, cr);
+    cr->checked_bounds_hi = clone_param_bounds_node(
+        vm, fty->checked_ret_bounds_hi, reads, nargs, 0, cr);
+
+    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *copy      = *call;
+    copy->next = NULL;
+    Node *lhs  = new_var_node(vm, cr, tok);
+    add_type(vm, lhs);
+    Node *store = new_binary(vm, ND_ASSIGN, lhs, copy, tok);
+    add_type(vm, store);
+
+    Node *read = new_var_node(vm, cr, tok);
+    add_type(vm, read);
+    Node *saved = call->next;
+    *call       = *read;
+    call->next  = saved;
+    return store;
+}
+
 // #488 entry point, called once per call site from funcall() (src/parse_
 // postfix.c), after every other per-argument validation there and before
 // the ND_FUNCALL node is built. `fn_ty` is the callee's function type
@@ -1775,7 +2005,8 @@ void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
         // verify_checked_assign_scan() decides then.
         CheckedBase src_base = find_checked_base(a);
         if (!checked_base_is_declared(src_base) &&
-            !(src_base.var && src_base.var->checked_prop_candidate))
+            !(src_base.var && src_base.var->checked_prop_candidate) &&
+            !checked_call_root(a))
             continue;
 
         // Gate: every OTHER parameter this parameter's bounds template
@@ -2010,6 +2241,8 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
         p->next = vm->compiler.current_fn->checked_dynamic_pending;
         vm->compiler.current_fn->checked_dynamic_pending = p;
         return;
+    } else if (checked_call_root(cast_node->lhs)) {
+        return; // bounds come from the callee's return type
     }
     (void)src_nt;
     if (!src_lo || !src_hi)
@@ -2048,6 +2281,49 @@ void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
     propagate_checked_bounds(vm, fn);
     resolve_pending_dynamic_casts(vm, fn);
     verify_checked_assign_bounds(vm, fn);
+    if (fn->checked_ret_entry && fn->body) {
+        Node *init =
+            new_unary(vm, ND_EXPR_STMT, fn->checked_ret_entry, fn->body->tok);
+        add_type(vm, init->lhs);
+        init->next            = fn->body->body;
+        fn->body->body        = init;
+        fn->checked_ret_entry = NULL;
+    }
+}
+
+typedef struct {
+    Obj *param, *copy;
+} RetEntryCopy;
+
+// Points every parameter reference in the return-bounds tree `n` at a local
+// holding its entry value, creating the local on first use.
+static void retarget_ret_params(VirtualMachine *vm, Obj *fn, Node *n,
+                                RetEntryCopy *map, int *count) {
+    if (!n)
+        return;
+    if (n->kind == ND_VAR && n->var) {
+        for (Obj *p = fn->params; p; p = p->next) {
+            if (p != n->var)
+                continue;
+            Obj *copy = NULL;
+            for (int i = 0; i < *count; i++)
+                if (map[i].param == p)
+                    copy = map[i].copy;
+            if (!copy) {
+                copy = new_lvar(vm, "", 0, plain_value_type(vm, p->ty));
+                map[(*count)++] = (RetEntryCopy){p, copy};
+            }
+            n->var = copy;
+            n->ty  = copy->ty;
+            break;
+        }
+        return;
+    }
+    retarget_ret_params(vm, fn, n->lhs, map, count);
+    retarget_ret_params(vm, fn, n->rhs, map, count);
+    retarget_ret_params(vm, fn, n->cond, map, count);
+    retarget_ret_params(vm, fn, n->then, map, count);
+    retarget_ret_params(vm, fn, n->els, map, count);
 }
 
 // Declares the local a checked return value is assigned through; see
@@ -2068,6 +2344,31 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     Obj *var = new_lvar(vm, "", 0, rty);
     resolve_checked_bounds(vm, var);
     fn->checked_ret_var = var;
+
+    // Callers evaluate the return bounds with the argument values they
+    // passed, so `return` is verified against entry copies of the parameters
+    // the bounds name rather than their possibly-reassigned values.
+    int nparams = 0;
+    for (Obj *p = fn->params; p; p = p->next)
+        nparams++;
+    RetEntryCopy *map =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(*map) * (nparams + 1));
+    int count = 0;
+    retarget_ret_params(vm, fn, var->checked_bounds_lo, map, &count);
+    retarget_ret_params(vm, fn, var->checked_bounds_hi, map, &count);
+    Token *tok   = fn->ty->name;
+    Node  *chain = NULL;
+    for (int i = 0; i < count; i++) {
+        Node *dst = new_var_node(vm, map[i].copy, tok);
+        add_type(vm, dst);
+        Node *src = new_var_node(vm, map[i].param, tok);
+        add_type(vm, src);
+        Node *store = new_binary(vm, ND_ASSIGN, dst, src, tok);
+        add_type(vm, store);
+        chain = chain ? new_binary(vm, ND_COMMA, chain, store, tok) : store;
+        add_type(vm, chain);
+    }
+    fn->checked_ret_entry = chain;
 }
 
 // `return E` in a function with a checked return type becomes
@@ -2081,7 +2382,8 @@ Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
         return exp;
     CheckedBase base = find_checked_base(exp);
     if (!checked_base_is_declared(base) &&
-        !(base.var && base.var->checked_prop_candidate))
+        !(base.var && base.var->checked_prop_candidate) &&
+        !checked_call_root(exp))
         return exp;
 
     Node *lhs = new_var_node(vm, fn->checked_ret_var, tok);

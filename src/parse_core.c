@@ -1225,13 +1225,16 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
         return;
     fn_ty->checked_param_tmpl_done = true;
 
-    bool any                       = false;
-    for (Type *p = fn_ty->params; p; p = p->next)
+    Type *ret                      = fn_ty->return_ty;
+    bool  ret_has_bounds           = ret && ret->kind == TY_PTR &&
+                                     ret->checked_kind != CHECKED_NONE &&
+                                     ret->checked_bounds_form != CB_NONE &&
+                                     ret->checked_bounds_form != CB_UNKNOWN;
+    bool  any                      = ret_has_bounds;
+    for (Type *p = fn_ty->params; p && !any; p = p->next)
         if (p->checked_bounds_form != CB_NONE &&
-            p->checked_bounds_form != CB_UNKNOWN) {
+            p->checked_bounds_form != CB_UNKNOWN)
             any = true;
-            break;
-        }
     if (!any)
         return;
 
@@ -1263,6 +1266,14 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
                               &p->checked_param_bounds_hi);
         check_param_bounds_template(vm, p->checked_param_bounds_lo, err_tok);
         check_param_bounds_template(vm, p->checked_param_bounds_hi, err_tok);
+    }
+
+    if (ret_has_bounds) {
+        Token *err_tok = ret->checked_bounds_arg1;
+        resolve_bounds_tokens(vm, ret, &fn_ty->checked_ret_bounds_lo,
+                              &fn_ty->checked_ret_bounds_hi);
+        check_param_bounds_template(vm, fn_ty->checked_ret_bounds_lo, err_tok);
+        check_param_bounds_template(vm, fn_ty->checked_ret_bounds_hi, err_tok);
     }
 
     leave_scope(vm);

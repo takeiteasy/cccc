@@ -1238,6 +1238,7 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // above -- positional param<->arg pairing is meaningless once arity
     // itself is deferred.
     if (!deferred_splice) {
+        resolve_param_checked_bounds(vm, ty);
         cc_check_checked_call(vm, watch, ty, fn->tok);
         rewrite_checked_call_args(vm, ty, head_next, tok);
     }

@@ -53,6 +53,23 @@ int * [[cccc::array, cccc::count(n)]] pick(int * [[cccc::array, cccc::count(3)]]
 
 A value with no known bounds (`int *raw`) is returned unchecked.[^ret]
 
+### At the call site
+
+A call to a function with a checked return type carries the declared bounds, with the parameters replaced by the arguments of that call. Every consumer that accepts a checked pointer accepts the call:
+
+```c
+int * [[cccc::array, cccc::count(n)]] head(int n);
+
+head(2)[3];                                    // traps: 2 elements
+int *q = head(2);   q[3];                      // traps: q inherits [head, head + 2)
+int * [[cccc::array, cccc::count(8)]] p = head(2);   // traps: 2 elements don't cover 8
+sink(head(2), 8);                              // traps against sink's parameter bounds
+```
+
+The arguments the bounds name are evaluated once, before the call, so `head(i++)` and a callee that changes a global keep the bounds the callee was given. A callee that reassigns such a parameter is verified against the value it was called with.
+
+A bound can name scalar parameters (integers and pointers). A call whose bounds name any other parameter type is left unchecked.
+
 ## Bounds casts
 
 `assume` and `dynamic` go in a cast's type name, with the checked kind and bounds being claimed:
@@ -127,5 +144,5 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
 [^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Skipped calls (side-effecting arguments, or a propagated argument whose bounds are known on only some paths) are skipped silently.
-[^ret]: The bounds are verified inside the callee; the call site doesn't treat the returned pointer as checked. A block literal's inferred return type isn't verified.
+[^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

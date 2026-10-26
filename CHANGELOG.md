@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a call to a function with a checked return type carries the declared return bounds, with the call's arguments substituted. A dereference, a propagated local, a checked assignment, an annotated argument, a checked return and a `dynamic` cast all accept it. A `return` is verified against the parameters' values at entry.
+- Changed: a bound on a function's return type that names an undeclared identifier is an error at the declaration, in every mode.
 - Changed: a checked region rejects a plain array declaration or array compound literal; write `_Checked[N]`/`_Nt_checked[N]`. Array typedefs from headers (`jmp_buf`) are exempt.
 - Added: checked flexible array members, `int data _Checked[] [[cccc::count(n)]];` (also `_Nt_checked[]`), bounds-checked against a sibling field.
 - Added: `_Checked`/`_Nt_checked` in an abstract declarator, so a compound literal such as `(int _Checked[4]){1, 2, 3, 4}` is a bounds-checked array.

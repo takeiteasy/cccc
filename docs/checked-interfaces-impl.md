@@ -28,7 +28,7 @@ Other points:
 - A prototype and a later definition with different bounds for one parameter are accepted silently: the first one parsed is the type every template resolves against.
 - The pass is gated on `--checked-pointers` at parse time, like `verify_checked_assign_bounds()`. With the flag off `rewrite_checked_call_args()` never runs, so `-m`, `-c=native` and `-c=generated` output is unaffected.
 - An annotated same-TU function's own body stays `CHKR`-checked against its declared bounds. This can newly trap code no unchecked caller ever touched, since the callee breaks its own contract. It uses its own declared bound, not the caller's storage, so an unchecked caller passing a too-short buffer does not trap there: closing that gap at the call boundary is the point of the feature.
-- Not done: return-position bounds (`int * [[cccc::array, cccc::count(4)]] f(void);` parses and is unconsumed), arguments with side effects via pre-call hoisting, a warning when a check is declined, a prototype/definition disagreement diagnostic, propagated arguments, struct-field bounds interfaces, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
+- Not done: arguments with side effects via pre-call hoisting, a warning when a check is declined, a prototype/definition disagreement diagnostic, propagated arguments, struct-field bounds interfaces, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
 
 ## Bounds casts
 
@@ -48,6 +48,18 @@ Other points:
 ## Return values
 
 `declare_checked_return_var()` (`src/parse_decl.c`, once the parameters are in scope) gives a function whose return type is a checked pointer with a bounds form a hidden local `Obj.checked_ret_var`, so a bound naming a parameter resolves there and a body local can't shadow it. `rewrite_checked_return()` turns `return E` into `return (__cr = E, __cr)` when `E` roots in a declared-checked pointer or a propagation candidate, and the assignment scan emits the `CHKAB` pair as for `q = E`. Block literals infer their return type and have no such local.
+
+The bounds a `return` is checked against name the parameters' **entry** values: `declare_checked_return_var()` points each parameter reference at a hidden local (`Obj.checked_ret_entry` holds the `__rp = param` stores, prepended to the body by `checked_tail_passes()`), so a callee that reassigns a parameter is still checked against the value callers saw.
+
+### Call sites
+
+| Step | Where | What happens |
+|---|---|---|
+| Template | `resolve_param_checked_bounds()` (`src/parse_core.c`) | The return type's bounds resolve into `Type.checked_ret_bounds_lo/hi` on the **function** type, with the same parameter placeholders as argument templates. They are not stored on the return type, which a typedef can share between functions whose parameters sit at different indices |
+| Recognise | `checked_call_root()` (`src/parse_checked.c`) | A pure predicate, the call analogue of `find_checked_base()`: `+`, `-` and casts down to an `ND_FUNCALL` whose callee returns a checked pointer and whose template names only scalar parameters it is passed. It allocates nothing and ignores `--checked-pointers`, so a `dynamic` cast from a call is accepted in every mode |
+| Split | `split_checked_call_result()` | The call becomes a read of a declared-checked local `__cr` (`Obj.checked_call_result`) and the returned store is `__cr = call`. Each argument the template names is rewritten to `(__ak = ak)` and the bounds read `__ak`, so every argument is evaluated once and the bounds hold what the callee received |
+
+The split is lazy, done by each consumer so a call that is not used as a checked source keeps its `ND_FUNCALL` (nodiscard, null-return analysis, serialization and tail calls see it unchanged). A direct dereference splits at parse time (`set_checked_deref_bounds()`, the comma is recognised by `comma_yields_checked_var()`). Propagation (`checked_prop_rewrite_assign()`) and assignment verification (`verify_checked_assign_scan()`) split in the tail passes and put the store ahead of the source-bounds snapshot, which reads `__cr` after the call. Annotated arguments, checked returns and `dynamic` casts only need the recognition: they build `__ca = call`, `__cr = call` and `__cv = (T)call`, which the assignment scan splits.
 
 ## `dynamic_check`
 
