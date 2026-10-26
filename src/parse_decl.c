@@ -373,6 +373,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
+        } else if (!adopted) {
+            merge_checked_interface(vm, fn, ty);
         }
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
@@ -665,6 +667,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
+        } else if (!adopted) {
+            merge_checked_interface(vm, fn, ty);
         }
         // GNU lets a non-inline definition replace a gnu_inline one.
         bool replaces_gnu_inline = fn->is_definition && fn->is_gnu_inline &&

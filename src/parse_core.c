@@ -1297,6 +1297,185 @@ void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty) {
     resolve_type_checked_bounds(vm, ty->return_ty);
 }
 
+// Structural equality of two resolved bounds templates. A sibling parameter
+// is a placeholder Obj, so it compares by position, not by spelling.
+static bool checked_tmpl_equal(Node *a, Node *b) {
+    if (a == b)
+        return true;
+    if (!a || !b || a->kind != b->kind)
+        return false;
+    switch (a->kind) {
+        case ND_NUM:
+            return a->val == b->val && a->fval == b->fval;
+        case ND_VAR:
+            if (a->var->checked_self_param_idx ||
+                b->var->checked_self_param_idx)
+                return a->var->checked_self_param_idx ==
+                       b->var->checked_self_param_idx;
+            return a->var == b->var;
+        case ND_MEMBER:
+            if (a->member != b->member)
+                return false;
+            break;
+        case ND_CAST:
+            if (!a->ty || !b->ty || !is_compatible(a->ty, b->ty))
+                return false;
+            break;
+        case ND_FUNCALL: {
+            Node *x = a->args, *y = b->args;
+            for (; x && y; x = x->next, y = y->next)
+                if (!checked_tmpl_equal(x, y))
+                    return false;
+            if (x || y)
+                return false;
+            break;
+        }
+        case ND_BLOCK:
+        case ND_STMT_EXPR:
+        case ND_ASM:
+            return false;
+        default:
+            break;
+    }
+    return checked_tmpl_equal(a->lhs, b->lhs) &&
+           checked_tmpl_equal(a->rhs, b->rhs) &&
+           checked_tmpl_equal(a->cond, b->cond) &&
+           checked_tmpl_equal(a->then, b->then) &&
+           checked_tmpl_equal(a->els, b->els);
+}
+
+static bool checked_bounds_conflict(Type *o, Node *o_lo, Node *o_hi, Type *n,
+                                    Node *n_lo, Node *n_hi) {
+    if (o->checked_kind != CHECKED_NONE && n->checked_kind != CHECKED_NONE &&
+        o->checked_kind != n->checked_kind)
+        return true;
+    if (o->checked_bounds_form == CB_NONE || n->checked_bounds_form == CB_NONE)
+        return false;
+    return o->checked_bounds_form != n->checked_bounds_form ||
+           o->checked_array_extent != n->checked_array_extent ||
+           !checked_tmpl_equal(o_lo, n_lo) || !checked_tmpl_equal(o_hi, n_hi);
+}
+
+static void checked_conflict_error(VirtualMachine *vm, Type *n, Token *new_tok,
+                                   Token *old_tok, const char *name,
+                                   const char *what) {
+    Token *at = n->name ? n->name : n->checked_bounds_arg1;
+    if (!at)
+        at = new_tok;
+    error_tok(vm, at,
+              "conflicting checked-pointer bounds for %s of '%s' (first "
+              "declared at %s:%d)",
+              what, name, old_tok->file->name, old_tok->line_no);
+}
+
+// Errors when the two function types spell different bounds for the same
+// parameter or return value. Recurses into function-pointer parameters.
+static void check_checked_iface_conflict(VirtualMachine *vm, Type *old_ty,
+                                         Type *ty, const char *name,
+                                         Token *old_tok, Token *new_tok) {
+    resolve_param_checked_bounds(vm, old_ty);
+    resolve_param_checked_bounds(vm, ty);
+
+    Type *o = old_ty->return_ty, *n = ty->return_ty;
+    if (o && n && o->kind == TY_PTR && n->kind == TY_PTR &&
+        checked_bounds_conflict(
+            o, old_ty->checked_ret_bounds_lo, old_ty->checked_ret_bounds_hi, n,
+            ty->checked_ret_bounds_lo, ty->checked_ret_bounds_hi))
+        checked_conflict_error(vm, n, new_tok, old_tok, name,
+                               "the return value");
+
+    int idx = 0;
+    for (o = old_ty->params, n = ty->params; o && n; o = o->next, n = n->next) {
+        idx++;
+        if (checked_bounds_conflict(
+                o, o->checked_param_bounds_lo, o->checked_param_bounds_hi, n,
+                n->checked_param_bounds_lo, n->checked_param_bounds_hi)) {
+            char what[32];
+            snprintf(what, sizeof what, "parameter %d", idx);
+            checked_conflict_error(vm, n, new_tok, old_tok, name, what);
+        }
+        if (o->kind == TY_PTR && n->kind == TY_PTR && o->base && n->base &&
+            o->base->kind == TY_FUNC && n->base->kind == TY_FUNC)
+            check_checked_iface_conflict(vm, o->base, n->base, name, old_tok,
+                                         new_tok);
+    }
+}
+
+static bool checked_needs_adopt(Type *o, Type *n) {
+    return (o->checked_kind == CHECKED_NONE &&
+            n->checked_kind != CHECKED_NONE) ||
+           (o->checked_bounds_form == CB_NONE &&
+            n->checked_bounds_form != CB_NONE);
+}
+
+static void checked_adopt(Type *dst, Type *src) {
+    if (dst->checked_kind == CHECKED_NONE)
+        dst->checked_kind = src->checked_kind;
+    if (dst->checked_bounds_form != CB_NONE ||
+        src->checked_bounds_form == CB_NONE)
+        return;
+    dst->checked_bounds_form     = src->checked_bounds_form;
+    dst->checked_bounds_arg1     = src->checked_bounds_arg1;
+    dst->checked_bounds_arg2     = src->checked_bounds_arg2;
+    dst->checked_array_extent    = src->checked_array_extent;
+    dst->checked_vla_extent_tok  = src->checked_vla_extent_tok;
+    dst->checked_param_bounds_lo = src->checked_param_bounds_lo;
+    dst->checked_param_bounds_hi = src->checked_param_bounds_hi;
+}
+
+// A redeclaration of `fn` as `ty`: errors on bounds that disagree, and gives
+// fn->ty any bounds only the new declaration spells, so later calls are checked
+// against them. fn->ty is copied first because a typedef may share it.
+// Adoption stops at the top-level parameters and return value.
+void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
+    Type *old_ty = fn->ty;
+    if (!old_ty || old_ty == ty || old_ty->kind != TY_FUNC ||
+        ty->kind != TY_FUNC || vm->compiler.in_type_lookahead)
+        return;
+    int n_old = 0, n_new = 0;
+    for (Type *p = old_ty->params; p; p = p->next)
+        n_old++;
+    for (Type *p = ty->params; p; p = p->next)
+        n_new++;
+    if (n_old != n_new || !n_old)
+        return;
+
+    check_checked_iface_conflict(vm, old_ty, ty, fn->name,
+                                 old_ty->name ? old_ty->name : ty->name,
+                                 ty->name);
+
+    bool ret_adopt = old_ty->return_ty && ty->return_ty &&
+                     old_ty->return_ty->kind == TY_PTR &&
+                     ty->return_ty->kind == TY_PTR &&
+                     checked_needs_adopt(old_ty->return_ty, ty->return_ty);
+    bool adopt     = ret_adopt;
+    for (Type *o = old_ty->params, *n = ty->params; o && !adopt;
+         o = o->next, n = n->next)
+        adopt = checked_needs_adopt(o, n);
+    if (!adopt)
+        return;
+
+    Type *merged = copy_type(vm, old_ty);
+    if (ret_adopt) {
+        merged->return_ty = copy_type(vm, old_ty->return_ty);
+        checked_adopt(merged->return_ty, ty->return_ty);
+        if (old_ty->return_ty->checked_bounds_form == CB_NONE) {
+            merged->checked_ret_bounds_lo = ty->checked_ret_bounds_lo;
+            merged->checked_ret_bounds_hi = ty->checked_ret_bounds_hi;
+        }
+    }
+    Type **tail = &merged->params;
+    for (Type *o = old_ty->params, *n = ty->params; o;
+         o = o->next, n = n->next) {
+        Type *c = copy_type(vm, o);
+        checked_adopt(c, n);
+        *tail = c;
+        tail  = &c->next;
+    }
+    *tail  = NULL;
+    fn->ty = merged;
+}
+
 // Create a function Obj that is NOT in the global scope or globals list.
 // Used for __builtin_strlen/__builtin_strcmp stubs so they don't interfere
 // with user redeclarations of strlen/strcmp.

@@ -37,6 +37,18 @@ The bounds are resolved where the prototype is declared, so a bound naming an un
 void sink(int * [[cccc::array, cccc::count(n)]], int n);
 ```
 
+## Redeclarations
+
+Every declaration of a function must spell the same bounds. A mismatch is an error in every mode, as is a different pointer kind (`array` against `ntarray`). A declaration that spells no bounds takes them from one that does, so annotating only the definition checks the calls that follow it:
+
+```c
+void sink(int *p, int n);                                        // plain prototype
+void sink(int *[[cccc::array, cccc::count(n)]] p, int n) { }     // adds the bounds
+void sink(int *[[cccc::array, cccc::count(n + 1)]] p, int n);    // error: conflicting bounds
+```
+
+Sibling parameters compare by position, so `count(len)` against `count(n)` agrees. The same rules cover a return bound and the parameters of a function-pointer parameter.[^redecl]
+
 An annotated prototype is also what `-Wchecked-calls` accepts from a checked region ([safety-checked-regions.md](safety-checked-regions.md#call-boundaries)).
 
 The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved.
@@ -143,6 +155,7 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
-[^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
+[^proto]: Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
+[^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not. Bounds a redeclaration adds to a function-pointer parameter's own parameters are not adopted.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).
