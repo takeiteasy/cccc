@@ -22,7 +22,7 @@ Each unchecked local falls into one class:
 | FULL | Every assignment is checked-rooted | Checked against the latest snapshot |
 | OPT | A mix of checked-rooted and other assignments | Checked only if the *latest store* was checked-rooted |
 
-A value is checked-rooted when, through `+`, `-` and casts, it resolves to a declared checked pointer or to a member with enforceable bounds (`int *q = obj.p;` propagates from `obj.p`'s bounds), or to a call of a function with a [checked return type](safety-checked-interfaces.md#at-the-call-site) (`int *q = head(2);`).
+A value is checked-rooted when, through `+`, `-` and casts, it resolves to a declared checked pointer or to a member with enforceable bounds (`int *q = obj.p;` propagates from `obj.p`'s bounds), or to a call of a function with a [checked return type](safety-checked-interfaces.md#at-the-call-site) (`int *q = head(2);`), or to a [bounds cast](safety-checked-interfaces.md#bounds-casts) (`int *q = (int *[[cccc::array, cccc::count(5), cccc::assume]])raw;`).
 
 ## Mixed assignments
 

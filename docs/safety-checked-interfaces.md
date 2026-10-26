@@ -197,7 +197,12 @@ error: 'dynamic' cast source has no known bounds to verify against --
   source a bounds declaration
 ```
 
-A local whose bounds are known on only some paths (`int *q = raw; if (c) q = src;`) gets its own error, `'dynamic' cast source has known bounds on only some paths`. A cast works anywhere an expression does, including as a call argument or a `return` value.
+A local whose bounds are known on only some paths (`int *q = raw; if (c) q = src;`) gets its own error, `'dynamic' cast source has known bounds on only some paths`. A cast works anywhere an expression does, including as a call argument or a `return` value, and its claimed bounds are what the target, parameter or return type is checked against:
+
+```c
+int *[[cccc::array, cccc::count(100)]] q = 0;
+q = (int *[[cccc::array, cccc::count(5), cccc::assume]])raw;  // traps: 5 < 100
+```
 
 Inside a [checked region](safety-checked-regions.md) these are the sanctioned way to change a pointer's checked kind, with no `unchecked` wrapper needed.
 

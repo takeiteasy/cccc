@@ -171,7 +171,8 @@ static bool comma_yields_checked_var(Node *n) {
 // its address expression, that address (the whole comma) has already been
 // fully evaluated, including its internal store -- ordinary C comma-operator
 // semantics. So this variant is used only by set_checked_deref_bounds()
-// below, never by the assignment/propagation machinery. The general
+// below; the assignment/propagation machinery splits the cast's store out
+// first (split_checked_cast()) and sees a plain read of __cv. The general
 // `(a, p)[i]` carry for an arbitrary (non-cast-desugar) comma is filed as a
 // follow-up.
 static CheckedBase find_checked_deref_base(Node *n) {
@@ -280,6 +281,44 @@ static Node *checked_call_root(Node *n) {
         }
     }
     return NULL;
+}
+
+// The bounds-cast desugar `(__cv = (T [[...]])e, __cv)` that `n` roots in
+// (through the same `+`, `-` and cast descent as find_checked_base()), or NULL.
+static Node *checked_cast_root(Node *n) {
+    while (n) {
+        switch (n->kind) {
+            case ND_ADD:
+            case ND_SUB:
+            case ND_CAST:
+                n = n->lhs;
+                continue;
+            case ND_COMMA:
+                return n->lhs && n->lhs->kind == ND_ASSIGN && n->rhs &&
+                               n->rhs->kind == ND_VAR &&
+                               n->rhs->var->checked_cast_kind != CC_NONE &&
+                               n->lhs->lhs->kind == ND_VAR &&
+                               n->lhs->lhs->var == n->rhs->var
+                           ? n
+                           : NULL;
+            default:
+                return NULL;
+        }
+    }
+    return NULL;
+}
+
+// Moves the `__cv = (T)e` store out of the cast desugar `comma`, leaving a
+// read of `__cv` in its place, so the caller can run the store ahead of a
+// source-bounds snapshot that reads `__cv`. Returns the store.
+static Node *split_checked_cast(VirtualMachine *vm, Node *comma) {
+    Node *store = comma->lhs;
+    Node *read  = new_var_node(vm, comma->rhs->var, comma->tok);
+    add_type(vm, read);
+    Node *saved  = comma->next;
+    *comma       = *read;
+    comma->next  = saved;
+    return store;
 }
 
 // Builds the self-referencing expression a checked base's own bounds
@@ -790,7 +829,11 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
     *out_hi = NULL;
     if (out_obj_init)
         *out_obj_init = NULL;
-    CheckedBase base = find_checked_base(rhs);
+    // An unsplit bounds cast is a source through its `__cv` (the split, done
+    // by the consumers that rewrite, leaves a plain read of it).
+    Node       *cast = checked_cast_root(rhs);
+    CheckedBase base =
+        cast ? (CheckedBase){.var = cast->rhs->var} : find_checked_base(rhs);
     if (checked_base_is_declared(base)) {
         if ((base.mem || base.row) && node_has_side_effects(base.obj))
             return false;
@@ -1064,6 +1107,8 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     Node *croot    = checked_call_root(assign_node->rhs);
     if (croot)
         cr_store = split_checked_call_result(vm, croot, fn);
+    else if ((croot = checked_cast_root(assign_node->rhs)))
+        cr_store = split_checked_cast(vm, croot);
     // NT-ness isn't needed here -- walk 3 (checked_prop_attach_scan())
     // consults the candidate's own frozen checked_prop_nt_elem directly,
     // rather than recomputing per-store like lo/hi -- so src_nt/src_nt_elem
@@ -1669,6 +1714,14 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                     Node *croot    = checked_call_root(node->rhs);
                     if (croot)
                         cr_store = split_checked_call_result(vm, croot, fn);
+                    // A bounds-cast source is split the same way, its store
+                    // scanned whole so a `dynamic` cast's own check still runs.
+                    Node *cv_store = NULL;
+                    Node *croot_cv = croot ? NULL : checked_cast_root(node->rhs);
+                    if (croot_cv) {
+                        cv_store = split_checked_cast(vm, croot_cv);
+                        cr_store = cv_store;
+                    }
                     // An OPT propagated source can hold the sentinel range,
                     // which CHKAB would read as a real (always-failing)
                     // bound, so only declared and FULL sources are verified.
@@ -1684,7 +1737,9 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // The split moved the call, with its argument
                         // stores, out of the rhs.
-                        if (cr_store)
+                        if (cv_store)
+                            verify_checked_assign_scan(vm, fn, cv_store);
+                        else if (cr_store)
                             verify_checked_assign_scan(vm, fn, cr_store->rhs);
                         // #947: recompute both sides now with the hoist
                         // allocator live -- the probe above only proved
@@ -2035,7 +2090,7 @@ static bool checked_param_qualifies(Type *p, Node *a) {
     CheckedBase plain;
     return checked_base_is_declared(src_base) ||
            (src_base.var && src_base.var->checked_prop_candidate) ||
-           checked_call_root(a) != NULL ||
+           checked_call_root(a) != NULL || checked_cast_root(a) != NULL ||
            checked_plain_array_root(a, &plain) != NULL;
 }
 
@@ -2411,6 +2466,12 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
     if (ty->checked_cast_kind != CC_DYNAMIC)
         return;
     add_type(vm, cast_node->lhs);
+    // The inner bounds cast's claim is the source's bounds; with
+    // --checked-pointers off it is still a plain ND_CAST.
+    if (checked_cast_root(cast_node->lhs) ||
+        (cast_node->lhs->kind == ND_CAST && cast_node->lhs->ty &&
+         cast_node->lhs->ty->checked_cast_kind != CC_NONE))
+        return;
     CheckedBase src_base = find_checked_base(cast_node->lhs);
     Node       *src_lo = NULL, *src_hi = NULL;
     bool        src_nt = false;
@@ -2950,7 +3011,7 @@ Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
     CheckedBase base = find_checked_base(exp);
     if (!checked_base_is_declared(base) &&
         !(base.var && base.var->checked_prop_candidate) &&
-        !checked_call_root(exp) &&
+        !checked_call_root(exp) && !checked_cast_root(exp) &&
         !checked_plain_array_root(exp, &(CheckedBase){0}))
         return exp;
 
