@@ -88,6 +88,19 @@ int  v = (int _Checked[]){5, 6}[1];       // extent 2, from the initializer
 
 Indexing the literal is checked against its extent. A variable-length compound literal is not valid C.
 
+## Flexible array members
+
+A flexible array member takes its length from a sibling field:
+
+```c
+struct Buf {
+    int n;
+    int data _Checked[] [[cccc::count(n)]];
+};
+```
+
+`b->data[i]` traps unless `i < b->n`, and `int *p = b->data` keeps the count. `_Nt_checked[]` works the same way: `count(n)` is the element count and one more slot holds the terminator. A checked flexible array member without `count`, and `count` on anything but a flexible array member, are errors. `sizeof` is unchanged, and the output of `-m`/`-c=native`/`-c=generated` is an ordinary flexible array member.
+
 ## Variable-length checked arrays
 
 A non-constant extent is checked against the length the declaration computed. Changing `n` afterwards does not move the bound, and an extent with side effects runs once.

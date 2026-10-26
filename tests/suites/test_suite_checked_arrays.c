@@ -8,6 +8,8 @@
 // share a compiling file with these and live in standalone
 // tests/test_checked_array_*.c files instead.
 
+#include <stdlib.h>
+
 // ---------------------------------------------------------------------
 // Local, global, static-local and member checked arrays.
 // ---------------------------------------------------------------------
@@ -421,4 +423,47 @@ void test_checked_array_compound_literal(void) {
     AssertEq(q[2], 7);
     AssertEq(s[1], 'b');
     AssertEq(sizeof(int _Checked[4]), 4 * sizeof(int));
+}
+
+// ---------------------------------------------------------------------
+// Flexible array members: the count names a sibling field.
+// ---------------------------------------------------------------------
+
+struct Fam {
+    int n;
+    int d _Checked[] [[cccc::count(n)]];
+};
+
+struct NtFam {
+    int  n;
+    char s _Nt_checked[] [[cccc::count(n)]];
+};
+
+static int fam_last(struct Fam *f) {
+    int *p = f->d;
+    return p[f->n - 1];
+}
+
+[[cccc::test]]
+void test_checked_flexible_array_member(void) {
+    struct Fam *f = malloc(sizeof(struct Fam) + 3 * sizeof(int));
+    f->n          = 3;
+    f->d[0]       = 1;
+    f->d[2]       = 42;
+    AssertEq(sizeof(struct Fam), sizeof(int));
+    AssertEq(f->d[0], 1);
+    AssertEq(fam_last(f), 42);
+    free(f);
+}
+
+[[cccc::test]]
+void test_checked_nt_flexible_array_member(void) {
+    struct NtFam *f = malloc(sizeof(struct NtFam) + 4);
+    f->n            = 3;
+    f->s[0]         = 'a';
+    f->s[1]         = 'b';
+    f->s[2]         = 'c';
+    f->s[3]         = 0;
+    AssertEq(f->s[2], 'c');
+    free(f);
 }

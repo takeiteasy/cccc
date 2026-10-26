@@ -1937,6 +1937,24 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
     return after;
 }
 
+// `[[cccc::count(n)]]` after a checked flexible array member's `[]`. `tok`
+// points at the opening '(' and `arr` is a private copy of the array type.
+// Returns the token past the matching ')'.
+Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
+                                    Token *tok, Type *arr) {
+    if (arr->array_len >= 0)
+        error_tok(vm, name_tok,
+                  "'count' on a checked array is only for a flexible array "
+                  "member (e.g. int data _Checked[] [[cccc::count(n)]];)");
+    Token *arg1, *arg2;
+    Token *after = capture_checked_bounds_args(vm, tok, &arg1, &arg2);
+    if (arg2)
+        error_tok(vm, name_tok, "'count' takes one argument");
+    arr->checked_bounds_form = CB_COUNT;
+    arr->checked_bounds_arg1 = arg1;
+    return after;
+}
+
 typedef struct CheckedDynPending CheckedDynPending;
 struct CheckedDynPending {
     CheckedDynPending *next;

@@ -1147,11 +1147,35 @@ static Type *with_custom_attrs(VirtualMachine *vm, Type *ty,
 // The attribute-lists and asm-label after a declarator. GNU C allows them in
 // either order (glibc's __REDIRECT_NTH puts the asm-label first), so loop
 // until a pass consumes nothing.
+// `[[cccc::count(n)]]` directly after a checked array's `[]`; the count of a
+// flexible array member. Anything else is left for the attribute parsers.
+static Token *checked_array_count_attr(VirtualMachine *vm, Token *tok,
+                                       Type **ty) {
+    Token *name = tok->next ? tok->next->next : NULL;
+    for (int i = 0; i < 2 && name; i++)
+        name = name->next;
+    if (!equal(tok, "[") || !equal(tok->next, "[") ||
+        !equal(tok->next->next, "cccc") || !equal(tok->next->next->next, ":") ||
+        !name || !equal(name, ":"))
+        return tok;
+    name = name->next;
+    if (!name || !equal(name, "count") || !equal(name->next, "("))
+        return tok;
+    *ty      = copy_type(vm, *ty);
+    Token *t = cc_apply_checked_array_count(vm, name, name->next, *ty);
+    if (!equal(t, "]") || !equal(t->next, "]"))
+        error_tok(vm, t, "expected ']]' after 'count(...)'");
+    return t->next->next;
+}
+
 static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
                                Type *ty) {
     for (;;) {
         Token  *before      = tok;
         VarAttr suffix_attr = {};
+        if (ty->kind == TY_ARRAY && ty->checked_kind != CHECKED_NONE &&
+            !ty->checked_bounds_arg1)
+            tok = checked_array_count_attr(vm, tok, &ty);
         tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
         tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
         ty = with_custom_attrs(vm, ty, suffix_attr.custom_attrs);
@@ -2399,7 +2423,17 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
         if (vm->compiler.c_std < CCCC_STD_C99)
             error_tok(vm, cur->name ? cur->name : *rest,
                       "flexible array members are not available before C99");
-        cur->ty         = array_of(vm, cur->ty->base, 0);
+        Type *declared = cur->ty;
+        cur->ty        = array_of(vm, declared->base, 0);
+        if (declared->checked_kind != CHECKED_NONE) {
+            if (!declared->checked_bounds_arg1)
+                error_tok(vm, cur->name ? cur->name : *rest,
+                          "a checked flexible array member needs a count "
+                          "(e.g. int data _Checked[] [[cccc::count(n)]];)");
+            cur->ty->checked_kind         = declared->checked_kind;
+            cur->ty->checked_bounds_form  = declared->checked_bounds_form;
+            cur->ty->checked_bounds_arg1  = declared->checked_bounds_arg1;
+        }
         ty->is_flexible = true;
     }
 

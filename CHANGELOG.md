@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: checked flexible array members, `int data _Checked[] [[cccc::count(n)]];` (also `_Nt_checked[]`), bounds-checked against a sibling field.
 - Added: `_Checked`/`_Nt_checked` in an abstract declarator, so a compound literal such as `(int _Checked[4]){1, 2, 3, 4}` is a bounds-checked array.
 - Fixed: `char s _Nt_checked[] = "hi"` takes its extent from the string initializer instead of failing with "must declare at least 1 element".
 - Added: variable-length checked arrays (`int a _Checked[n]`, `_Nt_checked[n]`, and `_Checked[n]` parameters). A local is checked against the length computed at its declaration; a parameter is `count(n)`. Only the outermost dimension may be variable.
