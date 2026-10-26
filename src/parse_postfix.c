@@ -4236,8 +4236,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // The $symbol reflection path (above, in this same TK_IDENT branch's
         // sibling handling) is deliberately exempt: reaching into the runtime
         // Obj table for its address is that path's entire purpose.
+        // Bounds-template placeholders (a parameter or member named in a
+        // checked bound) are not globals and are exempt.
         if (vm->compiler.in_macro_mode && sc && sc->var && !sc->var->is_local &&
-            !sc->var->is_function) {
+            !sc->var->is_function && !sc->var->checked_self_param_idx &&
+            !sc->var->checked_self_member) {
             bool in_macro_program = false;
             for (Obj *o = vm->compiler.globals; o; o = o->next) {
                 if (o == sc->var) {
