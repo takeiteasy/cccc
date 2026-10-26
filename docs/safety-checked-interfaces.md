@@ -156,6 +156,6 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
 [^proto]: Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
-[^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not. Bounds a redeclaration adds to a function-pointer parameter's own parameters are not adopted.
+[^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

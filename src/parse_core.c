@@ -1426,7 +1426,8 @@ static void checked_adopt(Type *dst, Type *src) {
 // A redeclaration of `fn` as `ty`: errors on bounds that disagree, and gives
 // fn->ty any bounds only the new declaration spells, so later calls are checked
 // against them. fn->ty is copied first because a typedef may share it.
-// Adoption stops at the top-level parameters and return value.
+// Adoption is top-level only: callers never see a callback parameter's own
+// bounds, so adopting them into fn->ty would change nothing.
 void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
     Type *old_ty = fn->ty;
     if (!old_ty || old_ty == ty || old_ty->kind != TY_FUNC ||
