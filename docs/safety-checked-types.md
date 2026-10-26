@@ -74,8 +74,24 @@ int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays c
 
 | Limit | Reason |
 |---|---|
-| The extent must be a compile-time constant | A VLA has no fixed extent |
+| Only the outermost dimension may be variable-length (`_Checked[n][5]` works, `_Checked[3][n]` is an error) | The row checks use a constant extent per row |
 | `_Nt_checked` is one dimension only (`_Nt_checked[3][10]` is an error, also through a typedef'd row) | Only a single terminator slot is modelled |
+
+## Variable-length checked arrays
+
+A non-constant extent is checked against the length the declaration computed. Changing `n` afterwards does not move the bound, and an extent with side effects runs once.
+
+```c
+int n = 5;
+int a _Checked[n];
+n += 10;
+a[4] = 1;    // ok
+a[5] = 1;    // traps: the array still has 5 elements
+
+void f(int n, int p _Checked[n]);   // p is count(n) on the decayed pointer
+```
+
+A parameter's extent is its pointer's `count(n)`, so it is re-evaluated at each access and must be side-effect free. `_Nt_checked[n]` reserves the last slot for the terminator; at `n == 0` the range is empty and every access traps.
 
 ## Multidimensional checked arrays
 

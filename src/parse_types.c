@@ -813,11 +813,20 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             bool saved_is_const    = ty2->is_const;
             bool saved_is_volatile = ty2->is_volatile;
             bool saved_is_restrict = ty2->is_restrict;
+            // A checked VLA parameter becomes `count(extent)`, re-parsed in
+            // the body scope like any checked pointer's bound.
+            CheckedKind       saved_checked_kind = ty2->checked_kind;
+            CheckedBoundsForm saved_bounds_form  = ty2->checked_bounds_form;
+            Token            *saved_extent_tok   = ty2->checked_vla_extent_tok;
             ty2                    = pointer_to(vm, ty2->base);
             ty2->name              = name;
             ty2->is_const          = saved_is_const;
             ty2->is_volatile       = saved_is_volatile;
             ty2->is_restrict       = saved_is_restrict;
+            ty2->checked_kind                    = saved_checked_kind;
+            ty2->checked_bounds_form             = saved_bounds_form;
+            ty2->checked_bounds_arg1             = saved_extent_tok;
+            ty2->checked_vla_extent_tok          = saved_extent_tok;
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
@@ -1313,21 +1322,16 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     inherit_semantic_attrs(ty, inner_ty);
 
     if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead) {
-        // v1 restrictions (#487) -- both deferred to follow-up tickets, not
-        // silently accepted as an unchecked array:
-        if (ty->kind == TY_VLA)
-            error_tok(vm, checked_array_tok,
-                      "a checked array must have a constant extent -- "
-                      "variable-length checked arrays are not supported");
-        if (ty->kind != TY_ARRAY)
+        if (ty->kind != TY_ARRAY && ty->kind != TY_VLA)
             error_tok(vm, checked_array_tok,
                       "'%.*s' must be followed by an array declarator",
                       checked_array_tok->len, checked_array_tok->loc);
         for (Type *row = ty->base; row; row = row->base) {
+            // TODO: inner VLA dimensions need per-row runtime extents (#1798)
             if (row->kind == TY_VLA)
                 error_tok(vm, checked_array_tok,
-                          "a checked array must have a constant extent -- "
-                          "variable-length checked arrays are not supported");
+                          "only the outermost dimension of a checked array "
+                          "may be variable-length");
             if (row->kind != TY_ARRAY)
                 break;
             if (checked_array_kind == CHECKED_NTARRAY ||
@@ -1336,7 +1340,8 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
                           "multidimensional '_Nt_checked' arrays are not "
                           "supported");
         }
-        if (checked_array_kind == CHECKED_NTARRAY && ty->array_len < 1)
+        if (checked_array_kind == CHECKED_NTARRAY && ty->kind == TY_ARRAY &&
+            ty->array_len < 1)
             error_tok(vm, checked_array_tok,
                       "an '_Nt_checked' array must declare at least 1 "
                       "element -- the last element is reserved for the "
@@ -1355,9 +1360,12 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         ty->base                 = checked_array_rows(vm, ty->base);
         ty->checked_kind         = checked_array_kind;
         ty->checked_bounds_form  = CB_COUNT;
-        ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
-                                       ? ty->array_len - 1
-                                       : ty->array_len;
+        if (ty->kind == TY_VLA)
+            ty->checked_vla_extent_tok = checked_array_tok->next->next;
+        else
+            ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
+                                           ? ty->array_len - 1
+                                           : ty->array_len;
     }
 
     // Propagate noreturn from prefix __attribute__ to function type

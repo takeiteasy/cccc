@@ -226,7 +226,7 @@ static bool checked_base_is_declared(CheckedBase base) {
 // only be set on a TY_PTR before #487, so this arm was unreachable until
 // checked arrays existed.
 static Node *checked_array_decay(VirtualMachine *vm, Node *e, Token *tok) {
-    if (!e->ty || e->ty->kind != TY_ARRAY)
+    if (!e->ty || (e->ty->kind != TY_ARRAY && e->ty->kind != TY_VLA))
         return e;
     Node *addr = new_unary(vm, ND_ADDR, e, tok);
     add_type(vm, addr);

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: variable-length checked arrays (`int a _Checked[n]`, `_Nt_checked[n]`, and `_Checked[n]` parameters). A local is checked against the length computed at its declaration; a parameter is `count(n)`. Only the outermost dimension may be variable.
 - Fixed: under the VM heap, `realloc`, `calloc`, `reallocarray`, `aligned_alloc`, `posix_memalign` and `free_sized` no longer lose an earlier argument when a later one contains a call (`realloc(p, n * f())` aborted).
 - Added: `@deserialize` publishes `int T_deserialize_into(T *out, const void *buf, unsigned long len)`, a bounds-checked read that returns nonzero on a malformed buffer and leaves `*out` untouched.
 - Added: `@serialize` and `@deserialize` write and read the content of `@owned` members after the fixed bytes. `@serialize` also publishes `T_serialize_size`, and `@deserialize` publishes `T_deserialize_read`. Structs without `@owned` members serialize as before.

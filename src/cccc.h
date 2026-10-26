@@ -1730,7 +1730,8 @@ struct Type {
     // and CB_COUNT respectively) so find_checked_base()/compute_checked_
     // bounds() treat a checked array as an ordinary declared-checked base --
     // no new machinery. Unlike a checked POINTER's count(n), the count here
-    // is a compile-time constant (the array's own declared length), so
+    // is a compile-time constant (the array's own declared length; a VLA
+    // leaves it 0, see checked_vla_extent_tok), so
     // there is no token span to defer/re-parse -- checked_bounds_arg1/arg2
     // stay NULL for a checked array, and resolve_bounds_tokens()
     // (src/parse_core.c) seeds *out_hi straight from this field instead.
@@ -1771,6 +1772,13 @@ struct Type {
     struct Node *checked_param_bounds_lo;
     struct Node *checked_param_bounds_hi;
     bool         checked_param_tmpl_done;
+
+    // Variable-length checked array (`int a _Checked[n]`): the first token of
+    // the extent expression. checked_array_extent stays 0; a local takes its
+    // bound from the declaration's one-time vla_len snapshot, and a parameter
+    // (which decays to a pointer) re-parses this span as its count(n). Also
+    // marks the type so _Nt_checked can reserve its terminator slot.
+    Token *checked_vla_extent_tok;
 
     // aligned(N) written on this type itself (struct/union tag or typedef'd
     // vector), as opposed to an alignment that is merely the natural one. See

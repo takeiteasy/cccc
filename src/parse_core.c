@@ -1012,6 +1012,21 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
         return;
     }
 
+    // A local checked VLA is bounded by its declaration's one-time length
+    // snapshot (compute_vla_size()), not by re-reading the extent expression.
+    // A VLA parameter has checked_bounds_arg1 and takes the path below.
+    if (ty->kind == TY_VLA && !ty->checked_bounds_arg1 &&
+        ty->checked_vla_extent_tok) {
+        Node *n = ty->vla_len;
+        add_type(vm, n);
+        if (ty->checked_kind == CHECKED_NTARRAY) {
+            n = new_binary(vm, ND_SUB, n, new_long(vm, 1, ty->name), ty->name);
+            add_type(vm, n);
+        }
+        *out_hi = n;
+        return;
+    }
+
     // An incomplete checked array (`int a _Checked[] = {...}`) has no extent
     // until its initializer sizes it; the initializer path resolves again.
     if (!ty->checked_bounds_arg1 && ty->checked_bounds_form == CB_COUNT)
@@ -1049,6 +1064,11 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
         error_tok(vm, ty->checked_bounds_arg1,
                   "checked-pointer bounds expression must not have side "
                   "effects -- it is re-evaluated at every access");
+    // `_Nt_checked[n]` reserves the last slot for the terminator.
+    if (ty->checked_vla_extent_tok && ty->checked_kind == CHECKED_NTARRAY) {
+        n = new_binary(vm, ND_SUB, n, new_long(vm, 1, tok), tok);
+        add_type(vm, n);
+    }
     *out_hi = n;
 }
 

@@ -287,6 +287,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             Obj *var = new_lvar(vm, get_ident(vm, ty->name), ty->name->len, ty);
             decl_vars_add(vm, &dv, var);
             claim_cleanup(vm, var, attr);
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
             Token *tok_local = ty->name;
             Node  *expr      = new_binary(
                 vm, ND_ASSIGN, new_vla_ptr(vm, var, tok_local),

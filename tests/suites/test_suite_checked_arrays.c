@@ -342,3 +342,57 @@ void test_multidim_pointer_to_row_element_is_unchecked(void) {
     p[0][j]              = 3; // lands in row 1 -- not trapped
     AssertEq(a[1][0], 3);
 }
+
+// ---------------------------------------------------------------------
+// Variable-length checked arrays: a local's extent is fixed when the
+// declaration runs; a parameter is count(n) on the decayed pointer.
+// ---------------------------------------------------------------------
+
+static int vla_param_last(int n, int a _Checked[n]) {
+    return a[n - 1];
+}
+
+[[cccc::test]]
+void test_vla_checked_array_in_bounds(void) {
+    int   n = 5;
+    int a _Checked[n];
+    for (int i = 0; i < n; i++)
+        a[i] = i;
+    AssertEq(a[4], 4);
+    AssertEq(vla_param_last(n, a), 4);
+}
+
+[[cccc::test]]
+void test_vla_checked_array_extent_is_a_snapshot(void) {
+    int   n = 5;
+    int a _Checked[n];
+    n    += 10;
+    a[4]  = 7;
+    AssertEq(a[4], 7);
+}
+
+[[cccc::test]]
+void test_vla_checked_array_extent_evaluated_once(void) {
+    int   n = 3;
+    int a _Checked[n++];
+    a[2] = 5;
+    AssertEq(n, 4);
+    AssertEq(a[2], 5);
+}
+
+[[cccc::test]]
+void test_vla_checked_array_outer_dimension(void) {
+    int   m = 3;
+    int a _Checked[m][5];
+    a[2][4] = 9;
+    AssertEq(a[2][4], 9);
+}
+
+[[cccc::test]]
+void test_vla_nt_checked_array_terminator_slot(void) {
+    int    n = 5;
+    char s _Nt_checked[n];
+    s[3] = 'x';
+    s[4] = 0;
+    AssertEq(s[3], 'x');
+}
