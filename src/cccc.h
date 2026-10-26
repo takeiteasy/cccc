@@ -4282,6 +4282,7 @@ typedef struct Compiler {
         CheckedScope opened;   // state this begin pushed (its keyword)
         Token       *open_tok; // token of the #pragma cccc checked/unchecked
                                // begin (for "unclosed" diagnostics)
+        bool is_push;          // #pragma CHECKED_SCOPE push, not a begin
     }           *checked_scope_stack;
     int          checked_scope_stack_len;
     int          checked_scope_stack_cap;

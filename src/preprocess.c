@@ -181,7 +181,7 @@ static void suite_pop(VirtualMachine *vm) {
 // nested inside a `checked begin` restores to CHECKED_SCOPE_ON on its own
 // `end`, not to UNSET).
 static void checked_scope_push(VirtualMachine *vm, CheckedScope state,
-                               Token *open_tok) {
+                               Token *open_tok, bool is_push) {
     if (vm->compiler.checked_scope_stack_len ==
         vm->compiler.checked_scope_stack_cap) {
         vm->compiler.checked_scope_stack_cap =
@@ -195,7 +195,7 @@ static void checked_scope_push(VirtualMachine *vm, CheckedScope state,
     }
     vm->compiler.checked_scope_stack[vm->compiler.checked_scope_stack_len++] =
         (struct CheckedScopeEntry){vm->compiler.checked_scope_pp, state,
-                                   open_tok};
+                                   open_tok, is_push};
     vm->compiler.checked_scope_pp = state;
 }
 
@@ -6019,6 +6019,53 @@ static int read_pack_align(VirtualMachine *vm, Token *tok) {
     return (int)v;
 }
 
+static bool token_is_ci(Token *tok, const char *word) {
+    if (tok->len != (int)strlen(word))
+        return false;
+    for (int i = 0; i < tok->len; i++)
+        if ((tok->loc[i] | 0x20) != word[i])
+            return false;
+    return true;
+}
+
+// Checked C's `#pragma CHECKED_SCOPE on|off|push|pop`. `on`/`off` set the
+// region state for the rest of the file; `push`/`pop` save and restore it.
+// Only meaningful at file scope: the preprocessor does not track blocks.
+static Token *handle_pragma_checked_scope(VirtualMachine *vm, Token *tok) {
+    Token *op = tok->next;
+    if (!op || op->kind == TK_EOF || op->at_bol)
+        error_tok(vm, tok,
+                  "expected 'on', 'off', 'push' or 'pop' after "
+                  "'#pragma CHECKED_SCOPE'");
+    if (token_is_ci(op, "on") || token_is_ci(op, "off")) {
+        vm->compiler.checked_scope_pp =
+            token_is_ci(op, "on") ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
+    } else if (equal(op, "push")) {
+        checked_scope_push(vm, vm->compiler.checked_scope_pp, tok, true);
+    } else if (equal(op, "pop")) {
+        if (vm->compiler.checked_scope_stack_len == 0)
+            error_tok(vm, tok,
+                      "stray #pragma CHECKED_SCOPE pop without matching push");
+        struct CheckedScopeEntry *top =
+            &vm->compiler.checked_scope_stack
+                 [vm->compiler.checked_scope_stack_len - 1];
+        if (!top->is_push)
+            error_tok(vm, tok,
+                      "#pragma CHECKED_SCOPE pop does not match "
+                      "'#pragma cccc checked/unchecked begin' at line %d",
+                      top->open_tok->line_no + top->open_tok->file->line_delta);
+        checked_scope_pop(vm);
+    } else if (equal(op, "_Bounds_only")) {
+        error_tok(vm, op,
+                  "#pragma CHECKED_SCOPE _Bounds_only is not supported");
+    } else {
+        error_tok(vm, op,
+                  "expected 'on', 'off', 'push' or 'pop' after "
+                  "'#pragma CHECKED_SCOPE'");
+    }
+    return skip_line(vm, op->next);
+}
+
 // Parses `pack(N)`, `pack()`, `pack(push[, ident][, N])`, and
 // `pack(pop[, ident])` -- the GCC/MSVC-compatible subset (#1173). `tok` is
 // the "pack" token itself. Unlike the previous behavior (accepted, parsed,
@@ -6309,7 +6356,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
             Token *after      = sub->next;
             if (equal(after, "begin")) {
                 checked_scope_push(
-                    vm, is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF, tok);
+                    vm, is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF, tok,
+                    false);
                 return skip_line(vm, after->next);
             } else if (equal(after, "end")) {
                 if (vm->compiler.checked_scope_stack_len == 0)
@@ -6322,6 +6370,13 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                          [vm->compiler.checked_scope_stack_len - 1];
                 CheckedScope want =
                     is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
+                if (top->is_push)
+                    error_tok(vm, tok,
+                              "#pragma cccc %s end does not match "
+                              "'#pragma CHECKED_SCOPE push' at line %d",
+                              is_checked ? "checked" : "unchecked",
+                              top->open_tok->line_no +
+                                  top->open_tok->file->line_delta);
                 if (top->opened != want)
                     error_tok(vm, tok,
                               "#pragma cccc %s end does not match "
@@ -6350,6 +6405,8 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
     } else if ((equal(tok, "GCC") || equal(tok, "clang")) &&
                equal(tok->next, "diagnostic")) {
         return handle_gcc_diagnostic(vm, tok->next->next);
+    } else if (equal(tok, "CHECKED_SCOPE")) {
+        return handle_pragma_checked_scope(vm, tok);
     } else if (equal(tok, "pack")) {
         return handle_pragma_pack(vm, tok);
     } else if (equal(tok, "omp") && (vm->flags & CCCC_OPENMP)) {
@@ -8463,7 +8520,9 @@ Token *preprocess(VirtualMachine *vm, Token *tok) {
     // outermost opener.
     if (vm->compiler.checked_scope_stack_len > 0)
         error_tok(vm, vm->compiler.checked_scope_stack[0].open_tok,
-                  "unclosed #pragma cccc checked/unchecked begin");
+                  vm->compiler.checked_scope_stack[0].is_push
+                      ? "unclosed #pragma CHECKED_SCOPE push"
+                      : "unclosed #pragma cccc checked/unchecked begin");
     if (vm->compiler.cond_incl) {
         Token      *ci_tok = vm->compiler.cond_incl->tok;
         const char *hint   = "";

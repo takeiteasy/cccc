@@ -513,3 +513,44 @@ void test_function_level_names_not_reclassified(void) {
     _Checked_row r = {0, 0};
     AssertEq(_Checked() + _Unchecked + r[0], 42);
 }
+
+// ---------------------------------------------------------------------
+// #pragma CHECKED_SCOPE on|off|push|pop (Checked C spelling): on/off set the
+// state for the rest of the file, push/pop save and restore it.
+// ---------------------------------------------------------------------
+
+#pragma CHECKED_SCOPE push
+#pragma CHECKED_SCOPE on
+int cs_pragma_checked_sum(void) {
+    int n                                  = 2;
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[2]){20, 22};
+    return a[0] + a[1];
+}
+
+#pragma CHECKED_SCOPE push
+#pragma CHECKED_SCOPE OFF
+int cs_pragma_raw_inside_off(int *p) {
+    return p[0];
+}
+#pragma CHECKED_SCOPE pop
+
+// The inner pop restores the `on` state.
+int cs_pragma_checked_again(void) {
+    int *[[cccc::array, cccc::count(1)]] a = (int _Checked[1]){42};
+    return a[0];
+}
+#pragma CHECKED_SCOPE pop
+
+// The outer pop restores the unchecked default.
+int cs_pragma_raw_after_pop(int *p) {
+    return p[0];
+}
+
+[[cccc::test]]
+void test_checked_scope_pragma_on_off_push_pop(void) {
+    int v = 42;
+    AssertEq(cs_pragma_checked_sum(), 42);
+    AssertEq(cs_pragma_raw_inside_off(&v), 42);
+    AssertEq(cs_pragma_checked_again(), 42);
+    AssertEq(cs_pragma_raw_after_pop(&v), 42);
+}
