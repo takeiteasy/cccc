@@ -2,7 +2,7 @@
 
 Say "only checked pointers in here" for a block, a function or a stretch of file, so code can migrate piece by piece.
 
-Inside a checked region an unchecked pointer declaration or an unsafe pointer cast is a compile error, or a warning once you [downgrade it](#downgrading-to-warnings).
+Inside a checked region an unchecked pointer declaration, a plain array declaration or an unsafe pointer cast is a compile error, or a warning once you [downgrade it](#downgrading-to-warnings).
 
 ## Opening a region
 
@@ -10,6 +10,8 @@ Inside a checked region an unchecked pointer declaration or an unsafe pointer ca
 [[cccc::checked]] void f(void) {
     int * [[cccc::array, cccc::count(n)]] a = ...;  // fine
     int *p = a;                                     // error: unchecked local
+    int buf[8];                                     // error: plain array
+    int ok _Checked[8];                             // fine
 
     [[cccc::unchecked]] {
         int *raw = (int *)a;                        // fine: escape hatch
@@ -45,6 +47,7 @@ Regions nest to any depth and the innermost wins, across all spellings. An attri
 | Rule | Example |
 |---|---|
 | A pointer-typed local, parameter, global, member or function return type with no checked kind; arrays of such pointers count | `int *p;`, `int *a[2];`, `int *f(void);` |
+| An array whose outermost type is not `_Checked`/`_Nt_checked`, as a local, global, member (flexible array members too) or compound literal; `char s[] = "hi"` and `Row a[3]` count | `int a[3];`, `(int[2]){1, 2}` |
 | An `array`/`ntarray` pointer with no bounds form | `int * [[cccc::array]] a;` |
 | A cast to an unchecked pointer type, or one that changes a checked pointer's kind (`array` to `single`) | `(int *)a` |
 | A cast from an unchecked pointer to a checked one | `(int * [[cccc::array, cccc::count(n)]])raw` |
@@ -100,7 +103,7 @@ These calls are never reported:
 
 ## Headers
 
-A region around an `#include` does not apply to the header's declarations, since every libc prototype is unchecked:
+A region around an `#include` does not apply to the header's declarations, since every libc prototype is unchecked. An array type from a header typedef, such as `jmp_buf`, is also exempt, because `_Checked` cannot be written on a typedef'd array:
 
 ```c
 #pragma cccc checked begin

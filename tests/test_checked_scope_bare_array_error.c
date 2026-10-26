@@ -8,7 +8,7 @@ int  g_x;
 
 [[cccc::checked]]
 int f(void) {
-    int arr[3]             = {1, 2, 3};
+    int arr _Checked[3]    = {1, 2, 3};
     int *[[cccc::array]] a = arr;
     return a[0];
 }

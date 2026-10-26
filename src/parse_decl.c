@@ -110,6 +110,9 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         if (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
             ty->kind != TY_ENUM)
             ty = copy_type(vm, ty);
+        if (ty->kind == TY_ARRAY && ty->name->file &&
+            !cc_file_is_command_line_input(vm, ty->name->file->name))
+            ty->header_array_typedef = true;
         drop_cleanup_attr(vm, ty, attr, ty->name);
         resolve_type_checked_bounds(vm, ty);
         char *name = get_ident(vm, ty->name);

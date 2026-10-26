@@ -2309,9 +2309,9 @@ void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
         "[[cccc::unchecked]] block");
 }
 
-// Declaration-ban diagnostic (#485 v1 ban list, item 1 of 2): a local,
-// parameter, global or struct/union member whose type is an unchecked
-// pointer, declared while a checked region is in effect. Called once per
+// Declaration-ban diagnostic (#485 v1 ban list): a local, parameter, global
+// or struct/union member whose type is an unchecked pointer or a plain array,
+// declared while a checked region is in effect. Called once per
 // declarator from declaration()/global_variable() (src/parse_init.c,
 // src/parse_decl.c), create_param_lvars() (src/parse_decl.c) and the
 // struct/union member loop (src/parse_types.c) -- never from new_lvar()/
@@ -2331,6 +2331,15 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what) {
     if (vm->compiler.in_type_lookahead || !ty || !name_tok)
         return;
+    if ((ty->kind == TY_ARRAY || ty->kind == TY_VLA) &&
+        ty->checked_kind == CHECKED_NONE && !ty->header_array_typedef &&
+        cc_checked_scope_at(vm, name_tok) == CHECKED_SCOPE_ON)
+        checked_region_diag(vm, name_tok,
+                            "unchecked array %s '%.*s' is not allowed in a "
+                            "checked region -- declare it _Checked[N] or "
+                            "_Nt_checked[N], or move it into an "
+                            "[[cccc::unchecked]] block",
+                            what, name_tok->len, name_tok->loc);
     while (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
         ty = ty->base;
     if (ty->kind != TY_PTR)
@@ -2356,6 +2365,21 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                         "[[cccc::array]] or [[cccc::ntarray]], or move it "
                         "into an [[cccc::unchecked]] block",
                         what, name_tok->len, name_tok->loc);
+}
+
+// A compound literal of plain array type creates an unchecked array object.
+void cc_check_checked_scope_compound_literal(VirtualMachine *vm, Type *ty,
+                                             Token *tok) {
+    if (vm->compiler.in_type_lookahead || !ty ||
+        (ty->kind != TY_ARRAY && ty->kind != TY_VLA) ||
+        ty->checked_kind != CHECKED_NONE || ty->header_array_typedef ||
+        cc_checked_scope_at(vm, tok) != CHECKED_SCOPE_ON)
+        return;
+    checked_region_diag(vm, tok,
+                        "compound literal of an unchecked array type is not "
+                        "allowed in a checked region -- write "
+                        "(T _Checked[N]){...}, or move it into an "
+                        "[[cccc::unchecked]] block");
 }
 
 static bool is_unchecked_data_ptr(Type *ty) {

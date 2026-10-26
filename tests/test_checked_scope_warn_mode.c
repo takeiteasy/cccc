@@ -10,7 +10,7 @@ int *g_raw;
 [[cccc::checked]]
 int f(int n) {
     int *raw                               = 0;
-    int *[[cccc::array, cccc::count(n)]] a = (int[2]){40, 2};
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[2]){40, 2};
     char *c                                = (char *)a;
     int *[[cccc::array, cccc::count(n)]] p = g_raw;
     (void)raw;

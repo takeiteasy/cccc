@@ -523,6 +523,8 @@ void record_type_name(VirtualMachine *vm, Type *ty, char *name, int name_len,
 void mark_last_type_name_as_definition(VirtualMachine *vm, Type *ty); // #1010
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var);
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members);
+void cc_check_checked_scope_compound_literal(VirtualMachine *vm, Type *ty,
+                                             Token *tok);
 Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
                                     Token *tok, Type *arr);
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);

@@ -18,7 +18,7 @@
 [[cccc::checked]]
 int checked_array_sum(void) {
     int n                                  = 4;
-    int *[[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[4]){1, 2, 3, 4};
     return a[0] + a[1] + a[2] + a[3];
 }
 
@@ -30,7 +30,7 @@ void test_checked_function_body(void) {
 [[cccc::checked]]
 int checked_with_unchecked_escape(void) {
     int n                                  = 1;
-    int *[[cccc::array, cccc::count(n)]] a = (int[1]){41};
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){41};
     int result;
     [[cccc::unchecked]] {
         int *raw = (int *)a; // fine -- inside the escape hatch
@@ -88,10 +88,10 @@ void test_null_constants_allowed_in_region(void) {
 
 [[cccc::checked]]
 int visible_objects_convert_implicitly(void) {
-    int arr[4]                                = {1, 2, 3, 4};
+    int arr _Checked[4]                              = {1, 2, 3, 4};
     int *[[cccc::array, cccc::count(4)]] a    = arr;
     int *[[cccc::array, cccc::count(3)]] b    = arr + 1;
-    int *[[cccc::array, cccc::count(2)]] c    = (int[2]){5, 6};
+    int *[[cccc::array, cccc::count(2)]] c    = (int _Checked[2]){5, 6};
     int *[[cccc::single]] d                   = &g_one;
     char *[[cccc::ntarray, cccc::count(2)]] s = "hi";
     int *[[cccc::array, cccc::count(3)]] e    = a + 1;
@@ -138,7 +138,7 @@ int *[[cccc::single]] checked_return_type(int *[[cccc::single]] p);
 
 [[cccc::checked]]
 int checked_pointer_array(void) {
-    int *[[cccc::single]] slots[2] = {&g_one, NULL};
+    int *[[cccc::single]] slots _Checked[2] = {&g_one, NULL};
     return *slots[0] + (slots[1] == NULL) + *checked_return_type(&g_one);
 }
 
@@ -186,7 +186,7 @@ void test_bounds_unknown_from_raw_allowed(void) {
 
 [[cccc::checked]]
 int bounds_unknown_escape_hatch(void) {
-    int arr[3]                                    = {10, 20, 12};
+    int arr _Checked[3]                                  = {10, 20, 12};
     int *[[cccc::array, cccc::bounds(unknown)]] a = arr;
     return a[0] + a[1] + a[2];
 }
@@ -286,7 +286,7 @@ void test_region_does_not_leak_across_block(void) {
 int underscore_checked_array_sum(void) {
     int n = 4;
     _Checked {
-        int *[[cccc::array, cccc::count(n)]] a = (int[4]){1, 2, 3, 4};
+        int *[[cccc::array, cccc::count(n)]] a = (int _Checked[4]){1, 2, 3, 4};
         return a[0] + a[1] + a[2] + a[3];
     }
 }
@@ -299,7 +299,7 @@ void test_underscore_checked_block(void) {
 [[cccc::checked]]
 int underscore_unchecked_escape_in_attr_function(void) {
     int n                                  = 1;
-    int *[[cccc::array, cccc::count(n)]] a = (int[1]){41};
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){41};
     int result;
     _Unchecked {
         int *raw = (int *)a; // fine -- inside the escape hatch
@@ -340,7 +340,7 @@ void test_underscore_three_deep_alternating_nesting(void) {
 [[cccc::checked]]
 int mixed_spelling_attr_then_keyword(void) {
     int n                                  = 1;
-    int *[[cccc::array, cccc::count(n)]] a = (int[1]){20};
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){20};
     int result;
     _Unchecked {
         int *raw = (int *)a;
@@ -376,7 +376,7 @@ void test_mixed_spelling_keyword_then_attr(void) {
 int underscore_checked_overrides_pragma(void) {
     int n = 1;
     _Checked {
-        int *[[cccc::array, cccc::count(n)]] a = (int[1]){42};
+        int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){42};
         return a[0];
     }
 }
@@ -412,7 +412,7 @@ int trusted_first(int *p) {
 
 [[cccc::checked]]
 int call_trusted(void) {
-    int *[[cccc::array, cccc::count(1)]] a = (int[1]){7};
+    int *[[cccc::array, cccc::count(1)]] a = (int _Checked[1]){7};
     return trusted_first(a);
 }
 

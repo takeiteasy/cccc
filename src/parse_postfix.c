@@ -381,6 +381,7 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                      "compound literals are a C99 extension");
         VarAttr attr = {};
         Type   *ty   = compound_literal_type(vm, &tok, tok->next, &attr);
+        cc_check_checked_scope_compound_literal(vm, ty, start);
         tok          = skip(vm, tok, ")");
 
         // A compound literal used inside a global/static initializer must

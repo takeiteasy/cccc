@@ -3,7 +3,7 @@
 // Checked regions: an array of unchecked pointers as a global.
 
 #pragma cccc checked begin
-int *g_arr[2][2];
+int *g_arr _Checked[2][2];
 #pragma cccc checked end
 
 int main(void) {

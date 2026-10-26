@@ -1574,6 +1574,9 @@ struct Type {
     // re-emission inside the struct body.
     struct StaticAssertRecord *member_asserts;
     bool                       is_flexible;
+    // Array typedef declared in a header (`jmp_buf`): exempt from the checked-region
+    // array rule, since `_Checked` cannot be written on a typedef'd array.
+    bool header_array_typedef;
     bool           is_packed;
     bool designated_init; // __attribute__((designated_init)): all initializers
                           // of this struct type must be designated (#659)

@@ -137,7 +137,7 @@ Three or more dimensions work the same way, and the outer extent may be omitted 
 | Pointer to a row (`int (*p)[5] = a; p[0][7]`) | `p[0]` is checked, the element access is not |
 | Plain outer array of checked rows (`Row a[3]` with `typedef int Row _Checked[5]`) | Each row is checked; the outer index is not |
 
-A plain array inside a [checked region](safety-checked-regions.md) stays legal. Checked arrays serialize as ordinary arrays in `-m`/`-c=native`/`-c=generated` output.
+A plain array inside a [checked region](safety-checked-regions.md#what-is-banned) is an error. Checked arrays serialize as ordinary arrays in `-m`/`-c=native`/`-c=generated` output.
 
 [^rows]: The row expression would be evaluated a second time to build the inner bounds, so the inner check is skipped rather than changing the program's side effects.
 [^bytes]: A `byte_count(n)` that is not a multiple of `sizeof(T)` widens by exactly `sizeof(T)` bytes, so the slot is misaligned and no element index reaches it; the guard has nothing to protect there.

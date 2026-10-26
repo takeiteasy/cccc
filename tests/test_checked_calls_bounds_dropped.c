@@ -10,7 +10,7 @@ int sink_raw(int *p, int n) {
 
 [[cccc::checked]]
 int f(void) {
-    int *[[cccc::array, cccc::count(2)]] a = (int[2]){20, 22};
+    int *[[cccc::array, cccc::count(2)]] a = (int _Checked[2]){20, 22};
     return sink_raw(a, 2);
 }
 

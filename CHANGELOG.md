@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a checked region rejects a plain array declaration or array compound literal; write `_Checked[N]`/`_Nt_checked[N]`. Array typedefs from headers (`jmp_buf`) are exempt.
 - Added: checked flexible array members, `int data _Checked[] [[cccc::count(n)]];` (also `_Nt_checked[]`), bounds-checked against a sibling field.
 - Added: `_Checked`/`_Nt_checked` in an abstract declarator, so a compound literal such as `(int _Checked[4]){1, 2, 3, 4}` is a bounds-checked array.
 - Fixed: `char s _Nt_checked[] = "hi"` takes its extent from the string initializer instead of failing with "must declare at least 1 element".

@@ -4,7 +4,7 @@
 
 [[cccc::checked]]
 void f(void) {
-    int *a[2];
+    int *a _Checked[2];
     (void)a;
 }
 

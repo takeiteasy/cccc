@@ -16,7 +16,7 @@ int raw(int *p) {
 
 [[cccc::checked]]
 int f(void) {
-    int *[[cccc::array, cccc::count(2)]] a = (int[2]){20, 22};
+    int *[[cccc::array, cccc::count(2)]] a = (int _Checked[2]){20, 22};
     int (*fp)(int *)                       = raw;
     int total                              = annotated(a, 2);
     total += (int)strlen("") + (int)strlen("ab") - 2;

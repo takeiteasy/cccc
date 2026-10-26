@@ -5,7 +5,7 @@
 [[cccc::checked]]
 void f(void) {
     struct S {
-        int *a[2];
+        int *a _Checked[2];
     } s;
     (void)s;
 }

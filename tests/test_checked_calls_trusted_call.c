@@ -11,7 +11,7 @@ int read_first(int *p) {
 
 [[cccc::checked]]
 int f(void) {
-    int *[[cccc::array, cccc::count(1)]] a = (int[1]){42};
+    int *[[cccc::array, cccc::count(1)]] a = (int _Checked[1]){42};
     return read_first(a);
 }
 
