@@ -2569,3 +2569,19 @@ void test_checked_call_arg_hoist_block_call_pass(void) {
     checked_call_arg_sink(small, two());
     AssertEq(calls, 1);
 }
+
+// The arguments of a checked-return call are verified when the result is
+// stored into a declared-checked pointer.
+[[cccc::test]]
+void test_checked_call_arg_checked_return_store_pass(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(2)]] q     = checked_call_arg_ret(small, 2);
+    AssertEq(q[1], 2);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_checked_return_store_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(2)]] q     = checked_call_arg_ret(small, 8);
+    (void)q;
+}

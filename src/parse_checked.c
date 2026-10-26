@@ -1623,6 +1623,10 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
                     if (is_source && !src_optional && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
+                        // The split moved the call, with its argument
+                        // stores, out of the rhs.
+                        if (cr_store)
+                            verify_checked_assign_scan(vm, fn, cr_store->rhs);
                         // #947: recompute both sides now with the hoist
                         // allocator live -- the probe above only proved
                         // this rewrite is going to happen.
