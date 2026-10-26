@@ -2436,3 +2436,136 @@ static int callback_sum(int *p, int n) {
 void test_checked_call_arg_callback_param_pass(void) {
     AssertEq(callback_apply(callback_sum), 6);
 }
+
+// A side-effecting sibling argument is hoisted ahead of the call: it runs
+// once and the bounds are checked against the value the callee receives.
+
+static int hoist_calls;
+static int hoist_two(void) {
+    hoist_calls++;
+    return 2;
+}
+static int hoist_eight(void) {
+    hoist_calls++;
+    return 8;
+}
+
+static int
+checked_call_arg_count_first(int n, int *[[cccc::array, cccc::count(n)]] p) {
+    return n + p[0];
+}
+
+[[cccc::test]]
+void test_checked_call_arg_hoist_pass(void) {
+    hoist_calls                                = 0;
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_sink(small, hoist_two());
+    AssertEq(hoist_calls, 1);
+    AssertEq(checked_call_arg_count_first(hoist_two(), small), 3);
+    AssertEq(hoist_calls, 2);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_call_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_sink(small, hoist_eight());
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_before_pointer_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    checked_call_arg_count_first(hoist_eight(), small);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_increment_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int i                                      = 8;
+    checked_call_arg_sink(small, i++);
+}
+
+[[cccc::test]]
+void test_checked_call_arg_hoist_increment_once(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int i                                      = 2;
+    checked_call_arg_sink(small, i++);
+    AssertEq(i, 3);
+}
+
+static int *[[cccc::array, cccc::count(n)]] checked_call_arg_ret(
+    int *[[cccc::array, cccc::count(n)]] p, int n) {
+    return p;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_checked_return_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    // The callee's return bounds are count(8): a wider claim traps.
+    int *[[cccc::array, cccc::count(16)]] q =
+        checked_call_arg_ret(small, hoist_eight());
+    (void)q;
+}
+
+typedef struct {
+    long a, b;
+} HoistPair;
+
+static HoistPair checked_call_arg_pair(int *[[cccc::array, cccc::count(n)]] p,
+                                       int n) {
+    return (HoistPair){p[0], n};
+}
+
+[[cccc::test]]
+void test_checked_call_arg_hoist_struct_return(void) {
+    hoist_calls                                = 0;
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    HoistPair r = checked_call_arg_pair(small, hoist_two());
+    AssertEq(r.a, 1);
+    AssertEq(r.b, 2);
+    AssertEq(hoist_calls, 1);
+}
+
+// Two parameters whose bounds name the same sibling share one hoisted temp.
+static int checked_call_arg_shared(int *[[cccc::array, cccc::count(n)]] p,
+                                   int *[[cccc::array, cccc::count(n)]] q,
+                                   int n) {
+    return p[0] + q[0] + n;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_hoist_shared_sibling_once(void) {
+    hoist_calls                            = 0;
+    int *[[cccc::array, cccc::count(2)]] a = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(2)]] b = (int[2]){3, 4};
+    AssertEq(checked_call_arg_shared(a, b, hoist_two()), 6);
+    AssertEq(hoist_calls, 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_shared_sibling_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] a = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(8)]] b = (int[8]){0};
+    checked_call_arg_shared(a, b, hoist_eight());
+}
+
+// A block call as the sibling argument is hoisted like a function call.
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_hoist_block_call_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int (^eight)(void)                         = ^{
+      return 8;
+    };
+    checked_call_arg_sink(small, eight());
+}
+
+[[cccc::test]]
+void test_checked_call_arg_hoist_block_call_pass(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    __block int calls                          = 0;
+    int (^two)(void)                           = ^{
+      calls++;
+      return 2;
+    };
+    checked_call_arg_sink(small, two());
+    AssertEq(calls, 1);
+}

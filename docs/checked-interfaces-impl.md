@@ -12,12 +12,14 @@ An annotated parameter is itself the bounds-safe interface (Checked C's `itype`)
 | Rewrite | `rewrite_checked_call_args()` (`src/parse_checked.c`) at each call | Every placeholder becomes a clone of that call's actual argument, and the qualifying argument `arg` becomes `(__ca = arg, __ca)`, where `__ca` is a fresh declared-checked local carrying the substituted template as its bounds |
 | Check | The existing `verify_checked_assign_bounds()` walk | It finds `__ca = arg` and emits the usual `CHKAB` pair. No new opcode or codegen: this is the same shape `checked_cast_desugar()` produces for `assume` and `dynamic` |
 
-A call is rewritten only when both hold:
+A call is rewritten only when the argument is rooted as below. A side-effecting sibling argument the bounds name is hoisted first:
 
 | Condition | Reason |
 |---|---|
 | The argument is rooted at a declared-checked source (`find_checked_base()` + `checked_base_is_declared()`) or at a propagation candidate | A candidate's class (FULL, OPT, NONE) is only known once the body is parsed, so `__ca = arg` is built and the assignment scan verifies it only for a FULL source. An OPT one can hold the sentinel range, which `CHKAB` has no sentinel-aware variant for. An unchecked `int *raw` gets no check |
-| Every *other* parameter the bounds name is fed a side-effect-free argument (`node_has_side_effects()`, the predicate bounds resolution already uses) | The template is re-evaluated, and an extra evaluation of a side-effecting expression is not worth a check. `sink(small, 8)` and `sink(small, len)` qualify; `sink(small, f())` and `sink(small, i++)` are silently declined, as `f()->p[i]` is for member bounds |
+| Every *other* parameter the bounds name is fed an argument that is side-effect-free (`node_has_side_effects()`) or can be hoisted | The template substitutes a clone of that argument, so one with side effects is first stored in a temp. `sink(small, 8)`, `sink(small, len)`, `sink(small, f())` and `sink(small, i++)` are all checked. A sibling that is itself a verified checked argument keeps the call unchecked |
+
+The hoist is a prelude comma around the whole call, `(__t = f(), sink(...))`, flagged `Node.call_prelude`. Hoisted siblings are evaluated once, in argument order, before every argument that stays in place, because call arguments are unsequenced and a check in one argument cannot read a temp stored in another. `checked_call_root()` returns the prelude comma and `split_checked_call_result()` wraps it, so a checked-return call keeps its return bounds. A `return` of such a call is not a tail call.
 
 Other points:
 
@@ -28,7 +30,7 @@ Other points:
 - A prototype and a later definition with different bounds for one parameter are accepted silently: the first one parsed is the type every template resolves against.
 - The pass is gated on `--checked-pointers` at parse time, like `verify_checked_assign_bounds()`. With the flag off `rewrite_checked_call_args()` never runs, so `-m`, `-c=native` and `-c=generated` output is unaffected.
 - An annotated same-TU function's own body stays `CHKR`-checked against its declared bounds. This can newly trap code no unchecked caller ever touched, since the callee breaks its own contract. It uses its own declared bound, not the caller's storage, so an unchecked caller passing a too-short buffer does not trap there: closing that gap at the call boundary is the point of the feature.
-- Not done: arguments with side effects via pre-call hoisting, a warning when a check is declined, a prototype/definition disagreement diagnostic, propagated arguments, struct-field bounds interfaces, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
+- Not done: a warning when a check is declined, a prototype/definition disagreement diagnostic, propagated arguments, struct-field bounds interfaces, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
 
 ## Bounds casts
 

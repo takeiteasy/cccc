@@ -2195,7 +2195,9 @@ struct Node {
     bool         pass_by_stack;
     bool         has_splice_arg; // deferred arity/cast check needed after
                                  // quote_substitute
-    Obj         *ret_buffer;
+    bool call_prelude; // ND_COMMA `(hoisted argument temps, call)` built by
+                       // rewrite_checked_call_args(); ->rhs is the ND_FUNCALL
+    Obj *ret_buffer;
     // #981: true only for the alloca(...) ND_FUNCALL synthesized by
     // new_alloca() to back a VLA declaration (parse.c's
     // ND_ASSIGN(ND_VLA_PTR, alloca(...)) lowering). False for every other

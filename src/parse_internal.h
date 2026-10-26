@@ -530,8 +530,8 @@ Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
-void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
-                               Token *tok);
+Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
+                                Token *tok);
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                            AttrTargetKind kind, char *name, Type *target_ty,
                            Obj *obj, Token *tok);

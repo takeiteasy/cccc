@@ -1237,10 +1237,11 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // deferred splice ($@k) the same as every other per-argument check
     // above -- positional param<->arg pairing is meaningless once arity
     // itself is deferred.
+    Node *prelude = NULL;
     if (!deferred_splice) {
         resolve_param_checked_bounds(vm, ty);
         cc_check_checked_call(vm, watch, ty, fn->tok);
-        rewrite_checked_call_args(vm, ty, head_next, tok);
+        prelude = rewrite_checked_call_args(vm, ty, head_next, tok);
     }
 
     Node *node           = new_unary(vm, ND_FUNCALL, fn, tok);
@@ -1259,6 +1260,12 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
         node->ret_buffer                = new_lvar(vm, "", 0, node->ty);
         node->ret_buffer->is_ret_buffer = true;
+    }
+    if (prelude) {
+        Node *wrapped         = new_binary(vm, ND_COMMA, prelude, node, tok);
+        wrapped->call_prelude = true;
+        add_type(vm, wrapped);
+        return wrapped;
     }
     return node;
 }

@@ -897,6 +897,7 @@ bool node_has_side_effects(Node *n) {
     switch (n->kind) {
         case ND_ASSIGN:
         case ND_FUNCALL:
+        case ND_BLOCK_CALL:
         case ND_CAS:
         case ND_EXCH:
         case ND_ALOAD:

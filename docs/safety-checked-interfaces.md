@@ -27,7 +27,7 @@ A call is checked when both hold:
 | Condition | Example that qualifies | Example that is skipped |
 |---|---|---|
 | The argument is a declared-checked pointer, or a local that [inherits its bounds](safety-checked-propagation.md) on every path | `small`, `q` after `int *q = small;` | `int *raw` (unchecked to unchecked is untouched) |
-| Every other parameter the bounds name has a side-effect-free argument | `sink(small, 8)`, `sink(small, len)` | `sink(small, f())`, `sink(small, i++)` |
+| Every other parameter the bounds name has an argument that is side-effect-free or hoistable | `sink(small, 8)`, `sink(small, f())`, `sink(small, i++)` | a sibling argument that is itself a checked pointer with side effects |
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
 
@@ -143,6 +143,6 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
-[^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Skipped calls (side-effecting arguments, or a propagated argument whose bounds are known on only some paths) are skipped silently.
+[^proto]: A prototype and a later definition that declare different bounds for one parameter are accepted without a diagnostic; the first declaration seen is used. Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

@@ -244,8 +244,10 @@ static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
 
 // The call `n` roots in (through the same `+`, `-` and cast descent as
 // find_checked_base()) when its callee returns a checked pointer whose bounds
-// split_checked_call_result() can substitute. A pure predicate: it allocates
-// nothing and does not depend on --checked-pointers.
+// split_checked_call_result() can substitute. A call wrapped in its argument
+// prelude is returned as the wrapper, so the split keeps the prelude ahead of
+// the call. A pure predicate: it allocates nothing and does not depend on
+// --checked-pointers.
 static Node *checked_call_root(Node *n) {
     while (n) {
         switch (n->kind) {
@@ -254,6 +256,10 @@ static Node *checked_call_root(Node *n) {
             case ND_CAST:
                 n = n->lhs;
                 continue;
+            case ND_COMMA:
+                return n->call_prelude && checked_call_root(n->rhs) == n->rhs
+                           ? n
+                           : NULL;
             case ND_FUNCALL: {
                 Type *fty = n->func_ty;
                 if (!fty || n->has_splice_arg ||
@@ -749,7 +755,8 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
     // classification probe needs just the fact and its terminator slot.
     Node *croot = checked_call_root(rhs);
     if (croot) {
-        Type *rt      = croot->func_ty->return_ty;
+        Type *rt =
+            (croot->call_prelude ? croot->rhs : croot)->func_ty->return_ty;
         *out_optional = false;
         *out_nt       = rt->checked_kind == CHECKED_NTARRAY &&
                         checked_nt_pointee_supported(rt->base);
@@ -1730,6 +1737,12 @@ void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn) {
 // committing to this design: an ND_ASSIGN nested in an ND_COMMA that is
 // itself a call argument is reached by verify_checked_assign_scan()'s
 // existing descent.
+//
+// A sibling argument a bounds template names is substituted as a clone, so
+// one with side effects is first hoisted into a temp. The stores form a
+// prelude `(__t = f(), call)` around the whole call, evaluated once and
+// before any argument: arguments are unsequenced, so a read of the temp in one
+// argument could not be ordered after its store in another.
 // ---------------------------------------------------------------------
 
 // Walks a resolved parameter-bounds TEMPLATE (Type.checked_param_bounds_lo/
@@ -1746,11 +1759,7 @@ void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn) {
 // decline a plain integer-literal argument (the ticket's own headline
 // case, `sink(small, 8)`). A reference to `self_idx` itself needs no
 // argument at all -- it substitutes to `__ca`'s own value, not to any
-// argument expression -- so it is always accepted here. An
-// ND_BLOCK_CALL argument is explicitly declined even though
-// node_has_side_effects() has no true-arm for that kind (a known,
-// separately-tracked gap in the shared predicate) -- a block invocation
-// can run arbitrary side-effecting code same as any other call.
+// argument expression -- so it is always accepted here.
 static bool checked_param_bounds_args_ok(Node *n, Node **arg_by_idx, int nargs,
                                          int self_idx) {
     if (!n)
@@ -1761,7 +1770,7 @@ static bool checked_param_bounds_args_ok(Node *n, Node **arg_by_idx, int nargs,
             if (k < 1 || k > nargs || !arg_by_idx[k - 1])
                 return false;
             Node *a = arg_by_idx[k - 1];
-            if (node_has_side_effects(a) || a->kind == ND_BLOCK_CALL)
+            if (node_has_side_effects(a))
                 return false;
         }
         return true;
@@ -1898,21 +1907,22 @@ static void hoist_ret_bounds_args(VirtualMachine *vm, Node *n, Type *params,
 // it is being parsed.
 static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
                                        Obj *alloc_fn) {
-    Type  *fty   = call->func_ty;
-    Type  *ret   = unqualified(vm, fty->return_ty);
-    Token *tok   = call->tok;
+    Node  *callee = call->call_prelude ? call->rhs : call;
+    Type  *fty    = callee->func_ty;
+    Type  *ret    = unqualified(vm, fty->return_ty);
+    Token *tok    = call->tok;
 
-    int    nargs = 0;
-    for (Node *a = call->args; a; a = a->next)
+    int    nargs  = 0;
+    for (Node *a = callee->args; a; a = a->next)
         nargs++;
     Node **reads =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * (nargs + 1));
     for (int i = 0; i <= nargs; i++)
         reads[i] = NULL;
     hoist_ret_bounds_args(vm, fty->checked_ret_bounds_lo, fty->params,
-                          call->args, reads, alloc_fn, tok);
+                          callee->args, reads, alloc_fn, tok);
     hoist_ret_bounds_args(vm, fty->checked_ret_bounds_hi, fty->params,
-                          call->args, reads, alloc_fn, tok);
+                          callee->args, reads, alloc_fn, tok);
 
     Obj *cr = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ret)
                        : new_checked_call_temp(vm, ret);
@@ -1938,13 +1948,129 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
     return store;
 }
 
+// True when parameter `p`, fed by argument `a`, is verified at the call: a
+// checked pointer parameter with a bounds form, whose argument is rooted at a
+// declared-checked var/member, a propagation candidate, or a call returning a
+// checked pointer. Whether a candidate is FULL (verified) or NONE/OPT (the
+// store stays unverified, as an unchecked argument would) is only known once
+// the function body is parsed; verify_checked_assign_scan() decides then.
+static bool checked_param_qualifies(Type *p, Node *a) {
+    if (p->kind != TY_PTR || p->checked_kind == CHECKED_NONE)
+        return false;
+    bool has_form = p->checked_kind == CHECKED_SINGLE ||
+                    (p->checked_bounds_form != CB_NONE &&
+                     p->checked_bounds_form != CB_UNKNOWN);
+    if (!has_form)
+        return false;
+    CheckedBase src_base = find_checked_base(a);
+    return checked_base_is_declared(src_base) ||
+           (src_base.var && src_base.var->checked_prop_candidate) ||
+           checked_call_root(a) != NULL;
+}
+
+// Marks in `need` every side-effecting sibling argument the bounds template
+// `n` names, so it can be hoisted. False when one cannot be: its parameter is
+// not a scalar, or the argument is itself verified at this call (a plain temp
+// would drop its root).
+static bool checked_param_hoist_siblings(Node *n, Type *params,
+                                         Node **arg_by_idx, int nargs,
+                                         int self_idx, bool *need) {
+    if (!n)
+        return true;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
+        int k = n->var->checked_self_param_idx;
+        if (k == self_idx)
+            return true;
+        if (k < 1 || k > nargs || !arg_by_idx[k - 1])
+            return false;
+        Node *a = arg_by_idx[k - 1];
+        if (!node_has_side_effects(a))
+            return true;
+        Type *pk = params;
+        for (int i = 1; i < k && pk; i++)
+            pk = pk->next;
+        // TODO: a verified sibling argument with side effects stays declined
+        // (#1802)
+        if (!pk || !(is_integer(pk) || pk->kind == TY_PTR) ||
+            checked_param_qualifies(pk, a))
+            return false;
+        need[k - 1] = true;
+        return true;
+    }
+    return checked_param_hoist_siblings(n->lhs, params, arg_by_idx, nargs,
+                                        self_idx, need) &&
+           checked_param_hoist_siblings(n->rhs, params, arg_by_idx, nargs,
+                                        self_idx, need) &&
+           checked_param_hoist_siblings(n->cond, params, arg_by_idx, nargs,
+                                        self_idx, need) &&
+           checked_param_hoist_siblings(n->then, params, arg_by_idx, nargs,
+                                        self_idx, need) &&
+           checked_param_hoist_siblings(n->els, params, arg_by_idx, nargs,
+                                        self_idx, need);
+}
+
+// Hoists the side-effecting siblings that verified parameters name into temps,
+// in argument order, rewriting each argument in place into a read of its temp.
+// Returns the chain of stores, or NULL if nothing was hoisted.
+static Node *hoist_checked_call_siblings(VirtualMachine *vm, Type *fn_ty,
+                                         Node **arg_by_idx, int nargs,
+                                         Token *tok) {
+    bool *need  = arena_alloc(&vm->compiler.parser_arena, nargs);
+    bool *trial = arena_alloc(&vm->compiler.parser_arena, nargs);
+    int   idx   = 0;
+    for (Type *p = fn_ty->params; p && idx < nargs; p = p->next) {
+        Node *a = arg_by_idx[idx++];
+        if (!checked_param_qualifies(p, a))
+            continue;
+        for (int i = 0; i < nargs; i++)
+            trial[i] = false;
+        if (checked_param_hoist_siblings(p->checked_param_bounds_lo,
+                                         fn_ty->params, arg_by_idx, nargs, idx,
+                                         trial) &&
+            checked_param_hoist_siblings(p->checked_param_bounds_hi,
+                                         fn_ty->params, arg_by_idx, nargs, idx,
+                                         trial))
+            for (int i = 0; i < nargs; i++)
+                need[i] |= trial[i];
+    }
+
+    Node *prelude = NULL;
+    Type *pk      = fn_ty->params;
+    for (int k = 1; k <= nargs && pk; k++, pk = pk->next) {
+        if (!need[k - 1])
+            continue;
+        Node *a    = arg_by_idx[k - 1];
+        Obj  *tmp  = new_checked_call_temp(vm, plain_value_type(vm, pk));
+        Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+        *orig      = *a;
+        orig->next = NULL;
+        Node *lhs  = new_var_node(vm, tmp, tok);
+        add_type(vm, lhs);
+        Node *store = new_binary(vm, ND_ASSIGN, lhs, orig, tok);
+        add_type(vm, store);
+        if (prelude) {
+            prelude = new_binary(vm, ND_COMMA, prelude, store, tok);
+            add_type(vm, prelude);
+        } else {
+            prelude = store;
+        }
+        Node *read = new_var_node(vm, tmp, tok);
+        add_type(vm, read);
+        Node *saved = a->next;
+        *a          = *read;
+        a->next     = saved;
+    }
+    return prelude;
+}
+
 // #488 entry point, called once per call site from funcall() (src/parse_
 // postfix.c), after every other per-argument validation there and before
-// the ND_FUNCALL node is built. `fn_ty` is the callee's function type
-// (already unwrapped from a function-pointer type by funcall()'s own
-// `ty` computation); `args` is the just-built, already param-type-cast
-// argument list (funcall()'s `head.next`); `tok` is the call's own token,
-// used for every node built here.
+// the ND_FUNCALL node is built. Returns the prelude of hoisted sibling
+// arguments the caller must evaluate before the call, or NULL. `fn_ty` is the
+// callee's function type (already unwrapped from a function-pointer type by
+// funcall()'s own `ty` computation); `args` is the just-built, already
+// param-type-cast argument list (funcall()'s `head.next`); `tok` is the call's
+// own token, used for every node built here.
 //
 // No-op (silent) unless CCCC_CHECKED_BOUNDS is set -- ABI transparency:
 // with the flag off, this never runs, so -m/-c=native/-c=generated output
@@ -1955,16 +2081,16 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
 // erroring) for its own temp; here it is simply skipped, since a call in
 // such a context is either already invalid C or a constant-folding path
 // this ticket has no reason to newly reject.
-void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
-                               Token *tok) {
+Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
+                                Token *tok) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !vm->compiler.current_fn)
-        return;
+        return NULL;
 
     int nargs = 0;
     for (Node *a = args; a; a = a->next)
         nargs++;
     if (nargs == 0)
-        return;
+        return NULL;
 
     // Snapshot positional argument pointers -- stable for the whole call.
     // A pointer here may later point at an ALREADY-rewritten node (this
@@ -1975,7 +2101,8 @@ void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
     // the rewritten shape's inner ND_ASSIGN makes node_has_side_effects()
     // report true for it -- a param-i bounds expression referencing an
     // already-checked param-k argument is naturally (and correctly)
-    // declined, not corrupted.
+    // declined, not corrupted. The hoisting below rewrites arguments in
+    // place too, to side-effect-free temp reads, so the gate passes for them.
     Node **arg_by_idx =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * nargs);
     {
@@ -1986,32 +2113,19 @@ void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
 
     resolve_param_checked_bounds(vm, fn_ty);
 
+    Node *prelude =
+        hoist_checked_call_siblings(vm, fn_ty, arg_by_idx, nargs, tok);
+
     int   idx = 0;
     Node *a   = args;
     for (Type *p = fn_ty->params; p && a; p = p->next, a = a->next) {
         idx++;
-        if (p->kind != TY_PTR || p->checked_kind == CHECKED_NONE)
-            continue;
-        bool has_form = p->checked_kind == CHECKED_SINGLE ||
-                        (p->checked_bounds_form != CB_NONE &&
-                         p->checked_bounds_form != CB_UNKNOWN);
-        if (!has_form)
-            continue;
-
-        // Gate: the argument must be rooted at a declared-checked var/member
-        // or at a propagation candidate. Whether a candidate is FULL (verified)
-        // or NONE/OPT (the store stays unverified, as an unchecked argument
-        // would) is only known once the function body is parsed;
-        // verify_checked_assign_scan() decides then.
-        CheckedBase src_base = find_checked_base(a);
-        if (!checked_base_is_declared(src_base) &&
-            !(src_base.var && src_base.var->checked_prop_candidate) &&
-            !checked_call_root(a))
+        if (!checked_param_qualifies(p, a))
             continue;
 
         // Gate: every OTHER parameter this parameter's bounds template
         // references must be fed, at this call, by a side-effect-free
-        // argument.
+        // argument (a hoisted one is).
         if (!checked_param_bounds_args_ok(p->checked_param_bounds_lo,
                                           arg_by_idx, nargs, idx) ||
             !checked_param_bounds_args_ok(p->checked_param_bounds_hi,
@@ -2044,6 +2158,7 @@ void rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
         *a               = *comma;
         a->next          = saved_next;
     }
+    return prelude;
 }
 
 bool is_attr_name(Token *tok, char *name) {

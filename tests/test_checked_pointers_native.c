@@ -5,6 +5,8 @@
 // CCCC_EXPECT_STDOUT: Non-null store into a \[\[cccc::ntarray\]\] terminator slot[\s\S]*terminator=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*implication=255
 // CCCC_EXPECT_STDOUT: dynamic_check\(\) assertion failed at line 1[\s\S]*dynamic=255
+// CCCC_EXPECT_STDOUT: hoistonce=42
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*hoisttrap=255
 //
 // -c=native enforces --checked-pointers: each violation prints the VM's
 // banner and exits 255.
@@ -58,6 +60,29 @@ int build_main(Builder *ctx) {
          "int main(void) {\n"
          "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
          "    sink(small, 8);\n"
+         "    return 42;\n"
+         "}\n"},
+        {"hoistonce",
+         "static int calls;\n"
+         "static int two(void) { calls++; return 2; }\n"
+         "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+         "    (void)p;\n"
+         "    (void)n;\n"
+         "}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    sink(small, two());\n"
+         "    return calls == 1 ? 42 : 1;\n"
+         "}\n"},
+        {"hoisttrap",
+         "static int eight(void) { return 8; }\n"
+         "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+         "    (void)p;\n"
+         "    (void)n;\n"
+         "}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    sink(small, eight());\n"
          "    return 42;\n"
          "}\n"},
         {"dynamic", "int main(void) { volatile int i = 10, n = 5; "
