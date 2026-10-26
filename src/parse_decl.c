@@ -883,6 +883,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     while (!equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok)) {
         VarAttr knr_attr = {};
         Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
+        cc_reject_checked_scope_here(vm, &knr_attr);
         bool    first    = true;
         for (;;) {
             if (!first)

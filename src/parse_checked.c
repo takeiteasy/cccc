@@ -3137,15 +3137,25 @@ bool cc_checked_spec_start(VirtualMachine *vm, Token *tok) {
            (equal(next, "[") && equal(next->next, "["));
 }
 
-// A specifier-position region applies to a function definition only.
+// A region written before the declarators applies to a function definition
+// only.
 void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,
                                  VarAttr *attr) {
-    if (attr->checked_spec_tok &&
-        (attr->is_typedef || !is_function(vm, tok, basety)))
+    if (attr->is_typedef || !is_function(vm, tok, basety))
+        cc_reject_checked_scope_here(vm, attr);
+}
+
+void cc_reject_checked_scope_here(VirtualMachine *vm, VarAttr *attr) {
+    if (attr->checked_spec_tok)
         error_tok(vm, attr->checked_spec_tok,
                   "'%.*s' as a declaration specifier applies only to a "
                   "function definition",
                   attr->checked_spec_tok->len, attr->checked_spec_tok->loc);
+    if (attr->checked_attr_tok)
+        error_tok(vm, attr->checked_attr_tok,
+                  "'%.*s' applies to a function definition or a compound "
+                  "statement, not to this declaration",
+                  attr->checked_attr_tok->len, attr->checked_attr_tok->loc);
 }
 
 static bool is_null_pointer_constant(Node *e) {

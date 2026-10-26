@@ -156,6 +156,7 @@ typedef struct {
     // a #pragma cccc checked/unchecked region.
     CheckedScope checked_scope;
     Token       *checked_spec_tok; // `_Checked`/`_Unchecked` written as a specifier
+    Token       *checked_attr_tok; // `[[cccc::checked]]`/`unchecked` attribute name
 
     Token *decl_start; // first token of the declaration (function source span)
 
@@ -319,6 +320,9 @@ CheckedScope cc_checked_scope_keyword(Token *tok);
 bool cc_checked_spec_start(VirtualMachine *vm, Token *tok);
 void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,
                                  VarAttr *attr);
+// For declspec() sites that never start a function definition (parameters,
+// members, `for` initialisers).
+void cc_reject_checked_scope_here(VirtualMachine *vm, VarAttr *attr);
 // Records `want` on `attr`, rejecting a checked/unchecked conflict.
 void cc_set_checked_scope(VirtualMachine *vm, VarAttr *attr, CheckedScope want,
                           Token *tok);

@@ -770,6 +770,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         VarAttr attr      = {};
         Token  *param_tok = tok;
         Type   *ty2       = declspec(vm, &tok, tok, &attr);
+        cc_reject_checked_scope_here(vm, &attr);
         ty2               = declarator(vm, &tok, tok, ty2);
         ty2               = apply_var_attrs_to_type(vm, ty2, &attr);
         drop_cleanup_attr(vm, ty2, &attr, ty2->name ? ty2->name : param_tok);
@@ -1185,6 +1186,13 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
             tok = checked_array_count_attr(vm, tok, &ty);
         tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
         tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+        if (suffix_attr.checked_attr_tok && !vm->compiler.in_type_lookahead)
+            error_tok(vm, suffix_attr.checked_attr_tok,
+                      "'%.*s' applies to a function definition or a compound "
+                      "statement, not after a declarator (write `_Checked` "
+                      "there, or put the attribute before the declaration)",
+                      suffix_attr.checked_attr_tok->len,
+                      suffix_attr.checked_attr_tok->loc);
         ty = with_custom_attrs(vm, ty, suffix_attr.custom_attrs);
         ty = apply_var_attrs_to_type(vm, ty, &suffix_attr);
         forward_fn_attrs_to_pointee(vm, ty, &suffix_attr);
@@ -2311,6 +2319,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
 
         VarAttr attr   = {.in_member_list = true};
         Type   *basety = declspec(vm, &tok, tok, &attr);
+        cc_reject_checked_scope_here(vm, &attr);
         bool first = true;
 
         // Anonymous struct member
@@ -2752,6 +2761,7 @@ static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
     cc_set_checked_scope(vm, attr,
                          is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF,
                          name_tok);
+    attr->checked_attr_tok = name_tok;
     return tok;
 }
 
@@ -3466,6 +3476,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             if (is_checked_scope_attr) {
                 tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
                                                equal(name_tok, "checked"));
+                attr->checked_attr_tok = name_tok;
                 continue;
             }
 

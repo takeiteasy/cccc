@@ -46,11 +46,11 @@ _Unchecked int k(int *p) { ... }
 
 | Form | Scope | Notes |
 |---|---|---|
-| `[[cccc::checked]]` / `[[cccc::unchecked]]` | A function body or a `{ }` block | Also `__attribute__((checked))`, `__checked__`, `@checked` |
+| `[[cccc::checked]]` / `[[cccc::unchecked]]` | A function body or a `{ }` block | Also `__attribute__((checked))`, `__checked__`, `@checked`. Write it before a function definition or a block; on a variable, typedef, parameter or member, or after a declarator (`void f(void) [[cccc::checked]] { }`), it is an error |
 | `#pragma cccc checked begin` / `end` (and `unchecked`) | From `begin` to `end` | A positional directive; `end` must name the same keyword as its `begin`, and an unclosed `begin` or stray `end` is an error |
 | `#pragma CHECKED_SCOPE on` / `off` / `push` / `pop` | `on`/`off`: the rest of the file; `push`/`pop`: save and restore | Checked C spelling, for file scope. `on`/`off` take either case and need no closing directive; an unclosed `push` or a stray `pop` is an error, and `pop` cannot close a `begin` (nor `end` a `push`). Inside a function body it still means "rest of the file" |
 | `_Checked { }` / `_Unchecked { }` | A block, as a statement | Checked C spelling; recognised by position, so the names are not reserved |
-| `void f(void) _Checked { }`, `_Checked void f(void) { }` (and `_Unchecked`) | A function definition: parameters, return type and body | The same region as `[[cccc::checked]]` on the function. The specifier goes among the other specifiers (`static _Checked int f(void)`). On a variable or a prototype it is an error |
+| `void f(void) _Checked { }`, `_Checked void f(void) { }` (and `_Unchecked`) | A function definition: parameters, return type and body | The same region as `[[cccc::checked]]` on the function. The specifier goes among the other specifiers (`static _Checked int f(void)`). On a variable, prototype, parameter or member it is an error |
 
 Regions nest to any depth and the innermost wins, across all spellings. An attribute or keyword region overrides a surrounding pragma region.
 

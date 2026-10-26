@@ -256,6 +256,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
                 VarAttr attr     = {};
                 Type   *param_ty = declspec(vm, &tok, tok, &attr);
+                cc_reject_checked_scope_here(vm, &attr);
                 param_ty         = declarator(vm, &tok, tok, param_ty);
                 param_ty         = apply_var_attrs_to_type(vm, param_ty, &attr);
                 if (has_custom_attrs(param_ty, &attr))

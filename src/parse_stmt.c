@@ -463,6 +463,7 @@ static Node *stmt_or_decl(VirtualMachine *vm, Token **rest, Token *tok) {
                       "(use --std=c23 or later)");
         VarAttr attr   = {};
         Type   *basety = declspec(vm, &tok, tok, &attr);
+        cc_reject_checked_scope_here(vm, &attr);
         return declaration(vm, rest, tok, basety, &attr);
     }
     return stmt(vm, rest, tok);
@@ -887,6 +888,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             VarAttr       attr        = {};
             Token        *decl_tok    = tok;
             Type         *basety      = declspec(vm, &tok, tok, &attr);
+            cc_reject_checked_scope_here(vm, &attr);
             for_init_declaration(vm, &tok, decl_tok, basety, &attr, node);
             init_has_cleanup = declared_cleanup_var(vm, vars_before);
             if (init_has_cleanup)
