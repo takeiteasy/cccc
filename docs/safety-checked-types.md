@@ -77,6 +77,17 @@ int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays c
 | Only the outermost dimension may be variable-length (`_Checked[n][5]` works, `_Checked[3][n]` is an error) | The row checks use a constant extent per row |
 | `_Nt_checked` is one dimension only (`_Nt_checked[3][10]` is an error, also through a typedef'd row) | Only a single terminator slot is modelled |
 
+## Compound literals
+
+`_Checked` and `_Nt_checked` also go in an abstract declarator, so a compound literal, a `sizeof` or a type name can be a checked array:
+
+```c
+int *p = (int _Checked[4]){1, 2, 3, 4};
+int  v = (int _Checked[]){5, 6}[1];       // extent 2, from the initializer
+```
+
+Indexing the literal is checked against its extent. A variable-length compound literal is not valid C.
+
 ## Variable-length checked arrays
 
 A non-constant extent is checked against the length the declaration computed. Changing `n` afterwards does not move the bound, and an extent with side effects runs once.

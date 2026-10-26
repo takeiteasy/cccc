@@ -407,3 +407,18 @@ void test_vla_nt_checked_array_terminator_slot(void) {
     s[4] = 0;
     AssertEq(s[3], 'x');
 }
+
+// ---------------------------------------------------------------------
+// Compound literals: `_Checked` in an abstract declarator.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_checked_array_compound_literal(void) {
+    int  *p = (int _Checked[4]){1, 2, 3, 4};
+    int  *q = (int _Checked[]){5, 6, 7};
+    char *s = (char _Nt_checked[]){'a', 'b', 0};
+    AssertEq(p[3], 4);
+    AssertEq(q[2], 7);
+    AssertEq(s[1], 'b');
+    AssertEq(sizeof(int _Checked[4]), 4 * sizeof(int));
+}

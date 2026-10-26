@@ -1199,6 +1199,78 @@ static Type *checked_array_rows(VirtualMachine *vm, Type *ty) {
     return ty;
 }
 
+// #487: Checked C-style checked array declarator suffix -- `int a
+// _Checked[10]` / `char s _Nt_checked[11]`, or `int _Checked[10]` in an
+// abstract declarator. Recognized *positionally* (the keyword in the
+// declarator-name position), exactly the convention #1331 uses for
+// `_Checked { ... }` region blocks -- so `_Checked`/`_Nt_checked` are never
+// reserved words and stay ordinary identifiers everywhere else.
+static CheckedKind checked_array_keyword(VirtualMachine *vm, Token **tok,
+                                         Token **kw_tok) {
+    Token *t = *tok;
+    if (t->kind != TK_IDENT || !(equal(t, "_Checked") || equal(t, "_Nt_checked")))
+        return CHECKED_NONE;
+    *kw_tok = t;
+    if (!vm->compiler.in_type_lookahead && !equal(t->next, "["))
+        error_tok(vm, t,
+                  "'%.*s' must be followed by an array declarator, "
+                  "e.g. 'int a %.*s[10]'",
+                  t->len, t->loc, t->len, t->loc);
+    *tok = t->next;
+    return equal(t, "_Checked") ? CHECKED_ARRAY : CHECKED_NTARRAY;
+}
+
+// Marks the array `ty` that followed the keyword as a checked array.
+static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
+                                 CheckedKind checked_array_kind,
+                                 Token *checked_array_tok) {
+    if (ty->kind != TY_ARRAY && ty->kind != TY_VLA)
+        error_tok(vm, checked_array_tok,
+                  "'%.*s' must be followed by an array declarator",
+                  checked_array_tok->len, checked_array_tok->loc);
+    for (Type *row = ty->base; row; row = row->base) {
+        // TODO: inner VLA dimensions need per-row runtime extents (#1798)
+        if (row->kind == TY_VLA)
+            error_tok(vm, checked_array_tok,
+                      "only the outermost dimension of a checked array "
+                      "may be variable-length");
+        if (row->kind != TY_ARRAY)
+            break;
+        if (checked_array_kind == CHECKED_NTARRAY ||
+            row->checked_kind == CHECKED_NTARRAY)
+            error_tok(vm, checked_array_tok,
+                      "multidimensional '_Nt_checked' arrays are not "
+                      "supported");
+    }
+    if (checked_array_kind == CHECKED_NTARRAY && ty->kind == TY_ARRAY &&
+        ty->array_len >= 0 && ty->array_len < 1)
+        error_tok(vm, checked_array_tok,
+                  "an '_Nt_checked' array must declare at least 1 "
+                  "element -- the last element is reserved for the "
+                  "null-terminator slot");
+
+    // Mirrors the checked-pointer attribute path: this array's checked
+    // kind/bounds-form is a qualifier on its own type, exactly like
+    // const/volatile (see the CheckedKind/checked_bounds_form fields'
+    // comments in src/cccc.h) -- copy_type() so it never leaks onto a
+    // sibling declarator sharing this basety, the same reason
+    // declarator()'s gnu_align handling above copies. #919's
+    // propagation pass and #944's assignment-bounds-implication pass
+    // then treat this exactly like any other declared-checked base --
+    // no new machinery.
+    ty                       = copy_type(vm, ty);
+    ty->base                 = checked_array_rows(vm, ty->base);
+    ty->checked_kind         = checked_array_kind;
+    ty->checked_bounds_form  = CB_COUNT;
+    if (ty->kind == TY_VLA)
+        ty->checked_vla_extent_tok = checked_array_tok->next->next;
+    else
+        ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
+                                       ? ty->array_len - 1
+                                       : ty->array_len;
+    return ty;
+}
+
 Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     // Handle __attribute__ before declarator
     VarAttr prefix_attr = {};
@@ -1294,79 +1366,15 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         tok  = tok->next;
     }
 
-    // #487: Checked C-style checked array declarator suffix -- `int a
-    // _Checked[10]` / `char s _Nt_checked[11]`. Recognized *positionally*
-    // (an identifier immediately followed by `[`), exactly the convention
-    // #1331 uses for `_Checked { ... }` region blocks -- so `_Checked`/
-    // `_Nt_checked` are never reserved words and stay ordinary identifiers
-    // everywhere else (a variable or function actually named `_Checked` is
-    // unaffected unless it happens to be followed by `[`, in which case the
-    // very next check below requires it to actually BE an array).
-    CheckedKind checked_array_kind = CHECKED_NONE;
     Token      *checked_array_tok  = NULL;
-    if (tok->kind == TK_IDENT &&
-        (equal(tok, "_Checked") || equal(tok, "_Nt_checked"))) {
-        checked_array_tok = tok;
-        checked_array_kind =
-            equal(tok, "_Checked") ? CHECKED_ARRAY : CHECKED_NTARRAY;
-        if (!vm->compiler.in_type_lookahead && !equal(tok->next, "["))
-            error_tok(vm, tok,
-                      "'%.*s' must be followed by an array declarator, "
-                      "e.g. 'int a %.*s[10]'",
-                      tok->len, tok->loc, tok->len, tok->loc);
-        tok = tok->next;
-    }
+    CheckedKind checked_array_kind = checked_array_keyword(vm, &tok, &checked_array_tok);
 
     Type *inner_ty = ty;
     ty             = type_suffix(vm, rest, tok, ty);
     inherit_semantic_attrs(ty, inner_ty);
 
-    if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead) {
-        if (ty->kind != TY_ARRAY && ty->kind != TY_VLA)
-            error_tok(vm, checked_array_tok,
-                      "'%.*s' must be followed by an array declarator",
-                      checked_array_tok->len, checked_array_tok->loc);
-        for (Type *row = ty->base; row; row = row->base) {
-            // TODO: inner VLA dimensions need per-row runtime extents (#1798)
-            if (row->kind == TY_VLA)
-                error_tok(vm, checked_array_tok,
-                          "only the outermost dimension of a checked array "
-                          "may be variable-length");
-            if (row->kind != TY_ARRAY)
-                break;
-            if (checked_array_kind == CHECKED_NTARRAY ||
-                row->checked_kind == CHECKED_NTARRAY)
-                error_tok(vm, checked_array_tok,
-                          "multidimensional '_Nt_checked' arrays are not "
-                          "supported");
-        }
-        if (checked_array_kind == CHECKED_NTARRAY && ty->kind == TY_ARRAY &&
-            ty->array_len >= 0 && ty->array_len < 1)
-            error_tok(vm, checked_array_tok,
-                      "an '_Nt_checked' array must declare at least 1 "
-                      "element -- the last element is reserved for the "
-                      "null-terminator slot");
-
-        // Mirrors the checked-pointer attribute path: this array's checked
-        // kind/bounds-form is a qualifier on its own type, exactly like
-        // const/volatile (see the CheckedKind/checked_bounds_form fields'
-        // comments in src/cccc.h) -- copy_type() so it never leaks onto a
-        // sibling declarator sharing this basety, the same reason
-        // declarator()'s gnu_align handling above copies. #919's
-        // propagation pass and #944's assignment-bounds-implication pass
-        // then treat this exactly like any other declared-checked base --
-        // no new machinery.
-        ty                       = copy_type(vm, ty);
-        ty->base                 = checked_array_rows(vm, ty->base);
-        ty->checked_kind         = checked_array_kind;
-        ty->checked_bounds_form  = CB_COUNT;
-        if (ty->kind == TY_VLA)
-            ty->checked_vla_extent_tok = checked_array_tok->next->next;
-        else
-            ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
-                                           ? ty->array_len - 1
-                                           : ty->array_len;
-    }
+    if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead)
+        ty = apply_checked_array(vm, ty, checked_array_kind, checked_array_tok);
 
     // Propagate noreturn from prefix __attribute__ to function type
     if (prefix_attr.is_noreturn && ty->kind == TY_FUNC)
@@ -1425,7 +1433,13 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
         return abstract_declarator(vm, &tok, start->next, ty);
     }
 
-    return type_suffix(vm, rest, tok, ty);
+    Token      *checked_array_tok = NULL;
+    CheckedKind checked_array_kind =
+        checked_array_keyword(vm, &tok, &checked_array_tok);
+    ty = type_suffix(vm, rest, tok, ty);
+    if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead)
+        ty = apply_checked_array(vm, ty, checked_array_kind, checked_array_tok);
+    return ty;
 }
 
 // type-name = declspec abstract-declarator

@@ -137,6 +137,19 @@ static CheckedBase find_checked_base(Node *n) {
     return (CheckedBase){0};
 }
 
+// A comma whose value is a checked-cast temporary (the #486 bounds-cast
+// desugar) or a checked array, as a compound literal such as
+// `(int _Checked[4]){...}` produces. An array's extent is part of its type,
+// not a value the comma establishes, so it is safe to look through.
+static bool comma_yields_checked_var(Node *n) {
+    while (n && n->kind == ND_COMMA)
+        n = n->rhs;
+    return n && n->kind == ND_VAR &&
+           (n->var->checked_cast_kind != CC_NONE ||
+            (n->var->ty->kind == TY_ARRAY &&
+             n->var->ty->checked_kind != CHECKED_NONE));
+}
+
 // #486: like find_checked_base(), but ALSO follows into a bounds cast's own
 // desugared shape -- `(__cv = (T [[...]])expr, __cv)`, ND_COMMA's rhs is
 // ND_VAR(__cv) -- so a dereference of the cast's result directly,
@@ -162,8 +175,7 @@ static CheckedBase find_checked_base(Node *n) {
 // follow-up.
 static CheckedBase find_checked_deref_base(Node *n) {
     while (n) {
-        if (n->kind == ND_COMMA && n->rhs && n->rhs->kind == ND_VAR &&
-            n->rhs->var->checked_cast_kind != CC_NONE) {
+        if (n->kind == ND_COMMA && n->rhs && comma_yields_checked_var(n)) {
             n = n->rhs;
             continue;
         }

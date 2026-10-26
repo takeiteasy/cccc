@@ -399,10 +399,14 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
             var->is_tls              = attr.is_tls;
             var->is_local_symbol     = vm->compiler.scope->next != NULL;
             var->is_compound_literal = true;
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
             gvar_initializer(vm, rest, tok, var);
             node = new_var_node(vm, var, start);
         } else {
-            Obj  *var = new_lvar(vm, "", 0, ty);
+            Obj *var = new_lvar(vm, "", 0, ty);
+            if (var->checked_kind != CHECKED_NONE)
+                resolve_checked_bounds(vm, var);
             Node *lhs = lvar_initializer(vm, rest, tok, var);
             if (type_contains_vla(ty))
                 lhs = new_binary(vm, ND_COMMA, compute_vla_size(vm, ty, start),
