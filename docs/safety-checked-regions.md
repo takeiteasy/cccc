@@ -65,7 +65,7 @@ A `bounds(unknown)` target accepts any source, and `assume` and `dynamic` casts 
 }
 ```
 
-Not banned: address-of and array decay producing a plain `T *`, function-pointer pointees, and calling a function with an unchecked prototype (all of libc), unless you opt in to [`-Wchecked-calls`](#call-boundaries).[^gaps]
+Not banned: address-of and array decay producing a plain `T *`, function-pointer pointees, and calling a function with an unchecked prototype (libc, apart from the [functions with built-in bounds](safety-checked-interfaces.md#standard-library-calls)), unless you opt in to [`-Wchecked-calls`](#call-boundaries).[^gaps]
 
 ## Call boundaries
 

@@ -1401,7 +1401,11 @@ static void check_checked_iface_conflict(VirtualMachine *vm, Type *old_ty,
     }
 }
 
-static bool checked_needs_adopt(Type *o, Type *n) {
+static bool checked_needs_adopt(Type *o, Type *n, bool defaults) {
+    if (defaults)
+        return o->kind == TY_PTR && o->checked_kind == CHECKED_NONE &&
+               o->checked_bounds_form == CB_NONE &&
+               n->checked_bounds_form != CB_NONE;
     return (o->checked_kind == CHECKED_NONE &&
             n->checked_kind != CHECKED_NONE) ||
            (o->checked_bounds_form == CB_NONE &&
@@ -1423,12 +1427,11 @@ static void checked_adopt(Type *dst, Type *src) {
     dst->checked_param_bounds_hi = src->checked_param_bounds_hi;
 }
 
-// A redeclaration of `fn` as `ty`: errors on bounds that disagree, and gives
-// fn->ty any bounds only the new declaration spells, so later calls are checked
-// against them. fn->ty is copied first because a typedef may share it.
-// Adoption is top-level only: callers never see a callback parameter's own
-// bounds, so adopting them into fn->ty would change nothing.
-void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
+// `defaults` merges a built-in table prototype (apply_checked_libc_bounds):
+// it only fills pointer parameters that spell neither a kind nor bounds, and
+// never reports a conflict, so a user's own annotation always wins.
+static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
+                                         bool defaults) {
     Type *old_ty = fn->ty;
     if (!old_ty || old_ty == ty || old_ty->kind != TY_FUNC ||
         ty->kind != TY_FUNC || vm->compiler.in_type_lookahead)
@@ -1441,18 +1444,49 @@ void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
     if (n_old != n_new || !n_old)
         return;
 
-    check_checked_iface_conflict(vm, old_ty, ty, fn->name,
-                                 old_ty->name ? old_ty->name : ty->name,
-                                 ty->name);
+    if (!defaults && fn->checked_libc_mask) {
+        // Bounds the libc table supplied give way to the ones spelled here.
+        Type *reset = copy_type(vm, old_ty);
+        Type **tail = &reset->params;
+        int     idx = 0;
+        for (Type *o = old_ty->params, *n = ty->params; o && n;
+             o = o->next, n = n->next, idx++) {
+            Type *c = copy_type(vm, o);
+            if ((fn->checked_libc_mask & (1u << idx)) &&
+                n->checked_bounds_form != CB_NONE) {
+                c->checked_kind              = CHECKED_NONE;
+                c->checked_bounds_form       = CB_NONE;
+                c->checked_bounds_arg1       = NULL;
+                c->checked_bounds_arg2       = NULL;
+                c->checked_param_bounds_lo   = NULL;
+                c->checked_param_bounds_hi   = NULL;
+                fn->checked_libc_mask       &= ~(1u << idx);
+            }
+            *tail = c;
+            tail  = &c->next;
+        }
+        *tail          = NULL;
+        reset->checked_param_tmpl_done = true;
+        fn->ty         = old_ty = reset;
+    }
 
-    bool ret_adopt = old_ty->return_ty && ty->return_ty &&
+    if (defaults) {
+        resolve_param_checked_bounds(vm, old_ty);
+        resolve_param_checked_bounds(vm, ty);
+    } else
+        check_checked_iface_conflict(vm, old_ty, ty, fn->name,
+                                     old_ty->name ? old_ty->name : ty->name,
+                                     ty->name);
+
+    bool ret_adopt = !defaults && old_ty->return_ty && ty->return_ty &&
                      old_ty->return_ty->kind == TY_PTR &&
                      ty->return_ty->kind == TY_PTR &&
-                     checked_needs_adopt(old_ty->return_ty, ty->return_ty);
+                     checked_needs_adopt(old_ty->return_ty, ty->return_ty,
+                                         false);
     bool adopt     = ret_adopt;
     for (Type *o = old_ty->params, *n = ty->params; o && !adopt;
          o = o->next, n = n->next)
-        adopt = checked_needs_adopt(o, n);
+        adopt = checked_needs_adopt(o, n, defaults);
     if (!adopt)
         return;
 
@@ -1469,12 +1503,26 @@ void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
     for (Type *o = old_ty->params, *n = ty->params; o;
          o = o->next, n = n->next) {
         Type *c = copy_type(vm, o);
-        checked_adopt(c, n);
+        if (!defaults || checked_needs_adopt(o, n, true))
+            checked_adopt(c, n);
         *tail = c;
         tail  = &c->next;
     }
     *tail  = NULL;
     fn->ty = merged;
+}
+
+// A redeclaration of `fn` as `ty`: errors on bounds that disagree, and gives
+// fn->ty any bounds only the new declaration spells, so later calls are checked
+// against them. fn->ty is copied first because a typedef may share it.
+// Adoption is top-level only: callers never see a callback parameter's own
+// bounds, so adopting them into fn->ty would change nothing.
+void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty) {
+    merge_checked_interface_impl(vm, fn, ty, false);
+}
+
+void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty) {
+    merge_checked_interface_impl(vm, fn, ty, true);
 }
 
 // Create a function Obj that is NOT in the global scope or globals list.

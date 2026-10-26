@@ -32,6 +32,20 @@ Other points:
 - An annotated same-TU function's own body stays `CHKR`-checked against its declared bounds. This can newly trap code no unchecked caller ever touched, since the callee breaks its own contract. It uses its own declared bound, not the caller's storage, so an unchecked caller passing a too-short buffer does not trap there: closing that gap at the call boundary is the point of the feature.
 - Not done: a warning when a check is declined, propagated arguments, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
 
+## Standard library bounds
+
+`apply_checked_libc_bounds()` (`src/checked_libc.c`) runs after a function declaration or definition is recorded, in `declare_function_prototype()` and `function()` (`src/parse_decl.c`), under `--checked-pointers`. A row of its table is a full annotated prototype; the hook tokenizes and parses it with `declspec()`/`declarator()`, so the bounds reach a template the usual way, and merges it with `merge_checked_interface_defaults()` (`src/parse_core.c`).
+
+| Rule | Reason |
+|---|---|
+| Only a non-`static` declaration in a file with `is_system_header` set | A program's own `read` is never touched. A quoted include inside a system header is a system header too, so the bundled `sys/socket.h` → `"unistd.h"` chain is covered when it resolves from disk |
+| Only pointer parameters with neither a kind nor bounds are filled | A program's annotation wins. Return values are never filled |
+| Parameter count must match the row | A same-named function of another shape is skipped silently |
+| The merge reports no conflict | The table is a default, not a declaration |
+| `Obj.checked_libc_mask` records the filled parameters | A later declaration that spells bounds for one of them clears it and takes over, where a plain redeclaration would be a conflict |
+
+The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidden_builtin()` skips `merge_checked_interface()`, and the table runs after either branch.
+
 ## Plain array sources
 
 `checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate: `find_checked_base()` roots at a complete `TY_ARRAY` variable (a string literal is one), or at a non-bit-field array member of a struct that is not its last member, reached through a trivial object expression. The last member is excluded because it may stand in for a flexible array. `checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`.

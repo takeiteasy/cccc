@@ -3081,6 +3081,11 @@ struct Obj {
     // result is used.
     int checked_self_param_idx;
 
+    // On a function Obj: bit i set when parameter i's bounds came from the
+    // built-in libc table (src/checked_libc.c), so a later user declaration
+    // that spells its own bounds replaces them instead of conflicting.
+    unsigned checked_libc_mask;
+
     // On a function Obj: the `dynamic` casts whose source is a propagation
     // candidate, resolved once propagate_checked_bounds() has classified it
     // (resolve_pending_dynamic_casts(), src/parse_checked.c).

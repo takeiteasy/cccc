@@ -531,6 +531,8 @@ Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty);
 void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty);
+void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty);
+void apply_checked_libc_bounds(VirtualMachine *vm, Obj *fn, Token *decl_tok);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
 Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
                                 Token *tok);

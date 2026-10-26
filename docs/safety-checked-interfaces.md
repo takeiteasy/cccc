@@ -5,6 +5,7 @@ Check what callers pass in, and move pointers into the checked world.
 | Feature | Use it to |
 |---|---|
 | [Annotated parameters](#annotated-parameters) | Trap a call whose arguments don't satisfy the callee's declared bounds |
+| [Standard library calls](#standard-library-calls) | Check `memcpy`, `read`, `snprintf` and friends with no annotation |
 | [Checked return values](#checked-return-values) | Trap a `return` that doesn't satisfy the function's declared return bounds |
 | [Plain arrays as sources](#plain-arrays-as-sources) | Check a pointer taken from an array of known size |
 | [Struct fields](#struct-fields) | Check a pointer stored into a field, including the count written after it |
@@ -37,6 +38,33 @@ The bounds are resolved where the prototype is declared, so a bound naming an un
 
 ```c
 void sink(int * [[cccc::array, cccc::count(n)]], int n);
+```
+
+## Standard library calls
+
+Under `--checked-pointers`, calls to common libc/POSIX functions are checked against the size they are given, with no annotation in the header or the program:
+
+```c
+char a[8], b[16];
+memcpy(a, b, 16);   // traps: a has 8 bytes
+```
+
+| Header | Functions | Bound on the buffer |
+|---|---|---|
+| `string.h` | `memcpy`, `memmove` (both buffers), `memset` | `n` bytes |
+| `stdio.h` | `fread`, `fwrite` | `size * nmemb` bytes |
+| | `fgets`, `snprintf`, `vsnprintf` | `n` bytes |
+| `unistd.h` | `read`, `write`, `pread`, `pwrite`, `getcwd`, `readlink`, `gethostname` | the length argument |
+| `sys/socket.h` | `recv`, `send`, `recvfrom`, `sendto` | the length argument |
+
+A buffer must hold the whole length even when the call would touch less (`read(fd, a, 16)` into `char a[8]` traps although only 4 bytes may arrive). Calls are checked by the [rules above](#annotated-parameters): the argument must be a checked pointer, an inherited local or a [plain array](#plain-arrays-as-sources); an unchecked pointer is left alone.[^libc-null]
+
+The bounds attach to the declaration in a system header (`<...>` include, or a header such as `<sys/socket.h>` includes), so they apply the same under `--use-system-headers` and `--sysroot`. A program's own function of the same name, and a `static` one, get none.
+
+A program that redeclares one of these functions with its own bounds replaces the built-in ones for the parameters it annotates:
+
+```c
+ssize_t read(int fd, void *[[cccc::array, cccc::byte_count(n * 2)]] buf, size_t n);
 ```
 
 ## Redeclarations
@@ -214,3 +242,4 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^plain]: A plain array is not a propagation source, so only checked targets (declarations, assignments, arguments, returns and casts) read its extent.
 [^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).
+[^libc-null]: `snprintf(NULL, 0, ...)` and other null buffers are unchecked. Functions that may touch fewer bytes than their length (`strncpy`'s source, `strncmp`, `memchr`, `memcmp`) have no bounds. `fread` and `fwrite` multiply `size * nmemb` without an overflow check, so a wrapping product can let an oversized call pass.

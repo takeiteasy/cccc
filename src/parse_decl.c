@@ -429,6 +429,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     if (ty->method_of)
         register_method(vm, fn, ty, tok);
 
+    apply_checked_libc_bounds(vm, fn, ty->name);
     fn->is_root = !obj_is_inline_only(fn);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
                           fn, fn->tok);
@@ -743,6 +744,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                             (ty->is_gnu_inline || attr->is_gnu_inline ||
                              vm->compiler.c_std < CCCC_STD_C99);
 
+    apply_checked_libc_bounds(vm, fn, ty->name);
     fn->is_root = !obj_is_inline_only(fn);
 
     if (fn->ty && ty->name && ty->name->file)

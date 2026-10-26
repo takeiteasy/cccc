@@ -7341,7 +7341,9 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     mark_transitive_include_target(vm, path ? path : filename);
                 tok = include_file(vm, tok, path ? path : filename,
                                    start->next->next, filename,
-                                   !is_dquote || found_in_sys);
+                                   !is_dquote || found_in_sys ||
+                                       (start->file &&
+                                        start->file->is_system_header));
                 break;
             }
             case PP_INCLUDE_NEXT: {
