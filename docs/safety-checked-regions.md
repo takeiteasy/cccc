@@ -32,13 +32,17 @@ void g(void) {
         _Unchecked { int *raw = (int *)a; }
     }
 }
+
+void h(int * [[cccc::array, cccc::count(n)]] a, int n) _Checked { ... }
+_Unchecked int k(int *p) { ... }
 ```
 
 | Form | Scope | Notes |
 |---|---|---|
 | `[[cccc::checked]]` / `[[cccc::unchecked]]` | A function body or a `{ }` block | Also `__attribute__((checked))`, `__checked__`, `@checked` |
 | `#pragma cccc checked begin` / `end` (and `unchecked`) | From `begin` to `end` | A positional directive; `end` must name the same keyword as its `begin`, and an unclosed `begin` or stray `end` is an error |
-| `_Checked { }` / `_Unchecked { }` | A block, as a statement | Checked C spelling; recognised by position, so the names are not reserved. Not valid as a declarator suffix (`void f(void) _Checked { }`): use the attribute |
+| `_Checked { }` / `_Unchecked { }` | A block, as a statement | Checked C spelling; recognised by position, so the names are not reserved |
+| `void f(void) _Checked { }`, `_Checked void f(void) { }` (and `_Unchecked`) | A function definition: parameters, return type and body | The same region as `[[cccc::checked]]` on the function. The specifier goes among the other specifiers (`static _Checked int f(void)`). On a variable or a prototype it is an error |
 
 Regions nest to any depth and the innermost wins, across all spellings. An attribute or keyword region overrides a surrounding pragma region.
 
@@ -137,4 +141,4 @@ Malformed regions (a stray, unclosed or mismatched `#pragma cccc ... end`, or co
 
 The diagnostics are not gated by `--checked-pointers`, and they fire under `-c=native`, `-m` and `-c=generated`. The region attributes are stripped from that output.
 
-[^gaps]: Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); `-Wchecked-calls` does not follow calls through function pointers; global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion.
+[^gaps]: Not supported: Checked C's `_Bounds_only` variant and `_Checked { }` around file-scope declarations (use `#pragma cccc checked begin`). Not enforced: a `typedef` of an unchecked pointer type (each use as a local, parameter, global or member is rejected instead); `-Wchecked-calls` does not follow calls through function pointers; global initialisers and comptime builtin arguments are not checked for unchecked-to-checked conversion.

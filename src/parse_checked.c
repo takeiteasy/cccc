@@ -3105,6 +3105,49 @@ CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok) {
     return tok ? tok->checked_scope : CHECKED_SCOPE_UNSET;
 }
 
+CheckedScope cc_checked_scope_keyword(Token *tok) {
+    if (!tok || tok->kind != TK_IDENT)
+        return CHECKED_SCOPE_UNSET;
+    if (equal(tok, "_Checked"))
+        return CHECKED_SCOPE_ON;
+    if (equal(tok, "_Unchecked"))
+        return CHECKED_SCOPE_OFF;
+    return CHECKED_SCOPE_UNSET;
+}
+
+void cc_set_checked_scope(VirtualMachine *vm, VarAttr *attr, CheckedScope want,
+                          Token *tok) {
+    if (attr->checked_scope != CHECKED_SCOPE_UNSET &&
+        attr->checked_scope != want)
+        error_tok(vm, tok,
+                  "'checked' and 'unchecked' cannot both apply to the same "
+                  "declaration");
+    attr->checked_scope = want;
+}
+
+// `_Checked int f(void) { ... }`: the keyword counts as a specifier only when
+// a type or attribute follows, so `int _Checked = 3;` and `T _Checked[4]`
+// keep `_Checked` as an ordinary name.
+bool cc_checked_spec_start(VirtualMachine *vm, Token *tok) {
+    if (cc_checked_scope_keyword(tok) == CHECKED_SCOPE_UNSET ||
+        find_typedef(vm, tok))
+        return false;
+    Token *next = tok->next;
+    return is_typename_ex(vm, next, false) || equal(next, "__attribute__") ||
+           (equal(next, "[") && equal(next->next, "["));
+}
+
+// A specifier-position region applies to a function definition only.
+void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,
+                                 VarAttr *attr) {
+    if (attr->checked_spec_tok &&
+        (attr->is_typedef || !is_function(vm, tok, basety)))
+        error_tok(vm, attr->checked_spec_tok,
+                  "'%.*s' as a declaration specifier applies only to a "
+                  "function definition",
+                  attr->checked_spec_tok->len, attr->checked_spec_tok->loc);
+}
+
 static bool is_null_pointer_constant(Node *e) {
     if (e && e->ty && e->ty->kind == TY_NULLPTR_T)
         return true;

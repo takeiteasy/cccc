@@ -589,6 +589,13 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     if (!ty->name)
         error_tok(vm, ty->name_pos, "function name omitted");
     char *name_str = get_ident(vm, ty->name);
+
+    // `void f(void) _Checked { ... }`
+    CheckedScope suffix_scope = cc_checked_scope_keyword(tok);
+    if (suffix_scope != CHECKED_SCOPE_UNSET && equal(tok->next, "{")) {
+        cc_set_checked_scope(vm, attr, suffix_scope, tok);
+        tok = tok->next;
+    }
     check_sentinel_variadic(vm, ty);
 
     // Propagate noreturn from attribute to function type
@@ -2119,6 +2126,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         VarAttr attr   = {};
         attr.decl_start = tok;
         Type   *basety = declspec(vm, &tok, tok, &attr);
+        cc_reject_checked_specifier(vm, tok, basety, &attr);
 
         // Typedef
         if (attr.is_typedef) {

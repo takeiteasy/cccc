@@ -1098,24 +1098,12 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
     }
 
-    // #1331: Checked C keyword spellings `_Checked { ... }` /
-    // `_Unchecked { ... }` -- a second spelling for the same region state as
-    // [[cccc::checked]] / [[cccc::unchecked]], recognized positionally (a
-    // name immediately followed by '{') rather than as a tokenizer keyword
-    // (see init_keyword_map(), src/tokenize.c) -- an existing identifier of
-    // either spelling is never reclassified this way, at the cost of not
-    // covering declarator-suffix position (`void f(void) _Checked { ... }`,
-    // already covered by [[cccc::checked]]) in this pass. See
-    // docs/safety.md's Checked Regions section.
-    if (tok->kind == TK_IDENT && equal(tok->next, "{") &&
-        (equal(tok, "_Checked") || equal(tok, "_Unchecked"))) {
-        CheckedScope want =
-            equal(tok, "_Checked") ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
-        if (label_attr.checked_scope != CHECKED_SCOPE_UNSET &&
-            label_attr.checked_scope != want)
-            error_tok(vm, tok,
-                      "'checked' and 'unchecked' cannot both apply to the "
-                      "same declaration");
+    // Checked C keyword spellings of [[cccc::checked]] / [[cccc::unchecked]],
+    // recognized by position (a name followed by '{') rather than as
+    // tokenizer keywords, so an identifier of either spelling stays usable.
+    CheckedScope want = cc_checked_scope_keyword(tok);
+    if (want != CHECKED_SCOPE_UNSET && equal(tok->next, "{")) {
+        cc_set_checked_scope(vm, &label_attr, want, tok);
         CheckedScope saved              = vm->compiler.checked_scope_attr;
         vm->compiler.checked_scope_attr = want;
         Node *n = compound_stmt(vm, rest, tok->next->next, NULL);
@@ -1200,12 +1188,14 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
     bool scope_has_cleanup =
         false; // true once first cleanup var is seen in this scope
     while (!equal(tok, "}") && !omp_at_section(vm, tok)) {
-        if (is_decl_start(vm, tok) && !equal(tok->next, ":")) {
+        if ((is_decl_start(vm, tok) || cc_checked_spec_start(vm, tok)) &&
+            !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
                 warn_tok(vm, tok, CCCC_WARN_PEDANTIC,
                          "mixing declarations and code is a C99 extension");
             VarAttr attr   = {};
             Type   *basety = declspec(vm, &tok, tok, &attr);
+            cc_reject_checked_specifier(vm, tok, basety, &attr);
 
             if (attr.is_typedef) {
                 if (has_custom_attrs(basety, &attr))

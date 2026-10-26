@@ -420,3 +420,96 @@ int call_trusted(void) {
 void test_trusted_prototype(void) {
     AssertEq(call_trusted(), 7);
 }
+
+// ---------------------------------------------------------------------
+// `_Checked`/`_Unchecked` on a function definition: after the parameter list
+// (`void f(void) _Checked { ... }`) and among the specifiers
+// (`_Checked int f(void) { ... }`).
+// ---------------------------------------------------------------------
+
+int suffix_checked_sum(void) _Checked {
+    int n                                  = 2;
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[2]){20, 22};
+    return a[0] + a[1];
+}
+
+_Checked int specifier_checked_sum(void) {
+    int n                                  = 2;
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[2]){20, 22};
+    return a[0] + a[1];
+}
+
+static _Checked int static_specifier_checked(void) {
+    int n                                  = 1;
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){42};
+    return a[0];
+}
+
+extern _Checked int extern_specifier_checked(void) {
+    int n                                  = 1;
+    int *[[cccc::array, cccc::count(n)]] a = (int _Checked[1]){42};
+    return a[0];
+}
+
+[[cccc::test]]
+void test_function_level_checked(void) {
+    AssertEq(suffix_checked_sum(), 42);
+    AssertEq(specifier_checked_sum(), 42);
+    AssertEq(static_specifier_checked(), 42);
+    AssertEq(extern_specifier_checked(), 42);
+}
+
+#pragma cccc checked begin
+int suffix_unchecked_in_pragma(int *p) _Unchecked {
+    return p[0];
+}
+
+_Unchecked int specifier_unchecked_in_pragma(int *p) {
+    return p[0];
+}
+#pragma cccc checked end
+
+[[cccc::test]]
+void test_function_level_unchecked_inside_pragma_region(void) {
+    int v = 42;
+    AssertEq(suffix_unchecked_in_pragma(&v), 42);
+    AssertEq(specifier_unchecked_in_pragma(&v), 42);
+}
+
+int nested_suffix_checked(void) {
+    int inner(void) _Checked {
+        int *[[cccc::array, cccc::count(1)]] a = (int _Checked[1]){42};
+        return a[0];
+    }
+    return inner();
+}
+
+int nested_specifier_checked(void) {
+    _Checked int inner(void) {
+        int *[[cccc::array, cccc::count(1)]] a = (int _Checked[1]){42};
+        return a[0];
+    }
+    return inner();
+}
+
+[[cccc::test]]
+void test_nested_function_level_checked(void) {
+    AssertEq(nested_suffix_checked(), 42);
+    AssertEq(nested_specifier_checked(), 42);
+}
+
+// A name spelled `_Checked`/`_Unchecked` stays an ordinary identifier
+// wherever it is not followed by '{' or a type.
+int _Checked(void) {
+    return 20;
+}
+
+int _Unchecked = 22;
+
+typedef int _Checked_row[2];
+
+[[cccc::test]]
+void test_function_level_names_not_reclassified(void) {
+    _Checked_row r = {0, 0};
+    AssertEq(_Checked() + _Unchecked + r[0], 42);
+}

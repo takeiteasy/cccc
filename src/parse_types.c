@@ -308,7 +308,14 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
     // and redeclaring its enumerators.
     while (is_typename_ex(vm, tok, /*allow_splice=*/counter == 0) ||
            equal(tok, "__attribute__") ||
-           (equal(tok, "[") && equal(tok->next, "["))) {
+           (equal(tok, "[") && equal(tok->next, "[")) ||
+           (attr && cc_checked_spec_start(vm, tok))) {
+        if (attr && cc_checked_spec_start(vm, tok)) {
+            cc_set_checked_scope(vm, attr, cc_checked_scope_keyword(tok), tok);
+            attr->checked_spec_tok = tok;
+            tok                    = tok->next;
+            continue;
+        }
         if (equal(tok, "__attribute__")) {
             tok = attribute_list(vm, tok, NULL, vs_attr);
             continue;
@@ -2742,13 +2749,9 @@ static Token *apply_checked_scope_attr(VirtualMachine *vm, Token *name_tok,
                   "'%s' applies to a function definition or a compound "
                   "statement, not to this position",
                   name);
-    CheckedScope want = is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF;
-    if (attr->checked_scope != CHECKED_SCOPE_UNSET &&
-        attr->checked_scope != want)
-        error_tok(vm, name_tok,
-                  "'checked' and 'unchecked' cannot both apply to the same "
-                  "declaration");
-    attr->checked_scope = want;
+    cc_set_checked_scope(vm, attr,
+                         is_checked ? CHECKED_SCOPE_ON : CHECKED_SCOPE_OFF,
+                         name_tok);
     return tok;
 }
 

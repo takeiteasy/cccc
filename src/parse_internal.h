@@ -155,6 +155,7 @@ typedef struct {
     // cc_checked_scope_at() (src/parse_checked.c) for how this composes with
     // a #pragma cccc checked/unchecked region.
     CheckedScope checked_scope;
+    Token       *checked_spec_tok; // `_Checked`/`_Unchecked` written as a specifier
 
     Token *decl_start; // first token of the declaration (function source span)
 
@@ -313,6 +314,14 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
 // #485: effective checked-region state at `tok` -- see cc_checked_scope_at()'s
 // own comment (src/parse_checked.c) for the composition rule.
 CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok);
+// `_Checked`/`_Unchecked` spelled as an identifier, else CHECKED_SCOPE_UNSET.
+CheckedScope cc_checked_scope_keyword(Token *tok);
+bool cc_checked_spec_start(VirtualMachine *vm, Token *tok);
+void cc_reject_checked_specifier(VirtualMachine *vm, Token *tok, Type *basety,
+                                 VarAttr *attr);
+// Records `want` on `attr`, rejecting a checked/unchecked conflict.
+void cc_set_checked_scope(VirtualMachine *vm, VarAttr *attr, CheckedScope want,
+                          Token *tok);
 void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
                                  const char *what);
 void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
