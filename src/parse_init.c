@@ -1669,6 +1669,10 @@ static void restore_checked_array(VirtualMachine *vm, Obj *var) {
     if (var->checked_kind == CHECKED_NONE || var->ty->kind != TY_ARRAY ||
         var->ty->checked_kind != CHECKED_NONE)
         return;
+    if (var->checked_kind == CHECKED_NTARRAY && var->ty->array_len < 1)
+        error_tok(vm, var->tok,
+                  "an '_Nt_checked' array must declare at least 1 element -- "
+                  "the last element is reserved for the null-terminator slot");
     Type *ty                = copy_type(vm, var->ty);
     ty->checked_kind        = var->checked_kind;
     ty->checked_bounds_form = var->checked_bounds_form;

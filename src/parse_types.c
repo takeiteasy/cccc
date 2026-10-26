@@ -1341,7 +1341,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
                           "supported");
         }
         if (checked_array_kind == CHECKED_NTARRAY && ty->kind == TY_ARRAY &&
-            ty->array_len < 1)
+            ty->array_len >= 0 && ty->array_len < 1)
             error_tok(vm, checked_array_tok,
                       "an '_Nt_checked' array must declare at least 1 "
                       "element -- the last element is reserved for the "

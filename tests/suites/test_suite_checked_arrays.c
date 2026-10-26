@@ -185,6 +185,17 @@ void test_inferred_extent_local(void) {
     AssertEq(q[0], 1);
 }
 
+char g_nt_inferred _Nt_checked[] = "hi";
+
+[[cccc::test]]
+void test_nt_checked_inferred_extent(void) {
+    char s _Nt_checked[] = "hello";
+    AssertEq(s[4], 'o');
+    AssertEq(sizeof(s), 6);
+    AssertEq(g_nt_inferred[1], 'i');
+    AssertEq(sizeof(g_nt_inferred), 3);
+}
+
 // ---------------------------------------------------------------------
 // Multidimensional: every dimension is checked.
 // ---------------------------------------------------------------------

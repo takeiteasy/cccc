@@ -105,7 +105,7 @@ a[3][0] = 1;               // traps: past the last row
 int *r = a[1];             // r is checked against the 5 elements of row 1
 ```
 
-Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`).
+Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`). A string initializer sizes an `_Nt_checked[]` the same way (`char s _Nt_checked[] = "hi"` has 3 slots).
 
 | Case | Behavior |
 |---|---|
