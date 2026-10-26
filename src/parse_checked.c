@@ -385,6 +385,60 @@ static bool checked_obj_is_addressable(Node *n) {
            (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
 }
 
+// A plain array object with a known extent as a source for a checked target:
+// `q = buf`, `sink(buf, 8)`, `(T [[...]])buf`. Its bounds are the object's
+// own [buf, buf + sizeof buf). Not a propagation source: an unchecked
+// `int *q = buf;` stays unchecked.
+//
+// Accepted: a complete non-VLA array variable (a string literal is one), or a
+// non-bit-field array member that is not the last member of a struct (a
+// trailing array may be a flexible-array stand-in) reached through a trivial
+// object expression. An array parameter is a TY_PTR and never matches.
+static Type *checked_plain_array_root(Node *rhs, CheckedBase *out) {
+    CheckedBase base = find_checked_base(rhs);
+    Type       *ty   = NULL;
+    if (base.var) {
+        ty = base.var->ty;
+    } else if (base.mem && base.obj) {
+        ty = base.mem->ty;
+        if (base.mem->is_bitfield || !base.mem->next || !base.obj->ty ||
+            base.obj->ty->kind != TY_STRUCT ||
+            !checked_obj_is_trivial(base.obj))
+            return NULL;
+    }
+    if (!ty || ty->kind != TY_ARRAY || ty->checked_kind != CHECKED_NONE ||
+        ty->size <= 0)
+        return NULL;
+    *out = base;
+    return ty;
+}
+
+static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
+                                       Token *tok, Node **out_lo,
+                                       Node **out_hi) {
+    CheckedBase base;
+    Type       *ty = checked_plain_array_root(rhs, &base);
+    *out_lo        = NULL;
+    *out_hi        = NULL;
+    if (!ty)
+        return false;
+    Node *arr;
+    if (base.var) {
+        arr = new_var_node(vm, base.var, tok);
+    } else {
+        arr = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
+        arr->member = base.mem;
+    }
+    add_type(vm, arr);
+    Node *lo = checked_array_decay(vm, arr, tok);
+    Node *hi = new_binary(vm, ND_ADD, clone_bounds_node(vm, lo),
+                          new_long(vm, ty->size, tok), tok);
+    add_type(vm, hi);
+    *out_lo = lo;
+    *out_hi = hi;
+    return true;
+}
+
 // Computes the checked-pointer bounds range to enforce for an access rooted
 // at `base` (#770/#484, generalised for #921's member roots and split out
 // of set_checked_deref_bounds() so #919's propagate_checked_bounds() can
@@ -1621,7 +1675,12 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                     bool is_source = checked_prop_source_bounds(
                         vm, node->rhs, node->tok, &src_lo, &src_hi,
                         &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
-                    if (is_source && !src_optional && src_lo && src_hi) {
+                    bool plain_src = false;
+                    if (!is_source && !cr_store)
+                        plain_src = checked_plain_array_source(
+                            vm, node->rhs, node->tok, &src_lo, &src_hi);
+                    if (plain_src ||
+                        (is_source && !src_optional && src_lo && src_hi)) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // The split moved the call, with its argument
                         // stores, out of the rhs.
@@ -1636,10 +1695,16 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         compute_checked_bounds(vm, dst_base, dst_pty, node->tok,
                                                &dst_lo, &dst_hi, &dst_nt2,
                                                &dst_obj_init, fn);
-                        checked_prop_source_bounds(
-                            vm, node->rhs, node->tok, &src_lo, &src_hi,
-                            &src_optional, &src_nt2, &src_nt_elem2, fn,
-                            &src_obj_init);
+                        if (plain_src) {
+                            checked_plain_array_source(vm, node->rhs, node->tok,
+                                                       &src_lo, &src_hi);
+                            src_obj_init = NULL;
+                        } else {
+                            checked_prop_source_bounds(
+                                vm, node->rhs, node->tok, &src_lo, &src_hi,
+                                &src_optional, &src_nt2, &src_nt_elem2, fn,
+                                &src_obj_init);
+                        }
                         verify_checked_assign_rewrite(
                             vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
                             src_obj_init, dst_obj_init, cr_store);
@@ -1967,9 +2032,11 @@ static bool checked_param_qualifies(Type *p, Node *a) {
     if (!has_form)
         return false;
     CheckedBase src_base = find_checked_base(a);
+    CheckedBase plain;
     return checked_base_is_declared(src_base) ||
            (src_base.var && src_base.var->checked_prop_candidate) ||
-           checked_call_root(a) != NULL;
+           checked_call_root(a) != NULL ||
+           checked_plain_array_root(a, &plain) != NULL;
 }
 
 // Marks in `need` every side-effecting sibling argument the bounds template
@@ -2362,6 +2429,8 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
         return;
     } else if (checked_call_root(cast_node->lhs)) {
         return; // bounds come from the callee's return type
+    } else if (checked_plain_array_root(cast_node->lhs, &(CheckedBase){0})) {
+        return; // bounds are the array's own extent
     }
     (void)src_nt;
     if (!src_lo || !src_hi)
@@ -2394,12 +2463,391 @@ static void resolve_pending_dynamic_casts(VirtualMachine *vm, Obj *fn) {
     fn->checked_dynamic_pending = NULL;
 }
 
+// ---------------------------------------------------------------------------
+// Deferred sibling-write group check.
+//
+// `s.p = small; s.n = 8;` stores a pointer whose bounds name `s.n`, then
+// widens the count. The assignment check above ran right after the pointer
+// store, against the old count. This pass moves that check to the end of a
+// run of directly following writes to the pointer's bound-naming siblings, so
+// it sees the final count.
+//
+// A group is a stamped pointer assignment (the "anchor") plus the leaves that
+// follow it in evaluation order: stores to compiler temps, writes to the
+// anchor's siblings on the same object (plain, compound and ++/--), and other
+// anchors on that object. Anything else ends it. The anchor's CHKAB stamp
+// moves onto a carrier `__cg = 0` placed after the last sibling write; the
+// source-bounds snapshot stays before the pointer store.
+//
+// A sibling write whose value has side effects or reads the pointer ends the
+// group before it, so the pointer is never read through the stale check.
+
+typedef struct {
+    Node *a;
+    Node *b;
+} GroupTemp; // `tmp = &obj`: the object a compound assignment writes through
+
+typedef struct {
+    Obj    *var;
+    Member *mem;
+    Node   *obj;
+    Obj    *vars[8];
+    Member *mems[8];
+    int     nvars, nmems;
+} GroupTarget;
+
+static void group_collect_siblings(Node *n, Obj *self, GroupTarget *t) {
+    if (!n)
+        return;
+    if (n->kind == ND_VAR && n->var) {
+        if (n->var->checked_self_member) {
+            if (t->nmems < 8)
+                t->mems[t->nmems++] = n->var->checked_self_member;
+        } else if (n->var != self && n->var->name && n->var->name[0] &&
+                   !n->var->checked_self_param_idx) {
+            if (t->nvars < 8)
+                t->vars[t->nvars++] = n->var;
+        }
+        return;
+    }
+    group_collect_siblings(n->lhs, self, t);
+    group_collect_siblings(n->rhs, self, t);
+    group_collect_siblings(n->cond, self, t);
+    group_collect_siblings(n->then, self, t);
+    group_collect_siblings(n->els, self, t);
+}
+
+// The pointer a stamped assignment stores into, with the variables and
+// members its bounds name. False when it names none, or is a compiler temp.
+static bool group_anchor_target(Node *leaf, GroupTarget *t) {
+    memset(t, 0, sizeof(*t));
+    if (leaf->kind != ND_ASSIGN || !leaf->checked_assign_dst_lo || !leaf->lhs)
+        return false;
+    Node *l = leaf->lhs;
+    if (l->kind == ND_VAR && l->var && l->var->name && l->var->name[0]) {
+        t->var = l->var;
+        group_collect_siblings(l->var->checked_bounds_lo, l->var, t);
+        group_collect_siblings(l->var->checked_bounds_hi, l->var, t);
+    } else if (l->kind == ND_MEMBER && l->member && l->lhs &&
+               !node_has_side_effects(l->lhs)) {
+        t->mem = l->member;
+        t->obj = l->lhs;
+        group_collect_siblings(l->member->checked_bounds_lo, NULL, t);
+        group_collect_siblings(l->member->checked_bounds_hi, NULL, t);
+    } else {
+        return false;
+    }
+    return t->nvars || t->nmems;
+}
+
+static Node *group_peel_casts(Node *n) {
+    while (n && n->kind == ND_CAST)
+        n = n->lhs;
+    return n;
+}
+
+static bool group_reads_target(Node *n, const GroupTarget *t) {
+    if (!n)
+        return false;
+    if (n->kind == ND_VAR && t->var && n->var == t->var)
+        return true;
+    if (n->kind == ND_MEMBER && t->mem && n->member == t->mem)
+        return true;
+    if (group_reads_target(n->lhs, t) || group_reads_target(n->rhs, t) ||
+        group_reads_target(n->cond, t) || group_reads_target(n->then, t) ||
+        group_reads_target(n->els, t))
+        return true;
+    for (Node *a = n->args; a; a = a->next)
+        if (group_reads_target(a, t))
+            return true;
+    return false;
+}
+
+static bool group_is_temp(Node *n) {
+    return n && n->kind == ND_VAR && n->var &&
+           (!n->var->name || !n->var->name[0]);
+}
+
+static Node *group_temp_object(GroupTemp *temps, int ntemps, Node *tmp) {
+    for (int i = ntemps - 1; i >= 0; i--)
+        if (temps[i].a->var == tmp->var)
+            return temps[i].b;
+    return NULL;
+}
+
+// What a leaf writes: a plain variable, or a member of an object. Writes
+// through a `tmp = &x` compound-assignment temp resolve to `x`.
+static bool group_write_target(Node *leaf, GroupTemp *temps, int ntemps,
+                               Obj **out_var, Member **out_mem,
+                               Node **out_obj) {
+    *out_var = NULL;
+    *out_mem = NULL;
+    *out_obj = NULL;
+    Node *l  = leaf->lhs;
+    if (!l)
+        return false;
+    if (l->kind == ND_VAR && !group_is_temp(l)) {
+        *out_var = l->var;
+        return true;
+    }
+    if (l->kind == ND_MEMBER && l->lhs) {
+        Node *o = l->lhs;
+        if (o->kind == ND_DEREF && group_is_temp(o->lhs)) {
+            Node *x = group_temp_object(temps, ntemps, o->lhs);
+            if (!x)
+                return false;
+            o = x;
+        }
+        *out_mem = l->member;
+        *out_obj = o;
+        return true;
+    }
+    if (l->kind == ND_DEREF && group_is_temp(l->lhs)) {
+        Node *x = group_temp_object(temps, ntemps, l->lhs);
+        if (!x)
+            return false;
+        if (x->kind == ND_VAR && !group_is_temp(x)) {
+            *out_var = x->var;
+            return true;
+        }
+        if (x->kind == ND_MEMBER && x->lhs) {
+            *out_mem = x->member;
+            *out_obj = x->lhs;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool group_target_has(const GroupTarget *t, Obj *var, Member *mem) {
+    for (int i = 0; var && i < t->nvars; i++)
+        if (t->vars[i] == var)
+            return true;
+    for (int i = 0; mem && i < t->nmems; i++)
+        if (t->mems[i] == mem)
+            return true;
+    return false;
+}
+
+// True when `b`'s pointer is bound by a sibling `a` also names, on the same
+// object.
+static bool group_anchors_related(const GroupTarget *a, const GroupTarget *b) {
+    if ((a->var != NULL) != (b->var != NULL))
+        return false;
+    if (a->mem && !nodes_structurally_equal(a->obj, b->obj))
+        return false;
+    for (int i = 0; i < b->nvars; i++)
+        if (group_target_has(a, b->vars[i], NULL))
+            return true;
+    for (int i = 0; i < b->nmems; i++)
+        if (group_target_has(a, NULL, b->mems[i]))
+            return true;
+    return false;
+}
+
+static void group_wrap_leaf(VirtualMachine *vm, Node *leaf, Node *extra) {
+    Node *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *copy       = *leaf;
+    copy->next  = NULL;
+    Node *comma = new_binary(vm, ND_COMMA, copy, extra, leaf->tok);
+    add_type(vm, comma);
+    Node *saved = leaf->next;
+    *leaf       = *comma;
+    leaf->next  = saved;
+}
+
+static void group_move_stamp(VirtualMachine *vm, Obj *fn, Node *from,
+                             Node *after) {
+    Obj  *cg  = new_checked_prop_temp(vm, fn, ty_int);
+    Node *lhs = new_var_node(vm, cg, from->tok);
+    add_type(vm, lhs);
+    Node *carrier =
+        new_binary(vm, ND_ASSIGN, lhs,
+                   new_cast(vm, new_long(vm, 0, from->tok), ty_int), from->tok);
+    add_type(vm, carrier);
+    carrier->checked_assign_dst_lo       = from->checked_assign_dst_lo;
+    carrier->checked_assign_dst_hi       = from->checked_assign_dst_hi;
+    carrier->checked_assign_dst_obj_init = from->checked_assign_dst_obj_init;
+    carrier->checked_assign_src_lo       = from->checked_assign_src_lo;
+    carrier->checked_assign_src_hi       = from->checked_assign_src_hi;
+    from->checked_assign_dst_lo          = NULL;
+    from->checked_assign_dst_hi          = NULL;
+    from->checked_assign_dst_obj_init    = NULL;
+    from->checked_assign_src_lo          = NULL;
+    from->checked_assign_src_hi          = NULL;
+    group_wrap_leaf(vm, after, carrier);
+}
+
+// `n` leaves in evaluation order; the last `protect_last` ones never take a
+// carrier (the value of an expression-level comma chain).
+static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
+                          int protect_last) {
+    int limit = n - protect_last;
+    for (int i = 0; i < limit; i++) {
+        GroupTarget at;
+        if (!group_anchor_target(leaves[i], &at))
+            continue;
+        GroupTemp temps[8];
+        int       ntemps = 0;
+        Node     *joined[8];
+        int       njoined = 0, last = -1, last_joined = 0;
+        for (int j = i + 1; j < limit; j++) {
+            Node *l = leaves[j];
+            if (l->kind == ND_NULL_EXPR)
+                continue;
+            if (l->kind != ND_ASSIGN)
+                break;
+            GroupTarget bt;
+            if (group_anchor_target(l, &bt)) {
+                if (njoined == 8 || !group_anchors_related(&at, &bt))
+                    break;
+                joined[njoined++] = l;
+                continue;
+            }
+            if (l->checked_assign_dst_lo)
+                break;
+            if (group_is_temp(l->lhs)) {
+                if (node_has_side_effects(l->rhs))
+                    break;
+                Node *r = group_peel_casts(l->rhs);
+                if (r && r->kind == ND_ADDR && ntemps < 8)
+                    temps[ntemps++] = (GroupTemp){l->lhs, r->lhs};
+                continue;
+            }
+            Obj    *wv;
+            Member *wm;
+            Node   *wo;
+            if (!group_write_target(l, temps, ntemps, &wv, &wm, &wo))
+                break;
+            bool sibling = wv ? group_target_has(&at, wv, NULL)
+                              : (group_target_has(&at, NULL, wm) && at.mem &&
+                                 !node_has_side_effects(wo) &&
+                                 nodes_structurally_equal(at.obj, wo));
+            if (!sibling || node_has_side_effects(l->rhs) ||
+                group_reads_target(l->rhs, &at))
+                break;
+            last        = j;
+            last_joined = njoined;
+        }
+        if (last < 0)
+            continue;
+        group_move_stamp(vm, fn, leaves[i], leaves[last]);
+        for (int k = 0; k < last_joined; k++)
+            group_move_stamp(vm, fn, joined[k], leaves[last]);
+    }
+}
+
+typedef struct {
+    Node **v;
+    int    n, cap;
+} GroupLeaves;
+
+static void group_push(GroupLeaves *g, Node *leaf) {
+    if (g->n == g->cap) {
+        g->cap = g->cap ? g->cap * 2 : 16;
+        g->v   = realloc(g->v, (size_t)g->cap * sizeof(Node *));
+    }
+    g->v[g->n++] = leaf;
+}
+
+// The spine of a comma chain, in evaluation order.
+static void group_flatten(Node *e, GroupLeaves *g) {
+    if (e && e->kind == ND_COMMA) {
+        group_flatten(e->lhs, g);
+        group_flatten(e->rhs, g);
+        return;
+    }
+    if (e)
+        group_push(g, e);
+}
+
+// A discarded statement's value wrappers: the `(x, ...) + c` a postfix ++/--
+// builds.
+static Node *group_peel_discarded(VirtualMachine *vm, Node *e) {
+    for (;;) {
+        if (e->kind == ND_CAST) {
+            e = e->lhs;
+        } else if ((e->kind == ND_ADD || e->kind == ND_SUB) && e->rhs &&
+                   is_const_expr(vm, e->rhs)) {
+            e = e->lhs;
+        } else {
+            return e;
+        }
+    }
+}
+
+static void group_stream_add(VirtualMachine *vm, Obj *fn, Node *s,
+                             GroupLeaves *g) {
+    if (s->kind == ND_EXPR_STMT && s->lhs) {
+        group_flatten(group_peel_discarded(vm, s->lhs), g);
+    } else if (s->kind == ND_BLOCK && s->is_decl_group) {
+        for (Node *t = s->body; t; t = t->next)
+            group_stream_add(vm, fn, t, g);
+    } else {
+        group_process(vm, fn, g->v, g->n, 0);
+        g->n = 0;
+    }
+}
+
+static void group_walk_one(VirtualMachine *vm, Obj *fn, Node *node);
+
+static void group_walk(VirtualMachine *vm, Obj *fn, Node *list) {
+    for (Node *n = list; n; n = n->next)
+        group_walk_one(vm, fn, n);
+}
+
+static void group_walk_children(VirtualMachine *vm, Obj *fn, Node *node) {
+    group_walk_one(vm, fn, node->lhs);
+    group_walk_one(vm, fn, node->rhs);
+    group_walk_one(vm, fn, node->cond);
+    group_walk_one(vm, fn, node->then);
+    group_walk_one(vm, fn, node->els);
+    group_walk_one(vm, fn, node->init);
+    group_walk_one(vm, fn, node->inc);
+    group_walk(vm, fn, node->body);
+    group_walk(vm, fn, node->args);
+}
+
+// Groups the statement lists of every block and the comma chains inside
+// expressions (a compound literal's initializer).
+static void group_walk_one(VirtualMachine *vm, Obj *fn, Node *node) {
+    if (!node)
+        return;
+    if (node->kind == ND_BLOCK) {
+        GroupLeaves g = {0};
+        for (Node *s = node->body; s; s = s->next)
+            group_stream_add(vm, fn, s, &g);
+        group_process(vm, fn, g.v, g.n, 0);
+        free(g.v);
+    } else if (node->kind == ND_COMMA) {
+        GroupLeaves g = {0};
+        group_flatten(node, &g);
+        group_process(vm, fn, g.v, g.n, 1);
+        for (int i = 0; i < g.n; i++) {
+            if (g.v[i]->kind == ND_COMMA) // a leaf wrapped with its carrier
+                group_walk_children(vm, fn, g.v[i]->lhs);
+            else
+                group_walk_one(vm, fn, g.v[i]);
+        }
+        free(g.v);
+        return;
+    }
+    group_walk_children(vm, fn, node);
+}
+
+void group_checked_sibling_writes(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !fn->body)
+        return;
+    group_walk_one(vm, fn, fn->body);
+}
+
 // The tail passes of every function body, in order: propagation, the
 // pending `dynamic` casts it decides, then #944's assignment verification.
 void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
     propagate_checked_bounds(vm, fn);
     resolve_pending_dynamic_casts(vm, fn);
     verify_checked_assign_bounds(vm, fn);
+    group_checked_sibling_writes(vm, fn);
     if (fn->checked_ret_entry && fn->body) {
         Node *init =
             new_unary(vm, ND_EXPR_STMT, fn->checked_ret_entry, fn->body->tok);
@@ -2502,7 +2950,8 @@ Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
     CheckedBase base = find_checked_base(exp);
     if (!checked_base_is_declared(base) &&
         !(base.var && base.var->checked_prop_candidate) &&
-        !checked_call_root(exp))
+        !checked_call_root(exp) &&
+        !checked_plain_array_root(exp, &(CheckedBase){0}))
         return exp;
 
     Node *lhs = new_var_node(vm, fn->checked_ret_var, tok);
@@ -2867,4 +3316,132 @@ void cc_check_checked_call(VirtualMachine *vm, CheckedCallWatch *w, Type *fn_ty,
                  "prototype [[cccc::trusted]] or give it a checked return "
                  "type",
                  w->callee);
+}
+
+// A constant-initialized checked pointer whose source is a static array the
+// declared bounds overrun, e.g. `struct S g = {8, buf}` with `int buf[2]`.
+// The bound is evaluated with each sibling member replaced by its own
+// initializer; one that is not a compile-time constant is skipped.
+static Node *static_init_bounds(VirtualMachine *vm, Node *n,
+                                Initializer *siblings) {
+    if (!n)
+        return NULL;
+    if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
+        if (!siblings)
+            return NULL;
+        Initializer *si = siblings->children[n->var->checked_self_member->idx];
+        if (si && si->expr)
+            return si->expr;
+        return new_long(vm, 0, n->tok);
+    }
+    Node *c       = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *c            = *n;
+    c->next       = NULL;
+    Node **kids[] = {&c->lhs, &c->rhs, &c->cond, &c->then, &c->els};
+    for (int i = 0; i < 5; i++) {
+        Node *k = *kids[i];
+        if (!k)
+            continue;
+        *kids[i] = static_init_bounds(vm, k, siblings);
+        if (!*kids[i])
+            return NULL;
+    }
+    return c;
+}
+
+static void check_static_checked_slot(VirtualMachine *vm, Node *expr, Type *pty,
+                                      CheckedKind kind, CheckedBoundsForm form,
+                                      Node *bound, Initializer *siblings) {
+    Obj *src;
+    int  off;
+    if (!expr || kind == CHECKED_NONE || pty->kind != TY_PTR ||
+        !objsize_peel_offset_chain(vm, expr, &src, &off))
+        return;
+    Type *aty = src->ty;
+    if (!aty || aty->kind != TY_ARRAY || aty->size <= 0 || off < 0)
+        return;
+
+    int64_t elem = pty->base ? get_vm_size(pty->base) : 1;
+    int64_t need;
+    if (kind == CHECKED_SINGLE) {
+        need = elem;
+    } else if (form == CB_COUNT || form == CB_BYTE_COUNT) {
+        Node *n = static_init_bounds(vm, bound, siblings);
+        if (!n || !is_const_expr(vm, n))
+            return;
+        int64_t v = eval(vm, n);
+        if (v < 0)
+            return;
+        need = form == CB_COUNT ? v * elem : v;
+        if (kind == CHECKED_NTARRAY)
+            need += elem;
+    } else {
+        return;
+    }
+    if (off + need > aty->size)
+        error_tok(vm, expr->tok,
+                  "checked initializer needs %lld bytes but the source array "
+                  "has %lld from this offset",
+                  (long long)need, (long long)(aty->size - off));
+}
+
+static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
+                                      Type *ty) {
+    if (!init)
+        return;
+    switch (ty->kind) {
+        case TY_ARRAY:
+            if (ty->base->kind != TY_PTR && ty->base->kind != TY_STRUCT &&
+                ty->base->kind != TY_UNION && ty->base->kind != TY_ARRAY)
+                return;
+            if (!init->children)
+                return;
+            for (int i = 0; i < ty->array_len; i++)
+                check_static_checked_walk(vm, init->children[i], ty->base);
+            return;
+        case TY_STRUCT:
+            if (!init->children)
+                return;
+            for (Member *m = ty->members; m; m = m->next) {
+                if (m->is_bitfield)
+                    continue;
+                Initializer *child = init->children[m->idx];
+                if (!child)
+                    continue;
+                if (m->ty->kind == TY_PTR)
+                    check_static_checked_slot(
+                        vm, child->expr, m->ty, m->ty->checked_kind,
+                        m->ty->checked_bounds_form, m->checked_bounds_hi, init);
+                else
+                    check_static_checked_walk(vm, child, m->ty);
+            }
+            return;
+        case TY_UNION:
+            if (!init->mem || !init->children)
+                return;
+            if (init->mem->ty->kind == TY_PTR)
+                check_static_checked_slot(
+                    vm, init->children[init->mem->idx]->expr, init->mem->ty,
+                    init->mem->ty->checked_kind,
+                    init->mem->ty->checked_bounds_form,
+                    init->mem->checked_bounds_hi, NULL);
+            else
+                check_static_checked_walk(vm, init->children[init->mem->idx],
+                                          init->mem->ty);
+            return;
+        default:
+            return;
+    }
+}
+
+void check_static_checked_init(VirtualMachine *vm, Obj *var,
+                               Initializer *init) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !init)
+        return;
+    if (var->ty->kind == TY_PTR)
+        check_static_checked_slot(vm, init->expr, var->ty, var->checked_kind,
+                                  var->checked_bounds_form,
+                                  var->checked_bounds_hi, NULL);
+    else
+        check_static_checked_walk(vm, init, var->ty);
 }

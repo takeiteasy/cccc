@@ -6,6 +6,8 @@ Check what callers pass in, and move pointers into the checked world.
 |---|---|
 | [Annotated parameters](#annotated-parameters) | Trap a call whose arguments don't satisfy the callee's declared bounds |
 | [Checked return values](#checked-return-values) | Trap a `return` that doesn't satisfy the function's declared return bounds |
+| [Plain arrays as sources](#plain-arrays-as-sources) | Check a pointer taken from an array of known size |
+| [Struct fields](#struct-fields) | Check a pointer stored into a field, including the count written after it |
 | [`assume` / `dynamic` casts](#bounds-casts) | Turn an unchecked pointer into a checked one |
 | [`dynamic_check`](#dynamic_check) | Assert a condition, trapping when it is false |
 
@@ -26,7 +28,7 @@ A call is checked when both hold:
 
 | Condition | Example that qualifies | Example that is skipped |
 |---|---|---|
-| The argument is a declared-checked pointer, or a local that [inherits its bounds](safety-checked-propagation.md) on every path | `small`, `q` after `int *q = small;` | `int *raw` (unchecked to unchecked is untouched) |
+| The argument is a declared-checked pointer, a local that [inherits its bounds](safety-checked-propagation.md) on every path, or a [plain array](#plain-arrays-as-sources) | `small`, `q` after `int *q = small;`, `int buf[2]` | `int *raw` (unchecked to unchecked is untouched) |
 | Every other parameter the bounds name has an argument that is side-effect-free or hoistable | `sink(small, 8)`, `sink(small, f())`, `sink(small, i++)` | a sibling argument that is itself a checked pointer with side effects |
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
@@ -82,6 +84,57 @@ The arguments the bounds name are evaluated once, before the call, so `head(i++)
 
 A bound can name scalar parameters (integers and pointers). A call whose bounds name any other parameter type is left unchecked.
 
+## Plain arrays as sources
+
+A plain array object of known size is a source for a checked pointer, with the bounds `[buf, buf + sizeof buf)`. Assignments, arguments, return values and `dynamic` casts check against it:
+
+```c
+int buf[2];
+int * [[cccc::array, cccc::count(8)]] p = buf;   // traps: 2 elements
+sink(buf, 8);                                    // traps against sink's parameter bounds
+```
+
+| Source | Covered |
+|---|---|
+| A local or global array, a string literal, `buf + 1` | Yes |
+| A non-last array member of a struct (`h.data`) | Yes |
+| The last member of a struct, a variable-length array, an array parameter (a pointer) | No |
+| `int *q = buf;` followed by `q[i]` | No: unchecked pointers stay unchecked[^plain] |
+
+## Struct fields
+
+A pointer stored into a checked field is checked against the bounds the field declares, with the sibling fields read from the same object.
+
+| Site | Checked |
+|---|---|
+| `s.p = src;` | After the store, or after the sibling writes that follow it ([below](#count-written-after-the-pointer)) |
+| `{ .p = src, .n = 8 }`, `{ src, 8 }`, `(struct S){ src, 8 }` | After the whole initializer, whatever the member order |
+| `struct S g = { 8, buf };` at file or static scope | At compile time ([below](#constant-initializers)) |
+| `s.p = raw;` with an unchecked source | Not checked |
+
+### Count written after the pointer
+
+A write to a field the pointer's bounds name, directly after the pointer's store, belongs to the same check:
+
+```c
+s.p = small;   // small has 2 elements
+s.n = 8;       // traps here, against the final count
+```
+
+The check runs after the last such write. The writes are `=`, `+=`, `++` and `--` on a sibling of the same object, and they may follow stores to other checked pointers that share the count. A call, a label, a branch or any other statement ends the run.[^group] A run that ends in bounds passes: `s.p = small; s.n = 8; s.n = 2;`. A local pointer and the local its count names group the same way.
+
+Not checked: a count written later with other statements between (`s.p = small; log(); s.n = 8;`), through an alias, or on its own with the pointer stored earlier.
+
+### Constant initializers
+
+With `--checked-pointers`, a file-scope or `static` initializer that stores an array into a checked pointer is an error when the declared bounds are constants and overrun the array:
+
+```
+error: checked initializer needs 32 bytes but the source array has 8 from this offset
+```
+
+A count that is not a constant, a null pointer and the `bounds(lo, hi)` form are not checked.
+
 ## Bounds casts
 
 `assume` and `dynamic` go in a cast's type name, with the checked kind and bounds being claimed:
@@ -102,7 +155,7 @@ p = (int * [[cccc::array, cccc::count(n), cccc::dynamic]])src;
 | | `assume` | `dynamic` |
 |---|---|---|
 | Checks the conversion | No | Yes, against the source's declared bounds |
-| Source must be | Anything | A declared-checked pointer with known bounds, or a local that inherits bounds on every path |
+| Source must be | Anything | A declared-checked pointer with known bounds, a plain array of known size, or a local that inherits bounds on every path |
 | `bounds(unknown)` | Accepted | Rejected |
 | Later accesses through the result | Checked | Checked |
 
@@ -158,4 +211,6 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^proto]: Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
 [^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
+[^plain]: A plain array is not a propagation source, so only checked targets (declarations, assignments, arguments, returns and casts) read its extent.
+[^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

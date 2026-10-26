@@ -2013,6 +2013,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     write_gvar_data(vm, &head, init, var->ty, buf, 0);
     var->init_data = buf;
     var->rel       = head.next;
+    check_static_checked_init(vm, var, init);
 }
 
 // Finalize global variable initializers that were deferred because their
@@ -2036,6 +2037,7 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog) {
         write_gvar_data(vm, &head, init, var->ty, buf, 0);
         var->init_data = buf;
         var->rel       = head.next;
+        check_static_checked_init(vm, var, init);
         // Clear the temporary storage.
         var->has_pending_macro_init = false;
         var->constexpr_init         = NULL;

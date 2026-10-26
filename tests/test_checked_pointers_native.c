@@ -7,6 +7,10 @@
 // CCCC_EXPECT_STDOUT: dynamic_check\(\) assertion failed at line 1[\s\S]*dynamic=255
 // CCCC_EXPECT_STDOUT: hoistonce=42
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*hoisttrap=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupwiden=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupinit=255
+// CCCC_EXPECT_STDOUT: groupok=42
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainarray=255
 //
 // -c=native enforces --checked-pointers: each violation prints the VM's
 // banner and exits 255.
@@ -85,6 +89,51 @@ int build_main(Builder *ctx) {
          "    sink(small, eight());\n"
          "    return 42;\n"
          "}\n"},
+        {"groupwiden",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    s.n = 8;\n"
+         "    return 42;\n"
+         "}\n"},
+        {"groupinit",
+         "struct T {\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "    int n;\n"
+         "};\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct T t = {small, 8};\n"
+         "    return t.n;\n"
+         "}\n"},
+        {"groupok",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    s.n = 8;\n"
+         "    s.n = 2;\n"
+         "    return 42;\n"
+         "}\n"},
+        {"plainarray", "int buf[2];\n"
+                       "void sink(int *[[cccc::array, cccc::count(n)]] p, "
+                       "int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                       "int main(void) {\n"
+                       "    sink(buf, 8);\n"
+                       "    return 42;\n"
+                       "}\n"},
         {"dynamic", "int main(void) { volatile int i = 10, n = 5; "
                     "__builtin_cccc_dynamic_check(i < n); return 42; }\n"},
     };

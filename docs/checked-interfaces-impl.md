@@ -30,7 +30,45 @@ Other points:
 - `merge_checked_interface()` (`src/parse_core.c`) runs at each redeclaration in `function()` and `declare_function_prototype()` (`src/parse_decl.c`). It compares kind, bounds form, `checked_array_extent` and the resolved templates (`checked_tmpl_equal()`, sibling placeholders by `checked_self_param_idx`) of the return value, each parameter and, recursively, function-pointer parameters, and errors on a mismatch. Bounds only the new declaration spells are copied onto a `copy_type()` of `fn->ty`, because a typedef may share the original.
 - The pass is gated on `--checked-pointers` at parse time, like `verify_checked_assign_bounds()`. With the flag off `rewrite_checked_call_args()` never runs, so `-m`, `-c=native` and `-c=generated` output is unaffected.
 - An annotated same-TU function's own body stays `CHKR`-checked against its declared bounds. This can newly trap code no unchecked caller ever touched, since the callee breaks its own contract. It uses its own declared bound, not the caller's storage, so an unchecked caller passing a too-short buffer does not trap there: closing that gap at the call boundary is the point of the feature.
-- Not done: a warning when a check is declined, propagated arguments, struct-field bounds interfaces, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
+- Not done: a warning when a check is declined, propagated arguments, and an annotated libc/POSIX bounds table (which would make this useful for `memcpy` and `fread`). No checked-region call-boundary ban exists, so an annotated prototype was already callable from a checked region; `-Wchecked-calls` treats its checked parameters as crossing nothing.
+
+## Plain array sources
+
+`checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate: `find_checked_base()` roots at a complete `TY_ARRAY` variable (a string literal is one), or at a non-bit-field array member of a struct that is not its last member, reached through a trivial object expression. The last member is excluded because it may stand in for a flexible array. `checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`.
+
+| Consumer | Change |
+|---|---|
+| `verify_checked_assign_scan()` | Falls back to the predicate when `checked_prop_source_bounds()` finds no source, in both the probe and the committed rewrite |
+| `checked_param_qualifies()`, `rewrite_checked_return()` | Accept a plain-array root, so the `__ca`/`__cr` store reaches the scan |
+| `check_checked_cast_dynamic_source()` | Accepts it, so `__cv = (T)arr` reaches the scan |
+
+`checked_prop_source_bounds()` and the propagation passes do not see plain arrays, so an unchecked `int *q = buf;` keeps no bounds.
+
+## Struct fields
+
+| Site | Where |
+|---|---|
+| Assignment `s.p = E` | `verify_checked_assign_scan()` already takes an `ND_MEMBER` target |
+| Local aggregate initializer | The initializer lowers to a comma chain of member stores, so each pointer store is an ordinary stamped assignment |
+| Sibling written after the pointer | `group_checked_sibling_writes()`, below |
+| File-scope initializer | `check_static_checked_init()`, below |
+
+### Group check
+
+`group_checked_sibling_writes()` runs from `checked_tail_passes()` after `verify_checked_assign_bounds()`. It flattens each block's statement list (declaration groups are transparent) and each comma chain into leaves in evaluation order. A stamped assignment to a named variable or member whose bounds name siblings is an **anchor**; `group_process()` scans the leaves after it:
+
+| Leaf | Effect |
+|---|---|
+| A store to a compiler temp with a pure value | Transparent; a `tmp = &obj` store records the object a compound assignment writes through |
+| A write to a sibling of the anchor, on the same object (`nodes_structurally_equal()`), with a pure value that does not read the anchor's pointer | Extends the group |
+| Another anchor on the same object with a shared sibling | Joins the group |
+| Anything else | Ends the group |
+
+With at least one sibling write, `group_move_stamp()` moves each anchor's five `checked_assign_*` fields onto a carrier `__cg = 0` wrapped after the last sibling write (`group_wrap_leaf()` rewrites that leaf in place into a comma). The source snapshot stays ahead of the pointer store. Codegen (`src/codegen_expr.c`) and `serialize_checked_assign()` read the stamp off any `ND_ASSIGN`, so `-c=native` needs no change. The last leaf of an expression-level comma chain never takes a carrier, since it carries the chain's value.
+
+### Constant initializers
+
+`check_static_checked_init()` runs after `write_gvar_data()` in `gvar_initializer()` and `cc_finalize_macro_gvar_inits()`, under `--checked-pointers`. It walks the `Initializer` tree like `write_gvar_data()` and checks each checked-pointer slot with an expression: `objsize_peel_offset_chain()` yields the array and byte offset, and the bounds template is cloned with each sibling placeholder replaced by that sibling's initializer expression and evaluated with `eval()`. `count`, `byte_count`, `ntarray` (one extra element) and `single` are handled; a non-constant bound, a null source or `bounds(lo, hi)` is skipped.
 
 ## Bounds casts
 

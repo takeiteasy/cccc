@@ -55,6 +55,8 @@ struct S {
 
 `single` and `bounds(unknown)` work on members as on variables.
 
+A pointer stored into a member is checked against these bounds, including a count written right after it: see [Struct fields](safety-checked-interfaces.md#struct-fields).
+
 ## Example
 
 ```c

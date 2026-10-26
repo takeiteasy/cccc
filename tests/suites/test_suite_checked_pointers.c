@@ -2314,7 +2314,8 @@ void test_checked_call_arg_count_trap(void) {
 
 [[cccc::test]]
 void test_checked_call_arg_unchecked_caller_no_check(void) {
-    int raw[2] = {1, 2};
+    int  buf[2] = {1, 2};
+    int *raw    = buf;
     // An ordinary unchecked pointer argument gets no caller-side check at
     // all -- unchecked-to-unchecked interop is unaffected by #488, even
     // though this call's own declared claim is false.
