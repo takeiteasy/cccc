@@ -1012,10 +1012,12 @@ int gen_checked_nt_hi(VirtualMachine *vm, Node *deref) {
 // `is_hi` is false, hi when true); rs_slo/rs_shi are the source's snapshot
 // bounds, already evaluated into registers by the caller. Traps unless
 // rs_slo <= rs_val <= rs_shi. No-op at runtime unless CCCC_CHECKED_BOUNDS is
-// set, same as CHKR/CHKNT; callers gate emission on that flag.
+// set, same as CHKR/CHKNT; callers gate emission on that flag. `optional`
+// emits CHKABO, which no-ops on the [-1, 0) sentinel source range.
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
-                bool is_hi) {
-    emit_rrrs_i(vm, CHKAB, rs_val, rs_slo, rs_shi, 0, is_hi ? 1 : 0);
+                bool is_hi, bool optional) {
+    emit_rrrs_i(vm, optional ? CHKABO : CHKAB, rs_val, rs_slo, rs_shi, 0,
+                is_hi ? 1 : 0);
 }
 
 // Emit CHKDC (dynamic_check(cond), #486). rs_val is the already-evaluated

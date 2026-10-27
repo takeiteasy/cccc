@@ -1848,7 +1848,8 @@ static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
             serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_lo);
             fprintf(f, ", ");
             serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_hi);
-            fprintf(f, ", %d); ", is_hi);
+            fprintf(f, ", %d, %d); ", is_hi,
+                    node->checked_assign_src_optional ? 1 : 0);
         }
     }
     if (discard)

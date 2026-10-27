@@ -13,7 +13,7 @@ Contributor notes behind the [safety](safety.md) guides.
 
 ## Assignment-time check
 
-`verify_checked_assign_bounds()` is a sibling pass over declared-checked targets, disjoint from propagation. It rewrites `q = E` into `(temp = source bounds), (q = E)` and emits `CHKAB rs_val, rs_slo, rs_shi` twice (target `lo`, then `hi`), which traps unless `slo <= val <= shi`. The source is snapshotted *before* the store because the store may overwrite it. The target's bounds are evaluated *after* the store because they refer to the target itself (`[q, q + m*sizeof(T))`). A propagated source is used through its snapshot temps when it is FULL. An OPT one is skipped since it may hold the sentinel and `CHKAB` has no sentinel-aware form.
+`verify_checked_assign_bounds()` is a sibling pass over declared-checked targets, disjoint from propagation. It rewrites `q = E` into `(temp = source bounds), (q = E)` and emits `CHKAB rs_val, rs_slo, rs_shi` twice (target `lo`, then `hi`), which traps unless `slo <= val <= shi`. The source is snapshotted *before* the store because the store may overwrite it. The target's bounds are evaluated *after* the store because they refer to the target itself (`[q, q + m*sizeof(T))`). A propagated source is used through its snapshot temps. An OPT one may hold the `[-1, 0)` sentinel, so its assignment emits `CHKABO` instead, which no-ops on the sentinel the way `CHKRO` does (`CHKAB` and `CHKABO` share `chkab_common()`).
 
 Both passes run at parse time only under `--checked-pointers`, because the snapshots cost stack slots. `#pragma cccc config(checked_pointers = true)` resolves during preprocessing, so its position in the file does not matter.
 

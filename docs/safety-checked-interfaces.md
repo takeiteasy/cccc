@@ -29,7 +29,7 @@ A call is checked when both hold:
 
 | Condition | Example that qualifies | Example that is skipped |
 |---|---|---|
-| The argument is a declared-checked pointer, a local that [inherits its bounds](safety-checked-propagation.md) on every path, or a [plain array](#plain-arrays-as-sources) | `small`, `q` after `int *q = small;`, `int buf[2]` | `int *raw` (unchecked to unchecked is untouched) |
+| The argument is a declared-checked pointer, a local that [inherits its bounds](safety-checked-propagation.md) on every path or only on some, or a [plain array](#plain-arrays-as-sources) | `small`, `q` after `int *q = small;`, `int buf[2]` | `int *raw` (unchecked to unchecked is untouched) |
 | Every other parameter the bounds name has an argument that is side-effect-free or hoistable | `sink(small, 8)`, `sink(small, f())`, `sink(small, i++)` | verified siblings whose bounds name each other |
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
@@ -281,7 +281,7 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 
 Contract errors (arithmetic on a `single` pointer, side effects in a bounds expression, a member bound naming an enclosing local or a bit-field sibling) are reported in every mode.
 
-[^proto]: Skipped calls (a propagated argument whose bounds are known on only some paths) are skipped silently. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
+[^proto]: An argument whose bounds are known on only some paths is verified on the paths where they are known and passes unchecked on the others. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
 [^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^plain]: The extent flows through the local like any [propagated bounds](safety-checked-propagation.md#plain-arrays), but only checked targets (declarations, assignments, arguments, returns and casts) read it. A local that also holds a checked pointer, or a pointer from elsewhere (`if (c) q = malloc(n);`), is not verified against the array.

@@ -58,6 +58,7 @@ Emitted when the matching flag is set; they no-op at run time if it is cleared. 
 | `CHKNT` | Terminator guard: traps a non-zero store into the widened `ntarray` terminator slot (`addr >= hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
 | `CHKNTZ` | The same for pointees stored through `MCPY`: traps unless every source byte is zero, checked before the copy. Takes a slot size and a scan size (a struct-typed member scans only its own bytes) | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Assignment bounds implication: traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
+| `CHKABO` | Optional `CHKAB`: a source range of `[-1, 0)` (the OPT sentinel) is a no-op | `CCCC_CHECKED_BOUNDS` |
 | `CHKDC` | `dynamic_check(cond)`: traps unless `regs[rs_val] != 0`. No address lookup | `CCCC_CHECKED_BOUNDS` |
 | `HOLE` | Fills reclaimed text inside live code so instruction walkers stay aligned; executing it is a runtime error. Format `[HOLE]` | |
 
@@ -71,7 +72,7 @@ Emitted when the matching flag is set; they no-op at run time if it is cleared. 
 |---|---|---|
 | `CHKNT` | The store path (`ND_ASSIGN` in `src/codegen_expr.c`), because it needs the stored value, which `gen_addr` never sees | A second site in `ND_CAS` checks an `_Atomic` element's *desired* value ahead of `ACAS`. `to_assign()` desugars `s[n] += 1` into a store carrying the same checked fields. `Obj.checked_prop_nt_elem` carries the terminator fact through propagation; `Node.checked_rmw_mirror` lets the propagation pass stamp desugared read-modify-write stores |
 | `CHKNTZ` | The memcpy branch of `ND_ASSIGN`, right before `MCPY` | `float` and `double` stay on `CHKNT` via `FR2R`/`FR2R_F32` (so `-0.0f` traps). `long double` is excluded because the slot is 16 bytes but the store is an 8-byte `FSTR`. `checked_nt_pointee_supported()` (`src/parse_checked.c`) is the single gate |
-| `CHKAB` | After a rewritten `q = E`, twice: against `q`'s declared lower bound, then its upper bound | Reused unmodified by the `dynamic` cast and by `rewrite_checked_call_args()` (call arguments become `(__ca = arg, __ca)` against a hidden checked local) |
+| `CHKAB`, `CHKABO` | After a rewritten `q = E`, twice (`CHKABO` when `E` is an OPT propagated source): against `q`'s declared lower bound, then its upper bound | Reused unmodified by the `dynamic` cast and by `rewrite_checked_call_args()` (call arguments become `(__ca = arg, __ca)` against a hidden checked local) |
 | `CHKDC` | Only when `CCCC_CHECKED_BOUNDS` was set at parse time; otherwise the call parses to `ND_NULL_EXPR` like `__builtin_assume` | Never reaches native serialization in the default build |
 
 `CHKNT` does not verify that a terminator is present: Checked C's `count(n)` is a lower bound, and finding the real terminator would need a read past `hi`.

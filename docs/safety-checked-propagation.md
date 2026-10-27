@@ -95,7 +95,7 @@ q = p;   // traps: p's 4 elements don't cover q's declared 10
 
 | Covered | Not covered |
 |---|---|
-| `q = E;` where `E` roots in a declared checked pointer, or in a propagated local that is not OPT | A source that is OPT or never rooted |
+| `q = E;` where `E` roots in a declared checked pointer or in a propagated local, including an OPT one (checked where it was rooted, skipped where it was not) | A source that is never rooted |
 | Call arguments and `return` values[^args] | A target with `bounds(unknown)` |
 | A plain array of known size ([plain array sources](safety-checked-interfaces.md#plain-arrays-as-sources)), directly or through a [plain-array local](#plain-arrays) | A plain-array local that also holds other values (OPT) |
 

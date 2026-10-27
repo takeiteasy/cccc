@@ -210,7 +210,7 @@ void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg);
 void emit_int32_wrap(VirtualMachine *vm, Type *ty, int reg);
 int checked_width(Type *ty);
 void emit_chkab(VirtualMachine *vm, int rs_val, int rs_slo, int rs_shi,
-                bool is_hi);
+                bool is_hi, bool optional);
 void emit_chkdc(VirtualMachine *vm, int rs_val, long long line);
 void emit_chki(VirtualMachine *vm, long long offset);
 void emit_chkl(VirtualMachine *vm, long long offset);

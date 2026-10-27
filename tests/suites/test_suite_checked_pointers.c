@@ -2497,6 +2497,87 @@ void test_checked_call_arg_unchecked_caller_no_check(void) {
     AssertEq(raw[0], 1);
 }
 
+// An OPT local is verified at a checked parameter on the path that rooted it,
+// and skipped (sentinel) on the path that did not.
+[[cccc::test]]
+void test_checked_call_arg_optional_unrooted_ok(void) {
+    int arr[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    volatile int c                             = 0;
+    int         *q                             = arr;
+    if (c)
+        q = small;
+    checked_call_arg_sink(q, 8); // c==0: q is unrooted -- no check
+    AssertEq(arr[0], 0);
+}
+
+[[cccc::test]]
+void test_checked_call_arg_optional_rooted_ok(void) {
+    int *[[cccc::array, cccc::count(8)]] big = (int[8]){0};
+    int          raw[8]                      = {0};
+    volatile int c                           = 1;
+    int         *q                           = raw;
+    if (c)
+        q = big;
+    checked_call_arg_sink(q, 8); // c==1: q rooted at count(8) -- satisfied
+    AssertEq(q[0], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_optional_rooted_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int          raw[8]                        = {0};
+    volatile int c                             = 1;
+    int         *q                             = raw;
+    if (c)
+        q = small;
+    checked_call_arg_sink(q, 8); // c==1: q rooted at count(2) -- traps
+}
+
+// OPT-ness chains: `r` reads `q`'s snapshot, so the sentinel (or the real
+// range) reaches the declared target through the chain.
+[[cccc::test]]
+void test_assign_implication_optional_chain_unrooted_ok(void) {
+    int arr[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    volatile int c                             = 0;
+    int         *q                             = arr;
+    if (c)
+        q = small;
+    int *r                                 = q;
+    int *[[cccc::array, cccc::count(8)]] p = arr;
+    p                                      = r; // c==0: no check
+    AssertEq(p[7], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_assign_implication_optional_chain_rooted_trap(void) {
+    int arr[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    volatile int c                             = 1;
+    int         *q                             = arr;
+    if (c)
+        q = small;
+    int *r                                 = q;
+    int *[[cccc::array, cccc::count(8)]] p = arr;
+    p = r; // c==1: count(8) target from a count(2) source -- traps
+}
+
+// The rooted store happens on a later loop iteration: the check sees the
+// sentinel before it and the real range after it.
+[[cccc::test(exit_code = 255)]]
+void test_assign_implication_optional_loop_back_edge_trap(void) {
+    int arr[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int *[[cccc::array, cccc::count(8)]] p     = arr;
+    int *q                                     = arr;
+    for (int i = 0; i < 3; i++) {
+        if (i == 1)
+            q = small;
+        p = q; // i==0: sentinel, no check; i==1: count(2) source -- traps
+    }
+}
+
 static void
 checked_call_arg_byte_sink(char *[[cccc::array, cccc::byte_count(n)]] p,
                            int n) {

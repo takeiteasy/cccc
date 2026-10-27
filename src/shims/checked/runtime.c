@@ -50,9 +50,11 @@ static inline void __cccc_chknt(const volatile void *__cccc_a,
 static inline void __cccc_chkab(const volatile void *__cccc_v,
                                 const volatile void *__cccc_slo,
                                 const volatile void *__cccc_shi,
-                                int __cccc_is_hi) {
+                                int __cccc_is_hi, int __cccc_optional) {
     intptr_t v = (intptr_t)__cccc_v, slo = (intptr_t)__cccc_slo,
               shi = (intptr_t)__cccc_shi;
+    if (__cccc_optional && slo == -1 && shi == 0)
+        return;
     if (v < slo || v > shi) {
         printf("\n===== CHECKED ASSIGNMENT BOUNDS VIOLATION =====\n");
         printf("Assignment does not satisfy the target's declared bounds\n");

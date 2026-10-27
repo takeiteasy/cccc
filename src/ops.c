@@ -5428,15 +5428,10 @@ static inline int op_CHKNTZ_fn(VirtualMachine *vm) {
     return 0;
 }
 
-static inline int op_CHKAB_fn(VirtualMachine *vm) {
-    // Checked-pointer assignment-time bounds implication (#944). Format:
-    // [CHKAB] [rs_val:8|rs_slo:8|rs_shi:8|unused:8] (RRR operand word)
-    //         [is_hi:i64]
-    // Traps unless slo <= val && val <= shi -- see the X-macro comment in
-    // src/cccc.h for how codegen pairs two of these (one for the target's
-    // own declared lo, one for its hi) to enforce
-    // [dlo, dhi) subset-of [slo, shi]. is_hi only selects the diagnostic
-    // wording below; the comparison itself is identical either way.
+// Shared body for CHKAB/CHKABO: `allow_sentinel` is true only for CHKABO and
+// skips the check when the source range is the propagation sentinel
+// (slo == -1 && shi == 0), exactly as chkr_common() does for CHKRO.
+static inline int chkab_common(VirtualMachine *vm, bool allow_sentinel) {
     long long operands = cc_read_word(vm);
     int       rs_val, rs_slo, rs_shi;
     DECODE_RRR(operands, rs_val, rs_slo, rs_shi);
@@ -5448,6 +5443,9 @@ static inline int op_CHKAB_fn(VirtualMachine *vm) {
     long long val = vm->regs[rs_val];
     long long slo = vm->regs[rs_slo];
     long long shi = vm->regs[rs_shi];
+
+    if (allow_sentinel && slo == -1 && shi == 0)
+        return 0;
 
     if (val < slo || val > shi) {
         printf("\n===== CHECKED ASSIGNMENT BOUNDS VIOLATION =====\n");
@@ -5462,6 +5460,22 @@ static inline int op_CHKAB_fn(VirtualMachine *vm) {
     }
 
     return 0;
+}
+
+static inline int op_CHKABO_fn(VirtualMachine *vm) {
+    return chkab_common(vm, true);
+}
+
+static inline int op_CHKAB_fn(VirtualMachine *vm) {
+    // Checked-pointer assignment-time bounds implication (#944). Format:
+    // [CHKAB] [rs_val:8|rs_slo:8|rs_shi:8|unused:8] (RRR operand word)
+    //         [is_hi:i64]
+    // Traps unless slo <= val && val <= shi -- see the X-macro comment in
+    // src/cccc.h for how codegen pairs two of these (one for the target's
+    // own declared lo, one for its hi) to enforce
+    // [dlo, dhi) subset-of [slo, shi]. is_hi only selects the diagnostic
+    // wording; the comparison itself is identical either way.
+    return chkab_common(vm, false);
 }
 
 static inline int op_CHKDC_fn(VirtualMachine *vm) {

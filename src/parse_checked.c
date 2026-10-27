@@ -1922,7 +1922,8 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
                                           Node *assign_node, Node *dst_lo,
                                           Node *dst_hi, Node *src_lo,
                                           Node *src_hi, Node *src_obj_init,
-                                          Node *dst_obj_init, Node *cr_store) {
+                                          Node *dst_obj_init, Node *cr_store,
+                                          bool src_optional) {
     Token *tok     = assign_node->tok;
     Obj   *slo_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
     Obj   *shi_var = new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
@@ -1952,6 +1953,7 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
     orig->checked_assign_dst_lo       = dst_lo;
     orig->checked_assign_dst_hi       = dst_hi;
     orig->checked_assign_dst_obj_init = dst_obj_init;
+    orig->checked_assign_src_optional = src_optional;
     orig->checked_assign_src_lo       = new_var_node(vm, slo_var, tok);
     add_type(vm, orig->checked_assign_src_lo);
     orig->checked_assign_src_hi = new_var_node(vm, shi_var, tok);
@@ -1967,10 +1969,9 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
 // #944 tree walk: finds every ND_ASSIGN whose lhs is a declared-checked
 // target (ND_VAR or a side-effect-free ND_MEMBER) with a resolvable bounds
 // form, and whose rhs is rooted at a declared-checked source with a
-// resolvable bounds form (a declared or FULL propagated source -- see
-// verify_checked_assign_bounds()'s scope comment), and rewrites it via
-// verify_checked_assign_rewrite(). Structurally the same shape as
-// checked_prop_rewrite_scan() -- recurse into rhs first, then rewrite, then
+// resolvable bounds form (a declared or propagated source, OPT included), and
+// rewrites it via verify_checked_assign_rewrite(). Structurally the same shape
+// as checked_prop_rewrite_scan() -- recurse into rhs first, then rewrite, then
 // `continue` past the resulting ND_COMMA wrapper's own copy of this same
 // ND_ASSIGN so the generic descent below doesn't match and rewrite it again.
 static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
@@ -2016,14 +2017,13 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         cv_store = split_checked_cast(vm, croot_cv);
                         cr_store = cv_store;
                     }
-                    // An OPT propagated source can hold the sentinel range,
-                    // which CHKAB would read as a real (always-failing)
-                    // bound, so only declared and FULL sources are verified.
+                    // An OPT propagated source can hold the sentinel range;
+                    // its check is CHKABO, which no-ops on it.
                     bool is_source = checked_prop_source_bounds(
                         vm, node->rhs, node->tok, &src_lo, &src_hi,
                         &src_optional, &src_nt, &src_nt_elem, &src_plain, NULL,
                         NULL);
-                    if (is_source && !src_optional && src_lo && src_hi) {
+                    if (is_source && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // The split moved the call, with its argument
                         // stores, out of the rhs.
@@ -2046,7 +2046,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                             fn, &src_obj_init);
                         verify_checked_assign_rewrite(
                             vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
-                            src_obj_init, dst_obj_init, cr_store);
+                            src_obj_init, dst_obj_init, cr_store, src_optional);
                         continue; // node is now the wrapper; parts already
                                   // scanned
                     }
@@ -2090,10 +2090,10 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
 // user-facing writeup):
 //  - Source must be a declared-checked base (find_checked_base() +
 //    checked_base_is_declared(), kind 1 of checked_prop_source_bounds()) or a
-//    #919-propagated local classified FULL (kind 2: its snapshot temps are
-//    the source range). An OPT local can hold the #942 sentinel range, which
-//    CHKAB would misread as a real bound, so `q = r;` with `r` OPT (or never
-//    rooted) is silently skipped, same as an unrecognised source.
+//    #919-propagated local (kind 2: its snapshot temps are the source range).
+//    An OPT local can hold the #942 sentinel range, so its check is CHKABO,
+//    which no-ops on it; `q = r;` with `r` never rooted is silently skipped,
+//    same as an unrecognised source.
 //  - Target must be ND_VAR or ND_MEMBER (side-effect-free object expression
 //    for the latter), declared checked, with a resolvable bounds form
 //    (compute_checked_bounds() returns non-NULL lo/hi) -- CB_NONE/

@@ -580,10 +580,9 @@ extern "C" {
                     q's own declaration promises. q's own lo/hi are                  \
                     evaluated AFTER the store (self-referencing on q's own,          \
                     now-updated, value) -- the inverse ordering from CHKR's          \
-                    snapshot-before-store propagation temps. Only emitted            \
-                    for a declared-checked (not #941-propagated) rhs; see            \
-                    docs/safety.md's Checked Pointers section for the v1             \
-                    scope. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */            \
+                    snapshot-before-store propagation temps. Emitted for a           \
+                    declared-checked or propagated rhs (CHKABO when it is            \
+                    OPT). Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */             \
     /* #982: appended (never interleaved -- see the rule stated above CHKR)          \
        so no existing opcode renumbers. */                                           \
     X(CHKBN, 1) /* Check array bounds, subtracting form: CHKB's sibling for          \
@@ -729,7 +728,14 @@ extern "C" {
     /* Appended (never interleaved -- see the rule stated above CHKR) so no          \
        existing opcode renumbers. */                                                 \
     X(HOLE, 0) /* Fills reclaimed text inside live code so instruction walkers       \
-                  stay aligned; executing it is a runtime error. */
+                  stay aligned; executing it is a runtime error. */                  \
+    /* Appended (never interleaved -- see the rule stated above CHKR) so no          \
+       existing opcode renumbers. */                                                 \
+    X(CHKABO, 3) /* Optional CHKAB: identical operand format and test, but a         \
+                    source range of [slo=-1, shi=0) -- the propagation               \
+                    pass's "not rooted on this path" sentinel -- is a no-op          \
+                    instead of a violation. Emitted when the assignment's            \
+                    source is an OPT propagated local (see CHKRO). */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
@@ -2518,6 +2524,9 @@ struct Node {
     struct Node *checked_assign_dst_obj_init;
     struct Node *checked_assign_src_lo;
     struct Node *checked_assign_src_hi;
+    // True when the source is an OPT propagated local, whose snapshot may
+    // hold the [-1, 0) sentinel: codegen emits CHKABO instead of CHKAB.
+    bool checked_assign_src_optional;
 
     // #919: marks the `&A` node to_assign() synthesizes for its *generic*
     // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/

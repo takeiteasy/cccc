@@ -1847,12 +1847,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 if (node->checked_assign_dst_obj_init)
                     gen_expr(vm, node->checked_assign_dst_obj_init, r_dlo);
                 gen_expr(vm, node->checked_assign_dst_lo, r_dlo);
-                emit_chkab(vm, r_dlo, r_slo, r_shi, false);
+                emit_chkab(vm, r_dlo, r_slo, r_shi, false,
+                           node->checked_assign_src_optional);
                 free_temp_reg(r_dlo);
 
                 int r_dhi = alloc_temp_reg();
                 gen_expr(vm, node->checked_assign_dst_hi, r_dhi);
-                emit_chkab(vm, r_dhi, r_slo, r_shi, true);
+                emit_chkab(vm, r_dhi, r_slo, r_shi, true,
+                           node->checked_assign_src_optional);
                 free_temp_reg(r_dhi);
 
                 free_temp_reg(r_shi);
