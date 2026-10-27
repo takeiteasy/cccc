@@ -7,6 +7,8 @@
 // CCCC_EXPECT_STDOUT: dynamic_check\(\) assertion failed at line 1[\s\S]*dynamic=255
 // CCCC_EXPECT_STDOUT: hoistonce=42
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*hoisttrap=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*verifiedsibling=255
+// CCCC_EXPECT_STDOUT: CHECKED BOUNDS VIOLATION[\s\S]*structreturn=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupwiden=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupinit=255
 // CCCC_EXPECT_STDOUT: groupok=42
@@ -88,6 +90,30 @@ int build_main(Builder *ctx) {
          "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
          "    sink(small, eight());\n"
          "    return 42;\n"
+         "}\n"},
+        {"verifiedsibling",
+         "static int k = 8;\n"
+         "static int *[[cccc::single]] mk(void) {\n"
+         "    return (int *[[cccc::single, cccc::assume]])&k;\n"
+         "}\n"
+         "static int sink(int *[[cccc::array, cccc::count(*p)]] q,\n"
+         "                int *[[cccc::single]] p) {\n"
+         "    return q[0];\n"
+         "}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    return sink(small, mk()) + 42;\n"
+         "}\n"},
+        {"structreturn",
+         "struct L { int n; };\n"
+         "static int buf[8];\n"
+         "static int *[[cccc::array, cccc::count(l.n)]] head(struct L l) {\n"
+         "    return (int *[[cccc::array, cccc::count(l.n), "
+         "cccc::assume]])buf;\n"
+         "}\n"
+         "int main(void) {\n"
+         "    struct L l = {2};\n"
+         "    return head(l)[5] + 42;\n"
          "}\n"},
         {"groupwiden",
          "struct S {\n"

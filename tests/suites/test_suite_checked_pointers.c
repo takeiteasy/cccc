@@ -2727,3 +2727,73 @@ void test_checked_call_arg_checked_return_store_trap(void) {
     int *[[cccc::array, cccc::count(2)]] q     = checked_call_arg_ret(small, 8);
     (void)q;
 }
+
+// A verified sibling a bound names is stored once ahead of the call, whether
+// or not it has side effects, and the pointer that names it is checked against
+// the stored value.
+
+static int verified_cell = 2;
+static int verified_calls;
+static int *[[cccc::single]] verified_mk(void) {
+    verified_calls++;
+    return (int *[[cccc::single, cccc::assume]])&verified_cell;
+}
+
+static int verified_sibling_len(int *[[cccc::array, cccc::count(*p)]] q,
+                                int *[[cccc::single]] p) {
+    return q[0] + *p;
+}
+
+static int verified_sibling_first(int *[[cccc::single]] p,
+                                  int *[[cccc::array, cccc::count(*p)]] q) {
+    return q[0] + *p;
+}
+
+[[cccc::test]]
+void test_checked_call_arg_verified_sibling_pass(void) {
+    verified_calls                             = 0;
+    verified_cell                              = 2;
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    AssertEq(verified_sibling_len(small, verified_mk()), 3);
+    AssertEq(verified_calls, 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_verified_sibling_trap(void) {
+    verified_cell                              = 8;
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    verified_sibling_len(small, verified_mk());
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_verified_sibling_first_trap(void) {
+    verified_cell                              = 8;
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    int *[[cccc::single]] pk                   = &verified_cell;
+    verified_sibling_first(pk, small);
+}
+
+// A checked return whose bound names a struct or floating parameter is checked.
+
+struct ReturnLen {
+    int n;
+};
+
+static int return_len_buf[8];
+static int *[[cccc::array,
+              cccc::count(l.n)]] return_len_head(struct ReturnLen l) {
+    return (int *[[cccc::array, cccc::count(l.n), cccc::assume]])return_len_buf;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_return_call_struct_param_trap(void) {
+    struct ReturnLen l    = {2};
+    return_len_head(l)[5] = 1;
+}
+
+[[cccc::test]]
+void test_checked_return_call_struct_param_pass(void) {
+    struct ReturnLen l    = {8};
+    return_len_head(l)[5] = 7;
+    AssertEq(return_len_buf[5], 7);
+}

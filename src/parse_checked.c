@@ -225,9 +225,16 @@ static bool checked_ret_form_ok(Type *ret) {
              ret->checked_bounds_form != CB_UNKNOWN));
 }
 
-// True if every parameter the return-bounds template `n` names is a scalar
-// the call passes an argument for, i.e. one split_checked_call_result() can
-// hoist.
+// True if a value of parameter type `p` can be held in a temp and passed on:
+// the types a bounds expression can read a hoisted argument through.
+static bool checked_param_copyable(Type *p) {
+    return is_integer(p) || is_flonum(p) || p->kind == TY_PTR ||
+           p->kind == TY_STRUCT || p->kind == TY_UNION;
+}
+
+// True if every parameter the return-bounds template `n` names is a copyable
+// parameter the call passes an argument for, i.e. one
+// split_checked_call_result() can hoist.
 static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
     if (!n)
         return true;
@@ -239,7 +246,7 @@ static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
             p = p->next;
             a = a->next;
         }
-        return p && a && (is_integer(p) || p->kind == TY_PTR);
+        return p && a && checked_param_copyable(p);
     }
     return checked_ret_tmpl_ok(n->lhs, params, args) &&
            checked_ret_tmpl_ok(n->rhs, params, args) &&
@@ -2046,6 +2053,51 @@ static Obj *new_checked_call_temp(VirtualMachine *vm, Type *ty) {
     return var;
 }
 
+// The declared-checked temp standing for parameter `idx`'s argument: its
+// bounds are the parameter's template with the other arguments substituted.
+static Obj *new_checked_arg_temp(VirtualMachine *vm, Type *p, Node **arg_by_idx,
+                                 int nargs, int idx) {
+    Obj *ca               = new_checked_call_temp(vm, p);
+    ca->checked_bounds_lo = clone_param_bounds_node(
+        vm, p->checked_param_bounds_lo, arg_by_idx, nargs, idx, ca);
+    ca->checked_bounds_hi = clone_param_bounds_node(
+        vm, p->checked_param_bounds_hi, arg_by_idx, nargs, idx, ca);
+    return ca;
+}
+
+static Node *copy_arg_node(VirtualMachine *vm, Node *a) {
+    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *copy      = *a;
+    copy->next = NULL;
+    return copy;
+}
+
+// Overwrites argument `a` with `repl` in place, keeping its place in the list.
+static void overwrite_arg(Node *a, Node *repl) {
+    Node *saved = a->next;
+    *a          = *repl;
+    a->next     = saved;
+}
+
+// `tmp = value` as a prelude statement.
+static Node *new_temp_store(VirtualMachine *vm, Obj *tmp, Node *value,
+                            Token *tok) {
+    Node *lhs = new_var_node(vm, tmp, tok);
+    add_type(vm, lhs);
+    Node *store = new_binary(vm, ND_ASSIGN, lhs, value, tok);
+    add_type(vm, store);
+    return store;
+}
+
+static Node *append_prelude(VirtualMachine *vm, Node *prelude, Node *store,
+                            Token *tok) {
+    if (!prelude)
+        return store;
+    Node *comma = new_binary(vm, ND_COMMA, prelude, store, tok);
+    add_type(vm, comma);
+    return comma;
+}
+
 // A scalar parameter's value as a plain local: a checked-annotated pointer
 // parameter is held as an ordinary pointer, so the copy carries no bounds of
 // its own.
@@ -2171,13 +2223,15 @@ static bool checked_param_qualifies(Type *p, Node *a) {
            checked_plain_array_root(a, &plain) != NULL;
 }
 
-// Marks in `need` every side-effecting sibling argument the bounds template
-// `n` names, so it can be hoisted. False when one cannot be: its parameter is
-// not a scalar, or the argument is itself verified at this call (a plain temp
-// would drop its root).
+// Marks every side-effecting sibling argument the bounds template `n` names so
+// it can be hoisted: in `need` when it is a plain value, in `vneed` when it is
+// itself verified at this call (its store into a declared-checked temp keeps
+// its own check). False when one cannot be: its parameter cannot be held in a
+// temp.
 static bool checked_param_hoist_siblings(Node *n, Type *params,
                                          Node **arg_by_idx, int nargs,
-                                         int self_idx, bool *need) {
+                                         int self_idx, bool *need,
+                                         bool *vneed) {
     if (!n)
         return true;
     if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
@@ -2192,49 +2246,57 @@ static bool checked_param_hoist_siblings(Node *n, Type *params,
         Type *pk = params;
         for (int i = 1; i < k && pk; i++)
             pk = pk->next;
-        // TODO: a verified sibling argument with side effects stays declined
-        // (#1802)
-        if (!pk || !(is_integer(pk) || pk->kind == TY_PTR) ||
-            checked_param_qualifies(pk, a))
+        if (!pk || !checked_param_copyable(pk))
             return false;
-        need[k - 1] = true;
+        if (checked_param_qualifies(pk, a))
+            vneed[k - 1] = true;
+        else
+            need[k - 1] = true;
         return true;
     }
     return checked_param_hoist_siblings(n->lhs, params, arg_by_idx, nargs,
-                                        self_idx, need) &&
+                                        self_idx, need, vneed) &&
            checked_param_hoist_siblings(n->rhs, params, arg_by_idx, nargs,
-                                        self_idx, need) &&
+                                        self_idx, need, vneed) &&
            checked_param_hoist_siblings(n->cond, params, arg_by_idx, nargs,
-                                        self_idx, need) &&
+                                        self_idx, need, vneed) &&
            checked_param_hoist_siblings(n->then, params, arg_by_idx, nargs,
-                                        self_idx, need) &&
+                                        self_idx, need, vneed) &&
            checked_param_hoist_siblings(n->els, params, arg_by_idx, nargs,
-                                        self_idx, need);
+                                        self_idx, need, vneed);
 }
 
 // Hoists the side-effecting siblings that verified parameters name into temps,
-// in argument order, rewriting each argument in place into a read of its temp.
-// Returns the chain of stores, or NULL if nothing was hoisted.
+// rewriting each argument in place into a read of its temp. Plain values come
+// first, in argument order. A verified sibling follows as `ca = arg` once every
+// argument its own bounds name is side-effect-free, so a chain is stored in
+// dependency order; a cycle stays as it is and the calls that name it are left
+// unchecked. `done[k-1]` is set for a verified sibling whose store is in the
+// prelude. Returns the chain of stores, or NULL if nothing was hoisted.
 static Node *hoist_checked_call_siblings(VirtualMachine *vm, Type *fn_ty,
                                          Node **arg_by_idx, int nargs,
-                                         Token *tok) {
-    bool *need  = arena_alloc(&vm->compiler.parser_arena, nargs);
-    bool *trial = arena_alloc(&vm->compiler.parser_arena, nargs);
-    int   idx   = 0;
+                                         bool *done, Token *tok) {
+    bool *need   = arena_alloc(&vm->compiler.parser_arena, nargs);
+    bool *vneed  = arena_alloc(&vm->compiler.parser_arena, nargs);
+    bool *trial  = arena_alloc(&vm->compiler.parser_arena, nargs);
+    bool *vtrial = arena_alloc(&vm->compiler.parser_arena, nargs);
+    int   idx    = 0;
     for (Type *p = fn_ty->params; p && idx < nargs; p = p->next) {
         Node *a = arg_by_idx[idx++];
         if (!checked_param_qualifies(p, a))
             continue;
         for (int i = 0; i < nargs; i++)
-            trial[i] = false;
+            trial[i] = vtrial[i] = false;
         if (checked_param_hoist_siblings(p->checked_param_bounds_lo,
                                          fn_ty->params, arg_by_idx, nargs, idx,
-                                         trial) &&
+                                         trial, vtrial) &&
             checked_param_hoist_siblings(p->checked_param_bounds_hi,
                                          fn_ty->params, arg_by_idx, nargs, idx,
-                                         trial))
-            for (int i = 0; i < nargs; i++)
+                                         trial, vtrial))
+            for (int i = 0; i < nargs; i++) {
                 need[i] |= trial[i];
+                vneed[i] |= vtrial[i];
+            }
     }
 
     Node *prelude = NULL;
@@ -2244,24 +2306,35 @@ static Node *hoist_checked_call_siblings(VirtualMachine *vm, Type *fn_ty,
             continue;
         Node *a    = arg_by_idx[k - 1];
         Obj  *tmp  = new_checked_call_temp(vm, plain_value_type(vm, pk));
-        Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-        *orig      = *a;
-        orig->next = NULL;
-        Node *lhs  = new_var_node(vm, tmp, tok);
-        add_type(vm, lhs);
-        Node *store = new_binary(vm, ND_ASSIGN, lhs, orig, tok);
-        add_type(vm, store);
-        if (prelude) {
-            prelude = new_binary(vm, ND_COMMA, prelude, store, tok);
-            add_type(vm, prelude);
-        } else {
-            prelude = store;
-        }
+        Node *orig = copy_arg_node(vm, a);
+        prelude    = append_prelude(vm, prelude,
+                                    new_temp_store(vm, tmp, orig, tok), tok);
         Node *read = new_var_node(vm, tmp, tok);
         add_type(vm, read);
-        Node *saved = a->next;
-        *a          = *read;
-        a->next     = saved;
+        overwrite_arg(a, read);
+    }
+
+    for (bool progress = true; progress;) {
+        progress = false;
+        pk       = fn_ty->params;
+        for (int k = 1; k <= nargs && pk; k++, pk = pk->next) {
+            if (!vneed[k - 1] || done[k - 1] ||
+                !checked_param_bounds_args_ok(pk->checked_param_bounds_lo,
+                                              arg_by_idx, nargs, k) ||
+                !checked_param_bounds_args_ok(pk->checked_param_bounds_hi,
+                                              arg_by_idx, nargs, k))
+                continue;
+            Node *a    = arg_by_idx[k - 1];
+            Obj  *ca   = new_checked_arg_temp(vm, pk, arg_by_idx, nargs, k);
+            Node *orig = copy_arg_node(vm, a);
+            prelude    = append_prelude(vm, prelude,
+                                        new_temp_store(vm, ca, orig, tok), tok);
+            Node *read = new_var_node(vm, ca, tok);
+            add_type(vm, read);
+            overwrite_arg(a, read);
+            done[k - 1] = true;
+            progress    = true;
+        }
     }
     return prelude;
 }
@@ -2295,17 +2368,10 @@ Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
     if (nargs == 0)
         return NULL;
 
-    // Snapshot positional argument pointers -- stable for the whole call.
-    // A pointer here may later point at an ALREADY-rewritten node (this
-    // function processes parameters left to right, and an earlier
-    // parameter's argument may itself have just been rewritten into
-    // `(ca = arg, ca)`); checked_param_bounds_args_ok()'s side-effect
-    // check handles that correctly with no special-casing needed, since
-    // the rewritten shape's inner ND_ASSIGN makes node_has_side_effects()
-    // report true for it -- a param-i bounds expression referencing an
-    // already-checked param-k argument is naturally (and correctly)
-    // declined, not corrupted. The hoisting below rewrites arguments in
-    // place too, to side-effect-free temp reads, so the gate passes for them.
+    // Snapshot positional argument pointers. Hoisting rewrites an argument in
+    // place into a side-effect-free temp read, so the pointer stays valid; a
+    // verified argument rewritten to `(ca = arg, ca)` is replaced here by its
+    // original expression.
     Node **arg_by_idx =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * nargs);
     {
@@ -2316,14 +2382,15 @@ Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
 
     resolve_param_checked_bounds(vm, fn_ty);
 
+    bool *done = arena_alloc(&vm->compiler.parser_arena, nargs);
     Node *prelude =
-        hoist_checked_call_siblings(vm, fn_ty, arg_by_idx, nargs, tok);
+        hoist_checked_call_siblings(vm, fn_ty, arg_by_idx, nargs, done, tok);
 
     int   idx = 0;
     Node *a   = args;
     for (Type *p = fn_ty->params; p && a; p = p->next, a = a->next) {
         idx++;
-        if (!checked_param_qualifies(p, a))
+        if (done[idx - 1] || !checked_param_qualifies(p, a))
             continue;
 
         // Gate: every OTHER parameter this parameter's bounds template
@@ -2335,31 +2402,22 @@ Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
                                           arg_by_idx, nargs, idx))
             continue;
 
-        Obj *ca               = new_checked_call_temp(vm, p);
-        ca->checked_bounds_lo = clone_param_bounds_node(
-            vm, p->checked_param_bounds_lo, arg_by_idx, nargs, idx, ca);
-        ca->checked_bounds_hi = clone_param_bounds_node(
-            vm, p->checked_param_bounds_hi, arg_by_idx, nargs, idx, ca);
+        Obj *ca = new_checked_arg_temp(vm, p, arg_by_idx, nargs, idx);
 
         // `(ca = arg, ca)`, same shape and in-place-overwrite trick as
         // checked_cast_desugar()'s `(__cv = (T[[...]])e, __cv)` (#486).
-        Node *arg_copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-        *arg_copy      = *a;
-        arg_copy->next = NULL;
-
-        Node *lhs      = new_var_node(vm, ca, tok);
-        add_type(vm, lhs);
-        Node *store = new_binary(vm, ND_ASSIGN, lhs, arg_copy, tok);
-        add_type(vm, store);
+        Node *arg_copy = copy_arg_node(vm, a);
+        Node *store    = new_temp_store(vm, ca, arg_copy, tok);
 
         Node *result = new_var_node(vm, ca, tok);
         add_type(vm, result);
         Node *comma = new_binary(vm, ND_COMMA, store, result, tok);
         add_type(vm, comma);
 
-        Node *saved_next = a->next;
-        *a               = *comma;
-        a->next          = saved_next;
+        overwrite_arg(a, comma);
+        // Later bounds name the argument as written: the rewritten shape's
+        // store would read as a side effect and decline them.
+        arg_by_idx[idx - 1] = arg_copy;
     }
     return prelude;
 }

@@ -30,7 +30,7 @@ A call is checked when both hold:
 | Condition | Example that qualifies | Example that is skipped |
 |---|---|---|
 | The argument is a declared-checked pointer, a local that [inherits its bounds](safety-checked-propagation.md) on every path, or a [plain array](#plain-arrays-as-sources) | `small`, `q` after `int *q = small;`, `int buf[2]` | `int *raw` (unchecked to unchecked is untouched) |
-| Every other parameter the bounds name has an argument that is side-effect-free or hoistable | `sink(small, 8)`, `sink(small, f())`, `sink(small, i++)` | a sibling argument that is itself a checked pointer with side effects |
+| Every other parameter the bounds name has an argument that is side-effect-free or hoistable | `sink(small, 8)`, `sink(small, f())`, `sink(small, i++)` | verified siblings whose bounds name each other |
 
 `[[cccc::single]]` needs no other argument, so it is always checked. A `_Checked` array argument decays to a declared-checked pointer and is covered too.[^proto]
 
@@ -110,7 +110,7 @@ sink(head(2), 8);                              // traps against sink's parameter
 
 The arguments the bounds name are evaluated once, before the call, so `head(i++)` and a callee that changes a global keep the bounds the callee was given. A callee that reassigns such a parameter is verified against the value it was called with.
 
-A bound can name scalar parameters (integers and pointers). A call whose bounds name any other parameter type is left unchecked.
+A bound can name any parameter, including a struct (`l.n`) or a floating one. A call whose bounds are mutually dependent (two checked pointers that each name the other, both with side effects) is left unchecked.
 
 ## Plain arrays as sources
 
