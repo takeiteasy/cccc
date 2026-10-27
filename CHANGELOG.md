@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-27
+
 - Added: `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the rest of the `__builtin___*_chk` family, with `__has_builtin` support. Apple's SDK now routes its fortified `memcpy`/`strcpy`/`snprintf` calls to them, so `-D_FORTIFY_SOURCE=0` is not needed to compile programs against it. A size check that fails aborts with `*** buffer overflow detected ***` (exit 134).
 - Added: the VM implements glibc's `__memcpy_chk`, `__read_chk`, `__snprintf_chk`, `__fgets_chk`, `__recv_chk` and related entry points, and the library bounds table covers them, so fortified glibc headers (`-O1 -D_FORTIFY_SOURCE=2`) work under `--checked-pointers`.
 - Added: `-O1` and above define `__OPTIMIZE__`.
