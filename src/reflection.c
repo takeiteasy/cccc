@@ -5157,6 +5157,7 @@ static bool copy_node_kind_ok(const Node *n) {
         case ND_CAS:
         case ND_EXCH:
         case ND_QUOTE_LAZY:
+        case ND_DYNAMIC_CHECK:
             return true;
         default:
             return false;

@@ -127,6 +127,8 @@ static const char *node_kind_name(NodeKind kind) {
             return "FENCE";
         case ND_QUOTE_LAZY:
             return "QUOTE_LAZY";
+        case ND_DYNAMIC_CHECK:
+            return "DYNAMIC_CHECK";
         case ND_FRAME_ADDR:
             return "FRAME_ADDR";
         case ND_RETURN_ADDR:
