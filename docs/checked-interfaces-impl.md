@@ -103,7 +103,7 @@ A nested statement is classified whole by `track_stmt()` into a list of writes t
 
 ### Constant initializers
 
-`check_static_checked_init()` runs after `write_gvar_data()` in `gvar_initializer()` and `cc_finalize_macro_gvar_inits()`, under `--checked-pointers`. It walks the `Initializer` tree like `write_gvar_data()` and checks each checked-pointer slot with an expression: `objsize_peel_offset_chain()` yields the array and byte offset, and the bounds template is cloned with each sibling placeholder replaced by that sibling's initializer expression and evaluated with `eval()`. `count`, `byte_count`, `ntarray` (one extra element) and `single` are handled; a non-constant bound, a null source or `bounds(lo, hi)` is skipped.
+`check_static_checked_init()` runs after `write_gvar_data()` in `gvar_initializer()` and `cc_finalize_macro_gvar_inits()`, under `--checked-pointers`. It walks the `Initializer` tree like `write_gvar_data()` and checks each checked-pointer slot with an expression: `objsize_peel_offset_chain()` yields the array and byte offset, and the bounds template is cloned with each sibling placeholder replaced by that sibling's initializer expression and evaluated with `eval()`. `count`, `byte_count`, `ntarray` (one extra element) and `single` are handled, and `&buf[i]` peels like `buf + i`. `bounds(lo, hi)` goes through `check_static_checked_range()`: both ends are cloned with siblings and the variable itself replaced by their initializers, peeled, and must name the same array. A non-constant bound or a null source is skipped.
 
 ## Bounds casts
 

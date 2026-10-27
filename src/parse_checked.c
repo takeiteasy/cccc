@@ -4366,11 +4366,15 @@ void cc_check_checked_call(VirtualMachine *vm, CheckedCallWatch *w, Type *fn_ty,
 // A constant-initialized checked pointer whose source is a static array the
 // declared bounds overrun, e.g. `struct S g = {8, buf}` with `int buf[2]`.
 // The bound is evaluated with each sibling member replaced by its own
-// initializer; one that is not a compile-time constant is skipped.
+// initializer, and `self` (the variable being initialized) by `self_init`;
+// one that is not a compile-time constant is skipped.
 static Node *static_init_bounds(VirtualMachine *vm, Node *n,
-                                Initializer *siblings) {
+                                Initializer *siblings, Obj *self,
+                                Node *self_init) {
     if (!n)
         return NULL;
+    if (self && n->kind == ND_VAR && n->var == self)
+        return self_init;
     if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
         if (!siblings)
             return NULL;
@@ -4387,20 +4391,60 @@ static Node *static_init_bounds(VirtualMachine *vm, Node *n,
         Node *k = *kids[i];
         if (!k)
             continue;
-        *kids[i] = static_init_bounds(vm, k, siblings);
+        *kids[i] = static_init_bounds(vm, k, siblings, self, self_init);
         if (!*kids[i])
             return NULL;
     }
     return c;
 }
 
+// bounds(lo, hi) with both ends constant offsets into one array: the range
+// must lie inside it.
+static void check_static_checked_range(VirtualMachine *vm, Node *expr,
+                                       Type *pty, CheckedKind kind, Node *lo,
+                                       Node *hi) {
+    Obj *lo_src;
+    Obj *hi_src;
+    int  lo_off;
+    int  hi_off;
+    if (!lo || !hi || !objsize_peel_offset_chain(vm, lo, &lo_src, &lo_off) ||
+        !objsize_peel_offset_chain(vm, hi, &hi_src, &hi_off) ||
+        lo_src != hi_src)
+        return;
+    Type *aty = lo_src->ty;
+    if (!aty || aty->kind != TY_ARRAY || aty->size <= 0)
+        return;
+    if (lo_off < 0)
+        error_tok(vm, expr->tok,
+                  "checked initializer's bounds start %d bytes before the "
+                  "source array",
+                  -lo_off);
+    int64_t end = hi_off;
+    if (kind == CHECKED_NTARRAY)
+        end += pty->base ? get_vm_size(pty->base) : 1;
+    if (end > aty->size)
+        error_tok(vm, expr->tok,
+                  "checked initializer's bounds end %lld bytes past the "
+                  "source array",
+                  (long long)(end - aty->size));
+}
+
 static void check_static_checked_slot(VirtualMachine *vm, Node *expr, Type *pty,
                                       CheckedKind kind, CheckedBoundsForm form,
-                                      Node *bound, Initializer *siblings) {
+                                      Node *bound_lo, Node *bound,
+                                      Initializer *siblings, Obj *self) {
+    if (!expr || kind == CHECKED_NONE || pty->kind != TY_PTR)
+        return;
+    if (form == CB_RANGE && kind != CHECKED_SINGLE) {
+        check_static_checked_range(
+            vm, expr, pty, kind,
+            static_init_bounds(vm, bound_lo, siblings, self, expr),
+            static_init_bounds(vm, bound, siblings, self, expr));
+        return;
+    }
     Obj *src;
     int  off;
-    if (!expr || kind == CHECKED_NONE || pty->kind != TY_PTR ||
-        !objsize_peel_offset_chain(vm, expr, &src, &off))
+    if (!objsize_peel_offset_chain(vm, expr, &src, &off))
         return;
     Type *aty = src->ty;
     if (!aty || aty->kind != TY_ARRAY || aty->size <= 0 || off < 0)
@@ -4411,7 +4455,7 @@ static void check_static_checked_slot(VirtualMachine *vm, Node *expr, Type *pty,
     if (kind == CHECKED_SINGLE) {
         need = elem;
     } else if (form == CB_COUNT || form == CB_BYTE_COUNT) {
-        Node *n = static_init_bounds(vm, bound, siblings);
+        Node *n = static_init_bounds(vm, bound, siblings, self, expr);
         if (!n || !is_const_expr(vm, n))
             return;
         int64_t v = eval(vm, n);
@@ -4456,7 +4500,8 @@ static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
                 if (m->ty->kind == TY_PTR)
                     check_static_checked_slot(
                         vm, child->expr, m->ty, m->ty->checked_kind,
-                        m->ty->checked_bounds_form, m->checked_bounds_hi, init);
+                        m->ty->checked_bounds_form, m->checked_bounds_lo,
+                        m->checked_bounds_hi, init, NULL);
                 else
                     check_static_checked_walk(vm, child, m->ty);
             }
@@ -4469,7 +4514,8 @@ static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
                     vm, init->children[init->mem->idx]->expr, init->mem->ty,
                     init->mem->ty->checked_kind,
                     init->mem->ty->checked_bounds_form,
-                    init->mem->checked_bounds_hi, NULL);
+                    init->mem->checked_bounds_lo, init->mem->checked_bounds_hi,
+                    NULL, NULL);
             else
                 check_static_checked_walk(vm, init->children[init->mem->idx],
                                           init->mem->ty);
@@ -4486,7 +4532,8 @@ void check_static_checked_init(VirtualMachine *vm, Obj *var,
     if (var->ty->kind == TY_PTR)
         check_static_checked_slot(vm, init->expr, var->ty, var->checked_kind,
                                   var->checked_bounds_form,
-                                  var->checked_bounds_hi, NULL);
+                                  var->checked_bounds_lo,
+                                  var->checked_bounds_hi, NULL, var);
     else
         check_static_checked_walk(vm, init, var->ty);
 }

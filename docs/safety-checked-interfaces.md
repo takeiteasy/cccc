@@ -193,7 +193,15 @@ With `--checked-pointers`, a file-scope or `static` initializer that stores an a
 error: checked initializer needs 32 bytes but the source array has 8 from this offset
 ```
 
-A count that is not a constant, a null pointer and the `bounds(lo, hi)` form are not checked.
+```c
+int buf[4];
+int *[[cccc::array, cccc::count(3)]] p = &buf[2];                 // error
+int *[[cccc::array, cccc::bounds(buf, buf + 9)]] q = buf;         // error
+```
+
+A `bounds(lo, hi)` range is checked when both ends are constant offsets into one array: it must start inside the array and end at or before its end (one element further for `ntarray`). The pointer's own value is not compared with the range.
+
+A count that is not a constant, a null pointer and a bound spanning two objects are not checked.
 
 ## Bounds casts
 

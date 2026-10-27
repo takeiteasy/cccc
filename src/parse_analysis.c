@@ -1078,6 +1078,8 @@ bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base,
     for (;;) {
         if (p->kind == ND_CAST) {
             p = p->lhs;
+        } else if (p->kind == ND_ADDR && p->lhs && p->lhs->kind == ND_DEREF) {
+            p = p->lhs->lhs; // `&buf[i]` is `buf + i`
         } else if (p->kind == ND_ADD && is_const_expr(vm, p->rhs)) {
             offset += eval(vm, p->rhs);
             p       = p->lhs;

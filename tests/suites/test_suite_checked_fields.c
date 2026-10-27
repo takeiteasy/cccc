@@ -681,6 +681,18 @@ static struct CountLast g_late                            = {g_arr, 2};
 static int              g_len                             = 100;
 static int *[[cccc::array, cccc::count(g_len)]] g_dynamic = g_arr;
 static char *[[cccc::ntarray, cccc::count(3)]] g_nt       = g_text;
+static int *[[cccc::array, cccc::count(1)]] g_elem        = &g_arr[1];
+static int *[[cccc::array, cccc::bounds(g_arr, g_arr + 2)]] g_range = g_arr;
+static int *[[cccc::array, cccc::bounds(g_arr + 1, g_arr + 2)]] g_inner_range =
+    &g_arr[1];
+
+struct Range {
+    int *lo;
+    int *hi;
+    int *[[cccc::array, cccc::bounds(lo, hi)]] p;
+};
+
+static struct Range g_member_range = {g_arr, g_arr + 2, g_arr};
 
 [[cccc::test]]
 void test_static_initializers_that_fit(void) {
@@ -690,4 +702,8 @@ void test_static_initializers_that_fit(void) {
     AssertEq(g_nt[0], 'a');
     (void)g_null;
     (void)g_dynamic;
+    (void)g_elem;
+    (void)g_range;
+    (void)g_inner_range;
+    AssertEq(g_member_range.hi - g_member_range.lo, 2);
 }
