@@ -2701,12 +2701,28 @@ static Token *capture_checked_bounds_args(VirtualMachine *vm, Token *tok,
 // attributes (e.g. a bounds form without array/ntarray, or on a `single`
 // pointer) is checked once per '*', after all of this level's attributes
 // have been parsed -- see the checked-pointer post-check in pointers().
+// `ty` may instead be a checked array (a flexible array member's bound after
+// its `[]`), which takes only count/byte_count/bounds.
 Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Type *ty, const char *name) {
-    if (!ty || ty->kind != TY_PTR)
+    bool on_array = ty && ty->kind == TY_ARRAY;
+    if (!ty || (ty->kind != TY_PTR && !on_array))
         error_tok(vm, name_tok,
                   "'%s' must be written immediately after '*' "
                   "(e.g. int * [[cccc::%s]] p;), not in this position",
+                  name, name);
+
+    bool bounds_form = !strcmp(name, "count") || !strcmp(name, "byte_count") ||
+                       !strcmp(name, "bounds");
+    if (on_array && !bounds_form)
+        error_tok(vm, name_tok,
+                  "'%s' does not apply to a checked array; only count, "
+                  "byte_count and bounds take a bound after its '[]'",
+                  name);
+    if (on_array && ty->array_len >= 0)
+        error_tok(vm, name_tok,
+                  "'%s' on a checked array is only for a flexible array "
+                  "member (e.g. int data _Checked[] [[cccc::%s(n)]];)",
                   name, name);
 
     if (!strcmp(name, "single") || !strcmp(name, "array") ||
@@ -2762,24 +2778,6 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
                       "single argument 'unknown'");
         }
     }
-    return after;
-}
-
-// `[[cccc::count(n)]]` after a checked flexible array member's `[]`. `tok`
-// points at the opening '(' and `arr` is a private copy of the array type.
-// Returns the token past the matching ')'.
-Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
-                                    Token *tok, Type *arr) {
-    if (arr->array_len >= 0)
-        error_tok(vm, name_tok,
-                  "'count' on a checked array is only for a flexible array "
-                  "member (e.g. int data _Checked[] [[cccc::count(n)]];)");
-    Token *arg1, *arg2;
-    Token *after = capture_checked_bounds_args(vm, tok, &arg1, &arg2);
-    if (arg2)
-        error_tok(vm, name_tok, "'count' takes one argument");
-    arr->checked_bounds_form = CB_COUNT;
-    arr->checked_bounds_arg1 = arg1;
     return after;
 }
 

@@ -158,6 +158,10 @@ typedef struct {
     Token       *checked_spec_tok; // `_Checked`/`_Unchecked` written as a specifier
     Token       *checked_attr_tok; // `[[cccc::checked]]`/`unchecked` attribute name
 
+    // A checked array declarator's type while its bounds attribute after the
+    // `[]` is parsed (`int d _Checked[] [[cccc::count(n)]]`).
+    Type  *checked_array;
+
     Token *decl_start; // first token of the declaration (function source span)
 
     // Declared inside a struct/union member list, where a bare `struct S;`
@@ -540,8 +544,6 @@ void resolve_checked_bounds(VirtualMachine *vm, Obj *var);
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members);
 void cc_check_checked_scope_compound_literal(VirtualMachine *vm, Type *ty,
                                              Token *tok);
-Token *cc_apply_checked_array_count(VirtualMachine *vm, Token *name_tok,
-                                    Token *tok, Type *arr);
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty);
 void resolve_type_checked_bounds(VirtualMachine *vm, Type *ty);
 void merge_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty);

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a checked flexible array member takes `byte_count(n)`, `bounds(lo, hi)` and `bounds(unknown)` as well as `count(n)`, in `[[cccc::...]]` or `__attribute__((...))` spelling.
 - Fixed: a bit-field store into an `_Nt_checked` terminator slot traps when the value truncated to the field width is non-zero (`b[n].f = 1`).
 - Added: an unchecked local assigned from a plain array (`int *q = buf;`) carries the array's extent into checked targets (`s.p = q`, `sink(q, n)`, `return q`); accesses through the local stay unchecked.
 - Added: `&buf[i]`, a row of a multidimensional plain array (`m[i]`, bounded by the array it indexes) and the last member of a complete struct object (`s.data`) are plain-array sources for checked targets.

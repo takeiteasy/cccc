@@ -665,3 +665,62 @@ void test_nt_2d_struct_rows_member_write_traps(void) {
                                      {{5, 6}, {7, 8}, {0, 0}}};
     s[1][2].b                     = 1;
 }
+
+struct BytesFam {
+    int   bytes;
+    int d _Checked[] [[cccc::byte_count(bytes)]];
+};
+
+struct RangeFam {
+    int  *end;
+    int d _Checked[] [[cccc::bounds(d, end)]];
+};
+
+struct GnuFam {
+    int   n;
+    int d _Checked[] __attribute__((__count__(n)));
+};
+
+struct NtBytesFam {
+    int    bytes;
+    char s _Nt_checked[] [[cccc::byte_count(bytes)]];
+};
+
+struct OptOutFam {
+    int   n;
+    int d _Checked[] [[cccc::bounds(unknown)]];
+};
+
+[[cccc::test]]
+void test_checked_flexible_array_member_forms(void) {
+    struct BytesFam *b = malloc(sizeof(struct BytesFam) + 3 * sizeof(int));
+    b->bytes           = 3 * sizeof(int);
+    b->d[2]            = 7;
+    AssertEq(b->d[2], 7);
+    free(b);
+
+    struct RangeFam *r = malloc(sizeof(struct RangeFam) + 3 * sizeof(int));
+    r->end             = r->d + 3;
+    r->d[2]            = 8;
+    AssertEq(r->d[2], 8);
+    free(r);
+
+    struct GnuFam *g = malloc(sizeof(struct GnuFam) + 3 * sizeof(int));
+    g->n             = 3;
+    g->d[2]          = 9;
+    AssertEq(g->d[2], 9);
+    free(g);
+
+    struct NtBytesFam *s = malloc(sizeof(struct NtBytesFam) + 4);
+    s->bytes             = 3;
+    s->s[0]              = 'a';
+    s->s[3]              = 0;
+    AssertEq(s->s[0], 'a');
+    free(s);
+
+    struct OptOutFam *o = malloc(sizeof(struct OptOutFam) + 8 * sizeof(int));
+    o->n                = 1;
+    o->d[5]             = 6;
+    AssertEq(o->d[5], 6);
+    free(o);
+}

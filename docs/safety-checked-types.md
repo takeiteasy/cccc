@@ -110,7 +110,18 @@ struct Buf {
 };
 ```
 
-`b->data[i]` traps unless `i < b->n`, and `int *p = b->data` keeps the count. `_Nt_checked[]` works the same way: `count(n)` is the element count and one more slot holds the terminator. A checked flexible array member without `count`, and `count` on anything but a flexible array member, are errors. `sizeof` is unchanged, and the output of `-m`/`-c=native`/`-c=generated` is an ordinary flexible array member.
+`b->data[i]` traps unless `i < b->n`, and `int *p = b->data` keeps the count. `_Nt_checked[]` works the same way: `count(n)` is the element count and one more slot holds the terminator.
+
+The bound takes the same forms as a checked pointer member:
+
+| Written after `[]` | Bound |
+|---|---|
+| `[[cccc::count(n)]]` | `n` elements |
+| `[[cccc::byte_count(n)]]` | `n` bytes |
+| `[[cccc::bounds(data, end)]]` | `[data, end)` |
+| `[[cccc::bounds(unknown)]]` | not checked; opts out |
+
+`__attribute__((count(n)))` after the `]` is accepted too. A checked flexible array member without a bound, and a bound on anything but a flexible array member, are errors. `sizeof` is unchanged, and the output of `-m`/`-c=native`/`-c=generated` is an ordinary flexible array member.
 
 ## Variable-length checked arrays
 

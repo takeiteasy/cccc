@@ -1167,37 +1167,22 @@ static Type *with_custom_attrs(VirtualMachine *vm, Type *ty,
 // The attribute-lists and asm-label after a declarator. GNU C allows them in
 // either order (glibc's __REDIRECT_NTH puts the asm-label first), so loop
 // until a pass consumes nothing.
-// `[[cccc::count(n)]]` directly after a checked array's `[]`; the count of a
-// flexible array member. Anything else is left for the attribute parsers.
-static Token *checked_array_count_attr(VirtualMachine *vm, Token *tok,
-                                       Type **ty) {
-    Token *name = tok->next ? tok->next->next : NULL;
-    for (int i = 0; i < 2 && name; i++)
-        name = name->next;
-    if (!equal(tok, "[") || !equal(tok->next, "[") ||
-        !equal(tok->next->next, "cccc") || !equal(tok->next->next->next, ":") ||
-        !name || !equal(name, ":"))
-        return tok;
-    name = name->next;
-    if (!name || !equal(name, "count") || !equal(name->next, "("))
-        return tok;
-    *ty      = copy_type(vm, *ty);
-    Token *t = cc_apply_checked_array_count(vm, name, name->next, *ty);
-    if (!equal(t, "]") || !equal(t->next, "]"))
-        error_tok(vm, t, "expected ']]' after 'count(...)'");
-    return t->next->next;
-}
-
 static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
                                Type *ty) {
     for (;;) {
         Token  *before      = tok;
         VarAttr suffix_attr = {};
+        // A bound after a checked array's `[]` (flexible array member) lands
+        // on a private copy.
         if (ty->kind == TY_ARRAY && ty->checked_kind != CHECKED_NONE &&
-            !ty->checked_bounds_arg1)
-            tok = checked_array_count_attr(vm, tok, &ty);
+            ty->checked_bounds_form == CB_COUNT && !ty->checked_bounds_arg1)
+            suffix_attr.checked_array = copy_type(vm, ty);
         tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
         tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
+        if (suffix_attr.checked_array &&
+            (suffix_attr.checked_array->checked_bounds_arg1 ||
+             suffix_attr.checked_array->checked_bounds_form == CB_UNKNOWN))
+            ty = suffix_attr.checked_array;
         if (suffix_attr.checked_attr_tok && !vm->compiler.in_type_lookahead)
             error_tok(vm, suffix_attr.checked_attr_tok,
                       "'%.*s' applies to a function definition or a compound "
@@ -2466,13 +2451,16 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
         Type *declared = cur->ty;
         cur->ty        = array_of(vm, declared->base, 0);
         if (declared->checked_kind != CHECKED_NONE) {
-            if (!declared->checked_bounds_arg1)
+            if (declared->checked_bounds_form == CB_COUNT &&
+                !declared->checked_bounds_arg1)
                 error_tok(vm, cur->name ? cur->name : *rest,
-                          "a checked flexible array member needs a count "
-                          "(e.g. int data _Checked[] [[cccc::count(n)]];)");
+                          "a checked flexible array member needs a bound "
+                          "(e.g. int data _Checked[] [[cccc::count(n)]];), "
+                          "or bounds(unknown) to opt out");
             cur->ty->checked_kind         = declared->checked_kind;
             cur->ty->checked_bounds_form  = declared->checked_bounds_form;
             cur->ty->checked_bounds_arg1  = declared->checked_bounds_arg1;
+            cur->ty->checked_bounds_arg2  = declared->checked_bounds_arg2;
         }
         ty->is_flexible = true;
     }
@@ -2913,7 +2901,9 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                                    : is_attr_name(tok, "bounds") ? "bounds"
                                    : is_attr_name(tok, "assume") ? "assume"
                                                                  : "dynamic";
-                tok = apply_checked_ptr_attr(vm, attr_tok, tok->next, ty, name);
+                tok =
+                    apply_checked_ptr_attr(vm, attr_tok, tok->next,
+                                           ty ? ty : attr->checked_array, name);
                 continue;
             }
 
@@ -3490,7 +3480,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                                    : equal(name_tok, "bounds") ? "bounds"
                                    : equal(name_tok, "assume") ? "assume"
                                                                : "dynamic";
-                tok = apply_checked_ptr_attr(vm, attr_tok, tok, ty, name);
+                tok              = apply_checked_ptr_attr(
+                    vm, attr_tok, tok, ty ? ty : attr->checked_array, name);
                 continue;
             }
 
