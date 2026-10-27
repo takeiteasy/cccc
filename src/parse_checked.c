@@ -441,26 +441,89 @@ static bool checked_obj_is_addressable(Node *n) {
            (n->kind == ND_VAR || n->kind == ND_MEMBER || n->kind == ND_DEREF);
 }
 
+// The array-typed lvalue a plain-array source expression denotes: a variable,
+// a member, or a row (`m[i]`), reached through `+`, `-`, casts and `&x[i]`.
+static Node *plain_array_lvalue(Node *n) {
+    while (n) {
+        switch (n->kind) {
+            case ND_VAR:
+            case ND_MEMBER:
+                return n;
+            case ND_DEREF:
+                return n->ty && n->ty->kind == TY_ARRAY ? n : NULL;
+            case ND_ADDR:
+                if (!n->lhs || n->lhs->kind != ND_DEREF)
+                    return NULL;
+                n = n->lhs->lhs;
+                continue;
+            case ND_ADD:
+            case ND_SUB:
+            case ND_CAST:
+                n = n->lhs;
+                continue;
+            default:
+                return NULL;
+        }
+    }
+    return NULL;
+}
+
+// The array variable or member a chain of rows (`m[i][j]`) is part of.
+static Node *plain_array_whole(Node *lv) {
+    while (lv && lv->kind == ND_DEREF)
+        lv = plain_array_lvalue(lv->lhs);
+    return lv;
+}
+
+// True if `n` names a struct object of declared size: a struct variable, or
+// members of one, with no pointer in the way.
+static bool checked_obj_complete(Node *n) {
+    while (n && n->kind == ND_MEMBER)
+        n = n->lhs;
+    return n && n->kind == ND_VAR && n->var->ty->kind == TY_STRUCT;
+}
+
 // A plain array object with a known extent as a source for a checked target:
 // `q = buf`, `sink(buf, 8)`, `(T [[...]])buf`. Its bounds are the object's
 // own [buf, buf + sizeof buf). Not a propagation source: an unchecked
 // `int *q = buf;` stays unchecked.
 //
-// Accepted: a complete non-VLA array variable (a string literal is one), or a
-// non-bit-field array member that is not the last member of a struct (a
-// trailing array may be a flexible-array stand-in) reached through a trivial
-// object expression. An array parameter is a TY_PTR and never matches.
+// Accepted: a complete non-VLA array variable (a string literal is one), a
+// non-bit-field array member of a struct reached through a trivial object
+// expression, or a row of either (`m[i]`, `&buf[i]`). The last member of a
+// struct is accepted only on a complete object (`s.data`, never `sp->data`),
+// since through a pointer it may be a flexible-array stand-in. An array
+// parameter is a TY_PTR and never matches.
 static Type *checked_plain_array_root(Node *rhs, CheckedBase *out) {
-    CheckedBase base = find_checked_base(rhs);
+    Node *lv = plain_array_lvalue(rhs);
+    if (!lv)
+        return NULL;
+    CheckedBase base = {0};
     Type       *ty   = NULL;
-    if (base.var) {
-        ty = base.var->ty;
-    } else if (base.mem && base.obj) {
-        ty = base.mem->ty;
-        if (base.mem->is_bitfield || !base.mem->next || !base.obj->ty ||
-            base.obj->ty->kind != TY_STRUCT ||
-            !checked_obj_is_trivial(base.obj))
-            return NULL;
+    switch (lv->kind) {
+        case ND_VAR:
+            base.var = lv->var;
+            ty       = lv->var->ty;
+            break;
+        case ND_MEMBER:
+            base.mem = lv->member;
+            base.obj = lv->lhs;
+            ty       = lv->member->ty;
+            if (lv->member->is_bitfield || !base.obj->ty ||
+                base.obj->ty->kind != TY_STRUCT ||
+                !checked_obj_is_trivial(base.obj) ||
+                (!lv->member->next && !checked_obj_complete(base.obj)))
+                return NULL;
+            break;
+        default: {
+            ty = lv->ty;
+            if (node_has_side_effects(lv) ||
+                !checked_plain_array_root(lv->lhs, &(CheckedBase){0}))
+                return NULL;
+            base.row = ty;
+            base.obj = lv;
+            break;
+        }
     }
     if (!ty || ty->kind != TY_ARRAY || ty->checked_kind != CHECKED_NONE ||
         ty->size <= 0)
@@ -479,7 +542,9 @@ static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
     if (!ty)
         return false;
     Node *arr;
-    if (base.var) {
+    if (base.row) {
+        arr = clone_bounds_node(vm, base.obj);
+    } else if (base.var) {
         arr = new_var_node(vm, base.var, tok);
     } else {
         arr = new_unary(vm, ND_MEMBER, clone_bounds_node(vm, base.obj), tok);
@@ -490,6 +555,30 @@ static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
     Node *hi = new_binary(vm, ND_ADD, clone_bounds_node(vm, lo),
                           new_long(vm, ty->size, tok), tok);
     add_type(vm, hi);
+    if (base.row) {
+        // A row outside the array it indexes (`m[i]` with `i` out of range)
+        // has the empty range [lo, lo), which no non-empty target satisfies.
+        CheckedBase whole_base;
+        Node       *whole = plain_array_whole(base.obj);
+        Type       *wty   = checked_plain_array_root(whole, &whole_base);
+        Node       *warr  = whole->kind == ND_VAR
+                                ? new_var_node(vm, whole->var, tok)
+                                : clone_bounds_node(vm, whole);
+        add_type(vm, warr);
+        Node *wlo = checked_array_decay(vm, warr, tok);
+        Node *whi = new_binary(vm, ND_ADD, clone_bounds_node(vm, wlo),
+                               new_long(vm, wty->size, tok), tok);
+        add_type(vm, whi);
+        Node *lo_ok = new_binary(vm, ND_LE, wlo, clone_bounds_node(vm, lo), tok);
+        Node *hi_ok = new_binary(vm, ND_LE, clone_bounds_node(vm, hi), whi, tok);
+        Node *inside = new_binary(vm, ND_LOGAND, lo_ok, hi_ok, tok);
+        Node *cond   = new_node(vm, ND_COND, tok);
+        cond->cond   = inside;
+        cond->then   = hi;
+        cond->els    = clone_bounds_node(vm, lo);
+        add_type(vm, cond);
+        hi = cond;
+    }
     *out_lo = lo;
     *out_hi = hi;
     return true;

@@ -15,6 +15,11 @@
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*tracktrap=255
 // CCCC_EXPECT_STDOUT: trackok=42
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainarray=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainelem=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainrow=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainrowoor=255
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainlast=255
+// CCCC_EXPECT_STDOUT: plainshapesok=42
 //
 // -c=native enforces --checked-pointers: each violation prints the VM's
 // banner and exits 255.
@@ -191,6 +196,63 @@ int build_main(Builder *ctx) {
                        "    sink(buf, 8);\n"
                        "    return 42;\n"
                        "}\n"},
+        {"plainelem", "int buf[4];\n"
+                      "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                      "int main(void) {\n"
+                      "    sink(&buf[1], 4);\n"
+                      "    return 42;\n"
+                      "}\n"},
+        {"plainrow", "int m[3][4];\n"
+                     "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                     "int main(void) {\n"
+                     "    sink(m[1], 8);\n"
+                     "    return 42;\n"
+                     "}\n"},
+        {"plainrowoor", "int m[3][4];\n"
+                        "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                        "int main(void) {\n"
+                        "    volatile int i = 7;\n"
+                        "    sink(m[i], 4);\n"
+                        "    return 42;\n"
+                        "}\n"},
+        {"plainlast", "struct H {\n"
+                      "    int n;\n"
+                      "    int tail[4];\n"
+                      "};\n"
+                      "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                      "int main(void) {\n"
+                      "    struct H h = {0};\n"
+                      "    sink(h.tail, 8);\n"
+                      "    return 42;\n"
+                      "}\n"},
+        {"plainshapesok", "struct H {\n"
+                          "    int n;\n"
+                          "    int tail[4];\n"
+                          "};\n"
+                          "int m[3][4];\n"
+                          "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+                       "    (void)p;\n"
+                       "    (void)n;\n"
+                       "}\n"
+                          "int main(void) {\n"
+                          "    struct H h = {0};\n"
+                          "    sink(&m[0][1], 3);\n"
+                          "    sink(m[2], 4);\n"
+                          "    sink(h.tail, 4);\n"
+                          "    return 42;\n"
+                          "}\n"},
         {"dynamic", "int main(void) { volatile int i = 10, n = 5; "
                     "__builtin_cccc_dynamic_check(i < n); return 42; }\n"},
     };

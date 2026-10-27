@@ -459,10 +459,93 @@ void test_plain_array_dynamic_cast_passes(void) {
     AssertEq(p[0], 0);
 }
 
-[[cccc::test]]
-void test_plain_array_trailing_member_is_not_a_source(void) {
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_trailing_member_trap(void) {
     struct Holder h = {0};
     sink(h.tail, 100);
+}
+
+[[cccc::test]]
+void test_plain_array_trailing_member_through_pointer_is_not_a_source(void) {
+    struct Holder  h  = {0};
+    struct Holder *hp = &h;
+    sink(hp->tail, 100);
+}
+
+[[cccc::test]]
+void test_plain_array_trailing_member_exact_fit_passes(void) {
+    struct Holder h = {0};
+    sink(h.tail, 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_address_of_element_trap(void) {
+    int buf[2];
+    int *[[cccc::array, cccc::count(2)]] p = &buf[1];
+    (void)p;
+}
+
+[[cccc::test]]
+void test_plain_array_address_of_element_passes(void) {
+    int buf[8] = {0};
+    int *[[cccc::array, cccc::count(4)]] p = &buf[1];
+    sink(&buf[2], 4);
+    AssertEq(p[0], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_address_of_member_element_trap(void) {
+    struct Holder h = {0};
+    sink(&h.data[1], 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_row_trap(void) {
+    int m[3][4];
+    int *[[cccc::array, cccc::count(8)]] p = m[1];
+    (void)p;
+}
+
+[[cccc::test]]
+void test_plain_array_row_passes(void) {
+    int m[3][4] = {0};
+    int *[[cccc::array, cccc::count(4)]] p = m[2];
+    sink(m[0], 4);
+    AssertEq(p[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_row_out_of_range_trap(void) {
+    int          m[3][4];
+    volatile int i = 7;
+    sink(m[i], 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_inner_row_trap(void) {
+    int m[2][3][4];
+    sink(m[1][2], 8);
+}
+
+[[cccc::test]]
+void test_plain_array_row_loop_passes(void) {
+    int m[3][4];
+    int total = 0;
+    for (int i = 0; i < 3; i++) {
+        sink(m[i], 4);
+        for (int j = 0; j < 4; j++) {
+            m[i][j] = i + j;
+            total += m[i][j];
+        }
+    }
+    AssertEq(total, 30);
+}
+
+[[cccc::test]]
+void test_plain_array_row_through_pointer_is_not_a_source(void) {
+    int  m[3][4];
+    int (*pm)[4] = m;
+    sink(pm[1], 100);
 }
 
 [[cccc::test]]

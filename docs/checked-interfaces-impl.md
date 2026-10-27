@@ -49,7 +49,9 @@ The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidde
 
 ## Plain array sources
 
-`checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate: `find_checked_base()` roots at a complete `TY_ARRAY` variable (a string literal is one), or at a non-bit-field array member of a struct that is not its last member, reached through a trivial object expression. The last member is excluded because it may stand in for a flexible array. `checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`.
+`checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate. `plain_array_lvalue()` finds the array-typed lvalue through `+`, `-`, casts and `&x[i]` (`ND_ADDR` of `ND_DEREF`); the root is then a complete `TY_ARRAY` variable (a string literal is one), a non-bit-field array member of a struct reached through a trivial object expression, or a row (`ND_DEREF` of array type) whose address leads back to such a root. The last member needs `checked_obj_complete()`: a chain of members ending at a struct variable, never a pointer, because through a pointer it may stand in for a flexible array. `find_checked_base()` is not widened: it feeds `set_checked_deref_bounds()`, and rooting plain rows there would check every ordinary `m[i][j]`.
+
+`checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`. For a row the high bound is `lo` when the row is not inside `plain_array_whole()` (`ND_COND`), an empty range.
 
 | Consumer | Change |
 |---|---|

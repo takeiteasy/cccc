@@ -131,9 +131,10 @@ sink(buf, 8);                                    // traps against sink's paramet
 
 | Source | Covered |
 |---|---|
-| A local or global array, a string literal, `buf + 1` | Yes |
-| A non-last array member of a struct (`h.data`) | Yes |
-| The last member of a struct, a variable-length array, an array parameter (a pointer) | No |
+| A local or global array, a string literal, `buf + 1`, `&buf[i]` | Yes |
+| A member array of a struct object (`h.data`, including the last member) | Yes |
+| A row of a multidimensional array (`m[i]`) | Yes: the row, or nothing when `i` is outside `m`[^row] |
+| The last member through a pointer (`hp->data`), a variable-length array, an array parameter (a pointer) | No[^tail] |
 | `int *q = buf;` followed by `q[i]` | No: unchecked pointers stay unchecked[^plain] |
 
 ## Struct fields
@@ -275,6 +276,10 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^plain]: A plain array is not a propagation source, so only checked targets (declarations, assignments, arguments, returns and casts) read its extent.
+
+[^row]: The range is the row itself, so `&m[0][1]` covers three elements and flattening a matrix into one checked pointer (`sink(m[0], 12)`) traps. A runtime row index outside the array gives an empty range.
+
+[^tail]: Through a pointer a trailing array may stand in for a flexible array member of an over-allocated object, so its declared size is not the object's.
 [^track]: Rechecks read the source range the pointer store snapshotted, so a narrowing write passes and a widening one traps at the write. An object that is not a private local (a global, `ps->p`, a local whose address is passed on) ends tracking at the first call, since the callee could replace the pointer.
 [^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).
