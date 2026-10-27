@@ -198,6 +198,114 @@ static long long wrap_getline(char **lineptr, size_t *n, FILE *stream) {
     return wrap_getdelim(lineptr, n, '\n', stream);
 }
 
+// `__*_chk` entry points behind __builtin___*_chk and fortified headers. The
+// printf family takes a `flag` (ignored) and the destination's object size;
+// the output goes through the same engine as the plain function.
+#if defined(CCCC_HAVE_NATIVE_PCT_B) && !defined(CCCC_HAS_DECIMAL)
+#define CHK_VSNPRINTF      vsnprintf
+#define CHK_VSPRINTF       vsprintf
+#define CHK_VFPRINTF       vfprintf
+#define CHK_WRAP_VSNPRINTF wrap_vsnprintf
+#define CHK_WRAP_VSPRINTF  wrap_vsprintf
+#define CHK_WRAP_VPRINTF   wrap_vprintf
+#define CHK_WRAP_VFPRINTF  wrap_vfprintf
+#else
+#define CHK_VSNPRINTF      cccc_vsnprintf
+#define CHK_VSPRINTF       cccc_vsprintf
+#define CHK_VFPRINTF       cccc_vfprintf
+#define CHK_WRAP_VSNPRINTF wrap_cccc_vsnprintf
+#define CHK_WRAP_VSPRINTF  wrap_cccc_vsprintf
+#define CHK_WRAP_VPRINTF   wrap_cccc_vprintf
+#define CHK_WRAP_VFPRINTF  wrap_cccc_vfprintf
+#endif
+
+static int chk_snprintf(char *s, size_t n, int flag, size_t os, const char *fmt,
+                        ...) {
+    (void)flag;
+    CCCC_FORTIFY_CHECK(n, os, "snprintf");
+    va_list ap;
+    va_start(ap, fmt);
+    int r = CHK_VSNPRINTF(s, n, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int chk_sprintf(char *s, int flag, size_t os, const char *fmt, ...) {
+    (void)flag;
+    va_list ap, need_ap;
+    va_start(ap, fmt);
+    va_copy(need_ap, ap);
+    int need = CHK_VSNPRINTF(NULL, 0, fmt, need_ap);
+    va_end(need_ap);
+    if (need >= 0)
+        CCCC_FORTIFY_CHECK((size_t)need + 1, os, "sprintf");
+    int r = CHK_VSPRINTF(s, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int chk_printf(int flag, const char *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = CHK_VFPRINTF(stdout, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static int chk_fprintf(FILE *stream, int flag, const char *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = CHK_VFPRINTF(stream, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static long long chk_vsnprintf(char *s, long long n, long long flag,
+                               long long os, const char *fmt,
+                               long long va_ptr) {
+    (void)flag;
+    CCCC_FORTIFY_CHECK(n, os, "vsnprintf");
+    return CHK_WRAP_VSNPRINTF(s, n, fmt, va_ptr);
+}
+
+// The size of a vsprintf result is not known before it is formatted, so this
+// formats into a bounded scratch copy first when the object size is known.
+static long long chk_vsprintf(char *s, long long flag, long long os,
+                              const char *fmt, long long va_ptr) {
+    (void)flag;
+    if ((size_t)os != (size_t)-1) {
+        char probe[1];
+        int  need = (int)CHK_WRAP_VSNPRINTF(probe, 0, fmt, va_ptr);
+        if (need >= 0)
+            CCCC_FORTIFY_CHECK((size_t)need + 1, os, "vsprintf");
+    }
+    return CHK_WRAP_VSPRINTF(s, fmt, va_ptr);
+}
+
+static long long chk_vprintf(long long flag, const char *fmt,
+                             long long va_ptr) {
+    (void)flag;
+    return CHK_WRAP_VPRINTF(fmt, va_ptr);
+}
+
+static long long chk_vfprintf(FILE *stream, long long flag, const char *fmt,
+                              long long va_ptr) {
+    (void)flag;
+    return CHK_WRAP_VFPRINTF(stream, fmt, va_ptr);
+}
+
+static char *chk_fgets(char *s, size_t size, int n, FILE *f) {
+    CCCC_FORTIFY_CHECK(n < 0 ? 0 : (size_t)n, size, "fgets");
+    return fgets(s, n, f);
+}
+
+static size_t chk_fread(void *p, size_t plen, size_t size, size_t n, FILE *f) {
+    CCCC_FORTIFY_CHECK(size * n, plen, "fread");
+    return fread(p, size, n, f);
+}
+
 // Register all stdio.h functions
 void register_stdio_functions(VirtualMachine *vm) {
     // Standard streams
@@ -246,6 +354,19 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_variadic_cfunc(vm, "asprintf", (void *)cccc_asprintf, 2, 0);
     cc_register_cfunc(vm, "vasprintf", (void *)wrap_cccc_vasprintf, 3, 0);
 #endif
+
+    // __builtin___*_chk
+    cc_register_variadic_cfunc(vm, "__snprintf_chk", (void *)chk_snprintf, 5,
+                               0);
+    cc_register_variadic_cfunc(vm, "__sprintf_chk", (void *)chk_sprintf, 4, 0);
+    cc_register_variadic_cfunc(vm, "__printf_chk", (void *)chk_printf, 2, 0);
+    cc_register_variadic_cfunc(vm, "__fprintf_chk", (void *)chk_fprintf, 3, 0);
+    cc_register_cfunc(vm, "__vsnprintf_chk", (void *)chk_vsnprintf, 6, 0);
+    cc_register_cfunc(vm, "__vsprintf_chk", (void *)chk_vsprintf, 5, 0);
+    cc_register_cfunc(vm, "__vprintf_chk", (void *)chk_vprintf, 3, 0);
+    cc_register_cfunc(vm, "__vfprintf_chk", (void *)chk_vfprintf, 4, 0);
+    cc_register_cfunc(vm, "__fgets_chk", (void *)chk_fgets, 4, 0);
+    cc_register_cfunc(vm, "__fread_chk", (void *)chk_fread, 5, 0);
 
     // Variadic scanf family: always routed to the custom format_scanf.c
     // engine, even when CCCC_HAVE_NATIVE_PCT_B is set. glibc's scanf family

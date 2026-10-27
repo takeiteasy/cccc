@@ -1941,6 +1941,8 @@ static bool is_has_builtin_supported(char *name) {
     int libm_row, libm_variant;
     if (libm_builtin_lookup(name, (int)strlen(name), &libm_row, &libm_variant))
         return true;
+    if (chk_builtin_known(name, (int)strlen(name)))
+        return true;
     static const char *builtins[] = {
         "__builtin_types_compatible_p",
         "__builtin_classify_type",
@@ -8103,6 +8105,7 @@ void init_macros(VirtualMachine *vm) {
     define_macro(vm, "__signed__", "signed");
     define_macro(vm, "__signed", "signed");
     define_macro(vm, "__typeof__", "typeof");
+    define_macro(vm, "__typeof", "typeof");
     define_macro(vm, "__volatile__", "volatile");
     define_macro(vm, "__CCCC__", "1");
 

@@ -52,12 +52,13 @@ memcpy(a, b, 16);   // traps: a has 8 bytes
 | Header | Functions | Bound on the buffer |
 |---|---|---|
 | `string.h` | `memcpy`, `memmove` (both buffers), `memset` | `n` bytes |
+| | `strncpy`, `stpncpy`, `strlcpy`, `strlcat` (destination) | `n` bytes |
 | `stdio.h` | `fread`, `fwrite` | `size * nmemb` bytes |
 | | `fgets`, `snprintf`, `vsnprintf` | `n` bytes |
 | `unistd.h` | `read`, `write`, `pread`, `pwrite`, `getcwd`, `readlink`, `gethostname` | the length argument |
 | `sys/socket.h` | `recv`, `send`, `recvfrom`, `sendto` | the length argument |
 
-A buffer must hold the whole length even when the call would touch less (`read(fd, a, 16)` into `char a[8]` traps although only 4 bytes may arrive). Calls are checked by the [rules above](#annotated-parameters): the argument must be a checked pointer, an inherited local or a [plain array](#plain-arrays-as-sources); an unchecked pointer is left alone.[^libc-null]
+The fortified spellings (`__builtin___memcpy_chk`, `__read_chk`, `__snprintf_chk`, ...) and `__builtin_memcpy`, `__builtin_memset`, `__builtin_memmove` carry the same bounds as the plain functions; the object-size argument of a `_chk` call is not a bound. A buffer must hold the whole length even when the call would touch less (`read(fd, a, 16)` into `char a[8]` traps although only 4 bytes may arrive). Calls are checked by the [rules above](#annotated-parameters): the argument must be a checked pointer, an inherited local or a [plain array](#plain-arrays-as-sources); an unchecked pointer is left alone.[^libc-null]
 
 The bounds attach to the declaration in a system header (`<...>` include, or a header such as `<sys/socket.h>` includes), so they apply the same under `--use-system-headers` and `--sysroot`. A program's own function of the same name, and a `static` one, get none.
 
@@ -305,4 +306,4 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^track]: Rechecks read the source range the pointer store snapshotted, so a narrowing write passes and a widening one traps at the write. An object that is not a private local (a global, `ps->p`, a local whose address is passed on) ends tracking at the first call, since the callee could replace the pointer.
 [^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).
-[^libc-null]: `snprintf(NULL, 0, ...)` and other null buffers are unchecked. Functions that may touch fewer bytes than their length (`strncpy`'s source, `strncmp`, `memchr`, `memcmp`) have no bounds.
+[^libc-null]: `snprintf(NULL, 0, ...)` and other null buffers are unchecked. Functions that may touch fewer bytes than their length (`strncpy`'s source, `strncmp`, `memchr`, `memcmp`) have no bounds on that buffer, and `strcpy`, `strcat` and `sprintf` have none because they take no length.

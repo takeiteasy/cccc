@@ -94,6 +94,8 @@ These are forwarded to libc via a private stub bound to the real libc name, not 
 | `__builtin_memcpy(d, s, n)` | `void *` | Equivalent to `memcpy(d, s, n)` |
 | `__builtin_memmove(d, s, n)` | `void *` | Equivalent to `memmove(d, s, n)` |
 | `__builtin_memcmp(a, b, n)` | `int` | Equivalent to `memcmp(a, b, n)` |
+| `__builtin___memcpy_chk(d, s, n, os)` | `void *` | Fortified `memcpy`; aborts when `os` is known and `n > os`. Likewise `mempcpy` (GNU), `memmove`, `memset`, `strcpy`, `stpcpy`, `strncpy`, `stpncpy`, `strcat`, `strncat` |
+| `__builtin___snprintf_chk(s, n, flag, os, fmt, ...)` | `int` | Fortified `snprintf`; `flag` is ignored. Likewise `sprintf`, `vsprintf`, `vsnprintf`, and `strlcpy`, `strlcat`, `memccpy` on Apple |
 
 #### Math Builtins
 

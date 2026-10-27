@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the rest of the `__builtin___*_chk` family, with `__has_builtin` support. Apple's SDK now routes its fortified `memcpy`/`strcpy`/`snprintf` calls to them, so `-D_FORTIFY_SOURCE=0` is not needed to compile programs against it. A size check that fails aborts with `*** buffer overflow detected ***` (exit 134).
+- Added: the VM implements glibc's `__memcpy_chk`, `__read_chk`, `__snprintf_chk`, `__fgets_chk`, `__recv_chk` and related entry points, and the library bounds table covers them, so fortified glibc headers (`-O1 -D_FORTIFY_SOURCE=2`) work under `--checked-pointers`.
+- Added: `-O1` and above define `__OPTIMIZE__`.
+- Added: `__typeof` is accepted as a spelling of `typeof` (glibc's `<sys/cdefs.h>`).
+- Added: library bounds for `strncpy`, `stpncpy`, `strlcpy` and `strlcat` (destination).
+- Fixed: `__builtin_memcpy`, `__builtin_memset` and `__builtin_memmove` are bounds-checked under `--checked-pointers`.
 - Added: a checked flexible array member takes `byte_count(n)`, `bounds(lo, hi)` and `bounds(unknown)` as well as `count(n)`, in `[[cccc::...]]` or `__attribute__((...))` spelling.
 - Fixed: a bit-field store into an `_Nt_checked` terminator slot traps when the value truncated to the field width is non-zero (`b[n].f = 1`).
 - Added: an unchecked local assigned from a plain array (`int *q = buf;`) carries the array's extent into checked targets (`s.p = q`, `sink(q, n)`, `return q`); accesses through the local stay unchecked.

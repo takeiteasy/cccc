@@ -38,6 +38,66 @@ static void *cccc_shim_memmove(void *dst, const void *src, size_t n) {
     return r;
 }
 
+// `__*_chk` entry points behind __builtin___*_chk and fortified headers: fail
+// when the object size `os` is known and the copy would exceed it, then run
+// the plain function.
+static void *chk_memcpy(void *d, const void *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "memcpy");
+    return cccc_shim_memcpy(d, s, n);
+}
+static void *chk_memmove(void *d, const void *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "memmove");
+    return cccc_shim_memmove(d, s, n);
+}
+static void *chk_mempcpy(void *d, const void *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "mempcpy");
+    cccc_shim_memcpy(d, s, n);
+    return (char *)d + n;
+}
+static void *chk_memset(void *d, int c, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "memset");
+    return memset(d, c, n);
+}
+static char *chk_strcpy(char *d, const char *s, size_t os) {
+    CCCC_FORTIFY_CHECK(strlen(s) + 1, os, "strcpy");
+    return strcpy(d, s);
+}
+static char *chk_stpcpy(char *d, const char *s, size_t os) {
+    CCCC_FORTIFY_CHECK(strlen(s) + 1, os, "stpcpy");
+    return stpcpy(d, s);
+}
+static char *chk_strncpy(char *d, const char *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "strncpy");
+    return strncpy(d, s, n);
+}
+static char *chk_stpncpy(char *d, const char *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "stpncpy");
+    return stpncpy(d, s, n);
+}
+static char *chk_strcat(char *d, const char *s, size_t os) {
+    CCCC_FORTIFY_CHECK(strlen(d) + strlen(s) + 1, os, "strcat");
+    return strcat(d, s);
+}
+static char *chk_strncat(char *d, const char *s, size_t n, size_t os) {
+    size_t sl = strlen(s);
+    CCCC_FORTIFY_CHECK(strlen(d) + (sl < n ? sl : n) + 1, os, "strncat");
+    return strncat(d, s, n);
+}
+#ifdef __APPLE__
+static size_t chk_strlcpy(char *d, const char *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "strlcpy");
+    return strlcpy(d, s, n);
+}
+static size_t chk_strlcat(char *d, const char *s, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "strlcat");
+    return strlcat(d, s, n);
+}
+static void *chk_memccpy(void *d, const void *s, int c, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "memccpy");
+    return memccpy(d, s, c, n);
+}
+#endif
+
 // Register all string.h functions
 void register_string_functions(VirtualMachine *vm) {
     // Memory operations
@@ -84,4 +144,21 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "strsignal", (void *)strsignal, 1, 0);
     cc_register_cfunc(vm, "strdup", (void *)strdup, 1, 0);
     cc_register_cfunc(vm, "strndup", (void *)strndup, 2, 0);
+
+    // __builtin___*_chk
+    cc_register_cfunc(vm, "__memcpy_chk", (void *)chk_memcpy, 4, 0);
+    cc_register_cfunc(vm, "__memmove_chk", (void *)chk_memmove, 4, 0);
+    cc_register_cfunc(vm, "__mempcpy_chk", (void *)chk_mempcpy, 4, 0);
+    cc_register_cfunc(vm, "__memset_chk", (void *)chk_memset, 4, 0);
+    cc_register_cfunc(vm, "__strcpy_chk", (void *)chk_strcpy, 3, 0);
+    cc_register_cfunc(vm, "__stpcpy_chk", (void *)chk_stpcpy, 3, 0);
+    cc_register_cfunc(vm, "__strncpy_chk", (void *)chk_strncpy, 4, 0);
+    cc_register_cfunc(vm, "__stpncpy_chk", (void *)chk_stpncpy, 4, 0);
+    cc_register_cfunc(vm, "__strcat_chk", (void *)chk_strcat, 3, 0);
+    cc_register_cfunc(vm, "__strncat_chk", (void *)chk_strncat, 4, 0);
+#ifdef __APPLE__
+    cc_register_cfunc(vm, "__strlcpy_chk", (void *)chk_strlcpy, 4, 0);
+    cc_register_cfunc(vm, "__strlcat_chk", (void *)chk_strlcat, 4, 0);
+    cc_register_cfunc(vm, "__memccpy_chk", (void *)chk_memccpy, 5, 0);
+#endif
 }

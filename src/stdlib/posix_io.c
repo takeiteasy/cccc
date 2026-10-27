@@ -365,11 +365,43 @@ static char ***wrap_environ_ptr(void) {
     return &environ;
 }
 
+// `__*_chk` entry points glibc's fortified <unistd.h> calls: fail when the
+// buffer size is known and the request exceeds it, then run the plain call.
+static long long chk_read(long long fd, long long buf, long long n,
+                          long long buflen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "read");
+    return wrap_read_gil(fd, buf, n);
+}
+static long long chk_pread(long long fd, long long buf, long long n,
+                           long long off, long long buflen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "pread");
+    return wrap_pread_gil(fd, buf, n, off);
+}
+static long long chk_readlink(const char *path, char *buf, long long n,
+                              long long buflen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "readlink");
+    return (long long)readlink(path, buf, (size_t)n);
+}
+static char *chk_getcwd(char *buf, long long n, long long buflen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "getcwd");
+    return getcwd(buf, (size_t)n);
+}
+static long long chk_gethostname(char *buf, long long n, long long nreal) {
+    CCCC_FORTIFY_CHECK(n, nreal, "gethostname");
+    return (long long)gethostname(buf, (size_t)n);
+}
+
 void register_posix_io_functions(VirtualMachine *vm) {
     // Blocking I/O — GIL released while blocked so other VM threads can run
     cc_register_cfunc(vm, "read", (void *)wrap_read_gil, 3, 0);
     cc_register_cfunc(vm, "write", (void *)wrap_write_gil, 3, 0);
     cc_register_cfunc(vm, "pread", (void *)wrap_pread_gil, 4, 0);
+    cc_register_cfunc(vm, "__read_chk", (void *)chk_read, 4, 0);
+    cc_register_cfunc(vm, "__pread_chk", (void *)chk_pread, 5, 0);
+    cc_register_cfunc(vm, "__pread64_chk", (void *)chk_pread, 5, 0);
+    cc_register_cfunc(vm, "__readlink_chk", (void *)chk_readlink, 4, 0);
+    cc_register_cfunc(vm, "__getcwd_chk", (void *)chk_getcwd, 3, 0);
+    cc_register_cfunc(vm, "__gethostname_chk", (void *)chk_gethostname, 3, 0);
     cc_register_cfunc(vm, "pwrite", (void *)wrap_pwrite_gil, 4, 0);
     cc_register_cfunc(vm, "nanosleep", (void *)wrap_nanosleep_gil, 2, 0);
     // readv/writev/preadv/pwritev release the GIL like read/write/pread/pwrite.

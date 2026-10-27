@@ -189,3 +189,76 @@ void test_libc_checked_pointer_arg_oob(void) {
     volatile size_t n                       = 8;
     memcpy(p, b, n);
 }
+
+// ---------------------------------------------------------------------
+// Fortified spellings and builtins keep their bounds.
+// ---------------------------------------------------------------------
+
+[[cccc::test]]
+void test_libc_builtin_chk_in_bounds(void) {
+    char a[8], b[16] = "abc";
+    __builtin___memcpy_chk(a, b, sizeof a, __builtin_object_size(a, 0));
+    __builtin___memset_chk(a, 'x', sizeof a, __builtin_object_size(a, 0));
+    AssertEq(a[7], 'x');
+    __builtin___snprintf_chk(a, sizeof a, 0, __builtin_object_size(a, 0), "%d",
+                             123);
+    AssertEq(strcmp(a, "123"), 0);
+    __builtin___strncpy_chk(a, b, sizeof a, __builtin_object_size(a, 0));
+    AssertEq(strcmp(a, "abc"), 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_chk_memcpy_dest_oob(void) {
+    char            a[8], b[16] = {0};
+    volatile size_t n = 16;
+    __builtin___memcpy_chk(a, b, n, (size_t)-1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_chk_memset_oob(void) {
+    char            a[8];
+    volatile size_t n = 16;
+    __builtin___memset_chk(a, 0, n, (size_t)-1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_chk_snprintf_oob(void) {
+    char            a[8];
+    volatile size_t n = 16;
+    __builtin___snprintf_chk(a, n, 0, (size_t)-1, "%d", 1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_chk_strncpy_dest_oob(void) {
+    char            a[8], b[16] = "abc";
+    volatile size_t n = 16;
+    __builtin___strncpy_chk(a, b, n, (size_t)-1);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_memcpy_oob(void) {
+    char            a[8], b[16] = {0};
+    volatile size_t n = 16;
+    __builtin_memcpy(a, b, n);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_builtin_memset_oob(void) {
+    char            a[8];
+    volatile size_t n = 16;
+    __builtin_memset(a, 0, n);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_libc_strncpy_dest_oob(void) {
+    char            a[8], b[16] = "abc";
+    volatile size_t n = 16;
+    strncpy(a, b, n);
+}
+
+[[cccc::test]]
+void test_libc_strncpy_in_bounds(void) {
+    char a[8], b[16] = "abc";
+    strncpy(a, b, sizeof a);
+    AssertEq(strcmp(a, "abc"), 0);
+}

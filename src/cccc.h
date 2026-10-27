@@ -749,6 +749,7 @@ typedef uint32_t Pc;
 */
 // Rows in the libm_builtins table (src/parse_decl.c).
 #define CCCC_LIBM_BUILTINS 10
+#define CCCC_CHK_BUILTINS  17
 
 typedef enum {
 #define X(NAME, OPERANDS) NAME,
@@ -4596,6 +4597,7 @@ typedef struct Compiler {
     Obj  *builtin_memcmp;     // Builtin memcmp (forwarded to libc, #1144)
     Obj  *builtin_libm[CCCC_LIBM_BUILTINS]
                       [3];    // __builtin_fabs etc.: [row][d,f,l]
+    Obj  *builtin_chk[CCCC_CHK_BUILTINS]; // __builtin___*_chk stubs, lazy
     Obj  *builtin_setjmp;     // Builtin setjmp function
     Obj  *builtin_longjmp;    // Builtin longjmp function
     Obj  *builtin__setjmp;    // Builtin _setjmp (POSIX alias, same semantics as

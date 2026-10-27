@@ -269,7 +269,16 @@ static long long wrap_ppoll_gil(long long fds, long long nfds,
     return (long long)r;
 }
 
+// glibc's fortified FD_SET/FD_CLR/FD_ISSET index through __fdelt_chk.
+static long long chk_fdelt(long long d) {
+    if (d < 0 || d >= FD_SETSIZE)
+        cccc_fortify_fail("FD_SET");
+    return d / (8 * (long long)sizeof(long));
+}
+
 void register_posix_poll_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__fdelt_chk", (void *)chk_fdelt, 1, 0);
+    cc_register_cfunc(vm, "__fdelt_warn", (void *)chk_fdelt, 1, 0);
     cc_register_cfunc(vm, "poll", (void *)wrap_poll_gil, 3, 0);
 #ifdef __linux__
     cc_register_cfunc(vm, "ppoll", (void *)wrap_ppoll_gil, 4, 0);

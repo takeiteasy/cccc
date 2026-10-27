@@ -2822,6 +2822,10 @@ int main(int argc, const char *argv[]) {
         !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
     if (vm.compiler.omp_threaded)
         define_macro(&vm, "__CCCC_OMP_THREADED__", "1");
+    // As GCC/clang: -O1 and above define __OPTIMIZE__, which fortified glibc
+    // headers require before they route calls to __*_chk.
+    if (opt_level > 0)
+        define_macro(&vm, "__OPTIMIZE__", "1");
     vm.compiler.serializes_output =
         (compile_format == COMPILE_NATIVE || dump_expanded_only) &&
         !(testing_mode && testing_backend != TESTING_BACKEND_NATIVE);
@@ -2981,13 +2985,13 @@ int main(int argc, const char *argv[]) {
 
     // Optimisation level. The VM has no bytecode optimiser: -O<n> only has an
     // effect under -c=native, where it is forwarded verbatim to the host cc
-    // (#1159). In plain VM mode it is accepted and ignored; warn once so the
-    // user is not surprised. The warning is suppressed under --testing because
+    // (#1159). In plain VM mode it only defines __OPTIMIZE__; warn once so
+    // the user is not surprised. The warning is suppressed under --testing because
     // a test's CCCC_FLAGS carries -O for the native round-trip leg on purpose.
     if (opt_level != 0 && compile_format != COMPILE_NATIVE && !testing_mode)
         fprintf(stderr,
-                "warning: -O%d has no effect in VM mode (the VM does not "
-                "optimise); use -c=native for host -O\n",
+                "warning: -O%d only defines __OPTIMIZE__ in VM mode (the VM "
+                "does not optimise); use -c=native for host -O\n",
                 opt_level);
     if (macro_recursion_limit >= 0)
         vm.compiler.macro_recursion_limit = macro_recursion_limit;

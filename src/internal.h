@@ -672,6 +672,7 @@ Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
 // Matches __builtin_<libm name>[f|l]; sets *row (table index) and *variant
 // (0 double, 1 float, 2 long double), returns the argument count or 0.
 int libm_builtin_lookup(const char *name, int len, int *row, int *variant);
+bool chk_builtin_known(const char *name, int len);
 // Folds a constant-argument call; false when it must stay a run-time call
 // (domain/range error, signaling NaN).
 bool libm_builtin_fold(int row, int variant, const double *args,
@@ -1686,6 +1687,15 @@ void cccc_signal_poll_handler_returns(VirtualMachine *vm);
 void register_stdio_functions(VirtualMachine *vm);
 void register_stdlib_functions(VirtualMachine *vm);
 void register_string_functions(VirtualMachine *vm);
+
+// Aborts with libc's "buffer overflow detected" message (stdlib/fortify.c).
+// CCCC_FORTIFY_CHECK aborts when an object size is known and `n` exceeds it.
+noreturn void cccc_fortify_fail(const char *fn);
+#define CCCC_FORTIFY_CHECK(n, os, fn)                                          \
+    do {                                                                       \
+        if ((size_t)(os) != (size_t)-1 && (size_t)(n) > (size_t)(os))          \
+            cccc_fortify_fail(fn);                                             \
+    } while (0)
 void register_time_functions(VirtualMachine *vm);
 void register_wide_functions(VirtualMachine *vm);
 void register_wide_bitint_functions(VirtualMachine *vm);

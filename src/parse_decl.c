@@ -1690,8 +1690,152 @@ bool libm_builtin_fold(int row, int variant, const double *a,
     return true;
 }
 
+// `__builtin___X_chk(..., object_size)`: the fortified libc entry points glibc
+// and Apple headers route calls to. Each is a private stub named `__X_chk`
+// (the VM native of that name does the size check), spelled
+// `__builtin___X_chk` by the serializer so a native build gets the host's own
+// fortify. `fmt` is the 1-based format argument of the printf family (0 =
+// none) and `avail` is CHK_ALL, CHK_APPLE (clang-only builtins) or CHK_GNU
+// (GCC/glibc-only ones).
+enum { CHK_ALL, CHK_APPLE, CHK_GNU };
+#define CHK_BUILTINS(X)                                                        \
+    X(memcpy,                                                                  \
+      "void *__memcpy_chk(void *d, const void *s, unsigned long n, "           \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(mempcpy,                                                                 \
+      "void *__mempcpy_chk(void *d, const void *s, unsigned long n, "          \
+      "unsigned long os)",                                                     \
+      0, CHK_GNU)                                                              \
+    X(memmove,                                                                 \
+      "void *__memmove_chk(void *d, const void *s, unsigned long n, "          \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(memset,                                                                  \
+      "void *__memset_chk(void *s, int c, unsigned long n, "                   \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(strcpy, "char *__strcpy_chk(char *d, const char *s, unsigned long os)",  \
+      0, 0)                                                                    \
+    X(stpcpy, "char *__stpcpy_chk(char *d, const char *s, unsigned long os)",  \
+      0, 0)                                                                    \
+    X(strncpy,                                                                 \
+      "char *__strncpy_chk(char *d, const char *s, unsigned long n, "          \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(stpncpy,                                                                 \
+      "char *__stpncpy_chk(char *d, const char *s, unsigned long n, "          \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(strcat, "char *__strcat_chk(char *d, const char *s, unsigned long os)",  \
+      0, 0)                                                                    \
+    X(strncat,                                                                 \
+      "char *__strncat_chk(char *d, const char *s, unsigned long n, "          \
+      "unsigned long os)",                                                     \
+      0, 0)                                                                    \
+    X(sprintf,                                                                 \
+      "int __sprintf_chk(char *s, int flag, unsigned long os, "                \
+      "const char *fmt, ...)",                                                 \
+      4, 0)                                                                    \
+    X(snprintf,                                                                \
+      "int __snprintf_chk(char *s, unsigned long n, int flag, "                \
+      "unsigned long os, const char *fmt, ...)",                               \
+      5, 0)                                                                    \
+    X(vsprintf,                                                                \
+      "int __vsprintf_chk(char *s, int flag, unsigned long os, "               \
+      "const char *fmt, struct __cccc_va_list ap)",                            \
+      0, 0)                                                                    \
+    X(vsnprintf,                                                               \
+      "int __vsnprintf_chk(char *s, unsigned long n, int flag, "               \
+      "unsigned long os, const char *fmt, struct __cccc_va_list "              \
+      "ap)",                                                                   \
+      0, 0)                                                                    \
+    X(strlcpy,                                                                 \
+      "unsigned long __strlcpy_chk(char *d, const char *s, "                   \
+      "unsigned long n, unsigned long os)",                                    \
+      0, CHK_APPLE)                                                            \
+    X(strlcat,                                                                 \
+      "unsigned long __strlcat_chk(char *d, const char *s, "                   \
+      "unsigned long n, unsigned long os)",                                    \
+      0, CHK_APPLE)                                                            \
+    X(memccpy,                                                                 \
+      "void *__memccpy_chk(void *d, const void *s, int c, "                    \
+      "unsigned long n, unsigned long os)",                                    \
+      0, CHK_APPLE)
+
+static const struct {
+    const char *suffix;
+    const char *proto;
+    int         fmt;
+    int         avail;
+} CHK_ROWS[] = {
+#define X(sfx, proto, fmt, avail) {#sfx, proto, fmt, avail},
+    CHK_BUILTINS(X)
+#undef X
+};
+_Static_assert(sizeof CHK_ROWS / sizeof *CHK_ROWS == CCCC_CHK_BUILTINS,
+               "CCCC_CHK_BUILTINS out of sync with CHK_BUILTINS");
+
+static int chk_builtin_row(const char *name, int len) {
+    static const char PREFIX[] = "__builtin___";
+    static const char SUFFIX[] = "_chk";
+    size_t            pl = sizeof PREFIX - 1, sl = sizeof SUFFIX - 1;
+    if ((size_t)len <= pl + sl || strncmp(name, PREFIX, pl) ||
+        strncmp(name + len - sl, SUFFIX, sl))
+        return -1;
+    for (int i = 0; i < CCCC_CHK_BUILTINS; i++) {
+        if (strlen(CHK_ROWS[i].suffix) != len - pl - sl ||
+            strncmp(name + pl, CHK_ROWS[i].suffix, len - pl - sl))
+            continue;
+#ifdef __APPLE__
+        if (CHK_ROWS[i].avail == CHK_GNU)
+            return -1;
+#else
+        if (CHK_ROWS[i].avail == CHK_APPLE)
+            return -1;
+#endif
+        return i;
+    }
+    return -1;
+}
+
+bool chk_builtin_known(const char *name, int len) {
+    return chk_builtin_row(name, len) >= 0;
+}
+
+// The stub for `__builtin___X_chk`, or NULL when `name` is not one.
+Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len) {
+    int row = chk_builtin_row(name, len);
+    if (row < 0)
+        return NULL;
+    if (vm->compiler.builtin_chk[row])
+        return vm->compiler.builtin_chk[row];
+
+    Scope  *saved = vm->compiler.scope;
+    Token  *tok   = tokenize_string(vm, "<builtin-chk>", CHK_ROWS[row].proto);
+    VarAttr attr  = {0};
+    Type   *base  = declspec(vm, &tok, tok, &attr);
+    Type   *ty    = declarator(vm, &tok, tok, base);
+    vm->compiler.scope = saved;
+
+    if (CHK_ROWS[row].fmt) {
+        ty->format_style         = 1;
+        ty->format_string_index  = CHK_ROWS[row].fmt;
+        ty->format_fmt_first_arg = CHK_ROWS[row].fmt + 1;
+    }
+    const char *fn_name =
+        ty->name->loc ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;
+    Obj *stub = new_private_func_obj(vm, fn_name, ty);
+    stub->builtin_spelling =
+        arena_format(vm, "__builtin___%s_chk", CHK_ROWS[row].suffix);
+    apply_checked_libc_builtin_bounds(vm, stub);
+    vm->compiler.builtin_chk[row] = stub;
+    return stub;
+}
+
 static void declare_builtin_functions(VirtualMachine *vm) {
     Obj *prior_globals = vm->compiler.globals;
+    memset(vm->compiler.builtin_chk, 0, sizeof vm->compiler.builtin_chk);
     // alloca(size) -> void*
     Type *ty                    = func_type(vm, pointer_to(vm, ty_void));
     ty->params                  = copy_type(vm, ty_int);
@@ -1761,6 +1905,9 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     memcmp_ty->params->next->base->is_const = true;
     memcmp_ty->params->next->next           = copy_type(vm, ty_long);
     vm->compiler.builtin_memcmp = new_private_func_obj(vm, "memcmp", memcmp_ty);
+    apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_memset);
+    apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_memcpy);
+    apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_memmove);
 
     // __builtin_fabs/sqrt/... forward to the libm function of the same name
     // (private stub, spelled __builtin_* by the serializer).

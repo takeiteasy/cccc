@@ -43,7 +43,10 @@ Other points:
 | Only pointer parameters with neither a kind nor bounds are filled | A program's annotation wins. Return values are never filled |
 | Parameter count must match the row | A same-named function of another shape is skipped silently |
 | The merge reports no conflict | The table is a default, not a declaration |
+| A row is found by name, then by `asm_label` | `__read_chk_warn` (labelled `__read_chk`) and `pread` (`pread64`) share a row |
 | `Obj.checked_libc_mask` records the filled parameters | A later declaration that spells bounds for one of them clears it and takes over, where a plain redeclaration would be a conflict |
+
+`apply_checked_libc_builtin_bounds()` is the same lookup without the system-header gate, for the private stubs: `__builtin_memcpy`/`memset`/`memmove` and the `__builtin___*_chk` family (`chk_builtin_stub()`, `src/parse_decl.c`, one stub named `__X_chk` per builtin, created on first use). `parse_postfix.c` parses their arguments and builds the call with `new_call()`, so arity, conversions, format checks and checked-pointer verification run as for a written call. The `__*_chk` rows of the table also reach the real glibc and Darwin declarations of those names. In the VM the stub resolves to a `__X_chk` native (`string.c`, `stdio.c`, `posix_io.c`, `posix_net.c`) that compares the count with the object size and calls `cccc_fortify_fail()` (`stdlib/fortify.c`); `-c=native` spells the stub `__builtin___X_chk` (`builtin_spelling`) for the host.
 
 `compute_checked_bounds()` (`src/parse_checked.c`) wraps each integer product in a bound, written or the implicit `count * sizeof`, as `(dynamic_check(a == 0 || b <= ULONG_MAX / a), a * b)` (`checked_guard_mul()`). The operands are pure and cloned for the check, and `-c=native` lowers the check with `__cccc_chkdc` like any `dynamic_check`. This covers the `fread`/`fwrite` rows' `size * nmemb`.
 

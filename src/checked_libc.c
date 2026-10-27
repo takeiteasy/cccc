@@ -9,6 +9,11 @@
 // A pointer gets byte_count(n) only when the function may touch all n bytes,
 // the rule glibc's _FORTIFY_SOURCE uses. strncpy's source, strncmp, memchr,
 // memcmp and strncat's destination stop early or extend past n, so have no row.
+//
+// The `__*_chk` rows cover the fortified entry points (the `__builtin___*_chk`
+// stubs, and glibc/Darwin declarations of the same name): the object-size
+// argument is not a bound, the count is. They are matched by name, then by
+// asm label (`__read_chk_warn` is labelled `__read_chk`, `pread` `pread64`).
 #define BC(n) "[[cccc::array, cccc::byte_count(" n ")]]"
 
 static const struct {
@@ -23,6 +28,17 @@ static const struct {
                     "n") " s, "
                          "unsigned long n)"},
     {"memset", "void *memset(void *" BC("n") " s, int c, unsigned long n)"},
+    {"mempcpy", "void *mempcpy(void *" BC("n") " d, const void *" BC(
+                    "n") " s, "
+                         "unsigned long n)"},
+    {"strncpy", "char *strncpy(char *" BC("n") " d, const char *s, "
+                                               "unsigned long n)"},
+    {"stpncpy", "char *stpncpy(char *" BC("n") " d, const char *s, "
+                                               "unsigned long n)"},
+    {"strlcpy", "unsigned long strlcpy(char *" BC("n") " d, const char *s, "
+                                                       "unsigned long n)"},
+    {"strlcat", "unsigned long strlcat(char *" BC("n") " d, const char *s, "
+                                                       "unsigned long n)"},
 
     // stdio.h
     {"fread",
@@ -49,6 +65,8 @@ static const struct {
      "long pwrite(int fd, const void *" BC("n") " buf, "
                                                 "unsigned long n, long off)"},
     {"getcwd", "char *getcwd(char *" BC("n") " buf, unsigned long n)"},
+    {"pread64", "long pread64(int fd, void *" BC("n") " buf, unsigned long n, "
+                                                      "long off)"},
     {"readlink",
      "long readlink(const char *path, char *" BC("n") " buf, "
                                                       "unsigned long n)"},
@@ -67,31 +85,122 @@ static const struct {
      "long sendto(int fd, const void *" BC(
          "n") " buf, "
               "unsigned long n, int flags, const void *addr, unsigned alen)"},
+
+    // Fortified entry points. `os` / `buflen` / `nreal` are object sizes.
+    {"__memcpy_chk", "void *__memcpy_chk(void *" BC("n") " d, const void *" BC(
+                         "n") " s, "
+                              "unsigned long n, unsigned long os)"},
+    {"__memmove_chk", "void *__memmove_chk(void *" BC(
+                          "n") " d, const void *" BC("n") " s, "
+                                                          "unsigned long n, "
+                                                          "unsigned long os)"},
+    {"__mempcpy_chk", "void *__mempcpy_chk(void *" BC(
+                          "n") " d, const void *" BC("n") " s, "
+                                                          "unsigned long n, "
+                                                          "unsigned long os)"},
+    {"__memset_chk", "void *__memset_chk(void *" BC("n") " s, int c, "
+                                                         "unsigned long n, "
+                                                         "unsigned long os)"},
+    {"__strncpy_chk",
+     "char *__strncpy_chk(char *" BC("n") " d, const char *s, "
+                                          "unsigned long n, unsigned long os)"},
+    {"__stpncpy_chk",
+     "char *__stpncpy_chk(char *" BC("n") " d, const char *s, "
+                                          "unsigned long n, unsigned long os)"},
+    {"__strlcpy_chk", "unsigned long __strlcpy_chk(char *" BC(
+                          "n") " d, const char *s, "
+                               "unsigned long n, unsigned long os)"},
+    {"__strlcat_chk", "unsigned long __strlcat_chk(char *" BC(
+                          "n") " d, const char *s, "
+                               "unsigned long n, unsigned long os)"},
+    {"__snprintf_chk",
+     "int __snprintf_chk(char *" BC("n") " s, unsigned long n, int flag, "
+                                         "unsigned long os, const char *fmt, "
+                                         "...)"},
+    {"__vsnprintf_chk",
+     "int __vsnprintf_chk(char *" BC("n") " s, unsigned long n, int flag, "
+                                          "unsigned long os, const char *fmt, "
+                                          "void *ap)"},
+    {"__fgets_chk", "char *__fgets_chk(char *" BC(
+                        "n") " s, unsigned long size, int n, void *f)"},
+    {"__fread_chk",
+     "unsigned long __fread_chk(void *" BC("size * nmemb") " p, "
+                                                           "unsigned long "
+                                                           "plen, unsigned "
+                                                           "long size, "
+                                                           "unsigned long "
+                                                           "nmemb, void *f)"},
+    {"__read_chk",
+     "long __read_chk(int fd, void *" BC("n") " buf, unsigned long n, "
+                                              "unsigned long buflen)"},
+    {"__pread_chk", "long __pread_chk(int fd, void *" BC(
+                        "n") " buf, unsigned long n, "
+                             "long off, unsigned long buflen)"},
+    {"__pread64_chk", "long __pread64_chk(int fd, void *" BC(
+                          "n") " buf, unsigned long n, "
+                               "long off, unsigned long buflen)"},
+    {"__readlink_chk", "long __readlink_chk(const char *path, char *" BC(
+                           "n") " buf, "
+                                "unsigned long n, unsigned long buflen)"},
+    {"__getcwd_chk", "char *__getcwd_chk(char *" BC(
+                         "n") " buf, unsigned long n, unsigned long buflen)"},
+    {"__gethostname_chk",
+     "int __gethostname_chk(char *" BC("n") " name, unsigned long n, "
+                                            "unsigned long nreal)"},
+    {"__recv_chk", "long __recv_chk(int fd, void *" BC(
+                       "n") " buf, unsigned long n, "
+                            "unsigned long buflen, int flags)"},
+    {"__recvfrom_chk",
+     "long __recvfrom_chk(int fd, void *" BC(
+         "n") " buf, unsigned long n, unsigned long buflen, int flags, "
+              "void *addr, void *alen)"},
 };
+
+static int find_row(const char *name) {
+    if (!name)
+        return -1;
+    for (size_t i = 0; i < sizeof ROWS / sizeof *ROWS; i++)
+        if (!strcmp(name, ROWS[i].name))
+            return (int)i;
+    return -1;
+}
+
+static void apply_row(VirtualMachine *vm, Obj *fn, int row) {
+    Token  *tok    = tokenize_string(vm, "<checked-libc>", ROWS[row].proto);
+    VarAttr attr   = {0};
+    Type   *base   = declspec(vm, &tok, tok, &attr);
+    Type   *ty     = declarator(vm, &tok, tok, base);
+    Type   *before = fn->ty;
+    merge_checked_interface_defaults(vm, fn, ty);
+    if (fn->ty == before)
+        return;
+    int idx = 0;
+    for (Type *o = before->params, *m = fn->ty->params; o && m;
+         o = o->next, m = m->next, idx++)
+        if (o->checked_bounds_form == CB_NONE &&
+            m->checked_bounds_form != CB_NONE)
+            fn->checked_libc_mask |= 1u << idx;
+}
+
+static void apply_by_name_or_label(VirtualMachine *vm, Obj *fn) {
+    int row = find_row(fn->name);
+    if (row < 0)
+        row = find_row(fn->asm_label);
+    if (row >= 0)
+        apply_row(vm, fn, row);
+}
 
 void apply_checked_libc_bounds(VirtualMachine *vm, Obj *fn, Token *decl_tok) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS) || fn->is_static || !decl_tok ||
         !decl_tok->file || !decl_tok->file->is_system_header ||
         vm->compiler.in_type_lookahead)
         return;
+    apply_by_name_or_label(vm, fn);
+}
 
-    for (size_t i = 0; i < sizeof ROWS / sizeof *ROWS; i++) {
-        if (strcmp(fn->name, ROWS[i].name))
-            continue;
-        Token  *tok    = tokenize_string(vm, "<checked-libc>", ROWS[i].proto);
-        VarAttr attr   = {0};
-        Type   *base   = declspec(vm, &tok, tok, &attr);
-        Type   *ty     = declarator(vm, &tok, tok, base);
-        Type   *before = fn->ty;
-        merge_checked_interface_defaults(vm, fn, ty);
-        if (fn->ty == before)
-            return;
-        int idx = 0;
-        for (Type *o = before->params, *m = fn->ty->params; o && m;
-             o = o->next, m = m->next, idx++)
-            if (o->checked_bounds_form == CB_NONE &&
-                m->checked_bounds_form != CB_NONE)
-                fn->checked_libc_mask |= 1u << idx;
+// For a private builtin stub, which has no declaration token to gate on.
+void apply_checked_libc_builtin_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || vm->compiler.in_type_lookahead)
         return;
-    }
+    apply_by_name_or_label(vm, fn);
 }

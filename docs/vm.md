@@ -231,8 +231,8 @@ The VM is the runtime for compile-time macro bodies and for VM-only workflows (t
 
 **VM execution speed is an explicit non-goal.** There is no bytecode
 optimiser: the VM compiles C to bytecode and interprets it at `-O0`
-equivalent. `-O<n>` is accepted but only has an effect under `-c=native`,
-where it is forwarded to the host cc. A few always-on lowerings keep
+equivalent. `-O<n>` optimises only under `-c=native`, where it is forwarded
+to the host cc; in the VM it just defines `__OPTIMIZE__` (`-O1` and above). A few always-on lowerings keep
 the interpreter honest rather than fast:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.

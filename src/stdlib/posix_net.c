@@ -727,10 +727,26 @@ static long long wrap_freeaddrinfo(long long res) {
     return 0;
 }
 
+// glibc's fortified <sys/socket.h> calls `__recv_chk` / `__recvfrom_chk` with
+// the buffer size before `flags`.
+static long long chk_recv(long long fd, long long buf, long long n,
+                          long long buflen, long long flags) {
+    CCCC_FORTIFY_CHECK(n, buflen, "recv");
+    return wrap_recv_gil(fd, buf, n, flags);
+}
+static long long chk_recvfrom(long long fd, long long buf, long long n,
+                              long long buflen, long long flags, long long addr,
+                              long long alen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "recvfrom");
+    return wrap_recvfrom_gil(fd, buf, n, flags, addr, alen);
+}
+
 void register_posix_net_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "accept", (void *)wrap_accept_gil, 3, 0);
     cc_register_cfunc(vm, "connect", (void *)wrap_connect_gil, 3, 0);
     cc_register_cfunc(vm, "recv", (void *)wrap_recv_gil, 4, 0);
+    cc_register_cfunc(vm, "__recv_chk", (void *)chk_recv, 5, 0);
+    cc_register_cfunc(vm, "__recvfrom_chk", (void *)chk_recvfrom, 7, 0);
     cc_register_cfunc(vm, "send", (void *)wrap_send_gil, 4, 0);
     cc_register_cfunc(vm, "recvfrom", (void *)wrap_recvfrom_gil, 6, 0);
     cc_register_cfunc(vm, "sendto", (void *)wrap_sendto_gil, 6, 0);

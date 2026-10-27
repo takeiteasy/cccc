@@ -3857,32 +3857,26 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // #1144: __builtin_memset/memcpy/memmove/memcmp -> forward to libc, same
     // pattern as __builtin_strlen/__builtin_strcmp above (a private stub Obj,
     // not in global scope, so this doesn't need -- or conflict with -- the
-    // user's own <string.h> declaration on the VM path).
-    if (equal(tok, "__builtin_memset") || equal(tok, "__builtin_memcpy") ||
-        equal(tok, "__builtin_memmove") || equal(tok, "__builtin_memcmp")) {
-        Obj *fn = equal(tok, "__builtin_memset")   ? vm->compiler.builtin_memset
-                  : equal(tok, "__builtin_memcpy") ? vm->compiler.builtin_memcpy
-                  : equal(tok, "__builtin_memmove")
-                      ? vm->compiler.builtin_memmove
-                      : vm->compiler.builtin_memcmp;
-        tok     = skip(vm, tok->next, "(");
-        Node *a = assign(vm, &tok, tok);
-        tok     = skip(vm, tok, ",");
-        Node *b = assign(vm, &tok, tok);
-        tok     = skip(vm, tok, ",");
-        Node *c = assign(vm, &tok, tok);
-        *rest   = skip(vm, tok, ")");
-        Node *node =
-            new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, a->tok), a->tok);
-        node->func_ty = fn->ty;
-        node->ty      = fn->ty->return_ty;
-        node->args    = a;
-        a->next       = b;
-        b->next       = c;
-        add_type(vm, a);
-        add_type(vm, b);
-        add_type(vm, c);
-        return node;
+    // user's own <string.h> declaration on the VM path). Built as an ordinary
+    // call, so checked-pointer bounds apply as they do to the libc function.
+    //
+    // `__builtin___X_chk(..., object_size)` takes the same route, through the
+    // `__X_chk` stub of chk_builtin_stub().
+    Obj *fwd = NULL;
+    if (equal(tok, "__builtin_memset"))
+        fwd = vm->compiler.builtin_memset;
+    else if (equal(tok, "__builtin_memcpy"))
+        fwd = vm->compiler.builtin_memcpy;
+    else if (equal(tok, "__builtin_memmove"))
+        fwd = vm->compiler.builtin_memmove;
+    else if (equal(tok, "__builtin_memcmp"))
+        fwd = vm->compiler.builtin_memcmp;
+    else if (tok->kind == TK_IDENT)
+        fwd = chk_builtin_stub(vm, tok->loc, tok->len);
+    if (fwd) {
+        Token *name_tok = tok;
+        return funcall(vm, rest, skip(vm, tok->next, "("),
+                       new_var_node(vm, fwd, name_tok), NULL);
     }
 
     // __builtin_fabs/sqrt/floor/... (+ f/l): forward to libm like the mem*

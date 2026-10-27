@@ -23,12 +23,24 @@ Macros advertising what CCCC does not implement stay undefined, whatever `--comp
 | `defined(...)` or `__has_*(...)` produced by a macro expansion (macOS `<pthread.h>`, `<secure/_string.h>`) | Recognised wherever it lands in the `#if` expression |
 | An unrecognised `__has_*` operator (`__has_declspec_attribute`, `__has_warning`) | Evaluates to 0 with a `-Wcpp` warning naming it ([attributes.md](attributes-feature-tests.md)) |
 | Host header named like a CCCC one (SDK `Availability.h`) | Replayed as a host header; only a file whose bytes equal CCCC's copy counts as CCCC's own |
-| Apple's fortified `strcpy`/`memcpy` (`__builtin___*_chk`) | Pass `-D_FORTIFY_SOURCE=0` |
+| Fortified `strcpy`/`memcpy`/`snprintf` (`__builtin___*_chk`, `__read_chk`) | Supported; see [Fortified headers](#fortified-headers) |
 | `-c=native` with a real `<unistd.h>` using fixed-width names | `#include <stdint.h>` is added automatically when nothing includes it |
 | `--sysroot` on Debian/Ubuntu multiarch | Also adds `<path>/usr/include/<arch>-linux-gnu`. A bare `-i` does not: supply the triplet directory yourself |
 | `__asm__("name")` before `__attribute__(...)` (glibc `__REDIRECT_NTH`) | Parsed in either order |
 | `va_list` | One type whether `<stdio.h>` or `<stdarg.h>` comes first |
 | Legacy BSD calls (`bcmp`, `bzero`, `index`, `getpagesize`) | Hidden under the predefined `_POSIX_C_SOURCE=200809L`; declare them or `-U_POSIX_C_SOURCE` |
+
+## Fortified headers
+
+Apple's SDK fortifies the string and stdio calls with `_FORTIFY_SOURCE` by default. glibc does so when the program is optimised: `-O1` or above (CCCC defines `__OPTIMIZE__` there, as GCC does) together with `-D_FORTIFY_SOURCE=2`.
+
+```sh
+cccc --sysroot / --use-system-headers -O1 -D_FORTIFY_SOURCE=2 -c=native prog.c
+```
+
+The fortified spellings `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the other `__builtin___*_chk` builtins are built in, and `__has_builtin` reports them. A call that exceeds a known object size aborts with `*** buffer overflow detected ***` (SIGABRT, exit 134), as libc's does. Under `-c=native` the host compiler applies its own fortify. With `--checked-pointers` the [library bounds](safety-checked-interfaces.md#standard-library-calls) apply to the fortified spellings as to the plain ones, and trap first (exit 255).[^fortify]
+
+[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Fortified wide-character, `syslog` and `inet` wrappers are not registered; calling one reports `undefined function`.
 
 ## Pragmas
 

@@ -555,6 +555,8 @@ void resolve_checked_template_bounds(VirtualMachine *vm, Obj **params,
                                      int self_idx, Node **out_lo,
                                      Node **out_hi);
 void apply_checked_libc_bounds(VirtualMachine *vm, Obj *fn, Token *decl_tok);
+void apply_checked_libc_builtin_bounds(VirtualMachine *vm, Obj *fn);
+Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len);
 void resolve_objsize_queries(VirtualMachine *vm, Node *body);
 Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
                                 Token *tok);
