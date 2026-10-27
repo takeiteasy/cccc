@@ -476,19 +476,79 @@ static Node *plain_array_lvalue(Node *n) {
     return NULL;
 }
 
-// The array variable or member a chain of rows (`m[i][j]`) is part of.
-static Node *plain_array_whole(Node *lv) {
-    while (lv && lv->kind == ND_DEREF)
-        lv = plain_array_lvalue(lv->lhs);
-    return lv;
+static Type *checked_plain_array_root(Node *rhs, CheckedBase *out);
+
+// True if `n` names an object of declared size: a struct or union variable,
+// members of one, or an element of a declared array of them, with no pointer
+// in the way.
+static bool checked_obj_complete(Node *n) {
+    while (n) {
+        if (n->kind == ND_MEMBER) {
+            n = n->lhs;
+        } else if (n->kind == ND_DEREF) {
+            Node *arr = plain_array_lvalue(n->lhs);
+            return arr && arr->ty && arr->ty->kind == TY_ARRAY &&
+                   checked_plain_array_root(arr, &(CheckedBase){0});
+        } else {
+            return n->kind == ND_VAR && n->var->ty &&
+                   (n->var->ty->kind == TY_STRUCT ||
+                    n->var->ty->kind == TY_UNION);
+        }
+    }
+    return false;
 }
 
-// True if `n` names a struct object of declared size: a struct variable, or
-// members of one, with no pointer in the way.
-static bool checked_obj_complete(Node *n) {
-    while (n && n->kind == ND_MEMBER)
-        n = n->lhs;
-    return n && n->kind == ND_VAR && n->var->ty->kind == TY_STRUCT;
+// `elem` (an element or row of the array lvalue `arr`) lies inside `arr`.
+static Node *plain_array_step_ok(VirtualMachine *vm, Node *elem, Node *arr,
+                                 Token *tok) {
+    Type *cp   = pointer_to(vm, ty_char);
+    Node *addr = new_unary(vm, ND_ADDR, clone_bounds_node(vm, elem), tok);
+    add_type(vm, addr);
+    Node *elo = new_cast(vm, addr, cp);
+    add_type(vm, elo);
+    Node *ehi = new_binary(vm, ND_ADD, clone_bounds_node(vm, elo),
+                           new_long(vm, elem->ty->size, tok), tok);
+    add_type(vm, ehi);
+    Node *a = arr->kind == ND_VAR ? new_var_node(vm, arr->var, tok)
+                                  : clone_bounds_node(vm, arr);
+    add_type(vm, a);
+    Node *alo = new_cast(vm, checked_array_decay(vm, a, tok), cp);
+    add_type(vm, alo);
+    Node *ahi = new_binary(vm, ND_ADD, clone_bounds_node(vm, alo),
+                           new_long(vm, arr->ty->size, tok), tok);
+    add_type(vm, ahi);
+    Node *lo_ok = new_binary(vm, ND_LE, alo, clone_bounds_node(vm, elo), tok);
+    Node *hi_ok = new_binary(vm, ND_LE, ehi, ahi, tok);
+    Node *ok    = new_binary(vm, ND_LOGAND, lo_ok, hi_ok, tok);
+    add_type(vm, ok);
+    return ok;
+}
+
+// The condition under which every element or row on the way from `obj` to its
+// declared array lies inside the array it indexes, or NULL when there is none.
+// Each step is checked against its own array, so `arr[0].m[5]` is out of `m`
+// even though it is inside `arr`.
+static Node *plain_array_guard(VirtualMachine *vm, Node *obj, Token *tok) {
+    Node *guard = NULL;
+    for (Node *cur = obj; cur;) {
+        Node *e = cur;
+        while (e && e->kind == ND_MEMBER)
+            e = e->lhs;
+        if (!e || e->kind != ND_DEREF)
+            break;
+        Node *arr = plain_array_lvalue(e->lhs);
+        if (!arr || !arr->ty || arr->ty->kind != TY_ARRAY)
+            break;
+        Node *ok = plain_array_step_ok(vm, e, arr, tok);
+        if (guard) {
+            guard = new_binary(vm, ND_LOGAND, guard, ok, tok);
+            add_type(vm, guard);
+        } else {
+            guard = ok;
+        }
+        cur = arr;
+    }
+    return guard;
 }
 
 // A plain array object with a known extent as a source for a checked target:
@@ -513,16 +573,21 @@ static Type *checked_plain_array_root(Node *rhs, CheckedBase *out) {
             base.var = lv->var;
             ty       = lv->var->ty;
             break;
-        case ND_MEMBER:
+        case ND_MEMBER: {
             base.mem = lv->member;
             base.obj = lv->lhs;
             ty       = lv->member->ty;
-            if (lv->member->is_bitfield || !base.obj->ty ||
-                base.obj->ty->kind != TY_STRUCT ||
-                !checked_obj_is_trivial(base.obj) ||
-                (!lv->member->next && !checked_obj_complete(base.obj)))
+            Type *oty = base.obj->ty;
+            // The last member of a struct, and any member of a union, may be
+            // a stand-in for a longer array when reached through a pointer.
+            bool tail = !lv->member->next || (oty && oty->kind == TY_UNION);
+            if (lv->member->is_bitfield || !oty ||
+                (oty->kind != TY_STRUCT && oty->kind != TY_UNION) ||
+                node_has_side_effects(base.obj) ||
+                (tail && !checked_obj_complete(base.obj)))
                 return NULL;
             break;
+        }
         default: {
             ty = lv->ty;
             if (node_has_side_effects(lv) ||
@@ -563,27 +628,14 @@ static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
     Node *hi = new_binary(vm, ND_ADD, clone_bounds_node(vm, lo),
                           new_long(vm, ty->size, tok), tok);
     add_type(vm, hi);
-    if (base.row) {
-        // A row outside the array it indexes (`m[i]` with `i` out of range)
-        // has the empty range [lo, lo), which no non-empty target satisfies.
-        CheckedBase whole_base;
-        Node       *whole = plain_array_whole(base.obj);
-        Type       *wty   = checked_plain_array_root(whole, &whole_base);
-        Node       *warr  = whole->kind == ND_VAR
-                                ? new_var_node(vm, whole->var, tok)
-                                : clone_bounds_node(vm, whole);
-        add_type(vm, warr);
-        Node *wlo = checked_array_decay(vm, warr, tok);
-        Node *whi = new_binary(vm, ND_ADD, clone_bounds_node(vm, wlo),
-                               new_long(vm, wty->size, tok), tok);
-        add_type(vm, whi);
-        Node *lo_ok = new_binary(vm, ND_LE, wlo, clone_bounds_node(vm, lo), tok);
-        Node *hi_ok = new_binary(vm, ND_LE, clone_bounds_node(vm, hi), whi, tok);
-        Node *inside = new_binary(vm, ND_LOGAND, lo_ok, hi_ok, tok);
-        Node *cond   = new_node(vm, ND_COND, tok);
-        cond->cond   = inside;
-        cond->then   = hi;
-        cond->els    = clone_bounds_node(vm, lo);
+    // An element or row outside the array it indexes has the empty range
+    // [lo, lo), which no non-empty target satisfies.
+    Node *inside = plain_array_guard(vm, base.obj, tok);
+    if (inside) {
+        Node *cond = new_node(vm, ND_COND, tok);
+        cond->cond = inside;
+        cond->then = hi;
+        cond->els  = clone_bounds_node(vm, lo);
         add_type(vm, cond);
         hi = cond;
     }
@@ -3226,6 +3278,19 @@ static void group_move_stamp(VirtualMachine *vm, Obj *fn, Node *from,
     group_wrap_leaf(vm, after, carrier);
 }
 
+typedef struct {
+    Node **v;
+    int    n, cap;
+} GroupLeaves;
+
+static void group_push(GroupLeaves *g, Node *leaf) {
+    if (g->n == g->cap) {
+        g->cap = g->cap ? g->cap * 2 : 16;
+        g->v   = realloc(g->v, (size_t)g->cap * sizeof(Node *));
+    }
+    g->v[g->n++] = leaf;
+}
+
 // An anchor kept for tracking after its group run: the stamp's expressions are
 // remembered before group_move_stamp() takes them off the leaf.
 typedef struct {
@@ -3342,19 +3407,6 @@ static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
     }
 }
 
-typedef struct {
-    Node **v;
-    int    n, cap;
-} GroupLeaves;
-
-static void group_push(GroupLeaves *g, Node *leaf) {
-    if (g->n == g->cap) {
-        g->cap = g->cap ? g->cap * 2 : 16;
-        g->v   = realloc(g->v, (size_t)g->cap * sizeof(Node *));
-    }
-    g->v[g->n++] = leaf;
-}
-
 // The spine of a comma chain, in evaluation order.
 static void group_flatten(Node *e, GroupLeaves *g) {
     if (e && e->kind == ND_COMMA) {
@@ -3395,7 +3447,8 @@ static Node *group_peel_discarded(VirtualMachine *vm, Node *e) {
 // pointer or to a variable its object expression reads, a label, and (for an
 // object that is not a private local) any call or indirect store. A nested
 // statement is entered only when none of it ends tracking. A write whose value
-// is used (`if ((s.n = f()))`) is not rechecked.
+// is used (`if ((s.n = f()))`) is rechecked when the rest of its expression
+// does not end tracking.
 
 typedef enum { TV_SKIP, TV_RECHECK, TV_STOP } TrackVerdict;
 
@@ -3435,6 +3488,8 @@ typedef struct {
     GroupTemp    temps[8];
     int          ntemps;
     Obj         *cg;
+    GroupLeaves  unit; // value-used sibling writes found in the current unit
+    GroupLeaves  held; // those of a nested statement, wrapped if it stays live
 } TrackCtx;
 
 static void track_addr_add(TrackFn *tf, Obj *root, Obj *via, Node *target) {
@@ -3712,6 +3767,8 @@ static TrackVerdict track_assign(Node *n, TrackCtx *cx, bool top) {
                                : (group_target_has(at, NULL, wm) && at->mem &&
                                   !node_has_side_effects(wo) &&
                                   nodes_structurally_equal(cx->obj, wo));
+    if (sibling && !top)
+        group_push(&cx->unit, n);
     return sibling && top ? TV_RECHECK : TV_SKIP;
 }
 
@@ -3756,15 +3813,17 @@ static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
     return call_like && !cx->priv ? TV_STOP : TV_SKIP;
 }
 
-static void track_wrap(VirtualMachine *vm, Obj *fn, Node *leaf, TrackCtx *cx) {
+// A `__cg = 0` stamped like the anchor's own assignment; one `__cg` serves all
+// of an anchor's carriers.
+static Node *track_carrier(VirtualMachine *vm, Obj *fn, Token *tok,
+                           TrackCtx *cx) {
     TrackAnchor *a = cx->a;
     if (!cx->cg)
         cx->cg = new_checked_prop_temp(vm, fn, ty_int);
-    Node *lhs = new_var_node(vm, cx->cg, leaf->tok);
+    Node *lhs = new_var_node(vm, cx->cg, tok);
     add_type(vm, lhs);
-    Node *carrier =
-        new_binary(vm, ND_ASSIGN, lhs,
-                   new_cast(vm, new_long(vm, 0, leaf->tok), ty_int), leaf->tok);
+    Node *carrier = new_binary(vm, ND_ASSIGN, lhs,
+                               new_cast(vm, new_long(vm, 0, tok), ty_int), tok);
     add_type(vm, carrier);
     carrier->checked_assign_dst_lo = clone_bounds_node(vm, a->dst_lo);
     carrier->checked_assign_dst_hi = clone_bounds_node(vm, a->dst_hi);
@@ -3772,7 +3831,50 @@ static void track_wrap(VirtualMachine *vm, Obj *fn, Node *leaf, TrackCtx *cx) {
         clone_bounds_node(vm, a->dst_obj_init);
     carrier->checked_assign_src_lo = clone_bounds_node(vm, a->src_lo);
     carrier->checked_assign_src_hi = clone_bounds_node(vm, a->src_hi);
-    group_wrap_leaf(vm, leaf, carrier);
+    return carrier;
+}
+
+static void track_wrap(VirtualMachine *vm, Obj *fn, Node *leaf, TrackCtx *cx) {
+    group_wrap_leaf(vm, leaf, track_carrier(vm, fn, leaf->tok, cx));
+}
+
+// A write whose value is used becomes `(__v = write, carrier, __v)`.
+static void track_wrap_value(VirtualMachine *vm, Obj *fn, Node *w,
+                             TrackCtx *cx) {
+    if (!w->ty || !is_integer(w->ty))
+        return;
+    Obj  *v    = new_checked_prop_temp(vm, fn, w->ty);
+    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    *copy      = *w;
+    copy->next = NULL;
+    Node *dst  = new_var_node(vm, v, w->tok);
+    add_type(vm, dst);
+    Node *store = new_binary(vm, ND_ASSIGN, dst, copy, w->tok);
+    add_type(vm, store);
+    Node *checked =
+        new_binary(vm, ND_COMMA, store, track_carrier(vm, fn, w->tok, cx),
+                   w->tok);
+    add_type(vm, checked);
+    Node *read = new_var_node(vm, v, w->tok);
+    add_type(vm, read);
+    Node *value = new_binary(vm, ND_COMMA, checked, read, w->tok);
+    add_type(vm, value);
+    Node *saved = w->next;
+    *w          = *value;
+    w->next     = saved;
+}
+
+// Finishes a unit: its value-used writes are wrapped now, or held for the
+// statement they are in. Nothing is wrapped when the unit ended tracking.
+static void track_unit_done(VirtualMachine *vm, Obj *fn, TrackCtx *cx,
+                            bool live) {
+    for (int i = 0; live && i < cx->unit.n; i++) {
+        if (cx->immediate)
+            track_wrap_value(vm, fn, cx->unit.v[i], cx);
+        else
+            group_push(&cx->held, cx->unit.v[i]);
+    }
+    cx->unit.n = 0;
 }
 
 // An expression statement's leaves, or a condition/value as one unit.
@@ -3780,19 +3882,24 @@ static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
                        TrackCtx *cx, GroupLeaves *wraps) {
     if (!e)
         return true;
-    if (!discarded)
-        return track_node(e, cx, false) != TV_STOP;
+    if (!discarded) {
+        cx->unit.n = 0;
+        bool live  = track_node(e, cx, false) != TV_STOP;
+        track_unit_done(vm, fn, cx, live);
+        return live;
+    }
     GroupLeaves g = {0};
     group_flatten(group_peel_discarded(vm, e), &g);
     bool ok = true;
     for (int i = 0; ok && i < g.n; i++) {
+        cx->unit.n     = 0;
         TrackVerdict v = track_node(g.v[i], cx, true);
-        if (v == TV_STOP)
-            ok = false;
-        else if (v == TV_RECHECK && cx->immediate)
+        ok             = v != TV_STOP;
+        if (v == TV_RECHECK && cx->immediate)
             track_wrap(vm, fn, g.v[i], cx);
         else if (v == TV_RECHECK)
             group_push(wraps, g.v[i]);
+        track_unit_done(vm, fn, cx, ok);
     }
     free(g.v);
     return ok;
@@ -3841,7 +3948,7 @@ static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx,
 // Tracks each anchor of a stream through the rest of its leaves, then through
 // the statements from `next_stmt` on.
 // TODO: a count written where no pointer store is visible stays unchecked;
-// a run-time extent check on the write would cover it (#1823).
+// a run-time extent check on the write would cover it (#1825).
 static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
                           Node **leaves, int n, TrackAnchors *as,
                           Node *next_stmt) {
@@ -3858,22 +3965,29 @@ static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
         TrackCtx cx;
         if (!track_ctx_init(&cx, &as->v[k], tf))
             continue;
-        bool live = true;
+        bool live    = true;
+        cx.immediate = true;
         for (int j = as->v[k].resume; live && j < n; j++) {
+            cx.unit.n      = 0;
             TrackVerdict v = track_node(leaves[j], &cx, true);
-            if (v == TV_STOP)
-                live = false;
-            else if (v == TV_RECHECK)
+            live           = v != TV_STOP;
+            if (v == TV_RECHECK)
                 track_wrap(vm, fn, leaves[j], &cx);
+            track_unit_done(vm, fn, &cx, live);
         }
         for (Node *s = next_stmt; live && s; s = s->next) {
             wraps.n      = 0;
+            cx.held.n    = 0;
             cx.immediate = s->kind == ND_EXPR_STMT ||
                            (s->kind == ND_BLOCK && s->is_decl_group);
             live         = track_stmt(vm, fn, s, &cx, &wraps);
             for (int w = 0; live && w < wraps.n; w++)
                 track_wrap(vm, fn, wraps.v[w], &cx);
+            for (int w = 0; live && w < cx.held.n; w++)
+                track_wrap_value(vm, fn, cx.held.v[w], &cx);
         }
+        free(cx.unit.v);
+        free(cx.held.v);
     }
     free(wraps.v);
 }

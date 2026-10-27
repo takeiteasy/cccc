@@ -14,6 +14,10 @@
 // CCCC_EXPECT_STDOUT: groupok=42
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*tracktrap=255
 // CCCC_EXPECT_STDOUT: trackok=42
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*trackvalue=255
+// CCCC_EXPECT_STDOUT: trackvalueok=42
+// CCCC_EXPECT_STDOUT: CHECKED BOUNDS VIOLATION[\s\S]*elementmember=255
+// CCCC_EXPECT_STDOUT: CHECKED BOUNDS VIOLATION[\s\S]*unionmember=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainarray=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainelem=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainrow=255
@@ -187,6 +191,60 @@ int build_main(Builder *ctx) {
          "    note();\n"
          "    s.n = 2;\n"
          "    s.n = 1;\n"
+         "    return 42;\n"
+         "}\n"},
+        {"trackvalue",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "static void note(void) {}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    note();\n"
+         "    if ((s.n = 8)) {\n"
+         "    }\n"
+         "    return 42;\n"
+         "}\n"},
+        {"trackvalueok",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "static void note(void) {}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    note();\n"
+         "    int x = (s.n = 2);\n"
+         "    return x == 2 ? 42 : 1;\n"
+         "}\n"},
+        {"elementmember",
+         "struct H {\n"
+         "    int data[4];\n"
+         "};\n"
+         "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+         "    (void)p;\n"
+         "}\n"
+         "int main(int argc, char **argv) {\n"
+         "    struct H arr[3] = {0};\n"
+         "    sink(arr[argc].data, 100);\n"
+         "    return 42;\n"
+         "}\n"},
+        {"unionmember",
+         "union U {\n"
+         "    int a[2];\n"
+         "    char b[8];\n"
+         "};\n"
+         "void sink(int *[[cccc::array, cccc::count(n)]] p, int n) {\n"
+         "    (void)p;\n"
+         "}\n"
+         "int main(void) {\n"
+         "    union U u = {0};\n"
+         "    sink(u.a, 100);\n"
          "    return 42;\n"
          "}\n"},
         {"plainarray", "int buf[2];\n"

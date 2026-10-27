@@ -51,9 +51,9 @@ The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidde
 
 ## Plain array sources
 
-`checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate. `plain_array_lvalue()` finds the array-typed lvalue through `+`, `-`, casts and `&x[i]` (`ND_ADDR` of `ND_DEREF`); the root is then a complete `TY_ARRAY` variable (a string literal is one), a non-bit-field array member of a struct reached through a trivial object expression, or a row (`ND_DEREF` of array type) whose address leads back to such a root. The last member needs `checked_obj_complete()`: a chain of members ending at a struct variable, never a pointer, because through a pointer it may stand in for a flexible array. `find_checked_base()` is not widened: it feeds `set_checked_deref_bounds()`, and rooting plain rows there would check every ordinary `m[i][j]`.
+`checked_plain_array_root()` (`src/parse_checked.c`) is the pure predicate. `plain_array_lvalue()` finds the array-typed lvalue through `+`, `-`, casts and `&x[i]` (`ND_ADDR` of `ND_DEREF`); the root is then a complete `TY_ARRAY` variable (a string literal is one), a non-bit-field array member of a struct or union whose object expression has no side effects, or a row (`ND_DEREF` of array type) whose address leads back to such a root. The last member of a struct and every member of a union need `checked_obj_complete()`: a chain of members and elements of declared arrays ending at a struct or union variable, never a pointer, because through a pointer they may stand in for a longer array. `find_checked_base()` is not widened: it feeds `set_checked_deref_bounds()`, and rooting plain rows there would check every ordinary `m[i][j]`.
 
-`checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`. For a row the high bound is `lo` when the row is not inside `plain_array_whole()` (`ND_COND`), an empty range.
+`checked_plain_array_source()` builds the bounds `[decay(arr), decay(arr) + size)`. The high bound is `lo` (`ND_COND`), an empty range, unless `plain_array_guard()` holds: it walks the object from the source outwards and conjoins `plain_array_step_ok()` for each element or row, which must lie inside the declared array it indexes. Each step is checked against its own array, not the outermost one.
 
 | Consumer | Change |
 |---|---|
@@ -96,6 +96,8 @@ With at least one sibling write, `group_move_stamp()` moves each anchor's five `
 | `TV_SKIP` | Everything else |
 
 `track_wrap()` appends a carrier `__cg = 0` after the write, stamped with clones of the anchor's destination bounds and its source-snapshot reads (`clone_bounds_node()`). The carrier takes the write's token and one `__cg` serves all of an anchor's carriers. Group runs treat a carrier as transparent (`track_is_carrier()`), and `track_unwrap()` sees through the comma a group carrier made.
+
+A sibling write that is not a discarded leaf is a value-used write: `track_assign()` collects it in `TrackCtx.unit`, and `track_unit_done()` wraps the unit's writes only if nothing in the unit ended tracking. `track_wrap_value()` rewrites the write in place to `(__v = write, carrier, __v)` with a fresh temp per write.
 
 A nested statement is classified whole by `track_stmt()` into a list of writes to wrap; the list is applied only when no node in it ended tracking, so a loop is entered or skipped as a unit. Straight-line expression statements wrap as they go.
 

@@ -133,8 +133,10 @@ sink(buf, 8);                                    // traps against sink's paramet
 |---|---|
 | A local or global array, a string literal, `buf + 1`, `&buf[i]` | Yes |
 | A member array of a struct object (`h.data`, including the last member) | Yes |
+| A member array of an element of an array of structs or unions (`arr[k].data`, including the last member) | Yes: the member, or nothing when an index is outside the array it indexes[^row] |
+| A member array of a union object (`u.a`) | Yes |
 | A row of a multidimensional array (`m[i]`) | Yes: the row, or nothing when `i` is outside `m`[^row] |
-| The last member through a pointer (`hp->data`), a variable-length array, an array parameter (a pointer) | No[^tail] |
+| The last member of a struct or a member of a union through a pointer (`hp->tail`, `up->a`, `ps[k].tail`), a variable-length array, an array parameter (a pointer) | No[^tail] |
 | `int *q = buf;` then `p = q`, `sink(q, n)` or `return q` | Yes: `q` carries `buf`'s extent into checked targets[^plain] |
 | `int *q = buf;` followed by `q[i]` | No: derefs through an unchecked local stay unchecked |
 
@@ -183,7 +185,18 @@ Tracking ends at:
 | A label, `case`, `switch` or statement-expression | `again: s.n = 8;` |
 | A nested statement containing any of the above | `if (c) { s.p = other; }` |
 
-Not checked: a count written in a function that did not store the pointer, past the events above, or inside a value that is used (`if ((s.n = f()))`) ([#1823](https://todo.sr.ht/~takeiteasy/cccc/1823)).
+A write whose value is used is rechecked too, and keeps its value:
+
+```c
+s.p = small;
+log();
+if ((s.n = 8)) {}   // traps here
+int x = (s.n = 2);  // x == 2
+```
+
+The recheck applies when nothing else in the same expression ends tracking (`(s.n = 8) + (s.p = other, 0)` is not rechecked).
+
+Not checked: a count written in a function that did not store the pointer, or past the events above ([#1825](https://todo.sr.ht/~takeiteasy/cccc/1825)).
 
 ### Constant initializers
 
@@ -286,9 +299,9 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^plain]: The extent flows through the local like any [propagated bounds](safety-checked-propagation.md#plain-arrays), but only checked targets (declarations, assignments, arguments, returns and casts) read it. A local that also holds a checked pointer is verified against the array on the paths that stored it. On a path that holds a pointer from elsewhere (`if (c) q = malloc(n);`) it is not verified.
 
-[^row]: The range is the row itself, so `&m[0][1]` covers three elements and flattening a matrix into one checked pointer (`sink(m[0], 12)`) traps. A runtime row index outside the array gives an empty range.
+[^row]: Each element or row is checked against the array it indexes, so `o[0].m[5]` is empty when `m` has fewer than six elements even though it lies inside `o`. The range is the row itself, so `&m[0][1]` covers three elements and flattening a matrix into one checked pointer (`sink(m[0], 12)`) traps. A runtime row index outside the array gives an empty range.
 
-[^tail]: Through a pointer a trailing array may stand in for a flexible array member of an over-allocated object, so its declared size is not the object's.
+[^tail]: Through a pointer a trailing array, or any member of a union, may stand in for a longer array in an over-allocated object, so its declared size is not the object's.
 [^track]: Rechecks read the source range the pointer store snapshotted, so a narrowing write passes and a widening one traps at the write. An object that is not a private local (a global, `ps->p`, a local whose address is passed on) ends tracking at the first call, since the callee could replace the pointer.
 [^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).

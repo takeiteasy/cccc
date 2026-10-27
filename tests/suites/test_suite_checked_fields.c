@@ -26,6 +26,36 @@ struct Holder {
     int tail[4];
 };
 
+struct Inner {
+    int d[2];
+    int t[2];
+};
+
+struct Outer {
+    int          pad[2];
+    struct Inner m[3];
+};
+
+struct VolCount {
+    volatile unsigned char n;
+    int *[[cccc::array, cccc::count(n)]] p;
+};
+
+struct WideCount {
+    unsigned long n;
+    int *[[cccc::array, cccc::count(n)]] p;
+};
+
+union Words {
+    int  a[2];
+    char b[8];
+};
+
+union Wrap {
+    struct Holder h;
+    int           w[16];
+};
+
 static int  g_buf[4];
 static int  g_dummy;
 static char g_text[] = "abc";
@@ -388,6 +418,171 @@ later:
 }
 
 // ---------------------------------------------------------------------
+// A count written inside a value that is used.
+// ---------------------------------------------------------------------
+
+static int widen_returned(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    return s.n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_condition_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    if ((s.n = 8)) {
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_assigned_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          x                             = 0;
+    s.p                                        = small;
+    note();
+    x = (s.n = 8);
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_initializer_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    int x = (s.n = 8);
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_return_trap(void) {
+    (void)widen_returned();
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_compound_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    if ((s.n += 6)) {
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_postfix_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          x                             = 0;
+    s.p                                        = small;
+    note();
+    s.n = 2;
+    x   = s.n++;
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_loop_condition_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    while ((s.n = 8)) {
+        break;
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_for_condition_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    for (; (s.n = 8);)
+        break;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_nested_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          x                             = 0;
+    s.p                                        = small;
+    note();
+    if (small) {
+        x = (s.n = 8);
+    }
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_volatile_count_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct VolCount v                          = {0};
+    int          x                             = 0;
+    v.p                                        = small;
+    note();
+    x = (v.n = 8);
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_wide_count_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct WideCount w                         = {0};
+    w.p                                        = small;
+    note();
+    if ((w.n = 8)) {
+    }
+}
+
+[[cccc::test]]
+void test_track_value_is_preserved(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    struct VolCount v                          = {0};
+    s.p                                        = small;
+    v.p                                        = small;
+    note();
+    int x = (s.n = 2);
+    int y = (v.n = 1);
+    AssertEq(x, 2);
+    AssertEq(y, 1);
+    AssertEq(s.n, 2);
+}
+
+[[cccc::test]]
+void test_track_value_short_circuit_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          off                           = 0;
+    s.p                                        = small;
+    note();
+    if (off && (s.n = 8)) {
+    }
+    AssertEq(s.n, 0);
+}
+
+[[cccc::test]]
+void test_track_value_pointer_write_ends_tracking_passes(void) {
+    int *[[cccc::array, cccc::count(8)]] big   = eight();
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    s.p                                        = big;
+    note();
+    if ((s.n = 8)) {
+    }
+    AssertEq(s.n, 8);
+}
+
+// ---------------------------------------------------------------------
 // Plain arrays as sources.
 // ---------------------------------------------------------------------
 
@@ -505,6 +700,115 @@ void test_plain_array_row_trap(void) {
     int m[3][4];
     int *[[cccc::array, cccc::count(8)]] p = m[1];
     (void)p;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_element_member_trap(void) {
+    struct Holder arr[3] = {0};
+    sink(arr[0].data, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_element_member_runtime_index_trap(void) {
+    struct Holder arr[3] = {0};
+    int           k      = 1;
+    sink(arr[k].data, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_element_trailing_member_trap(void) {
+    struct Holder arr[3] = {0};
+    int           k      = 2;
+    sink(arr[k].tail, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_element_index_out_of_range_is_empty(void) {
+    struct Holder arr[3] = {0};
+    int           k      = 5;
+    sink(arr[k].data, 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_nested_element_member_trap(void) {
+    struct Outer o[2] = {0};
+    int          k    = 1;
+    sink(o[k].m[1].d, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_inner_index_out_of_range_is_empty(void) {
+    struct Outer o[2] = {0};
+    int          k    = 0;
+    sink(o[k].m[5].d, 2);
+}
+
+[[cccc::test]]
+void test_plain_array_element_member_exact_fit_passes(void) {
+    struct Holder arr[3] = {0};
+    struct Outer  o[2]   = {0};
+    int           k      = 2;
+    sink(arr[k].data, 4);
+    sink(arr[k].tail, 4);
+    sink(o[1].m[2].d, 2);
+}
+
+[[cccc::test]]
+void test_plain_array_element_member_through_pointer(void) {
+    struct Holder  arr[3] = {0};
+    struct Holder *ps     = arr;
+    int            k      = 1;
+    sink(ps[k].tail, 100);
+}
+
+[[cccc::test]]
+void test_plain_array_element_member_carry_is_snapshotted(void) {
+    struct Holder arr[3] = {0};
+    int           k      = 1;
+    int          *q      = arr[k].data;
+    k                    = 7;
+    sink(q, 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_element_member_carry_trap(void) {
+    struct Holder arr[3] = {0};
+    int           k      = 1;
+    int          *q      = arr[k].data;
+    k                    = 7;
+    sink(q, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_union_member_trap(void) {
+    union Words u = {0};
+    sink(u.a, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_union_element_member_trap(void) {
+    union Words ua[2] = {0};
+    int         k     = 1;
+    sink(ua[k].a, 100);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_array_union_nested_tail_trap(void) {
+    union Wrap uh = {0};
+    sink(uh.h.tail, 100);
+}
+
+[[cccc::test]]
+void test_plain_array_union_member_exact_fit_passes(void) {
+    union Words u = {0};
+    sink(u.a, 2);
+}
+
+[[cccc::test]]
+void test_plain_array_union_member_through_pointer_is_not_a_source(void) {
+    union Words  u  = {0};
+    union Words *up = &u;
+    sink(up->a, 100);
 }
 
 [[cccc::test]]
