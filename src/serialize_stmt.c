@@ -229,6 +229,15 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             }
             if (is_noop_expr(node->lhs))
                 break;
+            if (node->var && node->var->vla_extent_impure) {
+                print_indent_level(f, indent);
+                serialize_discard_expr(f, vm, ctx, node->lhs, 0);
+                fprintf(f, ";\n");
+                print_indent_level(f, indent);
+                serialize_type_decl(f, ctx, node->var->ty, node->var->name);
+                fprintf(f, " = __cccc_p_%s;\n", node->var->name);
+                break;
+            }
             // #964: `v = alloca(tmp)` is declaration()'s lowering of a VLA
             // local
             // -- re-emitting it literally would diverge from VM semantics

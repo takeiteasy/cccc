@@ -1951,7 +1951,8 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
     }
 
     if (ty->kind == TY_PTR && !ctx->name_proto_params &&
-        ctx->proto_depth == 0 && type_has_proto_vla(ty)) {
+        ctx->proto_depth == 0 &&
+        (type_has_proto_vla(ty) || type_vla_extent_impure(ty))) {
         fprintf(f, "void *%s", name ? name : "");
         return;
     }

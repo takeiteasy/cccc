@@ -228,10 +228,15 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             if (!first)
                 fprintf(df, ", ");
             first = false;
+            // An extent with side effects is evaluated once, in the body
+            // (serialize_stmt declares the real parameter there), so the
+            // host does not run it again for the declarator.
+            if (param->vla_extent_impure) {
+                fprintf(df, "void *__cccc_p_%s", param->name);
+                continue;
+            }
             // A length naming an earlier parameter is spelled from the
             // prototype's own type: by name in a definition, `*` elsewhere.
-            // TODO: the host evaluates a definition's lengths again on entry,
-            // so a length with side effects runs twice (#1821)
             if (proto_param && type_has_proto_vla(proto_param) &&
                 proto_param->name && param->name &&
                 proto_param->name->len == (int)strlen(param->name) &&

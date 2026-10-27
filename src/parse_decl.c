@@ -157,10 +157,12 @@ static Node *param_vla_init_stmts(VirtualMachine *vm, Obj *params) {
     for (Obj *p = params; p; p = p->next) {
         if (!p->is_param || !type_contains_vla(p->ty))
             continue;
-        p->ty = rebind_param_vla(vm, p->ty);
-        cur   = cur->next =
+        p->vla_extent_impure = type_vla_extent_impure(p->ty);
+        p->ty                = rebind_param_vla(vm, p->ty);
+        cur                  = cur->next =
             new_unary(vm, ND_EXPR_STMT,
                       compute_vla_size(vm, p->ty, p->ty->name), p->ty->name);
+        cur->var = p;
         add_type(vm, cur);
     }
     return head.next;

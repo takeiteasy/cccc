@@ -10,6 +10,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: any dimension of a variable-length checked array may vary (`_Checked[3][n]`, `_Checked[m][n]`), as a local, a parameter or behind a row pointer; each is checked against its own length.
 - Fixed: a function parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`) no longer crashes the compiler when subscripted; its lengths are evaluated once on entry.
 - Fixed: `-c=native` spells a parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`): `[*]` in prototypes, the parameter names in the definition, and `void *` at call sites.
+- Fixed: `-c=native` evaluates a parameter extent with side effects (`int (*a)[g()]`) once per call, as the VM does.
 - Fixed: `-c=native` declares a checked pointer to a variable-length row (`int (*p)[n] = a;`) before its bounds are used.
 - Fixed: a call is bounds-checked when a bound names a struct, union or floating parameter, for both an argument bound and a checked-return call.
 - Fixed: a call is bounds-checked when a checked pointer argument that another parameter's bound names has side effects, or comes before the pointer that names it (`sink(pk, small)` with `count(*p)`).

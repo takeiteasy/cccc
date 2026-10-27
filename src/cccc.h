@@ -2664,6 +2664,9 @@ struct Obj {
     bool is_param; // true if this is a function parameter
     bool is_proto_param; // prototype-scope stand-in for a parameter named in a
                          // later parameter's array length
+    bool vla_extent_impure; // param whose pointee extent has side effects:
+                            // -c=native takes it as `void *` and declares it
+                            // after the entry-time size statements
     bool is_captured; // true if accessed by a nested function (for optimization
                       // hints)
     struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit

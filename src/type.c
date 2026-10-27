@@ -717,6 +717,36 @@ bool type_contains_vla(Type *ty) {
     return false;
 }
 
+static bool node_has_side_effect(Node *n, int depth) {
+    if (!n || depth > 32)
+        return false;
+    switch (n->kind) {
+        case ND_FUNCALL:
+        case ND_ASSIGN:
+        case ND_STMT_EXPR:
+        case ND_CAS:
+        case ND_EXCH:
+        case ND_ASTORE:
+            return true;
+        default:
+            break;
+    }
+    return node_has_side_effect(n->lhs, depth + 1) ||
+           node_has_side_effect(n->rhs, depth + 1) ||
+           node_has_side_effect(n->cond, depth + 1) ||
+           node_has_side_effect(n->then, depth + 1) ||
+           node_has_side_effect(n->els, depth + 1);
+}
+
+// True when evaluating a VLA extent in `ty` could be observed (a call, a
+// store).
+bool type_vla_extent_impure(Type *ty) {
+    for (Type *t = ty; t; t = t->base)
+        if (t->kind == TY_VLA && node_has_side_effect(t->vla_len, 0))
+            return true;
+    return false;
+}
+
 Type *enum_type(VirtualMachine *vm) {
     return new_type(vm, TY_ENUM, 4, 4); // enums are int-sized (4 bytes)
 }
