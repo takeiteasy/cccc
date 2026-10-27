@@ -2931,11 +2931,60 @@ static void group_move_stamp(VirtualMachine *vm, Obj *fn, Node *from,
     group_wrap_leaf(vm, after, carrier);
 }
 
+// An anchor kept for tracking after its group run: the stamp's expressions are
+// remembered before group_move_stamp() takes them off the leaf.
+typedef struct {
+    GroupTarget at;
+    Node       *leaf;
+    Node       *dst_lo, *dst_hi, *dst_obj_init, *src_lo, *src_hi;
+    int         resume; // first leaf the group run does not cover
+} TrackAnchor;
+
+typedef struct {
+    TrackAnchor *v;
+    int          n, cap;
+} TrackAnchors;
+
+static void track_note(TrackAnchors *t, int idx, Node *leaf,
+                       const GroupTarget *at) {
+    if (t->n == t->cap) {
+        t->cap = t->cap ? t->cap * 2 : 4;
+        t->v   = realloc(t->v, (size_t)t->cap * sizeof(TrackAnchor));
+    }
+    t->v[t->n++] =
+        (TrackAnchor){.at           = *at,
+                      .leaf         = leaf,
+                      .dst_lo       = leaf->checked_assign_dst_lo,
+                      .dst_hi       = leaf->checked_assign_dst_hi,
+                      .dst_obj_init = leaf->checked_assign_dst_obj_init,
+                      .src_lo       = leaf->checked_assign_src_lo,
+                      .src_hi       = leaf->checked_assign_src_hi,
+                      .resume       = idx + 1};
+}
+
+static void track_set_resume(TrackAnchors *t, Node *leaf, int resume) {
+    for (int k = 0; k < t->n; k++)
+        if (t->v[k].leaf == leaf)
+            t->v[k].resume = resume;
+}
+
+// A `__cg = 0` carrying a checked-assignment stamp, from a group or a recheck.
+static bool track_is_carrier(Node *n) {
+    return n && n->kind == ND_ASSIGN && group_is_temp(n->lhs) &&
+           n->checked_assign_dst_lo;
+}
+
 // `n` leaves in evaluation order; the last `protect_last` ones never take a
-// carrier (the value of an expression-level comma chain).
+// carrier (the value of an expression-level comma chain). `tracks`, when
+// given, receives every anchor of the stream.
 static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
-                          int protect_last) {
+                          int protect_last, TrackAnchors *tracks) {
     int limit = n - protect_last;
+    for (int i = 0; tracks && i < limit; i++) {
+        GroupTarget t;
+        if (group_anchor_target(leaves[i], &t))
+            track_note(tracks, i, leaves[i], &t);
+    }
     for (int i = 0; i < limit; i++) {
         GroupTarget at;
         if (!group_anchor_target(leaves[i], &at))
@@ -2957,6 +3006,8 @@ static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
                 joined[njoined++] = l;
                 continue;
             }
+            if (track_is_carrier(l))
+                continue;
             if (l->checked_assign_dst_lo)
                 break;
             if (group_is_temp(l->lhs)) {
@@ -2981,6 +3032,12 @@ static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
                 break;
             last        = j;
             last_joined = njoined;
+        }
+        if (tracks) {
+            int resume = last >= 0 ? last + 1 : i + 1;
+            track_set_resume(tracks, leaves[i], resume);
+            for (int k = 0; k < last_joined; k++)
+                track_set_resume(tracks, joined[k], resume);
         }
         if (last < 0)
             continue;
@@ -3029,69 +3086,580 @@ static Node *group_peel_discarded(VirtualMachine *vm, Node *e) {
     }
 }
 
-static void group_stream_add(VirtualMachine *vm, Obj *fn, Node *s,
+// ---------------------------------------------------------------------------
+// Tracked rechecks.
+//
+// The group run ends at the first statement that is not a sibling write. The
+// pointer keeps the value the anchor stored, though, so each later write to a
+// sibling of the same object is checked against the anchor's source snapshot
+// (`__slo`/`__shi`, read before the pointer store) with a recheck carrier
+// stamped like the anchor's own.
+//
+// Tracking runs forward through the anchor's block and ends at anything that
+// could change the pointer, or which object it lives in: a write to the
+// pointer or to a variable its object expression reads, a label, and (for an
+// object that is not a private local) any call or indirect store. A nested
+// statement is entered only when none of it ends tracking. A write whose value
+// is used (`if ((s.n = f()))`) is not rechecked.
+
+typedef enum { TV_SKIP, TV_RECHECK, TV_STOP } TrackVerdict;
+
+// A variable whose address is taken. `via` is the local pointer the address
+// initialises when the form is `via = &target`.
+typedef struct {
+    Obj  *root;
+    Obj  *via;
+    Node *target;
+} AddrRoot;
+
+// A local pointer's stores, and whether it is used other than as `*q`.
+typedef struct {
+    Obj *ptr;
+    int  stores;
+    bool leaked;
+} PtrUse;
+
+// What one function's body says about its locals' addresses.
+typedef struct {
+    AddrRoot *addrs;
+    int       naddrs, caddrs;
+    PtrUse   *ptrs;
+    int       nptrs, cptrs;
+    bool      scanned;
+    bool      disabled; // block literals and indirect gotos: nothing is tracked
+} TrackFn;
+
+typedef struct {
+    TrackAnchor *a;
+    TrackFn     *tf;
+    Node        *obj;       // the anchor's object, seen through a must-alias
+    bool         priv;      // nothing but the function's own code reaches it
+    bool         immediate; // wrap rechecks as found, not after the statement
+    Obj         *objvars[8];
+    int          nobjvars;
+    GroupTemp    temps[8];
+    int          ntemps;
+    Obj         *cg;
+} TrackCtx;
+
+static void track_addr_add(TrackFn *tf, Obj *root, Obj *via, Node *target) {
+    if (tf->naddrs == tf->caddrs) {
+        tf->caddrs = tf->caddrs ? tf->caddrs * 2 : 8;
+        tf->addrs  = realloc(tf->addrs, (size_t)tf->caddrs * sizeof(AddrRoot));
+    }
+    tf->addrs[tf->naddrs++] = (AddrRoot){root, via, target};
+}
+
+static bool track_tracked_ptr(Obj *v) {
+    return v && v->is_local && !v->is_static && !v->is_param && v->name &&
+           v->name[0] && v->ty && v->ty->kind == TY_PTR;
+}
+
+static PtrUse *track_ptr(TrackFn *tf, Obj *v) {
+    for (int i = 0; i < tf->nptrs; i++)
+        if (tf->ptrs[i].ptr == v)
+            return &tf->ptrs[i];
+    if (tf->nptrs == tf->cptrs) {
+        tf->cptrs = tf->cptrs ? tf->cptrs * 2 : 8;
+        tf->ptrs  = realloc(tf->ptrs, (size_t)tf->cptrs * sizeof(PtrUse));
+    }
+    tf->ptrs[tf->nptrs] = (PtrUse){.ptr = v};
+    return &tf->ptrs[tf->nptrs++];
+}
+
+// The variable an lvalue or address expression is rooted at.
+static Obj *track_root_var(Node *n) {
+    while (n) {
+        switch (n->kind) {
+            case ND_VAR:
+                return n->var;
+            case ND_MEMBER:
+            case ND_DEREF:
+            case ND_CAST:
+            case ND_ADD:
+            case ND_SUB:
+                n = n->lhs;
+                break;
+            default:
+                return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void track_scan_one(Node *n, TrackFn *tf);
+
+static void track_scan_list(Node *n, TrackFn *tf) {
+    for (; n; n = n->next)
+        track_scan_one(n, tf);
+}
+
+// Every `&x` and every array that decays outside `a[i]` exposes its root to
+// writes the tracker cannot see. The `tmp = &x` a compound assignment hoists
+// is not one: the tracker resolves it. A local pointer whose only store is
+// `q = &x` and which is used only as `*q` / `q->f` is a must-alias of `x`.
+static void track_scan_one(Node *n, TrackFn *tf) {
+    if (!n)
+        return;
+    switch (n->kind) {
+        case ND_BLOCK_LITERAL:
+        case ND_BLOCK_CALL:
+        case ND_GOTO_EXPR:
+        case ND_LABEL_VAL:
+            tf->disabled = true;
+            break;
+        case ND_ADDR: {
+            Obj *r = track_root_var(n->lhs);
+            if (r)
+                track_addr_add(tf, r, NULL, NULL);
+            if (track_tracked_ptr(r))
+                track_ptr(tf, r)->leaked = true; // `&q->f` exposes the pointee
+            break;
+        }
+        case ND_VAR:
+            if (n->var && n->var->ty && n->var->ty->kind == TY_ARRAY)
+                track_addr_add(tf, n->var, NULL, NULL);
+            else if (track_tracked_ptr(n->var))
+                track_ptr(tf, n->var)->leaked = true;
+            return;
+        case ND_DEREF: {
+            Node *b = n->lhs;
+            if (b && b->kind == ND_VAR && track_tracked_ptr(b->var))
+                return;
+            while (b && (b->kind == ND_ADD || b->kind == ND_SUB ||
+                         b->kind == ND_CAST)) {
+                track_scan_one(b->rhs, tf);
+                b = b->lhs;
+            }
+            if (!(b && b->kind == ND_VAR && b->var && b->var->ty &&
+                  b->var->ty->kind == TY_ARRAY))
+                track_scan_one(b, tf);
+            return;
+        }
+        case ND_ASSIGN: {
+            Node *r    = group_peel_casts(n->rhs);
+            bool  addr = r && r->kind == ND_ADDR;
+            if (addr && group_is_temp(n->lhs)) {
+                track_scan_one(r->lhs, tf);
+                return;
+            }
+            if (n->lhs && n->lhs->kind == ND_VAR &&
+                track_tracked_ptr(n->lhs->var)) {
+                track_ptr(tf, n->lhs->var)->stores++;
+                if (addr) {
+                    Obj *root = track_root_var(r->lhs);
+                    if (root)
+                        track_addr_add(tf, root, n->lhs->var, r->lhs);
+                    if (track_tracked_ptr(root))
+                        track_ptr(tf, root)->leaked = true;
+                    track_scan_one(r->lhs, tf);
+                } else {
+                    track_scan_one(n->rhs, tf);
+                }
+                return;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    track_scan_one(n->lhs, tf);
+    track_scan_one(n->rhs, tf);
+    track_scan_one(n->cond, tf);
+    track_scan_one(n->then, tf);
+    track_scan_one(n->els, tf);
+    track_scan_one(n->init, tf);
+    track_scan_one(n->inc, tf);
+    track_scan_list(n->body, tf);
+    track_scan_list(n->args, tf);
+}
+
+// What `*q` is, when q is a must-alias; NULL otherwise.
+static Node *track_alias_target(TrackFn *tf, Obj *q) {
+    if (!track_tracked_ptr(q))
+        return NULL;
+    PtrUse *u = track_ptr(tf, q);
+    if (u->stores != 1 || u->leaked)
+        return NULL;
+    Node *target = NULL;
+    for (int i = 0; i < tf->naddrs; i++) {
+        if (tf->addrs[i].root == q)
+            return NULL;
+        if (tf->addrs[i].via == q)
+            target = tf->addrs[i].target;
+    }
+    return target && !node_has_side_effects(target) ? target : NULL;
+}
+
+// `o` with `*q` replaced by what the must-alias q points at.
+static Node *track_alias_object(TrackFn *tf, Node *o) {
+    if (o && o->kind == ND_DEREF && o->lhs && o->lhs->kind == ND_VAR) {
+        Node *x = track_alias_target(tf, o->lhs->var);
+        if (x)
+            return x;
+    }
+    return o;
+}
+
+static bool track_collect_vars(Node *n, TrackCtx *cx) {
+    if (!n)
+        return true;
+    if (n->kind == ND_VAR && n->var) {
+        if (cx->nobjvars == 8)
+            return false;
+        cx->objvars[cx->nobjvars++] = n->var;
+        return true;
+    }
+    return track_collect_vars(n->lhs, cx) && track_collect_vars(n->rhs, cx) &&
+           track_collect_vars(n->cond, cx) && track_collect_vars(n->then, cx) &&
+           track_collect_vars(n->els, cx);
+}
+
+// Reached only through its own function: no address is taken, except to
+// initialise a must-alias.
+static bool track_var_private(Obj *v, TrackFn *tf) {
+    if (!(v && v->is_local && !v->is_static))
+        return false;
+    for (int i = 0; i < tf->naddrs; i++)
+        if (tf->addrs[i].root == v &&
+            !(tf->addrs[i].via && track_alias_target(tf, tf->addrs[i].via)))
+            return false;
+    return true;
+}
+
+static bool track_ctx_init(TrackCtx *cx, TrackAnchor *a, TrackFn *tf) {
+    memset(cx, 0, sizeof(*cx));
+    cx->a  = a;
+    cx->tf = tf;
+    if (a->at.var) {
+        cx->priv = track_var_private(a->at.var, tf);
+        return true;
+    }
+    cx->obj = track_alias_object(tf, a->at.obj);
+    if (!track_collect_vars(a->at.obj, cx) ||
+        (cx->obj != a->at.obj && !track_collect_vars(cx->obj, cx)))
+        return false;
+    Obj *root = track_root_var(cx->obj);
+    cx->priv  = root && root->ty &&
+                (root->ty->kind == TY_STRUCT || root->ty->kind == TY_UNION ||
+                 root->ty->kind == TY_ARRAY) &&
+                track_var_private(root, tf);
+    return true;
+}
+
+static Node *track_unwrap(Node *n) {
+    while (n && n->kind == ND_COMMA && track_is_carrier(n->rhs))
+        n = n->lhs;
+    return n;
+}
+
+// A write that replaces the pointer, or moves the object it lives in.
+static bool track_write_hits(const TrackCtx *cx, Obj *wv, Member *wm) {
+    if (wv) {
+        if (wv == cx->a->at.var)
+            return true;
+        for (int i = 0; i < cx->nobjvars; i++)
+            if (cx->objvars[i] == wv)
+                return true;
+    }
+    return wm && wm == cx->a->at.mem;
+}
+
+static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top);
+
+// A store through `*q` (or the `*tmp` of a compound assignment on it) for a
+// must-alias q: the write to the variable or member q points at.
+static bool track_alias_write(TrackCtx *cx, Node *l, Obj **wv, Member **wm,
+                              Node **wo) {
+    if (l && l->kind == ND_DEREF && group_is_temp(l->lhs))
+        l = group_temp_object(cx->temps, cx->ntemps, l->lhs);
+    Node *x = track_alias_object(cx->tf, l);
+    if (!x || x == l)
+        return false;
+    *wv = NULL;
+    *wm = NULL;
+    *wo = NULL;
+    if (x->kind == ND_VAR) {
+        *wv = x->var;
+        return true;
+    }
+    if (x->kind == ND_MEMBER && x->lhs) {
+        *wm = x->member;
+        *wo = x->lhs;
+        return true;
+    }
+    return false;
+}
+
+static TrackVerdict track_assign(Node *n, TrackCtx *cx, bool top) {
+    if (track_node(n->rhs, cx, false) == TV_STOP ||
+        track_node(n->lhs, cx, false) == TV_STOP)
+        return TV_STOP;
+    if (group_is_temp(n->lhs)) {
+        Node *r = group_peel_casts(n->rhs);
+        if (r && r->kind == ND_ADDR && cx->ntemps < 8)
+            cx->temps[cx->ntemps++] = (GroupTemp){n->lhs, r->lhs};
+        return TV_SKIP;
+    }
+    Obj    *wv;
+    Member *wm;
+    Node   *wo;
+    if (group_write_target(n, cx->temps, cx->ntemps, &wv, &wm, &wo)) {
+        if (wm)
+            wo = track_alias_object(cx->tf, wo);
+    } else if (!track_alias_write(cx, n->lhs, &wv, &wm, &wo)) {
+        return cx->priv ? TV_SKIP : TV_STOP;
+    }
+    if (track_write_hits(cx, wv, wm))
+        return TV_STOP;
+    const GroupTarget *at = &cx->a->at;
+    bool sibling          = wv ? group_target_has(at, wv, NULL)
+                               : (group_target_has(at, NULL, wm) && at->mem &&
+                                  !node_has_side_effects(wo) &&
+                                  nodes_structurally_equal(cx->obj, wo));
+    return sibling && top ? TV_RECHECK : TV_SKIP;
+}
+
+// What evaluating `n` does to the anchor. `top` is a discarded leaf, the only
+// place a sibling write can take a recheck.
+static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
+    if (!n)
+        return TV_SKIP;
+    n              = track_unwrap(n);
+    bool call_like = false;
+    switch (n->kind) {
+        case ND_ASSIGN:
+            return track_assign(n, cx, top);
+        case ND_MEMZERO:
+            return track_write_hits(cx, n->var, NULL) ? TV_STOP : TV_SKIP;
+        case ND_LABEL:
+        case ND_CASE:
+        case ND_LABEL_VAL:
+        case ND_GOTO_EXPR:
+        case ND_STMT_EXPR:
+        case ND_BLOCK_LITERAL:
+        case ND_BLOCK_CALL:
+            return TV_STOP;
+        case ND_FUNCALL:
+        case ND_ASM:
+        case ND_CAS:
+        case ND_EXCH:
+            call_like = true;
+            break;
+        default:
+            break;
+    }
+    if (track_node(n->lhs, cx, false) == TV_STOP ||
+        track_node(n->rhs, cx, false) == TV_STOP ||
+        track_node(n->cond, cx, false) == TV_STOP ||
+        track_node(n->then, cx, false) == TV_STOP ||
+        track_node(n->els, cx, false) == TV_STOP)
+        return TV_STOP;
+    for (Node *a = n->args; a; a = a->next)
+        if (track_node(a, cx, false) == TV_STOP)
+            return TV_STOP;
+    return call_like && !cx->priv ? TV_STOP : TV_SKIP;
+}
+
+static void track_wrap(VirtualMachine *vm, Obj *fn, Node *leaf, TrackCtx *cx) {
+    TrackAnchor *a = cx->a;
+    if (!cx->cg)
+        cx->cg = new_checked_prop_temp(vm, fn, ty_int);
+    Node *lhs = new_var_node(vm, cx->cg, leaf->tok);
+    add_type(vm, lhs);
+    Node *carrier =
+        new_binary(vm, ND_ASSIGN, lhs,
+                   new_cast(vm, new_long(vm, 0, leaf->tok), ty_int), leaf->tok);
+    add_type(vm, carrier);
+    carrier->checked_assign_dst_lo = clone_bounds_node(vm, a->dst_lo);
+    carrier->checked_assign_dst_hi = clone_bounds_node(vm, a->dst_hi);
+    carrier->checked_assign_dst_obj_init =
+        clone_bounds_node(vm, a->dst_obj_init);
+    carrier->checked_assign_src_lo = clone_bounds_node(vm, a->src_lo);
+    carrier->checked_assign_src_hi = clone_bounds_node(vm, a->src_hi);
+    group_wrap_leaf(vm, leaf, carrier);
+}
+
+// An expression statement's leaves, or a condition/value as one unit.
+static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
+                       TrackCtx *cx, GroupLeaves *wraps) {
+    if (!e)
+        return true;
+    if (!discarded)
+        return track_node(e, cx, false) != TV_STOP;
+    GroupLeaves g = {0};
+    group_flatten(group_peel_discarded(vm, e), &g);
+    bool ok = true;
+    for (int i = 0; ok && i < g.n; i++) {
+        TrackVerdict v = track_node(g.v[i], cx, true);
+        if (v == TV_STOP)
+            ok = false;
+        else if (v == TV_RECHECK && cx->immediate)
+            track_wrap(vm, fn, g.v[i], cx);
+        else if (v == TV_RECHECK)
+            group_push(wraps, g.v[i]);
+    }
+    free(g.v);
+    return ok;
+}
+
+static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx,
+                       GroupLeaves *wraps) {
+    if (!s)
+        return true;
+    switch (s->kind) {
+        case ND_NULL_EXPR:
+        case ND_GOTO:
+            return true;
+        case ND_EXPR_STMT:
+            return track_expr(vm, fn, s->lhs, true, cx, wraps);
+        case ND_BLOCK:
+            for (Node *t = s->body; t; t = t->next)
+                if (!track_stmt(vm, fn, t, cx, wraps))
+                    return false;
+            return true;
+        case ND_IF:
+            return track_expr(vm, fn, s->cond, false, cx, wraps) &&
+                   track_stmt(vm, fn, s->then, cx, wraps) &&
+                   track_stmt(vm, fn, s->els, cx, wraps);
+        case ND_FOR:
+            return track_stmt(vm, fn, s->init, cx, wraps) &&
+                   track_expr(vm, fn, s->cond, false, cx, wraps) &&
+                   track_stmt(vm, fn, s->then, cx, wraps) &&
+                   track_expr(vm, fn, s->inc, true, cx, wraps);
+        case ND_DO:
+            return track_stmt(vm, fn, s->then, cx, wraps) &&
+                   track_expr(vm, fn, s->cond, false, cx, wraps);
+        case ND_SWITCH:
+            return track_expr(vm, fn, s->cond, false, cx, wraps) &&
+                   track_stmt(vm, fn, s->then, cx, wraps);
+        case ND_RETURN:
+            return track_expr(vm, fn, s->lhs, false, cx, wraps);
+        case ND_LABEL:
+        case ND_CASE:
+            return false;
+        default:
+            return track_node(s, cx, false) != TV_STOP;
+    }
+}
+
+// Tracks each anchor of a stream through the rest of its leaves, then through
+// the statements from `next_stmt` on.
+// TODO: a count written where no pointer store is visible stays unchecked;
+// a run-time extent check on the write would cover it (#1823).
+static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
+                          Node **leaves, int n, TrackAnchors *as,
+                          Node *next_stmt) {
+    if (!as->n)
+        return;
+    if (!tf->scanned) {
+        tf->scanned = true;
+        track_scan_one(fn->body, tf);
+    }
+    if (tf->disabled)
+        return;
+    GroupLeaves wraps = {0};
+    for (int k = 0; k < as->n; k++) {
+        TrackCtx cx;
+        if (!track_ctx_init(&cx, &as->v[k], tf))
+            continue;
+        bool live = true;
+        for (int j = as->v[k].resume; live && j < n; j++) {
+            TrackVerdict v = track_node(leaves[j], &cx, true);
+            if (v == TV_STOP)
+                live = false;
+            else if (v == TV_RECHECK)
+                track_wrap(vm, fn, leaves[j], &cx);
+        }
+        for (Node *s = next_stmt; live && s; s = s->next) {
+            wraps.n      = 0;
+            cx.immediate = s->kind == ND_EXPR_STMT ||
+                           (s->kind == ND_BLOCK && s->is_decl_group);
+            live         = track_stmt(vm, fn, s, &cx, &wraps);
+            for (int w = 0; live && w < wraps.n; w++)
+                track_wrap(vm, fn, wraps.v[w], &cx);
+        }
+    }
+    free(wraps.v);
+}
+
+static void group_flush(VirtualMachine *vm, Obj *fn, TrackFn *tf,
+                        GroupLeaves *g, Node *next_stmt) {
+    TrackAnchors tracks = {0};
+    group_process(vm, fn, g->v, g->n, 0, &tracks);
+    track_anchors(vm, fn, tf, g->v, g->n, &tracks, next_stmt);
+    free(tracks.v);
+    g->n = 0;
+}
+
+static void group_stream_add(VirtualMachine *vm, Obj *fn, TrackFn *tf, Node *s,
                              GroupLeaves *g) {
     if (s->kind == ND_EXPR_STMT && s->lhs) {
         group_flatten(group_peel_discarded(vm, s->lhs), g);
     } else if (s->kind == ND_BLOCK && s->is_decl_group) {
         for (Node *t = s->body; t; t = t->next)
-            group_stream_add(vm, fn, t, g);
+            group_stream_add(vm, fn, tf, t, g);
     } else {
-        group_process(vm, fn, g->v, g->n, 0);
-        g->n = 0;
+        group_flush(vm, fn, tf, g, s);
     }
 }
 
-static void group_walk_one(VirtualMachine *vm, Obj *fn, Node *node);
+static void group_walk_one(VirtualMachine *vm, Obj *fn, TrackFn *tf,
+                           Node *node);
 
-static void group_walk(VirtualMachine *vm, Obj *fn, Node *list) {
+static void group_walk(VirtualMachine *vm, Obj *fn, TrackFn *tf, Node *list) {
     for (Node *n = list; n; n = n->next)
-        group_walk_one(vm, fn, n);
+        group_walk_one(vm, fn, tf, n);
 }
 
-static void group_walk_children(VirtualMachine *vm, Obj *fn, Node *node) {
-    group_walk_one(vm, fn, node->lhs);
-    group_walk_one(vm, fn, node->rhs);
-    group_walk_one(vm, fn, node->cond);
-    group_walk_one(vm, fn, node->then);
-    group_walk_one(vm, fn, node->els);
-    group_walk_one(vm, fn, node->init);
-    group_walk_one(vm, fn, node->inc);
-    group_walk(vm, fn, node->body);
-    group_walk(vm, fn, node->args);
+static void group_walk_children(VirtualMachine *vm, Obj *fn, TrackFn *tf,
+                                Node *node) {
+    group_walk_one(vm, fn, tf, node->lhs);
+    group_walk_one(vm, fn, tf, node->rhs);
+    group_walk_one(vm, fn, tf, node->cond);
+    group_walk_one(vm, fn, tf, node->then);
+    group_walk_one(vm, fn, tf, node->els);
+    group_walk_one(vm, fn, tf, node->init);
+    group_walk_one(vm, fn, tf, node->inc);
+    group_walk(vm, fn, tf, node->body);
+    group_walk(vm, fn, tf, node->args);
 }
 
 // Groups the statement lists of every block and the comma chains inside
 // expressions (a compound literal's initializer).
-static void group_walk_one(VirtualMachine *vm, Obj *fn, Node *node) {
+static void group_walk_one(VirtualMachine *vm, Obj *fn, TrackFn *tf,
+                           Node *node) {
     if (!node)
         return;
     if (node->kind == ND_BLOCK) {
         GroupLeaves g = {0};
         for (Node *s = node->body; s; s = s->next)
-            group_stream_add(vm, fn, s, &g);
-        group_process(vm, fn, g.v, g.n, 0);
+            group_stream_add(vm, fn, tf, s, &g);
+        group_flush(vm, fn, tf, &g, NULL);
         free(g.v);
     } else if (node->kind == ND_COMMA) {
         GroupLeaves g = {0};
         group_flatten(node, &g);
-        group_process(vm, fn, g.v, g.n, 1);
+        group_process(vm, fn, g.v, g.n, 1, NULL);
         for (int i = 0; i < g.n; i++) {
             if (g.v[i]->kind == ND_COMMA) // a leaf wrapped with its carrier
-                group_walk_children(vm, fn, g.v[i]->lhs);
+                group_walk_children(vm, fn, tf, g.v[i]->lhs);
             else
-                group_walk_one(vm, fn, g.v[i]);
+                group_walk_one(vm, fn, tf, g.v[i]);
         }
         free(g.v);
         return;
     }
-    group_walk_children(vm, fn, node);
+    group_walk_children(vm, fn, tf, node);
 }
 
 void group_checked_sibling_writes(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !fn->body)
         return;
-    group_walk_one(vm, fn, fn->body);
+    TrackFn tf = {0};
+    group_walk_one(vm, fn, &tf, fn->body);
+    free(tf.addrs);
+    free(tf.ptrs);
 }
 
 // The tail passes of every function body, in order: propagation, the

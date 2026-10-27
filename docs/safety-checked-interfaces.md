@@ -158,7 +158,30 @@ s.n = 8;       // traps here, against the final count
 
 The check runs after the last such write. The writes are `=`, `+=`, `++` and `--` on a sibling of the same object, and they may follow stores to other checked pointers that share the count. A call, a label, a branch or any other statement ends the run.[^group] A run that ends in bounds passes: `s.p = small; s.n = 8; s.n = 2;`. A local pointer and the local its count names group the same way.
 
-Not checked: a count written later with other statements between (`s.p = small; log(); s.n = 8;`), through an alias, or on its own with the pointer stored earlier.
+Writes after the run are rechecked ([below](#count-written-later)).
+
+### Count written later
+
+A count written after other statements is checked against the range the pointer was stored from:
+
+```c
+s.p = small;   // small has 2 elements
+log();
+s.n = 8;       // traps here
+```
+
+Every later write to a sibling of the same object is rechecked until something could change the pointer: `=`, `+=`, `++` and `--` count, inside `if`, loops and blocks too. A local pointer initialised once with `&s` and used only as `q->n` or `*q` writes to `s`, and so does `int *pn = &s.n; *pn = 8;`.[^track]
+
+Tracking ends at:
+
+| Event | Example |
+|---|---|
+| A write to the pointer, or to a variable the object expression reads | `s.p = other;`, `a[k].p = small; k++;` |
+| A call or write through a pointer, when the object is a global, is reached through a pointer, or has its address taken | `fill(&s);` |
+| A label, `case`, `switch` or statement-expression | `again: s.n = 8;` |
+| A nested statement containing any of the above | `if (c) { s.p = other; }` |
+
+Not checked: a count written in a function that did not store the pointer, past the events above, or inside a value that is used (`if ((s.n = f()))`) ([#1823](https://todo.sr.ht/~takeiteasy/cccc/1823)).
 
 ### Constant initializers
 
@@ -252,6 +275,7 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
 [^plain]: A plain array is not a propagation source, so only checked targets (declarations, assignments, arguments, returns and casts) read its extent.
+[^track]: Rechecks read the source range the pointer store snapshotted, so a narrowing write passes and a widening one traps at the write. An object that is not a private local (a global, `ps->p`, a local whose address is passed on) ends tracking at the first call, since the callee could replace the pointer.
 [^group]: A sibling write whose value has side effects, or reads the pointer, ends the run before it, so the pointer is still checked right after its store. The check moves to the end of the run; the source bounds are still read before the pointer store.
 [^cast]: A bounds cast is verified by the same check as `q = E;`, so its limits are the ones in [safety-checked-propagation.md](safety-checked-propagation.md#assignments-between-checked-pointers).
 [^libc-null]: `snprintf(NULL, 0, ...)` and other null buffers are unchecked. Functions that may touch fewer bytes than their length (`strncpy`'s source, `strncmp`, `memchr`, `memcmp`) have no bounds. `fread` and `fwrite` multiply `size * nmemb` without an overflow check, so a wrapping product can let an oversized call pass.

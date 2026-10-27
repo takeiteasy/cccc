@@ -81,6 +81,22 @@ The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidde
 
 With at least one sibling write, `group_move_stamp()` moves each anchor's five `checked_assign_*` fields onto a carrier `__cg = 0` wrapped after the last sibling write (`group_wrap_leaf()` rewrites that leaf in place into a comma). The source snapshot stays ahead of the pointer store. Codegen (`src/codegen_expr.c`) and `serialize_checked_assign()` read the stamp off any `ND_ASSIGN`, so `-c=native` needs no change. The last leaf of an expression-level comma chain never takes a carrier, since it carries the chain's value.
 
+### Tracked rechecks
+
+`group_flush()` runs `group_process()` on a stream and then `track_anchors()`. `group_process()` first records every anchor of the stream (`TrackAnchor`: the target, the five stamp expressions and `resume`, the first leaf after its group run), because `group_move_stamp()` takes the stamp off the leaf. `track_anchors()` walks each anchor forward through the stream's remaining leaves and then the statements from the one that ended the stream (`next_stmt`), classifying every node with `track_node()`:
+
+| Verdict | Cause |
+|---|---|
+| `TV_RECHECK` | A discarded leaf that writes a sibling of the same object |
+| `TV_STOP` | A write to the pointer (`track_write_hits()`: the pointer variable or member, or a variable the object expression reads), a label or `case`, a statement-expression, block literal or `&&label`; a call, `asm`, atomic or unresolved indirect store when the object is not private |
+| `TV_SKIP` | Everything else |
+
+`track_wrap()` appends a carrier `__cg = 0` after the write, stamped with clones of the anchor's destination bounds and its source-snapshot reads (`clone_bounds_node()`). The carrier takes the write's token and one `__cg` serves all of an anchor's carriers. Group runs treat a carrier as transparent (`track_is_carrier()`), and `track_unwrap()` sees through the comma a group carrier made.
+
+A nested statement is classified whole by `track_stmt()` into a list of writes to wrap; the list is applied only when no node in it ended tracking, so a loop is entered or skipped as a unit. Straight-line expression statements wrap as they go.
+
+**Private objects.** `track_scan_one()` runs once per function and records every `&x` (except the `tmp = &x` a compound assignment hoists) and every array that decays outside `a[i]`; block literals and `&&label` disable tracking for the function. An object is private when it is a non-static local struct, union or array with none of those, or only ones that initialise a must-alias. A local pointer `q` is a must-alias of `x` when its single store is `q = &x`, its address is never taken and every use is `*q` or `q->f` (`track_alias_target()`); `track_alias_object()` then reads `*q` as `x` for the anchor's object and for the write target.
+
 ### Constant initializers
 
 `check_static_checked_init()` runs after `write_gvar_data()` in `gvar_initializer()` and `cc_finalize_macro_gvar_inits()`, under `--checked-pointers`. It walks the `Initializer` tree like `write_gvar_data()` and checks each checked-pointer slot with an expression: `objsize_peel_offset_chain()` yields the array and byte offset, and the bounds template is cloned with each sibling placeholder replaced by that sibling's initializer expression and evaluated with `eval()`. `count`, `byte_count`, `ntarray` (one extra element) and `single` are handled; a non-constant bound, a null source or `bounds(lo, hi)` is skipped.

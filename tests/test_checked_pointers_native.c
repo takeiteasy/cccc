@@ -12,6 +12,8 @@
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupwiden=255
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*groupinit=255
 // CCCC_EXPECT_STDOUT: groupok=42
+// CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*tracktrap=255
+// CCCC_EXPECT_STDOUT: trackok=42
 // CCCC_EXPECT_STDOUT: CHECKED ASSIGNMENT BOUNDS VIOLATION[\s\S]*plainarray=255
 //
 // -c=native enforces --checked-pointers: each violation prints the VM's
@@ -148,6 +150,35 @@ int build_main(Builder *ctx) {
          "    s.p = small;\n"
          "    s.n = 8;\n"
          "    s.n = 2;\n"
+         "    return 42;\n"
+         "}\n"},
+        {"tracktrap",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "static void note(void) {}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    note();\n"
+         "    s.n = 8;\n"
+         "    return 42;\n"
+         "}\n"},
+        {"trackok",
+         "struct S {\n"
+         "    int n;\n"
+         "    int *[[cccc::array, cccc::count(n)]] p;\n"
+         "};\n"
+         "static void note(void) {}\n"
+         "int main(void) {\n"
+         "    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};\n"
+         "    struct S s = {0};\n"
+         "    s.p = small;\n"
+         "    note();\n"
+         "    s.n = 2;\n"
+         "    s.n = 1;\n"
          "    return 42;\n"
          "}\n"},
         {"plainarray", "int buf[2];\n"

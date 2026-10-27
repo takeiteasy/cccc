@@ -182,12 +182,206 @@ void test_group_exact_count_passes(void) {
     AssertEq(s.n, 1);
 }
 
-[[cccc::test]]
-void test_group_non_adjacent_write_is_unchecked(void) {
+// ---------------------------------------------------------------------
+// Sibling written after other statements.
+// ---------------------------------------------------------------------
+
+static int g_calls;
+static void note(void) {
+    g_calls++;
+}
+
+static int *[[cccc::array, cccc::count(8)]] eight(void) {
+    static int block[8];
+    return block;
+}
+
+static void swap_in_eight(struct Count *c) {
+    c->p = eight();
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_after_call_trap(void) {
     int *[[cccc::array, cccc::count(2)]] small = two();
     struct Count s                             = {0};
     s.p                                        = small;
-    AssertEq(s.n, 0);
+    note();
+    s.n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_compound_assign_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    s.n += 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_branch_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    if (g_calls > 0)
+        s.n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_loop_increment_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    for (int i = 0; i < 4; i++)
+        s.n++;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_indexed_object_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count a[2]                          = {};
+    int          k                             = 1;
+    a[k].p                                     = small;
+    note();
+    a[k].n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_local_count_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    int n                                      = 2;
+    int *[[cccc::array, cccc::count(n)]] q     = small;
+    note();
+    n = 8;
+    (void)q;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_second_pointer_does_not_stop_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Pair u                              = {0};
+    u.p                                        = small;
+    note();
+    u.q = small;
+    u.n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_alias_write_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count  s                            = {0};
+    struct Count *q                            = &s;
+    s.p                                        = small;
+    note();
+    q->n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_alias_pointer_store_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count  s                            = {0};
+    struct Count *q                            = &s;
+    q->p                                       = small;
+    note();
+    s.n = 8;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_alias_to_count_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int         *pn                            = &s.n;
+    s.p                                        = small;
+    note();
+    *pn = 8;
+}
+
+[[cccc::test]]
+void test_track_leaked_alias_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count  s                            = {0};
+    struct Count *q                            = &s;
+    s.p                                        = small;
+    swap_in_eight(q);
+    s.n = 8;
+    AssertEq(s.p[7], 0);
+}
+
+[[cccc::test]]
+void test_track_member_address_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count  s                            = {0};
+    struct Count *q                            = &s;
+    s.p                                        = small;
+    swap_in_eight(&*q);
+    s.n = 8;
+    AssertEq(s.p[7], 0);
+}
+
+[[cccc::test]]
+void test_track_narrowing_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    s.n = 2;
+    s.n = 1;
+    AssertEq(s.n, 1);
+}
+
+[[cccc::test]]
+void test_track_pointer_replaced_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    note();
+    s.p = eight();
+    s.n = 8;
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_escaping_object_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    swap_in_eight(&s);
+    s.n = 8;
+    AssertEq(s.p[7], 0);
+}
+
+[[cccc::test]]
+void test_track_object_index_changed_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count a[2]                          = {};
+    int          k                             = 0;
+    a[k].p                                     = small;
+    note();
+    k++;
+    a[k].n = 8;
+    AssertEq(a[1].n, 8);
+}
+
+[[cccc::test]]
+void test_track_other_object_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    struct Count t                             = {0};
+    s.p                                        = small;
+    note();
+    t.n = 8;
+    AssertEq(t.n, 8);
+}
+
+[[cccc::test]]
+void test_track_label_ends_tracking_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    goto later;
+later:
     s.n = 8;
     AssertEq(s.n, 8);
 }

@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a count written after other statements, in a nested `if`/loop, or through a local pointer to the struct is checked against the source range the checked pointer was stored from (`s.p = small; log(); s.n = 8;` traps at the write).
 - Added: any dimension of a variable-length checked array may vary (`_Checked[3][n]`, `_Checked[m][n]`), as a local, a parameter or behind a row pointer; each is checked against its own length.
 - Fixed: a function parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`) no longer crashes the compiler when subscripted; its lengths are evaluated once on entry.
 - Fixed: `-c=native` spells a parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`): `[*]` in prototypes, the parameter names in the definition, and `void *` at call sites.
