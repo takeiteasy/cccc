@@ -417,19 +417,160 @@ void test_ntarray_long_double_terminator_not_guarded(void) {
     AssertTrue(a[n] == 1.0L);
 }
 
-// CHKNTZ only ever sees a whole-object store through the pointer itself
-// (an ND_DEREF lvalue); a member-wise write into the same slot stores
-// through an ND_MEMBER lvalue instead, which checked_nt_terminator is never
-// attached to -- so this does NOT trap. Known gap, see docs/safety.md's
-// "Known coverage gaps" -- pinned here rather than left implicit so a
-// future fix updates this test deliberately instead of silently.
+// A store into a member of the terminator-slot element is guarded the same
+// way as a whole-element store: scalar, float, nested, array-member and
+// struct-typed members, plain and compound assignment.
+typedef struct {
+    int  a;
+    char b;
+} CHKNTMInner;
+
+typedef struct {
+    CHKNTMInner in;
+    int         arr[3];
+    float       f;
+    long double ld;
+    unsigned    bf : 3;
+} CHKNTMember;
+
+typedef union {
+    int  i;
+    char c[4];
+} CHKNTMUnion;
+
+#define CHKNTM_TBL(name)                                                       \
+    int n                                               = 2;                   \
+    CHKNTMember *[[cccc::ntarray, cccc::count(n)]] name = (CHKNTMember[3]) {   \
+        {{1, 'a'}, {1, 2, 3}, 1.f, 1.L, 1},                                    \
+            {{2, 'b'}, {4, 5, 6}, 2.f, 2.L, 2},                                \
+            {{0, 0}, {0, 0, 0}, 0.f, 0.L, 0}                                   \
+    }
+
 [[cccc::test]]
-void test_ntarray_struct_terminator_member_write_not_guarded(void) {
+void test_ntarray_member_write_ok(void) {
+    CHKNTM_TBL(tbl);
+    tbl[1].in.a    = 9;
+    tbl[0].arr[2]  = 7;
+    tbl[1].f       = 3.f;
+    tbl[n].in.a    = 0;
+    tbl[n].in.b    = 0;
+    tbl[n].arr[1]  = 0;
+    tbl[n].f       = 0.f;
+    tbl[n].in.a   += 0;
+    AssertEq(tbl[1].in.a, 9);
+    AssertEq(tbl[0].arr[2], 7);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_struct_terminator_member_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in.a = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_char_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in.b = 'x';
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_array_element_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    int k         = 2;
+    tbl[n].arr[k] = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_float_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].f = 1.f;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_struct_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in = (CHKNTMInner){1, 0};
+}
+
+[[cccc::test]]
+void test_ntarray_member_struct_zero_write_ok(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in = (CHKNTMInner){0, 0};
+    AssertEq(tbl[n].in.a, 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_compound_assign_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in.a += 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_increment_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].in.a++;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_array_decrement_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].arr[0]--;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_float_compound_assign_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].f += 1.f;
+}
+
+[[cccc::test]]
+void test_ntarray_member_nonterminator_compound_assign_ok(void) {
+    CHKNTM_TBL(tbl);
+    tbl[1].in.a += 5;
+    tbl[1].in.a++;
+    AssertEq(tbl[1].in.a, 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_union_member_write_traps(void) {
+    int n = 1;
+    CHKNTMUnion *[[cccc::ntarray, cccc::count(n)]] u =
+        (CHKNTMUnion[2]){{.i = 5}, {.i = 0}};
+    u[n].c[1] = 1;
+}
+
+typedef struct {
+    _Atomic int a;
+    int         b;
+} CHKNTMAtomic;
+
+[[cccc::test]]
+void test_ntarray_atomic_member_nonterminator_rmw_ok(void) {
     int n = 2;
-    CHKNTZOption *[[cccc::ntarray, cccc::count(n)]] tbl =
-        (CHKNTZOption[3]){{1, 'a'}, {2, 'b'}, {0, 0}};
-    tbl[n].a = 1; // member-wise write into the terminator slot -- unguarded
-    AssertEq(tbl[n].a, 1);
+    CHKNTMAtomic *[[cccc::ntarray, cccc::count(n)]] t =
+        (CHKNTMAtomic[3]){{1, 2}, {3, 4}, {0, 0}};
+    t[1].a += 5;
+    t[n].a += 0;
+    AssertEq((int)t[1].a, 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_atomic_member_rmw_traps(void) {
+    int n = 2;
+    CHKNTMAtomic *[[cccc::ntarray, cccc::count(n)]] t =
+        (CHKNTMAtomic[3]){{1, 2}, {3, 4}, {0, 0}};
+    t[n].a += 1;
+}
+
+// Unguarded by design: a long double's slot is 16 bytes but is stored as an
+// 8-byte double, and a bit-field's stored value is truncated to its width.
+[[cccc::test]]
+void test_ntarray_member_long_double_and_bitfield_not_guarded(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].ld = 1.L;
+    tbl[n].bf = 3;
+    AssertTrue(tbl[n].ld == 1.L);
+    AssertEq(tbl[n].bf, 3);
 }
 
 // ---------------------------------------------------------------------

@@ -1760,9 +1760,10 @@ static bool checked_deref_lowered(VirtualMachine *vm, Node *node) {
            node->checked_bounds_hi && serialize_lowers_checks(vm);
 }
 
-static bool checked_nt_store(Node *lhs) {
-    return lhs->kind == ND_DEREF && lhs->checked_nt_terminator &&
-           lhs->checked_bounds_hi;
+// The ntarray element deref whose terminator slot a store to `lhs` can hit.
+static Node *checked_nt_store(Node *lhs) {
+    Node *root = checked_nt_store_root(lhs);
+    return root && root->checked_bounds_hi ? root : NULL;
 }
 
 static bool checked_assign_lowered(VirtualMachine *vm, Node *node) {
@@ -1779,7 +1780,8 @@ static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
                                      bool discard) {
     int   seq = ctx->checked_seq++;
     Node *lhs = node->lhs;
-    bool  nt  = checked_nt_store(lhs);
+    Node *nt_root = checked_nt_store(lhs);
+    bool  nt      = nt_root != NULL;
     fprintf(f, "({ ");
     if (nt || !discard) {
         fprintf(f, "__typeof__(");
@@ -1796,12 +1798,12 @@ static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
         fprintf(f, ") __cccc_chka%d = &", seq);
         serialize_expr(f, vm, ctx, lhs, 14);
         fprintf(f, "; __cccc_chknt(__cccc_chka%d, ", seq);
-        serialize_checked_hi(f, vm, ctx, lhs);
+        serialize_checked_hi(f, vm, ctx, nt_root);
         fprintf(f,
-                ", &__cccc_chkv%d, %lldLL, %d); *__cccc_chka%d = "
+                ", &__cccc_chkv%d, %lldLL, %lldLL, %d); *__cccc_chka%d = "
                 "__cccc_chkv%d; ",
-                seq, (long long)lhs->checked_access_size, scalar ? 1 : 0, seq,
-                seq);
+                seq, (long long)checked_nt_slot_size(nt_root),
+                (long long)ty->size, scalar ? 1 : 0, seq, seq);
     } else {
         fprintf(f, "(");
         serialize_assign_target(f, vm, ctx, lhs, 2);
@@ -3242,8 +3244,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 serialize_checked_ptr(f, vm, ctx, node->cas_addr);
                 fprintf(f, ", ");
                 serialize_checked_hi(f, vm, ctx, node);
-                fprintf(f, ", &__cccc_chkv%d, %lldLL, 1); ", seq,
-                        (long long)node->checked_access_size);
+                fprintf(f, ", &__cccc_chkv%d, %lldLL, %lldLL, 1); ", seq,
+                        (long long)checked_nt_slot_size(node),
+                        (long long)node->cas_new->ty->size);
             }
             fprintf(f, "__atomic_compare_exchange_n(");
             // #1101: strip _Atomic from both pointer operands' static types

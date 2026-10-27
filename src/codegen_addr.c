@@ -987,8 +987,9 @@ void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
 // node->checked_nt_terminator) so the default build never emits this
 // opcode.
 void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
-                 long long elem_size) {
+                 long long elem_size, long long scan_size) {
     emit_rrrs_i(vm, CHKNTZ, rs_addr, rs_hi, rs_src, 0, elem_size);
+    emit_i64(vm, scan_size);
 }
 
 // #945/#939: every CHKNT/CHKNTZ emission site needs `deref`'s own

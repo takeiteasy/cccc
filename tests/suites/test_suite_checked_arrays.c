@@ -560,3 +560,24 @@ void test_nt_3d_terminator_nonnull_traps(void) {
     char s _Nt_checked[2][2][4];
     s[0][1][3] = 'x';
 }
+
+typedef struct {
+    int a;
+    int b;
+} NtRowCell;
+
+[[cccc::test]]
+void test_nt_2d_struct_rows_member_write_ok(void) {
+    NtRowCell s _Nt_checked[2][3] = {{{1, 2}, {3, 4}, {0, 0}},
+                                     {{5, 6}, {7, 8}, {0, 0}}};
+    s[1][1].b                     = 9;
+    s[1][2].a                     = 0;
+    AssertEq(s[1][1].b, 9);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_struct_rows_member_write_traps(void) {
+    NtRowCell s _Nt_checked[2][3] = {{{1, 2}, {3, 4}, {0, 0}},
+                                     {{5, 6}, {7, 8}, {0, 0}}};
+    s[1][2].b                     = 1;
+}

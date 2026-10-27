@@ -558,19 +558,22 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         // on the *attempted* desired value, so a CAS iteration that would
         // have failed the compare still traps -- correct, since the program
         // is still trying to write a non-null byte into the terminator slot.
-        if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_hi &&
-            binary->lhs->checked_nt_terminator) {
+        // #950: a member of the element (`tbl[n].a += 1`) takes the element's
+        // hi and slot size from the root deref instead.
+        Node *nt_root = checked_nt_store_root(binary->lhs);
+        if (nt_root && nt_root->checked_bounds_hi) {
             cas->checked_bounds_hi =
-                clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
-            cas->checked_access_size   = binary->lhs->checked_access_size;
+                clone_bounds_node(vm, nt_root->checked_bounds_hi);
+            cas->checked_access_size   = nt_root->checked_access_size;
+            cas->checked_nt_slot       = checked_nt_slot_size(nt_root);
             cas->checked_nt_terminator = true;
             // #945: carry the object-expression hoist init across too (if
             // any) -- `hi` above may read `*t`, so codegen's CHKNT site for
             // `cas` must re-run the same `t = &obj` init immediately before
             // it, exactly like every other checked_bounds_hi consumer.
-            if (binary->lhs->checked_bounds_obj_init)
+            if (nt_root->checked_bounds_obj_init)
                 cas->checked_bounds_obj_init =
-                    clone_bounds_node(vm, binary->lhs->checked_bounds_obj_init);
+                    clone_bounds_node(vm, nt_root->checked_bounds_obj_init);
         }
         // #943: back-link so propagate_checked_bounds()'s walk 3
         // (checked_prop_attach_scan(), which runs after to_assign() has
@@ -683,6 +686,7 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // One redundant CHKR results per checked RMW (`&s[n]` and this `*tmp`
     // store both range-check the same address) -- acceptable at this
     // magnitude, not worth deduping.
+    Node *nt_root_rmw = checked_nt_store_root(binary->lhs);
     if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_lo &&
         binary->lhs->checked_bounds_hi) {
         store_deref->checked_bounds_lo =
@@ -696,6 +700,21 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         if (binary->lhs->checked_bounds_obj_init)
             store_deref->checked_bounds_obj_init =
                 clone_bounds_node(vm, binary->lhs->checked_bounds_obj_init);
+    } else if (nt_root_rmw && nt_root_rmw->checked_bounds_lo &&
+               nt_root_rmw->checked_bounds_hi) {
+        // #950: `tbl[n].a += 1` stores into a member of the element; carry
+        // the element's bounds and slot size, with the member's own size as
+        // the range-checked access.
+        store_deref->checked_bounds_lo =
+            clone_bounds_node(vm, nt_root_rmw->checked_bounds_lo);
+        store_deref->checked_bounds_hi =
+            clone_bounds_node(vm, nt_root_rmw->checked_bounds_hi);
+        store_deref->checked_access_size   = get_vm_size(binary->lhs->ty);
+        store_deref->checked_nt_terminator = true;
+        store_deref->checked_nt_slot       = checked_nt_slot_size(nt_root_rmw);
+        if (nt_root_rmw->checked_bounds_obj_init)
+            store_deref->checked_bounds_obj_init =
+                clone_bounds_node(vm, nt_root_rmw->checked_bounds_obj_init);
     }
     // #943: back-link so propagate_checked_bounds()'s walk 3
     // (checked_prop_attach_scan()) can mirror a PROPAGATED terminator-slot

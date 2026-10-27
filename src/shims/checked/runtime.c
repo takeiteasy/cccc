@@ -24,11 +24,12 @@ static inline void *__cccc_chkr(const volatile void *__cccc_a,
 }
 static inline void __cccc_chknt(const volatile void *__cccc_a,
                                 const volatile void *__cccc_hi,
-                                const volatile void *__cccc_src, long long __cccc_n,
+                                const volatile void *__cccc_src,
+                                long long __cccc_slot, long long __cccc_n,
                                 int __cccc_scalar) {
     intptr_t a = (intptr_t)__cccc_a, hi = (intptr_t)__cccc_hi;
-    if (__cccc_n <= 0 || hi < (intptr_t)__cccc_n ||
-        a != hi - (intptr_t)__cccc_n)
+    if (__cccc_slot <= 0 || __cccc_n <= 0 || hi < (intptr_t)__cccc_slot ||
+        a < hi - (intptr_t)__cccc_slot)
         return;
     const volatile unsigned char *src =
         (const volatile unsigned char *)__cccc_src;
@@ -39,7 +40,7 @@ static inline void __cccc_chknt(const volatile void *__cccc_a,
                    __cccc_scalar ? "null" : "zero");
             printf("Address:         0x%llx\n", (unsigned long long)a);
             printf("Terminator slot: [0x%llx, 0x%llx)\n",
-                   (unsigned long long)(hi - (intptr_t)__cccc_n),
+                   (unsigned long long)(hi - (intptr_t)__cccc_slot),
                    (unsigned long long)hi);
             printf("====================================================\n");
             __cccc_chk_fail();

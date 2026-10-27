@@ -35,10 +35,10 @@ An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and abo
 
 ## Terminator guard
 
-- `CHKNT` traps a store of a non-zero value into the widened slot, keyed off the `[lo, hi)` `CHKR` already computed (`addr == hi - elem_size && val != 0`). `CHKNTZ` traps a non-all-zero-bytes store for pointees whose store never goes through one value register; it scans the source bytes before the `memcpy` runs, so the slot is never clobbered.
+- `CHKNT` traps a store of a non-zero value into the widened slot, keyed off the `[lo, hi)` `CHKR` already computed (`addr >= hi - slot_size && val != 0`). `CHKNTZ` traps a non-all-zero-bytes store for pointees whose store never goes through one value register; it scans the source bytes before the `memcpy` runs, so the slot is never clobbered. Its second immediate is the scan size, which is smaller than the slot for a struct-typed member store.
 - Floating-point values move into an integer register first (`FR2R`, `FR2R_F32`), so `-0.0` is non-zero. `long double` is unguarded because its slot is 16 bytes but the store is an 8-byte flat-double `FSTR`; vectors and `_Complex` have no opcode that reads their full representation.
 - `s[n] += 1` and `s[n]++` desugar in `to_assign()` to `tmp = &s[n]; *tmp = *tmp + 1`, and the synthesized store carries the same `checked_bounds_lo/hi` and `checked_nt_terminator`. An `_Atomic` element takes the CAS-loop desugar and gets its own `CHKNT` ahead of `ACAS`, checking the desired value. `CHKNTZ` has no CAS counterpart because C has no compound assignment on aggregates.
-- Gap: `tbl[n].a = 1` stores through an `ND_MEMBER` lvalue, and `set_checked_deref_bounds()`/`checked_prop_attach_scan()` stamp `checked_nt_terminator` only on the outer `ND_DEREF`.
+- A member store (`tbl[n].a = 1`, `tbl[n].arr[k] = 1`) finds the element's `ND_DEREF` through `checked_nt_store_root()` (`src/parse_checked.c`), which walks `ND_MEMBER` chains, array-member subscripts and the `rmw_lvalue` link of a desugared read-modify-write. The guard fires for any store at or past `hi - slot_size`; the slot size is the element size, carried in `Node.checked_nt_slot` on a synthesized store whose own access size is the member's. The native `__cccc_chknt` takes the slot and scan sizes separately.
 - Presence validation is not implemented: `count(n)` is a lower bound in Checked C, and locating the real terminator needs a read past `hi`.
 
 ## Type shadow

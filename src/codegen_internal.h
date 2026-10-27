@@ -217,7 +217,7 @@ void emit_chkl(VirtualMachine *vm, long long offset);
 void emit_chknt(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_val,
                 long long elem_size);
 void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
-                 long long elem_size);
+                 long long elem_size, long long scan_size);
 void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
                             int seq_limit);
 void emit_bitfield_load(VirtualMachine *vm, Member *mem, int dest, int r_addr,

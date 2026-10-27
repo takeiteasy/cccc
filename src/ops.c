@@ -5356,7 +5356,7 @@ static inline int op_CHKNT_fn(VirtualMachine *vm) {
         return 0; // no room for a terminator slot at all -- nothing to guard
 
     long long term_slot = hi - elem_size;
-    if (addr == term_slot && val != 0) {
+    if (addr >= term_slot && val != 0) {
         printf("\n========== CHECKED TERMINATOR VIOLATION ==========\n");
         printf("Non-null store into a [[cccc::ntarray]] terminator slot\n");
         printf("Address:         0x%llx\n", addr);
@@ -5377,21 +5377,23 @@ static inline int op_CHKNTZ_fn(VirtualMachine *vm) {
     // cannot reach because they never pass through a single value register.
     // Format:
     // [CHKNTZ] [rs_addr:8|rs_hi:8|rs_src:8|unused:8] (RRR operand word)
-    //          [elem_size:i64]
+    //          [slot_size:i64] [scan_size:i64]
     // Same terminator-slot semantics as CHKNT, but the "value" is
-    // elem_size bytes at a source ADDRESS (rs_src) rather than one
-    // register, scanned for any non-zero byte. Runs before the MCPY it
-    // guards, so the slot is never actually clobbered when this traps.
+    // scan_size bytes at a source ADDRESS (rs_src) rather than one
+    // register, scanned for any non-zero byte. scan_size is smaller than
+    // slot_size for a struct-typed member store into the slot. Runs before the
+    // MCPY it guards, so the slot is never actually clobbered when this traps.
     // Guest addresses are flat host pointers here, same as op_MCPY_fn.
     long long operands = cc_read_word(vm);
     int       rs_addr, rs_hi, rs_src;
     DECODE_RRR(operands, rs_addr, rs_hi, rs_src);
     long long elem_size = cc_read_i64(vm);
+    long long scan_size = cc_read_i64(vm);
 
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         return 0;
 
-    if (elem_size <= 0)
+    if (elem_size <= 0 || scan_size <= 0)
         return 0;
 
     long long addr = vm->regs[rs_addr];
@@ -5401,12 +5403,12 @@ static inline int op_CHKNTZ_fn(VirtualMachine *vm) {
         return 0; // no room for a terminator slot at all -- nothing to guard
 
     long long term_slot = hi - elem_size;
-    if (addr != term_slot)
+    if (addr < term_slot)
         return 0;
 
     const unsigned char *src     = (const unsigned char *)vm->regs[rs_src];
     bool                 nonzero = false;
-    for (long long i = 0; i < elem_size; i++) {
+    for (long long i = 0; i < scan_size; i++) {
         if (src[i] != 0) {
             nonzero = true;
             break;

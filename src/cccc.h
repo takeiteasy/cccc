@@ -503,7 +503,7 @@ extern "C" {
                     element CHKR's +1 widening (src/parse.c) makes writable.         \
                     Format: [CHKNT][rs_addr:8|rs_hi:8|rs_val:8|unused:8]             \
                     [elem_size:i64] (RRR operand word + i64 immediate).              \
-                    Traps iff addr == hi - elem_size && val != 0, where hi is        \
+                    Traps iff addr >= hi - elem_size && val != 0, where hi is        \
                     the already-widened upper bound CHKR itself just checked         \
                     addr against -- CHKNT does no range check of its own.            \
                     This only enforces the store half of the nt invariant            \
@@ -517,19 +517,22 @@ extern "C" {
                     reading past hi, the exact unbounded read this feature           \
                     exists to prevent). See docs/safety.md's Checked Pointers        \
                     section. Gated on CCCC_CHECKED_BOUNDS, same as CHKR. */          \
-    X(CHKNTZ, 3) /* Checked-pointer null-terminator guard for the                    \
+    X(CHKNTZ, 5) /* Checked-pointer null-terminator guard for the                    \
                    memcpy-lowered [[cccc::ntarray]] pointees CHKNT cannot            \
                    reach -- struct/union and wide _BitInt/_Decimal (#939),           \
                    which store via MCPY rather than through an integer or            \
                    flat-double register. Same terminator-slot semantics as           \
-                   CHKNT, but scans elem_size bytes at a source ADDRESS              \
+                   CHKNT, but scans scan_size bytes at a source ADDRESS              \
                    (rs_src) instead of reading one value register, and runs          \
                    before the MCPY it guards -- the slot is never actually           \
                    clobbered when this traps.                                        \
                    Format: [CHKNTZ][rs_addr:8|rs_hi:8|rs_src:8|unused:8]             \
-                   [elem_size:i64] (RRR operand word + i64 immediate).               \
-                   Traps iff addr == hi - elem_size && any of the                    \
-                   elem_size bytes at rs_src is non-zero -- the aggregate            \
+                   [slot_size:i64][scan_size:i64] (RRR operand word + two            \
+                   i64 immediates).                                                  \
+                   Traps iff addr >= hi - slot_size && any of the                    \
+                   scan_size bytes at rs_src is non-zero. A whole-element            \
+                   store has scan_size == slot_size; a struct-typed member           \
+                   store (#950) scans only its own bytes. The aggregate              \
                    analogue of CHKNT's "all zero bytes" rule, satisfied by           \
                    `= {0}`/compound-literal sources (which zero the whole            \
                    object including padding, src/parse.c's                           \
@@ -2448,6 +2451,12 @@ struct Node {
     // (checked_prop_attach_scan() leaves it false), which is a separate,
     // still-open gap (docs/safety.md).
     bool checked_nt_terminator;
+    // Slot size for the terminator guard when this node's own access is a
+    // sub-object of the ntarray element (a member store, or the synthesized
+    // RMW/CAS store of one): checked_access_size is then the member's size
+    // (what CHKR range-checks) and this is the root element's. 0 means the
+    // slot is checked_access_size, the whole-element case.
+    int64_t checked_nt_slot;
 
     // #942: true when checked_bounds_lo/hi were attached by
     // propagate_checked_bounds()'s walk 3 (checked_prop_attach_scan(),

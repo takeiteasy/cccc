@@ -488,6 +488,17 @@ static inline int cc_opcode_operand_words(int op) {
     return operand_words[op];
 }
 
+// #950: the ntarray element deref (checked_nt_terminator set) whose
+// terminator slot a store to `lhs` can land in, or NULL (parse_checked.c).
+Node *checked_nt_store_root(Node *lhs);
+
+// Terminator-slot size of an ntarray deref that checked_nt_store_root()
+// returned (see Node.checked_nt_slot).
+static inline int64_t checked_nt_slot_size(const Node *root) {
+    return root->checked_nt_slot ? root->checked_nt_slot
+                                 : root->checked_access_size;
+}
+
 static inline int cc_instr_words(int op) {
     int operands = cc_opcode_operand_words(op);
     return operands < 0 ? -1 : operands + 1;

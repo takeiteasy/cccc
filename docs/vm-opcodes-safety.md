@@ -55,8 +55,8 @@ Emitted when the matching flag is set; they no-op at run time if it is cleared. 
 | `CHKT3` | Effective-type check on dereference ([modes](#chkt3)) | `CCCC_TYPE_CHECKS` |
 | `CHKR` | Checked-pointer range: traps unless `addr != 0 && lo <= addr && addr + size <= hi` | `CCCC_CHECKED_BOUNDS` |
 | `CHKRO` | `CHKR`, but the sentinel `lo == -1, hi == 0` is a no-op (for pointers checked-rooted on only some paths) | `CCCC_CHECKED_BOUNDS` |
-| `CHKNT` | Terminator guard: traps a non-zero store into the widened `ntarray` terminator slot (`addr == hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
-| `CHKNTZ` | The same for pointees stored through `MCPY`: traps unless every source byte is zero, checked before the copy | `CCCC_CHECKED_BOUNDS` |
+| `CHKNT` | Terminator guard: traps a non-zero store into the widened `ntarray` terminator slot (`addr >= hi - elem_size && val != 0`) | `CCCC_CHECKED_BOUNDS` |
+| `CHKNTZ` | The same for pointees stored through `MCPY`: traps unless every source byte is zero, checked before the copy. Takes a slot size and a scan size (a struct-typed member scans only its own bytes) | `CCCC_CHECKED_BOUNDS` |
 | `CHKAB` | Assignment bounds implication: traps unless `slo <= val && val <= shi` | `CCCC_CHECKED_BOUNDS` |
 | `CHKDC` | `dynamic_check(cond)`: traps unless `regs[rs_val] != 0`. No address lookup | `CCCC_CHECKED_BOUNDS` |
 | `HOLE` | Fills reclaimed text inside live code so instruction walkers stay aligned; executing it is a runtime error. Format `[HOLE]` | |

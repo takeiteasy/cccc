@@ -526,6 +526,49 @@ static bool checked_nt_pointee_supported(Type *base_ty) {
            is_decimal(base_ty);
 }
 
+// #950: a store into a member of an ntarray element (`tbl[n].a`,
+// `tbl[n].in.arr[k]`) lands in the terminator slot when the element does, but
+// the NT fact lives on the element's ND_DEREF. Walk the member chain back to
+// it. Bit-fields stay unguarded: the stored value is truncated to the field
+// width, so a non-zero value need not leave the slot non-zero.
+Node *checked_nt_store_root(Node *lhs) {
+    if (!lhs)
+        return NULL;
+    if (lhs->kind == ND_DEREF && lhs->checked_nt_terminator)
+        return lhs;
+    if (lhs->kind != ND_MEMBER && lhs->kind != ND_DEREF)
+        return NULL;
+    if (lhs->kind == ND_MEMBER && lhs->member->is_bitfield)
+        return NULL;
+    if (!checked_nt_pointee_supported(lhs->ty))
+        return NULL;
+    for (Node *n = lhs;;) {
+        if (n->kind == ND_DEREF && n->checked_nt_terminator)
+            return n;
+        if (n->kind == ND_MEMBER) {
+            n = n->lhs;
+            continue;
+        }
+        if (n->kind == ND_DEREF && n->rmw_lvalue) {
+            // `*tmp` of an `A.x op= B` / `*tmp op= B` desugar: back to A.
+            n = n->rmw_lvalue;
+            continue;
+        }
+        if (n->kind == ND_DEREF) {
+            // Subscript of an array member: DEREF(ADD(MEMBER, idx)).
+            Node *a = n->lhs;
+            while (a && (a->kind == ND_ADD || a->kind == ND_SUB ||
+                         a->kind == ND_CAST))
+                a = a->lhs;
+            if (a && a->kind == ND_MEMBER && a->ty && a->ty->kind == TY_ARRAY) {
+                n = a;
+                continue;
+            }
+        }
+        return NULL;
+    }
+}
+
 static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
 
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,

@@ -1630,14 +1630,16 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // pointee type (src/parse.c's get_vm_size() is just ty->size)
                 // -- so no CHKR/CHKNT-widened-hi vs. MCPY-size mismatch is
                 // possible.
-                if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                    node->lhs->kind == ND_DEREF &&
-                    node->lhs->checked_nt_terminator) {
+                Node *nt_root = (vm->flags & CCCC_CHECKED_BOUNDS)
+                                    ? checked_nt_store_root(node->lhs)
+                                    : NULL;
+                if (nt_root) {
                     mark_temp_reg_used(r_dest);
                     mark_temp_reg_used(r_src);
-                    int r_hi = gen_checked_nt_hi(vm, node->lhs);
+                    int r_hi = gen_checked_nt_hi(vm, nt_root);
                     emit_chkntz(vm, r_dest, r_hi, r_src,
-                                node->lhs->checked_access_size);
+                                checked_nt_slot_size(nt_root),
+                                node->lhs->ty->size);
                     free_temp_reg(r_hi);
                 }
 
@@ -1740,9 +1742,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // path only: lhs_fused is ND_VAR-only, so an ND_DEREF checked store
             // always has r_addr >= 0 and reaches the standard emit_store_ex
             // below.
-            if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                node->lhs->kind == ND_DEREF &&
-                node->lhs->checked_nt_terminator && r_addr >= 0) {
+            Node *nt_root = (vm->flags & CCCC_CHECKED_BOUNDS) && r_addr >= 0
+                                ? checked_nt_store_root(node->lhs)
+                                : NULL;
+            if (nt_root) {
                 mark_temp_reg_used(r_addr);
                 mark_temp_reg_used(r_val);
                 // #939: a float/double r_val is a FReg index, not an int one --
@@ -1770,9 +1773,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // re-running it here is idempotent, not redundant work that
                 // could be skipped -- this site must not assume gen_addr's CHKR
                 // always fires first.
-                int r_hi = gen_checked_nt_hi(vm, node->lhs);
+                int r_hi = gen_checked_nt_hi(vm, nt_root);
                 emit_chknt(vm, r_addr, r_hi, r_ntval,
-                           node->lhs->checked_access_size);
+                           checked_nt_slot_size(nt_root));
                 free_temp_reg(r_hi);
                 if (free_ntval)
                     free_temp_reg(r_ntval);
@@ -3801,7 +3804,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // disturbing the just-staged REG_A0-A2 this check and the ACAS
                 // call right after both need.
                 int r_hi = gen_checked_nt_hi(vm, node);
-                emit_chknt(vm, REG_A0, r_hi, REG_A2, node->checked_access_size);
+                emit_chknt(vm, REG_A0, r_hi, REG_A2,
+                           checked_nt_slot_size(node));
                 free_temp_reg(r_hi);
             }
 
