@@ -113,7 +113,10 @@ typedef struct {
 
 static bool checked_vla_row_ready(Type *ty);
 
-static CheckedBase find_checked_base(Node *n) {
+// A plain row whose inner deref is OPT (its bounds may be the sentinel) is a
+// row root only for callers that guard the derived bounds with the same
+// sentinel (`allow_optional_row`, see checked_guard_optional_row()).
+static CheckedBase find_checked_base_ex(Node *n, bool allow_optional_row) {
     while (n) {
         switch (n->kind) {
             case ND_VAR:
@@ -132,7 +135,8 @@ static CheckedBase find_checked_base(Node *n) {
                 if (n->ty &&
                     ((n->ty->kind == TY_ARRAY && n->ty->array_len > 0) ||
                      checked_vla_row_ready(n->ty)) &&
-                    n->checked_bounds_lo && !n->checked_bounds_optional)
+                    n->checked_bounds_lo &&
+                    (allow_optional_row || !n->checked_bounds_optional))
                     return (CheckedBase){.row = n->ty, .obj = n};
                 return (CheckedBase){0};
             case ND_ADD:
@@ -145,6 +149,10 @@ static CheckedBase find_checked_base(Node *n) {
         }
     }
     return (CheckedBase){0};
+}
+
+static CheckedBase find_checked_base(Node *n) {
+    return find_checked_base_ex(n, false);
 }
 
 // A comma whose value is a checked-cast temporary (the #486 bounds-cast
@@ -1006,6 +1014,37 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
                            &deref->checked_bounds_obj_init, NULL);
 }
 
+// Bounds of a row reached through an OPT inner deref (`p[0]` of an OPT
+// `int (*p)[5]`): where the inner bounds are the not-rooted sentinel
+// ([-1, 0)) the derived bounds are the sentinel too, so the access goes
+// through CHKRO/CHKABO and no-ops on a path where `p` was never rooted.
+static void checked_guard_optional_row(VirtualMachine *vm, Node *inner,
+                                       Token *tok, Node **lo, Node **hi) {
+    Type *cp = pointer_to(vm, ty_char);
+    Node *is_sentinel[2];
+    for (int k = 0; k < 2; k++) {
+        Node *at = new_binary(vm, ND_EQ,
+                              clone_bounds_node(vm, inner->checked_bounds_lo),
+                              new_cast(vm, new_num(vm, -1, tok), cp), tok);
+        add_type(vm, at);
+        Node *ht = new_binary(vm, ND_EQ,
+                              clone_bounds_node(vm, inner->checked_bounds_hi),
+                              new_cast(vm, new_num(vm, 0, tok), cp), tok);
+        add_type(vm, ht);
+        is_sentinel[k] = new_binary(vm, ND_LOGAND, at, ht, tok);
+    }
+    Node  **out[2]  = {lo, hi};
+    int64_t sent[2] = {-1, 0};
+    for (int k = 0; k < 2; k++) {
+        Node *c = new_node(vm, ND_COND, tok);
+        c->cond = is_sentinel[k];
+        c->then = new_cast(vm, new_num(vm, sent[k], tok), cp);
+        c->els  = new_cast(vm, *out[k], cp);
+        add_type(vm, c);
+        *out[k] = c;
+    }
+}
+
 // #919/#941: bounds propagation across assignment for an unchecked pointer
 // local whose value is snapshotted from a checked-rooted source. See the
 // design note at propagate_checked_bounds() below for the whole-function
@@ -1086,8 +1125,8 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
     // An unsplit bounds cast is a source through its `__cv` (the split, done
     // by the consumers that rewrite, leaves a plain read of it).
     Node       *cast = checked_cast_root(rhs);
-    CheckedBase base =
-        cast ? (CheckedBase){.var = cast->rhs->var} : find_checked_base(rhs);
+    CheckedBase base = cast ? (CheckedBase){.var = cast->rhs->var}
+                            : find_checked_base_ex(rhs, true);
     if (checked_base_is_declared(base)) {
         if ((base.mem || base.row) && node_has_side_effects(base.obj))
             return false;
@@ -1097,6 +1136,10 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         if (!(*out_lo && *out_hi))
             return false;
         *out_optional = false;
+        if (base.row && base.obj->checked_bounds_optional) {
+            checked_guard_optional_row(vm, base.obj, tok, out_lo, out_hi);
+            *out_optional = true;
+        }
         Type *base_ty = pty->base;
         *out_nt_elem  = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
         return true;
@@ -1571,7 +1614,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 
         if (node->kind != ND_DEREF || node->checked_bounds_lo)
             continue;
-        CheckedBase base = find_checked_base(node->lhs);
+        CheckedBase base = find_checked_base_ex(node->lhs, true);
         if (base.var && base.var->checked_prop_candidate &&
             !base.var->checked_prop_unsafe && !base.var->checked_prop_plain &&
             base.var->checked_prop_lo) {
@@ -1605,6 +1648,12 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
                 &node->checked_bounds_hi, &node->checked_nt_terminator,
                 &node->checked_bounds_obj_init, fn);
             if (node->checked_bounds_lo && node->checked_bounds_hi) {
+                if (base.obj->checked_bounds_optional) {
+                    checked_guard_optional_row(vm, base.obj, node->tok,
+                                               &node->checked_bounds_lo,
+                                               &node->checked_bounds_hi);
+                    node->checked_bounds_optional = true;
+                }
                 node->checked_access_size = checked_access_bytes(pty->base);
                 checked_attach_mirror(vm, node);
             }

@@ -376,6 +376,86 @@ void test_multidim_pointer_to_row_side_effecting_row(void) {
     AssertEq(a[0][1], 4);
 }
 
+// A row pointer that is checked-rooted on only some paths is OPT: its
+// element accesses are checked where it was rooted and unchecked elsewhere.
+[[cccc::test]]
+void test_multidim_optional_row_pointer_in_bounds(void) {
+    int a        _Checked[3][5] = {{0}};
+    int          plain[3][5]    = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 5; j++)
+            p[i][j] = i * 10 + j;
+    AssertEq(a[2][4], 24);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_optional_row_pointer_inner_oob(void) {
+    int a        _Checked[3][5] = {{0}};
+    int          plain[3][5]    = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    volatile int j = 5;
+    p[0][j]        = 3;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_optional_row_pointer_inner_oob_compound(void) {
+    int a        _Checked[3][5] = {{0}};
+    int          plain[3][5]    = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    volatile int j  = 5;
+    p[0][j]        += 3;
+}
+
+[[cccc::test]]
+void test_multidim_optional_row_pointer_unrooted_not_checked(void) {
+    int a        _Checked[3][5] = {{0}};
+    volatile int c              = 0;
+    int (*p)[5]                 = malloc(sizeof(int) * 50);
+    if (c)
+        p = a;
+    p[0][7] = 5; // c==0: p is the malloc'd pointer -- no row check
+    AssertEq(p[0][7], 5);
+    free(p);
+}
+
+// A row of an OPT row pointer is a source for a declared-checked target
+// on the path where the pointer was rooted.
+[[cccc::test(exit_code = 255)]]
+void test_multidim_optional_row_pointer_row_source_trap(void) {
+    int a        _Checked[3][5] = {{0}};
+    int          plain[3][5]    = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    int n                                  = 8;
+    int *[[cccc::array, cccc::count(n)]] t = p[0]; // count(8) from a row of 5
+    (void)t;
+}
+
+[[cccc::test]]
+void test_multidim_optional_row_pointer_row_source_unrooted_ok(void) {
+    int          plain[3][5]    = {{0}};
+    int a        _Checked[3][5] = {{0}};
+    volatile int c              = 0;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    int n                                  = 5;
+    int *[[cccc::array, cccc::count(n)]] t = p[0];
+    AssertEq(t[4], 0);
+}
+
 // ---------------------------------------------------------------------
 // Variable-length checked arrays: a local's extent is fixed when the
 // declaration runs; a parameter is count(n) on the decayed pointer.
