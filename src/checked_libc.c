@@ -25,9 +25,6 @@ static const struct {
     {"memset", "void *memset(void *" BC("n") " s, int c, unsigned long n)"},
 
     // stdio.h
-    // TODO(#1809): size * nmemb can wrap and let an oversized call pass; needs
-    // an
-    // overflow-checked product in bounds templates.
     {"fread",
      "unsigned long fread(void *" BC(
          "size * nmemb") " p, "

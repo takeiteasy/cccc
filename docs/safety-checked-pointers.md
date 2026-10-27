@@ -32,6 +32,8 @@ A bounds expression may name any in-scope parameter, local or global, including 
 
 For `count` and `byte_count` the lower bound is the pointer's live value, so reassigning `p` moves both the base and the lower bound. `(p + k)[i]` still checks against `p`'s declared bounds.
 
+A product in a bounds expression, written (`count(w * h)`, `byte_count(size * nmemb)`) or implied by `count(n)` times the element size, traps if it wraps, so `count(n)` on an `int *` rejects `n = 2^62 + 1` rather than reading it as one element.
+
 A prototype's bounds are resolved at the declaration, so a bad bound is an error there, with or without `--checked-pointers`. A bound on a prototype, typedef or function pointer may name sibling parameters and globals declared earlier. The bounds are used at every call ([safety-checked-interfaces.md](safety-checked-interfaces.md)).
 
 ### On struct members

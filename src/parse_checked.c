@@ -712,6 +712,47 @@ static Node *checked_elem_size_node(VirtualMachine *vm, Type *ty, Token *tok) {
     return new_long(vm, ty ? get_vm_size(ty) : 1, tok);
 }
 
+// `prod` (an ND_MUL inside a bounds template) as `(dynamic_check(a == 0 ||
+// b <= ULONG_MAX / a), prod)`, so a product that wraps traps instead of
+// reading as a small bound. Operands are pure and cloned for the check.
+static Node *checked_guard_mul(VirtualMachine *vm, Node *prod) {
+    Node *a = prod->lhs, *b = prod->rhs;
+    if ((a->kind == ND_NUM && b->kind == ND_NUM) ||
+        (a->kind == ND_NUM && (a->val == 0 || a->val == 1)) ||
+        (b->kind == ND_NUM && (b->val == 0 || b->val == 1)))
+        return prod;
+    Token *tok = prod->tok;
+    Node  *ua  = new_cast(vm, clone_bounds_node(vm, a), ty_ulong);
+    Node  *ub  = new_cast(vm, clone_bounds_node(vm, b), ty_ulong);
+    Node  *ud  = new_cast(vm, clone_bounds_node(vm, a), ty_ulong);
+    Node  *fits =
+        new_binary(vm, ND_LE, ub,
+                   new_binary(vm, ND_DIV, new_ulong(vm, -1, tok), ud, tok), tok);
+    Node *ok = new_binary(
+        vm, ND_LOGOR, new_binary(vm, ND_EQ, ua, new_ulong(vm, 0, tok), tok),
+        fits, tok);
+    Node *check = new_unary(vm, ND_DYNAMIC_CHECK, ok, tok);
+    check->ty   = ty_void;
+    add_type(vm, ok);
+    Node *guarded = new_binary(vm, ND_COMMA, check, prod, tok);
+    add_type(vm, guarded);
+    return guarded;
+}
+
+// Guards every integer product in the (already cloned) bounds expression `n`.
+static Node *checked_guard_products(VirtualMachine *vm, Node *n) {
+    if (!n)
+        return NULL;
+    n->lhs  = checked_guard_products(vm, n->lhs);
+    n->rhs  = checked_guard_products(vm, n->rhs);
+    n->cond = checked_guard_products(vm, n->cond);
+    n->then = checked_guard_products(vm, n->then);
+    n->els  = checked_guard_products(vm, n->els);
+    if (n->kind == ND_MUL && n->ty && is_integer(n->ty))
+        return checked_guard_mul(vm, n);
+    return n;
+}
+
 // The size CHKR checks an access of `pointee` against. A variable-length row
 // starts on a row boundary, so checking its first byte against the exact end
 // is the same as checking the whole row.
@@ -850,12 +891,14 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             // compiler.
             if (!resolved_lo || !resolved_hi)
                 return;
-            *out_lo  = base.mem
-                           ? clone_member_bounds_node(vm, resolved_lo, base.obj)
-                           : clone_bounds_node(vm, resolved_lo);
-            Node *hi = base.mem
-                           ? clone_member_bounds_node(vm, resolved_hi, base.obj)
-                           : clone_bounds_node(vm, resolved_hi);
+            *out_lo  = checked_guard_products(
+                vm, base.mem
+                        ? clone_member_bounds_node(vm, resolved_lo, base.obj)
+                        : clone_bounds_node(vm, resolved_lo));
+            Node *hi = checked_guard_products(
+                vm, base.mem
+                        ? clone_member_bounds_node(vm, resolved_hi, base.obj)
+                        : clone_bounds_node(vm, resolved_hi));
             // #938: the terminator slot is the element-size bytes beginning at
             // the declared end of the range -- for bounds(lo,hi) that end is
             // `hi` itself, so widen it by one element exactly as CB_COUNT/
@@ -881,9 +924,10 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             // originally shipped this for count(n) only; docs/safety.md
             // documents the unified rule).
             *out_lo = checked_base_self_expr(vm, base, tok);
-            Node *n = base.mem
-                          ? clone_member_bounds_node(vm, resolved_hi, base.obj)
-                          : clone_bounds_node(vm, resolved_hi); // already typed
+            Node *n = checked_guard_products(
+                vm, base.mem ? clone_member_bounds_node(vm, resolved_hi,
+                                                        base.obj)
+                             : clone_bounds_node(vm, resolved_hi));
             Node *count_bytes;
             if (form == CB_BYTE_COUNT) {
                 count_bytes = n;
@@ -901,11 +945,13 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                     new_binary(vm, ND_MUL, n_plus_1,
                                checked_elem_size_node(vm, base_ty, tok), tok);
                 add_type(vm, count_bytes);
+                count_bytes = checked_guard_mul(vm, count_bytes);
             } else {
                 count_bytes =
                     new_binary(vm, ND_MUL, n,
                                checked_elem_size_node(vm, base_ty, tok), tok);
                 add_type(vm, count_bytes);
+                count_bytes = checked_guard_mul(vm, count_bytes);
             }
             // #923/#938/#939: this access can land on the widened terminator
             // slot -- flag it for CHKNT/CHKNTZ's store-side null-terminator

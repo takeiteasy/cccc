@@ -45,6 +45,8 @@ Other points:
 | The merge reports no conflict | The table is a default, not a declaration |
 | `Obj.checked_libc_mask` records the filled parameters | A later declaration that spells bounds for one of them clears it and takes over, where a plain redeclaration would be a conflict |
 
+`compute_checked_bounds()` (`src/parse_checked.c`) wraps each integer product in a bound, written or the implicit `count * sizeof`, as `(dynamic_check(a == 0 || b <= ULONG_MAX / a), a * b)` (`checked_guard_mul()`). The operands are pure and cloned for the check, and `-c=native` lowers the check with `__cccc_chkdc` like any `dynamic_check`. This covers the `fread`/`fwrite` rows' `size * nmemb`.
+
 The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidden_builtin()` skips `merge_checked_interface()`, and the table runs after either branch.
 
 ## Plain array sources
