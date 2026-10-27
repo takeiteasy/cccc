@@ -1116,7 +1116,8 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
                                        Token *tok, Node **out_lo, Node **out_hi,
                                        bool *out_optional, bool *out_nt,
                                        int64_t *out_nt_elem, bool *out_plain,
-                                       Obj *hoist_fn, Node **out_obj_init) {
+                                       Obj *hoist_fn, Node **out_obj_init,
+                                       bool use_src_pair) {
     *out_lo    = NULL;
     *out_hi    = NULL;
     *out_plain = false;
@@ -1187,9 +1188,17 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         // stabilised as non-unsafe by the round the fixpoint stopped at --
         // has real temps, so *out_lo/*out_hi come back non-NULL there.
         if (base.var->checked_prop_lo) {
-            *out_lo = new_var_node(vm, base.var->checked_prop_lo, tok);
+            // A mixed local's source pair also holds its plain arrays' ranges.
+            bool src = use_src_pair && base.var->checked_prop_src_lo;
+            *out_lo  = new_var_node(vm,
+                                    src ? base.var->checked_prop_src_lo
+                                        : base.var->checked_prop_lo,
+                                    tok);
             add_type(vm, *out_lo);
-            *out_hi = new_var_node(vm, base.var->checked_prop_hi, tok);
+            *out_hi = new_var_node(vm,
+                                   src ? base.var->checked_prop_src_hi
+                                       : base.var->checked_prop_hi,
+                                   tok);
             add_type(vm, *out_hi);
         }
         *out_optional = base.var->checked_prop_optional;
@@ -1256,7 +1265,12 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                     int64_t src_nt_elem;
                     if (checked_prop_source_bounds(
                             vm, node->rhs, node->tok, &lo, &hi, &src_optional,
-                            &src_nt, &src_nt_elem, &src_plain, NULL, NULL)) {
+                            &src_nt, &src_nt_elem, &src_plain, NULL, NULL,
+                            false)) {
+                        Obj *src_var = find_checked_base(node->rhs).var;
+                        if (src_var && src_var->checked_prop_chain_src &&
+                            src_var->checked_prop_mixed)
+                            var->checked_prop_scan_src_mixed = true;
                         if (src_plain) {
                             // Rooted or not is decided at the end of the
                             // round, once it is known whether any checked
@@ -1363,6 +1377,14 @@ static void checked_prop_alloc_temps(VirtualMachine *vm, Obj *fn) {
             v->checked_prop_hi =
                 new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
         }
+    for (Obj *v = fn->locals; v; v = v->next)
+        if (v->checked_prop_mixed && !v->checked_prop_unsafe &&
+            !v->checked_prop_src_lo) {
+            v->checked_prop_src_lo =
+                new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+            v->checked_prop_src_hi =
+                new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
+        }
 }
 
 // #942: builds the raw integer constant (0 for hi, -1 for lo) that
@@ -1430,11 +1452,16 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     // are discarded.
     bool is_source = checked_prop_source_bounds(
         vm, assign_node->rhs, assign_node->tok, &lo, &hi, &src_optional,
-        &src_nt, &src_nt_elem, &src_plain, fn, &src_obj_init);
+        &src_nt, &src_nt_elem, &src_plain, fn, &src_obj_init, false);
     // A plain-array store into a local that also holds checked values is
-    // unrooted (the classifier made that local OPT).
-    if (is_source && src_plain && !var->checked_prop_plain)
+    // unrooted for dereferences (the classifier made that local OPT), but its
+    // range still goes to the local's source pair.
+    Node *plain_lo = NULL, *plain_hi = NULL;
+    if (is_source && src_plain && !var->checked_prop_plain) {
+        plain_lo  = lo;
+        plain_hi  = hi;
         is_source = false;
+    }
     Token *tok = assign_node->tok;
     if (is_source && lo && hi) {
         // Rooted store -- unchanged #919/#941 behavior below; lo/hi are
@@ -1477,6 +1504,33 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     add_type(vm, store_hi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_lo, store_hi, tok);
     add_type(vm, snapshot);
+    if (var->checked_prop_mixed && var->checked_prop_src_lo) {
+        Node *slo, *shi;
+        Obj  *src_var = find_checked_base(assign_node->rhs).var;
+        if (plain_lo) {
+            slo = plain_lo;
+            shi = plain_hi;
+        } else if (is_source && src_var && src_var->checked_prop_mixed &&
+                   src_var->checked_prop_src_lo) {
+            slo = new_var_node(vm, src_var->checked_prop_src_lo, tok);
+            shi = new_var_node(vm, src_var->checked_prop_src_hi, tok);
+        } else {
+            slo = clone_bounds_node(vm, lo);
+            shi = clone_bounds_node(vm, hi);
+        }
+        Node *store_slo = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_src_lo, tok),
+            new_cast(vm, slo, pointer_to(vm, ty_char)), tok);
+        add_type(vm, store_slo);
+        Node *store_shi = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_src_hi, tok),
+            new_cast(vm, shi, pointer_to(vm, ty_char)), tok);
+        add_type(vm, store_shi);
+        Node *src_stores = new_binary(vm, ND_COMMA, store_slo, store_shi, tok);
+        add_type(vm, src_stores);
+        snapshot = new_binary(vm, ND_COMMA, snapshot, src_stores, tok);
+        add_type(vm, snapshot);
+    }
     // #947: if the source needed a hoisted object-expression temp, its init
     // has to run before BOTH store_lo and store_hi read it -- splice it in
     // ahead of the existing pair rather than appending, same program point
@@ -1708,6 +1762,26 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
         add_type(vm, init->lhs);
         init->next     = fn->body->body;
         fn->body->body = init;
+        if (!v->checked_prop_src_lo)
+            continue;
+        Node *store_slo = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_src_lo, tok),
+            new_cast(vm, checked_prop_sentinel_node(vm, false, tok),
+                     pointer_to(vm, ty_char)),
+            tok);
+        add_type(vm, store_slo);
+        Node *store_shi = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_src_hi, tok),
+            new_cast(vm, checked_prop_sentinel_node(vm, true, tok),
+                     pointer_to(vm, ty_char)),
+            tok);
+        add_type(vm, store_shi);
+        Node *src_init =
+            new_unary(vm, ND_EXPR_STMT,
+                      new_binary(vm, ND_COMMA, store_slo, store_shi, tok), tok);
+        add_type(vm, src_init->lhs);
+        src_init->next = fn->body->body;
+        fn->body->body = src_init;
     }
 }
 
@@ -1819,7 +1893,8 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
     // probe path (skip building *out_lo/*out_hi entirely when the caller is
     // checked_prop_poison_scan(), which only reads the return value) would
     // avoid the rebuild.
-    int  prev_survivors = -1, prev_optional = -1, prev_nt = -1, prev_plain = -1;
+    int  prev_survivors = -1, prev_optional = -1, prev_nt = -1, prev_plain = -1,
+         prev_mixed = -1;
     bool converged = false;
     for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
         for (Obj *v = fn->locals; v; v = v->next)
@@ -1829,6 +1904,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                 v->checked_prop_scan_saw_unrooted = false;
                 v->checked_prop_scan_src_optional = false;
                 v->checked_prop_scan_saw_plain    = false;
+                v->checked_prop_scan_src_mixed    = false;
                 // #943: reset alongside the other per-round scratch fields
                 // -- see their comments in cccc.h.
                 v->checked_prop_scan_nt_elem     = 0;
@@ -1847,7 +1923,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
         // reading its own field is not hostage to that ordering staying
         // true after some future refactor.
         int survivors = 0, optional_survivors = 0, nt_survivors = 0,
-            plain_survivors = 0;
+            plain_survivors = 0, mixed_survivors = 0;
         for (Obj *v = fn->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
                 // #942: a candidate with no checked-rooted store at all
@@ -1866,6 +1942,10 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                 if (!v->checked_prop_scan_saw_rooted && !plain_only)
                     v->checked_prop_unsafe = true;
                 v->checked_prop_plain = plain_only;
+                v->checked_prop_mixed =
+                    !v->checked_prop_unsafe &&
+                    ((v->checked_prop_scan_saw_plain && !plain_only) ||
+                     v->checked_prop_scan_src_mixed);
                 if (v->is_captured)
                     v->checked_prop_unsafe = true;
                 v->checked_prop_chain_src = !v->checked_prop_unsafe;
@@ -1892,14 +1972,17 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                         nt_survivors++;
                     if (v->checked_prop_plain)
                         plain_survivors++;
+                    if (v->checked_prop_mixed)
+                        mixed_survivors++;
                 } else {
                     v->checked_prop_nt_elem = 0;
                     v->checked_prop_plain   = false;
+                    v->checked_prop_mixed   = false;
                 }
             }
         if (survivors == prev_survivors &&
             optional_survivors == prev_optional && nt_survivors == prev_nt &&
-            plain_survivors == prev_plain) {
+            plain_survivors == prev_plain && mixed_survivors == prev_mixed) {
             converged = true;
             break;
         }
@@ -1907,6 +1990,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
         prev_optional  = optional_survivors;
         prev_nt        = nt_survivors;
         prev_plain     = plain_survivors;
+        prev_mixed     = mixed_survivors;
     }
     // Defensive: if the cap was hit before convergence, force every
     // remaining survivor to OPT rather than trusting a possibly-incomplete
@@ -2071,7 +2155,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                     bool is_source = checked_prop_source_bounds(
                         vm, node->rhs, node->tok, &src_lo, &src_hi,
                         &src_optional, &src_nt, &src_nt_elem, &src_plain, NULL,
-                        NULL);
+                        NULL, true);
                     if (is_source && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // The split moved the call, with its argument
@@ -2092,7 +2176,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         checked_prop_source_bounds(
                             vm, node->rhs, node->tok, &src_lo, &src_hi,
                             &src_optional, &src_nt2, &src_nt_elem2, &src_plain,
-                            fn, &src_obj_init);
+                            fn, &src_obj_init, true);
                         verify_checked_assign_rewrite(
                             vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
                             src_obj_init, dst_obj_init, cr_store, src_optional);

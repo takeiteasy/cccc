@@ -3098,6 +3098,16 @@ struct Obj {
     bool checked_prop_plain;
     bool checked_prop_scan_saw_plain;
 
+    // A survivor that holds both plain-array and checked-rooted values, or
+    // chains from one. Derefs read checked_prop_lo/hi, where a plain store
+    // leaves the sentinel; checked_prop_src_lo/hi also keep the plain array's
+    // range and are read only when the local is a source for a checked
+    // target. Recomputed per round like checked_prop_plain.
+    bool checked_prop_mixed;
+    bool checked_prop_scan_src_mixed;
+    Obj *checked_prop_src_lo;
+    Obj *checked_prop_src_hi;
+
     // #486: non-CC_NONE only for the compiler-generated local a bounds
     // cast's desugar declares (cast(), src/parse_expr.c) -- mirrors
     // ty->checked_cast_kind the same way checked_kind/checked_bounds_form

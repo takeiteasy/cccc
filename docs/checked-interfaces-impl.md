@@ -61,7 +61,7 @@ The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidde
 | `checked_param_qualifies()`, `rewrite_checked_return()` | Accept a plain-array root, so the `__ca`/`__cr` store reaches the scan |
 | `check_checked_cast_dynamic_source()` | Accepts it, so `__cv = (T)arr` reaches the scan |
 
-A plain array is also a propagation source. `Obj.checked_prop_plain` marks a local whose every rooted store is plain (directly or through a chain from one); `checked_prop_attach_scan()` skips it, so derefs through it get no bounds, while the snapshot temps and `verify_checked_assign_scan()` still use it. In the classifier a plain store roots the local only when no checked store shares it; otherwise it counts as unrooted and the local is OPT. `checked_prop_rewrite_assign()` applies the same rule. The plain count joins the fixpoint test.
+A plain array is also a propagation source. `Obj.checked_prop_plain` marks a local whose every rooted store is plain (directly or through a chain from one); `checked_prop_attach_scan()` skips it, so derefs through it get no bounds, while the snapshot temps and `verify_checked_assign_scan()` still use it. In the classifier a plain store roots the local only when no checked store shares it; otherwise it counts as unrooted for dereferences and the local is OPT and `checked_prop_mixed`. A mixed local also records the plain array's range in `checked_prop_src_lo/hi`, which `checked_prop_source_bounds(..., use_src_pair)` returns to `verify_checked_assign_scan()`. `checked_prop_rewrite_assign()` applies the same rule. The plain count joins the fixpoint test.
 
 ## Struct fields
 

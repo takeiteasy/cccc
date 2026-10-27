@@ -66,7 +66,7 @@ sink(r, 3);                              // traps: 2 elements remain
 r[i];                                  // not checked
 ```
 
-A local that also holds a checked-rooted value is an ordinary propagated local: its plain stores count as other assignments (OPT), and accesses through it are checked by the rules above.
+A local that also holds a checked-rooted value is an ordinary propagated local: its plain stores count as other assignments (OPT), and accesses through it are checked by the rules above. When it reaches a checked target, the array's own extent is verified on the paths that stored the array.[^mixed]
 
 ## Terminator slot
 
@@ -97,6 +97,8 @@ q = p;   // traps: p's 4 elements don't cover q's declared 10
 |---|---|
 | `q = E;` where `E` roots in a declared checked pointer or in a propagated local, including an OPT one (checked where it was rooted, skipped where it was not) | A source that is never rooted |
 | Call arguments and `return` values[^args] | A target with `bounds(unknown)` |
-| A plain array of known size ([plain array sources](safety-checked-interfaces.md#plain-arrays-as-sources)), directly or through a [plain-array local](#plain-arrays) | A plain-array local that also holds other values (OPT) |
+| A plain array of known size ([plain array sources](safety-checked-interfaces.md#plain-arrays-as-sources)), directly or through a [plain-array local](#plain-arrays), including one that also holds checked pointers or pointers from elsewhere | — |
 
 [^args]: Arguments to annotated parameters and values returned from a checked return type are checked as assignments to a hidden local; see [safety-checked-interfaces.md](safety-checked-interfaces.md). How the passes work: [safety-impl.md](safety-impl.md#bounds-propagation).
+
+[^mixed]: The local keeps a second range that records each plain array it held, read only when it is a source for a checked target. Dereferences through it still use the first range, so a path that held the plain array stays unchecked there. A pointer from elsewhere (`if (c) q = malloc(n);`) holds the no-bounds sentinel and is not verified.

@@ -2534,6 +2534,77 @@ void test_checked_call_arg_optional_rooted_trap(void) {
     checked_call_arg_sink(q, 8); // c==1: q rooted at count(2) -- traps
 }
 
+// A local holding a plain array (`q = buf`) on some paths and a checked
+// pointer on others is verified through whichever it holds at the target.
+[[cccc::test]]
+void test_checked_call_arg_mixed_plain_ok(void) {
+    int buf[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    volatile int c                             = 1;
+    int         *q                             = buf;
+    if (!c)
+        q = small;
+    checked_call_arg_sink(q, 8); // c==1: q is buf, 8 elements -- satisfied
+    AssertEq(q[7], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_mixed_plain_trap(void) {
+    int buf[2]                               = {1, 2};
+    int *[[cccc::array, cccc::count(8)]] big = (int[8]){0};
+    volatile int c                           = 1;
+    int         *q                           = buf;
+    if (!c)
+        q = big;
+    checked_call_arg_sink(q, 8); // c==1: q is buf, 2 elements -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_mixed_checked_trap(void) {
+    int buf[8]                                 = {0};
+    int *[[cccc::array, cccc::count(2)]] small = (int[2]){1, 2};
+    volatile int c                             = 0;
+    int         *q                             = buf;
+    if (!c)
+        q = small;
+    checked_call_arg_sink(q, 8); // c==0: q is small, 2 elements -- traps
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_mixed_chain_trap(void) {
+    int buf[2]                               = {1, 2};
+    int *[[cccc::array, cccc::count(8)]] big = (int[8]){0};
+    volatile int c                           = 1;
+    int         *q                           = buf;
+    if (!c)
+        q = big;
+    int *r = q;
+    checked_call_arg_sink(r, 8); // the plain range reaches r through q
+}
+
+// A plain array and a pointer from elsewhere: the array's range is verified
+// on the path that stored it, the other path holds the sentinel.
+[[cccc::test(exit_code = 255)]]
+void test_checked_call_arg_plain_or_heap_plain_path_trap(void) {
+    int          buf[2] = {1, 2};
+    volatile int c      = 1;
+    int         *q      = malloc(sizeof(int) * 8);
+    if (c)
+        q = buf;
+    checked_call_arg_sink(q, 8); // c==1: q is buf, 2 elements -- traps
+}
+
+[[cccc::test]]
+void test_checked_call_arg_plain_or_heap_heap_path_ok(void) {
+    int          buf[2] = {1, 2};
+    volatile int c      = 0;
+    int         *q      = malloc(sizeof(int) * 8);
+    if (c)
+        q = buf;
+    checked_call_arg_sink(q, 8); // c==0: q is the heap pointer -- no check
+    free(q);
+}
+
 // OPT-ness chains: `r` reads `q`'s snapshot, so the sentinel (or the real
 // range) reaches the declared target through the chain.
 [[cccc::test]]

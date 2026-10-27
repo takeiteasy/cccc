@@ -284,7 +284,7 @@ Contract errors (arithmetic on a `single` pointer, side effects in a bounds expr
 [^proto]: An argument whose bounds are known on only some paths is verified on the paths where they are known and passes unchecked on the others. A side-effecting argument that a bound names is evaluated once, before the call's other arguments.
 [^redecl]: The comparison is structural on the resolved bounds, so `count((n))` agrees with `count(n)` but `count(n + 0)` does not.
 [^ret]: A block literal's inferred return type isn't verified. A bound on a return type is resolved where the function is declared, so an undeclared name there is an error in every mode.
-[^plain]: The extent flows through the local like any [propagated bounds](safety-checked-propagation.md#plain-arrays), but only checked targets (declarations, assignments, arguments, returns and casts) read it. A local that also holds a checked pointer, or a pointer from elsewhere (`if (c) q = malloc(n);`), is not verified against the array.
+[^plain]: The extent flows through the local like any [propagated bounds](safety-checked-propagation.md#plain-arrays), but only checked targets (declarations, assignments, arguments, returns and casts) read it. A local that also holds a checked pointer is verified against the array on the paths that stored it. On a path that holds a pointer from elsewhere (`if (c) q = malloc(n);`) it is not verified.
 
 [^row]: The range is the row itself, so `&m[0][1]` covers three elements and flattening a matrix into one checked pointer (`sink(m[0], 12)`) traps. A runtime row index outside the array gives an empty range.
 
