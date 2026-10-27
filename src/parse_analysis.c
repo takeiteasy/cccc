@@ -1769,10 +1769,22 @@ static NNState *nn_env_slot(NNEnv *env, Obj *v) {
     return NULL;
 }
 
+// Peels casts and the checked-pointer `(tmp = E, tmp)` call-argument/return
+// desugar down to `E`.
 static Node *nn_strip_cast(Node *node) {
-    while (node && node->kind == ND_CAST)
-        node = node->lhs;
-    return node;
+    for (;;) {
+        if (node && node->kind == ND_CAST) {
+            node = node->lhs;
+        } else if (node && node->kind == ND_COMMA && node->lhs &&
+                   node->lhs->kind == ND_ASSIGN && node->lhs->lhs &&
+                   node->lhs->lhs->kind == ND_VAR && node->rhs &&
+                   node->rhs->kind == ND_VAR &&
+                   node->lhs->lhs->var == node->rhs->var) {
+            node = node->lhs->rhs;
+        } else {
+            return node;
+        }
+    }
 }
 
 static NNState nn_state_of_expr(VirtualMachine *vm, NNEnv *env, Node *node) {
