@@ -36,9 +36,9 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 | Flag | Effect |
 |---|---|
 | `--attr-target=auto\|c23\|gnu\|msvc\|strip` | How remaining attributes are printed. `auto` emits standard C23 attributes as `[[...]]` in C23 mode and GNU `__attribute__` otherwise; GNU-only ones such as `packed` stay GNU |
-| `--emit-cccc` | Keep `[[cccc::...]]` attributes and route markers, re-emit cccc-only includes, and print checked-pointer qualifiers after the `*`[^emit] |
+| `--emit-cccc` | Keep `[[cccc::...]]` attributes and route markers, re-emit cccc-only includes, print checked-pointer qualifiers after the `*`, and keep `_Checked[N]`/`_Nt_checked[N]` array declarators[^emit] |
 
-[^emit]: `test`, `comptime`, `test_setup`, `test_teardown` and `build` are consumed structurally during preprocessing whatever the flag says; `--emit-cccc` only affects attributes that would be stripped cosmetically, such as `[[cccc::emit]]`. With `-c=native` it disables the `PATH` search, so `CCCC_NATIVE_CC` must name a compiler, since a plain `cc` is not guaranteed to tolerate `[[cccc::...]]`.
+[^emit]: `test`, `comptime`, `test_setup`, `test_teardown` and `build` are consumed structurally during preprocessing whatever the flag says; `--emit-cccc` only affects attributes that would be stripped cosmetically, such as `[[cccc::emit]]`. With `-c=native` it disables the `PATH` search, so `CCCC_NATIVE_CC` must name a compiler, since a plain `cc` is not guaranteed to tolerate `[[cccc::...]]`. A checked array keeps its keyword only where it can be spelled again, as a plain declared name (`int a _Checked[4]`); in other positions, such as a pointer to a checked array, it prints as a plain array.
 
 ## Where attributes may appear
 

@@ -1804,6 +1804,37 @@ unsigned __int128 decode_wide_digits(const char *digits, int base) {
     return v;
 }
 
+// --emit-cccc: the [[cccc::count()/byte_count()/bounds()]] form of a checked
+// type, appended to `buf` (which already holds `n` bytes). Writes nothing for
+// a type with no bounds form.
+static void format_checked_bounds_attr(char *buf, size_t cap, size_t n,
+                                       Type *ty) {
+    switch (ty->checked_bounds_form) {
+        case CB_COUNT:
+        case CB_BYTE_COUNT:
+            if (ty->checked_bounds_arg1)
+                snprintf(buf + n, cap - n, " [[cccc::%s(%.*s)]]",
+                         ty->checked_bounds_form == CB_COUNT ? "count"
+                                                             : "byte_count",
+                         ty->checked_bounds_arg1->len,
+                         ty->checked_bounds_arg1->loc);
+            break;
+        case CB_RANGE:
+            if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
+                snprintf(
+                    buf + n, cap - n, " [[cccc::bounds(%.*s, %.*s)]]",
+                    ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
+                    ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
+            break;
+        case CB_UNKNOWN:
+            snprintf(buf + n, cap - n, " [[cccc::bounds(unknown)]]");
+            break;
+        case CB_NONE:
+        default:
+            break;
+    }
+}
+
 // --emit-cccc: format a checked pointer's [[cccc::single/array/ntarray]]
 // (+ count()/byte_count()/bounds() bounds form, if any) qualifier for
 // re-emission in the post-'*' declarator position it was originally written
@@ -1818,30 +1849,34 @@ static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
     int         n         = snprintf(buf, cap, " [[cccc::%s]]", kind_name);
     if (n < 0 || (size_t)n >= cap)
         return;
-    switch (ty->checked_bounds_form) {
-        case CB_COUNT:
-        case CB_BYTE_COUNT:
-            if (ty->checked_bounds_arg1)
-                snprintf(buf + n, cap - (size_t)n, " [[cccc::%s(%.*s)]]",
-                         ty->checked_bounds_form == CB_COUNT ? "count"
-                                                             : "byte_count",
-                         ty->checked_bounds_arg1->len,
-                         ty->checked_bounds_arg1->loc);
-            break;
-        case CB_RANGE:
-            if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
-                snprintf(
-                    buf + n, cap - (size_t)n, " [[cccc::bounds(%.*s, %.*s)]]",
-                    ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
-                    ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
-            break;
-        case CB_UNKNOWN:
-            snprintf(buf + n, cap - (size_t)n, " [[cccc::bounds(unknown)]]");
-            break;
-        case CB_NONE:
-        default:
-            break;
-    }
+    format_checked_bounds_attr(buf, cap, (size_t)n, ty);
+}
+
+// --emit-cccc: the `_Checked`/`_Nt_checked` keyword that re-declares the
+// checked array `ty` (outermost dimension only; a row carries it implicitly).
+// NULL where the keyword would not re-parse: the declarator must be a bare
+// identifier or empty, not `(*p)` or an already-extended `a[3]`.
+static const char *checked_array_keyword(SerializeContext *ctx, Type *ty,
+                                         const char *name) {
+    if (!ctx->emit_cccc || ty->checked_kind == CHECKED_NONE)
+        return NULL;
+    for (const char *c = name; c && *c; c++)
+        if (!isalnum((unsigned char)*c) && *c != '_')
+            return NULL;
+    Type *innermost = ty;
+    while (innermost->base && (innermost->base->kind == TY_ARRAY ||
+                               innermost->base->kind == TY_VLA))
+        innermost = innermost->base;
+    return innermost->checked_kind == CHECKED_NTARRAY ? "_Nt_checked"
+                                                      : "_Checked";
+}
+
+// `name` followed by the checked-array keyword, if there is one.
+static void checked_array_head(char *buf, size_t cap, const char *kw,
+                               const char *name) {
+    bool named = name && *name;
+    snprintf(buf, cap, "%s%s%s", named ? name : "", named && kw ? " " : "",
+             kw ? kw : "");
 }
 
 // Forward declaration -- defined below (near type_layout_is_host_owned,
@@ -1907,13 +1942,15 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                        ty->array_len_layout_is_align);
             fclose(df);
         }
+        char head[512];
+        checked_array_head(head, sizeof(head),
+                           checked_array_keyword(ctx, ty, name), name);
         if (ty->array_len < 0)
-            snprintf(buf, sizeof(buf), "%s[]", name ? name : "");
+            snprintf(buf, sizeof(buf), "%s[]", head);
         else if (wrote_layout)
-            snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "", dimbuf);
+            snprintf(buf, sizeof(buf), "%s[%s]", head, dimbuf);
         else
-            snprintf(buf, sizeof(buf), "%s[%d]", name ? name : "",
-                     ty->array_len);
+            snprintf(buf, sizeof(buf), "%s[%d]", head, ty->array_len);
         free(dimbuf);
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
@@ -1945,8 +1982,10 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         fclose(lf);
 
         char buf[1024];
-        snprintf(buf, sizeof(buf), "%s[%s]", name ? name : "",
-                 lenbuf ? lenbuf : "");
+        char head[512];
+        checked_array_head(head, sizeof(head),
+                           checked_array_keyword(ctx, ty, name), name);
+        snprintf(buf, sizeof(buf), "%s[%s]", head, lenbuf ? lenbuf : "");
         free(lenbuf);
         serialize_type_decl(f, ctx, ty->base, buf);
         return;
@@ -2332,8 +2371,17 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
                 serialize_anon_aggregate(f, ctx, m->ty);
             } else if (ty->is_flexible && !m->next && m->ty->kind == TY_ARRAY &&
                        m->ty->array_len == 0) {
+                const char *kw = checked_array_keyword(ctx, m->ty, name);
+                if (kw)
+                    snprintf(name + strlen(name), sizeof(name) - strlen(name),
+                             " %s", kw);
                 strncat(name, "[]", sizeof(name) - strlen(name) - 1);
                 serialize_type_decl(f, ctx, m->ty->base, name);
+                if (kw) {
+                    char attr[256] = "";
+                    format_checked_bounds_attr(attr, sizeof(attr), 0, m->ty);
+                    fputs(attr, f);
+                }
             } else {
                 serialize_type_decl(f, ctx, m->ty, name);
             }
