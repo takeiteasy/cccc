@@ -1531,6 +1531,119 @@ void merge_checked_interface_defaults(VirtualMachine *vm, Obj *fn, Type *ty) {
     merge_checked_interface_impl(vm, fn, ty, true);
 }
 
+// A copy of `def_fn` carrying the bounds only `proto_fn` spells, or NULL when
+// there is nothing to adopt. The copy keeps the prototype's resolved
+// templates, so none is re-parsed against the definition's parameter names.
+static Type *adopt_fn_iface(VirtualMachine *vm, Type *def_fn, Type *proto_fn) {
+    if (def_fn->kind != TY_FUNC || proto_fn->kind != TY_FUNC)
+        return NULL;
+    resolve_param_checked_bounds(vm, def_fn);
+    resolve_param_checked_bounds(vm, proto_fn);
+
+    Type *merged  = copy_type(vm, def_fn);
+    bool  changed = false;
+    Type  head    = {0};
+    Type *tail    = &head;
+    Type *p       = proto_fn->params;
+    for (Type *d = def_fn->params, *next; d; d = next) {
+        next = d->next;
+        if (!p)
+            return NULL;
+        Type *c = d;
+        if (d->kind == TY_PTR && p->kind == TY_PTR) {
+            if (checked_needs_adopt(d, p, false)) {
+                c = copy_type(vm, d);
+                checked_adopt(c, p);
+                changed = true;
+            }
+            if (d->base && p->base) {
+                Type *nested = adopt_fn_iface(vm, d->base, p->base);
+                if (nested) {
+                    if (c == d)
+                        c = copy_type(vm, d);
+                    c->base = nested;
+                    changed = true;
+                }
+            }
+        }
+        tail->next = c;
+        tail       = c;
+        p          = p->next;
+    }
+    if (p)
+        return NULL;
+    tail->next     = NULL;
+    merged->params = head.next;
+
+    Type *dr = def_fn->return_ty, *pr = proto_fn->return_ty;
+    if (dr && pr && dr->kind == TY_PTR && pr->kind == TY_PTR &&
+        checked_needs_adopt(dr, pr, false)) {
+        merged->return_ty = copy_type(vm, dr);
+        checked_adopt(merged->return_ty, pr);
+        if (dr->checked_bounds_form == CB_NONE) {
+            merged->checked_ret_bounds_lo = proto_fn->checked_ret_bounds_lo;
+            merged->checked_ret_bounds_hi = proto_fn->checked_ret_bounds_hi;
+        }
+        changed = true;
+    }
+    if (!changed)
+        return NULL;
+    merged->checked_param_tmpl_done = true;
+    return merged;
+}
+
+// Gives the definition's own parameter types the bounds a prior declaration
+// spells and the definition does not, so the body is checked against them.
+// Bounds the libc table supplied are left out: they describe callers, not a
+// user's own implementation. Returns a mask of the parameters that took
+// top-level bounds; function-pointer parameters are adopted in place.
+unsigned adopt_checked_definition_bounds(VirtualMachine *vm, Obj *fn,
+                                         Type *def_ty) {
+    Type *proto = fn->ty;
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !proto || proto == def_ty ||
+        proto->kind != TY_FUNC || def_ty->kind != TY_FUNC ||
+        vm->compiler.in_type_lookahead)
+        return 0;
+    resolve_param_checked_bounds(vm, proto);
+    resolve_param_checked_bounds(vm, def_ty);
+
+    unsigned mask = 0;
+    Type     head = {0};
+    Type    *tail = &head;
+    Type    *p    = proto->params;
+    int      idx  = 0;
+    for (Type *d = def_ty->params, *next; d; d = next, idx++) {
+        next = d->next;
+        if (!p)
+            return 0;
+        Type *c = d;
+        if (idx < 32 && !(fn->checked_libc_mask & (1u << idx)) &&
+            d->kind == TY_PTR && p->kind == TY_PTR) {
+            if (checked_needs_adopt(d, p, false)) {
+                c = copy_type(vm, d);
+                checked_adopt(c, p);
+                mask |= 1u << idx;
+            }
+            if (d->base && p->base) {
+                Type *nested = adopt_fn_iface(vm, d->base, p->base);
+                if (nested) {
+                    if (c == d)
+                        c = copy_type(vm, d);
+                    c->base = nested;
+                }
+            }
+        }
+        tail->next = c;
+        tail       = c;
+        p          = p->next;
+    }
+    if (p)
+        return 0;
+    tail->next     = NULL;
+    def_ty->params = head.next;
+    return mask;
+}
+
 // Create a function Obj that is NOT in the global scope or globals list.
 // Used for __builtin_strlen/__builtin_strcmp stubs so they don't interfere
 // with user redeclarations of strlen/strcmp.

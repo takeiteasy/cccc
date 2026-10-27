@@ -2070,6 +2070,27 @@ static Node *clone_param_bounds_node(VirtualMachine *vm, Node *n,
     return c;
 }
 
+// Instantiates a parameter-bounds template inside the definition's body:
+// placeholder k becomes the definition's k-th parameter, so a definition that
+// renames its parameters still binds by position. `self_idx` is the 1-based
+// parameter the template belongs to, or 0 for a return value.
+void resolve_checked_template_bounds(VirtualMachine *vm, Obj **params,
+                                     int nparams, Node *lo_tmpl, Node *hi_tmpl,
+                                     int self_idx, Node **out_lo,
+                                     Node **out_hi) {
+    Node **arg_by_idx = arena_alloc(&vm->compiler.parser_arena,
+                                    sizeof(Node *) * (nparams + 1));
+    for (int i = 0; i < nparams; i++) {
+        arg_by_idx[i] = new_var_node(vm, params[i], params[i]->ty->name);
+        add_type(vm, arg_by_idx[i]);
+    }
+    Obj *self = self_idx ? params[self_idx - 1] : NULL;
+    *out_lo   = clone_param_bounds_node(vm, lo_tmpl, arg_by_idx, nparams,
+                                        self_idx, self);
+    *out_hi   = clone_param_bounds_node(vm, hi_tmpl, arg_by_idx, nparams,
+                                        self_idx, self);
+}
+
 // Allocates the hidden `__ca` local this rewrite assigns each qualifying
 // argument through. Deliberately bypasses new_lvar() -- new_lvar() calls
 // warn_if_shadowing(vm, ty->name), and `ty` here is the CALLEE's parameter
@@ -3141,15 +3162,24 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     if (!has_form)
         return;
     Obj *var = new_lvar(vm, "", 0, rty);
-    resolve_checked_bounds(vm, var);
+    int  nparams = 0;
+    for (Obj *p = fn->params; p; p = p->next)
+        nparams++;
+    resolve_param_checked_bounds(vm, fn->ty);
+    Obj **params = arena_alloc(&vm->compiler.parser_arena,
+                               sizeof(Obj *) * (nparams + 1));
+    int   i      = 0;
+    for (Obj *p = fn->params; p; p = p->next)
+        params[i++] = p;
+    resolve_checked_template_bounds(
+        vm, params, nparams, fn->ty->checked_ret_bounds_lo,
+        fn->ty->checked_ret_bounds_hi, 0, &var->checked_bounds_lo,
+        &var->checked_bounds_hi);
     fn->checked_ret_var = var;
 
     // Callers evaluate the return bounds with the argument values they
     // passed, so `return` is verified against entry copies of the parameters
     // the bounds name rather than their possibly-reassigned values.
-    int nparams = 0;
-    for (Obj *p = fn->params; p; p = p->next)
-        nparams++;
     RetEntryCopy *map =
         arena_alloc(&vm->compiler.parser_arena, sizeof(*map) * (nparams + 1));
     int count = 0;

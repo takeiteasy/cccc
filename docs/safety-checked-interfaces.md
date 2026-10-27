@@ -81,7 +81,14 @@ Sibling parameters compare by position, so `count(len)` against `count(n)` agree
 
 An annotated prototype is also what `-Wchecked-calls` accepts from a checked region ([safety-checked-regions.md](safety-checked-regions.md#call-boundaries)).
 
-The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved.
+The callee's own body is checked against its declared bounds as usual, so it can trap even when no unchecked caller is involved. The body is checked against bounds any declaration spells, so annotating the header once is enough. Sibling parameters bind by position, so the definition may rename them:
+
+```c
+int sum(int *[[cccc::array, cccc::count(n)]] p, int n);      // header
+int  sum(int *q, int m) { return q[m]; }                      // traps: q[m] is out of bounds
+```
+
+This covers a return bound and the parameters of a function-pointer parameter too. Built-in libc bounds are not applied to a user's own definition.
 
 ## Checked return values
 

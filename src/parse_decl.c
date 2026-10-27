@@ -964,6 +964,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                       "star modifier used outside of function prototype");
 
     validate_main_signature(vm, fn);
+    unsigned body_adopted = adopt_checked_definition_bounds(vm, fn, ty);
     create_param_lvars(vm, ty->params);
 
     // Resolve checked-pointer bounds expressions for every checked param
@@ -972,9 +973,26 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // was reset to NULL immediately before create_param_lvars() above (see
     // the assignment a few lines up), so at this point it holds exactly the
     // params just installed and nothing else.
+    int nparams = 0;
     for (Obj *p = vm->compiler.locals; p; p = p->next)
-        if (p->checked_kind != CHECKED_NONE)
+        nparams++;
+    Obj **param_objs = arena_alloc(&vm->compiler.parser_arena,
+                                   sizeof(Obj *) * (nparams + 1));
+    int   pidx       = 0;
+    for (Obj *p = vm->compiler.locals; p; p = p->next)
+        param_objs[pidx++] = p;
+    for (int i = 0; i < nparams; i++) {
+        Obj *p = param_objs[i];
+        if (p->checked_kind == CHECKED_NONE)
+            continue;
+        if (i < 32 && (body_adopted & (1u << i)))
+            resolve_checked_template_bounds(
+                vm, param_objs, nparams, p->ty->checked_param_bounds_lo,
+                p->ty->checked_param_bounds_hi, i + 1, &p->checked_bounds_lo,
+                &p->checked_bounds_hi);
+        else
             resolve_checked_bounds(vm, p);
+    }
 
     // For nested functions, create a hidden __static_link parameter
     // This holds a pointer to the parent function's stack frame (bp)
