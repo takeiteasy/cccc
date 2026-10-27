@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a function parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`) no longer crashes the compiler when subscripted; its lengths are evaluated once on entry.
 - Fixed: a call is bounds-checked when a bound names a struct, union or floating parameter, for both an argument bound and a checked-return call.
 - Fixed: a call is bounds-checked when a checked pointer argument that another parameter's bound names has side effects, or comes before the pointer that names it (`sink(pk, small)` with `count(*p)`).
 - Added: a call to a function with a checked return type carries the declared return bounds, with the call's arguments substituted. A dereference, a propagated local, a checked assignment, an annotated argument, a checked return and a `dynamic` cast all accept it. A `return` is verified against the parameters' values at entry.

@@ -133,6 +133,49 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
     return tok;
 }
 
+// A parameter's pointee lengths (`int (*a)[n]`, `int a[][n]`) were parsed in
+// the prototype scope, where the other parameters are placeholders; re-parse
+// them in the body scope so they read the real parameters.
+static Type *rebind_param_vla(VirtualMachine *vm, Type *ty) {
+    if (!ty || !type_contains_vla(ty))
+        return ty;
+    Type *copy = copy_type(vm, ty);
+    copy->base = rebind_param_vla(vm, ty->base);
+    if (ty->kind == TY_VLA && !ty->vla_size && ty->vla_len_tok) {
+        Token *t      = ty->vla_len_tok;
+        copy->vla_len = conditional(vm, &t, t);
+    }
+    return copy;
+}
+
+// Evaluates each parameter's pointee lengths once, on entry. The size
+// temporaries are allocated now (the body's subscripts read them) and the
+// statements that fill them are returned for prepending to the body.
+static Node *param_vla_init_stmts(VirtualMachine *vm, Obj *params) {
+    Node  head = {};
+    Node *cur  = &head;
+    for (Obj *p = params; p; p = p->next) {
+        if (!p->is_param || !type_contains_vla(p->ty))
+            continue;
+        p->ty = rebind_param_vla(vm, p->ty);
+        cur = cur->next = new_unary(
+            vm, ND_EXPR_STMT, compute_vla_size(vm, p->ty, p->ty->name),
+            p->ty->name);
+        add_type(vm, cur);
+    }
+    return head.next;
+}
+
+static void prepend_stmts(Node *body, Node *stmts) {
+    Node *last = stmts;
+    if (!last)
+        return;
+    while (last->next)
+        last = last->next;
+    last->next = body->body;
+    body->body = stmts;
+}
+
 static void create_param_lvars(VirtualMachine *vm, Type *param) {
     if (param) {
         create_param_lvars(vm, param->next);
@@ -948,6 +991,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             new_lvar(vm, "__va_area__", 11, array_of(vm, ty_char, 136));
     fn->alloca_bottom =
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
+    Node *param_vla_inits = param_vla_init_stmts(vm, fn->params);
 
     // #1043: for a K&R-form definition, is_definition was set from
     // equal(tok, "{") back at :494/:526 -- before the K&R declaration-list
@@ -1105,6 +1149,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->body = NULL; // suppress codegen — test result is precomputed
     } else {
         fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+        prepend_stmts(fn->body, param_vla_inits);
         append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
         if (!is_nested) {
             fn->def_begin = attr->decl_start;

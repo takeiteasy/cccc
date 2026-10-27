@@ -1799,6 +1799,10 @@ struct Type {
     // parameters sit at different indices.
     struct Node *checked_ret_bounds_lo;
     struct Node *checked_ret_bounds_hi;
+
+    // TY_VLA: first token of the length expression, so a function definition
+    // can re-parse a parameter's inner lengths in its own body scope.
+    Token *vla_len_tok;
 };
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such

@@ -930,7 +930,9 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
         if (vm->compiler.c_std < CCCC_STD_C99)
             warn_tok(vm, expr_tok, CCCC_WARN_PEDANTIC,
                      "variable-length arrays are a C99 extension");
-        return vla_of(vm, ty, expr);
+        ty              = vla_of(vm, ty, expr);
+        ty->vla_len_tok = expr_tok;
+        return ty;
     }
     // #1095: capture layout provenance from the *unfolded* node before
     // array_of()'s own eval(vm, expr) discards it -- see
