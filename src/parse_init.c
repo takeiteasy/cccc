@@ -543,6 +543,13 @@ static void string_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                  "%d available)",
                  tok->ty->array_len - 1, init->ty->array_len);
 
+    if (init->ty->checked_kind == CHECKED_NTARRAY &&
+        tok->ty->array_len - 1 >= init->ty->array_len)
+        error_tok(vm, tok,
+                  "initializer-string leaves no room for the '_Nt_checked' "
+                  "null-terminator slot (%d chars into %d elements)",
+                  tok->ty->array_len - 1, init->ty->array_len);
+
     int len = MIN(init->ty->array_len, tok->ty->array_len);
 
     switch (init->ty->base->size) {

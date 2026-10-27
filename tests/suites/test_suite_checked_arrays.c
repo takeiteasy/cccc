@@ -467,3 +467,96 @@ void test_checked_nt_flexible_array_member(void) {
     AssertEq(f->s[2], 'c');
     free(f);
 }
+
+// ---------------------------------------------------------------------
+// Multidimensional _Nt_checked: the innermost row holds the terminator.
+// ---------------------------------------------------------------------
+
+typedef char NtStr _Nt_checked[10];
+
+[[cccc::test]]
+void test_nt_2d_terminator_write_ok(void) {
+    char s _Nt_checked[3][10];
+    s[2][9] = 0;
+    s[0][0] = 'a';
+    AssertEq(s[0][0], 'a');
+    AssertEq(s[2][9], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_terminator_nonnull_traps(void) {
+    char s _Nt_checked[3][10];
+    s[1][9] = 'x';
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_row_overrun_traps(void) {
+    char s _Nt_checked[3][10];
+    int    i = 10;
+    s[1][i]  = 0;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_outer_overrun_traps(void) {
+    char s _Nt_checked[3][10];
+    int    i = 3;
+    s[i][0]  = 0;
+}
+
+[[cccc::test]]
+void test_nt_typedef_rows_under_checked(void) {
+    NtStr t _Checked[3];
+    t[1][8] = 'z';
+    t[1][9] = 0;
+    AssertEq(t[1][8], 'z');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_typedef_rows_terminator_traps(void) {
+    NtStr t _Checked[3];
+    t[2][9] = 1;
+}
+
+[[cccc::test]]
+void test_nt_2d_inferred_outer(void) {
+    char s _Nt_checked[][4] = {"ab", "cd"};
+    AssertEq((int)sizeof(s), 8);
+    AssertEq(s[1][1], 'd');
+    s[1][3] = 0;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_inferred_outer_terminator_traps(void) {
+    char s _Nt_checked[][4] = {"ab", "cd"};
+    s[0][3]                 = 'x';
+}
+
+[[cccc::test]]
+void test_nt_2d_vla_outer(void) {
+    int    n = 2;
+    char s _Nt_checked[n][4];
+    s[1][3] = 0;
+    s[1][0] = 'q';
+    AssertEq(s[1][0], 'q');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_2d_vla_outer_terminator_traps(void) {
+    int    n = 2;
+    char s _Nt_checked[n][4];
+    s[1][3] = 1;
+}
+
+[[cccc::test]]
+void test_nt_3d_terminator_write_ok(void) {
+    char s _Nt_checked[2][2][4];
+    s[1][1][3] = 0;
+    s[1][1][2] = 'c';
+    AssertEq(s[1][1][2], 'c');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_nt_3d_terminator_nonnull_traps(void) {
+    char s _Nt_checked[2][2][4];
+    s[0][1][3] = 'x';
+}

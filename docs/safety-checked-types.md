@@ -75,7 +75,8 @@ int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays c
 | Limit | Reason |
 |---|---|
 | Only the outermost dimension may be variable-length (`_Checked[n][5]` works, `_Checked[3][n]` is an error) | The row checks use a constant extent per row |
-| `_Nt_checked` is one dimension only (`_Nt_checked[3][10]` is an error, also through a typedef'd row) | Only a single terminator slot is modelled |
+| `_Nt_checked` over rows that are already checked arrays (`Str t _Nt_checked[3]` with `typedef char Str _Nt_checked[10]`, or over a `_Checked` typedef row) is an error | The terminator belongs to the innermost row, once |
+| A string initializer that fills the last slot (`char s _Nt_checked[3] = "abc"`) is an error | No room is left for the terminator |
 
 ## Compound literals
 
@@ -130,6 +131,15 @@ int *r = a[1];             // r is checked against the 5 elements of row 1
 ```
 
 Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`). A string initializer sizes an `_Nt_checked[]` the same way (`char s _Nt_checked[] = "hi"` has 3 slots).
+
+In a multidimensional `_Nt_checked` array only the innermost row holds a terminator slot; the outer dimensions are plain checked arrays:
+
+```c
+char s _Nt_checked[3][10];   // 3 rows of 9 characters + a terminator slot each
+s[1][9] = 'x';               // traps: non-null store into row 1's terminator slot
+typedef char Str _Nt_checked[10];
+Str t _Checked[3];           // same shape through a typedef'd row
+```
 
 | Case | Behavior |
 |---|---|

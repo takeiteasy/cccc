@@ -1267,6 +1267,7 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
         error_tok(vm, checked_array_tok,
                   "'%.*s' must be followed by an array declarator",
                   checked_array_tok->len, checked_array_tok->loc);
+    Type *innermost = ty;
     for (Type *row = ty->base; row; row = row->base) {
         // TODO: inner VLA dimensions need per-row runtime extents (#1798)
         if (row->kind == TY_VLA)
@@ -1275,14 +1276,17 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
                       "may be variable-length");
         if (row->kind != TY_ARRAY)
             break;
-        if (checked_array_kind == CHECKED_NTARRAY ||
-            row->checked_kind == CHECKED_NTARRAY)
-            error_tok(vm, checked_array_tok,
-                      "multidimensional '_Nt_checked' arrays are not "
-                      "supported");
+        innermost = row;
     }
-    if (checked_array_kind == CHECKED_NTARRAY && ty->kind == TY_ARRAY &&
-        ty->array_len >= 0 && ty->array_len < 1)
+    // Only the innermost row of a multidimensional '_Nt_checked' array holds
+    // a terminator; the outer dimensions are plain checked arrays.
+    bool nt_rows = checked_array_kind == CHECKED_NTARRAY && innermost != ty;
+    if (nt_rows && innermost->checked_kind != CHECKED_NONE)
+        error_tok(vm, checked_array_tok,
+                  "'_Nt_checked' rows must be plain arrays: the row type "
+                  "is already a checked array");
+    if (checked_array_kind == CHECKED_NTARRAY && innermost->kind == TY_ARRAY &&
+        innermost->array_len >= 0 && innermost->array_len < 1)
         error_tok(vm, checked_array_tok,
                   "an '_Nt_checked' array must declare at least 1 "
                   "element -- the last element is reserved for the "
@@ -1299,8 +1303,16 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
     // no new machinery.
     ty                       = copy_type(vm, ty);
     ty->base                 = checked_array_rows(vm, ty->base);
-    ty->checked_kind         = checked_array_kind;
-    ty->checked_bounds_form  = CB_COUNT;
+    if (nt_rows) {
+        Type *row = ty->base;
+        while (row->base && row->base->kind == TY_ARRAY)
+            row = row->base;
+        row->checked_kind         = CHECKED_NTARRAY;
+        row->checked_array_extent = row->array_len - 1;
+        checked_array_kind        = CHECKED_ARRAY;
+    }
+    ty->checked_kind        = checked_array_kind;
+    ty->checked_bounds_form = CB_COUNT;
     if (ty->kind == TY_VLA)
         ty->checked_vla_extent_tok = checked_array_tok->next->next;
     else
