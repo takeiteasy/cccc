@@ -3079,6 +3079,16 @@ struct Obj {
     bool    checked_prop_scan_saw_non_nt;
     bool    checked_prop_scan_nt_conflict;
 
+    // True for a survivor whose every rooted store is a plain array's own
+    // extent (`int *q = buf;`, or a chain from such a local). The snapshot
+    // feeds only checked targets (assignments, arguments, returns, casts);
+    // derefs through the local are not checked. A local that also holds a
+    // checked-rooted value is not plain: its plain stores count as unrooted.
+    // Frozen per round like checked_prop_optional;
+    // checked_prop_scan_saw_plain is the round-local scratch.
+    bool checked_prop_plain;
+    bool checked_prop_scan_saw_plain;
+
     // #486: non-CC_NONE only for the compiler-generated local a bounds
     // cast's desugar declares (cast(), src/parse_expr.c) -- mirrors
     // ty->checked_cast_kind the same way checked_kind/checked_bounds_form

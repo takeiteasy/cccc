@@ -27,6 +27,7 @@ struct Holder {
 };
 
 static int  g_buf[4];
+static int  g_dummy;
 static char g_text[] = "abc";
 
 static int *[[cccc::array, cccc::count(2)]] two(void) {
@@ -555,9 +556,117 @@ void test_plain_array_parameter_is_not_a_source(void) {
 }
 
 [[cccc::test]]
-void test_unchecked_pointer_is_not_a_source(void) {
-    int *raw = g_buf;
+void test_unchecked_pointer_without_a_source_is_not_checked(void) {
+    int *raw = &g_dummy;
     sink(raw, 100);
+}
+
+// ---------------------------------------------------------------------
+// A plain array held by an unchecked local.
+// ---------------------------------------------------------------------
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_into_checked_local_trap(void) {
+    int  buf[2];
+    int *q                                 = buf;
+    int *[[cccc::array, cccc::count(8)]] p = q;
+    (void)p;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_into_field_trap(void) {
+    int          buf[2];
+    int         *q = buf;
+    struct Count s = {0};
+    s.n            = 8;
+    s.p            = q;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_argument_trap(void) {
+    int  buf[2];
+    int *q = buf;
+    sink(q, 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_offset_trap(void) {
+    int  buf[4];
+    int *q = buf + 2;
+    sink(q, 3);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_chain_trap(void) {
+    int  buf[4];
+    int *q = buf;
+    int *r = q + 1;
+    sink(r, 4);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_row_trap(void) {
+    int  m[3][4];
+    int *q = m[1];
+    sink(q, 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_trailing_member_trap(void) {
+    struct Holder h = {0};
+    int          *q = h.tail;
+    sink(q, 8);
+}
+
+[[cccc::test]]
+void test_plain_local_fits_passes(void) {
+    int          buf[8] = {0};
+    int         *q      = buf + 2;
+    int         *r      = q + 1;
+    struct Count s      = {0};
+    s.n                 = 5;
+    s.p                 = r;
+    sink(q, 6);
+    sink(r, 5);
+    AssertEq(s.p[4], 0);
+}
+
+[[cccc::test]]
+void test_plain_local_derefs_stay_unchecked(void) {
+    int          buf[2] = {7, 9};
+    int         *q      = buf;
+    volatile int i      = 1;
+    AssertEq(q[i], 9);
+    AssertEq((q + 1)[0], 9);
+}
+
+[[cccc::test]]
+void test_plain_local_reassigned_from_a_pointer_is_not_verified(void) {
+    int          buf[2] = {0};
+    int         *q      = buf;
+    volatile int z      = 1;
+    if (z)
+        q = g_buf;
+    sink(q, 4);
+}
+
+[[cccc::test]]
+void test_plain_local_mixed_with_checked_keeps_deref_checks(void) {
+    int *[[cccc::array, cccc::count(4)]] c = g_buf;
+    int  buf[8]                            = {0};
+    int *q                                 = buf;
+    q                                      = c;
+    AssertEq(q[3], 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_plain_local_mixed_with_checked_still_checks_derefs(void) {
+    int *[[cccc::array, cccc::count(4)]] c = g_buf;
+    int          buf[8]                    = {0};
+    int         *q                         = buf;
+    volatile int i                         = 6;
+    q                                      = c;
+    (void)q[i];
 }
 
 // ---------------------------------------------------------------------

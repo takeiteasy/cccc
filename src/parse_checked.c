@@ -1029,10 +1029,11 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
 static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
                                        Token *tok, Node **out_lo, Node **out_hi,
                                        bool *out_optional, bool *out_nt,
-                                       int64_t *out_nt_elem, Obj *hoist_fn,
-                                       Node **out_obj_init) {
-    *out_lo = NULL;
-    *out_hi = NULL;
+                                       int64_t *out_nt_elem, bool *out_plain,
+                                       Obj *hoist_fn, Node **out_obj_init) {
+    *out_lo    = NULL;
+    *out_hi    = NULL;
+    *out_plain = false;
     if (out_obj_init)
         *out_obj_init = NULL;
     // An unsplit bounds cast is a source through its `__cv` (the split, done
@@ -1051,6 +1052,15 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         *out_optional = false;
         Type *base_ty = pty->base;
         *out_nt_elem  = *out_nt ? (base_ty ? get_vm_size(base_ty) : 1) : 0;
+        return true;
+    }
+    // A plain array's own extent: a source for checked targets only, so the
+    // propagation passes keep derefs through the holder unchecked.
+    if (checked_plain_array_source(vm, rhs, tok, out_lo, out_hi)) {
+        *out_optional = false;
+        *out_nt       = false;
+        *out_nt_elem  = 0;
+        *out_plain    = true;
         return true;
     }
     // A checked-return call is a source whose bounds exist only once the call
@@ -1095,6 +1105,7 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         *out_optional = base.var->checked_prop_optional;
         *out_nt_elem  = base.var->checked_prop_nt_elem;
         *out_nt       = *out_nt_elem != 0;
+        *out_plain    = base.var->checked_prop_plain;
         return true;
     }
     return false;
@@ -1151,11 +1162,19 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                         find_checked_base(node->rhs).var == var)
                         break; // self-rooted -- neutral, see comment above
                     Node   *lo, *hi;
-                    bool    src_optional, src_nt;
+                    bool    src_optional, src_nt, src_plain;
                     int64_t src_nt_elem;
                     if (checked_prop_source_bounds(
                             vm, node->rhs, node->tok, &lo, &hi, &src_optional,
-                            &src_nt, &src_nt_elem, NULL, NULL)) {
+                            &src_nt, &src_nt_elem, &src_plain, NULL, NULL)) {
+                        if (src_plain) {
+                            // Rooted or not is decided at the end of the
+                            // round, once it is known whether any checked
+                            // store shares this local.
+                            var->checked_prop_scan_saw_plain     = true;
+                            var->checked_prop_scan_src_optional |= src_optional;
+                            break;
+                        }
                         var->checked_prop_scan_saw_rooted    = true;
                         var->checked_prop_scan_src_optional |= src_optional;
                         // #943: fold this store's NT fact into the round's
@@ -1305,7 +1324,7 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
                                         Node *assign_node) {
     Obj    *var = assign_node->lhs->var;
     Node   *lo, *hi, *src_obj_init;
-    bool    src_optional, src_nt;
+    bool    src_optional, src_nt, src_plain;
     int64_t src_nt_elem;
     // A checked-return call source is evaluated into its result local first;
     // the snapshot below reads that local's bounds after the call.
@@ -1321,7 +1340,11 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     // are discarded.
     bool is_source = checked_prop_source_bounds(
         vm, assign_node->rhs, assign_node->tok, &lo, &hi, &src_optional,
-        &src_nt, &src_nt_elem, fn, &src_obj_init);
+        &src_nt, &src_nt_elem, &src_plain, fn, &src_obj_init);
+    // A plain-array store into a local that also holds checked values is
+    // unrooted (the classifier made that local OPT).
+    if (is_source && src_plain && !var->checked_prop_plain)
+        is_source = false;
     Token *tok = assign_node->tok;
     if (is_source && lo && hi) {
         // Rooted store -- unchanged #919/#941 behavior below; lo/hi are
@@ -1503,7 +1526,8 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             continue;
         CheckedBase base = find_checked_base(node->lhs);
         if (base.var && base.var->checked_prop_candidate &&
-            !base.var->checked_prop_unsafe && base.var->checked_prop_lo) {
+            !base.var->checked_prop_unsafe && !base.var->checked_prop_plain &&
+            base.var->checked_prop_lo) {
             Node *lo = new_var_node(vm, base.var->checked_prop_lo, node->tok);
             add_type(vm, lo);
             Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
@@ -1699,7 +1723,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
     // probe path (skip building *out_lo/*out_hi entirely when the caller is
     // checked_prop_poison_scan(), which only reads the return value) would
     // avoid the rebuild.
-    int  prev_survivors = -1, prev_optional = -1, prev_nt = -1;
+    int  prev_survivors = -1, prev_optional = -1, prev_nt = -1, prev_plain = -1;
     bool converged = false;
     for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
         for (Obj *v = fn->locals; v; v = v->next)
@@ -1708,6 +1732,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                 v->checked_prop_scan_saw_rooted   = false;
                 v->checked_prop_scan_saw_unrooted = false;
                 v->checked_prop_scan_src_optional = false;
+                v->checked_prop_scan_saw_plain    = false;
                 // #943: reset alongside the other per-round scratch fields
                 // -- see their comments in cccc.h.
                 v->checked_prop_scan_nt_elem     = 0;
@@ -1725,7 +1750,8 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
         // touches vm->compiler.locals), but taking `fn` as a parameter and
         // reading its own field is not hostage to that ordering staying
         // true after some future refactor.
-        int survivors = 0, optional_survivors = 0, nt_survivors = 0;
+        int survivors = 0, optional_survivors = 0, nt_survivors = 0,
+            plain_survivors = 0;
         for (Obj *v = fn->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
                 // #942: a candidate with no checked-rooted store at all
@@ -1735,8 +1761,15 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                 // snapshot. Otherwise it's a survivor: FULL if every store
                 // reached was rooted, OPT if any wasn't (or if a rooted
                 // store's own source was itself OPT).
-                if (!v->checked_prop_scan_saw_rooted)
+                // Plain-array stores root a local only when no checked store
+                // shares it; otherwise they are unrooted, making it OPT.
+                bool plain_only = v->checked_prop_scan_saw_plain &&
+                                  !v->checked_prop_scan_saw_rooted;
+                if (v->checked_prop_scan_saw_plain && !plain_only)
+                    v->checked_prop_scan_saw_unrooted = true;
+                if (!v->checked_prop_scan_saw_rooted && !plain_only)
                     v->checked_prop_unsafe = true;
+                v->checked_prop_plain = plain_only;
                 if (v->is_captured)
                     v->checked_prop_unsafe = true;
                 v->checked_prop_chain_src = !v->checked_prop_unsafe;
@@ -1761,18 +1794,23 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                             : v->checked_prop_scan_nt_elem;
                     if (v->checked_prop_nt_elem != 0)
                         nt_survivors++;
+                    if (v->checked_prop_plain)
+                        plain_survivors++;
                 } else {
                     v->checked_prop_nt_elem = 0;
+                    v->checked_prop_plain   = false;
                 }
             }
         if (survivors == prev_survivors &&
-            optional_survivors == prev_optional && nt_survivors == prev_nt) {
+            optional_survivors == prev_optional && nt_survivors == prev_nt &&
+            plain_survivors == prev_plain) {
             converged = true;
             break;
         }
         prev_survivors = survivors;
         prev_optional  = optional_survivors;
         prev_nt        = nt_survivors;
+        prev_plain     = plain_survivors;
     }
     // Defensive: if the cap was hit before convergence, force every
     // remaining survivor to OPT rather than trusting a possibly-incomplete
@@ -1914,7 +1952,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                                        &dst_lo, &dst_hi, &dst_nt, NULL, NULL);
                 if (dst_lo && dst_hi) {
                     Node   *src_lo, *src_hi;
-                    bool    src_optional = false, src_nt;
+                    bool    src_optional = false, src_nt, src_plain;
                     int64_t src_nt_elem;
                     // A checked-return call source is evaluated into its
                     // result local first; the source bounds below are that
@@ -1936,13 +1974,9 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                     // bound, so only declared and FULL sources are verified.
                     bool is_source = checked_prop_source_bounds(
                         vm, node->rhs, node->tok, &src_lo, &src_hi,
-                        &src_optional, &src_nt, &src_nt_elem, NULL, NULL);
-                    bool plain_src = false;
-                    if (!is_source && !cr_store)
-                        plain_src = checked_plain_array_source(
-                            vm, node->rhs, node->tok, &src_lo, &src_hi);
-                    if (plain_src ||
-                        (is_source && !src_optional && src_lo && src_hi)) {
+                        &src_optional, &src_nt, &src_nt_elem, &src_plain, NULL,
+                        NULL);
+                    if (is_source && !src_optional && src_lo && src_hi) {
                         verify_checked_assign_scan(vm, fn, node->rhs);
                         // The split moved the call, with its argument
                         // stores, out of the rhs.
@@ -1959,16 +1993,10 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
                         compute_checked_bounds(vm, dst_base, dst_pty, node->tok,
                                                &dst_lo, &dst_hi, &dst_nt2,
                                                &dst_obj_init, fn);
-                        if (plain_src) {
-                            checked_plain_array_source(vm, node->rhs, node->tok,
-                                                       &src_lo, &src_hi);
-                            src_obj_init = NULL;
-                        } else {
-                            checked_prop_source_bounds(
-                                vm, node->rhs, node->tok, &src_lo, &src_hi,
-                                &src_optional, &src_nt2, &src_nt_elem2, fn,
-                                &src_obj_init);
-                        }
+                        checked_prop_source_bounds(
+                            vm, node->rhs, node->tok, &src_lo, &src_hi,
+                            &src_optional, &src_nt2, &src_nt_elem2, &src_plain,
+                            fn, &src_obj_init);
                         verify_checked_assign_rewrite(
                             vm, fn, node, dst_lo, dst_hi, src_lo, src_hi,
                             src_obj_init, dst_obj_init, cr_store);

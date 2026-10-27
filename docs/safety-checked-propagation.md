@@ -54,6 +54,20 @@ int *s = r + 1;   // from r
 
 A pointer chained from an OPT pointer is OPT too, even if its own store is always rooted. A cycle with no declared root (`q = r + 1; r = q + 1;`) never propagates.
 
+## Plain arrays
+
+An unchecked local assigned only from a plain array carries the array's extent into checked targets, but accesses through the local stay unchecked:
+
+```c
+int buf[4];
+int *q = buf + 1;
+int *r = q + 1;                          // chains like any propagated local
+sink(r, 3);                              // traps: 2 elements remain
+r[i];                                  // not checked
+```
+
+A local that also holds a checked-rooted value is an ordinary propagated local: its plain stores count as other assignments (OPT), and accesses through it are checked by the rules above.
+
 ## Terminator slot
 
 For `[[cccc::ntarray]]` sources the terminator guard follows the snapshot, if every source agrees on the element size:
@@ -83,6 +97,6 @@ q = p;   // traps: p's 4 elements don't cover q's declared 10
 |---|---|
 | `q = E;` where `E` roots in a declared checked pointer, or in a propagated local that is not OPT | A source that is OPT or never rooted |
 | Call arguments and `return` values[^args] | A target with `bounds(unknown)` |
-| A plain array of known size ([plain array sources](safety-checked-interfaces.md#plain-arrays-as-sources)) | An unchecked local assigned from a plain array: it propagates nothing |
+| A plain array of known size ([plain array sources](safety-checked-interfaces.md#plain-arrays-as-sources)), directly or through a [plain-array local](#plain-arrays) | A plain-array local that also holds other values (OPT) |
 
 [^args]: Arguments to annotated parameters and values returned from a checked return type are checked as assignments to a hidden local; see [safety-checked-interfaces.md](safety-checked-interfaces.md). How the passes work: [safety-impl.md](safety-impl.md#bounds-propagation).

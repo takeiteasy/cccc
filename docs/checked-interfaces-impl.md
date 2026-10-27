@@ -55,11 +55,11 @@ The same hook covers the hidden builtins (`memcpy`, `memset`, ...): `adopt_hidde
 
 | Consumer | Change |
 |---|---|
-| `verify_checked_assign_scan()` | Falls back to the predicate when `checked_prop_source_bounds()` finds no source, in both the probe and the committed rewrite |
+| `checked_prop_source_bounds()` | Returns the plain array as a source (`out_plain`), so `verify_checked_assign_scan()` needs no separate path |
 | `checked_param_qualifies()`, `rewrite_checked_return()` | Accept a plain-array root, so the `__ca`/`__cr` store reaches the scan |
 | `check_checked_cast_dynamic_source()` | Accepts it, so `__cv = (T)arr` reaches the scan |
 
-`checked_prop_source_bounds()` and the propagation passes do not see plain arrays, so an unchecked `int *q = buf;` keeps no bounds.
+A plain array is also a propagation source. `Obj.checked_prop_plain` marks a local whose every rooted store is plain (directly or through a chain from one); `checked_prop_attach_scan()` skips it, so derefs through it get no bounds, while the snapshot temps and `verify_checked_assign_scan()` still use it. In the classifier a plain store roots the local only when no checked store shares it; otherwise it counts as unrooted and the local is OPT. `checked_prop_rewrite_assign()` applies the same rule. The plain count joins the fixpoint test.
 
 ## Struct fields
 
