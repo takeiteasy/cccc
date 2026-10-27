@@ -635,8 +635,8 @@ static bool checked_nt_pointee_supported(Type *base_ty) {
 // #950: a store into a member of an ntarray element (`tbl[n].a`,
 // `tbl[n].in.arr[k]`) lands in the terminator slot when the element does, but
 // the NT fact lives on the element's ND_DEREF. Walk the member chain back to
-// it. Bit-fields stay unguarded: the stored value is truncated to the field
-// width, so a non-zero value need not leave the slot non-zero.
+// it. A bit-field store is guarded on the value truncated to the field width;
+// a field wider than 64 bits stays unguarded (TODO: #1827).
 Node *checked_nt_store_root(Node *lhs) {
     if (!lhs)
         return NULL;
@@ -644,7 +644,8 @@ Node *checked_nt_store_root(Node *lhs) {
         return lhs;
     if (lhs->kind != ND_MEMBER && lhs->kind != ND_DEREF)
         return NULL;
-    if (lhs->kind == ND_MEMBER && lhs->member->is_bitfield)
+    if (lhs->kind == ND_MEMBER && lhs->member->is_bitfield &&
+        lhs->member->bit_width > 64)
         return NULL;
     if (!checked_nt_pointee_supported(lhs->ty))
         return NULL;

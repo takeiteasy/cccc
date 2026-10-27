@@ -524,6 +524,41 @@ void test_ntarray_member_float_compound_assign_traps(void) {
 }
 
 [[cccc::test]]
+void test_ntarray_member_bitfield_write_ok(void) {
+    CHKNTM_TBL(tbl);
+    tbl[1].bf  = 5;
+    tbl[n].bf  = 0;
+    tbl[n].bf  = 8; // truncates to 0 in a 3-bit field
+    tbl[n].bf += 8;
+    AssertEq(tbl[1].bf, 5u);
+    AssertEq(tbl[n].bf, 0u);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_bitfield_write_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].bf = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_bitfield_truncated_nonzero_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].bf = 9; // 9 & 7 == 1
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_bitfield_compound_assign_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].bf += 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_ntarray_member_bitfield_increment_traps(void) {
+    CHKNTM_TBL(tbl);
+    tbl[n].bf++;
+}
+
+[[cccc::test]]
 void test_ntarray_member_nonterminator_compound_assign_ok(void) {
     CHKNTM_TBL(tbl);
     tbl[1].in.a += 5;
@@ -563,14 +598,12 @@ void test_ntarray_atomic_member_rmw_traps(void) {
 }
 
 // Unguarded by design: a long double's slot is 16 bytes but is stored as an
-// 8-byte double, and a bit-field's stored value is truncated to its width.
+// 8-byte double.
 [[cccc::test]]
-void test_ntarray_member_long_double_and_bitfield_not_guarded(void) {
+void test_ntarray_member_long_double_not_guarded(void) {
     CHKNTM_TBL(tbl);
     tbl[n].ld = 1.L;
-    tbl[n].bf = 3;
     AssertTrue(tbl[n].ld == 1.L);
-    AssertEq(tbl[n].bf, 3);
 }
 
 // ---------------------------------------------------------------------

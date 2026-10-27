@@ -1765,6 +1765,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     emit_rr(vm, fop_for_type(node->lhs->ty, FR2R), r_ntval,
                             r_val);
                     free_ntval = true;
+                } else if (node->lhs->kind == ND_MEMBER &&
+                           node->lhs->member->is_bitfield) {
+                    r_ntval    = alloc_temp_reg();
+                    free_ntval = true;
+                    int r_mask = alloc_temp_reg();
+                    emit_mov3(vm, r_ntval, r_val);
+                    emit_li3(vm, r_mask, bitfield_mask(node->lhs->member));
+                    emit_rrr(vm, AND3, r_ntval, r_ntval, r_mask);
+                    free_temp_reg(r_mask);
                 }
                 // #945: gen_checked_nt_hi() re-runs the object-expression hoist
                 // init before reading `hi` -- see the gen_addr ND_DEREF CHKR

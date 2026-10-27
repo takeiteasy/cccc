@@ -1788,7 +1788,30 @@ static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
         serialize_type(f, ctx, lhs->ty);
         fprintf(f, ") __cccc_chkv%d = ", seq);
     }
-    if (nt) {
+    if (nt && lhs->kind == ND_MEMBER && lhs->member->is_bitfield) {
+        // A bit-field has no address: guard the value truncated to its width
+        // against the enclosing struct, then store through that pointer.
+        Member *m = lhs->member;
+        serialize_value_expr(f, vm, ctx, node->rhs, 2);
+        fprintf(f, "; __typeof__(");
+        serialize_type(f, ctx, pointer_to(vm, lhs->lhs->ty));
+        fprintf(f, ") __cccc_chka%d = &", seq);
+        serialize_expr(f, vm, ctx, lhs->lhs, 14);
+        fprintf(f,
+                "; unsigned long long __cccc_chkm%d = (unsigned long long)"
+                "__cccc_chkv%d & %lluULL; __cccc_chknt(__cccc_chka%d, ",
+                seq, seq,
+                m->bit_width >= 64 ? ~0ULL : (1ULL << m->bit_width) - 1, seq);
+        serialize_checked_hi(f, vm, ctx, nt_root);
+        fprintf(f,
+                ", &__cccc_chkm%d, %lldLL, 8LL, 1); __cccc_chka%d->%.*s = "
+                "__cccc_chkv%d; ",
+                seq, (long long)checked_nt_slot_size(nt_root), seq,
+                m->name->len, m->name->loc, seq);
+        if (!discard)
+            fprintf(f, "__cccc_chkv%d = __cccc_chka%d->%.*s; ", seq, seq,
+                    m->name->len, m->name->loc);
+    } else if (nt) {
         Type *ty = lhs->ty;
         bool  scalar =
             ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->size <= 8;

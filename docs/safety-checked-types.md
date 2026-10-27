@@ -59,7 +59,7 @@ tbl[n].arr[0]++;       // traps
 tbl[n].in = (Inner){}; // ok: all-zero bytes
 ```
 
-`long double` and bit-field members are not guarded.[^members]
+A bit-field store is checked after truncation to the field width, so storing `8` into a 3-bit field is fine and storing `9` traps. `long double` members and bit-fields wider than 64 bits are not guarded.[^members]
 
 CCCC does not check that a terminator is *present* in the range: Checked C's `count(n)` is a lower bound, so terminator-free declarations are legal and a scan would also have to read past `hi`.
 
@@ -172,4 +172,4 @@ A plain array inside a [checked region](safety-checked-regions.md#what-is-banned
 
 [^rows]: The row expression would be evaluated a second time to build the inner bounds, so the inner check is skipped rather than changing the program's side effects.
 [^bytes]: A `byte_count(n)` that is not a multiple of `sizeof(T)` widens by exactly `sizeof(T)` bytes, so the slot is misaligned and no element index reaches it; the guard has nothing to protect there.
-[^members]: A `long double` slot is 16 bytes but is stored as an 8-byte double, and a bit-field's stored value is truncated to its width, so a non-zero value need not leave the slot non-zero. Internals: [safety-impl.md](safety-impl.md#terminator-guard).
+[^members]: A `long double` slot is 16 bytes but is stored as an 8-byte double. Internals: [safety-impl.md](safety-impl.md#terminator-guard).
