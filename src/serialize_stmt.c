@@ -256,7 +256,15 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // of the same variable would produce, so only the exact node
             // recorded at parse time is treated as the declaration.
             if (node_is_deferred_vla_ptr_init(node->lhs)) {
-                Obj *var = node->lhs->lhs->var;
+                Node *init = deferred_vla_ptr_init_of(node->lhs);
+                Obj  *var  = init->lhs->var;
+                // A checked-pointer bounds snapshot wrapped around the
+                // initializer reads only the source, so it runs first.
+                for (Node *c = node->lhs; c != init; c = c->rhs) {
+                    print_indent_level(f, indent);
+                    serialize_discard_expr(f, vm, ctx, c->lhs, 0);
+                    fprintf(f, ";\n");
+                }
                 print_indent_level(f, indent);
                 serialize_type_decl(f, ctx, var->ty, var->name);
                 serialize_cleanup_attr(f, vm, ctx, var);
@@ -267,7 +275,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // ND_COMMA here would bind looser than `=` and initialize the
                 // declaration with the comma's first operand instead of its
                 // value.
-                serialize_expr(f, vm, ctx, node->lhs->rhs, 2);
+                serialize_expr(f, vm, ctx, init->rhs, 2);
                 fprintf(f, ";\n");
                 emit_deferred_nested_upvar_store(f, vm, ctx, indent, var);
                 break;

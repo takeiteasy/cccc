@@ -220,11 +220,28 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
         fprintf(df, "%s(", fn->name);
 
     bool first = true;
+    ctx->proto_depth++;
     if (fn->params) {
-        for (Obj *param = fn->params; param; param = param->next) {
+        Type *proto_param = fn->ty ? fn->ty->params : NULL;
+        for (Obj *param = fn->params; param; param = param->next,
+                 proto_param = proto_param ? proto_param->next : NULL) {
             if (!first)
                 fprintf(df, ", ");
             first = false;
+            // A length naming an earlier parameter is spelled from the
+            // prototype's own type: by name in a definition, `*` elsewhere.
+            // TODO: the host evaluates a definition's lengths again on entry,
+            // so a length with side effects runs twice (#1821)
+            if (proto_param && type_has_proto_vla(proto_param) &&
+                proto_param->name && param->name &&
+                proto_param->name->len == (int)strlen(param->name) &&
+                !strncmp(proto_param->name->loc, param->name,
+                         proto_param->name->len)) {
+                ctx->name_proto_params = fn->body && !with_asm_label;
+                serialize_type_decl(df, ctx, proto_param, param->name);
+                ctx->name_proto_params = false;
+                continue;
+            }
             // #1062: only when this signature is for a body-having
             // definition (see va_list_shim_param_name's own comment) --
             // fn->body's own local-decl emission (serialize_function)
@@ -269,6 +286,8 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                 serialize_type_decl(df, ctx, param, buf);
         }
     }
+
+    ctx->proto_depth--;
 
     if (fn->ty && fn->ty->is_variadic && !first) {
         fprintf(df, ", ...");

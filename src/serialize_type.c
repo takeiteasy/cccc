@@ -1850,6 +1850,31 @@ static void format_checked_ptr_qualifier(char *buf, size_t cap, Type *ty) {
 static bool type_def_is_from_include_suppressed(SerializeContext *ctx,
                                                 Type             *ty);
 
+static bool node_reads_proto_param(Node *n, int depth) {
+    if (!n || depth > 32)
+        return false;
+    if (n->kind == ND_VAR && n->var && n->var->is_proto_param)
+        return true;
+    for (Node *a = n->args; a; a = a->next)
+        if (node_reads_proto_param(a, depth + 1))
+            return true;
+    return node_reads_proto_param(n->lhs, depth + 1) ||
+           node_reads_proto_param(n->rhs, depth + 1) ||
+           node_reads_proto_param(n->cond, depth + 1) ||
+           node_reads_proto_param(n->then, depth + 1) ||
+           node_reads_proto_param(n->els, depth + 1);
+}
+
+// True when a variable-length extent in `ty` reads a prototype-scope
+// parameter (`int (*a)[n]` in a prototype, a cast, or a pointer type). No
+// such name exists where the type is spelled outside the definition.
+bool type_has_proto_vla(Type *ty) {
+    for (; ty; ty = ty->base)
+        if (ty->kind == TY_VLA && node_reads_proto_param(ty->vla_len, 0))
+            return true;
+    return false;
+}
+
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name) {
     if (!ty) {
@@ -1911,7 +1936,9 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         char  *lenbuf = NULL;
         size_t lensz  = 0;
         FILE  *lf     = open_memstream(&lenbuf, &lensz);
-        if (ty->vla_len && ctx->vm)
+        if (!ctx->name_proto_params && node_reads_proto_param(ty->vla_len, 0))
+            fputc('*', lf);
+        else if (ty->vla_len && ctx->vm)
             serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 2);
         fclose(lf);
 
@@ -1920,6 +1947,12 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                  lenbuf ? lenbuf : "");
         free(lenbuf);
         serialize_type_decl(f, ctx, ty->base, buf);
+        return;
+    }
+
+    if (ty->kind == TY_PTR && !ctx->name_proto_params &&
+        ctx->proto_depth == 0 && type_has_proto_vla(ty)) {
+        fprintf(f, "void *%s", name ? name : "");
         return;
     }
 
@@ -2008,12 +2041,14 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
             fprintf(out, "%s", name);
         fprintf(out, "(");
         bool first = true;
+        ctx->proto_depth++;
         for (Type *p = ty->params; p; p = p->next) {
             if (!first)
                 fprintf(out, ", ");
             first = false;
             serialize_type(out, ctx, p);
         }
+        ctx->proto_depth--;
         if (ty->is_variadic) {
             if (!first)
                 fprintf(out, ", ");

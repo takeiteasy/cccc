@@ -533,14 +533,25 @@ static inline bool node_is_vla_ptr_assign(Node *n) {
     return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VLA_PTR;
 }
 
-// #973 follow-up: true for the initializer of a pointer-to-VLA local (see
+// #973 follow-up: the initializer of a pointer-to-VLA local (see
 // Obj.deferred_vla_ptr_init, cccc.h and the matching ND_EXPR_STMT case in
 // serialize_stmt()) -- the same "must stay in scope past this block" shape
 // as node_is_vla_ptr_assign, just for `int (*p)[n] = &v;` instead of a VLA's
-// own `v = alloca(...)`.
+// own `v = alloca(...)`. A checked-pointer bounds snapshot wraps the assign
+// in place as `ND_COMMA(snapshot, assign)`; this returns the inner assign
+// for either shape, NULL when `n` is not the recorded initializer.
+static inline Node *deferred_vla_ptr_init_of(Node *n) {
+    Node *a = n;
+    while (a && a->kind == ND_COMMA)
+        a = a->rhs;
+    if (a && a->kind == ND_ASSIGN && a->lhs && a->lhs->kind == ND_VAR &&
+        a->lhs->var->deferred_vla_ptr_init == n)
+        return a;
+    return NULL;
+}
+
 static inline bool node_is_deferred_vla_ptr_init(Node *n) {
-    return n && n->kind == ND_ASSIGN && n->lhs && n->lhs->kind == ND_VAR &&
-           n->lhs->var->deferred_vla_ptr_init == n;
+    return deferred_vla_ptr_init_of(n) != NULL;
 }
 
 // #964: true if any of blk's *immediate* statements is a VLA_PTR assignment

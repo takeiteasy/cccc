@@ -284,6 +284,11 @@ typedef struct {
     // disagree), and a typedef/cast/type-name spelling must stay folded
     // (reused across every context, including the two excluded above).
     bool allow_layout_dims;
+    // A pointer whose extent names a parameter (`int (*a)[n]`) only has a
+    // spelling inside a parameter list: by name in a definition's, `*` in any
+    // other. Everywhere else it is a `void *`.
+    bool name_proto_params;
+    int  proto_depth; // >0 while spelling a parameter list
     // #1113(a): set by collect_type() the moment any TY_DECIMAL32/64/128
     // is reached during the pre-emission collection walk (cc_serialize_
     // program's collect_obj_types()/collect_static_assert_types() loop) --
@@ -491,6 +496,7 @@ void serialize_type_index_reset(void);
 void same_type_memo_begin(void);
 void same_type_memo_clear(void);
 void same_type_memo_end(void);
+bool type_has_proto_vla(Type *ty);
 void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                          const char *name);
 bool type_needs_opaque_storage(Type *ty);

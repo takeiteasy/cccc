@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: -c=native cannot spell a VLA-pointee parameter type (#1819)
 // A parameter whose pointee is variable-length reads the other parameters.
 
 static int sum_rows(int n, int a[][n], int rows) {

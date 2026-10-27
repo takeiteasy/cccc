@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: -c=native uses a propagated VLA-row pointer before declaring it (#1820)
 // CCCC_FLAGS: --checked-pointers
 // A pointer to a variable-length row keeps the row's length.
 

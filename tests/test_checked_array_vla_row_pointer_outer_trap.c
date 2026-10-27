@@ -1,5 +1,4 @@
 // EXPECT_RUNTIME_ERROR CCCC_FLAGS: --checked-pointers
-// CCCC_NATIVE_SKIP: -c=native uses a propagated VLA-row pointer before declaring it (#1820)
 // The array's row count bounds the row index through a row pointer.
 
 int main(void) {

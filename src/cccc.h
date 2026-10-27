@@ -2662,6 +2662,8 @@ struct Obj {
     int offset;    /**< For local variables: stack offset. For globals/functions
                       some fields (like code_addr) are used instead. */
     bool is_param; // true if this is a function parameter
+    bool is_proto_param; // prototype-scope stand-in for a parameter named in a
+                         // later parameter's array length
     bool is_captured; // true if accessed by a nested function (for optimization
                       // hints)
     struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit

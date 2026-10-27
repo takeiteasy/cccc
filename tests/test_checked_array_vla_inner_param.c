@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: -c=native cannot spell a VLA-pointee parameter type (#1819)
 // CCCC_FLAGS: --checked-pointers
 // A checked array parameter with variable-length inner dimensions is bounded
 // by its own lengths, on every dimension.

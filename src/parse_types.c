@@ -850,6 +850,8 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             dummy->ty                                 = ty2;
             dummy->align                              = ty2->align;
             dummy->is_local                           = true;
+            dummy->is_proto_param                     = true;
+            dummy->name = arena_strndup(vm, name->loc, name->len);
             push_scope(vm, name->loc, name->len)->var = dummy;
         }
 
