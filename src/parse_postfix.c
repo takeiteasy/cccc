@@ -4528,6 +4528,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 "name, because file-scope comptime generation runs before "
                 "the runtime translation unit is parsed)",
                 tok->len, tok->loc, tok->len, tok->loc);
+        } else if (cc_checked_scope_keyword(tok) != CHECKED_SCOPE_UNSET) {
+            msg = arena_format(vm,
+                               "undefined variable '%.*s' (a '%.*s' region "
+                               "must be followed by a compound statement "
+                               "'{ ... }')",
+                               tok->len, tok->loc, tok->len, tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,
                                tok->loc);
