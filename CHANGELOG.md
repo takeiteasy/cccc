@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: any dimension of a variable-length checked array may vary (`_Checked[3][n]`, `_Checked[m][n]`), as a local, a parameter or behind a row pointer; each is checked against its own length.
 - Fixed: a function parameter whose pointee is variable-length (`int (*a)[n]`, `int a[][n]`) no longer crashes the compiler when subscripted; its lengths are evaluated once on entry.
 - Fixed: a call is bounds-checked when a bound names a struct, union or floating parameter, for both an argument bound and a checked-return call.
 - Fixed: a call is bounds-checked when a checked pointer argument that another parameter's bound names has side effects, or comes before the pointer that names it (`sink(pk, small)` with `count(*p)`).

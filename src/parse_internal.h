@@ -401,6 +401,7 @@ Node *clone_bounds_node(VirtualMachine *vm, Node *n);
 Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
                     Token **close_tok);
 Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok);
+Node *checked_vla_extent(VirtualMachine *vm, Type *ty, Token *tok);
 Node *conditional(VirtualMachine *vm, Token **rest, Token *tok);
 Node *constexpr_expr_for_node(Node *node);
 bool consume_end(Token **rest, Token *tok);

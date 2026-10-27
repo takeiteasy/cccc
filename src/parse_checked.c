@@ -111,6 +111,8 @@ typedef struct {
     Type   *row; // row root's checked array type; .obj is the row expression
 } CheckedBase;
 
+static bool checked_vla_row_ready(Type *ty);
+
 static CheckedBase find_checked_base(Node *n) {
     while (n) {
         switch (n->kind) {
@@ -121,12 +123,15 @@ static CheckedBase find_checked_base(Node *n) {
             case ND_DEREF:
                 // A row of a multidimensional checked array (`a[i]` in
                 // `a[i][j]`).
-                if (n->ty && n->ty->kind == TY_ARRAY &&
+                if (n->ty &&
+                    (n->ty->kind == TY_ARRAY || n->ty->kind == TY_VLA) &&
                     n->ty->checked_kind != CHECKED_NONE)
                     return (CheckedBase){.row = n->ty, .obj = n};
                 // A plain row reached through a checked or propagated pointer
                 // (`p[0]` of `int (*p)[5] = a`) keeps the row's extent.
-                if (n->ty && n->ty->kind == TY_ARRAY && n->ty->array_len > 0 &&
+                if (n->ty &&
+                    ((n->ty->kind == TY_ARRAY && n->ty->array_len > 0) ||
+                     checked_vla_row_ready(n->ty)) &&
                     n->checked_bounds_lo && !n->checked_bounds_optional)
                     return (CheckedBase){.row = n->ty, .obj = n};
                 return (CheckedBase){0};
@@ -602,6 +607,31 @@ static void strip_row_checks(Node *n) {
     strip_row_checks(n->els);
 }
 
+// A row whose length is only known at run time carries its byte size in a
+// temporary (`vla_size`); element-size arithmetic reads that instead of the
+// placeholder get_vm_size() reports for a TY_VLA.
+static bool checked_vla_row_ready(Type *ty) {
+    return ty->kind == TY_VLA && ty->vla_len && ty->vla_size;
+}
+
+static Node *checked_elem_size_node(VirtualMachine *vm, Type *ty, Token *tok) {
+    if (ty && ty->kind == TY_VLA) {
+        Node *n = new_cast(vm, new_var_node(vm, ty->vla_size, tok), ty_long);
+        add_type(vm, n);
+        return n;
+    }
+    return new_long(vm, ty ? get_vm_size(ty) : 1, tok);
+}
+
+// The size CHKR checks an access of `pointee` against. A variable-length row
+// starts on a row boundary, so checking its first byte against the exact end
+// is the same as checking the whole row.
+static int64_t checked_access_bytes(Type *pointee) {
+    if (!pointee)
+        return 1;
+    return pointee->kind == TY_VLA ? 1 : get_vm_size(pointee);
+}
+
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                                    Type *access_ty, Token *tok, Node **out_lo,
                                    Node **out_hi, bool *out_nt,
@@ -677,7 +707,11 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         : base.mem ? base.mem->checked_bounds_lo
                    : NULL;
     Node *resolved_hi = NULL;
-    if (base.row) {
+    if (base.row && base.row->kind == TY_VLA) {
+        if (!checked_vla_row_ready(base.row))
+            return;
+        resolved_hi = checked_vla_extent(vm, base.row, tok);
+    } else if (base.row) {
         resolved_hi = new_long(vm,
                                plain_row ? base.row->array_len
                                          : base.row->checked_array_extent,
@@ -688,7 +722,8 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
     }
     Type   *base_ty   = access_ty->base;
-    int64_t elem_size = base_ty ? get_vm_size(base_ty) : 1;
+    if (base_ty && base_ty->kind == TY_VLA && !checked_vla_row_ready(base_ty))
+        return;
 
     if (kind == CHECKED_SINGLE) {
         // ~ Checked C _Ptr<T>: implicit range [p, p + sizeof(T)). Built
@@ -703,7 +738,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         // untyped and crash codegen.
         *out_lo  = checked_base_self_expr(vm, base, tok);
         Node *hi = new_binary(vm, ND_ADD, checked_base_self_expr(vm, base, tok),
-                              new_long(vm, elem_size, tok), tok);
+                              checked_elem_size_node(vm, base_ty, tok), tok);
         add_type(vm, hi);
         *out_hi = hi;
         return;
@@ -732,13 +767,13 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             Node *hi = base.mem
                            ? clone_member_bounds_node(vm, resolved_hi, base.obj)
                            : clone_bounds_node(vm, resolved_hi);
-            // #938: the terminator slot is the elem_size bytes beginning at the
-            // declared end of the range -- for bounds(lo,hi) that end is `hi`
-            // itself, so widen it by one element exactly as CB_COUNT/
+            // #938: the terminator slot is the element-size bytes beginning at
+            // the declared end of the range -- for bounds(lo,hi) that end is
+            // `hi` itself, so widen it by one element exactly as CB_COUNT/
             // CB_BYTE_COUNT do below.
             if (kind == CHECKED_NTARRAY) {
-                hi = new_binary(vm, ND_ADD, hi, new_long(vm, elem_size, tok),
-                                tok);
+                hi = new_binary(vm, ND_ADD, hi,
+                                checked_elem_size_node(vm, base_ty, tok), tok);
                 add_type(vm, hi);
                 if (checked_nt_pointee_supported(base_ty))
                     *out_nt = true;
@@ -751,11 +786,11 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             if (!resolved_hi)
                 return; // see the CB_RANGE comment above
             // lo = the base's own live value at this access; hi = base +
-            // n[*elem_size]. #938: ntarray widens by one element for the
-            // terminator slot -- the elem_size bytes beginning at the declared
-            // end of the range -- under all three bounds forms (#483 originally
-            // shipped this for count(n) only; docs/safety.md documents the
-            // unified rule).
+            // n[*element size]. #938: ntarray widens by one element for the
+            // terminator slot -- the element-size bytes beginning at the
+            // declared end of the range -- under all three bounds forms (#483
+            // originally shipped this for count(n) only; docs/safety.md
+            // documents the unified rule).
             *out_lo = checked_base_self_expr(vm, base, tok);
             Node *n = base.mem
                           ? clone_member_bounds_node(vm, resolved_hi, base.obj)
@@ -764,20 +799,23 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             if (form == CB_BYTE_COUNT) {
                 count_bytes = n;
                 if (kind == CHECKED_NTARRAY) {
-                    count_bytes = new_binary(vm, ND_ADD, count_bytes,
-                                             new_long(vm, elem_size, tok), tok);
+                    count_bytes = new_binary(
+                        vm, ND_ADD, count_bytes,
+                        checked_elem_size_node(vm, base_ty, tok), tok);
                     add_type(vm, count_bytes);
                 }
             } else if (kind == CHECKED_NTARRAY) {
                 Node *n_plus_1 =
                     new_binary(vm, ND_ADD, n, new_long(vm, 1, tok), tok);
                 add_type(vm, n_plus_1);
-                count_bytes = new_binary(vm, ND_MUL, n_plus_1,
-                                         new_long(vm, elem_size, tok), tok);
+                count_bytes =
+                    new_binary(vm, ND_MUL, n_plus_1,
+                               checked_elem_size_node(vm, base_ty, tok), tok);
                 add_type(vm, count_bytes);
             } else {
-                count_bytes = new_binary(vm, ND_MUL, n,
-                                         new_long(vm, elem_size, tok), tok);
+                count_bytes =
+                    new_binary(vm, ND_MUL, n,
+                               checked_elem_size_node(vm, base_ty, tok), tok);
                 add_type(vm, count_bytes);
             }
             // #923/#938/#939: this access can land on the widened terminator
@@ -825,7 +863,7 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
     if (!checked_base_is_declared(base))
         return;
     Type *pty = checked_base_type(base);
-    deref->checked_access_size = pty->base ? get_vm_size(pty->base) : 1;
+    deref->checked_access_size = checked_access_bytes(pty->base);
     compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
                            &deref->checked_bounds_hi,
                            &deref->checked_nt_terminator,
@@ -1391,8 +1429,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             node->checked_bounds_optional = base.var->checked_prop_optional;
             Type *access_ty               = node->lhs->ty;
             Type *pointee_ty              = access_ty ? access_ty->base : NULL;
-            node->checked_access_size =
-                pointee_ty ? get_vm_size(pointee_ty) : 1;
+            node->checked_access_size     = checked_access_bytes(pointee_ty);
             if (base.var->checked_prop_nt_elem != 0 &&
                 node->checked_access_size == base.var->checked_prop_nt_elem &&
                 checked_nt_pointee_supported(pointee_ty))
@@ -1408,8 +1445,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
                 &node->checked_bounds_hi, &node->checked_nt_terminator,
                 &node->checked_bounds_obj_init, fn);
             if (node->checked_bounds_lo && node->checked_bounds_hi) {
-                node->checked_access_size =
-                    pty->base ? get_vm_size(pty->base) : 1;
+                node->checked_access_size = checked_access_bytes(pty->base);
                 checked_attach_mirror(vm, node);
             }
         }

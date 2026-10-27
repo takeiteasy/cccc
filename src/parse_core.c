@@ -957,6 +957,18 @@ bool node_is_stmt_kind(Node *n) {
     }
 }
 
+// The element count of a checked VLA dimension: its length snapshot, less the
+// terminator slot of an `_Nt_checked` row. Typed, and fresh on every call.
+Node *checked_vla_extent(VirtualMachine *vm, Type *ty, Token *tok) {
+    Node *n = ty->vla_len;
+    add_type(vm, n);
+    if (ty->checked_kind == CHECKED_NTARRAY) {
+        n = new_binary(vm, ND_SUB, n, new_long(vm, 1, tok), tok);
+        add_type(vm, n);
+    }
+    return n;
+}
+
 // Resolves a checked pointer's bounds expression(s) from the raw token
 // span(s) captured at attribute-parse time (Type.checked_bounds_arg1/arg2 --
 // see its comment for why resolution is deferred) into real Node* ASTs, once
@@ -1018,13 +1030,7 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
     // A VLA parameter has checked_bounds_arg1 and takes the path below.
     if (ty->kind == TY_VLA && !ty->checked_bounds_arg1 &&
         ty->checked_vla_extent_tok) {
-        Node *n = ty->vla_len;
-        add_type(vm, n);
-        if (ty->checked_kind == CHECKED_NTARRAY) {
-            n = new_binary(vm, ND_SUB, n, new_long(vm, 1, ty->name), ty->name);
-            add_type(vm, n);
-        }
-        *out_hi = n;
+        *out_hi = checked_vla_extent(vm, ty, ty->name);
         return;
     }
 

@@ -1228,14 +1228,17 @@ static Type *with_cleanup(VirtualMachine *vm, Type *ty, Obj *cleanup_fn) {
 // Every dimension of a checked array is itself a checked array, so a row
 // (`a[i]` of `int a _Checked[3][5]`) is checked against its own extent.
 static Type *checked_array_rows(VirtualMachine *vm, Type *ty) {
-    if (!ty || ty->kind != TY_ARRAY)
+    if (!ty || (ty->kind != TY_ARRAY && ty->kind != TY_VLA))
         return ty;
     ty       = copy_type(vm, ty);
     ty->base = checked_array_rows(vm, ty->base);
     if (ty->checked_kind == CHECKED_NONE) {
-        ty->checked_kind         = CHECKED_ARRAY;
-        ty->checked_bounds_form  = CB_COUNT;
-        ty->checked_array_extent = ty->array_len;
+        ty->checked_kind        = CHECKED_ARRAY;
+        ty->checked_bounds_form = CB_COUNT;
+        if (ty->kind == TY_VLA)
+            ty->checked_vla_extent_tok = ty->vla_len_tok;
+        else
+            ty->checked_array_extent = ty->array_len;
     }
     return ty;
 }
@@ -1271,12 +1274,7 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
                   checked_array_tok->len, checked_array_tok->loc);
     Type *innermost = ty;
     for (Type *row = ty->base; row; row = row->base) {
-        // TODO: inner VLA dimensions need per-row runtime extents (#1798)
-        if (row->kind == TY_VLA)
-            error_tok(vm, checked_array_tok,
-                      "only the outermost dimension of a checked array "
-                      "may be variable-length");
-        if (row->kind != TY_ARRAY)
+        if (row->kind != TY_ARRAY && row->kind != TY_VLA)
             break;
         innermost = row;
     }
@@ -1307,11 +1305,13 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
     ty->base                 = checked_array_rows(vm, ty->base);
     if (nt_rows) {
         Type *row = ty->base;
-        while (row->base && row->base->kind == TY_ARRAY)
+        while (row->base &&
+               (row->base->kind == TY_ARRAY || row->base->kind == TY_VLA))
             row = row->base;
-        row->checked_kind         = CHECKED_NTARRAY;
-        row->checked_array_extent = row->array_len - 1;
-        checked_array_kind        = CHECKED_ARRAY;
+        row->checked_kind = CHECKED_NTARRAY;
+        if (row->kind == TY_ARRAY)
+            row->checked_array_extent = row->array_len - 1;
+        checked_array_kind = CHECKED_ARRAY;
     }
     ty->checked_kind        = checked_array_kind;
     ty->checked_bounds_form = CB_COUNT;

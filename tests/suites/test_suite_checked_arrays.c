@@ -422,6 +422,70 @@ void test_vla_checked_array_outer_dimension(void) {
 }
 
 [[cccc::test]]
+void test_vla_checked_array_inner_dimension(void) {
+    int   n = 4;
+    int a _Checked[3][n];
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < n; j++)
+            a[i][j] = i * 10 + j;
+    AssertEq(a[2][3], 23);
+    AssertEq((int)sizeof(a[0]), 4 * (int)sizeof(int));
+}
+
+[[cccc::test]]
+void test_vla_checked_array_every_dimension_varies(void) {
+    int   m = 3, n = 4;
+    int a _Checked[m][n];
+    int c _Checked[2][m][3];
+    a[m - 1][n - 1] = 7;
+    c[1][2][2]      = 5;
+    AssertEq(a[2][3], 7);
+    AssertEq(c[1][2][2], 5);
+}
+
+[[cccc::test]]
+void test_vla_checked_array_inner_extent_is_a_snapshot(void) {
+    int   n = 4;
+    int a _Checked[2][n];
+    n       += 10;
+    a[1][3]  = 9;
+    AssertEq(a[1][3], 9);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_vla_checked_array_inner_oob_traps(void) {
+    int          n = 4;
+    int a        _Checked[3][n];
+    volatile int j = n;
+    a[1][j]        = 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_vla_checked_array_outer_of_vla_rows_traps(void) {
+    int          n = 4;
+    int a        _Checked[3][n];
+    volatile int i = 3;
+    a[i][0]        = 1;
+}
+
+[[cccc::test]]
+void test_vla_nt_checked_array_inner_terminator_slot(void) {
+    int    n = 4;
+    char s _Nt_checked[2][n];
+    s[1][2] = 'x';
+    s[1][3] = 0;
+    AssertEq(s[1][2], 'x');
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_vla_nt_checked_array_inner_terminator_traps(void) {
+    int          n = 4;
+    char s       _Nt_checked[2][n];
+    volatile int j = n - 1;
+    s[1][j]        = 'x';
+}
+
+[[cccc::test]]
 void test_vla_nt_checked_array_terminator_slot(void) {
     int    n = 5;
     char s _Nt_checked[n];

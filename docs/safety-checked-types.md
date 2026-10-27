@@ -85,7 +85,6 @@ int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays c
 
 | Limit | Reason |
 |---|---|
-| Only the outermost dimension may be variable-length (`_Checked[n][5]` works, `_Checked[3][n]` is an error) | The row checks use a constant extent per row |
 | `_Nt_checked` over rows that are already checked arrays (`Str t _Nt_checked[3]` with `typedef char Str _Nt_checked[10]`, or over a `_Checked` typedef row) is an error | The terminator belongs to the innermost row, once |
 | A string initializer that fills the last slot (`char s _Nt_checked[3] = "abc"`) is an error | No room is left for the terminator |
 
@@ -125,6 +124,16 @@ a[4] = 1;    // ok
 a[5] = 1;    // traps: the array still has 5 elements
 
 void f(int n, int p _Checked[n]);   // p is count(n) on the decayed pointer
+```
+
+Any dimension may vary, and each is checked against its own length. A pointer to a variable-length row keeps that length.
+
+```c
+int m = 3, n = 4;
+int a _Checked[m][n];
+int (*p)[n] = a;
+a[1][4] = 1;    // traps: past the row
+p[3][0] = 1;    // traps: past the last row
 ```
 
 A parameter's extent is its pointer's `count(n)`, so it is re-evaluated at each access and must be side-effect free. `_Nt_checked[n]` reserves the last slot for the terminator; at `n == 0` the range is empty and every access traps.
