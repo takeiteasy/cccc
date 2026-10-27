@@ -37,8 +37,17 @@ void print_escaped_string(FILE *f, const char *str) {
             case '\t':
                 fprintf(f, "\\t");
                 break;
+            case '\b':
+                fprintf(f, "\\b");
+                break;
+            case '\f':
+                fprintf(f, "\\f");
+                break;
             default:
-                fprintf(f, "%c", *p);
+                if ((unsigned char)*p < 0x20)
+                    fprintf(f, "\\u%04x", (unsigned char)*p);
+                else
+                    fputc(*p, f);
                 break;
         }
     }
