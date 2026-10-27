@@ -738,6 +738,14 @@ static bool node_has_side_effect(Node *n, int depth) {
            node_has_side_effect(n->els, depth + 1);
 }
 
+// True when `ty` has a `[*]` extent (a VLA row with no length expression).
+bool type_has_unspecified_vla(Type *ty) {
+    for (Type *t = ty; t; t = t->base)
+        if (t->kind == TY_VLA && !t->vla_len)
+            return true;
+    return false;
+}
+
 // True when evaluating a VLA extent in `ty` could be observed (a call, a
 // store).
 bool type_vla_extent_impure(Type *ty) {

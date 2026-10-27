@@ -1870,7 +1870,8 @@ static bool node_reads_proto_param(Node *n, int depth) {
 // such name exists where the type is spelled outside the definition.
 bool type_has_proto_vla(Type *ty) {
     for (; ty; ty = ty->base)
-        if (ty->kind == TY_VLA && node_reads_proto_param(ty->vla_len, 0))
+        if (ty->kind == TY_VLA &&
+            (!ty->vla_len || node_reads_proto_param(ty->vla_len, 0)))
             return true;
     return false;
 }
@@ -1936,7 +1937,8 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         char  *lenbuf = NULL;
         size_t lensz  = 0;
         FILE  *lf     = open_memstream(&lenbuf, &lensz);
-        if (!ctx->name_proto_params && node_reads_proto_param(ty->vla_len, 0))
+        if (!ty->vla_len ||
+            (!ctx->name_proto_params && node_reads_proto_param(ty->vla_len, 0)))
             fputc('*', lf);
         else if (ty->vla_len && ctx->vm)
             serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 2);

@@ -61,6 +61,25 @@ The emitted C behaves as the VM does, except:
 | C23 `<math.h>` functions host libms lack (`exp10`, `sinpi` family, `fmaximum` family, `totalorder`, `canonicalize`, payload and `fromfp` families) | `static __cccc_native_<name>`, the same code the VM runs; `l` variants compute in `double` |
 | `memset_explicit`, `memalignment`, `free_sized`, `free_aligned_sized` | Static functions from the same shared runtime |
 
+## Variable-length array parameters
+
+A parameter whose pointee length reads an earlier parameter (`int (*a)[n]`, `int a[][n]`) is spelled by position:
+
+| Where | Spelling |
+|---|---|
+| Prototype, function-pointer type | `int (*a)[*]` |
+| Definition | `int (*a)[n]`, with the real parameter names |
+| Call-site cast, compiler temporary | `void *` |
+
+A length with side effects (`int (*a)[g()]`) is evaluated once per call, as in the VM. The parameter is taken as `void *__cccc_p_a` and declared as `int (*a)[tmp] = __cccc_p_a;` after the lengths are computed, so the prototype of such a function also says `void *`.
+
+`[*]` is accepted in source in a prototype that is not a definition:
+
+```c
+int f(int n, int a[n][*]);   // ok
+int f(int n, int a[n][*]) {  // error: star modifier used outside of function prototype
+```
+
 ## Wide `_BitInt` bit-fields
 
 A bit-field of a `_BitInt` wider than 128 bits has no C spelling, so the struct becomes a byte array in CCCC's layout and members are read and written at CCCC offsets:

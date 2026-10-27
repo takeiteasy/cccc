@@ -755,6 +755,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
     // subsequent parameters' VLA size expressions (C99 §6.7.6.3p12).
     // e.g. void f(int n, int a[n]) — 'n' must be in scope when parsing a[n].
     enter_scope(vm);
+    vm->compiler.proto_params++;
 
     while (!equal(tok, ")")) {
         if (cur != &head)
@@ -858,6 +859,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         cur = cur->next = copy_type(vm, ty2);
     }
 
+    vm->compiler.proto_params--;
     leave_scope(vm);
 
     if (cur == &head) {
@@ -903,6 +905,12 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
         if (equal(tok, "_Atomic"))
             saw_atomic = true;
         tok = tok->next;
+    }
+
+    // `[*]`: a prototype's unspecified extent (C99 6.7.6.2).
+    if (vm->compiler.proto_params && equal(tok, "*") && equal(tok->next, "]")) {
+        ty = type_suffix(vm, rest, tok->next->next, ty);
+        return vla_of(vm, ty, NULL);
     }
 
     if (equal(tok, "]")) {

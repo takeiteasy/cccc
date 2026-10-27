@@ -819,6 +819,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         return tok;
     }
 
+    fn->def_ty = ty;
+
     if (is_float16(fn->ty->return_ty))
         error_float16_unsupported(vm, ty->name);
     for (Type *p = fn->ty->params; p; p = p->next)
@@ -955,6 +957,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         }
         tok = skip(vm, tok, ";");
     }
+
+    for (Type *p = ty->params; p; p = p->next)
+        if (type_has_unspecified_vla(p))
+            error_tok(vm, p->name ? p->name : fn->tok,
+                      "star modifier used outside of function prototype");
 
     validate_main_signature(vm, fn);
     create_param_lvars(vm, ty->params);

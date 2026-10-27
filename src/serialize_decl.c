@@ -222,7 +222,8 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     bool first = true;
     ctx->proto_depth++;
     if (fn->params) {
-        Type *proto_param = fn->ty ? fn->ty->params : NULL;
+        Type *def_ty      = fn->def_ty ? fn->def_ty : fn->ty;
+        Type *proto_param = def_ty ? def_ty->params : NULL;
         for (Obj *param = fn->params; param; param = param->next,
                  proto_param = proto_param ? proto_param->next : NULL) {
             if (!first)

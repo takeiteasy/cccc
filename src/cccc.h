@@ -2664,6 +2664,8 @@ struct Obj {
     bool is_param; // true if this is a function parameter
     bool is_proto_param; // prototype-scope stand-in for a parameter named in a
                          // later parameter's array length
+    struct Type
+        *def_ty; // the definition's own declarator type (parameter spelling)
     bool vla_extent_impure; // param whose pointee extent has side effects:
                             // -c=native takes it as `void *` and declares it
                             // after the entry-time size statements
@@ -4509,6 +4511,7 @@ typedef struct Compiler {
     bool   in_bitfield_width;  // True while parsing a bit-field width: a "[["
                                // then starts an attribute, not a subscript.
     Obj   *current_fn;         // Function being parsed
+    int    proto_params; // >0 while parsing a parameter list (`[*]` is legal)
     PendingMemberAttrs *pending_member_attrs; // FIFO head; tail via _tail
     OperatorEntry      *operators;
     int                 noperators, operators_cap;

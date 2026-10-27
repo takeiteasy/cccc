@@ -933,6 +933,7 @@ Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
 // to the top of its function. See Obj.deferred_vla_ptr_init (cccc.h).
 bool type_contains_vla(Type *ty);
 bool type_vla_extent_impure(Type *ty);
+bool type_has_unspecified_vla(Type *ty);
 Type *enum_type(VirtualMachine *vm);
 Type *struct_type(VirtualMachine *vm);
 Type *union_type(VirtualMachine *vm);
