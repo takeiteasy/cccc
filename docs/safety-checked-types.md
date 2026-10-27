@@ -139,6 +139,8 @@ a[2][4] = 1;               // ok
 a[1][5] = 1;               // traps: past the row, though inside the object
 a[3][0] = 1;               // traps: past the last row
 int *r = a[1];             // r is checked against the 5 elements of row 1
+int (*p)[5] = a;
+p[0][7] = 1;               // traps: a pointer to a row checks its elements against the row's 5
 ```
 
 Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`). A string initializer sizes an `_Nt_checked[]` the same way (`char s _Nt_checked[] = "hi"` has 3 slots).
@@ -155,7 +157,6 @@ Str t _Checked[3];           // same shape through a typedef'd row
 | Case | Behavior |
 |---|---|
 | Row expression with side effects (`a[i++][j]`) | The outer index is checked; the inner index is not [^rows] |
-| Pointer to a row (`int (*p)[5] = a; p[0][7]`) | `p[0]` is checked, the element access is not |
 | Plain outer array of checked rows (`Row a[3]` with `typedef int Row _Checked[5]`) | Each row is checked; the outer index is not |
 
 A plain array inside a [checked region](safety-checked-regions.md#what-is-banned) is an error. Checked arrays serialize as ordinary arrays in `-m`/`-c=native`/`-c=generated` output.

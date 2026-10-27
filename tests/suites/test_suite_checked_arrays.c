@@ -334,8 +334,8 @@ void test_multidim_typedef_row_inner_oob(void) {
 }
 
 // ---------------------------------------------------------------------
-// Limits: a side-effecting row expression is not re-evaluated for its inner
-// check, and a pointer-to-row's element access has no checked root.
+// A side-effecting row expression is not re-evaluated for its inner check;
+// a pointer to a row checks its elements against the row's extent.
 // ---------------------------------------------------------------------
 
 [[cccc::test]]
@@ -347,13 +347,33 @@ void test_multidim_side_effecting_row_evaluated_once(void) {
     AssertEq(a[0][1], 4);
 }
 
-[[cccc::test]]
-void test_multidim_pointer_to_row_element_is_unchecked(void) {
+[[cccc::test(exit_code = 255)]]
+void test_multidim_pointer_to_row_inner_oob(void) {
     int a _Checked[3][5] = {{0}};
     int (*p)[5]          = a;
     volatile int j       = 5;
-    p[0][j]              = 3; // lands in row 1 -- not trapped
-    AssertEq(a[1][0], 3);
+    p[0][j]              = 3;
+}
+
+[[cccc::test]]
+void test_multidim_pointer_to_row_in_bounds(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 5; j++)
+            p[i][j] = i * 10 + j;
+    AssertEq(a[2][4], 24);
+    AssertEq(p[1][3], 13);
+}
+
+[[cccc::test]]
+void test_multidim_pointer_to_row_side_effecting_row(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    int i                = 0;
+    p[i++][1]            = 4;
+    AssertEq(i, 1);
+    AssertEq(a[0][1], 4);
 }
 
 // ---------------------------------------------------------------------

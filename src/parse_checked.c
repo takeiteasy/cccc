@@ -124,6 +124,11 @@ static CheckedBase find_checked_base(Node *n) {
                 if (n->ty && n->ty->kind == TY_ARRAY &&
                     n->ty->checked_kind != CHECKED_NONE)
                     return (CheckedBase){.row = n->ty, .obj = n};
+                // A plain row reached through a checked or propagated pointer
+                // (`p[0]` of `int (*p)[5] = a`) keeps the row's extent.
+                if (n->ty && n->ty->kind == TY_ARRAY && n->ty->array_len > 0 &&
+                    n->checked_bounds_lo && !n->checked_bounds_optional)
+                    return (CheckedBase){.row = n->ty, .obj = n};
                 return (CheckedBase){0};
             case ND_ADD:
             case ND_SUB:
@@ -571,6 +576,25 @@ Node *checked_nt_store_root(Node *lhs) {
 
 static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
 
+// An array-typed deref only computes an address; the real access carries the
+// check, so the hoisted `&row` clone drops it.
+static void strip_row_checks(Node *n) {
+    if (!n)
+        return;
+    if (n->kind == ND_DEREF && n->ty && n->ty->kind == TY_ARRAY) {
+        n->checked_bounds_lo       = NULL;
+        n->checked_bounds_hi       = NULL;
+        n->checked_bounds_obj_init = NULL;
+        n->checked_nt_terminator   = false;
+        n->checked_bounds_optional = false;
+    }
+    strip_row_checks(n->lhs);
+    strip_row_checks(n->rhs);
+    strip_row_checks(n->cond);
+    strip_row_checks(n->then);
+    strip_row_checks(n->els);
+}
+
 static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                                    Type *access_ty, Token *tok, Node **out_lo,
                                    Node **out_hi, bool *out_nt,
@@ -619,10 +643,9 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         Obj  *t = hoist_fn ? new_checked_prop_temp(vm, hoist_fn,
                                                    pointer_to(vm, base.obj->ty))
                            : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
-        // TODO: for a row root the clone keeps its own CHKR fields, so the
-        // outer index is checked twice (#1797).
-        Node *addr =
-            new_unary(vm, ND_ADDR, clone_bounds_node(vm, base.obj), tok);
+        Node *obj_clone = clone_bounds_node(vm, base.obj);
+        strip_row_checks(obj_clone);
+        Node *addr = new_unary(vm, ND_ADDR, obj_clone, tok);
         add_type(vm, addr);
         Node *init =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, t, tok), addr, tok);
@@ -633,10 +656,13 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         base.obj = obj_temp;
     }
 
-    CheckedKind kind = base.row   ? base.row->checked_kind
-                       : base.var ? base.var->checked_kind
-                                  : base.mem->ty->checked_kind;
-    CheckedBoundsForm form = base.row   ? base.row->checked_bounds_form
+    bool        plain_row  = base.row && base.row->checked_kind == CHECKED_NONE;
+    CheckedKind kind       = plain_row  ? CHECKED_ARRAY
+                             : base.row ? base.row->checked_kind
+                             : base.var ? base.var->checked_kind
+                                        : base.mem->ty->checked_kind;
+    CheckedBoundsForm form = plain_row  ? CB_COUNT
+                             : base.row ? base.row->checked_bounds_form
                              : base.var ? base.var->checked_bounds_form
                                         : base.mem->ty->checked_bounds_form;
     Node             *resolved_lo =
@@ -645,7 +671,10 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                    : NULL;
     Node *resolved_hi = NULL;
     if (base.row) {
-        resolved_hi = new_long(vm, base.row->checked_array_extent, tok);
+        resolved_hi = new_long(vm,
+                               plain_row ? base.row->array_len
+                                         : base.row->checked_array_extent,
+                               tok);
         add_type(vm, resolved_hi);
     } else {
         resolved_hi =
@@ -1301,77 +1330,82 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 // size mismatch must not attach the guard -- see compute_checked_bounds()'s
 // own identical size-derived guard for the direct-access case). Also gated
 // on checked_nt_pointee_supported(), matching compute_checked_bounds() (#939).
-static void checked_prop_attach_scan(VirtualMachine *vm, Node *node) {
-    for (; node; node = node->next) {
-        if (node->kind == ND_DEREF && !node->checked_bounds_lo) {
-            CheckedBase base = find_checked_base(node->lhs);
-            if (base.var && base.var->checked_prop_candidate &&
-                !base.var->checked_prop_unsafe && base.var->checked_prop_lo) {
-                Node *lo =
-                    new_var_node(vm, base.var->checked_prop_lo, node->tok);
-                add_type(vm, lo);
-                Node *hi =
-                    new_var_node(vm, base.var->checked_prop_hi, node->tok);
-                add_type(vm, hi);
-                node->checked_bounds_lo = lo;
-                node->checked_bounds_hi = hi;
-                // #942: OPT survivors' snapshot temps can legitimately hold
-                // the sentinel range at runtime (any path that hasn't yet
-                // executed a checked-rooted store), so this deref must go
-                // through CHKRO, not plain CHKR -- see emit_chkr()'s
-                // comment in codegen.c.
-                node->checked_bounds_optional = base.var->checked_prop_optional;
-                Type *access_ty               = node->lhs->ty;
-                Type *pointee_ty = access_ty ? access_ty->base : NULL;
-                node->checked_access_size =
-                    pointee_ty ? get_vm_size(pointee_ty) : 1;
-                if (base.var->checked_prop_nt_elem != 0 &&
-                    node->checked_access_size ==
-                        base.var->checked_prop_nt_elem &&
-                    checked_nt_pointee_supported(pointee_ty))
-                    node->checked_nt_terminator = true;
+// Mirrors a deref's just-attached bounds onto its RMW store node.
+static void checked_attach_mirror(VirtualMachine *vm, Node *node) {
+    Node *mirror = node->checked_rmw_mirror;
+    if (!mirror)
+        return;
+    if (mirror->kind == ND_DEREF) {
+        mirror->checked_bounds_lo =
+            clone_bounds_node(vm, node->checked_bounds_lo);
+        mirror->checked_bounds_obj_init =
+            clone_bounds_node(vm, node->checked_bounds_obj_init);
+        mirror->checked_bounds_optional = node->checked_bounds_optional;
+    }
+    // ND_CAS (the `_Atomic` desugar) -- lo is deliberately omitted, matching
+    // to_assign()'s own direct-access ND_CAS copy (it has no gen_addr-driven
+    // CHKR path to feed lo into).
+    mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
+    mirror->checked_access_size   = node->checked_access_size;
+    mirror->checked_nt_terminator = node->checked_nt_terminator;
+}
 
-                // #943: to_assign()'s RMW desugar builds a synthesized store
-                // node (checked_rmw_mirror) BEFORE this pass runs, so it
-                // never got a chance to see these just-attached bounds --
-                // mirror them across now, the same fields #937 already
-                // copies for the direct-access case.
-                if (node->checked_rmw_mirror) {
-                    Node *mirror = node->checked_rmw_mirror;
-                    if (mirror->kind == ND_DEREF) {
-                        mirror->checked_bounds_lo =
-                            clone_bounds_node(vm, node->checked_bounds_lo);
-                        mirror->checked_bounds_hi =
-                            clone_bounds_node(vm, node->checked_bounds_hi);
-                        mirror->checked_bounds_optional =
-                            node->checked_bounds_optional;
-                        mirror->checked_access_size = node->checked_access_size;
-                        mirror->checked_nt_terminator =
-                            node->checked_nt_terminator;
-                    } else {
-                        // ND_CAS (the `_Atomic` desugar) -- lo is deliberately
-                        // omitted, matching to_assign()'s own direct-access
-                        // ND_CAS copy (it has no gen_addr-driven CHKR path to
-                        // feed lo into).
-                        mirror->checked_bounds_hi =
-                            clone_bounds_node(vm, node->checked_bounds_hi);
-                        mirror->checked_access_size = node->checked_access_size;
-                        mirror->checked_nt_terminator =
-                            node->checked_nt_terminator;
-                    }
-                }
+static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
+    for (; node; node = node->next) {
+        // Children first: a row access reads the bounds its inner row deref
+        // (`p[0]` in `p[0][j]`) receives here.
+        checked_prop_attach_scan(vm, fn, node->lhs);
+        checked_prop_attach_scan(vm, fn, node->rhs);
+        checked_prop_attach_scan(vm, fn, node->cond);
+        checked_prop_attach_scan(vm, fn, node->then);
+        checked_prop_attach_scan(vm, fn, node->els);
+        checked_prop_attach_scan(vm, fn, node->init);
+        checked_prop_attach_scan(vm, fn, node->inc);
+        checked_prop_attach_scan(vm, fn, node->body);
+        for (Node *a = node->args; a; a = a->next)
+            checked_prop_attach_scan(vm, fn, a);
+
+        if (node->kind != ND_DEREF || node->checked_bounds_lo)
+            continue;
+        CheckedBase base = find_checked_base(node->lhs);
+        if (base.var && base.var->checked_prop_candidate &&
+            !base.var->checked_prop_unsafe && base.var->checked_prop_lo) {
+            Node *lo = new_var_node(vm, base.var->checked_prop_lo, node->tok);
+            add_type(vm, lo);
+            Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
+            add_type(vm, hi);
+            node->checked_bounds_lo = lo;
+            node->checked_bounds_hi = hi;
+            // #942: OPT survivors' snapshot temps can legitimately hold
+            // the sentinel range at runtime (any path that hasn't yet
+            // executed a checked-rooted store), so this deref must go
+            // through CHKRO, not plain CHKR -- see emit_chkr()'s
+            // comment in codegen.c.
+            node->checked_bounds_optional = base.var->checked_prop_optional;
+            Type *access_ty               = node->lhs->ty;
+            Type *pointee_ty              = access_ty ? access_ty->base : NULL;
+            node->checked_access_size =
+                pointee_ty ? get_vm_size(pointee_ty) : 1;
+            if (base.var->checked_prop_nt_elem != 0 &&
+                node->checked_access_size == base.var->checked_prop_nt_elem &&
+                checked_nt_pointee_supported(pointee_ty))
+                node->checked_nt_terminator = true;
+            // #943: to_assign()'s RMW desugar built its store node before
+            // this pass ran, so mirror the attached bounds across.
+            checked_attach_mirror(vm, node);
+        } else if (base.row && !node_has_side_effects(base.obj)) {
+            // An element of a row reached through a propagated pointer.
+            Type *pty = node->lhs->ty;
+            compute_checked_bounds(
+                vm, base, pty, node->tok, &node->checked_bounds_lo,
+                &node->checked_bounds_hi, &node->checked_nt_terminator,
+                &node->checked_bounds_obj_init, fn);
+            if (node->checked_bounds_lo && node->checked_bounds_hi) {
+                node->checked_access_size =
+                    pty->base ? get_vm_size(pty->base) : 1;
+                checked_attach_mirror(vm, node);
             }
         }
-        checked_prop_attach_scan(vm, node->lhs);
-        checked_prop_attach_scan(vm, node->rhs);
-        checked_prop_attach_scan(vm, node->cond);
-        checked_prop_attach_scan(vm, node->then);
-        checked_prop_attach_scan(vm, node->els);
-        checked_prop_attach_scan(vm, node->init);
-        checked_prop_attach_scan(vm, node->inc);
-        checked_prop_attach_scan(vm, node->body);
-        for (Node *a = node->args; a; a = a->next)
-            checked_prop_attach_scan(vm, a);
     }
 }
 
@@ -1641,7 +1675,7 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     // then attach the resulting snapshots to every deref reached through a
     // survivor.
     checked_prop_rewrite_scan(vm, fn, fn->body);
-    checked_prop_attach_scan(vm, fn->body);
+    checked_prop_attach_scan(vm, fn, fn->body);
 }
 
 // #944 per-assignment rewrite: `q = E` where `q` is a declared-checked
