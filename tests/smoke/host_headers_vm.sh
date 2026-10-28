@@ -2,6 +2,8 @@
 # run in the VM and as -c=native: sockets, unistd, fopen's SDK variants and
 # glibc's scanf/strtol redirects bind to the registered natives, and the native
 # TU sees the same feature-test macros as the parse (fd_set's member name).
+# strtol's C23 "0b" prefix survives -c=native with the host's declarations (on
+# glibc 2.38+ the host accepts it itself, so macOS is the real coverage).
 # Skipped when no system headers are installed.
 . "$(dirname "$0")/lib.sh"
 
@@ -61,6 +63,27 @@ C
 
 expect_exit 42 "$CCCC" $FLAGS vm_host.c
 grep -q to-stderr err.txt || fail "stderr missing"
+
+cat >strtol_bin.c <<'C'
+#include <stdlib.h>
+
+int main(void) {
+    char *e;
+    if (strtol("0b11x", &e, 0) != 3 || *e != 'x')
+        return 1;
+    if (strtoll("-0B101", &e, 2) != -5 || *e)
+        return 2;
+    if (strtoul("0b110", &e, 0) != 6 || *e)
+        return 3;
+    if (strtoull("0b1", &e, 0) != 1 || *e)
+        return 4;
+    return 42;
+}
+C
+
+expect_exit 42 "$CCCC" $FLAGS strtol_bin.c
+expect_exit 0 "$CCCC" $FLAGS -c=native -o strtol_native strtol_bin.c
+expect_exit 42 ./strtol_native
 
 expect_exit 42 "$CCCC" $FLAGS fdset.c
 expect_exit 0 "$CCCC" $FLAGS -c=native -o fdset_native fdset.c

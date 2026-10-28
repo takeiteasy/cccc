@@ -371,9 +371,10 @@ static bool bundled_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
 // renamed Obj's definition is supplied right here, and the real host
 // symbol under the original name is left completely untouched for the
 // shim body to call.
-static bool rename_bundled_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
-                                                  const char *name,
-                                                  const char *header_basename) {
+static bool rename_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
+                                          const char *name,
+                                          const char *header_basename,
+                                          bool        any_system_header) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || !obj->is_used || obj->body)
             continue;
@@ -382,14 +383,21 @@ static bool rename_bundled_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
         Token *t = obj->tok;
         if (!t || !t->file)
             continue;
-        if (!cc_file_is_cccc_bundled(vm, t->file->name))
-            continue;
-        if (!path_basename_is(t->file->name, header_basename))
+        bool bundled = cc_file_is_cccc_bundled(vm, t->file->name) &&
+                       path_basename_is(t->file->name, header_basename);
+        if (!bundled && !(any_system_header && t->file->is_system_header))
             continue;
         obj->name = arena_format(vm, "__cccc_native_%s", name);
         return true;
     }
     return false;
+}
+
+static bool rename_bundled_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
+                                                  const char *name,
+                                                  const char *header_basename) {
+    return rename_extern_for_native_shim(vm, prog, name, header_basename,
+                                         false);
 }
 
 void serialize_threads_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
@@ -1374,6 +1382,8 @@ void serialize_c23_mem_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 // C23 strtol family "0b" prefix under -c=native: the shared runtime
 // (src/stdlib/c23_strtol/runtime.c) the VM also runs, emitted on every host
 // since libcs differ on the prefix (macOS and glibc before 2.38 reject it).
+// Also renames declarations from the host's own headers (--use-system-headers),
+// where the SDK may declare them outside stdlib.h (macOS: _stdlib.h).
 void serialize_c23_strtol_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     if (vm->compiler.emit_cccc)
         return;
@@ -1381,8 +1391,8 @@ void serialize_c23_strtol_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     static const char *const names[] = {"strtol", "strtoll", "strtoul",
                                         "strtoull"};
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
-        any |= rename_bundled_extern_for_native_shim(vm, prog, names[i],
-                                                     "stdlib.h");
+        any |= rename_extern_for_native_shim(vm, prog, names[i], "stdlib.h",
+                                             true);
     if (any)
         fprintf(f, "%s\n", CCCC_SHIM_c23_strtol_runtime);
 }
