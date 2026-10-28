@@ -8,7 +8,7 @@ Run it from the repository root, because `src/std_table.c`'s `.incbin` paths are
 
 ```sh
 SDK=$(xcrun --show-sdk-path)
-cccc --use-system-headers -D_FORTIFY_SOURCE=0 -c=native \
+cccc --use-system-headers -c=native \
   $(ls src/*.c src/stdlib/*.c | grep -v -e src/ops.c) \
   -I include -I src -i "$SDK/usr/include" -I "$SDK/usr/include/ffi" \
   --iframework "$SDK/System/Library/Frameworks" \
@@ -22,7 +22,7 @@ cccc --use-system-headers -D_FORTIFY_SOURCE=0 -c=native \
 | Linux | Drop `-i`, `--iframework`, the ffi `-I` and the CoreServices link args; `pkg-config --cflags libffi` covers libffi as `Makefile` does; drop `-l iconv` (glibc has it in libc). `src/watch.c` builds against inotify |
 | macOS | Keep `--use-system-headers`: `src/watch.c` (with `src/dmon.h`) includes CoreServices, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`. Without it every file but `src/watch.c` compiles and the link fails on `cc_watch_*` |
 
-`-i` is CCCC's `--isystem` short flag, not `-isystem` (getopt would read that as `-i` with the argument `system`). `--sysroot` and `-i "$SDK/usr/include"` are equivalent here. `-D_FORTIFY_SOURCE=0` skips Apple's fortified `strcpy` rewrite, which needs `__builtin___*_chk`.
+`-i` is CCCC's `--isystem` short flag, not `-isystem` (getopt would read that as `-i` with the argument `system`). `--sysroot` and `-i "$SDK/usr/include"` are equivalent here.
 
 ## What to check
 
