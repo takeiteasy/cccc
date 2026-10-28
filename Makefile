@@ -139,7 +139,7 @@ endif
 .PHONY: default
 default: cccc$(EXE)
 
-cccc$(EXE): $(SRCS) $(HEADERS) $(SHIMS) $(BT_LIB)
+cccc$(EXE): $(SRCS) src/ops.c $(wildcard src/*.h src/stdlib/*.h) $(HEADERS) $(SHIMS) $(BT_LIB)
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(BT_LIB) $(LDFLAGS)
 
 $(BT_OUT)/%.o: $(BT_DIR)/%.c
