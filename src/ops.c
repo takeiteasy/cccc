@@ -5962,6 +5962,26 @@ static const CcBuiltin *find_compiler_builtin(void *func_ptr) {
     return hit ? *hit : NULL;
 }
 
+// --disable-ffi / --ffi-allow / --ffi-deny verdict for `name`: 1 to proceed,
+// otherwise cccc_handle_ffi_policy_error's result.
+static int cccc_check_ffi_name_policy(VirtualMachine *vm, const char *name) {
+    if (vm->disable_all_ffi)
+        return cccc_handle_ffi_policy_error(
+            vm, "FFI Disabled", name,
+            "All FFI calls are disabled via --disable-ffi");
+
+    if (vm->ffi_allow_count > 0 &&
+        !cccc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, name))
+        return cccc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
+                                            "Function not in allow list");
+
+    if (vm->ffi_allow_count == 0 &&
+        cccc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, name))
+        return cccc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
+                                            "Function in deny list");
+    return 1;
+}
+
 static int cccc_check_ffi_policy(VirtualMachine *vm, void *func_ptr,
                                  const char *name, int actual_nargs,
                                  int is_variadic, int num_fixed_args) {
@@ -5980,20 +6000,9 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, void *func_ptr,
         return 1;
     }
 
-    if (vm->disable_all_ffi)
-        return cccc_handle_ffi_policy_error(
-            vm, "FFI Disabled", name,
-            "All FFI calls are disabled via --disable-ffi");
-
-    if (vm->ffi_allow_count > 0 &&
-        !cccc_ffi_name_in_list(vm->ffi_allow_list, vm->ffi_allow_count, name))
-        return cccc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
-                                            "Function not in allow list");
-
-    if (vm->ffi_allow_count == 0 &&
-        cccc_ffi_name_in_list(vm->ffi_deny_list, vm->ffi_deny_count, name))
-        return cccc_handle_ffi_policy_error(vm, "FFI Access Denied", name,
-                                            "Function in deny list");
+    int policy = cccc_check_ffi_name_policy(vm, name);
+    if (policy != 1)
+        return policy;
 
     cccc_comptime_enforce(vm, name);
 
@@ -6015,6 +6024,30 @@ static int cccc_check_ffi_policy(VirtualMachine *vm, void *func_ptr,
     }
 
     return 1;
+}
+
+// Address of a registered host data object (an undefined extern global).
+// The FFI flags and the comptime policy apply as to a call of the same name.
+static inline int op_LDHA3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd;
+    DECODE_R(operands, rd);
+    long long idx  = cc_read_i64(vm);
+    HostData *hd   = &vm->compiler.cdata_table[idx];
+    void     *addr = hd->addr;
+    if (__builtin_expect(vm->comptime_depth != 0 || vm->disable_all_ffi ||
+                             vm->ffi_allow_count > 0 || vm->ffi_deny_count > 0,
+                         0)) {
+        if (cccc_check_ffi_name_policy(vm, hd->name) != 1)
+            return -1;
+        if (vm->comptime_depth != 0) {
+            cccc_comptime_enforce(vm, hd->name);
+            addr = cccc_comptime_host_data(vm, hd->name, addr, hd->size);
+        }
+    }
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)addr;
+    return 0;
 }
 
 // Comptime code only dereferences VM memory, so host data a builtin returns

@@ -499,6 +499,19 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__cccc_stdout", (void *)wrap_stdout, 0, 0);
     cc_register_cfunc(vm, "__cccc_stderr", (void *)wrap_stderr, 0, 0);
 
+    // The same streams as plain externs, for programs using the SDK's own
+    // <stdio.h>. Self-hosting turns `stdout` into an accessor call instead.
+#ifndef __CCCC__
+    cc_register_cdata(vm, "stdin", &stdin, sizeof stdin);
+    cc_register_cdata(vm, "stdout", &stdout, sizeof stdout);
+    cc_register_cdata(vm, "stderr", &stderr, sizeof stderr);
+#ifdef __APPLE__
+    cc_register_cdata(vm, "__stdinp", &stdin, sizeof stdin);
+    cc_register_cdata(vm, "__stdoutp", &stdout, sizeof stdout);
+    cc_register_cdata(vm, "__stderrp", &stderr, sizeof stderr);
+#endif
+#endif
+
     // Variadic printf family
     //
     // #829: even on glibc >= 2.35, host printf has no IEEE 754-2008 decimal

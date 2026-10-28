@@ -136,6 +136,7 @@ int alloc_temp_reg(void);
 int assign_stack_offsets(VirtualMachine *vm, Obj *fn);
 int ffi_index_for_callee(VirtualMachine *vm, Obj *callee);
 int ffi_index_for_obj(VirtualMachine *vm, Obj *obj);
+int cc_cdata_index_for_obj(VirtualMachine *vm, Obj *var);
 int find_capture_index(Obj *block_fn, Obj *var);
 int find_ffi_function(VirtualMachine *vm, const char *name);
 void cc_reset_intrinsic_stubs(void);

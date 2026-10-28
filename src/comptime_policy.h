@@ -42,6 +42,15 @@ bool cccc_comptime_parse_classes(const char *list, unsigned *mask, char *bad,
 // unclassified).
 bool cccc_comptime_name_allowed(unsigned mask, const char *name, int *cls_out);
 
+// Comptime view kind ("w", "s", "h" or "E") of a host data object name, NULL
+// when the name has none. Every bound name needs a class above and a kind.
+const char *cccc_comptime_data_spec(const char *name);
+
+// While comptime code runs: the address an LDHA3 load hands back for a bound
+// host data object (registers the ranges and handles it may touch).
+void *cccc_comptime_host_data(VirtualMachine *vm, const char *name, void *addr,
+                              size_t size);
+
 // Stops compilation with an error when comptime code is running and its grant
 // mask does not cover `name`. No-op outside comptime.
 void cccc_comptime_enforce(VirtualMachine *vm, const char *name);

@@ -7,6 +7,7 @@
 // than as host pointers.
 #include "../cccc.h"
 #include "../internal.h"
+#include "../codegen_internal.h"
 
 #ifdef __GLIBC__
 #include <obstack.h>
@@ -22,11 +23,24 @@ static long long guest_fn(void (*fn)(void)) {
     return (long long)(intptr_t)fn;
 }
 
-// TODO: glibc runs obstack_alloc_failed_handler here; guest assignments to it
-// are not reachable from the VM (#1851)
-static void obstack_exhausted(void) {
+// glibc's default handler: print, then exit with obstack_exit_failure.
+static void obstack_default_handler(void) {
+    int *status = cc_cdata_addr(cccc_current_ffi_vm(), "obstack_exit_failure");
     fputs("memory exhausted\n", stderr);
-    exit(1);
+    cccc_guest_exit(status ? *status : EXIT_FAILURE);
+}
+
+// A handler that returns falls back to the default: glibc would carry on with
+// a NULL chunk.
+// TODO: a handler that longjmps out does not unwind the VM's callback frame
+// (#1852)
+static void obstack_exhausted(void) {
+    VirtualMachine *vm      = cccc_current_ffi_vm();
+    long long      *handler = cc_cdata_addr(vm, "obstack_alloc_failed_handler");
+    long long       ignored;
+    if (handler && *handler)
+        cccc_call_guest_callback(vm, *handler, NULL, 0, &ignored);
+    obstack_default_handler();
 }
 
 static struct _obstack_chunk *obstack_new_chunk(struct obstack *h, long size) {
@@ -164,6 +178,14 @@ static long long wrap_obstack_free(long long hv, long long objv) {
 }
 
 void register_obstack_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__cccc_obstack_alloc_failed",
+                      (void *)obstack_default_handler, 0, 0);
+    long long dflt   = CCCC_FFI_TOKEN_BASE -
+                       find_ffi_function(vm, "__cccc_obstack_alloc_failed");
+    int       status = EXIT_FAILURE;
+    cc_register_cdata_owned(vm, "obstack_alloc_failed_handler", sizeof dflt,
+                            &dflt);
+    cc_register_cdata_owned(vm, "obstack_exit_failure", sizeof status, &status);
     cc_register_cfunc(vm, "_obstack_begin", (void *)wrap_obstack_begin, 5, 0);
     cc_register_cfunc(vm, "_obstack_begin_1", (void *)wrap_obstack_begin_1, 6,
                       0);

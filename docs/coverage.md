@@ -51,7 +51,7 @@ See [threading.md](threading.md). Per-feature rows are below and in [stdlib.md](
 | Function declarations and definitions | ✓ | |
 | Recursive functions | ✓ | |
 | Function pointers — declaration, call, assignment | ✓ | |
-| `extern` linkage | ✓ | Every redeclaration of the same global variable within a translation unit canonicalizes onto a single object, and offsets are shared across translation units at link time -- an `extern` declared, referenced, but never anywhere-defined global is a hard `undefined global: <name>` compile error, mirroring the existing `undefined function: <name>` check; suppressed (not deferred) under `-c`/`--link`, since there is no name-based data relocation mechanism for globals |
+| `extern` linkage | ✓ | Every redeclaration of the same global variable within a translation unit canonicalizes onto a single object, and offsets are shared across translation units at link time -- an `extern` declared, referenced, but never anywhere-defined global is a hard `undefined global: <name>` compile error, mirroring the existing `undefined function: <name>` check; suppressed (not deferred) under `-c`/`--link`, since there is no name-based data relocation mechanism for globals. The exception is a global bound to host storage with `cc_register_cdata` (the standard streams, getopt's variables and `environ`), which resolves to the host object |
 | `static` — locals, globals, functions | ✓ | |
 | `const` | ✓ | |
 | `volatile` | ✓ | Volatile locals routed via generic LDR/STR (watchpoint-safe, C11 §6.7.3p7) |

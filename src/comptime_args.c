@@ -2069,6 +2069,64 @@ static void r_environ(VirtualMachine *vm, long long *args, int nargs,
     *result = (long long)cell;
 }
 
+// Host data objects an undefined extern global can bind to (cc_register_cdata)
+// and what comptime code sees of each: w = writable host object, s = string
+// pointer cell, h = opaque handle cell (FILE *), E = environment snapshot.
+static const struct {
+    const char *name;
+    const char *kind;
+} HOST_DATA[] = {
+    {"stdin", "h"},
+    {"stdout", "h"},
+    {"stderr", "h"},
+    {"__stdinp", "h"},
+    {"__stdoutp", "h"},
+    {"__stderrp", "h"},
+    {"optarg", "s"},
+    {"optind", "w"},
+    {"opterr", "w"},
+    {"optopt", "w"},
+    {"optreset", "w"},
+    {"environ", "E"},
+    {"__environ", "E"},
+    {"obstack_alloc_failed_handler", "w"},
+    {"obstack_exit_failure", "w"},
+};
+
+const char *cccc_comptime_data_spec(const char *name) {
+    for (size_t i = 0; i < sizeof HOST_DATA / sizeof *HOST_DATA; i++)
+        if (strcmp(HOST_DATA[i].name, name) == 0)
+            return HOST_DATA[i].kind;
+    return NULL;
+}
+
+void *cccc_comptime_host_data(VirtualMachine *vm, const char *name, void *addr,
+                              size_t size) {
+    const char *kind = cccc_comptime_data_spec(name);
+    if (!kind)
+        return addr;
+    switch (*kind) {
+        case 'w':
+            cccc_comptime_host_range_add(addr, size, addr, true);
+            break;
+        case 's':
+            cccc_comptime_host_range_add(addr, size, addr, false);
+            cccc_comptime_host_string(*(char **)addr, addr);
+            break;
+        case 'h':
+            cccc_comptime_host_range_add(addr, size, addr, false);
+            cccc_comptime_host_ptr_add(vm, *(void **)addr);
+            break;
+        case 'E': {
+            char ***cell = vm_copy(vm, addr, sizeof *cell);
+            if (cell)
+                *cell = dup_vec(vm, *(char ***)addr, 0);
+            return cell;
+        }
+    }
+    return addr;
+}
+
 static size_t dirent_len(const struct dirent *e) {
     return offsetof(struct dirent, d_name) + strlen(e->d_name) + 1;
 }

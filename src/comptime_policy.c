@@ -335,6 +335,25 @@ static const char *const ENV_NAMES[] = {
     "uname",
     "unsetenv",
     "__cccc_environ_ptr",
+    "environ",
+    "__environ",
+};
+
+// Host data objects a program can bind (cccc_comptime_data_spec).
+static const char *const SAFE_DATA_NAMES[] = {
+    "stdin",
+    "stdout",
+    "stderr",
+    "__stdinp",
+    "__stdoutp",
+    "__stderrp",
+    "optarg",
+    "optind",
+    "opterr",
+    "optopt",
+    "optreset",
+    "obstack_alloc_failed_handler",
+    "obstack_exit_failure",
 };
 
 static const char *const THREAD_NAMES[] = {
@@ -865,11 +884,12 @@ static const struct {
     ComptimeClass      cls;
 } TABLES[] = {
 #define T(arr, c) {arr, sizeof(arr) / sizeof(arr[0]), c}
-    T(FS_NAMES, CT_FS),         T(EXEC_NAMES, CT_EXEC),
-    T(NET_NAMES, CT_NET),       T(ENV_NAMES, CT_ENV),
-    T(THREAD_NAMES, CT_THREAD), T(SIGNAL_NAMES, CT_SIGNAL),
-    T(IPC_NAMES, CT_IPC),       T(SAFE_NAMES, CT_SAFE),
-    T(CTYPE_NAMES, CT_SAFE),    T(DLOPEN_NAMES, CT_DLOPEN),
+    T(FS_NAMES, CT_FS),          T(EXEC_NAMES, CT_EXEC),
+    T(NET_NAMES, CT_NET),        T(ENV_NAMES, CT_ENV),
+    T(THREAD_NAMES, CT_THREAD),  T(SIGNAL_NAMES, CT_SIGNAL),
+    T(IPC_NAMES, CT_IPC),        T(SAFE_NAMES, CT_SAFE),
+    T(CTYPE_NAMES, CT_SAFE),     T(DLOPEN_NAMES, CT_DLOPEN),
+    T(SAFE_DATA_NAMES, CT_SAFE),
 #undef T
 };
 

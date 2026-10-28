@@ -619,6 +619,21 @@ void register_posix_io_functions(VirtualMachine *vm) {
                       0);
 #endif
     cc_register_cfunc(vm, "__cccc_errno_ptr", (void *)wrap_errno_ptr, 0, 0);
+
+    // The same globals as plain externs, for programs using the SDK's own
+    // <getopt.h> / <unistd.h>.
+    cc_register_cdata(vm, "optarg", &optarg, sizeof optarg);
+    cc_register_cdata(vm, "optind", &optind, sizeof optind);
+    cc_register_cdata(vm, "opterr", &opterr, sizeof opterr);
+    cc_register_cdata(vm, "optopt", &optopt, sizeof optopt);
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
+    defined(__NetBSD__)
+    cc_register_cdata(vm, "optreset", &optreset, sizeof optreset);
+#endif
+    cc_register_cdata(vm, "environ", &environ, sizeof environ);
+#ifdef __GLIBC__
+    cc_register_cdata(vm, "__environ", &environ, sizeof environ);
+#endif
     cc_register_cfunc(vm, "__cccc_environ_ptr", (void *)wrap_environ_ptr, 0, 0);
 
     // sys/ipc.h etc via posix_ipc.c, sockets via posix_net.c, etc. are

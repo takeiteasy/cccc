@@ -635,7 +635,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
             continue;
         if (var->is_definition || var->is_tentative || var->init_data)
             continue;
-        if (vm->compiler.compile_only)
+        if (vm->compiler.compile_only || cc_cdata_index_for_obj(vm, var) >= 0)
             continue;
         error("undefined global: %s", obj_external_name(var));
     }

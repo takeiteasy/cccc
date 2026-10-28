@@ -51,7 +51,7 @@ cccc --sysroot / --use-system-headers -O1 -D_FORTIFY_SOURCE=2 -c=native prog.c
 
 The fortified spellings `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the other `__builtin___*_chk` builtins are built in, and `__has_builtin` reports them. A call that exceeds a known object size aborts with `*** buffer overflow detected ***` (SIGABRT, exit 134), as libc's does. Under `-c=native` the host compiler applies its own fortify. With `--checked-pointers` the [library bounds](safety-checked-interfaces.md#standard-library-calls) apply to the fortified spellings as to the plain ones, and trap first (exit 255).[^fortify]
 
-[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own.
+[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own.
 
 ## Obstacks
 
@@ -69,7 +69,19 @@ obstack_grow(&o, "hello", 5);
 obstack_free(&o, NULL);
 ```
 
-Setting `obstack_alloc_failed_handler` or `obstack_exit_failure` from guest code has no effect.
+Assigning `obstack_alloc_failed_handler` sets the function called when a chunk allocation fails, and `obstack_exit_failure` the status the default handler exits with (`EXIT_FAILURE` at program start). The default handler prints `memory exhausted` and exits through the program's `atexit` handlers. A handler that returns falls back to the default. A handler that leaves with `longjmp` is not supported in the VM.
+
+## Host globals
+
+Under `--sysroot ... --use-system-headers` the SDK's `stdin`/`stdout`/`stderr` (`__stdinp`/`__stdoutp`/`__stderrp` on macOS), getopt's `optarg`/`optind`/`opterr`/`optopt` (and `optreset` on macOS) and `environ` are plain `extern` declarations. In a VM run they are the host's own objects, so `fputs("x", stdout)`, `getopt` and `environ[0]` behave as in a native build.
+
+```c
+#include <getopt.h>
+extern char **environ;
+static int *where = &optind;
+```
+
+A program that defines one of these names uses its own definition. Embedders bind their own objects with `cc_register_cdata` ([vm.md](vm.md#binding-host-data)).
 
 ## Pragmas
 

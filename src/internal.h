@@ -1239,6 +1239,8 @@ void cc_vm_profile_enable(VirtualMachine *vm);
 // program calling getopt() as its first action would otherwise see
 // whatever cccc's own argument parsing left behind.
 void cccc_reset_getopt_state(void);
+// Start-of-run reset: getopt state plus the registered host data slots.
+void cccc_reset_run_state(VirtualMachine *vm);
 
 typedef struct ExecState {
     long long  regs[32];
@@ -1511,6 +1513,8 @@ void register_ctype_functions(VirtualMachine *vm);
 void register_fenv_functions(VirtualMachine *vm);
 void register_locale_functions(VirtualMachine *vm);
 void register_obstack_functions(VirtualMachine *vm);
+// exit() after the guest's atexit handlers and destructors have run.
+void cccc_guest_exit(int status);
 void register_math_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
 // Per-domain POSIX registrars (#946 split of posix.c), called directly by

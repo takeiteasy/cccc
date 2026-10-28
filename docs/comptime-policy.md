@@ -34,6 +34,8 @@ Compilation stops at the first denied call and names the function and the flag t
 error: comptime call to 'fopen' denied (class fs); pass --comptime-allow=fs
 ```
 
+A host global the program declares as `extern` ([headers-sdk.md](headers-sdk.md#host-globals)) is checked by name like a function: reading `environ` needs `--comptime-allow=env`, while `optind` and the standard streams are safe.
+
 A function that no class lists (for example one bound from a shared library with `extern`, or an `asm` statement under `--asm-passthru`) is denied until `--comptime-allow=all`.
 
 ## Example: reading files at comptime

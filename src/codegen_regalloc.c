@@ -93,6 +93,47 @@ int ffi_index_for_obj(VirtualMachine *vm, Obj *obj) {
     return find_ffi_function(vm, name);
 }
 
+// Index of the registered host data object an undefined extern global binds
+// to, or -1. Definition flags are final by codegen: a same-TU definition
+// reuses the Obj and cc_link_progs copies the flags onto every alias.
+int cc_cdata_index_for_obj(VirtualMachine *vm, Obj *var) {
+    if (!vm->compiler.cdata_count || var->is_function || var->is_static ||
+        var->is_tls || var->is_definition || var->is_tentative ||
+        var->init_data)
+        return -1;
+    const char *name = obj_external_name(var);
+    if (!name)
+        return -1;
+    size_t name_len = strlen(name);
+#ifdef __APPLE__
+    // SDK headers spell asm labels with the Mach-O underscore.
+    bool stripped = var->asm_label && name[0] == '_';
+#endif
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < vm->compiler.cdata_count; i++) {
+            HostData *hd = &vm->compiler.cdata_table[i];
+            if (hd->name_len != name_len ||
+                memcmp(hd->name, name, name_len) != 0)
+                continue;
+            if (var->ty && var->ty->size > 0 &&
+                (size_t)var->ty->size > hd->size)
+                error_tok(vm, var->tok,
+                          "extern '%s' is %d bytes; the host object is %zu",
+                          var->name, var->ty->size, hd->size);
+            return i;
+        }
+#ifdef __APPLE__
+        if (!stripped)
+            break;
+        name++;
+        name_len--;
+#else
+        break;
+#endif
+    }
+    return -1;
+}
+
 // A guest program can define its own function whose name happens to match
 // a registered FFI symbol -- e.g. `int printf(const char *fmt, ...) { ... }`
 // wrapping the real one. find_ffi_function's exact-name match doesn't know
@@ -239,6 +280,18 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 // name regardless of whether target is ever defined, so
                 // without this an extern-declared-but-never-defined global
                 // silently gets an address into an inert zero slot.
+                int cd = cc_cdata_index_for_obj(vm, target);
+                if (cd >= 0) {
+                    long long host =
+                        (long long)(intptr_t)vm->compiler.cdata_table[cd].addr +
+                        rel->addend;
+                    long long slot = var->offset + rel->offset;
+                    if (var->is_tls)
+                        *(long long *)(vm->tls_template + slot) = host;
+                    else
+                        *(long long *)(vm->data_seg + slot) = host;
+                    continue;
+                }
                 if (!target->is_definition && !target->is_tentative &&
                     !target->init_data && !vm->compiler.compile_only)
                     error("undefined global: %s", target->name);

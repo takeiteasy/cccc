@@ -146,6 +146,101 @@ int main(void) {
 }
 C
 
+# A chunk allocator that always fails sends obstack_init to the handler.
+cat >fail_head.h <<'C'
+#define _GNU_SOURCE
+#include <obstack.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+static void *fail_alloc(size_t n) {
+    (void)n;
+    return 0;
+}
+#define obstack_chunk_alloc fail_alloc
+#define obstack_chunk_free free
+C
+
+cat >handler_exit.c <<'C'
+#include "fail_head.h"
+static void bail(void) {
+    exit(42);
+}
+int main(void) {
+    struct obstack o;
+    obstack_alloc_failed_handler = bail;
+    obstack_init(&o);
+    return 1;
+}
+C
+
+cat >default_status.c <<'C'
+#include "fail_head.h"
+int main(void) {
+    struct obstack o;
+    obstack_exit_failure = 42;
+    obstack_init(&o);
+    return 1;
+}
+C
+
+cat >handler_returns.c <<'C'
+#include "fail_head.h"
+static int calls;
+static void returns(void) {
+    calls++;
+}
+int main(void) {
+    struct obstack o;
+    obstack_alloc_failed_handler = returns;
+    obstack_exit_failure          = 43;
+    obstack_init(&o);
+    return 1;
+}
+C
+
+cat >atexit_runs.c <<'C'
+#include "fail_head.h"
+static void at(void) {
+    _exit(42);
+}
+int main(void) {
+    struct obstack o;
+    atexit(at);
+    obstack_init(&o);
+    return 1;
+}
+C
+
+cat >save_restore.c <<'C'
+#include "fail_head.h"
+static void other(void) {
+    exit(1);
+}
+int main(void) {
+    struct obstack o;
+    void (*saved)(void) = obstack_alloc_failed_handler;
+    obstack_alloc_failed_handler = other;
+    obstack_alloc_failed_handler = saved;
+    obstack_exit_failure          = 42;
+    obstack_alloc_failed_handler();
+    return 1;
+}
+C
+
+expect_exit 42 "$CCCC" --sysroot / --use-system-headers handler_exit.c
+expect_exit 42 "$CCCC" --sysroot / --use-system-headers default_status.c
+grep -q "memory exhausted" err.txt || fail "default handler printed nothing"
+expect_exit 43 "$CCCC" --sysroot / --use-system-headers handler_returns.c
+expect_exit 42 "$CCCC" --sysroot / --use-system-headers atexit_runs.c
+expect_exit 42 "$CCCC" --sysroot / --use-system-headers save_restore.c
+
+# The same programs against glibc itself.
+for p in handler_exit default_status; do
+    expect_exit 0 "$CCCC" --sysroot / --use-system-headers -c=native -o "$p.native" "$p.c"
+    expect_exit 42 "./$p.native"
+done
+
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers reinit.c
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers arg_cb.c
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers plain.c

@@ -1746,6 +1746,16 @@ void cc_destroy(VirtualMachine *vm) {
     if (vm->compiler.dtor_list)
         free(vm->compiler.dtor_list);
 
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        HostData *hd = &vm->compiler.cdata_table[i];
+        if (hd->init) {
+            free(hd->addr);
+            free(hd->init);
+        }
+        free(hd->name);
+    }
+    free(vm->compiler.cdata_table);
+
     // Free FFI table
     if (vm->compiler.ffi_table) {
         for (int i = 0; i < vm->compiler.ffi_count; i++) {
@@ -2177,6 +2187,86 @@ void cc_register_cfunc_ex(VirtualMachine *vm, const char *name, void *func_ptr,
                       .is_variadic     = 0,
                       .num_fixed_args  = num_args,
                       .double_arg_mask = double_arg_mask};
+}
+
+static HostData *find_cdata(VirtualMachine *vm, const char *name) {
+    size_t name_len = strlen(name);
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        HostData *hd = &vm->compiler.cdata_table[i];
+        if (hd->name_len == name_len && memcmp(hd->name, name, name_len) == 0)
+            return hd;
+    }
+    return NULL;
+}
+
+static HostData *new_cdata(VirtualMachine *vm, const char *name) {
+    HostData *hd = find_cdata(vm, name);
+    if (hd) {
+        if (hd->init) {
+            free(hd->addr);
+            free(hd->init);
+            hd->init = NULL;
+        }
+        return hd;
+    }
+    if (vm->compiler.cdata_count == vm->compiler.cdata_capacity) {
+        int cap =
+            vm->compiler.cdata_capacity ? vm->compiler.cdata_capacity * 2 : 16;
+        HostData *grown =
+            realloc(vm->compiler.cdata_table, (size_t)cap * sizeof *grown);
+        if (!grown)
+            error("cc_register_cdata: realloc failed");
+        vm->compiler.cdata_table    = grown;
+        vm->compiler.cdata_capacity = cap;
+    }
+    hd  = &vm->compiler.cdata_table[vm->compiler.cdata_count++];
+    *hd = (HostData){.name = strdup(name), .name_len = strlen(name)};
+    return hd;
+}
+
+int cc_register_cdata(VirtualMachine *vm, const char *name, void *addr,
+                      size_t size) {
+    if (!vm || !name || !addr)
+        return -1;
+    HostData *hd = new_cdata(vm, name);
+    hd->addr     = addr;
+    hd->size     = size;
+    return 0;
+}
+
+void *cc_register_cdata_owned(VirtualMachine *vm, const char *name, size_t size,
+                              const void *init) {
+    if (!vm || !name || !size)
+        return NULL;
+    void *slot  = calloc(1, size);
+    void *saved = calloc(1, size);
+    if (!slot || !saved) {
+        free(slot);
+        free(saved);
+        return NULL;
+    }
+    if (init) {
+        memcpy(slot, init, size);
+        memcpy(saved, init, size);
+    }
+    HostData *hd = new_cdata(vm, name);
+    hd->addr     = slot;
+    hd->size     = size;
+    hd->init     = saved;
+    return slot;
+}
+
+void *cc_cdata_addr(VirtualMachine *vm, const char *name) {
+    HostData *hd = vm && name ? find_cdata(vm, name) : NULL;
+    return hd ? hd->addr : NULL;
+}
+
+static void reset_cdata(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        HostData *hd = &vm->compiler.cdata_table[i];
+        if (hd->init)
+            memcpy(hd->addr, hd->init, hd->size);
+    }
 }
 
 // Reserves an FFI slot for an --asm-passthru thunk; cc_asm_passthru_flush
@@ -2862,8 +2952,13 @@ void cccc_reset_getopt_state(void) {
 #endif
 }
 
-int cc_run(VirtualMachine *vm, int argc, char **argv) {
+void cccc_reset_run_state(VirtualMachine *vm) {
     cccc_reset_getopt_state();
+    reset_cdata(vm);
+}
+
+int cc_run(VirtualMachine *vm, int argc, char **argv) {
+    cccc_reset_run_state(vm);
 
     // #832: guarantee the guest program observes ISO C's startup contract
     // (round-to-nearest, no pending FP exceptions) regardless of what the

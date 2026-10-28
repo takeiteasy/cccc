@@ -1682,7 +1682,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     vm->debug_vm          = 0;
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
-    cccc_reset_getopt_state();      // #1041
+    cccc_reset_run_state(vm);
     vm->runtime_fault      = false; // no stale fault from an earlier vm_eval
     vm->runtime_fault_op   = NULL;
     bool saved_in_comptime = vm->vm_profile_in_comptime;
@@ -3253,7 +3253,7 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     vm->debug_vm    = 0;          // Disable debug output during macro execution
     int fenv_saved_round;
     fenv_barrier_begin(&fenv_saved_round);
-    cccc_reset_getopt_state();    // #1041
+    cccc_reset_run_state(vm);
     vm->runtime_fault      = false; // no stale fault from an earlier vm_eval
     vm->runtime_fault_op   = NULL;
     bool saved_in_comptime = vm->vm_profile_in_comptime;

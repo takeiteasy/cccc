@@ -745,7 +745,7 @@ void cc_repl_init(VirtualMachine *vm) {
     // #1041: reset getopt() state once for the whole REPL session, not per
     // statement (cc_expr_exec_wrapper below runs once per input line) --
     // same "once per program run" reasoning as cc_run()'s own call.
-    cccc_reset_getopt_state();
+    cccc_reset_run_state(vm);
 
     vm->compiler.allow_fn_redefinition = true;
 }

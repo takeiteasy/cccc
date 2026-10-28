@@ -402,7 +402,10 @@ process state, so a plain `extern int errno;` would now be a hard
 `undefined global: errno` compile error rather than silently staying
 zero forever regardless of what host-backed calls actually did. The
 accessor pattern makes these specific, known globals alias the host's real
-storage directly, so guest code observes the real outcome.
+storage directly, so guest code observes the real outcome. A program using the
+SDK's own headers (`--sysroot ... --use-system-headers`) declares all of them
+except `errno` as plain `extern` globals, and they bind to the same host
+objects ([headers-sdk.md](headers-sdk.md#host-globals)).
 
 | Header | Status | Notes |
 |---|---|---|

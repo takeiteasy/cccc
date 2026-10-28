@@ -1138,7 +1138,10 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // still compiles without a definition -- sizeof never reaches
                 // gen_addr.
                 node->var->is_referenced = true;
-                if (node->var->is_tls)
+                int cdata = cc_cdata_index_for_obj(vm, node->var);
+                if (cdata >= 0)
+                    emit_ri(vm, LDHA3, dest_reg, cdata);
+                else if (node->var->is_tls)
                     emit_ldtls3(vm, dest_reg, node->var->offset);
                 else
                     emit_lda3(vm, dest_reg, node->var->offset);

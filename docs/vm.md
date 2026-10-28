@@ -241,6 +241,18 @@ the interpreter honest rather than fast:
 
 The dominant cost is the interpreter itself.
 
+## Binding host data
+
+An `extern` global the program declares and uses but never defines can resolve to host storage:
+
+```c
+int counter = 3;
+cc_register_cdata(&vm, "counter", &counter, sizeof counter);
+void *slot = cc_register_cdata_owned(&vm, "limit", sizeof(int), &(int){10});
+```
+
+The guest reads and writes `counter` in place. An owned slot is VM-allocated and reset to its initial value at the start of each run. A definition in the program wins, and a declaration larger than the registered size is a compile error. The load honours `--disable-ffi`, `--ffi-allow` and `--ffi-deny` by the object's name, and comptime code needs a [capability class](comptime-policy.md) for it.
+
 ## Guide pages
 
 | Page | Covers |

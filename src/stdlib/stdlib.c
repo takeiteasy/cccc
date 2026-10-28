@@ -260,13 +260,17 @@ static void drain_destructors_nested(VirtualMachine *vm) {
     }
 }
 
-static long long wrap_exit(long long status) {
+void cccc_guest_exit(int status) {
     VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm) {
         drain_exit_handlers_nested(vm, &vm->atexit_handlers, &vm->atexit_count);
         drain_destructors_nested(vm);
     }
-    exit((int)status);
+    exit(status);
+}
+
+static long long wrap_exit(long long status) {
+    cccc_guest_exit((int)status);
     return 0; /* unreachable */
 }
 

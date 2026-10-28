@@ -59,6 +59,20 @@ int main(void) {
                   "(add it to src/comptime_args.c)",
                   name);
     }
+    for (int i = 0; i < vm.compiler.cdata_count; i++) {
+        const char *name = vm.compiler.cdata_table[i].name;
+        CHECK(cccc_comptime_class_of(name) >= 0,
+              "host data '%s' has no comptime capability class "
+              "(add it to src/comptime_policy.c)",
+              name);
+        CHECK(cccc_comptime_data_spec(name) != NULL,
+              "host data '%s' has no comptime view "
+              "(add it to HOST_DATA in src/comptime_args.c)",
+              name);
+    }
+    CHECK(cccc_comptime_class_of("environ") == CT_ENV, "environ not env");
+    CHECK(cccc_comptime_class_of("optind") == CT_SAFE, "optind not safe");
+
     CHECK(cccc_comptime_arg_spec("fopen") == NULL, "fopen is not spec'd");
     CHECK(strcmp(cccc_comptime_arg_spec("sqrtf"), "") == 0, "sqrtf spec");
     CHECK(strcmp(cccc_comptime_arg_spec("modff"), "- w=4") == 0, "modff spec");
