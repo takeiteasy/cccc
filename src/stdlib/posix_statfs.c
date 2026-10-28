@@ -115,7 +115,29 @@ static long long wrap_fstatvfs(long long fd, long long buf) {
     return rc;
 }
 
+// Host-layout passthroughs (host_ffi_family.h): a program built against the
+// real headers already holds the host's struct statfs/statvfs.
+static long long host_statfs(long long path, long long buf) {
+    return (long long)statfs((const char *)path, (struct statfs *)buf);
+}
+
+static long long host_fstatfs(long long fd, long long buf) {
+    return (long long)fstatfs((int)fd, (struct statfs *)buf);
+}
+
+static long long host_statvfs(long long path, long long buf) {
+    return (long long)statvfs((const char *)path, (struct statvfs *)buf);
+}
+
+static long long host_fstatvfs(long long fd, long long buf) {
+    return (long long)fstatvfs((int)fd, (struct statvfs *)buf);
+}
+
 void register_posix_statfs_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__cccc_host_statfs", (void *)host_statfs, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_fstatfs", (void *)host_fstatfs, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_statvfs", (void *)host_statvfs, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_fstatvfs", (void *)host_fstatvfs, 2, 0);
     cc_register_cfunc(vm, "statfs", (void *)wrap_statfs, 2, 0);
     cc_register_cfunc(vm, "fstatfs", (void *)wrap_fstatfs, 2, 0);
     cc_register_cfunc(vm, "statvfs", (void *)wrap_statvfs, 2, 0);

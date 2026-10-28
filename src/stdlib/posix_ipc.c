@@ -357,7 +357,31 @@ static long long wrap_msgctl(long long msqid, long long cmd, long long buf) {
     return rc;
 }
 
+// Host-layout passthroughs (host_ffi_family.h): a program built against the
+// real <sys/shm.h>/<sys/sem.h>/<sys/msg.h> already holds the host's *_ds
+// structs and IPC_*/GETVAL-style command numbers.
+static long long host_shmctl(long long shmid, long long cmd, long long buf) {
+    return (long long)shmctl((int)shmid, (int)cmd, (struct shmid_ds *)buf);
+}
+
+static long long host_semctl(long long semid, long long semnum, long long cmd,
+                             ...) {
+    va_list ap;
+    va_start(ap, cmd);
+    long long arg = va_arg(ap, long long);
+    va_end(ap);
+    return (long long)semctl((int)semid, (int)semnum, (int)cmd, arg);
+}
+
+static long long host_msgctl(long long msqid, long long cmd, long long buf) {
+    return (long long)msgctl((int)msqid, (int)cmd, (struct msqid_ds *)buf);
+}
+
 void register_posix_ipc_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__cccc_host_shmctl", (void *)host_shmctl, 3, 0);
+    cc_register_variadic_cfunc(vm, "__cccc_host_semctl", (void *)host_semctl, 3,
+                               0);
+    cc_register_cfunc(vm, "__cccc_host_msgctl", (void *)host_msgctl, 3, 0);
     // sys/ipc.h, sys/shm.h, sys/sem.h, sys/msg.h (#812)
     cc_register_cfunc(vm, "ftok", (void *)wrap_ftok, 2, 0);
     cc_register_cfunc(vm, "shmget", (void *)wrap_shmget, 3, 0);

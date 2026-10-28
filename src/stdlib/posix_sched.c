@@ -277,12 +277,29 @@ static long long wrap_confstr(long long name, long long buf, long long len) {
     }
 }
 
-// TODO: unreachable from the VM with real glibc headers, whose _CS_* numbers
-// differ from the canonical ones wrap_confstr expects (#1845)
+// Host-numbered passthroughs (host_ffi_family.h): a program built against the
+// real libc headers already passes the host's _SC_/_PC_/_CS_/SCHED_ numbers.
+static long long host_sysconf(long long name) {
+    return (long long)sysconf((int)name);
+}
+
+static long long host_pathconf(long long path, long long name) {
+    return (long long)pathconf((const char *)path, (int)name);
+}
+
+static long long host_fpathconf(long long fd, long long name) {
+    return (long long)fpathconf((int)fd, (int)name);
+}
+
+static long long host_confstr(long long name, long long buf, long long len) {
+    return (long long)confstr((int)name, (char *)buf, (size_t)len);
+}
+
+// `_chk` names only come from real glibc headers, so they take host numbers.
 static long long chk_confstr(long long name, long long buf, long long len,
                              long long buflen) {
     CCCC_FORTIFY_CHECK(len, buflen, "confstr");
-    return wrap_confstr(name, buf, len);
+    return host_confstr(name, buf, len);
 }
 
 // sched.h (#800) -- SCHED_OTHER/FIFO/RR genuinely disagree between hosts
@@ -421,7 +438,62 @@ static long long wrap_sched_rr_get_interval(long long pid, long long interval) {
 }
 #endif
 
+static long long host_sched_get_priority_min(long long policy) {
+    return (long long)sched_get_priority_min((int)policy);
+}
+
+static long long host_sched_get_priority_max(long long policy) {
+    return (long long)sched_get_priority_max((int)policy);
+}
+
+#ifdef __linux__
+static long long host_sched_setparam(long long pid, long long param) {
+    return (long long)sched_setparam((pid_t)pid,
+                                     (const struct sched_param *)param);
+}
+
+static long long host_sched_getparam(long long pid, long long param) {
+    return (long long)sched_getparam((pid_t)pid, (struct sched_param *)param);
+}
+
+static long long host_sched_setscheduler(long long pid, long long policy,
+                                         long long param) {
+    return (long long)sched_setscheduler((pid_t)pid, (int)policy,
+                                         (const struct sched_param *)param);
+}
+
+static long long host_sched_getscheduler(long long pid) {
+    return (long long)sched_getscheduler((pid_t)pid);
+}
+
+static long long host_sched_rr_get_interval(long long pid, long long interval) {
+    return (long long)sched_rr_get_interval((pid_t)pid,
+                                            (struct timespec *)interval);
+}
+#endif
+
 void register_posix_sched_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__cccc_host_sysconf", (void *)host_sysconf, 1, 0);
+    cc_register_cfunc(vm, "__cccc_host_pathconf", (void *)host_pathconf, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_fpathconf", (void *)host_fpathconf, 2,
+                      0);
+    cc_register_cfunc(vm, "__cccc_host_confstr", (void *)host_confstr, 3, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_get_priority_min",
+                      (void *)host_sched_get_priority_min, 1, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_get_priority_max",
+                      (void *)host_sched_get_priority_max, 1, 0);
+#ifdef __linux__
+    cc_register_cfunc(vm, "__cccc_host_sched_setparam",
+                      (void *)host_sched_setparam, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_getparam",
+                      (void *)host_sched_getparam, 2, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_setscheduler",
+                      (void *)host_sched_setscheduler, 3, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_getscheduler",
+                      (void *)host_sched_getscheduler, 1, 0);
+    cc_register_cfunc(vm, "__cccc_host_sched_rr_get_interval",
+                      (void *)host_sched_rr_get_interval, 2, 0);
+#endif
     cc_register_cfunc(vm, "sysconf", (void *)wrap_sysconf, 1, 0);
     cc_register_cfunc(vm, "pathconf", (void *)wrap_pathconf, 2, 0);
     cc_register_cfunc(vm, "fpathconf", (void *)wrap_fpathconf, 2, 0);

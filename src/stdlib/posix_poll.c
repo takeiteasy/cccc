@@ -30,6 +30,8 @@ static short guest_to_host_pollev(short guest_events) {
 
 static short host_to_guest_pollev(short host_revents) {
 #ifdef __APPLE__
+    // TODO: POLLWRNORM aliases POLLOUT here, so this mask also drops POLLOUT
+    // and contradicts the comment below (#1848)
     short guest = host_revents &
                   (short)~(POLLRDNORM | POLLRDBAND | POLLWRNORM | POLLWRBAND);
     if (host_revents & POLLRDNORM)
@@ -276,26 +278,63 @@ static long long chk_fdelt(long long d) {
     return d / (8 * (long long)sizeof(long));
 }
 
+// Host-numbered passthroughs (host_ffi_family.h): a program built against the
+// real <poll.h> already holds the host's POLL* bits and sigset_t, so the guest
+// array goes straight to the host with only the GIL released.
+static long long host_poll_gil(long long fds, long long nfds,
+                               long long timeout) {
+    VirtualMachine *vm = cccc_posix_current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)poll((struct pollfd *)fds, (nfds_t)nfds,
+                               (int)timeout);
+    ExecState state;
+    cccc_posix_save_and_release_gil(vm, &state);
+    int r = poll((struct pollfd *)fds, (nfds_t)nfds, (int)timeout);
+    cccc_posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+
+#ifdef __linux__
+static long long host_ppoll_gil(long long fds, long long nfds,
+                                long long timeout, long long sigmask) {
+    extern int ppoll(struct pollfd * fds, nfds_t nfds,
+                     const struct timespec *timeout, const sigset_t *sigmask);
+    VirtualMachine *vm = cccc_posix_current_vm();
+    if (!vm || !vm->gil_initialized)
+        return (long long)ppoll((struct pollfd *)fds, (nfds_t)nfds,
+                                (const struct timespec *)timeout,
+                                (const sigset_t *)sigmask);
+    ExecState state;
+    cccc_posix_save_and_release_gil(vm, &state);
+    int r = ppoll((struct pollfd *)fds, (nfds_t)nfds,
+                  (const struct timespec *)timeout, (const sigset_t *)sigmask);
+    cccc_posix_acquire_and_restore_gil(vm, &state);
+    return (long long)r;
+}
+#endif
+
 // glibc's fortified <poll.h>: `fdslen` is the byte size of the pollfd array.
 static long long chk_poll(long long fds, long long nfds, long long timeout,
                           long long fdslen) {
     CCCC_FORTIFY_CHECK((size_t)nfds * sizeof(struct pollfd), fdslen, "poll");
-    return wrap_poll_gil(fds, nfds, timeout);
+    return host_poll_gil(fds, nfds, timeout);
 }
 #ifdef __linux__
 static long long chk_ppoll(long long fds, long long nfds, long long timeout,
                            long long sigmask, long long fdslen) {
     CCCC_FORTIFY_CHECK((size_t)nfds * sizeof(struct pollfd), fdslen, "ppoll");
-    return wrap_ppoll_gil(fds, nfds, timeout, sigmask);
+    return host_ppoll_gil(fds, nfds, timeout, sigmask);
 }
 #endif
 
 void register_posix_poll_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__fdelt_chk", (void *)chk_fdelt, 1, 0);
     cc_register_cfunc(vm, "__fdelt_warn", (void *)chk_fdelt, 1, 0);
+    cc_register_cfunc(vm, "__cccc_host_poll", (void *)host_poll_gil, 3, 0);
     cc_register_cfunc(vm, "poll", (void *)wrap_poll_gil, 3, 0);
     cc_register_cfunc(vm, "__poll_chk", (void *)chk_poll, 4, 0);
 #ifdef __linux__
+    cc_register_cfunc(vm, "__cccc_host_ppoll", (void *)host_ppoll_gil, 4, 0);
     cc_register_cfunc(vm, "ppoll", (void *)wrap_ppoll_gil, 4, 0);
     cc_register_cfunc(vm, "__ppoll_chk", (void *)chk_ppoll, 5, 0);
 #else

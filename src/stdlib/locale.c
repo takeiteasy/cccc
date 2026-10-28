@@ -91,7 +91,21 @@ static void wrap_freelocale(locale_t locobj) {
 #endif
 }
 
+// Host-numbered passthroughs (host_ffi_family.h) for programs built against
+// the real <locale.h>.
+static char *host_setlocale(int category, const char *locale) {
+    return setlocale(category, locale);
+}
+
+static locale_t host_newlocale(int mask, const char *locale, locale_t base) {
+    return newlocale(mask, locale, base);
+}
+
 void register_locale_functions(VirtualMachine *vm) {
+    cc_register_cfunc(vm, "__cccc_host_setlocale", (void *)host_setlocale, 2,
+                      0);
+    cc_register_cfunc(vm, "__cccc_host_newlocale", (void *)host_newlocale, 3,
+                      0);
     cc_register_cfunc(vm, "setlocale", (void *)wrap_setlocale, 2, 0);
     cc_register_cfunc(vm, "localeconv", (void *)localeconv, 0, 0);
     cc_register_cfunc(vm, "newlocale", (void *)wrap_newlocale, 3, 0);

@@ -385,6 +385,13 @@ ported verbatim from `wrap_sysconf`/`wrap_pathconf`/`wrap_fpathconf`/
 `_SC_VERSION`/`_SC_2_VERSION`/`_SC_XOPEN_VERSION` VM-model-constant special
 case and the `-1`/`0` unrecognized-name default.
 
+With `--use-system-headers` and a real libc header (`--sysroot`), the program
+already holds the host's numbers and struct layouts, so these natives, plus
+`setlocale`, `newlocale`, `nl_langinfo`, `poll`, `ppoll`, the `sched_*`
+calls, `statfs`/`statvfs` and `shmctl`/`semctl`/`msgctl`, take them
+unchanged and `sysconf(_SC_VERSION)` answers with the host's value. See
+[headers-sdk.md](headers-sdk.md#host-numbering).
+
 A handful of host libc globals (`errno`, `environ`, and getopt's
 `optarg`/`optind`/`opterr`/`optopt`) are exposed the same way
 `stdin`/`stdout`/`stderr` always have been: as a macro expanding to a

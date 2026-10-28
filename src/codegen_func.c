@@ -561,7 +561,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
         if (!fn_def) {
             // Check for FFI function
-            int ffi_idx = find_ffi_function(vm, fn_name);
+            int ffi_idx = ffi_index_for_obj(vm, target);
             if (ffi_idx >= 0) {
                 // FFI - not handled via CALL, skip
                 continue;
@@ -590,9 +590,8 @@ void gen(VirtualMachine *vm, Obj *prog) {
             cc_write_i64_at(vm, loc,
                             cc_pc_to_byte_offset((Pc)fn_def->code_addr));
         } else {
-            const char *fn_name = obj_external_name(target);
-            int         ffi_idx = find_ffi_function(vm, fn_name);
-            Pc stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
+            int ffi_idx = ffi_index_for_obj(vm, target);
+            Pc  stub    = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
             if (ffi_idx >= 0) {
                 // FFI function used as a value: store token so CALLN can
                 // call it. (JMPI, the other indirect-control-flow opcode,
@@ -1275,7 +1274,7 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
             Obj        *fn_def  = find_function_definition_for_patch(
                 &fn_defs, &static_defs, target);
             if (!fn_def) {
-                int ffi_idx = find_ffi_function(vm, fn_name);
+                int ffi_idx = ffi_index_for_obj(vm, target);
                 if (ffi_idx >= 0)
                     continue; // FFI - not handled via CALL
                 error("undefined function: %s", fn_name);
@@ -1294,9 +1293,8 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                 cc_write_i64_at(vm, loc,
                                 cc_pc_to_byte_offset((Pc)fn_def->code_addr));
             } else {
-                const char *fn_name = obj_external_name(target);
-                int         ffi_idx = find_ffi_function(vm, fn_name);
-                Pc stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
+                int ffi_idx = ffi_index_for_obj(vm, target);
+                Pc  stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
                 if (ffi_idx >= 0)
                     cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
                 else if (stub)

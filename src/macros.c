@@ -1953,6 +1953,7 @@ static int rebuild_macro_globals(VirtualMachine *vm, Obj *new_prog,
 // (src/codegen_func.c, src/codegen_regalloc.c). Not taken from internal.h
 // because main.c has its own file-static obj_external_name.
 int find_ffi_function(VirtualMachine *vm, const char *name);
+int ffi_index_for_obj(VirtualMachine *vm, Obj *obj);
 const char *obj_external_name(Obj *obj);
 
 // Apply relocations for macro global initializers that reference other
@@ -1992,8 +1993,7 @@ static void apply_macro_global_relocations(VirtualMachine *vm,
                     // static-initializer path (apply_global_relocations,
                     // src/codegen_regalloc.c). The token is segment-
                     // independent, so no data reloc is recorded.
-                    int ffi_idx =
-                        find_ffi_function(vm, obj_external_name(target));
+                    int ffi_idx = ffi_index_for_obj(vm, target);
                     if (ffi_idx < 0)
                         error("unsupported macro relocation to undefined "
                               "function: %s",
@@ -2023,7 +2023,7 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
             // should not happen -- but mirror the runtime patcher
             // (src/codegen_func.c) and skip it defensively rather than
             // hard-erroring on a name the comptime VM can in fact dispatch.
-            if (find_ffi_function(vm, obj_external_name(fn)) >= 0)
+            if (ffi_index_for_obj(vm, fn) >= 0)
                 continue;
             error("undefined function in macro bytecode: '%s' -- comptime "
                   "code calls it but no body is available to the comptime "
@@ -2049,7 +2049,7 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
             // compilation, so an unresolved reference has no host linker to
             // fall through to -- it would be a wild jump when the comptime
             // function runs.
-            int ffi_idx = find_ffi_function(vm, obj_external_name(fn));
+            int ffi_idx = ffi_index_for_obj(vm, fn);
             if (ffi_idx >= 0) {
                 cc_write_i64_at(vm, loc, CCCC_FFI_TOKEN_BASE - ffi_idx);
                 continue;

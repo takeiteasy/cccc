@@ -30,6 +30,17 @@ Macros advertising what CCCC does not implement stay undefined, whatever `--comp
 | `va_list` | One type whether `<stdio.h>` or `<stdarg.h>` comes first |
 | Legacy BSD calls (`bcmp`, `bzero`, `index`, `getpagesize`) | Hidden under the predefined `_POSIX_C_SOURCE=200809L`; declare them or `-U_POSIX_C_SOURCE` |
 
+## Host numbering
+
+CCCC's own headers number `_SC_*`, `_PC_*`, `_CS_*`, `LC_*`, `POLL*`, `SCHED_*` and `nl_item` values, and lay out `struct statfs` and the SysV IPC structs, independently of the host. When the real header declares the function, the program holds the host's values, and the call goes to the host unchanged:
+
+| Call | Header | Binds to |
+|---|---|---|
+| `sysconf(_SC_PAGESIZE)` | CCCC's | canonical translation |
+| `sysconf(_SC_PAGESIZE)` | the SDK's or glibc's | the host function |
+
+A header that falls back to CCCC's copy keeps the canonical numbering.
+
 ## Fortified headers
 
 Apple's SDK fortifies the string and stdio calls with `_FORTIFY_SOURCE` by default. glibc does so when the program is optimised: `-O1` or above (CCCC defines `__OPTIMIZE__` there, as GCC does) together with `-D_FORTIFY_SOURCE=2`.
@@ -40,7 +51,7 @@ cccc --sysroot / --use-system-headers -O1 -D_FORTIFY_SOURCE=2 -c=native prog.c
 
 The fortified spellings `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the other `__builtin___*_chk` builtins are built in, and `__has_builtin` reports them. A call that exceeds a known object size aborts with `*** buffer overflow detected ***` (SIGABRT, exit 134), as libc's does. Under `-c=native` the host compiler applies its own fortify. With `--checked-pointers` the [library bounds](safety-checked-interfaces.md#standard-library-calls) apply to the fortified spellings as to the plain ones, and trap first (exit 255).[^fortify]
 
-[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own. `<obstack.h>` is not usable in the VM, so the obstack wrappers are not registered. `confstr(_CS_PATH, ...)` with glibc's own `<unistd.h>` fails in the VM before and after fortification (#1845).
+[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own. `<obstack.h>` is not usable in the VM, so the obstack wrappers are not registered.
 
 ## Pragmas
 

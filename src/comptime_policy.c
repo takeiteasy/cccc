@@ -23,6 +23,7 @@
 // every registered name is listed).
 
 #include "comptime_policy.h"
+#include "host_ffi_family.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -889,6 +890,10 @@ int cccc_comptime_class_of(const char *name) {
     if (!name)
         return -1;
     pthread_once(&table_once, build_tables);
+
+    // A host-numbered passthrough shares its canonical twin's class.
+    if (strncmp(name, CCCC_HOST_FFI_PREFIX, CCCC_HOST_FFI_PREFIX_LEN) == 0)
+        name += CCCC_HOST_FFI_PREFIX_LEN;
 
     size_t len = strlen(name);
     int    cls = lookup_exact(name, len);

@@ -115,6 +115,16 @@ static char *wrap_nl_langinfo_l(nl_item guest_item, locale_t loc) {
     return nl_langinfo_l(host_item, loc);
 }
 
+// Host-numbered passthroughs (host_ffi_family.h) for programs built against
+// the real <langinfo.h>.
+static char *host_nl_langinfo(nl_item item) {
+    return nl_langinfo(item);
+}
+
+static char *host_nl_langinfo_l(nl_item item, locale_t loc) {
+    return nl_langinfo_l(item, loc);
+}
+
 // ---------------------------------------------------------------------------
 // vsyslog() (#803) -- forwards a captured cccc va_list to the host's real
 // variadic syslog() via ffi_prep_cif_var, same technique as
@@ -255,6 +265,10 @@ void register_posix_lang_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "iconv_open", (void *)iconv_open, 2, 0);
     cc_register_cfunc(vm, "iconv", (void *)iconv, 5, 0);
     cc_register_cfunc(vm, "iconv_close", (void *)iconv_close, 1, 0);
+    cc_register_cfunc(vm, "__cccc_host_nl_langinfo", (void *)host_nl_langinfo,
+                      1, 0);
+    cc_register_cfunc(vm, "__cccc_host_nl_langinfo_l",
+                      (void *)host_nl_langinfo_l, 2, 0);
     cc_register_cfunc(vm, "nl_langinfo", (void *)wrap_nl_langinfo, 1, 0);
     cc_register_cfunc(vm, "nl_langinfo_l", (void *)wrap_nl_langinfo_l, 2, 0);
     cc_register_cfunc(vm, "catopen", (void *)catopen, 2, 0);

@@ -78,6 +78,7 @@
 #include <wchar.h>
 #include <wordexp.h>
 
+#include "host_ffi_family.h"
 #include "internal.h"
 
 #include <fenv.h>
@@ -539,6 +540,9 @@ const char *cccc_comptime_arg_spec(const char *name) {
     if (!name)
         return NULL;
     pthread_once(&specs_once, build_specs);
+    // A host-numbered passthrough shares its canonical twin's spec.
+    if (strncmp(name, CCCC_HOST_FFI_PREFIX, CCCC_HOST_FFI_PREFIX_LEN) == 0)
+        name += CCCC_HOST_FFI_PREFIX_LEN;
     size_t      len         = strlen(name);
     bool        locale_tail = false, alias = false;
     const char *spec = lookup_spec(name, len, &locale_tail, &alias);

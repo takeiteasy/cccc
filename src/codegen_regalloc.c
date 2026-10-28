@@ -18,6 +18,7 @@
 */
 
 #include "./codegen_internal.h"
+#include "./host_ffi_family.h"
 
 // ========== FFI Helper ==========
 
@@ -54,6 +55,44 @@ const char *obj_external_name(Obj *obj) {
     return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
 }
 
+static bool is_host_family_name(const char *name) {
+    static const char *const family[] = {
+#define ROW(n) #n,
+        CCCC_HOST_FFI_FAMILY(ROW) CCCC_HOST_FFI_FAMILY_LINUX(ROW)
+#undef ROW
+    };
+    for (size_t i = 0; i < sizeof family / sizeof *family; i++)
+        if (strcmp(name, family[i]) == 0)
+            return true;
+    return false;
+}
+
+// FFI slot a call to `obj` binds to. Under --use-system-headers a translated
+// native (host_ffi_family.h) declared by a real, non-bundled header binds to
+// its `__cccc_host_` passthrough, since that program already holds the host's
+// numbers. The first declaration decides (Obj.tok), so a user prototype ahead
+// of the header counts as non-bundled. Name-only lookups (find_ffi_function)
+// stay canonical.
+int ffi_index_for_obj(VirtualMachine *vm, Obj *obj) {
+    const char *name = obj_external_name(obj);
+    if (!name)
+        return -1;
+#ifdef __APPLE__
+    // SDK headers spell asm labels with the Mach-O underscore
+    // (`__asm("_confstr")`).
+    if (obj->asm_label && name[0] == '_' && find_ffi_function(vm, name) < 0)
+        name++;
+#endif
+    if (vm->compiler.use_system_headers && obj->tok && obj->tok->file &&
+        is_host_family_name(name) &&
+        !cc_file_is_cccc_bundled(vm, obj->tok->file->name)) {
+        char host_name[64];
+        snprintf(host_name, sizeof host_name, CCCC_HOST_FFI_PREFIX "%s", name);
+        return find_ffi_function(vm, host_name);
+    }
+    return find_ffi_function(vm, name);
+}
+
 // A guest program can define its own function whose name happens to match
 // a registered FFI symbol -- e.g. `int printf(const char *fmt, ...) { ... }`
 // wrapping the real one. find_ffi_function's exact-name match doesn't know
@@ -64,8 +103,7 @@ const char *obj_external_name(Obj *obj) {
 int ffi_index_for_callee(VirtualMachine *vm, Obj *callee) {
     if (callee && callee->body)
         return -1;
-    const char *name = obj_external_name(callee);
-    return find_ffi_function(vm, name);
+    return ffi_index_for_obj(vm, callee);
 }
 
 static Obj *find_global_obj(Obj *prog, const char *name) {
@@ -165,8 +203,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                     // (#589).  The token is segment-independent, so no data/tls
                     // reloc is recorded (it survives .c4 round-trips verbatim,
                     // exactly like the text-segment FFI case).
-                    int ffi_idx =
-                        find_ffi_function(vm, obj_external_name(target));
+                    int ffi_idx = ffi_index_for_obj(vm, target);
                     if (ffi_idx < 0) {
                         // VM-lowered intrinsics (signal, longjmp, dlopen...)
                         // point at their stub instead.
