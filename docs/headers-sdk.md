@@ -71,7 +71,7 @@ obstack_grow(&o, "hello", 5);
 obstack_free(&o, NULL);
 ```
 
-Assigning `obstack_alloc_failed_handler` sets the function called when a chunk allocation fails, and `obstack_exit_failure` the status the default handler exits with (`EXIT_FAILURE` at program start). The default handler prints `memory exhausted` and exits through the program's `atexit` handlers. A handler that returns falls back to the default. A handler that leaves with `longjmp` is not supported in the VM.
+Assigning `obstack_alloc_failed_handler` sets the function called when a chunk allocation fails, and `obstack_exit_failure` the status the default handler exits with (`EXIT_FAILURE` at program start). The default handler prints `memory exhausted` and exits through the program's `atexit` handlers. A handler that returns falls back to the default. A handler may leave with `longjmp`.
 
 ## Host globals
 

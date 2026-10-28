@@ -1477,6 +1477,18 @@ void cccc_thread_exit_end(void) {
     t_thread_exiting = false;
 }
 
+_Thread_local CcSlotSave *cccc_slot_saves;
+
+typedef struct CcCallbackFrame CcCallbackFrame;
+struct CcCallbackFrame {
+    CcCallbackFrame *previous;
+    long long       *floor_bp; // bp of the guest frame that made the native call
+    void            *landing;  // pad of the vm_eval that made it, or NULL
+    CcUnwindPoint    unwind;
+};
+
+static _Thread_local CcCallbackFrame *t_callback_frame;
+
 void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
     p->gil_depth             = gil_depth_of_caller(vm);
     p->flags                 = vm->flags;
@@ -1486,11 +1498,13 @@ void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p) {
     p->step_over_return_addr = vm->dbg.step_over_return_addr;
     p->step_out_bp           = vm->dbg.step_out_bp;
     p->debugger_attached     = vm->dbg.debugger_attached;
+    p->callback_frame        = t_callback_frame;
+    p->eval_landing          = cccc_eval_landing_current();
+    p->slot_saves            = cccc_slot_saves;
 }
 
-void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
-    if (gil_depth_of_caller(vm) > p->gil_depth)
-        cccc_pthread_main_unwinding(vm);
+void cccc_unwind_point_restore_state(VirtualMachine       *vm,
+                                     const CcUnwindPoint *p) {
     vm->flags                     = p->flags;
     vm->dbg.single_step           = p->single_step;
     vm->dbg.step_over             = p->step_over;
@@ -1498,10 +1512,49 @@ void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
     vm->dbg.step_over_return_addr = p->step_over_return_addr;
     vm->dbg.step_out_bp           = p->step_out_bp;
     vm->dbg.debugger_attached     = p->debugger_attached;
-    cc_running_vm                 = NULL;
+}
+
+void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p) {
+    if (gil_depth_of_caller(vm) > p->gil_depth)
+        cccc_pthread_main_unwinding(vm);
+    cccc_unwind_point_restore_state(vm, p);
+    // The frames these point into are gone: reset, don't read them.
+    t_callback_frame = p->callback_frame;
+    cccc_eval_landing_set(p->eval_landing);
+    cccc_slot_saves = p->slot_saves;
+    cc_running_vm   = NULL;
     cccc_ffi_vm_reset();
     // Last: another thread may run as soon as the GIL is free.
     cccc_gil_release_to(vm, p->gil_depth);
+}
+
+void cccc_callback_chains_abandon(void) {
+    t_callback_frame = NULL;
+    cccc_eval_landing_set(NULL);
+    cccc_slot_saves = NULL;
+}
+
+void cccc_slot_saves_unwind_to(CcSlotSave *head) {
+    while (cccc_slot_saves && cccc_slot_saves != head) {
+        CcSlotSave *e = cccc_slot_saves;
+        memcpy(e->slot, e->saved, e->size);
+        cccc_slot_saves = e->previous;
+    }
+}
+
+int cccc_callback_longjmp_leave(VirtualMachine *vm, long long *target_bp) {
+    CcCallbackFrame *top = t_callback_frame;
+    // Frames of the callback itself lie below its floor.
+    if (!top || target_bp < top->floor_bp)
+        return 0;
+    CcCallbackFrame *outer = top;
+    while (outer->previous && target_bp >= outer->previous->floor_bp)
+        outer = outer->previous;
+    if (!outer->landing)
+        return -1;
+    cccc_unwind_point_restore_state(vm, &outer->unwind);
+    t_callback_frame = outer->previous;
+    cccc_eval_landing_jump(outer->landing);
 }
 
 static int free_value_iter(char *key, int keylen, void *val, void *user_data) {
@@ -2820,6 +2873,12 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     if (check_stack_overflow(vm, 1))
         return -1;
 
+    CcCallbackFrame frame = {.previous = t_callback_frame,
+                             .floor_bp = saved_bp,
+                             .landing  = cccc_eval_landing_current()};
+    cccc_unwind_point_save(vm, &frame.unwind);
+    t_callback_frame          = &frame;
+
     vm->flags                 &= ~CCCC_ENABLE_DEBUGGER;
     vm->dbg.single_step        = 0;
     vm->dbg.step_over          = 0;
@@ -2836,6 +2895,7 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
     *--vm->sp = 0; // sentinel return address, recognized by op_LEV3_fn
     vm->pc    = entry;
     vm_eval(vm);
+    t_callback_frame = frame.previous;
     // vm_eval()'s return value is not a status code on the path taken by a
     // normal return -- when the dispatch loop's LEV handler pops the
     // sentinel return address (0) pushed above, it sets vm->pc to

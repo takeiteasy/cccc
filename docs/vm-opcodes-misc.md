@@ -19,6 +19,8 @@ Stack instrumentation, jumps, linking, FFI and traps.
 | `SETJMP` | Save `pc`, `sp`, `bp`, (and shadow-sp if CFI) into `jmp_buf`; return 0 |
 | `LONGJMP` | Restore context from `jmp_buf`; return value in `REG_A1` (never 0) |
 
+A `LONGJMP` whose target is outside the guest callback it runs in (a `qsort` comparator, an obstack handler; see `cccc_call_guest_callback_ex`) also abandons the native frames between the target and the callback. Each callback pushes a `CcCallbackFrame` holding its floor `bp` and the landing pad of the `vm_eval` that made the native call. `cccc_callback_longjmp_leave` compares the target `bp` with those floors, restores the flags and debugger state the callback cleared, and C-longjmps to the outermost pad crossed. `vm_eval` (`src/host_signal.c`) sets that pad once per call. Before jumping it also uninstalls the abandoned signal guards, resets the FFI VM pointer, and restores every `CcSlotSave` entry newer than the pad, so a wrapper's thread-local callback slots (qsort's comparator) return to the outer call's values. As in C, cleanup inside the skipped host frames does not run (qsort's scratch memory, the type-shadow clear after a sort). A compile error that longjmps out of running guest code drops these chains (`cccc_callback_chains_abandon`).
+
 ## Dynamic Linking
 
 | Opcode | Description |

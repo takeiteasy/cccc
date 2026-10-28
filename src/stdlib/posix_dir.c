@@ -50,18 +50,14 @@ static int glob_errfunc_trampoline(const char *epath, int eerrno) {
 
 static long long wrap_glob(long long pattern, long long flags,
                            long long errfunc, long long pglob) {
-    long long saved_errfunc = g_glob_errfunc_value;
-    int       saved_faulted = g_glob_errfunc_faulted;
-    g_glob_errfunc_value    = errfunc;
-    g_glob_errfunc_faulted  = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_glob_errfunc_value, errfunc,
+                              &g_glob_errfunc_faulted);
 
     int r = glob((const char *)pattern, (int)flags,
                  errfunc ? glob_errfunc_trampoline : NULL, (glob_t *)pglob);
 
-    int faulted            = g_glob_errfunc_faulted;
-    g_glob_errfunc_value   = saved_errfunc;
-    g_glob_errfunc_faulted = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return r;
 }
@@ -115,21 +111,20 @@ static int scandir_compar_trampoline(const struct dirent **a,
 
 static long long wrap_scandir(long long dirname, long long namelist,
                               long long select, long long compar) {
-    long long saved_select  = g_scandir_select_value;
-    long long saved_compar  = g_scandir_compar_value;
-    int       saved_faulted = g_scandir_faulted;
-    g_scandir_select_value  = select;
-    g_scandir_compar_value  = compar;
-    g_scandir_faulted       = 0;
+    CcSlotSave      select_slot;
+    CcCallbackSlots slots;
+    cccc_slot_save_push(&select_slot, &g_scandir_select_value,
+                        sizeof g_scandir_select_value);
+    g_scandir_select_value = select;
+    cccc_callback_slots_enter(&slots, &g_scandir_compar_value, compar,
+                              &g_scandir_faulted);
 
     int n       = scandir((const char *)dirname, (struct dirent ***)namelist,
                           select ? scandir_select_trampoline : NULL,
                           compar ? scandir_compar_trampoline : NULL);
 
-    int faulted = g_scandir_faulted;
-    g_scandir_select_value = saved_select;
-    g_scandir_compar_value = saved_compar;
-    g_scandir_faulted      = saved_faulted;
+    int faulted = cccc_callback_slots_leave(&slots);
+    cccc_slot_save_pop(&select_slot);
     if (faulted)
         errno = EFAULT;
     return n;
@@ -230,18 +225,14 @@ static int fts_compar_trampoline(const FTSENT **a, const FTSENT **b) {
 
 static long long wrap_fts_open(long long path_argv, long long options,
                                long long compar) {
-    long long saved_compar  = g_fts_compar_value;
-    int       saved_faulted = g_fts_faulted;
-    g_fts_compar_value      = compar;
-    g_fts_faulted           = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_fts_compar_value, compar,
+                              &g_fts_faulted);
 
     FTS *f                  = fts_open((char *const *)path_argv, (int)options,
                                        compar ? fts_compar_trampoline : NULL);
 
-    int  faulted            = g_fts_faulted;
-    g_fts_compar_value      = saved_compar;
-    g_fts_faulted           = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     if (f && compar)
         fts_handle_bind(f, compar);

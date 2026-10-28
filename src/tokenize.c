@@ -434,6 +434,12 @@ static void vdiagnostic_at(VirtualMachine *vm, const char *filename, char *input
         print_expansion_notes(stderr, vm, chain);
 }
 
+// Frames of a guest callback the error interrupted are abandoned.
+static _Noreturn void jump_to_error_handler(VirtualMachine *vm) {
+    cccc_callback_chains_abandon();
+    longjmp(*vm->error_jmp_buf, 1);
+}
+
 static void verror_at(VirtualMachine *vm, const char *filename, char *input,
                       int line_no, char *loc, ExpansionFrame *chain, char *fmt,
                       va_list ap) {
@@ -526,7 +532,7 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
-        longjmp(*vm->error_jmp_buf, 1);
+        jump_to_error_handler(vm);
     }
     exit(1);
 }
@@ -552,7 +558,7 @@ void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
 
     // Always use longjmp/exit (Level 1: no parser recovery)
     if (vm && vm->error_jmp_buf) {
-        longjmp(*vm->error_jmp_buf, 1);
+        jump_to_error_handler(vm);
     }
     exit(1);
 }
@@ -577,7 +583,7 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
         if (vm->max_errors > 0 && vm->error_count >= vm->max_errors) {
             // Too many errors, bail out
             if (vm->error_jmp_buf) {
-                longjmp(*vm->error_jmp_buf, 1);
+                jump_to_error_handler(vm);
             }
             return false;
         }
@@ -587,7 +593,7 @@ bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...) {
 
     // If error collection not enabled, use old behavior
     if (vm && vm->error_jmp_buf) {
-        longjmp(*vm->error_jmp_buf, 1);
+        jump_to_error_handler(vm);
     }
     exit(1);
 }
@@ -662,7 +668,7 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
         // Use longjmp like error_tok
         if (vm->error_jmp_buf) {
-            longjmp(*vm->error_jmp_buf, 1);
+            jump_to_error_handler(vm);
         }
         exit(1);
     }
@@ -755,7 +761,7 @@ void warn_at(VirtualMachine *vm, char *loc, CCCCWarning category, char *fmt,
         }
 
         if (vm->error_jmp_buf)
-            longjmp(*vm->error_jmp_buf, 1);
+            jump_to_error_handler(vm);
         exit(1);
     }
 
@@ -822,7 +828,7 @@ Token *skip(VirtualMachine *vm, Token *tok, char *op) {
     if (!tok) {
         if (vm && vm->error_jmp_buf) {
             fprintf(stderr, "expected '%s'\n", op);
-            longjmp(*vm->error_jmp_buf, 1);
+            jump_to_error_handler(vm);
         }
         error("expected '%s'", op);
     }

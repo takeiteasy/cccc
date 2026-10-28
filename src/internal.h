@@ -1298,19 +1298,94 @@ void cccc_gil_release_to(VirtualMachine *vm, int depth);
 // stale, snapshotted before each harness setjmp and restored where it lands.
 // Host resources a callback held (qsort scratch, scandir/glob allocations)
 // are not recoverable.
+//
+// A callback wrapper that parks per-call state in a thread-local slot (qsort's
+// comparator, glob's errfunc) pushes the slot's old value here and pops it
+// after the host call. A guest longjmp out of the callback skips the pop, so
+// the unwind restores every entry newer than the landing pad.
+typedef struct CcSlotSave CcSlotSave;
+struct CcSlotSave {
+    CcSlotSave   *previous;
+    void         *slot;
+    size_t        size;
+    unsigned char saved[sizeof(long long)];
+};
+
+extern _Thread_local CcSlotSave *cccc_slot_saves;
+
+static inline void cccc_slot_save_push(CcSlotSave *e, void *slot, size_t size) {
+    e->slot     = slot;
+    e->size     = size;
+    e->previous = cccc_slot_saves;
+    memcpy(e->saved, slot, size);
+    cccc_slot_saves = e;
+}
+
+static inline void cccc_slot_save_pop(CcSlotSave *e) {
+    memcpy(e->slot, e->saved, e->size);
+    cccc_slot_saves = e->previous;
+}
+
+// A wrapper's slots: the guest function value and the fault latch.
 typedef struct {
-    int        gil_depth;
-    uint32_t   flags;
-    int        single_step;
-    int        step_over;
-    int        step_out;
-    Pc         step_over_return_addr;
-    long long *step_out_bp;
-    int        debugger_attached;
+    CcSlotSave value, faulted;
+} CcCallbackSlots;
+
+static inline void cccc_callback_slots_enter(CcCallbackSlots *s,
+                                             long long *value_slot,
+                                             long long value, int *faulted_slot) {
+    cccc_slot_save_push(&s->value, value_slot, sizeof *value_slot);
+    cccc_slot_save_push(&s->faulted, faulted_slot, sizeof *faulted_slot);
+    *value_slot   = value;
+    *faulted_slot = 0;
+}
+
+// Restores both slots; returns whether a callback faulted.
+static inline int cccc_callback_slots_leave(CcCallbackSlots *s) {
+    int faulted = *(int *)s->faulted.slot;
+    cccc_slot_save_pop(&s->faulted);
+    cccc_slot_save_pop(&s->value);
+    return faulted;
+}
+
+typedef struct {
+    int         gil_depth;
+    uint32_t    flags;
+    int         single_step;
+    int         step_over;
+    int         step_out;
+    Pc          step_over_return_addr;
+    long long  *step_out_bp;
+    int         debugger_attached;
+    void       *callback_frame;
+    void       *eval_landing;
+    CcSlotSave *slot_saves;
 } CcUnwindPoint;
 
 void cccc_unwind_point_save(VirtualMachine *vm, CcUnwindPoint *p);
 void cccc_unwind_point_restore(VirtualMachine *vm, const CcUnwindPoint *p);
+// Only the flags and debugger fields the unwind point holds.
+void cccc_unwind_point_restore_state(VirtualMachine       *vm,
+                                     const CcUnwindPoint *p);
+
+// A guest longjmp whose target is outside the innermost guest callback
+// (cccc_call_guest_callback_ex) leaves the callback and every native frame
+// between it and the vm_eval that made the native call: the host frames are
+// abandoned with a C longjmp to that vm_eval's landing pad. Returns 0 when the
+// target stays inside the callback (or there is none), -1 when no vm_eval
+// encloses the callback; does not return when it unwinds.
+int  cccc_callback_longjmp_leave(VirtualMachine *vm, long long *target_bp);
+// Drops the callback/landing/slot chains after a compile error longjmps out of
+// running guest code, so no later longjmp reads the abandoned frames.
+void cccc_callback_chains_abandon(void);
+
+void cccc_slot_saves_unwind_to(CcSlotSave *head);
+
+// host_signal.c: one landing pad per vm_eval call.
+void *cccc_eval_landing_current(void);
+void  cccc_eval_landing_set(void *landing);
+_Noreturn void cccc_eval_landing_jump(void *landing);
+void           cccc_ffi_vm_set(VirtualMachine *vm);
 
 // Marks the calling guest thread as ending (a failed Assert or pthread_exit).
 // While set, cccc_call_guest_callback_ex skips new callbacks and abandons

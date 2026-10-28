@@ -103,16 +103,12 @@ static long long wrap_lfind(long long key, long long base, long long nmemb,
         errno = EFAULT;
         return 0;
     }
-    long long saved         = g_search_compar_value;
-    int       saved_faulted = g_search_faulted;
-    g_search_compar_value   = compar;
-    g_search_faulted        = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_search_compar_value, compar,
+                              &g_search_faulted);
     void *r = lfind((const void *)key, (const void *)base, (size_t *)nmemb,
                     (size_t)size, search_compar_trampoline);
-    int   faulted         = g_search_faulted;
-    g_search_compar_value = saved;
-    g_search_faulted      = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)r;
 }
@@ -123,16 +119,12 @@ static long long wrap_lsearch(long long key, long long base, long long nmemb,
         errno = EFAULT;
         return 0;
     }
-    long long saved         = g_search_compar_value;
-    int       saved_faulted = g_search_faulted;
-    g_search_compar_value   = compar;
-    g_search_faulted        = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_search_compar_value, compar,
+                              &g_search_faulted);
     void *r = lsearch((const void *)key, (void *)base, (size_t *)nmemb,
                       (size_t)size, search_compar_trampoline);
-    int   faulted         = g_search_faulted;
-    g_search_compar_value = saved;
-    g_search_faulted      = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)r;
 }
@@ -143,16 +135,12 @@ static long long wrap_tsearch(long long key, long long rootp,
         errno = EFAULT;
         return 0;
     }
-    long long saved         = g_search_compar_value;
-    int       saved_faulted = g_search_faulted;
-    g_search_compar_value   = compar;
-    g_search_faulted        = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_search_compar_value, compar,
+                              &g_search_faulted);
     void *r =
         tsearch((const void *)key, (void **)rootp, search_compar_trampoline);
-    int   faulted           = g_search_faulted;
-    g_search_compar_value   = saved;
-    g_search_faulted        = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)r;
 }
@@ -162,16 +150,12 @@ static long long wrap_tfind(long long key, long long rootp, long long compar) {
         errno = EFAULT;
         return 0;
     }
-    long long saved         = g_search_compar_value;
-    int       saved_faulted = g_search_faulted;
-    g_search_compar_value   = compar;
-    g_search_faulted        = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_search_compar_value, compar,
+                              &g_search_faulted);
     void *r                 = tfind((const void *)key, (void *const *)rootp,
                                     search_compar_trampoline);
-    int   faulted           = g_search_faulted;
-    g_search_compar_value   = saved;
-    g_search_faulted        = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)r;
 }
@@ -182,16 +166,12 @@ static long long wrap_tdelete(long long key, long long rootp,
         errno = EFAULT;
         return 0;
     }
-    long long saved         = g_search_compar_value;
-    int       saved_faulted = g_search_faulted;
-    g_search_compar_value   = compar;
-    g_search_faulted        = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_search_compar_value, compar,
+                              &g_search_faulted);
     void *r =
         tdelete((const void *)key, (void **)rootp, search_compar_trampoline);
-    int   faulted           = g_search_faulted;
-    g_search_compar_value   = saved;
-    g_search_faulted        = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)r;
 }
@@ -217,15 +197,11 @@ static void twalk_action_trampoline(const void *nodep, VISIT which, int depth) {
 }
 
 static long long wrap_twalk(long long root, long long action) {
-    long long saved         = g_twalk_action_value;
-    int       saved_faulted = g_twalk_faulted;
-    g_twalk_action_value    = action;
-    g_twalk_faulted         = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_twalk_action_value, action,
+                              &g_twalk_faulted);
     twalk((const void *)root, action ? twalk_action_trampoline : NULL);
-    int faulted          = g_twalk_faulted;
-    g_twalk_action_value = saved;
-    g_twalk_faulted      = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return 0;
 }

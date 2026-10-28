@@ -109,12 +109,11 @@ static int qsort_compar_trampoline(const void *a, const void *b) {
 // returns. Not worth a CHKT3 suppression range on the hot path for this.
 static long long wrap_qsort(long long base, long long nmemb, long long size,
                             long long compar) {
-    long long saved_compar  = g_qsort_compar_value;
-    int       saved_faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value    = compar;
-    g_qsort_compar_faulted  = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_qsort_compar_value, compar,
+                              &g_qsort_compar_faulted);
 
-    VirtualMachine *vm      = cccc_current_ffi_vm();
+    VirtualMachine *vm = cccc_current_ffi_vm();
     if (vm && !cc_type_shadow_elements_uniform(vm, (void *)base, (size_t)nmemb,
                                                (size_t)size))
         cc_type_shadow_clear_range(vm, (void *)base,
@@ -127,28 +126,21 @@ static long long wrap_qsort(long long base, long long nmemb, long long size,
         cc_type_shadow_clear_range(vm, (void *)base,
                                    (size_t)nmemb * (size_t)size);
 
-    int faulted            = g_qsort_compar_faulted;
-    g_qsort_compar_value   = saved_compar;
-    g_qsort_compar_faulted = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return 0;
 }
 
 static long long wrap_bsearch(long long key, long long base, long long nmemb,
                               long long size, long long compar) {
-    long long saved_compar  = g_qsort_compar_value;
-    int       saved_faulted = g_qsort_compar_faulted;
-    g_qsort_compar_value    = compar;
-    g_qsort_compar_faulted  = 0;
+    CcCallbackSlots slots;
+    cccc_callback_slots_enter(&slots, &g_qsort_compar_value, compar,
+                              &g_qsort_compar_faulted);
 
-    void *result            = bsearch((void *)key, (void *)base, (size_t)nmemb,
+    void *result = bsearch((void *)key, (void *)base, (size_t)nmemb,
                                       (size_t)size, qsort_compar_trampoline);
 
-    int   faulted           = g_qsort_compar_faulted;
-    g_qsort_compar_value    = saved_compar;
-    g_qsort_compar_faulted  = saved_faulted;
-    if (faulted)
+    if (cccc_callback_slots_leave(&slots))
         errno = EFAULT;
     return (long long)(intptr_t)result;
 }

@@ -174,6 +174,24 @@ int main(void) {
 }
 C
 
+cat >handler_longjmp.c <<'C'
+#include "fail_head.h"
+#include <setjmp.h>
+static jmp_buf env;
+static void jump(void) {
+    longjmp(env, 42);
+}
+int main(void) {
+    struct obstack o;
+    obstack_alloc_failed_handler = jump;
+    int r = setjmp(env);
+    if (r)
+        return r;
+    obstack_init(&o);
+    return 1;
+}
+C
+
 cat >default_status.c <<'C'
 #include "fail_head.h"
 int main(void) {
@@ -232,11 +250,12 @@ expect_exit 42 "$CCCC" --sysroot / --use-system-headers handler_exit.c
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers default_status.c
 grep -q "memory exhausted" err.txt || fail "default handler printed nothing"
 expect_exit 43 "$CCCC" --sysroot / --use-system-headers handler_returns.c
+expect_exit 42 "$CCCC" --sysroot / --use-system-headers handler_longjmp.c
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers atexit_runs.c
 expect_exit 42 "$CCCC" --sysroot / --use-system-headers save_restore.c
 
 # The same programs against glibc itself.
-for p in handler_exit default_status; do
+for p in handler_exit handler_longjmp default_status; do
     expect_exit 0 "$CCCC" --sysroot / --use-system-headers -c=native -o "$p.native" "$p.c"
     expect_exit 42 "./$p.native"
 done

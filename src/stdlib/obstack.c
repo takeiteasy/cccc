@@ -32,8 +32,6 @@ static void obstack_default_handler(void) {
 
 // A handler that returns falls back to the default: glibc would carry on with
 // a NULL chunk.
-// TODO: a handler that longjmps out does not unwind the VM's callback frame
-// (#1852)
 static void obstack_exhausted(void) {
     VirtualMachine *vm      = cccc_current_ffi_vm();
     long long      *handler = cc_cdata_addr(vm, "obstack_alloc_failed_handler");

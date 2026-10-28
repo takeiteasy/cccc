@@ -5868,6 +5868,14 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
         vm->shadow_sp = (long long *)((char *)vm->shadow_stack + saved_offset);
     }
     vm->regs[REG_A0] = val ? val : 1; // Return value (never 0)
+
+    // The target may be outside the guest callback this ran in (a qsort
+    // comparator, an obstack handler): leave it as C's longjmp would.
+    if (cccc_callback_longjmp_leave(vm, vm->bp) < 0) {
+        fprintf(stderr, "error: longjmp out of a callback with no enclosing "
+                        "guest frame\n");
+        return -1;
+    }
     return 0;
 }
 
@@ -5907,6 +5915,10 @@ VirtualMachine *cccc_current_ffi_vm(void) {
 // cccc_call_native_function.
 void cccc_ffi_vm_reset(void) {
     cccc_tls_ffi_vm = NULL;
+}
+
+void cccc_ffi_vm_set(VirtualMachine *vm) {
+    cccc_tls_ffi_vm = vm;
 }
 
 int cccc_ffi_name_in_list(char **list, int count, const char *name) {

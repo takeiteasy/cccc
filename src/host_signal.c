@@ -256,13 +256,63 @@ int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
     return sigaction(sig, &desired, NULL);
 }
 
+// A guest longjmp out of a callback lands here (cccc_eval_landing_jump): the
+// vm_eval that made the native call resumes dispatching at the longjmp target.
+typedef struct EvalLanding EvalLanding;
+struct EvalLanding {
+    jmp_buf          env;
+    EvalLanding     *previous;
+    HostSignalGuard *guard;
+    const char      *native;
+    VirtualMachine  *ffi_vm;
+    CcSlotSave      *slots;
+};
+
+static _Thread_local EvalLanding *eval_landing;
+
+void *cccc_eval_landing_current(void) {
+    return eval_landing;
+}
+
+void cccc_eval_landing_set(void *landing) {
+    eval_landing = landing;
+}
+
+// Undoes, while the abandoned frames are still live, what they would have
+// undone on return, then continues in the vm_eval that owns `landing`.
+_Noreturn void cccc_eval_landing_jump(void *landing) {
+    EvalLanding *pad = landing;
+    while (active_guard && active_guard != pad->guard)
+        uninstall_host_handlers(active_guard);
+    native_call = pad->native;
+    cccc_ffi_vm_set(pad->ffi_vm);
+    cccc_slot_saves_unwind_to(pad->slots);
+    eval_landing = pad;
+    _longjmp(pad->env, 1);
+}
+
+static int eval_with_landing(VirtualMachine *vm, volatile Pc *current_pc) {
+    EvalLanding pad;
+    pad.previous = eval_landing;
+    pad.guard    = active_guard;
+    pad.native   = native_call;
+    pad.ffi_vm   = cccc_current_ffi_vm();
+    pad.slots    = cccc_slot_saves;
+    eval_landing = &pad;
+    // A landing resumes dispatch at vm->pc, the longjmp target.
+    _setjmp(pad.env);
+    int rc       = cccc_vm_eval_dispatch(vm, current_pc);
+    eval_landing = pad.previous;
+    return rc;
+}
+
 int vm_eval(VirtualMachine *vm) {
     volatile Pc current_pc = vm ? vm->pc : CCCC_INVALID_PC;
     vm->cycle              = 0;
 
     bool debugger          = host_signal_debug_active(vm);
     if (!debugger && !vm->comptime_depth)
-        return cccc_vm_eval_dispatch(vm, &current_pc);
+        return eval_with_landing(vm, &current_pc);
 
     // A callback re-entering from a native call starts with no native call of
     // its own active.
@@ -299,10 +349,10 @@ int vm_eval(VirtualMachine *vm) {
 
         if (!install_host_handlers(&guard)) {
             native_call = outer_native;
-            return cccc_vm_eval_dispatch(vm, &current_pc);
+            return eval_with_landing(vm, &current_pc);
         }
 
-        int rc = cccc_vm_eval_dispatch(vm, &current_pc);
+        int rc = eval_with_landing(vm, &current_pc);
         uninstall_host_handlers(&guard);
         native_call = outer_native;
         return rc;
@@ -316,6 +366,19 @@ void cccc_host_native_enter(const char *name) {
 }
 
 void cccc_host_native_leave(void) {}
+
+void *cccc_eval_landing_current(void) {
+    return NULL;
+}
+
+void cccc_eval_landing_set(void *landing) {
+    (void)landing;
+}
+
+_Noreturn void cccc_eval_landing_jump(void *landing) {
+    (void)landing;
+    abort();
+}
 
 int cccc_set_guest_signal_action(VirtualMachine *vm, int sig, int action) {
     (void)vm;
