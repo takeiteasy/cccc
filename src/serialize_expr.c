@@ -486,6 +486,36 @@ void serialize_string_n(FILE *f, const char *str, int len) {
     fprintf(f, "\"");
 }
 
+// Prints a `u`/`U`/`L` string literal for `count` elements of `elem_size`
+// bytes, dropping one trailing NUL element like serialize_string_n().
+static void serialize_wide_string(FILE *f, const char *data, int elem_size,
+                                  bool is_unsigned, int count) {
+    if (count > 0) {
+        unsigned long long last = 0;
+        memcpy(&last, data + (size_t)(count - 1) * elem_size, elem_size);
+        if (last == 0)
+            count--;
+    }
+    fprintf(f, "%s\"", elem_size == 2 ? "u" : is_unsigned ? "U" : "L");
+    bool after_hex = false;
+    for (int i = 0; i < count; i++) {
+        unsigned long long c = 0;
+        memcpy(&c, data + (size_t)i * elem_size, elem_size);
+        if (c >= 32 && c < 127) {
+            if (after_hex && isxdigit((int)c))
+                fprintf(f, "\" \"");
+            if (c == '\\' || c == '"')
+                fputc('\\', f);
+            fputc((int)c, f);
+            after_hex = false;
+        } else {
+            fprintf(f, "\\x%llX", c);
+            after_hex = true;
+        }
+    }
+    fprintf(f, "\"");
+}
+
 // #965: index of `var` in `block_fn`'s capture list, or -1. Mirrors
 // find_capture_index (codegen.c) exactly -- kept as an independent copy
 // here rather than shared, since codegen's version is `static` in a
@@ -2160,12 +2190,18 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // termination -- an anonymous string-literal global can
                     // legitimately contain embedded NULs (wide/multi-part
                     // literals, __func__ splicing, etc).
-                    // TODO: array_len counts elements, so a wide literal is cut
-                    // to a quarter of its bytes (#1843)
-                    int len = (node->var->ty && node->var->ty->kind == TY_ARRAY)
-                                  ? node->var->ty->array_len
-                                  : (int)strlen(node->var->init_data);
-                    serialize_string_n(f, node->var->init_data, len);
+                    Type *lit_ty = node->var->ty;
+                    if (lit_ty && lit_ty->kind == TY_ARRAY && lit_ty->base &&
+                        (lit_ty->base->size == 2 || lit_ty->base->size == 4))
+                        serialize_wide_string(
+                            f, node->var->init_data, lit_ty->base->size,
+                            lit_ty->base->is_unsigned, lit_ty->array_len);
+                    else
+                        serialize_string_n(
+                            f, node->var->init_data,
+                            lit_ty && lit_ty->kind == TY_ARRAY
+                                ? lit_ty->size
+                                : (int)strlen(node->var->init_data));
                 } else if (serialize_block_capture_ref(f, ctx, node->var)) {
                     // #965: handled -- var is captured by the block literal
                     // currently being serialized.

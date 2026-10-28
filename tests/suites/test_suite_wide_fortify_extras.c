@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: a wide string literal used as an expression is cut to a quarter of its bytes under -c=native (#1843)
 // Wide-character copies, conversions, printf family and line reader that the
 // fortified <wchar.h> reaches.
 

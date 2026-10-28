@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --testing
-// CCCC_NATIVE_SKIP: a wide string literal used as an expression is cut to a quarter of its bytes under -c=native (#1843)
 // glibc's fortified headers call these `__*_chk` functions directly. In bounds
 // they behave like the plain function. They are glibc-only, so the cases are
 // Linux-only.
