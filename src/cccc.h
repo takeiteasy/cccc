@@ -4713,7 +4713,8 @@ typedef struct Compiler {
     // re-emission filter (main.c).
     HashMap cccc_only_files;  // filename -> (void*)1
     HashMap include_children; // filename -> StringArray* of #include'd child
-                              // filenames
+    HashMap cccc_only_cache;  // filename -> 1 (no) / 2 (yes); see
+                              // cc_file_is_cccc_only filenames
     // #1096: files whose declarations came from one of CCCC's own bundled
     // headers (get_std_header()'s embedded table, resolved either via the
     // embedded fallback or an on-disk `-I./include` hit) -- as opposed to a

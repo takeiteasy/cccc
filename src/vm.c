@@ -1883,6 +1883,7 @@ void cc_destroy(VirtualMachine *vm) {
         hashmap_deinit(&c->cli_macro_snapshot);
     hashmap_deinit(&c->cccc_only_files);
     hashmap_deinit(&c->include_children);
+    hashmap_deinit(&c->cccc_only_cache);
     hashmap_deinit(&c->cccc_bundled_files);
     hashmap_deinit(&c->cccc_bundled_include_dirs);
     hashmap_deinit(&c->captured_include_targets);

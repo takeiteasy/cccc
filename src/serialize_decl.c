@@ -911,10 +911,32 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 // vanishingly rare in an initializer and not worth threading codegen state
 // into the serializer for; falls through to the "unresolved relocation"
 // hard error below.
-Obj *serialize_find_global(VirtualMachine *vm, const char *name) {
+static void index_globals(HashMap *index, VirtualMachine *vm) {
+    hashmap_deinit_borrowed(index);
     for (Obj *g = vm->compiler.globals; g; g = g->next)
-        if (strcmp(g->name, name) == 0)
+        if (!hashmap_get(index, g->name))
+            hashmap_put_borrowed(index, g->name, g);
+}
+
+// The serializer renames globals in place, so the index can go stale: a hit
+// is checked against the current name and a miss falls back to the scan.
+Obj *serialize_find_global(VirtualMachine *vm, const char *name) {
+    static HashMap         index;
+    static VirtualMachine *indexed_vm;
+    static Obj            *indexed_head;
+    if (indexed_vm != vm || indexed_head != vm->compiler.globals) {
+        index_globals(&index, vm);
+        indexed_vm   = vm;
+        indexed_head = vm->compiler.globals;
+    }
+    Obj *hit = hashmap_get(&index, name);
+    if (hit && strcmp(hit->name, name) == 0)
+        return hit;
+    for (Obj *g = vm->compiler.globals; g; g = g->next)
+        if (strcmp(g->name, name) == 0) {
+            index_globals(&index, vm);
             return g;
+        }
     return NULL;
 }
 

@@ -639,6 +639,7 @@ static void mark_cccc_only_file(VirtualMachine *vm, const char *filename) {
     if (!filename)
         return;
     hashmap_put(&vm->compiler.cccc_only_files, filename, (void *)1);
+    hashmap_deinit(&vm->compiler.cccc_only_cache);
 }
 
 // #896: record that `parent` contains a plain #include resolving to
@@ -658,6 +659,9 @@ static void record_include_edge(VirtualMachine *vm, const char *parent,
         hashmap_put(&vm->compiler.include_children, parent, children);
     }
     arena_strarray_push(vm, children, arena_strdup(vm, child_path));
+    // A new edge only changes an answer if it leads to a cccc-only closure.
+    if (cc_file_is_cccc_only(vm, child_path))
+        hashmap_deinit(&vm->compiler.cccc_only_cache);
 }
 
 // #896: true if `filename` itself uses cccc-only routing, or plain-
@@ -682,10 +686,21 @@ static bool file_is_cccc_only_closure(VirtualMachine *vm, const char *filename,
     return false;
 }
 
+// Memoised: the preprocessor asks once per directive, and the walk covers the
+// whole include subtree. Only top-level answers are cached (a cycle guard can
+// make a nested node's answer incomplete).
 bool cc_file_is_cccc_only(VirtualMachine *vm, const char *filename) {
+    if (!filename)
+        return false;
+    uintptr_t cached =
+        (uintptr_t)hashmap_get(&vm->compiler.cccc_only_cache, filename);
+    if (cached)
+        return cached == 2;
     HashMap visited = {0};
     bool    result  = file_is_cccc_only_closure(vm, filename, &visited);
     hashmap_deinit(&visited);
+    hashmap_put(&vm->compiler.cccc_only_cache, filename,
+                (void *)(uintptr_t)(result ? 2 : 1));
     return result;
 }
 
@@ -2856,9 +2871,13 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
         Token   *body = add_hideset(vm, m->body, hs);
         for (Token *t = body; t->kind != TK_EOF; t = t->next)
             t->origin = tok;
-        *rest              = append(vm, body, tok->next);
-        (*rest)->at_bol    = tok->at_bol;
-        (*rest)->has_space = tok->has_space;
+        *rest = append(vm, body, tok->next);
+        // An empty expansion leaves tok->next as the head; it keeps its own
+        // line-start state.
+        if (body->kind != TK_EOF) {
+            (*rest)->at_bol    = tok->at_bol;
+            (*rest)->has_space = tok->has_space;
+        }
         return true;
     }
 
@@ -2885,9 +2904,11 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     body        = add_hideset(vm, body, hs);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
         t->origin = macro_token;
-    *rest              = append(vm, body, tok->next);
-    (*rest)->at_bol    = macro_token->at_bol;
-    (*rest)->has_space = macro_token->has_space;
+    *rest = append(vm, body, tok->next);
+    if (body->kind != TK_EOF) {
+        (*rest)->at_bol    = macro_token->at_bol;
+        (*rest)->has_space = macro_token->has_space;
+    }
     return true;
 }
 

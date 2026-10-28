@@ -147,13 +147,11 @@ int ffi_index_for_callee(VirtualMachine *vm, Obj *callee) {
     return ffi_index_for_obj(vm, callee);
 }
 
-static Obj *find_global_obj(Obj *prog, const char *name) {
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->name && strlen(obj->name) == strlen(name) &&
-            strncmp(obj->name, name, strlen(name)) == 0)
-            return obj;
-    }
-    return NULL;
+// First object per name, matching a front-to-back scan of the list.
+static void index_global_objs(HashMap *index, Obj *prog) {
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->name && !hashmap_get(index, obj->name))
+            hashmap_put_borrowed(index, obj->name, obj);
 }
 
 bool is_extern_func_name(Node *node, const char *name) {
@@ -199,6 +197,8 @@ int               num_global_labels = 0;
 int               global_labels_cap = 0;
 
 void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
+    HashMap index   = {0};
+    bool    indexed = false;
     for (Obj *var = prog; var != stop; var = var->next) {
         if (var->is_function || var->reuse_of)
             continue;
@@ -211,7 +211,11 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
             long long value;
             int       segment;
 
-            Obj      *target = find_global_obj(prog, *rel->label);
+            if (!indexed) {
+                index_global_objs(&index, prog);
+                indexed = true;
+            }
+            Obj *target = hashmap_get(&index, *rel->label);
             if (target && target->reuse_of)
                 target = reuse_root(target);
             if (!target) {
@@ -314,6 +318,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
             }
         }
     }
+    hashmap_deinit_borrowed(&index);
 }
 
 Obj *fn_canonical(Obj *fn) {
