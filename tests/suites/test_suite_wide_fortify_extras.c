@@ -2,6 +2,7 @@
 // Wide-character copies, conversions, printf family and line reader that the
 // fortified <wchar.h> reaches.
 
+#define _GNU_SOURCE // glibc declares wmempcpy only under it
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
