@@ -12,7 +12,7 @@ static short __cccc_native_guest_to_host_pollev(short guest_events) {
 }
 static short __cccc_native_host_to_guest_pollev(short host_revents) {
 #ifdef __APPLE__
-    short guest = host_revents & (short)~(POLLRDNORM | POLLRDBAND | POLLWRNORM | POLLWRBAND);
+    short guest = host_revents & (short)~(POLLRDNORM | POLLRDBAND | POLLWRBAND);
     if (host_revents & POLLRDNORM) guest |= 0x0040;
     if (host_revents & POLLRDBAND) guest |= 0x0080;
     if (host_revents & POLLWRNORM) guest |= 0x0100;
