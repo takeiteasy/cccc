@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-28
+
+- Fixed: a `longjmp` out of a guest callback (a `qsort`/`bsearch`/`tsearch` comparator, a `glob`/`scandir`/`fts` callback, an obstack handler) leaves the native frames and lands in the `setjmp` frame, as in compiled C.
+- Fixed: `strtol`, `strtoll`, `strtoul` and `strtoull` accept the C23 `0b` prefix under `--use-system-headers -c=native`.
 - Added: the VM implements every remaining `__*_chk` entry point glibc 2.39's fortified headers reference: wide-character (`__wmemcpy_chk`, `__wcscpy_chk`, `__swprintf_chk`, ...), `__poll_chk`, `__ppoll_chk`, `__syslog_chk`, `__asprintf_chk`, `__dprintf_chk`, `__realpath_chk`, `__mbstowcs_chk`, `__wctomb_chk`, `__getgroups_chk`, `__readlinkat_chk` and the rest. A failed size check aborts (exit 134). Only the obstack pair is left out.
 - Added: libc functions the fortified headers reach, as VM natives: `strlcpy`, `strlcat`, `dprintf`, `vdprintf`, `readlinkat`, `getdomainname`, `getwd`, `ptsname_r`, `wmemcpy`, `wmemmove`, `wmemset`, `wcpcpy`, `wcpncpy`, `wcslcpy`, `wcslcat`, `fgetws`, `mbsnrtowcs`, `wcsnrtombs` and the wide printf family; on Linux also `explicit_bzero`, `fgets_unlocked`, `fread_unlocked`, `wmempcpy` and `fgetws_unlocked`.
 - Added: the library bounds table covers the new byte-counted entry points.
