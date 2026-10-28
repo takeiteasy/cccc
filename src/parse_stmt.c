@@ -390,26 +390,66 @@ static void close_cleanup_scope(VirtualMachine *vm, Node *blk) {
         vm->compiler.cur_cleanup_chain = vm->compiler.cur_cleanup_chain->parent;
 }
 
+// gcc's -Wpedantic wording: one warning per name and per tag the init clause
+// declares.
+static void warn_for_init_declared(VirtualMachine *vm, Token *start,
+                                   VarAttr *attr, Token *fn_name,
+                                   VarScopeNode *vars_before,
+                                   TagScopeNode *tags_before) {
+    if (fn_name)
+        warn_tok(vm, start, CCCC_WARN_PEDANTIC,
+                 "declaration of non-variable '%.*s' in 'for' loop initial "
+                 "declaration",
+                 fn_name->len, fn_name->loc);
+    for (VarScopeNode *sv = vm->compiler.scope->vars; sv != vars_before;
+         sv               = sv->next) {
+        // A static local also leaves a compiler-named alias entry.
+        if (sv->name_len > 3 && !strncmp(sv->name, ".L.", 3))
+            continue;
+        const char *what = attr->is_typedef || sv->type_def || sv->enum_ty ||
+                                   (sv->var && sv->var->is_function)
+                               ? "non-variable"
+                           : attr->is_static ? "static variable"
+                           : attr->is_extern ? "'extern' variable"
+                                             : NULL;
+        if (what)
+            warn_tok(vm, start, CCCC_WARN_PEDANTIC,
+                     "declaration of %s '%.*s' in 'for' loop initial "
+                     "declaration",
+                     what, sv->name_len, sv->name);
+    }
+    for (TagScopeNode *tn = vm->compiler.scope->tags; tn != tags_before;
+         tn               = tn->next) {
+        const char *kw = tn->ty->kind == TY_UNION  ? "union"
+                         : tn->ty->kind == TY_ENUM ? "enum"
+                                                   : "struct";
+        warn_tok(vm, start, CCCC_WARN_PEDANTIC,
+                 "'%s %.*s' declared in 'for' loop initial declaration", kw,
+                 tn->name_len, tn->name);
+    }
+}
+
 // The init clause's declaration. Before C23 only auto/register objects are
 // allowed; gcc accepts the rest with a -Wpedantic warning, so do the same.
 static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
-                                 Type *basety, VarAttr *attr, Node *loop) {
+                                 Type *basety, VarAttr *attr, Node *loop,
+                                 VarScopeNode *vars_before,
+                                 TagScopeNode *tags_before) {
     Token *tok = *rest;
     if (attr->is_tls && !attr->is_static && !attr->is_extern)
         error_tok(vm, start,
                   "'_Thread_local' variable in 'for' loop initial declaration "
                   "must be static or extern");
 
-    bool is_fn = !attr->is_typedef && is_function(vm, tok, basety);
-    if (vm->compiler.c_std < CCCC_STD_C23) {
-        const char *what = attr->is_typedef || is_fn ? "non-variable"
-                           : attr->is_static         ? "static variable"
-                           : attr->is_extern         ? "'extern' variable"
-                                                     : NULL;
-        if (what)
-            warn_tok(vm, start, CCCC_WARN_PEDANTIC,
-                     "declaration of %s in 'for' loop initial declaration",
-                     what);
+    // A block-scope function declaration is not entered in the for scope.
+    Token *fn_name = NULL;
+    bool   is_fn   = !attr->is_typedef && is_function(vm, tok, basety);
+    if (is_fn) {
+        bool saved                     = vm->compiler.in_type_lookahead;
+        vm->compiler.in_type_lookahead = true;
+        Token *probe                   = tok;
+        fn_name = declarator(vm, &probe, tok, copy_type(vm, basety))->name;
+        vm->compiler.in_type_lookahead = saved;
     }
 
     if (attr->is_typedef) {
@@ -428,6 +468,9 @@ static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
         // initializer is later rejected as an assignment.
         add_type(vm, loop->init);
     }
+    if (vm->compiler.c_std < CCCC_STD_C23)
+        warn_for_init_declared(vm, start, attr, fn_name, vars_before,
+                               tags_before);
 }
 
 // `for (T v CLEANUP = x; ...)` becomes `{ <decl v>; for (v = x; ...) }`: the
@@ -887,11 +930,13 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         bool init_has_cleanup = false;
         if (is_decl_start(vm, tok)) {
             VarScopeNode *vars_before = vm->compiler.scope->vars;
+            TagScopeNode *tags_before = vm->compiler.scope->tags;
             VarAttr       attr        = {};
             Token        *decl_tok    = tok;
             Type         *basety      = declspec(vm, &tok, tok, &attr);
             cc_reject_checked_scope_here(vm, &attr);
-            for_init_declaration(vm, &tok, decl_tok, basety, &attr, node);
+            for_init_declaration(vm, &tok, decl_tok, basety, &attr, node,
+                                 vars_before, tags_before);
             init_has_cleanup = declared_cleanup_var(vm, vars_before);
             if (init_has_cleanup)
                 open_cleanup_scope(vm);
