@@ -161,6 +161,7 @@ a[3][0] = 1;               // traps: past the last row
 int *r = a[1];             // r is checked against the 5 elements of row 1
 int (*p)[5] = a;
 p[0][7] = 1;               // traps: a pointer to a row checks its elements against the row's 5 (also when `p` is checked-rooted on only some paths)
+sink(p[0], 8);             // traps: a row passed to a checked parameter is checked against the row's 5
 ```
 
 Three or more dimensions work the same way, and the outer extent may be omitted when an initializer sizes it (`int t _Checked[][5] = {{1}, {2}}`). A string initializer sizes an `_Nt_checked[]` the same way (`char s _Nt_checked[] = "hi"` has 3 slots).

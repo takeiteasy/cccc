@@ -456,6 +456,84 @@ void test_multidim_optional_row_pointer_row_source_unrooted_ok(void) {
     AssertEq(t[4], 0);
 }
 
+// A row of a row pointer passed to a checked parameter is verified against
+// the row's extent.
+static int row_sink(int *[[cccc::array, cccc::count(n)]] r, int n) {
+    return r[n - 1];
+}
+
+[[cccc::test]]
+void test_multidim_row_argument_in_bounds(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    a[1][4]              = 7;
+    AssertEq(row_sink(p[1], 5), 7);
+    AssertEq(row_sink(*p, 5), 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_row_argument_oob(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    volatile int n       = 8;
+    (void)row_sink(p[0], n);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_row_argument_deref_oob(void) {
+    int a _Checked[3][5] = {{0}};
+    int (*p)[5]          = a;
+    (void)row_sink(*p, 8);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_nested_row_argument_oob(void) {
+    int a _Checked[2][3][5] = {{{0}}};
+    int (*p)[3][5]          = a;
+    (void)row_sink(p[0][1], 8);
+}
+
+[[cccc::test]]
+void test_multidim_optional_row_argument_in_bounds(void) {
+    int          plain[3][5]    = {{0}};
+    int a        _Checked[3][5] = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    AssertEq(row_sink(p[0], 5), 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_multidim_optional_row_argument_oob_rooted(void) {
+    int          plain[3][5]    = {{0}};
+    int a        _Checked[3][5] = {{0}};
+    volatile int c              = 1;
+    int (*p)[5]                 = plain;
+    if (c)
+        p = a;
+    (void)row_sink(p[0], 8);
+}
+
+[[cccc::test]]
+void test_multidim_optional_row_argument_oob_unrooted_ok(void) {
+    int          plain[3][8]    = {{0}};
+    int a        _Checked[3][5] = {{0}};
+    volatile int c              = 0;
+    int (*p)[5]                 = (int (*)[5])plain;
+    if (c)
+        p = a;
+    AssertEq(row_sink(p[0], 8), 0);
+}
+
+[[cccc::test]]
+void test_multidim_unrooted_row_argument_not_checked(void) {
+    int (*p)[5] = malloc(sizeof(int) * 50);
+    p[0][7]     = 3;
+    AssertEq(row_sink(p[0], 8), 3);
+    free(p);
+}
+
 // ---------------------------------------------------------------------
 // Variable-length checked arrays: a local's extent is fixed when the
 // declaration runs; a parameter is count(n) on the decayed pointer.

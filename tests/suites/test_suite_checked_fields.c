@@ -582,6 +582,120 @@ void test_track_value_pointer_write_ends_tracking_passes(void) {
     AssertEq(s.n, 8);
 }
 
+// A value-used write sequenced before an event that ends tracking is still
+// rechecked. `widen(&s)` replaces the pointer and makes `s` non-private.
+static int widen(struct Count *c) {
+    c->p = eight();
+    return 1;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_and_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if ((s.n = 8) && widen(&s)) {
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_or_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if ((s.n = 8) || widen(&s)) {
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_conditional_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    (void)((s.n = 8) ? widen(&s) : 0);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_conditional_branch_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    volatile int c                             = 1;
+    s.p                                        = small;
+    (void)(c ? (s.n = 8) : widen(&s));
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_comma_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if (((s.n = 8), widen(&s))) {
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_assigned_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          x                             = 0;
+    s.p                                        = small;
+    x                                          = (s.n = 8) && widen(&s);
+    (void)x;
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_value_before_call_initializer_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    int x                                      = (s.n = 8) && widen(&s);
+    (void)x;
+}
+
+[[cccc::test]]
+void test_track_value_after_call_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if (widen(&s) && (s.n = 8)) {
+    }
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_value_unsequenced_with_pointer_write_passes(void) {
+    int *[[cccc::array, cccc::count(8)]] big   = eight();
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if ((s.n = 8) + (s.p = big, 0)) {
+    }
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_value_unsequenced_with_call_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if (((s.n = 8), 0) + widen(&s)) {
+    }
+    AssertEq(s.n, 8);
+}
+
+// Iteration two writes after iteration one's call replaced the pointer.
+[[cccc::test]]
+void test_track_value_before_call_in_loop_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    for (int i = 0; i < 2; i++) {
+        if ((s.n = i ? 8 : 2) && widen(&s)) {
+        }
+    }
+    AssertEq(s.n, 8);
+}
+
 // ---------------------------------------------------------------------
 // Plain arrays as sources.
 // ---------------------------------------------------------------------

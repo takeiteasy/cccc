@@ -195,9 +195,16 @@ if ((s.n = 8)) {}   // traps here
 int x = (s.n = 2);  // x == 2
 ```
 
-The recheck applies when nothing else in the same expression ends tracking (`(s.n = 8) + (s.p = other, 0)` is not rechecked).
+The recheck applies when nothing else in the same expression ends tracking, or when `&&`, `||`, `?:` or `,` runs the write before the event, outside a loop:
 
-Not checked: a count written in a function that did not store the pointer, or past the events above ([#1825](https://todo.sr.ht/~takeiteasy/cccc/1825)).
+```c
+if ((s.n = 8) && fill(&s)) {}   // traps: the write runs before the call
+if (fill(&s) && (s.n = 8)) {}   // not rechecked: the call may have replaced the pointer
+```
+
+`(s.n = 8) + (s.p = other, 0)` is not rechecked: `+` does not order its operands.
+
+Not checked: a count written in a function that did not store the pointer, or past the events above ([#1825](https://todo.sr.ht/~takeiteasy/cccc/1825)); a write earlier in a nested statement than the event that ends tracking (`if ((s.n = 8)) { fill(&s); }`, [#1861](https://todo.sr.ht/~takeiteasy/cccc/1861)).
 
 ### Constant initializers
 

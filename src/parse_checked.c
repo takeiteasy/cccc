@@ -2607,6 +2607,26 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
     return store;
 }
 
+// A plain row reached through a propagation candidate (`p[0]`, `p[0][1]` of
+// `int (*p)[5]` / `int (*p)[3][5]`). The row only carries bounds once
+// propagate_checked_bounds() has run, after the call is parsed, so the gate
+// takes the shape and leaves FULL/OPT/NONE to the assignment scan.
+static bool checked_row_of_candidate(Node *a) {
+    while (a && (a->kind == ND_CAST || a->kind == ND_ADD || a->kind == ND_SUB))
+        a = a->lhs;
+    while (a && a->kind == ND_DEREF && a->ty &&
+           ((a->ty->kind == TY_ARRAY && a->ty->array_len > 0) ||
+            checked_vla_row_ready(a->ty))) {
+        a = a->lhs;
+        while (a &&
+               (a->kind == ND_CAST || a->kind == ND_ADD || a->kind == ND_SUB))
+            a = a->lhs;
+        if (a && a->kind == ND_VAR)
+            return a->var->checked_prop_candidate;
+    }
+    return false;
+}
+
 // True when parameter `p`, fed by argument `a`, is verified at the call: a
 // checked pointer parameter with a bounds form, whose argument is rooted at a
 // declared-checked var/member, a propagation candidate, or a call returning a
@@ -2625,7 +2645,8 @@ static bool checked_param_qualifies(Type *p, Node *a) {
     CheckedBase plain;
     return checked_base_is_declared(src_base) ||
            (src_base.var && src_base.var->checked_prop_candidate) ||
-           checked_call_root(a) != NULL || checked_cast_root(a) != NULL ||
+           checked_row_of_candidate(a) || checked_call_root(a) != NULL ||
+           checked_cast_root(a) != NULL ||
            checked_plain_array_root(a, &plain) != NULL;
 }
 
@@ -3448,7 +3469,8 @@ static Node *group_peel_discarded(VirtualMachine *vm, Node *e) {
 // object that is not a private local) any call or indirect store. A nested
 // statement is entered only when none of it ends tracking. A write whose value
 // is used (`if ((s.n = f()))`) is rechecked when the rest of its expression
-// does not end tracking.
+// does not end tracking, or when `&&`, `||`, `?:` or `,` sequences it before
+// the event and no loop re-enters it afterwards.
 
 typedef enum { TV_SKIP, TV_RECHECK, TV_STOP } TrackVerdict;
 
@@ -3490,6 +3512,9 @@ typedef struct {
     Obj         *cg;
     GroupLeaves  unit; // value-used sibling writes found in the current unit
     GroupLeaves  held; // those of a nested statement, wrapped if it stays live
+    int  committed; // leading writes of `unit` that run before anything later
+    bool spine;     // the node being visited is sequenced after those
+    int  loops;     // loops entered inside the tracked region
 } TrackCtx;
 
 static void track_addr_add(TrackFn *tf, Obj *root, Obj *via, Node *target) {
@@ -3741,9 +3766,25 @@ static bool track_alias_write(TrackCtx *cx, Node *l, Obj **wv, Member **wm,
     return false;
 }
 
+// Visits a child of the node being tracked. `sequenced` says the child's
+// effects precede whatever the parent evaluates next, so it keeps the spine.
+static TrackVerdict track_child(Node *n, TrackCtx *cx, bool sequenced) {
+    bool saved     = cx->spine;
+    cx->spine      = saved && sequenced;
+    TrackVerdict v = track_node(n, cx, false);
+    cx->spine      = saved;
+    return v;
+}
+
+static void track_unit_begin(TrackCtx *cx) {
+    cx->unit.n    = 0;
+    cx->committed = 0;
+    cx->spine     = true;
+}
+
 static TrackVerdict track_assign(Node *n, TrackCtx *cx, bool top) {
-    if (track_node(n->rhs, cx, false) == TV_STOP ||
-        track_node(n->lhs, cx, false) == TV_STOP)
+    if (track_child(n->rhs, cx, !node_has_side_effects(n->lhs)) == TV_STOP ||
+        track_child(n->lhs, cx, false) == TV_STOP)
         return TV_STOP;
     if (group_is_temp(n->lhs)) {
         Node *r = group_peel_casts(n->rhs);
@@ -3792,6 +3833,26 @@ static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
         case ND_BLOCK_LITERAL:
         case ND_BLOCK_CALL:
             return TV_STOP;
+        case ND_CAST:
+            return track_child(n->lhs, cx, true);
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_COMMA:
+            if (track_child(n->lhs, cx, true) == TV_STOP)
+                return TV_STOP;
+            if (cx->spine)
+                cx->committed = cx->unit.n;
+            return track_child(n->rhs, cx, true);
+        case ND_COND:
+            if (track_child(n->cond, cx, true) == TV_STOP)
+                return TV_STOP;
+            if (cx->spine)
+                cx->committed = cx->unit.n;
+            if (track_child(n->then, cx, true) == TV_STOP)
+                return TV_STOP;
+            if (cx->spine)
+                cx->committed = cx->unit.n; // the branches are exclusive
+            return track_child(n->els, cx, true);
         case ND_FUNCALL:
         case ND_ASM:
         case ND_CAS:
@@ -3801,14 +3862,14 @@ static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
         default:
             break;
     }
-    if (track_node(n->lhs, cx, false) == TV_STOP ||
-        track_node(n->rhs, cx, false) == TV_STOP ||
-        track_node(n->cond, cx, false) == TV_STOP ||
-        track_node(n->then, cx, false) == TV_STOP ||
-        track_node(n->els, cx, false) == TV_STOP)
+    if (track_child(n->lhs, cx, false) == TV_STOP ||
+        track_child(n->rhs, cx, false) == TV_STOP ||
+        track_child(n->cond, cx, false) == TV_STOP ||
+        track_child(n->then, cx, false) == TV_STOP ||
+        track_child(n->els, cx, false) == TV_STOP)
         return TV_STOP;
     for (Node *a = n->args; a; a = a->next)
-        if (track_node(a, cx, false) == TV_STOP)
+        if (track_child(a, cx, false) == TV_STOP)
             return TV_STOP;
     return call_like && !cx->priv ? TV_STOP : TV_SKIP;
 }
@@ -3865,16 +3926,19 @@ static void track_wrap_value(VirtualMachine *vm, Obj *fn, Node *w,
 }
 
 // Finishes a unit: its value-used writes are wrapped now, or held for the
-// statement they are in. Nothing is wrapped when the unit ended tracking.
+// statement they are in. A unit that ended tracking wraps only the writes
+// sequenced before the event, and only outside a loop, where a later iteration
+// would run them after it.
 static void track_unit_done(VirtualMachine *vm, Obj *fn, TrackCtx *cx,
                             bool live) {
-    for (int i = 0; live && i < cx->unit.n; i++) {
-        if (cx->immediate)
+    int n = live ? cx->unit.n : cx->loops ? 0 : cx->committed;
+    for (int i = 0; i < n; i++) {
+        if (cx->immediate || !live)
             track_wrap_value(vm, fn, cx->unit.v[i], cx);
         else
             group_push(&cx->held, cx->unit.v[i]);
     }
-    cx->unit.n = 0;
+    track_unit_begin(cx);
 }
 
 // An expression statement's leaves, or a condition/value as one unit.
@@ -3883,7 +3947,7 @@ static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
     if (!e)
         return true;
     if (!discarded) {
-        cx->unit.n = 0;
+        track_unit_begin(cx);
         bool live  = track_node(e, cx, false) != TV_STOP;
         track_unit_done(vm, fn, cx, live);
         return live;
@@ -3892,7 +3956,7 @@ static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
     group_flatten(group_peel_discarded(vm, e), &g);
     bool ok = true;
     for (int i = 0; ok && i < g.n; i++) {
-        cx->unit.n     = 0;
+        track_unit_begin(cx);
         TrackVerdict v = track_node(g.v[i], cx, true);
         ok             = v != TV_STOP;
         if (v == TV_RECHECK && cx->immediate)
@@ -3924,14 +3988,23 @@ static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx,
             return track_expr(vm, fn, s->cond, false, cx, wraps) &&
                    track_stmt(vm, fn, s->then, cx, wraps) &&
                    track_stmt(vm, fn, s->els, cx, wraps);
-        case ND_FOR:
-            return track_stmt(vm, fn, s->init, cx, wraps) &&
-                   track_expr(vm, fn, s->cond, false, cx, wraps) &&
-                   track_stmt(vm, fn, s->then, cx, wraps) &&
-                   track_expr(vm, fn, s->inc, true, cx, wraps);
-        case ND_DO:
-            return track_stmt(vm, fn, s->then, cx, wraps) &&
-                   track_expr(vm, fn, s->cond, false, cx, wraps);
+        case ND_FOR: {
+            if (!track_stmt(vm, fn, s->init, cx, wraps))
+                return false;
+            cx->loops++;
+            bool ok = track_expr(vm, fn, s->cond, false, cx, wraps) &&
+                      track_stmt(vm, fn, s->then, cx, wraps) &&
+                      track_expr(vm, fn, s->inc, true, cx, wraps);
+            cx->loops--;
+            return ok;
+        }
+        case ND_DO: {
+            cx->loops++;
+            bool ok = track_stmt(vm, fn, s->then, cx, wraps) &&
+                      track_expr(vm, fn, s->cond, false, cx, wraps);
+            cx->loops--;
+            return ok;
+        }
         case ND_SWITCH:
             return track_expr(vm, fn, s->cond, false, cx, wraps) &&
                    track_stmt(vm, fn, s->then, cx, wraps);
@@ -3968,7 +4041,7 @@ static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
         bool live    = true;
         cx.immediate = true;
         for (int j = as->v[k].resume; live && j < n; j++) {
-            cx.unit.n      = 0;
+            track_unit_begin(&cx);
             TrackVerdict v = track_node(leaves[j], &cx, true);
             live           = v != TV_STOP;
             if (v == TV_RECHECK)

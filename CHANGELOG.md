@@ -10,6 +10,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: the VM implements every remaining `__*_chk` entry point glibc 2.39's fortified headers reference: wide-character (`__wmemcpy_chk`, `__wcscpy_chk`, `__swprintf_chk`, ...), `__poll_chk`, `__ppoll_chk`, `__syslog_chk`, `__asprintf_chk`, `__dprintf_chk`, `__realpath_chk`, `__mbstowcs_chk`, `__wctomb_chk`, `__getgroups_chk`, `__readlinkat_chk` and the rest. A failed size check aborts (exit 134). Only the obstack pair is left out.
 - Added: libc functions the fortified headers reach, as VM natives: `strlcpy`, `strlcat`, `dprintf`, `vdprintf`, `readlinkat`, `getdomainname`, `getwd`, `ptsname_r`, `wmemcpy`, `wmemmove`, `wmemset`, `wcpcpy`, `wcpncpy`, `wcslcpy`, `wcslcat`, `fgetws`, `mbsnrtowcs`, `wcsnrtombs` and the wide printf family; on Linux also `explicit_bzero`, `fgets_unlocked`, `fread_unlocked`, `wmempcpy` and `fgetws_unlocked`.
 - Added: the library bounds table covers the new byte-counted entry points.
+- Added: a row of a row pointer (`p[0]`, `*p`, `p[0][1]`) passed to a checked parameter is verified against the row's extent, also when `p` is checked-rooted on only some paths.
+- Added: a count written inside a used value is rechecked when `&&`, `||`, `?:` or `,` sequences it before a call that ends tracking (`if ((s.n = 8) && fill(&s))`), outside a loop.
 
 ## [0.26.0] - 2026-10-27
 
