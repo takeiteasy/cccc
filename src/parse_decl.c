@@ -1615,13 +1615,19 @@ static void warn_unused_globals(VirtualMachine *vm) {
     X(ldexp, 2, false, I)                                                      \
     X(ilogb, 1, false, R)
 
+#define LIBM_KIND_1 '1'
+#define LIBM_KIND_2 '2'
+#define LIBM_KIND_3 '3'
+#define LIBM_KIND_I 'I'
+#define LIBM_KIND_R 'R'
+
 static const struct {
     const char *base;
     int         arity;
     bool        exact;
     char        kind;
 } libm_builtins[] = {
-#define X(n, ar, ex, k) {#n, ar, ex, #k[0]},
+#define X(n, ar, ex, k) {#n, ar, ex, LIBM_KIND_##k},
     LIBM_BUILTINS(X)
 #undef X
 };
