@@ -80,6 +80,14 @@ extern void *memset_explicit(void *s, int c, size_t n);
 /* extern void* memmove_s(void *dest, size_t destsz, const void *src, size_t n);
  */
 extern void *memccpy(void *dest, const void *src, int c, size_t n);
+/* BSD strlcpy/strlcat: Darwin and glibc >= 2.38 natively, older glibc via a
+   VM fallback with the same semantics. */
+extern size_t strlcpy(char *restrict dst, const char *restrict src, size_t n);
+extern size_t strlcat(char *restrict dst, const char *restrict src, size_t n);
+#ifdef __linux__
+/* glibc-only; Darwin has memset_explicit (C23). */
+extern void explicit_bzero(void *s, size_t n);
+#endif
 /* extern int strerror_s(char *buf, size_t bufsz, int errnum); */
 /* extern size_t strerrorlen_s(int errnum); */
 

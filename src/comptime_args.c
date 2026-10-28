@@ -35,6 +35,7 @@
 //   h        opaque host handle      c / C    strcat / strncat destination
 //   x        guest function pointer, not NULL
 //   f / F    printf / scanf format; the arguments it consumes are checked too
+//   g        wide printf format (wchar_t string), checked like f
 //   V        va_list pointer, consumed by the preceding format
 //   suffix ? accepts NULL            suffix ! accepts (void *)-1
 //
@@ -88,8 +89,16 @@ static const struct {
 } SPECS[] = {
     {"_Exit", ""},
     {"_exit", ""},
+    {"__asprintf_chk", "w=8 - f > A"},
+    {"__confstr_chk", "- w@2? - -"},
+    {"__explicit_bzero_chk", "w@1 - -"},
     {"__fdelt_chk", "-"},
     {"__fdelt_warn", "-"},
+    {"__fwprintf_chk", "h - g"},
+    {"__getgroups_chk", "- w@0*=4? -"},
+    {"__mbsnrtowcs_chk", "w@3*=4? w=8[s] - - w=mbstate? -"},
+    {"__mbsrtowcs_chk", "w@2*=4? w=8[s] - w=mbstate? -"},
+    {"__mbstowcs_chk", "w@2*=4? s - -"},
     {"__memcpy_chk", "w@2 r@2 - -"},
     {"__memmove_chk", "w@2 r@2 - -"},
     {"__mempcpy_chk", "w@2 r@2 - -"},
@@ -107,6 +116,9 @@ static const struct {
     {"__sprintf_chk", "w=1 - - f"},
     {"__printf_chk", "- f"},
     {"__fprintf_chk", "h - f"},
+    {"__swprintf_chk", "w@1*=4? - - - g"},
+    {"__vasprintf_chk", "w=8 - f V > A"},
+    {"__vfwprintf_chk", "h - g V"},
     {"__vsnprintf_chk", "w@1? - - - f V"},
     {"__vsprintf_chk", "w=1 - - f V"},
     {"__vprintf_chk", "- f V"},
@@ -149,6 +161,7 @@ static const struct {
     {"div", ""},
     {"duplocale", "h > h"},
     {"exit", ""},
+    {"explicit_bzero", "w@1 -"},
     {"feclearexcept", ""},
     {"fegetenv", "w=fenv"},
     {"fegetexceptflag", "w=fexcept -"},
@@ -162,6 +175,7 @@ static const struct {
     {"feupdateenv", "r=fenv!"},
     {"fflush", "h?"},
     {"fnmatch", "s s -"},
+    {"fwprintf", "h g"},
     {"getdelim", "w=8 w=8 - h"},
     {"getline", "w=8 w=8 h"},
     {"fprintf", "h f"},
@@ -236,6 +250,7 @@ static const struct {
     {"mbrtoc8", "w=1? r@2? - w=mbstate?"},
     {"mbrtowc", "w=4? r@2? - w=mbstate?"},
     {"mbsinit", "r=mbstate?"},
+    {"mbsnrtowcs", "w@3*=4? w=8[s] - - w=mbstate?"},
     {"mbsrtowcs", "w@2*=4? w=8[s] - w=mbstate?"},
     {"mbstowcs", "w@2*=4? s -"},
     {"mbtowc", "w=4? r@2? -"},
@@ -298,6 +313,8 @@ static const struct {
     {"strfmon", "w@1 - s"},
     {"strfmon_l", "w@1 - h! s"},
     {"strftime", "w@1 - s r=tm"},
+    {"strlcat", "w@2 s -"},
+    {"strlcpy", "w@2 s -"},
     {"strlen", "s"},
     {"strncasecmp", "n@2 n@2 -"},
     {"strncat", "C n@2 -"},
@@ -323,6 +340,7 @@ static const struct {
     {"strtoul", "s w=8? -"},
     {"strtoull", "s w=8? -"},
     {"strxfrm", "w@2? s -"},
+    {"swprintf", "w@1*=4? - g"},
     {"sysconf", ""},
     {"tdelete", "- w=8 x"},
     {"tfind", "- w=8 x"},
@@ -341,19 +359,27 @@ static const struct {
     {"usleep", ""},
     {"vasprintf", "w=8 f V > A"},
     {"vfprintf", "h f V"},
+    {"vfwprintf", "h g V"},
     {"vprintf", "f V"},
     {"vsnprintf", "w@1? - f V"},
     {"vsprintf", "w=1 f V"},
     {"vsscanf", "s F V"},
+    {"vswprintf", "w@1*=4? - g V"},
+    {"vwprintf", "g V"},
+    {"wcpcpy", "w=4 W"},
+    {"wcpncpy", "w@2*=4 W -"},
     {"wcrtomb", "w=16? - w=mbstate?"},
     {"wcscat", "w=4 W"},
     {"wcschr", "W -"},
     {"wcscmp", "W W"},
     {"wcscpy", "w=4 W"},
+    {"wcslcat", "w@2*=4 W -"},
+    {"wcslcpy", "w@2*=4 W -"},
     {"wcslen", "W"},
     {"wcsncat", "w=4 W -"},
     {"wcsncmp", "W W -"},
     {"wcsncpy", "w@2*=4 W -"},
+    {"wcsnrtombs", "w@3? w=8[W] - - w=mbstate?"},
     {"wcsrchr", "W -"},
     {"wcsrtombs", "w@2? w=8[W] - w=mbstate?"},
     {"wcsstr", "W W"},
@@ -402,6 +428,31 @@ static const struct {
     {"__cccc_stderr", "> h"},
     {"__cccc_stdin", "> h"},
     {"__cccc_stdout", "> h"},
+    {"__vswprintf_chk", "w@1*=4? - - - g V"},
+    {"__vwprintf_chk", "- g V"},
+    {"__wcpcpy_chk", "w=4 W -"},
+    {"__wcpncpy_chk", "w@2*=4 W - -"},
+    {"__wcrtomb_chk", "w=16? - w=mbstate? -"},
+    {"__wcscat_chk", "w=4 W -"},
+    {"__wcscpy_chk", "w=4 W -"},
+    {"__wcslcat_chk", "w@2*=4 W - -"},
+    {"__wcslcpy_chk", "w@2*=4 W - -"},
+    {"__wcsncat_chk", "w=4 W - -"},
+    {"__wcsncpy_chk", "w@2*=4 W - -"},
+    {"__wcsnrtombs_chk", "w@3? w=8[W] - - w=mbstate? -"},
+    {"__wcsrtombs_chk", "w@2? w=8[W] - w=mbstate? -"},
+    {"__wcstombs_chk", "w@2? W - -"},
+    {"__wctomb_chk", "w=16? - -"},
+    {"wmemcpy", "w@2*=4 r@2*=4 -"},
+    {"wmemmove", "w@2*=4 r@2*=4 -"},
+    {"wmempcpy", "w@2*=4 r@2*=4 -"},
+    {"wmemset", "w@2*=4 - -"},
+    {"wprintf", "g"},
+    {"__wmemcpy_chk", "w@2*=4 r@2*=4 - -"},
+    {"__wmemmove_chk", "w@2*=4 r@2*=4 - -"},
+    {"__wmempcpy_chk", "w@2*=4 r@2*=4 - -"},
+    {"__wmemset_chk", "w@2*=4 - - -"},
+    {"__wprintf_chk", "- g"},
 };
 
 // Handles libc returns that comptime code passes back to it.
@@ -1336,6 +1387,19 @@ static int check_format(CallCtx *c, Slots *s, bool scan, const char *fmt) {
     return scan ? check_scanf(c, s, fmt) : check_printf(c, s, fmt);
 }
 
+// A wide format is narrowed to ASCII: only the % directives matter.
+static int check_wide_format(CallCtx *c, Slots *s, const wchar_t *wfmt) {
+    size_t n   = wcslen(wfmt);
+    char  *fmt = malloc(n + 1);
+    if (!fmt)
+        return 0;
+    for (size_t i = 0; i <= n; i++)
+        fmt[i] = wfmt[i] > 0 && wfmt[i] < 128 ? (char)wfmt[i] : '?';
+    int rc = check_printf(c, s, fmt);
+    free(fmt);
+    return rc;
+}
+
 // One parsed spec token: kind letter, size expression, flags and deref suffix.
 typedef struct {
     char        kind;
@@ -1679,6 +1743,7 @@ static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
     int         i        = 0;
     int         fmt_idx  = -1;
     bool        fmt_scan = false;
+    bool        fmt_wide = false;
     int         ntokens  = 0;
 
     for (; *p && *p != '>'; i++) {
@@ -1701,12 +1766,14 @@ static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
             return fault(&c, i, ptr, 1, t.kind == 'w');
         switch (t.kind) {
             case 'f':
-            case 'F': {
-                int rc = check_leaf(&c, i, 's', n, ptr);
+            case 'F':
+            case 'g': {
+                int rc = check_leaf(&c, i, t.kind == 'g' ? 'W' : 's', n, ptr);
                 if (rc)
                     return rc;
                 fmt_idx  = i;
                 fmt_scan = t.kind == 'F';
+                fmt_wide = t.kind == 'g';
                 break;
             }
             case 'c':
@@ -1743,8 +1810,11 @@ static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
                                 va->stack_ptr,
                                 va->reg_count,
                                 false};
-                    int   rc = check_format(&c, &s, fmt_scan,
-                                            (const char *)args[fmt_idx]);
+                    int   rc = fmt_wide
+                                   ? check_wide_format(
+                                         &c, &s, (const wchar_t *)args[fmt_idx])
+                                   : check_format(&c, &s, fmt_scan,
+                                                  (const char *)args[fmt_idx]);
                     if (rc)
                         return rc;
                 }
@@ -1778,7 +1848,10 @@ static int run_spec(VirtualMachine *vm, const char *name, const char *spec,
     // Direct variadic arguments follow the format string.
     if (fmt_idx >= 0) {
         Slots s = {&c, ntokens, false, NULL, NULL, 0, false};
-        return check_format(&c, &s, fmt_scan, (const char *)args[fmt_idx]);
+        return fmt_wide
+                   ? check_wide_format(&c, &s, (const wchar_t *)args[fmt_idx])
+                   : check_format(&c, &s, fmt_scan,
+                                  (const char *)args[fmt_idx]);
     }
     return 0;
 }

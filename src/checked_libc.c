@@ -154,6 +154,76 @@ static const struct {
      "long __recvfrom_chk(int fd, void *" BC(
          "n") " buf, unsigned long n, unsigned long buflen, int flags, "
               "void *addr, void *alen)"},
+
+    // Entry points added with the rest of the fortified set. Wide counts are
+    // elements, so the byte count is n * 4 (wchar_t is 4 bytes on every host).
+    {"readlinkat", "long readlinkat(int fd, const char *path, char *" BC(
+                       "n") " buf, unsigned long n)"},
+    {"getdomainname",
+     "int getdomainname(char *" BC("n") " name, unsigned long n)"},
+    {"ptsname_r",
+     "int ptsname_r(int fd, char *" BC("n") " buf, unsigned long n)"},
+    {"explicit_bzero",
+     "void explicit_bzero(void *" BC("n") " s, unsigned long n)"},
+    {"fgets_unlocked", "char *fgets_unlocked(char *" BC("n") " s, int n, "
+                                                             "void *f)"},
+    {"fread_unlocked",
+     "unsigned long fread_unlocked(void *" BC(
+         "size * nmemb") " p, "
+                         "unsigned long size, unsigned long nmemb, void *f)"},
+    {"wmemcpy", "int *wmemcpy(int *" BC("n * 4") " d, const int *" BC(
+                    "n * 4") " s, "
+                             "unsigned long n)"},
+    {"wmemmove", "int *wmemmove(int *" BC("n * 4") " d, const int *" BC(
+                     "n * 4") " s, "
+                              "unsigned long n)"},
+    {"wmempcpy", "int *wmempcpy(int *" BC("n * 4") " d, const int *" BC(
+                     "n * 4") " s, "
+                              "unsigned long n)"},
+    {"wmemset", "int *wmemset(int *" BC("n * 4") " s, int c, unsigned long n)"},
+    {"__readlinkat_chk",
+     "long __readlinkat_chk(int fd, const char *path, char *" BC(
+         "n") " buf, unsigned long n, unsigned long buflen)"},
+    {"__getdomainname_chk",
+     "int __getdomainname_chk(char *" BC("n") " name, unsigned long n, "
+                                              "unsigned long nreal)"},
+    {"__ptsname_r_chk",
+     "int __ptsname_r_chk(int fd, char *" BC("n") " buf, unsigned long n, "
+                                                  "unsigned long nreal)"},
+    {"__ttyname_r_chk",
+     "int __ttyname_r_chk(int fd, char *" BC("n") " buf, unsigned long n, "
+                                                  "unsigned long nreal)"},
+    {"__getlogin_r_chk",
+     "int __getlogin_r_chk(char *" BC("n") " buf, unsigned long n, "
+                                           "unsigned long nreal)"},
+    {"__explicit_bzero_chk",
+     "void __explicit_bzero_chk(void *" BC("n") " s, unsigned long n, "
+                                                "unsigned long os)"},
+    {"__fgets_unlocked_chk",
+     "char *__fgets_unlocked_chk(char *" BC(
+         "n") " s, unsigned long size, int n, void *f)"},
+    {"__fread_unlocked_chk",
+     "unsigned long __fread_unlocked_chk(void *" BC(
+         "size * nmemb") " p, unsigned long plen, unsigned long size, "
+                         "unsigned long nmemb, void *f)"},
+    {"__wmemcpy_chk",
+     "int *__wmemcpy_chk(int *" BC("n * 4") " d, const int *" BC(
+         "n * 4") " s, unsigned long n, unsigned long ns)"},
+    {"__wmemmove_chk",
+     "int *__wmemmove_chk(int *" BC("n * 4") " d, const int *" BC(
+         "n * 4") " s, unsigned long n, unsigned long ns)"},
+    {"__wmempcpy_chk",
+     "int *__wmempcpy_chk(int *" BC("n * 4") " d, const int *" BC(
+         "n * 4") " s, unsigned long n, unsigned long ns)"},
+    {"__wmemset_chk",
+     "int *__wmemset_chk(int *" BC("n * 4") " s, int c, unsigned long n, "
+                                            "unsigned long ns)"},
+    {"__wcsncpy_chk",
+     "int *__wcsncpy_chk(int *" BC("n * 4") " d, const int *s, unsigned long "
+                                            "n, unsigned long dl)"},
+    {"__wcpncpy_chk",
+     "int *__wcpncpy_chk(int *" BC("n * 4") " d, const int *s, unsigned long "
+                                            "n, unsigned long dl)"},
 };
 
 static int find_row(const char *name) {

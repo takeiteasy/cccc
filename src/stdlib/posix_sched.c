@@ -277,6 +277,14 @@ static long long wrap_confstr(long long name, long long buf, long long len) {
     }
 }
 
+// TODO: unreachable from the VM with real glibc headers, whose _CS_* numbers
+// differ from the canonical ones wrap_confstr expects (#1845)
+static long long chk_confstr(long long name, long long buf, long long len,
+                             long long buflen) {
+    CCCC_FORTIFY_CHECK(len, buflen, "confstr");
+    return wrap_confstr(name, buf, len);
+}
+
 // sched.h (#800) -- SCHED_OTHER/FIFO/RR genuinely disagree between hosts
 // (macOS: 1/4/2, Linux: 0/1/2/3/5, verified against real headers), so the
 // guest sees CCCC-canonical numbering (include/sched.h) and these wrappers
@@ -418,6 +426,7 @@ void register_posix_sched_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "pathconf", (void *)wrap_pathconf, 2, 0);
     cc_register_cfunc(vm, "fpathconf", (void *)wrap_fpathconf, 2, 0);
     cc_register_cfunc(vm, "confstr", (void *)wrap_confstr, 3, 0);
+    cc_register_cfunc(vm, "__confstr_chk", (void *)chk_confstr, 4, 0);
     cc_register_cfunc(vm, "sched_yield", (void *)sched_yield, 0, 0);
     cc_register_cfunc(vm, "sched_get_priority_min",
                       (void *)wrap_sched_get_priority_min, 1, 0);

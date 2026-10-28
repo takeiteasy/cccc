@@ -4,6 +4,7 @@
 #include <wchar.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 
 #if defined(__APPLE__)
 #include <Availability.h>
@@ -420,6 +421,40 @@ static long long wrap_mbtowc(long long pwc, long long s, long long n) {
 static long long wrap_wctomb(long long s, long long wc) {
     return (long long)wctomb((char *)s, (wchar_t)wc);
 }
+
+#ifdef __linux__
+// glibc exports ptsname_r regardless of the feature macros; declared here
+// rather than enabling _GNU_SOURCE for the whole file.
+extern int ptsname_r(int fd, char *buf, size_t buflen);
+#endif
+
+// `__*_chk` entry points glibc's fortified <stdlib.h> calls. Each compares in
+// the unit glibc passes (bytes, except the wchar_t counts of mbstowcs).
+static long long chk_ptsname_r(long long fd, char *buf, long long n,
+                               long long nreal) {
+    CCCC_FORTIFY_CHECK(n, nreal, "ptsname_r");
+    return (long long)ptsname_r((int)fd, buf, (size_t)n);
+}
+static char *chk_realpath(const char *name, char *resolved, size_t reslen) {
+    if (reslen < (size_t)PATH_MAX)
+        cccc_fortify_fail("realpath");
+    return realpath(name, resolved);
+}
+static long long chk_wctomb(char *s, long long wc, size_t buflen) {
+    if (buflen < (size_t)MB_CUR_MAX)
+        cccc_fortify_fail("wctomb");
+    return (long long)wctomb(s, (wchar_t)wc);
+}
+static size_t chk_mbstowcs(wchar_t *dst, const char *src, size_t len,
+                           size_t dstlen) {
+    CCCC_FORTIFY_CHECK(len, dstlen, "mbstowcs");
+    return mbstowcs(dst, src, len);
+}
+static size_t chk_wcstombs(char *dst, const wchar_t *src, size_t len,
+                           size_t dstlen) {
+    CCCC_FORTIFY_CHECK(len, dstlen, "wcstombs");
+    return wcstombs(dst, src, len);
+}
 // #1069: MB_CUR_MAX (include/stdlib.h) reads the real host's own
 // MB_CUR_MAX -- glibc spells it as a function call
 // (__ctype_get_mb_cur_max()), macOS as a plain global (__mb_cur_max);
@@ -608,4 +643,12 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mbstowcs", (void *)mbstowcs, 3, 0);
     cc_register_cfunc(vm, "wcstombs", (void *)wcstombs, 3, 0);
     cc_register_cfunc(vm, "__cccc_mb_cur_max", (void *)wrap_mb_cur_max, 0, 0);
+
+    // __*_chk entry points of fortified <stdlib.h>
+    cc_register_cfunc(vm, "ptsname_r", (void *)ptsname_r, 3, 0);
+    cc_register_cfunc(vm, "__ptsname_r_chk", (void *)chk_ptsname_r, 4, 0);
+    cc_register_cfunc(vm, "__realpath_chk", (void *)chk_realpath, 3, 0);
+    cc_register_cfunc(vm, "__wctomb_chk", (void *)chk_wctomb, 3, 0);
+    cc_register_cfunc(vm, "__mbstowcs_chk", (void *)chk_mbstowcs, 4, 0);
+    cc_register_cfunc(vm, "__wcstombs_chk", (void *)chk_wcstombs, 4, 0);
 }

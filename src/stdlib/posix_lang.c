@@ -210,6 +210,21 @@ static long long wrap_vsyslog(long long priority, long long fmt,
     return cccc_ffi_call_variadic((void *)syslog, 2, fixed, n, types, vals);
 }
 
+// glibc's fortified <syslog.h>: `flag` is ignored, there is no size to check.
+static void chk_syslog(int priority, int flag, const char *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    vsyslog(priority, fmt, ap);
+    va_end(ap);
+}
+
+static long long chk_vsyslog(long long priority, long long flag, long long fmt,
+                             long long va_ptr) {
+    (void)flag;
+    return wrap_vsyslog(priority, fmt, va_ptr);
+}
+
 // Host-global accessors (#736, __cccc_errno_ptr/__cccc_optarg_ptr/etc.) are
 // registered in posix_io.c, next to getopt() itself.
 
@@ -259,6 +274,8 @@ void register_posix_lang_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setlogmask", (void *)setlogmask, 1, 0);
     cc_register_variadic_cfunc(vm, "syslog", (void *)syslog, 2, 0);
     cc_register_cfunc(vm, "vsyslog", (void *)wrap_vsyslog, 3, 0);
+    cc_register_variadic_cfunc(vm, "__syslog_chk", (void *)chk_syslog, 3, 0);
+    cc_register_cfunc(vm, "__vsyslog_chk", (void *)chk_vsyslog, 4, 0);
 
     // monetary.h (#808) -- strfmon is variadic with double arguments, but
     // (like syslog above) is a real, non-va_list-forwarding call site, so

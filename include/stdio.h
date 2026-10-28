@@ -123,6 +123,11 @@ extern int asprintf(char **strp, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 extern int vasprintf(char **strp, const char *fmt, va_list ap);
 
+/* POSIX.1-2008 dprintf/vdprintf: formatted output to a file descriptor. */
+extern int dprintf(int fd, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
+extern int vdprintf(int fd, const char *fmt, va_list ap);
+
 /* ================================================== */
 /* Common non-variadic stdio functions (both modes) */
 /* ================================================== */
@@ -152,6 +157,13 @@ extern void setbuf(FILE *stream, char *buf);
 extern int setvbuf(FILE *stream, char *buf, int mode, size_t size);
 extern int fgetc(FILE *stream);
 extern char *fgets(char *s, int n, FILE *stream);
+#ifdef __linux__
+/* glibc-only unlocked variants; Darwin has none, so they are undeclared there.
+ */
+extern char *fgets_unlocked(char *s, int n, FILE *stream);
+extern size_t fread_unlocked(void *ptr, size_t size, size_t nmemb,
+                             FILE *stream);
+#endif
 extern int fputc(int c, FILE *stream);
 extern int fputs(const char *s, FILE *stream);
 extern int getc(FILE *stream);

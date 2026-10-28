@@ -276,12 +276,28 @@ static long long chk_fdelt(long long d) {
     return d / (8 * (long long)sizeof(long));
 }
 
+// glibc's fortified <poll.h>: `fdslen` is the byte size of the pollfd array.
+static long long chk_poll(long long fds, long long nfds, long long timeout,
+                          long long fdslen) {
+    CCCC_FORTIFY_CHECK((size_t)nfds * sizeof(struct pollfd), fdslen, "poll");
+    return wrap_poll_gil(fds, nfds, timeout);
+}
+#ifdef __linux__
+static long long chk_ppoll(long long fds, long long nfds, long long timeout,
+                           long long sigmask, long long fdslen) {
+    CCCC_FORTIFY_CHECK((size_t)nfds * sizeof(struct pollfd), fdslen, "ppoll");
+    return wrap_ppoll_gil(fds, nfds, timeout, sigmask);
+}
+#endif
+
 void register_posix_poll_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__fdelt_chk", (void *)chk_fdelt, 1, 0);
     cc_register_cfunc(vm, "__fdelt_warn", (void *)chk_fdelt, 1, 0);
     cc_register_cfunc(vm, "poll", (void *)wrap_poll_gil, 3, 0);
+    cc_register_cfunc(vm, "__poll_chk", (void *)chk_poll, 4, 0);
 #ifdef __linux__
     cc_register_cfunc(vm, "ppoll", (void *)wrap_ppoll_gil, 4, 0);
+    cc_register_cfunc(vm, "__ppoll_chk", (void *)chk_ppoll, 5, 0);
 #else
     // Non-atomic emulation (#824) -- only register if the caller opted in
     // via --posix-emulation; matches poll.h's declaration guard.

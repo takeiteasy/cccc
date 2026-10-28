@@ -135,6 +135,7 @@ extern char *getlogin(void);
 
 /* Symbolic links / hard links */
 extern ssize_t readlink(const char *path, char *buf, size_t bufsize);
+extern ssize_t readlinkat(int fd, const char *path, char *buf, size_t bufsize);
 extern int symlink(const char *target, const char *linkpath);
 extern int link(const char *path1, const char *path2);
 
@@ -152,6 +153,9 @@ extern int pause(void);
 /* Misc process/host */
 extern int fchdir(int fd);
 extern int gethostname(char *name, size_t namelen);
+extern int getdomainname(char *name, size_t namelen);
+/* getwd: obsolete (POSIX.1-2001); buf must hold PATH_MAX bytes. */
+extern char *getwd(char *buf);
 extern int sethostname(const char *name, size_t namelen);
 extern int lchown(const char *path, uid_t owner, gid_t group);
 extern int ttyname_r(int fd, char *buf, size_t buflen);

@@ -1,7 +1,9 @@
 // stdio.h stdlib function registration
 #include "../cccc.h"
 #include "../internal.h" // cccc_current_ffi_vm, cccc_vm_heap_realloc
+#include <errno.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 // C23 adds the %b/%B (binary integer) conversion specifier to the
 // printf/scanf families. It's natively supported by glibc >= 2.35, but
@@ -205,18 +207,22 @@ static long long wrap_getline(char **lineptr, size_t *n, FILE *stream) {
 #define CHK_VSNPRINTF      vsnprintf
 #define CHK_VSPRINTF       vsprintf
 #define CHK_VFPRINTF       vfprintf
+#define CHK_VASPRINTF      vasprintf
 #define CHK_WRAP_VSNPRINTF wrap_vsnprintf
 #define CHK_WRAP_VSPRINTF  wrap_vsprintf
 #define CHK_WRAP_VPRINTF   wrap_vprintf
 #define CHK_WRAP_VFPRINTF  wrap_vfprintf
+#define CHK_WRAP_VASPRINTF wrap_vasprintf
 #else
 #define CHK_VSNPRINTF      cccc_vsnprintf
 #define CHK_VSPRINTF       cccc_vsprintf
 #define CHK_VFPRINTF       cccc_vfprintf
+#define CHK_VASPRINTF      cccc_vasprintf
 #define CHK_WRAP_VSNPRINTF wrap_cccc_vsnprintf
 #define CHK_WRAP_VSPRINTF  wrap_cccc_vsprintf
 #define CHK_WRAP_VPRINTF   wrap_cccc_vprintf
 #define CHK_WRAP_VFPRINTF  wrap_cccc_vfprintf
+#define CHK_WRAP_VASPRINTF wrap_cccc_vasprintf
 #endif
 
 static int chk_snprintf(char *s, size_t n, int flag, size_t os, const char *fmt,
@@ -306,6 +312,138 @@ static size_t chk_fread(void *p, size_t plen, size_t size, size_t n, FILE *f) {
     return fread(p, size, n, f);
 }
 
+static int chk_asprintf(char **strp, int flag, const char *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = CHK_VASPRINTF(strp, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static long long chk_vasprintf(char **strp, long long flag, const char *fmt,
+                               long long va_ptr) {
+    (void)flag;
+    return CHK_WRAP_VASPRINTF(strp, fmt, va_ptr);
+}
+
+// dprintf/vdprintf: format into a scratch buffer, then write it to the fd.
+static long long write_formatted(int fd, char *buf, int len) {
+    for (int off = 0; off < len;) {
+        ssize_t w = write(fd, buf + off, (size_t)(len - off));
+        if (w < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        off += (int)w;
+    }
+    return len;
+}
+
+static long long dprintf_va(int fd, const char *fmt, va_list ap) {
+    va_list need_ap;
+    va_copy(need_ap, ap);
+    int len = CHK_VSNPRINTF(NULL, 0, fmt, need_ap);
+    va_end(need_ap);
+    if (len < 0)
+        return -1;
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) {
+        errno = ENOMEM;
+        return -1;
+    }
+    CHK_VSNPRINTF(buf, (size_t)len + 1, fmt, ap);
+    long long r = write_formatted(fd, buf, len);
+    free(buf);
+    return r;
+}
+
+static long long wrap_dprintf(int fd, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    long long r = dprintf_va(fd, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static long long chk_dprintf(int fd, int flag, const char *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    long long r = dprintf_va(fd, fmt, ap);
+    va_end(ap);
+    return r;
+}
+
+static long long wrap_vdprintf(long long fd, const char *fmt,
+                               long long va_ptr) {
+    char probe[1];
+    int  len = (int)CHK_WRAP_VSNPRINTF(probe, 0, fmt, va_ptr);
+    if (len < 0)
+        return -1;
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) {
+        errno = ENOMEM;
+        return -1;
+    }
+    CHK_WRAP_VSNPRINTF(buf, len + 1, fmt, va_ptr);
+    long long r = write_formatted((int)fd, buf, len);
+    free(buf);
+    return r;
+}
+
+static long long chk_vdprintf(long long fd, long long flag, const char *fmt,
+                              long long va_ptr) {
+    (void)flag;
+    return wrap_vdprintf(fd, fmt, va_ptr);
+}
+
+#ifdef __linux__
+// glibc exports these regardless of the feature macros; declared here rather
+// than enabling _GNU_SOURCE for the whole file.
+extern char *fgets_unlocked(char *s, int n, FILE *f);
+static char *chk_fgets_unlocked(char *s, size_t size, int n, FILE *f) {
+    CCCC_FORTIFY_CHECK(n < 0 ? 0 : (size_t)n, size, "fgets_unlocked");
+    return fgets_unlocked(s, n, f);
+}
+
+static size_t chk_fread_unlocked(void *p, size_t plen, size_t size, size_t n,
+                                 FILE *f) {
+    CCCC_FORTIFY_CHECK(size * n, plen, "fread_unlocked");
+    return fread_unlocked(p, size, n, f);
+}
+
+// The buffer-refill and flush hooks behind glibc's extern-inline
+// fread_unlocked/getc_unlocked/putc_unlocked (live once __OPTIMIZE__ is set).
+extern int __uflow(FILE *f);
+extern int __overflow(FILE *f, int c);
+#endif
+
+// gets: removed from C11 and unlinkable on current glibc, so the VM reads the
+// line itself. Returns the line without its newline, NULL on EOF with no input.
+static char *read_gets_line(char *s, size_t limit, const char *fn) {
+    size_t i = 0;
+    int    c;
+    while ((c = getchar()) != EOF && c != '\n') {
+        if (limit != (size_t)-1 && i + 1 >= limit)
+            cccc_fortify_fail(fn);
+        s[i++] = (char)c;
+    }
+    if (c == EOF && i == 0)
+        return NULL;
+    s[i] = '\0';
+    return s;
+}
+
+static char *wrap_gets(char *s) {
+    return read_gets_line(s, (size_t)-1, "gets");
+}
+
+static char *chk_gets(char *s, size_t size) {
+    return read_gets_line(s, size, "gets");
+}
+
 // Register all stdio.h functions
 void register_stdio_functions(VirtualMachine *vm) {
     // Standard streams
@@ -367,6 +505,25 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__vfprintf_chk", (void *)chk_vfprintf, 4, 0);
     cc_register_cfunc(vm, "__fgets_chk", (void *)chk_fgets, 4, 0);
     cc_register_cfunc(vm, "__fread_chk", (void *)chk_fread, 5, 0);
+    cc_register_variadic_cfunc(vm, "__asprintf_chk", (void *)chk_asprintf, 3,
+                               0);
+    cc_register_cfunc(vm, "__vasprintf_chk", (void *)chk_vasprintf, 4, 0);
+    cc_register_variadic_cfunc(vm, "dprintf", (void *)wrap_dprintf, 2, 0);
+    cc_register_cfunc(vm, "vdprintf", (void *)wrap_vdprintf, 3, 0);
+    cc_register_variadic_cfunc(vm, "__dprintf_chk", (void *)chk_dprintf, 3, 0);
+    cc_register_cfunc(vm, "__vdprintf_chk", (void *)chk_vdprintf, 4, 0);
+    cc_register_cfunc(vm, "gets", (void *)wrap_gets, 1, 0);
+    cc_register_cfunc(vm, "__gets_chk", (void *)chk_gets, 2, 0);
+#ifdef __linux__
+    cc_register_cfunc(vm, "fgets_unlocked", (void *)fgets_unlocked, 3, 0);
+    cc_register_cfunc(vm, "fread_unlocked", (void *)fread_unlocked, 4, 0);
+    cc_register_cfunc(vm, "__uflow", (void *)__uflow, 1, 0);
+    cc_register_cfunc(vm, "__overflow", (void *)__overflow, 2, 0);
+    cc_register_cfunc(vm, "__fgets_unlocked_chk", (void *)chk_fgets_unlocked, 4,
+                      0);
+    cc_register_cfunc(vm, "__fread_unlocked_chk", (void *)chk_fread_unlocked, 5,
+                      0);
+#endif
 
     // Variadic scanf family: always routed to the custom format_scanf.c
     // engine, even when CCCC_HAVE_NATIVE_PCT_B is set. glibc's scanf family

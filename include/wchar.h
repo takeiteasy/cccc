@@ -5,6 +5,7 @@
 
 #include "stddef.h"
 #include <stdarg.h> /* #1070: angle-bracket for a correct #include_next hand-off under real GCC */
+#include <stdio.h>
 #include "time.h"
 
 #ifndef WEOF
@@ -73,6 +74,35 @@ extern wchar_t *wcschr(const wchar_t *s, wchar_t c);
 extern wchar_t *wcsrchr(const wchar_t *s, wchar_t c);
 extern wchar_t *wcsstr(const wchar_t *s1, const wchar_t *s2);
 extern size_t wcsxfrm(wchar_t *s1, const wchar_t *s2, size_t n);
+
+/* Wide memory and string copies (POSIX.1-2008). wcslcpy/wcslcat are BSD
+   extensions: Darwin and glibc >= 2.38 natively, older glibc via a VM
+   fallback. */
+extern wchar_t *wmemcpy(wchar_t *s1, const wchar_t *s2, size_t n);
+extern wchar_t *wmemmove(wchar_t *s1, const wchar_t *s2, size_t n);
+extern wchar_t *wmemset(wchar_t *s, wchar_t c, size_t n);
+extern wchar_t *wcpcpy(wchar_t *s1, const wchar_t *s2);
+extern wchar_t *wcpncpy(wchar_t *s1, const wchar_t *s2, size_t n);
+extern size_t wcslcpy(wchar_t *dst, const wchar_t *src, size_t n);
+extern size_t wcslcat(wchar_t *dst, const wchar_t *src, size_t n);
+extern size_t mbsnrtowcs(wchar_t *dst, const char **src, size_t nms, size_t len,
+                         mbstate_t *ps);
+extern size_t wcsnrtombs(char *dst, const wchar_t **src, size_t nwc, size_t len,
+                         mbstate_t *ps);
+#ifdef __linux__
+/* glibc-only; Darwin has neither, so they are undeclared there. */
+extern wchar_t *wmempcpy(wchar_t *s1, const wchar_t *s2, size_t n);
+extern wchar_t *fgetws_unlocked(wchar_t *s, int n, FILE *stream);
+#endif
+
+/* Wide formatted and line I/O. */
+extern wchar_t *fgetws(wchar_t *s, int n, FILE *stream);
+extern int swprintf(wchar_t *s, size_t n, const wchar_t *fmt, ...);
+extern int wprintf(const wchar_t *fmt, ...);
+extern int fwprintf(FILE *stream, const wchar_t *fmt, ...);
+extern int vswprintf(wchar_t *s, size_t n, const wchar_t *fmt, va_list ap);
+extern int vwprintf(const wchar_t *fmt, va_list ap);
+extern int vfwprintf(FILE *stream, const wchar_t *fmt, va_list ap);
 
 extern double wcstod(const wchar_t *nptr, wchar_t **endptr);
 extern float wcstof(const wchar_t *nptr, wchar_t **endptr);

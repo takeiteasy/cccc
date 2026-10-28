@@ -83,18 +83,55 @@ static char *chk_strncat(char *d, const char *s, size_t n, size_t os) {
     CCCC_FORTIFY_CHECK(strlen(d) + (sl < n ? sl : n) + 1, os, "strncat");
     return strncat(d, s, n);
 }
-#ifdef __APPLE__
+// strlcpy/strlcat: Darwin and glibc >= 2.38 have them; older glibc gets the
+// BSD semantics from these two functions.
+#if defined(__APPLE__)
+#define CCCC_HOST_HAS_STRLCPY 1
+#elif defined(__GLIBC__)
+#include <features.h>
+#if __GLIBC_PREREQ(2, 38)
+#define CCCC_HOST_HAS_STRLCPY 1
+#endif
+#endif
+#ifdef CCCC_HOST_HAS_STRLCPY
+#define cccc_strlcpy strlcpy
+#define cccc_strlcat strlcat
+#else
+static size_t cccc_strlcpy(char *d, const char *s, size_t n) {
+    size_t len = strlen(s);
+    if (n) {
+        size_t c = len < n - 1 ? len : n - 1;
+        memcpy(d, s, c);
+        d[c] = '\0';
+    }
+    return len;
+}
+static size_t cccc_strlcat(char *d, const char *s, size_t n) {
+    size_t dl = strnlen(d, n);
+    if (dl == n)
+        return n + strlen(s);
+    return dl + cccc_strlcpy(d + dl, s, n - dl);
+}
+#endif
 static size_t chk_strlcpy(char *d, const char *s, size_t n, size_t os) {
     CCCC_FORTIFY_CHECK(n, os, "strlcpy");
-    return strlcpy(d, s, n);
+    return cccc_strlcpy(d, s, n);
 }
 static size_t chk_strlcat(char *d, const char *s, size_t n, size_t os) {
     CCCC_FORTIFY_CHECK(n, os, "strlcat");
-    return strlcat(d, s, n);
+    return cccc_strlcat(d, s, n);
 }
+#ifdef __APPLE__
 static void *chk_memccpy(void *d, const void *s, int c, size_t n, size_t os) {
     CCCC_FORTIFY_CHECK(n, os, "memccpy");
     return memccpy(d, s, c, n);
+}
+#endif
+#ifdef __linux__
+// explicit_bzero is glibc-only; Darwin has memset_explicit (C23) instead.
+static void chk_explicit_bzero(void *d, size_t n, size_t os) {
+    CCCC_FORTIFY_CHECK(n, os, "explicit_bzero");
+    explicit_bzero(d, n);
 }
 #endif
 
@@ -156,9 +193,16 @@ void register_string_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__stpncpy_chk", (void *)chk_stpncpy, 4, 0);
     cc_register_cfunc(vm, "__strcat_chk", (void *)chk_strcat, 3, 0);
     cc_register_cfunc(vm, "__strncat_chk", (void *)chk_strncat, 4, 0);
-#ifdef __APPLE__
+    cc_register_cfunc(vm, "strlcpy", (void *)cccc_strlcpy, 3, 0);
+    cc_register_cfunc(vm, "strlcat", (void *)cccc_strlcat, 3, 0);
     cc_register_cfunc(vm, "__strlcpy_chk", (void *)chk_strlcpy, 4, 0);
     cc_register_cfunc(vm, "__strlcat_chk", (void *)chk_strlcat, 4, 0);
+#ifdef __APPLE__
     cc_register_cfunc(vm, "__memccpy_chk", (void *)chk_memccpy, 5, 0);
+#endif
+#ifdef __linux__
+    cc_register_cfunc(vm, "explicit_bzero", (void *)explicit_bzero, 2, 0);
+    cc_register_cfunc(vm, "__explicit_bzero_chk", (void *)chk_explicit_bzero, 3,
+                      0);
 #endif
 }

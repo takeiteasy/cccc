@@ -2160,6 +2160,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // termination -- an anonymous string-literal global can
                     // legitimately contain embedded NULs (wide/multi-part
                     // literals, __func__ splicing, etc).
+                    // TODO: array_len counts elements, so a wide literal is cut
+                    // to a quarter of its bytes (#1843)
                     int len = (node->var->ty && node->var->ty->kind == TY_ARRAY)
                                   ? node->var->ty->array_len
                                   : (int)strlen(node->var->init_data);

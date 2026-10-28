@@ -1,6 +1,7 @@
 // posix_io.c -- blocking fd I/O, open/creat/ioctl, pass-through fd/file
 // wrappers, and host-global (errno/getopt) accessor pointers (#946 split
 // of posix.c).
+#include <limits.h>
 #include "posix_util.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -390,6 +391,36 @@ static long long chk_gethostname(char *buf, long long n, long long nreal) {
     CCCC_FORTIFY_CHECK(n, nreal, "gethostname");
     return (long long)gethostname(buf, (size_t)n);
 }
+static long long chk_getdomainname(char *buf, long long n, long long nreal) {
+    CCCC_FORTIFY_CHECK(n, nreal, "getdomainname");
+    return (long long)getdomainname(buf, (size_t)n);
+}
+static long long chk_ttyname_r(long long fd, char *buf, long long n,
+                               long long nreal) {
+    CCCC_FORTIFY_CHECK(n, nreal, "ttyname_r");
+    return (long long)ttyname_r((int)fd, buf, (size_t)n);
+}
+static long long chk_getlogin_r(char *buf, long long n, long long nreal) {
+    CCCC_FORTIFY_CHECK(n, nreal, "getlogin_r");
+    return (long long)getlogin_r(buf, (size_t)n);
+}
+static long long chk_getgroups(long long size, gid_t *list, long long listlen) {
+    CCCC_FORTIFY_CHECK((size_t)size * sizeof(gid_t), listlen, "getgroups");
+    return (long long)getgroups((int)size, list);
+}
+static long long chk_readlinkat(long long fd, const char *path, char *buf,
+                                long long n, long long buflen) {
+    CCCC_FORTIFY_CHECK(n, buflen, "readlinkat");
+    return (long long)readlinkat((int)fd, path, buf, (size_t)n);
+}
+// getwd's buffer has no length argument: libc demands room for PATH_MAX.
+static char *wrap_getwd(char *buf) {
+    return getwd(buf);
+}
+static char *chk_getwd(char *buf, long long buflen) {
+    CCCC_FORTIFY_CHECK(PATH_MAX, buflen, "getwd");
+    return wrap_getwd(buf);
+}
 
 void register_posix_io_functions(VirtualMachine *vm) {
     // Blocking I/O — GIL released while blocked so other VM threads can run
@@ -402,6 +433,16 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "__readlink_chk", (void *)chk_readlink, 4, 0);
     cc_register_cfunc(vm, "__getcwd_chk", (void *)chk_getcwd, 3, 0);
     cc_register_cfunc(vm, "__gethostname_chk", (void *)chk_gethostname, 3, 0);
+    cc_register_cfunc(vm, "getdomainname", (void *)getdomainname, 2, 0);
+    cc_register_cfunc(vm, "__getdomainname_chk", (void *)chk_getdomainname, 3,
+                      0);
+    cc_register_cfunc(vm, "__ttyname_r_chk", (void *)chk_ttyname_r, 4, 0);
+    cc_register_cfunc(vm, "__getlogin_r_chk", (void *)chk_getlogin_r, 3, 0);
+    cc_register_cfunc(vm, "__getgroups_chk", (void *)chk_getgroups, 3, 0);
+    cc_register_cfunc(vm, "readlinkat", (void *)readlinkat, 4, 0);
+    cc_register_cfunc(vm, "__readlinkat_chk", (void *)chk_readlinkat, 5, 0);
+    cc_register_cfunc(vm, "getwd", (void *)wrap_getwd, 1, 0);
+    cc_register_cfunc(vm, "__getwd_chk", (void *)chk_getwd, 2, 0);
     cc_register_cfunc(vm, "pwrite", (void *)wrap_pwrite_gil, 4, 0);
     cc_register_cfunc(vm, "nanosleep", (void *)wrap_nanosleep_gil, 2, 0);
     // readv/writev/preadv/pwritev release the GIL like read/write/pread/pwrite.

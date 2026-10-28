@@ -1,6 +1,10 @@
 // wchar.h, wctype.h, and uchar.h stdlib function registration
 #include "../cccc.h"
+#include "../internal.h"
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 #include <wctype.h>
@@ -375,6 +379,226 @@ static size_t cccc_c8rtomb(char *s, cccc_char8_t c8, mbstate_t *ps) {
 }
 #endif /* !CCCC_HAVE_NATIVE_MBRTOC8 */
 
+// wcslcpy/wcslcat: Darwin and glibc >= 2.38 have them; older glibc gets the
+// BSD semantics from these two functions.
+#if defined(__APPLE__)
+#define CCCC_HOST_HAS_WCSLCPY 1
+#elif defined(__GLIBC__)
+#include <features.h>
+#if __GLIBC_PREREQ(2, 38)
+#define CCCC_HOST_HAS_WCSLCPY 1
+#endif
+#endif
+#ifdef CCCC_HOST_HAS_WCSLCPY
+#define cccc_wcslcpy wcslcpy
+#define cccc_wcslcat wcslcat
+#else
+static size_t cccc_wcslcpy(wchar_t *d, const wchar_t *s, size_t n) {
+    size_t len = wcslen(s);
+    if (n) {
+        size_t c = len < n - 1 ? len : n - 1;
+        wmemcpy(d, s, c);
+        d[c] = L'\0';
+    }
+    return len;
+}
+static size_t cccc_wcslcat(wchar_t *d, const wchar_t *s, size_t n) {
+    size_t dl = 0;
+    while (dl < n && d[dl])
+        dl++;
+    if (dl == n)
+        return n + wcslen(s);
+    return dl + cccc_wcslcpy(d + dl, s, n - dl);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Wide printf family. The variadic forms go straight to the host; the v*
+// forms replay the captured guest va_list through libffi. A wide format is
+// narrowed to ASCII first, since only the % directives decide the argument
+// types and those are the same as in the narrow printf.
+// ---------------------------------------------------------------------------
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#include "va_ffi_helper.h"
+#pragma GCC diagnostic pop
+
+static long long wide_vprintf_call(void *host_fn, int nfixed, int64_t *fixed,
+                                   const wchar_t *wfmt, long long va_ptr) {
+    size_t flen = wcslen(wfmt);
+    char  *nfmt = malloc(flen + 1);
+    if (!nfmt) {
+        errno = ENOMEM;
+        return -1;
+    }
+    for (size_t i = 0; i <= flen; i++)
+        nfmt[i] = wfmt[i] > 0 && wfmt[i] < 128 ? (char)wfmt[i] : '?';
+    CCCC_VA_LOCAL(va, va_ptr);
+    int     types[CCCC_VA_MAX_ARGS];
+    int     n = cccc_parse_printf_fmt(nfmt, types, CCCC_VA_MAX_ARGS);
+    int64_t vals[CCCC_VA_MAX_ARGS];
+    cccc_va_extract(va, types, n, vals);
+    free(nfmt);
+    return cccc_ffi_call_variadic(host_fn, nfixed, fixed, n, types, vals);
+}
+
+static long long wrap_vswprintf(wchar_t *s, long long n, const wchar_t *fmt,
+                                long long va_ptr) {
+    int64_t fixed[] = {(int64_t)s, (int64_t)n, (int64_t)fmt};
+    return wide_vprintf_call((void *)swprintf, 3, fixed, fmt, va_ptr);
+}
+
+static long long wrap_vwprintf(const wchar_t *fmt, long long va_ptr) {
+    int64_t fixed[] = {(int64_t)fmt};
+    return wide_vprintf_call((void *)wprintf, 1, fixed, fmt, va_ptr);
+}
+
+static long long wrap_vfwprintf(FILE *stream, const wchar_t *fmt,
+                                long long va_ptr) {
+    int64_t fixed[] = {(int64_t)stream, (int64_t)fmt};
+    return wide_vprintf_call((void *)fwprintf, 2, fixed, fmt, va_ptr);
+}
+
+// ---------------------------------------------------------------------------
+// `__*_chk` entry points glibc's fortified <wchar.h> calls. The object sizes
+// glibc passes are already in wchar_t units, except for the byte buffers of
+// wcrtomb/wcsrtombs/wcsnrtombs.
+// ---------------------------------------------------------------------------
+static wchar_t *chk_wmemcpy(wchar_t *d, const wchar_t *s, size_t n, size_t ns) {
+    CCCC_FORTIFY_CHECK(n, ns, "wmemcpy");
+    return wmemcpy(d, s, n);
+}
+static wchar_t *chk_wmemmove(wchar_t *d, const wchar_t *s, size_t n,
+                             size_t ns) {
+    CCCC_FORTIFY_CHECK(n, ns, "wmemmove");
+    return wmemmove(d, s, n);
+}
+static wchar_t *chk_wmemset(wchar_t *d, long long c, size_t n, size_t ns) {
+    CCCC_FORTIFY_CHECK(n, ns, "wmemset");
+    return wmemset(d, (wchar_t)c, n);
+}
+static wchar_t *chk_wcscpy(wchar_t *d, const wchar_t *s, size_t n) {
+    CCCC_FORTIFY_CHECK(wcslen(s) + 1, n, "wcscpy");
+    return wcscpy(d, s);
+}
+static wchar_t *chk_wcpcpy(wchar_t *d, const wchar_t *s, size_t n) {
+    CCCC_FORTIFY_CHECK(wcslen(s) + 1, n, "wcpcpy");
+    return wcpcpy(d, s);
+}
+static wchar_t *chk_wcsncpy(wchar_t *d, const wchar_t *s, size_t n, size_t dl) {
+    CCCC_FORTIFY_CHECK(n, dl, "wcsncpy");
+    return wcsncpy(d, s, n);
+}
+static wchar_t *chk_wcpncpy(wchar_t *d, const wchar_t *s, size_t n, size_t dl) {
+    CCCC_FORTIFY_CHECK(n, dl, "wcpncpy");
+    return wcpncpy(d, s, n);
+}
+static wchar_t *chk_wcscat(wchar_t *d, const wchar_t *s, size_t dl) {
+    CCCC_FORTIFY_CHECK(wcslen(d) + wcslen(s) + 1, dl, "wcscat");
+    return wcscat(d, s);
+}
+static wchar_t *chk_wcsncat(wchar_t *d, const wchar_t *s, size_t n, size_t dl) {
+    size_t sl = wcslen(s);
+    CCCC_FORTIFY_CHECK(wcslen(d) + (sl < n ? sl : n) + 1, dl, "wcsncat");
+    return wcsncat(d, s, n);
+}
+static size_t chk_wcslcpy(wchar_t *d, const wchar_t *s, size_t n, size_t dl) {
+    CCCC_FORTIFY_CHECK(n, dl, "wcslcpy");
+    return cccc_wcslcpy(d, s, n);
+}
+static size_t chk_wcslcat(wchar_t *d, const wchar_t *s, size_t n, size_t dl) {
+    CCCC_FORTIFY_CHECK(n, dl, "wcslcat");
+    return cccc_wcslcat(d, s, n);
+}
+static size_t chk_wcrtomb(char *s, long long wc, mbstate_t *ps, size_t buflen) {
+    if (s && buflen < (size_t)MB_CUR_MAX)
+        cccc_fortify_fail("wcrtomb");
+    return wcrtomb(s, (wchar_t)wc, ps);
+}
+static size_t chk_mbsrtowcs(wchar_t *d, const char **src, size_t len,
+                            mbstate_t *ps, size_t dl) {
+    CCCC_FORTIFY_CHECK(len, dl, "mbsrtowcs");
+    return mbsrtowcs(d, src, len, ps);
+}
+static size_t chk_mbsnrtowcs(wchar_t *d, const char **src, size_t nmc,
+                             size_t len, mbstate_t *ps, size_t dl) {
+    CCCC_FORTIFY_CHECK(len, dl, "mbsnrtowcs");
+    return mbsnrtowcs(d, src, nmc, len, ps);
+}
+static size_t chk_wcsrtombs(char *d, const wchar_t **src, size_t len,
+                            mbstate_t *ps, size_t dl) {
+    CCCC_FORTIFY_CHECK(len, dl, "wcsrtombs");
+    return wcsrtombs(d, src, len, ps);
+}
+static size_t chk_wcsnrtombs(char *d, const wchar_t **src, size_t nwc,
+                             size_t len, mbstate_t *ps, size_t dl) {
+    CCCC_FORTIFY_CHECK(len, dl, "wcsnrtombs");
+    return wcsnrtombs(d, src, nwc, len, ps);
+}
+static wchar_t *chk_fgetws(wchar_t *s, size_t size, int n, FILE *f) {
+    CCCC_FORTIFY_CHECK(n < 0 ? 0 : (size_t)n, size, "fgetws");
+    return fgetws(s, n, f);
+}
+#ifdef __linux__
+// glibc exports these regardless of the feature macros; declared here rather
+// than enabling _GNU_SOURCE for the whole file.
+extern wchar_t *wmempcpy(wchar_t *d, const wchar_t *s, size_t n);
+extern wchar_t *fgetws_unlocked(wchar_t *s, int n, FILE *f);
+static wchar_t *chk_wmempcpy(wchar_t *d, const wchar_t *s, size_t n,
+                             size_t ns) {
+    CCCC_FORTIFY_CHECK(n, ns, "wmempcpy");
+    return wmempcpy(d, s, n);
+}
+static wchar_t *chk_fgetws_unlocked(wchar_t *s, size_t size, int n, FILE *f) {
+    CCCC_FORTIFY_CHECK(n < 0 ? 0 : (size_t)n, size, "fgetws_unlocked");
+    return fgetws_unlocked(s, n, f);
+}
+#endif
+
+static int chk_swprintf(wchar_t *s, size_t n, int flag, size_t slen,
+                        const wchar_t *fmt, ...) {
+    (void)flag;
+    CCCC_FORTIFY_CHECK(n, slen, "swprintf");
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vswprintf(s, n, fmt, ap);
+    va_end(ap);
+    return r;
+}
+static int chk_fwprintf(FILE *f, int flag, const wchar_t *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vfwprintf(f, fmt, ap);
+    va_end(ap);
+    return r;
+}
+static int chk_wprintf(int flag, const wchar_t *fmt, ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vwprintf(fmt, ap);
+    va_end(ap);
+    return r;
+}
+static long long chk_vswprintf(wchar_t *s, long long n, long long flag,
+                               long long slen, const wchar_t *fmt,
+                               long long va_ptr) {
+    (void)flag;
+    CCCC_FORTIFY_CHECK(n, slen, "vswprintf");
+    return wrap_vswprintf(s, n, fmt, va_ptr);
+}
+static long long chk_vfwprintf(FILE *f, long long flag, const wchar_t *fmt,
+                               long long va_ptr) {
+    (void)flag;
+    return wrap_vfwprintf(f, fmt, va_ptr);
+}
+static long long chk_vwprintf(long long flag, const wchar_t *fmt,
+                              long long va_ptr) {
+    (void)flag;
+    return wrap_vwprintf(fmt, va_ptr);
+}
+
 void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mbsinit", (void *)wrap_mbsinit, 1, 0);
     cc_register_cfunc(vm, "mbrlen", (void *)wrap_mbrlen, 3, 0);
@@ -443,4 +667,55 @@ void register_wide_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "mbrtoc8", (void *)cccc_mbrtoc8, 4, 0);
     cc_register_cfunc(vm, "c8rtomb", (void *)cccc_c8rtomb, 3, 0);
 #endif
+
+    cc_register_cfunc(vm, "wmemcpy", (void *)wmemcpy, 3, 0);
+    cc_register_cfunc(vm, "wmemmove", (void *)wmemmove, 3, 0);
+    cc_register_cfunc(vm, "wmemset", (void *)wmemset, 3, 0);
+    cc_register_cfunc(vm, "wcpcpy", (void *)wcpcpy, 2, 0);
+    cc_register_cfunc(vm, "wcpncpy", (void *)wcpncpy, 3, 0);
+    cc_register_cfunc(vm, "wcslcpy", (void *)cccc_wcslcpy, 3, 0);
+    cc_register_cfunc(vm, "wcslcat", (void *)cccc_wcslcat, 3, 0);
+    cc_register_cfunc(vm, "fgetws", (void *)fgetws, 3, 0);
+    cc_register_cfunc(vm, "mbsnrtowcs", (void *)mbsnrtowcs, 5, 0);
+    cc_register_cfunc(vm, "wcsnrtombs", (void *)wcsnrtombs, 5, 0);
+    cc_register_variadic_cfunc(vm, "swprintf", (void *)swprintf, 3, 0);
+    cc_register_variadic_cfunc(vm, "wprintf", (void *)wprintf, 1, 0);
+    cc_register_variadic_cfunc(vm, "fwprintf", (void *)fwprintf, 2, 0);
+    cc_register_cfunc(vm, "vswprintf", (void *)wrap_vswprintf, 4, 0);
+    cc_register_cfunc(vm, "vwprintf", (void *)wrap_vwprintf, 2, 0);
+    cc_register_cfunc(vm, "vfwprintf", (void *)wrap_vfwprintf, 3, 0);
+#ifdef __linux__
+    cc_register_cfunc(vm, "wmempcpy", (void *)wmempcpy, 3, 0);
+    cc_register_cfunc(vm, "fgetws_unlocked", (void *)fgetws_unlocked, 3, 0);
+    cc_register_cfunc(vm, "__wmempcpy_chk", (void *)chk_wmempcpy, 4, 0);
+    cc_register_cfunc(vm, "__fgetws_unlocked_chk", (void *)chk_fgetws_unlocked,
+                      4, 0);
+#endif
+
+    // __*_chk
+    cc_register_cfunc(vm, "__wmemcpy_chk", (void *)chk_wmemcpy, 4, 0);
+    cc_register_cfunc(vm, "__wmemmove_chk", (void *)chk_wmemmove, 4, 0);
+    cc_register_cfunc(vm, "__wmemset_chk", (void *)chk_wmemset, 4, 0);
+    cc_register_cfunc(vm, "__wcscpy_chk", (void *)chk_wcscpy, 3, 0);
+    cc_register_cfunc(vm, "__wcpcpy_chk", (void *)chk_wcpcpy, 3, 0);
+    cc_register_cfunc(vm, "__wcsncpy_chk", (void *)chk_wcsncpy, 4, 0);
+    cc_register_cfunc(vm, "__wcpncpy_chk", (void *)chk_wcpncpy, 4, 0);
+    cc_register_cfunc(vm, "__wcscat_chk", (void *)chk_wcscat, 3, 0);
+    cc_register_cfunc(vm, "__wcsncat_chk", (void *)chk_wcsncat, 4, 0);
+    cc_register_cfunc(vm, "__wcslcpy_chk", (void *)chk_wcslcpy, 4, 0);
+    cc_register_cfunc(vm, "__wcslcat_chk", (void *)chk_wcslcat, 4, 0);
+    cc_register_cfunc(vm, "__wcrtomb_chk", (void *)chk_wcrtomb, 4, 0);
+    cc_register_cfunc(vm, "__mbsrtowcs_chk", (void *)chk_mbsrtowcs, 5, 0);
+    cc_register_cfunc(vm, "__mbsnrtowcs_chk", (void *)chk_mbsnrtowcs, 6, 0);
+    cc_register_cfunc(vm, "__wcsrtombs_chk", (void *)chk_wcsrtombs, 5, 0);
+    cc_register_cfunc(vm, "__wcsnrtombs_chk", (void *)chk_wcsnrtombs, 6, 0);
+    cc_register_cfunc(vm, "__fgetws_chk", (void *)chk_fgetws, 4, 0);
+    cc_register_variadic_cfunc(vm, "__swprintf_chk", (void *)chk_swprintf, 5,
+                               0);
+    cc_register_variadic_cfunc(vm, "__fwprintf_chk", (void *)chk_fwprintf, 3,
+                               0);
+    cc_register_variadic_cfunc(vm, "__wprintf_chk", (void *)chk_wprintf, 2, 0);
+    cc_register_cfunc(vm, "__vswprintf_chk", (void *)chk_vswprintf, 6, 0);
+    cc_register_cfunc(vm, "__vfwprintf_chk", (void *)chk_vfwprintf, 4, 0);
+    cc_register_cfunc(vm, "__vwprintf_chk", (void *)chk_vwprintf, 3, 0);
 }
