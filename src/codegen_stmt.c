@@ -208,6 +208,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                     vm->compiler.pending_tail_callee = NULL;
                     if (vm->flags & CCCC_STACK_INSTR)
                         emit_scopeout(vm, vm->current_function_scope_id);
+                    emit_restore_promoted_registers(vm);
                     emit(vm, CALLT);
                     Pc tco_patch            = emit_word_ptr(vm);
                     vm->text_seg[tco_patch] = 0;
@@ -336,6 +337,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             // Deactivate function-level scope before returning.
             if (vm->flags & CCCC_STACK_INSTR)
                 emit_scopeout(vm, vm->current_function_scope_id);
+            emit_restore_promoted_registers(vm);
             emit(vm, LEV3);
             cleanup_ranges_reopen(vm);
             return;

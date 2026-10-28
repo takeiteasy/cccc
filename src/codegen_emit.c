@@ -1497,3 +1497,85 @@ bool gen_fused_muladd(VirtualMachine *vm, Node *node, int dest_reg) {
         return gen_mul_imm(vm, node, dest_reg);
     return false;
 }
+
+// ========== Promoted locals ==========
+
+// Widens `reg` to the width and signedness of `ty`, as a load from the slot
+// would.
+static void emit_normalize_promoted_scalar(VirtualMachine *vm, Type *ty,
+                                           int reg) {
+    if (ty->kind == TY_BOOL || ty->kind == TY_CHAR) {
+        emit_rr(vm, ty->is_unsigned || ty->kind == TY_BOOL ? ZX1 : SX1, reg,
+                reg);
+    } else if (ty->kind == TY_SHORT) {
+        emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, reg, reg);
+    } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
+        emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
+    } else if (ty->kind == TY_BITINT) {
+        if (ty->size == 1)
+            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, reg, reg);
+        else if (ty->size == 2)
+            emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, reg, reg);
+        else if (ty->size == 4)
+            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, reg, reg);
+        emit_bitint_trunc(vm, ty, reg);
+    }
+}
+
+void emit_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg) {
+    if (dest_reg == REG_ZERO)
+        return;
+    int preg = promoted_local_reg(vm, var);
+    if (preg >= 0) {
+        emit_mov3(vm, dest_reg, preg);
+        return;
+    }
+    emit_fmov3(vm, dest_reg, fp_promoted_local_reg(vm, var));
+}
+
+void emit_promoted_write(VirtualMachine *vm, Obj *var, int value_reg) {
+    int preg = promoted_local_reg(vm, var);
+    if (preg >= 0) {
+        if (preg != value_reg)
+            emit_mov3(vm, preg, value_reg);
+        emit_normalize_promoted_scalar(vm, var->ty, preg);
+        return;
+    }
+    preg = fp_promoted_local_reg(vm, var);
+    if (var->ty->kind == TY_FLOAT)
+        emit_fround_f32(vm, preg, value_reg);
+    else if (preg != value_reg)
+        emit_fmov3(vm, preg, value_reg);
+}
+
+// Prologue: save the callee-saved registers this function uses, then load the
+// promoted parameters from their ENT3 spill slots.
+void emit_save_promoted_registers(VirtualMachine *vm) {
+    Compiler *cc = &vm->compiler;
+    for (int i = 0; i < cc->promoted_count; i++)
+        emit_local_store(vm, ty_long, cc->promoted_regs[i],
+                         cc->promoted_save_offsets[i]);
+    for (int i = 0; i < cc->fp_promoted_count; i++)
+        emit_ri(vm, FSTR_LOCAL, cc->fp_promoted_regs[i],
+                cc->fp_promoted_save_offsets[i]);
+    for (int i = 0; i < cc->promoted_count; i++)
+        if (cc->promoted_locals[i]->is_param)
+            emit_local_load(vm, cc->promoted_locals[i]->ty,
+                            cc->promoted_regs[i],
+                            cc->promoted_locals[i]->offset);
+    for (int i = 0; i < cc->fp_promoted_count; i++)
+        if (cc->fp_promoted_locals[i]->is_param)
+            emit_local_load(vm, cc->fp_promoted_locals[i]->ty,
+                            cc->fp_promoted_regs[i],
+                            cc->fp_promoted_locals[i]->offset);
+}
+
+void emit_restore_promoted_registers(VirtualMachine *vm) {
+    Compiler *cc = &vm->compiler;
+    for (int i = cc->fp_promoted_count - 1; i >= 0; i--)
+        emit_ri(vm, FLDR_LOCAL, cc->fp_promoted_regs[i],
+                cc->fp_promoted_save_offsets[i]);
+    for (int i = cc->promoted_count - 1; i >= 0; i--)
+        emit_local_load(vm, ty_long, cc->promoted_regs[i],
+                        cc->promoted_save_offsets[i]);
+}

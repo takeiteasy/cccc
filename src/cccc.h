@@ -2745,6 +2745,11 @@ struct Obj {
     // docs/safety.md.
     bool addr_taken;
 
+    // Synthetic `tmp = &x` of an `x op= y` / `x++` desugar whose x is held in a
+    // register: `*tmp` reads and writes that register
+    // (prepare_local_promotion).
+    struct Obj *promoted_alias;
+
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see
@@ -5004,6 +5009,20 @@ typedef struct Compiler {
     bool frame_has_esc_agg;    // body emits STKTAG for an escaping aggregate
     bool frame_has_esc_scalar; // body emits a recorded LEA3 for an escaping
                                // scalar
+
+    // Scalar local promotion: the hottest loop locals of the function being
+    // generated live in callee-saved S0-S3 / FS0-FS3 instead of their frame
+    // slot. The prologue saves the registers, the epilogue restores them.
+#define PROMOTE_MAX_INT 4
+#define PROMOTE_MAX_FP  4
+    Obj *promoted_locals[PROMOTE_MAX_INT];
+    int  promoted_regs[PROMOTE_MAX_INT];
+    int  promoted_save_offsets[PROMOTE_MAX_INT];
+    int  promoted_count;
+    Obj *fp_promoted_locals[PROMOTE_MAX_FP];
+    int  fp_promoted_regs[PROMOTE_MAX_FP];
+    int  fp_promoted_save_offsets[PROMOTE_MAX_FP];
+    int  fp_promoted_count;
 
     // True while gen_expr/gen_addr are emitting a load or store through a
     // union member access (#653). Threaded as compiler-scoped state rather

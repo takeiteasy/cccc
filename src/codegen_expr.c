@@ -756,6 +756,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     if (vm->flags & CCCC_STACK_INSTR)
                         emit_markr(vm, node->var->offset);
                 }
+                if (is_promoted_local(vm, node->var) ||
+                    is_fp_promoted_local(vm, node->var)) {
+                    emit_promoted_read(vm, node->var, dest_reg);
+                    return;
+                }
                 // Fused local load: skip the LEA3+LDR two-step for simple
                 // locals
                 if (is_simple_local_scalar(vm, node)) {
@@ -785,6 +790,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
 
         case ND_DEREF: {
+            Obj *promoted_target = promoted_deref_target(vm, node);
+            if (promoted_target) {
+                emit_promoted_read(vm, promoted_target, dest_reg);
+                return;
+            }
             IndexedRegs ix;
             if (gen_indexed_regs(vm, node, &ix)) {
                 emit_load_indexed(vm, node->ty, dest_reg, &ix);
@@ -1528,6 +1538,32 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         case ND_ASSIGN: {
+            // `tmp = &x` of an `x op= y` desugar with x in a register: the
+            // address is never needed, `*tmp` reads and writes the register.
+            if (dest_reg == REG_ZERO && promo_alias_addr(node) &&
+                node->lhs->var->promoted_alias &&
+                (is_promoted_local(vm, node->lhs->var->promoted_alias) ||
+                 is_fp_promoted_local(vm, node->lhs->var->promoted_alias)))
+                return;
+
+            Obj *promoted_dst = NULL;
+            if (node->lhs->kind == ND_VAR &&
+                (is_promoted_local(vm, node->lhs->var) ||
+                 is_fp_promoted_local(vm, node->lhs->var)))
+                promoted_dst = node->lhs->var;
+            else
+                promoted_dst = promoted_deref_target(vm, node->lhs);
+            if (promoted_dst) {
+                int  r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
+                bool need_free = dest_reg == REG_ZERO;
+                gen_expr(vm, node->rhs, r_val);
+                mark_temp_reg_used(r_val);
+                emit_promoted_write(vm, promoted_dst, r_val);
+                if (need_free)
+                    free_temp_reg(r_val);
+                return;
+            }
+
             // IMPORTANT: Evaluate RHS *before* computing LHS address!
             // If RHS is a function call, it will clobber temp registers.
             // Computing LHS address after ensures we get a fresh temp reg.

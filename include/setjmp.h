@@ -18,8 +18,10 @@
  * [1] - saved sp (stack pointer)
  * [2] - saved bp (base pointer)
  * [3] - CFI shadow-stack offset: (char*)shadow_sp - (char*)shadow_stack, or -1
- * if CFI disabled [4..] - reserved for future use / native-backend headroom
- * (see below)
+ * if CFI disabled
+ * [4..11] - callee-saved registers S0-S7 (a promoted local may live in one)
+ * [12..15] - callee-saved float registers FS0-FS3
+ * [16..] - reserved for future use / native-backend headroom (see below)
  *
  * Sizing under -c=native (#1054/#1030):
  * Under -c=native, setjmp()/longjmp() are emitted as calls to the *real*
@@ -36,7 +38,7 @@
  *   - glibc x86_64:    long[8] + int + sigset_t(128)    = 200 bytes
  *   - glibc aarch64:   ulonglong[22] + int + sigset_t   = 312 bytes  (max)
  * 40 long longs (320 bytes) covers the measured max with headroom. The VM
- * itself only ever indexes slots [0]-[3] (src/ops.c SETJMP/LONGJMP) --
+ * itself only ever indexes slots [0]-[15] (src/ops.c SETJMP/LONGJMP) --
  * the rest exists solely so a -c=native build's real host setjmp/longjmp
  * has somewhere safe to write.
  *

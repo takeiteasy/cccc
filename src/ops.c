@@ -5824,8 +5824,13 @@ static bool comptime_jmp_buf_ok(VirtualMachine *vm, const long long *jb) {
            comptime_addr_in((void *)jb[2], 1, vm->stack_base, stack_len);
 }
 
+// jmp_buf slots past the frame: the callee-saved registers a promoted local may
+// live in. longjmp skips the LEV3 of every frame it discards, so those frames
+// never restore them.
+enum { JMP_SAVED_REGS = 4, JMP_SAVED_FREGS = 12, JMP_SLOTS = 16 };
+
 static inline int op_SETJMP_fn(VirtualMachine *vm) {
-    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], 4 * sizeof(long long), true);
+    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], JMP_SLOTS * sizeof(long long), true);
     // setjmp: jmp_buf address in REG_A0, return 0 in REG_A0
     long long *jmp_buf = (long long *)vm->regs[REG_A0];
     jmp_buf[0]         = (long long)vm->pc;
@@ -5836,12 +5841,18 @@ static inline int op_SETJMP_fn(VirtualMachine *vm) {
             (long long)((char *)vm->shadow_sp - (char *)vm->shadow_stack);
     else
         jmp_buf[3] = -1;
+    for (int i = 0; i < 8; i++)
+        jmp_buf[JMP_SAVED_REGS + i] = vm->regs[REG_S0 + i];
+    for (int i = 0; i < 4; i++)
+        memcpy(&jmp_buf[JMP_SAVED_FREGS + i], &vm->fregs[FREG_S0 + i].f64,
+               sizeof(long long));
     vm->regs[REG_A0] = 0; // setjmp returns 0 on direct call
     return 0;
 }
 
 static inline int op_LONGJMP_fn(VirtualMachine *vm) {
-    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], 4 * sizeof(long long), false);
+    COMPTIME_CONTAIN(vm, vm->regs[REG_A0], JMP_SLOTS * sizeof(long long),
+                     false);
     if (vm->comptime_depth &&
         !comptime_jmp_buf_ok(vm, (long long *)vm->regs[REG_A0]))
         return cccc_comptime_abort(vm, "longjmp target is not a live frame");
@@ -5851,6 +5862,11 @@ static inline int op_LONGJMP_fn(VirtualMachine *vm) {
     vm->pc             = (Pc)jmp_buf[0];
     vm->sp             = (long long *)jmp_buf[1];
     vm->bp             = (long long *)jmp_buf[2];
+    for (int i = 0; i < 8; i++)
+        vm->regs[REG_S0 + i] = jmp_buf[JMP_SAVED_REGS + i];
+    for (int i = 0; i < 4; i++)
+        memcpy(&vm->fregs[FREG_S0 + i].f64, &jmp_buf[JMP_SAVED_FREGS + i],
+               sizeof(long long));
 
     // longjmp can unwind several frames at once (#673, #648): retire every
     // activation's liveness epoch above the target frame. The target frame

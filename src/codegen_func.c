@@ -118,6 +118,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Count parameters first
     // Assign stack offsets early
     int stack_size = assign_stack_offsets(vm, fn);
+    stack_size     += prepare_local_promotion(vm, fn, stack_size);
     if (stack_size % 2 != 0)
         stack_size++;
 
@@ -308,6 +309,8 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         free_temp_reg(r_dst);
     }
 
+    emit_save_promoted_registers(vm);
+
     // Generate function body
     gen_stmt(vm, fn->body);
 
@@ -357,7 +360,9 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // Deactivate function scope (for fall-through returns).
     if (vm->flags & CCCC_STACK_INSTR)
         emit_scopeout(vm, fn_scope_id);
+    emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
+    end_local_promotion(vm);
     fn->code_end_addr = vm->text_ptr + 1;
 }
 
