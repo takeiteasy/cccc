@@ -92,6 +92,7 @@ These are forwarded to libc via a private stub bound to the real libc name, not 
 | `__builtin_strcmp(a, b)` | `int` | Equivalent to `strcmp(a, b)` |
 | `__builtin_memset(s, c, n)` | `void *` | Equivalent to `memset(s, c, n)` |
 | `__builtin_memcpy(d, s, n)` | `void *` | Equivalent to `memcpy(d, s, n)` |
+| `__builtin_bzero(s, n)` | `void` | Equivalent to `bzero(s, n)` (the macOS SDK's `FD_ZERO`) |
 | `__builtin_memmove(d, s, n)` | `void *` | Equivalent to `memmove(d, s, n)` |
 | `__builtin_memcmp(a, b, n)` | `int` | Equivalent to `memcmp(a, b, n)` |
 | `__builtin_malloc(n)` | `void *` | Equivalent to `malloc(n)` |

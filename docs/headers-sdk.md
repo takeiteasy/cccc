@@ -75,7 +75,7 @@ Assigning `obstack_alloc_failed_handler` sets the function called when a chunk a
 
 ## Host globals
 
-Under `--sysroot ... --use-system-headers` the SDK's `stdin`/`stdout`/`stderr` (`__stdinp`/`__stdoutp`/`__stderrp` on macOS), getopt's `optarg`/`optind`/`opterr`/`optopt` (and `optreset` on macOS) and `environ` are plain `extern` declarations. In a VM run they are the host's own objects, so `fputs("x", stdout)`, `getopt` and `environ[0]` behave as in a native build. Calls such as `write`, `socketpair` and `fopen` run too.
+Under `--sysroot ... --use-system-headers` the SDK's `stdin`/`stdout`/`stderr` (`__stdinp`/`__stdoutp`/`__stderrp` on macOS), getopt's `optarg`/`optind`/`opterr`/`optopt` (and `optreset` on macOS) and `environ` are plain `extern` declarations. In a VM run they are the host's own objects, so `fputs("x", stdout)`, `getopt` and `environ[0]` behave as in a native build. Calls such as `write`, `socketpair` and `fopen` run too, and the SDK's `FD_ZERO`/`FD_SET`/`FD_ISSET` work on macOS.
 
 ```c
 #include <getopt.h>

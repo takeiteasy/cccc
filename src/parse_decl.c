@@ -1949,6 +1949,12 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     bfree_ty->params                              = pointer_to(vm, ty_void);
     vm->compiler.builtin_bfree = new_private_func_obj(vm, "free", bfree_ty);
     vm->compiler.builtin_bfree->builtin_spelling = "__builtin_free";
+    Type *bzero_ty       = func_type(vm, ty_void);
+    bzero_ty->params     = pointer_to(vm, ty_void);
+    bzero_ty->params->next = copy_type(vm, ty_long);
+    vm->compiler.builtin_bzero = new_private_func_obj(vm, "bzero", bzero_ty);
+    vm->compiler.builtin_bzero->builtin_spelling = "__builtin_bzero";
+    apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_bzero);
 
     // __builtin_fabs/sqrt/... forward to the libm function of the same name
     // (private stub, spelled __builtin_* by the serializer).

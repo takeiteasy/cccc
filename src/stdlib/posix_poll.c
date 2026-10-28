@@ -138,6 +138,15 @@ static int ppoll_emulate_macos(struct pollfd *host_fds, nfds_t nfds, int ms,
 // the same either way), so it passes straight through. struct timeval now
 // matches the host layout too (see include/sys/time.h). select()/pselect()
 // are blocking, so both release the GIL like poll() above.
+#ifdef __APPLE__
+// The SDK's FD_SET/FD_CLR/FD_ISSET inlines call this libSystem range check.
+static long long wrap_darwin_check_fd_set_overflow(long long fd, long long set,
+                                                   long long unlimited) {
+    return __darwin_check_fd_set_overflow((int)fd, (const void *)set,
+                                          (int)unlimited);
+}
+#endif
+
 static long long wrap_select_gil(long long nfds, long long readfds,
                                  long long writefds, long long exceptfds,
                                  long long timeout) {
@@ -342,6 +351,10 @@ void register_posix_poll_functions(VirtualMachine *vm) {
         cc_register_cfunc(vm, "ppoll", (void *)wrap_ppoll_gil, 4, 0);
 #endif
     cc_register_cfunc(vm, "select", (void *)wrap_select_gil, 5, 0);
+#ifdef __APPLE__
+    cc_register_cfunc(vm, "__darwin_check_fd_set_overflow",
+                      (void *)wrap_darwin_check_fd_set_overflow, 3, 0);
+#endif
     cc_register_cfunc(vm, "pselect", (void *)wrap_pselect_gil, 6, 0);
 }
 

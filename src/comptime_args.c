@@ -150,6 +150,7 @@ static const struct {
     {"bsearch", "r@3 r@2*@3 - - x"},
     {"btowc", ""},
     {"bzero", "w@1 -"},
+    {"__darwin_check_fd_set_overflow", "- r=1 -"},
     {"c16rtomb", "w=16? - w=mbstate?"},
     {"c32rtomb", "w=16? - w=mbstate?"},
     {"c8rtomb", "w=16? - w=mbstate?"},

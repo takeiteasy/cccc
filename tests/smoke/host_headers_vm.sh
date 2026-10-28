@@ -62,12 +62,9 @@ C
 expect_exit 42 "$CCCC" $FLAGS vm_host.c
 grep -q to-stderr err.txt || fail "stderr missing"
 
-# TODO: the macOS SDK's FD_ZERO expands to __builtin_bzero, which cccc lacks (#1862)
-if [ "$(uname -s)" = Linux ]; then
-    expect_exit 42 "$CCCC" $FLAGS fdset.c
-    expect_exit 0 "$CCCC" $FLAGS -c=native -o fdset_native fdset.c
-    expect_exit 42 ./fdset_native
-fi
+expect_exit 42 "$CCCC" $FLAGS fdset.c
+expect_exit 0 "$CCCC" $FLAGS -c=native -o fdset_native fdset.c
+expect_exit 42 ./fdset_native
 
 # On glibc the native TU carries the feature-test macros of the parse; -U drops one.
 if [ "$(uname -s)" = Linux ]; then

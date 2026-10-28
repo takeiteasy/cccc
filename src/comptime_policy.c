@@ -451,6 +451,7 @@ static const char *const SAFE_NAMES[] = {
     "__explicit_bzero_chk",
     "__fdelt_chk",
     "__fdelt_warn",
+    "__darwin_check_fd_set_overflow",
     "__fprintf_chk",
     "fwprintf",
     "__fwprintf_chk",

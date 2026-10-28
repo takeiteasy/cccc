@@ -635,6 +635,7 @@ bool is_const_expr(VirtualMachine *vm, Node *node) {
         case ND_SUB:
         case ND_MUL:
         case ND_DIV:
+        case ND_MOD:
         case ND_BITAND:
         case ND_BITOR:
         case ND_BITXOR:

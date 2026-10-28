@@ -163,6 +163,7 @@ static const struct {
      "int getdomainname(char *" BC("n") " name, unsigned long n)"},
     {"ptsname_r",
      "int ptsname_r(int fd, char *" BC("n") " buf, unsigned long n)"},
+    {"bzero", "void bzero(void *" BC("n") " s, unsigned long n)"},
     {"explicit_bzero",
      "void explicit_bzero(void *" BC("n") " s, unsigned long n)"},
     {"fgets_unlocked", "char *fgets_unlocked(char *" BC("n") " s, int n, "

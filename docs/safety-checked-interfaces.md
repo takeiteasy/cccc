@@ -58,7 +58,7 @@ memcpy(a, b, 16);   // traps: a has 8 bytes
 | `unistd.h` | `read`, `write`, `pread`, `pwrite`, `getcwd`, `readlink`, `gethostname` | the length argument |
 | `sys/socket.h` | `recv`, `send`, `recvfrom`, `sendto` | the length argument |
 
-The fortified spellings (`__builtin___memcpy_chk`, `__read_chk`, `__snprintf_chk`, ...) and `__builtin_memcpy`, `__builtin_memset`, `__builtin_memmove` carry the same bounds as the plain functions; the object-size argument of a `_chk` call is not a bound. A buffer must hold the whole length even when the call would touch less (`read(fd, a, 16)` into `char a[8]` traps although only 4 bytes may arrive). Calls are checked by the [rules above](#annotated-parameters): the argument must be a checked pointer, an inherited local or a [plain array](#plain-arrays-as-sources); an unchecked pointer is left alone.[^libc-null]
+The fortified spellings (`__builtin___memcpy_chk`, `__read_chk`, `__snprintf_chk`, ...) and `__builtin_memcpy`, `__builtin_memset`, `__builtin_memmove`, `__builtin_bzero` carry the same bounds as the plain functions; the object-size argument of a `_chk` call is not a bound. A buffer must hold the whole length even when the call would touch less (`read(fd, a, 16)` into `char a[8]` traps although only 4 bytes may arrive). Calls are checked by the [rules above](#annotated-parameters): the argument must be a checked pointer, an inherited local or a [plain array](#plain-arrays-as-sources); an unchecked pointer is left alone.[^libc-null]
 
 The bounds attach to the declaration in a system header (`<...>` include, or a header such as `<sys/socket.h>` includes), so they apply the same under `--use-system-headers` and `--sysroot`. A program's own function of the same name, and a `static` one, get none.
 

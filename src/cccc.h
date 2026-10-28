@@ -4608,6 +4608,7 @@ typedef struct Compiler {
     Obj  *builtin_memcmp;     // Builtin memcmp (forwarded to libc, #1144)
     Obj  *builtin_malloc;     // __builtin_malloc (forwarded to libc)
     Obj  *builtin_bfree;      // __builtin_free (forwarded to libc)
+    Obj  *builtin_bzero;      // __builtin_bzero (forwarded to libc)
     Obj  *builtin_libm[CCCC_LIBM_BUILTINS]
                       [3];    // __builtin_fabs etc.: [row][d,f,l]
     Obj  *builtin_chk[CCCC_CHK_BUILTINS]; // __builtin___*_chk stubs, lazy
