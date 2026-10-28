@@ -1073,7 +1073,19 @@ static void serialize_addr_comma(FILE *f, VirtualMachine *vm,
 // find_typedef_name_exact() cannot re-spell a qualified typedef alias
 // (same trick serialize_atomic_addr()/#1101 uses).
 static void serialize_offset_cast_type(FILE *f, VirtualMachine *vm,
-                                       SerializeContext *ctx, Type *ty) {
+                                       SerializeContext *ctx, Type *ty,
+                                       Node *ptr_operand) {
+    // A pointer to an anonymous aggregate with no tag or typedef name would
+    // print a fresh inline `struct { ... }`, which the host treats as a
+    // different type from the declaration it came from. Name it through the
+    // operand's own type instead (`__typeof__` does not evaluate it).
+    if (ty && ty->kind == TY_PTR && ptr_operand && ptr_operand->ty &&
+        ptr_operand->ty->kind == TY_PTR && type_needs_anon_aggregate(ctx, ty)) {
+        fprintf(f, "(__typeof__(");
+        serialize_expr(f, vm, ctx, ptr_operand, 0);
+        fprintf(f, "))");
+        return;
+    }
     bool is_array = ty && (ty->kind == TY_ARRAY || ty->kind == TY_VLA);
     bool qualified =
         ty && ty->base &&
@@ -2319,7 +2331,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // same fix applies.
                 // #1102: the cast-back drops pointee qualifiers -- see
                 // serialize_offset_cast_type().
-                serialize_offset_cast_type(f, vm, ctx, node->ty);
+                serialize_offset_cast_type(f, vm, ctx, node->ty, node->lhs);
                 fprintf(f, "((char *)");
                 serialize_expr(f, vm, ctx, node->lhs, 14);
                 fprintf(f, " %s ", get_binary_op_str(node->kind));
@@ -2336,7 +2348,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // #928: same array-cast fix as the ptr+num arm above; #964
                 // extends it to TY_VLA (a cast to `int[n]` is equally invalid
                 // C). #1102: qualifier-stripping cast-back, as above.
-                serialize_offset_cast_type(f, vm, ctx, node->ty);
+                serialize_offset_cast_type(f, vm, ctx, node->ty, node->rhs);
                 fprintf(f, "((char *)");
                 serialize_expr(f, vm, ctx, node->rhs, 14);
                 fprintf(f, " + ");

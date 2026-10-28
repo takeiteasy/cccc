@@ -108,6 +108,7 @@ void  bzero(void *, size_t);
 void  bcopy(const void *, void *, size_t);
 char *index(const char *, int);
 char *rindex(const char *, int);
+char *getwd(char *);
 #endif
 #include <wordexp.h>
 #ifdef __linux__
