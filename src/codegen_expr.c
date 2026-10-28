@@ -784,7 +784,13 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
             return;
 
-        case ND_DEREF:
+        case ND_DEREF: {
+            IndexedRegs ix;
+            if (gen_indexed_regs(vm, node, &ix)) {
+                emit_load_indexed(vm, node->ty, dest_reg, &ix);
+                free_indexed_regs(&ix);
+                return;
+            }
             // Routed through gen_addr() (rather than gen_expr(node->lhs, ...)
             // directly, which computes the identical address) so the checked-
             // pointer bounds check (#770/#484) in gen_addr's own ND_DEREF case
@@ -811,6 +817,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                              !addr_is_local_frame(vm, node));
             }
             return;
+        }
 
         case ND_ADDR:
             // #973: for a VLA operand the array's base address IS its value,
@@ -948,6 +955,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_real);
                 return;
             }
+
+            if (gen_fused_muladd(vm, node, dest_reg))
+                return;
 
             // Check if RHS contains a function call - if so, we need to save
             // LHS because function calls clobber caller-saved temp registers
@@ -1711,8 +1721,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 emit_local_store(vm, node->ty, r_val, r_val_spill);
             }
 
-            int r_addr = -1;
-            if (!lhs_fused) {
+            int         r_addr = -1;
+            IndexedRegs ix;
+            bool lhs_indexed = !lhs_fused && node->lhs->kind == ND_DEREF &&
+                               gen_indexed_regs(vm, node->lhs, &ix);
+            if (!lhs_fused && !lhs_indexed) {
                 // Now compute LHS address (after any function calls in RHS are
                 // done)
                 r_addr = alloc_temp_reg();
@@ -1804,6 +1817,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                     !addr_is_local_frame(vm, node->lhs));
             } else if (lhs_fused) {
                 emit_local_store(vm, node->ty, r_val, node->lhs->var->offset);
+            } else if (lhs_indexed) {
+                emit_store_indexed(vm, node->ty, r_val, &ix);
             } else {
                 // Standard store
                 emit_store_ex(vm, node->ty, r_val, r_addr,
@@ -1887,6 +1902,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
             if (r_addr >= 0)
                 free_temp_reg(r_addr);
+            if (lhs_indexed)
+                free_indexed_regs(&ix);
 
             // Assignment result is the value
             // If bitfield, r_val holds the RHS value, which is correct

@@ -88,6 +88,22 @@ extern CleanupScopeEntry *g_cleanup_scope;
 // Defined in codegen_regalloc.c, used from codegen_expr.c.
 #define TEMP_REG_SPILL_THRESHOLD 2
 
+// Flags that emit checks on the plain address / multiply / add paths. The
+// fused indexed and multiply-add opcodes skip those checks, so codegen fuses
+// only when none of these is set.
+#define CCCC_FUSION_UNSAFE_FLAGS                                               \
+    (CCCC_POINTER_CHECKS | CCCC_TYPE_CHECKS | CCCC_OVERFLOW_CHECKS |           \
+     CCCC_UNINIT_DETECTION | CCCC_STACK_INSTR | CCCC_PROVENANCE_TRACK |        \
+     CCCC_INVALID_ARITH | CCCC_CHECKED_BOUNDS)
+
+// Registers of a fused indexed access: base + index * scale + offset.
+typedef struct {
+    int       base;
+    int       index;
+    int       scale;
+    long long offset;
+} IndexedRegs;
+
 // One `switch` case's jump-table bookkeeping. Defined/used in
 // codegen_emit.c and codegen_stmt.c.
 typedef struct {
@@ -235,6 +251,18 @@ void emit_hrel(VirtualMachine *vm, int depth);
 void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
                   bool dangling_check);
 void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr);
+void emit_load_indexed(VirtualMachine *vm, Type *ty, int rd,
+                       const IndexedRegs *ix);
+void emit_store_indexed(VirtualMachine *vm, Type *ty, int rd_val,
+                        const IndexedRegs *ix);
+// Evaluates the base and index of `*(base + index * k + c)` into temp
+// registers when the access can use a fused indexed opcode; emits nothing and
+// returns false otherwise. Release with free_indexed_regs.
+bool gen_indexed_regs(VirtualMachine *vm, Node *deref, IndexedRegs *out);
+void free_indexed_regs(const IndexedRegs *ix);
+// Emits `a * b + c` / `a * K` as one fused opcode when the shape and flags
+// allow it.
+bool gen_fused_muladd(VirtualMachine *vm, Node *node, int dest_reg);
 void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset);
 void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
                       long long offset);

@@ -737,7 +737,32 @@ extern "C" {
                     instead of a violation. Emitted when the assignment's            \
                     source is an OPT propagated local (see CHKRO). */                \
     X(LDHA3, 3)  /* rd = address of host data object #idx (cc_register_cdata);       \
-                    Format: [LDHA3][rd:8][idx:i64], same shape as LDA3. */
+                    Format: [LDHA3][rd:8][idx:i64], same shape as LDA3. */           \
+    /* Fused indexed load/store: base + index * scale + byte offset. Emitted         \
+       only when no safety flag in CCCC_FUSION_UNSAFE_FLAGS is set. */               \
+    X(LDR_INDEX_B, 3)    /* regs[rd] = *(signed char*)(base+idx*scale+off) */        \
+    X(LDR_INDEX_H, 3)    /* regs[rd] = *(short*)(base+idx*scale+off) */              \
+    X(LDR_INDEX_W, 3)    /* regs[rd] = *(int*)(base+idx*scale+off) */                \
+    X(LDR_INDEX_D, 3)    /* regs[rd] = *(long long*)(base+idx*scale+off) */          \
+    X(STR_INDEX_B, 3)    /* *(char*)(base+idx*scale+off) = regs[rd] */               \
+    X(STR_INDEX_H, 3)    /* *(short*)(base+idx*scale+off) = regs[rd] */              \
+    X(STR_INDEX_W, 3)    /* *(int*)(base+idx*scale+off) = regs[rd] */                \
+    X(STR_INDEX_D, 3)    /* *(long long*)(base+idx*scale+off) = regs[rd] */          \
+    X(FLDR_INDEX, 3)     /* fregs[rd] = *(double*)(base+idx*scale+off) */            \
+    X(FSTR_INDEX, 3)     /* *(double*)(base+idx*scale+off) = fregs[rd] */            \
+    X(FLDR_INDEX_F32, 3) /* fregs[rd] = *(float*)(base+idx*scale+off) */             \
+    X(FSTR_INDEX_F32, 3) /* *(float*)(base+idx*scale+off) = fregs[rd] */             \
+    /* Fused multiply-add. Integer forms wrap; FP forms round twice, exactly         \
+       like the FMUL3 + FADD3/FSUB3 pair they replace. */                            \
+    X(MULI3, 3)    /* rd = rs1 * immediate */                                        \
+    X(MULADD3, 1)  /* rd = rs1 + rs2 * rs3 */                                        \
+    X(MULADDI3, 3) /* rd = rs1 + rs2 * immediate */                                  \
+    X(FMADD3, 1)   /* fregs[rd] = fregs[rs1] + fregs[rs2]*fregs[rs3] (f64) */        \
+    X(FMADD3_F32, 1) /* same, f32 */                                                 \
+    X(FMSUB3, 1) /* fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1] (f64) */          \
+    X(FMSUB3_F32, 1) /* same, f32 */                                                 \
+    X(FNMSUB3, 1) /* fregs[rd] = fregs[rs1] - fregs[rs2]*fregs[rs3] (f64) */         \
+    X(FNMSUB3_F32, 1) /* same, f32 */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

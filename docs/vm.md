@@ -150,7 +150,7 @@ Wide immediates (64-bit) are stored little-endian across **two consecutive** 32-
   Used by three-register arithmetic, comparisons, and FP ops.
 
 * **RRRS** — `[opcode] [rd:8 | base:8 | index:8 | scale:8] [offset:64]`
-  Used by the checked-access opcodes (`CHKR`, `CHKNT`, `CHKAB`, …).
+  Used by the fused indexed load/store opcodes and the checked-access opcodes (`CHKR`, `CHKNT`, `CHKAB`, …).
 
 * **RR** — `[opcode] [rd:8 | rs1:8 | unused:16]`  
   Used by moves, negations, loads, stores, and conversions.
@@ -237,7 +237,8 @@ the interpreter honest rather than fast:
 
 1. **Inlined threaded dispatch** — Opcode logic lives at computed-goto labels; there is no function call per instruction.
 2. **Fused local load/store** — The common `LEA3 + LDR/STR` pair for local variables is collapsed into a single `LDR_LOCAL_*` / `STR_LOCAL_*` opcode, saving one dispatch and one register-pressure hop per access.
-3. **Tail-call elimination** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above). This one is not a speed knob: deep-recursion correctness depends on it, so it is unconditional.
+3. **Fused indexed access and multiply-add** — `a[i]`, `a[i + 1]` and `s->arr[i]` become one `LDR_INDEX_*` / `STR_INDEX_*` opcode, and `x + a * b`, `a * K` and floating-point `c + a * b` become `MULADD3` / `MULI3` / `FMADD3`. The floating-point forms round twice, exactly like the multiply and add they replace. Both are skipped under any pointer, type, overflow, uninitialised-read or instrumentation check, whose checks they would bypass (see [Fused Indexed Load / Store](vm-opcodes.md#fused-indexed-load--store)).
+4. **Tail-call elimination** — `return f(args)` patterns that meet eligibility criteria emit `CALLT` instead of `CALL + LEV3`, reducing tail-recursive calls to O(1) stack depth (see [Tail-Call Optimisation](#tail-call-optimisation) above). This one is not a speed knob: deep-recursion correctness depends on it, so it is unconditional.
 
 The dominant cost is the interpreter itself.
 

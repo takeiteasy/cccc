@@ -705,32 +705,73 @@ void emit_load_safety_checks(VirtualMachine *vm, Type *ty, int rs_addr,
                  ((long long)ty->size << 8) | (long long)ty->kind);
 }
 
-void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
-                  bool dangling_check) {
-    emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
+// The fused indexed form of a plain load/store opcode.
+static int indexed_form(int op) {
+    switch (op) {
+        case LDR_B:
+            return LDR_INDEX_B;
+        case LDR_H:
+            return LDR_INDEX_H;
+        case LDR_W:
+            return LDR_INDEX_W;
+        case LDR_D:
+            return LDR_INDEX_D;
+        case STR_B:
+            return STR_INDEX_B;
+        case STR_H:
+            return STR_INDEX_H;
+        case STR_W:
+            return STR_INDEX_W;
+        case STR_D:
+            return STR_INDEX_D;
+        case FLDR:
+            return FLDR_INDEX;
+        case FLDR_F32:
+            return FLDR_INDEX_F32;
+        case FSTR:
+            return FSTR_INDEX;
+        default:
+            return FSTR_INDEX_F32;
+    }
+}
+
+// Emits `op rd, [rs_addr]`, or its fused indexed form when `ix` is given.
+static void emit_mem_rr(VirtualMachine *vm, int op, int rd, int rs_addr,
+                        const IndexedRegs *ix) {
+    if (ix)
+        emit_rrrs_i(vm, indexed_form(op), rd, ix->base, ix->index, ix->scale,
+                    ix->offset);
+    else
+        emit_rr(vm, op, rd, rs_addr);
+}
+
+static void emit_load_impl(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
+                           bool dangling_check, const IndexedRegs *ix) {
+    if (!ix)
+        emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
-        emit_rr(vm, LDR_B, rd, rs_addr);
+        emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
         if (ty->is_unsigned || ty->kind == TY_BOOL)
             emit_rr(vm, ZX1, rd, rd);
     } else if (ty->kind == TY_SHORT) {
-        emit_rr(vm, LDR_H, rd, rs_addr);
+        emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
         if (ty->is_unsigned)
             emit_rr(vm, ZX2, rd, rd);
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
-        emit_rr(vm, LDR_W, rd, rs_addr);
+        emit_mem_rr(vm, LDR_W, rd, rs_addr, ix);
         if (ty->is_unsigned)
             emit_rr(vm, ZX4, rd, rd);
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1) {
-            emit_rr(vm, LDR_B, rd, rs_addr);
+            emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
             if (ty->is_unsigned)
                 emit_rr(vm, ZX1, rd, rd);
         } else if (ty->size == 2) {
-            emit_rr(vm, LDR_H, rd, rs_addr);
+            emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
             if (ty->is_unsigned)
                 emit_rr(vm, ZX2, rd, rd);
         } else {
-            emit_rr(vm, LDR_D, rd, rs_addr);
+            emit_mem_rr(vm, LDR_D, rd, rs_addr, ix);
         }
     } else if (ty->kind == TY_BITINT) {
         if (is_wide_bitint(ty)) {
@@ -740,16 +781,16 @@ void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
             if (rd != rs_addr)
                 emit_mov3(vm, rd, rs_addr);
         } else if (ty->size == 1) {
-            emit_rr(vm, LDR_B, rd, rs_addr);
+            emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
             emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
         } else if (ty->size == 2) {
-            emit_rr(vm, LDR_H, rd, rs_addr);
+            emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
             emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, rd, rd);
         } else if (ty->size == 4) {
-            emit_rr(vm, LDR_W, rd, rs_addr);
+            emit_mem_rr(vm, LDR_W, rd, rs_addr, ix);
             emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, rd, rd);
         } else {
-            emit_rr(vm, LDR_D, rd, rs_addr);
+            emit_mem_rr(vm, LDR_D, rd, rs_addr, ix);
         }
         if (!is_wide_bitint(ty))
             emit_bitint_trunc(vm, ty, rd);
@@ -759,10 +800,21 @@ void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
         if (rd != rs_addr)
             emit_mov3(vm, rd, rs_addr);
     } else if (is_flonum(ty)) {
-        emit_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr);
+        emit_mem_rr(vm, ty->kind == TY_FLOAT ? FLDR_F32 : FLDR, rd, rs_addr,
+                    ix);
     } else {
-        emit_rr(vm, LDR_D, rd, rs_addr);
+        emit_mem_rr(vm, LDR_D, rd, rs_addr, ix);
     }
+}
+
+void emit_load_ex(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
+                  bool dangling_check) {
+    emit_load_impl(vm, ty, rd, rs_addr, dangling_check, NULL);
+}
+
+void emit_load_indexed(VirtualMachine *vm, Type *ty, int rd,
+                       const IndexedRegs *ix) {
+    emit_load_impl(vm, ty, rd, -1, false, ix);
 }
 
 void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
@@ -859,33 +911,34 @@ void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
 // through a *different* member of the same union is legal punning, not a
 // bug -- so this emits CHKT3 in "clear" mode instead of "stamp" mode,
 // erasing rather than establishing effective-type info for the range.
-void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
-                   bool dangling_check) {
-    if (dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
+static void emit_store_impl(VirtualMachine *vm, Type *ty, int rd_val,
+                            int rs_addr, bool dangling_check,
+                            const IndexedRegs *ix) {
+    if (!ix && dangling_check && (vm->flags & CCCC_POINTER_CHECKS))
         emit_rr(vm, CHKP3, rs_addr, 0);
     // #983: see emit_load_safety_checks' comment on dangling_check gating
     // CHKD the same way it gates CHKP3.
-    if (dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
+    if (!ix && dangling_check && (vm->flags & CCCC_BOUNDS_CHECKS))
         emit_rri(vm, CHKD, rs_addr, 0, (long long)ty->size);
-    if (vm->flags & CCCC_TYPE_CHECKS) {
+    if (!ix && (vm->flags & CCCC_TYPE_CHECKS)) {
         int mode = vm->compiler.in_union_member_access ? CHKT3_MODE_CLEAR
                                                        : CHKT3_MODE_STAMP;
         emit_rri(vm, CHKT3, rs_addr, mode,
                  ((long long)ty->size << 8) | (long long)ty->kind);
     }
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
-        emit_rr(vm, STR_B, rd_val, rs_addr);
+        emit_mem_rr(vm, STR_B, rd_val, rs_addr, ix);
     } else if (ty->kind == TY_SHORT) {
-        emit_rr(vm, STR_H, rd_val, rs_addr);
+        emit_mem_rr(vm, STR_H, rd_val, rs_addr, ix);
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
-        emit_rr(vm, STR_W, rd_val, rs_addr);
+        emit_mem_rr(vm, STR_W, rd_val, rs_addr, ix);
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1)
-            emit_rr(vm, STR_B, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_B, rd_val, rs_addr, ix);
         else if (ty->size == 2)
-            emit_rr(vm, STR_H, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_H, rd_val, rs_addr, ix);
         else
-            emit_rr(vm, STR_D, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_D, rd_val, rs_addr, ix);
     } else if (ty->kind == TY_BITINT) {
         if (is_wide_bitint(ty)) {
             // rd_val holds the source address; rs_addr is the destination.
@@ -894,13 +947,13 @@ void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
             emit_li3(vm, REG_A2, ty->size);
             emit(vm, MCPY);
         } else if (ty->size == 1) {
-            emit_rr(vm, STR_B, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_B, rd_val, rs_addr, ix);
         } else if (ty->size == 2) {
-            emit_rr(vm, STR_H, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_H, rd_val, rs_addr, ix);
         } else if (ty->size == 4) {
-            emit_rr(vm, STR_W, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_W, rd_val, rs_addr, ix);
         } else {
-            emit_rr(vm, STR_D, rd_val, rs_addr);
+            emit_mem_rr(vm, STR_D, rd_val, rs_addr, ix);
         }
     } else if (is_decimal(ty)) {
         // _Decimal32/64/128 (#402): rd_val holds the source address (like
@@ -910,10 +963,21 @@ void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
         emit_li3(vm, REG_A2, ty->size);
         emit(vm, MCPY);
     } else if (is_flonum(ty)) {
-        emit_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr);
+        emit_mem_rr(vm, ty->kind == TY_FLOAT ? FSTR_F32 : FSTR, rd_val, rs_addr,
+                    ix);
     } else {
-        emit_rr(vm, STR_D, rd_val, rs_addr);
+        emit_mem_rr(vm, STR_D, rd_val, rs_addr, ix);
     }
+}
+
+void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
+                   bool dangling_check) {
+    emit_store_impl(vm, ty, rd_val, rs_addr, dangling_check, NULL);
+}
+
+void emit_store_indexed(VirtualMachine *vm, Type *ty, int rd_val,
+                        const IndexedRegs *ix) {
+    emit_store_impl(vm, ty, rd_val, -1, false, ix);
 }
 
 void emit_store(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr) {
@@ -1090,4 +1154,346 @@ void emit_psh3(VirtualMachine *vm, int rs) {
 void emit_pop3(VirtualMachine *vm, int rd) {
     emit(vm, POP3);
     emit_word(vm, ENCODE_R(rd));
+}
+
+// ========== Fused indexed access and multiply-add ==========
+
+typedef struct {
+    Node     *base;
+    bool      base_is_addr; // base is a struct whose array member is indexed
+    Node     *index;
+    int       scale;
+    long long offset;
+} IndexedAddr;
+
+// Drops the cast layers that turn the pieces of a pointer sum into pointers.
+static Node *strip_ptr_casts(Node *node) {
+    while (node && node->kind == ND_CAST && node->ty && node->ty->base)
+        node = node->lhs;
+    return node;
+}
+
+// Peels casts that leave the value in its register unchanged: same-type casts
+// the parser wraps around operands, and (for a pointer sum) the casts that
+// turn its pieces into pointers.
+static Node *peel_noop_casts(Node *node, bool ptr_sum) {
+    while (node && node->kind == ND_CAST && node->lhs && node->ty &&
+           node->lhs->ty &&
+           (ptr_sum
+                ? node->ty->base != NULL
+                : (!node->ty->base && node->ty->kind == node->lhs->ty->kind &&
+                   node->ty->size == node->lhs->ty->size &&
+                   node->ty->is_unsigned == node->lhs->ty->is_unsigned)))
+        node = node->lhs;
+    return node;
+}
+
+// Small non-negative (or signed) integer constant behind widening casts only,
+// so a narrowing cast such as (char)300 is never read as 300.
+static bool const_operand(Node *node, long long *value) {
+    while (node && node->kind == ND_CAST && is_integer(node->ty) && node->lhs &&
+           is_integer(node->lhs->ty) && node->ty->size >= node->lhs->ty->size)
+        node = node->lhs;
+    if (!node || node->kind != ND_NUM || !is_integer(node->ty))
+        return false;
+    if (node->val < 0 ? node->ty->is_unsigned || node->val < INT_MIN
+                      : node->val > INT_MAX)
+        return false;
+    *value = node->val;
+    return true;
+}
+
+static bool indexed_type_ok(Type *ty) {
+    if (!ty || is_wide_bitint(ty) || is_decimal(ty))
+        return false;
+    switch (ty->kind) {
+        case TY_ARRAY:
+        case TY_VLA:
+        case TY_STRUCT:
+        case TY_UNION:
+        case TY_COMPLEX:
+        case TY_FUNC:
+        case TY_VECTOR:
+        case TY_VOID:
+            return false;
+        default:
+            return true;
+    }
+}
+
+// Folds a constant `idx + c` / `idx - c` into the offset. Wrapping unsigned
+// narrower than 64 bits is left alone: (long)(u + 1) is not (long)u + 1.
+static Node *fold_index_constant(Node *index, int scale, long long *offset) {
+    Node *sum = index;
+    while (sum && sum->kind == ND_CAST && is_integer(sum->ty) && sum->lhs &&
+           is_integer(sum->lhs->ty) && sum->ty->size >= sum->lhs->ty->size)
+        sum = sum->lhs;
+    if (!sum || (sum->kind != ND_ADD && sum->kind != ND_SUB) ||
+        !is_integer(sum->ty) || sum->ty->kind == TY_BITINT ||
+        (sum->ty->is_unsigned && sum->ty->size < 8))
+        return index;
+    long long c;
+    if (const_operand(sum->rhs, &c)) {
+        *offset += (sum->kind == ND_ADD ? c : -c) * scale;
+        return sum->lhs;
+    }
+    if (sum->kind == ND_ADD && const_operand(sum->lhs, &c)) {
+        *offset += c * scale;
+        return sum->rhs;
+    }
+    return index;
+}
+
+static bool match_indexed_addr(VirtualMachine *vm, Node *deref,
+                               IndexedAddr *out) {
+    if (!deref || deref->kind != ND_DEREF || !indexed_type_ok(deref->ty) ||
+        (vm->flags & CCCC_FUSION_UNSAFE_FLAGS))
+        return false;
+    Node *add = strip_ptr_casts(deref->lhs);
+    if (!add || add->kind != ND_ADD)
+        return false;
+    Node *l = strip_ptr_casts(add->lhs);
+    Node *r = strip_ptr_casts(add->rhs);
+    if (!l || !r || !l->ty || !r->ty)
+        return false;
+    Node *base, *scaled;
+    if (l->ty->base && is_integer(r->ty)) {
+        base   = l;
+        scaled = r;
+    } else if (r->ty->base && is_integer(l->ty)) {
+        base   = r;
+        scaled = l;
+    } else {
+        return false;
+    }
+
+    Node     *index  = scaled;
+    int       scale  = 1;
+    long long offset = 0, k;
+    if (scaled->kind == ND_MUL) {
+        if (const_operand(scaled->rhs, &k) && k >= 1 && k <= 255) {
+            index = scaled->lhs;
+            scale = (int)k;
+        } else if (const_operand(scaled->lhs, &k) && k >= 1 && k <= 255) {
+            index = scaled->rhs;
+            scale = (int)k;
+        }
+    }
+    index = fold_index_constant(index, scale, &offset);
+    if (const_operand(index, &k)) {
+        offset += k * scale;
+        index   = NULL;
+    }
+
+    bool base_is_addr = false;
+    if (base->kind == ND_MEMBER && base->ty->kind == TY_ARRAY &&
+        !base->member->is_bitfield) {
+        offset       += base->member->offset;
+        base          = base->lhs;
+        base_is_addr  = true;
+    }
+    if (contains_funcall(base) || (index && contains_funcall(index)))
+        return false;
+    *out = (IndexedAddr){base, base_is_addr, index, scale, offset};
+    return true;
+}
+
+bool gen_indexed_regs(VirtualMachine *vm, Node *deref, IndexedRegs *out) {
+    IndexedAddr a;
+    if (temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD + 2 ||
+        !match_indexed_addr(vm, deref, &a))
+        return false;
+    int r_base = alloc_temp_reg();
+    if (a.base_is_addr)
+        gen_addr(vm, a.base, r_base);
+    else
+        gen_expr(vm, a.base, r_base);
+    mark_temp_reg_used(r_base);
+    int r_index = REG_ZERO;
+    if (a.index) {
+        r_index = alloc_temp_reg();
+        gen_expr(vm, a.index, r_index);
+        // An unsigned index narrower than 64 bits can carry garbage in its
+        // high bits (a post-increment lowers to `(n += 1) - 1`); signed ones
+        // are sign-correct as loaded.
+        Type *ity = a.index->ty;
+        if (ity && ity->is_unsigned && is_integer(ity) &&
+            ity->kind != TY_BITINT && ity->size < 8)
+            emit_rr(vm,
+                    ity->size == 1   ? ZX1
+                    : ity->size == 2 ? ZX2
+                                     : ZX4,
+                    r_index, r_index);
+        mark_temp_reg_used(r_index);
+    }
+    *out = (IndexedRegs){r_base, r_index, a.scale, a.offset};
+    return true;
+}
+
+void free_indexed_regs(const IndexedRegs *ix) {
+    if (ix->index != REG_ZERO)
+        free_temp_reg(ix->index);
+    free_temp_reg(ix->base);
+}
+
+// `add`'s operand `operand` as a multiply whose rounding/wrapping the fused
+// opcode reproduces: 64-bit for pointer sums, same-width integers otherwise
+// (the add's own wrap then covers the multiply's).
+static Node *fusable_mul(Node *add, Node *operand) {
+    bool  ptr_sum = add->ty->base != NULL;
+    Node *mul     = peel_noop_casts(operand, ptr_sum);
+    if (!mul || mul->kind != ND_MUL || !mul->ty || !is_integer(mul->ty) ||
+        mul->ty->kind == TY_BITINT)
+        return NULL;
+    if (ptr_sum ? mul->ty->size != 8 : mul->ty->size != add->ty->size)
+        return NULL;
+    return mul;
+}
+
+static void emit_rrrr_op(VirtualMachine *vm, int op, int rd, int rs1, int rs2,
+                         int rs3) {
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_RRRR(rd, rs1, rs2, rs3));
+}
+
+// Evaluates `first` into dest_reg and `second`, `third` (optional) into fresh
+// temps, in that order, which the callers arrange to match source order.
+static bool gen_muladd_int(VirtualMachine *vm, Node *add, int dest_reg) {
+    if (!add->ty->base && (!is_integer(add->ty) || add->ty->kind == TY_BITINT ||
+                           add->ty->size > 8))
+        return false;
+    Node *mul_r = fusable_mul(add, add->rhs);
+    Node *mul_l = mul_r ? NULL : fusable_mul(add, add->lhs);
+    Node *mul   = mul_r ? mul_r : mul_l;
+    if (!mul)
+        return false;
+    Node     *addend = mul_r ? add->lhs : add->rhs;
+    Node     *x, *y = NULL;
+    long long imm;
+    if (const_operand(mul->rhs, &imm)) {
+        x = mul->lhs;
+    } else if (const_operand(mul->lhs, &imm)) {
+        x = mul->rhs;
+    } else {
+        x = mul->lhs;
+        y = mul->rhs;
+    }
+    if (add->ty->base) {
+        addend = strip_ptr_casts(addend);
+        x      = strip_ptr_casts(x);
+    }
+
+    int r_x = -1, r_y = -1, r_add = dest_reg;
+    if (mul_r) {
+        gen_expr(vm, addend, dest_reg);
+        mark_temp_reg_used(dest_reg);
+    }
+    r_x = mul_r ? alloc_temp_reg() : dest_reg;
+    gen_expr(vm, x, r_x);
+    mark_temp_reg_used(r_x);
+    if (y) {
+        r_y = alloc_temp_reg();
+        gen_expr(vm, y, r_y);
+        mark_temp_reg_used(r_y);
+    }
+    if (!mul_r) {
+        r_add = alloc_temp_reg();
+        gen_expr(vm, addend, r_add);
+        mark_temp_reg_used(r_add);
+    }
+    if (y)
+        emit_rrrr_op(vm, MULADD3, dest_reg, r_add, r_x, r_y);
+    else
+        emit_rrrs_i(vm, MULADDI3, dest_reg, r_add, r_x, 0, imm);
+    if (!add->ty->base)
+        emit_int32_wrap(vm, add->ty, dest_reg);
+    if (!mul_r)
+        free_temp_reg(r_add);
+    if (y)
+        free_temp_reg(r_y);
+    if (mul_r)
+        free_temp_reg(r_x);
+    return true;
+}
+
+static bool gen_mul_imm(VirtualMachine *vm, Node *mul, int dest_reg) {
+    if (!is_integer(mul->ty) || mul->ty->kind == TY_BITINT || mul->ty->base ||
+        mul->ty->size > 8)
+        return false;
+    long long imm;
+    Node     *x;
+    if (const_operand(mul->rhs, &imm))
+        x = mul->lhs;
+    else if (const_operand(mul->lhs, &imm))
+        x = mul->rhs;
+    else
+        return false;
+    gen_expr(vm, x, dest_reg);
+    emit_rri(vm, MULI3, dest_reg, dest_reg, imm);
+    emit_int32_wrap(vm, mul->ty, dest_reg);
+    return true;
+}
+
+static bool gen_muladd_float(VirtualMachine *vm, Node *node, int dest_reg) {
+    Type *ty = node->ty;
+    if (!ty || (ty->kind != TY_DOUBLE && ty->kind != TY_FLOAT))
+        return false;
+    bool f32 = ty->kind == TY_FLOAT;
+    // The multiply on the right takes priority: it is the one source order
+    // evaluates last, so the addend stays the first operand.
+    Node *rhs        = peel_noop_casts(node->rhs, false);
+    bool  mul_is_rhs = rhs->kind == ND_MUL;
+    Node *mul        = mul_is_rhs ? rhs : peel_noop_casts(node->lhs, false);
+    Node *addend     = mul_is_rhs ? node->lhs : node->rhs;
+    if (mul->kind != ND_MUL || !mul->ty || mul->ty->kind != ty->kind ||
+        !addend->ty || addend->ty->kind != ty->kind)
+        return false;
+    int op;
+    if (node->kind == ND_ADD)
+        op = f32 ? FMADD3_F32 : FMADD3;
+    else if (mul_is_rhs)
+        op = f32 ? FNMSUB3_F32 : FNMSUB3; // c - a*b
+    else
+        op = f32 ? FMSUB3_F32 : FMSUB3;   // a*b - c
+
+    int r_add = dest_reg, r_a, r_b;
+    if (mul_is_rhs) {
+        gen_expr(vm, addend, dest_reg);
+        mark_temp_reg_used(dest_reg);
+        r_a = alloc_temp_reg();
+    } else {
+        r_a = dest_reg;
+    }
+    gen_expr(vm, mul->lhs, r_a);
+    mark_temp_reg_used(r_a);
+    r_b = alloc_temp_reg();
+    gen_expr(vm, mul->rhs, r_b);
+    mark_temp_reg_used(r_b);
+    if (!mul_is_rhs) {
+        r_add = alloc_temp_reg();
+        gen_expr(vm, addend, r_add);
+        mark_temp_reg_used(r_add);
+    }
+    emit_rrrr_op(vm, op, dest_reg, r_add, r_a, r_b);
+    if (!mul_is_rhs)
+        free_temp_reg(r_add);
+    free_temp_reg(r_b);
+    if (mul_is_rhs)
+        free_temp_reg(r_a);
+    return true;
+}
+
+bool gen_fused_muladd(VirtualMachine *vm, Node *node, int dest_reg) {
+    if (dest_reg == REG_ZERO || (vm->flags & CCCC_FUSION_UNSAFE_FLAGS) ||
+        temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD + 3 || !node->ty ||
+        contains_funcall(node->lhs) || contains_funcall(node->rhs))
+        return false;
+    if (is_flonum(node->ty))
+        return (node->kind == ND_ADD || node->kind == ND_SUB) &&
+               gen_muladd_float(vm, node, dest_reg);
+    if (node->kind == ND_ADD)
+        return gen_muladd_int(vm, node, dest_reg);
+    if (node->kind == ND_MUL)
+        return gen_mul_imm(vm, node, dest_reg);
+    return false;
 }

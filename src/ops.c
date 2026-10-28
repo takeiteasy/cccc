@@ -6062,6 +6062,161 @@ static inline int op_LDHA3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+// ========== Fused indexed load/store ==========
+// Effective address is (char *)regs[base] + regs[index] * scale + byte offset.
+// Format: [op] [rd:8|base:8|index:8|scale:8] [offset:64]. Each handler checks
+// exactly what its plain LDR_*/STR_* counterpart does.
+
+static inline char *op_index_addr(VirtualMachine *vm, int base, int index,
+                                  int scale, long long offset) {
+    return (char *)vm->regs[base] + vm->regs[index] * (long long)scale + offset;
+}
+
+#define DEFINE_INDEX_LOAD(NAME, SIZE, LOAD)                                    \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, base, index, scale;                                      \
+        DECODE_RRRS(operands, rd, base, index, scale);                         \
+        char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));   \
+        check_race_access(vm, addr, 0);                                        \
+        WATCHPOINT_CHECK(vm, addr, SIZE, WATCH_READ);                          \
+        if (rd != REG_ZERO) {                                                  \
+            COMPTIME_CONTAIN(vm, addr, SIZE, false);                           \
+            vm->regs[rd] = LOAD(addr);                                         \
+        }                                                                      \
+        return 0;                                                              \
+    }
+
+#define DEFINE_INDEX_STORE(NAME, SIZE, STORE)                                  \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, base, index, scale;                                      \
+        DECODE_RRRS(operands, rd, base, index, scale);                         \
+        char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));   \
+        COMPTIME_CONTAIN(vm, addr, SIZE, true);                                \
+        check_race_access(vm, addr, 1);                                        \
+        STORE(addr, vm->regs[rd]);                                             \
+        WATCHPOINT_CHECK(vm, addr, SIZE, WATCH_WRITE);                         \
+        return 0;                                                              \
+    }
+
+#define LD_INDEX_I8(p)    (*(signed char *)(p))
+#define ST_INDEX_I8(p, v) (*(char *)(p) = (char)(v))
+
+DEFINE_INDEX_LOAD(LDR_INDEX_B, 1, LD_INDEX_I8)
+DEFINE_INDEX_LOAD(LDR_INDEX_H, 2, ld_i16)
+DEFINE_INDEX_LOAD(LDR_INDEX_W, 4, ld_i32)
+DEFINE_INDEX_LOAD(LDR_INDEX_D, 8, ld_i64)
+DEFINE_INDEX_STORE(STR_INDEX_B, 1, ST_INDEX_I8)
+DEFINE_INDEX_STORE(STR_INDEX_H, 2, st_i16)
+DEFINE_INDEX_STORE(STR_INDEX_W, 4, st_i32)
+DEFINE_INDEX_STORE(STR_INDEX_D, 8, st_i64)
+
+static inline int op_FLDR_INDEX_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));
+    COMPTIME_CONTAIN(vm, addr, 8, false);
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_READ);
+    cccc_freg_set_f64(vm, rd, ld_f64(addr));
+    return 0;
+}
+
+static inline int op_FSTR_INDEX_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));
+    COMPTIME_CONTAIN(vm, addr, 8, true);
+    st_f64(addr, cccc_freg_get_f64(vm, rd));
+    WATCHPOINT_CHECK(vm, addr, 8, WATCH_WRITE);
+    return 0;
+}
+
+static inline int op_FLDR_INDEX_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));
+    COMPTIME_CONTAIN(vm, addr, 4, false);
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_READ);
+    cccc_freg_set_f32(vm, rd, ld_f32(addr));
+    return 0;
+}
+
+static inline int op_FSTR_INDEX_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, base, index, scale;
+    DECODE_RRRS(operands, rd, base, index, scale);
+    char *addr = op_index_addr(vm, base, index, scale, cc_read_i64(vm));
+    COMPTIME_CONTAIN(vm, addr, 4, true);
+    st_f32(addr, cccc_freg_get_f32(vm, rd));
+    WATCHPOINT_CHECK(vm, addr, 4, WATCH_WRITE);
+    return 0;
+}
+
+// ========== Fused multiply-add ==========
+
+static inline int op_MULI3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    unsigned long long imm = (unsigned long long)cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)((unsigned long long)vm->regs[rs1] * imm);
+    return 0;
+}
+
+static inline int op_MULADD3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs1, rs2, rs3;
+    DECODE_RRRR(operands, rd, rs1, rs2, rs3);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)((unsigned long long)vm->regs[rs1] +
+                                   (unsigned long long)vm->regs[rs2] *
+                                       (unsigned long long)vm->regs[rs3]);
+    return 0;
+}
+
+static inline int op_MULADDI3_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs1, rs2;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    unsigned long long imm = (unsigned long long)cc_read_i64(vm);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = (long long)((unsigned long long)vm->regs[rs1] +
+                                   (unsigned long long)vm->regs[rs2] * imm);
+    return 0;
+}
+
+// The product lives in a volatile so a host compiler that contracts
+// across statements (gcc's default -ffp-contract=fast) cannot turn these
+// into a single-rounding fma: they must match FMUL3 + FADD3/FSUB3 exactly.
+#define DEFINE_FMA_OP(NAME, TYPE, GET, SET, EXPR)                              \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1, rs2, rs3;                                           \
+        DECODE_RRRR(operands, rd, rs1, rs2, rs3);                              \
+        volatile TYPE product = GET(vm, rs2) * GET(vm, rs3);                   \
+        TYPE          addend  = GET(vm, rs1);                                  \
+        SET(vm, rd, (EXPR));                                                   \
+        return 0;                                                              \
+    }
+
+DEFINE_FMA_OP(FMADD3, double, cccc_freg_get_f64, cccc_freg_set_f64,
+              addend + product)
+DEFINE_FMA_OP(FMSUB3, double, cccc_freg_get_f64, cccc_freg_set_f64,
+              product - addend)
+DEFINE_FMA_OP(FNMSUB3, double, cccc_freg_get_f64, cccc_freg_set_f64,
+              addend - product)
+DEFINE_FMA_OP(FMADD3_F32, float, cccc_freg_get_f32, cccc_freg_set_f32,
+              addend + product)
+DEFINE_FMA_OP(FMSUB3_F32, float, cccc_freg_get_f32, cccc_freg_set_f32,
+              product - addend)
+DEFINE_FMA_OP(FNMSUB3_F32, float, cccc_freg_get_f32, cccc_freg_set_f32,
+              addend - product)
+
 // Comptime code only dereferences VM memory, so host data a builtin returns
 // is handed back as a VM-heap copy.
 static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,

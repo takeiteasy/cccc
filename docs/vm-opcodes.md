@@ -41,6 +41,9 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `ADD3` | `rd = rs1 + rs2` |
 | `SUB3` | `rd = rs1 - rs2` |
 | `MUL3` | `rd = rs1 * rs2` |
+| `MULI3` | `rd = rs1 * immediate` |
+| `MULADD3` | `rd = rs1 + rs2 * rs3` |
+| `MULADDI3` | `rd = rs1 + rs2 * immediate` |
 | `DIV3` | `rd = rs1 / rs2` (signed; traps on divide-by-zero) |
 | `ADDC` | Checked signed addition; traps when the result leaves the signed width in the width byte |
 | `SUBC` | Checked signed subtraction (also unary `-` as `0 - x`); traps outside the width |
@@ -158,6 +161,19 @@ Sizes: **B** = byte, **H** = half-word (16-bit), **W** = word (32-bit), **D** = 
 | `STR_W` | `*(int*)regs[rs] = regs[rd]` |
 | `STR_D` | `*(long long*)regs[rs] = regs[rd]` |
 
+### Fused Indexed Load / Store
+
+`LDR_INDEX_{B,H,W,D}`, `STR_INDEX_{B,H,W,D}`, `FLDR_INDEX{,_F32}` and `FSTR_INDEX{,_F32}` access `base + index * scale + offset` in one instruction. They are `RRRS`-encoded (`[rd:8|base:8|index:8|scale:8]`) followed by a 64-bit byte offset, and check exactly what the matching plain `LDR_*`/`STR_*` opcode checks. A constant index uses `REG_ZERO` as the index register.
+
+Codegen emits them for `*(base + index * k + c)` with `k` in 1..255 and a constant `c` (`a[i]`, `a[i + 1]`, `s->arr[i]`), unless the base or index contains a call. A constant added to or subtracted from a signed (or 64-bit) index, and the offset of an array member, fold into the offset field. They are not emitted when any of `CCCC_FUSION_UNSAFE_FLAGS` is set (pointer, bounds, UAF, dangling, type, uninitialised, overflow, stack-instrumentation, provenance, invalid-arithmetic and checked-pointer checks), because those checks are emitted around the plain access.
+
+| Opcode | Description |
+|--------|-------------|
+| `LDR_INDEX_B` / `_H` / `_W` / `_D` | `regs[rd] = *(T*)(regs[base] + regs[index] * scale + offset)`, sign-extended |
+| `STR_INDEX_B` / `_H` / `_W` / `_D` | `*(T*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
+| `FLDR_INDEX` / `FLDR_INDEX_F32` | load a double / float into `fregs[rd]` |
+| `FSTR_INDEX` / `FSTR_INDEX_F32` | store `fregs[rd]` as a double / float |
+
 ### Atomic Operations
 
 Atomic load, store, and read-modify-write opcodes for concurrency. The access width is encoded in a 64-bit operand word (`(size << 1) | is_unsigned`). All atomic opcodes tag the accessed address in the shadow metadata for mixed-access detection.
@@ -175,6 +191,8 @@ Atomic load, store, and read-modify-write opcodes for concurrency. The access wi
 
 All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an integer register.
 
+The `FMADD3`/`FMSUB3`/`FNMSUB3` family replaces a multiply feeding an add or subtract of the same type. The product is rounded before the add, so the result is bit-identical to `FMUL3` followed by `FADD3`/`FSUB3`; it is not a single-rounding fused multiply-add (call `fma()` for that). The integer `MULADD3` forms wrap like the multiply and add they replace. Codegen emits all of them under the same flag condition as the indexed opcodes.
+
 | Opcode | Description |
 |--------|-------------|
 | `FADD3` | `fregs[rd] = fregs[rs1] + fregs[rs2]` (f64) |
@@ -183,6 +201,9 @@ All `F*` opcodes operate on `fregs[]`.  Comparisons write a boolean into an inte
 | `FDIV3` | `fregs[rd] = fregs[rs1] / fregs[rs2]` (f64; IEEE-754 semantics -- finite/0.0 is a correctly-signed infinity, 0.0/0.0 is NaN, neither is UB; traps only under the opt-in `--trap-fp-divzero`) |
 | `FMOV3` | `fregs[rd] = fregs[rs1]` (f64) |
 | `FNEG3` | `fregs[rd] = -fregs[rs1]` (f64) |
+| `FMADD3` / `FMADD3_F32` | `fregs[rd] = fregs[rs1] + fregs[rs2] * fregs[rs3]` |
+| `FMSUB3` / `FMSUB3_F32` | `fregs[rd] = fregs[rs2] * fregs[rs3] - fregs[rs1]` |
+| `FNMSUB3` / `FNMSUB3_F32` | `fregs[rd] = fregs[rs1] - fregs[rs2] * fregs[rs3]` |
 | `FEQ3` … `FGE3` | f64 comparisons |
 | `FADD3_F32` … `FDIV3_F32` | f32 arithmetic |
 | `FNEG3_F32` | f32 negation |
