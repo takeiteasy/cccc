@@ -65,6 +65,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [types.md](types.md) | Type compatibility, `_Generic`, `--compiler-family` |
 | [coverage.md](coverage.md) | C89–C23 and extension support table |
 | [stdlib.md](stdlib.md) | Standard-library and POSIX header support table |
+| [benchmarks.md](benchmarks.md) | Compile speed and VM run speed against a host compiler |
 
 **Contributing**
 

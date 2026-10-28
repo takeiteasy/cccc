@@ -24,6 +24,8 @@ cccc --use-system-headers -c=native \
 
 `-i` is CCCC's `--isystem` short flag, not `-isystem` (getopt would read that as `-i` with the argument `system`). `--sysroot` and `-i "$SDK/usr/include"` are equivalent here.
 
+The recipe takes about 2 minutes on an Apple M1 with a release-built `cccc`; see [benchmarks.md](benchmarks.md#compiling-cccc). A `make` build of `cccc` is about 3x slower.
+
 ## What to check
 
 | Stage | Pass when |

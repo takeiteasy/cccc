@@ -212,6 +212,10 @@ See [safety.md](docs/safety.md).
 | Explore interactively | [repl.md](docs/repl.md), [debugger.md](docs/debugger.md) |
 | Set defaults per project | [config.md](docs/config.md) |
 
+## Speed
+
+Compiling cccc's own sources takes about 2 minutes with `cccc -c=native` and 19 seconds with a parallel host `cc -O2` build (Apple M1). The VM is roughly 55x to 870x slower than `gcc -O2`; `-c=native` runs at native speed. Details are in [docs/benchmarks.md](docs/benchmarks.md).
+
 ## Documentation
 
 Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
@@ -279,6 +283,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | [types.md](docs/types.md) | Type compatibility, `_Generic`, `--compiler-family` |
 | [coverage.md](docs/coverage.md) | C89–C23 and extension support table |
 | [stdlib.md](docs/stdlib.md) | Standard-library and POSIX header support table |
+| [benchmarks.md](docs/benchmarks.md) | Compile speed and VM run speed against a host compiler |
 
 **Contributing**
 
