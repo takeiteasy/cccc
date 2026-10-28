@@ -1230,8 +1230,8 @@ static void serialize_complex_part(FILE *f, SerializeContext *ctx, Type *base,
 
 // An opaque-storage aggregate (type_needs_opaque_storage) is a byte image,
 // split around its pointer slots (opaque_pointer_slots) so a pointer can carry
-// its relocation. A relocation anywhere else has no spelling.
-// TODO(#1472): a pointer in a union or at a misaligned (packed) offset.
+// its relocation. A relocation anywhere else (a union, a packed offset) is left
+// as zero bytes and queued on ctx->patches for a startup constructor.
 static void serialize_opaque_init(FILE *f, VirtualMachine *vm,
                                   SerializeContext *ctx, Obj *var, Type *ty,
                                   int offset) {
@@ -1242,12 +1242,14 @@ static void serialize_opaque_init(FILE *f, VirtualMachine *vm,
         bool at_slot = false;
         for (int i = 0; i < slots.n; i++)
             at_slot |= r->offset == offset + slots.off[i];
-        if (!at_slot)
-            error("cccc: cannot serialize initializer for global '%s' in "
-                  "native mode: a pointer in a union or at a misaligned "
-                  "offset inside a struct/union with a _BitInt(N>128) "
-                  "bit-field\n\n1 error generated.",
-                  var->name);
+        if (at_slot)
+            continue;
+        if (ctx->patches_len == ctx->patches_cap) {
+            ctx->patches_cap = ctx->patches_cap ? ctx->patches_cap * 2 : 4;
+            ctx->patches =
+                realloc(ctx->patches, ctx->patches_cap * sizeof *ctx->patches);
+        }
+        ctx->patches[ctx->patches_len++] = (RelocPatch){r->offset, r};
     }
     Type *void_ptr = pointer_to(vm, ty_void);
     fprintf(f, "{ ");
@@ -1610,6 +1612,71 @@ void serialize_alignas_if_needed(FILE *f, Obj *var) {
         fprintf(f, "_Alignas(%d) ", var->ty->align);
 }
 
+// Stores the relocations serialize_opaque_init left as zero bytes. Priority 101
+// is the first open to user code: a constructor of priority 101 or lower that
+// runs before this one sees null. Mach-O gcc has no constructor priorities, so
+// there the globals' definition order (before every function) orders them.
+static void serialize_reloc_patches(FILE *f, VirtualMachine *vm,
+                                    SerializeContext *ctx, Obj *var,
+                                    bool force_static) {
+    if (var->is_tls || force_static)
+        error("cccc: cannot serialize initializer for global '%s' in native "
+              "mode: a pointer in a union or at a misaligned offset inside a "
+              "struct/union with a _BitInt(N>128) bit-field needs a "
+              "file-scope, non-thread-local global\n\n1 error generated.",
+              var->name);
+    Type *void_ptr = pointer_to(vm, ty_void);
+    if (!ctx->patch_seq)
+        fprintf(f,
+                "#if defined(__APPLE__) && !defined(__clang__)\n"
+                "#define __CCCC_RELOC_CTOR __attribute__((constructor))\n"
+                "#else\n"
+                "#define __CCCC_RELOC_CTOR __attribute__((constructor(101)))\n"
+                "#endif\n");
+    fprintf(f, "__CCCC_RELOC_CTOR static void __cccc_reloc_%d(void) {\n",
+            ctx->patch_seq++);
+    for (int i = 0; i < ctx->patches_len; i++) {
+        fprintf(f, "    { void *p = ");
+        serialize_reloc_init(f, vm, ctx, var, void_ptr, ctx->patches[i].rel);
+        fprintf(f,
+                "; __builtin_memcpy((unsigned char *)&%s + %d, &p, sizeof p); "
+                "}\n",
+                var->name, ctx->patches[i].offset);
+    }
+    fprintf(f, "}\n");
+}
+
+// A global whose pointers a constructor stores is written after start-up, so
+// it cannot keep a top-level `const` (read-only data).
+Type *serialize_global_decl_type(VirtualMachine *vm, Obj *var) {
+    Type *ty = var->ty;
+    if (!var->init_data || !var->rel || !type_needs_reloc_patch(ty))
+        return ty;
+    if (ty->kind != TY_ARRAY) {
+        if (!ty->is_const)
+            return ty;
+        ty           = copy_type(vm, ty);
+        ty->is_const = false;
+        return ty;
+    }
+    Type *base = ty->base;
+    while (base->kind == TY_ARRAY)
+        base = base->base;
+    if (!base->is_const && !ty->is_const)
+        return ty;
+    Type *copy     = copy_type(vm, ty);
+    copy->is_const = false;
+    Type **slot    = &copy->base;
+    for (Type *t = ty->base; t; t = t->base) {
+        *slot             = copy_type(vm, t);
+        (*slot)->is_const = false;
+        if (t->kind != TY_ARRAY)
+            break;
+        slot = &(*slot)->base;
+    }
+    return copy;
+}
+
 // Prints `var`'s definition: storage class, type, name and initializer.
 // `force_static` is for a definition emitted inside a function body, where a
 // bare declaration would be an automatic variable.
@@ -1645,9 +1712,10 @@ static void serialize_var_definition(FILE *f, VirtualMachine *vm,
     // serialize_init_bytes' own byte image below, sized off the same
     // folded value. See SerializeContext.allow_layout_dims's own comment.
     ctx->allow_layout_dims = !var->init_data;
-    serialize_type_decl(f, ctx, var->ty, var->name);
+    serialize_type_decl(f, ctx, serialize_global_decl_type(vm, var), var->name);
     ctx->allow_layout_dims = false;
 
+    ctx->patches_len       = 0;
     if (var->init_data) {
         fprintf(f, " = ");
         const char *pthread_init_macro = pthread_initializer_macro(ctx, var);
@@ -1658,6 +1726,8 @@ static void serialize_var_definition(FILE *f, VirtualMachine *vm,
     }
 
     fprintf(f, ";\n");
+    if (ctx->patches_len)
+        serialize_reloc_patches(f, vm, ctx, var, force_static);
 }
 
 void serialize_global_var(FILE *f, VirtualMachine *vm, SerializeContext *ctx,

@@ -1,9 +1,6 @@
-// EXPECT_COMPILE_ERROR
-// CCCC_FLAGS: -m
-// CCCC_EXPECT_STDERR: a pointer in a union or at a misaligned offset
-//
-// A pointer that overlaps other members can't be a slot of its own.
-int x;
+// A pointer in a union can't be a slot of its own; a startup constructor
+// stores it.
+int x = 7;
 
 union WithPointer {
     int *p;
@@ -14,5 +11,5 @@ union WithPointer {
 union WithPointer g = {.p = &x};
 
 int main(void) {
-    return g.l != 0;
+    return g.p == &x && *g.p == 7 ? 42 : 1;
 }

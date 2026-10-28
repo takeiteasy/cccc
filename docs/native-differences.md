@@ -8,7 +8,7 @@ Constructs with VM-only semantics are a compile error rather than divergent C:
 
 | Construct | Notes |
 |---|---|
-| Pointer in a union, or at a misaligned offset, of a struct with a wide `_BitInt` bit-field | See [wide bit-fields](#wide-_bitint-bit-fields) |
+| Pointer in a union, or at a misaligned offset, of a `_Thread_local` or function-local global with a wide `_BitInt` bit-field | See [wide bit-fields](#wide-_bitint-bit-fields) |
 | `__builtin_decimal_to_chars`, `<decimal_math.h>`, any decimal construct without `CCCC_HAS_DECIMAL` | |
 | `__builtin_pc_function_name`, `__builtin_pc_source_location` | VM source-map builtins |
 
@@ -94,4 +94,6 @@ s.tag = 7; // (*(int *)((unsigned char *)&s + 0)) = 7
 
 `sizeof`, `_Alignof` and offsets match the VM, including under `packed`. Address-of members, copies, by-value arguments and returns, nested and anonymous members, flexible array members and global initializers all work.
 
-**Limitations:** a global initializer holding a pointer inside a union, or at a misaligned (`packed`) offset, is refused ([#1472](https://todo.sr.ht/~takeiteasy/cccc/1472)).
+A global initializer holding a pointer inside a union, or at a misaligned (`packed`) offset, is stored by a startup constructor, and the global is emitted without its top-level `const`.[^ctor] A `_Thread_local` or function-local global holding such a pointer is refused.
+
+[^ctor]: The constructor has priority 101 (none on gcc for macOS), so a user constructor of priority 101 or lower that runs first sees a null pointer.

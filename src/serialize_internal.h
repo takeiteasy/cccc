@@ -122,6 +122,11 @@ typedef struct {
 } EnumConstRename;
 
 typedef struct {
+    int         offset;
+    Relocation *rel;
+} RelocPatch;
+
+typedef struct {
     TypeVec   seen;
     TypeVec   defs;
     TypeName *tags;
@@ -306,6 +311,13 @@ typedef struct {
     // reason (these constructs nest: e.g. a masked cast of a binop result).
     int wide_bitint_seq;
     int checked_seq; // names lowered checked-store temps, which nest
+    // Pointer relocations of the global being printed that
+    // serialize_opaque_init could not place in an initializer;
+    // serialize_var_definition emits a startup constructor storing them.
+    RelocPatch *patches;
+    int         patches_len;
+    int         patches_cap;
+    int         patch_seq;
 } SerializeContext;
 
 typedef struct {
@@ -505,6 +517,8 @@ typedef struct {
     int  n;
 } OpaqueSlots;
 OpaqueSlots opaque_pointer_slots(Type *ty);
+bool type_needs_reloc_patch(Type *ty);
+Type *serialize_global_decl_type(VirtualMachine *vm, Obj *var);
 void serialize_local_var_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
                                    const char *name);
 void serialize_hoisted_local_decl(FILE *f, VirtualMachine *vm,

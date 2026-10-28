@@ -2261,7 +2261,8 @@ static bool collect_pointer_slots(Type *ty, int base, OpaqueSlots *out,
 // Offsets of the pointers in an opaque-storage struct, each emitted as a real
 // `void *` so a global initializer can hold a relocation. Empty when there is
 // none, or when one can't be placed: a misaligned (packed) pointer, or one in
-// a union. The caller frees `.off`.
+// a union (those are stored by a startup constructor instead). The caller
+// frees `.off`.
 OpaqueSlots opaque_pointer_slots(Type *ty) {
     OpaqueSlots out = {0};
     int         cap = 0;
@@ -2270,6 +2271,45 @@ OpaqueSlots opaque_pointer_slots(Type *ty) {
         out = (OpaqueSlots){0};
     }
     return out;
+}
+
+static bool contains_pointer(Type *ty) {
+    switch (ty->kind) {
+        case TY_PTR:
+            return true;
+        case TY_ARRAY:
+            return contains_pointer(ty->base);
+        case TY_STRUCT:
+        case TY_UNION:
+            for (Member *m = ty->members; m; m = m->next)
+                if (!m->is_bitfield && contains_pointer(m->ty))
+                    return true;
+            return false;
+        default:
+            return false;
+    }
+}
+
+// Whether a global of this type can hold a pointer relocation that
+// serialize_opaque_init has no slot for, so a constructor stores it.
+bool type_needs_reloc_patch(Type *ty) {
+    switch (ty->kind) {
+        case TY_ARRAY:
+            return type_needs_reloc_patch(ty->base);
+        case TY_STRUCT:
+        case TY_UNION:
+            if (type_needs_opaque_storage(ty)) {
+                OpaqueSlots slots = opaque_pointer_slots(ty);
+                free(slots.off);
+                return !slots.n && contains_pointer(ty);
+            }
+            for (Member *m = ty->members; m; m = m->next)
+                if (!m->is_bitfield && type_needs_reloc_patch(m->ty))
+                    return true;
+            return false;
+        default:
+            return false;
+    }
 }
 
 // The byte arrays are never named by an access, so each gets a unique name:

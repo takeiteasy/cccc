@@ -5489,7 +5489,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             // #1095: same rule as serialize_global_var's own -- only when
             // no byte-image initializer will follow for this object.
             ctx.allow_layout_dims = !obj->init_data;
-            serialize_type_decl(f, &ctx, obj->ty, obj->name);
+            serialize_type_decl(f, &ctx, serialize_global_decl_type(vm, obj),
+                                obj->name);
             ctx.allow_layout_dims = false;
             fprintf(f, ";\n");
         }
@@ -6205,7 +6206,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // forward declaration and the real definition further down never
         // disagree on how the dimension is spelled.
         ctx.allow_layout_dims = !obj->init_data;
-        serialize_type_decl(f, &ctx, obj->ty, obj->name);
+        serialize_type_decl(f, &ctx, serialize_global_decl_type(vm, obj),
+                            obj->name);
         ctx.allow_layout_dims = false;
         fprintf(f, ";\n");
     }
