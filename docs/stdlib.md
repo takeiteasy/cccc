@@ -94,12 +94,14 @@ These are forwarded to libc via a private stub bound to the real libc name, not 
 | `__builtin_memcpy(d, s, n)` | `void *` | Equivalent to `memcpy(d, s, n)` |
 | `__builtin_memmove(d, s, n)` | `void *` | Equivalent to `memmove(d, s, n)` |
 | `__builtin_memcmp(a, b, n)` | `int` | Equivalent to `memcmp(a, b, n)` |
+| `__builtin_malloc(n)` | `void *` | Equivalent to `malloc(n)` |
+| `__builtin_free(p)` | `void` | Equivalent to `free(p)` |
 | `__builtin___memcpy_chk(d, s, n, os)` | `void *` | Fortified `memcpy`; aborts when `os` is known and `n > os`. Likewise `mempcpy` (GNU), `memmove`, `memset`, `strcpy`, `stpcpy`, `strncpy`, `stpncpy`, `strcat`, `strncat` |
 | `__builtin___snprintf_chk(s, n, flag, os, fmt, ...)` | `int` | Fortified `snprintf`; `flag` is ignored. Likewise `sprintf`, `vsprintf`, `vsnprintf`, and `strlcpy`, `strlcat`, `memccpy` on Apple |
 
 #### Math Builtins
 
-Each name below, and its `f` (float) and `l` (long double) form, forwards to the libm function of the same name. No `#include <math.h>` is needed, and a program's own `fabs` does not conflict. Arguments convert to the parameter type, so `__builtin_fabs(-42)` takes an `int`. Under `-c=native`/`-m`/`-c=generated` the serializer prints the literal `__builtin_` spelling. Calls with constant arguments fold at compile time, so they work in static initializers, `constexpr` and `_Static_assert`. `sqrt` and `fma` fold only when every argument and the result are finite, and a signaling-NaN argument never folds; those calls stay run-time calls so `errno` and FP exceptions still happen.[^libm-fold]
+Each name below, and its `f` (float) and `l` (long double) form, forwards to the libm function of the same name. No `#include <math.h>` is needed, and a program's own `fabs` does not conflict. Arguments convert to the parameter type, so `__builtin_fabs(-42)` takes an `int`. Under `-c=native`/`-m`/`-c=generated` the serializer prints the literal `__builtin_` spelling. Calls with constant arguments fold at compile time, so they work in static initializers, `constexpr` and `_Static_assert`. Every row except the rounding, `copysign`, `fmin`, `fmax` and `fabs` functions folds only when every argument and the result are finite, `ilogb` never folds, and a signaling-NaN argument never folds; those calls stay run-time calls so `errno` and FP exceptions still happen.[^libm-fold]
 
 | Builtin | Arguments | Description |
 |---------|-----------|-------------|
@@ -109,6 +111,12 @@ Each name below, and its `f` (float) and `l` (long double) form, forwards to the
 | `__builtin_copysign` | `x, y` | `x` with the sign of `y` |
 | `__builtin_fmin`, `__builtin_fmax` | `x, y` | Smaller / larger value |
 | `__builtin_fma` | `x, y, z` | `x * y + z` with a single rounding |
+| `__builtin_sin`, `__builtin_cos`, `__builtin_tan` | `x` | Trigonometric functions |
+| `__builtin_asin`, `__builtin_acos`, `__builtin_atan` | `x` | Inverse trigonometric functions |
+| `__builtin_atan2`, `__builtin_fmod`, `__builtin_pow` | `x, y` | Same argument order as the libm functions |
+| `__builtin_rint` | `x` | Round using the current rounding mode |
+| `__builtin_ldexp` | `x, e` | `x * 2^e`; `e` is an `int` |
+| `__builtin_ilogb` | `x` | Binary exponent of `x`, as an `int` |
 
 #### Variadic Argument Macros (`__builtin_va_*`)
 

@@ -748,7 +748,7 @@ typedef uint32_t Pc;
  emitted by the code generator and interpreted by the VM executor.
 */
 // Rows in the libm_builtins table (src/parse_decl.c).
-#define CCCC_LIBM_BUILTINS 10
+#define CCCC_LIBM_BUILTINS 22
 #define CCCC_CHK_BUILTINS  17
 
 typedef enum {
@@ -4595,6 +4595,8 @@ typedef struct Compiler {
     Obj  *builtin_memcpy;     // Builtin memcpy (forwarded to libc, #1144)
     Obj  *builtin_memmove;    // Builtin memmove (forwarded to libc, #1144)
     Obj  *builtin_memcmp;     // Builtin memcmp (forwarded to libc, #1144)
+    Obj  *builtin_malloc;     // __builtin_malloc (forwarded to libc)
+    Obj  *builtin_bfree;      // __builtin_free (forwarded to libc)
     Obj  *builtin_libm[CCCC_LIBM_BUILTINS]
                       [3];    // __builtin_fabs etc.: [row][d,f,l]
     Obj  *builtin_chk[CCCC_CHK_BUILTINS]; // __builtin___*_chk stubs, lazy

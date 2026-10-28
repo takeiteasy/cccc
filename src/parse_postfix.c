@@ -3871,6 +3871,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         fwd = vm->compiler.builtin_memmove;
     else if (equal(tok, "__builtin_memcmp"))
         fwd = vm->compiler.builtin_memcmp;
+    else if (equal(tok, "__builtin_malloc"))
+        fwd = vm->compiler.builtin_malloc;
+    else if (equal(tok, "__builtin_free"))
+        fwd = vm->compiler.builtin_bfree;
     else if (tok->kind == TK_IDENT)
         fwd = chk_builtin_stub(vm, tok->loc, tok->len);
     if (fwd) {

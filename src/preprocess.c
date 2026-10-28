@@ -1971,6 +1971,8 @@ static bool is_has_builtin_supported(char *name) {
         "__builtin_memcpy",
         "__builtin_memmove",
         "__builtin_memcmp",
+        "__builtin_malloc",
+        "__builtin_free",
         "__builtin_isnan",
         "__builtin_isinf",
         "__builtin_isfinite",

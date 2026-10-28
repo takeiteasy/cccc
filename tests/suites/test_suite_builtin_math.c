@@ -119,3 +119,67 @@ int test_domain_errors_stay_runtime(void) {
         return 2;
     return 42;
 }
+
+#if !__has_builtin(__builtin_ldexp) || !__has_builtin(__builtin_ilogbf) ||     \
+    !__has_builtin(__builtin_malloc) || !__has_builtin(__builtin_free)
+#error "transcendental, ldexp/ilogb or malloc/free builtins not reported"
+#endif
+
+[[cccc::test(return = 42)]]
+int test_transcendental(void) {
+    volatile double x = 0.5, y = 3.0;
+    if (__builtin_fabs(__builtin_asin(x) - 0.5235987755982989) > 1e-12)
+        return 1;
+    if (__builtin_fabs(__builtin_acos(x) - 1.0471975511965979) > 1e-12)
+        return 2;
+    if (__builtin_fabs(__builtin_atan(x) - 0.4636476090008061) > 1e-12)
+        return 3;
+    if (__builtin_fabs(__builtin_atan2(x, y) - 0.16514867741462683) > 1e-12)
+        return 4;
+    if (__builtin_fabs(__builtin_sin(x) - 0.479425538604203) > 1e-12 ||
+        __builtin_fabs(__builtin_cos(x) - 0.8775825618903728) > 1e-12 ||
+        __builtin_fabs(__builtin_tan(x) - 0.5463024898437905) > 1e-12)
+        return 5;
+    if (__builtin_fmod(y, x) != 0.0 || __builtin_pow(y, 2.0) != 9.0)
+        return 6;
+    if (__builtin_sinf(0.0f) != 0.0f || __builtin_powl(2.0L, 3.0L) != 8.0L)
+        return 7;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_rint_ldexp_ilogb(void) {
+    volatile double x = 0.5;
+    volatile int    n = 4;
+    if (__builtin_rint(2.5) != 2.0 || __builtin_rintf(3.5f) != 4.0f)
+        return 1;
+    if (__builtin_ldexp(x, n) != 8.0 || __builtin_ldexp(1.0, 3) != 8.0 ||
+        __builtin_ldexpf(1.0f, 2) != 4.0f || __builtin_ldexpl(1.0L, 5) != 32.0L)
+        return 2;
+    if (__builtin_ilogb(3.0) != 1 || __builtin_ilogbf(8.0f) != 3 ||
+        __builtin_ilogbl(0.001L) != -10)
+        return 3;
+    int shift = __builtin_ilogb(1024.0);
+    return shift == 10 ? 42 : 4;
+}
+
+[[cccc::test(return = 42)]]
+int test_fold_stays_runtime_for_errors(void) {
+    double inf = __builtin_pow(10.0, 400.0);
+    double nan = __builtin_asin(2.0);
+    double big = __builtin_ldexp(1.0, 2000);
+    if (inf != __builtin_inf() || nan == nan || big != __builtin_inf())
+        return 1;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_builtin_malloc_free(void) {
+    int *p = __builtin_malloc(sizeof(int) * 4);
+    if (!p)
+        return 1;
+    p[3]  = 42;
+    int v = p[3];
+    __builtin_free(p);
+    return v;
+}

@@ -1587,27 +1587,41 @@ static void warn_unused_globals(VirtualMachine *vm) {
     free(infos);
 }
 
-// X(name, arity, exact): `exact` rows never raise an exception or set errno
-// for non-signaling operands, so they fold for any such argument; the others
-// fold only when every argument and the result are finite.
+// X(name, arity, exact, kind): `exact` rows never raise an exception or set
+// errno for non-signaling operands, so they fold for any such argument; the
+// others fold only when every argument and the result are finite. `kind` is
+// 1/2/3 (all floating), I (last argument `int`) or R (returns `int`).
 #define LIBM_BUILTINS(X)                                                       \
-    X(fabs, 1, true)                                                           \
-    X(sqrt, 1, false)                                                          \
-    X(floor, 1, true)                                                          \
-    X(ceil, 1, true)                                                           \
-    X(trunc, 1, true)                                                          \
-    X(round, 1, true)                                                          \
-    X(copysign, 2, true)                                                       \
-    X(fmin, 2, true)                                                           \
-    X(fmax, 2, true)                                                           \
-    X(fma, 3, false)
+    X(fabs, 1, true, 1)                                                        \
+    X(sqrt, 1, false, 1)                                                       \
+    X(floor, 1, true, 1)                                                       \
+    X(ceil, 1, true, 1)                                                        \
+    X(trunc, 1, true, 1)                                                       \
+    X(round, 1, true, 1)                                                       \
+    X(copysign, 2, true, 2)                                                    \
+    X(fmin, 2, true, 2)                                                        \
+    X(fmax, 2, true, 2)                                                        \
+    X(fma, 3, false, 3)                                                        \
+    X(asin, 1, false, 1)                                                       \
+    X(acos, 1, false, 1)                                                       \
+    X(atan, 1, false, 1)                                                       \
+    X(atan2, 2, false, 2)                                                      \
+    X(sin, 1, false, 1)                                                        \
+    X(cos, 1, false, 1)                                                        \
+    X(tan, 1, false, 1)                                                        \
+    X(fmod, 2, false, 2)                                                       \
+    X(pow, 2, false, 2)                                                        \
+    X(rint, 1, false, 1)                                                       \
+    X(ldexp, 2, false, I)                                                      \
+    X(ilogb, 1, false, R)
 
 static const struct {
     const char *base;
     int         arity;
     bool        exact;
+    char        kind;
 } libm_builtins[] = {
-#define X(n, ar, ex) {#n, ar, ex},
+#define X(n, ar, ex, k) {#n, ar, ex, #k[0]},
     LIBM_BUILTINS(X)
 #undef X
 };
@@ -1616,7 +1630,7 @@ static_assert(sizeof libm_builtins / sizeof *libm_builtins ==
               "CCCC_LIBM_BUILTINS out of sync with LIBM_BUILTINS");
 
 enum {
-#define X(n, ar, ex) LIBM_ROW_##n,
+#define X(n, ar, ex, k) LIBM_ROW_##n,
     LIBM_BUILTINS(X)
 #undef X
 };
@@ -1658,6 +1672,14 @@ int libm_builtin_lookup(const char *name, int len, int *row, int *variant) {
     (v == 0   ? (long double)n(a[0], a[1], a[2])                               \
      : v == 1 ? (long double)n##f((float)a[0], (float)a[1], (float)a[2])       \
               : n##l((long double)a[0], (long double)a[1], (long double)a[2]))
+#define LIBM_APPLY_I(n)                                                        \
+    (v == 0   ? (long double)n(a[0], (int)a[1])                                \
+     : v == 1 ? (long double)n##f((float)a[0], (int)a[1])                      \
+              : n##l((long double)a[0], (int)a[1]))
+#define LIBM_APPLY_R(n)                                                        \
+    (v == 0   ? (long double)n(a[0])                                           \
+     : v == 1 ? (long double)n##f((float)a[0])                                 \
+              : (long double)n##l((long double)a[0]))
 
 static bool is_signaling_nan(double x) {
     uint64_t bits;
@@ -1675,11 +1697,15 @@ bool libm_builtin_fold(int row, int variant, const double *a,
             (!libm_builtins[row].exact && !isfinite(a[i])))
             return false;
     }
+    // ilogb returns an exception-raising int for 0/inf/NaN, which a finite
+    // result check cannot see.
+    if (libm_builtins[row].kind == 'R')
+        return false;
     long double r = 0;
     switch (row) {
-#define X(n, ar, ex)                                                           \
+#define X(n, ar, ex, k)                                                        \
     case LIBM_ROW_##n:                                                         \
-        r = LIBM_APPLY_##ar(n);                                                \
+        r = LIBM_APPLY_##k(n);                                                 \
         break;
         LIBM_BUILTINS(X)
 #undef X
@@ -1909,6 +1935,15 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_memcpy);
     apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_memmove);
 
+    Type *malloc_ty             = func_type(vm, pointer_to(vm, ty_void));
+    malloc_ty->params           = copy_type(vm, ty_long);
+    vm->compiler.builtin_malloc = new_private_func_obj(vm, "malloc", malloc_ty);
+    vm->compiler.builtin_malloc->builtin_spelling = "__builtin_malloc";
+    Type *bfree_ty                                = func_type(vm, ty_void);
+    bfree_ty->params                              = pointer_to(vm, ty_void);
+    vm->compiler.builtin_bfree = new_private_func_obj(vm, "free", bfree_ty);
+    vm->compiler.builtin_bfree->builtin_spelling = "__builtin_free";
+
     // __builtin_fabs/sqrt/... forward to the libm function of the same name
     // (private stub, spelled __builtin_* by the serializer).
     static const char suffix[3] = {'\0', 'f', 'l'};
@@ -1916,11 +1951,13 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     for (int i = 0; i < CCCC_LIBM_BUILTINS; i++) {
         for (int v = 0; v < 3; v++) {
             const char *base = libm_builtins[i].base;
-            Type       *fty  = func_type(vm, floats[v]);
+            const char  kind = libm_builtins[i].kind;
+            Type       *fty  = func_type(vm, kind == 'R' ? ty_int : floats[v]);
             Type      **tail = &fty->params;
             for (int a = 0; a < libm_builtins[i].arity; a++) {
-                *tail = copy_type(vm, floats[v]);
-                tail  = &(*tail)->next;
+                bool is_int = kind == 'I' && a == libm_builtins[i].arity - 1;
+                *tail       = copy_type(vm, is_int ? ty_int : floats[v]);
+                tail        = &(*tail)->next;
             }
             Obj *stub = new_private_func_obj(
                 vm, arena_format(vm, "%s%.*s", base, v ? 1 : 0, &suffix[v]),
