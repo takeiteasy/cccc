@@ -1510,6 +1510,7 @@ char *cccc_path_find_executable(
 void register_ctype_functions(VirtualMachine *vm);
 void register_fenv_functions(VirtualMachine *vm);
 void register_locale_functions(VirtualMachine *vm);
+void register_obstack_functions(VirtualMachine *vm);
 void register_math_functions(VirtualMachine *vm);
 void register_posix_functions(VirtualMachine *vm);
 // Per-domain POSIX registrars (#946 split of posix.c), called directly by
