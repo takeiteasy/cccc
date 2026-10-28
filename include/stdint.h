@@ -3,34 +3,31 @@
 #ifndef __STDINT_H
 #define __STDINT_H
 
-/* #1040 follow-on: found while fixing include/stdio.h/include/getopt.h's */
-/* own header-shadow bug (same ticket) -- once those two headers hand off */
-/* to the real host <stdio.h>/<getopt.h> via #include_next under */
-/* -c=native/-c=generated, the real header transitively defines the actual */
-/* fixed-width typedefs (e.g. real macOS <sys/_types/_int64_t.h>: */
-/* `typedef long long int64_t;`) ahead of this file's own, unconditional */
-/* `typedef long int64_t;` (`long`, not `long long`, to match this VM's own */
-/* internal ABI assumption, per the comment below) -- a real, confirmed */
-/* "typedef redefinition with different types" error whenever a test */
-/* includes both <stdio.h> and <stdint.h>/<math.h> (test_ffi.c, */
-/* test_ffi_variadic_fnptr.c). Both spellings are 8 bytes on every LP64 */
-/* target CCCC supports, so there is no correctness difference once this */
-/* file's job is only to satisfy guest-side compilation -- guarded the same */
-/* way include/errno.h/include/fenv.h are, handing off to the host's own, */
-/* authoritative <stdint.h> whenever a genuine host compiler (not CCCC's */
-/* own preprocessor) is the one reading this physical file. */
+/* Under CCCC the types are fixed here; a real host compiler hands off to the */
+/* host's own <stdint.h> (below). */
 #ifdef __CCCC__
 
 /* On this VM, long is 8 bytes */
 typedef signed char    int8_t;
 typedef short          int16_t;
 typedef int            int32_t;
+#ifdef __APPLE__
+/* The macOS SDK spells int64_t `long long`; both are 8 bytes, but the spelling
+ * must match so a struct reached through the SDK and through here is one type.
+ */
+typedef long long int64_t;
+#else
 typedef long           int64_t;
+#endif
 
 typedef unsigned char  uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int   uint32_t;
+#ifdef __APPLE__
+typedef unsigned long long uint64_t;
+#else
 typedef unsigned long  uint64_t;
+#endif
 
 typedef long           intptr_t;
 typedef unsigned long  uintptr_t;
@@ -52,13 +49,22 @@ typedef unsigned long  uintmax_t;
 #define INT16_MAX   32767
 #define INT32_MIN   (-2147483648)
 #define INT32_MAX   2147483647
+#ifdef __APPLE__
+#define INT64_MIN (-9223372036854775807LL - 1)
+#define INT64_MAX 9223372036854775807LL
+#else
 #define INT64_MIN   (-9223372036854775807L - 1)
 #define INT64_MAX   9223372036854775807L
+#endif
 
 #define UINT8_MAX   255
 #define UINT16_MAX  65535
 #define UINT32_MAX  4294967295U
+#ifdef __APPLE__
+#define UINT64_MAX 18446744073709551615ULL
+#else
 #define UINT64_MAX  18446744073709551615UL
+#endif
 
 /* 7.18.3 Limits of other integer types. size_t/ptrdiff_t are fixed typedefs
  * (include/stddef.h: `unsigned long`/`long` on every CCCC target), so these

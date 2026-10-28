@@ -20,6 +20,7 @@ Constructs with VM-only semantics are a compile error rather than divergent C:
 |---|---|
 | Local variables | Hoisted to one declaration list at the top of each function; initializers become assignments. Braces are kept for readability only. |
 | Name clash | A local that collides with a global, function or typedef it also uses is renamed `name__cccc_N`; the global is never renamed. Grep for the suffix if a local seems missing. |
+| Typedef shadowing a header's | A program's own `typedef struct token_t token_t;` beside a system header's `typedef struct au_token token_t;` is renamed `token_t__cccc_dupN`; the header keeps the name and uses of the struct are spelled `struct token_t`. |
 | Anonymous struct/union | Tag `__cccc_anon<N>` in `-m`/`-c=native`; every use names the same type |
 | C11 anonymous members, header-owned types | Keep their inline spelling |
 | `-c=generated` | Anonymous aggregates stay inline |

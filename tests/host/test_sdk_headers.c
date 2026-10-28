@@ -46,6 +46,49 @@ static const char MISC[] =
     "    return 42;\n"
     "}\n";
 
+// Several translation units merged into one -c=native program, built with
+// --use-system-headers so the SDK's own spellings reach the host compile.
+typedef struct {
+    const char *name;
+    const char *text;
+} SrcFile;
+
+static const char INT64_HEADER[] =
+    "#include <stdint.h>\n#include <stdio.h>\n"
+    "struct Pair { int64_t a; uint64_t b; };\n"
+    "struct Pair pair_make(int64_t a, uint64_t b);\n";
+
+static const SrcFile INT64_PAIR[] = {
+    {"pair.h", INT64_HEADER},
+    {"pair_other.c", "#include \"pair.h\"\n"
+                     "struct Pair pair_make(int64_t a, uint64_t b)"
+                     " { return (struct Pair){a, b}; }\n"},
+    {"pair_main.c", "#include <stdio.h>\n#include \"pair.h\"\n"
+                    "int main(void) { struct Pair p = pair_make(40, 2);"
+                    " return (int)(p.a + (int64_t)p.b); }\n"},
+    {NULL, NULL},
+};
+
+static const SrcFile TOKEN_SHADOW[] = {
+    {"audit_user.c",
+     "#include <bsm/audit.h>\n"
+     "int audit_user(void) { token_t *t = 0; return t == 0; }\n"},
+    {"token_main.c",
+     "typedef struct token_t token_t;\n"
+     "struct token_t { int kind; };\n"
+     "int audit_user(void);\n"
+     "int main(void) { token_t t = {41}; return t.kind + audit_user(); }\n"},
+    {NULL, NULL},
+};
+
+static const SrcFile ISNAN_REPLAY[] = {
+    {"isnan_main.c",
+     "#include <math.h>\n"
+     "int main(void) { volatile double d = 0.0;"
+     " double n = d / d; return isnan(n) && !isnan(d) ? 42 : 1; }\n"},
+    {NULL, NULL},
+};
+
 static int run(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 static int run(const char *fmt, ...) {
@@ -123,6 +166,37 @@ static int check(const char *cccc, const char *sdk, const char *root,
     return 0;
 }
 
+// Exits 42 natively; `cccc_flags` precede the SDK path and sources.
+static int check_files(const char *cccc, const char *sdk, const char *root,
+                       const char *name, const char *cccc_flags,
+                       const SrcFile *files) {
+    char srcs[4 * PATH_MAX] = "", exe[PATH_MAX];
+    snprintf(exe, sizeof exe, "%s/%s", root, name);
+    for (const SrcFile *f = files; f->name; f++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof path, "%s/%s", root, f->name);
+        if (!write_file(path, f->text))
+            return 1;
+        size_t len = strlen(srcs);
+        if (strstr(f->name, ".c"))
+            snprintf(srcs + len, sizeof srcs - len, " '%s'", path);
+    }
+    int rc =
+        run("'%s' %s -I '%s' -i '%s/usr/include' -c=native %s -o '%s' 2>&1",
+            cccc, cccc_flags, root, sdk, srcs, exe);
+    if (rc != 0) {
+        fprintf(stderr, "FAIL: %s -c=native build exited %d\n", name, rc);
+        return 1;
+    }
+    rc = run("'%s'", exe);
+    if (rc != 42) {
+        fprintf(stderr, "FAIL: %s native binary exited %d, want 42\n", name,
+                rc);
+        return 1;
+    }
+    return 0;
+}
+
 int main(void) {
     alarm(240);
     char cccc[PATH_MAX], sdk[PATH_MAX];
@@ -137,6 +211,12 @@ int main(void) {
     int failed = check(cccc, sdk, root, "va_stdarg_first", VA_STDARG_FIRST);
     failed    |= check(cccc, sdk, root, "va_stdio_first", VA_STDIO_FIRST);
     failed    |= check(cccc, sdk, root, "misc", MISC);
+    failed |= check_files(cccc, sdk, root, "int64_pair", "--use-system-headers",
+                          INT64_PAIR);
+    failed |= check_files(cccc, sdk, root, "token_shadow",
+                          "--use-system-headers", TOKEN_SHADOW);
+    failed |= check_files(cccc, sdk, root, "isnan_replay",
+                          "--use-system-headers -I include", ISNAN_REPLAY);
     nftw(root, remove_entry, 8, FTW_DEPTH | FTW_PHYS);
     if (!failed)
         printf("PASS: sdk headers\n");

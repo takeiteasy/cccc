@@ -7872,9 +7872,10 @@ typedef struct {
 static void define_predef_int(VirtualMachine *vm, const PredefInt *t) {
     uint64_t    max    = t->is_signed ? (UINT64_MAX >> (65 - t->bits))
                                       : (UINT64_MAX >> (64 - t->bits));
-    const char *suffix = t->bits == 64
-                             ? (t->is_signed ? "L" : "UL")
-                             : (!t->is_signed && t->bits == 32 ? "U" : "");
+    const bool  ll     = !strcmp(t->type, "long long");
+    const char *suffix =
+        t->bits == 64 ? (t->is_signed ? (ll ? "LL" : "L") : (ll ? "ULL" : "UL"))
+                      : (!t->is_signed && t->bits == 32 ? "U" : "");
     char       *name;
 
 #define PD(field, value)                                                       \
@@ -7949,8 +7950,14 @@ static void init_target_macros(VirtualMachine *vm) {
         {"UINT16", "short", 16, false, "h", true, true},
         {"INT32", "int", 32, true, "", true, true},
         {"UINT32", "int", 32, false, "", true, true},
+    // The macOS SDK spells int64_t `long long`.
+#ifdef __APPLE__
+        {"INT64", "long long", 64, true, "ll", true, true},
+        {"UINT64", "long long", 64, false, "ll", true, true},
+#else
         {"INT64", "long", 64, true, "l", true, true},
         {"UINT64", "long", 64, false, "l", true, true},
+#endif
         {"INTMAX", "long", 64, true, "l", true, true},
         {"UINTMAX", "long", 64, false, "l", true, true},
         {"INTPTR", "long", 64, true, "l", true, false},

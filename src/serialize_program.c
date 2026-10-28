@@ -1342,6 +1342,37 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
     free(collided);
 }
 
+// A file-scope aggregate typedef from the program itself that reuses the name
+// of a different header typedef (`typedef struct token_t token_t;` beside an
+// SDK `typedef struct au_token token_t;`) is renamed to `<name>__cccc_dup<N>`;
+// the header keeps its name. Uses of a tagged aggregate are spelled by tag, so
+// only the typedef declaration changes.
+static void rename_typedefs_shadowing_header(VirtualMachine   *vm,
+                                             SerializeContext *ctx) {
+    for (int i = 0; i < ctx->typedefs_len; i++) {
+        TypeName *rec = &ctx->typedefs[i];
+        if (rec->owner_fn || (rec->from_include && !rec->always_emit) ||
+            !rec->ty ||
+            (rec->ty->kind != TY_STRUCT && rec->ty->kind != TY_UNION &&
+             rec->ty->kind != TY_ENUM))
+            continue;
+        bool shadows = false;
+        for (int j = 0; j < ctx->typedefs_len && !shadows; j++) {
+            TypeName *hdr = &ctx->typedefs[j];
+            shadows       = hdr->from_include && !hdr->always_emit &&
+                            !hdr->owner_fn && hdr->name_len == rec->name_len &&
+                            !strncmp(hdr->name, rec->name, rec->name_len) &&
+                            hdr->ty && !same_type_strong(hdr->ty, rec->ty);
+        }
+        if (!shadows)
+            continue;
+        char *new_name = arena_format(vm, "%.*s__cccc_dup%d", rec->name_len,
+                                      rec->name, ctx->anon_global_counter++);
+        rec->name      = new_name;
+        rec->name_len  = (int)strlen(new_name);
+    }
+}
+
 // #1015: two translation units can each independently declare a same-named
 // enumerator inside a differently-shaped enum -- reachable even when the
 // enclosing enum's own tag doesn't collide (different tags, same
@@ -5180,6 +5211,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     rename_colliding_static_names(vm, prog, &ctx);   // #1002
     rename_colliding_type_tags(vm, prog, &ctx);      // #1014
     rename_colliding_typedef_names(vm, prog, &ctx);  // #1293
+    rename_typedefs_shadowing_header(vm, &ctx);
     rename_colliding_enum_constants(vm, prog, &ctx); // #1015
     rename_colliding_local_type_names(vm, &ctx, ctx.tags, ctx.tags_len, true);
     rename_colliding_local_type_names(vm, &ctx, ctx.typedefs, ctx.typedefs_len,
@@ -5849,11 +5881,19 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             char *bundled_path = find_cccc_bundled_header_path(
                 vm,
                 path_basename_is(resolved, "math.h") ? "math.h" : "float.h");
-            if (bundled_path) {
+            // Only when the parse used the bundled copy: a parsed SDK
+            // <math.h> declares its own helpers (`__inline_isnand`) that the
+            // bundled one lacks.
+            bool parsed_bundled =
+                bundled_path &&
+                !strcmp(cc_canonical_path_key(vm, resolved),
+                        cc_canonical_path_key(vm, bundled_path));
+            if (parsed_bundled) {
                 fprintf(f, "#include \"%s\"\n", bundled_path);
                 free(bundled_path);
                 continue;
             }
+            free(bundled_path);
         }
         if (resolved && path_basename_is(resolved, "tgmath.h"))
             seen_tgmath_h = true;
