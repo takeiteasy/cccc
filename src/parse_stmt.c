@@ -630,6 +630,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_IF, tok);
         tok        = skip(vm, tok->next, "(");
         node->cond = expr(vm, &tok, tok);
+        require_value(vm, node->cond);
         tok        = skip(vm, tok, ")");
 
         // DCE-aware diagnostic suppression: when saw_diag_attr is set, check
@@ -689,6 +690,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_SWITCH, tok);
         tok        = skip(vm, tok->next, "(");
         node->cond = expr(vm, &tok, tok);
+        require_value(vm, node->cond);
         tok        = skip(vm, tok, ")");
 
         if (vm->compiler.warnings & CCCC_WARN_SWITCH_BOOL) {
@@ -899,8 +901,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
-        if (!equal(tok, ";"))
+        if (!equal(tok, ";")) {
             node->cond = expr(vm, &tok, tok);
+            require_value(vm, node->cond);
+        }
         tok = skip(vm, tok, ";");
 
         // DCE-aware suppression: for(;0; inc){body} — cond statically 0 makes
@@ -938,6 +942,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node             = new_node(vm, ND_FOR, tok);
         tok                    = skip(vm, tok->next, "(");
         node->cond             = expr(vm, &tok, tok);
+        require_value(vm, node->cond);
         tok                    = skip(vm, tok, ")");
 
         char *brk              = vm->compiler.brk_label;
@@ -987,6 +992,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         tok                             = skip(vm, tok, "while");
         tok                             = skip(vm, tok, "(");
         node->cond                      = expr(vm, &tok, tok);
+        require_value(vm, node->cond);
         tok                             = skip(vm, tok, ")");
         *rest                           = skip(vm, tok, ";");
         return node;

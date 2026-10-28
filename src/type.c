@@ -1423,6 +1423,9 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_NOT:
         case ND_LOGOR:
         case ND_LOGAND:
+            require_value(vm, node->lhs);
+            if (node->rhs)
+                require_value(vm, node->rhs);
             node->ty = ty_int;
             return;
         case ND_BITNOT:
@@ -1450,6 +1453,7 @@ void add_type(VirtualMachine *vm, Node *node) {
             }
             return;
         case ND_COND: {
+            require_value(vm, node->cond);
             Type *t = node->then->ty;
             Type *e = node->els->ty;
             // Vector arms in '?:' (tracker #715): must be checked before the

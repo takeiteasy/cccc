@@ -669,6 +669,7 @@ bool cc_has_attribute(const char *name, int len);
 
 bool is_flonum(Type *ty);
 Node *new_cast(VirtualMachine *vm, Node *expr, Type *ty);
+void require_value(VirtualMachine *vm, Node *node);
 // Matches __builtin_<libm name>[f|l]; sets *row (table index) and *variant
 // (0 double, 1 float, 2 long double), returns the argument count or 0.
 int libm_builtin_lookup(const char *name, int len, int *row, int *variant);
