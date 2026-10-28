@@ -556,6 +556,117 @@ static long long wrap_dec_strtod(long long w, long long dst, long long s,
 }
 
 // Register all stdlib.h functions
+#ifdef __GLIBC__
+#include <obstack.h>
+
+int find_ffi_function(VirtualMachine *vm, const char *name);
+
+// glibc obstacks keep their chunk allocator and deallocator in the struct and
+// call them from later _obstack_newchunk/obstack_free calls. Those are VM
+// natives, so a guest callback goes through a record handed to glibc as its
+// extra argument. When both callbacks are the registered malloc and free, glibc
+// calls those directly and no record exists.
+typedef struct {
+    long long alloc, free, arg;
+    bool      has_arg;
+} ObstackGuestFns;
+
+static struct _obstack_chunk *obstack_guest_alloc(void *rec, long size) {
+    ObstackGuestFns *g = rec;
+    long long        args[2];
+    int              n  = 0;
+    long long        rv = 0;
+    if (g->has_arg)
+        args[n++] = g->arg;
+    args[n++] = size;
+    if (cccc_call_guest_callback(cccc_current_ffi_vm(), g->alloc, args, n,
+                                 &rv) != 0)
+        return NULL;
+    return (struct _obstack_chunk *)rv;
+}
+
+static void obstack_guest_free(void *rec, struct _obstack_chunk *chunk) {
+    ObstackGuestFns *g = rec;
+    long long        args[2];
+    int              n = 0;
+    if (g->has_arg)
+        args[n++] = g->arg;
+    long long rv = 0;
+    args[n++]    = (long long)chunk;
+    cccc_call_guest_callback(cccc_current_ffi_vm(), g->free, args, n, &rv);
+}
+
+// The host function behind a registered native used as a guest function value.
+static void *obstack_host_fn(VirtualMachine *vm, long long value,
+                             const char *name) {
+    int idx = find_ffi_function(vm, name);
+    if (idx < 0 || value != CCCC_FFI_TOKEN_BASE - idx)
+        return NULL;
+    return vm->compiler.ffi_table[idx].func_ptr;
+}
+
+static long long obstack_begin_with(long long h, long long size,
+                                    long long align, long long chunkfun,
+                                    long long freefun, long long arg,
+                                    bool has_arg) {
+    struct obstack  *o = (struct obstack *)h;
+    ObstackGuestFns *g = calloc(1, sizeof *g);
+    if (!g)
+        return 0;
+    g->alloc   = chunkfun;
+    g->free    = freefun;
+    g->arg     = arg;
+    g->has_arg = has_arg;
+    int ok = _obstack_begin_1(o, (int)size, (int)align,
+                              (void *(*)(void *, long))obstack_guest_alloc,
+                              (void (*)(void *, void *))obstack_guest_free, g);
+    if (!ok)
+        free(g);
+    return ok;
+}
+
+static long long wrap_obstack_begin(long long h, long long size,
+                                    long long align, long long chunkfun,
+                                    long long freefun) {
+    VirtualMachine *vm        = cccc_current_ffi_vm();
+    void *(*host_alloc)(long) = obstack_host_fn(vm, chunkfun, "malloc");
+    void (*host_free)(void *) = obstack_host_fn(vm, freefun, "free");
+    if (host_alloc && host_free)
+        return _obstack_begin((struct obstack *)h, (int)size, (int)align,
+                              host_alloc, host_free);
+    return obstack_begin_with(h, size, align, chunkfun, freefun, 0, false);
+}
+
+static long long wrap_obstack_begin_1(long long h, long long size,
+                                      long long align, long long chunkfun,
+                                      long long freefun, long long arg) {
+    return obstack_begin_with(h, size, align, chunkfun, freefun, arg, true);
+}
+
+static long long wrap_obstack_newchunk(long long h, long long len) {
+    _obstack_newchunk((struct obstack *)h, (int)len);
+    return 0;
+}
+
+static long long wrap_obstack_memory_used(long long h) {
+    return _obstack_memory_used((struct obstack *)h);
+}
+
+// TODO: re-initialising an obstack without obstack_free(h, NULL) leaks its
+// record; a guest that assigns h->chunkfun/freefun directly (obstack_chunkfun)
+// stores guest values glibc calls as host pointers (#1850)
+static long long wrap_obstack_free(long long h, long long obj) {
+    struct obstack  *o = (struct obstack *)h;
+    ObstackGuestFns *g = NULL;
+    if (obj == 0 && o->use_extra_arg &&
+        (void *)o->chunkfun == (void *)obstack_guest_alloc)
+        g = o->extra_arg;
+    (obstack_free)(o, (void *)obj);
+    free(g);
+    return 0;
+}
+#endif
+
 void register_stdlib_functions(VirtualMachine *vm) {
     // Conversion functions
     cc_register_cfunc(vm, "atof", (void *)atof, 1, 1);     // returns double
@@ -595,6 +706,16 @@ void register_stdlib_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "free_aligned_sized",
                       (void *)__cccc_native_free_aligned_sized, 3, 0);
     cc_register_cfunc(vm, "malloc", (void *)cccc_ffi_malloc, 1, 0);
+#ifdef __GLIBC__
+    cc_register_cfunc(vm, "_obstack_begin", (void *)wrap_obstack_begin, 5, 0);
+    cc_register_cfunc(vm, "_obstack_begin_1", (void *)wrap_obstack_begin_1, 6,
+                      0);
+    cc_register_cfunc(vm, "_obstack_newchunk", (void *)wrap_obstack_newchunk, 2,
+                      0);
+    cc_register_cfunc(vm, "_obstack_memory_used",
+                      (void *)wrap_obstack_memory_used, 1, 0);
+    cc_register_cfunc(vm, "obstack_free", (void *)wrap_obstack_free, 2, 0);
+#endif
     cc_register_cfunc(vm, "realloc", (void *)cccc_ffi_realloc, 2, 0);
     cc_register_cfunc(vm, "reallocarray", (void *)cccc_ffi_reallocarray, 3,
                       0); // Portable polyfill (#699)

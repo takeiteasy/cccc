@@ -51,7 +51,25 @@ cccc --sysroot / --use-system-headers -O1 -D_FORTIFY_SOURCE=2 -c=native prog.c
 
 The fortified spellings `__builtin___memcpy_chk`, `__builtin___snprintf_chk` and the other `__builtin___*_chk` builtins are built in, and `__has_builtin` reports them. A call that exceeds a known object size aborts with `*** buffer overflow detected ***` (SIGABRT, exit 134), as libc's does. Under `-c=native` the host compiler applies its own fortify. With `--checked-pointers` the [library bounds](safety-checked-interfaces.md#standard-library-calls) apply to the fortified spellings as to the plain ones, and trap first (exit 255).[^fortify]
 
-[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own. `<obstack.h>` is not usable in the VM, so the obstack wrappers are not registered.
+[^fortify]: A glibc `memcpy` wrapper run in the VM sees no object size for its own parameters, so without `--checked-pointers` an overflow there is not caught; the bound at the call site is. glibc's real `stdout`/`stderr` globals are not reachable from a VM run with `--sysroot /`; use `-c=native`. Every `__*_chk` entry point glibc 2.39's fortified headers reference is a VM native, covering the string, stdio, wide-character, `poll`, `syslog`, stdlib and unistd wrappers; a failed size check aborts like `__chk_fail`. `longjmp` needs no entry point of its own.
+
+## Obstacks
+
+glibc's `<obstack.h>` works in the VM (glibc only; macOS has no obstacks). The chunk allocator and deallocator can be `malloc`/`free` or any guest function, with or without the extra argument of `obstack_specify_allocation_with_arg`. `obstack_printf` and `obstack_vprintf` format with CCCC's own printf engine, and the fortified `__obstack_printf_chk` and `__obstack_vprintf_chk` are natives.
+
+```c
+#include <obstack.h>
+#include <stdlib.h>
+#define obstack_chunk_alloc malloc
+#define obstack_chunk_free free
+
+struct obstack o;
+obstack_init(&o);
+obstack_grow(&o, "hello", 5);
+obstack_free(&o, NULL);
+```
+
+Setting `obstack_alloc_failed_handler` or `obstack_exit_failure` from guest code has no effect.
 
 ## Pragmas
 

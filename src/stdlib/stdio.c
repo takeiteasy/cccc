@@ -4,6 +4,9 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <unistd.h>
+#ifdef __GLIBC__
+#include <obstack.h>
+#endif
 
 // C23 adds the %b/%B (binary integer) conversion specifier to the
 // printf/scanf families. It's natively supported by glibc >= 2.35, but
@@ -399,6 +402,51 @@ static long long chk_vdprintf(long long fd, long long flag, const char *fmt,
     return wrap_vdprintf(fd, fmt, va_ptr);
 }
 
+#ifdef __GLIBC__
+// obstack_printf and obstack_vprintf format through the same engine as
+// asprintf, then append the text to the obstack.
+static long long obstack_append(long long h, char *buf, int len) {
+    if (len < 0)
+        return len;
+    obstack_grow((struct obstack *)h, buf, (size_t)len);
+    free(buf);
+    return len;
+}
+
+static long long wrap_obstack_printf(long long h, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char *buf;
+    int   len = CHK_VASPRINTF(&buf, fmt, ap);
+    va_end(ap);
+    return obstack_append(h, buf, len);
+}
+
+static long long wrap_obstack_vprintf(long long h, const char *fmt,
+                                      long long va_ptr) {
+    char *buf;
+    int   len = (int)CHK_WRAP_VASPRINTF(&buf, fmt, va_ptr);
+    return obstack_append(h, buf, len);
+}
+
+static long long chk_obstack_printf(long long h, int flag, const char *fmt,
+                                    ...) {
+    (void)flag;
+    va_list ap;
+    va_start(ap, fmt);
+    char *buf;
+    int   len = CHK_VASPRINTF(&buf, fmt, ap);
+    va_end(ap);
+    return obstack_append(h, buf, len);
+}
+
+static long long chk_obstack_vprintf(long long h, long long flag,
+                                     const char *fmt, long long va_ptr) {
+    (void)flag;
+    return wrap_obstack_vprintf(h, fmt, va_ptr);
+}
+#endif
+
 #ifdef __linux__
 // glibc exports these regardless of the feature macros; declared here rather
 // than enabling _GNU_SOURCE for the whole file.
@@ -508,6 +556,16 @@ void register_stdio_functions(VirtualMachine *vm) {
     cc_register_variadic_cfunc(vm, "__asprintf_chk", (void *)chk_asprintf, 3,
                                0);
     cc_register_cfunc(vm, "__vasprintf_chk", (void *)chk_vasprintf, 4, 0);
+#ifdef __GLIBC__
+    cc_register_variadic_cfunc(vm, "obstack_printf",
+                               (void *)wrap_obstack_printf, 2, 0);
+    cc_register_cfunc(vm, "obstack_vprintf", (void *)wrap_obstack_vprintf, 3,
+                      0);
+    cc_register_variadic_cfunc(vm, "__obstack_printf_chk",
+                               (void *)chk_obstack_printf, 3, 0);
+    cc_register_cfunc(vm, "__obstack_vprintf_chk", (void *)chk_obstack_vprintf,
+                      4, 0);
+#endif
     cc_register_variadic_cfunc(vm, "dprintf", (void *)wrap_dprintf, 2, 0);
     cc_register_cfunc(vm, "vdprintf", (void *)wrap_vdprintf, 3, 0);
     cc_register_variadic_cfunc(vm, "__dprintf_chk", (void *)chk_dprintf, 3, 0);

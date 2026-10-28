@@ -418,6 +418,15 @@ static const char *const IPC_NAMES[] = {
 
 static const char *const SAFE_NAMES[] = {
     "__asprintf_chk",
+    "__obstack_printf_chk",
+    "__obstack_vprintf_chk",
+    "_obstack_begin",
+    "_obstack_begin_1",
+    "_obstack_memory_used",
+    "_obstack_newchunk",
+    "obstack_free",
+    "obstack_printf",
+    "obstack_vprintf",
     "__confstr_chk",
     "explicit_bzero",
     "__explicit_bzero_chk",
