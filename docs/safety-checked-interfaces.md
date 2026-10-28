@@ -204,7 +204,18 @@ if (fill(&s) && (s.n = 8)) {}   // not rechecked: the call may have replaced the
 
 `(s.n = 8) + (s.p = other, 0)` is not rechecked: `+` does not order its operands.
 
-Not checked: a count written in a function that did not store the pointer, or past the events above ([#1825](https://todo.sr.ht/~takeiteasy/cccc/1825)); a write earlier in a nested statement than the event that ends tracking (`if ((s.n = 8)) { fill(&s); }`, [#1861](https://todo.sr.ht/~takeiteasy/cccc/1861)).
+A write in a nested statement is rechecked when it runs before the event that ends tracking, unless a loop contains both:
+
+```c
+if ((s.n = 8)) { fill(&s); }   // traps: the write runs before the call
+if (c) { s.n = 8; } else { fill(&s); }   // traps: the branches are exclusive
+for (i = 0; i < 2; i++) {
+    s.n = i ? 8 : 2;           // not rechecked: iteration two writes after the call
+    fill(&s);
+}
+```
+
+Not checked: a count written in a function that did not store the pointer, or past the events above ([#1825](https://todo.sr.ht/~takeiteasy/cccc/1825)).
 
 ### Constant initializers
 

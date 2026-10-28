@@ -12,6 +12,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: the library bounds table covers the new byte-counted entry points.
 - Added: a row of a row pointer (`p[0]`, `*p`, `p[0][1]`) passed to a checked parameter is verified against the row's extent, also when `p` is checked-rooted on only some paths.
 - Added: a count written inside a used value is rechecked when `&&`, `||`, `?:` or `,` sequences it before a call that ends tracking (`if ((s.n = 8) && fill(&s))`), outside a loop.
+- Added: a count written earlier in a nested statement than the call that ends tracking is rechecked (`if ((s.n = 8)) { fill(&s); }`, `if (c) { s.n = 8; } else { fill(&s); }`), unless a loop contains both.
 
 ## [0.26.0] - 2026-10-27
 

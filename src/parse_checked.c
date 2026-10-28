@@ -3466,11 +3466,12 @@ static Node *group_peel_discarded(VirtualMachine *vm, Node *e) {
 // Tracking runs forward through the anchor's block and ends at anything that
 // could change the pointer, or which object it lives in: a write to the
 // pointer or to a variable its object expression reads, a label, and (for an
-// object that is not a private local) any call or indirect store. A nested
-// statement is entered only when none of it ends tracking. A write whose value
-// is used (`if ((s.n = f()))`) is rechecked when the rest of its expression
-// does not end tracking, or when `&&`, `||`, `?:` or `,` sequences it before
-// the event and no loop re-enters it afterwards.
+// object that is not a private local) any call or indirect store. A write in a
+// nested statement is rechecked when it runs before the event that ends
+// tracking, which a loop containing both does not guarantee. A write whose
+// value is used (`if ((s.n = f()))`) is rechecked when the rest of its
+// expression does not end tracking, or when `&&`, `||`, `?:` or `,` sequences
+// it before the event and no loop re-enters it afterwards.
 
 typedef enum { TV_SKIP, TV_RECHECK, TV_STOP } TrackVerdict;
 
@@ -3511,7 +3512,8 @@ typedef struct {
     int          ntemps;
     Obj         *cg;
     GroupLeaves  unit; // value-used sibling writes found in the current unit
-    GroupLeaves  held; // those of a nested statement, wrapped if it stays live
+    GroupLeaves  held; // those of a nested statement
+    GroupLeaves  wraps; // its discarded sibling writes
     int  committed; // leading writes of `unit` that run before anything later
     bool spine;     // the node being visited is sequenced after those
     int  loops;     // loops entered inside the tracked region
@@ -3943,7 +3945,7 @@ static void track_unit_done(VirtualMachine *vm, Obj *fn, TrackCtx *cx,
 
 // An expression statement's leaves, or a condition/value as one unit.
 static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
-                       TrackCtx *cx, GroupLeaves *wraps) {
+                       TrackCtx *cx) {
     if (!e)
         return true;
     if (!discarded) {
@@ -3962,15 +3964,34 @@ static bool track_expr(VirtualMachine *vm, Obj *fn, Node *e, bool discarded,
         if (v == TV_RECHECK && cx->immediate)
             track_wrap(vm, fn, g.v[i], cx);
         else if (v == TV_RECHECK)
-            group_push(wraps, g.v[i]);
+            group_push(&cx->wraps, g.v[i]);
         track_unit_done(vm, fn, cx, ok);
     }
     free(g.v);
     return ok;
 }
 
-static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx,
-                       GroupLeaves *wraps) {
+static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx);
+
+// A loop's units run again after whatever ends tracking inside it, so a loop
+// that ends tracking gives up the writes it collected.
+static bool track_loop(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx) {
+    int held = cx->held.n, wraps = cx->wraps.n;
+    cx->loops++;
+    bool ok = s->kind == ND_DO ? track_stmt(vm, fn, s->then, cx) &&
+                                     track_expr(vm, fn, s->cond, false, cx)
+                               : track_expr(vm, fn, s->cond, false, cx) &&
+                                     track_stmt(vm, fn, s->then, cx) &&
+                                     track_expr(vm, fn, s->inc, true, cx);
+    cx->loops--;
+    if (!ok) {
+        cx->held.n  = held;
+        cx->wraps.n = wraps;
+    }
+    return ok;
+}
+
+static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx) {
     if (!s)
         return true;
     switch (s->kind) {
@@ -3978,38 +3999,25 @@ static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx,
         case ND_GOTO:
             return true;
         case ND_EXPR_STMT:
-            return track_expr(vm, fn, s->lhs, true, cx, wraps);
+            return track_expr(vm, fn, s->lhs, true, cx);
         case ND_BLOCK:
             for (Node *t = s->body; t; t = t->next)
-                if (!track_stmt(vm, fn, t, cx, wraps))
+                if (!track_stmt(vm, fn, t, cx))
                     return false;
             return true;
         case ND_IF:
-            return track_expr(vm, fn, s->cond, false, cx, wraps) &&
-                   track_stmt(vm, fn, s->then, cx, wraps) &&
-                   track_stmt(vm, fn, s->els, cx, wraps);
-        case ND_FOR: {
-            if (!track_stmt(vm, fn, s->init, cx, wraps))
-                return false;
-            cx->loops++;
-            bool ok = track_expr(vm, fn, s->cond, false, cx, wraps) &&
-                      track_stmt(vm, fn, s->then, cx, wraps) &&
-                      track_expr(vm, fn, s->inc, true, cx, wraps);
-            cx->loops--;
-            return ok;
-        }
-        case ND_DO: {
-            cx->loops++;
-            bool ok = track_stmt(vm, fn, s->then, cx, wraps) &&
-                      track_expr(vm, fn, s->cond, false, cx, wraps);
-            cx->loops--;
-            return ok;
-        }
+            return track_expr(vm, fn, s->cond, false, cx) &&
+                   track_stmt(vm, fn, s->then, cx) &&
+                   track_stmt(vm, fn, s->els, cx);
+        case ND_FOR:
+            return track_stmt(vm, fn, s->init, cx) && track_loop(vm, fn, s, cx);
+        case ND_DO:
+            return track_loop(vm, fn, s, cx);
         case ND_SWITCH:
-            return track_expr(vm, fn, s->cond, false, cx, wraps) &&
-                   track_stmt(vm, fn, s->then, cx, wraps);
+            return track_expr(vm, fn, s->cond, false, cx) &&
+                   track_stmt(vm, fn, s->then, cx);
         case ND_RETURN:
-            return track_expr(vm, fn, s->lhs, false, cx, wraps);
+            return track_expr(vm, fn, s->lhs, false, cx);
         case ND_LABEL:
         case ND_CASE:
             return false;
@@ -4033,7 +4041,6 @@ static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
     }
     if (tf->disabled)
         return;
-    GroupLeaves wraps = {0};
     for (int k = 0; k < as->n; k++) {
         TrackCtx cx;
         if (!track_ctx_init(&cx, &as->v[k], tf))
@@ -4049,20 +4056,20 @@ static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
             track_unit_done(vm, fn, &cx, live);
         }
         for (Node *s = next_stmt; live && s; s = s->next) {
-            wraps.n      = 0;
+            cx.wraps.n   = 0;
             cx.held.n    = 0;
             cx.immediate = s->kind == ND_EXPR_STMT ||
                            (s->kind == ND_BLOCK && s->is_decl_group);
-            live         = track_stmt(vm, fn, s, &cx, &wraps);
-            for (int w = 0; live && w < wraps.n; w++)
-                track_wrap(vm, fn, wraps.v[w], &cx);
-            for (int w = 0; live && w < cx.held.n; w++)
+            live = track_stmt(vm, fn, s, &cx);
+            for (int w = 0; w < cx.wraps.n; w++)
+                track_wrap(vm, fn, cx.wraps.v[w], &cx);
+            for (int w = 0; w < cx.held.n; w++)
                 track_wrap_value(vm, fn, cx.held.v[w], &cx);
         }
         free(cx.unit.v);
         free(cx.held.v);
+        free(cx.wraps.v);
     }
-    free(wraps.v);
 }
 
 static void group_flush(VirtualMachine *vm, Obj *fn, TrackFn *tf,

@@ -696,6 +696,163 @@ void test_track_value_before_call_in_loop_passes(void) {
     AssertEq(s.n, 8);
 }
 
+// A write in an earlier unit of a nested statement than the event that ends
+// tracking is rechecked.
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_then_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if ((s.n = 8)) {
+        widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_else_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if ((s.n = 8)) {
+    } else {
+        widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_block_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    {
+        if ((s.n = 8)) {
+        }
+        widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_switch_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    switch ((s.n = 8)) {
+        default:
+            widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_for_init_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    for (int i = (s.n = 8); i < 9; i++)
+        widen(&s);
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_value_before_loop_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    {
+        if ((s.n = 8)) {
+        }
+        for (int i = 0; i < 2; i++)
+            widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_discarded_then_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    volatile int c                             = 1;
+    s.p                                        = small;
+    if (c) {
+        s.n = 8;
+        widen(&s);
+    }
+}
+
+[[cccc::test(exit_code = 255)]]
+void test_track_nested_discarded_exclusive_trap(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    volatile int c                             = 1;
+    s.p                                        = small;
+    if (c) {
+        s.n = 8;
+    } else {
+        widen(&s);
+    }
+}
+
+[[cccc::test]]
+void test_track_nested_after_call_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    if (widen(&s)) {
+        s.n = 8;
+    }
+    AssertEq(s.n, 8);
+}
+
+// Iteration two writes after iteration one's call replaced the pointer.
+[[cccc::test]]
+void test_track_nested_value_loop_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    for (int i = 0; i < 2; i++) {
+        if ((s.n = i ? 8 : 2)) {
+        }
+        widen(&s);
+    }
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_nested_discarded_loop_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    s.p                                        = small;
+    for (int i = 0; i < 2; i++) {
+        s.n = i ? 8 : 2;
+        widen(&s);
+    }
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_nested_value_do_loop_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          i                             = 0;
+    s.p                                        = small;
+    do {
+        if ((s.n = i ? 8 : 2)) {
+        }
+        widen(&s);
+    } while (++i < 2);
+    AssertEq(s.n, 8);
+}
+
+[[cccc::test]]
+void test_track_nested_value_loop_condition_passes(void) {
+    int *[[cccc::array, cccc::count(2)]] small = two();
+    struct Count s                             = {0};
+    int          i                             = 0;
+    s.p                                        = small;
+    while ((s.n = i ? 8 : 2) && i < 2) {
+        widen(&s);
+        i++;
+    }
+    AssertEq(s.n, 8);
+}
+
 // ---------------------------------------------------------------------
 // Plain arrays as sources.
 // ---------------------------------------------------------------------
