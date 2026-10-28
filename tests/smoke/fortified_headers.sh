@@ -36,13 +36,16 @@ int main(void) {
     return 42;
 }
 C
-# The SDK's unistd.h cannot run in the VM, so the VM sees the string and stdio
-# calls only.
 cat >vm.c <<'C'
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 int main(void) {
     char a[16], b[16] = "hello";
+    int  fds[2];
+    if (pipe(fds) || write(fds[1], "abcd", 4) != 4 ||
+        read(fds[0], a, sizeof a) != 4)
+        return 1;
     memcpy(a, b, sizeof a);
     memset(a, 0, sizeof a);
     strcpy(a, b);

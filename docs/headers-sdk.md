@@ -28,6 +28,8 @@ Macros advertising what CCCC does not implement stay undefined, whatever `--comp
 | `--sysroot` on Debian/Ubuntu multiarch | Also adds `<path>/usr/include/<arch>-linux-gnu`. A bare `-i` does not: supply the triplet directory yourself |
 | `__asm__("name")` before `__attribute__(...)` (glibc `__REDIRECT_NTH`) | Parsed in either order |
 | `va_list` | One type whether `<stdio.h>` or `<stdarg.h>` comes first |
+| `-c=native` / `-m` output on Linux | Starts with `#define`s for the predefined feature-test macros (`_POSIX_C_SOURCE`, `_XOPEN_SOURCE`, `_DEFAULT_SOURCE`, ...) so the host compiler reads glibc's headers as CCCC did (`fd_set` is `fds_bits` under `_XOPEN_SOURCE`, `__fds_bits` without). `-U` removes one |
+| SDK `__asm("_fopen$DARWIN_EXTSN")` labels, glibc `__isoc23_sscanf` redirects | Bind to the plain native (`fopen`, `sscanf`) in the VM |
 | Legacy BSD calls (`bcmp`, `bzero`, `index`, `getpagesize`) | Hidden under the predefined `_POSIX_C_SOURCE=200809L`; declare them or `-U_POSIX_C_SOURCE` |
 
 ## Host numbering
@@ -73,7 +75,7 @@ Assigning `obstack_alloc_failed_handler` sets the function called when a chunk a
 
 ## Host globals
 
-Under `--sysroot ... --use-system-headers` the SDK's `stdin`/`stdout`/`stderr` (`__stdinp`/`__stdoutp`/`__stderrp` on macOS), getopt's `optarg`/`optind`/`opterr`/`optopt` (and `optreset` on macOS) and `environ` are plain `extern` declarations. In a VM run they are the host's own objects, so `fputs("x", stdout)`, `getopt` and `environ[0]` behave as in a native build.
+Under `--sysroot ... --use-system-headers` the SDK's `stdin`/`stdout`/`stderr` (`__stdinp`/`__stdoutp`/`__stderrp` on macOS), getopt's `optarg`/`optind`/`opterr`/`optopt` (and `optreset` on macOS) and `environ` are plain `extern` declarations. In a VM run they are the host's own objects, so `fputs("x", stdout)`, `getopt` and `environ[0]` behave as in a native build. Calls such as `write`, `socketpair` and `fopen` run too.
 
 ```c
 #include <getopt.h>

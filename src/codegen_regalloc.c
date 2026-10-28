@@ -67,6 +67,31 @@ static bool is_host_family_name(const char *name) {
     return false;
 }
 
+// The registered native an asm label (`__asm("...")` in a real header) stands
+// for: the Mach-O underscore and `$DARWIN_EXTSN`-style variant suffixes on
+// macOS, glibc's `__isoc99_`/`__isoc23_` scanf and strtol redirects on Linux.
+static const char *asm_label_base_name(const char *name, char *buf,
+                                       size_t size) {
+#ifdef __APPLE__
+    if (name[0] == '_')
+        name++;
+    const char *suffix = strchr(name, '$');
+    if (suffix && (size_t)(suffix - name) < size) {
+        memcpy(buf, name, suffix - name);
+        buf[suffix - name] = '\0';
+        return buf;
+    }
+#else
+    (void)buf;
+    (void)size;
+    if (!strncmp(name, "__isoc99_", 9))
+        return name + 9;
+    if (!strncmp(name, "__isoc23_", 9))
+        return name + 9;
+#endif
+    return name;
+}
+
 // FFI slot a call to `obj` binds to. Under --use-system-headers a translated
 // native (host_ffi_family.h) declared by a real, non-bundled header binds to
 // its `__cccc_host_` passthrough, since that program already holds the host's
@@ -77,12 +102,9 @@ int ffi_index_for_obj(VirtualMachine *vm, Obj *obj) {
     const char *name = obj_external_name(obj);
     if (!name)
         return -1;
-#ifdef __APPLE__
-    // SDK headers spell asm labels with the Mach-O underscore
-    // (`__asm("_confstr")`).
-    if (obj->asm_label && name[0] == '_' && find_ffi_function(vm, name) < 0)
-        name++;
-#endif
+    char base[64];
+    if (obj->asm_label && find_ffi_function(vm, name) < 0)
+        name = asm_label_base_name(name, base, sizeof base);
     if (vm->compiler.use_system_headers && obj->tok && obj->tok->file &&
         is_host_family_name(name) &&
         !cc_file_is_cccc_bundled(vm, obj->tok->file->name)) {

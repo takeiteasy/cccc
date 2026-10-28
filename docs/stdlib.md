@@ -363,6 +363,8 @@ including a POSIX header (e.g. `#if !defined(_XOPEN_SOURCE)`) sees the
 POSIX.1-2008 / X/Open 7 surface CCCC actually exposes, rather than always
 seeing nothing. A user `-D`/`#define` of any of these overrides the default
 silently (predefined macros are not redefinition-locked).
+On Linux, `-c=native` and `-m` output repeats them at the top, so the host
+compiler sees the same feature set ([headers-sdk.md](headers-sdk.md)).
 
 `sysconf`/`pathconf`/`fpathconf`/`confstr` use CCCC's own canonical,
 host-independent numbering for `_SC_*`/`_PC_*`/`_CS_*` (defined in

@@ -7625,6 +7625,13 @@ void define_macro(VirtualMachine *vm, char *name, char *buf) {
     add_macro(vm, name, strlen(name), true, tok, NULL);
 }
 
+char *cc_object_macro_text(VirtualMachine *vm, const char *name) {
+    Macro *m = hashmap_get2(&vm->compiler.macros, (char *)name, strlen(name));
+    if (!m || !m->is_objlike || m->handler || !m->body)
+        return NULL;
+    return join_tokens(vm, m->body, NULL, NULL);
+}
+
 void undef_macro(VirtualMachine *vm, char *name) {
     if (vm->compiler.warnings & CCCC_WARN_UNUSED_MACROS) {
         Macro *m = hashmap_get2(&vm->compiler.macros, name, strlen(name));

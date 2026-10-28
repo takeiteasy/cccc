@@ -654,6 +654,8 @@ void cccc_init_host_shadow_macros(
     VirtualMachine *vm); // src/host_values.c, #1315
 void define_macro(VirtualMachine *vm, char *name, char *buf);
 void undef_macro(VirtualMachine *vm, char *name);
+// Replacement text of the defined object-like macro `name`, or NULL.
+char *cc_object_macro_text(VirtualMachine *vm, const char *name);
 Token *preprocess(VirtualMachine *vm, Token *tok);
 bool is_compiler_owned_header(const char *name);
 void isolate_comptime_macros(VirtualMachine *vm);
