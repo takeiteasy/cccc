@@ -951,6 +951,40 @@ int test_stmt_expr(void) {
     return 42; // Success
 }
 
+static int void_expr_hits;
+static void void_expr_hit(void) {
+    void_expr_hits++;
+}
+
+// A statement expression whose last statement is not an expression is void.
+[[cccc::test(return = 42)]]
+int test_stmt_expr_void(void) {
+    int on = 1;
+    ({
+        if (on)
+            void_expr_hit();
+    });
+    ({
+        if (!on)
+            void_expr_hit();
+        else
+            void_expr_hit();
+    });
+    ({ int unused = 2; });
+    ({});
+    ({
+        ({
+            if (on)
+                void_expr_hit();
+        });
+    });
+    (void)({
+        if (on)
+            void_expr_hit();
+    });
+    return void_expr_hits == 4 ? 42 : void_expr_hits;
+}
+
 // test_switch
 [[cccc::test(return = 42)]]
 int test_switch(void) {

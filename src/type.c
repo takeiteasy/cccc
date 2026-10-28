@@ -1573,17 +1573,14 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = node->lhs->ty->base;
             return;
         case ND_STMT_EXPR:
+            node->ty = ty_void;
             if (node->body) {
                 Node *stmt = node->body;
                 while (stmt->next)
                     stmt = stmt->next;
-                if (stmt->kind == ND_EXPR_STMT) {
+                if (stmt->kind == ND_EXPR_STMT)
                     node->ty = unqualified(vm, stmt->lhs->ty);
-                    return;
-                }
             }
-            error_tok(vm, node->tok,
-                      "statement expression returning void is not supported");
             return;
         case ND_LABEL_VAL:
             node->ty = pointer_to(vm, ty_void);
