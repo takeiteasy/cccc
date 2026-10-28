@@ -3331,6 +3331,23 @@ int test_posix_timer_macros(void) {
     return 42;
 }
 
+// A writable fd polled for POLLOUT reports POLLOUT (macOS aliases POLLWRNORM
+// to it) and, for the canonical numbering, POLLWRNORM too.
+[[cccc::test(return = 42)]]
+int test_poll_pollout_reported(void) {
+    int fds[2];
+    if (pipe(fds) != 0)
+        return 1;
+    struct pollfd pfd = {.fd = fds[1], .events = POLLOUT};
+    if (poll(&pfd, 1, 0) != 1)
+        return 2;
+    if (!(pfd.revents & POLLOUT))
+        return 3;
+    close(fds[0]);
+    close(fds[1]);
+    return 42;
+}
+
 // test_posix_ppoll
 // #821: ppoll() is the poll()-with-timeout-and-sigmask analog of
 // pselect(). A pipe with data ready returns 1 with POLLIN set; an empty

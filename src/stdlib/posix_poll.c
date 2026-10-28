@@ -30,10 +30,8 @@ static short guest_to_host_pollev(short guest_events) {
 
 static short host_to_guest_pollev(short host_revents) {
 #ifdef __APPLE__
-    // TODO: POLLWRNORM aliases POLLOUT here, so this mask also drops POLLOUT
-    // and contradicts the comment below (#1848)
-    short guest = host_revents &
-                  (short)~(POLLRDNORM | POLLRDBAND | POLLWRNORM | POLLWRBAND);
+    // POLLWRNORM is not masked off: it aliases POLLOUT, which must survive.
+    short guest = host_revents & (short)~(POLLRDNORM | POLLRDBAND | POLLWRBAND);
     if (host_revents & POLLRDNORM)
         guest |= 0x0040;
     if (host_revents & POLLRDBAND)
