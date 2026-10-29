@@ -771,15 +771,15 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             add_type(vm, node->cond);
             Type *cond_ty = node->cond->ty;
             if (cond_ty && cond_ty->kind == TY_ENUM &&
-                cond_ty->enum_constants) {
+                type_agg(cond_ty)->enum_constants) {
                 bool has_default = node->default_case != NULL;
                 bool check_sw =
                     (vm->compiler.warnings & CCCC_WARN_SWITCH) && !has_default;
                 bool check_se =
                     !!(vm->compiler.warnings & CCCC_WARN_SWITCH_ENUM);
                 if (check_sw || check_se) {
-                    for (EnumConstant *ec = cond_ty->enum_constants; ec;
-                         ec               = ec->next) {
+                    for (EnumConstant *ec = type_agg(cond_ty)->enum_constants;
+                         ec; ec           = ec->next) {
                         bool covered = false;
                         for (Node *c = node->case_next; c; c = c->case_next) {
                             if (ec->value >= c->begin && ec->value <= c->end) {
@@ -808,8 +808,9 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 if (vm->compiler.warnings & CCCC_WARN_SWITCH) {
                     for (Node *c = node->case_next; c; c = c->case_next) {
                         bool matches = false;
-                        for (EnumConstant *ec = cond_ty->enum_constants; ec;
-                             ec               = ec->next) {
+                        for (EnumConstant *ec =
+                                 type_agg(cond_ty)->enum_constants;
+                             ec; ec = ec->next) {
                             if (ec->value >= c->begin && ec->value <= c->end) {
                                 matches = true;
                                 break;
@@ -1494,16 +1495,17 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             what      = "type";
         }
         if (nodiscard) {
-            if (node->lhs->func_ty && node->lhs->func_ty->nodiscard_msg)
+            if (node->lhs->func_ty &&
+                type_attrs(node->lhs->func_ty)->nodiscard_msg)
                 warn_tok(
                     vm, node->tok, CCCC_WARN_NODISCARD,
                     "ignoring return value of %s declared with 'nodiscard': %s",
-                    what, node->lhs->func_ty->nodiscard_msg);
-            else if (node->lhs->ty && node->lhs->ty->nodiscard_msg)
+                    what, type_attrs(node->lhs->func_ty)->nodiscard_msg);
+            else if (node->lhs->ty && type_attrs(node->lhs->ty)->nodiscard_msg)
                 warn_tok(
                     vm, node->tok, CCCC_WARN_NODISCARD,
                     "ignoring return value of %s declared with 'nodiscard': %s",
-                    what, node->lhs->ty->nodiscard_msg);
+                    what, type_attrs(node->lhs->ty)->nodiscard_msg);
             else
                 warn_tok(
                     vm, node->tok, CCCC_WARN_NODISCARD,

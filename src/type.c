@@ -267,8 +267,8 @@ bool is_error_type(Type *ty) {
 // VirtualMachine is in scope here, so only the pre-built singletons may
 // be returned -- never a freshly constructed Type.
 static Type *enum_compat_type(Type *ty) {
-    if (ty->enum_base_type)
-        return ty->enum_base_type;
+    if (type_agg(ty)->enum_base_type)
+        return type_agg(ty)->enum_base_type;
     if (ty->size == 8)
         return ty->is_unsigned ? ty_ulong : ty_long;
     return ty->is_unsigned ? ty_uint : ty_int;
@@ -442,7 +442,7 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
         case TY_NULLPTR_T:
             return true;
         case TY_VECTOR:
-            return t1->vec_len == t2->vec_len &&
+            return type_arr(t1)->vec_len == type_arr(t2)->vec_len &&
                    compat_nested(t1->base, t2->base, strict, family);
         default:
             return false;
@@ -497,12 +497,14 @@ bool types_same_layout(Type *a, Type *b) {
             Type *pa = a->base, *pb = b->base;
             if (pa && pb && pa->kind == pb->kind &&
                 (pa->kind == TY_STRUCT || pa->kind == TY_UNION))
-                return token_text_equal(pa->struct_tag, pb->struct_tag);
+                return token_text_equal(type_agg(pa)->struct_tag,
+                                        type_agg(pb)->struct_tag);
             return types_same_layout(pa, pb);
         }
         case TY_ARRAY:
         case TY_VECTOR:
-            return a->array_len == b->array_len && a->vec_len == b->vec_len &&
+            return a->array_len == b->array_len &&
+                   type_arr(a)->vec_len == type_arr(b)->vec_len &&
                    types_same_layout(a->base, b->base);
         case TY_FUNC: {
             if (a->is_variadic != b->is_variadic ||
@@ -516,11 +518,12 @@ bool types_same_layout(Type *a, Type *b) {
         }
         case TY_STRUCT:
         case TY_UNION: {
-            if (!token_text_equal(a->struct_tag, b->struct_tag) ||
+            if (!token_text_equal(type_agg(a)->struct_tag,
+                                  type_agg(b)->struct_tag) ||
                 a->is_flexible != b->is_flexible ||
                 a->is_packed != b->is_packed)
                 return false;
-            Member *ma = a->members, *mb = b->members;
+            Member *ma = type_agg(a)->members, *mb = type_agg(b)->members;
             for (; ma && mb; ma = ma->next, mb = mb->next) {
                 if (!token_text_equal(ma->name, mb->name) ||
                     ma->offset != mb->offset ||
@@ -533,7 +536,8 @@ bool types_same_layout(Type *a, Type *b) {
             return !ma && !mb;
         }
         case TY_ENUM: {
-            EnumConstant *ea = a->enum_constants, *eb = b->enum_constants;
+            EnumConstant *ea = type_agg(a)->enum_constants,
+                         *eb = type_agg(b)->enum_constants;
             for (; ea && eb; ea = ea->next, eb = eb->next)
                 if (strcmp(ea->name, eb->name) || ea->value != eb->value)
                     return false;
@@ -544,16 +548,47 @@ bool types_same_layout(Type *a, Type *b) {
     }
 }
 
+#define TYPE_EXT_MUT(fn, field, T)                                             \
+    T *fn(VirtualMachine *vm, Type *t) {                                       \
+        if (!t->field) {                                                       \
+            t->field = arena_alloc(&vm->compiler.parser_arena, sizeof(T));     \
+            memset(t->field, 0, sizeof(T));                                    \
+        }                                                                      \
+        return t->field;                                                       \
+    }
+TYPE_EXT_MUT(type_agg_mut, agg, TypeAgg)
+TYPE_EXT_MUT(type_attrs_mut, attrs, TypeAttrs)
+TYPE_EXT_MUT(type_arr_mut, arr, TypeArr)
+TYPE_EXT_MUT(type_chk_mut, chk, TypeChecked)
+#undef TYPE_EXT_MUT
+
+// Copies *src over *dst, giving dst its own copy of every extension group.
+void type_assign(VirtualMachine *vm, Type *dst, const Type *src) {
+    *dst = *src;
+#define DUP(field, mut)                                                        \
+    if (src->field)                                                            \
+        *mut(vm, dst) = *src->field;
+    dst->agg   = NULL;
+    dst->attrs = NULL;
+    dst->arr   = NULL;
+    dst->chk   = NULL;
+    DUP(agg, type_agg_mut)
+    DUP(attrs, type_attrs_mut)
+    DUP(arr, type_arr_mut)
+    DUP(chk, type_chk_mut)
+#undef DUP
+}
+
 Type *copy_type(VirtualMachine *vm, Type *ty) {
-    Type *ret   = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
-    *ret        = *ty;
+    Type *ret = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
+    type_assign(vm, ret, ty);
     ret->origin = ty;
-    // Note: is_const is preserved through memcpy (*ret = *ty)
     return ret;
 }
 
 int vector_lanes(Type *ty) {
-    return ty->vec_visible ? ty->vec_visible : ty->vec_len;
+    return type_arr(ty)->vec_visible ? type_arr(ty)->vec_visible
+                                     : type_arr(ty)->vec_len;
 }
 
 Type *without_addr_space(VirtualMachine *vm, Type *ty) {
@@ -623,7 +658,7 @@ Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
 #endif
     Type *ty    = new_type(vm, TY_VECTOR, bytes, align);
     ty->base    = base;
-    ty->vec_len = bytes / base->size;
+    type_arr_mut(vm, ty)->vec_len = bytes / base->size;
     return ty;
 }
 
@@ -698,7 +733,7 @@ Type *vector_mask_type(VirtualMachine *vm, Type *vecty) {
 Type *vla_of(VirtualMachine *vm, Type *base, Node *len) {
     Type *ty    = new_type(vm, TY_VLA, 8, 8);
     ty->base    = base;
-    ty->vla_len = len;
+    type_arr_mut(vm, ty)->vla_len = len;
     return ty;
 }
 
@@ -741,7 +776,7 @@ static bool node_has_side_effect(Node *n, int depth) {
 // True when `ty` has a `[*]` extent (a VLA row with no length expression).
 bool type_has_unspecified_vla(Type *ty) {
     for (Type *t = ty; t; t = t->base)
-        if (t->kind == TY_VLA && !t->vla_len)
+        if (t->kind == TY_VLA && !type_arr(t)->vla_len)
             return true;
     return false;
 }
@@ -750,7 +785,7 @@ bool type_has_unspecified_vla(Type *ty) {
 // store).
 bool type_vla_extent_impure(Type *ty) {
     for (Type *t = ty; t; t = t->base)
-        if (t->kind == TY_VLA && node_has_side_effect(t->vla_len, 0))
+        if (t->kind == TY_VLA && node_has_side_effect(type_arr(t)->vla_len, 0))
             return true;
     return false;
 }
@@ -849,8 +884,8 @@ static int get_integer_rank(Type *ty) {
         case TY_BOOL:
             return 1;
         case TY_ENUM:
-            if (ty->enum_base_type)
-                return get_integer_rank(ty->enum_base_type);
+            if (type_agg(ty)->enum_base_type)
+                return get_integer_rank(type_agg(ty)->enum_base_type);
             return 32; // default: int rank
         case TY_BITINT:
             return ty->bit_width;
@@ -1209,7 +1244,7 @@ static bool lhs_targets_initializing_var(Node *node, Obj *var) {
 Type *flexible_declared_type(Type *ty) {
     while (ty->origin && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
            ty->is_flexible) {
-        Member *last = ty->members;
+        Member *last = type_agg(ty)->members;
         while (last && last->next)
             last = last->next;
         if (!last || last->ty->kind != TY_ARRAY || last->ty->array_len <= 0)
@@ -1477,7 +1512,7 @@ void add_type(VirtualMachine *vm, Node *node) {
                               "vector types do not match in '?:' select");
                 if (is_vector(node->cond->ty)) {
                     Type *c = node->cond->ty;
-                    if (c->vec_len != t->vec_len ||
+                    if (type_arr(c)->vec_len != type_arr(t)->vec_len ||
                         c->base->size != t->base->size)
                         error_tok(vm, node->tok,
                                   "vector '?:' condition must be a vector with "

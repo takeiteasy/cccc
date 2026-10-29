@@ -34,30 +34,29 @@ Node *compute_vla_size(VirtualMachine *vm, Type *ty, Token *tok) {
 
     // Already evaluated: a typedef'd or typeof'd VLA keeps the size from the
     // point it was declared.
-    if (ty->kind != TY_VLA || ty->vla_size)
+    if (ty->kind != TY_VLA || type_arr(ty)->vla_size)
         return node;
 
     Node *base_sz;
     if (ty->base->kind == TY_VLA)
-        base_sz = new_var_node(vm, ty->base->vla_size, tok);
+        base_sz = new_var_node(vm, type_arr(ty->base)->vla_size, tok);
     else
         base_sz =
             new_num(vm, get_vm_size(ty->base), tok); // Use VM-adjusted size
 
-    if (ty->vla_len) {
+    if (type_arr(ty)->vla_len) {
         Obj *len = new_lvar(vm, "", 0, ty_long);
-        node     = new_binary(
-            vm, ND_COMMA, node,
-            new_binary(vm, ND_ASSIGN, new_var_node(vm, len, tok), ty->vla_len,
-                       tok),
-            tok);
-        ty->vla_len = new_var_node(vm, len, tok);
+        node = new_binary(vm, ND_COMMA, node,
+                          new_binary(vm, ND_ASSIGN, new_var_node(vm, len, tok),
+                                     type_arr(ty)->vla_len, tok),
+                          tok);
+        type_arr_mut(vm, ty)->vla_len = new_var_node(vm, len, tok);
     }
 
-    ty->vla_size = new_lvar(vm, "", 0, ty_ulong);
-    Node *expr =
-        new_binary(vm, ND_ASSIGN, new_var_node(vm, ty->vla_size, tok),
-                   new_binary(vm, ND_MUL, ty->vla_len, base_sz, tok), tok);
+    type_arr_mut(vm, ty)->vla_size = new_lvar(vm, "", 0, ty_ulong);
+    Node *expr                     = new_binary(
+        vm, ND_ASSIGN, new_var_node(vm, type_arr(ty)->vla_size, tok),
+        new_binary(vm, ND_MUL, type_arr(ty)->vla_len, base_sz, tok), tok);
     return new_binary(vm, ND_COMMA, node, expr, tok);
 }
 
@@ -118,7 +117,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
         Type *ty = declarator(vm, &tok, tok, basety);
 
-        if (has_custom_attrs(ty, attr) || (basety && basety->custom_attrs))
+        if (has_custom_attrs(ty, attr) ||
+            (basety && type_attrs(basety)->custom_attrs))
             error_tok(vm, ty->name ? ty->name : tok,
                       "custom attributes are only supported on file-scope "
                       "declarations");
@@ -217,7 +217,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 var->static_owner    = vm->compiler.current_fn;
                 var->is_maybe_unused = ty->is_maybe_unused;
                 var->is_deprecated   = ty->is_deprecated;
-                var->deprecated_msg  = ty->deprecated_msg;
+                var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
                 push_scope(vm, get_ident(vm, name_tok), name_tok->len)->var =
                     var;
                 Token *tmp = eq_tok;
@@ -262,7 +262,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->is_constexpr    = attr->is_constexpr;
             var->is_maybe_unused = ty->is_maybe_unused;
             var->is_deprecated   = ty->is_deprecated;
-            var->deprecated_msg  = ty->deprecated_msg;
+            var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
             push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
@@ -292,7 +292,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             Token *tok_local = ty->name;
             Node  *expr      = new_binary(
                 vm, ND_ASSIGN, new_vla_ptr(vm, var, tok_local),
-                new_alloca(vm, new_var_node(vm, ty->vla_size, tok_local)),
+                new_alloca(vm,
+                           new_var_node(vm, type_arr(ty)->vla_size, tok_local)),
                 tok_local);
 
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok_local);
@@ -332,7 +333,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                     // Stash it in ->rhs (unused by every other ND_MEMZERO
                     // producer) so codegen can gen_expr it into REG_A2
                     // instead of using the constant path.
-                    zero->rhs = new_var_node(vm, ty->vla_size, tok_local);
+                    zero->rhs =
+                        new_var_node(vm, type_arr(ty)->vla_size, tok_local);
                     Node *comma =
                         new_binary(vm, ND_COMMA, zero, init_node, tok_local);
                     cur = cur->next =
@@ -631,7 +633,7 @@ static Member *struct_designator(VirtualMachine *vm, Token **rest, Token *tok,
     if (tok->kind != TK_IDENT)
         error_tok(vm, tok, "expected a field designator");
 
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         // Anonymous struct/union member (its fields are reachable through
         // the parent's own designators, per C's anonymous-member rules).
         if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) &&
@@ -904,7 +906,7 @@ static void vector_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                       "initialization of non-aggregate vector type with a "
                       "designated initializer list");
 
-        if (i < init->ty->vec_len)
+        if (i < type_arr(init->ty)->vec_len)
             initializer2(vm, &tok, tok, init->children[i]);
         else {
             if (!warned_excess) {
@@ -961,7 +963,7 @@ static void struct_initializer1(VirtualMachine *vm, Token **rest, Token *tok,
                                 Initializer *init) {
     tok                   = skip(vm, tok, "{");
 
-    Member *mem           = init->ty->members;
+    Member *mem           = type_agg(init->ty)->members;
     bool    first         = true;
     bool    warned_excess = false;
 
@@ -1067,7 +1069,7 @@ static void union_initializer(VirtualMachine *vm, Token **rest, Token *tok,
         return;
     }
 
-    init->mem = init->ty->members;
+    init->mem = type_agg(init->ty)->members;
     if (!init->mem) {
         if (equal(tok, "{")) {
             tok   = skip(vm, tok->next, "}");
@@ -1140,7 +1142,7 @@ static void initializer2(VirtualMachine *vm, Token **rest, Token *tok,
             return;
         }
 
-        struct_initializer2(vm, rest, tok, init, init->ty->members);
+        struct_initializer2(vm, rest, tok, init, type_agg(init->ty)->members);
         return;
     }
 
@@ -1181,14 +1183,14 @@ static Type *copy_struct_type(VirtualMachine *vm, Type *ty) {
 
     Member  head = {};
     Member *cur  = &head;
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         Member *m = arena_alloc(&vm->compiler.parser_arena, sizeof(Member));
         memset(m, 0, sizeof(Member));
         *m  = *mem;
         cur = cur->next = m;
     }
 
-    ty->members = head.next;
+    type_agg_mut(vm, ty)->members = head.next;
     return ty;
 }
 
@@ -1200,7 +1202,7 @@ static Initializer *initializer(VirtualMachine *vm, Token **rest, Token *tok,
     if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->is_flexible) {
         ty          = copy_struct_type(vm, ty);
 
-        Member *mem = ty->members;
+        Member *mem = type_agg(ty)->members;
         while (mem->next)
             mem = mem->next;
         mem->ty   = init->children[mem->idx]->ty;
@@ -1225,7 +1227,7 @@ static bool is_constexpr_object_type(Type *ty) {
     if (ty->kind == TY_PTR)
         return !type_has_restrict(ty);
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             if (!is_constexpr_object_type(mem->ty))
                 return false;
     }
@@ -1252,7 +1254,7 @@ static bool initializer_is_constexpr(VirtualMachine *vm, Initializer *init,
         return true;
     }
     if (ty->kind == TY_STRUCT) {
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             if (!initializer_is_constexpr(vm, init->children[mem->idx],
                                           mem->ty))
                 return false;
@@ -1392,7 +1394,7 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
 
     if (ty->kind == TY_STRUCT && !init->expr) {
         int nmem = 0;
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             nmem++;
         if (nmem == 0)
             return new_node(vm, ND_NULL_EXPR, tok);
@@ -1400,7 +1402,7 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
         if (!items)
             error_tok(vm, tok, "out of memory building struct initializer");
         int cnt = 0;
-        for (Member *mem = ty->members; mem; mem = mem->next) {
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
             InitDesg desg2 = {desg, 0, mem};
             Node *rhs = create_lvar_init(vm, init->children[mem->idx], mem->ty,
                                          &desg2, tok);
@@ -1414,7 +1416,7 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
     }
 
     if (ty->kind == TY_UNION && !init->expr) {
-        Member *mem = init->mem ? init->mem : ty->members;
+        Member *mem = init->mem ? init->mem : type_agg(ty)->members;
         if (!mem)
             return new_node(vm, ND_NULL_EXPR, tok);
         InitDesg desg2 = {desg, 0, mem};
@@ -1426,11 +1428,11 @@ static Node *create_lvar_init(VirtualMachine *vm, Initializer *init, Type *ty,
     // so a whole-vector copy (`v4sf b = a;`) still routes through the scalar
     // ND_ASSIGN path below (init->children is unused/unset in that case).
     if (ty->kind == TY_VECTOR && !init->expr) {
-        Node **items = malloc((size_t)ty->vec_len * sizeof(Node *));
+        Node **items = malloc((size_t)type_arr(ty)->vec_len * sizeof(Node *));
         if (!items)
             error_tok(vm, tok, "out of memory building vector initializer");
         int cnt = 0;
-        for (int i = 0; i < ty->vec_len; i++) {
+        for (int i = 0; i < type_arr(ty)->vec_len; i++) {
             InitDesg desg2 = {desg, i};
             Node    *rhs =
                 create_lvar_init(vm, init->children[i], ty->base, &desg2, tok);
@@ -1463,7 +1465,7 @@ static int init_tail_count(Node *tail) {
 }
 
 static Member *member_at_index(Type *ty, int idx) {
-    for (Member *mem = ty->members; mem; mem = mem->next)
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
         if (mem->idx == idx)
             return mem;
     return NULL;
@@ -1516,7 +1518,7 @@ Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain) {
 
     int capacity = 0;
     if (ty->kind == TY_STRUCT) {
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             capacity++;
     } else if (ty->kind == TY_ARRAY) {
         if (splice->init_inferred_array) {
@@ -1618,7 +1620,7 @@ static bool build_deferred_init_splice(VirtualMachine *vm, Initializer *init,
     if (ty->kind == TY_ARRAY) {
         len = ty->array_len;
     } else {
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             len++;
     }
 
@@ -1682,9 +1684,10 @@ static void restore_checked_array(VirtualMachine *vm, Obj *var) {
                   "the last element is reserved for the null-terminator slot");
     Type *ty                = copy_type(vm, var->ty);
     ty->checked_kind        = var->checked_kind;
-    ty->checked_bounds_form = var->checked_bounds_form;
-    ty->checked_array_extent =
-        var->checked_kind == CHECKED_NTARRAY ? ty->array_len - 1 : ty->array_len;
+    type_chk_mut(vm, ty)->form = var->checked_bounds_form;
+    type_chk_mut(vm, ty)->checked_array_extent =
+        var->checked_kind == CHECKED_NTARRAY ? ty->array_len - 1
+                                             : ty->array_len;
     var->ty = ty;
     resolve_checked_bounds(vm, var);
 }
@@ -1698,7 +1701,7 @@ Node *lvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     if (declared_ty != var->ty &&
         (declared_ty->kind == TY_STRUCT || declared_ty->kind == TY_UNION) &&
         declared_ty->is_flexible) {
-        Member *tail = var->ty->members;
+        Member *tail = type_agg(var->ty)->members;
         while (tail->next)
             tail = tail->next;
         if (tail->ty->kind == TY_ARRAY && tail->ty->array_len > 0)
@@ -1813,7 +1816,7 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
     }
 
     if (ty->kind == TY_STRUCT) {
-        for (Member *mem = ty->members; mem; mem = mem->next) {
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
             if (mem->is_bitfield) {
                 Node *expr = init->children[mem->idx]->expr;
                 if (!expr)
@@ -1880,7 +1883,7 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
 
     if (ty->kind == TY_VECTOR) {
         int sz = ty->base->size;
-        for (int i = 0; i < ty->vec_len; i++)
+        for (int i = 0; i < type_arr(ty)->vec_len; i++)
             cur = write_gvar_data(vm, cur, init->children[i], ty->base, buf,
                                   offset + sz * i);
         return cur;

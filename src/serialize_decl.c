@@ -60,9 +60,9 @@ static bool member_named(Member *m, const char *name) {
 }
 
 bool type_is_cccc_va_list(Type *ty) {
-    if (!ty || ty->kind != TY_STRUCT || !ty->members)
+    if (!ty || ty->kind != TY_STRUCT || !type_agg(ty)->members)
         return false;
-    Member *m = ty->members;
+    Member *m = type_agg(ty)->members;
     if (!member_named(m, "reg_ptr") || !m->ty || m->ty->kind != TY_PTR)
         return false;
     m = m->next;
@@ -1095,7 +1095,7 @@ static void serialize_agg_member_list(FILE *f, VirtualMachine *vm,
         // internal inconsistency (a Relocation or non-zero byte where
         // write_gvar_data() should never have left one).
         Member *largest = NULL;
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (!largest || m->ty->size > largest->ty->size)
                 largest = m;
         if (!largest)
@@ -1129,7 +1129,7 @@ static void serialize_agg_member_list(FILE *f, VirtualMachine *vm,
 
     // TY_STRUCT: every member is designated (unless anonymous, or an
     // unnamed bitfield -- pure padding, nothing to designate).
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         if (m->is_bitfield && !m->name)
             continue;
         if (!m->name && !m->is_bitfield) {
@@ -1325,7 +1325,7 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
 
         case TY_VECTOR:
             fprintf(f, "{ ");
-            for (int i = 0; i < ty->vec_len; i++) {
+            for (int i = 0; i < type_arr(ty)->vec_len; i++) {
                 if (i > 0)
                     fprintf(f, ", ");
                 serialize_init_bytes(f, vm, ctx, var, ty->base,

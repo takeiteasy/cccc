@@ -248,8 +248,7 @@ static void apply_row(VirtualMachine *vm, Obj *fn, int row) {
     int idx = 0;
     for (Type *o = before->params, *m = fn->ty->params; o && m;
          o = o->next, m = m->next, idx++)
-        if (o->checked_bounds_form == CB_NONE &&
-            m->checked_bounds_form != CB_NONE)
+        if (type_chk(o)->form == CB_NONE && type_chk(m)->form != CB_NONE)
             fn->checked_libc_mask |= 1u << idx;
 }
 

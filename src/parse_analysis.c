@@ -1022,8 +1022,8 @@ bool objsize_alloc_from_call(VirtualMachine *vm, Node *rhs, int *out) {
     if (!fn || !fn->name || !fn->is_function || !fn->ty ||
         fn->ty->kind != TY_FUNC)
         return false;
-    int idx1 = fn->ty->alloc_size_idx;
-    int idx2 = fn->ty->alloc_size_idx2;
+    int idx1 = type_attrs(fn->ty)->alloc_size_idx;
+    int idx2 = type_attrs(fn->ty)->alloc_size_idx2;
     if (idx1 <= 0)
         return false; // no alloc_size attribute on this declaration
 
@@ -2041,17 +2041,18 @@ static void nn_check_call_args(NNCtx *ctx, NNEnv *env, Node *call) {
         return;
     VirtualMachine *vm      = ctx->vm;
     Type           *func_ty = call->func_ty;
-    if (!func_ty || (!func_ty->nonnull_all && !func_ty->nonnull_mask))
+    if (!func_ty ||
+        (!func_ty->nonnull_all && !type_attrs(func_ty)->nonnull_mask))
         return;
 
     Node *arg      = call->args;
     Type *param_ty = func_ty->params;
     int   idx      = 1;
     while (arg && param_ty) {
-        bool marked =
-            func_ty->nonnull_all
-                ? (param_ty->kind == TY_PTR)
-                : (idx <= 64 && (func_ty->nonnull_mask & (1ULL << (idx - 1))));
+        bool marked = func_ty->nonnull_all
+                          ? (param_ty->kind == TY_PTR)
+                          : (idx <= 64 && (type_attrs(func_ty)->nonnull_mask &
+                                           (1ULL << (idx - 1))));
         // Skip const-null args entirely -- validate_nonnull_call() already
         // warned on those at parse time; don't double-warn.
         Node *stripped = nn_strip_cast(arg);
@@ -2885,17 +2886,17 @@ void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
 // __attribute__((nonnull)) / [[gnu::nonnull]]. Only literal/constant-folded
 // null values are caught here -- no flow analysis across variables.
 void validate_nonnull_call(VirtualMachine *vm, Type *func_ty, Node *args) {
-    if (!func_ty->nonnull_all && !func_ty->nonnull_mask)
+    if (!func_ty->nonnull_all && !type_attrs(func_ty)->nonnull_mask)
         return;
 
     Node *arg      = args;
     Type *param_ty = func_ty->params;
     int   idx      = 1;
     while (arg && param_ty) {
-        bool marked =
-            func_ty->nonnull_all
-                ? (param_ty->kind == TY_PTR)
-                : (idx <= 64 && (func_ty->nonnull_mask & (1ULL << (idx - 1))));
+        bool marked = func_ty->nonnull_all
+                          ? (param_ty->kind == TY_PTR)
+                          : (idx <= 64 && (type_attrs(func_ty)->nonnull_mask &
+                                           (1ULL << (idx - 1))));
         if (marked && is_const_expr(vm, arg) && eval(vm, arg) == 0)
             warn_tok(vm, arg->tok, CCCC_WARN_NONNULL,
                      "null passed to a parameter marked nonnull (parameter %d)",
@@ -2933,7 +2934,7 @@ void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     for (Type *p = func_ty->params; p; p = p->next)
         num_named++;
 
-    int target = nargs - 1 - func_ty->sentinel_pos;
+    int target = nargs - 1 - type_attrs(func_ty)->sentinel_pos;
     // Bound both ends: target < num_named catches sentinel_pos >= nargs
     // (too few variadic args); target >= nargs catches a negative
     // sentinel_pos (e.g. sentinel(-1)), which would otherwise walk off

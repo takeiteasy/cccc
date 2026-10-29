@@ -706,7 +706,7 @@ declspec_done:
         ty                  = copy_type(vm, ty);
         ty->is_maybe_unused = attr->is_maybe_unused;
         ty->is_deprecated   = attr->is_deprecated;
-        ty->deprecated_msg  = attr->deprecated_msg;
+        type_attrs_mut(vm, ty)->deprecated_msg = attr->deprecated_msg;
     }
 
     if (is_atomic) {
@@ -787,7 +787,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             // context. For example, *argv[] is converted to **argv by this.
             // Qualifiers inside [...] apply to the resulting pointer per C99
             // §6.7.6.3p7.
-            int  saved_static_min  = ty2->static_min;
+            int  saved_static_min  = type_arr(ty2)->static_min;
             bool saved_is_const    = ty2->is_const;
             bool saved_is_volatile = ty2->is_volatile;
             bool saved_is_restrict = ty2->is_restrict;
@@ -803,18 +803,18 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             // checked) array parameter has checked_kind == CHECKED_NONE, so
             // this is a no-op for every existing declaration.
             CheckedKind       saved_checked_kind = ty2->checked_kind;
-            CheckedBoundsForm saved_bounds_form  = ty2->checked_bounds_form;
-            int               saved_array_extent = ty2->checked_array_extent;
+            CheckedBoundsForm saved_bounds_form  = type_chk(ty2)->form;
+            int saved_array_extent = type_chk(ty2)->checked_array_extent;
             ty2                                  = pointer_to(vm, ty2->base);
             ty2->name                            = name;
-            ty2->static_min                      = saved_static_min;
+            type_arr_mut(vm, ty2)->static_min    = saved_static_min;
             ty2->is_const                        = saved_is_const;
             ty2->is_volatile                     = saved_is_volatile;
             ty2->is_restrict                     = saved_is_restrict;
             ty2->is_atomic                       = saved_is_atomic;
             ty2->checked_kind                    = saved_checked_kind;
-            ty2->checked_bounds_form             = saved_bounds_form;
-            ty2->checked_array_extent            = saved_array_extent;
+            type_chk_mut(vm, ty2)->form          = saved_bounds_form;
+            type_chk_mut(vm, ty2)->checked_array_extent = saved_array_extent;
         } else if (ty2->kind == TY_VLA) {
             // VLA parameters also adjust to pointer-to-element (C99
             // §6.7.6.3p7). Qualifiers from the brackets transfer to the
@@ -825,17 +825,17 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             // A checked VLA parameter becomes `count(extent)`, re-parsed in
             // the body scope like any checked pointer's bound.
             CheckedKind       saved_checked_kind = ty2->checked_kind;
-            CheckedBoundsForm saved_bounds_form  = ty2->checked_bounds_form;
-            Token            *saved_extent_tok   = ty2->checked_vla_extent_tok;
+            CheckedBoundsForm saved_bounds_form  = type_chk(ty2)->form;
+            Token            *saved_extent_tok = type_chk(ty2)->vla_extent_tok;
             ty2                    = pointer_to(vm, ty2->base);
             ty2->name              = name;
             ty2->is_const          = saved_is_const;
             ty2->is_volatile       = saved_is_volatile;
             ty2->is_restrict       = saved_is_restrict;
             ty2->checked_kind                    = saved_checked_kind;
-            ty2->checked_bounds_form             = saved_bounds_form;
-            ty2->checked_bounds_arg1             = saved_extent_tok;
-            ty2->checked_vla_extent_tok          = saved_extent_tok;
+            type_chk_mut(vm, ty2)->form           = saved_bounds_form;
+            type_chk_mut(vm, ty2)->arg1           = saved_extent_tok;
+            type_chk_mut(vm, ty2)->vla_extent_tok = saved_extent_tok;
         } else if (ty2->kind == TY_FUNC) {
             // Likewise, a function is converted to a pointer to a function
             // only in the parameter context.
@@ -946,7 +946,7 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
             warn_tok(vm, expr_tok, CCCC_WARN_PEDANTIC,
                      "variable-length arrays are a C99 extension");
         ty              = vla_of(vm, ty, expr);
-        ty->vla_len_tok = expr_tok;
+        type_arr_mut(vm, ty)->vla_len_tok = expr_tok;
         return ty;
     }
     // #1095: capture layout provenance from the *unfolded* node before
@@ -957,10 +957,10 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
     LayoutOp layout_is_align = LAYOUT_SIZEOF;
     node_layout_const(expr, &layout_ty, &layout_is_align);
     Type *arr                      = array_of(vm, ty, eval(vm, expr));
-    arr->array_len_layout_ty       = layout_ty;
-    arr->array_len_layout_is_align = layout_is_align;
+    type_arr_mut(vm, arr)->array_len_layout_ty = layout_ty;
+    type_arr_mut(vm, arr)->array_len_layout_is_align = layout_is_align;
     if (saw_static)
-        arr->static_min = arr->array_len;
+        type_arr_mut(vm, arr)->static_min = arr->array_len;
     if (saw_const)
         arr->is_const = true;
     if (saw_volatile)
@@ -1033,7 +1033,7 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
         // apply_checked_ptr_attr() itself so attribute order within the
         // bracket list doesn't matter (`[[cccc::count(n), cccc::array]]` is
         // as valid as the more natural `[[cccc::array, cccc::count(n)]]`).
-        if (ty->checked_bounds_form != CB_NONE) {
+        if (type_chk(ty)->form != CB_NONE) {
             if (ty->checked_kind == CHECKED_NONE)
                 error_tok(vm, tok,
                           "a bounds declaration (count/byte_count/bounds) "
@@ -1048,7 +1048,7 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
 
         // #486: assume/dynamic bounds-cast consistency, checked here for the
         // same order-independence reason as the bounds-form check above.
-        if (ty->checked_cast_kind != CC_NONE) {
+        if (type_chk(ty)->cast_kind != CC_NONE) {
             if (ty->checked_kind == CHECKED_NONE)
                 error_tok(vm, tok,
                           "'assume'/'dynamic' require the pointer to also be "
@@ -1056,13 +1056,13 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
                           "[[cccc::ntarray]]");
             if ((ty->checked_kind == CHECKED_ARRAY ||
                  ty->checked_kind == CHECKED_NTARRAY) &&
-                ty->checked_bounds_form == CB_NONE)
+                type_chk(ty)->form == CB_NONE)
                 error_tok(vm, tok,
                           "'assume'/'dynamic' on an [[cccc::array]]/"
                           "[[cccc::ntarray]] pointer requires a bounds "
                           "declaration (count/byte_count/bounds)");
-            if (ty->checked_cast_kind == CC_DYNAMIC &&
-                ty->checked_bounds_form == CB_UNKNOWN)
+            if (type_chk(ty)->cast_kind == CC_DYNAMIC &&
+                type_chk(ty)->form == CB_UNKNOWN)
                 error_tok(vm, tok,
                           "'dynamic' cannot be combined with "
                           "bounds(unknown) -- there is nothing to verify; "
@@ -1097,7 +1097,7 @@ static Type *pointers(VirtualMachine *vm, Token **rest, Token *tok, Type *ty,
     return ty;
 }
 
-static void inherit_semantic_attrs(Type *dst, Type *src);
+static void inherit_semantic_attrs(VirtualMachine *vm, Type *dst, Type *src);
 
 // Several bundled system headers define an ordinarily-a-variable name as an
 // object-like accessor macro that expands to a call:
@@ -1164,8 +1164,9 @@ static Type *with_custom_attrs(VirtualMachine *vm, Type *ty,
     if (!list)
         return ty;
     ty               = copy_type(vm, ty);
-    ty->custom_attrs = clone_custom_attr_list(vm, ty->custom_attrs);
-    append_custom_attr_list(&ty->custom_attrs, list);
+    type_attrs_mut(vm, ty)->custom_attrs =
+        clone_custom_attr_list(vm, type_attrs(ty)->custom_attrs);
+    append_custom_attr_list(&type_attrs_mut(vm, ty)->custom_attrs, list);
     return ty;
 }
 
@@ -1180,13 +1181,13 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
         // A bound after a checked array's `[]` (flexible array member) lands
         // on a private copy.
         if (ty->kind == TY_ARRAY && ty->checked_kind != CHECKED_NONE &&
-            ty->checked_bounds_form == CB_COUNT && !ty->checked_bounds_arg1)
+            type_chk(ty)->form == CB_COUNT && !type_chk(ty)->arg1)
             suffix_attr.checked_array = copy_type(vm, ty);
         tok                 = attribute_list(vm, tok, NULL, &suffix_attr);
         tok                 = c23_attribute_list(vm, tok, NULL, &suffix_attr);
         if (suffix_attr.checked_array &&
-            (suffix_attr.checked_array->checked_bounds_arg1 ||
-             suffix_attr.checked_array->checked_bounds_form == CB_UNKNOWN))
+            (type_chk(suffix_attr.checked_array)->arg1 ||
+             type_chk(suffix_attr.checked_array)->form == CB_UNKNOWN))
             ty = suffix_attr.checked_array;
         if (suffix_attr.checked_attr_tok && !vm->compiler.in_type_lookahead)
             error_tok(vm, suffix_attr.checked_attr_tok,
@@ -1207,7 +1208,10 @@ static Type *declarator_suffix(VirtualMachine *vm, Token **rest, Token *tok,
                 ty->decl_align = suffix_attr.gnu_align;
         }
 
-        tok = asm_label(vm, tok, &ty->asm_label);
+        char *label = NULL;
+        tok         = asm_label(vm, tok, &label);
+        if (label)
+            type_attrs_mut(vm, ty)->asm_label = label;
         if (tok == before)
             break;
     }
@@ -1219,7 +1223,7 @@ static Type *with_cleanup(VirtualMachine *vm, Type *ty, Obj *cleanup_fn) {
     if (!cleanup_fn)
         return ty;
     ty             = copy_type(vm, ty);
-    ty->cleanup_fn = cleanup_fn;
+    type_attrs_mut(vm, ty)->cleanup_fn = cleanup_fn;
     return ty;
 }
 
@@ -1234,11 +1238,11 @@ static Type *checked_array_rows(VirtualMachine *vm, Type *ty) {
     ty->base = checked_array_rows(vm, ty->base);
     if (ty->checked_kind == CHECKED_NONE) {
         ty->checked_kind        = CHECKED_ARRAY;
-        ty->checked_bounds_form = CB_COUNT;
+        type_chk_mut(vm, ty)->form = CB_COUNT;
         if (ty->kind == TY_VLA)
-            ty->checked_vla_extent_tok = ty->vla_len_tok;
+            type_chk_mut(vm, ty)->vla_extent_tok = type_arr(ty)->vla_len_tok;
         else
-            ty->checked_array_extent = ty->array_len;
+            type_chk_mut(vm, ty)->checked_array_extent = ty->array_len;
     }
     return ty;
 }
@@ -1310,17 +1314,17 @@ static Type *apply_checked_array(VirtualMachine *vm, Type *ty,
             row = row->base;
         row->checked_kind = CHECKED_NTARRAY;
         if (row->kind == TY_ARRAY)
-            row->checked_array_extent = row->array_len - 1;
+            type_chk_mut(vm, row)->checked_array_extent = row->array_len - 1;
         checked_array_kind = CHECKED_ARRAY;
     }
     ty->checked_kind        = checked_array_kind;
-    ty->checked_bounds_form = CB_COUNT;
+    type_chk_mut(vm, ty)->form = CB_COUNT;
     if (ty->kind == TY_VLA)
-        ty->checked_vla_extent_tok = checked_array_tok->next->next;
+        type_chk_mut(vm, ty)->vla_extent_tok = checked_array_tok->next->next;
     else
-        ty->checked_array_extent = checked_array_kind == CHECKED_NTARRAY
-                                       ? ty->array_len - 1
-                                       : ty->array_len;
+        type_chk_mut(vm, ty)->checked_array_extent =
+            checked_array_kind == CHECKED_NTARRAY ? ty->array_len - 1
+                                                  : ty->array_len;
     return ty;
 }
 
@@ -1343,7 +1347,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     // type-name) is reached only for a real declaration, so a checked_kind
     // annotation ending up here means the attribute was written on a
     // declarator instead of a cast's type-name.
-    if (ty->checked_cast_kind != CC_NONE)
+    if (type_chk(ty)->cast_kind != CC_NONE)
         error_tok(vm, tok,
                   "'assume'/'dynamic' may only be used in a cast's "
                   "type-name (e.g. (int * [[cccc::array, cccc::count(n), "
@@ -1383,10 +1387,10 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
 
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
-        inherit_semantic_attrs(block_ty, ty);
+        inherit_semantic_attrs(vm, block_ty, ty);
         block_ty->name       = name;
         block_ty->name_pos   = name_pos;
-        block_ty->cleanup_fn = cleanup_fn;
+        type_attrs_mut(vm, block_ty)->cleanup_fn = cleanup_fn;
 
         return block_ty;
     }
@@ -1424,7 +1428,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
 
     Type *inner_ty = ty;
     ty             = type_suffix(vm, rest, tok, ty);
-    inherit_semantic_attrs(ty, inner_ty);
+    inherit_semantic_attrs(vm, ty, inner_ty);
 
     if (checked_array_kind != CHECKED_NONE && !vm->compiler.in_type_lookahead)
         ty = apply_checked_array(vm, ty, checked_array_kind, checked_array_tok);
@@ -1437,7 +1441,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
     if (prefix_attr.is_nodiscard && ty->kind == TY_FUNC) {
         ty->is_nodiscard = true;
         if (prefix_attr.nodiscard_msg)
-            ty->nodiscard_msg = prefix_attr.nodiscard_msg;
+            type_attrs_mut(vm, ty)->nodiscard_msg = prefix_attr.nodiscard_msg;
     }
 
     ty           = declarator_suffix(vm, &tok, *rest, ty);
@@ -1574,8 +1578,8 @@ static bool same_member_shape(Member *a, Member *b) {
 }
 
 static bool same_struct_members(Type *a, Type *b) {
-    Member *ma = a->members;
-    Member *mb = b->members;
+    Member *ma = type_agg(a)->members;
+    Member *mb = type_agg(b)->members;
     for (; ma && mb; ma = ma->next, mb = mb->next)
         if (!same_member_shape(ma, mb))
             return false;
@@ -1583,7 +1587,7 @@ static bool same_struct_members(Type *a, Type *b) {
 }
 
 static Member *find_union_member_by_name(Type *ty, Member *needle) {
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         if (!needle->name || !mem->name) {
             if (needle->name == mem->name)
                 return mem;
@@ -1598,19 +1602,19 @@ static Member *find_union_member_by_name(Type *ty, Member *needle) {
 static bool same_union_members(Type *a, Type *b) {
     int count_a = 0;
     int count_b = 0;
-    for (Member *ma = a->members; ma; ma = ma->next) {
+    for (Member *ma = type_agg(a)->members; ma; ma = ma->next) {
         count_a++;
         Member *mb = find_union_member_by_name(b, ma);
         if (!mb || !same_member_shape(ma, mb))
             return false;
     }
-    for (Member *mb = b->members; mb; mb = mb->next)
+    for (Member *mb = type_agg(b)->members; mb; mb = mb->next)
         count_b++;
     return count_a == count_b;
 }
 
 static EnumConstant *find_enum_constant(Type *ty, char *name) {
-    for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next)
+    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
         if (!strcmp(ec->name, name))
             return ec;
     return NULL;
@@ -1619,13 +1623,13 @@ static EnumConstant *find_enum_constant(Type *ty, char *name) {
 static bool same_enum_constants(Type *a, Type *b) {
     int count_a = 0;
     int count_b = 0;
-    for (EnumConstant *ea = a->enum_constants; ea; ea = ea->next) {
+    for (EnumConstant *ea = type_agg(a)->enum_constants; ea; ea = ea->next) {
         count_a++;
         EnumConstant *eb = find_enum_constant(b, ea->name);
         if (!eb || eb->value != ea->value)
             return false;
     }
-    for (EnumConstant *eb = b->enum_constants; eb; eb = eb->next)
+    for (EnumConstant *eb = type_agg(b)->enum_constants; eb; eb = eb->next)
         count_b++;
     return count_a == count_b;
 }
@@ -1634,7 +1638,8 @@ static bool compatible_tag_redeclaration(Type *old, Type *new) {
     if (!old || !new || old->kind != new->kind)
         return false;
     if (old->kind == TY_ENUM) {
-        if (!same_type_exact(old->enum_base_type, new->enum_base_type))
+        if (!same_type_exact(type_agg(old)->enum_base_type,
+                             type_agg(new)->enum_base_type))
             return false;
         return same_enum_constants(old, new);
     }
@@ -1668,8 +1673,8 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
         error_tok(vm, tag, "tag redeclared as different kind");
 
     if (existing->size < 0 ||
-        (existing->kind == TY_ENUM && !existing->enum_constants &&
-         ty->enum_constants)) {
+        (existing->kind == TY_ENUM && !type_agg(existing)->enum_constants &&
+         type_agg(ty)->enum_constants)) {
         *existing = *ty;
         // #906: completing a forward-declared tag (e.g. `typedef struct
         // Alpha Alpha;` in a header, `struct Alpha { ... };` in the primary
@@ -1713,7 +1718,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         tag          = tok;
         ty->name     = tag;
         ty->name_pos = tag;
-        ty->enum_tag = tag;
+        type_agg_mut(vm, ty)->enum_tag = tag;
         tok          = tok->next;
     }
 
@@ -1756,7 +1761,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
             base_ty->kind == TY_ENUM)
             error_tok(vm, base_tok,
                       "enum underlying type must be a non-bool integer type");
-        ty->enum_base_type = base_ty;
+        type_agg_mut(vm, ty)->enum_base_type = base_ty;
         ty->size           = base_ty->size;
         ty->align          = base_ty->align;
         ty->is_unsigned    = base_ty->is_unsigned;
@@ -1769,14 +1774,14 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
                 error_tok(vm, tag, "not an enum tag");
             if (existing->is_deprecated)
                 warn_deprecated_use(vm, tag, get_ident(vm, tag),
-                                    existing->deprecated_msg);
+                                    type_attrs(existing)->deprecated_msg);
             *rest = tok;
             return existing->is_deprecated
                        ? type_after_deprecated_use(vm, existing)
                        : existing;
         }
         // Forward declaration requires an underlying type (C23 §6.7.2.2)
-        if (!ty->enum_base_type)
+        if (!type_agg(ty)->enum_base_type)
             error_tok(vm, tag,
                       "enum forward declaration requires an underlying type");
         push_tag_scope(vm, tag, ty);
@@ -1888,7 +1893,7 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
         if (enum_tail) {
             enum_tail->next = ec;
         } else {
-            ty->enum_constants = ec;
+            type_agg_mut(vm, ty)->enum_constants = ec;
         }
         enum_tail = ec;
 
@@ -1935,12 +1940,13 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     // values, so `install_tag_definition`'s own wholesale `*existing = *ty`
     // overwrite below can't drop a real fixed base #1205 never asked to
     // touch.
-    if (existing_tag && existing_tag->enum_base_type) {
-        ty->enum_base_type = existing_tag->enum_base_type;
-        ty->size           = existing_tag->enum_base_type->size;
-        ty->align          = existing_tag->enum_base_type->align;
-        ty->is_unsigned    = existing_tag->enum_base_type->is_unsigned;
-    } else if (!ty->enum_base_type && !first_enum) {
+    if (existing_tag && type_agg(existing_tag)->enum_base_type) {
+        type_agg_mut(vm, ty)->enum_base_type =
+            type_agg(existing_tag)->enum_base_type;
+        ty->size        = type_agg(existing_tag)->enum_base_type->size;
+        ty->align       = type_agg(existing_tag)->enum_base_type->align;
+        ty->is_unsigned = type_agg(existing_tag)->enum_base_type->is_unsigned;
+    } else if (!type_agg(ty)->enum_base_type && !first_enum) {
         if (any_neg) {
             // Signed: needs to hold min_val and max_uval both.
             if (min_val >= INT32_MIN && max_uval <= INT32_MAX) {
@@ -2012,18 +2018,20 @@ Type *auto_deduced_type(VirtualMachine *vm, Type *ty) {
 // declared type.
 Type *auto_declared_type(VirtualMachine *vm, Type *decl, Type *deduced) {
     if (!decl->is_maybe_unused && !decl->is_deprecated && !decl->decl_align &&
-        !decl->cleanup_fn && !decl->custom_attrs && !decl->asm_label)
+        !type_attrs(decl)->cleanup_fn && !type_attrs(decl)->custom_attrs &&
+        !type_attrs(decl)->asm_label)
         return deduced;
     deduced                 = copy_type(vm, deduced);
     deduced->name           = decl->name;
     deduced->name_pos       = decl->name_pos;
     deduced->is_maybe_unused = decl->is_maybe_unused;
     deduced->is_deprecated  = decl->is_deprecated;
-    deduced->deprecated_msg = decl->deprecated_msg;
+    type_attrs_mut(vm, deduced)->deprecated_msg =
+        type_attrs(decl)->deprecated_msg;
     deduced->decl_align     = decl->decl_align;
-    deduced->cleanup_fn     = decl->cleanup_fn;
-    deduced->custom_attrs   = decl->custom_attrs;
-    deduced->asm_label      = decl->asm_label;
+    type_attrs_mut(vm, deduced)->cleanup_fn   = type_attrs(decl)->cleanup_fn;
+    type_attrs_mut(vm, deduced)->custom_attrs = type_attrs(decl)->custom_attrs;
+    type_attrs_mut(vm, deduced)->asm_label    = type_attrs(decl)->asm_label;
     return deduced;
 }
 
@@ -2140,12 +2148,12 @@ static void collect_member_attrs(VirtualMachine *vm, Member *mem, VarAttr *attr,
                                  bool is_anonymous) {
     append_custom_attr_list(&mem->custom_attrs,
                             clone_custom_attr_list(vm, attr->custom_attrs));
-    if (!is_anonymous && mem->ty->custom_attrs) {
+    if (!is_anonymous && type_attrs(mem->ty)->custom_attrs) {
         append_custom_attr_list(
             &mem->custom_attrs,
-            clone_custom_attr_list(vm, mem->ty->custom_attrs));
+            clone_custom_attr_list(vm, type_attrs(mem->ty)->custom_attrs));
         mem->ty               = copy_type(vm, mem->ty);
-        mem->ty->custom_attrs = NULL;
+        type_attrs_mut(vm, mem->ty)->custom_attrs = NULL;
     }
     append_custom_attr_list(&mem->custom_attrs, suffix);
     if (mem->custom_attrs)
@@ -2271,7 +2279,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
     Member  head = {};
     Member *cur  = &head;
     int     idx  = 0;
-    StaticAssertRecord **asserts = &ty->member_asserts;
+    StaticAssertRecord **asserts = &type_agg_mut(vm, ty)->member_asserts;
 
     while (!equal(tok, "}")) {
         // #1173: a `#pragma pack` between two members of one struct changes
@@ -2318,13 +2326,13 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
                                   method_op);
             PendingMethod *m =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(PendingMethod));
-            *m = (PendingMethod){.owner        = ty,
-                                 .tag          = ty->struct_tag,
-                                 .start        = tok,
-                                 .name         = method_name,
-                                 .end          = method_end,
-                                 .has_body     = method_body,
-                                 .operator_sym = method_op,
+            *m = (PendingMethod){.owner          = ty,
+                                 .tag            = type_agg(ty)->struct_tag,
+                                 .start          = tok,
+                                 .name           = method_name,
+                                 .end            = method_end,
+                                 .has_body       = method_body,
+                                 .operator_sym   = method_op,
                                  .operator_unary = method_unary};
             queue_method(vm, m);
             tok = method_end;
@@ -2456,37 +2464,37 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
         Type *declared = cur->ty;
         cur->ty        = array_of(vm, declared->base, 0);
         if (declared->checked_kind != CHECKED_NONE) {
-            if (declared->checked_bounds_form == CB_COUNT &&
-                !declared->checked_bounds_arg1)
+            if (type_chk(declared)->form == CB_COUNT &&
+                !type_chk(declared)->arg1)
                 error_tok(vm, cur->name ? cur->name : *rest,
                           "a checked flexible array member needs a bound "
                           "(e.g. int data _Checked[] [[cccc::count(n)]];), "
                           "or bounds(unknown) to opt out");
             cur->ty->checked_kind         = declared->checked_kind;
-            cur->ty->checked_bounds_form  = declared->checked_bounds_form;
-            cur->ty->checked_bounds_arg1  = declared->checked_bounds_arg1;
-            cur->ty->checked_bounds_arg2  = declared->checked_bounds_arg2;
+            type_chk_mut(vm, cur->ty)->form = type_chk(declared)->form;
+            type_chk_mut(vm, cur->ty)->arg1 = type_chk(declared)->arg1;
+            type_chk_mut(vm, cur->ty)->arg2 = type_chk(declared)->arg2;
         }
         ty->is_flexible = true;
     }
 
     *rest       = tok->next;
-    ty->members = head.next;
-    resolve_member_checked_bounds(vm, ty->members);
+    type_agg_mut(vm, ty)->members = head.next;
+    resolve_member_checked_bounds(vm, type_agg(ty)->members);
 }
 
-static void apply_semantic_attr(Type *ty, VarAttr *attr, Token *tok,
-                                bool unused, bool deprecated, bool nodiscard,
-                                char *message) {
+static void apply_semantic_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
+                                Token *tok, bool unused, bool deprecated,
+                                bool nodiscard, char *message) {
     if (ty) {
         ty->is_maybe_unused |= unused;
         ty->is_deprecated   |= deprecated;
         ty->is_nodiscard    |= nodiscard;
         if (message) {
             if (deprecated)
-                ty->deprecated_msg = message;
+                type_attrs_mut(vm, ty)->deprecated_msg = message;
             if (nodiscard)
-                ty->nodiscard_msg = message;
+                type_attrs_mut(vm, ty)->nodiscard_msg = message;
         }
     }
     if (attr) {
@@ -2528,8 +2536,8 @@ static Type *apply_vector_size(VirtualMachine *vm, Type *ty, VarAttr *attr) {
                   bytes);
     else {
         ty = vector_of(vm, ty, bytes);
-        if (attr->vec_visible > 0 && attr->vec_visible < ty->vec_len)
-            ty->vec_visible = attr->vec_visible;
+        if (attr->vec_visible > 0 && attr->vec_visible < type_arr(ty)->vec_len)
+            type_arr_mut(vm, ty)->vec_visible = attr->vec_visible;
     }
     return ty;
 }
@@ -2577,10 +2585,10 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
         ty = vectorize_innermost(vm, ty, attr);
 
     ty = copy_type(vm, ty);
-    apply_semantic_attr(ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
-                        attr->is_deprecated, attr->is_nodiscard,
-                        attr->deprecated_msg ? attr->deprecated_msg
-                                             : attr->nodiscard_msg);
+    apply_semantic_attr(
+        vm, ty, NULL, attr->attribute_tok, attr->is_maybe_unused,
+        attr->is_deprecated, attr->is_nodiscard,
+        attr->deprecated_msg ? attr->deprecated_msg : attr->nodiscard_msg);
     if (attr->is_noreturn && ty->kind == TY_FUNC)
         ty->is_noreturn = true;
     if (attr->is_pure && ty->kind == TY_FUNC)
@@ -2594,53 +2602,54 @@ Type *apply_var_attrs_to_type(VirtualMachine *vm, Type *ty, VarAttr *attr) {
     if (attr->is_trusted && ty->kind == TY_FUNC)
         ty->is_trusted = true;
     if (attr->operator_sym && ty->kind == TY_FUNC)
-        ty->operator_sym = attr->operator_sym;
+        type_attrs_mut(vm, ty)->operator_sym = attr->operator_sym;
     if (attr->method_of && ty->kind == TY_FUNC) {
-        ty->method_of   = attr->method_of;
-        ty->method_name = attr->method_name;
+        type_attrs_mut(vm, ty)->method_of   = attr->method_of;
+        type_attrs_mut(vm, ty)->method_name = attr->method_name;
     }
     if (attr->format_style && ty->kind == TY_FUNC) {
-        ty->format_style         = attr->format_style;
-        ty->format_string_index  = attr->format_string_index;
-        ty->format_fmt_first_arg = attr->format_fmt_first_arg;
+        type_attrs_mut(vm, ty)->format_style        = attr->format_style;
+        type_attrs_mut(vm, ty)->format_string_index = attr->format_string_index;
+        type_attrs_mut(vm, ty)->format_fmt_first_arg =
+            attr->format_fmt_first_arg;
     }
     // Transport cleanup_fn through the type so new_var() can pick it up.
     // (cleanup is a variable attribute, not a real type attribute.)
     if (attr->cleanup_fn)
-        ty->cleanup_fn = attr->cleanup_fn;
+        type_attrs_mut(vm, ty)->cleanup_fn = attr->cleanup_fn;
     if (attr->attr_error_msg && ty->kind == TY_FUNC)
-        ty->attr_error_msg = attr->attr_error_msg;
+        type_attrs_mut(vm, ty)->attr_error_msg = attr->attr_error_msg;
     if (attr->attr_warning_msg && ty->kind == TY_FUNC)
-        ty->attr_warning_msg = attr->attr_warning_msg;
+        type_attrs_mut(vm, ty)->attr_warning_msg = attr->attr_warning_msg;
     if (ty->kind == TY_FUNC) {
         if (attr->nonnull_all)
             ty->nonnull_all = true;
-        ty->nonnull_mask |= attr->nonnull_mask;
+        type_attrs_mut(vm, ty)->nonnull_mask |= attr->nonnull_mask;
         if (attr->returns_nonnull)
             ty->returns_nonnull = true;
         if (attr->is_sentinel) {
             ty->is_sentinel  = true;
-            ty->sentinel_pos = attr->sentinel_pos;
+            type_attrs_mut(vm, ty)->sentinel_pos = attr->sentinel_pos;
         }
         if (attr->alloc_size_idx) {
-            ty->alloc_size_idx  = attr->alloc_size_idx;
-            ty->alloc_size_idx2 = attr->alloc_size_idx2;
+            type_attrs_mut(vm, ty)->alloc_size_idx  = attr->alloc_size_idx;
+            type_attrs_mut(vm, ty)->alloc_size_idx2 = attr->alloc_size_idx2;
         }
         if (attr->is_malloc)
             ty->is_malloc = true;
         if (attr->is_constructor) {
             ty->is_constructor = true;
-            ty->init_priority  = attr->init_priority;
+            type_attrs_mut(vm, ty)->init_priority = attr->init_priority;
         }
         if (attr->is_destructor) {
             ty->is_destructor = true;
-            ty->init_priority = attr->init_priority;
+            type_attrs_mut(vm, ty)->init_priority = attr->init_priority;
         }
     }
     return ty;
 }
 
-static void inherit_semantic_attrs(Type *dst, Type *src) {
+static void inherit_semantic_attrs(VirtualMachine *vm, Type *dst, Type *src) {
     if (!dst || !src)
         return;
     dst->is_maybe_unused |= src->is_maybe_unused;
@@ -2652,44 +2661,51 @@ static void inherit_semantic_attrs(Type *dst, Type *src) {
     dst->is_gnu_inline   |= src->is_gnu_inline;
     dst->is_kernel       |= src->is_kernel;
     dst->is_trusted      |= src->is_trusted;
-    if (src->operator_sym)
-        dst->operator_sym = src->operator_sym;
-    if (src->method_of) {
-        dst->method_of   = src->method_of;
-        dst->method_name = src->method_name;
+    // Writes allocate dst's attrs group, so only write what src actually sets:
+    // dst may be a shared singleton such as ty_int.
+    const TypeAttrs *sa = type_attrs(src);
+    if (sa->operator_sym)
+        type_attrs_mut(vm, dst)->operator_sym = sa->operator_sym;
+    if (sa->method_of) {
+        type_attrs_mut(vm, dst)->method_of   = sa->method_of;
+        type_attrs_mut(vm, dst)->method_name = sa->method_name;
     }
-    if (!dst->deprecated_msg)
-        dst->deprecated_msg = src->deprecated_msg;
-    if (!dst->nodiscard_msg)
-        dst->nodiscard_msg = src->nodiscard_msg;
-    if (!dst->attr_error_msg)
-        dst->attr_error_msg = src->attr_error_msg;
-    if (!dst->attr_warning_msg)
-        dst->attr_warning_msg = src->attr_warning_msg;
-    if (src->format_style) {
-        dst->format_style         = src->format_style;
-        dst->format_string_index  = src->format_string_index;
-        dst->format_fmt_first_arg = src->format_fmt_first_arg;
+    if (sa->deprecated_msg && !type_attrs(dst)->deprecated_msg)
+        type_attrs_mut(vm, dst)->deprecated_msg = sa->deprecated_msg;
+    if (sa->nodiscard_msg && !type_attrs(dst)->nodiscard_msg)
+        type_attrs_mut(vm, dst)->nodiscard_msg = sa->nodiscard_msg;
+    if (sa->attr_error_msg && !type_attrs(dst)->attr_error_msg)
+        type_attrs_mut(vm, dst)->attr_error_msg = sa->attr_error_msg;
+    if (sa->attr_warning_msg && !type_attrs(dst)->attr_warning_msg)
+        type_attrs_mut(vm, dst)->attr_warning_msg = sa->attr_warning_msg;
+    if (sa->format_style) {
+        TypeAttrs *da            = type_attrs_mut(vm, dst);
+        da->format_style         = sa->format_style;
+        da->format_string_index  = sa->format_string_index;
+        da->format_fmt_first_arg = sa->format_fmt_first_arg;
     }
-    dst->nonnull_all     |= src->nonnull_all;
-    dst->nonnull_mask    |= src->nonnull_mask;
+    dst->nonnull_all |= src->nonnull_all;
+    if (sa->nonnull_mask)
+        type_attrs_mut(vm, dst)->nonnull_mask |= sa->nonnull_mask;
     dst->returns_nonnull |= src->returns_nonnull;
     if (src->is_sentinel) {
-        dst->is_sentinel  = true;
-        dst->sentinel_pos = src->sentinel_pos;
+        dst->is_sentinel = true;
+        if (sa->sentinel_pos)
+            type_attrs_mut(vm, dst)->sentinel_pos = sa->sentinel_pos;
     }
-    if (src->alloc_size_idx) {
-        dst->alloc_size_idx  = src->alloc_size_idx;
-        dst->alloc_size_idx2 = src->alloc_size_idx2;
+    if (sa->alloc_size_idx) {
+        TypeAttrs *da       = type_attrs_mut(vm, dst);
+        da->alloc_size_idx  = sa->alloc_size_idx;
+        da->alloc_size_idx2 = sa->alloc_size_idx2;
     }
     dst->is_malloc |= src->is_malloc;
     if (src->is_constructor) {
-        dst->is_constructor = true;
-        dst->init_priority  = src->init_priority;
+        dst->is_constructor                    = true;
+        type_attrs_mut(vm, dst)->init_priority = sa->init_priority;
     }
     if (src->is_destructor) {
-        dst->is_destructor = true;
-        dst->init_priority = src->init_priority;
+        dst->is_destructor                     = true;
+        type_attrs_mut(vm, dst)->init_priority = sa->init_priority;
     }
 }
 
@@ -3007,7 +3023,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                         tok = tok->next;
                     }
                 }
-                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
                                     false, message);
                 continue;
             }
@@ -3039,9 +3055,10 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     int first_arg = const_expr(vm, &tok, tok);
                     tok           = skip(vm, tok, ")");
                     if (ty && ty->kind == TY_FUNC) {
-                        ty->format_style         = style;
-                        ty->format_string_index  = fmt_idx;
-                        ty->format_fmt_first_arg = first_arg;
+                        type_attrs_mut(vm, ty)->format_style        = style;
+                        type_attrs_mut(vm, ty)->format_string_index = fmt_idx;
+                        type_attrs_mut(vm, ty)->format_fmt_first_arg =
+                            first_arg;
                     }
                     if (attr) {
                         attr->format_style         = style;
@@ -3077,7 +3094,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 if (ty && ty->kind == TY_FUNC) {
                     if (all)
                         ty->nonnull_all = true;
-                    ty->nonnull_mask |= mask;
+                    type_attrs_mut(vm, ty)->nonnull_mask |= mask;
                 }
                 if (attr) {
                     if (all)
@@ -3111,7 +3128,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 }
                 if (ty && ty->kind == TY_FUNC) {
                     ty->is_sentinel  = true;
-                    ty->sentinel_pos = pos;
+                    type_attrs_mut(vm, ty)->sentinel_pos = pos;
                 }
                 if (attr) {
                     attr->is_sentinel  = true;
@@ -3137,8 +3154,8 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     tok = skip(vm, tok, ")");
                 }
                 if (ty && ty->kind == TY_FUNC) {
-                    ty->alloc_size_idx  = idx1;
-                    ty->alloc_size_idx2 = idx2;
+                    type_attrs_mut(vm, ty)->alloc_size_idx  = idx1;
+                    type_attrs_mut(vm, ty)->alloc_size_idx2 = idx2;
                 }
                 if (attr) {
                     attr->alloc_size_idx  = idx1;
@@ -3201,7 +3218,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             // discarded
             if (is_attr_name(tok, "warn_unused_result")) {
                 tok = tok->next;
-                apply_semantic_attr(ty, attr, attr_tok, false, false, true,
+                apply_semantic_attr(vm, ty, attr, attr_tok, false, false, true,
                                     NULL);
                 continue;
             }
@@ -3230,7 +3247,8 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 }
                 if (!vm->compiler.in_type_lookahead) {
                     if (ty)
-                        ty->attr_error_msg = message ? message : "";
+                        type_attrs_mut(vm, ty)->attr_error_msg =
+                            message ? message : "";
                     if (attr)
                         attr->attr_error_msg = message ? message : "";
                     vm->compiler.saw_diag_attr = true;
@@ -3259,7 +3277,8 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 }
                 if (!vm->compiler.in_type_lookahead) {
                     if (ty)
-                        ty->attr_warning_msg = message ? message : "";
+                        type_attrs_mut(vm, ty)->attr_warning_msg =
+                            message ? message : "";
                     if (attr)
                         attr->attr_warning_msg = message ? message : "";
                     vm->compiler.saw_diag_attr = true;
@@ -3318,7 +3337,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                         } else {
                             ty->is_destructor = true;
                         }
-                        ty->init_priority = priority;
+                        type_attrs_mut(vm, ty)->init_priority = priority;
                     }
                     if (attr) {
                         if (is_ctor) {
@@ -3343,8 +3362,9 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                         append_custom_attr(vm, &attr->custom_attrs, name_tok,
                                            args, arg_count);
                     else if (ty)
-                        append_custom_attr(vm, &ty->custom_attrs, name_tok,
-                                           args, arg_count);
+                        append_custom_attr(
+                            vm, &type_attrs_mut(vm, ty)->custom_attrs, name_tok,
+                            args, arg_count);
                     else
                         error_tok(vm, name_tok,
                                   "custom attribute '%.*s' is not valid here",
@@ -3600,7 +3620,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     if (ty && ty->kind == TY_FUNC) {
                         if (all)
                             ty->nonnull_all = true;
-                        ty->nonnull_mask |= mask;
+                        type_attrs_mut(vm, ty)->nonnull_mask |= mask;
                     }
                     if (attr) {
                         if (all)
@@ -3621,7 +3641,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 }
                 if (ty && ty->kind == TY_FUNC) {
                     ty->is_sentinel  = true;
-                    ty->sentinel_pos = pos;
+                    type_attrs_mut(vm, ty)->sentinel_pos = pos;
                 }
                 if (attr) {
                     attr->is_sentinel  = true;
@@ -3641,8 +3661,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     tok = skip(vm, tok, ")");
                 }
                 if (ty && ty->kind == TY_FUNC) {
-                    ty->alloc_size_idx  = idx1;
-                    ty->alloc_size_idx2 = idx2;
+                    type_attrs_mut(vm, ty)->alloc_size_idx  = idx1;
+                    type_attrs_mut(vm, ty)->alloc_size_idx2 = idx2;
                 }
                 if (attr) {
                     attr->alloc_size_idx  = idx1;
@@ -3695,7 +3715,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                         ty->is_constructor = true;
                     else
                         ty->is_destructor = true;
-                    ty->init_priority = priority;
+                    type_attrs_mut(vm, ty)->init_priority = priority;
                 }
                 if (attr) {
                     if (is_ctor)
@@ -3717,7 +3737,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                               tok->loc);
                 tok = skip(vm, after, ")");
                 if (ty && ty->kind == TY_FUNC)
-                    ty->operator_sym = sym;
+                    type_attrs_mut(vm, ty)->operator_sym = sym;
                 if (attr)
                     attr->operator_sym = sym;
                 continue;
@@ -3737,8 +3757,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 }
                 tok = skip(vm, tok, ")");
                 if (ty && ty->kind == TY_FUNC) {
-                    ty->method_of   = recv;
-                    ty->method_name = name;
+                    type_attrs_mut(vm, ty)->method_of   = recv;
+                    type_attrs_mut(vm, ty)->method_name = name;
                 }
                 if (attr) {
                     attr->method_of   = recv;
@@ -3758,8 +3778,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                             append_custom_attr(vm, &attr->custom_attrs,
                                                name_tok, args, arg_count);
                         else if (ty)
-                            append_custom_attr(vm, &ty->custom_attrs, name_tok,
-                                               args, arg_count);
+                            append_custom_attr(
+                                vm, &type_attrs_mut(vm, ty)->custom_attrs,
+                                name_tok, args, arg_count);
                         else
                             error_tok(
                                 vm, name_tok,
@@ -3788,8 +3809,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                         append_custom_attr(vm, &attr->custom_attrs, name_tok,
                                            NULL, 0);
                     else if (ty)
-                        append_custom_attr(vm, &ty->custom_attrs, name_tok,
-                                           NULL, 0);
+                        append_custom_attr(
+                            vm, &type_attrs_mut(vm, ty)->custom_attrs, name_tok,
+                            NULL, 0);
                     else
                         error_tok(vm, name_tok,
                                   "custom attribute '%.*s' is not valid here",
@@ -3855,10 +3877,10 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                                                      : attr_tok->len,
                          (cccc_scoped || gnu_scoped) ? name_tok->loc
                                                      : attr_tok->loc);
-                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
                                     false, NULL);
             } else {
-                apply_semantic_attr(ty, attr, attr_tok, unused, deprecated,
+                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
                                     false, message);
             }
         }
@@ -3914,7 +3936,8 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
         tag            = tok;
         ty->name       = tag;
         ty->name_pos   = tag;
-        ty->struct_tag = tag; // #892: survives declarator name-overwrite
+        type_agg_mut(vm, ty)->struct_tag =
+            tag; // #892: survives declarator name-overwrite
         tok            = tok->next;
     }
 
@@ -3929,7 +3952,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
                 error_tok(vm, tag, "tag redeclared as different kind");
             if (ty2->is_deprecated)
                 warn_deprecated_use(vm, tag, get_ident(vm, tag),
-                                    ty2->deprecated_msg);
+                                    type_attrs(ty2)->deprecated_msg);
             return ty2->is_deprecated ? type_after_deprecated_use(vm, ty2)
                                       : ty2;
         }
@@ -4000,7 +4023,7 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
     // Assign offsets within the struct to members.
     int bits = 0;
 
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         if (mem->is_bitfield && mem->bit_width == 0) {
             // Zero-width anonymous bitfield has a special meaning: it forces
             // the next member onto a fresh storage unit -- this part is
@@ -4155,7 +4178,7 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     ty->size = align_to(bits, ty->align * 8) / 8;
-    return install_tag_definition(vm, ty->struct_tag, ty, "struct");
+    return install_tag_definition(vm, type_agg(ty)->struct_tag, ty, "struct");
 }
 
 // union-decl = struct-union-decl
@@ -4192,7 +4215,7 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     // alignment. Match struct_decl's rule: a member's *implicit* alignment
     // is suppressed under packed, but an *explicit* aligned(N)/_Alignas(N)
     // request still applies (verified against gcc-16/clang).
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         if (mem->is_bitfield && !mem->name && !CCCC_ALIGN_ANON_BITFIELDS)
             continue;
         int mem_align;
@@ -4212,12 +4235,12 @@ static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
             ty->size = mem->ty->size;
     }
     ty->size = align_to(ty->size, ty->align);
-    return install_tag_definition(vm, ty->struct_tag, ty, "union");
+    return install_tag_definition(vm, type_agg(ty)->struct_tag, ty, "union");
 }
 
 // Find a struct member by name.
 Member *get_struct_member(Type *ty, Token *tok) {
-    for (Member *mem = ty->members; mem; mem = mem->next) {
+    for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
         // Anonymous struct member
         if ((mem->ty->kind == TY_STRUCT || mem->ty->kind == TY_UNION) &&
             !mem->name) {

@@ -150,7 +150,7 @@ static bool type_is_incomplete_tagged(Type *t) {
     if (t->kind == TY_STRUCT || t->kind == TY_UNION)
         return t->size < 0;
     if (t->kind == TY_ENUM)
-        return t->enum_constants == NULL;
+        return type_agg(t)->enum_constants == NULL;
     return false;
 }
 
@@ -294,10 +294,12 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
         // comparison unchanged (an anonymous *incomplete* aggregate can't
         // exist in valid C, so this only affects complete types, e.g.
         // `typedef struct { int x; } Foo;`).
-        if (a->struct_tag && b->struct_tag) {
-            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
-                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
-                                     a->struct_tag->len) == 0;
+        if (type_agg(a)->struct_tag && type_agg(b)->struct_tag) {
+            bool tag_match =
+                type_agg(a)->struct_tag->len == type_agg(b)->struct_tag->len &&
+                strncmp(type_agg(a)->struct_tag->loc,
+                        type_agg(b)->struct_tag->loc,
+                        type_agg(a)->struct_tag->len) == 0;
             if (!tag_match)
                 return false;
         }
@@ -306,10 +308,11 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
         // above is the only signal available (mutual anonymity can't occur
         // for an incomplete type).
         if (a->size < 0 || b->size < 0)
-            return a->struct_tag != NULL && b->struct_tag != NULL;
+            return type_agg(a)->struct_tag != NULL &&
+                   type_agg(b)->struct_tag != NULL;
 
-        Member *ma = a->members;
-        Member *mb = b->members;
+        Member *ma = type_agg(a)->members;
+        Member *mb = type_agg(b)->members;
         for (; ma && mb; ma = ma->next, mb = mb->next) {
             if ((ma->name == NULL) != (mb->name == NULL))
                 return false;
@@ -374,15 +377,17 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
                same_type_or_origin(a->base, b->base);
 
     if (a && b && a->kind == TY_ENUM && b->kind == TY_ENUM) {
-        if (a->struct_tag && b->struct_tag) {
-            bool tag_match = a->struct_tag->len == b->struct_tag->len &&
-                             strncmp(a->struct_tag->loc, b->struct_tag->loc,
-                                     a->struct_tag->len) == 0;
+        if (type_agg(a)->struct_tag && type_agg(b)->struct_tag) {
+            bool tag_match =
+                type_agg(a)->struct_tag->len == type_agg(b)->struct_tag->len &&
+                strncmp(type_agg(a)->struct_tag->loc,
+                        type_agg(b)->struct_tag->loc,
+                        type_agg(a)->struct_tag->len) == 0;
             if (!tag_match)
                 return false;
         }
-        EnumConstant *ea = a->enum_constants;
-        EnumConstant *eb = b->enum_constants;
+        EnumConstant *ea = type_agg(a)->enum_constants;
+        EnumConstant *eb = type_agg(b)->enum_constants;
         for (; ea && eb; ea = ea->next, eb = eb->next) {
             if ((ea->name == NULL) != (eb->name == NULL))
                 return false;
@@ -583,7 +588,7 @@ static bool type_kind_has_fp(TypeKind k) {
 
 // hash of a struct/union tag's spelling; 0 when untagged (never indexed).
 static long long type_tag_key(Type *t) {
-    Token *tg = t ? t->struct_tag : NULL;
+    Token *tg = t ? type_agg(t)->struct_tag : NULL;
     if (!tg)
         return 0;
     unsigned long long h = 1469598103934665603ULL;
@@ -616,7 +621,7 @@ static long long type_fp_key(Type *t) {
         case TY_STRUCT:
         case TY_UNION: {
             int mc = 0;
-            for (Member *m = t->members; m; m = m->next) {
+            for (Member *m = type_agg(t)->members; m; m = m->next) {
                 mc++;
                 if (m->name)
                     for (int i = 0; i < m->name->len; i++)
@@ -628,7 +633,8 @@ static long long type_fp_key(Type *t) {
         }
         case TY_ENUM: {
             int ec = 0;
-            for (EnumConstant *e = t->enum_constants; e; e = e->next) {
+            for (EnumConstant *e = type_agg(t)->enum_constants; e;
+                 e               = e->next) {
                 ec++;
                 if (e->name)
                     for (const char *s = e->name; *s; s++)
@@ -650,7 +656,7 @@ static bool cand_add_one(CandIndex *ix, Type *t, int i) {
     if (!t)
         return false;
     cand_bucket_add(&ix->by_root, (long long)(intptr_t)type_origin_root(t), i);
-    if (t->struct_tag)
+    if (type_agg(t)->struct_tag)
         cand_bucket_add(&ix->by_tag, type_tag_key(t), i);
     if (type_kind_has_fp(t->kind))
         cand_bucket_add(&ix->by_fp, type_fp_key(t), i);
@@ -727,7 +733,7 @@ static int cand_index_probe(CandIndex *ix, TypeName *arr, int len, Type *ty,
             m   = &ix->by_root;
             key = (long long)(intptr_t)type_origin_root(ty);
         } else if (pass == 1) {
-            if (!ty->struct_tag)
+            if (!type_agg(ty)->struct_tag)
                 continue;
             m   = &ix->by_tag;
             key = type_tag_key(ty);
@@ -824,7 +830,7 @@ bool type_is_complete_tagged(Type *ty) {
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
         return ty->size >= 0;
     if (ty->kind == TY_ENUM)
-        return ty->enum_constants != NULL;
+        return type_agg(ty)->enum_constants != NULL;
     return false;
 }
 
@@ -857,7 +863,8 @@ bool same_type_strong(Type *a, Type *b) {
 // struct_tag, since it's the same object -- so this only ever fires against
 // a match same_type_or_origin() found through its structural fallback.
 static bool tag_spelling_mismatch(Type *ty, Type *cand) {
-    return ty && cand && !ty->struct_tag && cand->struct_tag;
+    return ty && cand && !type_agg(ty)->struct_tag &&
+           type_agg(cand)->struct_tag;
 }
 
 // A synthesized tag names a tagless aggregate, so a same-shaped type that has
@@ -865,7 +872,7 @@ static bool tag_spelling_mismatch(Type *ty, Type *cand) {
 // tagless copy to its tagged record structurally (owner/hoist) check only
 // this; spelling lookups use tag_rec_mismatch(), which adds the #1091 rule.
 static bool synth_rec_mismatch(Type *ty, TypeName *rec) {
-    return rec->synth_tag && ty && ty->struct_tag;
+    return rec->synth_tag && ty && type_agg(ty)->struct_tag;
 }
 
 static bool tag_rec_mismatch(Type *ty, TypeName *rec) {
@@ -1104,9 +1111,9 @@ static bool nominally_distinct_typedefs(SerializeContext *ctx, Type *a,
         if (fa && fb && oa != ob)
             return true;
     }
-    if (a->struct_tag && b->struct_tag)
+    if (type_agg(a)->struct_tag && type_agg(b)->struct_tag)
         return false;
-    if (a->struct_tag || b->struct_tag)
+    if (type_agg(a)->struct_tag || type_agg(b)->struct_tag)
         return true;
 
     // #1116: resolve both sides through the UNFILTERED exact lookup (not
@@ -1384,8 +1391,9 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
         // AST. Must run before this arm's own `return` below (TY_PTR has no
         // array_len_layout_ty, but sharing the arm costs nothing and keeps
         // this next to ty->base).
-        if (layout_type_needs_collecting(ctx, ty->array_len_layout_ty))
-            collect_type(ctx, ty->array_len_layout_ty);
+        if (layout_type_needs_collecting(ctx,
+                                         type_arr(ty)->array_len_layout_ty))
+            collect_type(ctx, type_arr(ty)->array_len_layout_ty);
         collect_type(ctx, ty->base);
         return;
     }
@@ -1434,9 +1442,10 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
             prior->size < 0 && ty->size >= 0) {
             ctx->seen.data[seen_idx] = ty;
             type_vec_remove_at(&ctx->defs, type_vec_find(&ctx->defs, ty));
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 collect_type(ctx, m->ty);
-            for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+            for (StaticAssertRecord *sa = type_agg(ty)->member_asserts; sa;
+                 sa                     = sa->next)
                 collect_static_assert_types(ctx, sa->cond);
             type_vec_push(&ctx->defs, ty);
         }
@@ -1444,9 +1453,10 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
     }
     type_vec_push_nominal(ctx, &ctx->seen, ty);
 
-    for (Member *m = ty->members; m; m = m->next)
+    for (Member *m = type_agg(ty)->members; m; m = m->next)
         collect_type(ctx, m->ty);
-    for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+    for (StaticAssertRecord *sa = type_agg(ty)->member_asserts; sa;
+         sa                     = sa->next)
         collect_static_assert_types(ctx, sa->cond);
     // #1167: TY_ENUM has no ty->members (the loop above is a no-op for it),
     // so an enumerator's own folded sizeof/_Alignof (EnumConstant.layout_ty,
@@ -1455,7 +1465,7 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
     // a re-materialized `sizeof(T)`/`_Alignof(T)` enum value
     // (serialize_enum_def()) can be the only reference to T left in the AST.
     if (ty->kind == TY_ENUM)
-        for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next)
+        for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
             if (layout_type_needs_collecting(ctx, ec->layout_ty))
                 collect_type(ctx, ec->layout_ty);
 
@@ -1548,7 +1558,7 @@ static void collect_byval_edges(SerializeContext *ctx, Type *mty, TypeVec *defs,
     bool tagged = find_tag_name(ctx, mty) || find_typedef_name(ctx, mty) ||
                   find_anonymous_typedef_name(ctx, mty);
     if (!tagged) {
-        for (Member *mm = mty->members; mm; mm = mm->next)
+        for (Member *mm = type_agg(mty)->members; mm; mm = mm->next)
             collect_byval_edges(ctx, mm->ty, defs, depends, n, container_idx);
         return;
     }
@@ -1573,7 +1583,7 @@ void reorder_defs_by_byval_deps(SerializeContext *ctx) {
         Type *ty = defs->data[i];
         if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
             continue; // enums have no by-value members to order against
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (member_needs_own_def(m->ty))
                 collect_byval_edges(ctx, m->ty, defs, depends, n, i);
     }
@@ -1809,22 +1819,20 @@ unsigned __int128 decode_wide_digits(const char *digits, int base) {
 // a type with no bounds form.
 static void format_checked_bounds_attr(char *buf, size_t cap, size_t n,
                                        Type *ty) {
-    switch (ty->checked_bounds_form) {
+    switch (type_chk(ty)->form) {
         case CB_COUNT:
         case CB_BYTE_COUNT:
-            if (ty->checked_bounds_arg1)
+            if (type_chk(ty)->arg1)
                 snprintf(buf + n, cap - n, " [[cccc::%s(%.*s)]]",
-                         ty->checked_bounds_form == CB_COUNT ? "count"
-                                                             : "byte_count",
-                         ty->checked_bounds_arg1->len,
-                         ty->checked_bounds_arg1->loc);
+                         type_chk(ty)->form == CB_COUNT ? "count"
+                                                        : "byte_count",
+                         type_chk(ty)->arg1->len, type_chk(ty)->arg1->loc);
             break;
         case CB_RANGE:
-            if (ty->checked_bounds_arg1 && ty->checked_bounds_arg2)
-                snprintf(
-                    buf + n, cap - n, " [[cccc::bounds(%.*s, %.*s)]]",
-                    ty->checked_bounds_arg1->len, ty->checked_bounds_arg1->loc,
-                    ty->checked_bounds_arg2->len, ty->checked_bounds_arg2->loc);
+            if (type_chk(ty)->arg1 && type_chk(ty)->arg2)
+                snprintf(buf + n, cap - n, " [[cccc::bounds(%.*s, %.*s)]]",
+                         type_chk(ty)->arg1->len, type_chk(ty)->arg1->loc,
+                         type_chk(ty)->arg2->len, type_chk(ty)->arg2->loc);
             break;
         case CB_UNKNOWN:
             snprintf(buf + n, cap - n, " [[cccc::bounds(unknown)]]");
@@ -1906,7 +1914,8 @@ static bool node_reads_proto_param(Node *n, int depth) {
 bool type_has_proto_vla(Type *ty) {
     for (; ty; ty = ty->base)
         if (ty->kind == TY_VLA &&
-            (!ty->vla_len || node_reads_proto_param(ty->vla_len, 0)))
+            (!type_arr(ty)->vla_len ||
+             node_reads_proto_param(type_arr(ty)->vla_len, 0)))
             return true;
     return false;
 }
@@ -1935,11 +1944,11 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         size_t dimsz        = 0;
         bool   wrote_layout = false;
         if (ty->array_len >= 0 && ctx->allow_layout_dims &&
-            ty->array_len_layout_ty) {
+            type_arr(ty)->array_len_layout_ty) {
             FILE *df = open_memstream(&dimbuf, &dimsz);
-            wrote_layout =
-                serialize_layout_const(df, ctx, ty->array_len_layout_ty,
-                                       ty->array_len_layout_is_align);
+            wrote_layout = serialize_layout_const(
+                df, ctx, type_arr(ty)->array_len_layout_ty,
+                type_arr(ty)->array_len_layout_is_align);
             fclose(df);
         }
         char head[512];
@@ -1974,11 +1983,12 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
         char  *lenbuf = NULL;
         size_t lensz  = 0;
         FILE  *lf     = open_memstream(&lenbuf, &lensz);
-        if (!ty->vla_len ||
-            (!ctx->name_proto_params && node_reads_proto_param(ty->vla_len, 0)))
+        if (!type_arr(ty)->vla_len ||
+            (!ctx->name_proto_params &&
+             node_reads_proto_param(type_arr(ty)->vla_len, 0)))
             fputc('*', lf);
-        else if (ty->vla_len && ctx->vm)
-            serialize_expr(lf, ctx->vm, ctx, ty->vla_len, 2);
+        else if (type_arr(ty)->vla_len && ctx->vm)
+            serialize_expr(lf, ctx->vm, ctx, type_arr(ty)->vla_len, 2);
         fclose(lf);
 
         char buf[1024];
@@ -2212,7 +2222,7 @@ bool type_needs_anon_aggregate(SerializeContext *ctx, Type *ty) {
 bool type_needs_opaque_storage(Type *ty) {
     if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION))
         return false;
-    for (Member *m = ty->members; m; m = m->next)
+    for (Member *m = type_agg(ty)->members; m; m = m->next)
         if (m->is_bitfield && m->ty && m->ty->kind == TY_BITINT &&
             m->ty->size > 16)
             return true;
@@ -2238,7 +2248,7 @@ static bool collect_pointer_slots(Type *ty, int base, OpaqueSlots *out,
                     return false;
             return true;
         case TY_STRUCT:
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 if (!m->is_bitfield &&
                     !collect_pointer_slots(m->ty, base + m->offset, out, cap))
                     return false;
@@ -2247,7 +2257,7 @@ static bool collect_pointer_slots(Type *ty, int base, OpaqueSlots *out,
             OpaqueSlots inner = {0};
             int         icap  = 0;
             bool        ok    = true;
-            for (Member *m = ty->members; ok && m; m = m->next)
+            for (Member *m = type_agg(ty)->members; ok && m; m = m->next)
                 if (!m->is_bitfield)
                     ok = collect_pointer_slots(m->ty, 0, &inner, &icap);
             free(inner.off);
@@ -2281,7 +2291,7 @@ static bool contains_pointer(Type *ty) {
             return contains_pointer(ty->base);
         case TY_STRUCT:
         case TY_UNION:
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 if (!m->is_bitfield && contains_pointer(m->ty))
                     return true;
             return false;
@@ -2303,7 +2313,7 @@ bool type_needs_reloc_patch(Type *ty) {
                 free(slots.off);
                 return !slots.n && contains_pointer(ty);
             }
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 if (!m->is_bitfield && type_needs_reloc_patch(m->ty))
                     return true;
             return false;
@@ -2374,7 +2384,7 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
         serialize_opaque_members(f, ty);
         return;
     }
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         fprintf(f, "    ");
         char name[256] = "";
         if (m->name) {
@@ -2407,7 +2417,7 @@ static void serialize_aggregate_members(FILE *f, SerializeContext *ctx,
             // would turn it into a member-less declaration.
             if (!m->name &&
                 (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) &&
-                !m->ty->struct_tag) {
+                !type_agg(m->ty)->struct_tag) {
                 serialize_anon_aggregate(f, ctx, m->ty);
             } else if (ty->is_flexible && !m->next && m->ty->kind == TY_ARRAY &&
                        m->ty->array_len == 0) {
@@ -2447,7 +2457,7 @@ static void serialize_aggregate_attrs(FILE *f, Type *ty) {
     if (type_needs_opaque_storage(ty))
         return; // serialize_opaque_members carries the alignment
     int natural = 1;
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         int contributed = ty->is_packed ? m->explicit_align : m->align;
         if (contributed > natural)
             natural = contributed;
@@ -2714,7 +2724,7 @@ void serialize_type(FILE *f, SerializeContext *ctx, Type *ty) {
             // tag (`__cccc_va_list`, from __builtin_va_list) means nothing there.
             if (type_is_cccc_va_list(ty))
                 fputs("va_list", f);
-            else if (tag && alias && !ty->members &&
+            else if (tag && alias && !type_agg(ty)->members &&
                      type_def_is_from_include_suppressed(ctx, ty))
                 fprintf(f, "%.*s", alias->name_len, alias->name);
             else if (tag)
@@ -2865,7 +2875,7 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
     TypeName *alias = find_typedef_name(ctx, ty);
 
     // An empty complete aggregate (`struct E {};`) has no members but a size.
-    if (!ty->members && ty->size < 0) {
+    if (!type_agg(ty)->members && ty->size < 0) {
         if (!tag && alias)
             fprintf(f, "typedef %s", aggregate_keyword(ty));
         else
@@ -2905,7 +2915,8 @@ static void serialize_struct_def(FILE *f, SerializeContext *ctx, Type *ty) {
 
     fprintf(f, " {\n");
     serialize_aggregate_members(f, ctx, ty);
-    for (StaticAssertRecord *sa = ty->member_asserts; sa; sa = sa->next)
+    for (StaticAssertRecord *sa = type_agg(ty)->member_asserts; sa;
+         sa                     = sa->next)
         serialize_static_assert(f, ctx->vm, ctx, sa->cond, sa->msg,
                                 sa->msg_len, sa->tok, 1);
     fprintf(f, "}");
@@ -2939,19 +2950,19 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
         fprintf(f, " %.*s", tag->name_len, tag->name);
 
     // C23 underlying type
-    if (ty->enum_base_type) {
+    if (type_agg(ty)->enum_base_type) {
         fprintf(f, " : ");
-        serialize_type(f, ctx, ty->enum_base_type);
+        serialize_type(f, ctx, type_agg(ty)->enum_base_type);
     }
 
-    if (!ty->enum_constants) {
+    if (!type_agg(ty)->enum_constants) {
         if (tag)
             fprintf(f, ";\n\n");
         return;
     }
 
     fprintf(f, " {\n");
-    for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
+    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next) {
         fprintf(f, "    %s = ", enum_const_spelling(ctx, ty, ec->name));
         // #1095: re-materialize a host-owned sizeof/_Alignof enumerator
         // value the same way #1031's ND_NUM arm does -- see
@@ -3053,7 +3064,7 @@ void hoist_local_type_to_file_scope(FILE *f, VirtualMachine *vm,
         return; // already an ordinary file-scope type -- nothing to hoist
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             hoist_local_type_to_file_scope(f, vm, ctx, m->ty);
 
     type_vec_push(&ctx->hoisted, ty);
@@ -3160,9 +3171,10 @@ Obj *type_local_owner(SerializeContext *ctx, Type *ty) {
         case TY_UNION:
         case TY_ENUM:
             owner = type_decl_owner(ctx, ty);
-            if (!owner && !ty->struct_tag && ty->kind != TY_ENUM &&
+            if (!owner && !type_agg(ty)->struct_tag && ty->kind != TY_ENUM &&
                 !type_has_file_scope_name(ctx, ty))
-                for (Member *m = ty->members; !owner && m; m = m->next)
+                for (Member *m = type_agg(ty)->members; !owner && m;
+                     m         = m->next)
                     owner = type_local_owner(ctx, m->ty);
             break;
         default:
@@ -3174,7 +3186,7 @@ Obj *type_local_owner(SerializeContext *ctx, Type *ty) {
 
 static bool is_tagless_aggregate(Type *ty) {
     return ty && (ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
-           !ty->struct_tag;
+           !type_agg(ty)->struct_tag;
 }
 
 // Pushes into `ex` every tagless aggregate reachable from `ty`'s members.
@@ -3182,7 +3194,7 @@ static void exclude_member_aggregates(TypeVec *ex, Type *ty, bool only_unnamed,
                                       int depth) {
     if (depth > 16 || !ty)
         return;
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         Type *mt = m->ty;
         while (mt && (mt->kind == TY_PTR || mt->kind == TY_ARRAY ||
                       mt->kind == TY_VLA))
@@ -3217,7 +3229,7 @@ void synthesize_anon_aggregate_tags(VirtualMachine *vm, SerializeContext *ctx) {
 
     for (int i = 0; i < ctx->defs.len; i++) {
         Type *ty = ctx->defs.data[i];
-        if (!is_tagless_aggregate(ty) || ty->size < 0 || !ty->members)
+        if (!is_tagless_aggregate(ty) || ty->size < 0 || !type_agg(ty)->members)
             continue;
         if (find_tag_name(ctx, ty) || type_vec_contains(&excluded, ty))
             continue;
@@ -3229,12 +3241,12 @@ void synthesize_anon_aggregate_tags(VirtualMachine *vm, SerializeContext *ctx) {
         }
         if (typedef_named)
             continue;
-        Member *first = ty->members;
+        Member *first = type_agg(ty)->members;
         if (token_is_from_include(vm, first->name ? first->name : first->tok))
             continue;
 
         Obj *owner = NULL;
-        for (Member *m = ty->members; !owner && m; m = m->next)
+        for (Member *m = type_agg(ty)->members; !owner && m; m = m->next)
             owner = type_local_owner(ctx, m->ty);
         char *name = arena_format(vm, "__cccc_anon%d", ctx->anon_tag_counter++);
         type_name_push(&ctx->tags, &ctx->tags_len, &ctx->tags_cap, ty, name,
@@ -3554,7 +3566,7 @@ bool type_layout_is_host_owned(SerializeContext *ctx, Type *ty, int depth) {
         !type_header_is_compiler_owned(ctx, ty))
         return true;
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (type_layout_is_host_owned(ctx, m->ty, depth + 1))
                 return true;
     return false;
@@ -3625,7 +3637,7 @@ static bool type_contains_compiler_owned_layout(SerializeContext *ctx, Type *ty,
     if (ty->kind == TY_PTR)
         return false;
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (type_contains_compiler_owned_layout(ctx, m->ty, depth + 1))
                 return true;
     return false;
@@ -3639,7 +3651,7 @@ static bool type_contains_vector(Type *ty, int depth) {
     if (ty->kind == TY_ARRAY || ty->kind == TY_VLA)
         return type_contains_vector(ty->base, depth + 1);
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (type_contains_vector(m->ty, depth + 1))
                 return true;
     return false;
@@ -3733,7 +3745,7 @@ static void serialize_layout_guards(FILE *f, SerializeContext *ctx, Type *ty,
     // The named members don't exist in the emitted type.
     if (type_needs_opaque_storage(ty))
         return;
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         if (m->is_bitfield || !m->name)
             continue; // no __builtin_offsetof for a bit-field or an
                       // anonymous struct/union member
@@ -4033,7 +4045,7 @@ static void ensure_typedef_for_type_emitted(FILE *f, SerializeContext *ctx,
         // whichever member of THIS aggregate will actually need it.
         if (!find_tag_name(ctx, ty) && !find_typedef_name(ctx, ty) &&
             !find_anonymous_typedef_name(ctx, ty))
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
                                                 typedef_done);
         return;
@@ -4169,7 +4181,7 @@ static void collect_proto_scope_targets(SerializeContext *ctx, Type *mty,
     if ((mty->kind == TY_STRUCT || mty->kind == TY_UNION) &&
         !find_tag_name(ctx, mty) && !find_typedef_name(ctx, mty) &&
         !find_anonymous_typedef_name(ctx, mty))
-        for (Member *mm = mty->members; mm; mm = mm->next)
+        for (Member *mm = type_agg(mty)->members; mm; mm = mm->next)
             collect_proto_scope_targets(ctx, mm->ty, targets);
 }
 
@@ -4180,7 +4192,7 @@ static void serialize_tag_forward_decls(FILE *f, SerializeContext *ctx) {
         if ((ty->kind != TY_STRUCT && ty->kind != TY_UNION) ||
             type_decl_owner(ctx, ty) != NULL)
             continue; // file scope only -- prototype scope only bites here
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             collect_proto_scope_targets(ctx, m->ty, &targets);
     }
 
@@ -4312,10 +4324,11 @@ void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
         // define them.
         if (!ctx->generated_only && typedef_done) {
             if (ty->kind == TY_ENUM)
-                ensure_typedef_for_type_emitted(f, ctx, ty->enum_base_type,
+                ensure_typedef_for_type_emitted(f, ctx,
+                                                type_agg(ty)->enum_base_type,
                                                 owner_fn, typedef_done);
             else
-                for (Member *m = ty->members; m; m = m->next)
+                for (Member *m = type_agg(ty)->members; m; m = m->next)
                     ensure_typedef_for_type_emitted(f, ctx, m->ty, owner_fn,
                                                     typedef_done);
         }
@@ -4368,10 +4381,11 @@ typedef struct {
 static bool prelude_walk(PreludeWalk *w, Type *ty, bool by_value);
 
 static bool prelude_members(PreludeWalk *w, Type *ty) {
-    for (Member *m = ty->members; m; m = m->next)
+    for (Member *m = type_agg(ty)->members; m; m = m->next)
         if (!prelude_walk(w, m->ty, true))
             return false;
-    return ty->kind != TY_ENUM || prelude_walk(w, ty->enum_base_type, true);
+    return ty->kind != TY_ENUM ||
+           prelude_walk(w, type_agg(ty)->enum_base_type, true);
 }
 
 static bool prelude_typedef(PreludeWalk *w, TypeName *td, bool by_value) {

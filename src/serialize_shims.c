@@ -1447,7 +1447,7 @@ static bool type_has_wide_bitint_depth(Type *ty, WideBitintSeen *seen,
             return type_has_wide_bitint_depth(ty->base, seen, depth + 1);
         case TY_STRUCT:
         case TY_UNION:
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 if (type_has_wide_bitint_depth(m->ty, seen, depth + 1))
                     return true;
             return false;
@@ -1510,7 +1510,7 @@ static void wide_bitint_scan_type(Type *ty, WideBitintNeed *need,
             break;
         case TY_STRUCT:
         case TY_UNION:
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 wide_bitint_scan_type(m->ty, need, seen, depth + 1);
             break;
         case TY_FUNC:

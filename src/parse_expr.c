@@ -1119,12 +1119,14 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             node = new_comparison(vm, "==", ND_EQ, false, node, rhs, start);
             continue;
@@ -1149,12 +1151,14 @@ static Node *equality(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             node = new_comparison(vm, "!=", ND_NE, false, node, rhs, start);
             continue;
@@ -1240,12 +1244,14 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             node = new_comparison(vm, "<", ND_LT, false, node, rhs, start);
             continue;
@@ -1265,12 +1271,14 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             node = new_comparison(vm, "<=", ND_LE, false, node, rhs, start);
             continue;
@@ -1295,12 +1303,14 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             // note: a > b is stored as b < a
             node = new_comparison(vm, ">", ND_LT, true, node, rhs, start);
@@ -1326,12 +1336,14 @@ static Node *relational(VirtualMachine *vm, Token **rest, Token *tok) {
                 add_type(vm, rhs);
                 if (node->ty && rhs->ty && node->ty->kind == TY_ENUM &&
                     rhs->ty->kind == TY_ENUM && node->ty != rhs->ty &&
-                    node->ty->enum_tag && rhs->ty->enum_tag)
+                    type_agg(node->ty)->enum_tag && type_agg(rhs->ty)->enum_tag)
                     warn_tok(vm, start, CCCC_WARN_ENUM_COMPARE,
                              "comparison between values of different enum "
                              "types '%.*s' and '%.*s'",
-                             node->ty->enum_tag->len, node->ty->enum_tag->loc,
-                             rhs->ty->enum_tag->len, rhs->ty->enum_tag->loc);
+                             type_agg(node->ty)->enum_tag->len,
+                             type_agg(node->ty)->enum_tag->loc,
+                             type_agg(rhs->ty)->enum_tag->len,
+                             type_agg(rhs->ty)->enum_tag->loc);
             }
             // note: a >= b is stored as b <= a
             node = new_comparison(vm, ">=", ND_LE, true, node, rhs, start);
@@ -1581,7 +1593,7 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     Compiler *c = &vm->compiler;
     Type     *lp = ty->params;
     Type     *rp = lp ? lp->next : NULL;
-    const char *sym = ty->operator_sym;
+    const char *sym        = type_attrs(ty)->operator_sym;
     bool unary_only = !strcmp(sym, "~") || !strcmp(sym, "!");
     bool either     = !strcmp(sym, "+") || !strcmp(sym, "-");
     bool unary      = lp && !rp && (unary_only || either);
@@ -1667,7 +1679,7 @@ void register_operator(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
 
 void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
     Compiler *c    = &vm->compiler;
-    Type     *recv = unqualified(vm, ty->method_of);
+    Type     *recv = unqualified(vm, type_attrs(ty)->method_of);
     if (!is_aggregate(recv))
         error_tok(vm, tok, "method receiver type must be a struct or union");
     Type *self = ty->params;
@@ -1678,7 +1690,9 @@ void register_method(VirtualMachine *vm, Obj *fn, Type *ty, Token *tok) {
                   fn->name);
 
     MethodEntry e       = {.recv = recv,
-                           .name = ty->method_name ? ty->method_name : fn->name,
+                           .name = type_attrs(ty)->method_name
+                                       ? type_attrs(ty)->method_name
+                                       : fn->name,
                            .fn   = fn};
     Type       *operand = operator_operand(vm, self, &e.recv_ptr);
     if (!is_compatible(operand, recv))
@@ -1908,8 +1922,8 @@ Node *new_add(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     if (lhs->ty->base->kind == TY_VLA) {
         Node *spill = spill_if_assigns(vm, &lhs, NULL, tok);
         rhs         = new_binary(
-            vm, ND_MUL, rhs, new_var_node(vm, lhs->ty->base->vla_size, tok),
-            tok);
+            vm, ND_MUL, rhs,
+            new_var_node(vm, type_arr(lhs->ty->base)->vla_size, tok), tok);
         return sequence_after(vm, spill, new_binary(vm, ND_ADD, lhs, rhs, tok),
                               tok);
     }
@@ -1974,8 +1988,8 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
     if (lhs->ty->base->kind == TY_VLA && !rhs->ty->base) {
         Node *spill = spill_if_assigns(vm, &lhs, NULL, tok);
         rhs         = new_binary(
-            vm, ND_MUL, rhs, new_var_node(vm, lhs->ty->base->vla_size, tok),
-            tok);
+            vm, ND_MUL, rhs,
+            new_var_node(vm, type_arr(lhs->ty->base)->vla_size, tok), tok);
         add_type(vm, rhs);
         Node *node = new_binary(vm, ND_SUB, lhs, rhs, tok);
         node->ty   = lhs->ty;
@@ -2032,9 +2046,11 @@ Node *new_sub(VirtualMachine *vm, Node *lhs, Node *rhs, Token *tok) {
         // division to unsigned via usual_arith_conv, which would turn a
         // negative result (e.g. `&v[0] - &v[1]` == -1) into a huge positive
         // garbage value instead.
-        if (lhs->ty->base->kind == TY_VLA && lhs->ty->base->vla_size) {
+        if (lhs->ty->base->kind == TY_VLA &&
+            type_arr(lhs->ty->base)->vla_size) {
             Node *divisor = new_cast(
-                vm, new_var_node(vm, lhs->ty->base->vla_size, tok), ty_long);
+                vm, new_var_node(vm, type_arr(lhs->ty->base)->vla_size, tok),
+                ty_long);
             add_type(vm, divisor);
             return sequence_after(
                 vm, spill, new_binary(vm, ND_DIV, node, divisor, tok), tok);
@@ -2220,7 +2236,7 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         // [[cccc::unchecked]] { ... } escape too.
         if (!vm->compiler.in_type_lookahead &&
             cc_checked_scope_at(vm, start) == CHECKED_SCOPE_ON &&
-            (!ty || ty->checked_cast_kind == CC_NONE)) {
+            (!ty || type_chk(ty)->cast_kind == CC_NONE)) {
             add_type(vm, expr);
             if (ty)
                 cc_check_checked_scope_cast(vm, expr, ty, start);
@@ -2241,7 +2257,7 @@ Node *cast(VirtualMachine *vm, Token **rest, Token *tok) {
         // error_tok() (or, for the desugar, allocate a stray local) for a
         // cast that is ultimately discarded.
         if (!vm->compiler.in_type_lookahead && ty &&
-            ty->checked_cast_kind != CC_NONE) {
+            type_chk(ty)->cast_kind != CC_NONE) {
             // Always on, independent of --checked-pointers -- a 'dynamic'
             // cast with no verifiable claim is a compile-time defect
             // regardless of whether runtime enforcement is even built.

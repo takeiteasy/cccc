@@ -110,20 +110,20 @@ static Type *swizzle_result_type(VirtualMachine *vm, Type *elem, int n,
                   n, bytes);
     Type *ty = vector_of(vm, elem, bytes);
     if (n == 3)
-        ty->vec_visible = 3;
+        type_arr_mut(vm, ty)->vec_visible = 3;
     return ty;
 }
 
 Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
     Type *vty = vec->ty;
     int   lanes[MAX_LANES];
-    int   n = parse_selector(sel, vty->vec_len, lanes);
+    int   n = parse_selector(sel, type_arr(vty)->vec_len, lanes);
     if (!n)
         error_tok(vm, sel, "'%.*s' is not a vector component", sel->len,
                   sel->loc);
     int visible = vector_lanes(vty);
     for (int i = 0; i < n; i++)
-        if (lanes[i] >= vty->vec_len ||
+        if (lanes[i] >= type_arr(vty)->vec_len ||
             (lanes[i] >= visible && !selector_is(sel, "hi")))
             error_tok(vm, sel, "'%.*s' names a lane the vector does not have",
                       sel->len, sel->loc);
@@ -146,7 +146,7 @@ Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
     Type *rty    = swizzle_result_type(vm, elem, n, sel);
     Obj  *result = new_lvar(vm, "", 0, rty);
     Node *chain  = init;
-    for (int i = 0; i < rty->vec_len; i++) {
+    for (int i = 0; i < type_arr(rty)->vec_len; i++) {
         Node *to   = vector_lane_ref(vm, new_var_node(vm, result, sel), elem,
                                      new_num(vm, i, sel), sel);
         Node *from = i < n
@@ -261,7 +261,7 @@ Node *opencl_vector_literal(VirtualMachine *vm, Token **rest, Token *tok,
                   visible, visible, lane);
     // chain's first assignment is lane 0; a splat copies it to the others
     int filled = splat ? visible : lane;
-    for (int i = splat ? 1 : filled; i < vty->vec_len; i++) {
+    for (int i = splat ? 1 : filled; i < type_arr(vty)->vec_len; i++) {
         Node *to   = vector_lane_ref(vm, new_var_node(vm, result, start), elem,
                                      new_num(vm, i, start), start);
         Node *from = i < filled

@@ -1768,7 +1768,8 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
 
             cv->is_struct = true;
             char *base    = vm->data_seg + obj->offset;
-            for (Member *mem = obj->ty->members; mem; mem = mem->next) {
+            for (Member *mem = type_agg(obj->ty)->members; mem;
+                 mem         = mem->next) {
                 if (mem->is_bitfield)
                     continue;
                 TypeKind mk = mem->ty->kind;
@@ -2353,7 +2354,7 @@ static void scan_fn_ptr_words(VirtualMachine *vm, FnSlotScan *sc, Type *ty,
             break;
         case TY_STRUCT:
         case TY_UNION:
-            for (Member *m = ty->members; m; m = m->next)
+            for (Member *m = type_agg(ty)->members; m; m = m->next)
                 if (!m->is_bitfield)
                     scan_fn_ptr_words(vm, sc, m->ty, addr + m->offset);
             break;
@@ -3841,7 +3842,7 @@ static void install_tag_alias_for_reparse(VirtualMachine *vm, Type *ty) {
         ty = ty->base;
     if (ty->kind != TY_STRUCT && ty->kind != TY_UNION && ty->kind != TY_ENUM)
         return;
-    if (ty->struct_tag || !ty->name)
+    if (type_agg(ty)->struct_tag || !ty->name)
         return; // already tagged, or no name at all to reference by
 
     // #997-style redefinition guard: if a distinct tag of this name already

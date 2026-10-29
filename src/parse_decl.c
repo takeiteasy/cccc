@@ -120,7 +120,7 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         VarScope *sc       = push_scope(vm, name, ty->name->len);
         sc->type_def       = ty;
         sc->is_deprecated  = ty->is_deprecated;
-        sc->deprecated_msg = ty->deprecated_msg;
+        sc->deprecated_msg = type_attrs(ty)->deprecated_msg;
         record_type_name(vm, ty, name, ty->name->len, false, ty->name);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty, NULL,
                               ty->name);
@@ -141,9 +141,10 @@ static Type *rebind_param_vla(VirtualMachine *vm, Type *ty) {
         return ty;
     Type *copy = copy_type(vm, ty);
     copy->base = rebind_param_vla(vm, ty->base);
-    if (ty->kind == TY_VLA && !ty->vla_size && ty->vla_len_tok) {
-        Token *t      = ty->vla_len_tok;
-        copy->vla_len = conditional(vm, &t, t);
+    if (ty->kind == TY_VLA && !type_arr(ty)->vla_size &&
+        type_arr(ty)->vla_len_tok) {
+        Token *t                        = type_arr(ty)->vla_len_tok;
+        type_arr_mut(vm, copy)->vla_len = conditional(vm, &t, t);
     }
     return copy;
 }
@@ -384,7 +385,7 @@ static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
     fn->display_name = fn->name;
     fn->is_static    = attr->is_static || (attr->is_inline && !attr->is_extern);
     fn->is_inline    = attr->is_inline;
-    fn->asm_label    = ty->asm_label;
+    fn->asm_label    = type_attrs(ty)->asm_label;
     return true;
 }
 
@@ -435,28 +436,35 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_func_const   |= ty->is_func_const;
         fn->is_kernel       |= ty->is_kernel;
         fn->is_trusted      |= ty->is_trusted;
-        if (ty->asm_label)
-            fn->asm_label = ty->asm_label;
-        if (ty->deprecated_msg)
-            fn->deprecated_msg = ty->deprecated_msg;
-        if (ty->format_style && fn->ty) {
-            fn->ty->format_style         = ty->format_style;
-            fn->ty->format_string_index  = ty->format_string_index;
-            fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
+        if (type_attrs(ty)->asm_label)
+            fn->asm_label = type_attrs(ty)->asm_label;
+        if (type_attrs(ty)->deprecated_msg)
+            fn->deprecated_msg = type_attrs(ty)->deprecated_msg;
+        if (type_attrs(ty)->format_style && fn->ty) {
+            type_attrs_mut(vm, fn->ty)->format_style =
+                type_attrs(ty)->format_style;
+            type_attrs_mut(vm, fn->ty)->format_string_index =
+                type_attrs(ty)->format_string_index;
+            type_attrs_mut(vm, fn->ty)->format_fmt_first_arg =
+                type_attrs(ty)->format_fmt_first_arg;
         }
         if (fn->ty) {
             if (ty->nonnull_all)
                 fn->ty->nonnull_all = true;
-            fn->ty->nonnull_mask |= ty->nonnull_mask;
+            type_attrs_mut(vm, fn->ty)->nonnull_mask |=
+                type_attrs(ty)->nonnull_mask;
             if (ty->returns_nonnull)
                 fn->ty->returns_nonnull = true;
             if (ty->is_sentinel) {
                 fn->ty->is_sentinel  = true;
-                fn->ty->sentinel_pos = ty->sentinel_pos;
+                type_attrs_mut(vm, fn->ty)->sentinel_pos =
+                    type_attrs(ty)->sentinel_pos;
             }
-            if (ty->alloc_size_idx) {
-                fn->ty->alloc_size_idx  = ty->alloc_size_idx;
-                fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
+            if (type_attrs(ty)->alloc_size_idx) {
+                type_attrs_mut(vm, fn->ty)->alloc_size_idx =
+                    type_attrs(ty)->alloc_size_idx;
+                type_attrs_mut(vm, fn->ty)->alloc_size_idx2 =
+                    type_attrs(ty)->alloc_size_idx2;
             }
             fn->ty->is_malloc |= ty->is_malloc;
         }
@@ -467,11 +475,11 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
-        fn->asm_label = ty->asm_label;
+        fn->asm_label = type_attrs(ty)->asm_label;
     }
-    if (ty->operator_sym)
+    if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
-    if (ty->method_of)
+    if (type_attrs(ty)->method_of)
         register_method(vm, fn, ty, tok);
 
     apply_checked_libc_bounds(vm, fn, ty->name);
@@ -709,7 +717,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_definition = true;
         fn->is_static     = new_static;
         fn->is_inline     = attr->is_inline;
-        fn->asm_label     = ty->asm_label;
+        fn->asm_label     = type_attrs(ty)->asm_label;
         // A never-compiled predecessor has no entry to redirect.
         if (replaced->code_addr)
             fn->reload_of = replaced;
@@ -749,28 +757,35 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_func_const   |= ty->is_func_const;
         fn->is_kernel       |= ty->is_kernel;
         fn->is_trusted       |= ty->is_trusted;
-        if (ty->asm_label)
-            fn->asm_label = ty->asm_label;
-        if (ty->deprecated_msg)
-            fn->deprecated_msg = ty->deprecated_msg;
-        if (ty->format_style && fn->ty) {
-            fn->ty->format_style         = ty->format_style;
-            fn->ty->format_string_index  = ty->format_string_index;
-            fn->ty->format_fmt_first_arg = ty->format_fmt_first_arg;
+        if (type_attrs(ty)->asm_label)
+            fn->asm_label = type_attrs(ty)->asm_label;
+        if (type_attrs(ty)->deprecated_msg)
+            fn->deprecated_msg = type_attrs(ty)->deprecated_msg;
+        if (type_attrs(ty)->format_style && fn->ty) {
+            type_attrs_mut(vm, fn->ty)->format_style =
+                type_attrs(ty)->format_style;
+            type_attrs_mut(vm, fn->ty)->format_string_index =
+                type_attrs(ty)->format_string_index;
+            type_attrs_mut(vm, fn->ty)->format_fmt_first_arg =
+                type_attrs(ty)->format_fmt_first_arg;
         }
         if (fn->ty) {
             if (ty->nonnull_all)
                 fn->ty->nonnull_all = true;
-            fn->ty->nonnull_mask |= ty->nonnull_mask;
+            type_attrs_mut(vm, fn->ty)->nonnull_mask |=
+                type_attrs(ty)->nonnull_mask;
             if (ty->returns_nonnull)
                 fn->ty->returns_nonnull = true;
             if (ty->is_sentinel) {
                 fn->ty->is_sentinel  = true;
-                fn->ty->sentinel_pos = ty->sentinel_pos;
+                type_attrs_mut(vm, fn->ty)->sentinel_pos =
+                    type_attrs(ty)->sentinel_pos;
             }
-            if (ty->alloc_size_idx) {
-                fn->ty->alloc_size_idx  = ty->alloc_size_idx;
-                fn->ty->alloc_size_idx2 = ty->alloc_size_idx2;
+            if (type_attrs(ty)->alloc_size_idx) {
+                type_attrs_mut(vm, fn->ty)->alloc_size_idx =
+                    type_attrs(ty)->alloc_size_idx;
+                type_attrs_mut(vm, fn->ty)->alloc_size_idx2 =
+                    type_attrs(ty)->alloc_size_idx2;
             }
             fn->ty->is_malloc |= ty->is_malloc;
         }
@@ -781,11 +796,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
-        fn->asm_label = ty->asm_label;
+        fn->asm_label = type_attrs(ty)->asm_label;
     }
-    if (ty->operator_sym)
+    if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
-    if (ty->method_of)
+    if (type_attrs(ty)->method_of)
         register_method(vm, fn, ty, tok);
 
     // GNU89 `extern inline`, or C99 with gnu_inline: an inline-only
@@ -987,8 +1002,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             continue;
         if (i < 32 && (body_adopted & (1u << i)))
             resolve_checked_template_bounds(
-                vm, param_objs, nparams, p->ty->checked_param_bounds_lo,
-                p->ty->checked_param_bounds_hi, i + 1, &p->checked_bounds_lo,
+                vm, param_objs, nparams, type_chk(p->ty)->param_bounds_lo,
+                type_chk(p->ty)->param_bounds_hi, i + 1, &p->checked_bounds_lo,
                 &p->checked_bounds_hi);
         else
             resolve_checked_bounds(vm, p);
@@ -1274,24 +1289,24 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
                        ty->kind == TY_ARRAY && ty->size >= 0))
         prev->ty = ty;
 
-    if (ty->asm_label) {
+    if (type_attrs(ty)->asm_label) {
         if (!prev->asm_label)
-            prev->asm_label = ty->asm_label;
-        else if (strcmp(prev->asm_label, ty->asm_label) != 0)
+            prev->asm_label = type_attrs(ty)->asm_label;
+        else if (strcmp(prev->asm_label, type_attrs(ty)->asm_label) != 0)
             error_tok(vm, name_tok, "conflicting asm label for '%s'",
                       prev->name);
     }
 
     if (ty->checked_kind != CHECKED_NONE) {
         prev->checked_kind        = ty->checked_kind;
-        prev->checked_bounds_form = ty->checked_bounds_form;
+        prev->checked_bounds_form = type_chk(ty)->form;
         resolve_checked_bounds(vm, prev);
     }
 
     prev->is_maybe_unused |= ty->is_maybe_unused;
     prev->is_deprecated   |= ty->is_deprecated;
     if (!prev->deprecated_msg)
-        prev->deprecated_msg = ty->deprecated_msg;
+        prev->deprecated_msg = type_attrs(ty)->deprecated_msg;
 
     if (is_def_now)
         prev->tok = name_tok;
@@ -1854,9 +1869,9 @@ Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len) {
     vm->compiler.scope = saved;
 
     if (CHK_ROWS[row].fmt) {
-        ty->format_style         = 1;
-        ty->format_string_index  = CHK_ROWS[row].fmt;
-        ty->format_fmt_first_arg = CHK_ROWS[row].fmt + 1;
+        type_attrs_mut(vm, ty)->format_style         = 1;
+        type_attrs_mut(vm, ty)->format_string_index  = CHK_ROWS[row].fmt;
+        type_attrs_mut(vm, ty)->format_fmt_first_arg = CHK_ROWS[row].fmt + 1;
     }
     const char *fn_name =
         ty->name->loc ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;

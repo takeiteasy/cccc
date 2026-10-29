@@ -667,13 +667,13 @@ static const char *fmt_type_names[] = {"int",
 // Validate format string arguments for __attribute__((format(...)))
 static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
                                  Node *args) {
-    if (!func_ty->format_style)
+    if (!type_attrs(func_ty)->format_style)
         return;
 
     // Walk to the format string argument (0-based index)
     Node *fmt_arg = args;
     int   idx     = 0;
-    while (fmt_arg && idx < func_ty->format_string_index - 1) {
+    while (fmt_arg && idx < type_attrs(func_ty)->format_string_index - 1) {
         fmt_arg = fmt_arg->next;
         idx++;
     }
@@ -689,7 +689,7 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
         return;
 
     const char *fmt   = fmt_arg->var->init_data;
-    int         style = func_ty->format_style;
+    int         style = type_attrs(func_ty)->format_style;
 
     // Count variadic args
     Node *vararg      = args;
@@ -697,7 +697,7 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     int   num_varargs = 0;
     while (vararg) {
         vararg_idx++;
-        if (vararg_idx >= func_ty->format_fmt_first_arg)
+        if (vararg_idx >= type_attrs(func_ty)->format_fmt_first_arg)
             num_varargs++;
         vararg = vararg->next;
     }
@@ -1006,7 +1006,7 @@ static void validate_format_call(VirtualMachine *vm, Token *tok, Type *func_ty,
     vararg_idx    = 0;
     while (vararg && check_idx < num_expected) {
         vararg_idx++;
-        if (vararg_idx >= func_ty->format_fmt_first_arg) {
+        if (vararg_idx >= type_attrs(func_ty)->format_fmt_first_arg) {
             int   exp    = expected[check_idx];
             Type *arg_ty = vararg->ty;
             bool  ok     = true;
@@ -1147,14 +1147,14 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
         // [static N] minimum-size check: only enforceable when the
         // argument is a compile-time-sized array; bare pointers are
         // best-effort.
-        if (param_ty->static_min > 0 && arg->ty->kind == TY_ARRAY &&
+        if (type_arr(param_ty)->static_min > 0 && arg->ty->kind == TY_ARRAY &&
             arg->ty->array_len >= 0 &&
-            arg->ty->array_len < param_ty->static_min) {
+            arg->ty->array_len < type_arr(param_ty)->static_min) {
             warn_tok(vm, tok, CCCC_WARN_STATIC_ARRAY_SIZE,
                      "array argument has %d element%s but parameter "
                      "requires at least %d",
                      arg->ty->array_len, arg->ty->array_len == 1 ? "" : "s",
-                     param_ty->static_min);
+                     type_arr(param_ty)->static_min);
         }
 
         if (param_ty->kind != TY_STRUCT && param_ty->kind != TY_UNION) {
@@ -1208,13 +1208,14 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // enclosing if-statement.  Under collect_errors recovery a live error_tok
     // may longjmp past the decrement — but dead branches never trigger
     // error_tok, so the counter stays balanced.
-    if (ty->attr_error_msg && vm->compiler.dead_code_depth == 0)
-        error_tok(vm, fn->tok, "%s", ty->attr_error_msg);
+    if (type_attrs(ty)->attr_error_msg && vm->compiler.dead_code_depth == 0)
+        error_tok(vm, fn->tok, "%s", type_attrs(ty)->attr_error_msg);
 
     // __attribute__((warning("msg"))): emit a compile-time warning on every
     // live call.
-    if (ty->attr_warning_msg && vm->compiler.dead_code_depth == 0)
-        warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s", ty->attr_warning_msg);
+    if (type_attrs(ty)->attr_warning_msg && vm->compiler.dead_code_depth == 0)
+        warn_tok(vm, fn->tok, CCCC_WARN_ATTRIBUTES, "%s",
+                 type_attrs(ty)->attr_warning_msg);
 
     // Validate format string arguments when -F is active
     if (!deferred_splice && (vm->flags & CCCC_FORMAT_STR_CHECKS))
@@ -2308,11 +2309,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest    = skip(vm, tok, ")");
 
         if (ty->kind == TY_VLA) {
-            if (ty->vla_size)
-                return new_var_node(vm, ty->vla_size, tok);
+            if (type_arr(ty)->vla_size)
+                return new_var_node(vm, type_arr(ty)->vla_size, tok);
 
             Node *lhs = compute_vla_size(vm, ty, tok);
-            Node *rhs = new_var_node(vm, ty->vla_size, tok);
+            Node *rhs = new_var_node(vm, type_arr(ty)->vla_size, tok);
             return new_binary(vm, ND_COMMA, lhs, rhs, tok);
         }
 
@@ -2328,7 +2329,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.unevaluated--;
         add_type(vm, node);
         if (node->ty->kind == TY_VLA) {
-            Node *size = new_var_node(vm, node->ty->vla_size, tok);
+            Node *size = new_var_node(vm, type_arr(node->ty)->vla_size, tok);
             // A VLA-typed operand is evaluated (C11 6.5.3.4p2); only one
             // that assigns (a cast's size temporaries) is observable.
             if (node_assigns(node))
@@ -2550,7 +2551,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             error_tok(
                 vm, start,
                 "__builtin_convertvector: target type must be a vector type");
-        if (src->ty->vec_len != dst_ty->vec_len)
+        if (type_arr(src->ty)->vec_len != type_arr(dst_ty)->vec_len)
             error_tok(vm, start,
                       "__builtin_convertvector: source and target vectors "
                       "must have the same number of lanes");
@@ -2665,7 +2666,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             }
         }
 
-        int   lane_count = v1->ty->vec_len;
+        int   lane_count = type_arr(v1->ty)->vec_len;
         int   max_index  = v2 ? lane_count * 2 : lane_count;
         Type *elem_ty    = v1->ty->base;
 
@@ -2738,7 +2739,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                       "__builtin_shuffle: the index mask must be an integer "
                       "vector (a brace-enclosed compile-time-constant list, "
                       "or a runtime/named integer vector value)");
-        if (mask->ty->vec_len != lane_count)
+        if (type_arr(mask->ty)->vec_len != lane_count)
             error_tok(vm, start,
                       "__builtin_shuffle: the index mask must have the same "
                       "number of lanes as the vector being shuffled");

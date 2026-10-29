@@ -1551,306 +1551,216 @@ typedef struct EmitEvent {
     Obj              *obj;
 } EmitEvent;
 
-/*!
- @brief Central representation of a C type in the compiler.
-*/
-struct Type {
-    TypeKind kind; /**< One of TypeKind indicating the category of this type. */
-    int      size; /**< sizeof() value in bytes. */
-    int      align;       /**< Alignment requirement in bytes. */
-    bool     is_unsigned; // unsigned or signed
-    // #1234: serialization-only spelling flag. CCCC has no distinct
-    // `long long` kind -- `long` and `long long` share TY_LONG (identical
-    // representation on every LP64 target CCCC supports), so this bit records
-    // only which of the two spellings a `long long` declaration used, for
-    // -c=native/-m to reproduce it. It denotes the *same type* as a plain
-    // TY_LONG: never consult it for compatibility, integer rank, usual
-    // arithmetic conversions, or _Generic selection (see
-    // src/parse_postfix.c:1089-1102, which documents that _Generic
-    // deliberately cannot tell the two apart). Only src/serialize_type.c's
-    // TY_LONG arm reads it.
-    bool         is_long_long;
-    bool         is_atomic;   // true if _Atomic
-    bool         is_const;    // true if const-qualified
-    bool         is_volatile; // true if volatile-qualified
-    bool         is_restrict; // true if restrict-qualified
-    struct Type *origin;      // for type compatibility check
+typedef struct VirtualMachine VirtualMachine;
 
-    // Pointer-to or array-of type. We intentionally use the same member
-    // to represent pointer/array duality in C.
-    //
-    // In many contexts in which a pointer is expected, we examine this
-    // member instead of "kind" member to determine whether a type is a
-    // pointer or not. That means in many contexts "array of T" is
-    // naturally handled as if it were "pointer to T", as required by
-    // the C spec.
-    struct Type *
-        base; /**< For pointer/array types: the referenced element/base type. */
+// Cold Type fields live in lazily allocated groups reached through the
+// type_*() accessors, which return an all-zero group when none was allocated.
+// Reads use type_X(t); writes use type_X_mut(vm, t). copy_type() duplicates
+// every allocated group, so a copy never shares a group with its original.
 
-    // Declaration
-    Token *name;
-    Token *name_pos;
-    char  *asm_label; // GNU asm("symbol") label for function declarations
+// struct/union/enum definition data
+typedef struct TypeAgg {
+    struct Member *members;
+    // `_Static_assert` written in the member list, in source order, for native
+    // re-emission inside the struct body.
+    struct StaticAssertRecord *member_asserts;
+    Token *struct_tag; // tag name token (survives declarator name-overwrite)
+    EnumConstant *enum_constants;
+    struct Type  *enum_base_type; // C23: underlying type (NULL = default int)
+    Token *enum_tag; // tag name token (survives declarator name-overwrite)
+} TypeAgg;
 
-    // Array
-    int array_len;
-    int static_min; // [static N] minimum required elements; 0 = no constraint
-    // #1095: set alongside array_len (by array_dimensions(), parse_types.c)
-    // when the dimension expression was a bare sizeof/_Alignof of a
-    // from_include type -- serialization-only, mirroring Node.layout_ty/
-    // layout_is_align (#1031). array_len/size themselves stay CCCC's own
-    // folded projection regardless (the VM path is byte-identical whether
-    // or not these are set); only serialize_type_decl's TY_ARRAY arm reads
-    // them, and only for the two declaration sites #1095 opted into
-    // (locals, and globals with no byte-image initializer -- see
-    // SerializeContext.allow_layout_dims's own comment).
-    Type *array_len_layout_ty;
+// Declaration attributes carrying a payload.
+typedef struct TypeAttrs {
+    char *asm_label;        // GNU asm("symbol") label for function declarations
+    const char
+        *operator_sym;      // [[cccc::operator(+)]]: the operator it implements
+    struct Type *method_of; // [[cccc::method(T)]]: the receiver type T
+    const char  *method_name; // ...and the name s.name() calls it by
+    char        *deprecated_msg;
+    char        *nodiscard_msg;
+    char *attr_error_msg;     // __attribute__((error("msg"))): error if called
+    char *attr_warning_msg;   // __attribute__((warning("msg"))): warn if called
+    struct CustomAttrUse *custom_attrs;
+    struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); moved to
+                            // Obj by claim_cleanup()
+    uint64_t    nonnull_mask; // 1-based arg indices marked non-null (bit i-1);
+                              // >64 args ignored
+    int format_style;         // 0=none, 1=printf, 2=scanf
+    int format_string_index;  // 1-based index of format string arg
+    int format_fmt_first_arg; // 1-based index of first variadic arg to check
+    int sentinel_pos; // trailing non-sentinel args allowed before the NULL (0 =
+                      // last arg)
+    int alloc_size_idx;  // alloc_size: size arg, or first factor for 2-arg form
+    int alloc_size_idx2; // second factor (calloc-style product), 0 if 1-arg
+    int init_priority; // CCCC_NO_INIT_PRIORITY unless an explicit priority was
+                       // given
+} TypeAttrs;
+
+// Array, vector and variable-length-array extras.
+typedef struct TypeArr {
+    // Set alongside array_len when the dimension was a bare sizeof/_Alignof of
+    // a from_include type; only the serializer reads them.
+    Type    *array_len_layout_ty;
     LayoutOp array_len_layout_is_align;
-
+    int      static_min; // [static N] minimum required elements; 0 = none
     // GNU vector_size vector (TY_VECTOR): lane count. `base` is the element
     // type, `size` is the total byte size (element size * vec_len).
     int vec_len;
     // Lanes a program may name (swizzles, literals) when fewer than vec_len: an
     // OpenCL float3 is stored as four lanes. 0 means all of them.
-    int vec_visible;
-
-    // Variable-length array
+    int   vec_visible;
     Node *vla_len;  // # of elements
     Obj  *vla_size; // sizeof() value
-
-    // Struct
-    struct Member *members;
-    // `_Static_assert` written in the member list, in source order, for native
-    // re-emission inside the struct body.
-    struct StaticAssertRecord *member_asserts;
-    bool                       is_flexible;
-    // Array typedef declared in a header (`jmp_buf`): exempt from the checked-region
-    // array rule, since `_Checked` cannot be written on a typedef'd array.
-    bool header_array_typedef;
-    bool           is_packed;
-    bool designated_init; // __attribute__((designated_init)): all initializers
-                          // of this struct type must be designated (#659)
-    Token *
-        struct_tag; // tag name token (survives declarator name-overwrite, #892)
-
-    // Enum
-    EnumConstant *enum_constants;
-    struct Type  *enum_base_type; // C23: underlying type (NULL = default int)
-    Token *enum_tag; // tag name token (survives declarator name-overwrite)
-    // #1205: set when this enum has no fixed `enum_base_type` and every
-    // enumerator fit `int` -- the enum's own compatible type is `unsigned
-    // int` (matching gcc-16/clang), but C17/C23 6.7.2.2p3 still gives each
-    // *enumerator identifier* type `int`. Enumerator-use sites (see
-    // parse_postfix.c's enum lookup) check this to type references `int`
-    // while the enum type itself stays unsigned.
-    bool enum_members_are_int;
-
-    // Function type
-    struct Type *return_ty;
-    struct Type *params;
-    bool         is_variadic;
-    struct Type *next;
-
-    // Declaration attributes used by semantic warnings
-    bool is_maybe_unused;
-    bool is_deprecated;
-    bool is_noreturn;
-    bool is_nodiscard;
-    bool is_pure; // __attribute__((pure)): no side effects, may read globals
-    bool is_func_const;   // __attribute__((const)): no side effects, no global
-                          // reads
-    bool is_kernel;       // [[cccc::kernel]]: GPU-safe subset
-    bool is_trusted;      // [[cccc::trusted]]: exempt from -Wchecked-calls
-    const char
-         *operator_sym;   // [[cccc::operator(+)]]: the operator it implements
-    Type *method_of;      // [[cccc::method(T)]]: the receiver type T
-    const char *method_name;   // ...and the name s.name() calls it by
-    bool      is_gnu_inline; // __attribute__((gnu_inline)): `extern inline` is
-                             // inline-only, never an external definition
-    AddrSpace addr_space; // [[cccc::global]] etc: space of the pointed-to or
-                          // declared object; ignored outside kernel checks
-    char     *deprecated_msg;
-    char     *nodiscard_msg;
-    char *attr_error_msg; // __attribute__((error("msg"))): error if callee is
-                          // called
-    char *attr_warning_msg; // __attribute__((warning("msg"))): warn if callee
-                            // is called
-    struct CustomAttrUse *custom_attrs;
-    struct Obj *cleanup_fn; // transport: __attribute__((cleanup(fn))); moved
-                            // to Obj by claim_cleanup()
-
-    // _BitInt(N): bit width for TY_BITINT types
-    int bit_width;
-
-    // Format string validation (__attribute__((format(...))))
-    int format_style;         // 0=none, 1=printf, 2=scanf
-    int format_string_index;  // 1-based index of format string arg
-    int format_fmt_first_arg; // 1-based index of first variadic arg to check
-
-    // Nonnull argument / return checking (__attribute__((nonnull /
-    // returns_nonnull)))
-    bool     nonnull_all;  // bare nonnull: every pointer parameter is non-null
-    uint64_t nonnull_mask; // 1-based arg indices marked non-null (bit i-1); >64
-                           // args ignored
-    bool     returns_nonnull;
-
-    // NULL-terminated variadic argument check (__attribute__((sentinel[(N)])))
-    bool is_sentinel; // true if the function requires a NULL sentinel arg
-    int sentinel_pos; // trailing non-sentinel args allowed before the NULL (0 =
-                      // last arg)
-
-    // __attribute__((alloc_size(n[,m]))): 1-based arg indices (0 = unset).
-    // Generalizes #642's name-based malloc-family detection: any function
-    // declared with this attribute participates in __builtin_object_size
-    // heap-allocation sizing (#649).
-    int alloc_size_idx;  // size arg, or first factor for the 2-arg form
-    int alloc_size_idx2; // second factor (calloc-style product), 0 if 1-arg
-                         // form
-
-    // __attribute__((malloc)): noalias/fresh-pointer hint (informational;
-    // not wired to any optimization or nonnull inference yet -- #649 followup).
-    bool is_malloc;
-
-    // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
-    bool is_constructor; // run before main(), ordered by init_priority
-    bool is_destructor;  // run after main() returns normally, reverse order
-    int  init_priority; // CCCC_NO_INIT_PRIORITY unless an explicit priority was
-                        // given
-
-    // Checked C-style checked-pointer qualifier (#770/#482-484). A qualifier
-    // on this TY_PTR type, exactly like is_const/is_volatile/is_restrict --
-    // not a distinct TypeKind -- so a checked pointer is ABI-identical to a
-    // plain one. Set by the post-'*' attribute loop in pointers()
-    // (src/parse.c), which is where [[cccc::single]] etc. attach, mirroring
-    // how const/volatile/restrict attach there today.
-    CheckedKind checked_kind;
-
-    // Bounds declaration for CHECKED_ARRAY/CHECKED_NTARRAY (count()/
-    // byte_count()/bounds()/bounds(unknown)). The bounds expression can
-    // reference sibling parameters not yet in scope when the attribute is
-    // parsed (e.g. `count(n)` where `n` is a later parameter), so the raw
-    // token span is captured here and re-parsed later, once the right scope
-    // exists -- see resolve_checked_bounds() in src/parse.c and
-    // Obj.checked_bounds_start below. checked_bounds_form records which of
-    // the three syntactic forms was written; checked_bounds_arg1/arg2 are the
-    // *unresolved* token spans (arg2 unused except for CB_RANGE's hi).
-    CheckedBoundsForm checked_bounds_form;
-    Token *checked_bounds_arg1; // count(n) / byte_count(n) / bounds(lo, .)
-    Token *checked_bounds_arg2; // bounds(., hi) only; NULL otherwise
-
-    // #1160: __attribute__((aligned(N))) seen in declarator-suffix position
-    // on this specific declarator (e.g. `int b
-    // __attribute__((aligned(16)))`). Kept separate from `align` above --
-    // which stays the type's own natural alignment -- so the -c=native
-    // serializer's `member->align > member->ty->align` re-emission check
-    // (#1129) still sees a real gap to re-emit; a floor, never lowers.
-    // Deliberately appended at the very end of the struct, not inserted
-    // next to `align`: several singleton Type objects in src/type.c
-    // (ty_uint et al.) are positionally initialized (`&(Type){TY_INT, 4, 4,
-    // true}`), so inserting a field anywhere before the last positional
-    // initializer silently shifts every field after it -- caught the hard
-    // way when adding this field between `align` and `is_unsigned` flipped
-    // is_unsigned itself to false, turning an unrelated -Wsign-compare test
-    // in the main VM suite from `x < y` (unsigned comparison rules) into a
-    // silent signed comparison.
-    int decl_align;
-
-    // #1173: `#pragma pack(N)` alignment cap in effect when this
-    // struct/union was defined (0 = no pack in effect). Unlike `is_packed`
-    // (__attribute__((packed)), which forces alignment to 1), this CAPS a
-    // member's implicit alignment at N -- an explicit aligned(N)/_Alignas(N)
-    // request still wins outright, same as under `packed` (#1163). Read by
-    // struct_decl/union_decl's layout loops (src/parse_types.c) and by the
-    // -c=native/-m/-c=generated emitter (src/serialize_type.c), which wraps
-    // the aggregate's definition in `#pragma pack(push, N)` / `pack(pop)` so
-    // the host reproduces the same layout. Also appended at the very end of
-    // the struct for the same positional-initializer reason as decl_align
-    // above.
-    int pack_align;
-
-    // #486: [[cccc::assume]]/[[cccc::dynamic]] on this TY_PTR's checked
-    // qualifier -- only ever set on the type-name of an explicit cast
-    // expression (cast(), src/parse_expr.c), never on a declarator (a
-    // compile error, see declarator()'s post-pointers() check,
-    // src/parse_types.c). Appended at the very end for the same
-    // positional-initializer reason as decl_align/pack_align above.
-    CheckedCastKind checked_cast_kind;
-
-    // #487: Checked C-style checked ARRAY declaration (`int a _Checked[10]`
-    // / `char s _Nt_checked[11]`), parsed in declarator() (src/parse_types.c)
-    // once the array's extent is known. Reuses the exact same checked_kind/
-    // checked_bounds_form fields above (set to CHECKED_ARRAY/CHECKED_NTARRAY
-    // and CB_COUNT respectively) so find_checked_base()/compute_checked_
-    // bounds() treat a checked array as an ordinary declared-checked base --
-    // no new machinery. Unlike a checked POINTER's count(n), the count here
-    // is a compile-time constant (the array's own declared length; a VLA
-    // leaves it 0, see checked_vla_extent_tok), so
-    // there is no token span to defer/re-parse -- checked_bounds_arg1/arg2
-    // stay NULL for a checked array, and resolve_bounds_tokens()
-    // (src/parse_core.c) seeds *out_hi straight from this field instead.
-    // Holds the resolved element count (CHECKED_ARRAY) or one less than the
-    // declared length (CHECKED_NTARRAY, reserving the last element as the
-    // terminator slot the same way a checked pointer's ntarray widening
-    // does) -- 0 (CHECKED_NONE) otherwise. Also copied onto the adjusted
-    // TY_PTR a checked array parameter decays to (func_params(),
-    // src/parse_types.c), since the array's own TY_ARRAY extent
-    // (Type.array_len) is gone once the parameter adjustment runs.
-    // Appended at the very end for the same positional-initializer reason as
-    // decl_align/pack_align/checked_cast_kind above.
-    int checked_array_extent;
-
-    // #488: bounds-safe interfaces -- caller-side verification of a checked
-    // pointer PARAMETER's declared bounds against the actual argument
-    // expressions at each call site. A prototype's checked_bounds_arg1/arg2
-    // (above) are raw, unresolved token spans (a prototype has no body scope
-    // for resolve_checked_bounds() to resolve them into -- see that
-    // function's comment in src/parse_core.c). resolve_param_checked_bounds()
-    // (src/parse_core.c) resolves them ONCE, when the declaration that spells
-    // the function type is parsed (resolve_type_checked_bounds()), into a
-    // TEMPLATE expression pinned to file scope: each reference to a sibling
-    // parameter resolves to a placeholder Obj (Obj.checked_self_param_idx)
-    // rather than a real value, and clone_param_bounds_node() substitutes
-    // each placeholder with a clone of that call's actual argument
-    // expression at every call site (mirrors Member.checked_bounds_lo/hi's
-    // own placeholder-template convention, see Obj.checked_self_member).
-    // Only meaningful on a PARAMETER's Type (one per entry in a TY_FUNC's
-    // ->params list); checked_param_tmpl_done lives on the TY_FUNC type
-    // itself and marks the whole parameter list as already resolved, so
-    // resolve_param_checked_bounds() only walks ->params once per distinct
-    // function type. NULL/NULL for CB_NONE/CB_UNKNOWN, same as the ordinary
-    // declaration/member paths above; an unnamed parameter is resolved like a
-    // named one.
-    // Appended at the very end for the same positional-initializer reason as
-    // decl_align/pack_align/checked_cast_kind/checked_array_extent above.
-    struct Node *checked_param_bounds_lo;
-    struct Node *checked_param_bounds_hi;
-    bool         checked_param_tmpl_done;
-
-    // Variable-length checked array (`int a _Checked[n]`): the first token of
-    // the extent expression. checked_array_extent stays 0; a local takes its
-    // bound from the declaration's one-time vla_len snapshot, and a parameter
-    // (which decays to a pointer) re-parses this span as its count(n). Also
-    // marks the type so _Nt_checked can reserve its terminator slot.
-    Token *checked_vla_extent_tok;
-
-    // aligned(N) written on this type itself (struct/union tag or typedef'd
-    // vector), as opposed to an alignment that is merely the natural one. See
-    // c11_alignof() (type.c). Appended at the end for the same
-    // positional-initializer reason as decl_align above.
-    bool user_align;
-
-    // On a TY_FUNC: the return type's bounds as a template over this
-    // function's parameters (Obj.checked_self_param_idx placeholders), resolved
-    // by resolve_param_checked_bounds(). Kept here rather than on return_ty
-    // because a typedef'd return type can be shared by functions whose
-    // parameters sit at different indices.
-    struct Node *checked_ret_bounds_lo;
-    struct Node *checked_ret_bounds_hi;
-
     // TY_VLA: first token of the length expression, so a function definition
     // can re-parse a parameter's inner lengths in its own body scope.
     Token *vla_len_tok;
+} TypeArr;
+
+// Checked C-style bounds (#770/#482-488). The bounds expression can reference
+// sibling parameters not yet in scope when the attribute is parsed, so the raw
+// token span is captured and re-parsed once the scope exists (see
+// resolve_checked_bounds(), src/parse.c).
+typedef struct TypeChecked {
+    // Which of count()/byte_count()/bounds()/bounds(unknown) was written, and
+    // the *unresolved* token spans (arg2 is bounds(., hi) only).
+    CheckedBoundsForm form;
+    Token            *arg1;
+    Token            *arg2;
+    // [[cccc::assume]]/[[cccc::dynamic]]: only on the type-name of a cast.
+    CheckedCastKind cast_kind;
+    // Resolved element count of a checked ARRAY declaration (one less for
+    // _Nt_checked, reserving the terminator slot); 0 otherwise. Also copied to
+    // the TY_PTR a checked array parameter decays to.
+    int checked_array_extent;
+    // Variable-length checked array: first token of the extent expression.
+    Token *vla_extent_tok;
+    // A parameter's declared bounds as a template over its siblings
+    // (Obj.checked_self_param_idx placeholders), resolved once per function
+    // type; param_tmpl_done lives on the TY_FUNC and marks the list resolved.
+    struct Node *param_bounds_lo;
+    struct Node *param_bounds_hi;
+    bool         param_tmpl_done;
+    // On a TY_FUNC: the return type's bounds as a template over its
+    // parameters. Not on return_ty, since a typedef'd return type can be shared
+    // by functions whose parameters sit at different indices.
+    struct Node *ret_bounds_lo;
+    struct Node *ret_bounds_hi;
+} TypeChecked;
+
+/*!
+ @brief Central representation of a C type in the compiler.
+*/
+struct Type {
+    // The first four fields are positionally initialized by the singleton
+    // types in src/type.c (`&(Type){TY_INT, 4, 4, true}`): keep their order.
+    TypeKind kind; /**< One of TypeKind indicating the category of this type. */
+    int      size; /**< sizeof() value in bytes. */
+    int      align;           /**< Alignment requirement in bytes. */
+    bool     is_unsigned : 1; // unsigned or signed
+    // Spelling only: `long` and `long long` share TY_LONG. Never consult it for
+    // compatibility, rank, conversions or _Generic; only serialize_type.c's
+    // TY_LONG arm reads it.
+    bool is_long_long : 1;
+    bool is_atomic    : 1; // true if _Atomic
+    bool is_const     : 1; // true if const-qualified
+    bool is_volatile  : 1; // true if volatile-qualified
+    bool is_restrict  : 1; // true if restrict-qualified
+    bool is_flexible  : 1;
+    // Array typedef declared in a header (`jmp_buf`): exempt from the
+    // checked-region array rule, since `_Checked` cannot be written on a
+    // typedef'd array.
+    bool header_array_typedef : 1;
+    bool is_packed            : 1;
+    bool designated_init      : 1; // __attribute__((designated_init)): all
+                                   // initializers must be designated
+    // Set when this enum has no fixed `enum_base_type` and every enumerator
+    // fit `int`: the enum type is `unsigned int` but each enumerator
+    // identifier still has type `int` (C17/C23 6.7.2.2p3).
+    bool enum_members_are_int : 1;
+    bool is_variadic          : 1;
+    bool is_maybe_unused      : 1;
+    bool is_deprecated        : 1;
+    bool is_noreturn          : 1;
+    bool is_nodiscard         : 1;
+    bool is_pure       : 1; // __attribute__((pure)): no side effects, may read
+                            // globals
+    bool is_func_const : 1; // __attribute__((const)): no side effects, no
+                            // global reads
+    bool is_kernel     : 1; // [[cccc::kernel]]: GPU-safe subset
+    bool is_trusted    : 1; // [[cccc::trusted]]: exempt from -Wchecked-calls
+    bool is_gnu_inline : 1; // __attribute__((gnu_inline)): `extern inline` is
+                            // inline-only, never an external definition
+    bool nonnull_all   : 1; // bare nonnull: every pointer parameter is non-null
+    bool returns_nonnull : 1;
+    bool is_sentinel     : 1; // the function requires a NULL sentinel arg
+    bool is_malloc       : 1; // __attribute__((malloc)): informational
+    bool is_constructor  : 1; // run before main(), ordered by init_priority
+    bool is_destructor : 1; // run after main() returns normally, reverse order
+    // aligned(N) written on this type itself (struct/union tag or typedef'd
+    // vector), as opposed to the natural alignment. See c11_alignof().
+    bool         user_align : 1;
+
+    struct Type *origin; // for type compatibility check
+    // Pointer-to or array-of type. The same member represents the pointer/array
+    // duality in C: code that expects a pointer examines this instead of
+    // "kind", so "array of T" is handled as "pointer to T".
+    struct Type *
+        base; /**< For pointer/array types: the referenced element/base type. */
+    Token       *name;
+    Token       *name_pos;
+    struct Type *return_ty;
+    struct Type *params;
+    struct Type *next;
+
+    TypeAgg     *agg;
+    TypeAttrs   *attrs;
+    TypeArr     *arr;
+    TypeChecked *chk;
+
+    int          array_len;
+    int          bit_width; // _BitInt(N): bit width for TY_BITINT types
+    // aligned(N) seen in declarator-suffix position on this declarator. Kept
+    // apart from `align` (the natural alignment) so the serializer still sees
+    // a real gap to re-emit; a floor, never lowers.
+    int decl_align;
+    // `#pragma pack(N)` cap in effect when this struct/union was defined (0 =
+    // none). Unlike `is_packed`, it caps a member's implicit alignment at N.
+    int pack_align;
+    // Checked C-style checked-pointer qualifier on a TY_PTR (or a checked
+    // array), exactly like is_const: not a distinct TypeKind, so a checked
+    // pointer is ABI-identical to a plain one.
+    CheckedKind checked_kind;
+    // [[cccc::global]] etc: space of the pointed-to or declared object;
+    // ignored outside kernel checks.
+    AddrSpace addr_space;
 };
+
+_Static_assert(sizeof(Type) <= 128,
+               "Type grew: put cold fields in a TypeAgg/TypeAttrs/TypeArr/"
+               "TypeChecked group");
+
+static const TypeAgg     type_agg_none   = {0};
+static const TypeAttrs   type_attrs_none = {0};
+static const TypeArr     type_arr_none   = {0};
+static const TypeChecked type_chk_none   = {0};
+
+static inline const TypeAgg *type_agg(const Type *t) {
+    return t->agg ? t->agg : &type_agg_none;
+}
+static inline const TypeAttrs *type_attrs(const Type *t) {
+    return t->attrs ? t->attrs : &type_attrs_none;
+}
+static inline const TypeArr *type_arr(const Type *t) {
+    return t->arr ? t->arr : &type_arr_none;
+}
+static inline const TypeChecked *type_chk(const Type *t) {
+    return t->chk ? t->chk : &type_chk_none;
+}
+TypeAgg *type_agg_mut(VirtualMachine *vm, Type *t);
+TypeAttrs *type_attrs_mut(VirtualMachine *vm, Type *t);
+TypeArr *type_arr_mut(VirtualMachine *vm, Type *t);
+TypeChecked *type_chk_mut(VirtualMachine *vm, Type *t);
 
 // Sentinel meaning "no explicit constructor/destructor priority given" — such
 // functions form the default-priority group, which GCC runs last for

@@ -247,7 +247,8 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             gen_expr(vm, node->rhs, r_rhs);
             int op = node->kind == ND_MOD ? vector_modop_for(fam)
                                           : vector_binop_for(node->kind, fam);
-            emit_rrrs(vm, op, dest_reg, r_lhs, r_rhs, node->ty->vec_len);
+            emit_rrrs(vm, op, dest_reg, r_lhs, r_rhs,
+                      type_arr(node->ty)->vec_len);
             free_temp_reg(r_rhs);
             free_temp_reg(r_lhs);
             return;
@@ -288,7 +289,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int r_rhs = alloc_temp_reg();
             gen_expr(vm, node->rhs, r_rhs);
             emit_rrrs(vm, vector_cmpop_for(node->kind, fam, is_uns), dest_reg,
-                      r_lhs, r_rhs, node->lhs->ty->vec_len);
+                      r_lhs, r_rhs, type_arr(node->lhs->ty)->vec_len);
             free_temp_reg(r_rhs);
             free_temp_reg(r_lhs);
             return;
@@ -331,7 +332,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int r_then = alloc_temp_reg();
             gen_expr(vm, node->then, r_then);
             emit_rrrs(vm, vector_selop_for(node->ty->base->size), r_dest,
-                      r_cond, r_then, node->ty->vec_len);
+                      r_cond, r_then, type_arr(node->ty)->vec_len);
             free_temp_reg(r_then);
             free_temp_reg(r_cond);
             if (dest_reg == REG_ZERO)
@@ -343,7 +344,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int           r_src = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_src);
             emit_rrs(vm, vector_negop_for(fam), dest_reg, r_src,
-                     node->ty->vec_len);
+                     type_arr(node->ty)->vec_len);
             free_temp_reg(r_src);
             return;
         }
@@ -362,7 +363,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int           r_scalar = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_scalar);
             emit_rrs(vm, vector_splatop_for(fam), dest_reg, r_scalar,
-                     node->ty->vec_len);
+                     type_arr(node->ty)->vec_len);
             free_temp_reg(r_scalar);
             return;
         }
@@ -389,7 +390,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
             int r_src = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_src);
-            emit_rrs(vm, op, dest_reg, r_src, node->ty->vec_len);
+            emit_rrs(vm, op, dest_reg, r_src, type_arr(node->ty)->vec_len);
             free_temp_reg(r_src);
             return;
         }

@@ -1207,7 +1207,8 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
         if (!ty || (ty->kind != TY_STRUCT && ty->kind != TY_UNION &&
                     ty->kind != TY_ENUM))
             continue;
-        bool tagless = ty->kind == TY_ENUM ? !ty->enum_tag : !ty->struct_tag;
+        bool tagless = ty->kind == TY_ENUM ? !type_agg(ty)->enum_tag
+                                           : !type_agg(ty)->struct_tag;
         if (!tagless || !type_is_complete_tagged(ty))
             continue;
 
@@ -1550,7 +1551,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     char **names     = NULL;
     int    names_len = 0, names_cap = 0;
     for (int g = 0; g < groups_len; g++)
-        for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+        for (EnumConstant *ec = type_agg(groups[g].rep)->enum_constants; ec;
              ec               = ec->next) {
             if (!ec->name)
                 continue;
@@ -1576,7 +1577,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         int members[64];
         int members_len = 0;
         for (int g = 0; g < groups_len && members_len < 64; g++) {
-            for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+            for (EnumConstant *ec = type_agg(groups[g].rep)->enum_constants; ec;
                  ec               = ec->next)
                 if (ec->name && strcmp(ec->name, name) == 0) {
                     members[members_len++] = g;
@@ -2210,10 +2211,10 @@ static void type_scan_complex_native(Type *ty, bool *want, TypeSeenSet *seen) {
         *want = true;
         return;
     }
-    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->members &&
-        !type_seen_set_has(seen, ty)) {
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+        type_agg(ty)->members && !type_seen_set_has(seen, ty)) {
         type_seen_set_push(seen, ty);
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             type_scan_complex_native(m->ty, want, seen);
         return;
     }
@@ -2427,7 +2428,7 @@ static bool type_needs_synth_typedef_header(SerializeContext *ctx, Type *ty,
         if (type_vec_contains(seen, ty))
             return false;
         type_vec_push(seen, ty);
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (type_needs_synth_typedef_header(ctx, m->ty, header, seen))
                 return true;
     }
@@ -2920,7 +2921,7 @@ static void collect_vla_extent_refs(VirtualMachine *vm, SerializeContext *ctx,
                                     Obj *fn, Type *ty) {
     for (; ty && (ty->kind == TY_VLA || ty->kind == TY_ARRAY); ty = ty->base)
         if (ty->kind == TY_VLA)
-            collect_nested_refs(vm, ctx, fn, ty->vla_len);
+            collect_nested_refs(vm, ctx, fn, type_arr(ty)->vla_len);
 }
 
 // A static that stays at file scope although its type is declared inside a
@@ -5118,7 +5119,7 @@ static bool local_enum_name_taken(VirtualMachine *vm, SerializeContext *ctx,
     for (int h = 0; h < g; h++) {
         if (groups[h].fn != fn)
             continue;
-        for (EnumConstant *ec = groups[h].rep->enum_constants; ec;
+        for (EnumConstant *ec = type_agg(groups[h].rep)->enum_constants; ec;
              ec               = ec->next)
             if (ec->name && strcmp(ec->name, name) == 0)
                 return true;
@@ -5163,7 +5164,7 @@ static void rename_colliding_local_enum_constants(VirtualMachine   *vm,
         }
     }
     for (int g = 0; g < groups_len; g++)
-        for (EnumConstant *ec = groups[g].rep->enum_constants; ec;
+        for (EnumConstant *ec = type_agg(groups[g].rep)->enum_constants; ec;
              ec               = ec->next)
             if (ec->name && local_enum_name_taken(vm, ctx, groups, g, ec->name))
                 add_enum_rename(vm, ctx, groups[g].rep, ec->name);

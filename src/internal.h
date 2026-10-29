@@ -910,6 +910,7 @@ bool is_compatible_qualified_strict(Type *t1, Type *t2);
 bool token_is_from_include(VirtualMachine *vm, Token *tok);
 bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);
+void type_assign(VirtualMachine *vm, Type *dst, const Type *src);
 // `ty` without its address space: the type of a private temporary that holds a
 // value read from global/local/constant memory.
 Type *without_addr_space(VirtualMachine *vm, Type *ty);

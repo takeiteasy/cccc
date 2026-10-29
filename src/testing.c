@@ -1081,7 +1081,7 @@ static bool cmp_ret_struct_body(const char *buf, int base_off, Type *ty,
                                 char *got, size_t got_cap, bool *first) {
     bool all_eq   = true;
     bool is_union = (ty->kind == TY_UNION);
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         if (!m->name) {
             // Anonymous struct/union member.
             if (!cmp_ret_struct_body(buf, base_off + m->offset, m->ty, expected,
@@ -1147,7 +1147,7 @@ static bool cmp_ret_aggregate(const char *buf, int base_off, Type *ty,
         return all_eq;
     }
 
-    if (!ty->members) {
+    if (!type_agg(ty)->members) {
         sb_appendf(got, got_cap, "{}");
         return true; // opaque/incomplete type -- nothing to compare
     }
@@ -1954,7 +1954,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                         Type *st = (fn->ty && fn->ty->return_ty)
                                        ? fn->ty->return_ty
                                        : NULL;
-                        if (!ret_struct_buf || !st || !st->members) {
+                        if (!ret_struct_buf || !st || !type_agg(st)->members) {
                             ret_ok = true; // can't compare; skip silently
                             break;
                         }

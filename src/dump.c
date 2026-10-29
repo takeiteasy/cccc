@@ -245,7 +245,8 @@ static void dump_type_simple(FILE *f, Type *ty) {
             // being typed against this struct/union type -- e.g. `struct P p;`
             // set ty->name to "p", not "P", so printing ty->name here
             // mis-spelled every tagged-type REPL result (#666).
-            Token *tag = ty->struct_tag ? ty->struct_tag : ty->name;
+            Token *tag =
+                type_agg(ty)->struct_tag ? type_agg(ty)->struct_tag : ty->name;
             if (tag) {
                 fprintf(f, " ");
                 fprintf(f, "%.*s", tag->len, tag->loc);
@@ -254,7 +255,8 @@ static void dump_type_simple(FILE *f, Type *ty) {
         }
         case TY_ENUM: {
             fprintf(f, "%s", type_kind_name(ty->kind));
-            Token *tag = ty->enum_tag ? ty->enum_tag : ty->name;
+            Token *tag =
+                type_agg(ty)->enum_tag ? type_agg(ty)->enum_tag : ty->name;
             if (tag) {
                 fprintf(f, " ");
                 fprintf(f, "%.*s", tag->len, tag->loc);
@@ -833,7 +835,7 @@ static void dump_value_at(FILE *f, VirtualMachine *vm, Type *ty,
                 return;
             }
             fprintf(f, "{\n");
-            for (Member *m = ty->members; m; m = m->next) {
+            for (Member *m = type_agg(ty)->members; m; m = m->next) {
                 // Flexible array member (`T x[];`, array_len == 0): no backing
                 // storage in any one instance, nothing to read.
                 if (m->ty->kind == TY_ARRAY && m->ty->array_len == 0)
@@ -905,7 +907,7 @@ static void dump_value_at(FILE *f, VirtualMachine *vm, Type *ty,
                 return;
             }
             fprintf(f, "{\n");
-            int len = ty->vec_len;
+            int len = type_arr(ty)->vec_len;
             int shown =
                 len < CC_DUMP_MAX_ARRAY_ELEMS ? len : CC_DUMP_MAX_ARRAY_ELEMS;
             for (int i = 0; i < shown; i++) {

@@ -75,7 +75,7 @@ void warn_deprecated_use(VirtualMachine *vm, Token *tok, char *name,
 Type *type_after_deprecated_use(VirtualMachine *vm, Type *ty) {
     Type *copy           = copy_type(vm, ty);
     copy->is_deprecated  = false;
-    copy->deprecated_msg = NULL;
+    type_attrs_mut(vm, copy)->deprecated_msg = NULL;
     return copy;
 }
 
@@ -305,7 +305,7 @@ static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
 }
 
 bool has_custom_attrs(Type *ty, VarAttr *attr) {
-    return (ty && ty->custom_attrs) || (attr && attr->custom_attrs);
+    return (ty && type_attrs(ty)->custom_attrs) || (attr && attr->custom_attrs);
 }
 
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
@@ -315,9 +315,9 @@ void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
     if (attr && attr->custom_attrs)
         run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
                          tok, NULL, NULL);
-    if (ty && ty->custom_attrs)
-        run_custom_attrs(vm, ty->custom_attrs, kind, name, target_ty, obj, tok,
-                         NULL, NULL);
+    if (ty && type_attrs(ty)->custom_attrs)
+        run_custom_attrs(vm, type_attrs(ty)->custom_attrs, kind, name,
+                         target_ty, obj, tok, NULL, NULL);
 }
 
 CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src) {
@@ -435,9 +435,9 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
         fn->ty = apply_var_attrs_to_type(vm, fn->ty, &attr);
         if (attr.align > 0)
             fn->align = attr.align;
-        if (fn->ty->operator_sym)
+        if (type_attrs(fn->ty)->operator_sym)
             register_operator(vm, fn, fn->ty, site_tok);
-        if (fn->ty->method_of)
+        if (type_attrs(fn->ty)->method_of)
             register_method(vm, fn, fn->ty, site_tok);
     }
     if (has_custom)
@@ -740,10 +740,12 @@ Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
     // GNU vector_size vector (TY_VECTOR): one child per lane, keyed on
     // vec_len like the TY_ARRAY case above (tracker #713).
     if (ty->kind == TY_VECTOR) {
-        init->children = arena_alloc(&vm->compiler.parser_arena,
-                                     ty->vec_len * sizeof(Initializer *));
-        memset(init->children, 0, ty->vec_len * sizeof(Initializer *));
-        for (int i = 0; i < ty->vec_len; i++)
+        init->children =
+            arena_alloc(&vm->compiler.parser_arena,
+                        type_arr(ty)->vec_len * sizeof(Initializer *));
+        memset(init->children, 0,
+               type_arr(ty)->vec_len * sizeof(Initializer *));
+        for (int i = 0; i < type_arr(ty)->vec_len; i++)
             init->children[i] = new_initializer(vm, ty->base, false);
         return init;
     }
@@ -758,14 +760,14 @@ Initializer *new_initializer(VirtualMachine *vm, Type *ty, bool is_flexible) {
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION) {
         // Count the number of struct members.
         int len = 0;
-        for (Member *mem = ty->members; mem; mem = mem->next)
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next)
             len++;
 
         init->children = arena_alloc(&vm->compiler.parser_arena,
                                      len * sizeof(Initializer *));
         memset(init->children, 0, len * sizeof(Initializer *));
 
-        for (Member *mem = ty->members; mem; mem = mem->next) {
+        for (Member *mem = type_agg(ty)->members; mem; mem = mem->next) {
             if (is_flexible && ty->is_flexible && !mem->next) {
                 Initializer *child = arena_alloc(&vm->compiler.parser_arena,
                                                  sizeof(Initializer));
@@ -788,7 +790,7 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     memset(var, 0, sizeof(Obj));
     var->name      = name;
     var->ty        = ty;
-    var->asm_label = ty->asm_label;
+    var->asm_label = type_attrs(ty)->asm_label;
     var->align     = ty->align;
     var->tok       = ty->name;
     var->display_name =
@@ -800,10 +802,10 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->is_func_const   = ty->is_func_const;
     var->is_kernel       = ty->is_kernel;
     var->is_trusted      = ty->is_trusted;
-    var->deprecated_msg  = ty->deprecated_msg;
+    var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
     var->is_constructor  = ty->is_constructor;
     var->is_destructor   = ty->is_destructor;
-    var->init_priority   = ty->init_priority;
+    var->init_priority   = type_attrs(ty)->init_priority;
     if (var->is_constructor || var->is_destructor) {
         // Reachable only via the attribute (gen() walks prog for
         // is_constructor/ is_destructor, not through any call site) — keep it
@@ -817,7 +819,7 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     // unresolved token spans straight off var->ty->checked_bounds_arg1/arg2
     // rather than needing its own copy here.
     var->checked_kind                   = ty->checked_kind;
-    var->checked_bounds_form            = ty->checked_bounds_form;
+    var->checked_bounds_form            = type_chk(ty)->form;
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
@@ -837,12 +839,13 @@ Obj *new_lvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
 // b;`) stays on the declaration's attr and applies to every declarator.
 // Clearing the Type keeps it from spreading to `__typeof__(v) t`.
 void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr) {
-    Obj *fn = var->ty->cleanup_fn;
+    Obj *fn = type_attrs(var->ty)->cleanup_fn;
     if (!fn && attr)
         fn = attr->cleanup_fn;
     if (!fn)
         return;
-    var->ty->cleanup_fn = NULL;
+    if (type_attrs(var->ty)->cleanup_fn)
+        type_attrs_mut(vm, var->ty)->cleanup_fn = NULL;
     var->cleanup_fn     = fn;
     var->cleanup_seq    = ++vm->compiler.cleanup_seq;
     fn->is_live         = true;
@@ -854,9 +857,10 @@ void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr) {
 // extern declaration.
 void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
                        Token *tok) {
-    if (!ty->cleanup_fn && !(attr && attr->cleanup_fn))
+    if (!type_attrs(ty)->cleanup_fn && !(attr && attr->cleanup_fn))
         return;
-    ty->cleanup_fn = NULL;
+    if (type_attrs(ty)->cleanup_fn)
+        type_attrs_mut(vm, ty)->cleanup_fn = NULL;
     if (tok)
         warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES, "'cleanup' attribute ignored");
 }
@@ -969,7 +973,7 @@ bool node_is_stmt_kind(Node *n) {
 // The element count of a checked VLA dimension: its length snapshot, less the
 // terminator slot of an `_Nt_checked` row. Typed, and fresh on every call.
 Node *checked_vla_extent(VirtualMachine *vm, Type *ty, Token *tok) {
-    Node *n = ty->vla_len;
+    Node *n = type_arr(ty)->vla_len;
     add_type(vm, n);
     if (ty->checked_kind == CHECKED_NTARRAY) {
         n = new_binary(vm, ND_SUB, n, new_long(vm, 1, tok), tok);
@@ -1018,8 +1022,7 @@ Node *checked_vla_extent(VirtualMachine *vm, Type *ty, Token *tok) {
 // line of defense.
 static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
                                   Node **out_hi) {
-    if (ty->checked_bounds_form == CB_NONE ||
-        ty->checked_bounds_form == CB_UNKNOWN)
+    if (type_chk(ty)->form == CB_NONE || type_chk(ty)->form == CB_UNKNOWN)
         return;
 
     // #487: a checked ARRAY's (or checked-array-adjusted parameter's) bounds
@@ -1029,41 +1032,41 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
     // func_params() for this case, and checked_array_extent carries the
     // already-resolved element count instead (see its comment in src/cccc.h).
     // No side-effect check is needed: a plain integer literal can't have one.
-    if (!ty->checked_bounds_arg1 && ty->checked_array_extent > 0) {
-        *out_hi = new_long(vm, ty->checked_array_extent, ty->name);
+    if (!type_chk(ty)->arg1 && type_chk(ty)->checked_array_extent > 0) {
+        *out_hi = new_long(vm, type_chk(ty)->checked_array_extent, ty->name);
         return;
     }
 
     // A local checked VLA is bounded by its declaration's one-time length
     // snapshot (compute_vla_size()), not by re-reading the extent expression.
     // A VLA parameter has checked_bounds_arg1 and takes the path below.
-    if (ty->kind == TY_VLA && !ty->checked_bounds_arg1 &&
-        ty->checked_vla_extent_tok) {
+    if (ty->kind == TY_VLA && !type_chk(ty)->arg1 &&
+        type_chk(ty)->vla_extent_tok) {
         *out_hi = checked_vla_extent(vm, ty, ty->name);
         return;
     }
 
     // An incomplete checked array (`int a _Checked[] = {...}`) has no extent
     // until its initializer sizes it; the initializer path resolves again.
-    if (!ty->checked_bounds_arg1 && ty->checked_bounds_form == CB_COUNT)
+    if (!type_chk(ty)->arg1 && type_chk(ty)->form == CB_COUNT)
         return;
 
     Token *tok;
 
-    if (ty->checked_bounds_form == CB_RANGE) {
-        tok      = ty->checked_bounds_arg1;
+    if (type_chk(ty)->form == CB_RANGE) {
+        tok      = type_chk(ty)->arg1;
         Node *lo = assign(vm, &tok, tok);
         add_type(vm, lo);
         if (node_has_side_effects(lo))
-            error_tok(vm, ty->checked_bounds_arg1,
+            error_tok(vm, type_chk(ty)->arg1,
                       "checked-pointer bounds expression must not have side "
                       "effects -- it is re-evaluated at every access");
 
-        tok      = ty->checked_bounds_arg2;
+        tok      = type_chk(ty)->arg2;
         Node *hi = assign(vm, &tok, tok);
         add_type(vm, hi);
         if (node_has_side_effects(hi))
-            error_tok(vm, ty->checked_bounds_arg2,
+            error_tok(vm, type_chk(ty)->arg2,
                       "checked-pointer bounds expression must not have side "
                       "effects -- it is re-evaluated at every access");
 
@@ -1073,15 +1076,15 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
     }
 
     // CB_COUNT / CB_BYTE_COUNT
-    tok     = ty->checked_bounds_arg1;
+    tok     = type_chk(ty)->arg1;
     Node *n = assign(vm, &tok, tok);
     add_type(vm, n);
     if (node_has_side_effects(n))
-        error_tok(vm, ty->checked_bounds_arg1,
+        error_tok(vm, type_chk(ty)->arg1,
                   "checked-pointer bounds expression must not have side "
                   "effects -- it is re-evaluated at every access");
     // `_Nt_checked[n]` reserves the last slot for the terminator.
-    if (ty->checked_vla_extent_tok && ty->checked_kind == CHECKED_NTARRAY) {
+    if (type_chk(ty)->vla_extent_tok && ty->checked_kind == CHECKED_NTARRAY) {
         n = new_binary(vm, ND_SUB, n, new_long(vm, 1, tok), tok);
         add_type(vm, n);
     }
@@ -1147,8 +1150,8 @@ static void check_member_bounds_template(VirtualMachine *vm, Node *n,
 void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
     bool any = false;
     for (Member *mem = members; mem; mem = mem->next)
-        if (mem->name && mem->ty->checked_bounds_form != CB_NONE &&
-            mem->ty->checked_bounds_form != CB_UNKNOWN) {
+        if (mem->name && type_chk(mem->ty)->form != CB_NONE &&
+            type_chk(mem->ty)->form != CB_UNKNOWN) {
             any = true;
             break;
         }
@@ -1168,8 +1171,8 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
         push_scope(vm, mem->name->loc, mem->name->len)->var = placeholder;
     }
     for (Member *mem = members; mem; mem = mem->next) {
-        if (!mem->name || mem->ty->checked_bounds_form == CB_NONE ||
-            mem->ty->checked_bounds_form == CB_UNKNOWN)
+        if (!mem->name || type_chk(mem->ty)->form == CB_NONE ||
+            type_chk(mem->ty)->form == CB_UNKNOWN)
             continue;
         resolve_bounds_tokens(vm, mem->ty, &mem->checked_bounds_lo,
                               &mem->checked_bounds_hi);
@@ -1237,19 +1240,17 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
 // error_tok() and a speculative type-lookahead declarator probe must never
 // fire a fatal error for a declaration that is about to be discarded.
 void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
-    if (fn_ty->checked_param_tmpl_done || vm->compiler.in_type_lookahead)
+    if (type_chk(fn_ty)->param_tmpl_done || vm->compiler.in_type_lookahead)
         return;
-    fn_ty->checked_param_tmpl_done = true;
+    type_chk_mut(vm, fn_ty)->param_tmpl_done = true;
 
     Type *ret                      = fn_ty->return_ty;
-    bool  ret_has_bounds           = ret && ret->kind == TY_PTR &&
-                                     ret->checked_kind != CHECKED_NONE &&
-                                     ret->checked_bounds_form != CB_NONE &&
-                                     ret->checked_bounds_form != CB_UNKNOWN;
+    bool  ret_has_bounds =
+        ret && ret->kind == TY_PTR && ret->checked_kind != CHECKED_NONE &&
+        type_chk(ret)->form != CB_NONE && type_chk(ret)->form != CB_UNKNOWN;
     bool  any                      = ret_has_bounds;
     for (Type *p = fn_ty->params; p && !any; p = p->next)
-        if (p->checked_bounds_form != CB_NONE &&
-            p->checked_bounds_form != CB_UNKNOWN)
+        if (type_chk(p)->form != CB_NONE && type_chk(p)->form != CB_UNKNOWN)
             any = true;
     if (!any)
         return;
@@ -1274,22 +1275,23 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
     }
 
     for (Type *p = fn_ty->params; p; p = p->next) {
-        if (p->checked_bounds_form == CB_NONE ||
-            p->checked_bounds_form == CB_UNKNOWN)
+        if (type_chk(p)->form == CB_NONE || type_chk(p)->form == CB_UNKNOWN)
             continue;
-        Token *err_tok = p->name ? p->name : p->checked_bounds_arg1;
-        resolve_bounds_tokens(vm, p, &p->checked_param_bounds_lo,
-                              &p->checked_param_bounds_hi);
-        check_param_bounds_template(vm, p->checked_param_bounds_lo, err_tok);
-        check_param_bounds_template(vm, p->checked_param_bounds_hi, err_tok);
+        Token *err_tok = p->name ? p->name : type_chk(p)->arg1;
+        resolve_bounds_tokens(vm, p, &type_chk_mut(vm, p)->param_bounds_lo,
+                              &type_chk_mut(vm, p)->param_bounds_hi);
+        check_param_bounds_template(vm, type_chk(p)->param_bounds_lo, err_tok);
+        check_param_bounds_template(vm, type_chk(p)->param_bounds_hi, err_tok);
     }
 
     if (ret_has_bounds) {
-        Token *err_tok = ret->checked_bounds_arg1;
-        resolve_bounds_tokens(vm, ret, &fn_ty->checked_ret_bounds_lo,
-                              &fn_ty->checked_ret_bounds_hi);
-        check_param_bounds_template(vm, fn_ty->checked_ret_bounds_lo, err_tok);
-        check_param_bounds_template(vm, fn_ty->checked_ret_bounds_hi, err_tok);
+        Token *err_tok = type_chk(ret)->arg1;
+        resolve_bounds_tokens(vm, ret, &type_chk_mut(vm, fn_ty)->ret_bounds_lo,
+                              &type_chk_mut(vm, fn_ty)->ret_bounds_hi);
+        check_param_bounds_template(vm, type_chk(fn_ty)->ret_bounds_lo,
+                                    err_tok);
+        check_param_bounds_template(vm, type_chk(fn_ty)->ret_bounds_hi,
+                                    err_tok);
     }
 
     leave_scope(vm);
@@ -1364,17 +1366,18 @@ static bool checked_bounds_conflict(Type *o, Node *o_lo, Node *o_hi, Type *n,
     if (o->checked_kind != CHECKED_NONE && n->checked_kind != CHECKED_NONE &&
         o->checked_kind != n->checked_kind)
         return true;
-    if (o->checked_bounds_form == CB_NONE || n->checked_bounds_form == CB_NONE)
+    if (type_chk(o)->form == CB_NONE || type_chk(n)->form == CB_NONE)
         return false;
-    return o->checked_bounds_form != n->checked_bounds_form ||
-           o->checked_array_extent != n->checked_array_extent ||
+    return type_chk(o)->form != type_chk(n)->form ||
+           type_chk(o)->checked_array_extent !=
+               type_chk(n)->checked_array_extent ||
            !checked_tmpl_equal(o_lo, n_lo) || !checked_tmpl_equal(o_hi, n_hi);
 }
 
 static void checked_conflict_error(VirtualMachine *vm, Type *n, Token *new_tok,
                                    Token *old_tok, const char *name,
                                    const char *what) {
-    Token *at = n->name ? n->name : n->checked_bounds_arg1;
+    Token *at = n->name ? n->name : type_chk(n)->arg1;
     if (!at)
         at = new_tok;
     error_tok(vm, at,
@@ -1394,17 +1397,18 @@ static void check_checked_iface_conflict(VirtualMachine *vm, Type *old_ty,
     Type *o = old_ty->return_ty, *n = ty->return_ty;
     if (o && n && o->kind == TY_PTR && n->kind == TY_PTR &&
         checked_bounds_conflict(
-            o, old_ty->checked_ret_bounds_lo, old_ty->checked_ret_bounds_hi, n,
-            ty->checked_ret_bounds_lo, ty->checked_ret_bounds_hi))
+            o, type_chk(old_ty)->ret_bounds_lo, type_chk(old_ty)->ret_bounds_hi,
+            n, type_chk(ty)->ret_bounds_lo, type_chk(ty)->ret_bounds_hi))
         checked_conflict_error(vm, n, new_tok, old_tok, name,
                                "the return value");
 
     int idx = 0;
     for (o = old_ty->params, n = ty->params; o && n; o = o->next, n = n->next) {
         idx++;
-        if (checked_bounds_conflict(
-                o, o->checked_param_bounds_lo, o->checked_param_bounds_hi, n,
-                n->checked_param_bounds_lo, n->checked_param_bounds_hi)) {
+        if (checked_bounds_conflict(o, type_chk(o)->param_bounds_lo,
+                                    type_chk(o)->param_bounds_hi, n,
+                                    type_chk(n)->param_bounds_lo,
+                                    type_chk(n)->param_bounds_hi)) {
             char what[32];
             snprintf(what, sizeof what, "parameter %d", idx);
             checked_conflict_error(vm, n, new_tok, old_tok, name, what);
@@ -1419,27 +1423,26 @@ static void check_checked_iface_conflict(VirtualMachine *vm, Type *old_ty,
 static bool checked_needs_adopt(Type *o, Type *n, bool defaults) {
     if (defaults)
         return o->kind == TY_PTR && o->checked_kind == CHECKED_NONE &&
-               o->checked_bounds_form == CB_NONE &&
-               n->checked_bounds_form != CB_NONE;
+               type_chk(o)->form == CB_NONE && type_chk(n)->form != CB_NONE;
     return (o->checked_kind == CHECKED_NONE &&
             n->checked_kind != CHECKED_NONE) ||
-           (o->checked_bounds_form == CB_NONE &&
-            n->checked_bounds_form != CB_NONE);
+           (type_chk(o)->form == CB_NONE && type_chk(n)->form != CB_NONE);
 }
 
-static void checked_adopt(Type *dst, Type *src) {
+static void checked_adopt(VirtualMachine *vm, Type *dst, Type *src) {
     if (dst->checked_kind == CHECKED_NONE)
         dst->checked_kind = src->checked_kind;
-    if (dst->checked_bounds_form != CB_NONE ||
-        src->checked_bounds_form == CB_NONE)
+    if (type_chk(dst)->form != CB_NONE || type_chk(src)->form == CB_NONE)
         return;
-    dst->checked_bounds_form     = src->checked_bounds_form;
-    dst->checked_bounds_arg1     = src->checked_bounds_arg1;
-    dst->checked_bounds_arg2     = src->checked_bounds_arg2;
-    dst->checked_array_extent    = src->checked_array_extent;
-    dst->checked_vla_extent_tok  = src->checked_vla_extent_tok;
-    dst->checked_param_bounds_lo = src->checked_param_bounds_lo;
-    dst->checked_param_bounds_hi = src->checked_param_bounds_hi;
+    TypeChecked       *d    = type_chk_mut(vm, dst);
+    const TypeChecked *c    = type_chk(src);
+    d->form                 = c->form;
+    d->arg1                 = c->arg1;
+    d->arg2                 = c->arg2;
+    d->checked_array_extent = c->checked_array_extent;
+    d->vla_extent_tok       = c->vla_extent_tok;
+    d->param_bounds_lo      = c->param_bounds_lo;
+    d->param_bounds_hi      = c->param_bounds_hi;
 }
 
 // `defaults` merges a built-in table prototype (apply_checked_libc_bounds):
@@ -1468,20 +1471,20 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
              o = o->next, n = n->next, idx++) {
             Type *c = copy_type(vm, o);
             if ((fn->checked_libc_mask & (1u << idx)) &&
-                n->checked_bounds_form != CB_NONE) {
+                type_chk(n)->form != CB_NONE) {
                 c->checked_kind              = CHECKED_NONE;
-                c->checked_bounds_form       = CB_NONE;
-                c->checked_bounds_arg1       = NULL;
-                c->checked_bounds_arg2       = NULL;
-                c->checked_param_bounds_lo   = NULL;
-                c->checked_param_bounds_hi   = NULL;
+                type_chk_mut(vm, c)->form             = CB_NONE;
+                type_chk_mut(vm, c)->arg1             = NULL;
+                type_chk_mut(vm, c)->arg2             = NULL;
+                type_chk_mut(vm, c)->param_bounds_lo  = NULL;
+                type_chk_mut(vm, c)->param_bounds_hi  = NULL;
                 fn->checked_libc_mask       &= ~(1u << idx);
             }
             *tail = c;
             tail  = &c->next;
         }
         *tail          = NULL;
-        reset->checked_param_tmpl_done = true;
+        type_chk_mut(vm, reset)->param_tmpl_done = true;
         fn->ty         = old_ty = reset;
     }
 
@@ -1508,10 +1511,12 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
     Type *merged = copy_type(vm, old_ty);
     if (ret_adopt) {
         merged->return_ty = copy_type(vm, old_ty->return_ty);
-        checked_adopt(merged->return_ty, ty->return_ty);
-        if (old_ty->return_ty->checked_bounds_form == CB_NONE) {
-            merged->checked_ret_bounds_lo = ty->checked_ret_bounds_lo;
-            merged->checked_ret_bounds_hi = ty->checked_ret_bounds_hi;
+        checked_adopt(vm, merged->return_ty, ty->return_ty);
+        if (type_chk(old_ty->return_ty)->form == CB_NONE) {
+            type_chk_mut(vm, merged)->ret_bounds_lo =
+                type_chk(ty)->ret_bounds_lo;
+            type_chk_mut(vm, merged)->ret_bounds_hi =
+                type_chk(ty)->ret_bounds_hi;
         }
     }
     Type **tail = &merged->params;
@@ -1519,7 +1524,7 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
          o = o->next, n = n->next) {
         Type *c = copy_type(vm, o);
         if (!defaults || checked_needs_adopt(o, n, true))
-            checked_adopt(c, n);
+            checked_adopt(vm, c, n);
         *tail = c;
         tail  = &c->next;
     }
@@ -1562,7 +1567,7 @@ static Type *adopt_fn_iface(VirtualMachine *vm, Type *def_fn, Type *proto_fn) {
         if (d->kind == TY_PTR && p->kind == TY_PTR) {
             if (checked_needs_adopt(d, p, false)) {
                 c = copy_type(vm, d);
-                checked_adopt(c, p);
+                checked_adopt(vm, c, p);
                 changed = true;
             }
             if (d->base && p->base) {
@@ -1588,16 +1593,18 @@ static Type *adopt_fn_iface(VirtualMachine *vm, Type *def_fn, Type *proto_fn) {
     if (dr && pr && dr->kind == TY_PTR && pr->kind == TY_PTR &&
         checked_needs_adopt(dr, pr, false)) {
         merged->return_ty = copy_type(vm, dr);
-        checked_adopt(merged->return_ty, pr);
-        if (dr->checked_bounds_form == CB_NONE) {
-            merged->checked_ret_bounds_lo = proto_fn->checked_ret_bounds_lo;
-            merged->checked_ret_bounds_hi = proto_fn->checked_ret_bounds_hi;
+        checked_adopt(vm, merged->return_ty, pr);
+        if (type_chk(dr)->form == CB_NONE) {
+            type_chk_mut(vm, merged)->ret_bounds_lo =
+                type_chk(proto_fn)->ret_bounds_lo;
+            type_chk_mut(vm, merged)->ret_bounds_hi =
+                type_chk(proto_fn)->ret_bounds_hi;
         }
         changed = true;
     }
     if (!changed)
         return NULL;
-    merged->checked_param_tmpl_done = true;
+    type_chk_mut(vm, merged)->param_tmpl_done = true;
     return merged;
 }
 
@@ -1630,7 +1637,7 @@ unsigned adopt_checked_definition_bounds(VirtualMachine *vm, Obj *fn,
             d->kind == TY_PTR && p->kind == TY_PTR) {
             if (checked_needs_adopt(d, p, false)) {
                 c = copy_type(vm, d);
-                checked_adopt(c, p);
+                checked_adopt(vm, c, p);
                 mask |= 1u << idx;
             }
             if (d->base && p->base) {

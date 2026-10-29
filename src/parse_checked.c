@@ -234,8 +234,8 @@ static bool checked_nt_pointee_supported(Type *base_ty);
 static bool checked_ret_form_ok(Type *ret) {
     return ret && ret->kind == TY_PTR && ret->checked_kind != CHECKED_NONE &&
            (ret->checked_kind == CHECKED_SINGLE ||
-            (ret->checked_bounds_form != CB_NONE &&
-             ret->checked_bounds_form != CB_UNKNOWN));
+            (type_chk(ret)->form != CB_NONE &&
+             type_chk(ret)->form != CB_UNKNOWN));
 }
 
 // True if a value of parameter type `p` can be held in a temp and passed on:
@@ -292,11 +292,12 @@ static Node *checked_call_root(Node *n) {
                     !checked_ret_form_ok(fty->return_ty))
                     return NULL;
                 if (fty->return_ty->checked_kind != CHECKED_SINGLE &&
-                    !fty->checked_ret_bounds_lo && !fty->checked_ret_bounds_hi)
+                    !type_chk(fty)->ret_bounds_lo &&
+                    !type_chk(fty)->ret_bounds_hi)
                     return NULL;
-                return checked_ret_tmpl_ok(fty->checked_ret_bounds_lo,
+                return checked_ret_tmpl_ok(type_chk(fty)->ret_bounds_lo,
                                            fty->params, n->args) &&
-                               checked_ret_tmpl_ok(fty->checked_ret_bounds_hi,
+                               checked_ret_tmpl_ok(type_chk(fty)->ret_bounds_hi,
                                                    fty->params, n->args)
                            ? n
                            : NULL;
@@ -761,12 +762,14 @@ static void strip_row_checks(Node *n) {
 // temporary (`vla_size`); element-size arithmetic reads that instead of the
 // placeholder get_vm_size() reports for a TY_VLA.
 static bool checked_vla_row_ready(Type *ty) {
-    return ty->kind == TY_VLA && ty->vla_len && ty->vla_size;
+    return ty->kind == TY_VLA && type_arr(ty)->vla_len &&
+           type_arr(ty)->vla_size;
 }
 
 static Node *checked_elem_size_node(VirtualMachine *vm, Type *ty, Token *tok) {
     if (ty && ty->kind == TY_VLA) {
-        Node *n = new_cast(vm, new_var_node(vm, ty->vla_size, tok), ty_long);
+        Node *n = new_cast(vm, new_var_node(vm, type_arr(ty)->vla_size, tok),
+                           ty_long);
         add_type(vm, n);
         return n;
     }
@@ -889,10 +892,10 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                              : base.row ? base.row->checked_kind
                              : base.var ? base.var->checked_kind
                                         : base.mem->ty->checked_kind;
-    CheckedBoundsForm form = plain_row  ? CB_COUNT
-                             : base.row ? base.row->checked_bounds_form
-                             : base.var ? base.var->checked_bounds_form
-                                        : base.mem->ty->checked_bounds_form;
+    CheckedBoundsForm form       = plain_row  ? CB_COUNT
+                                   : base.row ? type_chk(base.row)->form
+                                   : base.var ? base.var->checked_bounds_form
+                                              : type_chk(base.mem->ty)->form;
     Node             *resolved_lo =
         base.var ? base.var->checked_bounds_lo
         : base.mem ? base.mem->checked_bounds_lo
@@ -903,10 +906,11 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
             return;
         resolved_hi = checked_vla_extent(vm, base.row, tok);
     } else if (base.row) {
-        resolved_hi = new_long(vm,
-                               plain_row ? base.row->array_len
-                                         : base.row->checked_array_extent,
-                               tok);
+        resolved_hi =
+            new_long(vm,
+                     plain_row ? base.row->array_len
+                               : type_chk(base.row)->checked_array_extent,
+                     tok);
         add_type(vm, resolved_hi);
     } else {
         resolved_hi =
@@ -2464,9 +2468,9 @@ static Obj *new_checked_arg_temp(VirtualMachine *vm, Type *p, Node **arg_by_idx,
                                  int nargs, int idx) {
     Obj *ca               = new_checked_call_temp(vm, p);
     ca->checked_bounds_lo = clone_param_bounds_node(
-        vm, p->checked_param_bounds_lo, arg_by_idx, nargs, idx, ca);
+        vm, type_chk(p)->param_bounds_lo, arg_by_idx, nargs, idx, ca);
     ca->checked_bounds_hi = clone_param_bounds_node(
-        vm, p->checked_param_bounds_hi, arg_by_idx, nargs, idx, ca);
+        vm, type_chk(p)->param_bounds_hi, arg_by_idx, nargs, idx, ca);
     return ca;
 }
 
@@ -2577,18 +2581,18 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
         arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * (nargs + 1));
     for (int i = 0; i <= nargs; i++)
         reads[i] = NULL;
-    hoist_ret_bounds_args(vm, fty->checked_ret_bounds_lo, fty->params,
+    hoist_ret_bounds_args(vm, type_chk(fty)->ret_bounds_lo, fty->params,
                           callee->args, reads, alloc_fn, tok);
-    hoist_ret_bounds_args(vm, fty->checked_ret_bounds_hi, fty->params,
+    hoist_ret_bounds_args(vm, type_chk(fty)->ret_bounds_hi, fty->params,
                           callee->args, reads, alloc_fn, tok);
 
     Obj *cr = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ret)
                        : new_checked_call_temp(vm, ret);
     cr->checked_call_result = true;
     cr->checked_bounds_lo   = clone_param_bounds_node(
-        vm, fty->checked_ret_bounds_lo, reads, nargs, 0, cr);
+        vm, type_chk(fty)->ret_bounds_lo, reads, nargs, 0, cr);
     cr->checked_bounds_hi = clone_param_bounds_node(
-        vm, fty->checked_ret_bounds_hi, reads, nargs, 0, cr);
+        vm, type_chk(fty)->ret_bounds_hi, reads, nargs, 0, cr);
 
     Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     *copy      = *call;
@@ -2635,9 +2639,9 @@ static bool checked_row_of_candidate(Node *a) {
 static bool checked_param_qualifies(Type *p, Node *a) {
     if (p->kind != TY_PTR || p->checked_kind == CHECKED_NONE)
         return false;
-    bool has_form = p->checked_kind == CHECKED_SINGLE ||
-                    (p->checked_bounds_form != CB_NONE &&
-                     p->checked_bounds_form != CB_UNKNOWN);
+    bool has_form =
+        p->checked_kind == CHECKED_SINGLE ||
+        (type_chk(p)->form != CB_NONE && type_chk(p)->form != CB_UNKNOWN);
     if (!has_form)
         return false;
     CheckedBase src_base = find_checked_base(a);
@@ -2713,10 +2717,10 @@ static Node *hoist_checked_call_siblings(VirtualMachine *vm, Type *fn_ty,
             continue;
         for (int i = 0; i < nargs; i++)
             trial[i] = vtrial[i] = false;
-        if (checked_param_hoist_siblings(p->checked_param_bounds_lo,
+        if (checked_param_hoist_siblings(type_chk(p)->param_bounds_lo,
                                          fn_ty->params, arg_by_idx, nargs, idx,
                                          trial, vtrial) &&
-            checked_param_hoist_siblings(p->checked_param_bounds_hi,
+            checked_param_hoist_siblings(type_chk(p)->param_bounds_hi,
                                          fn_ty->params, arg_by_idx, nargs, idx,
                                          trial, vtrial))
             for (int i = 0; i < nargs; i++) {
@@ -2745,9 +2749,9 @@ static Node *hoist_checked_call_siblings(VirtualMachine *vm, Type *fn_ty,
         pk       = fn_ty->params;
         for (int k = 1; k <= nargs && pk; k++, pk = pk->next) {
             if (!vneed[k - 1] || done[k - 1] ||
-                !checked_param_bounds_args_ok(pk->checked_param_bounds_lo,
+                !checked_param_bounds_args_ok(type_chk(pk)->param_bounds_lo,
                                               arg_by_idx, nargs, k) ||
-                !checked_param_bounds_args_ok(pk->checked_param_bounds_hi,
+                !checked_param_bounds_args_ok(type_chk(pk)->param_bounds_hi,
                                               arg_by_idx, nargs, k))
                 continue;
             Node *a    = arg_by_idx[k - 1];
@@ -2822,9 +2826,9 @@ Node *rewrite_checked_call_args(VirtualMachine *vm, Type *fn_ty, Node *args,
         // Gate: every OTHER parameter this parameter's bounds template
         // references must be fed, at this call, by a side-effect-free
         // argument (a hoisted one is).
-        if (!checked_param_bounds_args_ok(p->checked_param_bounds_lo,
+        if (!checked_param_bounds_args_ok(type_chk(p)->param_bounds_lo,
                                           arg_by_idx, nargs, idx) ||
-            !checked_param_bounds_args_ok(p->checked_param_bounds_hi,
+            !checked_param_bounds_args_ok(type_chk(p)->param_bounds_hi,
                                           arg_by_idx, nargs, idx))
             continue;
 
@@ -2949,11 +2953,12 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
         if (equal(tok, "("))
             error_tok(vm, name_tok, "'%s' takes no arguments", name);
         CheckedCastKind kind = !strcmp(name, "assume") ? CC_ASSUME : CC_DYNAMIC;
-        if (ty->checked_cast_kind != CC_NONE && ty->checked_cast_kind != kind)
+        if (type_chk(ty)->cast_kind != CC_NONE &&
+            type_chk(ty)->cast_kind != kind)
             error_tok(vm, name_tok,
                       "'assume' and 'dynamic' cannot both be used on the "
                       "same cast");
-        ty->checked_cast_kind = kind;
+        type_chk_mut(vm, ty)->cast_kind = kind;
         return tok;
     }
 
@@ -2964,19 +2969,19 @@ Token *apply_checked_ptr_attr(VirtualMachine *vm, Token *name_tok, Token *tok,
     Token *after = capture_checked_bounds_args(vm, tok, &arg1, &arg2);
 
     if (!strcmp(name, "count")) {
-        ty->checked_bounds_form = CB_COUNT;
-        ty->checked_bounds_arg1 = arg1;
+        type_chk_mut(vm, ty)->form = CB_COUNT;
+        type_chk_mut(vm, ty)->arg1 = arg1;
     } else if (!strcmp(name, "byte_count")) {
-        ty->checked_bounds_form = CB_BYTE_COUNT;
-        ty->checked_bounds_arg1 = arg1;
+        type_chk_mut(vm, ty)->form = CB_BYTE_COUNT;
+        type_chk_mut(vm, ty)->arg1 = arg1;
     } else { // bounds
         if (arg2) {
-            ty->checked_bounds_form = CB_RANGE;
-            ty->checked_bounds_arg1 = arg1;
-            ty->checked_bounds_arg2 = arg2;
+            type_chk_mut(vm, ty)->form = CB_RANGE;
+            type_chk_mut(vm, ty)->arg1 = arg1;
+            type_chk_mut(vm, ty)->arg2 = arg2;
         } else if (arg1 && arg1->kind == TK_IDENT && arg1->len == 7 &&
                    !memcmp(arg1->loc, "unknown", 7)) {
-            ty->checked_bounds_form = CB_UNKNOWN;
+            type_chk_mut(vm, ty)->form = CB_UNKNOWN;
         } else {
             error_tok(vm, name_tok,
                       "'bounds' requires two arguments (lo, hi), or the "
@@ -3022,14 +3027,14 @@ static void dynamic_source_no_bounds_error(VirtualMachine *vm, Token *tok) {
 // caught even in a build that never enables runtime enforcement.
 void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
                                        Type *ty, Token *tok) {
-    if (ty->checked_cast_kind != CC_DYNAMIC)
+    if (type_chk(ty)->cast_kind != CC_DYNAMIC)
         return;
     add_type(vm, cast_node->lhs);
     // The inner bounds cast's claim is the source's bounds; with
     // --checked-pointers off it is still a plain ND_CAST.
     if (checked_cast_root(cast_node->lhs) ||
         (cast_node->lhs->kind == ND_CAST && cast_node->lhs->ty &&
-         cast_node->lhs->ty->checked_cast_kind != CC_NONE))
+         type_chk(cast_node->lhs->ty)->cast_kind != CC_NONE))
         return;
     CheckedBase src_base = find_checked_base(cast_node->lhs);
     Node       *src_lo = NULL, *src_hi = NULL;
@@ -4212,9 +4217,9 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !rty || rty->kind != TY_PTR ||
         rty->checked_kind == CHECKED_NONE)
         return;
-    bool has_form = rty->checked_kind == CHECKED_SINGLE ||
-                    (rty->checked_bounds_form != CB_NONE &&
-                     rty->checked_bounds_form != CB_UNKNOWN);
+    bool has_form =
+        rty->checked_kind == CHECKED_SINGLE ||
+        (type_chk(rty)->form != CB_NONE && type_chk(rty)->form != CB_UNKNOWN);
     if (!has_form)
         return;
     Obj *var = new_lvar(vm, "", 0, rty);
@@ -4228,8 +4233,8 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     for (Obj *p = fn->params; p; p = p->next)
         params[i++] = p;
     resolve_checked_template_bounds(
-        vm, params, nparams, fn->ty->checked_ret_bounds_lo,
-        fn->ty->checked_ret_bounds_hi, 0, &var->checked_bounds_lo,
+        vm, params, nparams, type_chk(fn->ty)->ret_bounds_lo,
+        type_chk(fn->ty)->ret_bounds_hi, 0, &var->checked_bounds_lo,
         &var->checked_bounds_hi);
     fn->checked_ret_var = var;
 
@@ -4316,7 +4321,7 @@ Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
     // above), so it never collides with a real identifier and needs no
     // uniqueness counter of its own.
     Obj *var               = new_lvar(vm, "", 0, ty);
-    var->checked_cast_kind = ty->checked_cast_kind;
+    var->checked_cast_kind = type_chk(ty)->cast_kind;
     resolve_checked_bounds(vm, var);
 
     Node *lhs = new_var_node(vm, var, tok);
@@ -4512,15 +4517,14 @@ void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
                             "[[cccc::unchecked]] { ... }");
         return;
     }
-    if (ty->checked_kind != CHECKED_SINGLE &&
-        ty->checked_bounds_form == CB_NONE) {
+    if (ty->checked_kind != CHECKED_SINGLE && type_chk(ty)->form == CB_NONE) {
         checked_region_diag(vm, tok,
                             "cast to an array pointer with no bounds in a "
                             "checked region -- add count(), byte_count() or "
                             "bounds(), or bounds(unknown) to opt out");
         return;
     }
-    if (ty->checked_bounds_form != CB_UNKNOWN &&
+    if (type_chk(ty)->form != CB_UNKNOWN &&
         !checked_source_ok(expr, /*visible_ok=*/false))
         checked_region_diag(
             vm, tok,
@@ -4535,7 +4539,7 @@ void cc_check_checked_scope_cast(VirtualMachine *vm, Node *expr, Type *ty,
 void cc_check_checked_scope_conv(VirtualMachine *vm, Node *src, Type *to,
                                  Token *tok) {
     if (vm->compiler.in_type_lookahead || !src || !is_checked_ptr_target(to) ||
-        to->checked_bounds_form == CB_UNKNOWN)
+        type_chk(to)->form == CB_UNKNOWN)
         return;
     if (cc_checked_scope_at(vm, tok) != CHECKED_SCOPE_ON)
         return;
@@ -4590,8 +4594,7 @@ void cc_check_checked_scope_decl(VirtualMachine *vm, Type *ty, Token *name_tok,
     if (cc_checked_scope_at(vm, name_tok) != CHECKED_SCOPE_ON)
         return;
     if (ty->checked_kind != CHECKED_NONE) {
-        if (ty->checked_kind != CHECKED_SINGLE &&
-            ty->checked_bounds_form == CB_NONE)
+        if (ty->checked_kind != CHECKED_SINGLE && type_chk(ty)->form == CB_NONE)
             checked_region_diag(
                 vm, name_tok,
                 "%s '%.*s' has no bounds in a checked region -- add "
@@ -4817,7 +4820,7 @@ static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
         case TY_STRUCT:
             if (!init->children)
                 return;
-            for (Member *m = ty->members; m; m = m->next) {
+            for (Member *m = type_agg(ty)->members; m; m = m->next) {
                 if (m->is_bitfield)
                     continue;
                 Initializer *child = init->children[m->idx];
@@ -4826,7 +4829,7 @@ static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
                 if (m->ty->kind == TY_PTR)
                     check_static_checked_slot(
                         vm, child->expr, m->ty, m->ty->checked_kind,
-                        m->ty->checked_bounds_form, m->checked_bounds_lo,
+                        type_chk(m->ty)->form, m->checked_bounds_lo,
                         m->checked_bounds_hi, init, NULL);
                 else
                     check_static_checked_walk(vm, child, m->ty);
@@ -4838,8 +4841,7 @@ static void check_static_checked_walk(VirtualMachine *vm, Initializer *init,
             if (init->mem->ty->kind == TY_PTR)
                 check_static_checked_slot(
                     vm, init->children[init->mem->idx]->expr, init->mem->ty,
-                    init->mem->ty->checked_kind,
-                    init->mem->ty->checked_bounds_form,
+                    init->mem->ty->checked_kind, type_chk(init->mem->ty)->form,
                     init->mem->checked_bounds_lo, init->mem->checked_bounds_hi,
                     NULL, NULL);
             else

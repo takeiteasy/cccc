@@ -667,8 +667,9 @@ static int handle_kind_of_type(const Type *ty) {
     const Type *pointee = ty->base;
     if (!pointee || (pointee->kind != TY_STRUCT && pointee->kind != TY_UNION))
         return CC_H_NONE;
-    const Token *tag =
-        pointee->struct_tag ? pointee->struct_tag : pointee->name;
+    const Token *tag = type_agg(pointee)->struct_tag
+                           ? type_agg(pointee)->struct_tag
+                           : pointee->name;
     if (!tag)
         return CC_H_NONE;
     const char *text = tag->loc;

@@ -167,13 +167,13 @@ void serialize_type_json(FILE *f, Type *ty, int indent) {
         free(name);
 
         // Members
-        if (ty->members) {
+        if (type_agg(ty)->members) {
             fprintf(f, ",\n");
             print_indent(f, indent + 1);
             fprintf(f, "\"members\": [\n");
 
             bool first_member = true;
-            for (Member *m = ty->members; m; m = m->next) {
+            for (Member *m = type_agg(ty)->members; m; m = m->next) {
                 if (!first_member)
                     fprintf(f, ",\n");
                 first_member = false;
@@ -359,13 +359,13 @@ static void serialize_aggregate_json(FILE *f, Type *ty, int indent,
     fprintf(f, "\"align\": %d", ty->align);
 
     // Members
-    if (ty->members) {
+    if (type_agg(ty)->members) {
         fprintf(f, ",\n");
         print_indent(f, indent + 1);
         fprintf(f, "\"members\": [\n");
 
         bool first_member = true;
-        for (Member *m = ty->members; m; m = m->next) {
+        for (Member *m = type_agg(ty)->members; m; m = m->next) {
             if (!first_member)
                 fprintf(f, ",\n");
             first_member = false;
@@ -447,13 +447,14 @@ static void serialize_enum_json(FILE *f, Type *ty, int indent) {
     fprintf(f, "\"size\": %d", ty->size);
 
     // Constants
-    if (ty->enum_constants) {
+    if (type_agg(ty)->enum_constants) {
         fprintf(f, ",\n");
         print_indent(f, indent + 1);
         fprintf(f, "\"constants\": [\n");
 
         bool first_const = true;
-        for (EnumConstant *ec = ty->enum_constants; ec; ec = ec->next) {
+        for (EnumConstant *ec = type_agg(ty)->enum_constants; ec;
+             ec               = ec->next) {
             if (!first_const)
                 fprintf(f, ",\n");
             first_const = false;
@@ -560,8 +561,9 @@ static void collect_type_recursive(Type *ty, TypeVec *seen_types,
         collect_type_recursive(ty->base, seen_types, structs, unions, enums);
 
     // Recursively collect from struct/union members
-    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->members)
-        for (Member *m = ty->members; m; m = m->next)
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+        type_agg(ty)->members)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             collect_type_recursive(m->ty, seen_types, structs, unions, enums);
 
     // Recursively collect from function return type and parameters

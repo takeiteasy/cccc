@@ -151,12 +151,13 @@ void cc_claim_spliced_chain(VirtualMachine *vm, Node *head) {
 static bool type_holds_by_value(const Type *ty, const Type *target) {
     if (!ty)
         return false;
-    if (ty == target || (ty->members && ty->members == target->members))
+    if (ty == target || (type_agg(ty)->members &&
+                         type_agg(ty)->members == type_agg(target)->members))
         return true;
     if (ty->kind == TY_ARRAY || ty->kind == TY_VLA || ty->kind == TY_VECTOR)
         return type_holds_by_value(ty->base, target);
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (const Member *m = ty->members; m; m = m->next)
+        for (const Member *m = type_agg(ty)->members; m; m = m->next)
             if (type_holds_by_value(m->ty, target))
                 return true;
     return false;
@@ -576,10 +577,11 @@ bool __builtin_ast_type_is_variadic(Type *ty) {
 static Token *type_name_token(Type *ty) {
     if (!ty)
         return NULL;
-    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) && ty->struct_tag)
-        return ty->struct_tag;
-    if (ty->kind == TY_ENUM && ty->enum_tag)
-        return ty->enum_tag;
+    if ((ty->kind == TY_STRUCT || ty->kind == TY_UNION) &&
+        type_agg(ty)->struct_tag)
+        return type_agg(ty)->struct_tag;
+    if (ty->kind == TY_ENUM && type_agg(ty)->enum_tag)
+        return type_agg(ty)->enum_tag;
     return ty->name;
 }
 
@@ -691,7 +693,8 @@ int __builtin_ast_enum_count(Type *enum_type) {
         return -1;
 
     int count = 0;
-    for (EnumConstant *ec = enum_type->enum_constants; ec; ec = ec->next)
+    for (EnumConstant *ec = type_agg(enum_type)->enum_constants; ec;
+         ec               = ec->next)
         count++;
     return count;
 }
@@ -703,7 +706,7 @@ EnumConstant *__builtin_ast_enum_at(Type *enum_type, int index) {
     if (!enum_type || enum_type->kind != TY_ENUM || index < 0)
         return NULL;
 
-    EnumConstant *ec = enum_type->enum_constants;
+    EnumConstant *ec = type_agg(enum_type)->enum_constants;
     for (int i = 0; i < index && ec; i++)
         ec = ec->next;
     return ec;
@@ -716,7 +719,8 @@ EnumConstant *__builtin_ast_enum_find(Type *enum_type, const char *name) {
     if (!enum_type || enum_type->kind != TY_ENUM || !name)
         return NULL;
 
-    for (EnumConstant *ec = enum_type->enum_constants; ec; ec = ec->next)
+    for (EnumConstant *ec = type_agg(enum_type)->enum_constants; ec;
+         ec               = ec->next)
         if (strlen(ec->name) == strlen(name) &&
             strncmp(ec->name, name, strlen(name)) == 0)
             return ec;
@@ -770,7 +774,7 @@ int __builtin_ast_struct_member_count(Type *struct_type) {
         return -1;
 
     int count = 0;
-    for (Member *m = struct_type->members; m; m = m->next)
+    for (Member *m = type_agg(struct_type)->members; m; m = m->next)
         count++;
     return count;
 }
@@ -784,7 +788,7 @@ Member *__builtin_ast_struct_member_at(Type *struct_type, int index) {
     if (struct_type->kind != TY_STRUCT && struct_type->kind != TY_UNION)
         return NULL;
 
-    Member *m = struct_type->members;
+    Member *m = type_agg(struct_type)->members;
     for (int i = 0; i < index && m; i++)
         m = m->next;
     return m;
@@ -800,7 +804,7 @@ Member *__builtin_ast_struct_member_find(Type *struct_type, const char *name) {
         return NULL;
 
     size_t name_len = strlen(name);
-    for (Member *m = struct_type->members; m; m = m->next)
+    for (Member *m = type_agg(struct_type)->members; m; m = m->next)
         if (m->name && m->name->len == (int)name_len &&
             strncmp(m->name->loc, name, name_len) == 0)
             return m;
@@ -1670,7 +1674,7 @@ Node *__builtin_ast_member(Node *obj, const char *name) {
     Member *mem = (Member *)__builtin_ast_struct_member_find(ty, name);
     if (!mem) {
         // A field of an anonymous struct/union member is reached through it.
-        for (Member *m = ty->members; m; m = m->next) {
+        for (Member *m = type_agg(ty)->members; m; m = m->next) {
             if (m->name || m->is_bitfield ||
                 (m->ty->kind != TY_STRUCT && m->ty->kind != TY_UNION))
                 continue;
@@ -2022,7 +2026,7 @@ static Node *make_gvar_compound_literal(VirtualMachine *vm, Type *ty,
         }
     } else if (ty->kind == TY_STRUCT) {
         int i = 0;
-        for (Member *m = ty->members; m && i < n; m = m->next) {
+        for (Member *m = type_agg(ty)->members; m && i < n; m = m->next) {
             if (!m->name) {
                 i++;
                 continue;
@@ -2253,7 +2257,7 @@ static Node *serdes_copy(VirtualMachine *vm, Node *obj, int obj_off,
 static void reflect_serdes_members(VirtualMachine *vm, SerdesCalls *calls,
                                    Type *ty, Node *expr, Node *buf_char,
                                    int expr_base, int ty_off, bool to_buf) {
-    for (Member *m = ty->members; m; m = m->next) {
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
         int off = expr_base + ty_off + m->offset;
 
         if (!m->name) {
@@ -2751,7 +2755,7 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
 
     // Add parameter type to function type (also append)
     Type *param_type = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
-    memcpy(param_type, type, sizeof(Type));
+    type_assign(vm, param_type, type);
     param_type->next = NULL;
     if (fn->ty->params == NULL) {
         fn->ty->params = param_type;
@@ -5330,8 +5334,8 @@ static Obj *copy_node_obj(CopyCtx *cx, Obj *o) {
 // own only when the tree computes that size.
 static bool copy_node_type_is_own(CopyCtx *cx, Type *ty) {
     for (Type *t = ty; t; t = t->base) {
-        if (t->kind == TY_VLA && t->vla_size &&
-            hashmap_get_int(&cx->declared, copy_key(t->vla_size)))
+        if (t->kind == TY_VLA && type_arr(t)->vla_size &&
+            hashmap_get_int(&cx->declared, copy_key(type_arr(t)->vla_size)))
             return true;
         if (t->kind != TY_PTR && t->kind != TY_ARRAY && t->kind != TY_VLA)
             break;
@@ -5351,8 +5355,9 @@ static Type *copy_node_type(CopyCtx *cx, Type *ty) {
     hashmap_put_int(&cx->types, copy_key(ty), c);
     c->base = copy_node_type(cx, ty->base);
     if (ty->kind == TY_VLA) {
-        c->vla_size = copy_node_obj(cx, ty->vla_size);
-        c->vla_len  = copy_node_tree(cx, ty->vla_len);
+        TypeArr *a  = type_arr_mut(cx->vm, c);
+        a->vla_size = copy_node_obj(cx, type_arr(ty)->vla_size);
+        a->vla_len  = copy_node_tree(cx, type_arr(ty)->vla_len);
     }
     return c;
 }
@@ -5596,7 +5601,7 @@ Type *__builtin_ast_make_struct(const char *name) {
     Type *ty       = struct_type(vm);
     int   name_len = (int)strlen(name);
     ty->name       = reflect_make_name_token(vm, name, name_len);
-    ty->struct_tag =
+    type_agg_mut(vm, ty)->struct_tag =
         ty->name; // #900: survives any later declarator name-overwrite
     ty->size  = 0;
     ty->align = 1;
@@ -5613,7 +5618,7 @@ Type *__builtin_ast_make_union(const char *name) {
     Type *ty       = union_type(vm);
     int   name_len = (int)strlen(name);
     ty->name       = reflect_make_name_token(vm, name, name_len);
-    ty->struct_tag =
+    type_agg_mut(vm, ty)->struct_tag =
         ty->name; // #900: survives any later declarator name-overwrite
     ty->size  = 0;
     ty->align = 1;
@@ -5643,10 +5648,10 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
     mem->align = field_type->align;
 
     // Append to the end of the members list to maintain declaration order
-    if (!ty->members) {
-        ty->members = mem;
+    if (!type_agg(ty)->members) {
+        type_agg_mut(vm, ty)->members = mem;
     } else {
-        Member *last = ty->members;
+        Member *last = type_agg(ty)->members;
         while (last->next)
             last = last->next;
         last->next = mem;
@@ -5656,7 +5661,7 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
     if (ty->kind == TY_STRUCT) {
         int bits      = 0;
         int new_align = 1;
-        for (Member *m = ty->members; m; m = m->next) {
+        for (Member *m = type_agg(ty)->members; m; m = m->next) {
             bits       = reflect_align_to(bits, m->align * 8);
             m->offset  = bits / 8;
             bits      += m->ty->size * 8;
@@ -5671,7 +5676,7 @@ Type *__builtin_ast_struct_add_field(Type *ty, const char *name,
         // Union: all members at offset 0, size = max member size
         int new_size  = 0;
         int new_align = 1;
-        for (Member *m = ty->members; m; m = m->next) {
+        for (Member *m = type_agg(ty)->members; m; m = m->next) {
             m->offset = 0;
             if (new_align < m->align)
                 new_align = m->align;
@@ -5697,7 +5702,7 @@ Type *__builtin_ast_make_enum(const char *name) {
     Type *ty       = enum_type(vm);
     int   name_len = (int)strlen(name);
     ty->name       = reflect_make_name_token(vm, name, name_len);
-    ty->enum_tag =
+    type_agg_mut(vm, ty)->enum_tag =
         ty->name; // #900: survives any later declarator name-overwrite
     reflect_push_tag_scope(vm, name, name_len, ty);
     return ty;
@@ -5720,10 +5725,10 @@ void __builtin_ast_enum_add_constant(Type *ty, const char *name,
     memset(ec, 0, sizeof(EnumConstant));
     ec->name  = arena_strdup(vm, name);
     ec->value = value;
-    if (!ty->enum_constants) {
-        ty->enum_constants = ec;
+    if (!type_agg(ty)->enum_constants) {
+        type_agg_mut(vm, ty)->enum_constants = ec;
     } else {
-        EnumConstant *last = ty->enum_constants;
+        EnumConstant *last = type_agg(ty)->enum_constants;
         while (last->next)
             last = last->next;
         last->next = ec;
