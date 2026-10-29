@@ -2160,11 +2160,11 @@ static bool is_file_scope_asm(Token *tok) {
 static Token *file_scope_asm(VirtualMachine *vm, Token *tok) {
     Token *kw = tok;
     tok       = skip(vm, tok->next, "(");
-    if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
+    if (tok->kind != TK_STR || tok_lit(tok)->ty->base->kind != TY_CHAR)
         error_tok(vm, tok, "expected asm string literal, found '%.*s'",
                   tok->len, tok->loc);
     FileAsmRecord *rec = calloc(1, sizeof(FileAsmRecord));
-    rec->text          = tok->str;
+    rec->text          = tok_lit(tok)->str;
     if (vm->compiler.file_asms_tail)
         vm->compiler.file_asms_tail->next = rec;
     else
@@ -2212,14 +2212,14 @@ static Token *method_token(VirtualMachine *vm, const char *text) {
     Token *t = tokenize_string(vm, "<method>", arena_strdup(vm, text));
     convert_pp_tokens(vm, t);
     Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *copy       = *t;
+    token_assign(vm, copy, t);
     copy->next  = NULL;
     return copy;
 }
 
 static Token *method_copy(VirtualMachine *vm, Token *t) {
     Token *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *copy       = *t;
+    token_assign(vm, copy, t);
     copy->next  = NULL;
     return copy;
 }

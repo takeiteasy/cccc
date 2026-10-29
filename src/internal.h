@@ -914,6 +914,9 @@ void type_assign(VirtualMachine *vm, Type *dst, const Type *src);
 void node_assign(VirtualMachine *vm, Node *dst, const Node *src);
 Node *node_clone(VirtualMachine *vm, const Node *src);
 void obj_assign(VirtualMachine *vm, Obj *dst, const Obj *src);
+void token_assign(VirtualMachine *vm, Token *dst, const Token *src);
+void cc_stamp_token_state(VirtualMachine *vm, Token *tok,
+                          CheckedScope checked_scope);
 void obj_set_asm_label(VirtualMachine *vm, Obj *o, char *value);
 void obj_set_deprecated_msg(VirtualMachine *vm, Obj *o, char *value);
 void obj_set_rel(VirtualMachine *vm, Obj *o, Relocation *value);

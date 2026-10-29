@@ -66,10 +66,10 @@ bool is_typename(VirtualMachine *vm, Token *tok) {
 
 static char *asm_string_literal(VirtualMachine *vm, Token *tok,
                                 const char *what) {
-    if (tok->kind != TK_STR || tok->ty->base->kind != TY_CHAR)
+    if (tok->kind != TK_STR || tok_lit(tok)->ty->base->kind != TY_CHAR)
         error_tok(vm, tok, "expected %s string literal, found '%.*s'", what,
                   tok->len, tok->loc);
-    return tok->str;
+    return tok_lit(tok)->str;
 }
 
 // An output must name modifiable storage; gen_addr's own check never runs
@@ -545,7 +545,7 @@ Token *static_assert_decl(VirtualMachine *vm, Token *tok, Node **out_cond,
         // included) -- tok->str is the already-decoded, NUL-terminated
         // buffer read_string_literal() built (tokenize.c), so its real
         // length is strlen(), not tok->len.
-        message     = tok->str;
+        message     = tok_lit(tok)->str;
         message_len = (int)strlen(message);
         tok         = tok->next;
     } else if (!c23_static_assert || vm->compiler.c_std < CCCC_STD_C23) {

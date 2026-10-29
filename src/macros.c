@@ -170,7 +170,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
 
 static Token *copy_macro_token(VirtualMachine *vm, Token *tok) {
     Token *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *copy        = *tok;
+    token_assign(vm, copy, tok);
     copy->next   = NULL;
     copy->origin = tok;
     return copy;
@@ -3194,9 +3194,9 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     if (call_tok) {
         stamped_call_tok =
             arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-        *stamped_call_tok           = *call_tok;
+        token_assign(vm, stamped_call_tok, call_tok);
         stamped_call_tok->next      = NULL;
-        stamped_call_tok->expansion = frame;
+        tok_rare_mut(vm, stamped_call_tok)->expansion = frame;
     }
     vm->compiler.macro_call_tok = stamped_call_tok;
 
@@ -4123,7 +4123,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
             equal(tok->next->next->next, ")") && tok->next->next->next->next &&
             equal(tok->next->next->next->next, ";")) {
             Token *next_tok = tok->next->next->next->next->next;
-            cc_record_emit_source(vm, tok->next->next->str);
+            cc_record_emit_source(vm, tok_lit(tok->next->next)->str);
             if (prev)
                 prev->next = next_tok;
             else
@@ -4212,7 +4212,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             char *str;
                             if (arg_start == arg_end &&
                                 arg_start->kind == TK_STR) {
-                                str = arg_start->str;
+                                str = tok_lit(arg_start)->str;
                             } else {
                                 int total = 0;
                                 for (Token *t                   = arg_start;

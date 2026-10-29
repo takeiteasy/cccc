@@ -530,7 +530,7 @@ static void string_initializer(VirtualMachine *vm, Token **rest, Token *tok,
                                Initializer *init) {
     if (init->is_flexible)
         *init = *new_initializer(
-            vm, array_of(vm, init->ty->base, tok->ty->array_len), false);
+            vm, array_of(vm, init->ty->base, tok_lit(tok)->ty->array_len), false);
 
     // Excess check after the is_flexible rewrite above: a flexible array
     // (`char c[] = "abcd"`) has just been retyped to the string's own
@@ -539,36 +539,36 @@ static void string_initializer(VirtualMachine *vm, Token **rest, Token *tok,
     // tok->ty->array_len includes the trailing NUL, which C drops silently
     // when the destination has exactly enough room for the string sans NUL
     // (`char a[4] = "abcd"` is legal, matching gcc/clang) -- hence the -1.
-    if (!init->is_flexible && tok->ty->array_len - 1 > init->ty->array_len)
+    if (!init->is_flexible && tok_lit(tok)->ty->array_len - 1 > init->ty->array_len)
         warn_tok(vm, tok, CCCC_WARN_EXCESS_INIT,
                  "initializer-string for array is too long (%d chars into "
                  "%d available)",
-                 tok->ty->array_len - 1, init->ty->array_len);
+                 tok_lit(tok)->ty->array_len - 1, init->ty->array_len);
 
     if (init->ty->checked_kind == CHECKED_NTARRAY &&
-        tok->ty->array_len - 1 >= init->ty->array_len)
+        tok_lit(tok)->ty->array_len - 1 >= init->ty->array_len)
         error_tok(vm, tok,
                   "initializer-string leaves no room for the '_Nt_checked' "
                   "null-terminator slot (%d chars into %d elements)",
-                  tok->ty->array_len - 1, init->ty->array_len);
+                  tok_lit(tok)->ty->array_len - 1, init->ty->array_len);
 
-    int len = MIN(init->ty->array_len, tok->ty->array_len);
+    int len = MIN(init->ty->array_len, tok_lit(tok)->ty->array_len);
 
     switch (init->ty->base->size) {
         case 1: {
-            char *str = tok->str;
+            char *str = tok_lit(tok)->str;
             for (int i = 0; i < len; i++)
                 init->children[i]->expr = new_num(vm, str[i], tok);
             break;
         }
         case 2: {
-            uint16_t *str = (uint16_t *)tok->str;
+            uint16_t *str = (uint16_t *)tok_lit(tok)->str;
             for (int i = 0; i < len; i++)
                 init->children[i]->expr = new_num(vm, str[i], tok);
             break;
         }
         case 4: {
-            uint32_t *str = (uint32_t *)tok->str;
+            uint32_t *str = (uint32_t *)tok_lit(tok)->str;
             for (int i = 0; i < len; i++)
                 init->children[i]->expr = new_num(vm, str[i], tok);
             break;

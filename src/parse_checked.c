@@ -4375,7 +4375,7 @@ Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
 CheckedScope cc_checked_scope_at(VirtualMachine *vm, Token *tok) {
     if (vm->compiler.checked_scope_attr != CHECKED_SCOPE_UNSET)
         return vm->compiler.checked_scope_attr;
-    return tok ? tok->checked_scope : CHECKED_SCOPE_UNSET;
+    return tok ? tok_state(tok)->checked_scope : CHECKED_SCOPE_UNSET;
 }
 
 CheckedScope cc_checked_scope_keyword(Token *tok) {
@@ -4479,10 +4479,10 @@ static bool is_checked_ptr_target(Type *ty) {
 // -Wno-checked-regions, or any pass that clears the masks, leaves it an error.
 static bool checked_region_demoted(VirtualMachine *vm, Token *tok) {
     uint64_t mask     = CCCC_WARN_CHECKED_REGIONS;
-    uint64_t warnings = tok && tok->diag_warnings
-                            ? tok->diag_warnings & ~(1ULL << 63)
+    uint64_t warnings = tok && tok_state(tok)->diag_warnings
+                            ? tok_state(tok)->diag_warnings & ~(1ULL << 63)
                             : vm->compiler.warnings;
-    uint64_t werror = tok && tok->diag_werror ? tok->diag_werror & ~(1ULL << 63)
+    uint64_t werror = tok && tok_state(tok)->diag_werror ? tok_state(tok)->diag_werror & ~(1ULL << 63)
                                               : vm->compiler.warning_errors;
     if (!(warnings & mask) || (werror & mask))
         return false;

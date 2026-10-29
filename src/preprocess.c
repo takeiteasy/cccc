@@ -1042,7 +1042,7 @@ static bool is_pragma_omp(Token *hash) {
 
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
     Token *t = cc_token_alloc(vm);
-    *t       = *tok;
+    token_assign(vm, t, tok);
     t->next  = NULL;
     return t;
 }
@@ -3953,9 +3953,9 @@ static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     tok          = preprocess(vm, copy_line(vm, rest, tok));
 
-    if (tok->kind != TK_NUM || tok->ty->kind != TY_INT)
+    if (tok->kind != TK_NUM || tok_lit(tok)->ty->kind != TY_INT)
         error_tok(vm, tok, "invalid line marker");
-    start->file->line_delta = tok->val - start->line_no;
+    start->file->line_delta = tok_lit(tok)->val - start->line_no;
 
     tok                     = tok->next;
     if (tok->kind == TK_EOF)
@@ -3963,7 +3963,7 @@ static void read_line_marker(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (tok->kind != TK_STR)
         error_tok(vm, tok, "filename expected");
-    start->file->display_name = tok->str;
+    start->file->display_name = tok_lit(tok)->str;
 }
 
 // Read a token sequence for #embed parameters (prefix, suffix, if_empty)
@@ -4340,10 +4340,10 @@ static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
         tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF) {
-        last->src_site = kw;
+        tok_rare_mut(vm, last)->src_site = kw;
         last           = last->next;
     }
-    last->src_site = kw;
+    tok_rare_mut(vm, last)->src_site = kw;
     last->next     = kw->next;
     *tok_ptr   = new_toks;
     return true;
@@ -4418,10 +4418,10 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
     // Strip trailing TK_EOF and splice new tokens before `after`.
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF) {
-        last->src_site = name_tok;
+        tok_rare_mut(vm, last)->src_site = name_tok;
         last           = last->next;
     }
-    last->src_site = name_tok;
+    tok_rare_mut(vm, last)->src_site = name_tok;
     last->next     = after;
 
     *tok_ptr   = new_toks;
@@ -4542,7 +4542,7 @@ static bool parse_scalar_operand(Token **p_ptr, RetKind *out_kind,
         return false;
     if (p->kind == TK_STR) {
         *out_kind = RET_STR;
-        *out_s    = p->str;
+        *out_s    = tok_lit(p)->str;
         *p_ptr    = p->next;
         return true;
     }
@@ -4781,7 +4781,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
     while (p && !equal(p, ")") && p->kind != TK_EOF) {
         if (equal(p, "suite") && p->next && equal(p->next, "=") &&
             p->next->next && p->next->next->kind == TK_STR) {
-            out->suite_name = p->next->next->str;
+            out->suite_name = tok_lit(p->next->next)->str;
             p               = p->next->next->next;
         } else if (equal(p, "error")) {
             p        = p->next;
@@ -4789,7 +4789,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             if (neg || (p && equal(p, "=")))
                 p = p->next;
             if (p && p->kind == TK_STR) {
-                out->error_pat        = p->str;
+                out->error_pat        = tok_lit(p)->str;
                 out->error_pat_negate = neg;
                 p                     = p->next;
             }
@@ -4808,7 +4808,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             }
         } else if (equal(p, "name") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
-            out->test_name = p->next->next->str;
+            out->test_name = tok_lit(p->next->next)->str;
             p              = p->next->next->next;
         } else if (equal(p, "timeout") && p->next && equal(p->next, "=") &&
                    p->next->next &&
@@ -4840,7 +4840,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 p = p->next;
             }
             if (p && p->kind == TK_NUM) {
-                out->error_count    = (int)p->val;
+                out->error_count    = (int)tok_lit(p)->val;
                 out->error_count_op = op;
                 p                   = p->next;
             }
@@ -4949,27 +4949,27 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             p                    = p->next->next->next;
         } else if (equal(p, "flags") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
-            out->flags = p->next->next->str;
+            out->flags = tok_lit(p->next->next)->str;
             p          = p->next->next->next;
         } else if (equal(p, "expect_stderr") && p->next &&
                    equal(p->next, "=") && p->next->next &&
                    p->next->next->kind == TK_STR) {
-            out->expect_stderr = p->next->next->str;
+            out->expect_stderr = tok_lit(p->next->next)->str;
             p                  = p->next->next->next;
         } else if (equal(p, "reject_stderr") && p->next &&
                    equal(p->next, "=") && p->next->next &&
                    p->next->next->kind == TK_STR) {
-            out->reject_stderr = p->next->next->str;
+            out->reject_stderr = tok_lit(p->next->next)->str;
             p                  = p->next->next->next;
         } else if (equal(p, "expect_stdout") && p->next &&
                    equal(p->next, "=") && p->next->next &&
                    p->next->next->kind == TK_STR) {
-            out->expect_stdout = p->next->next->str;
+            out->expect_stdout = tok_lit(p->next->next)->str;
             p                  = p->next->next->next;
         } else if (equal(p, "reject_stdout") && p->next &&
                    equal(p->next, "=") && p->next->next &&
                    p->next->next->kind == TK_STR) {
-            out->reject_stdout = p->next->next->str;
+            out->reject_stdout = tok_lit(p->next->next)->str;
             p                  = p->next->next->next;
         } else {
             p = p->next;
@@ -4987,11 +4987,11 @@ static void parse_test_setup_args(Token **p_ptr, TestSetupArgs *out) {
     while (p && !equal(p, ")") && p->kind != TK_EOF) {
         if (equal(p, "name") && p->next && equal(p->next, "=") &&
             p->next->next && p->next->next->kind == TK_STR) {
-            out->name_pat = p->next->next->str;
+            out->name_pat = tok_lit(p->next->next)->str;
             p             = p->next->next->next;
         } else if (equal(p, "suite") && p->next && equal(p->next, "=") &&
                    p->next->next && p->next->next->kind == TK_STR) {
-            out->suite = p->next->next->str;
+            out->suite = tok_lit(p->next->next)->str;
             p          = p->next->next->next;
         } else if (equal(p, "once")) {
             out->once = true;
@@ -5073,25 +5073,25 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
             // strlen(str) -- str is the unescaped content and may legally
             // contain an embedded NUL, which strlen would silently
             // truncate at.
-            if (p->ty->base->size != 1)
+            if (tok_lit(p)->ty->base->size != 1)
                 error_tok(vm, p,
                           "comptime(attribute(...)) attribute name must be a "
                           "plain (narrow) string literal");
-            size_t len  = (size_t)p->ty->array_len - 1;
+            size_t len  = (size_t)tok_lit(p)->ty->array_len - 1;
             Token *last = p;
             for (Token *t = p->next; t->kind == TK_STR; t = t->next) {
-                if (t->ty->base->size != 1)
+                if (tok_lit(t)->ty->base->size != 1)
                     error_tok(vm, t,
                               "comptime(attribute(...)) attribute name must "
                               "be a plain (narrow) string literal");
-                len  += (size_t)t->ty->array_len - 1;
+                len  += (size_t)tok_lit(t)->ty->array_len - 1;
                 last  = t;
             }
             char  *name = arena_alloc(&vm->compiler.parser_arena, len + 1);
             size_t off  = 0;
             for (Token *t = p;; t = t->next) {
-                size_t piece = (size_t)t->ty->array_len - 1;
-                memcpy(name + off, t->str, piece);
+                size_t piece = (size_t)tok_lit(t)->ty->array_len - 1;
+                memcpy(name + off, tok_lit(t)->str, piece);
                 off += piece;
                 if (t == last)
                     break;
@@ -5796,7 +5796,7 @@ static Token *handle_gcc_diagnostic(VirtualMachine *vm, Token *tok) {
             return skip_line(vm, tok ? tok : action_tok);
         }
         // tok->str holds the unescaped string contents (no quotes).
-        const char *s = tok->str;
+        const char *s = tok_lit(tok)->str;
 
         // Must start with "-W"
         if (!s || s[0] != '-' || s[1] != 'W') {
@@ -6045,7 +6045,7 @@ static Token *handle_pragma_link(VirtualMachine *vm, Token *sub) {
             error_tok(vm, p && p->kind != TK_EOF ? p : sub,
                       "expected a string literal library name in '#pragma cccc "
                       "link'");
-        strarray_push(&vm->compiler.pragma_link_libs, strdup(p->str));
+        strarray_push(&vm->compiler.pragma_link_libs, strdup(tok_lit(p)->str));
         p = p->next;
         if (equal(p, ",")) {
             p = p->next;
@@ -6294,7 +6294,7 @@ Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks) {
         Token *after = str->next->next;
         Token *body  = tokenize(
             vm, new_file(vm, str->file->name, str->file->file_no,
-                         arena_format(vm, "%s\n", str->str)));
+                         arena_format(vm, "%s\n", tok_lit(str)->str)));
         if (!equal(body, "omp"))
             error_tok(vm, tok,
                       "only _Pragma(\"omp ...\") is supported in a Quote "
@@ -6394,11 +6394,11 @@ static Token *handle_pragma_body(VirtualMachine *vm, Token *tok) {
                     error_tok(
                         vm, after,
                         "#pragma cccc suite begin requires a string name");
-                if (name_tok->str[0] == '\0')
+                if (tok_lit(name_tok)->str[0] == '\0')
                     error_tok(
                         vm, name_tok,
                         "#pragma cccc suite begin requires a non-empty name");
-                suite_push(vm, name_tok->str, tok);
+                suite_push(vm, tok_lit(name_tok)->str, tok);
                 return skip_line(vm, name_tok->next);
             } else if (equal(after, "end")) {
                 if (vm->compiler.suite_stack_len == 0)
@@ -6609,11 +6609,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     while (tok != after) {
                         tok->line_delta    = tok->file->line_delta;
                         tok->filename      = tok->file->display_name;
-                        tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
-                        tok->diag_werror =
-                            (1ULL << 63) | vm->compiler.warning_errors;
-                        tok->pack_align    = vm->compiler.pack_cur;
-                        tok->checked_scope = checked_scope_for_stamp(vm, tok);
+                        cc_stamp_token_state(vm, tok,
+                                             checked_scope_for_stamp(vm, tok));
                         cur = cur->next = tok;
                         tok             = tok->next;
                     }
@@ -6651,10 +6648,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 first_token        = false;
                 tok->line_delta    = tok->file->line_delta;
                 tok->filename      = tok->file->display_name;
-                tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
-                tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
-                tok->pack_align    = vm->compiler.pack_cur;
-                tok->checked_scope = checked_scope_for_stamp(vm, tok);
+                cc_stamp_token_state(vm, tok, checked_scope_for_stamp(vm, tok));
                 track_brace_depth(&brace_depth, tok);
                 cur = cur->next = tok;
                 tok             = tok->next;
@@ -6758,7 +6752,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok = skip(vm, tok, "(");
                 if (tok->kind != TK_STR)
                     error_tok(vm, tok, "_Pragma requires a string literal");
-                char  *content = arena_format(vm, "%s\n", tok->str);
+                char  *content = arena_format(vm, "%s\n", tok_lit(tok)->str);
                 Token *pragma_toks =
                     tokenize(vm, new_file(vm, tok->file->name,
                                           tok->file->file_no, content));
@@ -6814,13 +6808,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                         while (tok != passthrough_end) {
                             tok->line_delta = tok->file->line_delta;
                             tok->filename   = tok->file->display_name;
-                            tok->diag_warnings =
-                                (1ULL << 63) | vm->compiler.warnings;
-                            tok->diag_werror =
-                                (1ULL << 63) | vm->compiler.warning_errors;
-                            tok->pack_align = vm->compiler.pack_cur;
-                            tok->checked_scope =
-                                checked_scope_for_stamp(vm, tok);
+                            cc_stamp_token_state(
+                                vm, tok, checked_scope_for_stamp(vm, tok));
                             track_brace_depth(&brace_depth, tok);
                             cur = cur->next = tok;
                             tok             = tok->next;
@@ -6834,16 +6823,10 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
 
             tok->line_delta = tok->file->line_delta;
             tok->filename   = tok->file->display_name;
-            // Stamp the effective diagnostic state so warn_tok can use it.
-            tok->diag_warnings = (1ULL << 63) | vm->compiler.warnings;
-            tok->diag_werror   = (1ULL << 63) | vm->compiler.warning_errors;
-            // Stamp the effective #pragma pack(N) alignment cap so
-            // struct_union_decl can read it off the struct/union keyword
-            // token later, at parse time (#1173).
-            tok->pack_align = vm->compiler.pack_cur;
-            // Stamp the effective #pragma cccc checked/unchecked region
-            // (#485), gated to command-line-input tokens only.
-            tok->checked_scope = checked_scope_for_stamp(vm, tok);
+            // Stamp the diagnostic state warn_tok uses, the #pragma pack cap
+            // struct_union_decl reads, and the #pragma cccc checked region
+            // (command-line-input tokens only).
+            cc_stamp_token_state(vm, tok, checked_scope_for_stamp(vm, tok));
             track_brace_depth(&brace_depth, tok);
             cur = cur->next = tok;
             tok             = tok->next;
@@ -8450,13 +8433,13 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
         }
 
         StringKind kind   = getStringKind(tok1);
-        Type      *basety = tok1->ty->base;
+        Type      *basety = tok_lit(tok1)->ty->base;
 
         for (Token *t = tok1->next; t->kind == TK_STR; t = t->next) {
             StringKind k = getStringKind(t);
             if (kind == STR_NONE) {
                 kind   = k;
-                basety = t->ty->base;
+                basety = tok_lit(t)->ty->base;
             } else if (k != STR_NONE && kind != k) {
                 error_tok(vm, t,
                           "unsupported non-standard concatenation of string "
@@ -8466,7 +8449,7 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
 
         if (basety->size > 1)
             for (Token *t = tok1; t->kind == TK_STR; t = t->next)
-                if (t->ty->base->size == 1)
+                if (tok_lit(t)->ty->base->size == 1)
                     *t = *tokenize_string_literal(vm, t, basety);
 
         while (tok1->kind == TK_STR)
@@ -8484,23 +8467,23 @@ static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok) {
         while (tok2->kind == TK_STR)
             tok2 = tok2->next;
 
-        int len = tok1->ty->array_len;
+        int len = tok_lit(tok1)->ty->array_len;
         for (Token *t = tok1->next; t != tok2; t = t->next)
-            len = len + t->ty->array_len - 1;
+            len = len + tok_lit(t)->ty->array_len - 1;
 
         char *buf =
-            arena_alloc(&vm->compiler.parser_arena, tok1->ty->base->size * len);
-        memset(buf, 0, tok1->ty->base->size * len);
+            arena_alloc(&vm->compiler.parser_arena, tok_lit(tok1)->ty->base->size * len);
+        memset(buf, 0, tok_lit(tok1)->ty->base->size * len);
 
         int i = 0;
         for (Token *t = tok1; t != tok2; t = t->next) {
-            memcpy(buf + i, t->str, t->ty->size);
-            i = i + t->ty->size - t->ty->base->size;
+            memcpy(buf + i, tok_lit(t)->str, tok_lit(t)->ty->size);
+            i = i + tok_lit(t)->ty->size - tok_lit(t)->ty->base->size;
         }
 
         *tok1      = *copy_token(vm, tok1);
-        tok1->ty   = array_of(vm, tok1->ty->base, len);
-        tok1->str  = buf;
+        tok_lit_mut(vm, tok1)->ty   = array_of(vm, tok_lit(tok1)->ty->base, len);
+        tok_lit_mut(vm, tok1)->str  = buf;
         tok1->next = tok2;
         tok1       = tok2;
     }

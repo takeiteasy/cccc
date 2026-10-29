@@ -189,8 +189,8 @@ static int tok_col_no(Token *tok);
 // error raised *while* comptime code is still executing. tok may be NULL
 // (error_at/warn_at report by raw source location, not by token).
 static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
-    if (tok && tok->expansion)
-        return tok->expansion;
+    if (tok && tok_rare(tok)->expansion)
+        return tok_rare(tok)->expansion;
     return vm ? vm->compiler.expansion_stack : NULL;
 }
 
@@ -539,7 +539,7 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
 
 // The token a diagnostic reports its location at.
 static Token *diag_site(Token *tok) {
-    return tok && tok->src_site ? tok->src_site : tok;
+    return tok && tok_rare(tok)->src_site ? tok_rare(tok)->src_site : tok;
 }
 
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {
@@ -604,11 +604,11 @@ void warn_tok(VirtualMachine *vm, Token *tok, CCCCWarning category, char *fmt,
 
     // Use per-token effective state if the preprocessor stamped it; otherwise
     // fall back to the global compiler warning state.
-    uint64_t eff_warnings = (tok && tok->diag_warnings)
-                                ? (tok->diag_warnings & ~(1ULL << 63))
+    uint64_t eff_warnings = (tok && tok_state(tok)->diag_warnings)
+                                ? (tok_state(tok)->diag_warnings & ~(1ULL << 63))
                                 : (vm ? vm->compiler.warnings : 0);
-    uint64_t eff_werror   = (tok && tok->diag_werror)
-                                ? (tok->diag_werror & ~(1ULL << 63))
+    uint64_t eff_werror   = (tok && tok_state(tok)->diag_werror)
+                                ? (tok_state(tok)->diag_werror & ~(1ULL << 63))
                                 : (vm ? vm->compiler.warning_errors : 0);
 
     if (!vm || !(eff_warnings & mask))
@@ -852,6 +852,53 @@ bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str) {
 
 // Create a new token.
 // A zeroed Token, taken from the recycled list when it has one.
+#define TOK_GROUP_MUT(fn, field, T)                                            \
+    T *fn(VirtualMachine *vm, Token *t) {                                      \
+        if (!t->field) {                                                       \
+            t->field = arena_alloc(&vm->compiler.parser_arena, sizeof(T));     \
+            memset(t->field, 0, sizeof(T));                                    \
+        }                                                                      \
+        return t->field;                                                       \
+    }
+TOK_GROUP_MUT(tok_lit_mut, lit, TokenLit)
+TOK_GROUP_MUT(tok_rare_mut, rare, TokenRare)
+#undef TOK_GROUP_MUT
+
+// Copies *src over *dst, giving dst its own copy of every mutable group.
+void token_assign(VirtualMachine *vm, Token *dst, const Token *src) {
+    *dst = *src;
+    if (src->lit) {
+        dst->lit  = NULL;
+        *tok_lit_mut(vm, dst) = *src->lit;
+    }
+    if (src->rare) {
+        dst->rare = NULL;
+        *tok_rare_mut(vm, dst) = *src->rare;
+    }
+}
+
+// Stamps tok with the current diagnostic, pack and checked-region state,
+// sharing one TokenState across the run of tokens that see the same state.
+void cc_stamp_token_state(VirtualMachine *vm, Token *tok,
+                          CheckedScope checked_scope) {
+    uint64_t           warnings = (1ULL << 63) | vm->compiler.warnings;
+    uint64_t           werror   = (1ULL << 63) | vm->compiler.warning_errors;
+    const TokenState *cur      = vm->compiler.token_state_cur;
+    if (!cur || cur->diag_warnings != warnings || cur->diag_werror != werror ||
+        cur->pack_align != vm->compiler.pack_cur ||
+        cur->checked_scope != checked_scope) {
+        TokenState *fresh =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(TokenState));
+        fresh->diag_warnings = warnings;
+        fresh->diag_werror   = werror;
+        fresh->pack_align    = vm->compiler.pack_cur;
+        fresh->checked_scope = checked_scope;
+        cur                  = fresh;
+        vm->compiler.token_state_cur = cur;
+    }
+    tok->state = cur;
+}
+
 Token *cc_token_alloc(VirtualMachine *vm) {
     Token *tok = vm->compiler.token_free;
     if (tok)
@@ -1100,8 +1147,8 @@ static Token *read_string_literal(VirtualMachine *vm, char *start,
     Token *tok     = new_token(vm, TK_STR, start, end + 1);
     Type  *elem    = copy_type(vm, ty_char);
     elem->is_const = true;
-    tok->ty        = array_of(vm, elem, len + 1);
-    tok->str       = buf;
+    tok_lit_mut(vm, tok)->ty        = array_of(vm, elem, len + 1);
+    tok_lit_mut(vm, tok)->str       = buf;
     return tok;
 }
 
@@ -1130,7 +1177,7 @@ static Token *read_backtick_fragment(VirtualMachine *vm, char *token_start,
         if (p[0] == '$' && p[1] == '{') {
             Token *tok  = new_token(vm, TK_BACKTICK_STR, token_start, p);
             buf[len]    = '\0';
-            tok->str    = buf;
+            tok_lit_mut(vm, tok)->str    = buf;
             *new_pos    = p + 2;
             *has_splice = true;
             return tok;
@@ -1139,7 +1186,7 @@ static Token *read_backtick_fragment(VirtualMachine *vm, char *token_start,
         if (*p == '`') {
             Token *tok  = new_token(vm, TK_BACKTICK_STR, token_start, p + 1);
             buf[len]    = '\0';
-            tok->str    = buf;
+            tok_lit_mut(vm, tok)->str    = buf;
             *new_pos    = p + 1;
             *has_splice = false;
             return tok;
@@ -1182,8 +1229,8 @@ static Token *read_utf16_string_literal(VirtualMachine *vm, char *start,
     }
 
     Token *tok = new_token(vm, TK_STR, start, end + 1);
-    tok->ty    = array_of(vm, ty_ushort, len + 1);
-    tok->str   = (char *)buf;
+    tok_lit_mut(vm, tok)->ty    = array_of(vm, ty_ushort, len + 1);
+    tok_lit_mut(vm, tok)->str   = (char *)buf;
     return tok;
 }
 
@@ -1206,8 +1253,8 @@ static Token *read_utf32_string_literal(VirtualMachine *vm, char *start,
     }
 
     Token *tok = new_token(vm, TK_STR, start, end + 1);
-    tok->ty    = array_of(vm, ty, len + 1);
-    tok->str   = (char *)buf;
+    tok_lit_mut(vm, tok)->ty    = array_of(vm, ty, len + 1);
+    tok_lit_mut(vm, tok)->str   = (char *)buf;
     return tok;
 }
 
@@ -1228,8 +1275,8 @@ static Token *read_char_literal(VirtualMachine *vm, char *start, char *quote,
         error_at(vm, p, "unclosed char literal");
 
     Token *tok = new_token(vm, TK_NUM, start, end + 1);
-    tok->val   = c;
-    tok->ty    = ty;
+    tok_lit_mut(vm, tok)->val   = c;
+    tok_lit_mut(vm, tok)->ty    = ty;
     if (p != end)
         warn_tok(vm, tok, CCCC_WARN_MULTICHAR,
                  "multi-character character constant");
@@ -1436,11 +1483,11 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
             width = (vbits + 1 < 2) ? 2 : vbits + 1;
         }
         tok->kind = TK_NUM;
-        tok->val  = val;
-        tok->ty   = bitint_type(vm, tok, width, u);
+        tok_lit_mut(vm, tok)->val  = val;
+        tok_lit_mut(vm, tok)->ty   = bitint_type(vm, tok, width, u);
         if (width > 64) {
-            tok->wide_digits = cleaned;
-            tok->wide_base   = base;
+            tok_lit_mut(vm, tok)->wide_digits = cleaned;
+            tok_lit_mut(vm, tok)->wide_base   = base;
         }
         return true;
     }
@@ -1474,8 +1521,8 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     }
 
     tok->kind = TK_NUM;
-    tok->val  = val;
-    tok->ty   = ty;
+    tok_lit_mut(vm, tok)->val  = val;
+    tok_lit_mut(vm, tok)->ty   = ty;
     return true;
 }
 
@@ -1555,9 +1602,9 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
         memcpy(digits, cleaned, digit_len);
         digits[digit_len] = '\0';
         tok->kind         = TK_NUM;
-        tok->fval       = 0.0; // deliberately not strtold's value -- see above
-        tok->dec_digits = digits;
-        tok->ty         = dec_ty;
+        tok_lit_mut(vm, tok)->fval       = 0.0; // deliberately not strtold's value -- see above
+        tok_lit_mut(vm, tok)->dec_digits = digits;
+        tok_lit_mut(vm, tok)->ty         = dec_ty;
         return;
     }
 
@@ -1576,8 +1623,8 @@ static void convert_pp_number(VirtualMachine *vm, Token *tok) {
         error_tok(vm, tok, "invalid numeric constant");
 
     tok->kind = TK_NUM;
-    tok->fval = val;
-    tok->ty   = ty;
+    tok_lit_mut(vm, tok)->fval = val;
+    tok_lit_mut(vm, tok)->ty   = ty;
 }
 
 // Check whether a newly-recognised keyword is available in the selected -std.
@@ -1823,7 +1870,7 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // Character literal
         if (*p == '\'') {
             cur = cur->next  = read_char_literal(vm, p, p, ty_int);
-            cur->val         = (char)cur->val;
+            tok_lit_mut(vm, cur)->val         = (char)tok_lit(cur)->val;
             p               += cur->len;
             continue;
         }
@@ -1835,7 +1882,7 @@ Token *tokenize(VirtualMachine *vm, File *file) {
                          CCCC_WARN_PEDANTIC,
                          "u8 character literals are a C23 extension");
             cur = cur->next  = read_char_literal(vm, p, p + 2, ty_uchar);
-            cur->val        &= 0xff;
+            tok_lit_mut(vm, cur)->val        &= 0xff;
             p               += cur->len;
             continue;
         }
@@ -1843,7 +1890,7 @@ Token *tokenize(VirtualMachine *vm, File *file) {
         // UTF-16 character literal
         if (startswith(vm, p, "u'")) {
             cur = cur->next  = read_char_literal(vm, p, p + 1, ty_ushort);
-            cur->val        &= 0xffff;
+            tok_lit_mut(vm, cur)->val        &= 0xffff;
             p               += cur->len;
             continue;
         }
@@ -2408,7 +2455,7 @@ void cc_output_preprocessed(FILE *f, VirtualMachine *vm, Token *tok) {
 
             case TK_NUM:
                 // For numeric literals, output the original text
-                if (t->ty && is_flonum(t->ty)) {
+                if (tok_lit(t)->ty && is_flonum(tok_lit(t)->ty)) {
                     fprintf(f, "%.*s", t->len, t->loc);
                 } else {
                     fprintf(f, "%.*s", t->len, t->loc);

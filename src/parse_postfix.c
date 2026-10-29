@@ -1834,7 +1834,7 @@ typedef enum {
 
 static void validate_backtick_fragment(VirtualMachine *vm, Token *fragment,
                                        BacktickLexState *state) {
-    char *p = fragment->str;
+    char *p = tok_lit(fragment)->str;
 
     while (*p) {
         if (*state == BT_LEX_LINE_COMMENT) {
@@ -1910,7 +1910,7 @@ static Token *new_backtick_synthetic_token(VirtualMachine *vm, TokenKind kind,
 
 static Token *copy_backtick_expr_token(VirtualMachine *vm, Token *src) {
     Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    *tok       = *src;
+    token_assign(vm, tok, src);
     tok->next  = NULL;
     return tok;
 }
@@ -1959,7 +1959,7 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
     // the parser does not impose an argument-register-derived splice limit.
     for (;;) {
         fragment_count++;
-        template_len += strlen(fragment->str);
+        template_len += strlen(tok_lit(fragment)->str);
         validate_backtick_fragment(vm, fragment, &lex_state);
 
         if (!backtick_fragment_has_splice(fragment))
@@ -1999,8 +1999,8 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
     char *template = arena_alloc(&vm->compiler.parser_arena, template_len + 1);
     char *out      = template;
     for (int i = 0; i < fragment_count; i++) {
-        size_t len = strlen(fragments[i]->str);
-        memcpy(out, fragments[i]->str, len);
+        size_t len = strlen(tok_lit(fragments[i])->str);
+        memcpy(out, tok_lit(fragments[i])->str, len);
         out += len;
         if (i < splice_count)
             out += sprintf(out, " $%d ", i + 1);
@@ -2017,10 +2017,10 @@ static Node *backtick_quasi_quote(VirtualMachine *vm, Token **rest,
     Token *template_tok =
         new_backtick_synthetic_token(vm, TK_STR, tok->loc, tok);
     template_tok->len = tok->len;
-    template_tok->str = template;
+    tok_lit_mut(vm, template_tok)->str = template;
     Type *elem        = copy_type(vm, ty_char);
     elem->is_const    = true;
-    template_tok->ty  = array_of(vm, elem, (int)template_len + 1);
+    tok_lit_mut(vm, template_tok)->ty  = array_of(vm, elem, (int)template_len + 1);
     cur = cur->next = template_tok;
 
     for (int i = 0; i < splice_count; i++) {
@@ -4581,7 +4581,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     }
 
     if (tok->kind == TK_STR) {
-        Obj *var = new_string_literal(vm, tok->str, tok->ty);
+        Obj *var = new_string_literal(vm, tok_lit(tok)->str, tok_lit(tok)->ty);
         *rest    = tok->next;
         return new_var_node(vm, var, tok);
     }
@@ -4590,31 +4590,31 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node;
         if (vm->debug_vm)
             printf("  primary: TK_NUM tok->ty kind=%d, is_flonum=%d\n",
-                   tok->ty ? tok->ty->kind : -1, is_flonum(tok->ty));
+                   tok_lit(tok)->ty ? tok_lit(tok)->ty->kind : -1, is_flonum(tok_lit(tok)->ty));
 
-        if (is_flonum(tok->ty)) {
+        if (is_flonum(tok_lit(tok)->ty)) {
             node       = new_node(vm, ND_NUM, tok);
-            node_lit_mut(vm, node)->fval = tok->fval;
+            node_lit_mut(vm, node)->fval = tok_lit(tok)->fval;
             if (vm->debug_vm)
                 printf("  primary: created flonum node, fval=%Lf\n",
                        node_lit(node)->fval);
-        } else if (is_decimal(tok->ty)) {
+        } else if (is_decimal(tok_lit(tok)->ty)) {
             // _Decimal32/64/128 literal (#402): node->fval stays 0.0 (never
             // populated for these -- see tokenize.c); node->dec_digits below
             // is the sole source of truth, encoded to BID bits at codegen.
             node = new_node(vm, ND_NUM, tok);
         } else {
-            node = new_num(vm, tok->val, tok);
+            node = new_num(vm, tok_lit(tok)->val, tok);
             if (vm->debug_vm)
                 printf("  primary: created int node, val=%lld\n", node->val);
         }
 
-        node->ty          = tok->ty;
-        if (tok->wide_digits || tok->dec_digits) {
+        node->ty          = tok_lit(tok)->ty;
+        if (tok_lit(tok)->wide_digits || tok_lit(tok)->dec_digits) {
             NodeLit *lit     = node_lit_mut(vm, node);
-            lit->wide_digits = tok->wide_digits;
-            lit->wide_base   = tok->wide_base;
-            lit->dec_digits  = tok->dec_digits;
+            lit->wide_digits = tok_lit(tok)->wide_digits;
+            lit->wide_base   = tok_lit(tok)->wide_base;
+            lit->dec_digits  = tok_lit(tok)->dec_digits;
         }
         if (vm->debug_vm)
             printf(" primary: set node->ty to tok->ty, kind=%d\n",

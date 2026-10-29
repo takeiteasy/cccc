@@ -1340,76 +1340,100 @@ typedef enum {
 /*!
  @brief Token produced by the lexer or by macro expansion.
 */
-typedef struct Token {
-    TokenKind     kind; /**< Token kind (see TokenKind). */
-    struct Token *next; // Next token
-    int64_t       val;  // If kind is TK_NUM, its value
-    long double   fval; // If kind is TK_NUM, its value
-    char *
-        loc; /**< Pointer into the source buffer where the token text begins. */
-    int len; /**< Number of characters in the token text. */
-    Type *ty;  // Used if TK_NUM or TK_STR
-    char *str; /**< For string literals: pointer to the unescaped contents. */
+typedef struct VirtualMachine VirtualMachine;
+
+// Cold Token fields live in lazily allocated groups reached through tok_lit()
+// and tok_rare() (read; an all-zero group when none was allocated) and
+// tok_lit_mut()/tok_rare_mut() (write). token_assign() duplicates both, so a
+// copy never shares a group with its original.
+
+// Literal value of a TK_NUM / TK_STR token.
+typedef struct TokenLit {
+    int64_t     val;  // If kind is TK_NUM, its value
+    long double fval; // If kind is TK_NUM, its value
+    Type       *ty;   // Used if TK_NUM or TK_STR
+    char       *str;  /**< For string literals: pointer to the unescaped contents. */
     char *wide_digits; // wb/uwb _BitInt literal: full-precision digit text
                        // (no prefix/suffix/separators) when bit_width > 64
     int   wide_base;   // base (2/8/10/16) for wide_digits, else unused
+    // C23 _Decimal32/64/128 literal (df/dd/dl suffix): verbatim,
+    // separator-stripped, suffix-stripped digit text. It must NOT go through
+    // strtold (that binary-rounds it before BID ever sees it), so `fval` is
+    // left at 0.0 for a decimal-typed token and this is the only source of
+    // truth -- encoded to BID bits at codegen time via cccc_dec_encode_literal.
+    char *dec_digits;
+} TokenLit;
 
-    // C23 _Decimal32/64/128 literal (df/dd/dl suffix, #402): verbatim,
-    // separator-stripped, suffix-stripped digit text. The literal must NOT
-    // go through strtold (that binary-rounds it before BID ever sees it),
-    // so `fval` is left at 0.0 for a decimal-typed token and this is the
-    // only source of truth -- encoded to BID bits at codegen time via
-    // cccc_dec_encode_literal (compile-time-only, requires CCCC_HAS_DECIMAL).
-    char    *dec_digits;
+// Diagnostic, pack and checked-region state stamped by the preprocessor.
+// Immutable once stamped and shared by the tokens of a run (cc_stamp_token_state).
+typedef struct TokenState {
+    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask at the
+    // point this token was emitted (overrides vm->compiler.warnings).
+    uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
+    uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
+    // Effective #pragma pack(N) alignment cap. 0 means "no pack in effect".
+    // Read off the `struct`/`union` keyword token by struct_union_decl.
+    int pack_align;
+    // Effective #pragma cccc checked/unchecked begin/end region, stamped only
+    // for tokens of a command-line input file, never a #included header. Read
+    // via cc_checked_scope_at() (src/parse_checked.c), never directly.
+    CheckedScope checked_scope;
+} TokenState;
 
-    File    *file;       // Source location
-    const char *filename;   // Filename
-    int      line_no;    // Line number
-    int      col_no;     // Column number (1-based)
-    int      line_delta; // Line number
-    bool     at_bol;     // True if this token is at beginning of line
-    bool     has_space;  // True if this token follows a space character
-    Hideset *hideset;    // For macro expansion
-    struct Token
-        *origin;         // If this is expanded from a macro, the original token
+typedef struct TokenRare {
     struct Token *src_site; // Token synthesized from source text (an @name
                             // rewritten to an attribute): the source token
                             // diagnostics point at
-
-    // Effective diagnostic state stamped by the preprocessor.
-    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask
-    // at the point this token was emitted (overrides vm->compiler.warnings).
-    uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
-    uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
-
-    // Effective #pragma pack(N) alignment cap stamped by the preprocessor,
-    // mirroring diag_warnings/diag_werror above (#1173). 0 means "no pack in
-    // effect" -- unambiguous, unlike the diagnostic masks, since pack(N)
-    // never legitimately caps at 0 and pack()/an unset pragma mean the same
-    // thing to struct_union_decl. Read off the `struct`/`union` keyword
-    // token by struct_union_decl (src/parse_types.c).
-    int pack_align;
-
-    // Effective #pragma cccc checked/unchecked begin/end region (#485),
-    // stamped the same way as pack_align above -- but only for a token whose
-    // file is a command-line input (cc_file_is_command_line_input(),
-    // src/preprocess.c), never for one from a #included header: a checked
-    // region spanning `#include <stdio.h>` must not reject every libc
-    // prototype, and there are no annotated headers to fall back on. Read
-    // via cc_checked_scope_at() (src/parse_checked.c), never directly.
-    CheckedScope checked_scope;
-
     // Comptime expansion-origin chain stamped when this token is created by
-    // (or attached to a node created by) comptime code, mirroring
-    // diag_warnings/pack_align above. NULL for an ordinary source token.
-    // Set on an arena-allocated *copy* of the call-site token in
-    // execute_macro_fn (src/macros.c) and on synthetic tokens in
-    // __builtin_ast_synthetic_token (src/reflection.c) -- never on the real
-    // source token, which is shared with the un-expanded input. Walked by
-    // the diagnostic printer (src/tokenize.c) to print "note: in expansion
-    // of ..." lines (#966).
+    // (or attached to a node created by) comptime code. Set on an
+    // arena-allocated *copy* of the call-site token in execute_macro_fn and on
+    // synthetic tokens in __builtin_ast_synthetic_token -- never on the real
+    // source token. Walked by the diagnostic printer to print "note: in
+    // expansion of ..." lines.
     struct ExpansionFrame *expansion;
+} TokenRare;
+
+typedef struct Token {
+    TokenKind kind; /**< Token kind (see TokenKind). */
+    int       len;  /**< Number of characters in the token text. */
+    int       line_no;    // Line number
+    int       col_no;     // Column number (1-based)
+    int       line_delta; // Line number
+    bool      at_bol : 1;    // True if this token is at beginning of line
+    bool      has_space : 1; // True if this token follows a space character
+
+    struct Token *next; // Next token
+    char *
+        loc; /**< Pointer into the source buffer where the token text begins. */
+    File       *file;     // Source location
+    const char *filename; // Filename
+    Hideset    *hideset;  // For macro expansion
+    struct Token
+        *origin; // If this is expanded from a macro, the original token
+
+    const TokenState *state;
+    TokenLit         *lit;
+    TokenRare        *rare;
 } Token;
+
+_Static_assert(sizeof(Token) <= 96,
+               "Token grew: put cold fields in a TokenLit/TokenRare group");
+
+static const TokenLit   tok_lit_none   = {0};
+static const TokenRare  tok_rare_none  = {0};
+static const TokenState tok_state_none = {0};
+
+static inline const TokenLit *tok_lit(const Token *t) {
+    return t->lit ? t->lit : &tok_lit_none;
+}
+static inline const TokenRare *tok_rare(const Token *t) {
+    return t->rare ? t->rare : &tok_rare_none;
+}
+static inline const TokenState *tok_state(const Token *t) {
+    return t->state ? t->state : &tok_state_none;
+}
+TokenLit  *tok_lit_mut(VirtualMachine *vm, Token *t);
+TokenRare *tok_rare_mut(VirtualMachine *vm, Token *t);
 
 /*!
  @brief Kind tag for an ExpansionFrame (see below): what kind of comptime
@@ -4290,6 +4314,7 @@ typedef struct Compiler {
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
     Arena       parser_arena;         // Fast bump-pointer allocator
     Token      *token_free; // Recycled Tokens the preprocessor dropped
+    const TokenState *token_state_cur; // state the last stamped token shares
 
     StringArray include_paths;        // Quote include search paths
     StringArray system_include_paths; // System header search paths for <...>

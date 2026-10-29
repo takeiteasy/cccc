@@ -996,11 +996,11 @@ Token *asm_label(VirtualMachine *vm, Token *tok, char **label) {
         return tok;
 
     tok = skip(vm, tok->next, "(");
-    if (tok->kind != TK_STR || !tok->ty || !tok->ty->base ||
-        tok->ty->base->kind != TY_CHAR)
+    if (tok->kind != TK_STR || !tok_lit(tok)->ty || !tok_lit(tok)->ty->base ||
+        tok_lit(tok)->ty->base->kind != TY_CHAR)
         error_tok(vm, tok, "expected string literal in asm label");
     if (label)
-        *label = arena_strdup(vm, tok->str);
+        *label = arena_strdup(vm, tok_lit(tok)->str);
     return skip(vm, tok->next, ")");
 }
 
@@ -2288,7 +2288,7 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
         // silently applying the struct's opening pack value to every member
         // (or vice versa), which would just be a narrower reincarnation of
         // the original "accepted, not honoured" bug.
-        if (tok->pack_align != ty->pack_align)
+        if (tok_state(tok)->pack_align != ty->pack_align)
             error_tok(vm, tok,
                       "#pragma pack changed inside a struct/union body is "
                       "not supported -- move it outside the declaration");
@@ -2725,7 +2725,7 @@ static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
     if (tok->kind == TK_NUM || tok->kind == TK_PP_NUM) {
         long long val;
         if (tok->kind == TK_NUM) {
-            val = tok->val;
+            val = tok_lit(tok)->val;
         } else {
             char *ep = NULL;
             val      = strtoll(tok->loc, &ep, 10);
@@ -2739,20 +2739,20 @@ static Token *parse_optimize_attr(VirtualMachine *vm, Token *tok, Type *ty,
                       "optimize level must be an integer 0-4 (got %lld)", val);
         tok = tok->next;
     } else if (tok->kind == TK_STR) {
-        const char *s = tok->str;
+        const char *s = tok_lit(tok)->str;
         if (*s == '-')
             s++;
         if (*s != 'O' && *s != 'o')
             error_tok(
                 vm, tok,
                 "optimize string must be 'O0'–'O4' or '-O0'–'-O4' (got '%s')",
-                tok->str);
+                tok_lit(tok)->str);
         s++;
         if (*s < '0' || *s > '4' || *(s + 1) != '\0')
             error_tok(
                 vm, tok,
                 "optimize string must be 'O0'–'O4' or '-O0'–'-O4' (got '%s')",
-                tok->str);
+                tok_lit(tok)->str);
         tok = tok->next;
     } else {
         error_tok(vm, tok,
@@ -2817,7 +2817,7 @@ static void error_if_derive_attr_not_included(VirtualMachine *vm, Token *name) {
 // An unknown @name is its own on-by-default category; the other spellings
 // stay under -Wattributes.
 static CCCCWarning unknown_attr_warning(Token *name_tok) {
-    return name_tok->src_site ? CCCC_WARN_UNKNOWN_ATTRIBUTES
+    return tok_rare(name_tok)->src_site ? CCCC_WARN_UNKNOWN_ATTRIBUTES
                               : CCCC_WARN_ATTRIBUTES;
 }
 
@@ -3014,7 +3014,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     int depth = 1;
                     tok       = tok->next;
                     if (deprecated && tok->kind == TK_STR)
-                        message = tok->str;
+                        message = tok_lit(tok)->str;
                     while (depth > 0) {
                         if (equal(tok, "("))
                             depth++;
@@ -3234,7 +3234,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 if (equal(tok, "(")) {
                     tok = tok->next;
                     if (tok->kind == TK_STR)
-                        message = tok->str;
+                        message = tok_lit(tok)->str;
                     // Skip to closing paren
                     int depth = 1;
                     while (depth > 0) {
@@ -3265,7 +3265,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 if (equal(tok, "(")) {
                     tok = tok->next;
                     if (tok->kind == TK_STR)
-                        message = tok->str;
+                        message = tok_lit(tok)->str;
                     int depth = 1;
                     while (depth > 0) {
                         if (equal(tok, "("))
@@ -3793,7 +3793,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     tok       = tok->next;
                     if ((deprecated || is_nodiscard_attr) &&
                         tok->kind == TK_STR)
-                        message = tok->str;
+                        message = tok_lit(tok)->str;
                     while (depth > 0) {
                         if (equal(tok, "("))
                             depth++;
@@ -3926,7 +3926,7 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
     // (src/preprocess.c). `tok` here is the token immediately after that
     // keyword; no pragma can appear between the keyword and this token, so
     // its stamp is identical to the keyword's own.
-    ty->pack_align = tok->pack_align;
+    ty->pack_align = tok_state(tok)->pack_align;
     tok            = attribute_list(vm, tok, ty, NULL);
     tok            = c23_attribute_list(vm, tok, ty, NULL);
 
