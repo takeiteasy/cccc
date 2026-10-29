@@ -555,6 +555,51 @@ void node_assign(VirtualMachine *vm, Node *dst, const Node *src) {
 #undef DUP
 }
 
+#define OBJ_GROUP_MUT(fn, field, T)                                            \
+    T *fn(VirtualMachine *vm, Obj *o) {                                        \
+        if (!o->field) {                                                       \
+            o->field = arena_alloc(&vm->compiler.parser_arena, sizeof(T));     \
+            memset(o->field, 0, sizeof(T));                                    \
+        }                                                                      \
+        return o->field;                                                       \
+    }
+OBJ_GROUP_MUT(obj_attr_mut, ext_attr, ObjAttr)
+OBJ_GROUP_MUT(obj_fn_mut, ext_fn, ObjFn)
+OBJ_GROUP_MUT(obj_size_mut, ext_size, ObjSize)
+OBJ_GROUP_MUT(obj_init_mut, ext_init, ObjInit)
+OBJ_GROUP_MUT(obj_blk_mut, ext_blk, ObjBlk)
+OBJ_GROUP_MUT(obj_chk_mut, ext_chk, ObjChk)
+#undef OBJ_GROUP_MUT
+
+// Setters that allocate the group only when the value changes.
+#define OBJ_SETTER(fn, mut, group, field, T)                                   \
+    void fn(VirtualMachine *vm, Obj *o, T value) {                             \
+        if (group(o)->field != value)                                          \
+            mut(vm, o)->field = value;                                         \
+    }
+OBJ_SETTER(obj_set_asm_label, obj_attr_mut, obj_attr, asm_label, char *)
+OBJ_SETTER(obj_set_deprecated_msg, obj_attr_mut, obj_attr, deprecated_msg,
+           char *)
+OBJ_SETTER(obj_set_rel, obj_init_mut, obj_init, rel, Relocation *)
+#undef OBJ_SETTER
+
+// Copies *src over *dst, giving dst its own copy of every group.
+void obj_assign(VirtualMachine *vm, Obj *dst, const Obj *src) {
+    *dst = *src;
+#define DUP(field, mut)                                                        \
+    if (src->field) {                                                          \
+        dst->field = NULL;                                                     \
+        *mut(vm, dst) = *src->field;                                           \
+    }
+    DUP(ext_attr, obj_attr_mut)
+    DUP(ext_fn, obj_fn_mut)
+    DUP(ext_size, obj_size_mut)
+    DUP(ext_init, obj_init_mut)
+    DUP(ext_blk, obj_blk_mut)
+    DUP(ext_chk, obj_chk_mut)
+#undef DUP
+}
+
 Node *node_clone(VirtualMachine *vm, const Node *src) {
     Node *dst = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
     node_assign(vm, dst, src);
@@ -830,7 +875,6 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     memset(var, 0, sizeof(Obj));
     var->name      = name;
     var->ty        = ty;
-    var->asm_label = type_attrs(ty)->asm_label;
     var->align     = ty->align;
     var->tok       = ty->name;
     var->display_name =
@@ -842,10 +886,15 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     var->is_func_const   = ty->is_func_const;
     var->is_kernel       = ty->is_kernel;
     var->is_trusted      = ty->is_trusted;
-    var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
     var->is_constructor  = ty->is_constructor;
     var->is_destructor   = ty->is_destructor;
-    var->init_priority   = type_attrs(ty)->init_priority;
+    const TypeAttrs *ta  = type_attrs(ty);
+    if (ta->asm_label || ta->deprecated_msg || ta->init_priority) {
+        ObjAttr *attr        = obj_attr_mut(vm, var);
+        attr->asm_label      = ta->asm_label;
+        attr->deprecated_msg = ta->deprecated_msg;
+        attr->init_priority  = ta->init_priority;
+    }
     if (var->is_constructor || var->is_destructor) {
         // Reachable only via the attribute (gen() walks prog for
         // is_constructor/ is_destructor, not through any call site) — keep it
@@ -859,7 +908,8 @@ Obj *new_var(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     // unresolved token spans straight off var->ty->checked_bounds_arg1/arg2
     // rather than needing its own copy here.
     var->checked_kind                   = ty->checked_kind;
-    var->checked_bounds_form            = type_chk(ty)->form;
+    if (type_chk(ty)->form)
+        obj_chk_mut(vm, var)->checked_bounds_form = type_chk(ty)->form;
     push_scope(vm, name, name_len)->var = var;
     return var;
 }
@@ -886,8 +936,8 @@ void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr) {
         return;
     if (type_attrs(var->ty)->cleanup_fn)
         type_attrs_mut(vm, var->ty)->cleanup_fn = NULL;
-    var->cleanup_fn     = fn;
-    var->cleanup_seq    = ++vm->compiler.cleanup_seq;
+    obj_attr_mut(vm, var)->cleanup_fn     = fn;
+    obj_attr_mut(vm, var)->cleanup_seq    = ++vm->compiler.cleanup_seq;
     fn->is_live         = true;
     fn->is_root         = true;
 }
@@ -1133,8 +1183,8 @@ static void resolve_bounds_tokens(VirtualMachine *vm, Type *ty, Node **out_lo,
 }
 
 void resolve_checked_bounds(VirtualMachine *vm, Obj *var) {
-    resolve_bounds_tokens(vm, var->ty, &var->checked_bounds_lo,
-                          &var->checked_bounds_hi);
+    resolve_bounds_tokens(vm, var->ty, &obj_chk_mut(vm, var)->checked_bounds_lo,
+                          &obj_chk_mut(vm, var)->checked_bounds_hi);
 }
 
 // Walks a resolved member-bounds template (see Member.checked_bounds_lo/hi's
@@ -1158,8 +1208,8 @@ static void check_member_bounds_template(VirtualMachine *vm, Node *n,
         return;
     if (n->kind == ND_VAR) {
         Obj *v = n->var;
-        if (v->checked_self_member) {
-            if (v->checked_self_member->is_bitfield)
+        if (obj_chk(v)->checked_self_member) {
+            if (obj_chk(v)->checked_self_member->is_bitfield)
                 error_tok(
                     vm, tok,
                     "a checked-pointer bounds expression cannot reference "
@@ -1208,7 +1258,7 @@ void resolve_member_checked_bounds(VirtualMachine *vm, Member *members) {
         placeholder->name = arena_strndup(vm, mem->name->loc, mem->name->len);
         placeholder->display_name                           = placeholder->name;
         placeholder->ty                                     = mem->ty;
-        placeholder->checked_self_member                    = mem;
+        obj_chk_mut(vm, placeholder)->checked_self_member                    = mem;
         push_scope(vm, mem->name->loc, mem->name->len)->var = placeholder;
     }
     for (Member *mem = members; mem; mem = mem->next) {
@@ -1241,7 +1291,7 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
         return;
     if (n->kind == ND_VAR) {
         Obj *v = n->var;
-        if (!v->checked_self_param_idx && v->is_local)
+        if (!obj_chk(v)->checked_self_param_idx && v->is_local)
             error_tok(vm, tok,
                       "checked-pointer bounds on a function parameter may "
                       "only reference sibling parameters or globals");
@@ -1311,7 +1361,7 @@ void resolve_param_checked_bounds(VirtualMachine *vm, Type *fn_ty) {
         placeholder->name = arena_strndup(vm, p->name->loc, p->name->len);
         placeholder->display_name                       = placeholder->name;
         placeholder->ty                                 = p;
-        placeholder->checked_self_param_idx             = idx;
+        obj_chk_mut(vm, placeholder)->checked_self_param_idx             = idx;
         push_scope(vm, p->name->loc, p->name->len)->var = placeholder;
     }
 
@@ -1366,10 +1416,10 @@ static bool checked_tmpl_equal(Node *a, Node *b) {
         case ND_NUM:
             return a->val == b->val && node_lit(a)->fval == node_lit(b)->fval;
         case ND_VAR:
-            if (a->var->checked_self_param_idx ||
-                b->var->checked_self_param_idx)
-                return a->var->checked_self_param_idx ==
-                       b->var->checked_self_param_idx;
+            if (obj_chk(a->var)->checked_self_param_idx ||
+                obj_chk(b->var)->checked_self_param_idx)
+                return obj_chk(a->var)->checked_self_param_idx ==
+                       obj_chk(b->var)->checked_self_param_idx;
             return a->var == b->var;
         case ND_MEMBER:
             if (a->member != b->member)
@@ -1503,7 +1553,7 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
     if (n_old != n_new || !n_old)
         return;
 
-    if (!defaults && fn->checked_libc_mask) {
+    if (!defaults && obj_chk(fn)->checked_libc_mask) {
         // Bounds the libc table supplied give way to the ones spelled here.
         Type *reset = copy_type(vm, old_ty);
         Type **tail = &reset->params;
@@ -1511,7 +1561,7 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
         for (Type *o = old_ty->params, *n = ty->params; o && n;
              o = o->next, n = n->next, idx++) {
             Type *c = copy_type(vm, o);
-            if ((fn->checked_libc_mask & (1u << idx)) &&
+            if ((obj_chk(fn)->checked_libc_mask & (1u << idx)) &&
                 type_chk(n)->form != CB_NONE) {
                 c->checked_kind              = CHECKED_NONE;
                 type_chk_mut(vm, c)->form             = CB_NONE;
@@ -1519,7 +1569,7 @@ static void merge_checked_interface_impl(VirtualMachine *vm, Obj *fn, Type *ty,
                 type_chk_mut(vm, c)->arg2             = NULL;
                 type_chk_mut(vm, c)->param_bounds_lo  = NULL;
                 type_chk_mut(vm, c)->param_bounds_hi  = NULL;
-                fn->checked_libc_mask       &= ~(1u << idx);
+                obj_chk_mut(vm, fn)->checked_libc_mask       &= ~(1u << idx);
             }
             *tail = c;
             tail  = &c->next;
@@ -1674,7 +1724,7 @@ unsigned adopt_checked_definition_bounds(VirtualMachine *vm, Obj *fn,
         if (!p)
             return 0;
         Type *c = d;
-        if (idx < 32 && !(fn->checked_libc_mask & (1u << idx)) &&
+        if (idx < 32 && !(obj_chk(fn)->checked_libc_mask & (1u << idx)) &&
             d->kind == TY_PTR && p->kind == TY_PTR) {
             if (checked_needs_adopt(d, p, false)) {
                 c = copy_type(vm, d);

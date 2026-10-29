@@ -418,7 +418,7 @@ void cc_expr_exec_wrapper(VirtualMachine *vm, Obj *fn, long long *out_i,
     vm->sp                = vm->initial_sp;
     vm->bp                = vm->initial_bp;
     *(--vm->sp)           = 0; // sentinel return address
-    vm->pc                = (Pc)fn->code_addr;
+    vm->pc                = (Pc)obj_fn(fn)->code_addr;
 
     cc_running_vm         = vm;
     cccc_gil_acquire(vm);

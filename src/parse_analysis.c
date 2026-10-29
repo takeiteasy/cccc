@@ -31,7 +31,7 @@ static Initializer *constexpr_init_for_node(Node *node) {
     if (!node)
         return NULL;
     if (node->kind == ND_VAR && node->var && node->var->is_constexpr)
-        return (Initializer *)node->var->constexpr_init;
+        return (Initializer *)obj_init(node->var)->constexpr_init;
     if (node->kind == ND_MEMBER) {
         Initializer *base = constexpr_init_for_node(node->lhs);
         if (!base || !node->member)
@@ -1126,7 +1126,7 @@ static void objsize_poison_scan(Node *node) {
                 // lowers them to `p = p op rhs`).
                 if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                     node->lhs->var->objsize_has_alloc &&
-                    node->lhs->var->objsize_init_assign != node)
+                    obj_size(node->lhs->var)->objsize_init_assign != node)
                     node->lhs->var->objsize_unsafe = true;
                 break;
             case ND_ADDR:
@@ -1406,7 +1406,7 @@ void mark_addr_escapes(Node *node, Obj *fn) {
 // mark_nested_captures to tell "this function's own local" apart from
 // "reaches an enclosing frame through the static link".
 static bool var_in_fn_locals(Obj *fn, Obj *var) {
-    for (Obj *v = fn->locals; v; v = v->next)
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
         if (v == var)
             return true;
     return false;
@@ -1474,10 +1474,10 @@ static int64_t objsize_effective_remaining(Obj *var, int64_t offset,
                                            int depth) {
     if (!var || var->objsize_unsafe || depth > 64)
         return -1;
-    if (var->objsize_derived_from)
+    if (obj_size(var)->objsize_derived_from)
         return objsize_effective_remaining(
-            var->objsize_derived_from,
-            (int64_t)var->objsize_derived_offset + offset, depth + 1);
+            obj_size(var)->objsize_derived_from,
+            (int64_t)obj_size(var)->objsize_derived_offset + offset, depth + 1);
     // `var` is the true root of the chain: `offset` is now the total,
     // root-relative byte offset. Reject a before-the-object pointer here,
     // where the check is finally meaningful.
@@ -1489,7 +1489,7 @@ static int64_t objsize_effective_remaining(Obj *var, int64_t offset,
     int64_t root_size = (var->ty && var->ty->kind == TY_ARRAY &&
                          var->ty->size > 0 && !var->objsize_has_alloc)
                             ? (int64_t)var->ty->size
-                            : (int64_t)var->objsize_alloc;
+                            : (int64_t)obj_size(var)->objsize_alloc;
     return root_size - offset;
 }
 
@@ -1563,7 +1563,8 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
             // meaningless at this splice site. Do not attempt to compute the
             // exited-scope set; warn if either end sits in a cleanup scope.
             if (node->kind == ND_GOTO) {
-                node_ctl_mut(vm, node)->cleanup_target_depth = 0;
+                if (node_ctl(node)->cleanup_target_depth)
+                    node_ctl_mut(vm, node)->cleanup_target_depth = 0;
                 if (node_ctl(node)->cleanup_chain)
                     warn_tok(vm, node->tok, CCCC_WARN_ATTRIBUTES,
                              "goto from a macro template targets a label in "
@@ -1593,11 +1594,11 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
 }
 
 void cc_resolve_body_label_refs(VirtualMachine *vm, Obj *fn) {
-    if (!fn || !fn->body)
+    if (!fn || !obj_fn(fn)->body)
         return;
     HashMap map = {0};
-    collect_body_labels(fn->body, &map);
-    bind_free_label_refs(vm, fn->body, &map);
+    collect_body_labels(obj_fn(fn)->body, &map);
+    bind_free_label_refs(vm, obj_fn(fn)->body, &map);
     hashmap_deinit(&map);
 }
 
@@ -2852,16 +2853,16 @@ void check_may_return_null_summaries(VirtualMachine *vm) {
     do {
         changed = false;
         for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-            if (!(fn->is_function && fn->body && fn->ty &&
+            if (!(fn->is_function && obj_fn(fn)->body && fn->ty &&
                   fn->ty->kind == TY_FUNC && fn->ty->return_ty &&
                   fn->ty->return_ty->kind == TY_PTR))
                 continue;
-            if (!fn->may_return_null && nn_returns_null_walk(vm, fn->body)) {
+            if (!fn->may_return_null && nn_returns_null_walk(vm, obj_fn(fn)->body)) {
                 fn->may_return_null = true;
                 changed             = true;
             }
             if (!fn->always_returns_null &&
-                nn_all_returns_null_walk(vm, fn->body)) {
+                nn_all_returns_null_walk(vm, obj_fn(fn)->body)) {
                 fn->always_returns_null = true;
                 fn->may_return_null     = true;
                 changed                 = true;
@@ -2874,7 +2875,7 @@ void check_may_return_null_summaries(VirtualMachine *vm) {
 // function body. Call after mark_addr_escapes() has run (this pass relies
 // on Obj->addr_escapes to exclude address-taken locals from tracking).
 void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
-    if (!fn || !fn->body || !fn->ty)
+    if (!fn || !obj_fn(fn)->body || !fn->ty)
         return;
     if (!(vm->compiler.warnings &
           (CCCC_WARN_NONNULL | CCCC_WARN_MAYBE_NONNULL)))
@@ -2885,7 +2886,7 @@ void check_nonnull_flow(VirtualMachine *vm, Obj *fn) {
     ctx.budget = NN_WALK_BUDGET;
     NNEnv env  = {0};
     env.live   = true;
-    nn_walk(&ctx, fn->body, &env);
+    nn_walk(&ctx, obj_fn(fn)->body, &env);
 }
 
 // Warn on statically-provable-null arguments passed to a parameter marked

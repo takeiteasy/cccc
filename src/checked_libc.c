@@ -249,13 +249,13 @@ static void apply_row(VirtualMachine *vm, Obj *fn, int row) {
     for (Type *o = before->params, *m = fn->ty->params; o && m;
          o = o->next, m = m->next, idx++)
         if (type_chk(o)->form == CB_NONE && type_chk(m)->form != CB_NONE)
-            fn->checked_libc_mask |= 1u << idx;
+            obj_chk_mut(vm, fn)->checked_libc_mask |= 1u << idx;
 }
 
 static void apply_by_name_or_label(VirtualMachine *vm, Obj *fn) {
     int row = find_row(fn->name);
     if (row < 0)
-        row = find_row(fn->asm_label);
+        row = find_row(obj_attr(fn)->asm_label);
     if (row >= 0)
         apply_row(vm, fn, row);
 }

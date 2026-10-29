@@ -1107,7 +1107,7 @@ static void compact(Peep *p, PeepMark m) {
                 remap(p, map, (Pc)vm->dbg.source_map[i].pc_offset);
     for (int i = m.labels; i < num_global_labels; i++)
         global_label_map[i].offset = remap(p, map, global_label_map[i].offset);
-    for (CleanupRange *r = p->fn->cleanup_ranges; r; r = r->next) {
+    for (CleanupRange *r = obj_attr(p->fn)->cleanup_ranges; r; r = r->next) {
         r->start = remap(p, map, (Pc)r->start);
         if (r->end >= 0)
             r->end = remap(p, map, (Pc)r->end);
@@ -1127,7 +1127,7 @@ PeepMark cg_peep_mark(VirtualMachine *vm) {
 
 // Whether every cleanup range still starts and ends on an instruction.
 static bool cleanup_ranges_aligned(const Peep *p) {
-    for (const CleanupRange *r = p->fn->cleanup_ranges; r; r = r->next) {
+    for (const CleanupRange *r = obj_attr(p->fn)->cleanup_ranges; r; r = r->next) {
         for (int k = 0; k < 2; k++) {
             long long t = k ? r->end : r->start;
             if (t >= (long long)p->start && t < (long long)p->end &&
@@ -1193,7 +1193,7 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
         return;
     Peep p = {.vm    = vm,
               .fn    = fn,
-              .start = (Pc)fn->code_addr,
+              .start = (Pc)obj_fn(fn)->code_addr,
               .end   = vm->text_ptr + 1};
     if (p.end <= p.start || !decode_window(&p) || !mark_leaders(&p, m)) {
         free_peep(&p);

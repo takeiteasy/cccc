@@ -524,8 +524,8 @@ static void serialize_wide_string(FILE *f, const char *data, int elem_size,
 int block_capture_index(Obj *block_fn, Obj *var) {
     if (!block_fn || !var)
         return -1;
-    for (int i = 0; i < block_fn->num_captures; i++)
-        if (block_fn->captures[i] == var)
+    for (int i = 0; i < obj_blk(block_fn)->num_captures; i++)
+        if (obj_blk(block_fn)->captures[i] == var)
             return i;
     return -1;
 }
@@ -592,11 +592,11 @@ static const char *find_nested_env_name(SerializeContext *ctx, Obj *owner_fn) {
 // env's own `__up` field once per intervening level, casting at each hop.
 static char *nested_env_ptr_expr(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *from_fn, Obj *target) {
-    Obj  *p = from_fn->parent_fn;
+    Obj  *p = obj_fn(from_fn)->parent_fn;
     char *expr =
         arena_format(vm, "((%s *)__static_link)", find_nested_env_name(ctx, p));
     while (p != target) {
-        p    = p->parent_fn;
+        p    = obj_fn(p)->parent_fn;
         expr = arena_format(vm, "((%s *)%s->__up)",
                             find_nested_env_name(ctx, p), expr);
     }
@@ -648,14 +648,14 @@ static bool serialize_nested_upvar_ref(FILE *f, VirtualMachine *vm,
     if (!ctx->current_fn || !ctx->current_fn->is_nested ||
         ctx->current_fn->is_block)
         return false;
-    for (Obj *v = ctx->current_fn->locals; v; v = v->next)
+    for (Obj *v = obj_fn(ctx->current_fn)->locals; v; v = v->next)
         if (v == var)
             return false; // owned by the nested function itself, not an upvar
     Obj *owner       = NULL;
     Obj *block_owner = NULL;
-    for (Obj *anc = ctx->current_fn->parent_fn; anc; anc = anc->parent_fn) {
+    for (Obj *anc = obj_fn(ctx->current_fn)->parent_fn; anc; anc = obj_fn(anc)->parent_fn) {
         bool is_own = false;
-        for (Obj *v = anc->locals; v; v = v->next)
+        for (Obj *v = obj_fn(anc)->locals; v; v = v->next)
             if (v == var) {
                 is_own = true;
                 break;
@@ -2279,8 +2279,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     fprintf(f, "__builtin_memmove");
                 } else if (node->var == vm->compiler.builtin_memcmp) {
                     fprintf(f, "__builtin_memcmp");
-                } else if (node->var->builtin_spelling) {
-                    fprintf(f, "%s", node->var->builtin_spelling);
+                } else if (obj_attr(node->var)->builtin_spelling) {
+                    fprintf(f, "%s", obj_attr(node->var)->builtin_spelling);
                 } else if (obj_is_reserved_builtin(node->var, "longjmp") ||
                            obj_is_reserved_builtin(node->var, "_longjmp") ||
                            obj_is_reserved_builtin(node->var, "siglongjmp")) {
@@ -2990,7 +2990,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                 node->lhs->var->is_function && node->lhs->var->is_nested &&
                 !node->lhs->var->is_block) {
-                Obj *callee_parent = node->lhs->var->parent_fn;
+                Obj *callee_parent = obj_fn(node->lhs->var)->parent_fn;
                 Obj *current_fn    = ctx->current_fn;
                 fprintf(f, "(void *)");
                 if (callee_parent == current_fn)
@@ -3007,7 +3007,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // emit nothing.
                     fprintf(f, "&__cccc_nenv");
                 if (node->lhs->var->is_omp_region)
-                    fprintf(f, ", %s", node->lhs->var->omp_nt_var->name);
+                    fprintf(f, ", %s", obj_fn(node->lhs->var)->omp_nt_var->name);
                 else if (node->args)
                     fprintf(f, ", ");
             }
@@ -3504,8 +3504,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 if (enc_idx < 0 && cap->is_local &&
                     ctx->current_fn->is_nested && !ctx->current_fn->is_block &&
                     !nested_var_is_own(ctx->current_fn, cap)) {
-                    for (Obj *anc = ctx->current_fn->parent_fn; anc;
-                         anc      = anc->parent_fn)
+                    for (Obj *anc = obj_fn(ctx->current_fn)->parent_fn; anc;
+                         anc      = obj_fn(anc)->parent_fn)
                         if (nested_var_is_own(anc, cap)) {
                             anc_owner = anc;
                             break;

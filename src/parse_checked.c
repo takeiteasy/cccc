@@ -62,10 +62,10 @@ Node *clone_bounds_node(VirtualMachine *vm, Node *n) {
 static Node *clone_member_bounds_node(VirtualMachine *vm, Node *n, Node *obj) {
     if (!n)
         return NULL;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_member) {
         Node *member_node =
             new_unary(vm, ND_MEMBER, clone_bounds_node(vm, obj), n->tok);
-        member_node->member = n->var->checked_self_member;
+        member_node->member = obj_chk(n->var)->checked_self_member;
         add_type(vm, member_node);
         return member_node;
     }
@@ -164,7 +164,7 @@ static bool comma_yields_checked_var(Node *n) {
     while (n && n->kind == ND_COMMA)
         n = n->rhs;
     return n && n->kind == ND_VAR &&
-           (n->var->checked_cast_kind != CC_NONE ||
+           (obj_chk(n->var)->checked_cast_kind != CC_NONE ||
             n->var->checked_call_result ||
             (n->var->ty->kind == TY_ARRAY &&
              n->var->ty->checked_kind != CHECKED_NONE));
@@ -252,8 +252,8 @@ static bool checked_param_copyable(Type *p) {
 static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
     if (!n)
         return true;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
-        int   k = n->var->checked_self_param_idx;
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_param_idx) {
+        int   k = obj_chk(n->var)->checked_self_param_idx;
         Type *p = params;
         Node *a = args;
         for (int i = 1; i < k && p && a; i++) {
@@ -323,7 +323,7 @@ static Node *checked_cast_root(Node *n) {
             case ND_COMMA:
                 return n->lhs && n->lhs->kind == ND_ASSIGN && n->rhs &&
                                n->rhs->kind == ND_VAR &&
-                               n->rhs->var->checked_cast_kind != CC_NONE &&
+                               obj_chk(n->rhs->var)->checked_cast_kind != CC_NONE &&
                                n->lhs->lhs->kind == ND_VAR &&
                                n->lhs->lhs->var == n->rhs->var
                            ? n
@@ -898,10 +898,10 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                                         : base.mem->ty->checked_kind;
     CheckedBoundsForm form       = plain_row  ? CB_COUNT
                                    : base.row ? type_chk(base.row)->form
-                                   : base.var ? base.var->checked_bounds_form
+                                   : base.var ? obj_chk(base.var)->checked_bounds_form
                                               : type_chk(base.mem->ty)->form;
     Node             *resolved_lo =
-        base.var ? base.var->checked_bounds_lo
+        base.var ? obj_chk(base.var)->checked_bounds_lo
         : base.mem ? base.mem->checked_bounds_lo
                    : NULL;
     Node *resolved_hi = NULL;
@@ -918,7 +918,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
         add_type(vm, resolved_hi);
     } else {
         resolved_hi =
-            base.var ? base.var->checked_bounds_hi : base.mem->checked_bounds_hi;
+            base.var ? obj_chk(base.var)->checked_bounds_hi : base.mem->checked_bounds_hi;
     }
     Type   *base_ty   = access_ty->base;
     if (base_ty && base_ty->kind == TY_VLA && !checked_vla_row_ready(base_ty))
@@ -1246,22 +1246,22 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
         // chain source's checked_prop_chain_src can only be true if it
         // stabilised as non-unsafe by the round the fixpoint stopped at --
         // has real temps, so *out_lo/*out_hi come back non-NULL there.
-        if (base.var->checked_prop_lo) {
+        if (obj_chk(base.var)->checked_prop_lo) {
             // A mixed local's source pair also holds its plain arrays' ranges.
-            bool src = use_src_pair && base.var->checked_prop_src_lo;
+            bool src = use_src_pair && obj_chk(base.var)->checked_prop_src_lo;
             *out_lo  = new_var_node(vm,
-                                    src ? base.var->checked_prop_src_lo
-                                        : base.var->checked_prop_lo,
+                                    src ? obj_chk(base.var)->checked_prop_src_lo
+                                        : obj_chk(base.var)->checked_prop_lo,
                                     tok);
             add_type(vm, *out_lo);
             *out_hi = new_var_node(vm,
-                                   src ? base.var->checked_prop_src_hi
-                                       : base.var->checked_prop_hi,
+                                   src ? obj_chk(base.var)->checked_prop_src_hi
+                                       : obj_chk(base.var)->checked_prop_hi,
                                    tok);
             add_type(vm, *out_hi);
         }
         *out_optional = base.var->checked_prop_optional;
-        *out_nt_elem  = base.var->checked_prop_nt_elem;
+        *out_nt_elem  = obj_chk(base.var)->checked_prop_nt_elem;
         *out_nt       = *out_nt_elem != 0;
         *out_plain    = base.var->checked_prop_plain;
         return true;
@@ -1315,7 +1315,7 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                 if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                     node->lhs->var->checked_prop_candidate) {
                     Obj *var = node->lhs->var;
-                    if (node != var->checked_prop_init_assign &&
+                    if (node != obj_chk(var)->checked_prop_init_assign &&
                         find_checked_base(node->rhs).var == var)
                         break; // self-rooted -- neutral, see comment above
                     Node   *lo, *hi;
@@ -1349,16 +1349,16 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
                         // contradict an NT fact already seen -- it just isn't
                         // live on that path.
                         if (src_nt) {
-                            if (var->checked_prop_scan_nt_elem == 0)
-                                var->checked_prop_scan_nt_elem = src_nt_elem;
-                            else if (var->checked_prop_scan_nt_elem !=
+                            if (obj_chk(var)->checked_prop_scan_nt_elem == 0)
+                                obj_chk_mut(vm, var)->checked_prop_scan_nt_elem = src_nt_elem;
+                            else if (obj_chk(var)->checked_prop_scan_nt_elem !=
                                      src_nt_elem)
                                 var->checked_prop_scan_nt_conflict = true;
                             if (var->checked_prop_scan_saw_non_nt)
                                 var->checked_prop_scan_nt_conflict = true;
                         } else {
                             var->checked_prop_scan_saw_non_nt = true;
-                            if (var->checked_prop_scan_nt_elem != 0)
+                            if (obj_chk(var)->checked_prop_scan_nt_elem != 0)
                                 var->checked_prop_scan_nt_conflict = true;
                         }
                     } else {
@@ -1403,8 +1403,8 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
 static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
     Obj *var      = new_var(vm, "", 0, ty);
     var->is_local = true;
-    var->next     = fn->locals;
-    fn->locals    = var;
+    var->next     = obj_fn(fn)->locals;
+    obj_fn_mut(vm, fn)->locals    = var;
     return var;
 }
 
@@ -1427,20 +1427,20 @@ static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty) {
 // checked_prop_init_assign set anyway, so they'd be skipped even if it
 // did). Would need re-deriving if this ever switched to appending instead.
 static void checked_prop_alloc_temps(VirtualMachine *vm, Obj *fn) {
-    for (Obj *v = fn->locals; v; v = v->next)
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
         if (v->checked_prop_candidate && !v->checked_prop_unsafe &&
-            !v->checked_prop_lo) {
-            v->checked_prop_lo =
+            !obj_chk(v)->checked_prop_lo) {
+            obj_chk_mut(vm, v)->checked_prop_lo =
                 new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
-            v->checked_prop_hi =
+            obj_chk_mut(vm, v)->checked_prop_hi =
                 new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
         }
-    for (Obj *v = fn->locals; v; v = v->next)
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
         if (v->checked_prop_mixed && !v->checked_prop_unsafe &&
-            !v->checked_prop_src_lo) {
-            v->checked_prop_src_lo =
+            !obj_chk(v)->checked_prop_src_lo) {
+            obj_chk_mut(vm, v)->checked_prop_src_lo =
                 new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
-            v->checked_prop_src_hi =
+            obj_chk_mut(vm, v)->checked_prop_src_hi =
                 new_checked_prop_temp(vm, fn, pointer_to(vm, ty_char));
         }
 }
@@ -1553,35 +1553,35 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
     }
 
     Node *store_lo =
-        new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_lo, tok),
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, obj_chk(var)->checked_prop_lo, tok),
                    new_cast(vm, lo, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_lo);
     Node *store_hi =
-        new_binary(vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_hi, tok),
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, obj_chk(var)->checked_prop_hi, tok),
                    new_cast(vm, hi, pointer_to(vm, ty_char)), tok);
     add_type(vm, store_hi);
     Node *snapshot = new_binary(vm, ND_COMMA, store_lo, store_hi, tok);
     add_type(vm, snapshot);
-    if (var->checked_prop_mixed && var->checked_prop_src_lo) {
+    if (var->checked_prop_mixed && obj_chk(var)->checked_prop_src_lo) {
         Node *slo, *shi;
         Obj  *src_var = find_checked_base(assign_node->rhs).var;
         if (plain_lo) {
             slo = plain_lo;
             shi = plain_hi;
         } else if (is_source && src_var && src_var->checked_prop_mixed &&
-                   src_var->checked_prop_src_lo) {
-            slo = new_var_node(vm, src_var->checked_prop_src_lo, tok);
-            shi = new_var_node(vm, src_var->checked_prop_src_hi, tok);
+                   obj_chk(src_var)->checked_prop_src_lo) {
+            slo = new_var_node(vm, obj_chk(src_var)->checked_prop_src_lo, tok);
+            shi = new_var_node(vm, obj_chk(src_var)->checked_prop_src_hi, tok);
         } else {
             slo = clone_bounds_node(vm, lo);
             shi = clone_bounds_node(vm, hi);
         }
         Node *store_slo = new_binary(
-            vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_src_lo, tok),
+            vm, ND_ASSIGN, new_var_node(vm, obj_chk(var)->checked_prop_src_lo, tok),
             new_cast(vm, slo, pointer_to(vm, ty_char)), tok);
         add_type(vm, store_slo);
         Node *store_shi = new_binary(
-            vm, ND_ASSIGN, new_var_node(vm, var->checked_prop_src_hi, tok),
+            vm, ND_ASSIGN, new_var_node(vm, obj_chk(var)->checked_prop_src_hi, tok),
             new_cast(vm, shi, pointer_to(vm, ty_char)), tok);
         add_type(vm, store_shi);
         Node *src_stores = new_binary(vm, ND_COMMA, store_slo, store_shi, tok);
@@ -1640,7 +1640,7 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             // here either (checked_prop_source_bounds() wouldn't even find a
             // source for it: `q` is unchecked and, until proven otherwise,
             // not yet a chain source of itself).
-            if (node != node->lhs->var->checked_prop_init_assign &&
+            if (node != obj_chk(node->lhs->var)->checked_prop_init_assign &&
                 find_checked_base(node->rhs).var == node->lhs->var) {
                 checked_prop_rewrite_scan(vm, fn, node->rhs);
                 continue;
@@ -1729,10 +1729,10 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
         CheckedBase base = find_checked_base_ex(node->lhs, true);
         if (base.var && base.var->checked_prop_candidate &&
             !base.var->checked_prop_unsafe && !base.var->checked_prop_plain &&
-            base.var->checked_prop_lo) {
-            Node *lo = new_var_node(vm, base.var->checked_prop_lo, node->tok);
+            obj_chk(base.var)->checked_prop_lo) {
+            Node *lo = new_var_node(vm, obj_chk(base.var)->checked_prop_lo, node->tok);
             add_type(vm, lo);
-            Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
+            Node *hi = new_var_node(vm, obj_chk(base.var)->checked_prop_hi, node->tok);
             add_type(vm, hi);
             node_chk_mut(vm, node)->bounds_lo = lo;
             node_chk_mut(vm, node)->bounds_hi = hi;
@@ -1746,8 +1746,8 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             Type *pointee_ty              = access_ty ? access_ty->base : NULL;
             node_chk_mut(vm, node)->access_size =
                 checked_access_bytes(pointee_ty);
-            if (base.var->checked_prop_nt_elem != 0 &&
-                node_chk(node)->access_size == base.var->checked_prop_nt_elem &&
+            if (obj_chk(base.var)->checked_prop_nt_elem != 0 &&
+                node_chk(node)->access_size == obj_chk(base.var)->checked_prop_nt_elem &&
                 checked_nt_pointee_supported(pointee_ty))
                 node->checked_nt_terminator = true;
             // #943: to_assign()'s RMW desugar built its store node before
@@ -1801,19 +1801,19 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 // token) is used as every synthesized node's representative token, same
 // as elsewhere in this pass reaches for `assign_node->tok`/`node->tok`.
 static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
-    Token *tok = fn->body->tok;
-    for (Obj *v = fn->locals; v; v = v->next) {
+    Token *tok = obj_fn(fn)->body->tok;
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next) {
         if (!(v->checked_prop_candidate && !v->checked_prop_unsafe &&
               v->checked_prop_optional))
             continue;
         Node *store_lo =
-            new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_lo, tok),
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, obj_chk(v)->checked_prop_lo, tok),
                        new_cast(vm, checked_prop_sentinel_node(vm, false, tok),
                                 pointer_to(vm, ty_char)),
                        tok);
         add_type(vm, store_lo);
         Node *store_hi =
-            new_binary(vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_hi, tok),
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, obj_chk(v)->checked_prop_hi, tok),
                        new_cast(vm, checked_prop_sentinel_node(vm, true, tok),
                                 pointer_to(vm, ty_char)),
                        tok);
@@ -1822,18 +1822,18 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
             new_unary(vm, ND_EXPR_STMT,
                       new_binary(vm, ND_COMMA, store_lo, store_hi, tok), tok);
         add_type(vm, init->lhs);
-        init->next     = fn->body->body;
-        fn->body->body = init;
-        if (!v->checked_prop_src_lo)
+        init->next     = obj_fn(fn)->body->body;
+        obj_fn(fn)->body->body = init;
+        if (!obj_chk(v)->checked_prop_src_lo)
             continue;
         Node *store_slo = new_binary(
-            vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_src_lo, tok),
+            vm, ND_ASSIGN, new_var_node(vm, obj_chk(v)->checked_prop_src_lo, tok),
             new_cast(vm, checked_prop_sentinel_node(vm, false, tok),
                      pointer_to(vm, ty_char)),
             tok);
         add_type(vm, store_slo);
         Node *store_shi = new_binary(
-            vm, ND_ASSIGN, new_var_node(vm, v->checked_prop_src_hi, tok),
+            vm, ND_ASSIGN, new_var_node(vm, obj_chk(v)->checked_prop_src_hi, tok),
             new_cast(vm, checked_prop_sentinel_node(vm, true, tok),
                      pointer_to(vm, ty_char)),
             tok);
@@ -1842,8 +1842,8 @@ static void checked_prop_init_optional_sentinels(VirtualMachine *vm, Obj *fn) {
             new_unary(vm, ND_EXPR_STMT,
                       new_binary(vm, ND_COMMA, store_slo, store_shi, tok), tok);
         add_type(vm, src_init->lhs);
-        src_init->next = fn->body->body;
-        fn->body->body = src_init;
+        src_init->next = obj_fn(fn)->body->body;
+        obj_fn(fn)->body->body = src_init;
     }
 }
 
@@ -1959,7 +1959,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
          prev_mixed = -1;
     bool converged = false;
     for (int round = 0; round < CHECKED_PROP_MAX_ROUNDS; round++) {
-        for (Obj *v = fn->locals; v; v = v->next)
+        for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
                 v->checked_prop_unsafe            = false;
                 v->checked_prop_scan_saw_rooted   = false;
@@ -1969,11 +1969,11 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                 v->checked_prop_scan_src_mixed    = false;
                 // #943: reset alongside the other per-round scratch fields
                 // -- see their comments in cccc.h.
-                v->checked_prop_scan_nt_elem     = 0;
+                obj_chk_mut(vm, v)->checked_prop_scan_nt_elem     = 0;
                 v->checked_prop_scan_saw_non_nt  = false;
                 v->checked_prop_scan_nt_conflict = false;
             }
-        checked_prop_poison_scan(vm, fn->body);
+        checked_prop_poison_scan(vm, obj_fn(fn)->body);
         // is_captured is set by mark_nested_captures(), which -- for every
         // nested function textually inside this one -- always finishes
         // running before this function's own tail (and therefore this call)
@@ -1986,7 +1986,7 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
         // true after some future refactor.
         int survivors = 0, optional_survivors = 0, nt_survivors = 0,
             plain_survivors = 0, mixed_survivors = 0;
-        for (Obj *v = fn->locals; v; v = v->next)
+        for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
             if (v->checked_prop_candidate) {
                 // #942: a candidate with no checked-rooted store at all
                 // (an escaping address-of already set checked_prop_unsafe
@@ -2026,18 +2026,18 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
                     // NT-ness (kind 2 of checked_prop_source_bounds()) can
                     // only be trusted once IT stabilised as of the previous
                     // round -- same reasoning as checked_prop_chain_src.
-                    v->checked_prop_nt_elem =
+                    obj_chk_mut(vm, v)->checked_prop_nt_elem =
                         v->checked_prop_scan_nt_conflict
                             ? 0
-                            : v->checked_prop_scan_nt_elem;
-                    if (v->checked_prop_nt_elem != 0)
+                            : obj_chk(v)->checked_prop_scan_nt_elem;
+                    if (obj_chk(v)->checked_prop_nt_elem != 0)
                         nt_survivors++;
                     if (v->checked_prop_plain)
                         plain_survivors++;
                     if (v->checked_prop_mixed)
                         mixed_survivors++;
                 } else {
-                    v->checked_prop_nt_elem = 0;
+                    obj_chk_mut(vm, v)->checked_prop_nt_elem = 0;
                     v->checked_prop_plain   = false;
                     v->checked_prop_mixed   = false;
                 }
@@ -2063,10 +2063,10 @@ static void checked_prop_classify(VirtualMachine *vm, Obj *fn) {
     // round, would have turned out to conflict; losing the NT guard only
     // costs precision (falls back to plain CHKR/CHKRO), never soundness.
     if (!converged)
-        for (Obj *v = fn->locals; v; v = v->next)
+        for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
             if (v->checked_prop_candidate && !v->checked_prop_unsafe) {
                 v->checked_prop_optional = true;
-                v->checked_prop_nt_elem  = 0;
+                obj_chk_mut(vm, v)->checked_prop_nt_elem  = 0;
             }
 }
 
@@ -2086,8 +2086,8 @@ void propagate_checked_bounds(VirtualMachine *vm, Obj *fn) {
     // into a real snapshot, non-rooted OPT ones into a sentinel refresh),
     // then attach the resulting snapshots to every deref reached through a
     // survivor.
-    checked_prop_rewrite_scan(vm, fn, fn->body);
-    checked_prop_attach_scan(vm, fn, fn->body);
+    checked_prop_rewrite_scan(vm, fn, obj_fn(fn)->body);
+    checked_prop_attach_scan(vm, fn, obj_fn(fn)->body);
 }
 
 // #944 per-assignment rewrite: `q = E` where `q` is a declared-checked
@@ -2181,7 +2181,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
             if (checked_base_is_declared(dst_base) &&
                 !(dst_base.mem && node_has_side_effects(dst_base.obj)) &&
                 !(dst_base.var &&
-                  dst_base.var->checked_cast_kind == CC_ASSUME)) {
+                  obj_chk(dst_base.var)->checked_cast_kind == CC_ASSUME)) {
                 Type *dst_pty =
                     checked_base_type(dst_base);
                 Node *dst_lo, *dst_hi;
@@ -2311,7 +2311,7 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
 void verify_checked_assign_bounds(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         return;
-    verify_checked_assign_scan(vm, fn, fn->body);
+    verify_checked_assign_scan(vm, fn, obj_fn(fn)->body);
 }
 
 // ---------------------------------------------------------------------
@@ -2366,8 +2366,8 @@ static bool checked_param_bounds_args_ok(Node *n, Node **arg_by_idx, int nargs,
                                          int self_idx) {
     if (!n)
         return true;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
-        int k = n->var->checked_self_param_idx;
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_param_idx) {
+        int k = obj_chk(n->var)->checked_self_param_idx;
         if (k != self_idx) {
             if (k < 1 || k > nargs || !arg_by_idx[k - 1])
                 return false;
@@ -2405,8 +2405,8 @@ static Node *clone_param_bounds_node(VirtualMachine *vm, Node *n,
                                      Obj *ca) {
     if (!n)
         return NULL;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
-        int k = n->var->checked_self_param_idx;
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_param_idx) {
+        int k = obj_chk(n->var)->checked_self_param_idx;
         if (k == self_idx) {
             Node *v = new_var_node(vm, ca, n->tok);
             add_type(vm, v);
@@ -2475,9 +2475,9 @@ static Obj *new_checked_call_temp(VirtualMachine *vm, Type *ty) {
 static Obj *new_checked_arg_temp(VirtualMachine *vm, Type *p, Node **arg_by_idx,
                                  int nargs, int idx) {
     Obj *ca               = new_checked_call_temp(vm, p);
-    ca->checked_bounds_lo = clone_param_bounds_node(
+    obj_chk_mut(vm, ca)->checked_bounds_lo = clone_param_bounds_node(
         vm, type_chk(p)->param_bounds_lo, arg_by_idx, nargs, idx, ca);
-    ca->checked_bounds_hi = clone_param_bounds_node(
+    obj_chk_mut(vm, ca)->checked_bounds_hi = clone_param_bounds_node(
         vm, type_chk(p)->param_bounds_hi, arg_by_idx, nargs, idx, ca);
     return ca;
 }
@@ -2531,8 +2531,8 @@ static void hoist_ret_bounds_args(VirtualMachine *vm, Node *n, Type *params,
                                   Token *tok) {
     if (!n)
         return;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
-        int k = n->var->checked_self_param_idx;
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_param_idx) {
+        int k = obj_chk(n->var)->checked_self_param_idx;
         if (reads[k - 1])
             return;
         Type *p = params;
@@ -2598,9 +2598,9 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
     Obj *cr = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ret)
                        : new_checked_call_temp(vm, ret);
     cr->checked_call_result = true;
-    cr->checked_bounds_lo   = clone_param_bounds_node(
+    obj_chk_mut(vm, cr)->checked_bounds_lo   = clone_param_bounds_node(
         vm, type_chk(fty)->ret_bounds_lo, reads, nargs, 0, cr);
-    cr->checked_bounds_hi = clone_param_bounds_node(
+    obj_chk_mut(vm, cr)->checked_bounds_hi = clone_param_bounds_node(
         vm, type_chk(fty)->ret_bounds_hi, reads, nargs, 0, cr);
 
     Node *copy = node_clone(vm, call);
@@ -2672,8 +2672,8 @@ static bool checked_param_hoist_siblings(Node *n, Type *params,
                                          bool *vneed) {
     if (!n)
         return true;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_param_idx) {
-        int k = n->var->checked_self_param_idx;
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_param_idx) {
+        int k = obj_chk(n->var)->checked_self_param_idx;
         if (k == self_idx)
             return true;
         if (k < 1 || k > nargs || !arg_by_idx[k - 1])
@@ -3057,8 +3057,8 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
             arena_alloc(&vm->compiler.parser_arena, sizeof(*p));
         p->src  = src_base.var;
         p->tok  = tok;
-        p->next = vm->compiler.current_fn->checked_dynamic_pending;
-        vm->compiler.current_fn->checked_dynamic_pending = p;
+        p->next = obj_chk(vm->compiler.current_fn)->checked_dynamic_pending;
+        obj_chk_mut(vm, vm->compiler.current_fn)->checked_dynamic_pending = p;
         return;
     } else if (checked_call_root(cast_node->lhs)) {
         return; // bounds come from the callee's return type
@@ -3076,13 +3076,13 @@ void check_checked_cast_dynamic_source(VirtualMachine *vm, Node *cast_node,
 // has classified them, so the classifier runs here, for functions that
 // need it only.
 static void resolve_pending_dynamic_casts(VirtualMachine *vm, Obj *fn) {
-    if (!fn->checked_dynamic_pending)
+    if (!obj_chk(fn)->checked_dynamic_pending)
         return;
     if (!(vm->flags & CCCC_CHECKED_BOUNDS))
         checked_prop_classify(vm, fn);
-    for (CheckedDynPending *p = fn->checked_dynamic_pending; p; p = p->next) {
+    for (CheckedDynPending *p = obj_chk(fn)->checked_dynamic_pending; p; p = p->next) {
         bool in_fn = false;
-        for (Obj *v = fn->locals; v && !in_fn; v = v->next)
+        for (Obj *v = obj_fn(fn)->locals; v && !in_fn; v = v->next)
             in_fn = v == p->src;
         if (!in_fn || !p->src->checked_prop_candidate ||
             p->src->checked_prop_unsafe)
@@ -3093,7 +3093,7 @@ static void resolve_pending_dynamic_casts(VirtualMachine *vm, Obj *fn) {
                       "paths -- use 'assume' to take responsibility for this "
                       "conversion, or give the source a bounds declaration");
     }
-    fn->checked_dynamic_pending = NULL;
+    obj_chk_mut(vm, fn)->checked_dynamic_pending = NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -3133,11 +3133,11 @@ static void group_collect_siblings(Node *n, Obj *self, GroupTarget *t) {
     if (!n)
         return;
     if (n->kind == ND_VAR && n->var) {
-        if (n->var->checked_self_member) {
+        if (obj_chk(n->var)->checked_self_member) {
             if (t->nmems < 8)
-                t->mems[t->nmems++] = n->var->checked_self_member;
+                t->mems[t->nmems++] = obj_chk(n->var)->checked_self_member;
         } else if (n->var != self && n->var->name && n->var->name[0] &&
-                   !n->var->checked_self_param_idx) {
+                   !obj_chk(n->var)->checked_self_param_idx) {
             if (t->nvars < 8)
                 t->vars[t->nvars++] = n->var;
         }
@@ -3159,8 +3159,8 @@ static bool group_anchor_target(Node *leaf, GroupTarget *t) {
     Node *l = leaf->lhs;
     if (l->kind == ND_VAR && l->var && l->var->name && l->var->name[0]) {
         t->var = l->var;
-        group_collect_siblings(l->var->checked_bounds_lo, l->var, t);
-        group_collect_siblings(l->var->checked_bounds_hi, l->var, t);
+        group_collect_siblings(obj_chk(l->var)->checked_bounds_lo, l->var, t);
+        group_collect_siblings(obj_chk(l->var)->checked_bounds_hi, l->var, t);
     } else if (l->kind == ND_MEMBER && l->member && l->lhs &&
                !node_has_side_effects(l->lhs)) {
         t->mem = l->member;
@@ -4052,7 +4052,7 @@ static void track_anchors(VirtualMachine *vm, Obj *fn, TrackFn *tf,
         return;
     if (!tf->scanned) {
         tf->scanned = true;
-        track_scan_one(fn->body, tf);
+        track_scan_one(obj_fn(fn)->body, tf);
     }
     if (tf->disabled)
         return;
@@ -4158,10 +4158,10 @@ static void group_walk_one(VirtualMachine *vm, Obj *fn, TrackFn *tf,
 }
 
 void group_checked_sibling_writes(VirtualMachine *vm, Obj *fn) {
-    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !fn->body)
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !obj_fn(fn)->body)
         return;
     TrackFn tf = {0};
-    group_walk_one(vm, fn, &tf, fn->body);
+    group_walk_one(vm, fn, &tf, obj_fn(fn)->body);
     free(tf.addrs);
     free(tf.ptrs);
 }
@@ -4173,13 +4173,13 @@ void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
     resolve_pending_dynamic_casts(vm, fn);
     verify_checked_assign_bounds(vm, fn);
     group_checked_sibling_writes(vm, fn);
-    if (fn->checked_ret_entry && fn->body) {
+    if (obj_chk(fn)->checked_ret_entry && obj_fn(fn)->body) {
         Node *init =
-            new_unary(vm, ND_EXPR_STMT, fn->checked_ret_entry, fn->body->tok);
+            new_unary(vm, ND_EXPR_STMT, obj_chk(fn)->checked_ret_entry, obj_fn(fn)->body->tok);
         add_type(vm, init->lhs);
-        init->next            = fn->body->body;
-        fn->body->body        = init;
-        fn->checked_ret_entry = NULL;
+        init->next            = obj_fn(fn)->body->body;
+        obj_fn(fn)->body->body        = init;
+        obj_chk_mut(vm, fn)->checked_ret_entry = NULL;
     }
 }
 
@@ -4194,7 +4194,7 @@ static void retarget_ret_params(VirtualMachine *vm, Obj *fn, Node *n,
     if (!n)
         return;
     if (n->kind == ND_VAR && n->var) {
-        for (Obj *p = fn->params; p; p = p->next) {
+        for (Obj *p = obj_fn(fn)->params; p; p = p->next) {
             if (p != n->var)
                 continue;
             Obj *copy = NULL;
@@ -4235,19 +4235,19 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
         return;
     Obj *var = new_lvar(vm, "", 0, rty);
     int  nparams = 0;
-    for (Obj *p = fn->params; p; p = p->next)
+    for (Obj *p = obj_fn(fn)->params; p; p = p->next)
         nparams++;
     resolve_param_checked_bounds(vm, fn->ty);
     Obj **params = arena_alloc(&vm->compiler.parser_arena,
                                sizeof(Obj *) * (nparams + 1));
     int   i      = 0;
-    for (Obj *p = fn->params; p; p = p->next)
+    for (Obj *p = obj_fn(fn)->params; p; p = p->next)
         params[i++] = p;
     resolve_checked_template_bounds(
         vm, params, nparams, type_chk(fn->ty)->ret_bounds_lo,
-        type_chk(fn->ty)->ret_bounds_hi, 0, &var->checked_bounds_lo,
-        &var->checked_bounds_hi);
-    fn->checked_ret_var = var;
+        type_chk(fn->ty)->ret_bounds_hi, 0, &obj_chk_mut(vm, var)->checked_bounds_lo,
+        &obj_chk_mut(vm, var)->checked_bounds_hi);
+    obj_chk_mut(vm, fn)->checked_ret_var = var;
 
     // Callers evaluate the return bounds with the argument values they
     // passed, so `return` is verified against entry copies of the parameters
@@ -4255,8 +4255,8 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
     RetEntryCopy *map =
         arena_alloc(&vm->compiler.parser_arena, sizeof(*map) * (nparams + 1));
     int count = 0;
-    retarget_ret_params(vm, fn, var->checked_bounds_lo, map, &count);
-    retarget_ret_params(vm, fn, var->checked_bounds_hi, map, &count);
+    retarget_ret_params(vm, fn, obj_chk(var)->checked_bounds_lo, map, &count);
+    retarget_ret_params(vm, fn, obj_chk(var)->checked_bounds_hi, map, &count);
     Token *tok   = fn->ty->name;
     Node  *chain = NULL;
     for (int i = 0; i < count; i++) {
@@ -4269,7 +4269,7 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
         chain = chain ? new_binary(vm, ND_COMMA, chain, store, tok) : store;
         add_type(vm, chain);
     }
-    fn->checked_ret_entry = chain;
+    obj_chk_mut(vm, fn)->checked_ret_entry = chain;
 }
 
 // `return E` in a function with a checked return type becomes
@@ -4279,7 +4279,7 @@ void declare_checked_return_var(VirtualMachine *vm, Obj *fn) {
 // parameters' values at the return.
 Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
                              Token *tok) {
-    if (!fn || !fn->checked_ret_var)
+    if (!fn || !obj_chk(fn)->checked_ret_var)
         return exp;
     CheckedBase base = find_checked_base(exp);
     if (!checked_base_is_declared(base) &&
@@ -4288,11 +4288,11 @@ Node *rewrite_checked_return(VirtualMachine *vm, Obj *fn, Node *exp,
         !checked_plain_array_root(exp, &(CheckedBase){0}))
         return exp;
 
-    Node *lhs = new_var_node(vm, fn->checked_ret_var, tok);
+    Node *lhs = new_var_node(vm, obj_chk(fn)->checked_ret_var, tok);
     add_type(vm, lhs);
     Node *store = new_binary(vm, ND_ASSIGN, lhs, exp, tok);
     add_type(vm, store);
-    Node *result = new_var_node(vm, fn->checked_ret_var, tok);
+    Node *result = new_var_node(vm, obj_chk(fn)->checked_ret_var, tok);
     add_type(vm, result);
     Node *comma = new_binary(vm, ND_COMMA, store, result, tok);
     add_type(vm, comma);
@@ -4332,7 +4332,7 @@ Node *checked_cast_desugar(VirtualMachine *vm, Node *cast_node, Type *ty,
     // above), so it never collides with a real identifier and needs no
     // uniqueness counter of its own.
     Obj *var               = new_lvar(vm, "", 0, ty);
-    var->checked_cast_kind = type_chk(ty)->cast_kind;
+    obj_chk_mut(vm, var)->checked_cast_kind = type_chk(ty)->cast_kind;
     resolve_checked_bounds(vm, var);
 
     Node *lhs = new_var_node(vm, var, tok);
@@ -4715,10 +4715,10 @@ static Node *static_init_bounds(VirtualMachine *vm, Node *n,
         return NULL;
     if (self && n->kind == ND_VAR && n->var == self)
         return self_init;
-    if (n->kind == ND_VAR && n->var && n->var->checked_self_member) {
+    if (n->kind == ND_VAR && n->var && obj_chk(n->var)->checked_self_member) {
         if (!siblings)
             return NULL;
-        Initializer *si = siblings->children[n->var->checked_self_member->idx];
+        Initializer *si = siblings->children[obj_chk(n->var)->checked_self_member->idx];
         if (si && si->expr)
             return si->expr;
         return new_long(vm, 0, n->tok);
@@ -4870,9 +4870,9 @@ void check_static_checked_init(VirtualMachine *vm, Obj *var,
         return;
     if (var->ty->kind == TY_PTR)
         check_static_checked_slot(vm, init->expr, var->ty, var->checked_kind,
-                                  var->checked_bounds_form,
-                                  var->checked_bounds_lo,
-                                  var->checked_bounds_hi, NULL, var);
+                                  obj_chk(var)->checked_bounds_form,
+                                  obj_chk(var)->checked_bounds_lo,
+                                  obj_chk(var)->checked_bounds_hi, NULL, var);
     else
         check_static_checked_walk(vm, init, var->ty);
 }

@@ -545,7 +545,7 @@ static inline Node *deferred_vla_ptr_init_of(Node *n) {
     while (a && a->kind == ND_COMMA)
         a = a->rhs;
     if (a && a->kind == ND_ASSIGN && a->lhs && a->lhs->kind == ND_VAR &&
-        a->lhs->var->deferred_vla_ptr_init == n)
+        obj_size(a->lhs->var)->deferred_vla_ptr_init == n)
         return a;
     return NULL;
 }
@@ -568,7 +568,7 @@ static inline bool node_is_deferred_vla_ptr_init(Node *n) {
 // The no-op statement declaration() leaves where a cleanup var is declared, so
 // -c=native can declare it there with the host's cleanup attribute.
 static inline bool node_is_cleanup_decl(Node *n) {
-    return n && n->kind == ND_EXPR_STMT && n->var && n->var->cleanup_fn &&
+    return n && n->kind == ND_EXPR_STMT && n->var && obj_attr(n->var)->cleanup_fn &&
            n->lhs && n->lhs->kind == ND_NULL_EXPR;
 }
 
@@ -913,6 +913,10 @@ Type *copy_type(VirtualMachine *vm, Type *ty);
 void type_assign(VirtualMachine *vm, Type *dst, const Type *src);
 void node_assign(VirtualMachine *vm, Node *dst, const Node *src);
 Node *node_clone(VirtualMachine *vm, const Node *src);
+void obj_assign(VirtualMachine *vm, Obj *dst, const Obj *src);
+void obj_set_asm_label(VirtualMachine *vm, Obj *o, char *value);
+void obj_set_deprecated_msg(VirtualMachine *vm, Obj *o, char *value);
+void obj_set_rel(VirtualMachine *vm, Obj *o, Relocation *value);
 // `ty` without its address space: the type of a private temporary that holds a
 // value read from global/local/constant memory.
 Type *without_addr_space(VirtualMachine *vm, Type *ty);
@@ -1226,7 +1230,7 @@ long long wrap_fwrite(long long ptr, long long size, long long nmemb,
 //
 
 void gen_function(VirtualMachine *vm, Obj *fn);
-void cc_free_local_sets(Obj *prog);
+void cc_free_local_sets(VirtualMachine *vm, Obj *prog);
 void gen(VirtualMachine *vm, Obj *prog);
 // Note: gen_expr is now static in codegen.c with signature:
 // static void gen_expr(VirtualMachine *vm, Node *node, int dest_reg);

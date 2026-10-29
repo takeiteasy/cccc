@@ -284,7 +284,7 @@ void serialize_reallocarray_shim(FILE *f, Obj *prog) {
 static bool shim_fn_is_used(VirtualMachine *vm, Obj *prog, const char *name,
                             const char *header_basename) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj->body)
+        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
             continue;
         if (strcmp(obj->name, name) != 0)
             continue;
@@ -341,7 +341,7 @@ static bool bundled_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
                                     const char *name,
                                     const char *header_basename) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj->body)
+        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
             continue;
         if (strcmp(obj->name, name) != 0)
             continue;
@@ -376,7 +376,7 @@ static bool rename_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
                                           const char *header_basename,
                                           bool        any_system_header) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj->body)
+        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
             continue;
         if (strcmp(obj->name, name) != 0)
             continue;
@@ -1390,7 +1390,7 @@ void serialize_c23_strtol_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     // Self-hosting: src/stdlib/stdlib.c is part of the program and already
     // defines the runtime.
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->body &&
+        if (obj->is_function && obj_fn(obj)->body &&
             strcmp(obj->name, "__cccc_bin_strip") == 0)
             return;
     bool                     any     = false;
@@ -1578,10 +1578,10 @@ void serialize_wide_bitint_preamble(FILE *f, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         wide_bitint_scan_type(obj->ty, &need, &seen, 0);
         if (obj->is_function) {
-            for (Obj *v = obj->locals; v; v = v->next)
+            for (Obj *v = obj_fn(obj)->locals; v; v = v->next)
                 wide_bitint_scan_type(v->ty, &need, &seen, 0);
-            if (obj->body)
-                wide_bitint_scan_node(obj->body, &need, &seen);
+            if (obj_fn(obj)->body)
+                wide_bitint_scan_node(obj_fn(obj)->body, &need, &seen);
         }
     }
     hashmap_deinit_borrowed(&seen.map);
@@ -1635,7 +1635,7 @@ static bool node_calls(Node *node, const char *name, bool prefix) {
 static bool generated_code_calls(Obj *prog, const char *name, bool prefix) {
     for (Obj *obj = prog; obj; obj = obj->next)
         if (obj->is_function && obj->is_macro_generated &&
-            node_calls(obj->body, name, prefix))
+            node_calls(obj_fn(obj)->body, name, prefix))
             return true;
     return false;
 }
@@ -1685,7 +1685,7 @@ static bool omp_shims_needed(VirtualMachine *vm, Obj *prog,
     if (vm->compiler.omp_used)
         return true;
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->is_used && !obj->body &&
+        if (obj->is_function && obj->is_used && !obj_fn(obj)->body &&
             !strncmp(obj->name, "omp_", 4))
             return true;
     return false;
@@ -1699,7 +1699,7 @@ static bool kernel_shims_needed(VirtualMachine *vm, Obj *prog) {
     if (vm->compiler.kernel_used)
         return true;
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->is_used && !obj->body &&
+        if (obj->is_function && obj->is_used && !obj_fn(obj)->body &&
             is_kernel_builtin(obj->name))
             return true;
     return false;
@@ -1745,7 +1745,7 @@ void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog) {
             "static int __cccc_kernel_meta_find(void *fn, int *uses_barrier, "
             "int *local_bytes) {\n");
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->is_kernel && obj->body)
+        if (obj->is_function && obj->is_kernel && obj_fn(obj)->body)
             fprintf(f,
                     "    if (fn == (void *)%s) {\n"
                     "        *uses_barrier = %d;\n"
@@ -1753,7 +1753,7 @@ void serialize_kernel_meta(FILE *f, VirtualMachine *vm, Obj *prog) {
                     "        return 1;\n"
                     "    }\n",
                     obj->name, obj->kernel_uses_barrier ? 1 : 0,
-                    obj->kernel_local_bytes);
+                    obj_attr(obj)->kernel_local_bytes);
     fprintf(f, "    return 0;\n}\n");
 }
 

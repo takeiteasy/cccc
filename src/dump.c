@@ -559,15 +559,15 @@ static void dump_obj(FILE *f, Obj *obj, int verbose) {
             print_indent(f, 1), fprintf(f, "[static]\n");
         if (obj->is_nested)
             print_indent(f, 1),
-                fprintf(f, "[nested depth=%d]\n", obj->nesting_depth);
+                fprintf(f, "[nested depth=%d]\n", obj_fn(obj)->nesting_depth);
 
-        dump_obj_list(f, "params", obj->params, 1, verbose);
-        dump_obj_list(f, "locals", obj->locals, 1, verbose);
+        dump_obj_list(f, "params", obj_fn(obj)->params, 1, verbose);
+        dump_obj_list(f, "locals", obj_fn(obj)->locals, 1, verbose);
 
-        if (obj->body) {
+        if (obj_fn(obj)->body) {
             print_indent(f, 1);
             fprintf(f, "body:\n");
-            for (Node *n = obj->body; n; n = n->next)
+            for (Node *n = obj_fn(obj)->body; n; n = n->next)
                 dump_node(f, n, 2, verbose);
         }
     } else {
@@ -581,10 +581,10 @@ static void dump_obj(FILE *f, Obj *obj, int verbose) {
             fprintf(f, " [tentative]");
         fprintf(f, "\n");
 
-        if (obj->init_expr) {
+        if (obj_init(obj)->init_expr) {
             print_indent(f, 1);
             fprintf(f, "init:\n");
-            dump_node(f, obj->init_expr, 2, verbose);
+            dump_node(f, obj_init(obj)->init_expr, 2, verbose);
         }
     }
 
@@ -1141,17 +1141,17 @@ static void dump_ast_json_obj(FILE *f, Obj *obj, int indent) {
             fprintf(f, "true");
         }
 
-        if (obj->params) {
+        if (obj_fn(obj)->params) {
             JSON_FIELD(f, d, first, "params");
-            dump_ast_json_var_list(f, obj->params, d);
+            dump_ast_json_var_list(f, obj_fn(obj)->params, d);
         }
-        if (obj->locals) {
+        if (obj_fn(obj)->locals) {
             JSON_FIELD(f, d, first, "locals");
-            dump_ast_json_var_list(f, obj->locals, d);
+            dump_ast_json_var_list(f, obj_fn(obj)->locals, d);
         }
-        if (obj->body) {
+        if (obj_fn(obj)->body) {
             JSON_FIELD(f, d, first, "body");
-            dump_ast_json_node_list(f, obj->body, d);
+            dump_ast_json_node_list(f, obj_fn(obj)->body, d);
         }
     } else {
         JSON_FIELD(f, d, first, "kind");
@@ -1175,9 +1175,9 @@ static void dump_ast_json_obj(FILE *f, Obj *obj, int indent) {
             JSON_FIELD(f, d, first, "is_tentative");
             fprintf(f, "true");
         }
-        if (obj->init_expr) {
+        if (obj_init(obj)->init_expr) {
             JSON_FIELD(f, d, first, "init");
-            dump_ast_json_node(f, obj->init_expr, d);
+            dump_ast_json_node(f, obj_init(obj)->init_expr, d);
         }
     }
 

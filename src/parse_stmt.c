@@ -359,7 +359,7 @@ static bool declared_cleanup_var(VirtualMachine *vm,
                                  VarScopeNode   *vars_before) {
     for (VarScopeNode *sv = vm->compiler.scope->vars; sv != vars_before;
          sv               = sv->next)
-        if (sv->var && sv->var->cleanup_fn)
+        if (sv->var && obj_attr(sv->var)->cleanup_fn)
             return true;
     return false;
 }
@@ -383,11 +383,11 @@ static void close_cleanup_scope(VirtualMachine *vm, Node *blk) {
         vm->compiler.cleanup_scope_depth;
     CleanupVar **cv_tail = &node_ctl_mut(vm, blk)->cleanup_vars;
     for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
-        if (sv->var && sv->var->cleanup_fn) {
+        if (sv->var && obj_attr(sv->var)->cleanup_fn) {
             CleanupVar *cv =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(CleanupVar));
             cv->var        = sv->var;
-            cv->cleanup_fn = sv->var->cleanup_fn;
+            cv->cleanup_fn = obj_attr(sv->var)->cleanup_fn;
             *cv_tail       = cv;
             cv_tail        = &cv->next;
         }
@@ -1486,8 +1486,8 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
         tok->loc[1] >= '0' && tok->loc[1] <= '9' && equal(tok->next, ";")) {
         VarScope *vs = find_var(vm, tok);
-        if (vs && vs->var && vs->var->lazy_quote) {
-            Node *node = cc_quote_expand_lazy(vm, vs->var->lazy_quote,
+        if (vs && vs->var && obj_init(vs->var)->lazy_quote) {
+            Node *node = cc_quote_expand_lazy(vm, obj_init(vs->var)->lazy_quote,
                                               /*want_stmt=*/true);
             *rest      = skip(vm, tok->next, ";");
             return node;

@@ -33,9 +33,9 @@ static int source_index_cmp(const void *a, const void *b) {
 // (hot reload): nothing reaches it any more except frames already running it.
 bool cc_pc_in_replaced_body(VirtualMachine *vm, Pc pc) {
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-        Obj *old = fn->reload_of;
-        if (old && (long long)pc >= old->code_addr &&
-            (long long)pc < old->code_end_addr)
+        Obj *old = obj_fn(fn)->reload_of;
+        if (old && (long long)pc >= obj_fn(old)->code_addr &&
+            (long long)pc < obj_fn(old)->code_end_addr)
             return true;
     }
     return false;

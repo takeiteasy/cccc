@@ -488,7 +488,7 @@ run_native_backend(VirtualMachine *vm, Obj *prog, const char *out_file,
     // the library one in the VM; the host compiler would otherwise still
     // expand calls to it as its builtin.
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->body && !obj->is_static &&
+        if (obj->is_function && obj_fn(obj)->body && !obj->is_static &&
             find_ffi_function(vm, obj->name) >= 0)
             push_owned_flag(&cc_args, &owned, "-fno-builtin-", obj->name);
     // #1159: -O<n> used to be a hard error under -c=native (it tunes the VM's
@@ -1132,7 +1132,7 @@ static int ffi_index_by_name(VirtualMachine *vm, const char *name) {
 }
 
 static const char *obj_external_name(Obj *obj) {
-    return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
+    return obj && obj_attr(obj)->asm_label ? obj_attr(obj)->asm_label : obj ? obj->name : NULL;
 }
 
 static int count_params(Type *ty) {
@@ -1150,7 +1150,7 @@ static void register_dynamic_externs(VirtualMachine *vm, Obj *prog) {
                 !obj->is_definition && !obj->is_tentative && !obj->init_data) {
 #ifdef __APPLE__
                 // dlsym takes the C name without the Mach-O underscore.
-                if (obj->asm_label && extern_name[0] == '_')
+                if (obj_attr(obj)->asm_label && extern_name[0] == '_')
                     extern_name++;
 #endif
                 cc_register_cdata_placeholder(vm, extern_name);

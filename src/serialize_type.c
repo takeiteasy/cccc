@@ -1474,13 +1474,13 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
 
 void collect_obj_types(SerializeContext *ctx, Obj *obj) {
     collect_type(ctx, obj->ty);
-    collect_node_types(ctx, obj->init_expr);
+    collect_node_types(ctx, obj_init(obj)->init_expr);
 
-    for (Obj *param = obj->params; param; param = param->next)
+    for (Obj *param = obj_fn(obj)->params; param; param = param->next)
         collect_type(ctx, param->ty);
-    for (Obj *local = obj->locals; local; local = local->next)
+    for (Obj *local = obj_fn(obj)->locals; local; local = local->next)
         collect_type(ctx, local->ty);
-    collect_node_types(ctx, obj->body);
+    collect_node_types(ctx, obj_fn(obj)->body);
 }
 
 // #1167: a file-scope `_Static_assert`/`static_assert` (StaticAssertRecord,

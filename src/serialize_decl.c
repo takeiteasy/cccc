@@ -167,16 +167,16 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     // while clang accepts it, so a suffix form would pass on macOS and fail to
     // compile on Linux.
     if (fn->is_constructor) {
-        if (fn->init_priority == CCCC_NO_INIT_PRIORITY)
+        if (obj_attr(fn)->init_priority == CCCC_NO_INIT_PRIORITY)
             fprintf(f, "__attribute__((constructor)) ");
         else
-            fprintf(f, "__attribute__((constructor(%d))) ", fn->init_priority);
+            fprintf(f, "__attribute__((constructor(%d))) ", obj_attr(fn)->init_priority);
     }
     if (fn->is_destructor) {
-        if (fn->init_priority == CCCC_NO_INIT_PRIORITY)
+        if (obj_attr(fn)->init_priority == CCCC_NO_INIT_PRIORITY)
             fprintf(f, "__attribute__((destructor)) ");
         else
-            fprintf(f, "__attribute__((destructor(%d))) ", fn->init_priority);
+            fprintf(f, "__attribute__((destructor(%d))) ", obj_attr(fn)->init_priority);
     }
 
     if (fn->is_static)
@@ -214,17 +214,17 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     // nothing for the parens to defend against -- and #1253's own template
     // label plumbing plus this file's macro-generated-function test
     // coverage both assert an exact, unparenthesized spelling.
-    if (!fn->body && !fn->is_macro_generated)
+    if (!obj_fn(fn)->body && !fn->is_macro_generated)
         fprintf(df, "(%s)(", fn->name);
     else
         fprintf(df, "%s(", fn->name);
 
     bool first = true;
     ctx->proto_depth++;
-    if (fn->params) {
-        Type *def_ty      = fn->def_ty ? fn->def_ty : fn->ty;
+    if (obj_fn(fn)->params) {
+        Type *def_ty      = obj_attr(fn)->def_ty ? obj_attr(fn)->def_ty : fn->ty;
         Type *proto_param = def_ty ? def_ty->params : NULL;
-        for (Obj *param = fn->params; param; param = param->next,
+        for (Obj *param = obj_fn(fn)->params; param; param = param->next,
                  proto_param = proto_param ? proto_param->next : NULL) {
             if (!first)
                 fprintf(df, ", ");
@@ -243,7 +243,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
                 proto_param->name->len == (int)strlen(param->name) &&
                 !strncmp(proto_param->name->loc, param->name,
                          proto_param->name->len)) {
-                ctx->name_proto_params = fn->body && !with_asm_label;
+                ctx->name_proto_params = obj_fn(fn)->body && !with_asm_label;
                 serialize_type_decl(df, ctx, proto_param, param->name);
                 ctx->name_proto_params = false;
                 continue;
@@ -253,7 +253,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             // fn->body's own local-decl emission (serialize_function)
             // injects the matching `va_list <param->name>; va_copy(...)`
             // shim right after this signature is printed.
-            if (fn->body && type_is_cccc_va_list(param->ty)) {
+            if (obj_fn(fn)->body && type_is_cccc_va_list(param->ty)) {
                 char shimbuf[64];
                 serialize_type_decl(df, ctx, param->ty,
                                     va_list_shim_param_name(
@@ -302,7 +302,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     }
     fprintf(df, ")");
 
-    if (fn->asm_label && with_asm_label)
+    if (obj_attr(fn)->asm_label && with_asm_label)
         // __CCCC_ASM_PREFIX__ (see serialize_asm_prefix_preamble) supplies
         // the platform's real symbol prefix; adjacent string literals
         // concatenate at translation time, so this reads as e.g.
@@ -325,7 +325,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
         // `asm(...)` on both clang and a real gcc-16, found while adding
         // #1130 test coverage for a self-defined (not merely aliased)
         // asm-labeled function.
-        fprintf(df, " __asm__(__CCCC_ASM_PREFIX__ \"%s\")", fn->asm_label);
+        fprintf(df, " __asm__(__CCCC_ASM_PREFIX__ \"%s\")", obj_attr(fn)->asm_label);
 
     fclose(df);
     Type *ret_ty = (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : ty_int;
@@ -334,7 +334,7 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
     // declaration (same reasoning as the parenthesized declarator above:
     // a defined function's return type is never a decomposition risk,
     // since both its emission sites print the identical fn->ty).
-    if (fn->body ||
+    if (obj_fn(fn)->body ||
         !serialize_aliased_ptr_type_decl(f, ctx, ret_ty, decl ? decl : ""))
         serialize_type_decl(f, ctx, ret_ty, decl ? decl : "");
     free(decl);
@@ -530,20 +530,20 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
 
     // Skip pragma macro functions (they were consumed)
     // Skip non-definitions
-    if (!fn->is_definition && !fn->body)
+    if (!fn->is_definition && !obj_fn(fn)->body)
         return;
 
     // #1130: suppress the asm-label on a body-having signature -- see
     // serialize_function_signature's own comment. The "prototypes before
     // bodies" pass (serialize_program.c) already emitted a labeled,
     // bodyless declaration for this function ahead of here.
-    serialize_function_signature(f, ctx, fn, /*with_asm_label=*/!fn->body);
+    serialize_function_signature(f, ctx, fn, /*with_asm_label=*/!obj_fn(fn)->body);
 
-    if (fn->body) {
+    if (obj_fn(fn)->body) {
         // #1253: rename duplicate labels a hygienic Quote() template left in
         // this body so the emitted C has no repeated label in one function.
-        serialize_dedupe_function_labels(vm, fn->body);
-        serialize_collect_outer_jumps(ctx, fn->body);
+        serialize_dedupe_function_labels(vm, obj_fn(fn)->body);
+        serialize_collect_outer_jumps(ctx, obj_fn(fn)->body);
 
         fprintf(f, " {\n");
         Obj *saved_fn   = ctx->current_fn;
@@ -571,7 +571,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         // struct-tag array), so skipping it costs nothing and avoids
         // needing to track an extra cleanup point for a function that may
         // return from multiple places.
-        for (Obj *param = fn->params; param; param = param->next) {
+        for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
             if (!type_is_cccc_va_list(param->ty))
                 continue;
             char shimbuf[64];
@@ -599,7 +599,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         ReferencedGlobals referenced_globals       = {0};
         bool              referenced_globals_built = false;
 
-        for (Obj *var = fn->locals; var; var = var->next) {
+        for (Obj *var = obj_fn(fn)->locals; var; var = var->next) {
             // Params are never renamed here -- serialize_function_signature
             // already printed the function's signature (with each param's
             // current name) before this loop runs, so renaming a param's
@@ -620,7 +620,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // assign_lvar_offsets (:8622-8633) does this exact membership
             // scan for the same reason.
             bool is_actual_param = false;
-            for (Obj *p = fn->params; p; p = p->next)
+            for (Obj *p = obj_fn(fn)->params; p; p = p->next)
                 if (p == var) {
                     is_actual_param = true;
                     break;
@@ -710,7 +710,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             bool renamed_again;
             do {
                 renamed_again = false;
-                for (Obj *other = fn->locals; other; other = other->next) {
+                for (Obj *other = obj_fn(fn)->locals; other; other = other->next) {
                     if (other == var || strcmp(other->name, var->name) != 0)
                         continue;
                     var->name     = arena_format(vm, "%s__cccc_%d", var->name,
@@ -724,7 +724,7 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 ensure_global_name_index(vm, ctx);
                 if (hashmap_get(&ctx->global_names, var->name)) {
                     if (!referenced_globals_built) {
-                        serialize_ast_walk(fn->body, collect_referenced_globals,
+                        serialize_ast_walk(obj_fn(fn)->body, collect_referenced_globals,
                                            &referenced_globals);
                         referenced_globals_built = true;
                     }
@@ -780,12 +780,12 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // declarator referencing a not-yet-declared variable and fails
             // to compile -- a pre-existing gap this fix doesn't widen,
             // tracked separately rather than fixed here.
-            if (var->deferred_vla_ptr_init)
+            if (obj_size(var)->deferred_vla_ptr_init)
                 continue;
 
             // Declared in place instead (serialize_cleanup_decl), so the
             // host's cleanup runs at the end of the variable's own scope.
-            if (var->cleanup_fn) {
+            if (obj_attr(var)->cleanup_fn) {
                 if (var->is_block_var)
                     error_tok(vm, var->tok,
                               "a __block variable with a cleanup attribute "
@@ -799,8 +799,8 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // (serialize_block_preamble), which doesn't exist as a Type* and
             // so can't go through serialize_type_decl. Emit its declaration
             // directly instead.
-            if (var->block_desc_of) {
-                const char *env = find_block_env(ctx, var->block_desc_of);
+            if (obj_blk(var)->block_desc_of) {
+                const char *env = find_block_env(ctx, obj_blk(var)->block_desc_of);
                 print_indent_level(f, 1);
                 fprintf(f, "%s %s;\n", env ? env : "struct __cccc_block_env_?",
                         var->name);
@@ -885,10 +885,10 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         // wrapping. Both the parser and FunctionSetBody store the body as an
         // ND_BLOCK node.
         Node *body_stmts;
-        if (fn->body && fn->body->kind == ND_BLOCK && !fn->body->next)
-            body_stmts = fn->body->body;
+        if (obj_fn(fn)->body && obj_fn(fn)->body->kind == ND_BLOCK && !obj_fn(fn)->body->next)
+            body_stmts = obj_fn(fn)->body->body;
         else
-            body_stmts = fn->body;
+            body_stmts = obj_fn(fn)->body;
         for (Node *s = body_stmts; s; s = s->next) {
             serialize_stmt_list_item(f, vm, ctx, s, 1);
         }
@@ -945,7 +945,7 @@ Obj *serialize_find_global(VirtualMachine *vm, const char *name) {
 // a string literal, a function pointer, ...) has its raw bytes zeroed by
 // write_gvar_data() (parse.c) and the real target recorded here instead.
 static Relocation *serialize_find_reloc(Obj *var, int offset) {
-    for (Relocation *r = var->rel; r; r = r->next)
+    for (Relocation *r = obj_init(var)->rel; r; r = r->next)
         if (r->offset == offset)
             return r;
     return NULL;
@@ -1236,7 +1236,7 @@ static void serialize_opaque_init(FILE *f, VirtualMachine *vm,
                                   SerializeContext *ctx, Obj *var, Type *ty,
                                   int offset) {
     OpaqueSlots slots = opaque_pointer_slots(ty);
-    for (Relocation *r = var->rel; r; r = r->next) {
+    for (Relocation *r = obj_init(var)->rel; r; r = r->next) {
         if (r->offset < offset || r->offset >= offset + ty->size)
             continue;
         bool at_slot = false;
@@ -1650,7 +1650,7 @@ static void serialize_reloc_patches(FILE *f, VirtualMachine *vm,
 // it cannot keep a top-level `const` (read-only data).
 Type *serialize_global_decl_type(VirtualMachine *vm, Obj *var) {
     Type *ty = var->ty;
-    if (!var->init_data || !var->rel || !type_needs_reloc_patch(ty))
+    if (!var->init_data || !obj_init(var)->rel || !type_needs_reloc_patch(ty))
         return ty;
     if (ty->kind != TY_ARRAY) {
         if (!ty->is_const)

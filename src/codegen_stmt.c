@@ -320,7 +320,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                     } else {
                         // Float/double return: save to synthetic stack slot
                         emit_ri(vm, FSTR_LOCAL, FREG_A0,
-                                cur_fn->cleanup_fp_retval_offset);
+                                obj_attr(cur_fn)->cleanup_fp_retval_offset);
                     }
                 }
                 emit_cleanups_to_depth(vm, 0,
@@ -330,7 +330,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                         emit_pop3(vm, REG_A0);
                     } else {
                         emit_ri(vm, FLDR_LOCAL, FREG_A0,
-                                cur_fn->cleanup_fp_retval_offset);
+                                obj_attr(cur_fn)->cleanup_fp_retval_offset);
                     }
                 }
             }
@@ -664,8 +664,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 }
 
 static bool fn_has_any_cleanup_vars(Obj *fn) {
-    for (Obj *v = fn->locals; v; v = v->next)
-        if (v->cleanup_fn)
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
+        if (obj_attr(v)->cleanup_fn)
             return true;
     return false;
 }
@@ -677,7 +677,7 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
         return 0;
 
     int param_count = 0;
-    for (Obj *param = fn->params; param; param = param->next) {
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
         param_count++;
     }
 
@@ -699,7 +699,7 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
     // Assign parameter offsets (negative). Without canaries: bp[-1], bp[-2],
     // ... With canaries: bp[-2], bp[-3], ... (bp[-1] is the canary).
     int param_offset = -1 - canary_bias;
-    for (Obj *param = fn->params; param; param = param->next) {
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
         param->offset   = param_offset;
         param->is_local = true;
         param->is_param = true;
@@ -707,10 +707,10 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
     }
 
     // Assign local variable offsets (negative, after params)
-    for (Obj *var = fn->locals; var; var = var->next) {
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next) {
         // Check if this is a parameter (params are also in locals list)
         bool is_param = false;
-        for (Obj *p = fn->params; p; p = p->next) {
+        for (Obj *p = obj_fn(fn)->params; p; p = p->next) {
             if (p == var) {
                 is_param = true;
                 break;
@@ -718,7 +718,7 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
         }
 
         // Skip builtin variables (va_area and alloca_bottom) and params.
-        bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
+        bool is_builtin = (var == obj_fn(fn)->va_area) || (var == obj_fn(fn)->alloca_bottom);
 
         // #1137: an over-aligned slot-resident scalar param keeps its
         // positional ENT3 spill slot; the prologue copies it into a padded,
@@ -762,7 +762,7 @@ int assign_stack_offsets(VirtualMachine *vm, Obj *fn) {
     if (fn_has_any_cleanup_vars(fn) && fn->ty && fn->ty->return_ty &&
         is_flonum(fn->ty->return_ty)) {
         stack_size++;
-        fn->cleanup_fp_retval_offset = -stack_size;
+        obj_attr_mut(vm, fn)->cleanup_fp_retval_offset = -stack_size;
     }
 
     // Ensure 16-byte stack alignment

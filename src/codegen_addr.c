@@ -57,25 +57,25 @@ void cleanup_range_open(VirtualMachine *vm, Obj *var) {
     r->start           = vm->text_ptr + 1;
     r->end             = -1;
     Obj *fn            = vm->compiler.current_fn;
-    r->next            = fn->cleanup_ranges;
-    fn->cleanup_ranges = r;
-    var->cleanup_cur   = r;
+    r->next            = obj_attr(fn)->cleanup_ranges;
+    obj_attr_mut(vm, fn)->cleanup_ranges = r;
+    obj_attr_mut(vm, var)->cleanup_cur   = r;
 }
 
 static void cleanup_range_close(VirtualMachine *vm, Obj *var, bool reopen) {
-    CleanupRange *r = var->cleanup_cur;
+    CleanupRange *r = obj_attr(var)->cleanup_cur;
     if (!r)
         return;
     r->end           = vm->text_ptr + 1;
     r->reopen        = reopen;
-    var->cleanup_cur = NULL;
+    obj_attr_mut(vm, var)->cleanup_cur = NULL;
 }
 
 // Code after an early exit sequence is reachable only through labels, where
 // the variables it closed are live again.
 void cleanup_ranges_reopen(VirtualMachine *vm) {
     Obj *fn = vm->compiler.current_fn;
-    for (CleanupRange *r = fn->cleanup_ranges; r; r = r->next) {
+    for (CleanupRange *r = obj_attr(fn)->cleanup_ranges; r; r = r->next) {
         if (!r->reopen)
             continue;
         r->reopen = false;
@@ -121,7 +121,7 @@ void emit_cleanups_to_depth(VirtualMachine *vm, int target_depth,
     for (CleanupScopeEntry *s = g_cleanup_scope; s && s->depth > target_depth;
          s                    = s->outer)
         for (CleanupVar *cv = s->vars; cv; cv = cv->next)
-            if (!seq_limit || cv->var->cleanup_seq < seq_limit)
+            if (!seq_limit || obj_attr(cv->var)->cleanup_seq < seq_limit)
                 emit_one_cleanup(vm, cv, true);
 }
 
@@ -536,7 +536,7 @@ void cc_asm_passthru_flush(VirtualMachine *vm) {
 Obj *find_static_link_var(Obj *fn) {
     if (!fn || !fn->is_nested)
         return NULL;
-    for (Obj *var = fn->locals; var; var = var->next) {
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next) {
         if (strncmp(var->name, "__static_link", sizeof("__static_link")) == 0)
             return var;
     }
@@ -561,21 +561,21 @@ int static_link_hop_bytes(VirtualMachine *vm) {
 // captured. Descriptor slot = (index + 1) * 8 so that slot 0 (offset 0) stays
 // the invoke ptr.
 int find_capture_index(Obj *block_fn, Obj *var) {
-    for (int i = 0; i < block_fn->num_captures; i++)
-        if (block_fn->captures[i] == var)
+    for (int i = 0; i < obj_blk(block_fn)->num_captures; i++)
+        if (obj_blk(block_fn)->captures[i] == var)
             return i;
     return -1;
 }
 
 // Ensure parent->local_set is populated with all its locals and params.
 // Keyed by (long long)(intptr_t)var so membership is O(1). (#165)
-static void ensure_local_set(Obj *parent) {
+static void ensure_local_set(VirtualMachine *vm, Obj *parent) {
     if (parent->local_set_built)
         return;
-    for (Obj *local = parent->locals; local; local = local->next)
-        hashmap_put_int(&parent->local_set, (long long)(intptr_t)local, local);
-    for (Obj *param = parent->params; param; param = param->next)
-        hashmap_put_int(&parent->local_set, (long long)(intptr_t)param, param);
+    for (Obj *local = obj_fn(parent)->locals; local; local = local->next)
+        hashmap_put_int(&obj_fn_mut(vm, parent)->local_set, (long long)(intptr_t)local, local);
+    for (Obj *param = obj_fn(parent)->params; param; param = param->next)
+        hashmap_put_int(&obj_fn_mut(vm, parent)->local_set, (long long)(intptr_t)param, param);
     parent->local_set_built = true;
 }
 
@@ -583,14 +583,14 @@ static void ensure_local_set(Obj *parent) {
 // Returns the owning function, or NULL if it belongs to the current function.
 // O(depth) using per-function lazy hash sets instead of O(depth * locals).
 // (#165)
-Obj *belongs_to_outer_function(Obj *current_fn, Obj *var) {
+Obj *belongs_to_outer_function(VirtualMachine *vm, Obj *current_fn, Obj *var) {
     if (!current_fn || !current_fn->is_nested || !var || !var->is_local)
         return NULL;
 
-    for (Obj *parent = current_fn->parent_fn; parent;
-         parent      = parent->parent_fn) {
-        ensure_local_set(parent);
-        if (hashmap_get_int(&parent->local_set, (long long)(intptr_t)var))
+    for (Obj *parent = obj_fn(current_fn)->parent_fn; parent;
+         parent      = obj_fn(parent)->parent_fn) {
+        ensure_local_set(vm, parent);
+        if (hashmap_get_int(&obj_fn_mut(vm, parent)->local_set, (long long)(intptr_t)var))
             return parent;
     }
     return NULL;
@@ -599,7 +599,7 @@ Obj *belongs_to_outer_function(Obj *current_fn, Obj *var) {
 // Calculate how many static chain links to follow to reach the owning function
 static int calculate_chain_depth(Obj *current_fn, Obj *owner_fn) {
     int depth = 0;
-    for (Obj *fn = current_fn; fn && fn != owner_fn; fn = fn->parent_fn) {
+    for (Obj *fn = current_fn; fn && fn != owner_fn; fn = obj_fn(fn)->parent_fn) {
         depth++;
     }
     return depth;
@@ -648,7 +648,7 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
     // already worked before this fix (confirmed: a block's own param, read
     // directly by a nested function defined inside it, is an ordinary
     // frame-relative access into the block's very real stack frame).
-    Obj *anc = current_fn->parent_fn;
+    Obj *anc = obj_fn(current_fn)->parent_fn;
     for (int i = 1; i < depth; i++) {
         if (anc->is_block) {
             int cap_idx = find_capture_index(anc, var);
@@ -672,7 +672,7 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
         // depth reached 2).
         emit_addi3(vm, dest_reg, dest_reg, hop);
         emit_rr(vm, LDR_D, dest_reg, dest_reg); // load grandparent's bp
-        anc = anc->parent_fn;
+        anc = obj_fn(anc)->parent_fn;
     }
 
     // dest_reg now holds owner_fn's bp; add the variable's offset. Variable
@@ -707,7 +707,7 @@ bool is_simple_local_scalar(VirtualMachine *vm, Node *node) {
     if (vm->compiler.current_fn && vm->compiler.current_fn->is_block &&
         find_capture_index(vm->compiler.current_fn, node->var) >= 0)
         return false;
-    if (belongs_to_outer_function(vm->compiler.current_fn, node->var))
+    if (belongs_to_outer_function(vm, vm->compiler.current_fn, node->var))
         return false;
     // Volatile locals must go through the generic LEA3+LDR/STR path so that
     // watchpoint checks fire on every access (C11 §6.7.3p7).
@@ -791,7 +791,7 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
             if (current_fn && current_fn->is_block &&
                 find_capture_index(current_fn, var) >= 0)
                 return false;
-            if (belongs_to_outer_function(current_fn, var))
+            if (belongs_to_outer_function(vm, current_fn, var))
                 return false;
             if (var->is_param &&
                 (var->ty->kind == TY_STRUCT || var->ty->kind == TY_UNION ||
@@ -1087,7 +1087,7 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // Check if this variable belongs to an outer function
                     // (nested function access)
                     Obj *owner_fn =
-                        belongs_to_outer_function(current_fn, node->var);
+                        belongs_to_outer_function(vm, current_fn, node->var);
 
                     if (owner_fn) {
                         // Accessing outer function's variable via static chain.

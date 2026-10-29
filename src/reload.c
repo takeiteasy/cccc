@@ -54,10 +54,10 @@ static char *file_key(const File *f) {
 
 // The file a file-scope Obj was written in, or whose comptime call made it.
 static const File *obj_file(const Obj *o) {
-    if (o->gen_site)
-        return o->gen_site->file;
-    if (o->def_begin && o->def_begin->file)
-        return o->def_begin->file;
+    if (obj_fn(o)->gen_site)
+        return obj_fn(o)->gen_site->file;
+    if (obj_fn(o)->def_begin && obj_fn(o)->def_begin->file)
+        return obj_fn(o)->def_begin->file;
     return o->tok ? o->tok->file : NULL;
 }
 
@@ -71,7 +71,7 @@ static bool obj_in_file(const Obj *o, const char *key) {
 // A file-scope function or variable, as opposed to a block-scope static or a
 // compiler-made helper.
 static bool is_file_scope_obj(const Obj *o) {
-    return o->name && o->name[0] != '.' && !o->static_owner && !o->is_local &&
+    return o->name && o->name[0] != '.' && !obj_fn(o)->static_owner && !o->is_local &&
            !o->is_builtin_alloca;
 }
 
@@ -90,7 +90,7 @@ static bool same_identity(const Obj *a, const Obj *b) {
 }
 
 static bool is_defined(const Obj *o) {
-    return o->is_function ? o->body != NULL : o->is_definition;
+    return o->is_function ? obj_fn(o)->body != NULL : o->is_definition;
 }
 
 // The newest live definition `nw` replaces, or a declaration of the same
@@ -110,15 +110,15 @@ static Obj *find_old(Obj *globals, Obj *old_head, Obj *nw) {
 }
 
 static bool bodies_equal(const Obj *a, const Obj *b) {
-    const Token *ta = a->def_begin, *tb = b->def_begin;
-    if (!ta || !tb || !a->def_end || !b->def_end)
+    const Token *ta = obj_fn(a)->def_begin, *tb = obj_fn(b)->def_begin;
+    if (!ta || !tb || !obj_fn(a)->def_end || !obj_fn(b)->def_end)
         return false;
     for (;; ta = ta->next, tb = tb->next) {
         if (ta->kind != tb->kind || ta->len != tb->len ||
             memcmp(ta->loc, tb->loc, (size_t)ta->len))
             return false;
-        if (ta == a->def_end || tb == b->def_end)
-            return ta == a->def_end && tb == b->def_end;
+        if (ta == obj_fn(a)->def_end || tb == obj_fn(b)->def_end)
+            return ta == obj_fn(a)->def_end && tb == obj_fn(b)->def_end;
     }
 }
 
@@ -194,9 +194,9 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st,
         Obj *old = find_old(vm->compiler.globals, old_head, nw);
 
         if (nw->is_function) {
-            if (!nw->body)
+            if (!obj_fn(nw)->body)
                 continue;
-            if (!old || !old->body) {
+            if (!old || !obj_fn(old)->body) {
                 st->added++;
                 continue;
             }
@@ -208,14 +208,14 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st,
             // A rebuilt comptime program can change what a call expands to, and
             // a generated function has no source to compare.
             bool stale =
-                nw->gen_site ||
-                (comptime_rebuilt && nw->def_begin &&
-                 cc_find_comptime_call(vm, nw->def_begin, nw->def_end));
+                obj_fn(nw)->gen_site ||
+                (comptime_rebuilt && obj_fn(nw)->def_begin &&
+                 cc_find_comptime_call(vm, obj_fn(nw)->def_begin, obj_fn(nw)->def_end));
             if (bodies_equal(old, nw) && !stale) {
-                nw->reuse_of = old;
+                obj_fn_mut(vm, nw)->reuse_of = old;
                 st->unchanged++;
             } else {
-                nw->reload_of = reuse_root(old);
+                obj_fn_mut(vm, nw)->reload_of = reuse_root(old);
                 st->changed++;
             }
             continue;
@@ -240,7 +240,7 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st,
             }
         }
         if (old->is_definition || !nw->is_definition)
-            nw->reuse_of = old;
+            obj_fn_mut(vm, nw)->reuse_of = old;
     }
     return true;
 }
@@ -249,9 +249,9 @@ static bool match_objects(VirtualMachine *vm, Obj *old_head, ReloadStats *st,
 static void note_stale_callers(VirtualMachine *vm, Obj *old_head,
                                const char *key) {
     for (Obj *o = old_head; o; o = o->next)
-        if (is_file_scope_obj(o) && o->is_function && o->body && o->def_begin &&
+        if (is_file_scope_obj(o) && o->is_function && obj_fn(o)->body && obj_fn(o)->def_begin &&
             !obj_in_file(o, key) &&
-            cc_find_comptime_call(vm, o->def_begin, o->def_end)) {
+            cc_find_comptime_call(vm, obj_fn(o)->def_begin, obj_fn(o)->def_end)) {
             printf("note: comptime code changed; reload the other files that "
                    "call it\n");
             return;
@@ -286,7 +286,7 @@ static void note_removed(VirtualMachine *vm, Obj *old_head, const char *key,
 static void unlink_reused(VirtualMachine *vm, Obj *old_head) {
     Obj **link = &vm->compiler.globals;
     while (*link != old_head) {
-        if ((*link)->reuse_of)
+        if (obj_fn((*link))->reuse_of)
             *link = (*link)->next;
         else
             link = &(*link)->next;
@@ -296,7 +296,7 @@ static void unlink_reused(VirtualMachine *vm, Obj *old_head) {
 // Makes the file's new definitions reachable by name from the live scope.
 static void publish_new(VirtualMachine *vm, Obj *old_head) {
     for (Obj *nw = vm->compiler.globals; nw != old_head; nw = nw->next) {
-        if (!is_file_scope_obj(nw) || nw->reuse_of || nw->reload_of ||
+        if (!is_file_scope_obj(nw) || obj_fn(nw)->reuse_of || obj_fn(nw)->reload_of ||
             !is_defined(nw))
             continue;
         push_scope(vm, nw->name, (int)strlen(nw->name))->var = nw;
@@ -305,7 +305,7 @@ static void publish_new(VirtualMachine *vm, Obj *old_head) {
 
 static bool has_old_definition_in(Obj *old_head, const char *key) {
     for (Obj *o = old_head; o; o = o->next)
-        if (is_file_scope_obj(o) && o->is_function && o->body &&
+        if (is_file_scope_obj(o) && o->is_function && obj_fn(o)->body &&
             obj_in_file(o, key))
             return true;
     return false;

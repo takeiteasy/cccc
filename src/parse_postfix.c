@@ -343,7 +343,7 @@ void mark_function_referenced(VirtualMachine *vm, Obj *fn) {
     if (!fn->is_function)
         return;
     if (vm->compiler.current_fn)
-        arena_strarray_push(vm, &vm->compiler.current_fn->refs, fn->name);
+        arena_strarray_push(vm, &obj_fn_mut(vm, vm->compiler.current_fn)->refs, fn->name);
     else
         fn->is_root = true;
 }
@@ -1462,7 +1462,7 @@ static Node *kernel_launch_thunk(VirtualMachine *vm, Token *start, Node *kernel,
                                    vm->compiler.unique_name_counter++));
     r.fn->is_kernel_thunk = true;
     if (vm->compiler.kernel_test_run)
-        r.fn->kernel_vm_launch = declare_runtime_fn(
+        obj_attr_mut(vm, r.fn)->kernel_vm_launch = declare_runtime_fn(
             vm, "__cccc_kernel_launch_vm",
             "void __cccc_kernel_launch_vm(void *, void *, void *, void *, "
             "void *, long, void *);");
@@ -3404,7 +3404,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             int  base_offset;
             if (objsize_peel_offset_chain(vm, ptr, &base, &base_offset) &&
                 base->objsize_has_alloc &&
-                base->objsize_decl_fn == vm->compiler.current_fn) {
+                obj_size(base)->objsize_decl_fn == vm->compiler.current_fn) {
                 struct ObjSizeQuery *q = arena_alloc(
                     &vm->compiler.parser_arena, sizeof(struct ObjSizeQuery));
                 q->node                      = node;
@@ -4266,8 +4266,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Bounds-template placeholders (a parameter or member named in a
         // checked bound) are not globals and are exempt.
         if (vm->compiler.in_macro_mode && sc && sc->var && !sc->var->is_local &&
-            !sc->var->is_function && !sc->var->checked_self_param_idx &&
-            !sc->var->checked_self_member) {
+            !sc->var->is_function && !obj_chk(sc->var)->checked_self_param_idx &&
+            !obj_chk(sc->var)->checked_self_member) {
             bool in_macro_program = false;
             for (Obj *o = vm->compiler.globals; o; o = o->next) {
                 if (o == sc->var) {
@@ -4339,7 +4339,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 sc->var->is_used = true;
                 if (sc->var->is_deprecated)
                     warn_deprecated_use(vm, tok, obj_display_name(sc->var),
-                                        sc->var->deprecated_msg);
+                                        obj_attr(sc->var)->deprecated_msg);
                 // #1242: a $k placeholder whose argument was a QuoteLazy()
                 // fragment materialises here, in expression position --
                 // inside this parse's own live scope chain -- instead of
@@ -4348,8 +4348,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 // src/parse_stmt.c, so a fragment that is itself a
                 // statement -- e.g. containing `break;` -- never has to
                 // round-trip through here.)
-                if (sc->var->lazy_quote)
-                    return cc_quote_expand_lazy(vm, sc->var->lazy_quote,
+                if (obj_init(sc->var)->lazy_quote)
+                    return cc_quote_expand_lazy(vm, obj_init(sc->var)->lazy_quote,
                                                 /*want_stmt=*/false);
                 if (sc->var->is_kernel_local_obj)
                     return kernel_local_ref(vm, sc->var, tok);
@@ -4506,7 +4506,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
             Obj *fn = new_implicit_function(vm, tok);
             if (vm->compiler.current_fn)
-                arena_strarray_push(vm, &vm->compiler.current_fn->refs,
+                arena_strarray_push(vm, &obj_fn_mut(vm, vm->compiler.current_fn)->refs,
                                     fn->name);
             else
                 fn->is_root = true;

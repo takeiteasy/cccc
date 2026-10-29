@@ -118,10 +118,10 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node,
 static void collect_captures_for_fn_body(VirtualMachine *vm, Obj *fn,
                                          Obj *outer_locals, Obj ***captures,
                                          int *num_captures, int *cap_capacity) {
-    collect_captures_in_node(vm, fn->body, outer_locals, captures, num_captures,
+    collect_captures_in_node(vm, obj_fn(fn)->body, outer_locals, captures, num_captures,
                              cap_capacity);
-    for (Obj *child = fn->nested_children; child;
-         child      = child->next_nested_sibling)
+    for (Obj *child = obj_fn(fn)->nested_children; child;
+         child      = obj_fn(child)->next_nested_sibling)
         collect_captures_for_fn_body(vm, child, outer_locals, captures,
                                      num_captures, cap_capacity);
 }
@@ -181,7 +181,7 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
 long cc_block_capture_offset(Obj *block_fn, int idx) {
     long off = 16;
     for (int i = 0; i < idx; i++) {
-        Obj *cap         = block_fn->captures[i];
+        Obj *cap         = obj_blk(block_fn)->captures[i];
         int  slot_size   = (cap->is_block_var || cap->ty->kind == TY_VLA)
                                ? 8
                                : align_to((int)cap->ty->size, 8);
@@ -198,7 +198,7 @@ long cc_block_capture_offset(Obj *block_fn, int idx) {
 // slot per cc_block_capture_offset's layout, including trailing padding
 // so the last capture's slot ends on an 8-byte boundary).
 long cc_block_desc_size(Obj *block_fn) {
-    long off = cc_block_capture_offset(block_fn, block_fn->num_captures);
+    long off = cc_block_capture_offset(block_fn, obj_blk(block_fn)->num_captures);
     return align_to((int)off, 8);
 }
 
@@ -206,20 +206,20 @@ long cc_block_desc_size(Obj *block_fn) {
 // slot to fit. For callers that rewrite a block's body after parsing.
 void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var) {
     Obj *fn = node_misc(lit)->block_fn;
-    for (int i = 0; i < fn->num_captures; i++)
-        if (fn->captures[i] == var)
+    for (int i = 0; i < obj_blk(fn)->num_captures; i++)
+        if (obj_blk(fn)->captures[i] == var)
             return;
 
-    int   n = fn->num_captures;
+    int   n = obj_blk(fn)->num_captures;
     Obj **caps =
         arena_alloc(&vm->compiler.parser_arena, sizeof(Obj *) * (n + 1));
     for (int i = 0; i < n; i++)
-        caps[i] = fn->captures[i];
+        caps[i] = obj_blk(fn)->captures[i];
     caps[n]          = var;
     var->is_captured = true;
 
-    fn->captures = node_misc_mut(vm, lit)->block_captures = caps;
-    fn->num_captures = node_misc_mut(vm, lit)->num_block_captures = n + 1;
+    obj_blk_mut(vm, fn)->captures = node_misc_mut(vm, lit)->block_captures = caps;
+    obj_blk_mut(vm, fn)->num_captures = node_misc_mut(vm, lit)->num_block_captures = n + 1;
     node_misc(lit)->block_desc_var->ty =
         array_of(vm, ty_long, (int)(cc_block_desc_size(fn) / 8));
 }
@@ -301,13 +301,13 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     block_fn->is_definition = true;
     block_fn->is_static     = true;
     block_fn->is_block      = true;
-    block_fn->parent_fn     = outer_fn;
+    obj_fn_mut(vm, block_fn)->parent_fn     = outer_fn;
     block_fn->is_nested =
         true; // Treat blocks like nested functions for codegen
-    block_fn->nesting_depth = outer_fn ? outer_fn->nesting_depth + 1 : 1;
+    obj_fn_mut(vm, block_fn)->nesting_depth = outer_fn ? obj_fn(outer_fn)->nesting_depth + 1 : 1;
     // Store parent's locals snapshot before entering our own scope so nested
     // blocks can walk the ancestry chain during transitive capture collection.
-    block_fn->block_outer_locals = saved_locals;
+    obj_blk_mut(vm, block_fn)->block_outer_locals = saved_locals;
     // #965: return type inferred from the body below when not written
     // explicitly, matching clang's block-literal inference.
     block_fn->block_return_ty_pending = !return_ty_explicit;
@@ -359,18 +359,18 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Add __static_link LAST so it ends up FIRST in the list (receives A0)
     new_lvar(vm, "__static_link", 13, pointer_to(vm, ty_void));
 
-    block_fn->params = vm->compiler.locals;
-    block_fn->alloca_bottom =
+    obj_fn_mut(vm, block_fn)->params = vm->compiler.locals;
+    obj_fn_mut(vm, block_fn)->alloca_bottom =
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
 
     // Now parse the block body - params are visible in scope
     tok              = skip(vm, tok, "{");
-    block_fn->body   = compound_stmt(vm, &tok, tok, NULL);
-    block_fn->locals = vm->compiler.locals;
+    obj_fn_mut(vm, block_fn)->body   = compound_stmt(vm, &tok, tok, NULL);
+    obj_fn_mut(vm, block_fn)->locals = vm->compiler.locals;
 
     leave_scope(vm);
-    resolve_objsize_queries(vm, block_fn->body);
-    mark_addr_escapes(block_fn->body, block_fn);
+    resolve_objsize_queries(vm, obj_fn(block_fn)->body);
+    mark_addr_escapes(obj_fn(block_fn)->body, block_fn);
     checked_tail_passes(vm, block_fn);
 
     // #965: infer the block's return type from its own `return` statements
@@ -385,7 +385,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     if (block_fn->block_return_ty_pending) {
         Node **rets     = NULL;
         int    num_rets = 0, rets_cap = 0;
-        collect_block_returns(vm, block_fn->body, &rets, &num_rets, &rets_cap);
+        collect_block_returns(vm, obj_fn(block_fn)->body, &rets, &num_rets, &rets_cap);
 
         Type *inferred = ty_void;
         for (int i = 0; i < num_rets; i++) {
@@ -431,13 +431,13 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // is_block/is_nested should NOT be narrowed to is_block alone -- unlike
     // #1074's fix, which deliberately excluded is_block from every "is this
     // genuinely nested" check it added.
-    for (Obj *anc = outer_fn; anc && anc->is_nested && anc->block_outer_locals;
-         anc      = anc->parent_fn)
-        collect_captures_for_fn_body(vm, block_fn, anc->block_outer_locals,
+    for (Obj *anc = outer_fn; anc && anc->is_nested && obj_blk(anc)->block_outer_locals;
+         anc      = obj_fn(anc)->parent_fn)
+        collect_captures_for_fn_body(vm, block_fn, obj_blk(anc)->block_outer_locals,
                                      &captures, &num_captures, &cap_capacity);
 
-    block_fn->captures     = captures;
-    block_fn->num_captures = num_captures;
+    obj_blk_mut(vm, block_fn)->captures     = captures;
+    obj_blk_mut(vm, block_fn)->num_captures = num_captures;
     // Descriptor offsets are computed per-block at codegen time via
     // find_capture_index so no per-Obj offset field is needed.
 
@@ -459,7 +459,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     Type *desc_arr_ty = array_of(vm, ty_long, (int)(desc_bytes / 8));
     Obj  *desc_var    = new_lvar(vm, "", 0, desc_arr_ty);
     // #965: pure serializer bookkeeping -- see Obj.block_desc_of.
-    desc_var->block_desc_of = block_fn;
+    obj_blk_mut(vm, desc_var)->block_desc_of = block_fn;
 
     // Create the block literal node
     Node *node               = new_node(vm, ND_BLOCK_LITERAL, start);

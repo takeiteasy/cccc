@@ -60,11 +60,11 @@
 // before it's first assigned or after `var`'s scope ends.
 static void serialize_cleanup_attr(FILE *f, VirtualMachine *vm,
                                    SerializeContext *ctx, Obj *var) {
-    if (!var->cleanup_fn)
+    if (!obj_attr(var)->cleanup_fn)
         return;
     Node fn = {.kind = ND_VAR,
-               .var  = var->cleanup_fn,
-               .ty   = var->cleanup_fn->ty,
+               .var  = obj_attr(var)->cleanup_fn,
+               .ty   = obj_attr(var)->cleanup_fn->ty,
                .tok  = var->tok};
     fprintf(f, " __attribute__((cleanup(");
     serialize_expr(f, vm, ctx, &fn, 0);
@@ -220,7 +220,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
         case ND_EXPR_STMT:
             if (node_is_cleanup_decl(node)) {
                 // Declared at its deferred initializer below.
-                if (node->var->deferred_vla_ptr_init)
+                if (obj_size(node->var)->deferred_vla_ptr_init)
                     break;
                 print_indent_level(f, indent);
                 serialize_hoisted_local_decl(f, vm, ctx, node->var);

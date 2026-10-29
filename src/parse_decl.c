@@ -388,7 +388,7 @@ static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
     fn->display_name = fn->name;
     fn->is_static    = attr->is_static || (attr->is_inline && !attr->is_extern);
     fn->is_inline    = attr->is_inline;
-    fn->asm_label    = type_attrs(ty)->asm_label;
+    obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
     return true;
 }
 
@@ -440,9 +440,9 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_kernel       |= ty->is_kernel;
         fn->is_trusted      |= ty->is_trusted;
         if (type_attrs(ty)->asm_label)
-            fn->asm_label = type_attrs(ty)->asm_label;
+            obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
-            fn->deprecated_msg = type_attrs(ty)->deprecated_msg;
+            obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         if (type_attrs(ty)->format_style && fn->ty) {
             type_attrs_mut(vm, fn->ty)->format_style =
                 type_attrs(ty)->format_style;
@@ -478,7 +478,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
-        fn->asm_label = type_attrs(ty)->asm_label;
+        obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
     }
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
@@ -519,8 +519,8 @@ static void mark_live(VirtualMachine *vm, Obj *var) {
         return;
     var->is_live = true;
 
-    for (int i = 0; i < var->refs.len; i++) {
-        Obj *fn = find_func(vm, var->refs.data[i], strlen(var->refs.data[i]));
+    for (int i = 0; i < obj_fn(var)->refs.len; i++) {
+        Obj *fn = find_func(vm, obj_fn(var)->refs.data[i], strlen(obj_fn(var)->refs.data[i]));
         if (fn)
             mark_live(vm, fn);
     }
@@ -572,7 +572,7 @@ static void append_implicit_return(VirtualMachine *vm, Obj *fn, Token *tok) {
     }
 
     if (ty->kind == TY_VOID || strcmp(fn->name, "main") == 0 ||
-        statement_terminates(fn->body))
+        statement_terminates(obj_fn(fn)->body))
         return;
 
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
@@ -585,7 +585,7 @@ static void append_implicit_return(VirtualMachine *vm, Obj *fn, Token *tok) {
     Node *ret  = new_node(vm, ND_RETURN, tok);
     ret->lhs   = new_cast(vm, new_num(vm, 0, tok), ty);
 
-    Node **cur = &fn->body->body;
+    Node **cur = &obj_fn_mut(vm, fn)->body->body;
     while (*cur)
         cur = &(*cur)->next;
     *cur = ret;
@@ -721,10 +721,10 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_definition = true;
         fn->is_static     = new_static;
         fn->is_inline     = attr->is_inline;
-        fn->asm_label     = type_attrs(ty)->asm_label;
+        obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         // A never-compiled predecessor has no entry to redirect.
-        if (replaced->code_addr)
-            fn->reload_of = replaced;
+        if (obj_fn(replaced)->code_addr)
+            obj_fn_mut(vm, fn)->reload_of = replaced;
     } else if (fn) {
         // Redeclaration
         if (!fn->is_function)
@@ -746,7 +746,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (replaces_gnu_inline) {
             fn->is_static = attr->is_static;
             fn->is_inline = false;
-            fn->refs      = (StringArray){0};
+            obj_fn_mut(vm, fn)->refs      = (StringArray){0};
         }
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
             !equal(tok, "{") &&
@@ -762,9 +762,9 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_kernel       |= ty->is_kernel;
         fn->is_trusted       |= ty->is_trusted;
         if (type_attrs(ty)->asm_label)
-            fn->asm_label = type_attrs(ty)->asm_label;
+            obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
-            fn->deprecated_msg = type_attrs(ty)->deprecated_msg;
+            obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
         if (type_attrs(ty)->format_style && fn->ty) {
             type_attrs_mut(vm, fn->ty)->format_style =
                 type_attrs(ty)->format_style;
@@ -800,7 +800,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_static =
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
-        fn->asm_label = type_attrs(ty)->asm_label;
+        obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
     }
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
@@ -838,7 +838,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         return tok;
     }
 
-    fn->def_ty = ty;
+    obj_attr_mut(vm, fn)->def_ty = ty;
 
     if (is_float16(fn->ty->return_ty))
         error_float16_unsupported(vm, ty->name);
@@ -861,13 +861,13 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // compiled to expect). Recompute is_root after this, since is_static may
     // just have changed.
     if (is_nested) {
-        fn->parent_fn     = parent_fn;
+        obj_fn_mut(vm, fn)->parent_fn     = parent_fn;
         fn->is_nested     = true;
-        fn->nesting_depth = vm->compiler.fn_nesting_depth + 1;
+        obj_fn_mut(vm, fn)->nesting_depth = vm->compiler.fn_nesting_depth + 1;
         // #1039: nested functions are implicitly static (not visible
         // outside) -- except when an asm("symbol") label is present; see
         // the matching comment in declare_function_prototype above.
-        if (!fn->asm_label)
+        if (!obj_attr(fn)->asm_label)
             fn->is_static = true;
         // #1076: record the parent's locals snapshot the same way a block
         // literal does (parse_blocks.c) so a block literal defined *inside*
@@ -875,7 +875,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // owned by one of its own ancestors -- see the matching ancestor
         // walk in block_literal() (parse_blocks.c) that now keys off
         // is_nested rather than is_block.
-        fn->block_outer_locals = saved_locals;
+        obj_blk_mut(vm, fn)->block_outer_locals = saved_locals;
         // #1081: register `fn` as one of parent_fn's nested_children --
         // compound_stmt() (parse_stmt.c) never appends an AST node for a
         // nested function definition, so this is the only way a block
@@ -884,12 +884,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // nested function defined directly in the block's own body.
         // parent_fn may itself be a block (Obj.is_block) -- that's the
         // exact shape #1081 is about.
-        fn->next_nested_sibling    = parent_fn->nested_children;
-        parent_fn->nested_children = fn;
+        obj_fn_mut(vm, fn)->next_nested_sibling    = obj_fn(parent_fn)->nested_children;
+        obj_fn_mut(vm, parent_fn)->nested_children = fn;
     } else {
-        fn->parent_fn     = NULL;
+        obj_fn_mut(vm, fn)->parent_fn     = NULL;
         fn->is_nested     = false;
-        fn->nesting_depth = 0;
+        obj_fn_mut(vm, fn)->nesting_depth = 0;
     }
 
     fn->is_root = !obj_is_inline_only(fn);
@@ -964,7 +964,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                         !memcmp(p->name->loc, pname, plen)) {
                         Token *saved_name = p->name;
                         Type  *saved_next = p->next;
-                        *p                = *decl_ty;
+                        type_assign(vm, p, decl_ty);
                         p->name           = saved_name;
                         p->next           = saved_next;
                         break;
@@ -1007,8 +1007,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (i < 32 && (body_adopted & (1u << i)))
             resolve_checked_template_bounds(
                 vm, param_objs, nparams, type_chk(p->ty)->param_bounds_lo,
-                type_chk(p->ty)->param_bounds_hi, i + 1, &p->checked_bounds_lo,
-                &p->checked_bounds_hi);
+                type_chk(p->ty)->param_bounds_hi, i + 1, &obj_chk_mut(vm, p)->checked_bounds_lo,
+                &obj_chk_mut(vm, p)->checked_bounds_hi);
         else
             resolve_checked_bounds(vm, p);
     }
@@ -1029,15 +1029,15 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // if ((rty->kind == TY_STRUCT || rty->kind == TY_UNION) && rty->size > 16)
     //     new_lvar(vm, "", pointer_to(rty));
 
-    fn->params = vm->compiler.locals;
+    obj_fn_mut(vm, fn)->params = vm->compiler.locals;
     declare_checked_return_var(vm, fn);
 
     if (ty->is_variadic)
-        fn->va_area =
+        obj_fn_mut(vm, fn)->va_area =
             new_lvar(vm, "__va_area__", 11, array_of(vm, ty_char, 136));
-    fn->alloca_bottom =
+    obj_fn_mut(vm, fn)->alloca_bottom =
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
-    Node *param_vla_inits = param_vla_init_stmts(vm, fn->params);
+    Node *param_vla_inits = param_vla_init_stmts(vm, obj_fn(fn)->params);
 
     // #1043: for a K&R-form definition, is_definition was set from
     // equal(tok, "{") back at :494/:526 -- before the K&R declaration-list
@@ -1093,15 +1093,15 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         Token *body_start = tok;
 
         if (setjmp(neg_jmp_buf) == 0) {
-            fn->body = compound_stmt(vm, &tok, tok, &close_brace);
+            obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
             append_implicit_return(vm, fn,
                                    close_brace ? close_brace : ty->name);
-            fn->locals = vm->compiler.locals;
+            obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
             leave_scope(vm);
             // Diagnostics here are rolled back below; nothing to defer.
             resolve_goto_labels(vm, /*defer_unused=*/false);
-            resolve_objsize_queries(vm, fn->body);
-            mark_addr_escapes(fn->body, fn);
+            resolve_objsize_queries(vm, obj_fn(fn)->body);
+            mark_addr_escapes(obj_fn(fn)->body, fn);
             checked_tail_passes(vm, fn);
             // check_nonnull_flow() runs post-parse now (#688) -- see the
             // loop in parse() -- so a forward-referenced callee's summary
@@ -1195,20 +1195,20 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->error_count    = pre_count;
         vm->collect_errors = old_collect;
 
-        fn->body = NULL; // suppress codegen — test result is precomputed
+        obj_fn_mut(vm, fn)->body = NULL; // suppress codegen — test result is precomputed
     } else {
-        fn->body = compound_stmt(vm, &tok, tok, &close_brace);
-        prepend_stmts(fn->body, param_vla_inits);
+        obj_fn_mut(vm, fn)->body = compound_stmt(vm, &tok, tok, &close_brace);
+        prepend_stmts(obj_fn(fn)->body, param_vla_inits);
         append_implicit_return(vm, fn, close_brace ? close_brace : ty->name);
         if (!is_nested) {
-            fn->def_begin = attr->decl_start;
-            fn->def_end   = close_brace;
+            obj_fn_mut(vm, fn)->def_begin = attr->decl_start;
+            obj_fn_mut(vm, fn)->def_end   = close_brace;
         }
-        fn->locals = vm->compiler.locals;
+        obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
         leave_scope(vm);
         resolve_goto_labels(vm, vm->compiler.macro_fns != NULL);
-        resolve_objsize_queries(vm, fn->body);
-        mark_addr_escapes(fn->body, fn);
+        resolve_objsize_queries(vm, obj_fn(fn)->body);
+        mark_addr_escapes(obj_fn(fn)->body, fn);
         // #919: any nested function textually inside `fn` has already run
         // its own mark_nested_captures() call (inside the compound_stmt()
         // above) and set is_captured on whichever of `fn`'s own locals it
@@ -1218,7 +1218,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // function(s) they belong to, so later analyses over those functions
         // see a complete picture of which locals a nested function mutates.
         if (is_nested)
-            mark_nested_captures(fn, fn->body);
+            mark_nested_captures(fn, obj_fn(fn)->body);
         // check_nonnull_flow() runs post-parse now (#688) -- see the loop
         // in parse() -- so a caller of a later-defined function still sees
         // that callee's may-return-null summary.
@@ -1294,23 +1294,23 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
         prev->ty = ty;
 
     if (type_attrs(ty)->asm_label) {
-        if (!prev->asm_label)
-            prev->asm_label = type_attrs(ty)->asm_label;
-        else if (strcmp(prev->asm_label, type_attrs(ty)->asm_label) != 0)
+        if (!obj_attr(prev)->asm_label)
+            obj_set_asm_label(vm, prev, type_attrs(ty)->asm_label);
+        else if (strcmp(obj_attr(prev)->asm_label, type_attrs(ty)->asm_label) != 0)
             error_tok(vm, name_tok, "conflicting asm label for '%s'",
                       prev->name);
     }
 
     if (ty->checked_kind != CHECKED_NONE) {
         prev->checked_kind        = ty->checked_kind;
-        prev->checked_bounds_form = type_chk(ty)->form;
+        obj_chk_mut(vm, prev)->checked_bounds_form = type_chk(ty)->form;
         resolve_checked_bounds(vm, prev);
     }
 
     prev->is_maybe_unused |= ty->is_maybe_unused;
     prev->is_deprecated   |= ty->is_deprecated;
-    if (!prev->deprecated_msg)
-        prev->deprecated_msg = type_attrs(ty)->deprecated_msg;
+    if (!obj_attr(prev)->deprecated_msg)
+        obj_set_deprecated_msg(vm, prev, type_attrs(ty)->deprecated_msg);
 
     if (is_def_now)
         prev->tok = name_tok;
@@ -1880,7 +1880,7 @@ Obj *chk_builtin_stub(VirtualMachine *vm, const char *name, int len) {
     const char *fn_name =
         ty->name->loc ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;
     Obj *stub = new_private_func_obj(vm, fn_name, ty);
-    stub->builtin_spelling =
+    obj_attr_mut(vm, stub)->builtin_spelling =
         arena_format(vm, "__builtin___%s_chk", CHK_ROWS[row].suffix);
     apply_checked_libc_builtin_bounds(vm, stub);
     vm->compiler.builtin_chk[row] = stub;
@@ -1966,16 +1966,16 @@ static void declare_builtin_functions(VirtualMachine *vm) {
     Type *malloc_ty             = func_type(vm, pointer_to(vm, ty_void));
     malloc_ty->params           = copy_type(vm, ty_long);
     vm->compiler.builtin_malloc = new_private_func_obj(vm, "malloc", malloc_ty);
-    vm->compiler.builtin_malloc->builtin_spelling = "__builtin_malloc";
+    obj_attr_mut(vm, vm->compiler.builtin_malloc)->builtin_spelling = "__builtin_malloc";
     Type *bfree_ty                                = func_type(vm, ty_void);
     bfree_ty->params                              = pointer_to(vm, ty_void);
     vm->compiler.builtin_bfree = new_private_func_obj(vm, "free", bfree_ty);
-    vm->compiler.builtin_bfree->builtin_spelling = "__builtin_free";
+    obj_attr_mut(vm, vm->compiler.builtin_bfree)->builtin_spelling = "__builtin_free";
     Type *bzero_ty       = func_type(vm, ty_void);
     bzero_ty->params     = pointer_to(vm, ty_void);
     bzero_ty->params->next = copy_type(vm, ty_long);
     vm->compiler.builtin_bzero = new_private_func_obj(vm, "bzero", bzero_ty);
-    vm->compiler.builtin_bzero->builtin_spelling = "__builtin_bzero";
+    obj_attr_mut(vm, vm->compiler.builtin_bzero)->builtin_spelling = "__builtin_bzero";
     apply_checked_libc_builtin_bounds(vm, vm->compiler.builtin_bzero);
 
     // __builtin_fabs/sqrt/... forward to the libm function of the same name
@@ -1996,7 +1996,7 @@ static void declare_builtin_functions(VirtualMachine *vm) {
             Obj *stub = new_private_func_obj(
                 vm, arena_format(vm, "%s%.*s", base, v ? 1 : 0, &suffix[v]),
                 fty);
-            stub->builtin_spelling = arena_format(vm, "__builtin_%s%.*s", base,
+            obj_attr_mut(vm, stub)->builtin_spelling = arena_format(vm, "__builtin_%s%.*s", base,
                                                   v ? 1 : 0, &suffix[v]);
             vm->compiler.builtin_libm[i][v] = stub;
         }
@@ -2578,7 +2578,7 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     // of source order.
     check_may_return_null_summaries(vm);
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->body)
+        if (fn->is_function && obj_fn(fn)->body)
             check_nonnull_flow(vm, fn);
     check_kernel_subset(vm);
 

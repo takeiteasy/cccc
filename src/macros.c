@@ -1518,7 +1518,7 @@ static Token *build_combined_macro_tokens(VirtualMachine *vm,
 
 static Obj *find_macro_function(Obj *prog, const char *name) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_function && obj->body &&
+        if (obj->is_function && obj_fn(obj)->body &&
             strlen(obj->name) == strlen(name) &&
             strncmp(obj->name, name, strlen(name)) == 0)
             return obj;
@@ -1676,7 +1676,7 @@ static void run_comptime_var_initializers(VirtualMachine *vm, Obj *macro_prog) {
     }
     *(--vm->sp)           = 0; // sentinel return address
 
-    vm->pc                = (Pc)init_fn->code_addr;
+    vm->pc                = (Pc)obj_fn(init_fn)->code_addr;
 
     int saved_debug       = vm->debug_vm;
     vm->debug_vm          = 0;
@@ -1743,7 +1743,7 @@ static void evaluate_comptime_vars(VirtualMachine *vm, Obj *macro_prog) {
 
         // Pointer vars create relocations — rejected at preprocess time, but
         // guard here too in case something slips through.
-        if (obj->rel) {
+        if (obj_init(obj)->rel) {
             fprintf(stderr,
                     "Warning: comptime var '%s' has a relocation "
                     "(pointer/string vars are not yet supported)\n",
@@ -1886,9 +1886,9 @@ static bool same_macro_storage(Obj *a, Obj *b) {
     if (a->is_function || b->is_function || !a->ty || !b->ty ||
         !types_same_layout(a->ty, b->ty))
         return false;
-    if (a->static_owner || b->static_owner)
-        return a->static_owner && b->static_owner &&
-               !strcmp(a->static_owner->name, b->static_owner->name) &&
+    if (obj_fn(a)->static_owner || obj_fn(b)->static_owner)
+        return obj_fn(a)->static_owner && obj_fn(b)->static_owner &&
+               !strcmp(obj_fn(a)->static_owner->name, obj_fn(b)->static_owner->name) &&
                a->display_name && b->display_name &&
                !strcmp(a->display_name, b->display_name);
     return a->name && b->name && a->name[0] != '.' && !strcmp(a->name, b->name);
@@ -1975,7 +1975,7 @@ static void apply_macro_global_relocations(VirtualMachine *vm,
         if (skipped)
             continue;
 
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+        for (Relocation *rel = obj_init(var)->rel; rel; rel = rel->next) {
             if (!rel->label || !*rel->label)
                 error("invalid macro function global relocation");
 
@@ -1986,7 +1986,7 @@ static void apply_macro_global_relocations(VirtualMachine *vm,
 
             long long data_offset = var->offset + rel->offset;
             if (target->is_function) {
-                if (!target->body) {
+                if (!obj_fn(target)->body) {
                     // No comptime body: if the name is an FFI-registered host
                     // symbol, store the FFI dispatch token
                     // (CCCC_FFI_TOKEN_BASE - idx) so a call through the
@@ -2004,7 +2004,7 @@ static void apply_macro_global_relocations(VirtualMachine *vm,
                     continue;
                 }
                 *(long long *)(vm->data_seg + data_offset) =
-                    cc_pc_to_byte_offset((Pc)target->code_addr) + rel->addend;
+                    cc_pc_to_byte_offset((Pc)obj_fn(target)->code_addr) + rel->addend;
             } else {
                 *(long long *)(vm->data_seg + data_offset) =
                     (long long)(vm->data_seg + target->offset + rel->addend);
@@ -2033,7 +2033,7 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
                   "'#include @comptime \"file.c\"'",
                   fn->name);
         }
-        vm->text_seg[loc] = (Pc)fn_def->code_addr;
+        vm->text_seg[loc] = (Pc)obj_fn(fn_def)->code_addr;
     }
 
     for (int i = 0; i < vm->compiler.num_func_addr_patches; i++) {
@@ -2062,7 +2062,7 @@ static void patch_macro_call_addresses(VirtualMachine *vm, Obj *macro_prog) {
                   "'#include @comptime \"file.c\"'",
                   fn->name);
         }
-        cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+        cc_write_i64_at(vm, loc, cc_pc_to_byte_offset((Pc)obj_fn(fn_def)->code_addr));
     }
 }
 
@@ -2180,16 +2180,16 @@ static void harvest_macro_prog_refs(Obj *macro_prog, HashMap *scanned,
         // onto the in-scope prototype Obj). Non-functions carry no ->body and
         // their reference sources (init_expr, rel) are fixed after parse, so
         // they scan exactly once.
-        void *want = (o->is_function && o->body) ? (void *)2 : (void *)1;
+        void *want = (o->is_function && obj_fn(o)->body) ? (void *)2 : (void *)1;
         if (hashmap_get_int(scanned, key) == want)
             continue;
-        if (o->is_function && o->body)
-            collect_node_refs(o->body, o, refs);
-        if (o->init_expr)
-            collect_node_refs(o->init_expr, o, refs);
+        if (o->is_function && obj_fn(o)->body)
+            collect_node_refs(obj_fn(o)->body, o, refs);
+        if (obj_init(o)->init_expr)
+            collect_node_refs(obj_init(o)->init_expr, o, refs);
         // A comptime-side static function-pointer table (#309) names its
         // targets through relocations, with no Node behind the reference.
-        for (Relocation *r = o->rel; r; r = r->next)
+        for (Relocation *r = obj_init(o)->rel; r; r = r->next)
             if (r->label && *r->label)
                 hashmap_put_borrowed(ref_names, *r->label, (void *)1);
         hashmap_put_int(scanned, key, want);
@@ -2216,7 +2216,7 @@ static void splice_missing_macro_fn_bodies(VirtualMachine *vm,
         harvest_macro_prog_refs(*macro_prog, &scanned, &refs, &ref_names);
         bool progress = false;
         for (Obj *fn = *macro_prog; fn; fn = fn->next) {
-            if (!fn->is_function || fn->body)
+            if (!fn->is_function || obj_fn(fn)->body)
                 continue;
             if (!hashmap_get_int(&refs, (long long)(intptr_t)fn) &&
                 !hashmap_get(&ref_names, fn->name))
@@ -2348,7 +2348,7 @@ static void scan_fn_ptr_words(VirtualMachine *vm, FnSlotScan *sc, Type *ty,
                 long long *slot = (long long *)addr;
                 for (int i = 0; i < sc->nfns; i++)
                     if (*slot ==
-                        cc_pc_to_byte_offset((Pc)sc->fns[i]->code_addr)) {
+                        cc_pc_to_byte_offset((Pc)obj_fn(sc->fns[i])->code_addr)) {
                         add_fn_slot(vm, sc, slot, *slot, sc->fns[i], 0);
                         break;
                     }
@@ -2379,26 +2379,26 @@ static void scan_fn_ptr_words(VirtualMachine *vm, FnSlotScan *sc, Type *ty,
 static MacroFnSlot *collect_fn_slots(VirtualMachine *vm, Obj *prog, int *n) {
     FnSlotScan sc = {0};
     for (Obj *fn = prog; fn; fn = fn->next)
-        sc.nfns += fn->is_function && fn->body;
+        sc.nfns += fn->is_function && obj_fn(fn)->body;
     sc.fns = arena_alloc(&vm->compiler.parser_arena,
                          (size_t)(sc.nfns + 1) * sizeof *sc.fns);
     int i  = 0;
     for (Obj *fn = prog; fn; fn = fn->next)
-        if (fn->is_function && fn->body)
+        if (fn->is_function && obj_fn(fn)->body)
             sc.fns[i++] = fn;
 
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
             continue;
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+        for (Relocation *rel = obj_init(var)->rel; rel; rel = rel->next) {
             Obj *target = rel->label && *rel->label
                               ? find_macro_obj(prog, *rel->label)
                               : NULL;
-            if (!target || !target->is_function || !target->body)
+            if (!target || !target->is_function || !obj_fn(target)->body)
                 continue;
             add_fn_slot(vm, &sc,
                         (long long *)(vm->data_seg + var->offset + rel->offset),
-                        cc_pc_to_byte_offset((Pc)target->code_addr) +
+                        cc_pc_to_byte_offset((Pc)obj_fn(target)->code_addr) +
                             rel->addend,
                         target, rel->addend);
         }
@@ -2609,11 +2609,11 @@ static bool compile_macro_program_ex(VirtualMachine    *vm,
     //         __builtin_comptime_init helper produced by
     //         build_combined_macro_tokens.
     for (Obj *fn = macro_prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body)
+        if (fn->is_function && obj_fn(fn)->body)
             gen_function(vm, fn);
     }
     cc_asm_passthru_flush(vm);
-    cc_free_local_sets(macro_prog);
+    cc_free_local_sets(vm, macro_prog);
 
     // Step 3: apply global relocations now that every macro function has a
     //         code_addr, so static initializer tables can reference comptime
@@ -2636,9 +2636,9 @@ static bool compile_macro_program_ex(VirtualMachine    *vm,
         for (int i = 0; i < n_slots; i++) {
             Obj *target = find_macro_obj(macro_prog, old_slots[i].target->name);
             if (*old_slots[i].slot == old_slots[i].old_value && target &&
-                target->is_function && target->body)
+                target->is_function && obj_fn(target)->body)
                 *old_slots[i].slot =
-                    cc_pc_to_byte_offset((Pc)target->code_addr) +
+                    cc_pc_to_byte_offset((Pc)obj_fn(target)->code_addr) +
                     old_slots[i].addend;
         }
         cc_code_mark_end(vm, &mark, count, 0);
@@ -2688,7 +2688,7 @@ static bool compile_macro_program_ex(VirtualMachine    *vm,
     if (vm->debug_vm) {
         for (int i = 0; i < count; i++) {
             printf("Compiled compile-time function '%s' at code address %lld\n",
-                   macros[i]->name, macros[i]->compiled_fn->code_addr);
+                   macros[i]->name, obj_fn(macros[i]->compiled_fn)->code_addr);
         }
     }
 
@@ -2786,17 +2786,17 @@ static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
     cc_code_mark_begin(vm, mark);
     int fns = 0;
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body) {
+        if (fn->is_function && obj_fn(fn)->body) {
             gen_function(vm, fn);
             fns++;
         }
     }
     cc_asm_passthru_flush(vm);
-    cc_free_local_sets(prog);
+    cc_free_local_sets(vm, prog);
     patch_macro_call_addresses(vm, prog);
     for (int i = 0; i < nslots; i++)
         if (*slots[i].slot == slots[i].old_value)
-            *slots[i].slot = cc_pc_to_byte_offset((Pc)slots[i].target->code_addr) +
+            *slots[i].slot = cc_pc_to_byte_offset((Pc)obj_fn(slots[i].target)->code_addr) +
                              slots[i].addend;
     cc_code_mark_end(vm, mark, fns, 0);
     // Nothing outside the comptime program holds an address into this code,
@@ -2815,11 +2815,11 @@ static int regen_macro_program(VirtualMachine *vm, CcCodeMark *mark) {
 // A new definition in the session that holds a comptime call to expand.
 static bool session_needs_expansion(VirtualMachine *vm, Obj *old_head) {
     for (Obj *o = vm->compiler.globals; o != old_head; o = o->next) {
-        if (!!o->reuse_of)
+        if (!!obj_fn(o)->reuse_of)
             continue;
         if (o->has_pending_macro_init ||
-            (o->is_function && o->body &&
-             cc_find_comptime_call(vm, o->def_begin, o->def_end)))
+            (o->is_function && obj_fn(o)->body &&
+             cc_find_comptime_call(vm, obj_fn(o)->def_begin, obj_fn(o)->def_end)))
             return true;
     }
     return false;
@@ -2848,20 +2848,20 @@ bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head) {
 
         Obj *new_head = vm->compiler.globals;
         for (Obj *fn = new_head; fn != old_head; fn = fn->next) {
-            if (!!fn->reuse_of || !fn->is_function || !fn->body)
+            if (!!obj_fn(fn)->reuse_of || !fn->is_function || !obj_fn(fn)->body)
                 continue;
             vm->compiler.current_fn = fn;
-            vm->compiler.locals     = fn->locals;
-            fn->body                = transform_node(vm, fn->body, 0, false);
+            vm->compiler.locals     = obj_fn(fn)->locals;
+            obj_fn_mut(vm, fn)->body                = transform_node(vm, obj_fn(fn)->body, 0, false);
             cc_resolve_body_label_refs(vm, fn);
-            fn->locals = vm->compiler.locals;
+            obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
         }
         cc_flush_deferred_unused_labels(vm);
         vm->compiler.locals     = NULL;
         vm->compiler.current_fn = NULL;
         for (Obj *var = new_head; var != old_head; var = var->next) {
-            if (!var->is_function && var->init_expr && !var->reuse_of)
-                var->init_expr = transform_node(vm, var->init_expr, 0, false);
+            if (!var->is_function && obj_init(var)->init_expr && !obj_fn(var)->reuse_of)
+                obj_init_mut(vm, var)->init_expr = transform_node(vm, obj_init(var)->init_expr, 0, false);
         }
         cc_finalize_macro_gvar_inits(vm, new_head);
 
@@ -3255,7 +3255,7 @@ static Node *execute_macro_fn_ex(VirtualMachine *vm, MacroFn *pm,
     *(--vm->sp) = 0;
 
     // Set PC to function entry point
-    vm->pc = (Pc)pm->compiled_fn->code_addr;
+    vm->pc = (Pc)obj_fn(pm->compiled_fn)->code_addr;
 
     // Execute the macro function
     int saved_debug = vm->debug_vm;
@@ -4386,7 +4386,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                         while (o && o != globals_before) {
                             Obj *next_obj = o->next;
                             cc_record_emit_object(vm, o);
-                            o->gen_site = tok;
+                            obj_fn_mut(vm, o)->gen_site = tok;
                             o->next = vm->compiler.macro_globals;
                             vm->compiler.macro_globals = o;
                             o                          = next_obj;
@@ -4429,7 +4429,7 @@ static void prepend_generated_decls(VirtualMachine *vm, Obj *generated,
         // block function is_macro_generated for the first time, so the
         // is_fn_def arm needed the same `name[0] != '.'` guard #928 already
         // gave is_gvar_def.
-        bool is_fn_def   = o->is_function && o->body && o->is_macro_generated &&
+        bool is_fn_def   = o->is_function && obj_fn(o)->body && o->is_macro_generated &&
                            o->name[0] != '.';
         bool is_gvar_def = !o->is_function && o->is_definition &&
                            o->is_macro_generated && o->name[0] != '.';
@@ -4750,7 +4750,7 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
 
     // Then walk the AST and expand macro calls
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body)
+        if (!fn->is_function || !obj_fn(fn)->body)
             continue;
 
         if (vm->debug_vm)
@@ -4761,20 +4761,20 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
         // compound assignments in quote templates) are added to THIS
         // function's locals and get proper stack-offset allocation in codegen.
         vm->compiler.current_fn = fn;
-        vm->compiler.locals     = fn->locals;
+        vm->compiler.locals     = obj_fn(fn)->locals;
 
         // Transform the function body. fn->body is the function's own
         // ND_BLOCK, not itself a bare macro call, so stmt_pos here is moot --
         // its ->body chain is walked with stmt_pos=false and the
         // ND_EXPR_STMT branch marks statement position per-element.
-        fn->body = transform_node(vm, fn->body, 0, false);
+        obj_fn_mut(vm, fn)->body = transform_node(vm, obj_fn(fn)->body, 0, false);
 
         // #1253: bind any `goto host_label` / `&&host_label` a Quote() template
         // spliced into this body left as a free reference.
         cc_resolve_body_label_refs(vm, fn);
 
         // Flush new locals (created by quote templates) back into fn->locals.
-        fn->locals = vm->compiler.locals;
+        obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
     }
 
     // #1255: every template-spliced `goto host_label` is bound now, so the
@@ -4790,9 +4790,9 @@ void cc_expand_macros(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function)
             continue;
-        if (var->init_expr) {
+        if (obj_init(var)->init_expr) {
             // Global initializer: always expression position.
-            var->init_expr = transform_node(vm, var->init_expr, 0, false);
+            obj_init_mut(vm, var)->init_expr = transform_node(vm, obj_init(var)->init_expr, 0, false);
         }
     }
 

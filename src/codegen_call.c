@@ -116,7 +116,7 @@ static bool addr_roots_at_frame_local(Obj *fn, Node *n) {
             case ND_VAR:
                 if (!n->var || !n->var->is_local)
                     return false;
-                for (Obj *v = fn->locals; v; v = v->next)
+                for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
                     if (v == n->var)
                         return true;
                 return false;
@@ -334,7 +334,7 @@ bool can_emit_tail_call(VirtualMachine *vm, Node *expr) {
         for (Node *a = expr->args; a; a = a->next)
             if (tail_arg_carries_frame_addr(fn, a))
                 return false;
-        for (Obj *v = fn->locals; v; v = v->next)
+        for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
             if (v->addr_escapes)
                 return false;
     }

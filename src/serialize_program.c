@@ -49,7 +49,7 @@
 // #defines cost nothing, so match unconditionally instead.
 static bool prog_uses_asm_label(Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next)
-        if (obj->is_function && obj->asm_label)
+        if (obj->is_function && obj_attr(obj)->asm_label)
             return true;
     return false;
 }
@@ -437,10 +437,10 @@ static void var_ref_visit(Node *n, void *vctx) {
 static bool static_referenced_elsewhere(VirtualMachine *vm, Obj *prog, Obj *var,
                                         Obj *owner, Obj **siblings, int nsib) {
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body || fn == owner)
+        if (!fn->is_function || !obj_fn(fn)->body || fn == owner)
             continue;
         VarRefCtx vr = {.var = var, .found = false};
-        serialize_ast_walk(fn->body, var_ref_visit, &vr);
+        serialize_ast_walk(obj_fn(fn)->body, var_ref_visit, &vr);
         if (vr.found)
             return true;
     }
@@ -457,14 +457,14 @@ static bool static_referenced_elsewhere(VirtualMachine *vm, Obj *prog, Obj *var,
     // itself, same fail-loudly policy as the cross-function guard
     // above.
     for (Obj *other = prog; other; other = other->next) {
-        if (other == var || other->is_function || !other->rel)
+        if (other == var || other->is_function || !obj_init(other)->rel)
             continue;
         bool sibling = false;
         for (int i = 0; i < nsib && !sibling; i++)
             sibling = siblings[i] == other;
         if (sibling)
             continue;
-        for (Relocation *rel = other->rel; rel; rel = rel->next)
+        for (Relocation *rel = obj_init(other)->rel; rel; rel = rel->next)
             if (rel->label && *rel->label &&
                 serialize_find_global(vm, *rel->label) == var)
                 return true;
@@ -497,9 +497,9 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
     // function for free.
     bool any_unresolved_reloc = false;
     for (Obj *var = prog; var && !any_unresolved_reloc; var = var->next) {
-        if (var->is_function || !var->rel)
+        if (var->is_function || !obj_init(var)->rel)
             continue;
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+        for (Relocation *rel = obj_init(var)->rel; rel; rel = rel->next) {
             if (rel->label && *rel->label &&
                 !serialize_find_global(vm, *rel->label)) {
                 any_unresolved_reloc = true;
@@ -511,17 +511,17 @@ static void collect_deferred_static_labels(VirtualMachine *vm, Obj *prog,
         return;
 
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body)
+        if (!fn->is_function || !obj_fn(fn)->body)
             continue;
         LabelCollectCtx lc = {.ctx = ctx, .owner_fn = fn};
-        serialize_ast_walk(fn->body, collect_label_visit, &lc);
+        serialize_ast_walk(obj_fn(fn)->body, collect_label_visit, &lc);
     }
 
     for (Obj *var = prog; var; var = var->next) {
-        if (var->is_function || !var->rel)
+        if (var->is_function || !obj_init(var)->rel)
             continue;
         Obj *owner = NULL;
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+        for (Relocation *rel = obj_init(var)->rel; rel; rel = rel->next) {
             if (!rel->label || !*rel->label)
                 continue;
             if (serialize_find_global(vm, *rel->label))
@@ -569,10 +569,10 @@ static void collect_deferred_local_type_statics(VirtualMachine *vm, Obj *prog,
     int   n = 0, cap = 0;
     for (Obj *var = prog; var; var = var->next) {
         if (var->is_function || var->is_string_literal || !var->is_static ||
-            !var->static_owner || var_is_deferred_label_static(ctx, var))
+            !obj_fn(var)->static_owner || var_is_deferred_label_static(ctx, var))
             continue;
         Obj *owner = type_local_owner(ctx, var->ty);
-        if (owner != var->static_owner)
+        if (owner != obj_fn(var)->static_owner)
             continue;
         if (n == cap) {
             cap    = cap ? cap * 2 : 8;
@@ -807,7 +807,7 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         if (obj->is_static || obj->is_macro_generated || obj->name[0] == '.')
             continue;
         bool is_defining =
-            obj->is_function ? obj->body != NULL : obj->is_definition;
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
         if (!hashmap_get(&anchors, obj->name))
@@ -822,7 +822,7 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         // function prototype or a tentative (non-defining) declaration
         // prints nothing a host compiler would reject twice.
         bool is_defining =
-            obj->is_function ? obj->body != NULL : obj->is_definition;
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
         if (!is_defining)
             continue;
 
@@ -1069,7 +1069,7 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         if (obj->is_static)
             continue;
         bool is_defining =
-            obj->is_function ? obj->body != NULL : obj->is_definition;
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
         if (!is_defining || !obj->ty)
             continue;
         for (int g = 0; g < groups_len; g++)
@@ -1280,7 +1280,7 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
         if (obj->is_static)
             continue;
         bool is_defining =
-            obj->is_function ? obj->body != NULL : obj->is_definition;
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
         if (!is_defining || !obj->ty)
             continue;
         for (int g = 0; g < groups_len; g++)
@@ -1544,7 +1544,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         if (obj->is_static)
             continue;
         bool is_defining =
-            obj->is_function ? obj->body != NULL : obj->is_definition;
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
         if (!is_defining || !obj->ty)
             continue;
         for (int g = 0; g < groups_len; g++)
@@ -1802,9 +1802,9 @@ static void serialize_synth_libc_includes(FILE *f, VirtualMachine *vm,
         SynthLibcDecl *entry  = &reg->data[i];
         bool           called = false;
         for (Obj *obj = prog; obj && !called; obj = obj->next) {
-            if (!obj->is_function || !obj->body)
+            if (!obj->is_function || !obj_fn(obj)->body)
                 continue;
-            called = node_calls_obj(obj->body, entry->obj);
+            called = node_calls_obj(obj_fn(obj)->body, entry->obj);
         }
         if (!called)
             continue;
@@ -1892,10 +1892,10 @@ static bool node_calls_named_builtin(Node *node, const char *name) {
 // builtins?
 static bool prog_calls_any_named(Obj *prog, const char **family, int n) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->body)
+        if (!obj->is_function || !obj_fn(obj)->body)
             continue;
         for (int i = 0; i < n; i++)
-            if (node_calls_named_builtin(obj->body, family[i]))
+            if (node_calls_named_builtin(obj_fn(obj)->body, family[i]))
                 return true;
     }
     return false;
@@ -2078,9 +2078,9 @@ static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
 static void serialize_synth_f2i_helpers(FILE *f, Obj *prog) {
     F2ISynthNeed need = {0};
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->body)
+        if (!obj->is_function || !obj_fn(obj)->body)
             continue;
-        node_scan_f2i_native(obj->body, &need);
+        node_scan_f2i_native(obj_fn(obj)->body, &need);
     }
     if (!need.want_i64 && !need.want_i64_f32 && !need.want_u64 &&
         !need.want_u64_f32)
@@ -2282,13 +2282,13 @@ static void serialize_synth_complex_decls(FILE *f, VirtualMachine *vm,
             want = true;
         else {
             type_scan_complex_native(obj->ty, &want, &seen);
-            for (Obj *param = obj->params; param && !want; param = param->next)
+            for (Obj *param = obj_fn(obj)->params; param && !want; param = param->next)
                 type_scan_complex_native(param->ty, &want, &seen);
-            for (Obj *local = obj->locals; local && !want; local = local->next)
+            for (Obj *local = obj_fn(obj)->locals; local && !want; local = local->next)
                 type_scan_complex_native(local->ty, &want, &seen);
         }
-        if (!want && obj->is_function && obj->body)
-            node_scan_complex_native(obj->body, &want, &seen);
+        if (!want && obj->is_function && obj_fn(obj)->body)
+            node_scan_complex_native(obj_fn(obj)->body, &want, &seen);
     }
     free(seen.data);
     if (!want)
@@ -2481,15 +2481,15 @@ static bool obj_needs_synth_typedef_header(SerializeContext *ctx, Obj *obj,
                                            const char *header, TypeVec *seen) {
     if (type_needs_synth_typedef_header(ctx, obj->ty, header, seen))
         return true;
-    if (node_needs_synth_typedef_header(ctx, obj->init_expr, header, seen))
+    if (node_needs_synth_typedef_header(ctx, obj_init(obj)->init_expr, header, seen))
         return true;
-    for (Obj *param = obj->params; param; param = param->next)
+    for (Obj *param = obj_fn(obj)->params; param; param = param->next)
         if (type_needs_synth_typedef_header(ctx, param->ty, header, seen))
             return true;
-    for (Obj *local = obj->locals; local; local = local->next)
+    for (Obj *local = obj_fn(obj)->locals; local; local = local->next)
         if (type_needs_synth_typedef_header(ctx, local->ty, header, seen))
             return true;
-    return node_needs_synth_typedef_header(ctx, obj->body, header, seen);
+    return node_needs_synth_typedef_header(ctx, obj_fn(obj)->body, header, seen);
 }
 
 static void serialize_synth_typedef_includes(FILE *f, SerializeContext *ctx,
@@ -2593,15 +2593,15 @@ static bool node_mentions_block(Node *node) {
 static bool obj_uses_block_type(Obj *obj) {
     if (type_mentions_block(obj->ty))
         return true;
-    if (node_mentions_block(obj->init_expr))
+    if (node_mentions_block(obj_init(obj)->init_expr))
         return true;
-    for (Obj *param = obj->params; param; param = param->next)
+    for (Obj *param = obj_fn(obj)->params; param; param = param->next)
         if (type_mentions_block(param->ty))
             return true;
-    for (Obj *local = obj->locals; local; local = local->next)
+    for (Obj *local = obj_fn(obj)->locals; local; local = local->next)
         if (type_mentions_block(local->ty))
             return true;
-    return node_mentions_block(obj->body);
+    return node_mentions_block(obj_fn(obj)->body);
 }
 
 // #1074: does `var` belong to `fn`'s own locals list (which, for a
@@ -2611,7 +2611,7 @@ static bool obj_uses_block_type(Obj *obj) {
 // var_in_fn_locals() -- that one is `static` in a different translation
 // unit, so it isn't reachable from here.
 bool nested_var_is_own(Obj *fn, Obj *var) {
-    for (Obj *v = fn->locals; v; v = v->next)
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
         if (v == var)
             return true;
     return false;
@@ -2665,7 +2665,7 @@ static int add_nested_upvar(Obj ***upvars_out, int *len, int *cap, Obj *var) {
 // (serialize_decl.c) -- see record_nested_upvar()'s #1209 comment for why.
 bool nested_upvar_is_deferred(Obj *var) {
     return (var->ty && var->ty->kind == TY_VLA) ||
-           var->deferred_vla_ptr_init != NULL || var->cleanup_fn;
+           obj_size(var)->deferred_vla_ptr_init != NULL || obj_attr(var)->cleanup_fn;
 }
 
 // #1209: the env-struct field type for upvar `var`. A VLA (or pointer-to-
@@ -2687,7 +2687,7 @@ Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var) {
         return pointer_to(vm, pointer_to(vm, var->ty));
     if (var->ty && var->ty->kind == TY_VLA)
         return pointer_to(vm, array_of(vm, var->ty->base, -1));
-    if (var->deferred_vla_ptr_init)
+    if (obj_size(var)->deferred_vla_ptr_init)
         return pointer_to(
             vm, pointer_to(vm, array_of(vm, var->ty->base->base, -1)));
     return pointer_to(vm, var->ty);
@@ -2706,7 +2706,7 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
                                 Obj *fn, Node *node, Obj *var) {
     Obj *owner       = NULL;
     Obj *block_owner = NULL;
-    for (Obj *anc = fn->parent_fn; anc; anc = anc->parent_fn) {
+    for (Obj *anc = obj_fn(fn)->parent_fn; anc; anc = obj_fn(anc)->parent_fn) {
         if (nested_var_is_own(anc, var)) {
             owner = anc;
             break;
@@ -2786,7 +2786,7 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
     // of indirection than the VLA-local case, since `var` itself is
     // already a pointer). Rejected below for the same multi-dimensional
     // reason as above, on the VLA it points into.
-    if (var->deferred_vla_ptr_init) {
+    if (obj_size(var)->deferred_vla_ptr_init) {
         if (type_contains_vla(var->ty->base->base)) {
             error_tok(vm, node->tok ? node->tok : fn->tok,
                       "cannot serialize to native code: pointer to a "
@@ -2809,7 +2809,7 @@ static void record_nested_upvar(VirtualMachine *vm, SerializeContext *ctx,
     // serialize_nested_preamble()) and every read/write goes through an
     // extra dereference (serialize_nested_upvar_ref()) -- no longer
     // rejected as of #1080.
-    if (var->block_desc_of) {
+    if (obj_blk(var)->block_desc_of) {
         error_tok(vm, node->tok ? node->tok : fn->tok,
                   "cannot serialize to native code: a block literal's own "
                   "descriptor local '%s' cannot be captured by a nested "
@@ -2899,9 +2899,9 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
         // rather than let it cast a block descriptor as if it were an
         // ordinary nested-function env struct.
         if (lhs_is_direct_nested_call && fn->is_nested && !fn->is_block &&
-            node->lhs->var->parent_fn != fn) {
-            for (Obj *anc                                     = fn->parent_fn;
-                 anc && anc != node->lhs->var->parent_fn; anc = anc->parent_fn)
+            obj_fn(node->lhs->var)->parent_fn != fn) {
+            for (Obj *anc                                     = obj_fn(fn)->parent_fn;
+                 anc && anc != obj_fn(node->lhs->var)->parent_fn; anc = obj_fn(anc)->parent_fn)
                 if (anc->is_block) {
                     error_tok(vm, node->tok ? node->tok : fn->tok,
                               "cannot serialize to native code: calling "
@@ -2985,12 +2985,12 @@ static void hoist_static_local_types(FILE *f, VirtualMachine *vm,
 static void hoist_compiler_temp_anon_types(FILE *f, VirtualMachine *vm,
                                            SerializeContext *ctx, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->body)
+        if (!obj->is_function || !obj_fn(obj)->body)
             continue;
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
             continue;
-        for (Obj *var = obj->locals; var; var = var->next) {
+        for (Obj *var = obj_fn(obj)->locals; var; var = var->next) {
             if (var->is_param || !var->name || var->name[0] != '\0')
                 continue;
             // #18/#19 buffalo: never declared (serialize_decl.c's hoist
@@ -3021,7 +3021,7 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
         // -- a block literal is not one of "our" nested functions (it has
         // its own complete, separate lowering, #965) and must not trigger
         // creating an env for its parent here.
-        if (!obj->is_function || !obj->is_nested || obj->is_block || !obj->body)
+        if (!obj->is_function || !obj->is_nested || obj->is_block || !obj_fn(obj)->body)
             continue;
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
@@ -3029,13 +3029,13 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
         // Pass 1: guarantee obj->parent_fn has an entry regardless of
         // whether it turns out to own any upvars -- an intervening level of
         // a multi-level nest needs one purely to carry __up.
-        find_or_create_nested_env(vm, ctx, obj->parent_fn);
+        find_or_create_nested_env(vm, ctx, obj_fn(obj)->parent_fn);
     }
     if (ctx->nested_envs_len == 0)
         return;
 
     for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->body)
+        if (!obj->is_function || !obj_fn(obj)->body)
             continue;
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
@@ -3050,9 +3050,9 @@ static void serialize_nested_preamble(FILE *f, VirtualMachine *vm,
         // naturally no-ops for a non-nested `obj` (parent_fn is NULL, the
         // loop never runs, `owner` stays NULL, record_nested_upvar()
         // returns immediately) so this is safe to run unconditionally.
-        collect_nested_refs(vm, ctx, obj, obj->body);
+        collect_nested_refs(vm, ctx, obj, obj_fn(obj)->body);
         if (obj->is_nested && !obj->is_block)
-            for (Obj *var = obj->locals; var; var = var->next)
+            for (Obj *var = obj_fn(obj)->locals; var; var = var->next)
                 if (!var->is_param)
                     collect_vla_extent_refs(vm, ctx, obj, var->ty);
     }
@@ -3135,16 +3135,16 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm,
     bool release_used = false;
     for (Obj *obj = prog; obj && (!copy_used || !release_used);
          obj      = obj->next) {
-        if (!obj->is_function || !obj->body)
+        if (!obj->is_function || !obj_fn(obj)->body)
             continue;
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
             continue;
         if (!copy_used && vm->compiler.builtin_block_copy)
             copy_used =
-                node_calls_obj(obj->body, vm->compiler.builtin_block_copy);
+                node_calls_obj(obj_fn(obj)->body, vm->compiler.builtin_block_copy);
         if (!release_used && vm->compiler.builtin_free)
-            release_used = node_calls_obj(obj->body, vm->compiler.builtin_free);
+            release_used = node_calls_obj(obj_fn(obj)->body, vm->compiler.builtin_free);
     }
 
     if (!any_block && !uses_block_type && !copy_used && !release_used)
@@ -3178,8 +3178,8 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm,
         bool reachable = !ctx->generated_only || obj->is_macro_generated;
         if (!reachable)
             continue;
-        for (int i = 0; i < obj->num_captures; i++)
-            hoist_local_type_to_file_scope(f, vm, ctx, obj->captures[i]->ty);
+        for (int i = 0; i < obj_blk(obj)->num_captures; i++)
+            hoist_local_type_to_file_scope(f, vm, ctx, obj_blk(obj)->captures[i]->ty);
     }
 
     static const char *BLOCK_FN_PREFIX = "__cccc_block_";
@@ -3199,8 +3199,8 @@ static void serialize_block_preamble(FILE *f, VirtualMachine *vm,
         char *env_name = arena_format(vm, "struct __cccc_block_env_%s", suffix);
 
         fprintf(f, "%s {\n    void *__invoke;\n    long __size;\n", env_name);
-        for (int i = 0; i < obj->num_captures; i++) {
-            Obj *cap = obj->captures[i];
+        for (int i = 0; i < obj_blk(obj)->num_captures; i++) {
+            Obj *cap = obj_blk(obj)->captures[i];
 
             // #989: a capture whose own struct/union/enum type was declared
             // inside a function is already hoisted to file scope (with
@@ -3315,7 +3315,7 @@ static Token *token_expansion_site(Token *t) {
 
 bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
                                  Obj *obj) {
-    if (!obj->body || obj->is_macro_generated)
+    if (!obj_fn(obj)->body || obj->is_macro_generated)
         return false;
     Token *t = obj->tok;
     if (!t || !t->file)
@@ -3400,9 +3400,9 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
     // correctly resolves to the header itself, while a mere bodiless
     // prototype reached through that same header (obj->tok, in the
     // opaque-handle idiom) is never consulted here at all.
-    if (!obj->body->tok)
+    if (!obj_fn(obj)->body->tok)
         return false;
-    Token *body_exp = token_expansion_site(obj->body->tok);
+    Token *body_exp = token_expansion_site(obj_fn(obj)->body->tok);
     if (!body_exp || !body_exp->file ||
         file_is_command_line_input(vm, body_exp->file->name) ||
         cc_file_is_cccc_only(vm, body_exp->file->name))
@@ -3416,9 +3416,9 @@ bool function_is_header_supplied(VirtualMachine *vm, SerializeContext *ctx,
 // host emits no symbol for one. A system header's copy is left
 // alone: libc already exports that symbol.
 bool gnu_inline_needs_body(Obj *fn) {
-    if (!fn->is_gnu_inline || !fn->is_live || !fn->body)
+    if (!fn->is_gnu_inline || !fn->is_live || !obj_fn(fn)->body)
         return false;
-    Token *site = token_expansion_site(fn->body->tok);
+    Token *site = token_expansion_site(obj_fn(fn)->body->tok);
     return !site || !site->file || !site->file->is_system_header;
 }
 
@@ -4956,9 +4956,9 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
     s->ctx = ctx;
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (!obj->is_function || !function_is_header_supplied(vm, ctx, obj) ||
-            !obj->body->tok)
+            !obj_fn(obj)->body->tok)
             continue;
-        Token *site = token_expansion_site(obj->body->tok);
+        Token *site = token_expansion_site(obj_fn(obj)->body->tok);
         if (!site || !site->file)
             continue;
         s->fn     = obj;
@@ -4967,7 +4967,7 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
         // Its weak declaration must precede the header's definition.
         if (gnu_inline_needs_body(obj))
             prelude_add(s, obj);
-        serialize_ast_walk(obj->body, prelude_ref_visit, s);
+        serialize_ast_walk(obj_fn(obj)->body, prelude_ref_visit, s);
     }
 }
 
@@ -5139,7 +5139,7 @@ static bool local_enum_name_taken(VirtualMachine *vm, SerializeContext *ctx,
             if (ec->name && strcmp(ec->name, name) == 0)
                 return true;
     }
-    for (Obj *var = fn->locals; var; var = var->next)
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next)
         if (var->name && strcmp(var->name, name) == 0)
             return true;
     size_t len = strlen(name);
@@ -5270,7 +5270,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     for (Obj *obj = prog; obj; obj = obj->next) {
         if (generated_only && !obj->is_macro_generated)
             continue;
-        if (obj->is_function && !obj->is_definition && !obj->body)
+        if (obj->is_function && !obj->is_definition && !obj_fn(obj)->body)
             continue;
         if (!obj->is_function && obj->name[0] == '.')
             continue;
@@ -5560,9 +5560,9 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
             if (!obj || !obj->is_macro_generated)
                 continue;
             if (obj->is_function) {
-                if (obj->body) {
+                if (obj_fn(obj)->body) {
                     ObjVec needed = {0};
-                    collect_generated_call_targets(obj->body, &needed);
+                    collect_generated_call_targets(obj_fn(obj)->body, &needed);
                     for (int i = 0; i < needed.len; i++) {
                         Obj *callee = needed.data[i];
                         if (obj_vec_contains(&declared, callee))
@@ -5582,7 +5582,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                     fprintf(f, ";\n\n");
                     obj_vec_push(&declared, obj);
                 }
-                if (obj->body)
+                if (obj_fn(obj)->body)
                     serialize_function(f, vm, &ctx, obj);
             } else if (obj->name[0] != '.') {
                 serialize_global_var(f, vm, &ctx, obj);
@@ -6252,7 +6252,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 continue;
             if (obj->is_function || obj->name[0] == '.')
                 continue;
-            for (Relocation *rel = obj->rel; rel; rel = rel->next) {
+            for (Relocation *rel = obj_init(obj)->rel; rel; rel = rel->next) {
                 if (!rel->label || !*rel->label)
                     continue;
                 Obj *target = serialize_find_global(vm, *rel->label);
@@ -6273,7 +6273,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
                 // at all, the exact undeclared-identifier bug #999 this loop
                 // exists to prevent.
                 if (function_is_header_supplied(vm, &ctx, target) ||
-                    (!target->is_definition && !target->body &&
+                    (!target->is_definition && !obj_fn(target)->body &&
                      !target->is_implicit && !target->is_macro_generated &&
                      !bodyless_decl_from_input_or_bundled(vm, &ctx, target)))
                     continue;
@@ -6348,7 +6348,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         // just below already applies.
         if (function_is_header_supplied(vm, &ctx, obj))
             continue;
-        if (!obj->is_definition && !obj->body) {
+        if (!obj->is_definition && !obj_fn(obj)->body) {
             // #901: a bare declaration with no body (e.g. `int abs(int
             // x);`) used to be dropped entirely here. The VM path needs
             // no native declaration -- it resolves the call as an FFI

@@ -108,7 +108,7 @@ static AddrSpace pointee_space(Type *ty) {
 static Obj *find_param(Obj *fn, Type *param) {
     if (!param->name)
         return NULL;
-    for (Obj *local = fn->locals; local; local = local->next)
+    for (Obj *local = obj_fn(fn)->locals; local; local = local->next)
         if (local->is_param && (int)strlen(local->name) == param->name->len &&
             !memcmp(local->name, param->name->loc, param->name->len))
             return local;
@@ -314,7 +314,7 @@ static void check_call(KernelCtx *ctx, Node *call) {
         kernel_error(ctx, call->tok, what);
         return;
     }
-    if (def->is_kernel && def->kernel_local_bytes > 0) {
+    if (def->is_kernel && obj_attr(def)->kernel_local_bytes > 0) {
         char what[256];
         snprintf(what, sizeof(what),
                  "calling kernel entry '%s', which declares local-memory "
@@ -527,7 +527,7 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
         kernel_error(ctx, tok, "a variadic function");
     if (fn->is_kernel && !frame.up)
         seed_entry_params(ctx, fn);
-    for (Obj *local = fn->locals; local; local = local->next) {
+    for (Obj *local = obj_fn(fn)->locals; local; local = local->next) {
         check_object_space(ctx, fn, local, tok);
         if (local->ty && local->ty->kind == TY_VLA)
             kernel_error(ctx, local->tok ? local->tok : tok,
@@ -542,7 +542,7 @@ static void check_fn(KernelCtx *ctx, Obj *fn) {
         ctx->fn_reported_float = true;
         kernel_error(ctx, tok, "double or long double");
     }
-    walk(ctx, fn->body);
+    walk(ctx, obj_fn(fn)->body);
 
     ctx->fn_reported_float = saved_float;
     ctx->top               = frame.up;
@@ -562,10 +562,10 @@ void claim_kernel_local(VirtualMachine *vm, Obj *var, Token *tok) {
     if (var->ty->kind == TY_VLA)
         return;
     int align = var->align > 0 ? var->align : 16;
-    int off   = (fn->kernel_local_bytes + align - 1) / align * align;
-    var->kernel_local_off    = off;
-    var->kernel_local_id     = ++vm->compiler.kernel_local_ids;
-    fn->kernel_local_bytes   = off + (int)var->ty->size;
+    int off   = (obj_attr(fn)->kernel_local_bytes + align - 1) / align * align;
+    obj_attr_mut(vm, var)->kernel_local_off    = off;
+    obj_attr_mut(vm, var)->kernel_local_id     = ++vm->compiler.kernel_local_ids;
+    obj_attr_mut(vm, fn)->kernel_local_bytes   = off + (int)var->ty->size;
     var->is_kernel_local_obj = true;
     (void)tok;
 }
@@ -590,9 +590,9 @@ Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *call    = new_unary(vm, ND_FUNCALL, new_var_node(vm, fn, tok), tok);
     call->func_ty = fn_ty;
     call->ty      = void_ptr;
-    call->args    = new_num(vm, var->kernel_local_off, tok);
+    call->args    = new_num(vm, obj_attr(var)->kernel_local_off, tok);
     call->args->next       = new_num(vm, var->ty->size, tok);
-    call->args->next->next = new_num(vm, var->kernel_local_id, tok);
+    call->args->next->next = new_num(vm, obj_attr(var)->kernel_local_id, tok);
     for (Node *arg = call->args; arg; arg = arg->next)
         add_type(vm, arg);
     Node *typed                = new_cast(vm, call, ptr_ty);
@@ -605,17 +605,17 @@ Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok) {
 void check_kernel_subset(VirtualMachine *vm) {
     bool any = false;
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->is_kernel && fn->body)
+        if (fn->is_function && fn->is_kernel && obj_fn(fn)->body)
             any = true;
     if (!any)
         return;
 
     KernelCtx ctx = {.vm = vm};
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->body)
+        if (fn->is_function && obj_fn(fn)->body)
             hashmap_put(&ctx.defs, fn->name, fn);
     for (Obj *fn = vm->compiler.globals; fn && !ctx.stop; fn = fn->next)
-        if (fn->is_function && fn->is_kernel && fn->body)
+        if (fn->is_function && fn->is_kernel && obj_fn(fn)->body)
             check_fn(&ctx, fn);
 
     hashmap_deinit(&ctx.defs);

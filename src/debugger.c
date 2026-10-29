@@ -57,9 +57,9 @@ const char *cc_pc_to_name(VirtualMachine *vm, Pc pc) {
         return NULL;
     long long pc_offset = (long long)pc;
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body || !fn->name)
+        if (!fn->is_function || !obj_fn(fn)->body || !fn->name)
             continue;
-        if (pc_offset >= fn->code_addr && pc_offset < fn->code_end_addr)
+        if (pc_offset >= obj_fn(fn)->code_addr && pc_offset < obj_fn(fn)->code_end_addr)
             return fn->name;
     }
     return NULL;
@@ -106,9 +106,9 @@ static Obj *debugger_function_at(VirtualMachine *vm, Pc pc) {
         return NULL;
     long long pc_offset = pc;
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-        if (!fn->is_function || !fn->body)
+        if (!fn->is_function || !obj_fn(fn)->body)
             continue;
-        if (pc_offset >= fn->code_addr && pc_offset < fn->code_end_addr)
+        if (pc_offset >= obj_fn(fn)->code_addr && pc_offset < obj_fn(fn)->code_end_addr)
             return fn;
     }
     return NULL;
@@ -143,7 +143,7 @@ static bool debugger_frame_is_root(VirtualMachine *vm, long long ret,
 
 static bool debugger_pc_is_entry(VirtualMachine *vm, Pc pc) {
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next)
-        if (fn->is_function && fn->body && fn->code_addr == (long long)pc)
+        if (fn->is_function && obj_fn(fn)->body && obj_fn(fn)->code_addr == (long long)pc)
             return true;
     return false;
 }
@@ -1151,7 +1151,7 @@ int debugger_run(VirtualMachine *vm, int argc, char **argv) {
 
     // Override PC to main; cc_run_at already set up the stack, registers,
     // and sentinel return address correctly using poolsize_max.
-    vm->pc = (Pc)main_fn->code_addr;
+    vm->pc = (Pc)obj_fn(main_fn)->code_addr;
 
     printf("Starting debugger at main (PC: %u)\n", vm->pc);
 
@@ -1259,8 +1259,8 @@ Pc cc_find_function_entry(VirtualMachine *vm, const char *name) {
     for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
         if (fn->is_function && fn->name && strlen(fn->name) == strlen(name) &&
             strncmp(fn->name, name, strlen(name)) == 0) {
-            if (fn->code_addr >= 0) {
-                return (Pc)fn->code_addr;
+            if (obj_fn(fn)->code_addr >= 0) {
+                return (Pc)obj_fn(fn)->code_addr;
             }
         }
     }
@@ -1369,7 +1369,7 @@ static bool debugger_type_is_valid_condition(Type *ty) {
 static bool debugger_var_is_paused_frame_local(Obj *current_fn, Obj *var) {
     if (!current_fn)
         return false;
-    for (Obj *o = current_fn->locals; o; o = o->next)
+    for (Obj *o = obj_fn(current_fn)->locals; o; o = o->next)
         if (o == var)
             return true;
     return false;
@@ -1535,7 +1535,7 @@ static void debugger_capture_visit(Node *n, void *vctx) {
 // block must capture what its inner block reads.
 static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent) {
     BlockWalk w = {.map = m};
-    serialize_ast_walk(node_misc(lit)->block_fn->body, debugger_capture_visit,
+    serialize_ast_walk(obj_fn(node_misc(lit)->block_fn)->body, debugger_capture_visit,
                        &w);
     for (int i = 0; i < w.n; i++) {
         cc_block_add_capture(m->vm, lit, w.used[i]);
@@ -1685,7 +1685,7 @@ static Obj *debugger_compile_expr_at_file_scope(VirtualMachine *vm,
         for (Obj *obj = vm->compiler.globals; obj; obj = obj->next)
             debugger_add_condition_scope_var(&condition_scope.vars, obj);
         if (scope_fn) {
-            for (Obj *obj = scope_fn->locals; obj; obj = obj->next)
+            for (Obj *obj = obj_fn(scope_fn)->locals; obj; obj = obj->next)
                 debugger_add_condition_scope_var(&condition_scope.vars, obj);
         }
         scope_vars           = condition_scope.vars;
@@ -1901,7 +1901,7 @@ static int debugger_run_wrapper(VirtualMachine *vm, Obj *fn, long long *ival,
     if (vm->flags & CCCC_CFI)
         *--vm->shadow_sp = 0;
     *--vm->sp      = 0; // sentinel return address
-    vm->pc         = (Pc)fn->code_addr;
+    vm->pc         = (Pc)obj_fn(fn)->code_addr;
     // vm_eval returns the wrapper's value on success, so a negative value is
     // indistinguishable from an error code; a completed run leaves pc invalid.
     vm->dbg.cond_depth++;
@@ -2016,7 +2016,7 @@ static DbgOwed *debugger_collect_owed(VirtualMachine *vm,
             continue;
         long long pc    = i == 0 ? frames[i].pc : (long long)frames[i].pc + 1;
         int       first = len;
-        for (CleanupRange *r = frames[i].fn->cleanup_ranges; r; r = r->next) {
+        for (CleanupRange *r = obj_attr(frames[i].fn)->cleanup_ranges; r; r = r->next) {
             if (pc < r->start || (r->end >= 0 && pc >= r->end))
                 continue;
             if (len == cap) {
@@ -2026,7 +2026,7 @@ static DbgOwed *debugger_collect_owed(VirtualMachine *vm,
             DbgOwed o = {r->var, frames[i].fn, frames[i].bp};
             int     j = len++;
             while (j > first &&
-                   owed[j - 1].var->cleanup_seq < o.var->cleanup_seq) {
+                   obj_attr(owed[j - 1].var)->cleanup_seq < obj_attr(o.var)->cleanup_seq) {
                 owed[j] = owed[j - 1];
                 j--;
             }
@@ -2038,10 +2038,10 @@ static DbgOwed *debugger_collect_owed(VirtualMachine *vm,
 }
 
 static Obj *debugger_handler_definition(VirtualMachine *vm, Obj *handler) {
-    if (handler->body)
+    if (obj_fn(handler)->body)
         return fn_canonical(handler);
     for (Obj *g = vm->compiler.globals; g; g = g->next)
-        if (g->is_function && g->body && !strcmp(g->name, handler->name))
+        if (g->is_function && obj_fn(g)->body && !strcmp(g->name, handler->name))
             return fn_canonical(g);
     return NULL;
 }
@@ -2057,13 +2057,13 @@ static int debugger_run_owed(VirtualMachine *vm, const DbgOwed *o) {
         addr = *(void **)addr;
     long long arg = (long long)addr;
 
-    int       ffi = ffi_index_for_callee(vm, var->cleanup_fn);
+    int       ffi = ffi_index_for_callee(vm, obj_attr(var)->cleanup_fn);
     if (ffi >= 0) {
         long long ignored;
         return cccc_call_guest_callback(vm, CCCC_FFI_TOKEN_BASE - ffi, &arg, 1,
                                         &ignored);
     }
-    Obj *def = debugger_handler_definition(vm, var->cleanup_fn);
+    Obj *def = debugger_handler_definition(vm, obj_attr(var)->cleanup_fn);
     if (!def)
         return -1;
     // The handler gets a raw address into a frame the program still owns, which
@@ -2098,7 +2098,7 @@ static int debugger_finish_frames(VirtualMachine *vm, int last_frame,
             fprintf(stderr,
                     "error: [[cleanup]] handler %s for '%s' in %s failed; "
                     "frame not popped\n",
-                    owed[i].var->cleanup_fn->name, owed[i].var->name,
+                    obj_attr(owed[i].var)->cleanup_fn->name, owed[i].var->name,
                     owed[i].fn->name);
             rc = -1;
             break;
@@ -2197,7 +2197,7 @@ int cc_debug_restart(VirtualMachine *vm, int frame, bool run_cleanups) {
         return -1;
     vm->dbg.pending_op    = CC_FRAME_OP_RESTART;
     vm->dbg.pending_bp    = f.bp;
-    vm->dbg.pending_entry = (Pc)fn_canonical(f.fn)->code_addr;
+    vm->dbg.pending_entry = (Pc)obj_fn(fn_canonical(f.fn))->code_addr;
     return 0;
 }
 
@@ -2265,7 +2265,7 @@ static Obj *debugger_fix_target(VirtualMachine *vm, const char *name) {
 }
 
 const char *cc_function_source(const Obj *fn, size_t *len) {
-    const Token *b = fn->def_begin, *e = fn->def_end;
+    const Token *b = obj_fn(fn)->def_begin, *e = obj_fn(fn)->def_end;
     if (!b || !e || b->origin || e->origin || !b->file || b->file != e->file ||
         !b->file->contents)
         return NULL;
@@ -2288,7 +2288,7 @@ int cc_debug_fix(VirtualMachine *vm, const char *name, const char *src) {
 
     Obj *now = NULL;
     for (Obj *fn = vm->compiler.globals; fn && !now; fn = fn->next)
-        if (fn->is_function && fn->body && fn->name && !strcmp(fn->name, name))
+        if (fn->is_function && obj_fn(fn)->body && fn->name && !strcmp(fn->name, name))
             now = fn;
     if (!now || now == old) {
         fprintf(stderr, "error: the new source does not define %s\n", name);

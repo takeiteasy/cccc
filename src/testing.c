@@ -682,7 +682,7 @@ static bool test_took_runtime_fault(VirtualMachine *vm, char *buf, size_t n) {
 static void run_hook(VirtualMachine *vm, Obj *prog, const char *fn_name) {
     Obj *fn = find_fn(prog, fn_name);
     if (fn) {
-        cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+        cc_run_at(vm, (Pc)obj_fn(fn)->code_addr, 0, NULL);
         char fail_msg[512];
         if (s_run && test_took_runtime_fault(vm, fail_msg, sizeof(fail_msg))) {
             snprintf(fail_slot(), sizeof(s_run->fail_msg), "%s", fail_msg);
@@ -1638,7 +1638,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                 s_run                  = &child;
                 int rc                 = 0;
                 if (setjmp(child.jmp) == 0)
-                    rc = cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+                    rc = cc_run_at(vm, (Pc)obj_fn(fn)->code_addr, 0, NULL);
                 if (child.failed) {
                     if (fail_pipe[1] >= 0)
                         (void)!write(fail_pipe[1], child.fail_msg,
@@ -1829,7 +1829,7 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
             cccc_unwind_point_restore(vm, &unwind);
         if (jval == 0) {
             run_hooks(vm, prog, setups, false, false, cur_suite, disp);
-            cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+            cc_run_at(vm, (Pc)obj_fn(fn)->code_addr, 0, NULL);
             // #1013: check for a runtime safety violation / host signal
             // before anything else -- a return-value capture below reads
             // REG_A0 regardless of whether the body actually completed, and

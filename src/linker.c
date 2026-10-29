@@ -132,7 +132,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
             Obj *existing   = hashmap_get(&symbol_map, obj->name);
 
             bool obj_is_def = obj->is_definition ||
-                              (obj->is_function && obj->body) ||
+                              (obj->is_function && obj_fn(obj)->body) ||
                               (!obj->is_function && obj->init_data);
 
             if (!existing) {
@@ -142,7 +142,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 // Symbol already exists - handle conflicts
                 bool existing_is_def =
                     existing->is_definition ||
-                    (existing->is_function && existing->body) ||
+                    (existing->is_function && obj_fn(existing)->body) ||
                     (!existing->is_function && existing->init_data);
 
                 bool both_def = obj_is_def && existing_is_def;
@@ -164,14 +164,14 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                     // node references
                     existing->is_definition = obj->is_definition;
                     existing->init_data     = obj->init_data;
-                    existing->rel           = obj->rel;
+                    obj_set_rel(vm, existing, obj_init(obj)->rel);
                     existing->ty            = obj->ty;
                 } else if (existing_is_def) {
                     // Existing is definition, copy its properties to this
                     // declaration
                     obj->is_definition = existing->is_definition;
                     obj->init_data     = existing->init_data;
-                    obj->rel           = existing->rel;
+                    obj_set_rel(vm, obj, obj_init(existing)->rel);
                     obj->ty            = existing->ty;
                 }
                 // Otherwise both are declarations, keep first one
@@ -199,7 +199,7 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                 // one
                 obj->is_definition = canonical->is_definition;
                 obj->init_data     = canonical->init_data;
-                obj->rel           = canonical->rel;
+                obj_set_rel(vm, obj, obj_init(canonical)->rel);
                 obj->ty            = canonical->ty;
 
                 // #957: this non-canonical Obj is dropped from the merged

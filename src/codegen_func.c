@@ -48,7 +48,7 @@ void cc_reset_intrinsic_stubs(void) {
 // Code address of the stub for a body-less intrinsic, emitting it at the top
 // of the text on first use; 0 when `target` is not an intrinsic.
 Pc cc_intrinsic_stub_addr(VirtualMachine *vm, Obj *target) {
-    if (!target || !target->is_function || target->body || !target->name)
+    if (!target || !target->is_function || obj_fn(target)->body || !target->name)
         return 0;
     for (size_t i = 0; i < sizeof intrinsic_stubs / sizeof *intrinsic_stubs;
          i++) {
@@ -83,17 +83,17 @@ void cc_reject_setjmp_address(VirtualMachine *vm, Node *node) {
 // Frees the per-function local_set tables belongs_to_outer_function builds
 // lazily while code is generated. A table lives on the enclosing function,
 // which a block adopted by a generated function may not share a list with.
-void cc_free_local_sets(Obj *prog) {
+void cc_free_local_sets(VirtualMachine *vm, Obj *prog) {
     for (Obj *fn = prog; fn; fn = fn->next)
-        for (Obj *o = fn; o; o = o->parent_fn)
+        for (Obj *o = fn; o; o = obj_fn(o)->parent_fn)
             if (o->local_set_built) {
-                hashmap_deinit_borrowed(&o->local_set);
+                hashmap_deinit_borrowed(&obj_fn_mut(vm, o)->local_set);
                 o->local_set_built = false;
             }
 }
 
 void gen_function(VirtualMachine *vm, Obj *fn) {
-    if (!fn->is_function || !fn->body)
+    if (!fn->is_function || !obj_fn(fn)->body)
         return;
 
     // Set current function context for nested function checks (e.g. in
@@ -102,9 +102,11 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Reset cleanup scope stack for this function
     g_cleanup_scope = NULL;
-    fn->cleanup_ranges = NULL;
-    for (Obj *v = fn->locals; v; v = v->next)
-        v->cleanup_cur = NULL;
+    if (obj_attr(fn)->cleanup_ranges)
+        obj_attr_mut(vm, fn)->cleanup_ranges = NULL;
+    for (Obj *v = obj_fn(fn)->locals; v; v = v->next)
+        if (obj_attr(v)->cleanup_cur)
+            obj_attr_mut(vm, v)->cleanup_cur = NULL;
 
     vm->compiler.ent3_extra_stack = 0;
 
@@ -124,23 +126,23 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Helper vars needed for ENT3 emission
     int param_count = 0;
-    for (Obj *param = fn->params; param; param = param->next)
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next)
         param_count++;
     bool is_variadic       = fn->ty && fn->ty->is_variadic;
     int  spill_param_count = is_variadic && param_count < 8 ? 8 : param_count;
 
     // Record source location for function entry
-    emit_source_location(vm, fn->body);
+    emit_source_location(vm, obj_fn(fn)->body);
 
     // Record function address (offset from text_seg start)
-    fn->code_addr = vm->text_ptr + 1;
+    obj_fn_mut(vm, fn)->code_addr = vm->text_ptr + 1;
     PeepMark peep_mark = cg_peep_mark(vm);
 
     // Compute float parameter masks for ENT3
     unsigned int float_param_mask = 0;
     unsigned int f32_param_mask   = 0;
     int          pindex           = 0;
-    for (Obj *param = fn->params; param && pindex < 8;
+    for (Obj *param = obj_fn(fn)->params; param && pindex < 8;
          param      = param->next, pindex++) {
         if (is_flonum(param->ty)) {
             float_param_mask |= (1u << pindex);
@@ -154,20 +156,20 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     vm->current_function_scope_id = fn_scope_id;
 
     // Register all params and locals in the variable metadata map.
-    for (Obj *param = fn->params; param; param = param->next) {
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
         add_stack_var_meta(vm, param->name, param->offset, param->ty,
                            fn_scope_id);
         add_debug_symbol(vm, param->name, param->offset, param->ty, 1, fn,
                          local_align_log(param));
     }
-    for (Obj *var = fn->locals; var; var = var->next) {
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next) {
         bool is_param = false;
-        for (Obj *p = fn->params; p; p = p->next)
+        for (Obj *p = obj_fn(fn)->params; p; p = p->next)
             if (p == var) {
                 is_param = true;
                 break;
             }
-        bool is_builtin = (var == fn->va_area) || (var == fn->alloca_bottom);
+        bool is_builtin = (var == obj_fn(fn)->va_area) || (var == obj_fn(fn)->alloca_bottom);
         if (!is_param && !is_builtin) {
             add_stack_var_meta(vm, var->name, var->offset, var->ty,
                                fn_scope_id);
@@ -193,14 +195,14 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Mark parameters initialized (they arrive via registers).
     if (vm->flags & CCCC_UNINIT_DETECTION) {
-        for (Obj *param = fn->params; param; param = param->next)
+        for (Obj *param = obj_fn(fn)->params; param; param = param->next)
             emit_marki(vm, param->offset);
     }
 
     // Allocate heap storage for __block variables
     // Each __block variable gets heap allocation of its type's size
     // The heap pointer is stored in the variable's stack slot
-    for (Obj *var = fn->locals; var; var = var->next) {
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next) {
         if (var->is_block_var) {
             // Allocate heap memory for this __block variable via ALCB, not
             // MALC (#979) -- the box is compiler-internal storage the guest
@@ -228,7 +230,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // copy the spilled value there so &param is correctly aligned.
     {
         int spill_off = -1 - ((vm->flags & CCCC_STACK_CANARIES) ? 1 : 0);
-        for (Obj *param = fn->params; param; param = param->next, spill_off--) {
+        for (Obj *param = obj_fn(fn)->params; param; param = param->next, spill_off--) {
             if (!local_align_log(param))
                 continue;
             int r_val = alloc_temp_reg();
@@ -258,7 +260,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     // the value" and is unaffected -- only the pointee moves into this
     // frame. Safe to clobber A0-A2 for the MCPY here: ENT3 has already
     // spilled every argument register into its own slot by this point.
-    for (Obj *param = fn->params; param; param = param->next) {
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
         // #1137: a wide _BitInt/decimal param is by-pointer too, but into the
         // caller's (unaligned) scratch temp; only worth the copy when the
         // param's address is observable and its type wants > 8 alignment.
@@ -313,7 +315,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     emit_save_promoted_registers(vm);
 
     // Generate function body
-    gen_stmt(vm, fn->body);
+    gen_stmt(vm, obj_fn(fn)->body);
 
     // Patch ENT3 stack size if scratch temporaries were allocated
     if (vm->compiler.ent3_extra_stack > 0) {
@@ -365,7 +367,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
     emit(vm, LEV3);
     cg_peep_function(vm, fn, peep_mark);
     end_local_promotion(vm);
-    fn->code_end_addr = vm->text_ptr + 1;
+    obj_fn_mut(vm, fn)->code_end_addr = vm->text_ptr + 1;
 }
 
 // ========== Top-Level Code Generation ==========
@@ -537,7 +539,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
     // First pass: Generate code for all live functions
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body) {
+        if (fn->is_function && obj_fn(fn)->body) {
             if (obj_is_inline_only(fn) && !fn->is_live)
                 continue;
             gen_function(vm, fn);
@@ -545,14 +547,14 @@ void gen(VirtualMachine *vm, Obj *prog) {
     }
     cc_asm_passthru_flush(vm);
 
-    cc_free_local_sets(prog);
+    cc_free_local_sets(vm, prog);
 
     HashMap fn_defs     = {};
     HashMap static_defs = {};
     for (Obj *fn = prog; fn; fn = fn->next) {
-        if (fn->is_function && fn->body && fn->is_static)
+        if (fn->is_function && obj_fn(fn)->body && fn->is_static)
             add_static_function_def(&static_defs, fn);
-        else if (fn->is_function && fn->body &&
+        else if (fn->is_function && obj_fn(fn)->body &&
                  !(fn->is_gnu_inline && !fn->is_live))
             hashmap_put(&fn_defs, fn->name, fn);
     }
@@ -582,7 +584,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
             error("undefined function: %s", fn_name);
         }
 
-        vm->text_seg[loc] = (Pc)fn_def->code_addr;
+        vm->text_seg[loc] = (Pc)obj_fn(fn_def)->code_addr;
     }
 
     // Third pass: Patch function address references (for function pointers)
@@ -595,7 +597,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
 
         if (fn_def) {
             cc_write_i64_at(vm, loc,
-                            cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+                            cc_pc_to_byte_offset((Pc)obj_fn(fn_def)->code_addr));
         } else {
             int ffi_idx = ffi_index_for_obj(vm, target);
             Pc  stub    = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
@@ -667,24 +669,24 @@ void gen(VirtualMachine *vm, Obj *prog) {
         for (Obj *fn = prog; fn; fn = fn->next) {
             if (!fn->is_function)
                 continue;
-            if (fn->is_kernel && fn->body)
+            if (fn->is_kernel && obj_fn(fn)->body)
                 cccc_kernel_register_meta(
-                    vm, cc_pc_to_byte_offset((Pc)fn->code_addr),
-                    fn->kernel_uses_barrier, fn->kernel_local_bytes);
+                    vm, cc_pc_to_byte_offset((Pc)obj_fn(fn)->code_addr),
+                    fn->kernel_uses_barrier, obj_attr(fn)->kernel_local_bytes);
             if (fn->is_constructor) {
                 PATCH_GROW(vm, ctor_list, ctor_count, ctor_capacity);
                 CCCCInitEntry *e =
                     &vm->compiler.ctor_list[vm->compiler.ctor_count++];
-                e->code_addr = fn->code_addr;
-                e->priority  = fn->init_priority;
+                e->code_addr = obj_fn(fn)->code_addr;
+                e->priority  = obj_attr(fn)->init_priority;
                 e->seq       = seq;
             }
             if (fn->is_destructor) {
                 PATCH_GROW(vm, dtor_list, dtor_count, dtor_capacity);
                 CCCCInitEntry *e =
                     &vm->compiler.dtor_list[vm->compiler.dtor_count++];
-                e->code_addr = fn->code_addr;
-                e->priority  = fn->init_priority;
+                e->code_addr = obj_fn(fn)->code_addr;
+                e->priority  = obj_attr(fn)->init_priority;
                 e->seq       = seq;
             }
             seq++;
@@ -699,7 +701,7 @@ void gen(VirtualMachine *vm, Obj *prog) {
     for (Obj *fn = prog; fn; fn = fn->next) {
         if (fn->is_function &&
             strncmp(fn->name, entry, strlen(entry) + 1) == 0) {
-            vm->text_seg[0] = fn->code_addr;
+            vm->text_seg[0] = obj_fn(fn)->code_addr;
             return;
         }
     }
@@ -713,9 +715,9 @@ void gen(VirtualMachine *vm, Obj *prog) {
 // `old_head`, that includes an earlier prototype's Obj, which a later
 // definition reuses in place.
 static bool repl_fn_needs_compile(Obj *v, bool is_new) {
-    if (!v->is_function || !v->body || v->reuse_of)
+    if (!v->is_function || !obj_fn(v)->body || obj_fn(v)->reuse_of)
         return false;
-    return is_new || !v->code_addr;
+    return is_new || !obj_fn(v)->code_addr;
 }
 
 // A block-scope static of a reloaded function body keeps the storage of the
@@ -724,13 +726,13 @@ static bool repl_fn_needs_compile(Obj *v, bool is_new) {
 // in declaration order.
 static Obj *find_reloaded_static(VirtualMachine *vm, Obj *var, Obj **arr,
                                  int i) {
-    Obj *owner = var->static_owner;
-    if (!owner || !(owner->reload_of || owner->reuse_of))
+    Obj *owner = obj_fn(var)->static_owner;
+    if (!owner || !(obj_fn(owner)->reload_of || obj_fn(owner)->reuse_of))
         return NULL;
-    Obj *prev  = owner->reload_of ? owner->reload_of : owner->reuse_of;
+    Obj *prev  = obj_fn(owner)->reload_of ? obj_fn(owner)->reload_of : obj_fn(owner)->reuse_of;
     Obj *found = NULL;
     for (Obj *c = vm->compiler.globals; c; c = c->next) {
-        if (c->is_function || c->static_owner != prev || c == var ||
+        if (c->is_function || obj_fn(c)->static_owner != prev || c == var ||
             !c->display_name || !var->display_name ||
             strcmp(c->display_name, var->display_name) ||
             c->ty->size != var->ty->size || !is_compatible(c->ty, var->ty))
@@ -738,7 +740,7 @@ static Obj *find_reloaded_static(VirtualMachine *vm, Obj *var, Obj **arr,
         bool claimed = false;
         for (int j = 0; j < i && !claimed; j++)
             claimed = arr[j]->offset == c->offset && !arr[j]->is_tls &&
-                      arr[j]->static_owner == var->static_owner;
+                      obj_fn(arr[j])->static_owner == obj_fn(var)->static_owner;
         if (!claimed)
             found = c; // keep walking: the list is newest-first
     }
@@ -751,10 +753,10 @@ static Obj *find_reloaded_static(VirtualMachine *vm, Obj *var, Obj **arr,
 // ever shows up in profiles.
 static void redirect_function_entry(VirtualMachine *vm, Obj *fn) {
     Obj *root = fn_canonical(fn);
-    if (!fn->code_addr || !root->code_addr)
+    if (!obj_fn(fn)->code_addr || !obj_fn(root)->code_addr)
         error("cannot reload %s: no compiled body to redirect", fn->name);
-    vm->text_seg[root->code_addr + 1] = (Pc)fn->code_addr; // target before op
-    vm->text_seg[root->code_addr]     = JMP;
+    vm->text_seg[obj_fn(root)->code_addr + 1] = (Pc)obj_fn(fn)->code_addr; // target before op
+    vm->text_seg[obj_fn(root)->code_addr]     = JMP;
 }
 
 // ========== Incremental Code Generation (REPL support, ticket #661) ==========
@@ -853,8 +855,8 @@ static void forget_text_range(VirtualMachine *vm, Pc start, Pc end) {
     for (int i = 0; i < vm->dbg.num_debug_symbols; i++) {
         DebugSymbol *sym = &vm->dbg.debug_symbols[i];
         bool         own = sym->is_local && sym->owner_fn &&
-                           sym->owner_fn->code_addr >= start &&
-                           sym->owner_fn->code_addr < end;
+                           obj_fn(sym->owner_fn)->code_addr >= start &&
+                           obj_fn(sym->owner_fn)->code_addr < end;
         if (!own)
             vm->dbg.debug_symbols[kept++] = *sym;
     }
@@ -1072,7 +1074,7 @@ static long long new_vars_data_end(VirtualMachine *vm, Obj **arr, int n,
                                    long long off) {
     for (int i = 0; i < n; i++) {
         Obj *var = arr[i];
-        if (var->reuse_of || var->is_tls ||
+        if (obj_fn(var)->reuse_of || var->is_tls ||
             find_reloaded_static(vm, var, arr, i))
             continue;
         int align  = cc_effective_align(var->align, var->ty->align);
@@ -1174,7 +1176,7 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
         for (int i = 0; i < num_new_vars; i++) {
             Obj *var = arr[i];
-            if (var->reuse_of) {
+            if (obj_fn(var)->reuse_of) {
                 var->offset = reuse_root(var)->offset;
                 continue;
             }
@@ -1267,9 +1269,9 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
         HashMap fn_defs     = {};
         HashMap static_defs = {};
         for (Obj *fn = vm->compiler.globals; fn; fn = fn->next) {
-            if (fn->is_function && fn->body && fn->is_static)
+            if (fn->is_function && obj_fn(fn)->body && fn->is_static)
                 add_static_function_def(&static_defs, fn);
-            else if (fn->is_function && fn->body)
+            else if (fn->is_function && obj_fn(fn)->body)
                 hashmap_put(&fn_defs, fn->name, fn);
         }
 
@@ -1286,7 +1288,7 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                     continue; // FFI - not handled via CALL
                 error("undefined function: %s", fn_name);
             }
-            vm->text_seg[loc] = (Pc)fn_def->code_addr;
+            vm->text_seg[loc] = (Pc)obj_fn(fn_def)->code_addr;
         }
 
         for (int i = addr_patch_start; i < vm->compiler.num_func_addr_patches;
@@ -1298,7 +1300,7 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
                 &fn_defs, &static_defs, target);
             if (fn_def) {
                 cc_write_i64_at(vm, loc,
-                                cc_pc_to_byte_offset((Pc)fn_def->code_addr));
+                                cc_pc_to_byte_offset((Pc)obj_fn(fn_def)->code_addr));
             } else {
                 int ffi_idx = ffi_index_for_obj(vm, target);
                 Pc  stub = ffi_idx < 0 ? cc_intrinsic_stub_addr(vm, target) : 0;
@@ -1317,7 +1319,7 @@ void cc_repl_compile_new_marked(VirtualMachine *vm, Obj *old_head,
 
         // Only now is each new body fully patched and safe to jump into.
         for (int i = 0; i < num_new_fns; i++)
-            if (farr[i]->reload_of)
+            if (obj_fn(farr[i])->reload_of)
                 redirect_function_entry(vm, farr[i]);
     }
 

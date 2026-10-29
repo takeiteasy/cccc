@@ -536,7 +536,8 @@ static void test_cleanup(void) {
 
 static Obj *find_fn(const char *name) {
     for (Obj *o = vm.compiler.globals; o; o = o->next)
-        if (o->is_function && o->body && o->name && !strcmp(o->name, name))
+        if (o->is_function && obj_fn(o)->body && o->name &&
+            !strcmp(o->name, name))
             return o;
     return NULL;
 }
@@ -928,12 +929,13 @@ static void test_holes(void) {
     eval("ho_a(1)");
     Obj *aw = vm.dbg.breakpoints[a].cond_fn;
     CHECK(aw != NULL, "condition A compiled");
-    Pc a_code = (Pc)aw->code_addr;
-    Pc a_end  = (Pc)aw->code_end_addr;
+    Pc a_code = (Pc)obj_fn(aw)->code_addr;
+    Pc a_end  = (Pc)obj_fn(aw)->code_end_addr;
 
     decl("int ho_live(int x){ return x + 1; }");
     Obj *live = find_fn("ho_live");
-    CHECK(live && (Pc)live->code_addr == a_end, "live code sits right above A");
+    CHECK(live && (Pc)obj_fn(live)->code_addr == a_end,
+          "live code sits right above A");
     Pc    top     = vm.text_ptr;
     File *lf      = last_compiled_file();
     Pc    live_pc = cc_find_pc_for_source(&vm, lf, 1);
@@ -952,13 +954,14 @@ static void test_holes(void) {
     int b = cond_bp(b_in, "x == 1");
     eval("ho_b(1)");
     Obj *bw = vm.dbg.breakpoints[b].cond_fn;
-    CHECK(bw && (Pc)bw->code_addr < top, "B reuses freed text: %lld vs %u",
-          bw ? bw->code_addr : -1, top);
+    CHECK(bw && (Pc)obj_fn(bw)->code_addr < top,
+          "B reuses freed text: %lld vs %u", bw ? obj_fn(bw)->code_addr : -1,
+          top);
     CHECK(vm.text_ptr == top, "text top unchanged by a hole compile");
-    Pc b_end = bw ? (Pc)bw->code_end_addr : 0;
+    Pc b_end = bw ? (Pc)obj_fn(bw)->code_end_addr : 0;
     for (int i = 0; i < vm.compiler.num_text_holes; i++)
         if (vm.compiler.text_holes[i].start == b_end)
-            CHECK(text_walk_aligned((Pc)bw->code_addr,
+            CHECK(text_walk_aligned((Pc)obj_fn(bw)->code_addr,
                                     vm.compiler.text_holes[i].end),
                   "a partly filled hole can be walked");
     CHECK(eval("ho_b(1)") == 1, "program runs with B in the hole");
@@ -972,7 +975,8 @@ static void test_holes(void) {
     int c = cond_bp(c_in, "x > 99 && x < 200 && x != 150 && x != 151");
     eval("ho_c(1)");
     Obj *cw = vm.dbg.breakpoints[c].cond_fn;
-    CHECK(cw && (Pc)cw->code_addr > top, "C does not fit and goes on top");
+    CHECK(cw && (Pc)obj_fn(cw)->code_addr > top,
+          "C does not fit and goes on top");
 
     // Holes next to each other merge, and the top takes them back.
     cc_remove_breakpoint(&vm, b);

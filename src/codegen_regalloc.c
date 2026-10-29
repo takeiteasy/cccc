@@ -52,7 +52,7 @@ int find_ffi_function(VirtualMachine *vm, const char *name) {
 }
 
 const char *obj_external_name(Obj *obj) {
-    return obj && obj->asm_label ? obj->asm_label : obj ? obj->name : NULL;
+    return obj && obj_attr(obj)->asm_label ? obj_attr(obj)->asm_label : obj ? obj->name : NULL;
 }
 
 static bool is_host_family_name(const char *name) {
@@ -103,7 +103,7 @@ int ffi_index_for_obj(VirtualMachine *vm, Obj *obj) {
     if (!name)
         return -1;
     char base[64];
-    if (obj->asm_label && find_ffi_function(vm, name) < 0)
+    if (obj_attr(obj)->asm_label && find_ffi_function(vm, name) < 0)
         name = asm_label_base_name(name, base, sizeof base);
     if (vm->compiler.use_system_headers && obj->tok && obj->tok->file &&
         is_host_family_name(name) &&
@@ -129,7 +129,7 @@ int cc_cdata_index_for_obj(VirtualMachine *vm, Obj *var) {
     size_t name_len = strlen(name);
 #ifdef __APPLE__
     // SDK headers spell asm labels with the Mach-O underscore.
-    bool stripped = var->asm_label && name[0] == '_';
+    bool stripped = obj_attr(var)->asm_label && name[0] == '_';
 #endif
     for (int pass = 0; pass < 2; pass++) {
         for (int i = 0; i < vm->compiler.cdata_count; i++) {
@@ -168,7 +168,7 @@ int cc_cdata_index_for_obj(VirtualMachine *vm, Obj *var) {
 // silently calling the wrong code (#880). A bare declaration (the ordinary
 // libc case -- no body) must still resolve to FFI; only a body wins.
 int ffi_index_for_callee(VirtualMachine *vm, Obj *callee) {
-    if (callee && callee->body)
+    if (callee && obj_fn(callee)->body)
         return -1;
     return ffi_index_for_obj(vm, callee);
 }
@@ -226,10 +226,10 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
     HashMap index   = {0};
     bool    indexed = false;
     for (Obj *var = prog; var != stop; var = var->next) {
-        if (var->is_function || var->reuse_of)
+        if (var->is_function || obj_fn(var)->reuse_of)
             continue;
 
-        for (Relocation *rel = var->rel; rel; rel = rel->next) {
+        for (Relocation *rel = obj_init(var)->rel; rel; rel = rel->next) {
             if (!rel->label || !*rel->label)
                 error("invalid global relocation");
 
@@ -242,7 +242,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 indexed = true;
             }
             Obj *target = hashmap_get(&index, *rel->label);
-            if (target && target->reuse_of)
+            if (target && obj_fn(target)->reuse_of)
                 target = reuse_root(target);
             if (!target) {
                 // Not a global object — try the persistent label map.  This
@@ -263,7 +263,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 value         = target_offset + rel->addend;
             } else if (target->is_function) {
                 Pc stub = 0;
-                if (!target->body) {
+                if (!obj_fn(target)->body) {
                     // Undefined function: if it is an FFI/extern function,
                     // store the FFI dispatch token (CCCC_FFI_TOKEN_BASE - idx)
                     // directly, mirroring the runtime function-address path
@@ -301,7 +301,7 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 }
                 segment       = 1;
                 target_offset = cc_pc_to_byte_offset(
-                    stub ? stub : (Pc)fn_canonical(target)->code_addr);
+                    stub ? stub : (Pc)obj_fn(fn_canonical(target))->code_addr);
                 value = target_offset + rel->addend;
             } else {
                 // #957: a static initializer taking &g needs the same
@@ -354,14 +354,14 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
 }
 
 Obj *fn_canonical(Obj *fn) {
-    while (fn->reload_of)
-        fn = fn->reload_of;
+    while (obj_fn(fn)->reload_of)
+        fn = obj_fn(fn)->reload_of;
     return fn;
 }
 
 Obj *reuse_root(Obj *obj) {
-    while (obj->reuse_of)
-        obj = obj->reuse_of;
+    while (obj_fn(obj)->reuse_of)
+        obj = obj_fn(obj)->reuse_of;
     return obj;
 }
 
@@ -378,10 +378,10 @@ void add_static_function_def(HashMap *static_defs, Obj *fn) {
 // falls back to the unique static definition of that name.
 Obj *find_function_definition_for_patch(HashMap *fn_defs, HashMap *static_defs,
                                         Obj *target) {
-    if (target->reuse_of)
+    if (obj_fn(target)->reuse_of)
         return fn_canonical(reuse_root(target));
     Obj *def;
-    if (target->is_static && target->body)
+    if (target->is_static && obj_fn(target)->body)
         def = target;
     else if (target->is_static) {
         def = hashmap_get(static_defs, target->name);
@@ -565,16 +565,16 @@ static bool is_float_promotion_type(Type *ty) {
 static bool promotion_candidate_ok(VirtualMachine *vm, Obj *fn, Obj *var) {
     (void)vm;
     if (!var || !var->is_local || var->is_block_var || var->is_captured ||
-        var->is_static || var == fn->va_area || var == fn->alloca_bottom)
+        var->is_static || var == obj_fn(fn)->va_area || var == obj_fn(fn)->alloca_bottom)
         return false;
     if (!is_scalar_promotion_type(var->ty) && !is_float_promotion_type(var->ty))
         return false;
-    if (belongs_to_outer_function(fn, var))
+    if (belongs_to_outer_function(vm, fn, var))
         return false;
     if (var->name && strncmp(var->name, "__static_link", 14) == 0)
         return false;
     // The cleanup call takes the variable's address.
-    if (var->cleanup_fn)
+    if (obj_attr(var)->cleanup_fn)
         return false;
     // Unnamed locals are the compiler's own temporaries.
     if (!var->name || !var->name[0])
@@ -722,13 +722,13 @@ void end_local_promotion(VirtualMachine *vm) {
 // below `base_stack_size`. Returns the number of slots reserved.
 int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     promotion_reset(vm);
-    if (!cg_opt_enabled(vm) || !fn->body)
+    if (!cg_opt_enabled(vm) || !obj_fn(fn)->body)
         return 0;
-    if (body_calls_setjmp(fn->body))
+    if (body_calls_setjmp(obj_fn(fn)->body))
         return 0;
 
     int n = 0;
-    for (Obj *var = fn->locals; var; var = var->next)
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next)
         if (promotion_candidate_ok(vm, fn, var))
             n++;
     if (n == 0)
@@ -738,11 +738,11 @@ int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     if (!s.cands)
         error("out of memory");
     int idx = 0;
-    for (Obj *var = fn->locals; var; var = var->next)
+    for (Obj *var = obj_fn(fn)->locals; var; var = var->next)
         if (promotion_candidate_ok(vm, fn, var))
             s.cands[idx++].var = var;
 
-    promo_scan_node(&s, fn->body, 0);
+    promo_scan_node(&s, obj_fn(fn)->body, 0);
 
     qsort(s.cands, (size_t)n, sizeof(PromoCand), promo_cmp);
 

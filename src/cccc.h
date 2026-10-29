@@ -2435,69 +2435,24 @@ NodeAsm *node_asm_mut(VirtualMachine *vm, Node *n);
 NodeLit *node_lit_mut(VirtualMachine *vm, Node *n);
 NodeMisc *node_misc_mut(VirtualMachine *vm, Node *n);
 
-/*!
- @brief Represents a C object: either a variable (global/local) or a
-           function. The parser and code generator use Obj for symbol
-           and storage tracking.
-*/
-struct Obj {
-    struct Obj *next;
-    char       *name;    /**< Identifier name of the object. */
-    char  *display_name; // Source identifier when storage uses a synthetic name
-    char  *asm_label;    // External symbol name from GNU asm("symbol") label
-    Type  *ty;           /**< Type of the object. */
-    Token *tok;          // representative token
-    bool is_local; /**< True for local (stack) variables; false for globals. */
-    int  align;    // alignment
-    bool is_used;
-    bool is_maybe_unused;
-    // #18/#19 buffalo: a caller-side struct-return slot allocated by
-    // funcall() (parse_postfix.c) for every struct/union-returning call.
-    // VM codegen (RETBUF/VSTR) reads it purely as a frame offset -- no
-    // serialize_*.c file ever references the Obj itself -- so the
-    // serializer must never declare it; see serialize_decl.c's hoist loop.
-    bool is_ret_buffer;
-    bool is_deprecated;
-    bool is_noreturn;
-    bool is_nodiscard;
-    bool is_pure;
-    bool is_func_const;
-    bool is_kernel;
-    bool is_trusted;    // [[cccc::trusted]] on any declaration
-    bool is_gnu_inline; // GNU extern-inline definition: emitted only if called
-    bool is_kernel_thunk; // outlined cccc_launch body; a call to it serializes
-                          // as __cccc_kernel_launch (see parse_postfix.c)
-    struct Obj *kernel_vm_launch; // --test-run: the VM cfunc a call to this
-                                  // thunk is routed to (codegen_expr.c)
-    bool is_kernel_local_obj; // [[cccc::local]] object in a kernel entry's body,
-                              // stored in work-group memory at kernel_local_off
-    int  kernel_local_off;
-    int  kernel_local_id;     // per-TU number of the [[cccc::local]] object
-    bool kernel_uses_barrier; // kernel entry (or a callee) calls cccc_barrier
-    int  kernel_local_bytes;  // size of the entry's [[cccc::local]] objects
-    bool may_return_null; // #688: function has a provable null-returning path
-                          // (whole-TU summary)
-    bool always_returns_null; // #692: every reachable return in the function is
-                              // provably null
-    bool is_local_symbol;
+// Cold Obj fields live in lazily allocated groups reached through the
+// obj_*() accessors, which return an all-zero group when none was allocated.
+// Reads use obj_X(o); writes use obj_X_mut(vm, o). obj_assign() and
+// obj_clone() duplicate every allocated group. Write a group only when there
+// is a value to store: a write allocates it.
+
+// Declaration attribute payloads and cleanup state.
+typedef struct ObjAttr {
+    char *asm_label; // External symbol name from GNU asm("symbol") label
     char *deprecated_msg;
     char *nodiscard_msg;
     char *attr_error_msg;   // __attribute__((error("msg")))
     char *attr_warning_msg; // __attribute__((warning("msg")))
-
-    // Local variable
-    int offset;    /**< For local variables: stack offset. For globals/functions
-                      some fields (like code_addr) are used instead. */
-    bool is_param; // true if this is a function parameter
-    bool is_proto_param; // prototype-scope stand-in for a parameter named in a
-                         // later parameter's array length
+    const char *builtin_spelling; // printed verbatim for a private builtin stub
     struct Type
         *def_ty; // the definition's own declarator type (parameter spelling)
-    bool vla_extent_impure; // param whose pointee extent has side effects:
-                            // -c=native takes it as `void *` and declares it
-                            // after the entry-time size statements
-    bool is_captured; // true if accessed by a nested function (for optimization
-                      // hints)
+    int init_priority; // constructor/destructor: CCCC_NO_INIT_PRIORITY unless
+                       // an explicit priority was given
     struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit
                                   // (__attribute__((cleanup)))
     int cleanup_seq;              // declaration order among cleanup vars
@@ -2505,246 +2460,42 @@ struct Obj {
     CleanupRange *cleanup_cur;    // cleanup local: its open range in codegen
     int cleanup_fp_retval_offset; // stack offset for float retval save slot
                                   // (set by assign_stack_offsets)
+    // OpenCL-style kernels
+    struct Obj *kernel_vm_launch; // --test-run: the VM cfunc a call to this
+                                  // thunk is routed to (codegen_expr.c)
+    int kernel_local_off;  // [[cccc::local]] object's offset in work-group memory
+    int kernel_local_id;   // per-TU number of the [[cccc::local]] object
+    int kernel_local_bytes; // size of the entry's [[cccc::local]] objects
+} ObjAttr;
 
-    // Escape analysis for LEA3 epoch-recording pruning (#676). Set by a
-    // post-parse scan (mark_addr_escapes in parse.c) whenever this local's
-    // address is provably observed escaping its creating frame -- passed as
-    // a call argument, returned, or stored into a pointer/aggregate lvalue
-    // (walking through interior addressing, e.g. &arr[i] marks arr, and
-    // through cast/comma/ternary/chained-assign wrappers). Defaults to false
-    // (safe: LEA3 records into vm->stack_ptr_epochs unless this is proven
-    // true) -- any address-of this scan fails to classify simply stays
-    // recorded, so under-approximation here can only cost a wasted hashmap
-    // entry, never reintroduce the #673 false negative. See docs/safety.md.
-    bool addr_escapes;
-
-    // Uninitialized-variable-read false-positive fix (#1008). Set by the
-    // same post-parse scan (mark_addr_escapes in parse_analysis.c) for
-    // *every* syntactic `&expr` rooted at this local, regardless of whether
-    // the resulting address ever escapes the frame -- unlike addr_escapes
-    // above, which deliberately under-marks (safe for its own LEA3-pruning
-    // purpose, but not safe here: a write through a non-escaping address,
-    // e.g. `int *p = &x; *p = 1;`, still bypasses the syntactic-assignment
-    // MARKI tracking CHKI relies on). Consumed only by the read-side CHKI
-    // guard in codegen_expr.c to suppress precise initialization tracking
-    // for a local once its address is taken -- the same "address-based, so
-    // don't try to track precisely" treatment already given to
-    // struct/union/array/wide-_BitInt/_Decimal locals there (#402/#457).
-    // Defaults to false; under-marking here just leaves the false positive
-    // in place, over-marking costs an accepted false negative. See
-    // docs/safety.md.
-    bool addr_taken;
-
-    // __builtin_object_size: constant malloc-family allocation tracking (#642).
-    // Only honored when the pointer is assigned exactly once (its declaration
-    // initializer) and never has its address taken; see
-    // resolve_objsize_queries.
-    int   objsize_alloc;       // bytes from a const malloc-family initializer;
-                               // meaningless when objsize_derived_from is set
-    bool  objsize_has_alloc;   // true if this var is alloc-tracked, either
-                               // directly (objsize_alloc) or derived
-                               // (objsize_derived_from) (#642, #700)
-    bool  objsize_unsafe;      // true if reassigned or address-taken in scope
-    Node *objsize_init_assign; // the initializer ND_ASSIGN node (exempt from
-                               // poisoning)
-    struct Obj *objsize_decl_fn; // the function this var was declared in; a
-                                 // query is only ever registered when it's
-                                 // asked from this same function — a query
-                                 // inside a nested function/block on an
-                                 // enclosing-scope pointer resolves (and gets
-                                 // frozen) before the enclosing function's own
-                                 // poison scan can see a later reassignment,
-                                 // so such queries must stay conservative
-    // #700: `q = p + const` initializer tracking, where p is itself
-    // alloc-tracked (directly or transitively). objsize_derived_from chains
-    // resolve at query time (see objsize_effective_remaining), so a var may
-    // be derived from another derived var. NULL means this var's size comes
-    // straight from objsize_alloc (the #642/#649 direct case).
-    struct Obj *objsize_derived_from;
-    int         objsize_derived_offset; // byte offset from objsize_derived_from
-
-    // #973 follow-up: a pointer-to-VLA local (e.g. `int (*p)[n] = &v;`) has a
-    // declarator that reads `n`, a runtime variable -- its declaration can't
-    // be hoisted to the top of the function like an ordinary local's (n
-    // isn't in scope there yet), the same reason a VLA's own declaration
-    // isn't hoisted. Unlike a VLA (which always gets its own synthesized
-    // `= alloca(...)` node, so its in-place declaration site is unconditional),
-    // a pointer-to-VLA local only needs deferred declaration when it actually
-    // has an initializer to anchor the in-place declaration to; this field is
-    // set (in declaration(), parse.c) to that initializer's ND_ASSIGN node
-    // when one exists, and left NULL otherwise. NULL means: not deferred,
-    // hoisted normally (matches today's behavior, including the still-open
-    // gap for a no-initializer pointer-to-VLA declaration -- see the comment
-    // at its hoist-skip check (src/serialize_type.c)).
-    Node *deferred_vla_ptr_init;
-
-    // Global variable or function
-    bool is_function;        /**< True when this Obj represents a function. */
-    bool is_definition;
-    bool is_static;
-    bool is_builtin_alloca;  // the builtin alloca() used to lower VLAs (#588)
-    const char *builtin_spelling; // printed verbatim for a private builtin stub
-    bool is_constexpr;
-    bool is_implicit;        // synthesized by an implicit function declaration
-    bool is_hidden_builtin; // synthesized prototype not yet on the globals list
-    bool is_macro_generated; // true if created by a #pragma macro via
-                             // $function/$global_var
-    bool is_splice_placeholder; // true for $@k vars synthesised by quote_core
-    // #1250: true for any Obj created by new_gvar() while
-    // vm->compiler.in_macro_mode is set -- i.e. this object's storage lives
-    // in the *comptime program's* data segment (init_macro_globals,
-    // src/macros.c), not the runtime translation unit's. A comptime body
-    // that reads its own file-scope global during the comptime parse (e.g.
-    // `int probe = gx;`) causes comptime_index_splice's CDK_OBJECT branch to
-    // splice a copy of that global in as exactly such an Obj; a later
-    // Quote() referencing the same name by identifier must not be allowed
-    // to silently resolve to this copy outside macro mode -- see the guard
-    // in primary(), src/parse_postfix.c.
-    bool  is_macro_program_global;
-    Node *lazy_quote; // #1242: for a $k placeholder whose argument was a
-                      // QuoteLazy()/QuoteLazyN() fragment -- the
-                      // ND_QUOTE_LAZY node to parse at this placeholder's
-                      // splice site, via cc_quote_expand_lazy(). Set only by
-                      // quote_push_placeholder, alongside
-                      // is_splice_placeholder (which stays reserved for the
-                      // $@k list-splice case; a lazy $k is a distinct,
-                      // orthogonal flavour of placeholder).
-
-    // Global variable
-    bool  is_tentative;
-    bool  is_tls;
-    bool  is_referenced; // #957: codegen materialized this global's storage
-                         // address (gen_addr's ND_VAR global branch). Distinct
-                         // from is_used, which the parser sets on any
-                         // identifier lookup including sizeof/typeof -- a
-                         // declaration-only extern global that is only ever
-                         // sizeof()'d must still compile, so "referenced" has
-                         // to mean "codegen actually emitted a load/store/
-                         // address-of", not "the parser saw the name".
-    bool  is_compound_literal; // Anonymous global synthesized to hold a
-                               // compound literal's value (postfix's
-                               // compound-literal branch). GCC/clang extend
-                               // constant-initializer folding to a compound
-                               // literal's own (constant) elements but not to
-                               // an arbitrary global reference by value, so
-                               // write_gvar_data's #720 splice-in path gates
-                               // on this flag rather than merely having
-                               // init_data.
-    bool  is_anon_synthesized; // True for any anonymous global the compiler
-                               // itself synthesized and renamed to a real C
-                               // identifier (rename_anon_globals(),
-                               // serialize_program.c) -- a compound-literal
-                               // backing store (postfix()) or a reflection-
-                               // API anon global (reflect_new_anon_gvar(),
-                               // reflection.c; that path does NOT set
-                               // is_compound_literal, so this flag is the
-                               // one both share). Such an object has no
-                               // source declaration of its own: whatever
-                               // file its ty->name token happens to point at
-                               // (often a header, if the *type* is header-
-                               // declared) is irrelevant provenance, and no
-                               // header can ever supply its definition
-                               // (#1286) -- global_is_header_supplied() must
-                               // never suppress it on that basis.
-    bool  is_string_literal;   // Anonymous global synthesized by
-                               // new_string_literal() to hold a string
-                               // literal's bytes. new_anon_gvar()'s `.L..N`
-                               // name is shared by string literals, static
-                               // locals, and non-char-array compound literals
-                               // (#925) -- this flag is the only reliable way
-                               // to tell them apart; the serializer treats a
-                               // dotted name as "opaque string literal" only
-                               // when this is set (see src/serialize_decl.c).
-    char *init_data;
-    Relocation *rel;
-    Node       *init_expr;     // For constexpr: AST of initializer expression
-    void
-        *constexpr_init; // For constexpr: private Initializer tree; also used
-                         // temporarily for pending macro-init Initializer trees
-    bool has_pending_macro_init; // gvar init deferred: init expr contains
-                                 // ND_MACRO_CALL
-
-    // Function
-    bool  is_inline;
+// Function definition, nesting and code-generation state.
+typedef struct ObjFn {
     Obj  *params;
     Node *body;
     Obj  *locals;
     Obj  *va_area;
     Obj  *alloca_bottom;
     int   stack_size;
-
     // Nested function support (GNU C extension)
-    struct Obj *parent_fn;           // Enclosing function (NULL if top-level)
-    bool        is_nested;           // True if defined inside another function
-    bool        is_omp_task;         // Outlined #pragma omp task body; a call
-                                     // to it serializes as a task spawn
-    bool        is_omp_region;       // Outlined #pragma omp parallel body; a
-                                     // call to it serializes as a thread-pool
-                                     // fork (see parse_omp.c)
-    struct Obj *omp_nt_var;          // is_omp_region: local holding the team
-                                     // size passed to the fork
-    int         nesting_depth;       // 0 = top-level, 1 = one level deep, etc.
-    struct Obj *nested_children;     // #1081: linked list (via
-                                     // next_nested_sibling below) of every
-                                     // nested function defined directly inside
-                                     // this function/block's own body.
-                                     // compound_stmt() (parse_stmt.c) never
-                                     // appends an AST node for a nested
-                                     // function definition, so a block literal
-                                     // parsed inside this body has no other way
-                                     // to reach a variable referenced only
-                                     // inside such a child's own body when
-                                     // collecting its transitive captures
-                                     // (block_literal(), parse_blocks.c).
-    struct Obj *next_nested_sibling; // #1081: next entry in the parent's own
-                                     // nested_children list (see above); NULL
-                                     // for a top-level function.
-
-    // Block support (Apple blocks extension)
-    bool  is_block;         // True if this is a block's synthetic function
-    Obj **captures;         // Array of captured outer variables
-    int   num_captures;     // Number of captured variables
-    struct Obj *
-        block_outer_locals; // Parent scope's locals at definition time
-                            // (for transitive capture). Set for block literals
-                            // (parse_blocks.c) and, since #1076, for genuine
-                            // nested functions too (parse_decl.c) -- both feed
-                            // the same ancestor climb in block_literal() so a
-                            // block defined inside a nested function can reach
-                            // a variable owned by that function's own ancestor.
-    bool is_block_var;      // True if declared with __block storage qualifier
-    Obj *block_desc_of;     // #965: for a block literal's descriptor local
-                            // (Node.block_desc_var), the block function it
-                            // describes; NULL for every other Obj. Set at parse
-                            // time (block_literal(), parse.c) purely for the
-                            // serializer's benefit -- lets serialize_function's
-                            // hoist loop find the paired env struct
-                            // (serialize_block_preamble/find_block_env,
-    // find_block_env: src/serialize_expr.c; the preamble
-    // itself: src/serialize_program.c) without a separate
-    // AST walk. No VM/ codegen consumer.
-    bool
-        block_return_ty_pending; // #965: true while parsing a block literal's
-                                 // body whose return type wasn't written
-                                 // explicitly (`^{ ... }` / `^(params){ ... }`)
-                                 // -- block_literal() infers it from the
-                                 // body's `return` statements afterward, so
-                                 // the void-mismatch warning in stmt()'s
-                                 // "return" handling must stay quiet while
-                                 // this is set (the type is not final yet).
-
+    struct Obj *parent_fn; // Enclosing function (NULL if top-level)
+    int         nesting_depth; // 0 = top-level, 1 = one level deep, etc.
+    // Every nested function defined directly inside this function/block's
+    // body, linked through next_nested_sibling. compound_stmt() never appends
+    // an AST node for a nested function definition, so a block literal has no
+    // other way to reach a variable referenced only inside such a child when
+    // collecting its transitive captures (block_literal(), parse_blocks.c).
+    struct Obj *nested_children;
+    struct Obj *next_nested_sibling;
+    struct Obj *omp_nt_var; // is_omp_region: local holding the team size
+                            // passed to the fork
     // Static inline function
-    bool        is_live;
-    bool        is_root;
     StringArray refs;
-
     // Code generation (for VM)
     long long code_addr;     /**< For functions compiled to VM bytecode: start
                                 address in the text segment. */
     long long code_end_addr; // Address after function code in text segment
     Token    *def_begin, *def_end; // source span of a file-scope definition
     Token    *gen_site; // file-scope comptime call that generated this Obj
-
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
     // canonical entry; its ENT3 is overwritten with a JMP to the newest body.
@@ -2756,219 +2507,292 @@ struct Obj {
     // Block-scope static local: the function whose body declared it, so a
     // reload can keep the old storage.
     Obj *static_owner;
-
-    // __attribute__((constructor[(priority)])) / ((destructor[(priority)]))
-    bool is_constructor;
-    bool is_destructor;
-    int  init_priority; // CCCC_NO_INIT_PRIORITY unless an explicit priority was
-                        // given
-
-    // Lazy membership set for belongs_to_outer_function (#165).
-    // Populated on first query; keyed by (long long)(intptr_t)var_ptr →
-    // var_ptr. Free with hashmap_deinit_borrowed after codegen completes.
+    // Lazy membership set for belongs_to_outer_function. Populated on first
+    // query; keyed by (long long)(intptr_t)var_ptr -> var_ptr. Free with
+    // hashmap_deinit_borrowed after codegen completes.
     HashMap local_set;
-    bool    local_set_built;
+} ObjFn;
 
-    // Checked C-style checked-pointer bounds (#770/#482-484). checked_kind/
-    // checked_bounds_form are copied straight off ty->checked_kind/
-    // checked_bounds_form by new_var(), same transport pattern as
-    // ty->cleanup_fn above. The bounds expression itself needs deferred
-    // resolution (see Type.checked_bounds_arg1/arg2's comment: a count(n)
-    // naming a not-yet-in-scope sibling parameter can't be parsed inline),
-    // so resolve_checked_bounds() (src/parse.c) fills checked_bounds_lo/hi in
-    // once the right scope exists. Left NULL (not an error) for a
-    // prototype-only declaration, which has no body scope to resolve into
-    // and no accesses to check.
-    CheckedKind       checked_kind;
+// __builtin_object_size tracking of a constant malloc-family allocation. Only
+// honored when the pointer is assigned exactly once (its declaration
+// initializer) and never has its address taken; see resolve_objsize_queries.
+typedef struct ObjSize {
+    int   objsize_alloc;       // bytes from a const malloc-family initializer;
+                               // meaningless when objsize_derived_from is set
+    Node *objsize_init_assign; // the initializer ND_ASSIGN node (exempt from
+                               // poisoning)
+    struct Obj *objsize_decl_fn; // the function this var was declared in; a
+                                 // query is only registered when asked from
+                                 // this same function
+    // `q = p + const` initializer tracking, where p is itself alloc-tracked.
+    // Chains resolve at query time (objsize_effective_remaining). NULL means
+    // the size comes straight from objsize_alloc.
+    struct Obj *objsize_derived_from;
+    int         objsize_derived_offset; // byte offset from objsize_derived_from
+    // A pointer-to-VLA local's declarator reads a runtime variable, so its
+    // declaration can't be hoisted to the top of the function. Set to the
+    // initializer's ND_ASSIGN node when one exists (the in-place declaration
+    // anchor); NULL otherwise.
+    Node *deferred_vla_ptr_init;
+} ObjSize;
+
+// Global variable initializer data.
+typedef struct ObjInit {
+    Relocation *rel;
+    Node       *init_expr;     // For constexpr: AST of initializer expression
+    void
+        *constexpr_init; // For constexpr: private Initializer tree; also used
+                         // temporarily for pending macro-init Initializer trees
+    Node *lazy_quote; // for a $k placeholder whose argument was a
+                      // QuoteLazy()/QuoteLazyN() fragment: the ND_QUOTE_LAZY
+                      // node to parse at this placeholder's splice site
+} ObjInit;
+
+// Block support (Apple blocks extension)
+typedef struct ObjBlk {
+    Obj **captures;     // Array of captured outer variables
+    int   num_captures; // Number of captured variables
+    // Parent scope's locals at definition time (for transitive capture). Set
+    // for block literals and for genuine nested functions, so a block inside a
+    // nested function can reach a variable owned by that function's ancestor.
+    struct Obj *block_outer_locals;
+    // For a block literal's descriptor local (Node.block_desc_var), the block
+    // function it describes. Serializer only.
+    Obj *block_desc_of;
+} ObjBlk;
+
+// Checked-pointer bounds and bounds propagation.
+typedef struct ObjChk {
+    // checked_kind/checked_bounds_form mirror ty->checked_kind/
+    // checked_bounds_form (copied by new_var()). The bounds expression needs
+    // deferred resolution, so resolve_checked_bounds() fills checked_bounds_lo/
+    // hi in once the right scope exists. Left NULL for a prototype-only
+    // declaration, which has no body scope to resolve into.
     CheckedBoundsForm checked_bounds_form;
-    Node             *checked_bounds_lo; // resolved expression, or NULL if
-                                         // unresolved/unneeded
-    Node             *checked_bounds_hi; // resolved expression, or NULL if
-                                         // unresolved/unneeded
-
-    // #921: non-NULL marks this Obj as a throwaway placeholder standing in
-    // for a struct/union member during resolve_member_checked_bounds()'s
-    // scope-based re-parse of a member's bounds expression -- see
-    // Member.checked_bounds_lo/hi's comment. A placeholder is arena-
-    // allocated like new_private_func_obj(), never joins vm->compiler.locals
-    // or ->globals, and must never survive into a real access site's AST:
-    // compute_checked_bounds() substitutes every ND_VAR referencing one with
-    // a real ND_MEMBER before returning.
+    Node             *checked_bounds_lo; // resolved expression, or NULL
+    Node             *checked_bounds_hi;
+    // Non-NULL marks a throwaway placeholder standing in for a struct/union
+    // member during resolve_member_checked_bounds()'s re-parse of a member's
+    // bounds expression. Never joins vm->compiler.locals or ->globals, and
+    // compute_checked_bounds() substitutes every ND_VAR referencing one with a
+    // real ND_MEMBER before returning.
     Member *checked_self_member;
-
-    // #919: bounds propagation across assignment for an *unchecked* pointer
-    // local (checked_kind == CHECKED_NONE) whose value is snapshotted from a
-    // checked-rooted source at every assignment -- see the design note at
-    // propagate_checked_bounds() (src/parse.c). Mirrors the
-    // objsize_init_assign/objsize_unsafe pair above: a candidate is trusted
-    // only if every assignment reached in the whole function body is
-    // checked-rooted and the variable is never address-taken outside the
-    // to_assign() RMW desugar (Node.is_rmw_temp_addr). checked_prop_lo/hi are
-    // compiler-generated pointer_to(char)-typed locals holding the absolute
-    // snapshotted [lo, hi) range, prepended to fn->locals by the propagation
-    // pass; NULL until/unless the pass decides this candidate propagates.
+    // Non-zero (1-based): a throwaway placeholder for a function PARAMETER
+    // during resolve_param_checked_bounds()'s re-parse; substituted by
+    // clone_param_bounds_node() with the call's actual argument expression.
+    int checked_self_param_idx;
+    // Bounds propagation across assignment for an *unchecked* pointer local
+    // whose value is snapshotted from a checked-rooted source at every
+    // assignment (see propagate_checked_bounds()). checked_prop_lo/hi are
+    // compiler-generated pointer_to(char) locals holding the absolute
+    // snapshotted [lo, hi) range; NULL until the pass decides this candidate
+    // propagates.
     Node *checked_prop_init_assign; // the initializer ND_ASSIGN node, or NULL
-                                    // for an uninitialized #942 candidate (see
-                                    // checked_prop_candidate)
-    bool  checked_prop_unsafe;      // true once any non-checked-rooted store or
-                                    // escape is seen
+                                    // for an uninitialized candidate
     Obj  *checked_prop_lo;
     Obj  *checked_prop_hi;
-
-    // #942: true for any TY_PTR, CHECKED_NONE local registered as a
-    // propagation candidate, whether or not it has an initializer --
-    // supersedes `checked_prop_init_assign != NULL` as the candidacy test
-    // (every such test in propagate_checked_bounds() and its helpers now
-    // reads this flag instead) so an uninitialized `int *q;` can still be
-    // tracked: its snapshot starts at the sentinel via the phase-B' entry
-    // init and only becomes a real range once some path stores into it.
-    bool checked_prop_candidate;
-    // #942: true once this round's checked_prop_poison_scan() has seen BOTH
-    // a checked-rooted store (any candidate needs at least one, or it's
-    // fully unsafe/NONE, same as before #942) AND a non-checked-rooted
-    // store reached somewhere in the function, OR any rooted store's own
-    // source is itself optional (propagates transitively through a #941
-    // chain) -- i.e. this candidate is only trustworthy on SOME paths, not
-    // every path. A survivor with this false is "FULL": #919/#941's
-    // original all-rooted case, unchanged codegen (plain CHKR). A survivor
-    // with this true is "OPT": every deref through it emits CHKRO instead,
-    // and every non-rooted store into it (plus function entry) stores the
-    // sentinel range into checked_prop_lo/hi rather than skipping the
-    // store. Meaningless when checked_prop_unsafe is true (NONE candidates
-    // get no temps at all). Frozen per round exactly like
-    // checked_prop_chain_src, for the same AST-visit-order-independence
-    // reason.
-    bool checked_prop_optional;
-    // #942 round-local scratch, mutated live within a single round's scan
-    // (like checked_prop_unsafe, not frozen like checked_prop_chain_src/
-    // checked_prop_optional) and reset to false at the top of every round by
-    // propagate_checked_bounds(): whether checked_prop_poison_scan() has, so
-    // far this round, seen at least one checked-rooted store to this
-    // candidate (checked_prop_scan_saw_rooted), at least one
-    // non-checked-rooted store (checked_prop_scan_saw_unrooted), or a
-    // checked-rooted store whose OWN source was itself optional as of the
-    // previous round (checked_prop_scan_src_optional, #941-chain
-    // transitivity). A self-rooted store (`q = q + 1;`) touches none of
-    // these three, matching its existing neutral treatment. End of round:
-    // no rooted store at all -> unsafe (NONE, same as before #942, just
-    // phrased as "unsafe" instead of "poisoned"); otherwise a survivor, with
-    // checked_prop_optional = saw_unrooted || src_optional.
-    bool checked_prop_scan_saw_rooted;
-    bool checked_prop_scan_saw_unrooted;
-    bool checked_prop_scan_src_optional;
-
-    // #941: chained propagation ("q propagates from p; r propagates from
-    // q") is decided by a fixpoint iterated over the whole-function poison
-    // scan -- see propagate_checked_bounds()'s round loop. checked_prop_unsafe
-    // is mutated live within a single round's scan, so it can't double as
-    // "was this a valid chained source" without making the result depend on
-    // AST visit order. checked_prop_chain_src is a frozen snapshot, taken
-    // once at the end of each round (init_assign set && !unsafe), that the
-    // *next* round's checked_prop_source_bounds() is allowed to trust as a
-    // third CheckedBase kind alongside a declared variable/member. Seeded
-    // false, so round 0 only accepts today's declared-checked sources.
-    bool checked_prop_chain_src;
-
-    // #943: non-zero iff every checked-rooted store into this candidate
-    // (declared source directly, or transitively through a #941 chain) is
-    // rooted at an [[cccc::ntarray]] source's widened terminator slot with
-    // this same pointee element size -- i.e. checked_prop_hi is not just an
-    // absolute upper bound but specifically a widened ntarray hi, usable to
-    // guard the terminator slot the same way a direct access's
-    // checked_nt_terminator/checked_bounds_hi pair does. Zero means "no NT
-    // fact to propagate": either no rooted store was ntarray-rooted at all,
-    // or two rooted stores disagreed (different source element size, or one
-    // ntarray-rooted and one plain-array-rooted) -- see
-    // checked_prop_scan_nt_conflict below. Frozen per round exactly like
-    // checked_prop_chain_src/checked_prop_optional, for the same
-    // AST-visit-order-independence reason; forced to 0 for every survivor if
-    // the round cap is hit, matching how the cap already forces OPT (only
-    // ever costs precision, never unsoundness).
+    // Non-zero iff every checked-rooted store into this candidate is rooted at
+    // an [[cccc::ntarray]] source's widened terminator slot with this same
+    // pointee element size, so checked_prop_hi can guard the terminator slot.
+    // Frozen per round; zero means no NT fact to propagate.
     int64_t checked_prop_nt_elem;
-    // #943 round-local scratch, mutated live within a single round's scan
-    // and reset at the top of every round by propagate_checked_bounds():
-    // the ntarray element size seen so far this round (0 until the first
-    // ntarray-rooted store is seen), whether a checked-rooted-but-NOT-
-    // ntarray store has been seen this round (checked_prop_scan_saw_non_nt),
-    // and whether two disagreeing rooted stores were seen
-    // (checked_prop_scan_nt_conflict -- an ntarray-rooted store after a
-    // non-ntarray one, a non-ntarray-rooted store after an ntarray one
-    // regardless of visit order, or two ntarray-rooted stores with
-    // different element sizes). checked_prop_scan_saw_non_nt is what makes
-    // this order-independent within a round: without it, a non-ntarray
-    // rooted store seen BEFORE the first ntarray-rooted one would leave
-    // checked_prop_scan_nt_elem at 0 and be silently overwritten by the
-    // later ntarray store instead of flagging a conflict. A
-    // non-checked-rooted store (the OPT sentinel-refresh case) never touches
-    // any of these three -- writing the sentinel doesn't contradict a prior
-    // NT fact, it just isn't live on that path.
+    // Round-local scratch: the ntarray element size seen so far this round.
     int64_t checked_prop_scan_nt_elem;
-    bool    checked_prop_scan_saw_non_nt;
-    bool    checked_prop_scan_nt_conflict;
-
-    // True for a survivor whose every rooted store is a plain array's own
-    // extent (`int *q = buf;`, or a chain from such a local). The snapshot
-    // feeds only checked targets (assignments, arguments, returns, casts);
-    // derefs through the local are not checked. A local that also holds a
-    // checked-rooted value is not plain: its plain stores count as unrooted.
-    // Frozen per round like checked_prop_optional;
-    // checked_prop_scan_saw_plain is the round-local scratch.
-    bool checked_prop_plain;
-    bool checked_prop_scan_saw_plain;
-
     // A survivor that holds both plain-array and checked-rooted values, or
-    // chains from one. Derefs read checked_prop_lo/hi, where a plain store
-    // leaves the sentinel; checked_prop_src_lo/hi also keep the plain array's
-    // range and are read only when the local is a source for a checked
-    // target. Recomputed per round like checked_prop_plain.
-    bool checked_prop_mixed;
-    bool checked_prop_scan_src_mixed;
+    // chains from one: checked_prop_src_lo/hi keep the plain array's range and
+    // are read only when the local is a source for a checked target.
     Obj *checked_prop_src_lo;
     Obj *checked_prop_src_hi;
-
-    // #486: non-CC_NONE only for the compiler-generated local a bounds
-    // cast's desugar declares (cast(), src/parse_expr.c) -- mirrors
-    // ty->checked_cast_kind the same way checked_kind/checked_bounds_form
-    // above mirror ty->checked_kind/checked_bounds_form. Read by
-    // verify_checked_assign_scan() (#944) to skip CHKAB emission for a
-    // CC_ASSUME temp -- an assume cast takes the claimed bounds on trust by
-    // definition, so its `__cv = (T *)q` initializer must never be treated
-    // as an assignment needing implication-checked.
+    // Non-CC_NONE only for the compiler-generated local a bounds cast's desugar
+    // declares; mirrors ty->checked_cast_kind. A CC_ASSUME temp takes the
+    // claimed bounds on trust, so its initializer is never an assignment
+    // needing implication-checked.
     CheckedCastKind checked_cast_kind;
-
-    // #488: non-zero (1-based) marks this Obj as a throwaway placeholder
-    // standing in for a function PARAMETER during
-    // resolve_param_checked_bounds()'s scope-based re-parse of a parameter's
-    // bounds expression -- the exact analogue of checked_self_member above,
-    // one level up (parameter, not struct member). A placeholder is
-    // arena-allocated, pinned to file scope, never joins vm->compiler.locals
-    // or ->globals, and must never survive into a real call site: every
-    // ND_VAR referencing one is substituted by clone_param_bounds_node()
-    // with a clone of that call's actual argument expression before the
-    // result is used.
-    int checked_self_param_idx;
-
     // On a function Obj: bit i set when parameter i's bounds came from the
     // built-in libc table (src/checked_libc.c), so a later user declaration
     // that spells its own bounds replaces them instead of conflicting.
     unsigned checked_libc_mask;
-
     // On a function Obj: the `dynamic` casts whose source is a propagation
-    // candidate, resolved once propagate_checked_bounds() has classified it
-    // (resolve_pending_dynamic_casts(), src/parse_checked.c).
+    // candidate, resolved once propagate_checked_bounds() has classified it.
     struct CheckedDynPending *checked_dynamic_pending;
     // On a function Obj: the compiler-generated local `return E` is assigned
     // through when the return type is a checked pointer with a bounds form
-    // (rewrite_checked_return(), src/parse_checked.c). NULL otherwise.
+    // (rewrite_checked_return()).
     Obj *checked_ret_var;
     // On a function Obj: `__rp_k = param_k` entry stores for the parameters
-    // checked_ret_var's bounds name, so `return` is verified against the
-    // values a caller sees (declare_checked_return_var()).
+    // checked_ret_var's bounds name, so `return` is verified against the values
+    // a caller sees (declare_checked_return_var()).
     struct Node *checked_ret_entry;
-    // Marks the compiler-generated local a call to a checked-return function
-    // is assigned through (split_checked_call_result()).
-    bool checked_call_result;
+} ObjChk;
+
+/*!
+ @brief Represents a C object: either a variable (global/local) or a
+           function. The parser and code generator use Obj for symbol
+           and storage tracking.
+*/
+struct Obj {
+    struct Obj *next;
+    char       *name;         /**< Identifier name of the object. */
+    char       *display_name; // Source identifier when storage uses a synthetic
+                              // name
+    Type  *ty;                /**< Type of the object. */
+    Token *tok;               // representative token
+    char  *init_data;         // global: initial bytes
+    int    align;             // alignment
+    int    offset;            /**< For local variables: stack offset. */
+    CheckedKind checked_kind;
+
+    bool is_local : 1; /**< True for local (stack) variables; false for globals. */
+    bool is_used : 1;
+    bool is_maybe_unused : 1;
+    // A caller-side struct-return slot allocated by funcall() for every
+    // struct/union-returning call. VM codegen reads it purely as a frame
+    // offset, so the serializer must never declare it.
+    bool is_ret_buffer : 1;
+    bool is_deprecated : 1;
+    bool is_noreturn : 1;
+    bool is_nodiscard : 1;
+    bool is_pure : 1;
+    bool is_func_const : 1;
+    bool is_kernel : 1;
+    bool is_trusted : 1;    // [[cccc::trusted]] on any declaration
+    bool is_gnu_inline : 1; // GNU extern-inline definition: emitted only if
+                            // called
+    bool is_kernel_thunk : 1; // outlined cccc_launch body; a call to it
+                              // serializes as __cccc_kernel_launch
+    bool is_kernel_local_obj : 1; // [[cccc::local]] object in a kernel entry's
+                                  // body, stored in work-group memory
+    bool kernel_uses_barrier : 1; // kernel entry (or a callee) calls
+                                  // cccc_barrier
+    bool may_return_null : 1; // function has a provable null-returning path
+                              // (whole-TU summary)
+    bool always_returns_null : 1; // every reachable return is provably null
+    bool is_local_symbol : 1;
+    bool is_param : 1; // true if this is a function parameter
+    bool is_proto_param : 1; // prototype-scope stand-in for a parameter named
+                             // in a later parameter's array length
+    bool vla_extent_impure : 1; // param whose pointee extent has side effects:
+                                // -c=native takes it as `void *` and declares
+                                // it after the entry-time size statements
+    bool is_captured : 1; // true if accessed by a nested function
+    // Escape analysis for LEA3 epoch-recording pruning: set whenever this
+    // local's address is provably observed escaping its creating frame. False
+    // is the safe default (LEA3 records unless proven true).
+    bool addr_escapes : 1;
+    // Set for *every* syntactic `&expr` rooted at this local, even when the
+    // address never escapes: precise initialization tracking (CHKI) is
+    // suppressed once the address is taken.
+    bool addr_taken : 1;
+    bool objsize_has_alloc : 1; // alloc-tracked, directly or derived
+    bool objsize_unsafe : 1;    // reassigned or address-taken in scope
+
+    // Global variable or function
+    bool is_function : 1;        /**< True when this Obj represents a function. */
+    bool is_definition : 1;
+    bool is_static : 1;
+    bool is_builtin_alloca : 1;  // the builtin alloca() used to lower VLAs
+    bool is_constexpr : 1;
+    bool is_implicit : 1;        // synthesized by an implicit function declaration
+    bool is_hidden_builtin : 1; // synthesized prototype not yet on the globals
+                                // list
+    bool is_macro_generated : 1; // created by a #pragma macro via
+                                 // $function/$global_var
+    bool is_splice_placeholder : 1; // $@k var synthesised by quote_core
+    // Created by new_gvar() while vm->compiler.in_macro_mode is set: its
+    // storage lives in the *comptime program's* data segment, so a Quote()
+    // referencing the same name outside macro mode must not resolve to it.
+    bool is_macro_program_global : 1;
+    bool is_tentative : 1;
+    bool is_tls : 1;
+    // Codegen materialized this global's storage address. Distinct from
+    // is_used, which the parser sets on any identifier lookup including
+    // sizeof/typeof.
+    bool is_referenced : 1;
+    bool is_compound_literal : 1; // anonymous global holding a compound
+                                  // literal's value
+    bool is_anon_synthesized : 1; // anonymous global the compiler itself
+                                  // synthesized and renamed to a real C
+                                  // identifier; it has no source declaration,
+                                  // so no header can supply its definition
+    bool is_string_literal : 1;   // anonymous global holding a string literal's
+                                  // bytes
+    bool has_pending_macro_init : 1; // gvar init deferred: init expr contains
+                                     // ND_MACRO_CALL
+    bool is_inline : 1;
+    bool is_nested : 1;     // defined inside another function
+    bool is_omp_task : 1;   // outlined #pragma omp task body
+    bool is_omp_region : 1; // outlined #pragma omp parallel body
+    bool is_block : 1;      // a block's synthetic function
+    bool is_block_var : 1;  // declared with __block storage qualifier
+    bool block_return_ty_pending : 1; // while parsing a block literal whose
+                                      // return type wasn't written: the type
+                                      // is not final yet
+    bool is_live : 1;
+    bool is_root : 1;
+    bool is_constructor : 1;
+    bool is_destructor : 1;
+    bool local_set_built : 1;
+
+    // Bounds propagation state (see ObjChk). The scan flags are round-local
+    // scratch reset by propagate_checked_bounds(); the others are frozen per
+    // round.
+    bool checked_prop_unsafe : 1; // a non-checked-rooted store or escape was
+                                  // seen
+    bool checked_prop_candidate : 1; // TY_PTR, CHECKED_NONE local registered as
+                                     // a propagation candidate
+    bool checked_prop_optional : 1;  // trustworthy only on SOME paths: derefs
+                                     // emit CHKRO
+    bool checked_prop_scan_saw_rooted : 1;
+    bool checked_prop_scan_saw_unrooted : 1;
+    bool checked_prop_scan_src_optional : 1;
+    bool checked_prop_chain_src : 1; // frozen snapshot: a valid chained source
+    bool checked_prop_scan_saw_non_nt : 1;
+    bool checked_prop_scan_nt_conflict : 1;
+    bool checked_prop_plain : 1; // every rooted store is a plain array's own
+                                 // extent
+    bool checked_prop_scan_saw_plain : 1;
+    bool checked_prop_mixed : 1;
+    bool checked_prop_scan_src_mixed : 1;
+    // Marks the compiler-generated local a call to a checked-return function is
+    // assigned through (split_checked_call_result()).
+    bool checked_call_result : 1;
+
+    ObjAttr *ext_attr;
+    ObjFn   *ext_fn;
+    ObjSize *ext_size;
+    ObjInit *ext_init;
+    ObjBlk  *ext_blk;
+    ObjChk  *ext_chk;
 };
+
+_Static_assert(sizeof(Obj) <= 120,
+               "Obj grew: put cold fields in an ObjAttr/ObjFn/ObjSize/ObjInit/"
+               "ObjBlk/ObjChk group");
+
+static const ObjAttr obj_attr_none = {0};
+static const ObjFn   obj_fn_none   = {0};
+static const ObjSize obj_size_none = {0};
+static const ObjInit obj_init_none = {0};
+static const ObjBlk  obj_blk_none  = {0};
+static const ObjChk  obj_chk_none  = {0};
+
+#define OBJ_GROUP_READER(fn, field, T)                                         \
+    static inline const T *fn(const Obj *o) {                                  \
+        return o->field ? o->field : &fn##_none;                               \
+    }
+OBJ_GROUP_READER(obj_attr, ext_attr, ObjAttr)
+OBJ_GROUP_READER(obj_fn, ext_fn, ObjFn)
+OBJ_GROUP_READER(obj_size, ext_size, ObjSize)
+OBJ_GROUP_READER(obj_init, ext_init, ObjInit)
+OBJ_GROUP_READER(obj_blk, ext_blk, ObjBlk)
+OBJ_GROUP_READER(obj_chk, ext_chk, ObjChk)
+#undef OBJ_GROUP_READER
+ObjAttr *obj_attr_mut(VirtualMachine *vm, Obj *o);
+ObjFn   *obj_fn_mut(VirtualMachine *vm, Obj *o);
+ObjSize *obj_size_mut(VirtualMachine *vm, Obj *o);
+ObjInit *obj_init_mut(VirtualMachine *vm, Obj *o);
+ObjBlk  *obj_blk_mut(VirtualMachine *vm, Obj *o);
+ObjChk  *obj_chk_mut(VirtualMachine *vm, Obj *o);
 
 /*!
  @brief Stack entry used to track nested #if/#elif/#else processing

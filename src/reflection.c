@@ -1330,7 +1330,7 @@ Node *__builtin_ast_param_ref(Obj *fn, const char *name) {
 
     // Find the parameter in the function's params list
     size_t name_len = strlen(name);
-    for (Obj *param = fn->params; param; param = param->next) {
+    for (Obj *param = obj_fn(fn)->params; param; param = param->next) {
         if (strlen(param->name) == name_len &&
             strncmp(param->name, name, name_len) == 0) {
             param->is_used = true;
@@ -1471,8 +1471,6 @@ Node *__builtin_ast_switch(Node *cond) {
 
     Node *node         = alloc_node(vm, ND_SWITCH);
     node_ctl_mut(vm, node)->cond         = cond;
-    node_ctl_mut(vm, node)->case_next    = NULL;
-    node_ctl_mut(vm, node)->default_case = NULL;
     node_ctl_mut(vm, node)->then         = alloc_node(vm, ND_BLOCK);
     return node;
 }
@@ -2575,7 +2573,7 @@ void __builtin_ensure_string_h_decls(void) {
 // declaration is left alone: the reload pairs the new definition with it.
 static bool superseded_by_reload(VirtualMachine *vm, const Obj *obj) {
     return vm->compiler.reload_file_scope_calls &&
-           (obj->gen_site || !obj->is_definition);
+           (obj_fn(obj)->gen_site || !obj->is_definition);
 }
 
 CC_BUILTIN(__builtin_ast_function, 2);
@@ -2741,13 +2739,13 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
 
     // Count existing params to compute correct offset
     int param_count = 0;
-    for (Obj *p = fn->params; p; p = p->next)
+    for (Obj *p = obj_fn(fn)->params; p; p = p->next)
         param_count++;
     param->offset = -(param_count + 1);
-    if (fn->params == NULL) {
-        fn->params = param;
+    if (obj_fn(fn)->params == NULL) {
+        obj_fn_mut(vm, fn)->params = param;
     } else {
-        Obj *last = fn->params;
+        Obj *last = obj_fn(fn)->params;
         while (last->next)
             last = last->next;
         last->next = param;
@@ -2777,14 +2775,15 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
 // belongs_to_outer_function()/calculate_chain_depth() (src/codegen.c) find a
 // captured outer variable through the static chain. Mirrors the traversal
 // shape of collect_node_types() (src/serialize_type.c).
-static void relink_orphan_block_parents(Node *node, Obj *fn) {
+static void relink_orphan_block_parents(VirtualMachine *vm, Node *node,
+                                        Obj *fn) {
     if (!node)
         return;
 
     if (node->kind == ND_BLOCK_LITERAL && node_misc(node)->block_fn) {
-        if (node_misc(node)->block_fn->parent_fn == NULL) {
-            node_misc(node)->block_fn->parent_fn     = fn;
-            node_misc(node)->block_fn->nesting_depth = fn->nesting_depth + 1;
+        if (obj_fn(node_misc(node)->block_fn)->parent_fn == NULL) {
+            obj_fn_mut(vm, node_misc(node)->block_fn)->parent_fn     = fn;
+            obj_fn_mut(vm, node_misc(node)->block_fn)->nesting_depth = obj_fn(fn)->nesting_depth + 1;
         }
         // #995: a lifted block function is created via new_gvar() and never
         // gets is_macro_generated set at parse time (block_literal() has no
@@ -2802,37 +2801,37 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
         // is propagated too.
         node_misc(node)->block_fn->is_macro_generated |= fn->is_macro_generated;
         if (fn->is_macro_generated)
-            relink_orphan_block_parents(node_misc(node)->block_fn->body,
+            relink_orphan_block_parents(vm, obj_fn(node_misc(node)->block_fn)->body,
                                         node_misc(node)->block_fn);
     }
 
     if (node->kind == ND_SWITCH) {
-        relink_orphan_block_parents(node_ctl(node)->cond, fn);
+        relink_orphan_block_parents(vm, node_ctl(node)->cond, fn);
         for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
-            relink_orphan_block_parents(c->lhs, fn);
+            relink_orphan_block_parents(vm, c->lhs, fn);
         if (node_ctl(node)->default_case)
-            relink_orphan_block_parents(node_ctl(node)->default_case->lhs, fn);
-        relink_orphan_block_parents(node->next, fn);
+            relink_orphan_block_parents(vm, node_ctl(node)->default_case->lhs, fn);
+        relink_orphan_block_parents(vm, node->next, fn);
         return;
     }
 
     if (node->kind == ND_CASE) {
-        relink_orphan_block_parents(node->lhs, fn);
-        relink_orphan_block_parents(node->next, fn);
+        relink_orphan_block_parents(vm, node->lhs, fn);
+        relink_orphan_block_parents(vm, node->next, fn);
         return;
     }
 
-    relink_orphan_block_parents(node->lhs, fn);
-    relink_orphan_block_parents(node->rhs, fn);
-    relink_orphan_block_parents(node_ctl(node)->cond, fn);
-    relink_orphan_block_parents(node_ctl(node)->then, fn);
-    relink_orphan_block_parents(node_ctl(node)->els, fn);
-    relink_orphan_block_parents(node_ctl(node)->init, fn);
-    relink_orphan_block_parents(node_ctl(node)->inc, fn);
-    relink_orphan_block_parents(node->body, fn);
-    relink_orphan_block_parents(node->args, fn);
+    relink_orphan_block_parents(vm, node->lhs, fn);
+    relink_orphan_block_parents(vm, node->rhs, fn);
+    relink_orphan_block_parents(vm, node_ctl(node)->cond, fn);
+    relink_orphan_block_parents(vm, node_ctl(node)->then, fn);
+    relink_orphan_block_parents(vm, node_ctl(node)->els, fn);
+    relink_orphan_block_parents(vm, node_ctl(node)->init, fn);
+    relink_orphan_block_parents(vm, node_ctl(node)->inc, fn);
+    relink_orphan_block_parents(vm, node->body, fn);
+    relink_orphan_block_parents(vm, node->args, fn);
 
-    relink_orphan_block_parents(node->next, fn);
+    relink_orphan_block_parents(vm, node->next, fn);
 }
 
 // #997: returns true if obj is present on the linked list starting at
@@ -2848,7 +2847,7 @@ static bool obj_in_list(Obj *obj, Obj *candidates) {
 // and return the first one found still sitting on stray_locals (the calling
 // function's vm->compiler.locals list, per the caller's comment) rather than
 // already attached to fn (fn->locals/fn->params). Mirrors
-// relink_orphan_block_parents()'s traversal shape. Recurses into a nested
+// relink_orphan_block_parents(vm, )'s traversal shape. Recurses into a nested
 // block literal's own body via block_fn->body (not reached by the generic
 // node->body walk below -- see the comment on relink_orphan_block_parents).
 // Detection only, by design: a node kind this walk doesn't know about is
@@ -2861,18 +2860,18 @@ static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
     Obj *found = NULL;
     if ((node->kind == ND_VAR || node->kind == ND_VLA_PTR) && node->var &&
         obj_in_list(node->var, stray_locals) &&
-        !obj_in_list(node->var, fn->locals) &&
-        !obj_in_list(node->var, fn->params))
+        !obj_in_list(node->var, obj_fn(fn)->locals) &&
+        !obj_in_list(node->var, obj_fn(fn)->params))
         found = node->var;
 
     if (!found && node->kind == ND_BLOCK_LITERAL) {
         if (node_misc(node)->block_desc_var &&
             obj_in_list(node_misc(node)->block_desc_var, stray_locals) &&
-            !obj_in_list(node_misc(node)->block_desc_var, fn->locals) &&
-            !obj_in_list(node_misc(node)->block_desc_var, fn->params))
+            !obj_in_list(node_misc(node)->block_desc_var, obj_fn(fn)->locals) &&
+            !obj_in_list(node_misc(node)->block_desc_var, obj_fn(fn)->params))
             found = node_misc(node)->block_desc_var;
         if (!found && node_misc(node)->block_fn)
-            found = collect_stray_body_local(node_misc(node)->block_fn->body,
+            found = collect_stray_body_local(obj_fn(node_misc(node)->block_fn)->body,
                                              stray_locals,
                                              node_misc(node)->block_fn);
     }
@@ -2939,14 +2938,14 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     if (body->kind != ND_BLOCK) {
         Node *block = alloc_node(vm, ND_BLOCK);
         block->body = body;
-        fn->body    = block;
+        obj_fn_mut(vm, fn)->body    = block;
     } else {
-        fn->body = body;
+        obj_fn_mut(vm, fn)->body = body;
     }
 
     // CRITICAL: Run add_type on the body to assign types to all nodes
     // This is necessary for code generation to work correctly
-    add_type(vm, fn->body);
+    add_type(vm, obj_fn(fn)->body);
 
     // #1253: bind free `goto label` / `&&label` references produced by a
     // Quote() template against labels this body defines.
@@ -2989,10 +2988,10 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
         Obj *new_locals     = vm->compiler.locals;
         vm->compiler.locals = NULL;
 
-        if (fn->locals == NULL) {
-            fn->locals = new_locals;
+        if (obj_fn(fn)->locals == NULL) {
+            obj_fn_mut(vm, fn)->locals = new_locals;
         } else {
-            Obj *tail = fn->locals;
+            Obj *tail = obj_fn(fn)->locals;
             while (tail->next)
                 tail = tail->next;
             tail->next = new_locals;
@@ -3007,7 +3006,7 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     // WithFn(fn) needs the propagation too, not just the adopted-locals
     // case), so this call is unconditional rather than nested inside the
     // guard above.
-    relink_orphan_block_parents(fn->body, fn);
+    relink_orphan_block_parents(vm, obj_fn(fn)->body, fn);
 
     // #997: current_fn != NULL means a comptime macro invoked from *inside*
     // an ordinary function is building fn's body without wrapping the call
@@ -3028,7 +3027,7 @@ void __builtin_ast_function_set_body(Obj *fn, Node *body) {
     if (vm->compiler.current_fn != NULL && vm->compiler.current_fn != fn &&
         vm->compiler.locals != NULL) {
         Obj *stray =
-            collect_stray_body_local(fn->body, vm->compiler.locals, fn);
+            collect_stray_body_local(obj_fn(fn)->body, vm->compiler.locals, fn);
         if (stray) {
             // error_tok (used elsewhere in this file, e.g. #969's
             // __builtin_pc_* rejection) needs a real token to report a
@@ -3246,7 +3245,7 @@ void __builtin_ast_push_fn(Obj *fn) {
     _fn_context_stack[d]    = vm->compiler.current_fn;
     _fn_locals_stack[d]     = vm->compiler.locals; // save outer locals pointer
     vm->compiler.current_fn = fn;
-    vm->compiler.locals     = fn->locals; // switch to inner fn's locals
+    vm->compiler.locals     = obj_fn(fn)->locals; // switch to inner fn's locals
 }
 
 // Pop the most recently pushed function context.  Flushes any vars that were
@@ -3264,11 +3263,11 @@ void __builtin_ast_pop_fn(void) {
     }
     // Flush vars added inside the block back into the inner function.
     if (vm->compiler.current_fn)
-        vm->compiler.current_fn->locals = vm->compiler.locals;
+        obj_fn_mut(vm, vm->compiler.current_fn)->locals = vm->compiler.locals;
     // #1253: a WithFn(fn) { ... Quote(...) ... } body attached by any means
     // gets its free template label references bound here, before the inner
     // function context is popped.
-    if (vm->compiler.current_fn && vm->compiler.current_fn->body)
+    if (vm->compiler.current_fn && obj_fn(vm->compiler.current_fn)->body)
         cc_resolve_body_label_refs(vm, vm->compiler.current_fn);
     int d                   = --_fn_context_depth;
     vm->compiler.current_fn = _fn_context_stack[d];
@@ -4202,7 +4201,7 @@ static Obj *quote_push_placeholder(VirtualMachine *vm, Scope *sc, char *name,
     var->ty    = ty;
     var->align = ty->align;
     if (is_lazy)
-        var->lazy_quote = arg_node;
+        obj_init_mut(vm, var)->lazy_quote = arg_node;
     // #894: a $k/$@k quote placeholder behaves like a local pseudo-variable
     // (scoped to this one quote_core call, never a real global with
     // data-segment storage) -- mark it is_local so the #887 guard in
@@ -5203,14 +5202,14 @@ static void copy_node_check_decls(CopyCtx *cx, Node *n) {
         copy_node_declare(cx, v);
         if (!v->is_local)
             copy_node_refuse(cx, n, "static local; rebuild it");
-        if (v->cleanup_fn) {
+        if (obj_attr(v)->cleanup_fn) {
             if (cx->n_cvars == cx->cap_cvars) {
                 cx->cap_cvars = cx->cap_cvars ? cx->cap_cvars * 2 : 4;
                 cx->cvars =
                     realloc(cx->cvars, (size_t)cx->cap_cvars * sizeof(Obj *));
             }
             int j = cx->n_cvars++;
-            for (; j > 0 && cx->cvars[j - 1]->cleanup_seq > v->cleanup_seq; j--)
+            for (; j > 0 && obj_attr(cx->cvars[j - 1])->cleanup_seq > obj_attr(v)->cleanup_seq; j--)
                 cx->cvars[j] = cx->cvars[j - 1];
             cx->cvars[j] = v;
         }
@@ -5333,22 +5332,26 @@ static Obj *copy_node_obj(CopyCtx *cx, Obj *o) {
         return o;
     VirtualMachine *vm   = cx->vm;
     c                    = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
-    *c                   = *o;
+    obj_assign(vm, c, o);
     c->offset            = 0;
     c->objsize_has_alloc = false;
-    c->objsize_init_assign      = NULL;
-    c->objsize_derived_from     = NULL;
-    c->checked_prop_candidate   = false;
-    c->checked_prop_init_assign = NULL;
-    c->cleanup_cur              = NULL;
+    if (obj_size(c)->objsize_init_assign || obj_size(c)->objsize_derived_from) {
+        obj_size_mut(vm, c)->objsize_init_assign  = NULL;
+        obj_size_mut(vm, c)->objsize_derived_from = NULL;
+    }
+    c->checked_prop_candidate = false;
+    if (obj_chk(c)->checked_prop_init_assign)
+        obj_chk_mut(vm, c)->checked_prop_init_assign = NULL;
+    if (obj_attr(c)->cleanup_cur)
+        obj_attr_mut(vm, c)->cleanup_cur = NULL;
     c->next                     = vm->compiler.locals;
     vm->compiler.locals         = c;
     hashmap_put_int(&cx->objs, copy_key(o), c);
 
-    if (o->cleanup_fn)
+    if (obj_attr(o)->cleanup_fn)
         for (int i = 0; i < cx->n_cvars; i++)
             if (cx->cvars[i] == o)
-                c->cleanup_seq = cx->seq_base + 1 + i;
+                obj_attr_mut(vm, c)->cleanup_seq = cx->seq_base + 1 + i;
     if (cx->n_clones == cx->cap_clones) {
         cx->cap_clones = cx->cap_clones ? cx->cap_clones * 2 : 8;
         cx->clones =
@@ -5396,7 +5399,7 @@ static Type *copy_node_type(CopyCtx *cx, Type *ty) {
 static int copy_node_seq_limit(CopyCtx *cx, int limit) {
     int before = 0;
     for (int i = 0; i < cx->n_cvars; i++)
-        before += cx->cvars[i]->cleanup_seq < limit;
+        before += obj_attr(cx->cvars[i])->cleanup_seq < limit;
     return cx->seq_base + 1 + before;
 }
 
@@ -5557,11 +5560,11 @@ Node *__builtin_ast_copy_node(Node *n) {
     for (int i = 0; i < cx.n_clones; i++) {
         Obj  *c = cx.clones[i];
         Node *m =
-            c->deferred_vla_ptr_init
-                ? hashmap_get_int(&cx.nodes, copy_key(c->deferred_vla_ptr_init))
+            obj_size(c)->deferred_vla_ptr_init
+                ? hashmap_get_int(&cx.nodes, copy_key(obj_size(c)->deferred_vla_ptr_init))
                 : NULL;
         if (m)
-            c->deferred_vla_ptr_init = m;
+            obj_size_mut(vm, c)->deferred_vla_ptr_init = m;
     }
     hashmap_deinit(&cx.seen);
     hashmap_deinit(&cx.declared);
@@ -5928,9 +5931,9 @@ Node *__builtin_get_constexpr_value(const char *name) {
     if (!vm || !name)
         return NULL;
     Obj *obj = (Obj *)__builtin_ast_find_global(name);
-    if (!obj || !obj->is_constexpr || !obj->init_expr)
+    if (!obj || !obj->is_constexpr || !obj_init(obj)->init_expr)
         return NULL;
     if (obj->ty->kind >= TY_FLOAT)
-        return __builtin_ast_float_literal(cc_eval_double(vm, obj->init_expr));
-    return __builtin_ast_int_literal(cc_eval(vm, obj->init_expr));
+        return __builtin_ast_float_literal(cc_eval_double(vm, obj_init(obj)->init_expr));
+    return __builtin_ast_int_literal(cc_eval(vm, obj_init(obj)->init_expr));
 }

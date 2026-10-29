@@ -161,9 +161,9 @@ static void task_body_push(VirtualMachine *vm, OmpFrame *f, Node *node) {
 // The outlined parallel region directly inside `fn` that the parse is in, or
 // NULL when the parse is not inside OpenMP regions only.
 static Obj *region_child_of(VirtualMachine *vm, Obj *fn) {
-    for (Obj *cur = vm->compiler.current_fn; cur; cur = cur->parent_fn) {
+    for (Obj *cur = vm->compiler.current_fn; cur; cur = obj_fn(cur)->parent_fn) {
         bool outlined = cur->is_omp_region || cur->is_omp_task;
-        if (cur->parent_fn == fn)
+        if (obj_fn(cur)->parent_fn == fn)
             return outlined ? cur : NULL;
         if (!outlined)
             return NULL;
@@ -282,8 +282,8 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
     Obj *child = saved_fn != f->fn ? region_child_of(vm, f->fn) : NULL;
     if (child) {
         vm->compiler.current_fn       = f->fn;
-        vm->compiler.locals           = child->block_outer_locals;
-        vm->compiler.fn_nesting_depth = f->fn->nesting_depth;
+        vm->compiler.locals           = obj_blk(child)->block_outer_locals;
+        vm->compiler.fn_nesting_depth = obj_fn(f->fn)->nesting_depth;
     }
     vm->compiler.scope      = f->boundary;
     vm->compiler.omp_frames = NULL;
@@ -303,7 +303,7 @@ static void make_task_copy(VirtualMachine *vm, OmpFrame *f, Token *tok,
                                    name, id, name, name));
     }
     if (child) {
-        child->block_outer_locals     = vm->compiler.locals;
+        obj_blk_mut(vm, child)->block_outer_locals     = vm->compiler.locals;
         vm->compiler.current_fn       = saved_fn;
         vm->compiler.locals           = saved_locals;
         vm->compiler.fn_nesting_depth = saved_depth;
@@ -1543,11 +1543,11 @@ OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
     fn->is_nested                  = true;
     fn->is_macro_generated         = r.parent->is_macro_generated;
     fn->tok                        = tok;
-    fn->parent_fn                  = r.parent;
-    fn->nesting_depth              = r.saved_depth + 1;
-    fn->block_outer_locals         = vm->compiler.locals;
-    fn->next_nested_sibling        = r.parent->nested_children;
-    r.parent->nested_children      = fn;
+    obj_fn_mut(vm, fn)->parent_fn                  = r.parent;
+    obj_fn_mut(vm, fn)->nesting_depth              = r.saved_depth + 1;
+    obj_blk_mut(vm, fn)->block_outer_locals         = vm->compiler.locals;
+    obj_fn_mut(vm, fn)->next_nested_sibling        = obj_fn(r.parent)->nested_children;
+    obj_fn_mut(vm, r.parent)->nested_children      = fn;
     r.fn                           = fn;
 
     vm->compiler.current_fn        = fn;
@@ -1560,28 +1560,28 @@ OutlineRegion outline_begin(VirtualMachine *vm, Token *tok, const char *name) {
     vm->compiler.cur_cleanup_chain = NULL;
     enter_scope(vm);
     new_lvar(vm, "__static_link", 13, pointer_to(vm, ty_void));
-    fn->params = vm->compiler.locals;
-    fn->alloca_bottom =
+    obj_fn_mut(vm, fn)->params = vm->compiler.locals;
+    obj_fn_mut(vm, fn)->alloca_bottom =
         new_lvar(vm, "__alloca_size__", 15, pointer_to(vm, ty_char));
     return r;
 }
 
 void outline_end(VirtualMachine *vm, OutlineRegion *r, Node *body) {
     Obj *fn    = r->fn;
-    fn->body   = body;
-    fn->locals = vm->compiler.locals;
+    obj_fn_mut(vm, fn)->body   = body;
+    obj_fn_mut(vm, fn)->locals = vm->compiler.locals;
     leave_scope(vm);
     // A goto must stay inside the region: its labels are matched here, before
     // the enclosing function's own resolution could bind them to an outer one.
     cc_match_goto_labels(vm, vm->compiler.gotos, r->saved_gotos,
                          vm->compiler.labels, r->saved_labels, false, true);
-    resolve_objsize_queries(vm, fn->body);
-    mark_addr_escapes(fn->body, fn);
+    resolve_objsize_queries(vm, obj_fn(fn)->body);
+    mark_addr_escapes(obj_fn(fn)->body, fn);
     checked_tail_passes(vm, fn);
-    mark_nested_captures(fn, fn->body);
+    mark_nested_captures(fn, obj_fn(fn)->body);
 
     vm->compiler.current_fn         = r->parent;
-    vm->compiler.locals             = fn->block_outer_locals;
+    vm->compiler.locals             = obj_blk(fn)->block_outer_locals;
     vm->compiler.fn_nesting_depth   = r->saved_depth;
     vm->compiler.objsize_queries    = r->saved_queries;
     vm->compiler.brk_label          = r->saved_brk;
@@ -1596,7 +1596,7 @@ static OutlineRegion region_begin(VirtualMachine *vm, Token *tok, int id,
     OutlineRegion r =
         outline_begin(vm, tok, arena_format(vm, "__omp_region_%d", id));
     r.fn->is_omp_region = true;
-    r.fn->omp_nt_var    = nt_var;
+    obj_fn_mut(vm, r.fn)->omp_nt_var    = nt_var;
     return r;
 }
 

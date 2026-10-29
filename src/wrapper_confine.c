@@ -78,7 +78,7 @@ static bool call_confined(Node *call) {
     if (peel_comma(callee)->kind == ND_BLOCK_LITERAL)
         return true;
     if (callee->kind != ND_VAR || !callee->var->is_function ||
-        callee->var->body)
+        obj_fn(callee->var)->body)
         return false;
     if (callee->var->is_builtin_alloca)
         return true;
@@ -148,7 +148,7 @@ static void visit(Node *n, void *vctx) {
             break;
         case ND_VAR:
             // A cleanup handler gets the local's address.
-            if (n->var->cleanup_fn)
+            if (obj_attr(n->var)->cleanup_fn)
                 c->ok = false;
             break;
         case ND_CAST:
@@ -187,21 +187,21 @@ static void scan(Node *root, Confine *c) {
 static void scan_fn(Obj *fn, Confine *c) {
     if (!fn)
         return;
-    scan(fn->body, c);
-    for (Obj *child = fn->nested_children; child && c->ok;
-         child      = child->next_nested_sibling)
+    scan(obj_fn(fn)->body, c);
+    for (Obj *child = obj_fn(fn)->nested_children; child && c->ok;
+         child      = obj_fn(child)->next_nested_sibling)
         scan_fn(child, c);
 }
 
 bool cc_wrapper_is_confined(VirtualMachine *vm, Obj *wrapper,
                             bool result_dropped) {
     (void)vm;
-    if (!wrapper || !wrapper->body)
+    if (!wrapper || !obj_fn(wrapper)->body)
         return false;
     Type *ret = wrapper->ty ? wrapper->ty->return_ty : NULL;
     if (!result_dropped && ret && ret->kind != TY_VOID && !is_numeric(ret))
         return false;
     Confine c = {.ok = true};
-    scan(wrapper->body, &c);
+    scan(obj_fn(wrapper)->body, &c);
     return c.ok;
 }

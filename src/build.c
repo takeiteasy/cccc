@@ -4008,7 +4008,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 init_builder_ctx(&ctx, vm, opts, factory_names, factory_count);
 
                 s_ctx = &ctx;
-                cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
+                cc_run_at(vm, (Pc)obj_fn(factory_fn)->code_addr, 0, NULL);
                 BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
                 s_ctx            = NULL;
 
@@ -4061,7 +4061,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
                 break;
             }
             s_ctx = &ctx;
-            cc_run_at(vm, (Pc)factory_fn->code_addr, 0, NULL);
+            cc_run_at(vm, (Pc)obj_fn(factory_fn)->code_addr, 0, NULL);
             BuildTarget *tgt = (BuildTarget *)(intptr_t)vm->regs[REG_A0];
             s_ctx            = NULL;
             if (!tgt) {
@@ -4101,7 +4101,7 @@ int cc_run_build(VirtualMachine *vm, Obj *prog, const CcBuildOptions *opts) {
     ctx.target_filter = opts->target_name;
 
     s_ctx             = &ctx;
-    cc_run_at(vm, (Pc)fn->code_addr, 0, NULL);
+    cc_run_at(vm, (Pc)obj_fn(fn)->code_addr, 0, NULL);
     long long ret = vm->regs[REG_A0];
     s_ctx         = NULL;
 

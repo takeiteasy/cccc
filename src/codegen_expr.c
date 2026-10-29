@@ -2457,7 +2457,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // --test-run: a cccc_launch thunk call becomes a call to the VM
             // launcher with the thunk's address and this frame as its env.
             if (node->lhs->kind == ND_VAR && node->lhs->var->is_kernel_thunk &&
-                node->lhs->var->kernel_vm_launch) {
+                obj_attr(node->lhs->var)->kernel_vm_launch) {
                 Token *tok   = node->tok;
                 Obj   *thunk = node->lhs->var;
                 Node  *addr =
@@ -2468,8 +2468,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 env->next  = node->args;
                 Node *call = new_unary(
                     vm, ND_FUNCALL,
-                    new_var_node(vm, thunk->kernel_vm_launch, tok), tok);
-                call->func_ty = thunk->kernel_vm_launch->ty;
+                    new_var_node(vm, obj_attr(thunk)->kernel_vm_launch, tok), tok);
+                call->func_ty = obj_attr(thunk)->kernel_vm_launch->ty;
                 call->ty      = ty_void;
                 call->args    = addr;
                 add_type(vm, addr);
@@ -3316,7 +3316,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // The static link is the callee's parent's frame pointer
             if (calling_nested) {
                 Obj *callee        = node->lhs->var;
-                Obj *callee_parent = callee->parent_fn;
+                Obj *callee_parent = obj_fn(callee)->parent_fn;
                 Obj *current_fn    = vm->compiler.current_fn;
 
                 // Determine the static link value based on relationship
@@ -3340,8 +3340,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                         // shifts every frame's __static_link one slot lower
                         // (static_link_hop_bytes, src/codegen_addr.c).
                         int hop = static_link_hop_bytes(vm);
-                        for (Obj *fn = current_fn->parent_fn;
-                             fn && fn != callee_parent; fn = fn->parent_fn) {
+                        for (Obj *fn = obj_fn(current_fn)->parent_fn;
+                             fn && fn != callee_parent; fn = obj_fn(fn)->parent_fn) {
                             // #1081 residual (tracked separately, not fixed
                             // here): this hop reads `fn`'s own __static_link
                             // slot expecting the next ancestor's bp -- true
@@ -4034,7 +4034,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // Mirrors gen_addr's identical ND_VAR case (codegen_addr.c) via
                 // the shared emit_static_chain_var_addr.
                 Obj *outer_owner = (enc_cap_idx < 0 && cap->is_local && enc_fn)
-                                       ? belongs_to_outer_function(enc_fn, cap)
+                                       ? belongs_to_outer_function(vm, enc_fn, cap)
                                        : NULL;
                 bool wide_copy   = !cap->is_block_var &&
                                    cap->ty->kind != TY_VLA &&

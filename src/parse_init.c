@@ -214,10 +214,10 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 var->display_name    = get_ident(vm, name_tok);
                 var->is_local_symbol = true;
                 var->is_tls          = attr->is_tls;
-                var->static_owner    = vm->compiler.current_fn;
+                obj_fn_mut(vm, var)->static_owner    = vm->compiler.current_fn;
                 var->is_maybe_unused = ty->is_maybe_unused;
                 var->is_deprecated   = ty->is_deprecated;
-                var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
+                obj_set_deprecated_msg(vm, var, type_attrs(ty)->deprecated_msg);
                 push_scope(vm, get_ident(vm, name_tok), name_tok->len)->var =
                     var;
                 Token *tmp = eq_tok;
@@ -234,7 +234,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 var->is_block_var = true;
             claim_cleanup(vm, var, attr);
             Node *marker = NULL;
-            if (var->cleanup_fn)
+            if (obj_attr(var)->cleanup_fn)
                 marker = cur = cur->next = new_cleanup_decl(vm, var, name_tok);
 
             vm->compiler.initializing_var = var;
@@ -243,7 +243,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             Node *asgn = new_binary(vm, ND_ASSIGN, lhs, init_expr, name_tok);
             add_type(vm, asgn);
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, asgn, name_tok);
-            if (var->cleanup_fn)
+            if (obj_attr(var)->cleanup_fn)
                 cleanup_open_after(vm, var, marker, cur);
             continue;
         }
@@ -258,11 +258,11 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->display_name    = get_ident(vm, ty->name);
             var->is_local_symbol = true;
             var->is_tls          = attr->is_tls;
-            var->static_owner    = vm->compiler.current_fn;
+            obj_fn_mut(vm, var)->static_owner    = vm->compiler.current_fn;
             var->is_constexpr    = attr->is_constexpr;
             var->is_maybe_unused = ty->is_maybe_unused;
             var->is_deprecated   = ty->is_deprecated;
-            var->deprecated_msg  = type_attrs(ty)->deprecated_msg;
+            obj_set_deprecated_msg(vm, var, type_attrs(ty)->deprecated_msg);
             push_scope(vm, get_ident(vm, ty->name), ty->name->len)->var = var;
             if (var->checked_kind != CHECKED_NONE)
                 resolve_checked_bounds(vm, var);
@@ -298,7 +298,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok_local);
             Node *alloca_stmt = cur;
-            if (var->cleanup_fn)
+            if (obj_attr(var)->cleanup_fn)
                 cleanup_open_after(vm, var, NULL, cur);
 
             // Handle VLA initialization if present
@@ -339,7 +339,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                         new_binary(vm, ND_COMMA, zero, init_node, tok_local);
                     cur = cur->next =
                         new_unary(vm, ND_EXPR_STMT, comma, tok_local);
-                    if (var->cleanup_fn)
+                    if (obj_attr(var)->cleanup_fn)
                         cleanup_open_after(vm, var, alloca_stmt, cur);
                 }
             }
@@ -363,7 +363,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             var->is_block_var = true;
         claim_cleanup(vm, var, attr);
         Node *marker = NULL;
-        if (var->cleanup_fn)
+        if (obj_attr(var)->cleanup_fn)
             marker = cur = cur->next = new_cleanup_decl(vm, var, ty->name);
         // Resolve checked-pointer bounds (#770/#483) now that this local is
         // itself in scope, so a bound may reference any prior sibling local.
@@ -408,9 +408,9 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // using ND_VLA_PTR + alloca()), so type_contains_vla only
             // matches a pointer/array chain whose base is a VLA.
             if (type_contains_vla(var->ty))
-                var->deferred_vla_ptr_init = expr;
+                obj_size_mut(vm, var)->deferred_vla_ptr_init = expr;
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
-            if (var->cleanup_fn)
+            if (obj_attr(var)->cleanup_fn)
                 cleanup_open_after(vm, var, marker, cur);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
@@ -429,13 +429,13 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 int  base_offset;
                 if (objsize_alloc_from_call(vm, expr->rhs, &alloc_size)) {
                     var->objsize_has_alloc   = true;
-                    var->objsize_alloc       = alloc_size;
-                    var->objsize_init_assign = expr;
-                    var->objsize_decl_fn     = vm->compiler.current_fn;
+                    obj_size_mut(vm, var)->objsize_alloc       = alloc_size;
+                    obj_size_mut(vm, var)->objsize_init_assign = expr;
+                    obj_size_mut(vm, var)->objsize_decl_fn     = vm->compiler.current_fn;
                 } else if (objsize_peel_offset_chain(vm, expr->rhs, &base,
                                                      &base_offset) &&
                            ((base->objsize_has_alloc &&
-                             base->objsize_decl_fn ==
+                             obj_size(base)->objsize_decl_fn ==
                                  vm->compiler.current_fn) ||
                             (base->ty && base->ty->kind == TY_ARRAY &&
                              base->ty->size > 0))) {
@@ -462,10 +462,10 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                     // decays array parameters to TY_PTR at declaration, so
                     // `base->ty->kind` is never TY_ARRAY for one.
                     var->objsize_has_alloc      = true;
-                    var->objsize_derived_from   = base;
-                    var->objsize_derived_offset = base_offset;
-                    var->objsize_init_assign    = expr;
-                    var->objsize_decl_fn        = vm->compiler.current_fn;
+                    obj_size_mut(vm, var)->objsize_derived_from   = base;
+                    obj_size_mut(vm, var)->objsize_derived_offset = base_offset;
+                    obj_size_mut(vm, var)->objsize_init_assign    = expr;
+                    obj_size_mut(vm, var)->objsize_decl_fn        = vm->compiler.current_fn;
                 }
             }
 
@@ -479,7 +479,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             // (not the ND_COMMA-wrapped aggregate-initializer shape) counts.
             if (var->checked_prop_candidate && expr->kind == ND_ASSIGN &&
                 expr->lhs->kind == ND_VAR && expr->lhs->var == var)
-                var->checked_prop_init_assign = expr;
+                obj_chk_mut(vm, var)->checked_prop_init_assign = expr;
         } else if (var->is_constexpr) {
             error_tok(vm, ty->name, "constexpr object requires an initializer");
         }
@@ -1273,9 +1273,9 @@ static void validate_constexpr_initializer(VirtualMachine *vm, Obj *var,
     if (!initializer_is_constexpr(vm, init, var->ty))
         error_tok(vm, tok,
                   "constexpr initializer is not a constant expression");
-    var->constexpr_init = init;
+    obj_init_mut(vm, var)->constexpr_init = init;
     if (init && init->expr)
-        var->init_expr = init->expr;
+        obj_init_mut(vm, var)->init_expr = init->expr;
 }
 
 static Node *init_desg_expr(VirtualMachine *vm, InitDesg *desg, Token *tok) {
@@ -1684,7 +1684,7 @@ static void restore_checked_array(VirtualMachine *vm, Obj *var) {
                   "the last element is reserved for the null-terminator slot");
     Type *ty                = copy_type(vm, var->ty);
     ty->checked_kind        = var->checked_kind;
-    type_chk_mut(vm, ty)->form = var->checked_bounds_form;
+    type_chk_mut(vm, ty)->form = obj_chk(var)->checked_bounds_form;
     type_chk_mut(vm, ty)->checked_array_extent =
         var->checked_kind == CHECKED_NTARRAY ? ty->array_len - 1
                                              : ty->array_len;
@@ -1791,7 +1791,7 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
         Node *src = init->expr;
         if (src->kind == ND_VAR && src->var && src->var->is_compound_literal) {
             memcpy(buf + offset, src->var->init_data, ty->size);
-            for (Relocation *r = src->var->rel; r; r = r->next) {
+            for (Relocation *r = obj_init(src->var)->rel; r; r = r->next) {
                 Relocation *nr =
                     arena_alloc(&vm->compiler.parser_arena, sizeof(Relocation));
                 memset(nr, 0, sizeof(Relocation));
@@ -2012,7 +2012,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
         // Temporarily borrow constexpr_init (unused for non-constexpr vars) to
         // store the pending Initializer tree. constexpr_init_for_node() guards
         // on is_constexpr before reading this field, so there is no conflict.
-        var->constexpr_init         = init;
+        obj_init_mut(vm, var)->constexpr_init         = init;
         var->has_pending_macro_init = true;
         return;
     }
@@ -2022,7 +2022,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     memset(buf, 0, var->ty->size);
     write_gvar_data(vm, &head, init, var->ty, buf, 0);
     var->init_data = buf;
-    var->rel       = head.next;
+    obj_set_rel(vm, var, head.next);
     check_static_checked_init(vm, var, init);
 }
 
@@ -2036,7 +2036,7 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog) {
     for (Obj *var = prog; var; var = var->next) {
         if (!var->has_pending_macro_init)
             continue;
-        Initializer *init = (Initializer *)var->constexpr_init;
+        Initializer *init = (Initializer *)obj_init(var)->constexpr_init;
         // Expand macro calls in the scalar initializer expression.
         if (init->expr)
             init->expr = cc_eager_expand_macro_call(vm, init->expr);
@@ -2046,11 +2046,12 @@ void cc_finalize_macro_gvar_inits(VirtualMachine *vm, Obj *prog) {
         memset(buf, 0, var->ty->size);
         write_gvar_data(vm, &head, init, var->ty, buf, 0);
         var->init_data = buf;
-        var->rel       = head.next;
+        obj_set_rel(vm, var, head.next);
         check_static_checked_init(vm, var, init);
         // Clear the temporary storage.
         var->has_pending_macro_init = false;
-        var->constexpr_init         = NULL;
+        if (obj_init(var)->constexpr_init)
+            obj_init_mut(vm, var)->constexpr_init = NULL;
     }
 }
 
