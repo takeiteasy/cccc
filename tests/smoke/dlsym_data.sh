@@ -56,6 +56,17 @@ expect_fail "$CCCC" --run -L . -l data missing.c
 grep -q "unresolved dynamic library symbol 'absent_symbol'" err.txt ||
     fail "missing symbol not reported"
 
+# A library that links nothing resolves none of the program's names (a macOS
+# dylib always links libSystem, so only the other platforms can build one).
+if [ "$ext" = so ]; then
+    echo 'int bare_marker = 1;' >bare.c
+    "$cc" -shared -fPIC -nostdlib -o libbare.so bare.c ||
+        fail "cannot build the bare test library"
+    expect_fail "$CCCC" --run -L . -l bare missing.c
+    grep -q "unresolved dynamic library symbol 'absent_symbol'" err.txt ||
+        fail "missing symbol not reported from a library that resolves nothing"
+fi
+
 cat >functions_only.c <<'C'
 extern int libget(void);
 extern int unreferenced_extern;

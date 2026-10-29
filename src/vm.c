@@ -2536,6 +2536,29 @@ int cc_dlopen(VirtualMachine *vm, const char *lib_path) {
         }
     }
 
+    // A library that resolves nothing is wrong unless the program still has
+    // externs to resolve: those are reported by name once every library has
+    // loaded.
+    bool externs_pending = false;
+    for (int i = 0; i < vm->compiler.ffi_count; i++) {
+        const ForeignFunc *ff  = &vm->compiler.ffi_table[i];
+        externs_pending       |= ff->is_dynamic_placeholder &&
+                                 (!ff->func_ptr || ff->func_ptr == (void *)1);
+    }
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        const HostData *hd  = &vm->compiler.cdata_table[i];
+        externs_pending    |= hd->placeholder && hd->referenced && !hd->addr;
+    }
+    if (success_count == 0 && total_count > 0 && externs_pending) {
+#ifdef _WIN32
+        if (lib_path)
+            FreeLibrary(handle);
+#else
+        if (lib_path)
+            dlclose(handle);
+#endif
+        return 0;
+    }
     if (success_count == 0 && total_count > 0) {
         fprintf(stderr, "error: no FFI functions could be resolved\n");
 #ifdef _WIN32
