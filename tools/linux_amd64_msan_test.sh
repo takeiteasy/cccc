@@ -4,9 +4,8 @@
 # Build cccc-msan and run the suites against it inside the Linux amd64
 # Colima container, using `./cccc --build build.c --build-target=test_msan`.
 #
-# NOTE: host (libffi) call results are unpoisoned in ops.c; bytes a host
-# function writes through a pointer argument are not, so a suite may still
-# report. See docs/test-infrastructure.md.
+# NOTE: host (libffi) results and out-parameters are unpoisoned in ops.c;
+# see docs/test-infrastructure.md.
 set -e
 
 PROFILE="${1:-cccc-linux-amd64}"

@@ -48,12 +48,11 @@ builds its own fresh copy, so `make` is not required first. See
 Each suite is its own build target, so `--build-jobs=8` parallelises across
 suites and `--build-keep-going` reports every failing suite in one run.
 
-`test_msan` marks every value returned by a host (libffi) call as initialised,
-because the host libc and libffi are not MSan-instrumented. Bytes a host
-function writes through a pointer argument are not marked, so a suite that
-reads them back can still report. In a container, run with
-`--security-opt seccomp=unconfined`; MSan otherwise aborts at start-up on
-`personality(ADDR_NO_RANDOMIZE)`.
+`test_msan` marks host-call results, the bytes a host function writes through
+its pointer arguments and the host allocations it returns as initialised,
+because the host libc and libffi are not MSan-instrumented. In a container,
+run with `--security-opt seccomp=unconfined`; MSan otherwise aborts at
+start-up on `personality(ADDR_NO_RANDOMIZE)`.
 
 A suite's leading comment takes two optional lines (full table in
 [testing.md](testing-suites.md#test-file-header-directives)):

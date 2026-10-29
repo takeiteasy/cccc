@@ -6272,9 +6272,46 @@ static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,
 
 #if defined(__has_feature)
 #if __has_feature(memory_sanitizer)
+#include <sanitizer/allocator_interface.h>
 #include <sanitizer/msan_interface.h>
+#define CCCC_MSAN 1
 #define CCCC_FFI_RESULT_INITIALISED(r) __msan_unpoison(&(r), sizeof(r))
+static void ffi_msan_unpoison_block(void *p, int depth) {
+    if (!p || !__sanitizer_get_ownership(p))
+        return;
+    size_t n = __sanitizer_get_allocated_size(p);
+    __msan_unpoison(p, n);
+    if (depth <= 0)
+        return;
+    void **words = (void **)p;
+    for (size_t i = 0; i < n / sizeof(void *); i++)
+        ffi_msan_unpoison_block(words[i], depth - 1);
+}
+// A returned host allocation and the host allocations it points to
+// (if_nameindex entries, fts_read's path buffer).
+static inline void ffi_msan_unpoison_pointee(long long result) {
+    ffi_msan_unpoison_block((void *)result, 1);
+}
+static void ffi_msan_unpoison_written(VirtualMachine *vm, const char *name,
+                                      const long long *args, int actual_nargs,
+                                      uint64_t double_arg_mask,
+                                      uint64_t float_arg_mask);
 #endif
+#endif
+
+// Host pointers handed to a guest callback (qsort and fts comparators) point
+// into host allocations the host library filled.
+void cccc_msan_unpoison_callback_args(const long long *args, int nargs) {
+#ifdef CCCC_MSAN
+    for (int i = 0; i < nargs; i++)
+        ffi_msan_unpoison_block((void *)args[i], 2);
+#else
+    (void)args;
+    (void)nargs;
+#endif
+}
+#ifndef CCCC_MSAN
+#define ffi_msan_unpoison_pointee(r) ((void)0)
 #endif
 #ifndef CCCC_FFI_RESULT_INITIALISED
 #define CCCC_FFI_RESULT_INITIALISED(r) ((void)0)
@@ -6391,6 +6428,7 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         long long result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
         CCCC_FFI_RESULT_INITIALISED(result);
+        ffi_msan_unpoison_pointee(result);
         const CcBuiltin *builtin = find_compiler_builtin(func_ptr);
         if (builtin && builtin->ret != CC_RET_HANDLE && result)
             result = (long long)copy_builtin_result_to_vm(vm, builtin->ret,
@@ -6409,6 +6447,10 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
         vm->regs[REG_A0] = result;
     }
 
+#ifdef CCCC_MSAN
+    ffi_msan_unpoison_written(vm, name, args, actual_nargs, double_arg_mask,
+                              float_arg_mask);
+#endif
     if (__builtin_expect(vm->comptime_depth != 0, 0))
         cccc_host_native_leave();
     cccc_tls_ffi_vm = saved_ffi_vm;
@@ -6680,7 +6722,8 @@ static bool fmt_may_write_via_percent_n(VirtualMachine *vm, const char *fmt) {
 // that resolve to no tracked allocation -- those still get no clear, same
 // as before #914.
 static bool ffi_shadow_clear_extent(VirtualMachine *vm, long long ptr,
-                                    void **out_base, size_t *out_len) {
+                                    void **out_base, size_t *out_len,
+                                    bool include_stack) {
     size_t       off;
     AllocHeader *header = heap_alloc_for_ptr(vm, ptr, &off);
     if (header) {
@@ -6695,6 +6738,15 @@ static bool ffi_shadow_clear_extent(VirtualMachine *vm, long long ptr,
         *out_len  = (size_t)(vm->data_ptr - (char *)ptr);
         return true;
     }
+    // TODO(#1873): a stack object has no recoverable extent; the MSan
+    // unpoisoning takes a fixed window.
+    if (include_stack && (char *)ptr >= (char *)vm->sp &&
+        (char *)ptr < (char *)vm->initial_bp) {
+        size_t window = (size_t)((char *)vm->initial_bp - (char *)ptr);
+        *out_base     = (void *)ptr;
+        *out_len      = window < 4096 ? window : 4096;
+        return true;
+    }
     return false;
 }
 
@@ -6703,14 +6755,14 @@ static bool ffi_shadow_clear_extent(VirtualMachine *vm, long long ptr,
 // unclassified/unshimmed host function reached through a function pointer
 // or dlsym'd symbol could leave a stale shadow stamp with no clear at all).
 // See ffi_shadow_classify above for the per-name classification this drives.
-static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
-                                const long long *args, int actual_nargs,
-                                uint64_t double_arg_mask,
-                                uint64_t float_arg_mask) {
-    if (!(vm->flags & CCCC_TYPE_CHECKS) ||
-        !(vm->heap_shadow.pages || vm->data_shadow.pages))
-        return;
+typedef void (*FfiWrittenFn)(VirtualMachine *vm, void *ptr, size_t len);
 
+// Calls fn on every guest range the host call `name` may write through.
+static void ffi_for_written_ranges(VirtualMachine *vm, const char *name,
+                                   const long long *args, int actual_nargs,
+                                   uint64_t double_arg_mask,
+                                   uint64_t float_arg_mask, FfiWrittenFn fn,
+                                   bool include_stack) {
     const FfiShadowRule *rule = ffi_shadow_classify(name);
     FfiShadowClass       cls  = rule ? rule->class_ : FFI_SHADOW_DEFAULT;
 
@@ -6763,13 +6815,14 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
                 }
                 void  *base;
                 size_t obj_len;
-                if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len)) {
+                if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len,
+                                        include_stack)) {
                     size_t off       = (size_t)((char *)args[i] - (char *)base);
                     size_t remaining = obj_len - off;
                     if (len > remaining)
                         len = remaining; // a short/clamped read cleared a
                                          // superset: still sound
-                    type_shadow_clear(vm, (void *)args[i], len);
+                    fn(vm, (void *)args[i], len);
                 }
                 continue;
             }
@@ -6791,10 +6844,45 @@ static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
         // (ffi_shadow_clear_extent, #914).
         void  *base;
         size_t obj_len;
-        if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len))
-            type_shadow_clear(vm, base, obj_len);
+        if (ffi_shadow_clear_extent(vm, args[i], &base, &obj_len,
+                                        include_stack))
+            fn(vm, base, obj_len);
     }
 }
+
+static void ffi_shadow_clear_range(VirtualMachine *vm, void *ptr, size_t len) {
+    type_shadow_clear(vm, ptr, len);
+}
+
+static void ffi_shadow_backstop(VirtualMachine *vm, const char *name,
+                                const long long *args, int actual_nargs,
+                                uint64_t double_arg_mask,
+                                uint64_t float_arg_mask) {
+    if (!(vm->flags & CCCC_TYPE_CHECKS) ||
+        !(vm->heap_shadow.pages || vm->data_shadow.pages))
+        return;
+    ffi_for_written_ranges(vm, name, args, actual_nargs, double_arg_mask,
+                           float_arg_mask, ffi_shadow_clear_range, false);
+}
+
+#ifdef CCCC_MSAN
+static void ffi_msan_unpoison_range(VirtualMachine *vm, void *ptr, size_t len) {
+    (void)vm;
+    __msan_unpoison(ptr, len);
+}
+
+static void ffi_msan_unpoison_written(VirtualMachine *vm, const char *name,
+                                      const long long *args, int actual_nargs,
+                                      uint64_t double_arg_mask,
+                                      uint64_t float_arg_mask) {
+    ffi_for_written_ranges(vm, name, args, actual_nargs, double_arg_mask,
+                           float_arg_mask, ffi_msan_unpoison_range, true);
+    // A host handle (FTS *, DIR *) the call may refill with its own allocations.
+    for (int i = 0; i < actual_nargs && i < 64; i++)
+        if (!((float_arg_mask | double_arg_mask) & (1ULL << i)))
+            ffi_msan_unpoison_block((void *)args[i], 1);
+}
+#endif
 
 static inline int op_CALLF_fn(VirtualMachine *vm) {
     // Foreign function call using register-based calling convention

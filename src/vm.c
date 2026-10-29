@@ -2835,6 +2835,8 @@ int cccc_call_guest_callback_ex(VirtualMachine *vm, long long fn_value,
         return 0;
     }
 
+    cccc_msan_unpoison_callback_args(args, nargs);
+
     Pc entry = cc_byte_offset_to_pc(fn_value);
     if (entry == CCCC_INVALID_PC || entry > vm->text_ptr)
         return -1;

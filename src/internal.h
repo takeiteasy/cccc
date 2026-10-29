@@ -1109,6 +1109,7 @@ int cccc_thread_held_lock_count(VirtualMachine *vm);
 // Returns 0 on success, -1 if fn_value doesn't resolve to a callable target
 // or if the nested vm_eval reports an error (e.g. the guest callback itself
 // faulted).
+void cccc_msan_unpoison_callback_args(const long long *args, int nargs);
 int cccc_call_guest_callback(VirtualMachine *vm, long long fn_value,
                              const long long *args, int nargs,
                              long long *out_ival);
