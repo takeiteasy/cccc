@@ -21,17 +21,17 @@ Median wall-clock milliseconds, lower is better. `cccc` is the VM (source to byt
 
 | Benchmark | `cccc` | `gcc-O0` | `gcc-O1` | `gcc-O2` | `gcc-O3` |
 |---|---|---|---|---|---|
-| ackermann | 572.2 | 16.1 | 14.9 | 3.7 | 8.8 |
-| binary_tree | 762.7 | 19.1 | 17.5 | 17.8 | 16.4 |
-| fib | 510.1 | 8.4 | 12.1 | 10.0 | 10.1 |
-| mandelbrot | 2853.3 | 60.8 | 27.9 | 27.7 | 26.2 |
-| matrix_mul | 2322.4 | 19.8 | 8.0 | 9.0 | 7.5 |
-| nqueens | 538.9 | 12.9 | 7.6 | 9.4 | 13.2 |
-| quicksort | 908.7 | 16.9 | 10.4 | 12.4 | 12.3 |
-| sieve | 3439.1 | 33.4 | 21.2 | 18.8 | 17.6 |
-| **Geometric mean** | **1120.5** | **19.7** | **13.6** | **11.7** | **13.0** |
+| ackermann | 576.3 | 18.4 | 13.7 | 3.8 | 6.7 |
+| binary_tree | 767.7 | 20.0 | 18.5 | 18.4 | 16.4 |
+| fib | 518.1 | 6.6 | 6.9 | 4.6 | 6.5 |
+| mandelbrot | 2682.5 | 61.7 | 29.5 | 28.2 | 26.6 |
+| matrix_mul | 2096.5 | 22.6 | 5.6 | 4.7 | 5.2 |
+| nqueens | 533.4 | 8.7 | 5.6 | 9.3 | 7.1 |
+| quicksort | 830.2 | 14.2 | 8.5 | 9.5 | 9.6 |
+| sieve | 3111.9 | 34.1 | 22.7 | 19.2 | 19.6 |
+| **Geometric mean** | **1074.5** | **18.6** | **11.5** | **9.6** | **10.4** |
 
-The VM is roughly 43x to 258x slower than `gcc -O2`, worst on tight double-precision loops such as `matrix_mul`. Loop-heavy programs gain most from keeping loop locals in registers and from the per-function clean-up; recursion-heavy ones (`ackermann`, `fib`, `binary_tree`) gain least. `-c=native` hands the program to a host compiler and runs at native speed.
+The VM is roughly 42x to 446x slower than `gcc -O2`, worst on tight double-precision loops such as `matrix_mul`. Loop-heavy programs gain most from keeping loop locals in registers, from using those registers directly as instruction operands and from the per-function clean-up; recursion-heavy ones (`ackermann`, `fib`, `binary_tree`) gain least. `-c=native` hands the program to a host compiler and runs at native speed.
 
 ## Reproducing
 

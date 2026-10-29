@@ -1369,7 +1369,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 free_temp_reg(r_lhs);
             } else {
                 // Narrow integer operations (scalar _BitInt or plain int)
-                gen_expr(vm, node->lhs, dest_reg); // LHS goes directly to dest
+                // A promoted LHS is read from its register by the final
+                // instruction, unless the RHS may store to it first.
+                int r_lhs_prom = -1;
+                if (!may_store_to_variable(node->rhs))
+                    r_lhs_prom = promoted_operand_reg(vm, node->lhs);
+                if (r_lhs_prom < 0)
+                    gen_expr(vm, node->lhs,
+                             dest_reg); // LHS goes directly to dest
 
                 // LHS might contain a function call which resets temp regs.
                 // Re-mark dest_reg as used so r_rhs allocation doesn't clobber
@@ -1385,7 +1392,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // rhs_has_call case (PSH3 protects the LHS across any call
                 // inside the RHS).
                 int r_lhs_op, r_rhs_op, r_free;
-                if (temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD) {
+                if (r_lhs_prom < 0 &&
+                    temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD) {
                     emit_psh3(vm, dest_reg); // save LHS
                     gen_expr(vm, node->rhs,
                              dest_reg);      // RHS reuses dest; pool free
@@ -1394,17 +1402,22 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     r_lhs_op = r_free;
                     r_rhs_op = dest_reg;
                 } else {
-                    int r_rhs = alloc_temp_reg();
-                    if (rhs_has_call) {
-                        // Save LHS to stack before function call in RHS
-                        emit_psh3(vm, dest_reg);
-                        gen_expr(vm, node->rhs, r_rhs);
-                        // Restore saved LHS from stack
-                        emit_pop3(vm, dest_reg);
-                    } else {
-                        gen_expr(vm, node->rhs, r_rhs);
+                    int r_rhs = -1;
+                    if (!rhs_has_call)
+                        r_rhs = promoted_operand_reg(vm, node->rhs);
+                    if (r_rhs < 0) {
+                        r_rhs = alloc_temp_reg();
+                        if (rhs_has_call && r_lhs_prom < 0) {
+                            // Save LHS to stack before function call in RHS
+                            emit_psh3(vm, dest_reg);
+                            gen_expr(vm, node->rhs, r_rhs);
+                            // Restore saved LHS from stack
+                            emit_pop3(vm, dest_reg);
+                        } else {
+                            gen_expr(vm, node->rhs, r_rhs);
+                        }
                     }
-                    r_lhs_op = dest_reg;
+                    r_lhs_op = r_lhs_prom >= 0 ? r_lhs_prom : dest_reg;
                     r_rhs_op = r_rhs;
                     r_free   = r_rhs;
                 }

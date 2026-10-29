@@ -1303,14 +1303,23 @@ bool gen_indexed_regs(VirtualMachine *vm, Node *deref, IndexedRegs *out) {
     if (temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD + 2 ||
         !match_indexed_addr(vm, deref, &a))
         return false;
-    int r_base = alloc_temp_reg();
-    if (a.base_is_addr)
-        gen_addr(vm, a.base, r_base);
-    else
-        gen_expr(vm, a.base, r_base);
-    mark_temp_reg_used(r_base);
+    // A promoted base or index is read from its register: the access only
+    // reads it, and it is already extended.
+    int r_base = -1;
+    if (!a.base_is_addr && !(a.index && may_store_to_variable(a.index)))
+        r_base = promoted_operand_reg(vm, a.base);
+    if (r_base < 0) {
+        r_base = alloc_temp_reg();
+        if (a.base_is_addr)
+            gen_addr(vm, a.base, r_base);
+        else
+            gen_expr(vm, a.base, r_base);
+        mark_temp_reg_used(r_base);
+    }
     int r_index = REG_ZERO;
-    if (a.index) {
+    if (a.index && (r_index = promoted_operand_reg(vm, a.index)) >= 0) {
+        // nothing to evaluate
+    } else if (a.index) {
         r_index = alloc_temp_reg();
         gen_expr(vm, a.index, r_index);
         // An unsigned index narrower than 64 bits can carry garbage in its
@@ -1383,23 +1392,47 @@ static bool gen_muladd_int(VirtualMachine *vm, Node *add, int dest_reg) {
         x      = strip_ptr_casts(x);
     }
 
+    // Promoted operands are read from their registers unless an operand may
+    // store to a variable before the instruction reads it.
+    bool direct = !may_store_to_variable(addend) && !may_store_to_variable(x) &&
+                  !may_store_to_variable(y);
+    int  p_add  = direct ? promoted_operand_reg(vm, addend) : -1;
+    int  p_x    = direct ? promoted_operand_reg(vm, x) : -1;
+    int  p_y    = direct && y ? promoted_operand_reg(vm, y) : -1;
+
     int r_x = -1, r_y = -1, r_add = dest_reg;
     if (mul_r) {
-        gen_expr(vm, addend, dest_reg);
-        mark_temp_reg_used(dest_reg);
+        if (p_add >= 0) {
+            r_add = p_add;
+        } else {
+            gen_expr(vm, addend, dest_reg);
+            mark_temp_reg_used(dest_reg);
+        }
     }
-    r_x = mul_r ? alloc_temp_reg() : dest_reg;
-    gen_expr(vm, x, r_x);
-    mark_temp_reg_used(r_x);
+    if (p_x >= 0) {
+        r_x = p_x;
+    } else {
+        r_x = mul_r ? alloc_temp_reg() : dest_reg;
+        gen_expr(vm, x, r_x);
+        mark_temp_reg_used(r_x);
+    }
     if (y) {
-        r_y = alloc_temp_reg();
-        gen_expr(vm, y, r_y);
-        mark_temp_reg_used(r_y);
+        if (p_y >= 0) {
+            r_y = p_y;
+        } else {
+            r_y = alloc_temp_reg();
+            gen_expr(vm, y, r_y);
+            mark_temp_reg_used(r_y);
+        }
     }
     if (!mul_r) {
-        r_add = alloc_temp_reg();
-        gen_expr(vm, addend, r_add);
-        mark_temp_reg_used(r_add);
+        if (p_add >= 0) {
+            r_add = p_add;
+        } else {
+            r_add = alloc_temp_reg();
+            gen_expr(vm, addend, r_add);
+            mark_temp_reg_used(r_add);
+        }
     }
     if (y)
         emit_rrrr_op(vm, MULADD3, dest_reg, r_add, r_x, r_y);
@@ -1456,23 +1489,44 @@ static bool gen_muladd_float(VirtualMachine *vm, Node *node, int dest_reg) {
     else
         op = f32 ? FMSUB3_F32 : FMSUB3;   // a*b - c
 
+    bool direct = !may_store_to_variable(addend) &&
+                  !may_store_to_variable(mul->lhs) &&
+                  !may_store_to_variable(mul->rhs);
+    int  p_add  = direct ? promoted_operand_reg(vm, addend) : -1;
+    int  p_a    = direct ? promoted_operand_reg(vm, mul->lhs) : -1;
+    int  p_b    = direct ? promoted_operand_reg(vm, mul->rhs) : -1;
+
     int r_add = dest_reg, r_a, r_b;
     if (mul_is_rhs) {
-        gen_expr(vm, addend, dest_reg);
-        mark_temp_reg_used(dest_reg);
-        r_a = alloc_temp_reg();
+        if (p_add >= 0) {
+            r_add = p_add;
+        } else {
+            gen_expr(vm, addend, dest_reg);
+            mark_temp_reg_used(dest_reg);
+        }
+        r_a = p_a >= 0 ? p_a : alloc_temp_reg();
     } else {
-        r_a = dest_reg;
+        r_a = p_a >= 0 ? p_a : dest_reg;
     }
-    gen_expr(vm, mul->lhs, r_a);
-    mark_temp_reg_used(r_a);
-    r_b = alloc_temp_reg();
-    gen_expr(vm, mul->rhs, r_b);
-    mark_temp_reg_used(r_b);
+    if (p_a < 0) {
+        gen_expr(vm, mul->lhs, r_a);
+        mark_temp_reg_used(r_a);
+    }
+    if (p_b >= 0) {
+        r_b = p_b;
+    } else {
+        r_b = alloc_temp_reg();
+        gen_expr(vm, mul->rhs, r_b);
+        mark_temp_reg_used(r_b);
+    }
     if (!mul_is_rhs) {
-        r_add = alloc_temp_reg();
-        gen_expr(vm, addend, r_add);
-        mark_temp_reg_used(r_add);
+        if (p_add >= 0) {
+            r_add = p_add;
+        } else {
+            r_add = alloc_temp_reg();
+            gen_expr(vm, addend, r_add);
+            mark_temp_reg_used(r_add);
+        }
     }
     emit_rrrr_op(vm, op, dest_reg, r_add, r_a, r_b);
     if (!mul_is_rhs)
@@ -1755,6 +1809,63 @@ void emit_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg) {
         return;
     }
     emit_fmov3(vm, dest_reg, fp_promoted_local_reg(vm, var));
+}
+
+// A cast that leaves a promoted register's value as it is: a representation
+// no-op, or a widening of an integer the register already holds extended.
+static bool cast_keeps_promoted_value(Type *to, Type *from) {
+    if (cast_is_repr_noop(to, from))
+        return true;
+    if (!is_integer(to) || !is_integer(from) || to->kind == TY_BOOL ||
+        to->kind == TY_BITINT || from->kind == TY_BITINT || from->size > 8)
+        return false;
+    return to->size == 8 ||
+           (from->size < to->size && (from->is_unsigned || !to->is_unsigned));
+}
+
+// The promoted register to read `n` from in an instruction that only reads
+// its operand, or -1 when `n` has to be evaluated into a temporary.
+int promoted_operand_reg(VirtualMachine *vm, Node *n) {
+    while (n && n->kind == ND_CAST && n->lhs && n->ty && n->lhs->ty &&
+           cast_keeps_promoted_value(n->ty, n->lhs->ty))
+        n = n->lhs;
+    if (!n || n->kind != ND_VAR || !n->var)
+        return -1;
+    int reg = promoted_local_reg(vm, n->var);
+    return reg >= 0 ? reg : fp_promoted_local_reg(vm, n->var);
+}
+
+// Whether evaluating `n` may store to a variable. Conservative: statement
+// expressions, asm and atomics count, and so does a tree too large to scan.
+static bool may_store_within(Node *n, int *budget) {
+    for (; n; n = n->next) {
+        if (--*budget < 0)
+            return true;
+        switch (n->kind) {
+            case ND_ASSIGN:
+            case ND_STMT_EXPR:
+            case ND_ASM:
+            case ND_CAS:
+            case ND_EXCH:
+            case ND_ASTORE:
+                return true;
+            default:
+                break;
+        }
+        if (n->body || n->init || n->inc || may_store_within(n->lhs, budget) ||
+            may_store_within(n->rhs, budget) ||
+            may_store_within(n->cond, budget) ||
+            may_store_within(n->then, budget) ||
+            may_store_within(n->els, budget) ||
+            may_store_within(n->args, budget))
+            return true;
+    }
+    return false;
+}
+
+bool may_store_to_variable(Node *n) {
+    int budget = 32;
+    return may_store_within(n, &budget);
 }
 
 void emit_promoted_write(VirtualMachine *vm, Obj *var, int value_reg) {

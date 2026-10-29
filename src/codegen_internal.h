@@ -148,6 +148,8 @@ bool is_fp_promoted_local(VirtualMachine *vm, Obj *var);
 int promoted_local_index(VirtualMachine *vm, Obj *var);
 int promoted_local_reg(VirtualMachine *vm, Obj *var);
 int fp_promoted_local_reg(VirtualMachine *vm, Obj *var);
+int promoted_operand_reg(VirtualMachine *vm, Node *n);
+bool may_store_to_variable(Node *n);
 bool cg_opt_enabled(VirtualMachine *vm);
 int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size);
 void end_local_promotion(VirtualMachine *vm);
