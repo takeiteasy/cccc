@@ -150,6 +150,7 @@ int promoted_local_reg(VirtualMachine *vm, Obj *var);
 int fp_promoted_local_reg(VirtualMachine *vm, Obj *var);
 Obj *promoted_deref_target(VirtualMachine *vm, Node *node);
 Node *promo_alias_addr(Node *assign);
+bool cg_opt_enabled(VirtualMachine *vm);
 int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size);
 void end_local_promotion(VirtualMachine *vm);
 void emit_promoted_read(VirtualMachine *vm, Obj *var, int dest_reg);
@@ -276,6 +277,18 @@ void free_indexed_regs(const IndexedRegs *ix);
 // Emits `a * b + c` / `a * K` as one fused opcode when the shape and flags
 // allow it.
 bool gen_fused_muladd(VirtualMachine *vm, Node *node, int dest_reg);
+// `x + K`, `x - K` and compares against a constant as one immediate opcode.
+bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg);
+// An integer expression of constants as one LI3.
+bool gen_folded_constant(VirtualMachine *vm, Node *node, int dest_reg);
+
+// Counts of the tables that hold text positions when a function starts, so
+// the peephole pass remaps only the entries the function added.
+typedef struct {
+    int calls, faddrs, srcs, labels;
+} PeepMark;
+PeepMark cg_peep_mark(VirtualMachine *vm);
+void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark mark);
 void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset);
 void emit_local_store(VirtualMachine *vm, Type *ty, int rd_val,
                       long long offset);

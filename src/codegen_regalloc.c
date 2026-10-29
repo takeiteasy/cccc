@@ -775,9 +775,10 @@ static bool body_calls_setjmp(Node *node) {
     return false;
 }
 
-// Promotion stays off whenever a safety check or an explicit debugger would
-// observe a local's frame slot.
-static bool promotion_enabled(VirtualMachine *vm) {
+// The always-on bytecode optimisations (promotion, immediate operands, the
+// per-function peephole pass) stay off whenever a safety check or an explicit
+// debugger would observe a local's frame slot or an instruction.
+bool cg_opt_enabled(VirtualMachine *vm) {
     if (vm->flags & CCCC_FUSION_UNSAFE_FLAGS)
         return false;
     if ((vm->flags & CCCC_ENABLE_DEBUGGER) && !vm->dbg.crash_debug_auto)
@@ -798,7 +799,7 @@ void end_local_promotion(VirtualMachine *vm) {
 // below `base_stack_size`. Returns the number of slots reserved.
 int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
     promotion_reset(vm);
-    if (!promotion_enabled(vm) || !fn->body)
+    if (!cg_opt_enabled(vm) || !fn->body)
         return 0;
     if (body_calls_setjmp(fn->body))
         return 0;

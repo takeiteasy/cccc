@@ -511,6 +511,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         return;
     }
 
+    if (gen_folded_constant(vm, node, dest_reg))
+        return;
+
     // #916: REG_ZERO (a discarded-value expression -- `*p;`, `(void)*p`,
     // a comma-operator LHS) is hardwired to 0 and discards writes. The
     // ND_DEREF/ND_MEMBER cases below use dest_reg as scratch for the address
@@ -967,6 +970,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             }
 
             if (gen_fused_muladd(vm, node, dest_reg))
+                return;
+            if (gen_imm_operand_op(vm, node, dest_reg))
                 return;
 
             // Check if RHS contains a function call - if so, we need to save
@@ -2049,6 +2054,17 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         case ND_CAST:
+            // A discarded `A++` needs only the store, not the `+ -1` that
+            // rebuilds its old value (see new_inc_dec).
+            if (dest_reg == REG_ZERO && node->is_inc_dec_result &&
+                node->lhs->kind == ND_ADD && node->lhs->lhs &&
+                cg_opt_enabled(vm)) {
+                Node *rmw = node->lhs->lhs;
+                while (rmw->kind == ND_CAST && rmw->lhs)
+                    rmw = rmw->lhs;
+                gen_expr(vm, rmw, REG_ZERO);
+                return;
+            }
             if (is_complex(node->lhs->ty)) {
                 int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
                 gen_complex_expr(vm, node->lhs, dest_reg, imag_reg);

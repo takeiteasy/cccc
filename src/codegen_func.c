@@ -134,6 +134,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
 
     // Record function address (offset from text_seg start)
     fn->code_addr = vm->text_ptr + 1;
+    PeepMark peep_mark = cg_peep_mark(vm);
 
     // Compute float parameter masks for ENT3
     unsigned int float_param_mask = 0;
@@ -362,6 +363,7 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         emit_scopeout(vm, fn_scope_id);
     emit_restore_promoted_registers(vm);
     emit(vm, LEV3);
+    cg_peep_function(vm, fn, peep_mark);
     end_local_promotion(vm);
     fn->code_end_addr = vm->text_ptr + 1;
 }

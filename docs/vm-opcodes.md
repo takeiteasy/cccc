@@ -76,6 +76,23 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `ULT3` | `rd = (rs1 <  rs2)`, unsigned 64-bit |
 | `ULE3` | `rd = (rs1 <= rs2)`, unsigned 64-bit |
 
+### Comparisons (Immediate)
+
+Same format as `ADDI3`: `[op][rd|rs1][imm64]`. Codegen emits them when one side of a comparison is an integer constant, and not under a flag in `CCCC_FUSION_UNSAFE_FLAGS`. The `G` forms are the constant on the left: `5 < x` is `SGTI3 x, 5`.
+
+| Opcode | Description |
+|--------|-------------|
+| `SEQI3` | `rd = (rs1 == imm)` |
+| `SNEI3` | `rd = (rs1 != imm)` |
+| `SLTI3` | `rd = (rs1 <  imm)`, signed |
+| `SLEI3` | `rd = (rs1 <= imm)`, signed |
+| `SGTI3` | `rd = (rs1 >  imm)`, signed |
+| `SGEI3` | `rd = (rs1 >= imm)`, signed |
+| `ULTI3` | `rd = (rs1 <  imm)`, unsigned 64-bit |
+| `ULEI3` | `rd = (rs1 <= imm)`, unsigned 64-bit |
+| `UGTI3` | `rd = (rs1 >  imm)`, unsigned 64-bit |
+| `UGEI3` | `rd = (rs1 >= imm)`, unsigned 64-bit |
+
 ### Wide _BitInt Operations (N > 64)
 
 Multi-word arithmetic and shift opcodes for `_BitInt(N)` types wider than 64 bits. All are operand-free — source and destination registers are read from the fixed argument register block (REG_A0–REG_A5):

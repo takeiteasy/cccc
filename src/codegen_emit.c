@@ -1483,6 +1483,230 @@ static bool gen_muladd_float(VirtualMachine *vm, Node *node, int dest_reg) {
     return true;
 }
 
+// Value of an integer constant (a literal behind any casts) in its own type,
+// wrapped as each cast would. Narrowing and sign changes are applied, so
+// (unsigned)-1 is 4294967295.
+static long long wrap_int_to(Type *ty, long long v) {
+    if (ty->kind == TY_BOOL)
+        return v != 0;
+    switch (ty->size) {
+        case 1:
+            return ty->is_unsigned ? (long long)(uint8_t)v : (int8_t)v;
+        case 2:
+            return ty->is_unsigned ? (long long)(uint16_t)v : (int16_t)v;
+        case 4:
+            return ty->is_unsigned ? (long long)(uint32_t)v : (int32_t)v;
+        default:
+            return v;
+    }
+}
+
+static bool int_constant(Node *node, long long *value) {
+    if (!node || !node->ty || !is_integer(node->ty) ||
+        node->ty->kind == TY_BITINT || node->ty->size > 8)
+        return false;
+    if (node->kind == ND_NUM) {
+        *value = wrap_int_to(node->ty, node->val);
+        return true;
+    }
+    long long inner;
+    if (node->kind != ND_CAST || !int_constant(node->lhs, &inner))
+        return false;
+    *value = wrap_int_to(node->ty, inner);
+    return true;
+}
+
+// The value of an integer expression made only of constants, computed as the
+// VM would. Anything that could trap or has no defined result (a zero divisor,
+// an out-of-range shift count) is left to run.
+static bool fold_int(Node *node, long long *value) {
+    if (!node || !node->ty || !is_integer(node->ty) ||
+        node->ty->kind == TY_BITINT || node->ty->size > 8)
+        return false;
+    long long a, b;
+    if (node->kind == ND_NUM)
+        return int_constant(node, value);
+    if (node->kind == ND_CAST) {
+        if (!fold_int(node->lhs, &a))
+            return false;
+        *value = wrap_int_to(node->ty, a);
+        return true;
+    }
+    if (node->kind == ND_NEG || node->kind == ND_BITNOT ||
+        node->kind == ND_NOT) {
+        if (!fold_int(node->lhs, &a))
+            return false;
+        unsigned long long ua = (unsigned long long)a;
+        *value = wrap_int_to(node->ty,
+                             node->kind == ND_NEG      ? (long long)(0 - ua)
+                             : node->kind == ND_BITNOT ? (long long)~ua
+                                                       : (long long)(a == 0));
+        return true;
+    }
+    if (!node->lhs || !node->rhs || !fold_int(node->lhs, &a) ||
+        !fold_int(node->rhs, &b))
+        return false;
+    unsigned long long ua = (unsigned long long)a, ub = (unsigned long long)b;
+    bool               uns   = node->ty->is_unsigned;
+    int                width = node->ty->size * 8;
+    long long          r;
+    switch (node->kind) {
+        case ND_ADD:
+            r = (long long)(ua + ub);
+            break;
+        case ND_SUB:
+            r = (long long)(ua - ub);
+            break;
+        case ND_MUL:
+            r = (long long)(ua * ub);
+            break;
+        case ND_BITAND:
+            r = a & b;
+            break;
+        case ND_BITOR:
+            r = a | b;
+            break;
+        case ND_BITXOR:
+            r = a ^ b;
+            break;
+        case ND_DIV:
+        case ND_MOD:
+            if (b == 0 || (!uns && b == -1))
+                return false;
+            if (uns)
+                r = (long long)(node->kind == ND_DIV ? ua / ub : ua % ub);
+            else
+                r = node->kind == ND_DIV ? a / b : a % b;
+            break;
+        case ND_SHL:
+        case ND_SHR:
+            if (b < 0 || b >= width)
+                return false;
+            if (node->kind == ND_SHL)
+                r = (long long)(ua << b);
+            else
+                r = uns ? (long long)(ua >> b) : a >> b;
+            break;
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE: {
+            Type *lt  = node->lhs->ty;
+            bool  u64 = lt->is_unsigned && lt->size == 8;
+            bool  lt_ = u64 ? ua < ub : a < b;
+            bool  eq  = a == b;
+            *value    = node->kind == ND_EQ   ? eq
+                        : node->kind == ND_NE ? !eq
+                        : node->kind == ND_LT ? lt_
+                                              : (lt_ || eq);
+            return true;
+        }
+        default:
+            return false;
+    }
+    *value = wrap_int_to(node->ty, r);
+    return true;
+}
+
+bool gen_folded_constant(VirtualMachine *vm, Node *node, int dest_reg) {
+    switch (node->kind) {
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_CAST:
+            break;
+        default:
+            return false;
+    }
+    long long v;
+    if (!cg_opt_enabled(vm) || !fold_int(node, &v))
+        return false;
+    if (dest_reg != REG_ZERO)
+        emit_li3(vm, dest_reg, v);
+    return true;
+}
+
+static bool plain_int_operands(Node *node) {
+    Type *l = node->lhs->ty, *r = node->rhs->ty;
+    return l && r && is_integer(l) && is_integer(r) && l->kind != TY_BITINT &&
+           r->kind != TY_BITINT && l->size <= 8 && r->size <= 8;
+}
+
+// `x + K`, `K + x`, `x - K` as one ADDI3, and a compare against a constant as
+// one *I3 opcode, instead of loading the constant into a register first.
+bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg) {
+    if (dest_reg == REG_ZERO || !cg_opt_enabled(vm) || !node->ty ||
+        !plain_int_operands(node))
+        return false;
+    long long k;
+    Node     *x;
+    bool      const_on_left;
+    if (int_constant(node->rhs, &k)) {
+        x             = node->lhs;
+        const_on_left = false;
+    } else if (int_constant(node->lhs, &k)) {
+        x             = node->rhs;
+        const_on_left = true;
+    } else {
+        return false;
+    }
+    if (int_constant(x, &(long long){0}))
+        return false;
+
+    int op;
+    switch (node->kind) {
+        case ND_ADD:
+        case ND_SUB:
+            if (node->ty->base || !is_integer(node->ty) ||
+                node->ty->kind == TY_BITINT || node->ty->size > 8 ||
+                (node->kind == ND_SUB && const_on_left))
+                return false;
+            gen_expr(vm, x, dest_reg);
+            emit_rri(vm, ADDI3, dest_reg, dest_reg,
+                     node->kind == ND_SUB
+                         ? (long long)(0 - (unsigned long long)k)
+                         : k);
+            emit_int32_wrap(vm, node->ty, dest_reg);
+            return true;
+        case ND_EQ:
+            op = SEQI3;
+            break;
+        case ND_NE:
+            op = SNEI3;
+            break;
+        case ND_LT:
+        case ND_LE: {
+            Type *ct  = node->lhs->ty;
+            bool  u64 = ct->is_unsigned && ct->size == 8;
+            bool  lt  = node->kind == ND_LT;
+            if (const_on_left)
+                op = lt ? (u64 ? UGTI3 : SGTI3) : (u64 ? UGEI3 : SGEI3);
+            else
+                op = lt ? (u64 ? ULTI3 : SLTI3) : (u64 ? ULEI3 : SLEI3);
+            break;
+        }
+        default:
+            return false;
+    }
+    gen_expr(vm, x, dest_reg);
+    emit_rri(vm, op, dest_reg, dest_reg, k);
+    return true;
+}
+
 bool gen_fused_muladd(VirtualMachine *vm, Node *node, int dest_reg) {
     if (dest_reg == REG_ZERO || (vm->flags & CCCC_FUSION_UNSAFE_FLAGS) ||
         temp_regs_free() <= TEMP_REG_SPILL_THRESHOLD + 3 || !node->ty ||

@@ -762,7 +762,20 @@ extern "C" {
     X(FMSUB3, 1) /* fregs[rd] = fregs[rs2]*fregs[rs3] - fregs[rs1] (f64) */          \
     X(FMSUB3_F32, 1) /* same, f32 */                                                 \
     X(FNMSUB3, 1) /* fregs[rd] = fregs[rs1] - fregs[rs2]*fregs[rs3] (f64) */         \
-    X(FNMSUB3_F32, 1) /* same, f32 */
+    X(FNMSUB3_F32, 1) /* same, f32 */                                                \
+    /* Compare against an immediate: rd = (rs1 OP imm), 0 or 1. Format as            \
+       ADDI3. SGT/SGE/UGT/UGE serve a constant on the left: `5 < x` is               \
+       SGTI3 x, 5. */                                                                \
+    X(SEQI3, 3) /* rs1 == imm */                                                     \
+    X(SNEI3, 3) /* rs1 != imm */                                                     \
+    X(SLTI3, 3) /* rs1 < imm, signed */                                              \
+    X(SLEI3, 3) /* rs1 <= imm, signed */                                             \
+    X(SGTI3, 3) /* rs1 > imm, signed */                                              \
+    X(SGEI3, 3) /* rs1 >= imm, signed */                                             \
+    X(ULTI3, 3) /* rs1 < imm, unsigned */                                            \
+    X(ULEI3, 3) /* rs1 <= imm, unsigned */                                           \
+    X(UGTI3, 3) /* rs1 > imm, unsigned */                                            \
+    X(UGEI3, 3) /* rs1 >= imm, unsigned */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;
