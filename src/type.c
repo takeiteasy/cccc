@@ -828,7 +828,8 @@ void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {
     Node *root = n;
     while (root->kind == ND_MEMBER && root->lhs)
         root = root->lhs;
-    if ((root->kind == ND_COMMA && root->is_user_comma) ||
+    if ((root->kind == ND_COMMA &&
+         (root->is_user_comma || root->is_operator_seq)) ||
         root->kind == ND_FUNCALL || root->kind == ND_CAST)
         error_tok(vm, n->tok, "%s", msg);
 }

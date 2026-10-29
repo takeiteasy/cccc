@@ -462,6 +462,15 @@ static Node *overloaded_assign(VirtualMachine *vm, Node *call, bool yield_old) {
 }
 
 static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
+    if (binary->kind == ND_COMMA && binary->is_operator_seq) {
+        // overloaded_assign evaluates the left operand itself, once.
+        Node *call  = binary->rhs;
+        Node *first = call->args;
+        Node *orig  = new_cast(vm, binary->lhs->rhs, first->ty);
+        orig->next  = first->next;
+        call->args  = orig;
+        binary      = call;
+    }
     if (binary->kind == ND_FUNCALL)
         return overloaded_assign(vm, binary, yield_old);
     add_type(vm, binary->lhs);
@@ -1708,6 +1717,27 @@ MethodEntry *find_method(VirtualMachine *vm, Type *recv, Token *name) {
     return head ? &vm->compiler.methods[head - 1] : NULL;
 }
 
+// The call fn(args[0], args[1]). When an operand has side effects, args[0] is
+// stored in a temporary first: the host compiler picks the order of call
+// arguments, but operands evaluate left to right.
+static Node *new_operator_call(VirtualMachine *vm, Obj *fn, Node **args,
+                               bool ordered, Token *tok) {
+    Node *set = NULL;
+    if (ordered) {
+        add_type(vm, args[0]);
+        Obj *tmp = new_lvar(vm, "", 0, unqualified(vm, args[0]->ty));
+        set = new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, tok), args[0],
+                         tok);
+        args[0] = new_var_node(vm, tmp, tok);
+    }
+    Node *call = new_call(vm, new_var_node(vm, fn, tok), args, 2, tok);
+    if (!ordered)
+        return call;
+    Node *seq        = new_binary(vm, ND_COMMA, set, call, tok);
+    seq->is_operator_seq = true;
+    return seq;
+}
+
 // A call to the function bound to sym for these operands, or NULL when neither
 // operand is a struct/union or none matches exactly.
 Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
@@ -1732,7 +1762,9 @@ Node *try_overloaded_op(VirtualMachine *vm, const char *sym, Node *lhs,
             e->rhs_ptr ? addr_of_operand(vm, rhs, tok) : rhs,
         };
         mark_function_referenced(vm, e->fn);
-        return new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
+        return new_operator_call(
+            vm, e->fn, args,
+            node_has_side_effects(lhs) || node_has_side_effects(rhs), tok);
     }
     return NULL;
 }
@@ -1774,7 +1806,9 @@ Node *overloaded_subscript(VirtualMachine *vm, Node *base, Node *idx,
         Node *args[2] = {e->lhs_ptr ? addr_of_operand(vm, base, tok) : base,
                          idx};
         mark_function_referenced(vm, e->fn);
-        Node *call = new_call(vm, new_var_node(vm, e->fn, tok), args, 2, tok);
+        Node *call = new_operator_call(
+            vm, e->fn, args,
+            node_has_side_effects(base) || node_has_side_effects(idx), tok);
         return new_unary(vm, ND_DEREF, call, tok);
     }
     error_tok(vm, tok, "invalid operands to []");

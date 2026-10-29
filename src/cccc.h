@@ -2633,6 +2633,10 @@ struct Node {
     // compound literal): its value is an rvalue, never an assignment target.
     bool is_user_comma;
 
+    // ND_COMMA `(t = lhs, f(t, rhs))` that fixes a bound operator's operand
+    // order: an rvalue, and the only form to_assign() unwraps.
+    bool is_operator_seq;
+
     // #1018: which <stdarg.h> macro (if any) this node is the parsed
     // __builtin_va_*() wrapper for. The node itself is always the
     // *existing* VM-ABI impl expression, parsed and returned completely

@@ -261,7 +261,8 @@ Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok) {
         root = root->lhs;
     bool is_lvalue = root->kind == ND_VAR || root->kind == ND_DEREF ||
                      root->kind == ND_VLA_PTR ||
-                     (root->kind == ND_COMMA && !root->is_user_comma);
+                     (root->kind == ND_COMMA && !root->is_user_comma &&
+                      !root->is_operator_seq);
     if (is_lvalue)
         return new_unary(vm, ND_ADDR, n, tok);
     Obj  *tmp = new_lvar(vm, "", 0, n->ty);

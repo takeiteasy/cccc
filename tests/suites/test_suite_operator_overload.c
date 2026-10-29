@@ -522,6 +522,68 @@ static int tick(int v) {
     AssertEq(!!(1 <=> 2 < 0), 1);
     AssertEq(!!(0 < 1 <=> 0), 1);
 }
+
+static int order;
+static Rank next_rank(int v) {
+    order = order * 10 + v;
+    return (Rank){v};
+}
+static Cell next_cell(int n) {
+    order = order * 10 + n;
+    return (Cell){n};
+}
+static Vec2 next_vec(int n) {
+    order = order * 10 + n;
+    return (Vec2){n, n};
+}
+static int next_int(int n) {
+    order = order * 10 + n;
+    return n;
+}
+
+[[cccc::test]] void test_bound_operands_evaluate_left_to_right(void) {
+    order = 0;
+    AssertEq(next_rank(1) <=> next_rank(2) < 0, 1);
+    AssertEq(order, 12);
+    order = 0;
+    AssertEq(!!(next_vec(1) == next_vec(2)), 0);
+    AssertEq(order, 12);
+    order = 0;
+    AssertEq((next_vec(1) + next_vec(2)).x, 3);
+    AssertEq(order, 12);
+}
+
+[[cccc::test]] void test_chained_bound_operators_evaluate_left_to_right(void) {
+    order = 0;
+    AssertEq((next_cell(1) + next_cell(2) + next_cell(3)).n, 6);
+    AssertEq(order, 123);
+    order = 0;
+    AssertEq((next_vec(1) + next_vec(2) + next_vec(3)).x, 6);
+    AssertEq(order, 123);
+}
+
+static int shared;
+static Vec2 bump_vec(void) {
+    shared = 5;
+    return (Vec2){1, 1};
+}
+static Vec2 read_shared(void) {
+    return (Vec2){shared, shared};
+}
+
+[[cccc::test]] void test_right_operand_sees_left_side_effects(void) {
+    shared = 0;
+    AssertEq((bump_vec() + read_shared()).x, 6);
+}
+
+[[cccc::test]] void test_compound_assignment_with_side_effecting_operand(void) {
+    order = 0;
+    Vec2 a = {1, 2};
+    a *= next_int(3);
+    AssertEq(a.x, 3);
+    AssertEq(a.y, 6);
+    AssertEq(order, 3);
+}
 // clang-format on
 
 #pragma cccc suite end

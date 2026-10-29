@@ -63,6 +63,8 @@ Unary forms (one parameter): `-` `neg`, `+` `pos`, `!` `not`, `~` `compl`.
 
 `&&`, `||`, `,`, `=`, `*` and `&` as unary operators, and `->` cannot be overloaded. Compound assignment (`+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`) uses the binary operator and evaluates `a` once.
 
+A bound operator evaluates its left operand before its right, in the VM and under `-c=native`.
+
 ## Subscript
 
 `[[cccc::operator([])]]` binds `a[i]` for a struct or union `a`. The function returns a pointer, and the parser dereferences it, so `a[i]` is an lvalue.
