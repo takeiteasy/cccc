@@ -500,20 +500,9 @@ typedef struct {
     bool escapes;
 } PromoCand;
 
-// `tmp = &x` from the `x op= y` / `x++` desugar (parse_expr.c to_assign).
 typedef struct {
-    Obj *tmp;
-    Obj *target;
-} PromoAlias;
-
-typedef struct {
-    PromoCand  *cands;
-    int         ncands;
-    PromoAlias *aliases;
-    int         naliases, aliases_cap;
-    Node       *alias_addr; // the `&x` of the alias assignment being walked
-    Obj       **bad_tmps;   // unnamed locals used other than as `*tmp`
-    int         nbad, bad_cap;
+    PromoCand *cands;
+    int        ncands;
 } PromoScan;
 
 int promoted_local_index(VirtualMachine *vm, Obj *var) {
@@ -546,19 +535,6 @@ bool is_fp_promoted_local(VirtualMachine *vm, Obj *var) {
 int fp_promoted_local_reg(VirtualMachine *vm, Obj *var) {
     int idx = fp_promoted_local_index(vm, var);
     return idx >= 0 ? vm->compiler.fp_promoted_regs[idx] : -1;
-}
-
-// The promoted variable `*node` stands for, when `node` is `*tmp` for a
-// synthetic `tmp = &x` whose x is promoted.
-Obj *promoted_deref_target(VirtualMachine *vm, Node *node) {
-    if (!node || node->kind != ND_DEREF || !node->lhs ||
-        node->lhs->kind != ND_VAR || !node->lhs->var)
-        return NULL;
-    Obj *target = node->lhs->var->promoted_alias;
-    if (!target ||
-        (!is_promoted_local(vm, target) && !is_fp_promoted_local(vm, target)))
-        return NULL;
-    return target;
 }
 
 static bool is_scalar_promotion_type(Type *ty) {
@@ -613,50 +589,6 @@ static PromoCand *promo_find(PromoScan *s, Obj *var) {
     return NULL;
 }
 
-static void promo_note_bad_tmp(PromoScan *s, Obj *var) {
-    if (!var->is_local || (var->name && var->name[0]))
-        return;
-    for (int i = 0; i < s->nbad; i++)
-        if (s->bad_tmps[i] == var)
-            return;
-    if (s->nbad == s->bad_cap) {
-        s->bad_cap  = s->bad_cap ? s->bad_cap * 2 : 8;
-        s->bad_tmps = realloc(s->bad_tmps, (size_t)s->bad_cap * sizeof(Obj *));
-        if (!s->bad_tmps)
-            error("out of memory");
-    }
-    s->bad_tmps[s->nbad++] = var;
-}
-
-static void promo_add_alias(PromoScan *s, Obj *tmp, Obj *target) {
-    if (s->naliases == s->aliases_cap) {
-        s->aliases_cap = s->aliases_cap ? s->aliases_cap * 2 : 8;
-        s->aliases =
-            realloc(s->aliases, (size_t)s->aliases_cap * sizeof(PromoAlias));
-        if (!s->aliases)
-            error("out of memory");
-    }
-    s->aliases[s->naliases++] = (PromoAlias){tmp, target};
-}
-
-// The `&x` of a `tmp = (T *)&x` assignment (the shape to_assign emits for
-// `x op= y` / `x++`), or NULL when `assign` is not one.
-Node *promo_alias_addr(Node *assign) {
-    if (!assign || assign->kind != ND_ASSIGN)
-        return NULL;
-    Node *l = assign->lhs;
-    if (!l || l->kind != ND_VAR || !l->var || !l->var->is_local ||
-        (l->var->name && l->var->name[0]))
-        return NULL;
-    Node *r = assign->rhs;
-    while (r && r->kind == ND_CAST)
-        r = r->lhs;
-    if (!r || r->kind != ND_ADDR || !r->lhs || r->lhs->kind != ND_VAR ||
-        !r->lhs->var)
-        return NULL;
-    return r;
-}
-
 // Every variable under `node` is read or written by address.
 static void promo_escape_all(PromoScan *s, Node *node) {
     for (; node; node = node->next) {
@@ -676,8 +608,7 @@ static void promo_escape_all(PromoScan *s, Node *node) {
 
 // Walks every node reachable from `node`. The `next` chain is iterated, not
 // recursed on, so the walk stays linear in the number of statements.
-static void promo_scan_node(PromoScan *s, Node *node, Node *parent,
-                            int loop_depth) {
+static void promo_scan_node(PromoScan *s, Node *node, int loop_depth) {
     for (; node; node = node->next) {
         if (node->kind == ND_VAR && node->var) {
             PromoCand *c = promo_find(s, node->var);
@@ -686,34 +617,14 @@ static void promo_scan_node(PromoScan *s, Node *node, Node *parent,
                 if (loop_depth > 0)
                     c->in_loop = true;
             }
-            // `*tmp` is the only way an alias temporary may be used; its
-            // assignment is the one other (the walk reaches that lhs too).
-            bool deref_use =
-                parent && parent->kind == ND_DEREF && parent->lhs == node;
-            bool assign_lhs =
-                parent && parent->lhs == node && promo_alias_addr(parent);
-            if (!deref_use && !assign_lhs)
-                promo_note_bad_tmp(s, node->var);
         }
 
-        if (node->kind == ND_ASSIGN) {
-            Node *addr = promo_alias_addr(node);
-            if (addr && promo_find(s, addr->lhs->var)) {
-                promo_add_alias(s, node->lhs->var, addr->lhs->var);
-                s->alias_addr = addr;
-            }
-        }
-        if (node->kind == ND_ADDR && node != s->alias_addr && node->lhs &&
-            node->lhs->kind == ND_VAR && node->lhs->var) {
+        if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
+            node->lhs->var) {
             PromoCand *c = promo_find(s, node->lhs->var);
             if (c)
                 c->escapes = true;
         }
-        // `&*tmp` needs tmp's value, which an aliased tmp never holds.
-        if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_DEREF &&
-            node->lhs->lhs && node->lhs->lhs->kind == ND_VAR &&
-            node->lhs->lhs->var)
-            promo_note_bad_tmp(s, node->lhs->lhs->var);
 
         // Only ND_VAR reads and writes a variable through its register; any
         // other node naming one (ND_MEMZERO, ND_VLA_PTR, ...) uses its slot.
@@ -737,23 +648,22 @@ static void promo_scan_node(PromoScan *s, Node *node, Node *parent,
         }
 
         int d = loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
-        promo_scan_node(s, node->lhs, node, d);
-        promo_scan_node(s, node->rhs, node, d);
-        promo_scan_node(s, node->cond, node, d);
-        promo_scan_node(s, node->then, node, d);
-        promo_scan_node(s, node->els, node, d);
-        promo_scan_node(s, node->init, node, d);
-        promo_scan_node(s, node->inc, node, d);
-        promo_scan_node(s, node->body, node, d);
-        promo_scan_node(s, node->cas_addr, node, d);
-        promo_scan_node(s, node->cas_old, node, d);
-        promo_scan_node(s, node->cas_new, node, d);
-        promo_scan_node(s, node->atomic_expr, node, d);
-        promo_scan_node(s, node->va_ap, node, d);
-        promo_scan_node(s, node->va_src, node, d);
-        promo_scan_node(s, node->rmw_lvalue, node, d);
+        promo_scan_node(s, node->lhs, d);
+        promo_scan_node(s, node->rhs, d);
+        promo_scan_node(s, node->cond, d);
+        promo_scan_node(s, node->then, d);
+        promo_scan_node(s, node->els, d);
+        promo_scan_node(s, node->init, d);
+        promo_scan_node(s, node->inc, d);
+        promo_scan_node(s, node->body, d);
+        promo_scan_node(s, node->cas_addr, d);
+        promo_scan_node(s, node->cas_old, d);
+        promo_scan_node(s, node->cas_new, d);
+        promo_scan_node(s, node->atomic_expr, d);
+        promo_scan_node(s, node->va_ap, d);
+        promo_scan_node(s, node->va_src, d);
         for (Node *a = node->args; a; a = a->next)
-            promo_scan_node(s, a, node, d);
+            promo_scan_node(s, a, d);
     }
 }
 
@@ -829,19 +739,7 @@ int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
         if (promotion_candidate_ok(vm, fn, var))
             s.cands[idx++].var = var;
 
-    promo_scan_node(&s, fn->body, NULL, 0);
-
-    // An alias temporary used any other way than `*tmp` makes its target a
-    // plain memory variable.
-    for (int i = 0; i < s.naliases; i++) {
-        for (int j = 0; j < s.nbad; j++) {
-            if (s.bad_tmps[j] != s.aliases[i].tmp)
-                continue;
-            PromoCand *c = promo_find(&s, s.aliases[i].target);
-            if (c)
-                c->escapes = true;
-        }
-    }
+    promo_scan_node(&s, fn->body, 0);
 
     qsort(s.cands, (size_t)n, sizeof(PromoCand), promo_cmp);
 
@@ -871,13 +769,7 @@ int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
             cc->promoted_save_offsets[p] = -(base_stack_size + ++slots);
         }
     }
-    for (int i = 0; i < s.naliases; i++)
-        if (is_promoted_local(vm, s.aliases[i].target) ||
-            is_fp_promoted_local(vm, s.aliases[i].target))
-            s.aliases[i].tmp->promoted_alias = s.aliases[i].target;
 
     free(s.cands);
-    free(s.aliases);
-    free(s.bad_tmps);
     return slots;
 }

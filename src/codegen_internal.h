@@ -148,8 +148,6 @@ bool is_fp_promoted_local(VirtualMachine *vm, Obj *var);
 int promoted_local_index(VirtualMachine *vm, Obj *var);
 int promoted_local_reg(VirtualMachine *vm, Obj *var);
 int fp_promoted_local_reg(VirtualMachine *vm, Obj *var);
-Obj *promoted_deref_target(VirtualMachine *vm, Node *node);
-Node *promo_alias_addr(Node *assign);
 bool cg_opt_enabled(VirtualMachine *vm);
 int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size);
 void end_local_promotion(VirtualMachine *vm);

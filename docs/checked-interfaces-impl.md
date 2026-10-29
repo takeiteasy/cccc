@@ -81,7 +81,7 @@ A plain array is also a propagation source. `Obj.checked_prop_plain` marks a loc
 
 | Leaf | Effect |
 |---|---|
-| A store to a compiler temp with a pure value | Transparent; a `tmp = &obj` store records the object a compound assignment writes through |
+| A store to a compiler temp with a pure value | Transparent; a `tmp = &obj` store records the object a compound assignment on a member, element or dereference writes through (a plain variable is assigned directly) |
 | A write to a sibling of the anchor, on the same object (`nodes_structurally_equal()`), with a pure value that does not read the anchor's pointer | Extends the group |
 | Another anchor on the same object with a shared sibling | Joins the group |
 | Anything else | Ends the group |
@@ -104,7 +104,7 @@ A sibling write that is not a discarded leaf is a value-used write: `track_assig
 
 A nested statement is classified whole by `track_stmt()` into `TrackCtx.wraps` (discarded writes) and `TrackCtx.held` (value-used writes), which `track_anchors()` applies whether or not the statement stayed live: each was visited before the event that ended tracking. A loop whose units end tracking (`track_loop()`) truncates both lists to their length at its entry, because a later iteration runs those writes after the event; a `for` init stays outside it. `if`/`else` branches are exclusive, and a `switch` condition runs once before its body. Straight-line expression statements wrap as they go.
 
-**Private objects.** `track_scan_one()` runs once per function and records every `&x` (except the `tmp = &x` a compound assignment hoists) and every array that decays outside `a[i]`; block literals and `&&label` disable tracking for the function. An object is private when it is a non-static local struct, union or array with none of those, or only ones that initialise a must-alias. A local pointer `q` is a must-alias of `x` when its single store is `q = &x`, its address is never taken and every use is `*q` or `q->f` (`track_alias_target()`); `track_alias_object()` then reads `*q` as `x` for the anchor's object and for the write target.
+**Private objects.** `track_scan_one()` runs once per function and records every `&x` (except the `tmp = &x` a compound assignment on a member, element or dereference hoists) and every array that decays outside `a[i]`; block literals and `&&label` disable tracking for the function. An object is private when it is a non-static local struct, union or array with none of those, or only ones that initialise a must-alias. A local pointer `q` is a must-alias of `x` when its single store is `q = &x`, its address is never taken and every use is `*q` or `q->f` (`track_alias_target()`); `track_alias_object()` then reads `*q` as `x` for the anchor's object and for the write target.
 
 ### Constant initializers
 

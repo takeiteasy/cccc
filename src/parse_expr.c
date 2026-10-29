@@ -410,9 +410,9 @@ void eval_decimal(VirtualMachine *vm, Node *node, int w, void *out) {
 
 // Convert op= operators to expressions containing an assignment.
 //
-// In general, `A op= C` is converted to ``tmp = &A, *tmp = *tmp op B`.
-// However, if a given expression is of form `A.x op= C`, the input is
-// converted to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
+// A plain variable `A op= B` is converted to `A = A op B`. Otherwise
+// `A op= C` is converted to ``tmp = &A, *tmp = *tmp op B`, and a member
+// `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C` to handle assignments
 // to bitfields.
 // `A op= B` where op is an overloaded operator (binary is the call): A = op(A,
 // B), with A evaluated once.
@@ -615,6 +615,16 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
             node->atomic_fetch_old = yield_old;
         }
         return node;
+    }
+
+    // A plain variable needs no address temporary: `A = A op B`.
+    if (binary->lhs->kind == ND_VAR) {
+        Obj *var = binary->lhs->var;
+        return new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, var, tok),
+            new_binary(vm, binary->kind, new_var_node(vm, var, tok),
+                       binary->rhs, tok),
+            tok);
     }
 
     // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.

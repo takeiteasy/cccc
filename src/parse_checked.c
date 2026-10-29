@@ -1286,10 +1286,9 @@ static bool checked_prop_source_bounds(VirtualMachine *vm, Node *rhs,
 // itself via find_checked_base()) is treated as neutral -- touches none of
 // the three scratch fields -- rather than requiring `q` to also be its own
 // declared/chained source. Sound because the snapshotted range (real or
-// sentinel) is whatever `q` already held: the same fact that already lets
-// `q++`/`q += k` (the to_assign() RMW desugar, which never even reaches
-// this switch since it hides behind a temp) preserve the snapshot applies
-// equally to an explicit self-store. Deliberately narrow: only
+// sentinel) is whatever `q` already held: the same fact lets
+// `q++`/`q += k` (which to_assign() lowers to `q = q + k`) preserve the
+// snapshot. Deliberately narrow: only
 // `find_checked_base(rhs).var == node->lhs->var` (strictly the *lhs's own
 // descent*, e.g. `q = q + 1` or `q = (int*)q`, not `q = 1 + q` --
 // find_checked_base() only descends ->lhs, so the commuted form isn't

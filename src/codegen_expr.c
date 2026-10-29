@@ -793,11 +793,6 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
 
         case ND_DEREF: {
-            Obj *promoted_target = promoted_deref_target(vm, node);
-            if (promoted_target) {
-                emit_promoted_read(vm, promoted_target, dest_reg);
-                return;
-            }
             IndexedRegs ix;
             if (gen_indexed_regs(vm, node, &ix)) {
                 emit_load_indexed(vm, node->ty, dest_reg, &ix);
@@ -1543,21 +1538,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
         }
 
         case ND_ASSIGN: {
-            // `tmp = &x` of an `x op= y` desugar with x in a register: the
-            // address is never needed, `*tmp` reads and writes the register.
-            if (dest_reg == REG_ZERO && promo_alias_addr(node) &&
-                node->lhs->var->promoted_alias &&
-                (is_promoted_local(vm, node->lhs->var->promoted_alias) ||
-                 is_fp_promoted_local(vm, node->lhs->var->promoted_alias)))
-                return;
-
             Obj *promoted_dst = NULL;
             if (node->lhs->kind == ND_VAR &&
                 (is_promoted_local(vm, node->lhs->var) ||
                  is_fp_promoted_local(vm, node->lhs->var)))
                 promoted_dst = node->lhs->var;
-            else
-                promoted_dst = promoted_deref_target(vm, node->lhs);
             if (promoted_dst) {
                 int  r_val = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
                 bool need_free = dest_reg == REG_ZERO;

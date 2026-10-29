@@ -2758,11 +2758,6 @@ struct Obj {
     // docs/safety.md.
     bool addr_taken;
 
-    // Synthetic `tmp = &x` of an `x op= y` / `x++` desugar whose x is held in a
-    // register: `*tmp` reads and writes that register
-    // (prepare_local_promotion).
-    struct Obj *promoted_alias;
-
     // __builtin_object_size: constant malloc-family allocation tracking (#642).
     // Only honored when the pointer is assigned exactly once (its declaration
     // initializer) and never has its address taken; see

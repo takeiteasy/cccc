@@ -1119,11 +1119,9 @@ static void objsize_poison_scan(Node *node) {
     for (; node; node = node->next) {
         switch (node->kind) {
             case ND_ASSIGN:
-                // Plain `p = expr` reaches here directly with lhs == the raw
-                // ND_VAR. Compound assignment (`p += x`) and `++p`/`p++`/`--p`/
-                // `p--` are desugared by to_assign() into `tmp = &p, *tmp =
-                // *tmp op rhs`, which is caught by the ND_ADDR case below
-                // instead.
+                // `p = expr` reaches here directly with lhs == the raw ND_VAR,
+                // as do `p += x` and `++p`/`p++`/`--p`/`p--` (to_assign()
+                // lowers them to `p = p op rhs`).
                 if (node->lhs && node->lhs->kind == ND_VAR && node->lhs->var &&
                     node->lhs->var->objsize_has_alloc &&
                     node->lhs->var->objsize_init_assign != node)

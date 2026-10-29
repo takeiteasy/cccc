@@ -3,7 +3,7 @@
 // CCCC_EXPECT_STDOUT: s = \(a \+ b\) << 1;
 // CCCC_EXPECT_STDOUT: t = a \|\| \(b && c\);
 // CCCC_EXPECT_STDOUT: v = a \| \(b & c\);
-// CCCC_EXPECT_STDOUT: \*__cccc_tmp[0-9]+ & \(id != 0\)
+// CCCC_EXPECT_STDOUT: = \(_Bool\)\(ok & \(id != 0\)\)
 // -m: operand pairs gcc/clang's -Wparentheses flags are printed parenthesized,
 // including a bool compound assignment's right-hand side.
 #include <stdbool.h>
