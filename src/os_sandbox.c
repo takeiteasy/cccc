@@ -783,23 +783,56 @@ static bool landlock_apply(const Roots *r, char *err, size_t err_size) {
 #define AUDIT_ARCH_AARCH64 0xc00000b7U
 #endif
 
-// Inet sockets fail with EPERM; AF_UNIX still works.
+#ifndef __NR_io_uring_setup
+#define __NR_io_uring_setup    425
+#define __NR_io_uring_enter    426
+#define __NR_io_uring_register 427
+#endif
+
+#define SB_FILTER_MAX 24
+
+// Inet sockets fail with EPERM; AF_UNIX still works. Other ways to open one
+// are denied too: io_uring's socket op, x32-ABI numbers and foreign-arch
+// syscalls, which a raw syscall() could otherwise use to skip the check.
 static bool seccomp_no_network(char *err, size_t err_size) {
 #ifdef SB_AUDIT_ARCH
-    struct sock_filter filter[] = {
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SB_AUDIT_ARCH, 1, 0),
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 0, 3),
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                 offsetof(struct seccomp_data, args[0])),
-        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 1, 0),
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xffff)),
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    };
-    struct sock_fprog prog = {.len    = sizeof filter / sizeof *filter,
-                              .filter = filter};
+    struct sock_filter f[SB_FILTER_MAX];
+    int                deny_jumps[8], deny_count = 0, n = 0;
+#define SB_STMT(code, k) f[n++] = (struct sock_filter)BPF_STMT(code, k)
+#define SB_DENY_IF(code, k)                                                     \
+    do {                                                                        \
+        deny_jumps[deny_count++] = n;                                           \
+        f[n++]                   = (struct sock_filter)BPF_JUMP(code, k, 0, 0); \
+    } while (0)
+    SB_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
+    f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                                          SB_AUDIT_ARCH, 1, 0);
+    SB_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xffff));
+    SB_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
+#ifdef __x86_64__
+    SB_DENY_IF(BPF_JMP | BPF_JGE | BPF_K, 0x40000000U);
+#endif
+    SB_DENY_IF(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_setup);
+    SB_DENY_IF(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_enter);
+    SB_DENY_IF(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_register);
+    int socket_jump = n;
+    f[n++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
+                                          0, 0);
+    SB_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0]));
+    int af_jump = n;
+    f[n++] =
+        (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 0, 0);
+    int deny = n;
+    SB_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xffff));
+    int allow = n;
+    SB_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    for (int i = 0; i < deny_count; i++)
+        f[deny_jumps[i]].jt = (uint8_t)(deny - deny_jumps[i] - 1);
+    f[socket_jump].jf      = (uint8_t)(allow - socket_jump - 1);
+    f[af_jump].jt          = (uint8_t)(allow - af_jump - 1);
+#undef SB_STMT
+#undef SB_DENY_IF
+    struct sock_fprog prog = {.len = (unsigned short)n, .filter = f};
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 &&
         prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0)
         return true;

@@ -31,6 +31,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 static char cccc[PATH_MAX];
@@ -316,6 +319,52 @@ int main(void) {
             failed = 1;
         }
         break;
+    }
+
+    // A raw syscall() meets the same landlock and seccomp rules as the
+    // wrapped natives. Bit 1: opened a file outside the allowed directories.
+    // 2: made an inet socket. 4: io_uring_setup succeeded. 8: made an inet
+    // socket through the x32 ABI.
+    {
+        char raw_src[PATH_MAX + 2048], raw_c[PATH_MAX];
+#ifdef __x86_64__
+        long x32_socket = 0x40000000L | SYS_socket;
+#else
+        long x32_socket = -1;
+#endif
+        snprintf(
+            raw_src, sizeof raw_src,
+            "extern long syscall(long number, ...);\n"
+            "[[cccc::comptime]] int probe(void) {\n"
+            "    int r = 0;\n"
+            "    char params[128] = {0};\n"
+            "    if (syscall(%ldL, -100L, \"%s/key\", 0L) >= 0) r |= 1;\n"
+            "    if (syscall(%ldL, 2L, 1L, 0L) >= 0) r |= 2;\n"
+            "    if (syscall(%ldL, 1L, params) >= 0) r |= 4;\n"
+            "    if (%ldL >= 0 && syscall(%ldL, 2L, 1L, 0L) >= 0) r |= 8;\n"
+            "    return r;\n"
+            "}\n"
+            "[[cccc::comptime]] void gen(void) {\n"
+            "    Obj *fn = MakeFunction(\"result\", GetType(\"int\"));\n"
+            "    FunctionSetBody(fn, MakeReturn(MakeIntLiteral(probe())));\n"
+            "}\n"
+            "gen();\n"
+            "int main(void) { return result(); }\n",
+            (long)SYS_openat, secret, (long)SYS_socket,
+            (long)SYS_io_uring_setup, x32_socket, x32_socket);
+        snprintf(raw_c, sizeof raw_c, "%s/raw.c", indir);
+        write_file(raw_c, raw_src);
+        int open_rc =
+            run("%s --comptime-allow=all %s >/dev/null 2>&1", cccc, raw_c);
+        int box_rc = run("%s --sandbox --comptime-allow=all %s >/dev/null 2>&1",
+                         cccc, raw_c);
+        if (!(open_rc & 3) || box_rc != 0) {
+            fprintf(stderr,
+                    "FAIL: --sandbox raw syscall probe exited %d (unconfined "
+                    "%d), expected 0\n",
+                    box_rc, open_rc);
+            failed = 1;
+        }
     }
 #endif
 
