@@ -16,6 +16,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: `-c=native` of cccc's own sources failed with a duplicate `__cccc_native_strtol` runtime.
 - Added: Linux `O_PATH` in `<fcntl.h>` and `syscall()` in `<unistd.h>` (declared and registered under `__linux__`; comptime class `exec`).
 - Fixed: `<sys/time.h>` now makes `fd_set` and the `FD_*` macros visible.
+- Fixed: an `#include_next` that finds no further copy of a standard header uses the bundled one, so glibc's `<limits.h>` works under `--use-system-headers` on Linux.
+- Fixed: `__restrict` and `__restrict__` are accepted inside an array parameter's brackets (`int a[__restrict 4]`).
+- Added: the GNU predefined identifier `__PRETTY_FUNCTION__`.
+- Changed: the `ouroboros` target uses the system headers on Linux, as on macOS.
 
 ## [0.28.0] - 2026-10-29
 

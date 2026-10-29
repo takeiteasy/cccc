@@ -51,7 +51,7 @@ cccc --sysroot "$(xcrun --show-sdk-path)" -E watcher.c    # <CoreServices/CoreSe
 cccc -F ./vendor/Frameworks app.c                         # ./vendor/Frameworks/Foo.framework
 ```
 
-Frameworks are searched after `-I` and `--isystem`, and a framework header also finds that framework's sub-frameworks (`X.framework/Frameworks/Name.framework`). `#include_next` and `__has_include_next` continue in the same order. Under `-c=native` the flags are forwarded as `-F` and `-iframework`.[^fw]
+Frameworks are searched after `-I` and `--isystem`, and a framework header also finds that framework's sub-frameworks (`X.framework/Frameworks/Name.framework`). `#include_next` and `__has_include_next` continue in the same order. An `#include_next` that finds no further copy of a standard header uses CCCC's bundled one, standing in for the compiler's own header (glibc's `<limits.h>` ends this way). Under `-c=native` the flags are forwarded as `-F` and `-iframework`.[^fw]
 
 [^fw]: `-framework NAME` at link time is a separate option.
 

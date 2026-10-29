@@ -882,6 +882,11 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
 static Type *type_suffix(VirtualMachine *vm, Token **rest, Token *tok,
                          Type *ty);
 
+static bool is_restrict_keyword(Token *tok) {
+    return equal(tok, "restrict") || equal(tok, "__restrict") ||
+           equal(tok, "__restrict__");
+}
+
 // array-dimensions = ("static" | "restrict" | "const" | "volatile" |
 // "_Atomic")* const-expr? "]" type-suffix
 static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
@@ -891,7 +896,7 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
     bool saw_volatile = false;
     bool saw_restrict = false;
     bool saw_atomic   = false;
-    while (equal(tok, "static") || equal(tok, "restrict") ||
+    while (equal(tok, "static") || is_restrict_keyword(tok) ||
            equal(tok, "const") || equal(tok, "volatile") ||
            equal(tok, "_Atomic")) {
         if (equal(tok, "static"))
@@ -900,7 +905,7 @@ static Type *array_dimensions(VirtualMachine *vm, Token **rest, Token *tok,
             saw_const = true;
         if (equal(tok, "volatile"))
             saw_volatile = true;
-        if (equal(tok, "restrict"))
+        if (is_restrict_keyword(tok))
             saw_restrict = true;
         if (equal(tok, "_Atomic"))
             saw_atomic = true;

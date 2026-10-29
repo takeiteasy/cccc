@@ -1043,8 +1043,11 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         push_scope(vm, "__func__", 8)->var = new_string_literal(
             vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
 
-        // [GNU] __FUNCTION__ is yet another name of __func__.
+        // [GNU] __FUNCTION__ and __PRETTY_FUNCTION__ (the same in C) are
+        // yet other names of __func__.
         push_scope(vm, "__FUNCTION__", 12)->var = new_string_literal(
+            vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
+        push_scope(vm, "__PRETTY_FUNCTION__", 19)->var = new_string_literal(
             vm, fn->name, array_of(vm, ty_char, strlen(fn->name) + 1));
     }
 

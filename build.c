@@ -1343,17 +1343,18 @@ BuildTarget *ouroboros(Builder *ctx) {
         ouroboros_pkg_flags(ctx, t, "pkg-config --libs-only-L libffi", false);
     }
     if (strcmp(BuildHost(ctx), "linux") == 0) {
-        // Headers outside cccc's default search: Debian-style multiarch
-        // (libffi's ffi.h, asm/*.h) and the kernel's linux/*.h. -I, not
-        // --isystem, which would replace the default system search.
+        // glibc's real headers, as on macOS: cccc's bundled ones lack POSIX
+        // functions its own sources call (strnlen, stpcpy, ...). The multiarch
+        // directory holds libffi's ffi.h and asm/*.h.
+        UseSystemHeaders(t);
         const char **ffi = GlobFiles(ctx, "/usr/include/*/ffi.h");
         if (ffi[0]) {
             char dir[256];
             snprintf(dir, sizeof(dir), "%s", ffi[0]);
             *strrchr(dir, '/') = '\0';
-            AddInclude(t, dir);
+            AddSystemInclude(t, dir);
         }
-        AddInclude(t, "/usr/include"); // linux/*.h, used by src/os_sandbox.c
+        AddSystemInclude(t, "/usr/include");
     }
     char cmd[1100];
     snprintf(cmd, sizeof(cmd), "%s --version", TargetOutput(t));

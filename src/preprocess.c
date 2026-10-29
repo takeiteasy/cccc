@@ -7438,6 +7438,17 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 char *path     = search_include_next(
                     vm, filename,
                     start->file ? start->file->include_next_start : 0);
+                // A host header's #include_next is aimed at the compiler's own
+                // copy (glibc's limits.h); that role is CCCC's bundled header.
+                const char *next_embedded =
+                    path ? NULL : try_embedded_std_header(vm, filename);
+                if (next_embedded) {
+                    mark_cccc_bundled_file(vm,
+                                           embedded_header_key(vm, filename));
+                    tok = include_embedded_header(
+                        vm, tok, filename, next_embedded, start->next->next);
+                    break;
+                }
                 record_include_edge(vm, start->file ? start->file->name : NULL,
                                     path ? path : filename); // #896
                 tok = include_file(vm, tok, path ? path : filename,
