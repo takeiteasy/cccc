@@ -1,0 +1,33 @@
+image: ubuntu/lts
+packages:
+  - clang
+  - make
+  - pkg-config
+  - libffi-dev
+  - libgdbm-compat-dev
+  - python3
+sources:
+  - https://git.sr.ht/~takeiteasy/cccc#devel
+environment:
+  CC: clang
+tasks:
+  - guard: |
+      # Manual submit only (`hut builds submit --note ... .builds/sandbox-x86.yml`);
+      # a push sets GIT_REF and is skipped.
+      if [ -n "${GIT_REF:-}" ]; then
+        echo "skipping ${GIT_REF}: manual only"
+        complete-build
+      fi
+  - build: |
+      cd cccc
+      set -e
+      git submodule update --init
+      make
+  - sandbox: |
+      cd cccc
+      set -e
+      uname -r
+      cat /sys/kernel/security/lsm || true
+      clang -o test_sandbox tests/host/test_sandbox.c
+      CCCC_BIN=./cccc ./test_sandbox | tee sandbox.log
+      grep -q '^PASS: sandbox' sandbox.log
