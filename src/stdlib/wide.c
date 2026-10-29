@@ -432,7 +432,7 @@ static long long wide_vprintf_call(void *host_fn, int nfixed, int64_t *fixed,
         return -1;
     }
     for (size_t i = 0; i <= flen; i++)
-        nfmt[i] = wfmt[i] > 0 && wfmt[i] < 128 ? (char)wfmt[i] : '?';
+        nfmt[i] = wfmt[i] >= 0 && wfmt[i] < 128 ? (char)wfmt[i] : '?';
     CCCC_VA_LOCAL(va, va_ptr);
     int     types[CCCC_VA_MAX_ARGS];
     int     n = cccc_parse_printf_fmt(nfmt, types, CCCC_VA_MAX_ARGS);
