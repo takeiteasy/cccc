@@ -219,6 +219,27 @@ static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
         return to_assign_post(vm, addend > 0 ? new_add(vm, node, one, tok)
                                              : new_sub(vm, node, one, tok));
     }
+    // A _Bool store saturates to 0/1, so the old value cannot be rebuilt from
+    // the new one: `p = &A, old = *p, *p += addend, old`.
+    if (node->ty->kind == TY_BOOL &&
+        !(node->kind == ND_MEMBER && node->member->is_bitfield)) {
+        Obj  *p                = new_lvar(vm, "", 0, pointer_to(vm, node->ty));
+        Obj  *old              = new_lvar(vm, "", 0, unqualified(vm, node->ty));
+        Node *addr             = new_unary(vm, ND_ADDR, node, tok);
+        addr->is_rmw_temp_addr = true;
+        addr->rmw_addr_feeds_temp = true;
+        Node *set =
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, p, tok), addr, tok);
+        Node *save = new_binary(
+            vm, ND_ASSIGN, new_var_node(vm, old, tok),
+            new_unary(vm, ND_DEREF, new_var_node(vm, p, tok), tok), tok);
+        Node *deref = new_unary(vm, ND_DEREF, new_var_node(vm, p, tok), tok);
+        Node *store =
+            to_assign(vm, new_add(vm, deref, new_num(vm, addend, tok), tok));
+        Node *seq = new_binary(vm, ND_COMMA, set, save, tok);
+        seq       = new_binary(vm, ND_COMMA, seq, store, tok);
+        return new_binary(vm, ND_COMMA, seq, new_var_node(vm, old, tok), tok);
+    }
     Node *rmw =
         to_assign_post(vm, new_add(vm, node, new_num(vm, addend, tok), tok));
     if (rmw->kind == ND_STMT_EXPR && rmw->is_atomic_rmw)
