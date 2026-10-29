@@ -525,6 +525,7 @@ void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
 typedef struct {
     int *v;
     int  len, cap;
+    bool unsorted; // an index was appended below the previous one
 } IdxList;
 
 typedef struct {
@@ -545,6 +546,8 @@ static void idxlist_add(IdxList *l, int x) {
         l->cap = l->cap ? l->cap * 2 : 4;
         l->v   = realloc(l->v, sizeof(int) * l->cap);
     }
+    if (l->len && l->v[l->len - 1] > x)
+        l->unsorted = true;
     l->v[l->len++] = x;
 }
 
@@ -725,7 +728,10 @@ static int cand_index_probe(CandIndex *ix, TypeName *arr, int len, Type *ty,
         return -1;
     cand_index_ensure(ix, arr, len);
 
-    int n = 0;
+    IdxList *lists[3] = {0};
+    int      nl       = 0;
+    bool     sorted   = true;
+    long     total    = 0;
     for (int pass = 0; pass < 3; pass++) {
         long long key;
         HashMap  *m;
@@ -746,26 +752,48 @@ static int cand_index_probe(CandIndex *ix, TypeName *arr, int len, Type *ty,
         IdxList *l = hashmap_get_int(m, key);
         if (!l)
             continue;
-        for (int j = 0; j < l->len; j++) {
-            if (n >= TYPE_CAND_CAP)
-                return -1;
-            buf[n++] = l->v[j];
-        }
+        total += l->len;
+        if (total > TYPE_CAND_CAP)
+            return -1;
+        sorted      &= !l->unsorted;
+        lists[nl++]  = l;
     }
-    // insertion sort + dedup (n is small: entries per bucket ~= number of
-    // input files declaring one shared type)
-    for (int i = 1; i < n; i++) {
-        int v = buf[i], j = i - 1;
-        while (j >= 0 && buf[j] > v) {
-            buf[j + 1] = buf[j];
-            j--;
-        }
-        buf[j + 1] = v;
-    }
+
+    int n = 0;
     int w = 0;
-    for (int i = 0; i < n; i++)
-        if (w == 0 || buf[w - 1] != buf[i])
-            buf[w++] = buf[i];
+    if (sorted) {
+        // Each bucket ascends, so a merge yields the ascending, de-duplicated
+        // set.
+        int pos[3] = {0};
+        for (;;) {
+            int best = -1;
+            for (int k = 0; k < nl; k++)
+                if (pos[k] < lists[k]->len &&
+                    (best < 0 ||
+                     lists[k]->v[pos[k]] < lists[best]->v[pos[best]]))
+                    best = k;
+            if (best < 0)
+                break;
+            int v = lists[best]->v[pos[best]++];
+            if (w == 0 || buf[w - 1] != v)
+                buf[w++] = v;
+        }
+    } else {
+        for (int k = 0; k < nl; k++)
+            for (int j = 0; j < lists[k]->len; j++)
+                buf[n++] = lists[k]->v[j];
+        for (int i = 1; i < n; i++) {
+            int v = buf[i], j = i - 1;
+            while (j >= 0 && buf[j] > v) {
+                buf[j + 1] = buf[j];
+                j--;
+            }
+            buf[j + 1] = v;
+        }
+        for (int i = 0; i < n; i++)
+            if (w == 0 || buf[w - 1] != buf[i])
+                buf[w++] = buf[i];
+    }
 
     if (g_type_index_verify < 0)
         g_type_index_verify = getenv("CCCC_TYPE_INDEX_VERIFY") ? 1 : 0;
@@ -1409,6 +1437,12 @@ static void collect_type(SerializeContext *ctx, Type *ty) {
         return;
 
     ty = flexible_declared_type(ty);
+
+    // Resolving a Type pointer again changes nothing, and the nominal scans
+    // below compare against every collected definition.
+    if (hashmap_get_int(&ctx->collected_aggs, (long long)(intptr_t)ty))
+        return;
+    hashmap_put_int(&ctx->collected_aggs, (long long)(intptr_t)ty, (void *)1);
 
     // #1091: type_vec_find_nominal() (not the plain, purely-structural
     // type_vec_find()) so a tagless typedef that's structurally identical

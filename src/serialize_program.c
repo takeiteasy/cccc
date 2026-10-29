@@ -2188,23 +2188,15 @@ static int collect_complex_header_path(char *key, int keylen, void *val,
 // guards the equivalent walk with ctx->seen; this scanner is standalone, so
 // it carries its own (tiny) visited list.
 typedef struct {
-    Type **data;
-    int    len, cap;
+    HashMap map;
 } TypeSeenSet;
 
 static bool type_seen_set_has(TypeSeenSet *set, Type *ty) {
-    for (int i = 0; i < set->len; i++)
-        if (set->data[i] == ty)
-            return true;
-    return false;
+    return hashmap_get_int(&set->map, (long long)(intptr_t)ty) != NULL;
 }
 
 static void type_seen_set_push(TypeSeenSet *set, Type *ty) {
-    if (set->len >= set->cap) {
-        set->cap  = set->cap ? set->cap * 2 : 8;
-        set->data = realloc(set->data, sizeof(Type *) * set->cap);
-    }
-    set->data[set->len++] = ty;
+    hashmap_put_int(&set->map, (long long)(intptr_t)ty, (void *)1);
 }
 
 static void type_scan_complex_native(Type *ty, bool *want, TypeSeenSet *seen) {
@@ -2290,7 +2282,7 @@ static void serialize_synth_complex_decls(FILE *f, VirtualMachine *vm,
         if (!want && obj->is_function && obj_fn(obj)->body)
             node_scan_complex_native(obj_fn(obj)->body, &want, &seen);
     }
-    free(seen.data);
+    hashmap_deinit(&seen.map);
     if (!want)
         return;
     fprintf(f, "\n/* #1117: cccc-internal complex accessors the bundled "
@@ -5595,6 +5587,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         free(declared.data);
         free(ctx.seen.data);
         free(ctx.defs.data);
+        hashmap_deinit(&ctx.collected_aggs);
         free(ctx.tags);
         free(ctx.typedefs);
         free(ctx.captured_paths);
@@ -6449,6 +6442,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
 
     free(ctx.seen.data);
     free(ctx.defs.data);
+    hashmap_deinit(&ctx.collected_aggs);
     free(ctx.tags);
     free(ctx.typedefs);
     free(ctx.captured_paths);

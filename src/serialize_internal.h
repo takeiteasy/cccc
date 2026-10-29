@@ -129,6 +129,7 @@ typedef struct {
 typedef struct {
     TypeVec   seen;
     TypeVec   defs;
+    HashMap   collected_aggs; // aggregate Type pointers collect_type() resolved
     TypeName *tags;
     int       tags_len;
     int       tags_cap;
