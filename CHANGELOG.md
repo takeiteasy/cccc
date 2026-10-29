@@ -7,6 +7,19 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-29
+
+- Added: the VM fuses `*(base + idx*k + c)` into one indexed load or store opcode, and `x + a*b`, `a*K` and floating-point `c + a*b` into multiply-add opcodes. Fusion is off under any pointer, type, overflow, uninitialised-read or instrumentation check.
+- Added: a function with loops keeps up to four integer and four floating-point locals used inside a loop in callee-saved registers, and reads them directly as instruction operands. A local whose address is taken, that a nested function captures, or that has a `cleanup` attribute, and every local of a function that calls `setjmp`, stay in memory. `setjmp` saves these registers in the `jmp_buf` and `longjmp` restores them.
+- Added: an always-on constant folding, immediate-operand, copy-propagation, dead-definition and redundant-extension pass over each function's bytecode. `x++` and `x op= y` on a plain variable lower to `x = x op y`. Extension facts carry across branches, switch tables and computed gotos; functions with `setjmp`, computed goto or `cleanup` variables get the same clean-up. All of it is off under the flags that check or instrument locals, and under an explicit `-g`.
+- Added: an extern data object defined by a `-l` library binds through `dlsym`.
+- Added: pre-C23 `-Wpedantic` names each for-init declarator and warns on a tag declared there.
+- Added: `-c=native` stores a pointer in a union or packed slot of a wide-`_BitInt` bit-field aggregate from a startup constructor.
+- Fixed: postfix `++` and `--` on a `_Bool` yield the old value.
+- Fixed: the wide `printf` family copies the format's terminating NUL.
+- Fixed: `make` rebuilds `./cccc` after an edit to `src/ops.c` or a `src` header.
+- Fixed: `test_msan` no longer reports libffi's uninstrumented return, host-call out-parameters or callback arguments as uninitialised.
+
 ## [0.27.0] - 2026-10-28
 
 - Fixed: a `longjmp` out of a guest callback (a `qsort`/`bsearch`/`tsearch` comparator, a `glob`/`scandir`/`fts` callback, an obstack handler) leaves the native frames and lands in the `setjmp` frame, as in compiled C.
