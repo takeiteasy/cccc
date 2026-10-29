@@ -4,10 +4,9 @@
 # Build cccc-msan and run the suites against it inside the Linux amd64
 # Colima container, using `./cccc --build build.c --build-target=test_msan`.
 #
-# NOTE (#844): MSan reports roughly half the targets as failed from an
-# uninstrumented libc/libffi blind spot, documented in docs/test-infrastructure.md. A
-# nonzero exit here is expected, not on its own a regression signal --
-# compare the failure count/names against that documented baseline.
+# NOTE: host (libffi) call results are unpoisoned in ops.c; bytes a host
+# function writes through a pointer argument are not, so a suite may still
+# report. See docs/test-infrastructure.md.
 set -e
 
 PROFILE="${1:-cccc-linux-amd64}"

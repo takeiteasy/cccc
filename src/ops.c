@@ -6270,6 +6270,16 @@ static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,
     return copy;
 }
 
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#define CCCC_FFI_RESULT_INITIALISED(r) __msan_unpoison(&(r), sizeof(r))
+#endif
+#endif
+#ifndef CCCC_FFI_RESULT_INITIALISED
+#define CCCC_FFI_RESULT_INITIALISED(r) ((void)0)
+#endif
+
 int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
                               const char *name, long long *args,
                               int actual_nargs, uint64_t double_arg_mask,
@@ -6370,14 +6380,17 @@ int cccc_call_native_function(VirtualMachine *vm, void *func_ptr,
     if (returns_float) {
         float result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        CCCC_FFI_RESULT_INITIALISED(result);
         cccc_freg_set_f32(vm, FREG_A0, result);
     } else if (returns_double) {
         double result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        CCCC_FFI_RESULT_INITIALISED(result);
         cccc_freg_set_f64(vm, FREG_A0, result);
     } else {
         long long result;
         ffi_call(&cif, FFI_FN(func_ptr), &result, arg_ptrs);
+        CCCC_FFI_RESULT_INITIALISED(result);
         const CcBuiltin *builtin = find_compiler_builtin(func_ptr);
         if (builtin && builtin->ret != CC_RET_HANDLE && result)
             result = (long long)copy_builtin_result_to_vm(vm, builtin->ret,
