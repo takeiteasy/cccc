@@ -21,17 +21,18 @@ Median wall-clock milliseconds, lower is better. `cccc` is the VM (source to byt
 
 | Benchmark | `cccc` | `gcc-O0` | `gcc-O1` | `gcc-O2` | `gcc-O3` |
 |---|---|---|---|---|---|
-| ackermann | 576.3 | 18.4 | 13.7 | 3.8 | 6.7 |
-| binary_tree | 767.7 | 20.0 | 18.5 | 18.4 | 16.4 |
-| fib | 518.1 | 6.6 | 6.9 | 4.6 | 6.5 |
-| mandelbrot | 2682.5 | 61.7 | 29.5 | 28.2 | 26.6 |
-| matrix_mul | 2096.5 | 22.6 | 5.6 | 4.7 | 5.2 |
-| nqueens | 533.4 | 8.7 | 5.6 | 9.3 | 7.1 |
-| quicksort | 830.2 | 14.2 | 8.5 | 9.5 | 9.6 |
-| sieve | 3111.9 | 34.1 | 22.7 | 19.2 | 19.6 |
-| **Geometric mean** | **1074.5** | **18.6** | **11.5** | **9.6** | **10.4** |
+| ackermann | 578.2 | 17.9 | 14.5 | 14.0 | 15.7 |
+| binary_tree | 768.0 | 22.5 | 18.5 | 19.4 | 18.4 |
+| dispatch | 1574.7 | 19.1 | 5.3 | 10.2 | 7.8 |
+| fib | 524.6 | 8.3 | 9.2 | 9.2 | 9.6 |
+| mandelbrot | 2670.4 | 63.0 | 29.8 | 29.8 | 29.9 |
+| matrix_mul | 2082.6 | 21.3 | 5.4 | 4.2 | 6.0 |
+| nqueens | 524.0 | 14.1 | 7.3 | 10.2 | 12.2 |
+| quicksort | 825.2 | 16.9 | 10.9 | 11.5 | 12.4 |
+| sieve | 2991.3 | 44.5 | 20.2 | 18.0 | 17.7 |
+| **Geometric mean** | **1113.8** | **21.3** | **11.5** | **12.4** | **13.0** |
 
-The VM is roughly 42x to 446x slower than `gcc -O2`, worst on tight double-precision loops such as `matrix_mul`. Loop-heavy programs gain most from keeping loop locals in registers, from using those registers directly as instruction operands and from the per-function clean-up; recursion-heavy ones (`ackermann`, `fib`, `binary_tree`) gain least. `-c=native` hands the program to a host compiler and runs at native speed.
+The VM is roughly 40x to 496x slower than `gcc -O2`, worst on tight double-precision loops such as `matrix_mul`. Loop-heavy programs gain most from keeping loop locals in registers, from using those registers directly as instruction operands and from the per-function clean-up; recursion-heavy ones (`ackermann`, `fib`, `binary_tree`) gain least. `-c=native` hands the program to a host compiler and runs at native speed.
 
 ## Reproducing
 

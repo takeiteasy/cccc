@@ -26,10 +26,17 @@
 // opcode is opaque: it reads every register, ends every fact about register
 // contents and is never removed, so a new opcode is never mis-optimised.
 //
-// TODO: copy and extension facts stop at every branch target, and functions
-// with setjmp, computed goto or cleanup attributes are left as generated;
-// forward dataflow over the block graph lifts both
-// (https://todo.sr.ht/~takeiteasy/cccc/1869).
+// Extension facts flow across the block graph (meet = intersection over
+// predecessors); copy facts stay inside a block. A block that can be entered
+// from outside the graph (the function entry, an address-taken label) starts
+// from the promoted-register seed alone. A switch table's targets are
+// successors of its JMPT; every label of a function with a computed goto is a
+// successor of its JMPI.
+//
+// TODO: an extension after arithmetic (`ADDI3; SX4`) is kept because the pass
+// has no value ranges; branch-refined ranges would drop the loop-index ones
+// (https://todo.sr.ht/~takeiteasy/cccc/1875). LI3-fed operations that survive
+// codegen are not folded here (https://todo.sr.ht/~takeiteasy/cccc/1876).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -231,24 +238,38 @@ typedef struct {
     uint32_t iuse, idef, fuse, fdef;
 } Eff;
 
+// What is known about the registers at one point: icopy[r] / fcopy[r] is a
+// register r currently equals, ext[r] the extensions r already satisfies.
 typedef struct {
-    Pc     pc;
-    int    op;
-    int    size;
-    bool   dead;
-    bool   leader;
-    bool   known; // op_spec() applies and every register byte is in range
-    OpSpec spec;
+    int     icopy[NUM_REGS];
+    int     fcopy[NUM_REGS];
+    uint8_t ext[NUM_REGS];
+} Facts;
+
+typedef struct {
+    Pc      pc;
+    int     op;
+    int     size;
+    bool    dead;
+    bool    leader;
+    bool    addr_target; // a label whose address may be jumped to
+    bool    known;   // op_spec() applies and every register byte is in range
+    uint8_t src_ext; // an extension's source facts, set by the forward pass
+    OpSpec  spec;
 } Insn;
 
 typedef struct {
     int      first, last; // instruction indices, [first, last)
-    int      succ[2];
+    int      eoff, nsucc; // successors are Peep.edges[eoff, eoff + nsucc)
+    bool     ext_entry;   // enterable from outside the block graph
+    bool     reached;
     uint32_t iin, fin, iout, fout;
+    Facts    in;
 } Block;
 
 typedef struct {
     VirtualMachine *vm;
+    Obj            *fn;
     Pc              start, end;
     Insn           *ins;
     int             n;
@@ -256,6 +277,10 @@ typedef struct {
     Block          *blocks;
     int            *blk_of; // instruction index -> block index
     int             nblocks;
+    int            *edges;  // successor block indices, grouped by block
+    int             nedges, edge_cap;
+    int            *labels; // blocks starting at an address-taken label
+    int             nlabels;
     bool            changed;
     uint8_t         seed[NUM_REGS]; // extension facts that hold throughout
 } Peep;
@@ -301,6 +326,18 @@ static void effects(Peep *p, const Insn *in, Eff *e) {
     }
     if (in->op == LEV3 || in->op == CALLT) {
         e->iuse = e->fuse = EXIT_LIVE;
+        return;
+    }
+    if (in->op == JMPT) {
+        e->iuse = BIT(REG_A0);
+        return;
+    }
+    if (in->op == JMPI) {
+        int r = w & 0xFF;
+        if (r >= NUM_REGS)
+            e->iuse = ALL_REGS;
+        else if (r != REG_ZERO)
+            e->iuse = BIT(r);
         return;
     }
     if (!in->known) {
@@ -381,10 +418,8 @@ static bool decode_window(Peep *p) {
         return false;
 
     for (int i = 0; i < p->n; i++) {
-        Insn *in = &p->ins[i];
-        if (in->op == SETJMP || in->op == JMPI)
-            return false;
-        InstrWord w = vm->text_seg[in->pc + 1];
+        Insn     *in = &p->ins[i];
+        InstrWord w  = vm->text_seg[in->pc + 1];
         if (in->known) {
             for (int k = 0; k < 4; k++)
                 if (in->spec.role[k] != R_NO &&
@@ -395,13 +430,27 @@ static bool decode_window(Peep *p) {
     return true;
 }
 
+// Marks `t` as a label whose address may be jumped to.
+static bool mark_address_target(Peep *p, Pc t) {
+    if (!mark_target(p, t))
+        return false;
+    if (in_window(p, t))
+        p->ins[p->at[t - p->start]].addr_target = true;
+    return true;
+}
+
 // Marks every branch target as a leader. False if one is not an instruction.
-static bool mark_leaders(Peep *p) {
-    VirtualMachine *vm = p->vm;
+// With a computed goto, every label of the function is a possible target.
+static bool mark_leaders(Peep *p, PeepMark m) {
+    VirtualMachine *vm       = p->vm;
+    bool            has_jmpi = false;
     for (int i = 0; i < p->n; i++) {
         Insn *in = &p->ins[i];
         bool  ok = true;
         switch (in->op) {
+            case JMPI:
+                has_jmpi = true;
+                break;
             case JMP:
                 ok = mark_target(p, vm->text_seg[in->pc + 1]);
                 break;
@@ -418,22 +467,39 @@ static bool mark_leaders(Peep *p) {
                 break;
             }
             case LTA3:
-                ok = mark_target(
+                ok = mark_address_target(
                     p, cc_byte_offset_to_pc(cc_read_i64_at(vm, in->pc + 2)));
                 break;
         }
         if (!ok)
             return false;
     }
+    if (has_jmpi)
+        for (int i = m.labels; i < num_global_labels; i++)
+            if (!mark_address_target(p, global_label_map[i].offset))
+                return false;
     return true;
 }
 
 // ---- Control-flow graph and liveness ----
 
+static int count_blocks(const Peep *p) {
+    int  count = 0;
+    bool open  = false;
+    for (int i = 0; i < p->n; i++) {
+        if (!open || p->ins[i].leader)
+            count++;
+        open = ctrl_kind(&p->ins[i]) == C_NONE;
+    }
+    return count;
+}
+
 static void build_blocks(Peep *p) {
-    p->blocks = calloc((size_t)p->n + 1, sizeof(Block));
+    int cap   = count_blocks(p);
+    p->blocks = calloc((size_t)cap + 1, sizeof(Block));
+    p->labels = malloc(((size_t)cap + 1) * sizeof(int));
     int *bi = p->blk_of = malloc(((size_t)p->n + 1) * sizeof(int));
-    if (!p->blocks || !bi)
+    if (!p->blocks || !p->labels || !bi)
         error("out of memory");
     p->nblocks = 0;
     bool open  = false;
@@ -441,7 +507,9 @@ static void build_blocks(Peep *p) {
         if (!open || p->ins[i].leader) {
             if (open)
                 p->blocks[p->nblocks - 1].last = i;
-            p->blocks[p->nblocks].first = i;
+            Block *blk     = &p->blocks[p->nblocks];
+            blk->first     = i;
+            blk->ext_entry = p->nblocks == 0 || p->ins[i].addr_target;
             p->nblocks++;
             open = true;
         }
@@ -455,21 +523,47 @@ static void build_blocks(Peep *p) {
         p->blocks[p->nblocks - 1].last = p->n;
 }
 
+static void add_edge(Peep *p, int b) {
+    if (p->nedges == p->edge_cap) {
+        p->edge_cap = p->edge_cap ? p->edge_cap * 2 : 64;
+        p->edges    = realloc(p->edges, (size_t)p->edge_cap * sizeof(int));
+        if (!p->edges)
+            error("out of memory");
+    }
+    p->edges[p->nedges++] = b;
+}
+
+static void add_target(Peep *p, Pc t) {
+    if (in_window(p, t))
+        add_edge(p, p->blk_of[p->at[t - p->start]]);
+}
+
 static void compute_succs(Peep *p) {
     VirtualMachine *vm = p->vm;
+    p->nedges          = 0;
+    p->nlabels         = 0;
+    for (int b = 0; b < p->nblocks; b++)
+        if (p->ins[p->blocks[b].first].addr_target)
+            p->labels[p->nlabels++] = b;
     for (int b = 0; b < p->nblocks; b++) {
-        Block *blk   = &p->blocks[b];
-        blk->succ[0] = blk->succ[1] = -1;
-        const Insn *last            = &p->ins[blk->last - 1];
-        int         kind            = ctrl_kind(last);
-        bool        fall            = kind == C_NONE || kind == C_COND;
-        if (fall && b + 1 < p->nblocks)
-            blk->succ[1] = b + 1;
-        if (kind == C_JMP || kind == C_COND) {
-            Pc t = vm->text_seg[last->pc + (kind == C_JMP ? 1 : 2)];
-            if (in_window(p, t))
-                blk->succ[0] = p->blk_of[p->at[t - p->start]];
+        Block *blk       = &p->blocks[b];
+        blk->eoff        = p->nedges;
+        const Insn *last = &p->ins[blk->last - 1];
+        int         kind = ctrl_kind(last);
+        if ((kind == C_NONE || kind == C_COND) && b + 1 < p->nblocks)
+            add_edge(p, b + 1);
+        if (kind == C_JMP || kind == C_COND)
+            add_target(p, vm->text_seg[last->pc + (kind == C_JMP ? 1 : 2)]);
+        else if (last->op == JMPT && !last->dead) {
+            add_target(p, vm->text_seg[last->pc + 3]);
+            InstrWord count = vm->text_seg[last->pc + 2];
+            for (InstrWord k = 0; k < count; k++)
+                add_target(p, vm->text_seg[last->pc + 4 + (Pc)k]);
+        } else if (last->op == JMPI && !last->dead) {
+            for (int k = 0; k < p->nlabels; k++)
+                add_edge(p, p->labels[k]);
         }
+        blk->nsucc = p->nedges - blk->eoff;
     }
 }
 
@@ -481,7 +575,6 @@ static void step_back(Peep *p, const Insn *in, uint32_t *il, uint32_t *fl) {
 }
 
 static void compute_liveness(Peep *p) {
-    compute_succs(p);
     for (int b = 0; b < p->nblocks; b++)
         p->blocks[b].iin = p->blocks[b].fin = 0;
     bool again = true;
@@ -490,11 +583,10 @@ static void compute_liveness(Peep *p) {
         for (int b = p->nblocks - 1; b >= 0; b--) {
             Block   *blk = &p->blocks[b];
             uint32_t il = 0, fl = 0;
-            for (int s = 0; s < 2; s++) {
-                if (blk->succ[s] >= 0) {
-                    il |= p->blocks[blk->succ[s]].iin;
-                    fl |= p->blocks[blk->succ[s]].fin;
-                }
+            for (int s = 0; s < blk->nsucc; s++) {
+                const Block *sb  = &p->blocks[p->edges[blk->eoff + s]];
+                il              |= sb->iin;
+                fl              |= sb->fin;
             }
             blk->iout = il;
             blk->fout = fl;
@@ -617,12 +709,6 @@ static int ext_result(int op) {
     }
 }
 
-typedef struct {
-    int     icopy[NUM_REGS];
-    int     fcopy[NUM_REGS];
-    uint8_t ext[NUM_REGS];
-} Facts;
-
 // A promoted local's register is written only through emit_promoted_write,
 // which normalises it to the variable's type, and a callee restores it, so it
 // holds an in-range value at every point of the body.
@@ -657,10 +743,26 @@ static int get_byte(Peep *p, const Insn *in, int k) {
     return (int)((operand(p, in) >> (8 * k)) & 0xFF);
 }
 
-static void forward_block(Peep *p, Block *blk) {
+// Extensions the result of a bitwise operation satisfies. An AND's result is
+// a subset of the bits of a non-negative operand, so it keeps that operand's
+// facts.
+static int ext_bitwise(int op, int a, int b) {
+    int nonneg = X_ZX1 | X_ZX2 | X_ZX4;
+    int x      = a & b;
+    if (op == AND3) {
+        if (a & nonneg)
+            x |= a;
+        if (b & nonneg)
+            x |= b;
+    }
+    return x;
+}
+
+// Walks `blk` from the facts in `*f`, leaving the facts at its end. With
+// `rewrite` it also edits the code; without it, it only models what the edits
+// would do, so the facts it yields do not depend on them.
+static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
     VirtualMachine *vm = p->vm;
-    Facts           f;
-    facts_reset(&f, p->seed);
     for (int i = blk->first; i < blk->last; i++) {
         Insn *in = &p->ins[i];
         if (in->dead)
@@ -668,77 +770,153 @@ static void forward_block(Peep *p, Block *blk) {
         int kind = ctrl_kind(in);
         if ((in->op == MOV3 || in->op == FMOV3) &&
             get_byte(p, in, 0) == get_byte(p, in, 1)) {
-            in->dead   = true;
-            p->changed = true;
+            if (rewrite) {
+                in->dead   = true;
+                p->changed = true;
+            }
             continue;
         }
         if (!in->known) {
             if (in->op == JZ3 || in->op == JNZ3) {
                 int r = get_byte(p, in, 0);
-                if (r > REG_ZERO && r < NUM_REGS && f.icopy[r] >= 0) {
-                    set_byte(p, in, 0, f.icopy[r]);
+                if (rewrite && r > REG_ZERO && r < NUM_REGS &&
+                    f->icopy[r] >= 0) {
+                    set_byte(p, in, 0, f->icopy[r]);
                     p->changed = true;
                 }
             } else if (kind == C_NONE) {
-                facts_reset(&f, p->seed);
+                facts_reset(f, p->seed);
             }
             continue;
         }
 
         // A sign/zero extension of a value already known to fit is a copy.
-        int need = ext_needed(in->op);
+        int op   = in->op;
+        int need = ext_needed(op);
         if (need) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
-            if (f.ext[rs] & need) {
-                p->changed = true;
+            if (f->ext[rs] & need) {
+                if (rewrite)
+                    p->changed = true;
                 if (rd == rs) {
-                    in->dead = true;
+                    if (rewrite)
+                        in->dead = true;
                     continue;
                 }
-                vm->text_seg[in->pc] = MOV3;
-                in->op               = MOV3;
-                op_spec(MOV3, &in->spec);
+                if (rewrite) {
+                    vm->text_seg[in->pc] = MOV3;
+                    in->op               = MOV3;
+                    op_spec(MOV3, &in->spec);
+                }
+                op = MOV3;
+            } else if (rewrite) {
+                in->src_ext = f->ext[rs];
             }
         }
 
-        for (int k = 0; k < 4; k++) {
-            int role = in->spec.role[k];
-            int r    = get_byte(p, in, k);
-            if (role == R_IU && r > REG_ZERO && f.icopy[r] >= 0) {
-                set_byte(p, in, k, f.icopy[r]);
-                p->changed = true;
-            } else if (role == R_FU && f.fcopy[r] >= 0) {
-                set_byte(p, in, k, f.fcopy[r]);
-                p->changed = true;
+        if (rewrite) {
+            for (int k = 0; k < 4; k++) {
+                int role = in->spec.role[k];
+                int r    = get_byte(p, in, k);
+                if (role == R_IU && r > REG_ZERO && f->icopy[r] >= 0) {
+                    set_byte(p, in, k, f->icopy[r]);
+                    p->changed = true;
+                } else if (role == R_FU && f->fcopy[r] >= 0) {
+                    set_byte(p, in, k, f->fcopy[r]);
+                    p->changed = true;
+                }
             }
         }
 
         Eff e;
         effects(p, in, &e);
-        int ext = ext_result(in->op);
-        if (in->op == MOV3)
-            ext = f.ext[get_byte(p, in, 1)];
-        if (in->op == LI3)
+        int ext = ext_result(op);
+        if (op == MOV3)
+            ext = f->ext[get_byte(p, in, 1)];
+        else if (op == AND3 || op == OR3 || op == XOR3)
+            ext = ext_bitwise(op, f->ext[get_byte(p, in, 1)],
+                              f->ext[get_byte(p, in, 2)]);
+        else if (op == LI3)
             ext = ext_of_range(cc_read_i64_at(vm, in->pc + 2),
                                cc_read_i64_at(vm, in->pc + 2));
         for (int r = 1; r < NUM_REGS; r++) {
             if (e.idef & BIT(r)) {
-                kill_int(&f, r);
-                f.ext[r] = (uint8_t)ext;
+                kill_int(f, r);
+                f->ext[r] = (uint8_t)ext;
             }
             if (e.fdef & BIT(r))
-                kill_float(&f, r);
+                kill_float(f, r);
         }
-        if (in->op == MOV3) {
+        if (op == MOV3) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
             if (rd != rs && rd != REG_ZERO && rs != REG_ZERO)
-                f.icopy[rd] = rs;
-        } else if (in->op == FMOV3) {
+                f->icopy[rd] = rs;
+        } else if (op == FMOV3) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
             if (rd != rs)
-                f.fcopy[rd] = rs;
+                f->fcopy[rd] = rs;
         }
     }
+}
+
+// Intersects the extension facts of `src` into `dst`; true if `dst` lost one.
+static bool meet_ext(Facts *dst, const Facts *src) {
+    bool lost = false;
+    for (int r = 0; r < NUM_REGS; r++) {
+        uint8_t x = dst->ext[r] & src->ext[r];
+        if (x != dst->ext[r]) {
+            dst->ext[r] = x;
+            lost        = true;
+        }
+    }
+    return lost;
+}
+
+static void forget_copies(Facts *f) {
+    for (int r = 0; r < NUM_REGS; r++)
+        f->icopy[r] = f->fcopy[r] = -1;
+}
+
+// Facts at the start of every block: the function entry and any block that
+// can be entered from outside the graph start from the seed, the rest from the
+// intersection over the blocks that reach them. A block nothing reaches is
+// given the seed as well. Only extension facts cross a block boundary: a copy
+// forwarded across one keeps the source register live and defeats retargeting.
+// TODO: each pass models every block again; a worklist would visit only those
+// whose entry changed if compile time on very large functions shows it.
+static void compute_entry_facts(Peep *p) {
+    for (int b = 0; b < p->nblocks; b++) {
+        Block *blk   = &p->blocks[b];
+        blk->reached = blk->ext_entry;
+        facts_reset(&blk->in, p->seed);
+    }
+    bool again = true;
+    while (again) {
+        again = false;
+        for (int b = 0; b < p->nblocks; b++) {
+            Block *blk = &p->blocks[b];
+            if (!blk->reached)
+                continue;
+            Facts out = blk->in;
+            forward_block(p, blk, &out, false);
+            forget_copies(&out);
+            for (int s = 0; s < blk->nsucc; s++) {
+                Block *sb = &p->blocks[p->edges[blk->eoff + s]];
+                if (sb->ext_entry)
+                    continue;
+                if (!sb->reached) {
+                    sb->in      = out;
+                    sb->reached = true;
+                    again       = true;
+                } else if (meet_ext(&sb->in, &out)) {
+                    again = true;
+                }
+            }
+        }
+    }
+    for (int b = 0; b < p->nblocks; b++)
+        if (!p->blocks[b].reached)
+            facts_reset(&p->blocks[b].in, p->seed);
 }
 
 // ---- Backward pass: dead definitions and retargeting ----
@@ -779,8 +957,37 @@ static bool try_retarget(Peep *p, Block *blk, int mov, uint32_t il,
     return false;
 }
 
+// The facts under which `ext` (SXk / ZXk) keeps a value's zero-ness.
+static int ext_zero_facts(int op) {
+    switch (op) {
+        case SX1:
+        case ZX1:
+            return X_SX1 | X_ZX1;
+        case SX2:
+        case ZX2:
+            return X_SX2 | X_ZX2;
+        default:
+            return X_SX4 | X_ZX4;
+    }
+}
+
+// `SXk/ZXk t, s; JZ3/JNZ3 t` with t dead after the branch tests s directly when
+// s already fits k bytes: it is zero exactly when its low k bytes are.
+static bool drop_branch_ext(Peep *p, Insn *ext, Insn *br, uint32_t after_br) {
+    int rd = get_byte(p, ext, 0), rs = get_byte(p, ext, 1);
+    if (rd == REG_ZERO || get_byte(p, br, 0) != rd || (after_br & BIT(rd)) ||
+        !(ext->src_ext & ext_zero_facts(ext->op)))
+        return false;
+    set_byte(p, br, 0, rs);
+    ext->dead  = true;
+    p->changed = true;
+    return true;
+}
+
 static void backward_block(Peep *p, Block *blk) {
     uint32_t il = blk->iout, fl = blk->fout;
+    int      next     = -1;
+    uint32_t after_br = 0;
     for (int i = blk->last - 1; i >= blk->first; i--) {
         Insn *in = &p->ins[i];
         if (in->dead)
@@ -796,8 +1003,18 @@ static void backward_block(Peep *p, Block *blk) {
             }
             if ((in->spec.flags & SP_MOVE) && try_retarget(p, blk, i, il, fl))
                 continue;
+            if (ext_needed(in->op) && next >= 0 &&
+                (p->ins[next].op == JZ3 || p->ins[next].op == JNZ3) &&
+                drop_branch_ext(p, in, &p->ins[next], after_br)) {
+                int rs = get_byte(p, in, 1);
+                il     = after_br | (rs > REG_ZERO ? BIT(rs) : 0);
+                continue;
+            }
         }
+        if (in->op == JZ3 || in->op == JNZ3)
+            after_br = il;
         step_back(p, in, &il, &fl);
+        next = i;
     }
 }
 
@@ -890,6 +1107,11 @@ static void compact(Peep *p, PeepMark m) {
                 remap(p, map, (Pc)vm->dbg.source_map[i].pc_offset);
     for (int i = m.labels; i < num_global_labels; i++)
         global_label_map[i].offset = remap(p, map, global_label_map[i].offset);
+    for (CleanupRange *r = p->fn->cleanup_ranges; r; r = r->next) {
+        r->start = remap(p, map, (Pc)r->start);
+        if (r->end >= 0)
+            r->end = remap(p, map, (Pc)r->end);
+    }
 
     vm->text_ptr = out - 1;
     free(map);
@@ -901,6 +1123,19 @@ PeepMark cg_peep_mark(VirtualMachine *vm) {
     return (PeepMark){
         vm->compiler.num_call_patches, vm->compiler.num_func_addr_patches,
         vm->dbg.source_map ? vm->dbg.source_map_count : 0, num_global_labels};
+}
+
+// Whether every cleanup range still starts and ends on an instruction.
+static bool cleanup_ranges_aligned(const Peep *p) {
+    for (const CleanupRange *r = p->fn->cleanup_ranges; r; r = r->next) {
+        for (int k = 0; k < 2; k++) {
+            long long t = k ? r->end : r->start;
+            if (t >= (long long)p->start && t < (long long)p->end &&
+                p->at[t - p->start] < 0)
+                return false;
+        }
+    }
+    return true;
 }
 
 // An instruction holding a not-yet-resolved text address is left alone.
@@ -929,6 +1164,8 @@ static void free_peep(Peep *p) {
     free(p->at);
     free(p->blocks);
     free(p->blk_of);
+    free(p->edges);
+    free(p->labels);
 }
 
 static uint8_t promoted_ext(const Type *ty) {
@@ -952,10 +1189,13 @@ static uint8_t promoted_ext(const Type *ty) {
 }
 
 void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
-    if (!cg_opt_enabled(vm) || fn->cleanup_ranges)
+    if (!cg_opt_enabled(vm))
         return;
-    Peep p = {.vm = vm, .start = (Pc)fn->code_addr, .end = vm->text_ptr + 1};
-    if (p.end <= p.start || !decode_window(&p) || !mark_leaders(&p)) {
+    Peep p = {.vm    = vm,
+              .fn    = fn,
+              .start = (Pc)fn->code_addr,
+              .end   = vm->text_ptr + 1};
+    if (p.end <= p.start || !decode_window(&p) || !mark_leaders(&p, m)) {
         free_peep(&p);
         return;
     }
@@ -968,8 +1208,12 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
     bool any = false;
     for (int round = 0; round < 6; round++) {
         p.changed = false;
-        for (int b = 0; b < p.nblocks; b++)
-            forward_block(&p, &p.blocks[b]);
+        compute_succs(&p);
+        compute_entry_facts(&p);
+        for (int b = 0; b < p.nblocks; b++) {
+            Facts f = p.blocks[b].in;
+            forward_block(&p, &p.blocks[b], &f, true);
+        }
         compute_liveness(&p);
         for (int b = 0; b < p.nblocks; b++)
             backward_block(&p, &p.blocks[b]);
@@ -983,8 +1227,10 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
     free_peep(&p);
 
     if (any) {
-        Peep v = {.vm = vm, .start = p.start, .end = vm->text_ptr + 1};
-        if (!decode_window(&v) || !mark_leaders(&v))
+        Peep v = {
+            .vm = vm, .fn = fn, .start = p.start, .end = vm->text_ptr + 1};
+        if (!decode_window(&v) || !mark_leaders(&v, m) ||
+            !cleanup_ranges_aligned(&v))
             error("codegen: internal error: peephole left invalid bytecode in "
                   "'%s'",
                   fn->name);

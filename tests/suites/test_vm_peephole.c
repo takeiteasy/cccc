@@ -454,7 +454,7 @@ void test_recursion(void) {
 static jmp_buf pj;
 
 [[cccc::test]]
-void test_setjmp_function_is_untouched(void) {
+void test_setjmp_function_with_loop(void) {
     volatile int v = 0;
     int          i;
     if (setjmp(pj) == 0) {
@@ -578,4 +578,336 @@ void test_folding_leaves_traps_and_wide_shifts_alone(void) {
     AssertEq(10 / (zero + 5), 2);
     AssertEq(10 % (zero + 4), 2);
     AssertEq(1 << (zero + 31) < 0, 1);
+}
+
+// ---- Facts that cross a branch ----
+
+long tern_narrow(long v, long k) {
+    return (int)(k ? (long)(short)v : (long)(int)v);
+}
+
+long tern_raw_arm(long v, long k) {
+    return (int)(k ? (long)(int)v : v);
+}
+
+long tern_zero_extended(long v, long k) {
+    return (unsigned char)(k ? (long)(unsigned char)v : v);
+}
+
+long logical_chain(long v, long w) {
+    return (int)((v && w) ? (long)(signed char)v : w);
+}
+
+[[cccc::test]]
+void test_extension_facts_meet_at_joins(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        for (long k = 0; k < 2; k++) {
+            AssertEq(tern_narrow(v, k), k ? (long)(short)v : (long)(int)v);
+            AssertEq(tern_raw_arm(v, k), (long)(int)v);
+            AssertEq(tern_zero_extended(v, k), (long)(unsigned char)v);
+        }
+        for (int j = 0; j < NVALS; j++) {
+            long w = (long)opaque(vals[j]);
+            AssertEq(logical_chain(v, w),
+                     (v && w) ? (long)(signed char)v : (long)(int)w);
+        }
+    }
+}
+
+long loop_wrap_int(long n, long seed) {
+    long x = (int)seed;
+    for (long i = 0; i < n; i++)
+        x = (int)(x * 31 + i);
+    return x;
+}
+
+long loop_wrap_int_ref(long n, long seed) {
+    long x = (int)opaque(seed);
+    for (long i = 0; i < n; i++)
+        x = (int)opaque(x * 31 + i);
+    return x;
+}
+
+long loop_wrap_byte(long n) {
+    unsigned char c = 250;
+    long          s = 0;
+    for (long i = 0; i < n; i++) {
+        c += 3;
+        s += c;
+    }
+    return s;
+}
+
+[[cccc::test]]
+void test_extension_facts_in_loops(void) {
+    for (int i = 0; i < NVALS; i++)
+        AssertEq(loop_wrap_int(40, (long)vals[i]),
+                 loop_wrap_int_ref(40, (long)vals[i]));
+    long s = 0, c = 250;
+    for (long i = 0; i < 300; i++) {
+        c  = (c + 3) % 256;
+        s += c;
+    }
+    AssertEq(loop_wrap_byte(300), s);
+}
+
+long and_mask31(long v) {
+    return (int)(v & 0x7FFFFFFF);
+}
+long and_mask32(long v) {
+    return (int)(v & 0xFFFFFFFF);
+}
+long and_byte(long v) {
+    return (signed char)(v & 0xFF);
+}
+long and_mask_negative(long v, long m) {
+    return (int)(v & (int)m);
+}
+long or_ints(long a, long b) {
+    return (int)((int)a | (int)b);
+}
+long xor_bytes(long a, long b) {
+    return (int)((signed char)a ^ (signed char)b);
+}
+
+[[cccc::test]]
+void test_bitwise_extension_facts(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        AssertEq(and_mask31(v), v & 0x7FFFFFFF);
+        AssertEq(and_mask32(v), (long)(int)v);
+        AssertEq(and_byte(v), (long)(signed char)v);
+        for (int j = 0; j < NVALS; j++) {
+            long m = (long)opaque(vals[j]);
+            AssertEq(and_mask_negative(v, m),
+                     (long)(int)opaque(v & (long)(int)opaque(m)));
+            AssertEq(or_ints(v, m), (long)(int)opaque((long)(int)opaque(v) |
+                                                      (long)(int)opaque(m)));
+            AssertEq(xor_bytes(v, m),
+                     (long)(int)opaque((long)(signed char)opaque(v) ^
+                                       (long)(signed char)opaque(m)));
+        }
+    }
+}
+
+long zx_branch(long v) {
+    return (unsigned char)v ? 1 : 0;
+}
+long zx2_branch(long v) {
+    return (unsigned short)v ? 1 : 0;
+}
+long sx_branch(long v) {
+    return (signed char)v ? 1 : 0;
+}
+long zx_branch_char(signed char c) {
+    return (unsigned char)c ? 1 : 0;
+}
+
+long zx_branch_live(long v) {
+    unsigned char c = v;
+    if (c)
+        return c;
+    return -1;
+}
+
+[[cccc::test]]
+void test_extension_before_a_branch(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        AssertEq(zx_branch(v), (v & 0xFF) != 0);
+        AssertEq(zx2_branch(v), (v & 0xFFFF) != 0);
+        AssertEq(sx_branch(v), (v & 0xFF) != 0);
+        AssertEq(zx_branch_char((signed char)v), (v & 0xFF) != 0);
+        AssertEq(zx_branch_live(v), (v & 0xFF) ? (v & 0xFF) : -1);
+    }
+}
+
+long switch_ext(long v, int sel) {
+    long x = (int)v;
+    switch (sel) {
+        case 0:
+            break;
+        case 1:
+            x = v;
+            break;
+        case 2:
+            x = (short)v;
+            break;
+        case 3:
+            x = (unsigned char)v;
+            break;
+        default:
+            x += 1;
+            break;
+    }
+    return (int)x;
+}
+
+[[cccc::test]]
+void test_extension_facts_into_switch_targets(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        AssertEq(switch_ext(v, 0), (long)(int)v);
+        AssertEq(switch_ext(v, 1), (long)(int)v);
+        AssertEq(switch_ext(v, 2), (long)(short)v);
+        AssertEq(switch_ext(v, 3), (long)(unsigned char)v);
+        AssertEq(switch_ext(v, 4), (long)(int)((long)(int)v + 1));
+    }
+}
+
+// ---- Computed goto ----
+
+enum { OP_ADD, OP_DOUBLE, OP_NEG, OP_BYTE, OP_END };
+
+long interp_goto(const unsigned char *code, long arg) {
+    static void *tbl[] = {&&add, &&dbl, &&neg, &&byte, &&end};
+    long         acc   = arg;
+    long         steps = 0;
+    goto        *tbl[*code++];
+add:
+    acc += 3;
+    steps++;
+    goto *tbl[*code++];
+dbl:
+    acc = (int)(acc * 2);
+    steps++;
+    goto *tbl[*code++];
+neg:
+    acc = -acc;
+    steps++;
+    goto *tbl[*code++];
+byte:
+    acc = (signed char)acc;
+    steps++;
+    goto *tbl[*code++];
+end:
+    return acc * 100 + steps;
+}
+
+long interp_switch(const unsigned char *code, long arg) {
+    long acc = arg, steps = 0;
+    for (;; code++) {
+        switch (*code) {
+            case OP_ADD:
+                acc = (long)opaque(acc + 3);
+                break;
+            case OP_DOUBLE:
+                acc = (int)opaque(acc * 2);
+                break;
+            case OP_NEG:
+                acc = (long)opaque(-acc);
+                break;
+            case OP_BYTE:
+                acc = (signed char)opaque(acc);
+                break;
+            default:
+                return acc * 100 + steps;
+        }
+        steps++;
+    }
+}
+
+long local_label_goto(long v, int n) {
+    void *where = n ? &&again : &&done;
+    long  x     = (int)v;
+    goto *where;
+again:
+    x     = (short)(x + n);
+    where = &&done;
+    goto *where;
+done:
+    return (int)x;
+}
+
+[[cccc::test]]
+void test_computed_goto_dispatch(void) {
+    static const unsigned char progs[][8] = {
+        {OP_END},
+        {OP_ADD, OP_DOUBLE, OP_END},
+        {OP_DOUBLE, OP_DOUBLE, OP_DOUBLE, OP_NEG, OP_END},
+        {OP_BYTE, OP_ADD, OP_BYTE, OP_NEG, OP_DOUBLE, OP_END},
+        {OP_ADD, OP_ADD, OP_ADD, OP_ADD, OP_BYTE, OP_DOUBLE, OP_NEG, OP_END},
+    };
+    for (int p = 0; p < 5; p++)
+        for (int i = 0; i < NVALS; i++) {
+            long v = (long)opaque(vals[i]);
+            AssertEq(interp_goto(progs[p], v), interp_switch(progs[p], v));
+        }
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        AssertEq(local_label_goto(v, 0), (long)(int)v);
+        AssertEq(local_label_goto(v, 5), (long)(short)((long)(int)v + 5));
+    }
+}
+
+// ---- setjmp and cleanup ----
+
+static jmp_buf sj;
+
+static void thrower(long v) {
+    longjmp(sj, (int)(v & 0x7FFF) + 1);
+}
+
+long setjmp_flow(long v) {
+    volatile long seen   = 0;
+    long          before = (int)v;
+    int           r      = setjmp(sj);
+    if (r == 0) {
+        seen = before + 1;
+        thrower(v);
+    }
+    return seen * 1000 + r + (int)before;
+}
+
+[[cccc::test]]
+void test_setjmp_keeps_values_across_longjmp(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        long b = (int)v;
+        AssertEq(setjmp_flow(v), (b + 1) * 1000 + ((v & 0x7FFF) + 1) + b);
+    }
+}
+
+static int cl_log[8];
+static int cl_n;
+
+static void cl_rec(int *p) {
+    cl_log[cl_n++] = *p;
+}
+
+long cleanup_flow(long v, int mode) {
+    __attribute__((cleanup(cl_rec))) int a = (int)v;
+    long                                 x = (int)v;
+    if (mode == 0)
+        return x;
+    {
+        __attribute__((cleanup(cl_rec))) int b = (int)(v >> 3);
+        if (mode == 1)
+            return (int)(x + b);
+        x = v;
+    }
+    return (int)x;
+}
+
+[[cccc::test]]
+void test_cleanup_function_flow(void) {
+    for (int i = 0; i < NVALS; i++) {
+        long v = (long)opaque(vals[i]);
+        int  a = (int)v, b = (int)(v >> 3);
+        cl_n = 0;
+        AssertEq(cleanup_flow(v, 0), (long)a);
+        AssertEq(cl_n, 1);
+        AssertEq(cl_log[0], a);
+        cl_n = 0;
+        AssertEq(cleanup_flow(v, 1), (long)(int)((long)a + b));
+        AssertEq(cl_n, 2);
+        AssertEq(cl_log[0], b);
+        AssertEq(cl_log[1], a);
+        cl_n = 0;
+        AssertEq(cleanup_flow(v, 2), (long)a);
+        AssertEq(cl_n, 2);
+        AssertEq(cl_log[0], b);
+        AssertEq(cl_log[1], a);
+    }
 }

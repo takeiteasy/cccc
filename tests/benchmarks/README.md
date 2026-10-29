@@ -16,6 +16,7 @@ Each program is plain C99/C11, prints a single `result: …` line on stdout, and
 | `mandelbrot.c` | 400×400 mandelbrot, 200 iter | `400×400, 200` |
 | `binary_tree.c` | BST insert + inorder traversal | `N=100,000` |
 | `ackermann.c` | `ack(3, 8)` | `M=3, N=8` |
+| `dispatch.c` | Accumulator machine dispatched with computed goto | `N=1,000,000` |
 
 ## Running
 
