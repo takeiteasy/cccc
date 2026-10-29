@@ -59,6 +59,10 @@
 #define O_RSYNC     04010000
 #endif
 
+#ifdef __linux__
+#define O_PATH 010000000
+#endif
+
 /* fcntl() commands and record-locking constants (platform-specific) */
 #define F_DUPFD    0
 #define F_GETFD    1

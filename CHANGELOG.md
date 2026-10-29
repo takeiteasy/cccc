@@ -14,6 +14,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: a command-line `-i DIR` default reached a `CcccExecutable` as `-isystem DIR`, which `cccc` read as `-i system`.
 - Fixed: `ExcludeSource` had no effect on a `CcccExecutable` target.
 - Fixed: `-c=native` of cccc's own sources failed with a duplicate `__cccc_native_strtol` runtime.
+- Added: Linux `O_PATH` in `<fcntl.h>` and `syscall()` in `<unistd.h>` (declared and registered under `__linux__`; comptime class `exec`).
+- Fixed: `<sys/time.h>` now makes `fd_set` and the `FD_*` macros visible.
 
 ## [0.28.0] - 2026-10-29
 

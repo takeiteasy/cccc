@@ -177,6 +177,8 @@ extern int getpagesize(void);
 /* -- SQLite's unix VFS can reference it under Linux-specific config (#731). */
 extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
                       size_t len, unsigned int flags);
+/* syscall: raw kernel entry, Linux-only (Darwin deprecates it). */
+extern long syscall(long number, ...);
 #endif
 
 /* sysconf()/pathconf()/confstr() constants.

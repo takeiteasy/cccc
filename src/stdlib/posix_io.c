@@ -556,6 +556,8 @@ void register_posix_io_functions(VirtualMachine *vm) {
     extern ssize_t splice(int fd_in, off_t *off_in, int fd_out, off_t *off_out,
                           size_t len, unsigned int flags);
     cc_register_cfunc(vm, "splice", (void *)splice, 6, 0);
+    extern long syscall(long number, ...);
+    cc_register_variadic_cfunc(vm, "syscall", (void *)syscall, 1, 0);
     // preadv2/pwritev2 (#793): declared+wrapped above, next to preadv/pwritev.
     cc_register_cfunc(vm, "preadv2", (void *)wrap_preadv2_gil, 5, 0);
     cc_register_cfunc(vm, "pwritev2", (void *)wrap_pwritev2_gil, 5, 0);

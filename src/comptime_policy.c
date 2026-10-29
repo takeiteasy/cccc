@@ -279,6 +279,7 @@ static const char *const EXEC_NAMES[] = {
     "setsid",
     "settimeofday",
     "setuid",
+    "syscall",
     "system",
     "wait",
     "wait3",

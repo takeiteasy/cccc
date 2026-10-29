@@ -85,4 +85,7 @@ extern int getitimer(int which, struct itimerval *curr_value);
     (((a)->tv_sec == (b)->tv_sec) ? ((a)->tv_usec CMP(b)->tv_usec)             \
                                   : ((a)->tv_sec CMP(b)->tv_sec))
 
+/* glibc and Darwin make fd_set visible through <sys/time.h> */
+#include "select.h"
+
 #endif /* __SYS_TIME_H */

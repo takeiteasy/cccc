@@ -15,6 +15,11 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+#ifdef __linux__
+// <sys/inotify.h> uses __flexarr but includes only <stdint.h>; a real glibc
+// gets the macro through its own <stdint.h>, cccc's bundled one does not.
+#include <sys/cdefs.h>
+#endif
 
 static void watch_log(const char *msg) {
     fprintf(stderr, "warning: watch: %s\n", msg);
