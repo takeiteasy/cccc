@@ -2128,8 +2128,16 @@ static void collect_node_refs(Node *root, Obj *self, HashMap *refs) {
             continue;
         if (n->var && n->var != self)
             hashmap_put_int(refs, (long long)(intptr_t)n->var, (void *)1);
-        Node *kids[] = {n->next, n->lhs,  n->rhs, n->cond, n->then,
-                        n->els,  n->init, n->inc, n->body, n->args};
+        Node *kids[] = {n->next,
+                        n->lhs,
+                        n->rhs,
+                        node_ctl(n)->cond,
+                        node_ctl(n)->then,
+                        node_ctl(n)->els,
+                        node_ctl(n)->init,
+                        node_ctl(n)->inc,
+                        n->body,
+                        n->args};
         for (size_t i = 0; i < sizeof(kids) / sizeof(kids[0]); i++) {
             if (!kids[i])
                 continue;
@@ -3460,13 +3468,13 @@ static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
 static Node *execute_in_macro_scope(VirtualMachine *vm, MacroFn *pm,
                                     Node *node) {
     Scope *saved     = vm->compiler.scope;
-    Scope *sc        = node->macro_scope;
+    Scope *sc        = node_misc(node)->macro_scope;
     bool   vars_cold = sc && !sc->var_map.buckets;
     bool   tags_cold = sc && !sc->tag_map.buckets;
     if (sc)
         vm->compiler.scope = sc;
     Node *result = execute_macro_fn(vm, pm, node->tok, node->args,
-                                    node->macro_arg_count, NULL, 0);
+                                    node_misc(node)->macro_arg_count, NULL, 0);
     if (vars_cold)
         hashmap_deinit_borrowed(&sc->var_map);
     if (tags_cold)
@@ -3484,7 +3492,7 @@ Node *__builtin_macroexpand_1(Node *node) {
         return node;
     if (node->kind != ND_MACRO_CALL)
         return node;
-    MacroFn *pm = find_macro_fn_by_name(vm, node->macro_name);
+    MacroFn *pm = find_macro_fn_by_name(vm, node_misc(node)->macro_name);
     if (!pm || !pm->is_compiled)
         return node;
     Node *result = execute_in_macro_scope(vm, pm, node);
@@ -3508,7 +3516,7 @@ Node *__builtin_macroexpand(Node *node) {
             error_tok(vm, current->tok,
                       "macroexpand: recursion limit exceeded expanding "
                       "'%s' (depth %d, limit %d)",
-                      current->macro_name, depth + 1, limit);
+                      node_misc(current)->macro_name, depth + 1, limit);
             return current;
         }
         Node *next = __builtin_macroexpand_1(current);
@@ -3562,11 +3570,13 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
     // Handle ND_MACRO_CALL - this is where the magic happens
     if (node->kind == ND_MACRO_CALL) {
         if (vm->debug_vm)
-            printf("  Found ND_MACRO_CALL for '%s'\n", node->macro_name);
+            printf("  Found ND_MACRO_CALL for '%s'\n",
+                   node_misc(node)->macro_name);
 
-        MacroFn *pm = find_macro_fn_by_name(vm, node->macro_name);
+        MacroFn *pm = find_macro_fn_by_name(vm, node_misc(node)->macro_name);
         if (!pm) {
-            error_tok(vm, node->tok, "undefined macro: %s", node->macro_name);
+            error_tok(vm, node->tok, "undefined macro: %s",
+                      node_misc(node)->macro_name);
             return node;
         }
 
@@ -3574,7 +3584,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
             error_tok(vm, node->tok,
                       "void macro '%s' cannot be used as an expression; "
                       "it only emits definitions",
-                      node->macro_name);
+                      node_misc(node)->macro_name);
             return node;
         }
 
@@ -3588,13 +3598,13 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
                 "comptime function '%s' returns a non-pointer type and cannot "
                 "be used in expression position; expression-position comptime "
                 "functions must return Node*",
-                node->macro_name);
+                node_misc(node)->macro_name);
             return node;
         }
 
         if (!pm->is_compiled) {
             error_tok(vm, node->tok, "macro '%s' failed to compile",
-                      node->macro_name);
+                      node_misc(node)->macro_name);
             return node;
         }
 
@@ -3603,7 +3613,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
             error_tok(vm, node->tok,
                       "macro recursion limit exceeded while expanding "
                       "'%s' (depth %d, limit %d)",
-                      node->macro_name, depth + 1, limit);
+                      node_misc(node)->macro_name, depth + 1, limit);
             return node;
         }
 
@@ -3619,7 +3629,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
 
         if (!result) {
             error_tok(vm, node->tok, "macro '%s' returned NULL",
-                      node->macro_name);
+                      node_misc(node)->macro_name);
             // Return a placeholder
             Node *placeholder =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
@@ -3644,7 +3654,7 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
                       "cannot be used in expression position; return an "
                       "expression node, or wrap the template in a GNU "
                       "statement expression -- Quote(\"({ ... })\")",
-                      node->macro_name);
+                      node_misc(node)->macro_name);
             Node *placeholder =
                 arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
             memset(placeholder, 0, sizeof(Node));
@@ -3701,18 +3711,26 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
     // pass stmt_pos=false.
     node->lhs  = transform_node(vm, node->lhs, depth, false);
     node->rhs  = transform_node(vm, node->rhs, depth, false);
-    node->cond = transform_node(vm, node->cond, depth, false);
-    node->then = transform_node(vm, node->then, depth, false);
-    node->els  = transform_node(vm, node->els, depth, false);
-    node->init = transform_node(vm, node->init, depth, false);
-    node->inc  = transform_node(vm, node->inc, depth, false);
+    node_ctl_mut(vm, node)->cond =
+        transform_node(vm, node_ctl(node)->cond, depth, false);
+    node_ctl_mut(vm, node)->then =
+        transform_node(vm, node_ctl(node)->then, depth, false);
+    node_ctl_mut(vm, node)->els =
+        transform_node(vm, node_ctl(node)->els, depth, false);
+    node_ctl_mut(vm, node)->init =
+        transform_node(vm, node_ctl(node)->init, depth, false);
+    node_ctl_mut(vm, node)->inc =
+        transform_node(vm, node_ctl(node)->inc, depth, false);
     // #1018: va_ap/va_last/va_src (Node.va_form's annotation trees,
     // src/cccc.h) are independently-parsed subtrees, not aliases into this
     // node's own lhs/rhs/etc -- a macro call inside one of them needs the
     // same expansion pass as any other child field.
-    node->va_ap   = transform_node(vm, node->va_ap, depth, false);
-    node->va_last = transform_node(vm, node->va_last, depth, false);
-    node->va_src  = transform_node(vm, node->va_src, depth, false);
+    node_misc_mut(vm, node)->va_ap =
+        transform_node(vm, node_misc(node)->va_ap, depth, false);
+    node_misc_mut(vm, node)->va_last =
+        transform_node(vm, node_misc(node)->va_last, depth, false);
+    node_misc_mut(vm, node)->va_src =
+        transform_node(vm, node_misc(node)->va_src, depth, false);
 
     // For ND_BLOCK, body is a chain of statements linked via ->next. Each
     // element is itself a statement node (an ND_EXPR_STMT if it started life
@@ -3738,12 +3756,12 @@ static Node *transform_node(VirtualMachine *vm, Node *node, int depth,
     }
 
     // Transform case lists for switch
-    for (Node *c = node->case_next; c; c = c->case_next) {
+    for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next) {
         c->body = transform_node(vm, c->body, depth, false);
     }
-    if (node->default_case) {
-        node->default_case->body =
-            transform_node(vm, node->default_case->body, depth, false);
+    if (node_ctl(node)->default_case) {
+        node_ctl(node)->default_case->body = transform_node(
+            vm, node_ctl(node)->default_case->body, depth, false);
     }
 
     return node;
@@ -4658,9 +4676,9 @@ bool cc_expr_contains_macro_call(Node *node) {
         return true;
     return cc_expr_contains_macro_call(node->lhs) ||
            cc_expr_contains_macro_call(node->rhs) ||
-           cc_expr_contains_macro_call(node->cond) ||
-           cc_expr_contains_macro_call(node->then) ||
-           cc_expr_contains_macro_call(node->els);
+           cc_expr_contains_macro_call(node_ctl(node)->cond) ||
+           cc_expr_contains_macro_call(node_ctl(node)->then) ||
+           cc_expr_contains_macro_call(node_ctl(node)->els);
 }
 
 Node *cc_expand_const_macro_calls(VirtualMachine *vm, Node *node) {

@@ -171,7 +171,7 @@ static void visit(Node *n, void *vctx) {
             break;
         case ND_BLOCK_LITERAL:
             // The block's body is not reached through the node's own children.
-            scan_fn(n->block_fn, c);
+            scan_fn(node_misc(n)->block_fn, c);
             break;
         default:
             c->ok = false;

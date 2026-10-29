@@ -244,7 +244,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             add_type(vm, asgn);
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, asgn, name_tok);
             if (var->cleanup_fn)
-                cleanup_open_after(var, marker, cur);
+                cleanup_open_after(vm, var, marker, cur);
             continue;
         }
 
@@ -299,7 +299,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok_local);
             Node *alloca_stmt = cur;
             if (var->cleanup_fn)
-                cleanup_open_after(var, NULL, cur);
+                cleanup_open_after(vm, var, NULL, cur);
 
             // Handle VLA initialization if present
             if (equal(tok, "=")) {
@@ -340,7 +340,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                     cur = cur->next =
                         new_unary(vm, ND_EXPR_STMT, comma, tok_local);
                     if (var->cleanup_fn)
-                        cleanup_open_after(var, alloca_stmt, cur);
+                        cleanup_open_after(vm, var, alloca_stmt, cur);
                 }
             }
 
@@ -411,7 +411,7 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
                 var->deferred_vla_ptr_init = expr;
             cur = cur->next = new_unary(vm, ND_EXPR_STMT, expr, tok);
             if (var->cleanup_fn)
-                cleanup_open_after(var, marker, cur);
+                cleanup_open_after(vm, var, marker, cur);
             // Don't clear here - will be cleared by next init or at end of
             // parsing
 
@@ -507,8 +507,8 @@ Node *declaration(VirtualMachine *vm, Token **rest, Token *tok, Type *basety,
 
     Node *node          = new_node(vm, ND_BLOCK, tok);
     node->body          = head.next;
-    node->decl_vars      = dv.vars;
-    node->decl_var_count = dv.count;
+    node_ctl_mut(vm, node)->decl_vars      = dv.vars;
+    node_ctl_mut(vm, node)->decl_var_count = dv.count;
     node->is_decl_group = true; // #981: not a real C block scope, see the
                                 // field's own comment (cccc.h)
     *rest = tok->next;
@@ -1509,9 +1509,9 @@ Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain) {
     Token *tok          = splice->tok;
     Node  *result       = new_node(vm, ND_NULL_EXPR, tok);
     Node  *elem         = chain;
-    int    start        = splice->init_start_index;
+    int    start        = node_ctl(splice)->init_start_index;
     int    splice_count = 0;
-    int    tail_count   = init_tail_count(splice->init_tail);
+    int    tail_count   = init_tail_count(node_ctl(splice)->init_tail);
 
     for (Node *n = chain; n; n = n->next)
         splice_count++;
@@ -1548,7 +1548,7 @@ Node *node_expand_init_splice(VirtualMachine *vm, Node *splice, Node *chain) {
         elem   = next;
     }
 
-    for (Node *tail = splice->init_tail; tail;) {
+    for (Node *tail = node_ctl(splice)->init_tail; tail;) {
         Node *next = tail->next;
         tail->next = NULL;
         result = append_init_assignment(vm, result, var, ty, idx++, tail, tok);
@@ -1663,8 +1663,8 @@ static bool build_deferred_init_splice(VirtualMachine *vm, Initializer *init,
     Node *splice                = new_node(vm, ND_INIT_SPLICE, tok);
     splice->var                 = var;
     splice->lhs                 = placeholder;
-    splice->init_tail           = tail;
-    splice->init_start_index    = splice_idx;
+    node_ctl_mut(vm, splice)->init_tail        = tail;
+    node_ctl_mut(vm, splice)->init_start_index = splice_idx;
     splice->init_inferred_array = inferred_array;
 
     *out                        = new_binary(vm, ND_COMMA, node, splice, tok);

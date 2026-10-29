@@ -174,7 +174,7 @@ Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
                 chain_after(vm, store->stores,
                             new_binary(vm, ND_ASSIGN, to, from, sel), sel);
         }
-        swizzle->swizzle_store = store;
+        node_misc_mut(vm, swizzle)->swizzle_store = store;
     }
     return swizzle;
 }
@@ -183,7 +183,7 @@ Node *opencl_swizzle(VirtualMachine *vm, Node *vec, Token *sel) {
 // of the vector is stored from it.
 Node *opencl_swizzle_assign(VirtualMachine *vm, Node *lhs, Node *rhs,
                             Token *tok) {
-    SwizzleStore *store = lhs->swizzle_store;
+    SwizzleStore *store = node_misc(lhs)->swizzle_store;
     if (store->read_only)
         error_tok(vm, tok, "cannot assign to a swizzle of a const vector");
     if (store->repeats)

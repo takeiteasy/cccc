@@ -217,8 +217,8 @@ static void passthru_write_operand(FILE *f, Node *arg, int idx, void *ud) {
 // decay to a pointer.
 static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
                               PassthruOps *ops) {
-    int n_out = node->asm_n_outputs;
-    int n_ops = n_out + node->asm_n_inputs;
+    int n_out = node_asm(node)->asm_n_outputs;
+    int n_ops = n_out + node_asm(node)->asm_n_inputs;
     for (int i = 0; i < n_ops; i++) {
         Node *a   = args[i];
         Type *ty  = a->ty;
@@ -226,7 +226,8 @@ static void passthru_classify(VirtualMachine *vm, Node *node, Node **args,
         ops->is_input[i] = !out;
         bool aggregate = ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
                          ty->kind == TY_ARRAY;
-        bool mem_only = constraint_is_memory_only(node->asm_ops[i].constraint);
+        bool mem_only =
+            constraint_is_memory_only(node_asm(node)->asm_ops[i].constraint);
 
         if (mem_only && passthru_is_bitfield(a))
             error_tok(vm, a->tok, "asm memory operand cannot be a bit-field");
@@ -376,8 +377,8 @@ void cc_asm_passthru_add_file_asm(VirtualMachine *vm, const char *text) {
 
 void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
 #if !defined(_WIN32)
-    int n_out = node->asm_n_outputs;
-    int n_ops = n_out + node->asm_n_inputs;
+    int n_out = node_asm(node)->asm_n_outputs;
+    int n_ops = n_out + node_asm(node)->asm_n_inputs;
     if (node->asm_flags & ASM_GOTO)
         error_tok(vm, node->tok, "asm goto is not supported with "
                                  "--asm-passthru");
@@ -428,14 +429,14 @@ void cccc_default_asm_passthru(VirtualMachine *vm, Node *node) {
             bool  rval = !(passthru_is_lvalue(a) &&
                            (!(a->ty->kind == TY_ARRAY) ||
                             constraint_is_memory_only(
-                                node->asm_ops[i].constraint)));
+                                node_asm(node)->asm_ops[i].constraint)));
             if (i < n_out && passthru_is_bitfield(a)) {
                 long long slot = base + n_ops + i;
                 int       r_t  = alloc_temp_reg();
                 gen_addr(vm, a, r_p);
                 emit_lea3_aligned(vm, r_t, base + 2 * n_ops + i, 0, true);
                 emit_store(vm, ty_ulong, r_p, r_t);
-                if (node->asm_ops[i].constraint[0] == '+') {
+                if (node_asm(node)->asm_ops[i].constraint[0] == '+') {
                     int r_v = alloc_temp_reg();
                     emit_bitfield_load(vm, a->member, r_v, r_p,
                                        !addr_is_local_frame(vm, a));
@@ -808,8 +809,9 @@ bool addr_is_local_frame(VirtualMachine *vm, Node *node) {
         case ND_DEREF:
             if (node->dbg_frame_local)
                 return true;
-            return node->rmw_lvalue ? addr_is_local_frame(vm, node->rmw_lvalue)
-                                    : ptr_is_local_array_rooted(vm, node->lhs);
+            return node_chk(node)->rmw_lvalue
+                       ? addr_is_local_frame(vm, node_chk(node)->rmw_lvalue)
+                       : ptr_is_local_array_rooted(vm, node->lhs);
         default:
             return false; // everything else: keep checked
     }
@@ -1001,9 +1003,9 @@ void emit_chkntz(VirtualMachine *vm, int rs_addr, int rs_hi, int rs_src,
 // carry their own copy. Caller owns freeing the returned register.
 int gen_checked_nt_hi(VirtualMachine *vm, Node *deref) {
     int r_hi = alloc_temp_reg();
-    if (deref->checked_bounds_obj_init)
-        gen_expr(vm, deref->checked_bounds_obj_init, r_hi);
-    gen_expr(vm, deref->checked_bounds_hi, r_hi);
+    if (node_chk(deref)->bounds_obj_init)
+        gen_expr(vm, node_chk(deref)->bounds_obj_init, r_hi);
+    gen_expr(vm, node_chk(deref)->bounds_hi, r_hi);
     return r_hi;
 }
 
@@ -1168,8 +1170,8 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // set_checked_deref_bounds() (parse.c) found a checked pointer with
             // resolvable bounds at this access site, so no per-access flag
             // check is needed beyond the one on CCCC_CHECKED_BOUNDS itself.
-            if ((vm->flags & CCCC_CHECKED_BOUNDS) && node->checked_bounds_lo &&
-                node->checked_bounds_hi) {
+            if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
+                node_chk(node)->bounds_lo && node_chk(node)->bounds_hi) {
                 mark_temp_reg_used(
                     dest_reg); // protect the just-computed address
                 int r_lo = alloc_temp_reg();
@@ -1179,11 +1181,11 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // through
                 // `*t`. Result discarded (r_lo is free scratch); only the store
                 // to `t` matters.
-                if (node->checked_bounds_obj_init)
-                    gen_expr(vm, node->checked_bounds_obj_init, r_lo);
-                gen_expr(vm, node->checked_bounds_lo, r_lo);
-                gen_expr(vm, node->checked_bounds_hi, r_hi);
-                emit_chkr(vm, dest_reg, r_lo, r_hi, node->checked_access_size,
+                if (node_chk(node)->bounds_obj_init)
+                    gen_expr(vm, node_chk(node)->bounds_obj_init, r_lo);
+                gen_expr(vm, node_chk(node)->bounds_lo, r_lo);
+                gen_expr(vm, node_chk(node)->bounds_hi, r_hi);
+                emit_chkr(vm, dest_reg, r_lo, r_hi, node_chk(node)->access_size,
                           node->checked_bounds_optional);
                 free_temp_reg(r_hi);
                 free_temp_reg(r_lo);

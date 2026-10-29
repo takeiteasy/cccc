@@ -1541,11 +1541,11 @@ static void wide_bitint_scan_node(Node *node, WideBitintNeed *need,
         wide_bitint_scan_type(node->ty, need, seen, 0);
     wide_bitint_scan_node(node->lhs, need, seen);
     wide_bitint_scan_node(node->rhs, need, seen);
-    wide_bitint_scan_node(node->cond, need, seen);
-    wide_bitint_scan_node(node->then, need, seen);
-    wide_bitint_scan_node(node->els, need, seen);
-    wide_bitint_scan_node(node->init, need, seen);
-    wide_bitint_scan_node(node->inc, need, seen);
+    wide_bitint_scan_node(node_ctl(node)->cond, need, seen);
+    wide_bitint_scan_node(node_ctl(node)->then, need, seen);
+    wide_bitint_scan_node(node_ctl(node)->els, need, seen);
+    wide_bitint_scan_node(node_ctl(node)->init, need, seen);
+    wide_bitint_scan_node(node_ctl(node)->inc, need, seen);
     wide_bitint_scan_node(node->body, need, seen);
     wide_bitint_scan_node(node->args, need, seen);
     wide_bitint_scan_node(node->next, need, seen);
@@ -1619,11 +1619,11 @@ static bool node_calls(Node *node, const char *name, bool prefix) {
         }
         if (node_calls(node->lhs, name, prefix) ||
             node_calls(node->rhs, name, prefix) ||
-            node_calls(node->cond, name, prefix) ||
-            node_calls(node->then, name, prefix) ||
-            node_calls(node->els, name, prefix) ||
-            node_calls(node->init, name, prefix) ||
-            node_calls(node->inc, name, prefix) ||
+            node_calls(node_ctl(node)->cond, name, prefix) ||
+            node_calls(node_ctl(node)->then, name, prefix) ||
+            node_calls(node_ctl(node)->els, name, prefix) ||
+            node_calls(node_ctl(node)->init, name, prefix) ||
+            node_calls(node_ctl(node)->inc, name, prefix) ||
             node_calls(node->body, name, prefix) ||
             node_calls(node->args, name, prefix))
             return true;

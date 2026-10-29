@@ -348,7 +348,7 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
             break;
         case ND_NUM:
             if (node->ty && is_flonum(node->ty))
-                fprintf(f, " = %Lg", node->fval);
+                fprintf(f, " = %Lg", node_lit(node)->fval);
             else
                 fprintf(f, " = %lld", (long long)node->val);
             break;
@@ -359,26 +359,27 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
             break;
         case ND_GOTO:
         case ND_LABEL:
-            if (node->label)
-                fprintf(f, " = %s", node->label);
+            if (node_ctl(node)->label)
+                fprintf(f, " = %s", node_ctl(node)->label);
             break;
         case ND_LABEL_VAL:
-            if (node->label)
-                fprintf(f, " = %s", node->label);
+            if (node_ctl(node)->label)
+                fprintf(f, " = %s", node_ctl(node)->label);
             break;
         case ND_ASM:
-            if (node->asm_str)
-                fprintf(f, " = \"%s\"", node->asm_str);
+            if (node_asm(node)->asm_str)
+                fprintf(f, " = \"%s\"", node_asm(node)->asm_str);
             break;
         case ND_MACRO_CALL:
-            if (node->macro_name)
-                fprintf(f, " = %s", node->macro_name);
+            if (node_misc(node)->macro_name)
+                fprintf(f, " = %s", node_misc(node)->macro_name);
             break;
         case ND_CASE:
-            if (node->begin == node->end)
-                fprintf(f, " = %ld", node->begin);
+            if (node_ctl(node)->begin == node_ctl(node)->end)
+                fprintf(f, " = %ld", node_ctl(node)->begin);
             else
-                fprintf(f, " = %ld...%ld", node->begin, node->end);
+                fprintf(f, " = %ld...%ld", node_ctl(node)->begin,
+                        node_ctl(node)->end);
             break;
         default:
             break;
@@ -431,27 +432,27 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
             break;
 
         case ND_COND:
-            dump_node(f, node->cond, depth + 1, verbose);
-            dump_node(f, node->then, depth + 1, verbose);
-            dump_node(f, node->els, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->cond, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->then, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->els, depth + 1, verbose);
             break;
 
         case ND_IF:
-            dump_node(f, node->cond, depth + 1, verbose);
-            dump_node(f, node->then, depth + 1, verbose);
-            dump_node(f, node->els, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->cond, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->then, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->els, depth + 1, verbose);
             break;
 
         case ND_FOR:
-            dump_node(f, node->init, depth + 1, verbose);
-            dump_node(f, node->cond, depth + 1, verbose);
-            dump_node(f, node->inc, depth + 1, verbose);
-            dump_node(f, node->then, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->init, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->cond, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->inc, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->then, depth + 1, verbose);
             break;
 
         case ND_DO:
-            dump_node(f, node->then, depth + 1, verbose);
-            dump_node(f, node->cond, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->then, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->cond, depth + 1, verbose);
             break;
 
         case ND_BLOCK:
@@ -460,11 +461,12 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
             break;
 
         case ND_SWITCH:
-            dump_node(f, node->cond, depth + 1, verbose);
-            dump_node(f, node->then, depth + 1, verbose);
-            dump_node_list(f, "cases", node->case_next, depth + 1, verbose);
-            if (node->default_case)
-                dump_node(f, node->default_case, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->cond, depth + 1, verbose);
+            dump_node(f, node_ctl(node)->then, depth + 1, verbose);
+            dump_node_list(f, "cases", node_ctl(node)->case_next, depth + 1,
+                           verbose);
+            if (node_ctl(node)->default_case)
+                dump_node(f, node_ctl(node)->default_case, depth + 1, verbose);
             break;
 
         case ND_CASE:
@@ -490,15 +492,15 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
             break;
 
         case ND_CAS:
-            dump_node(f, node->cas_addr, depth + 1, verbose);
-            dump_node(f, node->cas_old, depth + 1, verbose);
-            dump_node(f, node->cas_new, depth + 1, verbose);
+            dump_node(f, node_atom(node)->cas_addr, depth + 1, verbose);
+            dump_node(f, node_atom(node)->cas_old, depth + 1, verbose);
+            dump_node(f, node_atom(node)->cas_new, depth + 1, verbose);
             break;
 
         case ND_EXCH:
-            if (node->atomic_addr)
-                fprintf(f, " [addr=%s]", node->atomic_addr->name);
-            dump_node(f, node->atomic_expr, depth + 1, verbose);
+            if (node_atom(node)->atomic_addr)
+                fprintf(f, " [addr=%s]", node_atom(node)->atomic_addr->name);
+            dump_node(f, node_atom(node)->atomic_expr, depth + 1, verbose);
             break;
 
         case ND_ALOAD:
@@ -1210,7 +1212,7 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
         case ND_NUM:
             if (node->ty && is_flonum(node->ty)) {
                 JSON_FIELD(f, d, first, "fval");
-                fprintf(f, "%Lg", node->fval);
+                fprintf(f, "%Lg", node_lit(node)->fval);
             } else {
                 JSON_FIELD(f, d, first, "val");
                 fprintf(f, "%lld", (long long)node->val);
@@ -1251,60 +1253,60 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
 
         case ND_IF:
             JSON_FIELD(f, d, first, "cond");
-            dump_ast_json_node(f, node->cond, d);
+            dump_ast_json_node(f, node_ctl(node)->cond, d);
             JSON_FIELD(f, d, first, "then");
-            dump_ast_json_node(f, node->then, d);
-            if (node->els) {
+            dump_ast_json_node(f, node_ctl(node)->then, d);
+            if (node_ctl(node)->els) {
                 JSON_FIELD(f, d, first, "else");
-                dump_ast_json_node(f, node->els, d);
+                dump_ast_json_node(f, node_ctl(node)->els, d);
             }
             break;
 
         case ND_FOR:
-            if (node->init) {
+            if (node_ctl(node)->init) {
                 JSON_FIELD(f, d, first, "init");
-                dump_ast_json_node(f, node->init, d);
+                dump_ast_json_node(f, node_ctl(node)->init, d);
             }
-            if (node->cond) {
+            if (node_ctl(node)->cond) {
                 JSON_FIELD(f, d, first, "cond");
-                dump_ast_json_node(f, node->cond, d);
+                dump_ast_json_node(f, node_ctl(node)->cond, d);
             }
-            if (node->inc) {
+            if (node_ctl(node)->inc) {
                 JSON_FIELD(f, d, first, "inc");
-                dump_ast_json_node(f, node->inc, d);
+                dump_ast_json_node(f, node_ctl(node)->inc, d);
             }
             JSON_FIELD(f, d, first, "then");
-            dump_ast_json_node(f, node->then, d);
+            dump_ast_json_node(f, node_ctl(node)->then, d);
             break;
 
         case ND_DO:
             JSON_FIELD(f, d, first, "then");
-            dump_ast_json_node(f, node->then, d);
+            dump_ast_json_node(f, node_ctl(node)->then, d);
             JSON_FIELD(f, d, first, "cond");
-            dump_ast_json_node(f, node->cond, d);
+            dump_ast_json_node(f, node_ctl(node)->cond, d);
             break;
 
         case ND_SWITCH:
             JSON_FIELD(f, d, first, "cond");
-            dump_ast_json_node(f, node->cond, d);
+            dump_ast_json_node(f, node_ctl(node)->cond, d);
             JSON_FIELD(f, d, first, "then");
-            dump_ast_json_node(f, node->then, d);
-            if (node->case_next) {
+            dump_ast_json_node(f, node_ctl(node)->then, d);
+            if (node_ctl(node)->case_next) {
                 JSON_FIELD(f, d, first, "cases");
-                dump_ast_json_node_list(f, node->case_next, d);
+                dump_ast_json_node_list(f, node_ctl(node)->case_next, d);
             }
-            if (node->default_case) {
+            if (node_ctl(node)->default_case) {
                 JSON_FIELD(f, d, first, "default");
-                dump_ast_json_node(f, node->default_case, d);
+                dump_ast_json_node(f, node_ctl(node)->default_case, d);
             }
             break;
 
         case ND_CASE:
             JSON_FIELD(f, d, first, "begin");
-            fprintf(f, "%ld", node->begin);
-            if (node->begin != node->end) {
+            fprintf(f, "%ld", node_ctl(node)->begin);
+            if (node_ctl(node)->begin != node_ctl(node)->end) {
                 JSON_FIELD(f, d, first, "end");
-                fprintf(f, "%ld", node->end);
+                fprintf(f, "%ld", node_ctl(node)->end);
             }
             JSON_FIELD(f, d, first, "body");
             dump_ast_json_node(f, node->lhs, d);
@@ -1312,19 +1314,19 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
 
         case ND_GOTO:
             JSON_FIELD(f, d, first, "label");
-            print_escaped_string(f, node->label);
+            print_escaped_string(f, node_ctl(node)->label);
             break;
 
         case ND_LABEL:
             JSON_FIELD(f, d, first, "label");
-            print_escaped_string(f, node->label);
+            print_escaped_string(f, node_ctl(node)->label);
             JSON_FIELD(f, d, first, "body");
             dump_ast_json_node(f, node->lhs, d);
             break;
 
         case ND_LABEL_VAL:
             JSON_FIELD(f, d, first, "label");
-            print_escaped_string(f, node->label);
+            print_escaped_string(f, node_ctl(node)->label);
             break;
 
         case ND_RETURN:
@@ -1355,12 +1357,12 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
 
         case ND_COND:
             JSON_FIELD(f, d, first, "cond");
-            dump_ast_json_node(f, node->cond, d);
+            dump_ast_json_node(f, node_ctl(node)->cond, d);
             JSON_FIELD(f, d, first, "then");
-            dump_ast_json_node(f, node->then, d);
-            if (node->els) {
+            dump_ast_json_node(f, node_ctl(node)->then, d);
+            if (node_ctl(node)->els) {
                 JSON_FIELD(f, d, first, "else");
-                dump_ast_json_node(f, node->els, d);
+                dump_ast_json_node(f, node_ctl(node)->els, d);
             }
             break;
 
@@ -1395,7 +1397,7 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
 
         case ND_ASM:
             JSON_FIELD(f, d, first, "asm_str");
-            print_escaped_string(f, node->asm_str);
+            print_escaped_string(f, node_asm(node)->asm_str);
             JSON_FIELD(f, d, first, "asm_flags");
             fprintf(f, "%d", node->asm_flags);
             if (node->args) {
@@ -1403,30 +1405,32 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
                 dump_ast_json_node_list(f, node->args, d);
                 JSON_FIELD(f, d, first, "constraints");
                 fprintf(f, "[");
-                for (int i = 0; i < node->asm_n_outputs + node->asm_n_inputs;
+                for (int i = 0; i < node_asm(node)->asm_n_outputs +
+                                        node_asm(node)->asm_n_inputs;
                      i++) {
                     fprintf(f, i ? ", " : "");
-                    print_escaped_string(f, node->asm_ops[i].constraint);
+                    print_escaped_string(f,
+                                         node_asm(node)->asm_ops[i].constraint);
                 }
                 fprintf(f, "]");
                 JSON_FIELD(f, d, first, "n_outputs");
-                fprintf(f, "%d", node->asm_n_outputs);
+                fprintf(f, "%d", node_asm(node)->asm_n_outputs);
             }
-            if (node->asm_n_clobbers) {
+            if (node_asm(node)->asm_n_clobbers) {
                 JSON_FIELD(f, d, first, "clobbers");
                 fprintf(f, "[");
-                for (int i = 0; i < node->asm_n_clobbers; i++) {
+                for (int i = 0; i < node_asm(node)->asm_n_clobbers; i++) {
                     fprintf(f, i ? ", " : "");
-                    print_escaped_string(f, node->asm_clobbers[i]);
+                    print_escaped_string(f, node_asm(node)->asm_clobbers[i]);
                 }
                 fprintf(f, "]");
             }
-            if (node->asm_labels) {
+            if (node_asm(node)->asm_labels) {
                 JSON_FIELD(f, d, first, "labels");
                 fprintf(f, "[");
-                for (Node *l = node->asm_labels; l; l = l->next) {
-                    fprintf(f, l == node->asm_labels ? "" : ", ");
-                    print_escaped_string(f, l->label);
+                for (Node *l = node_asm(node)->asm_labels; l; l = l->next) {
+                    fprintf(f, l == node_asm(node)->asm_labels ? "" : ", ");
+                    print_escaped_string(f, node_ctl(l)->label);
                 }
                 fprintf(f, "]");
             }
@@ -1434,27 +1438,27 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
 
         case ND_MACRO_CALL:
             JSON_FIELD(f, d, first, "macro_name");
-            print_escaped_string(f, node->macro_name);
+            print_escaped_string(f, node_misc(node)->macro_name);
             JSON_FIELD(f, d, first, "macro_arg_count");
-            fprintf(f, "%d", node->macro_arg_count);
+            fprintf(f, "%d", node_misc(node)->macro_arg_count);
             break;
 
         case ND_CAS:
             JSON_FIELD(f, d, first, "cas_addr");
-            dump_ast_json_node(f, node->cas_addr, d);
+            dump_ast_json_node(f, node_atom(node)->cas_addr, d);
             JSON_FIELD(f, d, first, "cas_old");
-            dump_ast_json_node(f, node->cas_old, d);
+            dump_ast_json_node(f, node_atom(node)->cas_old, d);
             JSON_FIELD(f, d, first, "cas_new");
-            dump_ast_json_node(f, node->cas_new, d);
+            dump_ast_json_node(f, node_atom(node)->cas_new, d);
             break;
 
         case ND_EXCH:
-            if (node->atomic_addr) {
+            if (node_atom(node)->atomic_addr) {
                 JSON_FIELD(f, d, first, "atomic_addr");
-                print_escaped_string(f, node->atomic_addr->name);
+                print_escaped_string(f, node_atom(node)->atomic_addr->name);
             }
             JSON_FIELD(f, d, first, "atomic_expr");
-            dump_ast_json_node(f, node->atomic_expr, d);
+            dump_ast_json_node(f, node_atom(node)->atomic_expr, d);
             break;
 
         case ND_VLA_PTR:

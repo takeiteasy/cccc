@@ -1107,7 +1107,7 @@ Node *__builtin_ast_float_literal(double value) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_NUM);
-    node->fval = value;
+    node_lit_mut(vm, node)->fval = value;
     node->ty   = ty_double;
     return node;
 }
@@ -1453,9 +1453,9 @@ Node *__builtin_ast_if(Node *cond, Node *then_body, Node *else_body) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_IF);
-    node->cond = cond;
-    node->then = then_body;
-    node->els  = else_body;
+    node_ctl_mut(vm, node)->cond = cond;
+    node_ctl_mut(vm, node)->then = then_body;
+    node_ctl_mut(vm, node)->els  = else_body;
     return node;
 }
 
@@ -1470,10 +1470,10 @@ Node *__builtin_ast_switch(Node *cond) {
         return NULL;
 
     Node *node         = alloc_node(vm, ND_SWITCH);
-    node->cond         = cond;
-    node->case_next    = NULL;
-    node->default_case = NULL;
-    node->then         = alloc_node(vm, ND_BLOCK);
+    node_ctl_mut(vm, node)->cond         = cond;
+    node_ctl_mut(vm, node)->case_next    = NULL;
+    node_ctl_mut(vm, node)->default_case = NULL;
+    node_ctl_mut(vm, node)->then         = alloc_node(vm, ND_BLOCK);
     return node;
 }
 
@@ -1495,20 +1495,20 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
         reflect_link_error(vm, "switch would contain itself");
     Node   *case_node = alloc_node(vm, ND_CASE);
     int64_t v         = cc_eval(vm, value);
-    case_node->begin  = v;
-    case_node->end    = v;
+    node_ctl_mut(vm, case_node)->begin = v;
+    node_ctl_mut(vm, case_node)->end   = v;
     case_node->lhs    = body;
 
     // #815/#816: reject a case value that collides with one already on the
     // switch, same as the parser does for hand-written switches. Must run
     // before the splice below -- once case_node is linked into case_next it
     // would trivially "collide" with itself.
-    check_case_conflict(vm, switch_node->case_next, case_node);
+    check_case_conflict(vm, node_ctl(switch_node)->case_next, case_node);
 
     // Add to switch's case list
-    case_node->case_next   = switch_node->case_next;
-    switch_node->case_next = case_node;
-    __builtin_ast_block_add_stmt(switch_node->then, case_node);
+    node_ctl_mut(vm, case_node)->case_next   = node_ctl(switch_node)->case_next;
+    node_ctl_mut(vm, switch_node)->case_next = case_node;
+    __builtin_ast_block_add_stmt(node_ctl(switch_node)->then, case_node);
 }
 
 CC_BUILTIN(__builtin_ast_switch_set_default, 2);
@@ -1522,7 +1522,7 @@ void __builtin_ast_switch_set_default(Node *switch_node, Node *body) {
 
     // #815/#816: a second default label silently overwrote the first with no
     // diagnostic; same fix as the parser's registration-time check.
-    if (switch_node->default_case)
+    if (node_ctl(switch_node)->default_case)
         __builtin_macro_error_at(switch_node,
                                  "multiple default labels in one switch");
 
@@ -1530,8 +1530,8 @@ void __builtin_ast_switch_set_default(Node *switch_node, Node *body) {
         reflect_link_error(vm, "switch would contain itself");
     Node *def                 = alloc_node(vm, ND_CASE);
     def->lhs                  = body;
-    switch_node->default_case = def;
-    __builtin_ast_block_add_stmt(switch_node->then, def);
+    node_ctl_mut(vm, switch_node)->default_case = def;
+    __builtin_ast_block_add_stmt(node_ctl(switch_node)->then, def);
 }
 
 // ============================================================================
@@ -1759,8 +1759,8 @@ Node *__builtin_ast_funcall(Node *callee, Node **args, int n) {
 // identity, so this alone is enough for the two existing consumers to treat
 // a builder loop exactly like a parsed one.
 static void reflect_assign_loop_labels(VirtualMachine *vm, Node *node) {
-    node->brk_label  = new_unique_name(vm);
-    node->cont_label = new_unique_name(vm);
+    node_ctl_mut(vm, node)->brk_label  = new_unique_name(vm);
+    node_ctl_mut(vm, node)->cont_label = new_unique_name(vm);
 }
 
 // #1249: if body is an unexpanded QuoteLazy() fragment, parse it now, inside
@@ -1778,8 +1778,8 @@ static Node *reflect_expand_loop_body(VirtualMachine *vm, Node *node,
     char *saved_cont                = vm->compiler.cont_label;
     int   saved_brk_cleanup_depth   = vm->compiler.brk_cleanup_depth;
     int   saved_cont_cleanup_depth  = vm->compiler.cont_cleanup_depth;
-    vm->compiler.brk_label          = node->brk_label;
-    vm->compiler.cont_label         = node->cont_label;
+    vm->compiler.brk_label          = node_ctl(node)->brk_label;
+    vm->compiler.cont_label         = node_ctl(node)->cont_label;
     vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
     vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
@@ -1801,9 +1801,9 @@ Node *__builtin_ast_while(Node *cond, Node *body) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_FOR);
-    node->cond = cond;
+    node_ctl_mut(vm, node)->cond = cond;
     reflect_assign_loop_labels(vm, node);
-    node->then = reflect_expand_loop_body(vm, node, body);
+    node_ctl_mut(vm, node)->then = reflect_expand_loop_body(vm, node, body);
     // node->init and node->inc left NULL — this is a while loop
     return node;
 }
@@ -1815,11 +1815,11 @@ Node *__builtin_ast_for(Node *init, Node *cond, Node *inc, Node *body) {
         return NULL;
 
     Node *node = alloc_node(vm, ND_FOR);
-    node->init = init;
-    node->cond = cond;
-    node->inc  = inc;
+    node_ctl_mut(vm, node)->init = init;
+    node_ctl_mut(vm, node)->cond = cond;
+    node_ctl_mut(vm, node)->inc  = inc;
     reflect_assign_loop_labels(vm, node);
-    node->then = reflect_expand_loop_body(vm, node, body);
+    node_ctl_mut(vm, node)->then = reflect_expand_loop_body(vm, node, body);
     return node;
 }
 
@@ -1831,8 +1831,8 @@ Node *__builtin_ast_do_while(Node *body, Node *cond) {
 
     Node *node = alloc_node(vm, ND_DO);
     reflect_assign_loop_labels(vm, node);
-    node->then = reflect_expand_loop_body(vm, node, body);
-    node->cond = cond;
+    node_ctl_mut(vm, node)->then = reflect_expand_loop_body(vm, node, body);
+    node_ctl_mut(vm, node)->cond = cond;
     return node;
 }
 
@@ -1852,9 +1852,9 @@ Node *__builtin_ast_cond(Node *cond, Node *then_expr, Node *else_expr) {
     if (!vm || !cond || !then_expr || !else_expr)
         return NULL;
     Node *node = alloc_node(vm, ND_COND);
-    node->cond = cond;
-    node->then = then_expr;
-    node->els  = else_expr;
+    node_ctl_mut(vm, node)->cond = cond;
+    node_ctl_mut(vm, node)->then = then_expr;
+    node_ctl_mut(vm, node)->els  = else_expr;
     // Type is resolved by add_type pass
     return node;
 }
@@ -2091,7 +2091,7 @@ Node *__builtin_ast_compound_literal(Type *ty, Node **inits, int n) {
     Node *splice             = alloc_node(vm, ND_INIT_SPLICE);
     splice->tok              = tok;
     splice->var              = var;
-    splice->init_start_index = 0;
+    node_ctl_mut(vm, splice)->init_start_index = 0;
     Node *assignments        = node_expand_init_splice(vm, splice, chain);
 
     Node *init_comma         = alloc_node(vm, ND_COMMA);
@@ -2781,10 +2781,10 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
     if (!node)
         return;
 
-    if (node->kind == ND_BLOCK_LITERAL && node->block_fn) {
-        if (node->block_fn->parent_fn == NULL) {
-            node->block_fn->parent_fn     = fn;
-            node->block_fn->nesting_depth = fn->nesting_depth + 1;
+    if (node->kind == ND_BLOCK_LITERAL && node_misc(node)->block_fn) {
+        if (node_misc(node)->block_fn->parent_fn == NULL) {
+            node_misc(node)->block_fn->parent_fn     = fn;
+            node_misc(node)->block_fn->nesting_depth = fn->nesting_depth + 1;
         }
         // #995: a lifted block function is created via new_gvar() and never
         // gets is_macro_generated set at parse time (block_literal() has no
@@ -2800,17 +2800,18 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
         // expression's* children, the block function's body lives on
         // block_fn->body) so a block nested inside another generated block
         // is propagated too.
-        node->block_fn->is_macro_generated |= fn->is_macro_generated;
+        node_misc(node)->block_fn->is_macro_generated |= fn->is_macro_generated;
         if (fn->is_macro_generated)
-            relink_orphan_block_parents(node->block_fn->body, node->block_fn);
+            relink_orphan_block_parents(node_misc(node)->block_fn->body,
+                                        node_misc(node)->block_fn);
     }
 
     if (node->kind == ND_SWITCH) {
-        relink_orphan_block_parents(node->cond, fn);
-        for (Node *c = node->case_next; c; c = c->case_next)
+        relink_orphan_block_parents(node_ctl(node)->cond, fn);
+        for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
             relink_orphan_block_parents(c->lhs, fn);
-        if (node->default_case)
-            relink_orphan_block_parents(node->default_case->lhs, fn);
+        if (node_ctl(node)->default_case)
+            relink_orphan_block_parents(node_ctl(node)->default_case->lhs, fn);
         relink_orphan_block_parents(node->next, fn);
         return;
     }
@@ -2823,11 +2824,11 @@ static void relink_orphan_block_parents(Node *node, Obj *fn) {
 
     relink_orphan_block_parents(node->lhs, fn);
     relink_orphan_block_parents(node->rhs, fn);
-    relink_orphan_block_parents(node->cond, fn);
-    relink_orphan_block_parents(node->then, fn);
-    relink_orphan_block_parents(node->els, fn);
-    relink_orphan_block_parents(node->init, fn);
-    relink_orphan_block_parents(node->inc, fn);
+    relink_orphan_block_parents(node_ctl(node)->cond, fn);
+    relink_orphan_block_parents(node_ctl(node)->then, fn);
+    relink_orphan_block_parents(node_ctl(node)->els, fn);
+    relink_orphan_block_parents(node_ctl(node)->init, fn);
+    relink_orphan_block_parents(node_ctl(node)->inc, fn);
     relink_orphan_block_parents(node->body, fn);
     relink_orphan_block_parents(node->args, fn);
 
@@ -2865,26 +2866,28 @@ static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
         found = node->var;
 
     if (!found && node->kind == ND_BLOCK_LITERAL) {
-        if (node->block_desc_var &&
-            obj_in_list(node->block_desc_var, stray_locals) &&
-            !obj_in_list(node->block_desc_var, fn->locals) &&
-            !obj_in_list(node->block_desc_var, fn->params))
-            found = node->block_desc_var;
-        if (!found && node->block_fn)
-            found = collect_stray_body_local(node->block_fn->body, stray_locals,
-                                             node->block_fn);
+        if (node_misc(node)->block_desc_var &&
+            obj_in_list(node_misc(node)->block_desc_var, stray_locals) &&
+            !obj_in_list(node_misc(node)->block_desc_var, fn->locals) &&
+            !obj_in_list(node_misc(node)->block_desc_var, fn->params))
+            found = node_misc(node)->block_desc_var;
+        if (!found && node_misc(node)->block_fn)
+            found = collect_stray_body_local(node_misc(node)->block_fn->body,
+                                             stray_locals,
+                                             node_misc(node)->block_fn);
     }
     if (found)
         return found;
 
     if (node->kind == ND_SWITCH) {
-        if ((found = collect_stray_body_local(node->cond, stray_locals, fn)))
+        if ((found = collect_stray_body_local(node_ctl(node)->cond,
+                                              stray_locals, fn)))
             return found;
-        for (Node *c = node->case_next; c; c = c->case_next)
+        for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
             if ((found = collect_stray_body_local(c->lhs, stray_locals, fn)))
                 return found;
-        if (node->default_case &&
-            (found = collect_stray_body_local(node->default_case->lhs,
+        if (node_ctl(node)->default_case &&
+            (found = collect_stray_body_local(node_ctl(node)->default_case->lhs,
                                               stray_locals, fn)))
             return found;
         return collect_stray_body_local(node->next, stray_locals, fn);
@@ -2898,11 +2901,16 @@ static Obj *collect_stray_body_local(Node *node, Obj *stray_locals, Obj *fn) {
 
     if ((found = collect_stray_body_local(node->lhs, stray_locals, fn)) ||
         (found = collect_stray_body_local(node->rhs, stray_locals, fn)) ||
-        (found = collect_stray_body_local(node->cond, stray_locals, fn)) ||
-        (found = collect_stray_body_local(node->then, stray_locals, fn)) ||
-        (found = collect_stray_body_local(node->els, stray_locals, fn)) ||
-        (found = collect_stray_body_local(node->init, stray_locals, fn)) ||
-        (found = collect_stray_body_local(node->inc, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node_ctl(node)->cond, stray_locals,
+                                          fn)) ||
+        (found = collect_stray_body_local(node_ctl(node)->then, stray_locals,
+                                          fn)) ||
+        (found =
+             collect_stray_body_local(node_ctl(node)->els, stray_locals, fn)) ||
+        (found = collect_stray_body_local(node_ctl(node)->init, stray_locals,
+                                          fn)) ||
+        (found =
+             collect_stray_body_local(node_ctl(node)->inc, stray_locals, fn)) ||
         (found = collect_stray_body_local(node->body, stray_locals, fn)) ||
         (found = collect_stray_body_local(node->args, stray_locals, fn)))
         return found;
@@ -3314,8 +3322,8 @@ void __builtin_ast_push_loop(Node *loop) {
     _loop_cont_stack[d]               = vm->compiler.cont_label;
     _loop_brk_cleanup_depth_stack[d]  = vm->compiler.brk_cleanup_depth;
     _loop_cont_cleanup_depth_stack[d] = vm->compiler.cont_cleanup_depth;
-    vm->compiler.brk_label            = loop->brk_label;
-    vm->compiler.cont_label           = loop->cont_label;
+    vm->compiler.brk_label            = node_ctl(loop)->brk_label;
+    vm->compiler.cont_label           = node_ctl(loop)->cont_label;
     vm->compiler.brk_cleanup_depth    = vm->compiler.cleanup_scope_depth;
     vm->compiler.cont_cleanup_depth   = vm->compiler.cleanup_scope_depth;
 }
@@ -3359,7 +3367,7 @@ Node *__builtin_ast_loop_set_body(Node *loop, Node *body) {
     }
     if (node_reaches(body, loop))
         reflect_link_error(vm, "loop would contain itself");
-    loop->then = body;
+    node_ctl_mut(vm, loop)->then = body;
     return loop;
 }
 
@@ -3847,7 +3855,8 @@ static void emit_ast_gen(FILE *f, Node *node) {
             if (node->ty &&
                 (node->ty->kind == TY_FLOAT || node->ty->kind == TY_DOUBLE ||
                  node->ty->kind == TY_LDOUBLE))
-                fprintf(f, "__builtin_ast_float_literal(VM, %Lg)", node->fval);
+                fprintf(f, "__builtin_ast_float_literal(VM, %Lg)",
+                        node_lit(node)->fval);
             else
                 fprintf(f, "__builtin_ast_int_literal(VM, %lld)",
                         (long long)node->val);
@@ -3884,30 +3893,30 @@ static void emit_ast_gen(FILE *f, Node *node) {
             fprintf(f, ")");
             break;
         case ND_FOR:
-            if (!node->init && !node->inc) {
+            if (!node_ctl(node)->init && !node_ctl(node)->inc) {
                 // Looks like a while loop
                 fprintf(f, "__builtin_ast_while(VM, ");
-                emit_ast_gen(f, node->cond);
+                emit_ast_gen(f, node_ctl(node)->cond);
                 fprintf(f, ", ");
-                emit_ast_gen(f, node->then);
+                emit_ast_gen(f, node_ctl(node)->then);
                 fprintf(f, ")");
             } else {
                 fprintf(f, "__builtin_ast_for(VM, ");
-                emit_ast_gen(f, node->init);
+                emit_ast_gen(f, node_ctl(node)->init);
                 fprintf(f, ", ");
-                emit_ast_gen(f, node->cond);
+                emit_ast_gen(f, node_ctl(node)->cond);
                 fprintf(f, ", ");
-                emit_ast_gen(f, node->inc);
+                emit_ast_gen(f, node_ctl(node)->inc);
                 fprintf(f, ", ");
-                emit_ast_gen(f, node->then);
+                emit_ast_gen(f, node_ctl(node)->then);
                 fprintf(f, ")");
             }
             break;
         case ND_DO:
             fprintf(f, "__builtin_ast_do_while(VM, ");
-            emit_ast_gen(f, node->then);
+            emit_ast_gen(f, node_ctl(node)->then);
             fprintf(f, ", ");
-            emit_ast_gen(f, node->cond);
+            emit_ast_gen(f, node_ctl(node)->cond);
             fprintf(f, ")");
             break;
         case ND_RETURN:
@@ -3917,11 +3926,11 @@ static void emit_ast_gen(FILE *f, Node *node) {
             break;
         case ND_IF:
             fprintf(f, "__builtin_ast_if(VM, ");
-            emit_ast_gen(f, node->cond);
+            emit_ast_gen(f, node_ctl(node)->cond);
             fprintf(f, ", ");
-            emit_ast_gen(f, node->then);
+            emit_ast_gen(f, node_ctl(node)->then);
             fprintf(f, ", ");
-            emit_ast_gen(f, node->els);
+            emit_ast_gen(f, node_ctl(node)->els);
             fprintf(f, ")");
             break;
         case ND_BLOCK:
@@ -4334,20 +4343,23 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     // Recurse into all child fields (same set as transform_node in pragma.c)
     node->lhs  = quote_substitute(s, node->lhs);
     node->rhs  = quote_substitute(s, node->rhs);
-    node->cond = quote_substitute(s, node->cond);
-    node->then = quote_substitute(s, node->then);
-    node->els  = quote_substitute(s, node->els);
-    node->init = quote_substitute(s, node->init);
-    node->inc  = quote_substitute(s, node->inc);
+    node_ctl_mut(s->vm, node)->cond = quote_substitute(s, node_ctl(node)->cond);
+    node_ctl_mut(s->vm, node)->then = quote_substitute(s, node_ctl(node)->then);
+    node_ctl_mut(s->vm, node)->els  = quote_substitute(s, node_ctl(node)->els);
+    node_ctl_mut(s->vm, node)->init = quote_substitute(s, node_ctl(node)->init);
+    node_ctl_mut(s->vm, node)->inc  = quote_substitute(s, node_ctl(node)->inc);
     // #1018: va_ap/va_last/va_src are the parsed __builtin_va_*() annotation
     // trees (Node.va_form, src/cccc.h) -- independently-parsed subtrees, not
     // aliases into node's own lhs/rhs/etc, so they need the same
     // placeholder substitution as any other child field or a quoted
     // variadic function body would keep a stale $k placeholder in its
     // serializer annotation after substitution.
-    node->va_ap   = quote_substitute(s, node->va_ap);
-    node->va_last = quote_substitute(s, node->va_last);
-    node->va_src  = quote_substitute(s, node->va_src);
+    node_misc_mut(s->vm, node)->va_ap =
+        quote_substitute(s, node_misc(node)->va_ap);
+    node_misc_mut(s->vm, node)->va_last =
+        quote_substitute(s, node_misc(node)->va_last);
+    node_misc_mut(s->vm, node)->va_src =
+        quote_substitute(s, node_misc(node)->va_src);
 
     // body is a statement chain linked via ->next.
     // Splice placeholders in body position expand to N statements.
@@ -4437,40 +4449,43 @@ static Node *quote_substitute(QuoteSubstState *s, Node *node) {
     }
 
     // switch case chains
-    for (Node *c = node->case_next; c; c = c->case_next)
+    for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
         c->lhs = quote_substitute(s, c->lhs);
-    if (node->default_case)
-        node->default_case->lhs = quote_substitute(s, node->default_case->lhs);
+    if (node_ctl(node)->default_case)
+        node_ctl(node)->default_case->lhs =
+            quote_substitute(s, node_ctl(node)->default_case->lhs);
 
     return node;
 }
 
-static void quote_rebind_macro_scope(Node *node, Scope *old_scope,
-                                     Scope *new_scope) {
+static void quote_rebind_macro_scope(VirtualMachine *vm, Node *node,
+                                     Scope *old_scope, Scope *new_scope) {
     if (!node)
         return;
 
-    if (node->kind == ND_MACRO_CALL && node->macro_scope == old_scope)
-        node->macro_scope = new_scope;
+    if (node->kind == ND_MACRO_CALL &&
+        node_misc(node)->macro_scope == old_scope)
+        node_misc_mut(vm, node)->macro_scope = new_scope;
 
-    quote_rebind_macro_scope(node->lhs, old_scope, new_scope);
-    quote_rebind_macro_scope(node->rhs, old_scope, new_scope);
-    quote_rebind_macro_scope(node->cond, old_scope, new_scope);
-    quote_rebind_macro_scope(node->then, old_scope, new_scope);
-    quote_rebind_macro_scope(node->els, old_scope, new_scope);
-    quote_rebind_macro_scope(node->init, old_scope, new_scope);
-    quote_rebind_macro_scope(node->inc, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node->lhs, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node->rhs, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node_ctl(node)->cond, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node_ctl(node)->then, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node_ctl(node)->els, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node_ctl(node)->init, old_scope, new_scope);
+    quote_rebind_macro_scope(vm, node_ctl(node)->inc, old_scope, new_scope);
 
     for (Node *st = node->body; st; st = st->next)
-        quote_rebind_macro_scope(st, old_scope, new_scope);
+        quote_rebind_macro_scope(vm, st, old_scope, new_scope);
 
     for (Node *a = node->args; a; a = a->next)
-        quote_rebind_macro_scope(a, old_scope, new_scope);
+        quote_rebind_macro_scope(vm, a, old_scope, new_scope);
 
-    for (Node *c = node->case_next; c; c = c->case_next)
-        quote_rebind_macro_scope(c->lhs, old_scope, new_scope);
-    if (node->default_case)
-        quote_rebind_macro_scope(node->default_case->lhs, old_scope, new_scope);
+    for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
+        quote_rebind_macro_scope(vm, c->lhs, old_scope, new_scope);
+    if (node_ctl(node)->default_case)
+        quote_rebind_macro_scope(vm, node_ctl(node)->default_case->lhs,
+                                 old_scope, new_scope);
 }
 
 // Determine lexically whether an unbraced template holds more than one
@@ -4539,11 +4554,11 @@ static void recheck_spliced_funcalls(VirtualMachine *vm, Node *node) {
         return;
     recheck_spliced_funcalls(vm, node->lhs);
     recheck_spliced_funcalls(vm, node->rhs);
-    recheck_spliced_funcalls(vm, node->cond);
-    recheck_spliced_funcalls(vm, node->then);
-    recheck_spliced_funcalls(vm, node->els);
-    recheck_spliced_funcalls(vm, node->init);
-    recheck_spliced_funcalls(vm, node->inc);
+    recheck_spliced_funcalls(vm, node_ctl(node)->cond);
+    recheck_spliced_funcalls(vm, node_ctl(node)->then);
+    recheck_spliced_funcalls(vm, node_ctl(node)->els);
+    recheck_spliced_funcalls(vm, node_ctl(node)->init);
+    recheck_spliced_funcalls(vm, node_ctl(node)->inc);
     for (Node *n = node->body; n; n = n->next)
         recheck_spliced_funcalls(vm, n);
     for (Node *a = node->args; a; a = a->next)
@@ -4743,17 +4758,17 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
         Node  head_g = {0};
         Node *tail_g = &head_g;
         for (Node *x = vm->compiler.gotos; x && x != saved_gotos;) {
-            Node *nx = x->goto_next;
-            bool  keep =
-                (x->unique_label == NULL) && !vm->compiler.in_macro_expansion;
+            Node *nx   = node_ctl(x)->goto_next;
+            bool  keep = (node_ctl(x)->unique_label == NULL) &&
+                         !vm->compiler.in_macro_expansion;
             if (keep) {
-                tail_g->goto_next = x;
+                node_ctl_mut(vm, tail_g)->goto_next = x;
                 tail_g            = x;
             }
             x = nx;
         }
-        tail_g->goto_next   = saved_gotos;
-        vm->compiler.gotos  = head_g.goto_next;
+        node_ctl_mut(vm, tail_g)->goto_next = saved_gotos;
+        vm->compiler.gotos                  = node_ctl(&head_g)->goto_next;
         vm->compiler.labels = saved_labels; // every template label unlinked
     }
 
@@ -4771,7 +4786,7 @@ static Node *quote_core(VirtualMachine *vm, const char *tmpl, Node **nodes,
                   "template's %s; wrap a multi-statement template in braces",
                   parsed_as_stmt ? "first statement" : "expression");
 
-    quote_rebind_macro_scope(result, &quote_scope, quote_scope.next);
+    quote_rebind_macro_scope(vm, result, &quote_scope, quote_scope.next);
 
     // 6. Restore outer scope, freeing any hashmap buckets accumulated in the
     //    quote scope (var_map from push_scope, tag_map from struct/enum tags).
@@ -4946,10 +4961,10 @@ static Node *quote_lazy_capture(VirtualMachine *vm, const char *tmpl,
     // program's own memory, which may be torn down before this fragment is
     // ever spliced (unlike quote_core's eager path, which consumes `tmpl`
     // immediately and never needs to keep it alive past this call).
-    node->quote_tmpl     = arena_strdup(vm, (char *)tmpl);
-    node->lazy_arg_count = n;
+    node_misc_mut(vm, node)->quote_tmpl     = arena_strdup(vm, (char *)tmpl);
+    node_misc_mut(vm, node)->lazy_arg_count = n;
     if (n > 0) {
-        node->lazy_args =
+        node_misc_mut(vm, node)->lazy_args =
             arena_alloc(&vm->compiler.parser_arena, (size_t)n * sizeof(Node *));
         // Deliberately NOT ->next-linked: a $@N argument is itself a
         // ->next-linked chain (NodeList()/splice_chain_for), and any slot
@@ -4957,7 +4972,7 @@ static Node *quote_lazy_capture(VirtualMachine *vm, const char *tmpl,
         // NULL for an index never actually passed). Positional identity is
         // what the eventual quote_core re-parse needs, so this must stay a
         // plain indexed array.
-        memcpy(node->lazy_args, nodes, (size_t)n * sizeof(Node *));
+        memcpy(node_misc(node)->lazy_args, nodes, (size_t)n * sizeof(Node *));
     }
     return node;
 }
@@ -5029,7 +5044,8 @@ Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt) {
         return lazy;
 
     Node *result =
-        quote_core(vm, lazy->quote_tmpl, lazy->lazy_args, lazy->lazy_arg_count);
+        quote_core(vm, node_misc(lazy)->quote_tmpl, node_misc(lazy)->lazy_args,
+                   node_misc(lazy)->lazy_arg_count);
     if (!result)
         return result;
 
@@ -5050,11 +5066,11 @@ Node *cc_quote_expand_lazy(VirtualMachine *vm, Node *lazy, bool want_stmt) {
             error_tok(vm, lazy->tok,
                       "QuoteLazy: fragment '%s' is a statement and cannot "
                       "be spliced in expression position",
-                      lazy->quote_tmpl);
+                      node_misc(lazy)->quote_tmpl);
         else
             error("QuoteLazy: fragment '%s' is a statement and cannot be "
                   "spliced in expression position",
-                  lazy->quote_tmpl);
+                  node_misc(lazy)->quote_tmpl);
         return result;
     }
     return result;
@@ -5113,16 +5129,15 @@ typedef struct {
 
 // Every Node pointer a copy follows, in one order for both passes. Chains
 // (body, args) and lazy_args are handled apart.
-#define COPY_NODE_CHILDREN(X)                                                  \
-    X(lhs)                                                                     \
-    X(rhs)                                                                     \
-    X(cond) X(then) X(els) X(init) X(inc) X(cas_addr) X(cas_old) X(cas_new)    \
-        X(atomic_expr) X(va_ap) X(va_last) X(va_src) X(static_assert_cond)     \
-            X(rmw_lvalue) X(checked_rmw_mirror) X(checked_bounds_lo)           \
-                X(checked_bounds_hi) X(checked_bounds_obj_init)                \
-                    X(checked_assign_dst_lo) X(checked_assign_dst_hi)          \
-                        X(checked_assign_dst_obj_init)                         \
-                            X(checked_assign_src_lo) X(checked_assign_src_hi)
+#define COPY_NODE_CTL(X)                                                       \
+    X(cond) X(then) X(els) X(init) X(inc) X(static_assert_cond)
+#define COPY_NODE_ATOM(X) X(cas_addr) X(cas_old) X(cas_new) X(atomic_expr)
+#define COPY_NODE_MISC(X) X(va_ap) X(va_last) X(va_src)
+#define COPY_NODE_CHK(X)                                                       \
+    X(rmw_lvalue)                                                              \
+    X(rmw_mirror) X(bounds_lo) X(bounds_hi) X(bounds_obj_init)                 \
+        X(assign_dst_lo) X(assign_dst_hi) X(assign_dst_obj_init)               \
+            X(assign_src_lo) X(assign_src_hi)
 
 static long long copy_key(const void *p) {
     return (long long)(uintptr_t)p;
@@ -5183,8 +5198,8 @@ static void copy_node_declare(CopyCtx *cx, Obj *v) {
 }
 
 static void copy_node_check_decls(CopyCtx *cx, Node *n) {
-    for (int i = 0; i < n->decl_var_count; i++) {
-        Obj *v = n->decl_vars[i];
+    for (int i = 0; i < node_ctl(n)->decl_var_count; i++) {
+        Obj *v = node_ctl(n)->decl_vars[i];
         copy_node_declare(cx, v);
         if (!v->is_local)
             copy_node_refuse(cx, n, "static local; rebuild it");
@@ -5204,7 +5219,7 @@ static void copy_node_check_decls(CopyCtx *cx, Node *n) {
         if (v->is_kernel_local_obj)
             copy_node_refuse(cx, n, "kernel local object");
     }
-    if (n->decl_var_count)
+    if (node_ctl(n)->decl_var_count)
         cx->needs_fn = true;
 }
 
@@ -5224,7 +5239,8 @@ static void copy_node_check(CopyCtx *cx, Node *n) {
 
     if (!copy_node_kind_ok(n))
         copy_node_refuse(cx, n, "this kind of node is not supported");
-    if (n->omp || n->init_tail || n->swizzle_store)
+    if (node_misc(n)->omp || node_ctl(n)->init_tail ||
+        node_misc(n)->swizzle_store)
         copy_node_refuse(cx, n, "this node kind is not supported");
     if (n->is_decl_group)
         copy_node_check_decls(cx, n);
@@ -5235,13 +5251,14 @@ static void copy_node_check(CopyCtx *cx, Node *n) {
         written = n->lhs->var;
     else if (n->kind == ND_VAR)
         written = NULL;
-    if (copy_node_is_temp(written) || n->ret_buffer || n->atomic_addr) {
+    if (copy_node_is_temp(written) || node_misc(n)->ret_buffer ||
+        node_atom(n)->atomic_addr) {
         if (copy_node_is_temp(written))
             copy_node_declare(cx, written);
-        if (n->ret_buffer)
-            copy_node_declare(cx, n->ret_buffer);
-        if (n->atomic_addr)
-            copy_node_declare(cx, n->atomic_addr);
+        if (node_misc(n)->ret_buffer)
+            copy_node_declare(cx, node_misc(n)->ret_buffer);
+        if (node_atom(n)->atomic_addr)
+            copy_node_declare(cx, node_atom(n)->atomic_addr);
         cx->needs_fn = true;
     }
     if (cx->needs_fn && !cx->vm->compiler.current_fn)
@@ -5251,15 +5268,15 @@ static void copy_node_check(CopyCtx *cx, Node *n) {
         case ND_FOR:
         case ND_DO:
         case ND_SWITCH:
-            copy_node_define_label(cx, n->brk_label);
-            copy_node_define_label(cx, n->cont_label);
+            copy_node_define_label(cx, node_ctl(n)->brk_label);
+            copy_node_define_label(cx, node_ctl(n)->cont_label);
             break;
         case ND_LABEL:
-            copy_node_define_label(cx, n->unique_label);
+            copy_node_define_label(cx, node_ctl(n)->unique_label);
             break;
         case ND_GOTO:
         case ND_LABEL_VAL:
-            if (n->label && n->unique_label) {
+            if (node_ctl(n)->label && node_ctl(n)->unique_label) {
                 if (cx->n_gotos == cx->cap_gotos) {
                     cx->cap_gotos = cx->cap_gotos ? cx->cap_gotos * 2 : 8;
                     cx->gotos = realloc(cx->gotos,
@@ -5272,13 +5289,25 @@ static void copy_node_check(CopyCtx *cx, Node *n) {
             break;
     }
 
-#define X(f) copy_node_check(cx, n->f);
-    COPY_NODE_CHILDREN(X)
+    copy_node_check(cx, n->lhs);
+    copy_node_check(cx, n->rhs);
+#define X(f) copy_node_check(cx, node_ctl(n)->f);
+    COPY_NODE_CTL(X)
+#undef X
+#define X(f) copy_node_check(cx, node_atom(n)->f);
+    COPY_NODE_ATOM(X)
+#undef X
+#define X(f) copy_node_check(cx, node_misc(n)->f);
+    COPY_NODE_MISC(X)
+#undef X
+#define X(f) copy_node_check(cx, node_chk(n)->f);
+    COPY_NODE_CHK(X)
 #undef X
     copy_node_check_chain(cx, n->body);
     copy_node_check_chain(cx, n->args);
-    for (int i = 0; n->kind == ND_QUOTE_LAZY && i < n->lazy_arg_count; i++)
-        copy_node_check_chain(cx, n->lazy_args[i]);
+    for (int i = 0;
+         n->kind == ND_QUOTE_LAZY && i < node_misc(n)->lazy_arg_count; i++)
+        copy_node_check_chain(cx, node_misc(n)->lazy_args[i]);
     cx->depth--;
 }
 
@@ -5383,48 +5412,64 @@ static Node *copy_node_tree(CopyCtx *cx, Node *n) {
     if (c)
         return c;
 
-    c  = arena_alloc(&cx->vm->compiler.parser_arena, sizeof(Node));
-    *c = *n;
+    c = arena_alloc(&cx->vm->compiler.parser_arena, sizeof(Node));
+    node_assign(cx->vm, c, n);
     hashmap_put_int(&cx->nodes, copy_key(n), c);
     c->next         = NULL;
     c->list_link    = LINK_FREE;
-    c->goto_next    = NULL;
-    c->case_next    = NULL;
-    c->default_case = NULL;
+    if (node_ctl(c)->goto_next || node_ctl(c)->case_next ||
+        node_ctl(c)->default_case) {
+        node_ctl_mut(cx->vm, c)->goto_next    = NULL;
+        node_ctl_mut(cx->vm, c)->case_next    = NULL;
+        node_ctl_mut(cx->vm, c)->default_case = NULL;
+    }
 
     switch (n->kind) {
         case ND_FOR:
         case ND_DO:
         case ND_SWITCH:
-            c->brk_label  = copy_node_label(cx, n->brk_label);
-            c->cont_label = copy_node_label(cx, n->cont_label);
+            node_ctl_mut(cx->vm, c)->brk_label =
+                copy_node_label(cx, node_ctl(n)->brk_label);
+            node_ctl_mut(cx->vm, c)->cont_label =
+                copy_node_label(cx, node_ctl(n)->cont_label);
             break;
         case ND_LABEL:
-            c->unique_label = copy_node_label(cx, n->unique_label);
+            node_ctl_mut(cx->vm, c)->unique_label =
+                copy_node_label(cx, node_ctl(n)->unique_label);
             break;
         case ND_GOTO:
         case ND_LABEL_VAL:
             // A user label outside the copy is bound again by name where the
             // copy lands (cc_resolve_body_label_refs); break/continue keep
             // their loop.
-            c->unique_label = copy_node_label(cx, n->unique_label);
-            if (n->label && c->unique_label == n->unique_label &&
-                !hashmap_get_int(&cx->labels, copy_key(n->unique_label)))
-                c->unique_label = NULL;
+            node_ctl_mut(cx->vm, c)->unique_label =
+                copy_node_label(cx, node_ctl(n)->unique_label);
+            if (node_ctl(n)->label &&
+                node_ctl(c)->unique_label == node_ctl(n)->unique_label &&
+                !hashmap_get_int(&cx->labels,
+                                 copy_key(node_ctl(n)->unique_label)))
+                node_ctl_mut(cx->vm, c)->unique_label = NULL;
             break;
         default:
             break;
     }
 
     c->var         = copy_node_obj(cx, n->var);
-    c->ret_buffer  = copy_node_obj(cx, n->ret_buffer);
-    c->atomic_addr = copy_node_obj(cx, n->atomic_addr);
+    if (node_misc(n)->ret_buffer)
+        node_misc_mut(cx->vm, c)->ret_buffer =
+            copy_node_obj(cx, node_misc(n)->ret_buffer);
+    if (node_atom(n)->atomic_addr)
+        node_atom_mut(cx->vm, c)->atomic_addr =
+            copy_node_obj(cx, node_atom(n)->atomic_addr);
     c->ty           = copy_node_type(cx, n->ty);
-    c->cleanup_open = copy_node_obj(cx, n->cleanup_open);
-    if (n->cleanup_seq_limit)
-        c->cleanup_seq_limit = copy_node_seq_limit(cx, n->cleanup_seq_limit);
-    CleanupVar **cv_tail = &c->cleanup_vars;
-    for (CleanupVar *cv = n->cleanup_vars; cv; cv = cv->next) {
+    if (node_ctl(n)->cleanup_open)
+        node_ctl_mut(cx->vm, c)->cleanup_open =
+            copy_node_obj(cx, node_ctl(n)->cleanup_open);
+    if (node_ctl(n)->cleanup_seq_limit)
+        node_ctl_mut(cx->vm, c)->cleanup_seq_limit =
+            copy_node_seq_limit(cx, node_ctl(n)->cleanup_seq_limit);
+    CleanupVar **cv_tail = &node_ctl_mut(cx->vm, c)->cleanup_vars;
+    for (CleanupVar *cv = node_ctl(n)->cleanup_vars; cv; cv = cv->next) {
         CleanupVar *cc =
             arena_alloc(&cx->vm->compiler.parser_arena, sizeof(CleanupVar));
         cc->var        = copy_node_obj(cx, cv->var);
@@ -5433,37 +5478,61 @@ static Node *copy_node_tree(CopyCtx *cx, Node *n) {
         cv_tail        = &cc->next;
     }
     *cv_tail = NULL;
-    if (n->decl_var_count) {
-        c->decl_vars = arena_alloc(&cx->vm->compiler.parser_arena,
-                                   (size_t)n->decl_var_count * sizeof(Obj *));
-        for (int i = 0; i < n->decl_var_count; i++)
-            c->decl_vars[i] = copy_node_obj(cx, n->decl_vars[i]);
+    if (node_ctl(n)->decl_var_count) {
+        node_ctl_mut(cx->vm, c)->decl_vars =
+            arena_alloc(&cx->vm->compiler.parser_arena,
+                        (size_t)node_ctl(n)->decl_var_count * sizeof(Obj *));
+        for (int i = 0; i < node_ctl(n)->decl_var_count; i++)
+            node_ctl(c)->decl_vars[i] =
+                copy_node_obj(cx, node_ctl(n)->decl_vars[i]);
     }
 
-#define X(f) c->f = copy_node_tree(cx, n->f);
-    COPY_NODE_CHILDREN(X)
+    c->lhs = copy_node_tree(cx, n->lhs);
+    c->rhs = copy_node_tree(cx, n->rhs);
+#define X(f)                                                                   \
+    if (node_ctl(n)->f)                                                        \
+        node_ctl_mut(cx->vm, c)->f = copy_node_tree(cx, node_ctl(n)->f);
+    COPY_NODE_CTL(X)
+#undef X
+#define X(f)                                                                   \
+    if (node_atom(n)->f)                                                       \
+        node_atom_mut(cx->vm, c)->f = copy_node_tree(cx, node_atom(n)->f);
+    COPY_NODE_ATOM(X)
+#undef X
+#define X(f)                                                                   \
+    if (node_misc(n)->f)                                                       \
+        node_misc_mut(cx->vm, c)->f = copy_node_tree(cx, node_misc(n)->f);
+    COPY_NODE_MISC(X)
+#undef X
+#define X(f)                                                                   \
+    if (node_chk(n)->f)                                                        \
+        node_chk_mut(cx->vm, c)->f = copy_node_tree(cx, node_chk(n)->f);
+    COPY_NODE_CHK(X)
 #undef X
     c->body = copy_node_chain(cx, n->body);
     c->args = copy_node_chain(cx, n->args);
-    if (n->kind == ND_QUOTE_LAZY && n->lazy_arg_count) {
-        c->lazy_args = arena_alloc(&cx->vm->compiler.parser_arena,
-                                   (size_t)n->lazy_arg_count * sizeof(Node *));
-        for (int i = 0; i < n->lazy_arg_count; i++)
-            c->lazy_args[i] = copy_node_chain(cx, n->lazy_args[i]);
+    if (n->kind == ND_QUOTE_LAZY && node_misc(n)->lazy_arg_count) {
+        node_misc_mut(cx->vm, c)->lazy_args =
+            arena_alloc(&cx->vm->compiler.parser_arena,
+                        (size_t)node_misc(n)->lazy_arg_count * sizeof(Node *));
+        for (int i = 0; i < node_misc(n)->lazy_arg_count; i++)
+            node_misc(c)->lazy_args[i] =
+                copy_node_chain(cx, node_misc(n)->lazy_args[i]);
     }
 
     // Codegen finds a switch's cases by node, so the copy needs its own chain.
     if (n->kind == ND_SWITCH) {
         Node *prev = NULL;
-        for (Node *k = n->case_next; k; k = k->case_next) {
+        for (Node *k = node_ctl(n)->case_next; k; k = node_ctl(k)->case_next) {
             Node *kc = copy_node_tree(cx, k);
             if (prev)
-                prev->case_next = kc;
+                node_ctl_mut(cx->vm, prev)->case_next = kc;
             else
-                c->case_next = kc;
+                node_ctl_mut(cx->vm, c)->case_next = kc;
             prev = kc;
         }
-        c->default_case = copy_node_tree(cx, n->default_case);
+        node_ctl_mut(cx->vm, c)->default_case =
+            copy_node_tree(cx, node_ctl(n)->default_case);
     }
     return c;
 }
@@ -5478,7 +5547,7 @@ Node *__builtin_ast_copy_node(Node *n) {
     for (int i = 0; i < cx.n_gotos; i++) {
         Node *g = cx.gotos[i];
         if (!vm->compiler.in_macro_expansion &&
-            !hashmap_get_int(&cx.labels, copy_key(g->unique_label)))
+            !hashmap_get_int(&cx.labels, copy_key(node_ctl(g)->unique_label)))
             copy_node_refuse(&cx, g, "goto to a label outside the copy");
     }
     cx.seq_base               = vm->compiler.cleanup_seq;

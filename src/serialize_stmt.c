@@ -105,14 +105,14 @@ void serialize_asm_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
     fprintf(f, node->asm_flags & (ASM_VOLATILE | ASM_INLINE | ASM_GOTO)
                    ? " ("
                    : "(");
-    if (node->asm_str)
-        serialize_string_n(f, node->asm_str,
-                           (int)strlen(node->asm_str));
+    if (node_asm(node)->asm_str)
+        serialize_string_n(f, node_asm(node)->asm_str,
+                           (int)strlen(node_asm(node)->asm_str));
     else
         fprintf(f, "\"\"");
     if (node->asm_flags & ASM_EXTENDED) {
-        int   n_out = node->asm_n_outputs;
-        int   n_ops = n_out + node->asm_n_inputs;
+        int   n_out = node_asm(node)->asm_n_outputs;
+        int   n_ops = n_out + node_asm(node)->asm_n_inputs;
         Node *arg   = node->args;
         // Both operand sections are always emitted, even if empty.
         for (int section = 0; section < 2; section++) {
@@ -126,12 +126,12 @@ void serialize_asm_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                               "mismatch");
                 if (i > lo)
                     fprintf(f, ",");
-                if (node->asm_ops[i].name)
-                    fprintf(f, " [%s]", node->asm_ops[i].name);
+                if (node_asm(node)->asm_ops[i].name)
+                    fprintf(f, " [%s]", node_asm(node)->asm_ops[i].name);
                 fprintf(f, " ");
                 serialize_string_n(
-                    f, node->asm_ops[i].constraint,
-                    (int)strlen(node->asm_ops[i].constraint));
+                    f, node_asm(node)->asm_ops[i].constraint,
+                    (int)strlen(node_asm(node)->asm_ops[i].constraint));
                 fprintf(f, " (");
                 if (writer)
                             writer(f, arg, i, ud);
@@ -140,19 +140,20 @@ void serialize_asm_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 fprintf(f, ")");
             }
         }
-        if (node->asm_n_clobbers || node->asm_labels) {
+        if (node_asm(node)->asm_n_clobbers || node_asm(node)->asm_labels) {
             fprintf(f, " :");
-            for (int i = 0; i < node->asm_n_clobbers; i++) {
+            for (int i = 0; i < node_asm(node)->asm_n_clobbers; i++) {
                 fprintf(f, i ? ", " : " ");
-                serialize_string_n(f, node->asm_clobbers[i],
-                                   (int)strlen(node->asm_clobbers[i]));
+                serialize_string_n(
+                    f, node_asm(node)->asm_clobbers[i],
+                    (int)strlen(node_asm(node)->asm_clobbers[i]));
             }
         }
-        if (node->asm_labels) {
+        if (node_asm(node)->asm_labels) {
             fprintf(f, " :");
-            for (Node *l = node->asm_labels; l; l = l->next)
-                fprintf(f, "%s %s", l == node->asm_labels ? "" : ",",
-                        l->label);
+            for (Node *l = node_asm(node)->asm_labels; l; l = l->next)
+                fprintf(f, "%s %s", l == node_asm(node)->asm_labels ? "" : ",",
+                        node_ctl(l)->label);
         }
     }
     fprintf(f, ")");
@@ -173,18 +174,19 @@ static void print_jump_label(FILE *f, const char *label) {
 static void serialize_loop_body(FILE *f, VirtualMachine *vm,
                                 SerializeContext *ctx, Node *node,
                                 int indent) {
-    SerJumpFrame frame = {ctx->jumps, node->brk_label, node->cont_label};
+    SerJumpFrame frame = {ctx->jumps, node_ctl(node)->brk_label,
+                          node_ctl(node)->cont_label};
     ctx->jumps         = &frame;
-    if (is_outer_jump(ctx, node->cont_label)) {
+    if (is_outer_jump(ctx, node_ctl(node)->cont_label)) {
         print_indent_level(f, indent);
         fprintf(f, "{\n");
-        serialize_stmt(f, vm, ctx, node->then, indent + 1);
-        print_jump_label(f, node->cont_label);
+        serialize_stmt(f, vm, ctx, node_ctl(node)->then, indent + 1);
+        print_jump_label(f, node_ctl(node)->cont_label);
         fprintf(f, ": ;\n");
         print_indent_level(f, indent);
         fprintf(f, "}\n");
     } else {
-        serialize_stmt(f, vm, ctx, node->then, indent + 1);
+        serialize_stmt(f, vm, ctx, node_ctl(node)->then, indent + 1);
     }
     ctx->jumps = frame.parent;
 }
@@ -313,11 +315,11 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // qualifies (see serialize_static_assert's own gate); an
             // unqualifying one is left as the pre-existing empty block,
             // same as before this ticket.
-            if (node->static_assert_cond) {
-                serialize_static_assert(f, vm, ctx, node->static_assert_cond,
-                                        node->static_assert_msg,
-                                        node->static_assert_msg_len, node->tok,
-                                        indent);
+            if (node_ctl(node)->static_assert_cond) {
+                serialize_static_assert(
+                    f, vm, ctx, node_ctl(node)->static_assert_cond,
+                    node_ctl(node)->static_assert_msg,
+                    node_ctl(node)->static_assert_msg_len, node->tok, indent);
                 break;
             }
             print_indent_level(f, indent);
@@ -333,14 +335,14 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             print_indent_level(f, indent);
             fprintf(f, "if (");
             // #1123: a wide-_BitInt cond can't appear bare here.
-            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
-                serialize_expr(f, vm, ctx, node->cond, 0);
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node_ctl(node)->cond))
+                serialize_expr(f, vm, ctx, node_ctl(node)->cond, 0);
             fprintf(f, ")\n");
-            serialize_stmt(f, vm, ctx, node->then, indent + 1);
-            if (node->els) {
+            serialize_stmt(f, vm, ctx, node_ctl(node)->then, indent + 1);
+            if (node_ctl(node)->els) {
                 print_indent_level(f, indent);
                 fprintf(f, "else\n");
-                serialize_stmt(f, vm, ctx, node->els, indent + 1);
+                serialize_stmt(f, vm, ctx, node_ctl(node)->els, indent + 1);
             }
             break;
 
@@ -348,11 +350,12 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // A VLA is a real declaration, which an init clause of
             // comma-joined expressions can't hold: emit the whole init in
             // order inside a block that scopes the VLA to the loop.
-            bool vla_init = node->init && block_defines_vla(node->init);
+            bool vla_init =
+                node_ctl(node)->init && block_defines_vla(node_ctl(node)->init);
             if (vla_init) {
                 print_indent_level(f, indent++);
                 fprintf(f, "{\n");
-                for (Node *s = node->init->body; s; s = s->next)
+                for (Node *s = node_ctl(node)->init->body; s; s = s->next)
                     serialize_stmt(f, vm, ctx, s, indent);
             }
             print_indent_level(f, indent);
@@ -375,12 +378,12 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // a bare `for (;;)`-style empty init clause. A non-declaration init
             // (`for (i = 0; ...)`) is a bare ND_EXPR_STMT (expr_stmt(),
             // parse.c) and serializes the same way.
-            if (node->init) {
+            if (node_ctl(node)->init) {
                 if (vla_init) {
                     // Already emitted above.
-                } else if (node->init->kind == ND_BLOCK) {
+                } else if (node_ctl(node)->init->kind == ND_BLOCK) {
                     bool first_init = true;
-                    for (Node *s = node->init->body; s; s = s->next) {
+                    for (Node *s = node_ctl(node)->init->body; s; s = s->next) {
                         if (s->kind != ND_EXPR_STMT || is_noop_expr(s->lhs))
                             continue;
                         if (!first_init)
@@ -393,23 +396,24 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                         // separator comma.
                         serialize_expr(f, vm, ctx, s->lhs, 2);
                     }
-                } else if (node->init->kind == ND_EXPR_STMT) {
-                    if (!is_noop_expr(node->init->lhs))
-                        serialize_expr(f, vm, ctx, node->init->lhs, 0);
+                } else if (node_ctl(node)->init->kind == ND_EXPR_STMT) {
+                    if (!is_noop_expr(node_ctl(node)->init->lhs))
+                        serialize_expr(f, vm, ctx, node_ctl(node)->init->lhs,
+                                       0);
                 } else {
-                    serialize_expr(f, vm, ctx, node->init, 0);
+                    serialize_expr(f, vm, ctx, node_ctl(node)->init, 0);
                 }
             }
             fprintf(f, "; ");
             // #1123: a wide-_BitInt cond can't appear bare here.
-            if (node->cond &&
-                !serialize_wide_bitint_truth(f, vm, ctx, node->cond))
-                serialize_expr(f, vm, ctx, node->cond, 0);
+            if (node_ctl(node)->cond &&
+                !serialize_wide_bitint_truth(f, vm, ctx, node_ctl(node)->cond))
+                serialize_expr(f, vm, ctx, node_ctl(node)->cond, 0);
             fprintf(f, "; ");
-            if (node->inc)
+            if (node_ctl(node)->inc)
                 // #1235: the update clause discards its value -- drop the dead
                 // `+ -1` term a postfix `i++` would otherwise leave here.
-                serialize_discard_expr(f, vm, ctx, node->inc, 0);
+                serialize_discard_expr(f, vm, ctx, node_ctl(node)->inc, 0);
             fprintf(f, ")\n");
             // #1005: a jump frame lets a break/continue in the body resolve
             // back to this loop -- see the ND_GOTO arm below.
@@ -418,7 +422,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 print_indent_level(f, --indent);
                 fprintf(f, "}\n");
             }
-            serialize_break_label(f, ctx, node->brk_label, indent);
+            serialize_break_label(f, ctx, node_ctl(node)->brk_label, indent);
             break;
         }
 
@@ -429,10 +433,10 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             print_indent_level(f, indent);
             fprintf(f, "while (");
             // #1123: a wide-_BitInt cond can't appear bare here.
-            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
-                serialize_expr(f, vm, ctx, node->cond, 0);
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node_ctl(node)->cond))
+                serialize_expr(f, vm, ctx, node_ctl(node)->cond, 0);
             fprintf(f, ");\n");
-            serialize_break_label(f, ctx, node->brk_label, indent);
+            serialize_break_label(f, ctx, node_ctl(node)->brk_label, indent);
             break;
 
         case ND_SWITCH:
@@ -449,31 +453,32 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             // statements.
             print_indent_level(f, indent);
             fprintf(f, "switch (");
-            serialize_expr(f, vm, ctx, node->cond, 0);
+            serialize_expr(f, vm, ctx, node_ctl(node)->cond, 0);
             fprintf(f, ")\n");
             {
                 // A switch saves/restores only brk_label at parse time
                 // (parse.c) -- cont_label is deliberately NULL here so a
                 // `continue` inside this switch skips over this frame and
                 // resolves to the nearest enclosing loop, not this switch.
-                SerJumpFrame frame        = {ctx->jumps, node->brk_label, NULL};
+                SerJumpFrame frame = {ctx->jumps, node_ctl(node)->brk_label,
+                                      NULL};
                 Node        *saved_switch = ctx->cur_switch;
                 ctx->jumps                = &frame;
                 ctx->cur_switch           = node;
-                serialize_stmt(f, vm, ctx, node->then, indent + 1);
+                serialize_stmt(f, vm, ctx, node_ctl(node)->then, indent + 1);
                 ctx->cur_switch = saved_switch;
                 ctx->jumps      = frame.parent;
             }
-            serialize_break_label(f, ctx, node->brk_label, indent);
+            serialize_break_label(f, ctx, node_ctl(node)->brk_label, indent);
             break;
 
         case ND_GOTO:
             print_indent_level(f, indent);
-            if (node->label) {
+            if (node_ctl(node)->label) {
                 // A real source-level `goto label;` (parse.c sets ->label to
                 // the source identifier; resolve_goto_labels also fills in
                 // ->unique_label, but ->label is authoritative here).
-                fprintf(f, "goto %s;\n", node->label);
+                fprintf(f, "goto %s;\n", node_ctl(node)->label);
             } else {
                 // #1005: break/continue lower to an ND_GOTO with only
                 // ->unique_label set (parse.c) -- a ".L..N" string that is not
@@ -484,19 +489,20 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // real C keyword instead of a (nonexistent) label reference.
                 // The keyword binds to the innermost C loop or switch, so a
                 // target further out is reached with a goto instead.
-                if (is_outer_jump(ctx, node->unique_label)) {
+                if (is_outer_jump(ctx, node_ctl(node)->unique_label)) {
                     fprintf(f, "goto ");
-                    print_jump_label(f, node->unique_label);
+                    print_jump_label(f, node_ctl(node)->unique_label);
                     fprintf(f, ";\n");
                     break;
                 }
                 const char *kw = NULL;
                 for (SerJumpFrame *fr = ctx->jumps; fr && !kw;
                      fr               = fr->parent) {
-                    if (fr->brk_label && fr->brk_label == node->unique_label)
+                    if (fr->brk_label &&
+                        fr->brk_label == node_ctl(node)->unique_label)
                         kw = "break";
                     else if (fr->cont_label &&
-                             fr->cont_label == node->unique_label)
+                             fr->cont_label == node_ctl(node)->unique_label)
                         kw = "continue";
                 }
                 if (!kw)
@@ -508,15 +514,16 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
             break;
 
         case ND_LABEL:
-            fprintf(f, "%s:\n", node->label);
+            fprintf(f, "%s:\n", node_ctl(node)->label);
             serialize_stmt(f, vm, ctx, node->lhs, indent);
             break;
 
         case ND_CASE:
             print_indent_level(f, indent);
-            if (ctx->cur_switch && ctx->cur_switch->default_case == node) {
+            if (ctx->cur_switch &&
+                node_ctl(ctx->cur_switch)->default_case == node) {
                 fprintf(f, "default:\n");
-            } else if (node->begin == node->end) {
+            } else if (node_ctl(node)->begin == node_ctl(node)->end) {
                 // #1095: re-materialize a host-owned sizeof/_Alignof label
                 // the same way #1031's ND_NUM arm does -- a case label is
                 // only ever compared against a runtime value, never fed
@@ -527,20 +534,23 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 // when re-materializing isn't sound/possible, so the plain
                 // folded value is the fallback exactly as before.
                 fprintf(f, "case ");
-                if (!serialize_layout_const(f, ctx, node->case_begin_layout_ty,
-                                            node->case_begin_layout_is_align))
-                    fprintf(f, "%ld", node->begin);
+                if (!serialize_layout_const(
+                        f, ctx, node_ctl(node)->case_begin_layout_ty,
+                        node_ctl(node)->case_begin_layout_is_align))
+                    fprintf(f, "%ld", node_ctl(node)->begin);
                 fprintf(f, ":\n");
             } else {
                 // [GNU] Case ranges, e.g. "case 1 ... 5:"
                 fprintf(f, "case ");
-                if (!serialize_layout_const(f, ctx, node->case_begin_layout_ty,
-                                            node->case_begin_layout_is_align))
-                    fprintf(f, "%ld", node->begin);
+                if (!serialize_layout_const(
+                        f, ctx, node_ctl(node)->case_begin_layout_ty,
+                        node_ctl(node)->case_begin_layout_is_align))
+                    fprintf(f, "%ld", node_ctl(node)->begin);
                 fprintf(f, " ... ");
-                if (!serialize_layout_const(f, ctx, node->case_end_layout_ty,
-                                            node->case_end_layout_is_align))
-                    fprintf(f, "%ld", node->end);
+                if (!serialize_layout_const(
+                        f, ctx, node_ctl(node)->case_end_layout_ty,
+                        node_ctl(node)->case_end_layout_is_align))
+                    fprintf(f, "%ld", node_ctl(node)->end);
                 fprintf(f, ":\n");
             }
             serialize_stmt(f, vm, ctx, node->lhs, indent);

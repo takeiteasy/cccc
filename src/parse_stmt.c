@@ -117,8 +117,8 @@ static bool asm_section_end(Token *tok) {
 // Target-specific punctuation after '%' is left to the host assembler.
 static void asm_check_template(VirtualMachine *vm, Token *tok, Node *node,
                                char **label_names, int n_labels) {
-    int total = node->asm_n_outputs + node->asm_n_inputs;
-    for (const char *p = node->asm_str; *p; p++) {
+    int total = node_asm(node)->asm_n_outputs + node_asm(node)->asm_n_inputs;
+    for (const char *p = node_asm(node)->asm_str; *p; p++) {
         if (*p != '%')
             continue;
         p++;
@@ -146,9 +146,9 @@ static void asm_check_template(VirtualMachine *vm, Token *tok, Node *node,
             int  len   = (int)(close - p - 1);
             bool found = false;
             for (int i = 0; i < total && !found; i++)
-                found = node->asm_ops[i].name &&
-                        (int)strlen(node->asm_ops[i].name) == len &&
-                        !strncmp(node->asm_ops[i].name, p + 1, len);
+                found = node_asm(node)->asm_ops[i].name &&
+                        (int)strlen(node_asm(node)->asm_ops[i].name) == len &&
+                        !strncmp(node_asm(node)->asm_ops[i].name, p + 1, len);
             for (int i = 0; i < n_labels && !found; i++)
                 found = (int)strlen(label_names[i]) == len &&
                         !strncmp(label_names[i], p + 1, len);
@@ -180,7 +180,7 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     tok            = skip(vm, tok, "(");
     Token *tpl_tok = tok;
-    node->asm_str  = asm_string_literal(vm, tok, "template");
+    node_asm_mut(vm, node)->asm_str = asm_string_literal(vm, tok, "template");
     tok            = tok->next;
 
     AsmOperand ops[ASM_MAX_OPERANDS];
@@ -207,10 +207,10 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                         error_tok(vm, op_tok, "duplicate asm operand name '%s'",
                                   ops[n_ops].name);
                 if (is_output) {
-                    node->asm_n_outputs++;
+                    node_asm_mut(vm, node)->asm_n_outputs++;
                     n_plus += ops[n_ops].constraint[0] == '+';
                 } else {
-                    node->asm_n_inputs++;
+                    node_asm_mut(vm, node)->asm_n_inputs++;
                 }
                 n_ops++;
                 if (!equal(tok, ","))
@@ -227,10 +227,11 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             int cnt = 0;
             for (Token *t = tok; !asm_section_end(t); t = t->next)
                 cnt += t->kind == TK_STR;
-            node->asm_clobbers = arena_alloc(&vm->compiler.parser_arena,
-                                             sizeof(char *) * (cnt + 1));
+            node_asm_mut(vm, node)->asm_clobbers = arena_alloc(
+                &vm->compiler.parser_arena, sizeof(char *) * (cnt + 1));
             while (!asm_section_end(tok)) {
-                node->asm_clobbers[node->asm_n_clobbers++] =
+                node_asm(node)
+                    ->asm_clobbers[node_asm_mut(vm, node)->asm_n_clobbers++] =
                     asm_string_literal(vm, tok, "clobber");
                 tok = tok->next;
                 if (!equal(tok, ","))
@@ -256,16 +257,18 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             while (!equal(tok, ")")) {
                 // cc_match_goto_labels() blames tok->next, i.e. the label.
                 Node *g                 = new_node(vm, ND_GOTO, prev);
-                g->label                = get_ident(vm, tok);
-                label_names[n_labels++] = g->label;
-                g->cleanup_chain        = vm->compiler.cur_cleanup_chain;
-                g->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
-                g->goto_next            = vm->compiler.gotos;
+                node_ctl_mut(vm, g)->label = get_ident(vm, tok);
+                label_names[n_labels++]    = node_ctl(g)->label;
+                node_ctl_mut(vm, g)->cleanup_chain =
+                    vm->compiler.cur_cleanup_chain;
+                node_ctl_mut(vm, g)->cleanup_seq_limit =
+                    vm->compiler.cleanup_seq + 1;
+                node_ctl_mut(vm, g)->goto_next = vm->compiler.gotos;
                 vm->compiler.gotos      = g;
                 if (lcur)
                     lcur->next = g;
                 else
-                    node->asm_labels = g;
+                    node_asm_mut(vm, node)->asm_labels = g;
                 lcur = g;
                 tok  = tok->next;
                 if (!equal(tok, ","))
@@ -280,9 +283,9 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         error_tok(vm, tpl_tok, "more than %d operands in asm",
                   ASM_MAX_OPERANDS);
     if (n_ops) {
-        node->asm_ops =
+        node_asm_mut(vm, node)->asm_ops =
             arena_alloc(&vm->compiler.parser_arena, sizeof(AsmOperand) * n_ops);
-        memcpy(node->asm_ops, ops, sizeof(AsmOperand) * n_ops);
+        memcpy(node_asm(node)->asm_ops, ops, sizeof(AsmOperand) * n_ops);
         node->args = head.next;
     }
     if (node->asm_flags & ASM_EXTENDED)
@@ -290,7 +293,7 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Reported here, not in codegen: diagnostics queued after parsing are
     // never flushed.
-    if ((node->asm_n_outputs || node->asm_labels) &&
+    if ((node_asm(node)->asm_n_outputs || node_asm(node)->asm_labels) &&
         !vm->compiler.serializes_output && !vm->compiler.asm_passthru &&
         !vm->compiler.asm_callback)
         warn_tok(vm, node->tok, CCCC_WARN_IGNORED_FEATURES,
@@ -323,8 +326,9 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 // unconditionally deref tok->file/tok->loc the way plain error_tok() call sites
 // do.
 void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
-    for (Node *o = chain; o; o = o->case_next) {
-        if (c->begin > o->end || o->begin > c->end)
+    for (Node *o = chain; o; o = node_ctl(o)->case_next) {
+        if (node_ctl(c)->begin > node_ctl(o)->end ||
+            node_ctl(o)->begin > node_ctl(c)->end)
             continue;
 
         Node *later = o;
@@ -334,8 +338,10 @@ void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
 
         char *msg;
         char  buf[64];
-        if (c->begin == c->end && o->begin == o->end) {
-            snprintf(buf, sizeof(buf), "duplicate case value '%ld'", c->begin);
+        if (node_ctl(c)->begin == node_ctl(c)->end &&
+            node_ctl(o)->begin == node_ctl(o)->end) {
+            snprintf(buf, sizeof(buf), "duplicate case value '%ld'",
+                     node_ctl(c)->begin);
             msg = buf;
         } else {
             msg = "duplicate (or overlapping) case value";
@@ -373,8 +379,9 @@ static void open_cleanup_scope(VirtualMachine *vm) {
 // Record the current scope's cleanup vars on `blk` in LIFO order (scope->vars
 // is prepend-ordered) and pop the cleanup scope.
 static void close_cleanup_scope(VirtualMachine *vm, Node *blk) {
-    blk->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
-    CleanupVar **cv_tail     = &blk->cleanup_vars;
+    node_ctl_mut(vm, blk)->cleanup_scope_depth =
+        vm->compiler.cleanup_scope_depth;
+    CleanupVar **cv_tail = &node_ctl_mut(vm, blk)->cleanup_vars;
     for (VarScopeNode *sv = vm->compiler.scope->vars; sv; sv = sv->next) {
         if (sv->var && sv->var->cleanup_fn) {
             CleanupVar *cv =
@@ -458,15 +465,15 @@ static void for_init_declaration(VirtualMachine *vm, Token **rest, Token *start,
                       "custom attributes are only supported on file-scope "
                       "declarations");
         *rest      = parse_typedef(vm, tok, basety, attr, NULL);
-        loop->init = new_node(vm, ND_BLOCK, start);
+        node_ctl_mut(vm, loop)->init = new_node(vm, ND_BLOCK, start);
     } else if (attr->is_extern && !is_fn) {
         *rest      = global_variable(vm, tok, basety, attr);
-        loop->init = new_node(vm, ND_BLOCK, start);
+        node_ctl_mut(vm, loop)->init = new_node(vm, ND_BLOCK, start);
     } else {
-        loop->init = declaration(vm, rest, tok, basety, attr);
+        node_ctl_mut(vm, loop)->init = declaration(vm, rest, tok, basety, attr);
         // Type it while initializing_var is still set, or a const/constexpr
         // initializer is later rejected as an assignment.
-        add_type(vm, loop->init);
+        add_type(vm, node_ctl(loop)->init);
     }
     if (vm->compiler.c_std < CCCC_STD_C23)
         warn_for_init_declared(vm, start, attr, fn_name, vars_before,
@@ -479,7 +486,7 @@ static Node *wrap_for_cleanup_scope(VirtualMachine *vm, Node *loop) {
     Node *blk  = new_node(vm, ND_BLOCK, loop->tok);
     Node  head = {};
     Node *decl = &head;
-    for (Node **p = &loop->init->body; *p;) {
+    for (Node **p = &node_ctl_mut(vm, loop)->init->body; *p;) {
         if (node_is_cleanup_decl(*p)) {
             decl = decl->next = *p;
             *p                = (*p)->next;
@@ -590,9 +597,9 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // ND_BLOCK case re-emits it for the host to re-check when the
         // condition folds a host-owned layout. See Node.static_assert_cond.
         Node *node                  = new_node(vm, ND_BLOCK, tok);
-        node->static_assert_cond    = cond;
-        node->static_assert_msg     = msg;
-        node->static_assert_msg_len = msg_len;
+        node_ctl_mut(vm, node)->static_assert_cond = cond;
+        node_ctl_mut(vm, node)->static_assert_msg  = msg;
+        node_ctl_mut(vm, node)->static_assert_msg_len = msg_len;
         return node;
     }
 
@@ -604,7 +611,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                       "'return' is not allowed inside an OpenMP parallel "
                       "region or task");
         Node *node              = new_node(vm, ND_RETURN, tok);
-        node->cleanup_seq_limit = vm->compiler.cleanup_seq + 1;
+        node_ctl_mut(vm, node)->cleanup_seq_limit =
+            vm->compiler.cleanup_seq + 1;
 
         // Warn if this is a noreturn function attempting to return
         if (vm->compiler.current_fn && vm->compiler.current_fn->is_noreturn)
@@ -672,8 +680,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "if")) {
         Node *node = new_node(vm, ND_IF, tok);
         tok        = skip(vm, tok->next, "(");
-        node->cond = expr(vm, &tok, tok);
-        require_value(vm, node->cond);
+        node_ctl_mut(vm, node)->cond = expr(vm, &tok, tok);
+        require_value(vm, node_ctl(node)->cond);
         tok        = skip(vm, tok, ")");
 
         // DCE-aware diagnostic suppression: when saw_diag_attr is set, check
@@ -683,28 +691,28 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // Note: we suppress diagnostics inside the dead branch but still parse
         // and emit it — we do not prune the AST, so codegen is unaffected.
         int  bv        = vm->compiler.saw_diag_attr
-                             ? static_branch_value(vm, node->cond)
+                             ? static_branch_value(vm, node_ctl(node)->cond)
                              : -1;
         bool then_dead = (bv == 0), else_dead = (bv == 1);
 
         if (then_dead)
             vm->compiler.dead_code_depth++;
-        node->then = stmt(vm, &tok, tok);
+        node_ctl_mut(vm, node)->then = stmt(vm, &tok, tok);
         if (then_dead)
             vm->compiler.dead_code_depth--;
 
         if (equal(tok, "else")) {
             if (else_dead)
                 vm->compiler.dead_code_depth++;
-            node->els = stmt(vm, &tok, tok->next);
+            node_ctl_mut(vm, node)->els = stmt(vm, &tok, tok->next);
             if (else_dead)
                 vm->compiler.dead_code_depth--;
         }
         *rest = tok;
 
-        if (node->els &&
+        if (node_ctl(node)->els &&
             (vm->compiler.warnings & CCCC_WARN_DUPLICATED_BRANCHES) &&
-            nodes_structurally_equal(node->then, node->els))
+            nodes_structurally_equal(node_ctl(node)->then, node_ctl(node)->els))
             warn_tok(vm, node->tok, CCCC_WARN_DUPLICATED_BRANCHES,
                      "both branches of 'if' statement are identical");
 
@@ -712,9 +720,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             Node *conds[64];
             int   nconds = 0;
             for (Node *chain = node; chain && chain->kind == ND_IF;
-                 chain       = chain->els) {
+                 chain       = node_ctl(chain)->els) {
                 for (int i = 0; i < nconds; i++) {
-                    if (nodes_structurally_equal(conds[i], chain->cond)) {
+                    if (nodes_structurally_equal(conds[i],
+                                                 node_ctl(chain)->cond)) {
                         warn_tok(
                             vm, chain->tok, CCCC_WARN_DUPLICATED_COND,
                             "duplicated condition in 'if'/'else if' chain");
@@ -722,7 +731,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                     }
                 }
                 if (nconds < 64)
-                    conds[nconds++] = chain->cond;
+                    conds[nconds++] = node_ctl(chain)->cond;
             }
         }
 
@@ -732,13 +741,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "switch")) {
         Node *node = new_node(vm, ND_SWITCH, tok);
         tok        = skip(vm, tok->next, "(");
-        node->cond = expr(vm, &tok, tok);
-        require_value(vm, node->cond);
+        node_ctl_mut(vm, node)->cond = expr(vm, &tok, tok);
+        require_value(vm, node_ctl(node)->cond);
         tok        = skip(vm, tok, ")");
 
         if (vm->compiler.warnings & CCCC_WARN_SWITCH_BOOL) {
-            add_type(vm, node->cond);
-            if (node->cond->ty && node->cond->ty->kind == TY_BOOL)
+            add_type(vm, node_ctl(node)->cond);
+            if (node_ctl(node)->cond->ty &&
+                node_ctl(node)->cond->ty->kind == TY_BOOL)
                 warn_tok(vm, node->tok, CCCC_WARN_SWITCH_BOOL,
                          "switch condition has boolean type");
         }
@@ -747,11 +757,12 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         vm->compiler.current_switch = node;
 
         char *brk                   = vm->compiler.brk_label;
-        vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
+        vm->compiler.brk_label      = node_ctl_mut(vm, node)->brk_label =
+            new_unique_name(vm);
         int saved_brk_cld              = vm->compiler.brk_cleanup_depth;
         vm->compiler.brk_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
-        node->then                     = stmt(vm, rest, tok);
+        node_ctl_mut(vm, node)->then   = stmt(vm, rest, tok);
 
         warn_switch_fallthrough(vm, node);
 
@@ -763,16 +774,17 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // the fully-populated case_next chain) rather than at case
         // registration so sequential and nested duplicate labels report
         // identically.
-        for (Node *c1 = node->case_next; c1; c1 = c1->case_next)
-            check_case_conflict(vm, c1->case_next, c1);
+        for (Node *c1 = node_ctl(node)->case_next; c1;
+             c1       = node_ctl(c1)->case_next)
+            check_case_conflict(vm, node_ctl(c1)->case_next, c1);
 
         if (vm->compiler.warnings &
             (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
-            add_type(vm, node->cond);
-            Type *cond_ty = node->cond->ty;
+            add_type(vm, node_ctl(node)->cond);
+            Type *cond_ty = node_ctl(node)->cond->ty;
             if (cond_ty && cond_ty->kind == TY_ENUM &&
                 type_agg(cond_ty)->enum_constants) {
-                bool has_default = node->default_case != NULL;
+                bool has_default = node_ctl(node)->default_case != NULL;
                 bool check_sw =
                     (vm->compiler.warnings & CCCC_WARN_SWITCH) && !has_default;
                 bool check_se =
@@ -781,8 +793,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                     for (EnumConstant *ec = type_agg(cond_ty)->enum_constants;
                          ec; ec           = ec->next) {
                         bool covered = false;
-                        for (Node *c = node->case_next; c; c = c->case_next) {
-                            if (ec->value >= c->begin && ec->value <= c->end) {
+                        for (Node *c = node_ctl(node)->case_next; c;
+                             c       = node_ctl(c)->case_next) {
+                            if (ec->value >= node_ctl(c)->begin &&
+                                ec->value <= node_ctl(c)->end) {
                                 covered = true;
                                 break;
                             }
@@ -806,12 +820,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                 // gated the same way since they're the same class of
                 // enum/switch mismatch.
                 if (vm->compiler.warnings & CCCC_WARN_SWITCH) {
-                    for (Node *c = node->case_next; c; c = c->case_next) {
+                    for (Node *c = node_ctl(node)->case_next; c;
+                         c       = node_ctl(c)->case_next) {
                         bool matches = false;
                         for (EnumConstant *ec =
                                  type_agg(cond_ty)->enum_constants;
                              ec; ec = ec->next) {
-                            if (ec->value >= c->begin && ec->value <= c->end) {
+                            if (ec->value >= node_ctl(c)->begin &&
+                                ec->value <= node_ctl(c)->end) {
                                 matches = true;
                                 break;
                             }
@@ -825,7 +841,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         if ((vm->compiler.warnings & CCCC_WARN_SWITCH_DEFAULT) &&
-            !node->default_case)
+            !node_ctl(node)->default_case)
             warn_tok(vm, node->tok, CCCC_WARN_SWITCH_DEFAULT,
                      "switch statement has no default case");
 
@@ -867,17 +883,19 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         tok         = skip(vm, tok, ":");
-        node->label = new_unique_name(vm);
+        node_ctl_mut(vm, node)->label = new_unique_name(vm);
         node->lhs   = stmt_or_decl(vm, rest, tok);
-        node->begin = begin;
-        node->end   = end;
+        node_ctl_mut(vm, node)->begin = begin;
+        node_ctl_mut(vm, node)->end   = end;
         // #1095: see Node.case_begin_layout_ty's own comment.
-        node->case_begin_layout_ty       = begin_layout_ty;
-        node->case_end_layout_ty         = end_layout_ty;
-        node->case_begin_layout_is_align = begin_layout_is_align;
-        node->case_end_layout_is_align   = end_layout_is_align;
-        node->case_next = vm->compiler.current_switch->case_next;
-        vm->compiler.current_switch->case_next = node;
+        node_ctl_mut(vm, node)->case_begin_layout_ty = begin_layout_ty;
+        node_ctl_mut(vm, node)->case_end_layout_ty   = end_layout_ty;
+        node_ctl_mut(vm, node)->case_begin_layout_is_align =
+            begin_layout_is_align;
+        node_ctl_mut(vm, node)->case_end_layout_is_align = end_layout_is_align;
+        node_ctl_mut(vm, node)->case_next =
+            node_ctl(vm->compiler.current_switch)->case_next;
+        node_ctl_mut(vm, vm->compiler.current_switch)->case_next = node;
         return node;
     }
 
@@ -897,14 +915,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // diagnostic. Must be checked here at registration -- by the time
         // the switch epilogue runs, default_case has already been
         // clobbered and the first label is gone.
-        if (vm->compiler.current_switch->default_case)
+        if (node_ctl(vm->compiler.current_switch)->default_case)
             error_tok(vm, tok, "multiple default labels in one switch");
 
         Node *node                                = new_node(vm, ND_CASE, tok);
         tok                                       = skip(vm, tok->next, ":");
-        node->label                               = new_unique_name(vm);
+        node_ctl_mut(vm, node)->label             = new_unique_name(vm);
         node->lhs                                 = stmt_or_decl(vm, rest, tok);
-        vm->compiler.current_switch->default_case = node;
+        node_ctl_mut(vm, vm->compiler.current_switch)->default_case = node;
         return node;
     }
 
@@ -916,12 +934,14 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         char *brk              = vm->compiler.brk_label;
         char *cont             = vm->compiler.cont_label;
-        vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
-        vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        vm->compiler.brk_label = node_ctl_mut(vm, node)->brk_label =
+            new_unique_name(vm);
+        vm->compiler.cont_label = node_ctl_mut(vm, node)->cont_label =
+            new_unique_name(vm);
         char *saved_omp_brk                        = vm->compiler.omp_loop_brk;
         if (vm->compiler.omp_assoc_loops > 0 &&
             --vm->compiler.omp_assoc_loops == 0)
-            vm->compiler.omp_loop_brk = node->brk_label;
+            vm->compiler.omp_loop_brk = node_ctl(node)->brk_label;
         int saved_brk_cld_for  = vm->compiler.brk_cleanup_depth;
         int saved_cont_cld_for = vm->compiler.cont_cleanup_depth;
 
@@ -942,26 +962,27 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             if (init_has_cleanup)
                 open_cleanup_scope(vm);
         } else {
-            node->init = expr_stmt(vm, &tok, tok);
+            node_ctl_mut(vm, node)->init = expr_stmt(vm, &tok, tok);
         }
         vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
         if (!equal(tok, ";")) {
-            node->cond = expr(vm, &tok, tok);
-            require_value(vm, node->cond);
+            node_ctl_mut(vm, node)->cond = expr(vm, &tok, tok);
+            require_value(vm, node_ctl(node)->cond);
         }
         tok = skip(vm, tok, ";");
 
         // DCE-aware suppression: for(;0; inc){body} — cond statically 0 makes
         // both the increment expression and the body unreachable (#644, #646).
-        bool for_cond_dead = node->cond && vm->compiler.saw_diag_attr &&
-                             static_branch_value(vm, node->cond) == 0;
+        bool for_cond_dead = node_ctl(node)->cond &&
+                             vm->compiler.saw_diag_attr &&
+                             static_branch_value(vm, node_ctl(node)->cond) == 0;
 
         if (!equal(tok, ")")) {
             if (for_cond_dead)
                 vm->compiler.dead_code_depth++;
-            node->inc = expr(vm, &tok, tok);
+            node_ctl_mut(vm, node)->inc = expr(vm, &tok, tok);
             if (for_cond_dead)
                 vm->compiler.dead_code_depth--;
         }
@@ -969,7 +990,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (for_cond_dead)
             vm->compiler.dead_code_depth++;
-        node->then = stmt(vm, rest, tok);
+        node_ctl_mut(vm, node)->then = stmt(vm, rest, tok);
         if (for_cond_dead)
             vm->compiler.dead_code_depth--;
 
@@ -987,14 +1008,16 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "while")) {
         Node *node             = new_node(vm, ND_FOR, tok);
         tok                    = skip(vm, tok->next, "(");
-        node->cond             = expr(vm, &tok, tok);
-        require_value(vm, node->cond);
+        node_ctl_mut(vm, node)->cond = expr(vm, &tok, tok);
+        require_value(vm, node_ctl(node)->cond);
         tok                    = skip(vm, tok, ")");
 
         char *brk              = vm->compiler.brk_label;
         char *cont             = vm->compiler.cont_label;
-        vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
-        vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        vm->compiler.brk_label = node_ctl_mut(vm, node)->brk_label =
+            new_unique_name(vm);
+        vm->compiler.cont_label = node_ctl_mut(vm, node)->cont_label =
+            new_unique_name(vm);
         int saved_brk_cld_whl           = vm->compiler.brk_cleanup_depth;
         int saved_cont_cld_whl          = vm->compiler.cont_cleanup_depth;
         vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
@@ -1002,10 +1025,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         // DCE-aware suppression: while(0){...} — body is statically dead.
         bool whl_body_dead = vm->compiler.saw_diag_attr &&
-                             static_branch_value(vm, node->cond) == 0;
+                             static_branch_value(vm, node_ctl(node)->cond) == 0;
         if (whl_body_dead)
             vm->compiler.dead_code_depth++;
-        node->then = stmt(vm, rest, tok);
+        node_ctl_mut(vm, node)->then = stmt(vm, rest, tok);
         if (whl_body_dead)
             vm->compiler.dead_code_depth--;
 
@@ -1021,14 +1044,16 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         char *brk              = vm->compiler.brk_label;
         char *cont             = vm->compiler.cont_label;
-        vm->compiler.brk_label = node->brk_label = new_unique_name(vm);
-        vm->compiler.cont_label = node->cont_label = new_unique_name(vm);
+        vm->compiler.brk_label = node_ctl_mut(vm, node)->brk_label =
+            new_unique_name(vm);
+        vm->compiler.cont_label = node_ctl_mut(vm, node)->cont_label =
+            new_unique_name(vm);
         int saved_brk_cld_do            = vm->compiler.brk_cleanup_depth;
         int saved_cont_cld_do           = vm->compiler.cont_cleanup_depth;
         vm->compiler.brk_cleanup_depth  = vm->compiler.cleanup_scope_depth;
         vm->compiler.cont_cleanup_depth = vm->compiler.cleanup_scope_depth;
 
-        node->then                      = stmt(vm, &tok, tok->next);
+        node_ctl_mut(vm, node)->then    = stmt(vm, &tok, tok->next);
 
         vm->compiler.brk_label          = brk;
         vm->compiler.cont_label         = cont;
@@ -1037,8 +1062,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 
         tok                             = skip(vm, tok, "while");
         tok                             = skip(vm, tok, "(");
-        node->cond                      = expr(vm, &tok, tok);
-        require_value(vm, node->cond);
+        node_ctl_mut(vm, node)->cond    = expr(vm, &tok, tok);
+        require_value(vm, node_ctl(node)->cond);
         tok                             = skip(vm, tok, ")");
         *rest                           = skip(vm, tok, ";");
         return node;
@@ -1061,10 +1086,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         Node *node              = new_node(vm, ND_GOTO, tok);
-        node->label             = get_ident(vm, tok->next);
-        node->cleanup_chain     = vm->compiler.cur_cleanup_chain;
-        node->cleanup_seq_limit = vm->compiler.cleanup_seq + 1;
-        node->goto_next     = vm->compiler.gotos;
+        node_ctl_mut(vm, node)->label         = get_ident(vm, tok->next);
+        node_ctl_mut(vm, node)->cleanup_chain = vm->compiler.cur_cleanup_chain;
+        node_ctl_mut(vm, node)->cleanup_seq_limit =
+            vm->compiler.cleanup_seq + 1;
+        node_ctl_mut(vm, node)->goto_next = vm->compiler.gotos;
         vm->compiler.gotos  = node;
         *rest               = skip(vm, tok->next->next, ";");
         return node;
@@ -1102,9 +1128,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             vm->compiler.brk_label == vm->compiler.omp_loop_brk)
             error_tok(vm, tok, "break statement used with OpenMP for loop");
         Node *node                 = new_node(vm, ND_GOTO, tok);
-        node->unique_label         = vm->compiler.brk_label;
-        node->cleanup_target_depth = vm->compiler.brk_cleanup_depth;
-        node->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
+        node_ctl_mut(vm, node)->unique_label = vm->compiler.brk_label;
+        node_ctl_mut(vm, node)->cleanup_target_depth =
+            vm->compiler.brk_cleanup_depth;
+        node_ctl_mut(vm, node)->cleanup_seq_limit =
+            vm->compiler.cleanup_seq + 1;
         *rest                      = skip(vm, tok->next, ";");
         return node;
     }
@@ -1132,9 +1160,11 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_node(vm, ND_NULL_EXPR, tok);
         }
         Node *node                 = new_node(vm, ND_GOTO, tok);
-        node->unique_label         = vm->compiler.cont_label;
-        node->cleanup_target_depth = vm->compiler.cont_cleanup_depth;
-        node->cleanup_seq_limit    = vm->compiler.cleanup_seq + 1;
+        node_ctl_mut(vm, node)->unique_label = vm->compiler.cont_label;
+        node_ctl_mut(vm, node)->cleanup_target_depth =
+            vm->compiler.cont_cleanup_depth;
+        node_ctl_mut(vm, node)->cleanup_seq_limit =
+            vm->compiler.cleanup_seq + 1;
         *rest                      = skip(vm, tok->next, ";");
         return node;
     }
@@ -1176,14 +1206,15 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
                       "'checked'/'unchecked' is not allowed on a label; "
                       "write it on the compound statement instead");
         Node *node         = new_node(vm, ND_LABEL, tok);
-        node->label        = arena_strndup(vm, tok->loc, tok->len);
-        node->unique_label = new_unique_name(vm);
+        node_ctl_mut(vm, node)->label = arena_strndup(vm, tok->loc, tok->len);
+        node_ctl_mut(vm, node)->unique_label = new_unique_name(vm);
         // Record the active cleanup scope depth at this label so that
         // resolve_goto_labels can propagate it to each goto's
         // cleanup_target_depth. A goto landing here exits only cleanup scopes
         // *above* this depth.
-        node->cleanup_scope_depth = vm->compiler.cleanup_scope_depth;
-        node->cleanup_chain       = vm->compiler.cur_cleanup_chain;
+        node_ctl_mut(vm, node)->cleanup_scope_depth =
+            vm->compiler.cleanup_scope_depth;
+        node_ctl_mut(vm, node)->cleanup_chain = vm->compiler.cur_cleanup_chain;
         Token *body_tok           = tok->next->next;
         body_tok = attribute_list(vm, body_tok, NULL, &label_attr);
         body_tok = c23_attribute_list(vm, body_tok, NULL, &label_attr);
@@ -1200,7 +1231,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         } else {
             node->lhs = stmt_or_decl(vm, rest, body_tok);
         }
-        node->goto_next     = vm->compiler.labels;
+        node_ctl_mut(vm, node)->goto_next = vm->compiler.labels;
         vm->compiler.labels = node;
         return node;
     }
@@ -1344,9 +1375,9 @@ static bool expr_has_no_side_effects(Node *n) {
         case ND_DEREF:
             return expr_has_no_side_effects(n->lhs);
         case ND_COND:
-            return expr_has_no_side_effects(n->cond) &&
-                   expr_has_no_side_effects(n->then) &&
-                   expr_has_no_side_effects(n->els);
+            return expr_has_no_side_effects(node_ctl(n)->cond) &&
+                   expr_has_no_side_effects(node_ctl(n)->then) &&
+                   expr_has_no_side_effects(node_ctl(n)->els);
         case ND_COMMA:
             return expr_has_no_side_effects(n->lhs) &&
                    expr_has_no_side_effects(n->rhs);
@@ -1407,9 +1438,11 @@ bool nodes_structurally_equal(Node *a, Node *b) {
         case ND_EXPR_STMT:
             return nodes_structurally_equal(a->lhs, b->lhs);
         case ND_COND:
-            return nodes_structurally_equal(a->cond, b->cond) &&
-                   nodes_structurally_equal(a->then, b->then) &&
-                   nodes_structurally_equal(a->els, b->els);
+            return nodes_structurally_equal(node_ctl(a)->cond,
+                                            node_ctl(b)->cond) &&
+                   nodes_structurally_equal(node_ctl(a)->then,
+                                            node_ctl(b)->then) &&
+                   nodes_structurally_equal(node_ctl(a)->els, node_ctl(b)->els);
         case ND_BLOCK: {
             Node *pa = a->body, *pb = b->body;
             while (pa && pb) {
@@ -1533,9 +1566,10 @@ static bool falls_through(Node *n) {
         case ND_UNREACHABLE:
             return false;
         case ND_IF:
-            if (!n->els)
+            if (!node_ctl(n)->els)
                 return true;
-            return falls_through(n->then) || falls_through(n->els);
+            return falls_through(node_ctl(n)->then) ||
+                   falls_through(node_ctl(n)->els);
         case ND_BLOCK:
         case ND_STMT_EXPR:
             if (!n->body)
@@ -1552,12 +1586,12 @@ static bool falls_through(Node *n) {
 }
 
 static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw) {
-    if (!sw || sw->kind != ND_SWITCH || !sw->then)
+    if (!sw || sw->kind != ND_SWITCH || !node_ctl(sw)->then)
         return;
-    if (sw->then->kind != ND_BLOCK || !sw->then->body)
+    if (node_ctl(sw)->then->kind != ND_BLOCK || !node_ctl(sw)->then->body)
         return;
 
-    Node *body       = sw->then->body;
+    Node *body       = node_ctl(sw)->then->body;
     Node *group_case = NULL; // current case group's label node
     Node *annotated  = NULL; // last annotated [[fallthrough]] node in group
 

@@ -142,9 +142,9 @@ static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst) {
 
     switch (node->kind) {
         case ND_NUM:
-            if (node->wide_digits)
-                __cccc_bitint_from_str(dst, node->wide_digits, node->wide_base,
-                                       words, width);
+            if (node_lit(node)->wide_digits)
+                __cccc_bitint_from_str(dst, node_lit(node)->wide_digits,
+                                       node_lit(node)->wide_base, words, width);
             else if (ty->is_unsigned)
                 __cccc_bitint_from_u64(dst, (unsigned long long)node->val,
                                        words, width);
@@ -242,10 +242,10 @@ static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst) {
             return;
         }
         case ND_COND:
-            if (eval_wide_truthy(vm, node->cond))
-                eval_wide_node(vm, node->then, dst);
+            if (eval_wide_truthy(vm, node_ctl(node)->cond))
+                eval_wide_node(vm, node_ctl(node)->then, dst);
             else
-                eval_wide_node(vm, node->els, dst);
+                eval_wide_node(vm, node_ctl(node)->els, dst);
             return;
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
@@ -456,8 +456,9 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 return (uint64_t)eval(vm, node->lhs) <= eval(vm, node->rhs);
             return eval(vm, node->lhs) <= eval(vm, node->rhs);
         case ND_COND:
-            return eval(vm, node->cond) ? eval2(vm, node->then, label)
-                                        : eval2(vm, node->els, label);
+            return eval(vm, node_ctl(node)->cond)
+                       ? eval2(vm, node_ctl(node)->then, label)
+                       : eval2(vm, node_ctl(node)->els, label);
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
             return eval2(vm, node->rhs, label);
@@ -517,7 +518,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
             if (!label)
                 error_tok(vm, node->tok,
                           "not a compile-time constant (label address)");
-            *label = &node->unique_label;
+            *label = &node_ctl_mut(vm, node)->unique_label;
             return 0;
         case ND_MEMBER: {
             Initializer *init = constexpr_init_for_node(node);
@@ -649,10 +650,11 @@ bool is_const_expr(VirtualMachine *vm, Node *node) {
         case ND_LOGOR:
             return is_const_expr(vm, node->lhs) && is_const_expr(vm, node->rhs);
         case ND_COND:
-            if (!is_const_expr(vm, node->cond))
+            if (!is_const_expr(vm, node_ctl(node)->cond))
                 return false;
-            return is_const_expr(vm,
-                                 eval(vm, node->cond) ? node->then : node->els);
+            return is_const_expr(vm, eval(vm, node_ctl(node)->cond)
+                                         ? node_ctl(node)->then
+                                         : node_ctl(node)->els);
         case ND_COMMA:
             return is_const_expr(vm, node->lhs) && is_const_expr(vm, node->rhs);
         case ND_NEG:
@@ -697,12 +699,12 @@ int64_t const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 bool node_layout_const(Node *node, Type **out_ty, LayoutOp *out_align) {
     while (node && node->kind == ND_CAST)
         node = node->lhs;
-    if (!node || node->kind != ND_NUM || !node->layout_ty)
+    if (!node || node->kind != ND_NUM || !node_misc(node)->layout_ty)
         return false;
     if (out_ty)
-        *out_ty = node->layout_ty;
+        *out_ty = node_misc(node)->layout_ty;
     if (out_align)
-        *out_align = node->layout_is_align;
+        *out_align = node_misc(node)->layout_is_align;
     return true;
 }
 
@@ -1135,11 +1137,11 @@ static void objsize_poison_scan(Node *node) {
             case ND_ASM: {
                 // Outputs and "m" operands may be rewritten by the asm.
                 Node *a = node->args;
-                for (int i = 0;
-                     a && i < node->asm_n_outputs + node->asm_n_inputs;
+                for (int i = 0; a && i < node_asm(node)->asm_n_outputs +
+                                             node_asm(node)->asm_n_inputs;
                      i++, a = a->next)
-                    if ((i < node->asm_n_outputs ||
-                         strchr(node->asm_ops[i].constraint, 'm')) &&
+                    if ((i < node_asm(node)->asm_n_outputs ||
+                         strchr(node_asm(node)->asm_ops[i].constraint, 'm')) &&
                         a->kind == ND_VAR && a->var &&
                         a->var->objsize_has_alloc)
                         a->var->objsize_unsafe = true;
@@ -1150,11 +1152,11 @@ static void objsize_poison_scan(Node *node) {
         }
         objsize_poison_scan(node->lhs);
         objsize_poison_scan(node->rhs);
-        objsize_poison_scan(node->cond);
-        objsize_poison_scan(node->then);
-        objsize_poison_scan(node->els);
-        objsize_poison_scan(node->init);
-        objsize_poison_scan(node->inc);
+        objsize_poison_scan(node_ctl(node)->cond);
+        objsize_poison_scan(node_ctl(node)->then);
+        objsize_poison_scan(node_ctl(node)->els);
+        objsize_poison_scan(node_ctl(node)->init);
+        objsize_poison_scan(node_ctl(node)->inc);
         objsize_poison_scan(node->body);
         for (Node *a = node->args; a; a = a->next)
             objsize_poison_scan(a);
@@ -1258,8 +1260,8 @@ static void find_and_mark_escaping_addr(Node *n) {
                 continue;
             case ND_COND: // ternary: both arms can be the value actually passed
                           // on
-                find_and_mark_escaping_addr(n->then);
-                find_and_mark_escaping_addr(n->els);
+                find_and_mark_escaping_addr(node_ctl(n)->then);
+                find_and_mark_escaping_addr(node_ctl(n)->els);
                 return;
             case ND_ADDR:
                 mark_escaping_root(n->lhs);
@@ -1389,11 +1391,11 @@ void mark_addr_escapes(Node *node, Obj *fn) {
         }
         mark_addr_escapes(node->lhs, fn);
         mark_addr_escapes(node->rhs, fn);
-        mark_addr_escapes(node->cond, fn);
-        mark_addr_escapes(node->then, fn);
-        mark_addr_escapes(node->els, fn);
-        mark_addr_escapes(node->init, fn);
-        mark_addr_escapes(node->inc, fn);
+        mark_addr_escapes(node_ctl(node)->cond, fn);
+        mark_addr_escapes(node_ctl(node)->then, fn);
+        mark_addr_escapes(node_ctl(node)->els, fn);
+        mark_addr_escapes(node_ctl(node)->init, fn);
+        mark_addr_escapes(node_ctl(node)->inc, fn);
         mark_addr_escapes(node->body, fn);
         for (Node *a = node->args; a; a = a->next)
             mark_addr_escapes(a, fn);
@@ -1432,15 +1434,15 @@ void mark_nested_captures(Obj *fn, Node *node) {
 
         mark_nested_captures(fn, node->lhs);
         mark_nested_captures(fn, node->rhs);
-        mark_nested_captures(fn, node->cond);
-        mark_nested_captures(fn, node->then);
-        mark_nested_captures(fn, node->els);
-        mark_nested_captures(fn, node->init);
-        mark_nested_captures(fn, node->inc);
+        mark_nested_captures(fn, node_ctl(node)->cond);
+        mark_nested_captures(fn, node_ctl(node)->then);
+        mark_nested_captures(fn, node_ctl(node)->els);
+        mark_nested_captures(fn, node_ctl(node)->init);
+        mark_nested_captures(fn, node_ctl(node)->inc);
         mark_nested_captures(fn, node->body);
-        mark_nested_captures(fn, node->cas_addr);
-        mark_nested_captures(fn, node->cas_old);
-        mark_nested_captures(fn, node->cas_new);
+        mark_nested_captures(fn, node_atom(node)->cas_addr);
+        mark_nested_captures(fn, node_atom(node)->cas_old);
+        mark_nested_captures(fn, node_atom(node)->cas_new);
         for (Node *a = node->args; a; a = a->next)
             mark_nested_captures(fn, a);
     }
@@ -1513,28 +1515,29 @@ static void collect_body_labels(Node *node, HashMap *map) {
     for (; node; node = node->next) {
         if (node->kind == ND_BLOCK_LITERAL)
             continue; // a block literal's synthetic fn owns its own labels
-        if (node->kind == ND_LABEL && node->label && node->unique_label) {
-            Node *have = hashmap_get(map, node->label);
+        if (node->kind == ND_LABEL && node_ctl(node)->label &&
+            node_ctl(node)->unique_label) {
+            Node *have = hashmap_get(map, node_ctl(node)->label);
             if (!have || !label_tok_is_template(node))
-                hashmap_put(map, node->label, node);
+                hashmap_put(map, node_ctl(node)->label, node);
         }
         collect_body_labels(node->lhs, map);
         collect_body_labels(node->rhs, map);
-        collect_body_labels(node->cond, map);
-        collect_body_labels(node->then, map);
-        collect_body_labels(node->els, map);
-        collect_body_labels(node->init, map);
-        collect_body_labels(node->inc, map);
+        collect_body_labels(node_ctl(node)->cond, map);
+        collect_body_labels(node_ctl(node)->then, map);
+        collect_body_labels(node_ctl(node)->els, map);
+        collect_body_labels(node_ctl(node)->init, map);
+        collect_body_labels(node_ctl(node)->inc, map);
         collect_body_labels(node->body, map);
-        collect_body_labels(node->va_ap, map);
-        collect_body_labels(node->va_last, map);
-        collect_body_labels(node->va_src, map);
+        collect_body_labels(node_misc(node)->va_ap, map);
+        collect_body_labels(node_misc(node)->va_last, map);
+        collect_body_labels(node_misc(node)->va_src, map);
         for (Node *a = node->args; a; a = a->next)
             collect_body_labels(a, map);
-        for (Node *c = node->case_next; c; c = c->case_next)
+        for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
             collect_body_labels(c->body, map);
-        if (node->default_case)
-            collect_body_labels(node->default_case->body, map);
+        if (node_ctl(node)->default_case)
+            collect_body_labels(node_ctl(node)->default_case->body, map);
     }
 }
 
@@ -1545,12 +1548,13 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
         if (node->kind == ND_BLOCK_LITERAL)
             continue;
         if ((node->kind == ND_GOTO || node->kind == ND_LABEL_VAL) &&
-            node->unique_label == NULL && node->label) {
-            Node *target = hashmap_get(map, node->label);
+            node_ctl(node)->unique_label == NULL && node_ctl(node)->label) {
+            Node *target = hashmap_get(map, node_ctl(node)->label);
             if (!target)
                 error_tok(vm, node->tok, "use of undeclared label '%s'",
-                          node->label);
-            node->unique_label = target->unique_label;
+                          node_ctl(node)->label);
+            node_ctl_mut(vm, node)->unique_label =
+                node_ctl(target)->unique_label;
             // Suppresses the -Wunused "unused label" warning, which
             // resolve_goto_labels() defers to cc_flush_deferred_unused_labels()
             // whenever comptime macros exist (#1255).
@@ -1559,8 +1563,8 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
             // meaningless at this splice site. Do not attempt to compute the
             // exited-scope set; warn if either end sits in a cleanup scope.
             if (node->kind == ND_GOTO) {
-                node->cleanup_target_depth = 0;
-                if (node->cleanup_chain)
+                node_ctl_mut(vm, node)->cleanup_target_depth = 0;
+                if (node_ctl(node)->cleanup_chain)
                     warn_tok(vm, node->tok, CCCC_WARN_ATTRIBUTES,
                              "goto from a macro template targets a label in "
                              "the enclosing function; __attribute__((cleanup)) "
@@ -1569,22 +1573,22 @@ static void bind_free_label_refs(VirtualMachine *vm, Node *node, HashMap *map) {
         }
         bind_free_label_refs(vm, node->lhs, map);
         bind_free_label_refs(vm, node->rhs, map);
-        bind_free_label_refs(vm, node->cond, map);
-        bind_free_label_refs(vm, node->then, map);
-        bind_free_label_refs(vm, node->els, map);
-        bind_free_label_refs(vm, node->init, map);
-        bind_free_label_refs(vm, node->inc, map);
+        bind_free_label_refs(vm, node_ctl(node)->cond, map);
+        bind_free_label_refs(vm, node_ctl(node)->then, map);
+        bind_free_label_refs(vm, node_ctl(node)->els, map);
+        bind_free_label_refs(vm, node_ctl(node)->init, map);
+        bind_free_label_refs(vm, node_ctl(node)->inc, map);
         bind_free_label_refs(vm, node->body, map);
-        bind_free_label_refs(vm, node->va_ap, map);
-        bind_free_label_refs(vm, node->va_last, map);
-        bind_free_label_refs(vm, node->va_src, map);
-        bind_free_label_refs(vm, node->asm_labels, map);
+        bind_free_label_refs(vm, node_misc(node)->va_ap, map);
+        bind_free_label_refs(vm, node_misc(node)->va_last, map);
+        bind_free_label_refs(vm, node_misc(node)->va_src, map);
+        bind_free_label_refs(vm, node_asm(node)->asm_labels, map);
         for (Node *a = node->args; a; a = a->next)
             bind_free_label_refs(vm, a, map);
-        for (Node *c = node->case_next; c; c = c->case_next)
+        for (Node *c = node_ctl(node)->case_next; c; c = node_ctl(c)->case_next)
             bind_free_label_refs(vm, c->body, map);
-        if (node->default_case)
-            bind_free_label_refs(vm, node->default_case->body, map);
+        if (node_ctl(node)->default_case)
+            bind_free_label_refs(vm, node_ctl(node)->default_case->body, map);
     }
 }
 
@@ -1853,11 +1857,11 @@ static void nn_collect_assigned(Node *node, NNEnv *env) {
         }
         nn_collect_assigned(node->lhs, env);
         nn_collect_assigned(node->rhs, env);
-        nn_collect_assigned(node->cond, env);
-        nn_collect_assigned(node->then, env);
-        nn_collect_assigned(node->els, env);
-        nn_collect_assigned(node->init, env);
-        nn_collect_assigned(node->inc, env);
+        nn_collect_assigned(node_ctl(node)->cond, env);
+        nn_collect_assigned(node_ctl(node)->then, env);
+        nn_collect_assigned(node_ctl(node)->els, env);
+        nn_collect_assigned(node_ctl(node)->init, env);
+        nn_collect_assigned(node_ctl(node)->inc, env);
         nn_collect_assigned(node->body, env);
         for (Node *a = node->args; a; a = a->next)
             nn_collect_assigned(a, env);
@@ -2126,7 +2130,7 @@ static bool nn_precise_ok(Node *node, bool in_switch) {
             case ND_LABEL:
                 return false;
             case ND_GOTO:
-                if (!node->unique_label)
+                if (!node_ctl(node)->unique_label)
                     return false; // a real `goto`, not break/continue
                 break;
             case ND_GOTO_EXPR:
@@ -2147,15 +2151,15 @@ static bool nn_precise_ok(Node *node, bool in_switch) {
             return false;
         if (!nn_precise_ok(node->rhs, in_switch))
             return false;
-        if (!nn_precise_ok(node->cond, in_switch))
+        if (!nn_precise_ok(node_ctl(node)->cond, in_switch))
             return false;
-        if (!nn_precise_ok(node->then, then_in_switch))
+        if (!nn_precise_ok(node_ctl(node)->then, then_in_switch))
             return false;
-        if (!nn_precise_ok(node->els, in_switch))
+        if (!nn_precise_ok(node_ctl(node)->els, in_switch))
             return false;
-        if (!nn_precise_ok(node->init, in_switch))
+        if (!nn_precise_ok(node_ctl(node)->init, in_switch))
             return false;
-        if (!nn_precise_ok(node->inc, in_switch))
+        if (!nn_precise_ok(node_ctl(node)->inc, in_switch))
             return false;
         if (!nn_precise_ok(node->body, in_switch))
             return false;
@@ -2173,9 +2177,9 @@ static bool nn_precise_ok(Node *node, bool in_switch) {
 // construction and the break/continue statement parser).
 static NNJumpTarget *nn_find_target(NNCtx *ctx, Node *g) {
     for (NNJumpTarget *t = ctx->jumps; t; t = t->parent) {
-        if (t->brk_label && t->brk_label == g->unique_label)
+        if (t->brk_label && t->brk_label == node_ctl(g)->unique_label)
             return t;
-        if (t->cont_label && t->cont_label == g->unique_label)
+        if (t->cont_label && t->cont_label == node_ctl(g)->unique_label)
             return t;
     }
     return NULL;
@@ -2194,27 +2198,27 @@ static NNJumpTarget *nn_innermost_switch(NNCtx *ctx) {
 static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env);
 
 static void nn_walk_loop_barrier(NNCtx *ctx, Node *node, NNEnv *env) {
-    if (node->cond)
-        nn_walk(ctx, node->cond, env);
+    if (node_ctl(node)->cond)
+        nn_walk(ctx, node_ctl(node)->cond, env);
     // Barrier before entering the body: the loop may run 0+ times and
     // repeat, so a var the body assigns must already read as UNKNOWN on
     // entry to avoid a false positive on a later iteration or on the
     // (already-executed) first one.
-    nn_collect_assigned(node->then, env);
-    if (node->inc)
-        nn_collect_assigned(node->inc, env);
+    nn_collect_assigned(node_ctl(node)->then, env);
+    if (node_ctl(node)->inc)
+        nn_collect_assigned(node_ctl(node)->inc, env);
     NNEnv body_env = *env;
-    nn_walk(ctx, node->then, &body_env);
-    if (node->inc)
-        nn_walk(ctx, node->inc, &body_env);
+    nn_walk(ctx, node_ctl(node)->then, &body_env);
+    if (node_ctl(node)->inc)
+        nn_walk(ctx, node_ctl(node)->inc, &body_env);
 }
 
 static void nn_walk_switch_barrier(NNCtx *ctx, Node *node, NNEnv *env) {
     // Case labels make precise per-branch merging impractical here --
     // barrier the whole body instead. (Caller has already walked node->cond.)
-    nn_collect_assigned(node->then, env);
+    nn_collect_assigned(node_ctl(node)->then, env);
     NNEnv body_env = *env;
-    nn_walk(ctx, node->then, &body_env);
+    nn_walk(ctx, node_ctl(node)->then, &body_env);
 }
 
 #define NN_LOOP_ITER_CAP                                                       \
@@ -2230,9 +2234,9 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
                                  bool is_do) {
     if (ctx->exhausted)
         return false;
-    if (!nn_precise_ok(node->then, false) ||
-        (node->inc && !nn_precise_ok(node->inc, false)) ||
-        (node->cond && !nn_precise_ok(node->cond, false)))
+    if (!nn_precise_ok(node_ctl(node)->then, false) ||
+        (node_ctl(node)->inc && !nn_precise_ok(node_ctl(node)->inc, false)) ||
+        (node_ctl(node)->cond && !nn_precise_ok(node_ctl(node)->cond, false)))
         return false;
 
     int    mark        = ctx->pool_top;
@@ -2257,8 +2261,8 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
     *cur               = *header_in;
 
     NNJumpTarget frame = {
-        .brk_label    = node->brk_label,
-        .cont_label   = node->cont_label,
+        .brk_label    = node_ctl(node)->brk_label,
+        .cont_label   = node_ctl(node)->cont_label,
         .brk_env      = brk,
         .cont_env     = cont,
         .switch_entry = NULL,
@@ -2279,16 +2283,16 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
         cont->overflow = false;
 
         *probe         = *cur;
-        if (!is_do && node->cond)
-            nn_walk(ctx, node->cond, probe);
+        if (!is_do && node_ctl(node)->cond)
+            nn_walk(ctx, node_ctl(node)->cond, probe);
         *body_out = *probe;
-        nn_walk(ctx, node->then, body_out);
+        nn_walk(ctx, node_ctl(node)->then, body_out);
         nn_env_join_into(ctx, back, body_out,
                          cont); // continue lands at inc/cond
-        if (node->inc)
-            nn_walk(ctx, node->inc, back);
-        if (is_do && node->cond)
-            nn_walk(ctx, node->cond, back);
+        if (node_ctl(node)->inc)
+            nn_walk(ctx, node_ctl(node)->inc, back);
+        if (is_do && node_ctl(node)->cond)
+            nn_walk(ctx, node_ctl(node)->cond, back);
 
         nn_env_join_into(ctx, next, header_in, back);
         if (ctx->exhausted || next->overflow)
@@ -2320,8 +2324,8 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
     cont->overflow = false;
 
     *final_env     = *cur;
-    if (!is_do && node->cond)
-        nn_walk(ctx, node->cond, final_env);
+    if (!is_do && node_ctl(node)->cond)
+        nn_walk(ctx, node_ctl(node)->cond, final_env);
     // for/while: cond is checked *before* the body, so "cond false" (the
     // state right after walking cond, before the body runs at all) is a
     // genuine exit path -- this is the zero-trip case. A `for (;;)` with no
@@ -2330,7 +2334,7 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
     // or a break-only infinite loop would spuriously pick up an
     // unreachable "fell out normally" predecessor and lose precision.
     if (!is_do) {
-        if (node->cond)
+        if (node_ctl(node)->cond)
             *exit_normal = *final_env;
         else {
             exit_normal->count    = 0;
@@ -2339,12 +2343,12 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
         }
     }
 
-    nn_walk(ctx, node->then, final_env);
+    nn_walk(ctx, node_ctl(node)->then, final_env);
     nn_env_join_into(ctx, back, final_env, cont);
-    if (node->inc)
-        nn_walk(ctx, node->inc, back);
-    if (is_do && node->cond)
-        nn_walk(ctx, node->cond, back);
+    if (node_ctl(node)->inc)
+        nn_walk(ctx, node_ctl(node)->inc, back);
+    if (is_do && node_ctl(node)->cond)
+        nn_walk(ctx, node_ctl(node)->cond, back);
     // do-while: cond is checked *after* the body, so the body always runs at
     // least once and the only exit path is "cond false" once execution has
     // already reached `back` (post body+inc+cond) -- unlike for/while, this
@@ -2364,7 +2368,7 @@ static bool nn_walk_loop_precise(NNCtx *ctx, Node *node, NNEnv *env,
 // handling. Caller has already walked node->cond and must fall back to
 // nn_walk_switch_barrier() if this returns false.
 static bool nn_walk_switch_precise(NNCtx *ctx, Node *node, NNEnv *env) {
-    if (ctx->exhausted || !nn_precise_ok(node->then, true))
+    if (ctx->exhausted || !nn_precise_ok(node_ctl(node)->then, true))
         return false;
 
     int    mark     = ctx->pool_top;
@@ -2382,7 +2386,7 @@ static bool nn_walk_switch_precise(NNCtx *ctx, Node *node, NNEnv *env) {
     brk->overflow      = false;
 
     NNJumpTarget frame = {
-        .brk_label    = node->brk_label,
+        .brk_label    = node_ctl(node)->brk_label,
         .cont_label   = NULL,
         .brk_env      = brk,
         .cont_env     = NULL,
@@ -2394,10 +2398,10 @@ static bool nn_walk_switch_precise(NNCtx *ctx, Node *node, NNEnv *env) {
     body->count    = 0;
     body->live     = false; // nothing before the first case label is reachable
     body->overflow = false;
-    nn_walk(ctx, node->then, body);
+    nn_walk(ctx, node_ctl(node)->then, body);
 
     nn_env_join_into(ctx, exit_env, body, brk);
-    if (!node->default_case)
+    if (!node_ctl(node)->default_case)
         // No `default`: the whole switch is itself skippable, so the
         // pre-switch entry env is also a valid predecessor of the exit.
         nn_env_join_into(ctx, exit_env, exit_env, entry);
@@ -2420,11 +2424,11 @@ static bool nn_walk_switch_precise(NNCtx *ctx, Node *node, NNEnv *env) {
 // unchanged) unless the condition is statically always-true (bv == 1), in
 // which case skipping is provably impossible.
 static void nn_walk_branch(NNCtx *ctx, Node *node, NNEnv *env) {
-    nn_walk(ctx, node->cond, env);
+    nn_walk(ctx, node_ctl(node)->cond, env);
 
-    int    bv                 = static_branch_value(ctx->vm, node->cond);
+    int    bv = static_branch_value(ctx->vm, node_ctl(node)->cond);
     bool   then_dead          = (bv == 0);
-    bool   els_specified      = node->els != NULL;
+    bool   els_specified      = node_ctl(node)->els != NULL;
     bool   els_dead           = els_specified && (bv == 1);
     bool   implicit_skip_live = !els_specified && bv != 1;
 
@@ -2446,12 +2450,12 @@ static void nn_walk_branch(NNCtx *ctx, Node *node, NNEnv *env) {
 
     if (then_live) {
         *then_env = *env;
-        nn_walk(ctx, node->then, then_env);
+        nn_walk(ctx, node_ctl(node)->then, then_env);
     }
     NNEnv *right_env = NULL;
     if (els_specified && !els_dead) {
         *els_env = *env;
-        nn_walk(ctx, node->els, els_env);
+        nn_walk(ctx, node_ctl(node)->els, els_env);
         right_env = els_env;
     } else if (implicit_skip_live) {
         right_env = pre; // "skip the if" path: env unchanged
@@ -2512,15 +2516,16 @@ static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env) {
             }
 
             case ND_GOTO:
-                if (node->unique_label) {
+                if (node_ctl(node)->unique_label) {
                     NNJumpTarget *t = nn_find_target(ctx, node);
                     if (t) {
                         // A break or continue whose target we're precisely
                         // tracking: accumulate this path's env into the target
                         // construct's break/continue accumulator, then this
                         // path is gone (bottom) from here on.
-                        bool   is_cont = (t->cont_label &&
-                                          t->cont_label == node->unique_label);
+                        bool is_cont =
+                            (t->cont_label &&
+                             t->cont_label == node_ctl(node)->unique_label);
                         NNEnv *acc     = is_cont ? t->cont_env : t->brk_env;
                         nn_env_join_into(ctx, acc, acc, env);
                         env->live = false;
@@ -2618,16 +2623,16 @@ static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env) {
 
             case ND_FOR:
             case ND_DO:
-                if (node->init)
-                    nn_walk(ctx, node->init, env);
+                if (node_ctl(node)->init)
+                    nn_walk(ctx, node_ctl(node)->init, env);
                 if (nn_walk_loop_precise(ctx, node, env, node->kind == ND_DO))
                     continue;
                 nn_walk_loop_barrier(ctx, node, env);
                 continue;
 
             case ND_SWITCH:
-                if (node->cond)
-                    nn_walk(ctx, node->cond, env);
+                if (node_ctl(node)->cond)
+                    nn_walk(ctx, node_ctl(node)->cond, env);
                 if (nn_walk_switch_precise(ctx, node, env))
                     continue;
                 nn_walk_switch_barrier(ctx, node, env);
@@ -2639,11 +2644,11 @@ static void nn_walk(NNCtx *ctx, Node *node, NNEnv *env) {
 
         nn_walk(ctx, node->lhs, env);
         nn_walk(ctx, node->rhs, env);
-        nn_walk(ctx, node->cond, env);
-        nn_walk(ctx, node->then, env);
-        nn_walk(ctx, node->els, env);
-        nn_walk(ctx, node->init, env);
-        nn_walk(ctx, node->inc, env);
+        nn_walk(ctx, node_ctl(node)->cond, env);
+        nn_walk(ctx, node_ctl(node)->then, env);
+        nn_walk(ctx, node_ctl(node)->els, env);
+        nn_walk(ctx, node_ctl(node)->init, env);
+        nn_walk(ctx, node_ctl(node)->inc, env);
         nn_walk(ctx, node->body, env);
         for (Node *a = node->args; a; a = a->next)
             nn_walk(ctx, a, env);
@@ -2692,10 +2697,10 @@ static bool nn_expr_may_be_null(VirtualMachine *vm, Node *expr) {
     if (is_const_expr(vm, expr))
         return eval(vm, expr) == 0;
     if (expr->kind == ND_COND) {
-        int bv = static_branch_value(vm, expr->cond);
-        if (bv != 0 && nn_expr_may_be_null(vm, expr->then))
+        int bv = static_branch_value(vm, node_ctl(expr)->cond);
+        if (bv != 0 && nn_expr_may_be_null(vm, node_ctl(expr)->then))
             return true;
-        if (bv != 1 && nn_expr_may_be_null(vm, expr->els))
+        if (bv != 1 && nn_expr_may_be_null(vm, node_ctl(expr)->els))
             return true;
     }
     // #693: a return expression that is itself a direct call to an
@@ -2711,10 +2716,11 @@ static bool nn_expr_may_be_null(VirtualMachine *vm, Node *expr) {
 static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_IF || node->kind == ND_COND) {
-            int bv = static_branch_value(vm, node->cond);
-            if (bv != 0 && nn_returns_null_walk(vm, node->then))
+            int bv = static_branch_value(vm, node_ctl(node)->cond);
+            if (bv != 0 && nn_returns_null_walk(vm, node_ctl(node)->then))
                 return true;
-            if (node->els && bv != 1 && nn_returns_null_walk(vm, node->els))
+            if (node_ctl(node)->els && bv != 1 &&
+                nn_returns_null_walk(vm, node_ctl(node)->els))
                 return true;
             continue; // dead branches already excluded above -- skip the
                       // generic recursion
@@ -2727,16 +2733,16 @@ static bool nn_returns_null_walk(VirtualMachine *vm, Node *node) {
         if (nn_returns_null_walk(vm, node->rhs))
             return true;
         if (node->kind != ND_IF && node->kind != ND_COND) {
-            if (nn_returns_null_walk(vm, node->cond))
+            if (nn_returns_null_walk(vm, node_ctl(node)->cond))
                 return true;
-            if (nn_returns_null_walk(vm, node->then))
+            if (nn_returns_null_walk(vm, node_ctl(node)->then))
                 return true;
-            if (nn_returns_null_walk(vm, node->els))
+            if (nn_returns_null_walk(vm, node_ctl(node)->els))
                 return true;
         }
-        if (nn_returns_null_walk(vm, node->init))
+        if (nn_returns_null_walk(vm, node_ctl(node)->init))
             return true;
-        if (nn_returns_null_walk(vm, node->inc))
+        if (nn_returns_null_walk(vm, node_ctl(node)->inc))
             return true;
         if (nn_returns_null_walk(vm, node->body))
             return true;
@@ -2761,13 +2767,13 @@ static bool nn_expr_is_null(VirtualMachine *vm, Node *expr) {
     if (is_const_expr(vm, expr))
         return eval(vm, expr) == 0;
     if (expr->kind == ND_COND) {
-        int bv = static_branch_value(vm, expr->cond);
+        int bv = static_branch_value(vm, node_ctl(expr)->cond);
         if (bv == 0)
-            return nn_expr_is_null(vm, expr->els);
+            return nn_expr_is_null(vm, node_ctl(expr)->els);
         if (bv == 1)
-            return nn_expr_is_null(vm, expr->then);
-        return nn_expr_is_null(vm, expr->then) &&
-               nn_expr_is_null(vm, expr->els);
+            return nn_expr_is_null(vm, node_ctl(expr)->then);
+        return nn_expr_is_null(vm, node_ctl(expr)->then) &&
+               nn_expr_is_null(vm, node_ctl(expr)->els);
     }
     if (expr->kind == ND_FUNCALL && expr->lhs && expr->lhs->kind == ND_VAR &&
         expr->lhs->var && expr->lhs->var->always_returns_null)
@@ -2786,11 +2792,11 @@ static bool nn_expr_is_null(VirtualMachine *vm, Node *expr) {
 static bool nn_all_returns_null_walk(VirtualMachine *vm, Node *node) {
     for (; node; node = node->next) {
         if (node->kind == ND_IF || node->kind == ND_COND) {
-            int bv = static_branch_value(vm, node->cond);
-            if (bv != 0 && !nn_all_returns_null_walk(vm, node->then))
+            int bv = static_branch_value(vm, node_ctl(node)->cond);
+            if (bv != 0 && !nn_all_returns_null_walk(vm, node_ctl(node)->then))
                 return false;
-            if (node->els && bv != 1 &&
-                !nn_all_returns_null_walk(vm, node->els))
+            if (node_ctl(node)->els && bv != 1 &&
+                !nn_all_returns_null_walk(vm, node_ctl(node)->els))
                 return false;
             continue; // dead branches already excluded above -- skip the
                       // generic recursion
@@ -2805,16 +2811,16 @@ static bool nn_all_returns_null_walk(VirtualMachine *vm, Node *node) {
         if (!nn_all_returns_null_walk(vm, node->rhs))
             return false;
         if (node->kind != ND_IF && node->kind != ND_COND) {
-            if (!nn_all_returns_null_walk(vm, node->cond))
+            if (!nn_all_returns_null_walk(vm, node_ctl(node)->cond))
                 return false;
-            if (!nn_all_returns_null_walk(vm, node->then))
+            if (!nn_all_returns_null_walk(vm, node_ctl(node)->then))
                 return false;
-            if (!nn_all_returns_null_walk(vm, node->els))
+            if (!nn_all_returns_null_walk(vm, node_ctl(node)->els))
                 return false;
         }
-        if (!nn_all_returns_null_walk(vm, node->init))
+        if (!nn_all_returns_null_walk(vm, node_ctl(node)->init))
             return false;
-        if (!nn_all_returns_null_walk(vm, node->inc))
+        if (!nn_all_returns_null_walk(vm, node_ctl(node)->inc))
             return false;
         if (!nn_all_returns_null_walk(vm, node->body))
             return false;

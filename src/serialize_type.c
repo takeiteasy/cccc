@@ -1327,19 +1327,19 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     // _Static_assert leaves behind; without collecting them, a
     // re-materialized `sizeof(T)`/`_Alignof(T)` (serialize_layout_const())
     // can be the only surviving reference to T in the whole AST.
-    if (layout_type_needs_collecting(ctx, node->layout_ty))
-        collect_type(ctx, node->layout_ty);
-    if (layout_type_needs_collecting(ctx, node->case_begin_layout_ty))
-        collect_type(ctx, node->case_begin_layout_ty);
-    if (layout_type_needs_collecting(ctx, node->case_end_layout_ty))
-        collect_type(ctx, node->case_end_layout_ty);
+    if (layout_type_needs_collecting(ctx, node_misc(node)->layout_ty))
+        collect_type(ctx, node_misc(node)->layout_ty);
+    if (layout_type_needs_collecting(ctx, node_ctl(node)->case_begin_layout_ty))
+        collect_type(ctx, node_ctl(node)->case_begin_layout_ty);
+    if (layout_type_needs_collecting(ctx, node_ctl(node)->case_end_layout_ty))
+        collect_type(ctx, node_ctl(node)->case_end_layout_ty);
     // #1098: a block-scope _Static_assert's condition tree (stashed on an
     // otherwise-empty ND_BLOCK, see Node.static_assert_cond's own comment)
     // isn't reached by the generic ->lhs/->rhs/... walk below at all --
     // recurse into it explicitly so any layout_ty leaves inside it (an
     // arbitrarily nested sizeof/_Alignof, not just a bare top-level one)
     // are collected too.
-    collect_node_types(ctx, node->static_assert_cond);
+    collect_node_types(ctx, node_ctl(node)->static_assert_cond);
 
     // #1005: no ND_SWITCH/ND_CASE special case here (there used to be one,
     // walking node->case_next/->default_case instead of node->then) -- that
@@ -1354,11 +1354,11 @@ static void collect_node_types(SerializeContext *ctx, Node *node) {
     // arms were rewritten to work.
     collect_node_types(ctx, node->lhs);
     collect_node_types(ctx, node->rhs);
-    collect_node_types(ctx, node->cond);
-    collect_node_types(ctx, node->then);
-    collect_node_types(ctx, node->els);
-    collect_node_types(ctx, node->init);
-    collect_node_types(ctx, node->inc);
+    collect_node_types(ctx, node_ctl(node)->cond);
+    collect_node_types(ctx, node_ctl(node)->then);
+    collect_node_types(ctx, node_ctl(node)->els);
+    collect_node_types(ctx, node_ctl(node)->init);
+    collect_node_types(ctx, node_ctl(node)->inc);
     collect_node_types(ctx, node->body);
     collect_node_types(ctx, node->args);
 
@@ -1680,9 +1680,9 @@ void collect_generated_call_targets(Node *node, ObjVec *out) {
     // in macros.c is newest-first, and the calling function's own
     // PublishNode event precedes the block's) than the caller's body that
     // references it.
-    if (node->kind == ND_BLOCK_LITERAL && node->block_fn &&
-        node->block_fn->is_macro_generated)
-        obj_vec_push(out, node->block_fn);
+    if (node->kind == ND_BLOCK_LITERAL && node_misc(node)->block_fn &&
+        node_misc(node)->block_fn->is_macro_generated)
+        obj_vec_push(out, node_misc(node)->block_fn);
 
     // #1005: see the matching comment in collect_node_types() -- no
     // ND_SWITCH/ND_CASE special case needed; the generic traversal below
@@ -1690,11 +1690,11 @@ void collect_generated_call_targets(Node *node, ObjVec *out) {
     // ->lhs/->next.
     collect_generated_call_targets(node->lhs, out);
     collect_generated_call_targets(node->rhs, out);
-    collect_generated_call_targets(node->cond, out);
-    collect_generated_call_targets(node->then, out);
-    collect_generated_call_targets(node->els, out);
-    collect_generated_call_targets(node->init, out);
-    collect_generated_call_targets(node->inc, out);
+    collect_generated_call_targets(node_ctl(node)->cond, out);
+    collect_generated_call_targets(node_ctl(node)->then, out);
+    collect_generated_call_targets(node_ctl(node)->els, out);
+    collect_generated_call_targets(node_ctl(node)->init, out);
+    collect_generated_call_targets(node_ctl(node)->inc, out);
     collect_generated_call_targets(node->body, out);
     collect_generated_call_targets(node->args, out);
 
@@ -1903,9 +1903,9 @@ static bool node_reads_proto_param(Node *n, int depth) {
             return true;
     return node_reads_proto_param(n->lhs, depth + 1) ||
            node_reads_proto_param(n->rhs, depth + 1) ||
-           node_reads_proto_param(n->cond, depth + 1) ||
-           node_reads_proto_param(n->then, depth + 1) ||
-           node_reads_proto_param(n->els, depth + 1);
+           node_reads_proto_param(node_ctl(n)->cond, depth + 1) ||
+           node_reads_proto_param(node_ctl(n)->then, depth + 1) ||
+           node_reads_proto_param(node_ctl(n)->els, depth + 1);
 }
 
 // True when a variable-length extent in `ty` reads a prototype-scope
@@ -3852,9 +3852,9 @@ static bool expr_has_host_owned_layout(SerializeContext *ctx, Node *node,
     }
     return expr_has_host_owned_layout(ctx, node->lhs, depth + 1) ||
            expr_has_host_owned_layout(ctx, node->rhs, depth + 1) ||
-           expr_has_host_owned_layout(ctx, node->cond, depth + 1) ||
-           expr_has_host_owned_layout(ctx, node->then, depth + 1) ||
-           expr_has_host_owned_layout(ctx, node->els, depth + 1);
+           expr_has_host_owned_layout(ctx, node_ctl(node)->cond, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node_ctl(node)->then, depth + 1) ||
+           expr_has_host_owned_layout(ctx, node_ctl(node)->els, depth + 1);
 }
 
 // #1098: emits `_Static_assert(cond, "msg");` (always the two-arg

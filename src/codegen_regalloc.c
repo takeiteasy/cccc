@@ -599,9 +599,9 @@ static void promo_escape_all(PromoScan *s, Node *node) {
         }
         promo_escape_all(s, node->lhs);
         promo_escape_all(s, node->rhs);
-        promo_escape_all(s, node->cond);
-        promo_escape_all(s, node->then);
-        promo_escape_all(s, node->els);
+        promo_escape_all(s, node_ctl(node)->cond);
+        promo_escape_all(s, node_ctl(node)->then);
+        promo_escape_all(s, node_ctl(node)->els);
         promo_escape_all(s, node->args);
     }
 }
@@ -629,8 +629,9 @@ static void promo_scan_node(PromoScan *s, Node *node, int loop_depth) {
         // Only ND_VAR reads and writes a variable through its register; any
         // other node naming one (ND_MEMZERO, ND_VLA_PTR, ...) uses its slot.
         Obj *named[] = {node->kind != ND_VAR ? node->var : NULL,
-                        node->ret_buffer, node->atomic_addr,
-                        node->block_desc_var};
+                        node_misc(node)->ret_buffer,
+                        node_atom(node)->atomic_addr,
+                        node_misc(node)->block_desc_var};
         for (size_t i = 0; i < sizeof named / sizeof *named; i++) {
             PromoCand *c = named[i] ? promo_find(s, named[i]) : NULL;
             if (c)
@@ -642,26 +643,26 @@ static void promo_scan_node(PromoScan *s, Node *node, int loop_depth) {
             for (Node *a = node->args; a; a = a->next)
                 promo_escape_all(s, a);
         }
-        if (node->va_ap || node->va_src) {
-            promo_escape_all(s, node->va_ap);
-            promo_escape_all(s, node->va_src);
+        if (node_misc(node)->va_ap || node_misc(node)->va_src) {
+            promo_escape_all(s, node_misc(node)->va_ap);
+            promo_escape_all(s, node_misc(node)->va_src);
         }
 
         int d = loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
         promo_scan_node(s, node->lhs, d);
         promo_scan_node(s, node->rhs, d);
-        promo_scan_node(s, node->cond, d);
-        promo_scan_node(s, node->then, d);
-        promo_scan_node(s, node->els, d);
-        promo_scan_node(s, node->init, d);
-        promo_scan_node(s, node->inc, d);
+        promo_scan_node(s, node_ctl(node)->cond, d);
+        promo_scan_node(s, node_ctl(node)->then, d);
+        promo_scan_node(s, node_ctl(node)->els, d);
+        promo_scan_node(s, node_ctl(node)->init, d);
+        promo_scan_node(s, node_ctl(node)->inc, d);
         promo_scan_node(s, node->body, d);
-        promo_scan_node(s, node->cas_addr, d);
-        promo_scan_node(s, node->cas_old, d);
-        promo_scan_node(s, node->cas_new, d);
-        promo_scan_node(s, node->atomic_expr, d);
-        promo_scan_node(s, node->va_ap, d);
-        promo_scan_node(s, node->va_src, d);
+        promo_scan_node(s, node_atom(node)->cas_addr, d);
+        promo_scan_node(s, node_atom(node)->cas_old, d);
+        promo_scan_node(s, node_atom(node)->cas_new, d);
+        promo_scan_node(s, node_atom(node)->atomic_expr, d);
+        promo_scan_node(s, node_misc(node)->va_ap, d);
+        promo_scan_node(s, node_misc(node)->va_src, d);
         for (Node *a = node->args; a; a = a->next)
             promo_scan_node(s, a, d);
     }
@@ -685,11 +686,13 @@ static bool body_calls_setjmp(Node *node) {
              strstr(node->lhs->var->name, "savectx")))
             return true;
         if (body_calls_setjmp(node->lhs) || body_calls_setjmp(node->rhs) ||
-            body_calls_setjmp(node->cond) || body_calls_setjmp(node->then) ||
-            body_calls_setjmp(node->els) || body_calls_setjmp(node->init) ||
-            body_calls_setjmp(node->inc) || body_calls_setjmp(node->body) ||
-            body_calls_setjmp(node->args) ||
-            body_calls_setjmp(node->atomic_expr))
+            body_calls_setjmp(node_ctl(node)->cond) ||
+            body_calls_setjmp(node_ctl(node)->then) ||
+            body_calls_setjmp(node_ctl(node)->els) ||
+            body_calls_setjmp(node_ctl(node)->init) ||
+            body_calls_setjmp(node_ctl(node)->inc) ||
+            body_calls_setjmp(node->body) || body_calls_setjmp(node->args) ||
+            body_calls_setjmp(node_atom(node)->atomic_expr))
             return true;
     }
     return false;

@@ -232,15 +232,16 @@ bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
                           Node *labels, Node *labels_end,
                           bool set_cleanup_depth, bool diagnose_undeclared) {
     bool all_resolved = true;
-    for (Node *x = refs; x != refs_end; x = x->goto_next) {
-        if (x->unique_label) // already bound (e.g. an earlier pass)
+    for (Node *x = refs; x != refs_end; x = node_ctl(x)->goto_next) {
+        if (node_ctl(x)->unique_label) // already bound (e.g. an earlier pass)
             continue;
-        for (Node *y = labels; y != labels_end; y = y->goto_next) {
-            if (!x->label || !y->label)
+        for (Node *y = labels; y != labels_end; y = node_ctl(y)->goto_next) {
+            if (!node_ctl(x)->label || !node_ctl(y)->label)
                 continue;
-            if (strlen(x->label) == strlen(y->label) &&
-                strncmp(x->label, y->label, strlen(y->label)) == 0) {
-                x->unique_label = y->unique_label;
+            if (strlen(node_ctl(x)->label) == strlen(node_ctl(y)->label) &&
+                strncmp(node_ctl(x)->label, node_ctl(y)->label,
+                        strlen(node_ctl(y)->label)) == 0) {
+                node_ctl_mut(vm, x)->unique_label = node_ctl(y)->unique_label;
                 // Cleanup ancestry applies only to actual jumps. ND_LABEL_VAL
                 // (labels-as-values, `&&label`) also flows through this loop
                 // but merely takes an address — it neither exits nor enters
@@ -252,14 +253,15 @@ bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
                     // the label's depth) handles cross-sibling jumps, where the
                     // goto and label share a depth number but no common cleanup
                     // scope.
-                    int lca =
-                        cleanup_lca_depth(x->cleanup_chain, y->cleanup_chain);
-                    x->cleanup_target_depth = lca;
+                    int lca = cleanup_lca_depth(node_ctl(x)->cleanup_chain,
+                                                node_ctl(y)->cleanup_chain);
+                    node_ctl_mut(vm, x)->cleanup_target_depth = lca;
                     // Jumping *into* a cleanup scope (the label sits inside a
                     // cleanup scope the goto is not in) leaves that variable
                     // uninitialized when its cleanup runs at the label's block
                     // exit — ill-formed C.
-                    if (y->cleanup_chain && y->cleanup_chain->depth > lca)
+                    if (node_ctl(y)->cleanup_chain &&
+                        node_ctl(y)->cleanup_chain->depth > lca)
                         warn_tok(
                             vm, x->tok, CCCC_WARN_ATTRIBUTES,
                             "goto jumps into scope of variable with "
@@ -271,7 +273,7 @@ bool cc_match_goto_labels(VirtualMachine *vm, Node *refs, Node *refs_end,
             }
         }
 
-        if (x->unique_label == NULL) {
+        if (node_ctl(x)->unique_label == NULL) {
             all_resolved = false;
             if (diagnose_undeclared)
                 error_tok(vm, x->tok->next, "use of undeclared label");
@@ -301,7 +303,8 @@ static void resolve_goto_labels(VirtualMachine *vm, bool defer_unused) {
                          /*set_cleanup_depth=*/true,
                          /*diagnose_undeclared=*/true);
 
-    for (Node *label = vm->compiler.labels; label; label = label->goto_next) {
+    for (Node *label = vm->compiler.labels; label;
+         label       = node_ctl(label)->goto_next) {
         if (label->label_used || label->label_maybe_unused)
             continue;
         if (defer_unused) {
@@ -314,7 +317,7 @@ static void resolve_goto_labels(VirtualMachine *vm, bool defer_unused) {
             continue;
         }
         warn_tok(vm, label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
-                 label->label);
+                 node_ctl(label)->label);
     }
 
     vm->compiler.gotos = vm->compiler.labels = NULL;
@@ -335,7 +338,7 @@ void cc_flush_deferred_unused_labels(VirtualMachine *vm) {
     for (struct DeferredUnusedLabel *d = rev; d; d = d->next)
         if (!d->label->label_used)
             warn_tok(vm, d->label->tok, CCCC_WARN_UNUSED, "unused label '%s'",
-                     d->label->label);
+                     node_ctl(d->label)->label);
 }
 
 static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
@@ -539,8 +542,9 @@ static bool statement_terminates(Node *node) {
             return statement_terminates(last);
         }
         case ND_IF:
-            return node->els && statement_terminates(node->then) &&
-                   statement_terminates(node->els);
+            return node_ctl(node)->els &&
+                   statement_terminates(node_ctl(node)->then) &&
+                   statement_terminates(node_ctl(node)->els);
         case ND_LABEL:
             // A named label statement (`DONE: return ...;`) terminates iff
             // the statement it labels does -- reachable only via `goto`, but

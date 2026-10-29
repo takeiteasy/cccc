@@ -2121,443 +2121,164 @@ enum {
     ASM_EXTENDED = 1 << 3, // a ':' followed the template
 };
 
-/*!
- @brief Represents a node in the parser's abstract syntax tree.
-*/
-struct Node {
-    NodeKind     kind; /**< Node kind (see NodeKind). */
-    struct Node *next; // Next node
-    // Comptime list builtins: who owns this node's ->next (0 free, 1 pending
-    // NodeList chain, 2 linked into a list); see reflect_link().
-    uint8_t list_link;
-    Type  *ty;  /**< Resolved type of this node (after semantic analysis). */
-    Token *tok; // Representative token
+// Cold Node fields live in lazily allocated groups reached through the
+// node_*() accessors, which return an all-zero group when none was allocated.
+// Reads use node_X(n); writes use node_X_mut(vm, n). node_assign() and
+// node_clone() duplicate every allocated group, so a copy never shares one
+// with its original. Write a group only when there is a value to store: a
+// write allocates it.
 
-    struct Node *lhs; /**< Left-hand side child (when applicable). */
-    struct Node *rhs; /**< Right-hand side child (when applicable). */
-
+// Control flow, labels, switch/case, cleanup scopes, declaration groups.
+typedef struct NodeCtl {
     // "if" or "for" statement
     struct Node *cond;
     struct Node *then;
     struct Node *els;
     struct Node *init;
     struct Node *inc;
-
     // "break" and "continue" labels
     char *brk_label;
     char *cont_label;
-
-    // Block or statement expression
-    struct Node *body;
-
-    // Struct member access
-    Member *member;
-
-    // Function call
-    Type        *func_ty;
-    struct Node *args;
-    bool         pass_by_stack;
-    bool         has_splice_arg; // deferred arity/cast check needed after
-                                 // quote_substitute
-    bool call_prelude; // ND_COMMA `(hoisted argument temps, call)` built by
-                       // rewrite_checked_call_args(); ->rhs is the ND_FUNCALL
-    Obj *ret_buffer;
-    // #981: true only for the alloca(...) ND_FUNCALL synthesized by
-    // new_alloca() to back a VLA declaration (parse.c's
-    // ND_ASSIGN(ND_VLA_PTR, alloca(...)) lowering). False for every other
-    // call to the same underlying `alloca` Obj, in particular an explicit
-    // `__builtin_alloca`/`__builtin_alloca_with_align` call -- those two
-    // construct their own ND_FUNCALL node directly in primary()/unary()
-    // rather than through new_alloca(), and are never set. Lets codegen's
-    // ND_FUNCALL case (which only sees `node->lhs->var->is_builtin_alloca`,
-    // true for both) choose ALCV (ALLOC_KIND_FRAME, block-scoped, swept by
-    // HREL) vs ALCA (ALLOC_KIND_ALLOCA, frame-scoped, swept only at LEV3)
-    // without needing to inspect the call's syntactic origin.
-    bool is_vla_alloca_call;
-    bool is_explicit_cast; // ND_CAST written as `(T)expr` in source
-    bool is_kernel_local_arg; // CCCC_LOCAL(n) argument of cccc_launch, or the
-                              // cast typing a [[cccc::local]] object's address
-    SwizzleStore *swizzle_store; // OpenCL multi-lane swizzle that can be
-                                 // assigned to (parse_opencl.c)
-
     // Goto or labeled statement, or labels-as-values
     char        *label;
     char        *unique_label;
     struct Node *goto_next;
-    bool         label_used;
-    bool         label_maybe_unused;
-    bool         is_fallthrough;     // [[fallthrough]] on a null statement
-    bool         is_sizeof_ptr_expr; // ND_NUM from sizeof(pointer_type) — for
-                                     // -Wsizeof-pointer-memaccess
-    // #1205: ND_NUM folded from an enumerator reference whose own type
-    // (num->ty) is ty_int per C17/C23 6.7.2.2p3, not the enum type it
-    // belongs to (enum_members_are_int, see parse_postfix.c) -- kept here so
-    // serialize_type.c's collect_node_types() still discovers and emits the
-    // enum's tag definition even though the use site's own node->ty no
-    // longer names it. NULL for every other ND_NUM.
-    Type *enum_source_ty;
-    // #1031: ND_NUM folded from sizeof/_Alignof of this type -- -c=native
-    // re-materializes the operator textually (`sizeof(struct statfs)`
-    // rather than the folded literal `56ULL`) when the type's layout is
-    // host-owned (a from_include struct whose body the serializer
-    // (src/serialize_type.c) suppresses in favor of the replayed #include), so
-    // the emitted value tracks whichever layout the host header actually
-    // supplies rather than CCCC's own possibly-smaller projection. NULL/unset
-    // for every other ND_NUM (ordinary literals, constant-folded arithmetic,
-    // etc). See serialize_expr.c's ND_NUM integer arm and serialize_type.c's
-    // type_layout_is_host_owned().
-    Type *layout_ty;
-    LayoutOp layout_is_align; // layout_ty came from _Alignof, not sizeof
-
-    // #1098: a block-scope `_Static_assert`/`static_assert` parses to an
-    // otherwise-empty ND_BLOCK (see static_assert_decl(), src/parse_stmt.c) --
-    // its condition Node and message are stashed here (rather than a new
-    // ND_ kind, keeping codegen/eval's switches untouched) so the serializer
-    // can re-emit the assert for the host compiler to re-check when the
-    // condition folds a host-owned layout. NULL for every ordinary
-    // ND_BLOCK. See serialize_static_assert()/expr_has_host_owned_layout().
-    OmpDirective     *omp; // ND_BLOCK built for a #pragma omp directive
-    Node             *static_assert_cond;
-    char             *static_assert_msg;
-    int               static_assert_msg_len;
-
-    int               cleanup_target_depth; // for ND_GOTO (break/continue):
-                                            // cleanup_scope_depth of target
+    // Switch
+    struct Node *case_next;
+    struct Node *default_case;
+    // Case
+    long begin;
+    long end;
+    // The case label's value expression was a bare sizeof/_Alignof of a
+    // from_include type; serializer only. begin/end stay CCCC's folded values.
+    Type    *case_begin_layout_ty;
+    Type    *case_end_layout_ty;
+    LayoutOp case_begin_layout_is_align;
+    LayoutOp case_end_layout_is_align;
+    // A block-scope `_Static_assert` parses to an otherwise-empty ND_BLOCK; its
+    // condition and message are kept here so the serializer can re-emit it.
+    Node *static_assert_cond;
+    char *static_assert_msg;
+    int   static_assert_msg_len;
+    // ND_GOTO (break/continue): cleanup_scope_depth of the target.
+    int               cleanup_target_depth;
     CleanupChainNode *cleanup_chain; // ND_GOTO/ND_LABEL: innermost active
                                      // cleanup scope (NULL if none)
     // ND_GOTO/ND_RETURN: only cleanup vars with cleanup_seq below this were
     // declared before the jump; 0 means no limit.
     int cleanup_seq_limit;
-
     // The last node of a cleanup var's declaration (its initializer, or the
     // marker when there is none): codegen opens the var's CleanupRange once it
     // has emitted this node.
     struct Obj *cleanup_open;
-
     // ND_BLOCK: cleanup vars declared in this scope (declaration order);
     // codegen emits LIFO
     CleanupVar *cleanup_vars;
-    int cleanup_scope_depth; // parse-time cleanup_scope_depth when this block
-                             // was built
-
-    // ND_BLOCK: true only for the synthetic wrapper declaration() (parse.c)
-    // returns to bundle one declaration statement's per-declarator
-    // initializers (e.g. `int n = 4, v[n];` is one such wrapper holding
-    // both declarators' statements) -- NOT a real C block scope, see
-    // declaration()'s own comment. #981 (codegen.c's ND_BLOCK case) relies
-    // on this to avoid a real correctness bug: without it, a VLA's own
-    // wrapper block would satisfy block_defines_vla (internal.h) directly
-    // and get its OWN narrow HMRK/HREL pair around just its own body
-    // (compute the VLA's size, alloca it) -- reclaiming the VLA's storage
-    // the instant it's declared, before any of the *enclosing* real
-    // scope's later statements (which is where the variable is actually
-    // used) ever run. Sibling flag to node_is_vla_ptr_assign/
-    // block_defines_vla (internal.h): a block's immediate ND_BLOCK child
-    // with is_decl_group set is treated as transparent -- looked *through*
-    // (one level, exhaustive: declaration() never nests a wrapper inside
-    // another) when deciding whether the ENCLOSING real scope needs a
-    // watermark, and never self-instrumented.
-    bool is_decl_group;
+    int cleanup_scope_depth; // parse-time cleanup_scope_depth for this block
     // is_decl_group blocks: every object the declaration declares, including
     // ones that emit no node (`int x;`, `static int n;`).
     Obj **decl_vars;
     int   decl_var_count;
+    // Tail expressions after a deferred initializer splice (ND_INIT_SPLICE)
+    struct Node *init_tail;
+    int          init_start_index; // positional field/element index
+} NodeCtl;
 
-    // Switch
-    struct Node *case_next;
-    struct Node *default_case;
+// Checked-pointer bounds. Set on an ND_DEREF built at a `*p` or `p[i]` site
+// whose base is a checked pointer with resolvable bounds (not a wrapper node
+// kind, since addr_is_local_frame() and the restrict deref cache pattern-match
+// on the address node's kind). bounds_lo/hi are absolute address expressions,
+// cloned per deref site so each access re-evaluates them independently; also
+// copied onto the synthesized `*tmp` store and ND_CAS that to_assign() builds
+// for `A op= B`/`A++`/`A--`.
+typedef struct NodeChk {
+    struct Node *bounds_lo;
+    struct Node *bounds_hi;
+    // `t = &obj` hoisting a member access's object expression into one temp
+    // when it is non-trivial, so bounds_lo/hi read it back through the temp
+    // instead of re-evaluating it. Emitted before every consumer of
+    // bounds_lo/hi; idempotent because `obj` is side-effect-free by
+    // construction.
+    struct Node *bounds_obj_init;
+    int64_t      access_size; // sizeof of the value actually accessed
+    // Terminator-slot size when the access is a sub-object of an ntarray
+    // element; 0 means access_size is the whole element.
+    int64_t nt_slot;
+    // On the original deref of an RMW desugar: the synthesized node that does
+    // the store, so propagate_checked_bounds() can stamp it too.
+    struct Node *rmw_mirror;
+    // On an ND_ASSIGN whose lhs and rhs are both declared-checked: the four
+    // expressions CHKAB needs. dst_lo/hi are the target's own bounds, re-read
+    // after the store; src_lo/hi are snapshot temps taken before it.
+    struct Node *assign_dst_lo;
+    struct Node *assign_dst_hi;
+    // `t = &obj` hoist for the target's member-access object, re-run just
+    // before dst_lo/hi at the post-store check site.
+    struct Node *assign_dst_obj_init;
+    struct Node *assign_src_lo;
+    struct Node *assign_src_hi;
+    // On the synthesized `*tmp` derefs of to_assign()'s RMW desugar: the
+    // original lvalue, so addr_is_local_frame() classifies by what the user
+    // wrote rather than by the opaque temp.
+    struct Node *rmw_lvalue;
+} NodeChk;
 
-    // Case
-    long begin;
-    long end;
-    // #1095: set alongside begin/end (stmt()'s "case" arm, parse_stmt.c)
-    // when the label's own value expression was a bare sizeof/_Alignof of a
-    // from_include type -- serialization-only, mirroring
-    // Type.array_len_layout_ty (#1031's own Node.layout_ty/layout_is_align
-    // pair, this is the case-label analog). begin/end themselves stay
-    // CCCC's own folded values regardless -- the switch dispatch itself
-    // (codegen, and this node's own case_next/default_case chain) always
-    // reads those, never these.
-    Type *case_begin_layout_ty;
-    Type *case_end_layout_ty;
-    LayoutOp case_begin_layout_is_align;
-    LayoutOp case_end_layout_is_align;
+// Atomic compare-and-swap and `op=` operators.
+typedef struct NodeAtom {
+    struct Node *cas_addr;
+    struct Node *cas_old;
+    struct Node *cas_new;
+    Obj         *atomic_addr;
+    struct Node *atomic_expr;
+} NodeAtom;
 
-    // "asm" string literal; extended-asm operand expressions live in `args`
-    // (outputs then inputs), parallel to asm_ops.
+// Inline asm: string literal; extended-asm operand expressions live in `args`
+// (outputs then inputs), parallel to asm_ops.
+typedef struct NodeAsm {
     char        *asm_str;
     AsmOperand  *asm_ops;
     int          asm_n_outputs, asm_n_inputs;
     char       **asm_clobbers;
     int          asm_n_clobbers;
     struct Node *asm_labels; // ND_GOTO refs chained by ->next
-    uint8_t      asm_flags;
+} NodeAsm;
 
-    // Atomic compare-and-swap
-    struct Node *cas_addr;
-    struct Node *cas_old;
-    struct Node *cas_new;
-
-    // Memory order of an __atomic_* builtin (ND_ALOAD/ASTORE/EXCH/CAS), stored
-    // as order + 1 so zero means seq_cst; the serializer emits it, the VM
-    // ignores it. A CAS failure order and the weak flag ride along.
-    uint8_t atomic_mo, atomic_mo_fail;
-    bool    atomic_weak;
-
-    // Atomic op= operators
-    Obj         *atomic_addr;
-    struct Node *atomic_expr;
-
-    // Variable
-    Obj *var;
-    struct Node
-        *init_tail; // Tail expressions after a deferred initializer splice
-    int  init_start_index; // Positional field/element index for ND_INIT_SPLICE
-    bool init_inferred_array; // True when array length must be finalized
-                              // post-splice
-
-    // ND_QUOTE_LAZY (#1242): a deferred QuoteLazy()/QuoteLazyN() template.
-    // lazy_args is a plain arena-allocated array (capped at 64, matching
-    // quote_core's arg_nodes bound) -- NOT ->next-linked, since a $@N
-    // argument is itself a ->next-linked chain that must survive intact
-    // until quote_substitute walks it.
-    char         *quote_tmpl;
-    struct Node **lazy_args;
-    int           lazy_arg_count;
-
-    // Numeric literal
-    int64_t     val;
+// Non-trivial numeric literal text.
+typedef struct NodeLit {
     long double fval;
     char *wide_digits; // wb/uwb _BitInt literal digit text, when bit_width > 64
     int   wide_base;   // base (2/8/10/16) for wide_digits, else unused
-    char *dec_digits;  // _Decimal32/64/128 literal digit text (#402), else NULL
+    char *dec_digits;  // _Decimal32/64/128 literal digit text, else NULL
+} NodeLit;
 
+// Everything else that is set on a few node kinds.
+typedef struct NodeMisc {
+    Obj          *ret_buffer;    // call: struct-return slot
+    SwizzleStore *swizzle_store; // OpenCL multi-lane swizzle that can be
+                                 // assigned to
+    OmpDirective *omp;           // ND_BLOCK built for a #pragma omp directive
+    // ND_NUM folded from sizeof/_Alignof of this type: -c=native re-emits the
+    // operator when the type's layout is host-owned.
+    Type    *layout_ty;
+    LayoutOp layout_is_align; // layout_ty came from _Alignof, not sizeof
+    // ND_QUOTE_LAZY: a deferred QuoteLazy()/QuoteLazyN() template. lazy_args
+    // is an arena array (capped at 64), not ->next-linked, since a $@N argument
+    // is itself a ->next chain that must survive until quote_substitute.
+    char         *quote_tmpl;
+    struct Node **lazy_args;
+    int           lazy_arg_count;
     // Block literal (Apple blocks extension)
     Obj  *block_fn;           // Synthetic function for block's body
     Obj **block_captures;     // Array of captured variables
     int   num_block_captures; // Number of captured variables
     Obj *block_desc_var; // Stack slot in enclosing frame for descriptor storage
-
     // Pragma macro call (ND_MACRO_CALL)
     char  *macro_name;      // Name of pragma macro to invoke
     int    macro_arg_count; // Number of arguments
     Scope *macro_scope;     // Parser scope active at the macro call site
-
-    // Checked-pointer bounds check (#770/#484). Set on an ND_DEREF built at
-    // a `*p` or `p[i]` site (src/parse.c) whose address expression's base
-    // variable is a checked pointer with resolvable bounds -- deliberately
-    // NOT a wrapper node kind, see the design note in the implementation
-    // plan for why (codegen.c's addr_is_local_frame/#740 and the restrict
-    // deref cache both pattern-match on the address node's own kind).
-    // checked_bounds_lo/hi are absolute address expressions, freshly cloned
-    // per deref site off the declaration's resolved Obj.checked_bounds_lo/hi
-    // (or synthesized from the pointer's own live value for CB_COUNT/
-    // CB_BYTE_COUNT/CHECKED_SINGLE, see set_checked_deref_bounds() in
-    // parse.c) so each access re-evaluates them independently, per the
-    // per-declaration (not propagated) bounds model. NULL/NULL means no
-    // check is emitted for this dereference (unchecked pointer, or a
-    // checked pointer with no resolvable bounds -- CB_NONE/CB_UNKNOWN).
-    //
-    // #937: also copied (cloned, not aliased) onto two node kinds that are
-    // NOT built at an original parse site: the synthesized `*tmp` store
-    // ND_DEREF and the ND_CAS `cas` node to_assign() (src/parse.c) builds
-    // when desugaring `A op= B`/`A++`/`A--` -- so CHKNT still sees the RMW
-    // store, not just the CHKR check on `&A`. The ND_CAS reuse only ever
-    // populates checked_bounds_hi (not lo): its own codegen case has no
-    // gen_addr-driven CHKR path to feed lo into.
-    struct Node *checked_bounds_lo;
-    struct Node *checked_bounds_hi;
-    // #945: an ND_ASSIGN (`t = &obj`) hoisting a struct/union member
-    // access's object expression (`s` in `s.p[i]`, `arr[k]` in
-    // `arr[k].p[i]`) into a single compiler-generated temp, when that
-    // expression is non-trivial (see checked_obj_is_trivial(), src/parse.c)
-    // -- checked_bounds_lo/hi then read the object back through the temp
-    // (`*t`) instead of each re-cloning and re-evaluating it. NULL for a
-    // variable-rooted access or a trivial member-access chain (no hoist
-    // needed). Must be evaluated at EVERY site that evaluates
-    // checked_bounds_lo/hi, immediately before them -- codegen.c's CHKR site
-    // (gen_addr) and both CHKNT sites (the plain store guard and the
-    // ND_CAS/_Atomic RMW guard) each independently emit it. Emitting it more
-    // than once per access is by design and harmless: `obj` is
-    // side-effect-free by construction (node_has_side_effects() already
-    // declines the check otherwise), so `t = &obj` is idempotent, and
-    // re-emitting at each consuming site means `t` can never be stale.
-    // #948: that side-effect-free-ness is load-bearing, not incidental --
-    // this whole multi-site re-emission contract only works because `obj`
-    // can never itself do anything observable. A side-effecting object
-    // expression (`f()->p[i]`) therefore can't just get the same treatment
-    // with a single-evaluation guarantee bolted on: `f()` would still have
-    // to run once for the real access AND once (or more, under this
-    // contract) to build `t`, an extra evaluation a `--checked-pointers`
-    // build must never introduce over a default build. See
-    // compute_checked_bounds()'s decline (src/parse.c) for where that's
-    // enforced.
-    struct Node *checked_bounds_obj_init;
-    int64_t      checked_access_size; // sizeof of the value actually accessed
-    // #923/#938/#939: true when this ND_DEREF is a [[cccc::ntarray]] access
-    // (any of count(n)/byte_count(n)/bounds(lo,hi)) to the widened
-    // terminator slot -- the elem_size bytes beginning at the declared end
-    // of the range, which set_checked_deref_bounds() widens by one element
-    // for -- through a pointee checked_nt_pointee_supported() (src/parse.c)
-    // accepts: integer/pointer (CHKNT), float/double (CHKNT via a
-    // bit-pattern transfer), or struct/union/wide _BitInt/_Decimal (CHKNTZ,
-    // #939). TY_LDOUBLE/vector/_Complex pointees still leave this false --
-    // no opcode can soundly guard them, see checked_nt_pointee_supported()'s
-    // comment. Independent of checked_bounds_lo/hi (which are populated for
-    // every checked deref); this flag narrows CHKNT/CHKNTZ emission to the
-    // one node kind that can actually destroy the nt invariant, a non-null
-    // store into that slot. #937: also copied onto the synthesized RMW
-    // store deref/ND_CAS node described above -- still never propagated
-    // across an ordinary assignment by #919's propagate_checked_bounds()
-    // (checked_prop_attach_scan() leaves it false), which is a separate,
-    // still-open gap (docs/safety.md).
-    bool checked_nt_terminator;
-    // Slot size for the terminator guard when this node's own access is a
-    // sub-object of the ntarray element (a member store, or the synthesized
-    // RMW/CAS store of one): checked_access_size is then the member's size
-    // (what CHKR range-checks) and this is the root element's. 0 means the
-    // slot is checked_access_size, the whole-element case.
-    int64_t checked_nt_slot;
-
-    // #942: true when checked_bounds_lo/hi were attached by
-    // propagate_checked_bounds()'s walk 3 (checked_prop_attach_scan(),
-    // src/parse.c) for a candidate that is only checked-rooted on SOME
-    // paths (Obj.checked_prop_optional) -- codegen must emit CHKRO instead
-    // of plain CHKR for this deref, since checked_bounds_lo/hi may hold the
-    // sentinel [(char*)-1, (char*)0) range at runtime rather than a real
-    // bound. False for a direct declared-checked access and for a fully
-    // checked-rooted (#919/#941) propagation candidate -- both always emit
-    // plain CHKR, unchanged from before #942.
-    bool checked_bounds_optional;
-
-    // #943: set by to_assign() (src/parse.c) on the *original* deref
-    // (`s[n]` in `s[n] += 1`/`s[n]++`/`s[n]--`) to point at the synthesized
-    // node that actually performs the RMW store -- `store_deref` (the plain
-    // `*tmp = *tmp op B` ND_DEREF) for a non-atomic desugar, or `cas` (the
-    // `_Atomic` CAS-loop's ND_CAS) for an atomic one. #937 already copies
-    // checked_bounds_lo/hi/checked_access_size/checked_nt_terminator across
-    // for the *direct-access* case at to_assign()'s own call time, but
-    // propagate_checked_bounds() (which populates a propagated candidate's
-    // bounds) runs well after to_assign() has already desugared and
-    // discarded any way to reach the mirror node -- this back-link is what
-    // lets propagate_checked_bounds()'s walk 3 (checked_prop_attach_scan())
-    // find and stamp the mirror too, once it knows `s[n]`'s own propagated
-    // bounds. NULL for every ordinary deref (to_assign() only sets this on
-    // the two RMW desugar paths).
-    struct Node *checked_rmw_mirror;
-
-    // #944: on an ND_ASSIGN whose lhs is itself a declared-checked target
-    // with a declared-checked rhs, set by verify_checked_assign_bounds()
-    // (src/parse.c) to the four
-    // expressions CHKAB needs: checked_assign_dst_lo/hi are the target's OWN
-    // declared bounds, deliberately left as bare expressions re-evaluated
-    // AFTER the store (they're self-referencing -- `[q, q + m*sizeof(T))` --
-    // so they must see the just-stored value, the opposite ordering from
-    // #919's pre-store snapshot); checked_assign_src_lo/hi are var reads of
-    // compiler-generated snapshot temps holding the source's bounds,
-    // evaluated and stored BEFORE the assignment executes (the source may
-    // alias or be overwritten by the store itself). NULL/NULL on
-    // checked_assign_dst_lo/hi means no check is emitted -- an unchecked lhs,
-    // a non-declared-checked rhs, or a CB_NONE/CB_UNKNOWN target.
-    struct Node *checked_assign_dst_lo;
-    struct Node *checked_assign_dst_hi;
-    // #947: an ND_ASSIGN (`t = &obj`) hoisting the TARGET's member-access
-    // object expression (e.g. `k` in `arr[k].p = src;`) into a single
-    // compiler-generated temp, when non-trivial -- same shape as
-    // Node.checked_bounds_obj_init, but tracked as its own field rather
-    // than reused, because it must run at a different program point:
-    // checked_assign_dst_lo/hi are deliberately read AFTER the store (see
-    // above), so this init cannot be folded into the pre-store snapshot
-    // comma the way checked_assign_src_lo/hi's own hoist is -- it has to be
-    // re-run immediately before dst_lo/hi at codegen's post-store CHKAB
-    // site instead. NULL when the target's object expression is trivial or
-    // there is no target hoist to do.
-    struct Node *checked_assign_dst_obj_init;
-    struct Node *checked_assign_src_lo;
-    struct Node *checked_assign_src_hi;
-    // True when the source is an OPT propagated local, whose snapshot may
-    // hold the [-1, 0) sentinel: codegen emits CHKABO instead of CHKAB.
-    bool checked_assign_src_optional;
-
-    // #919: marks the `&A` node to_assign() synthesizes for its *generic*
-    // compound-assign/++/-- desugar (`tmp = &A, *tmp = *tmp op B`), src/
-    // parse.c. propagate_checked_bounds()'s poison scan treats an ND_ADDR
-    // whose lhs is a propagation candidate as escaping (poisons it) UNLESS
-    // this flag is set -- the desugared address never leaves the comma
-    // expression it was created in, so `q++`/`q += k` must not poison `q`'s
-    // propagated bounds the way a real `&q` would. Deliberately NOT set on
-    // to_assign()'s ND_MEMBER desugar path, whose `&A` targets the member's
-    // *object* expression, not the assigned variable -- unrelated to this
-    // flag's purpose.
-    bool is_rmw_temp_addr;
-
-    // On the `&A` of to_assign()'s RMW desugar (both the generic and the
-    // member form): the address only feeds the `*tmp` read and write that
-    // follow, so it is not recorded as provenance and mark_addr_escapes does
-    // not count it as `A`'s address escaping.
-    bool rmw_addr_feeds_temp;
-
-    // On the synthesized `*tmp` derefs of to_assign()'s RMW desugar: the
-    // original lvalue `tmp` was assigned the address of (`A`, or the object
-    // of `A.x`), so addr_is_local_frame() can classify the access by what the
-    // user wrote rather than by the opaque temp.
-    struct Node *rmw_lvalue;
-
-    // On the ND_DEREF the debugger builds in place of a paused-frame local: it
-    // reads the live frame, so addr_is_local_frame() skips the dangling check
-    // a stale tag from a returned frame would otherwise trip.
-    bool dbg_frame_local;
-
-    // Codegen annotations for the static array bounds check (#1452). An
-    // ND_DEREF under `&` only forms an address (no_deref_access); otherwise
-    // its pointer-add records the bytes accessed (deref_bytes) so the check
-    // can reject the one-past-the-end element, not just one-past formation.
-    bool no_deref_access;
-    int  deref_bytes;
-
-    // #1235: marks the outer ND_CAST that new_inc_dec() (src/parse_postfix.c)
-    // wraps around a postfix `A++`/`A--` desugar
-    // (`(typeof A)((A += 1) + -1)`). Pure annotation, read only by the
-    // serializer: in a discard context (an expression statement, a for-loop
-    // update clause) serialize_discard_expr() (src/serialize_expr.c) peels
-    // this cast and the dead value-reconstructing `+ -1` term, emitting just
-    // the `(tmp = &A, *tmp = *tmp + 1)` store so the output is
-    // -Wunused-value-clean. VM codegen never looks at it -- `A++` semantics
-    // are unchanged.
-    bool is_inc_dec_result;
-
-    // ND_STMT_EXPR that to_assign() builds for an `_Atomic` read-modify-write
-    // (CAS loop, then a trailing read of the new value). Serializer-only: a
-    // discard context drops that trailing read.
-    bool is_atomic_rmw;
-
-    // ND_STMT_EXPR that build_atomic_fetch_op() builds for a fetch-and-op
-    // builtin: the op (0 = not one), nand, whether it yields the old value, and
-    // whether a pointer operand scales by its pointee (C11) rather than moving
-    // bytes (GCC). The order is atomic_mo. The VM runs the CAS loop; the
-    // serializer emits the host builtin instead when it accepts the operand.
-    NodeKind atomic_fetch_op;
-    bool     atomic_fetch_nand, atomic_fetch_old, atomic_fetch_scaled;
-
-    // ND_COMMA written as `a, b` in source (not a compiler desugar such as a
-    // compound literal): its value is an rvalue, never an assignment target.
-    bool is_user_comma;
-
-    // ND_COMMA `(t = lhs, f(t, rhs))` that fixes a bound operator's operand
-    // order: an rvalue, and the only form to_assign() unwraps.
-    bool is_operator_seq;
-
-    // #1018: which <stdarg.h> macro (if any) this node is the parsed
-    // __builtin_va_*() wrapper for. The node itself is always the
-    // *existing* VM-ABI impl expression, parsed and returned completely
-    // unchanged (same lhs/rhs/args/etc as before this ticket) -- va_form
-    // and the fields below are pure annotation, read only by the
-    // serializer (src/serialize_expr.c/src/serialize_stmt.c) to print
-    // the real host <stdarg.h> form (`va_start(ap, last)`, `va_arg(ap,
-    // type)`, ...) instead of walking the VM-internal subtree. VM codegen,
-    // comptime, reflection and inlining all see byte-identical AST to
-    // before this ticket, since nothing reads these fields but the
-    // serializer. VA_NONE (0) for every ordinary node.
+    // Wrapper for a parsed __builtin_va_*(): the node stays the VM-ABI impl
+    // expression; these annotations are read only by the serializer, which
+    // prints the host <stdarg.h> form instead.
     enum {
         VA_NONE = 0,
         VA_START,
@@ -2570,7 +2291,149 @@ struct Node {
         *va_last;        // VA_START only: the `last` fixed-parameter expression
     struct Node *va_src; // VA_COPY only: the `src` argument expression
     Type        *va_type; // VA_ARG only: the requested type argument
+} NodeMisc;
+
+/*!
+ @brief Represents a node in the parser's abstract syntax tree.
+*/
+struct Node {
+    NodeKind kind; /**< Node kind (see NodeKind). */
+    // Comptime list builtins: who owns this node's ->next (0 free, 1 pending
+    // NodeList chain, 2 linked into a list); see reflect_link().
+    uint8_t list_link;
+    // Memory order of an __atomic_* builtin (ND_ALOAD/ASTORE/EXCH/CAS), stored
+    // as order + 1 so zero means seq_cst; the serializer emits it, the VM
+    // ignores it. A CAS failure order and the weak flag ride along.
+    uint8_t atomic_mo, atomic_mo_fail;
+    uint8_t asm_flags;
+    bool    atomic_weak : 1;
+
+    // Function call
+    bool pass_by_stack  : 1;
+    bool has_splice_arg : 1; // deferred arity/cast check needed after
+                             // quote_substitute
+    bool call_prelude   : 1; // ND_COMMA `(hoisted argument temps, call)` built
+                             // by rewrite_checked_call_args(); ->rhs is the
+                             // ND_FUNCALL
+    // True only for the alloca(...) ND_FUNCALL synthesized by new_alloca() to
+    // back a VLA declaration, not for an explicit __builtin_alloca call: lets
+    // codegen choose ALCV (block-scoped) over ALCA (frame-scoped).
+    bool is_vla_alloca_call  : 1;
+    bool is_explicit_cast    : 1; // ND_CAST written as `(T)expr` in source
+    bool is_kernel_local_arg : 1; // CCCC_LOCAL(n) argument of cccc_launch, or
+                                  // the cast typing a [[cccc::local]] object's
+                                  // address
+
+    bool label_used          : 1;
+    bool label_maybe_unused  : 1;
+    bool is_fallthrough      : 1; // [[fallthrough]] on a null statement
+    bool is_sizeof_ptr_expr  : 1; // ND_NUM from sizeof(pointer_type), for
+                                  // -Wsizeof-pointer-memaccess
+    // ND_BLOCK: the synthetic wrapper declaration() returns to bundle one
+    // declaration statement's per-declarator initializers -- not a real C
+    // scope. Codegen looks through it when deciding whether the enclosing real
+    // scope needs a VLA watermark, and never instruments it itself.
+    bool is_decl_group       : 1;
+    bool init_inferred_array : 1; // array length must be finalized post-splice
+
+    // Checked-pointer annotations (see NodeChk)
+    bool checked_bounds_optional : 1; // bounds attached for a candidate that is
+                                      // only checked-rooted on some paths:
+                                      // emit CHKRO instead of CHKR
+    bool checked_assign_src_optional : 1; // source is an OPT propagated local,
+                                          // whose snapshot may hold the
+                                          // [-1, 0) sentinel: emit CHKABO
+    bool is_rmw_temp_addr    : 1; // the `&A` of to_assign()'s generic RMW
+                                  // desugar: it never leaves the comma
+                                  // expression, so it does not poison A's
+                                  // propagated bounds
+    bool rmw_addr_feeds_temp : 1; // that `&A` only feeds the `*tmp` read and
+                                  // write that follow: not provenance, and not
+                                  // an address escape
+    bool dbg_frame_local     : 1; // ND_DEREF the debugger builds for a
+                                  // paused-frame local: skips the dangling
+                                  // check a stale tag would trip
+    // Static array bounds check: an ND_DEREF under `&` only forms an address
+    // (no_deref_access); otherwise its pointer-add records the bytes accessed
+    // (deref_bytes) so the check rejects the one-past-the-end element.
+    bool no_deref_access : 1;
+    // Serializer-only annotations on desugared nodes
+    bool is_inc_dec_result : 1; // outer ND_CAST of a postfix `A++`/`A--`: a
+                                // discard context peels it
+    bool is_atomic_rmw     : 1; // ND_STMT_EXPR of an `_Atomic` RMW: a discard
+                                // context drops the trailing read
+    bool atomic_fetch_nand : 1, atomic_fetch_old : 1, atomic_fetch_scaled : 1;
+    bool is_user_comma   : 1; // ND_COMMA written as `a, b` in source: an rvalue
+    bool is_operator_seq : 1; // ND_COMMA `(t = lhs, f(t, rhs))` that fixes a
+                              // bound operator's operand order
+    // True when this ND_DEREF is a [[cccc::ntarray]] access to the widened
+    // terminator slot, through a pointee CHKNT/CHKNTZ can guard.
+    bool checked_nt_terminator;
+    // ND_STMT_EXPR built by build_atomic_fetch_op() for a fetch-and-op builtin:
+    // the op (0 = not one). The VM runs the CAS loop; the serializer emits the
+    // host builtin instead when it accepts the operand.
+    NodeKind     atomic_fetch_op;
+    int          deref_bytes;
+
+    struct Node *next; // Next node
+    Type  *ty;  /**< Resolved type of this node (after semantic analysis). */
+    Token *tok; // Representative token
+
+    struct Node *lhs; /**< Left-hand side child (when applicable). */
+    struct Node *rhs; /**< Right-hand side child (when applicable). */
+
+    // Block or statement expression
+    struct Node *body;
+    // Struct member access
+    Member *member;
+    // Function call
+    Type        *func_ty;
+    struct Node *args;
+    // Variable
+    Obj *var;
+    // Numeric literal
+    int64_t val;
+    // ND_NUM folded from an enumerator reference whose own type is int per
+    // C17/C23 6.7.2.2p3, not the enum type: kept so collect_node_types() still
+    // discovers the enum's tag definition. NULL for every other ND_NUM.
+    Type     *enum_source_ty;
+
+    NodeCtl  *ctl;
+    NodeChk  *chk;
+    NodeAtom *atom;
+    NodeAsm  *asmx;
+    NodeLit  *lit;
+    NodeMisc *misc;
 };
+
+_Static_assert(sizeof(Node) <= 168,
+               "Node grew: put cold fields in a NodeCtl/NodeChk/NodeAtom/"
+               "NodeAsm/NodeLit/NodeMisc group");
+
+static const NodeCtl  node_ctl_none  = {0};
+static const NodeChk  node_chk_none  = {0};
+static const NodeAtom node_atom_none = {0};
+static const NodeAsm  node_asm_none  = {0};
+static const NodeLit  node_lit_none  = {0};
+static const NodeMisc node_misc_none = {0};
+
+#define NODE_GROUP_READER(fn, field, T)                                        \
+    static inline const T *fn(const Node *n) {                                 \
+        return n->field ? n->field : &fn##_none;                               \
+    }
+NODE_GROUP_READER(node_ctl, ctl, NodeCtl)
+NODE_GROUP_READER(node_chk, chk, NodeChk)
+NODE_GROUP_READER(node_atom, atom, NodeAtom)
+NODE_GROUP_READER(node_asm, asmx, NodeAsm)
+NODE_GROUP_READER(node_lit, lit, NodeLit)
+NODE_GROUP_READER(node_misc, misc, NodeMisc)
+#undef NODE_GROUP_READER
+NodeCtl *node_ctl_mut(VirtualMachine *vm, Node *n);
+NodeChk *node_chk_mut(VirtualMachine *vm, Node *n);
+NodeAtom *node_atom_mut(VirtualMachine *vm, Node *n);
+NodeAsm *node_asm_mut(VirtualMachine *vm, Node *n);
+NodeLit *node_lit_mut(VirtualMachine *vm, Node *n);
+NodeMisc *node_misc_mut(VirtualMachine *vm, Node *n);
 
 /*!
  @brief Represents a C object: either a variable (global/local) or a

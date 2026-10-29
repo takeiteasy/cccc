@@ -768,9 +768,9 @@ static bool node_has_side_effect(Node *n, int depth) {
     }
     return node_has_side_effect(n->lhs, depth + 1) ||
            node_has_side_effect(n->rhs, depth + 1) ||
-           node_has_side_effect(n->cond, depth + 1) ||
-           node_has_side_effect(n->then, depth + 1) ||
-           node_has_side_effect(n->els, depth + 1);
+           node_has_side_effect(node_ctl(n)->cond, depth + 1) ||
+           node_has_side_effect(node_ctl(n)->then, depth + 1) ||
+           node_has_side_effect(node_ctl(n)->els, depth + 1);
 }
 
 // True when `ty` has a `[*]` extent (a VLA row with no length expression).
@@ -1260,11 +1260,11 @@ void add_type(VirtualMachine *vm, Node *node) {
 
     add_type(vm, node->lhs);
     add_type(vm, node->rhs);
-    add_type(vm, node->cond);
-    add_type(vm, node->then);
-    add_type(vm, node->els);
-    add_type(vm, node->init);
-    add_type(vm, node->inc);
+    add_type(vm, node_ctl(node)->cond);
+    add_type(vm, node_ctl(node)->then);
+    add_type(vm, node_ctl(node)->els);
+    add_type(vm, node_ctl(node)->init);
+    add_type(vm, node_ctl(node)->inc);
 
     for (Node *n = node->body; n; n = n->next)
         add_type(vm, n);
@@ -1274,7 +1274,8 @@ void add_type(VirtualMachine *vm, Node *node) {
     // Propagate error type from operands - prevents cascading errors
     if ((node->lhs && node->lhs->ty && is_error_type(node->lhs->ty)) ||
         (node->rhs && node->rhs->ty && is_error_type(node->rhs->ty)) ||
-        (node->cond && node->cond->ty && is_error_type(node->cond->ty))) {
+        (node_ctl(node)->cond && node_ctl(node)->cond->ty &&
+         is_error_type(node_ctl(node)->cond->ty))) {
         node->ty = ty_error;
         return;
     }
@@ -1282,7 +1283,7 @@ void add_type(VirtualMachine *vm, Node *node) {
     // _Float16 is storage-only: an operand is only legal where its address
     // or type is taken, never its value.
     if (node->kind != ND_ADDR) {
-        Node *const ops[] = {node->lhs, node->rhs, node->cond};
+        Node *const ops[] = {node->lhs, node->rhs, node_ctl(node)->cond};
         for (int i = 0; i < 3; i++)
             if (ops[i] && is_float16(ops[i]->ty))
                 error_float16_unsupported(vm, node->tok);
@@ -1489,9 +1490,9 @@ void add_type(VirtualMachine *vm, Node *node) {
             }
             return;
         case ND_COND: {
-            require_value(vm, node->cond);
-            Type *t = node->then->ty;
-            Type *e = node->els->ty;
+            require_value(vm, node_ctl(node)->cond);
+            Type *t = node_ctl(node)->then->ty;
+            Type *e = node_ctl(node)->els->ty;
             // Vector arms in '?:' (tracker #715): must be checked before the
             // pointer-arm logic below, since TY_VECTOR also sets `base` (to
             // the element type) and would otherwise be misrouted into the
@@ -1510,8 +1511,8 @@ void add_type(VirtualMachine *vm, Node *node) {
                 if (!is_vector(t) || !is_vector(e) || !is_compatible(t, e))
                     error_tok(vm, node->tok,
                               "vector types do not match in '?:' select");
-                if (is_vector(node->cond->ty)) {
-                    Type *c = node->cond->ty;
+                if (is_vector(node_ctl(node)->cond->ty)) {
+                    Type *c = node_ctl(node)->cond->ty;
                     if (type_arr(c)->vec_len != type_arr(t)->vec_len ||
                         c->base->size != t->base->size)
                         error_tok(vm, node->tok,
@@ -1549,12 +1550,15 @@ void add_type(VirtualMachine *vm, Node *node) {
                 else
                     pty = tp ? tp : ep;
                 pty        = unqualified(vm, pty);
-                node->then = new_cast(vm, node->then, pty);
-                node->els  = new_cast(vm, node->els, pty);
+                node_ctl_mut(vm, node)->then =
+                    new_cast(vm, node_ctl(node)->then, pty);
+                node_ctl_mut(vm, node)->els =
+                    new_cast(vm, node_ctl(node)->els, pty);
                 node->ty   = pty;
             } else {
-                usual_arith_conv(vm, &node->then, &node->els);
-                node->ty = node->then->ty;
+                usual_arith_conv(vm, &node_ctl_mut(vm, node)->then,
+                                 &node_ctl_mut(vm, node)->els);
+                node->ty = node_ctl(node)->then->ty;
             }
             return;
         }
@@ -1626,15 +1630,17 @@ void add_type(VirtualMachine *vm, Node *node) {
             node->ty = pointer_to(vm, ty_void);
             return;
         case ND_CAS:
-            add_type(vm, node->cas_addr);
-            add_type(vm, node->cas_old);
-            add_type(vm, node->cas_new);
+            add_type(vm, node_atom(node)->cas_addr);
+            add_type(vm, node_atom(node)->cas_old);
+            add_type(vm, node_atom(node)->cas_new);
             node->ty = ty_bool;
 
-            if (node->cas_addr->ty->kind != TY_PTR)
-                error_tok(vm, node->cas_addr->tok, "pointer expected");
-            if (node->cas_old->ty->kind != TY_PTR)
-                error_tok(vm, node->cas_old->tok, "pointer expected");
+            if (node_atom(node)->cas_addr->ty->kind != TY_PTR)
+                error_tok(vm, node_atom(node)->cas_addr->tok,
+                          "pointer expected");
+            if (node_atom(node)->cas_old->ty->kind != TY_PTR)
+                error_tok(vm, node_atom(node)->cas_old->tok,
+                          "pointer expected");
             return;
         case ND_EXCH:
             if (node->lhs->ty->kind != TY_PTR)
@@ -1668,9 +1674,11 @@ void add_type(VirtualMachine *vm, Node *node) {
         case ND_BLOCK_LITERAL:
             // Block literal type is already set during parsing (TY_BLOCK)
             // If not set, infer from block_fn
-            if (!node->ty && node->block_fn && node->block_fn->ty) {
-                node->ty = block_type(vm, node->block_fn->ty->return_ty,
-                                      node->block_fn->ty->params);
+            if (!node->ty && node_misc(node)->block_fn &&
+                node_misc(node)->block_fn->ty) {
+                node->ty =
+                    block_type(vm, node_misc(node)->block_fn->ty->return_ty,
+                               node_misc(node)->block_fn->ty->params);
             }
             return;
         case ND_BLOCK_CALL:

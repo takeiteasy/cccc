@@ -522,6 +522,45 @@ Node *new_node(VirtualMachine *vm, NodeKind kind, Token *tok) {
     return node;
 }
 
+#define NODE_GROUP_MUT(fn, field, T)                                           \
+    T *fn(VirtualMachine *vm, Node *n) {                                       \
+        if (!n->field) {                                                       \
+            n->field = arena_alloc(&vm->compiler.parser_arena, sizeof(T));     \
+            memset(n->field, 0, sizeof(T));                                    \
+        }                                                                      \
+        return n->field;                                                       \
+    }
+NODE_GROUP_MUT(node_ctl_mut, ctl, NodeCtl)
+NODE_GROUP_MUT(node_chk_mut, chk, NodeChk)
+NODE_GROUP_MUT(node_atom_mut, atom, NodeAtom)
+NODE_GROUP_MUT(node_asm_mut, asmx, NodeAsm)
+NODE_GROUP_MUT(node_lit_mut, lit, NodeLit)
+NODE_GROUP_MUT(node_misc_mut, misc, NodeMisc)
+#undef NODE_GROUP_MUT
+
+// Copies *src over *dst, giving dst its own copy of every group.
+void node_assign(VirtualMachine *vm, Node *dst, const Node *src) {
+    *dst = *src;
+#define DUP(field, mut)                                                        \
+    if (src->field) {                                                          \
+        dst->field    = NULL;                                                  \
+        *mut(vm, dst) = *src->field;                                           \
+    }
+    DUP(ctl, node_ctl_mut)
+    DUP(chk, node_chk_mut)
+    DUP(atom, node_atom_mut)
+    DUP(asmx, node_asm_mut)
+    DUP(lit, node_lit_mut)
+    DUP(misc, node_misc_mut)
+#undef DUP
+}
+
+Node *node_clone(VirtualMachine *vm, const Node *src) {
+    Node *dst = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
+    node_assign(vm, dst, src);
+    return dst;
+}
+
 Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
                  Token *tok) {
     Node *node = new_node(vm, kind, tok);
@@ -571,16 +610,17 @@ Node *new_cleanup_decl(VirtualMachine *vm, Obj *var, Token *tok) {
     Node *node =
         new_unary(vm, ND_EXPR_STMT, new_node(vm, ND_NULL_EXPR, tok), tok);
     node->var          = var;
-    node->cleanup_open = var;
+    node_ctl_mut(vm, node)->cleanup_open = var;
     return node;
 }
 
 // Moves the open point from the marker (NULL for a VLA, which has none) to the
 // declaration's last node, so a pause inside the initializer owes no handler.
-void cleanup_open_after(Obj *var, Node *marker, Node *last) {
+void cleanup_open_after(VirtualMachine *vm, Obj *var, Node *marker,
+                        Node *last) {
     if (marker)
-        marker->cleanup_open = NULL;
-    last->cleanup_open = var;
+        node_ctl_mut(vm, marker)->cleanup_open = NULL;
+    node_ctl_mut(vm, last)->cleanup_open = var;
 }
 
 Node *new_var_node(VirtualMachine *vm, Obj *var, Token *tok) {
@@ -922,8 +962,9 @@ bool node_has_side_effects(Node *n) {
             break;
     }
     if (node_has_side_effects(n->lhs) || node_has_side_effects(n->rhs) ||
-        node_has_side_effects(n->cond) || node_has_side_effects(n->then) ||
-        node_has_side_effects(n->els))
+        node_has_side_effects(node_ctl(n)->cond) ||
+        node_has_side_effects(node_ctl(n)->then) ||
+        node_has_side_effects(node_ctl(n)->els))
         return true;
     for (Node *a = n->args; a; a = a->next)
         if (node_has_side_effects(a))
@@ -1131,9 +1172,9 @@ static void check_member_bounds_template(VirtualMachine *vm, Node *n,
     }
     check_member_bounds_template(vm, n->lhs, tok);
     check_member_bounds_template(vm, n->rhs, tok);
-    check_member_bounds_template(vm, n->cond, tok);
-    check_member_bounds_template(vm, n->then, tok);
-    check_member_bounds_template(vm, n->els, tok);
+    check_member_bounds_template(vm, node_ctl(n)->cond, tok);
+    check_member_bounds_template(vm, node_ctl(n)->then, tok);
+    check_member_bounds_template(vm, node_ctl(n)->els, tok);
 }
 
 // Resolves checked-pointer bounds expressions on struct/union members
@@ -1207,9 +1248,9 @@ static void check_param_bounds_template(VirtualMachine *vm, Node *n,
     }
     check_param_bounds_template(vm, n->lhs, tok);
     check_param_bounds_template(vm, n->rhs, tok);
-    check_param_bounds_template(vm, n->cond, tok);
-    check_param_bounds_template(vm, n->then, tok);
-    check_param_bounds_template(vm, n->els, tok);
+    check_param_bounds_template(vm, node_ctl(n)->cond, tok);
+    check_param_bounds_template(vm, node_ctl(n)->then, tok);
+    check_param_bounds_template(vm, node_ctl(n)->els, tok);
 }
 
 // #488: resolves a function type's checked-pointer PARAMETER bounds
@@ -1323,7 +1364,7 @@ static bool checked_tmpl_equal(Node *a, Node *b) {
         return false;
     switch (a->kind) {
         case ND_NUM:
-            return a->val == b->val && a->fval == b->fval;
+            return a->val == b->val && node_lit(a)->fval == node_lit(b)->fval;
         case ND_VAR:
             if (a->var->checked_self_param_idx ||
                 b->var->checked_self_param_idx)
@@ -1356,9 +1397,9 @@ static bool checked_tmpl_equal(Node *a, Node *b) {
     }
     return checked_tmpl_equal(a->lhs, b->lhs) &&
            checked_tmpl_equal(a->rhs, b->rhs) &&
-           checked_tmpl_equal(a->cond, b->cond) &&
-           checked_tmpl_equal(a->then, b->then) &&
-           checked_tmpl_equal(a->els, b->els);
+           checked_tmpl_equal(node_ctl(a)->cond, node_ctl(b)->cond) &&
+           checked_tmpl_equal(node_ctl(a)->then, node_ctl(b)->then) &&
+           checked_tmpl_equal(node_ctl(a)->els, node_ctl(b)->els);
 }
 
 static bool checked_bounds_conflict(Type *o, Node *o_lo, Node *o_hi, Type *n,

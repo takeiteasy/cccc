@@ -77,15 +77,15 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node,
                              num_captures, cap_capacity);
     collect_captures_in_node(vm, node->rhs, outer_locals, captures,
                              num_captures, cap_capacity);
-    collect_captures_in_node(vm, node->cond, outer_locals, captures,
+    collect_captures_in_node(vm, node_ctl(node)->cond, outer_locals, captures,
                              num_captures, cap_capacity);
-    collect_captures_in_node(vm, node->then, outer_locals, captures,
+    collect_captures_in_node(vm, node_ctl(node)->then, outer_locals, captures,
                              num_captures, cap_capacity);
-    collect_captures_in_node(vm, node->els, outer_locals, captures,
+    collect_captures_in_node(vm, node_ctl(node)->els, outer_locals, captures,
                              num_captures, cap_capacity);
-    collect_captures_in_node(vm, node->init, outer_locals, captures,
+    collect_captures_in_node(vm, node_ctl(node)->init, outer_locals, captures,
                              num_captures, cap_capacity);
-    collect_captures_in_node(vm, node->inc, outer_locals, captures,
+    collect_captures_in_node(vm, node_ctl(node)->inc, outer_locals, captures,
                              num_captures, cap_capacity);
 
     for (Node *n = node->body; n; n = n->next)
@@ -100,9 +100,10 @@ static void collect_captures_in_node(VirtualMachine *vm, Node *node,
     // #1081: also walk the inner block's own nested_children (a nested
     // function defined inside it) the same way -- see
     // collect_captures_for_fn_body.
-    if (node->kind == ND_BLOCK_LITERAL && node->block_fn)
-        collect_captures_for_fn_body(vm, node->block_fn, outer_locals, captures,
-                                     num_captures, cap_capacity);
+    if (node->kind == ND_BLOCK_LITERAL && node_misc(node)->block_fn)
+        collect_captures_for_fn_body(vm, node_misc(node)->block_fn,
+                                     outer_locals, captures, num_captures,
+                                     cap_capacity);
 }
 
 // #1081: like collect_captures_in_node(fn->body, ...), but also walks every
@@ -151,11 +152,11 @@ static void collect_block_returns(VirtualMachine *vm, Node *node, Node ***out,
 
     collect_block_returns(vm, node->lhs, out, count, cap);
     collect_block_returns(vm, node->rhs, out, count, cap);
-    collect_block_returns(vm, node->cond, out, count, cap);
-    collect_block_returns(vm, node->then, out, count, cap);
-    collect_block_returns(vm, node->els, out, count, cap);
-    collect_block_returns(vm, node->init, out, count, cap);
-    collect_block_returns(vm, node->inc, out, count, cap);
+    collect_block_returns(vm, node_ctl(node)->cond, out, count, cap);
+    collect_block_returns(vm, node_ctl(node)->then, out, count, cap);
+    collect_block_returns(vm, node_ctl(node)->els, out, count, cap);
+    collect_block_returns(vm, node_ctl(node)->init, out, count, cap);
+    collect_block_returns(vm, node_ctl(node)->inc, out, count, cap);
 
     for (Node *n = node->body; n; n = n->next)
         collect_block_returns(vm, n, out, count, cap);
@@ -204,7 +205,7 @@ long cc_block_desc_size(Obj *block_fn) {
 // Adds `var` to a finished block literal's captures and grows its descriptor
 // slot to fit. For callers that rewrite a block's body after parsing.
 void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var) {
-    Obj *fn = lit->block_fn;
+    Obj *fn = node_misc(lit)->block_fn;
     for (int i = 0; i < fn->num_captures; i++)
         if (fn->captures[i] == var)
             return;
@@ -217,9 +218,9 @@ void cc_block_add_capture(VirtualMachine *vm, Node *lit, Obj *var) {
     caps[n]          = var;
     var->is_captured = true;
 
-    fn->captures = lit->block_captures = caps;
-    fn->num_captures = lit->num_block_captures = n + 1;
-    lit->block_desc_var->ty =
+    fn->captures = node_misc_mut(vm, lit)->block_captures = caps;
+    fn->num_captures = node_misc_mut(vm, lit)->num_block_captures = n + 1;
+    node_misc(lit)->block_desc_var->ty =
         array_of(vm, ty_long, (int)(cc_block_desc_size(fn) / 8));
 }
 
@@ -462,10 +463,10 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Create the block literal node
     Node *node               = new_node(vm, ND_BLOCK_LITERAL, start);
-    node->block_fn           = block_fn;
-    node->block_captures     = captures;
-    node->num_block_captures = num_captures;
-    node->block_desc_var     = desc_var;
+    node_misc_mut(vm, node)->block_fn = block_fn;
+    node_misc_mut(vm, node)->block_captures     = captures;
+    node_misc_mut(vm, node)->num_block_captures = num_captures;
+    node_misc_mut(vm, node)->block_desc_var     = desc_var;
 
     // Block type: pointer to function type (blocks are first-class callable
     // values)

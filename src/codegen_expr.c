@@ -295,7 +295,7 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
         case ND_COND: {
-            if (!is_vector(node->cond->ty)) {
+            if (!is_vector(node_ctl(node)->cond->ty)) {
                 // Ordinary C ternary with vector arms (tracker #715): the
                 // condition is a plain scalar, so the whole vector value is
                 // selected by a runtime branch -- standard C, not the GNU
@@ -304,17 +304,17 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 int r_cond =
                     (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
                 mark_temp_reg_used(r_cond);
-                gen_cond_expr(vm, node->cond, r_cond);
+                gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
                 Pc jz_else = emit_jz3(vm, r_cond);
                 if (r_cond != dest_reg)
                     free_temp_reg(r_cond);
 
-                gen_expr(vm, node->then, dest_reg);
+                gen_expr(vm, node_ctl(node)->then, dest_reg);
                 emit(vm, JMP);
                 Pc jmp_end            = emit_word_ptr(vm);
 
                 vm->text_seg[jz_else] = vm->text_ptr + 1;
-                gen_expr(vm, node->els, dest_reg);
+                gen_expr(vm, node_ctl(node)->els, dest_reg);
                 vm->text_seg[jmp_end] = vm->text_ptr + 1;
                 return;
             }
@@ -324,13 +324,13 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // on rd, like VINSERT_*, safe under the optimizer's fully-opaque
             // treatment of vector opcodes).
             int r_dest = dest_reg == REG_ZERO ? alloc_temp_reg() : dest_reg;
-            gen_expr(vm, node->els, r_dest);
+            gen_expr(vm, node_ctl(node)->els, r_dest);
             mark_temp_reg_used(r_dest);
             int r_cond = alloc_temp_reg();
-            gen_expr(vm, node->cond, r_cond);
+            gen_expr(vm, node_ctl(node)->cond, r_cond);
             mark_temp_reg_used(r_cond);
             int r_then = alloc_temp_reg();
-            gen_expr(vm, node->then, r_then);
+            gen_expr(vm, node_ctl(node)->then, r_then);
             emit_rrrs(vm, vector_selop_for(node->ty->base->size), r_dest,
                       r_cond, r_then, type_arr(node->ty)->vec_len);
             free_temp_reg(r_then);
@@ -569,7 +569,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // operand first sidesteps the whole hazard rather than requiring
             // a push/pop spill for buf/n.
             int r_val = alloc_temp_reg();
-            gen_expr(vm, node->cond, r_val); // decimal operand -> its address
+            gen_expr(vm, node_ctl(node)->cond,
+                     r_val); // decimal operand -> its address
             mark_temp_reg_used(r_val);
             int r_buf = alloc_temp_reg();
             gen_expr(vm, node->lhs, r_buf);
@@ -581,7 +582,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit_mov3(vm, REG_A0, r_buf);
             emit_mov3(vm, REG_A1, r_n);
             emit_mov3(vm, REG_A2, r_val);
-            emit_li3(vm, REG_A3, dec_width_code(node->cond->ty));
+            emit_li3(vm, REG_A3, dec_width_code(node_ctl(node)->cond->ty));
             if (vm->flags & CCCC_POINTER_CHECKS) {
                 emit_rr(vm, CHKP3, REG_A0, 0);
                 emit_rr(vm, CHKP3, REG_A2, 0);
@@ -605,10 +606,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                                          : sizeof(double);
                 check_data_capacity(vm, offset + lit_size);
                 if (node->ty->kind == TY_FLOAT) {
-                    *(float *)vm->data_ptr  = (float)node->fval;
+                    *(float *)vm->data_ptr  = (float)node_lit(node)->fval;
                     vm->data_ptr           += sizeof(float);
                 } else {
-                    *(double *)vm->data_ptr  = node->fval;
+                    *(double *)vm->data_ptr  = node_lit(node)->fval;
                     vm->data_ptr            += sizeof(double);
                 }
 
@@ -626,13 +627,13 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // value is address-based (never loaded into an FReg/int reg),
                 // so dest_reg receives the literal's address, not a loaded
                 // value.
-                if (!node->dec_digits)
+                if (!node_lit(node)->dec_digits)
                     error_tok(
                         vm, node->tok,
                         "internal error: _Decimal literal missing digit text");
 
                 unsigned char bits[16];
-                if (!cccc_dec_encode_literal(node->dec_digits,
+                if (!cccc_dec_encode_literal(node_lit(node)->dec_digits,
                                              dec_width_code(node->ty), bits))
                     error_tok(vm, node->tok,
                               "_Decimal literals require a build with "
@@ -653,17 +654,18 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // wb/uwb literal wider than 64 bits: materialize at runtime via
                 // __cccc_bitint_from_str, reading the full-precision digit text
                 // (captured by the tokenizer) from the data segment.
-                if (!node->wide_digits)
+                if (!node_lit(node)->wide_digits)
                     error_tok(vm, node->tok,
                               "internal error: wide _BitInt literal missing "
                               "digit text");
 
-                size_t    digit_len = strlen(node->wide_digits);
+                size_t    digit_len = strlen(node_lit(node)->wide_digits);
                 long long offset    = vm->data_ptr - vm->data_seg;
                 offset              = (offset + 7) & ~7; // Align
                 vm->data_ptr        = vm->data_seg + offset;
                 check_data_capacity(vm, offset + (long long)digit_len + 1);
-                memcpy(vm->data_ptr, node->wide_digits, digit_len + 1);
+                memcpy(vm->data_ptr, node_lit(node)->wide_digits,
+                       digit_len + 1);
                 vm->data_ptr += digit_len + 1;
 
                 int str_addr  = alloc_temp_reg();
@@ -674,7 +676,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
                 emit_lea3(vm, REG_A0, dst_offset);
                 emit_mov3(vm, REG_A1, str_addr);
-                emit_li3(vm, REG_A2, node->wide_base);
+                emit_li3(vm, REG_A2, node_lit(node)->wide_base);
                 emit_li3(vm, REG_A3, words);
                 emit_li3(vm, REG_A4, node->ty->bit_width);
                 emit_wide_helper(vm, "__cccc_bitint_from_str", 5);
@@ -877,8 +879,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 gen_expr(vm, node->lhs, r_src);
                 mark_temp_reg_used(r_src);
                 long long dst_offset =
-                    node->ret_buffer ? (long long)node->ret_buffer->offset
-                                     : alloc_decimal_temp(vm, node->ty->size);
+                    node_misc(node)->ret_buffer
+                        ? (long long)node_misc(node)->ret_buffer->offset
+                        : alloc_decimal_temp(vm, node->ty->size);
                 emit_lea3(vm, REG_A0, dst_offset);
                 emit_mov3(vm, REG_A1, r_src);
                 emit_li3(vm, REG_A2, dec_width_code(node->ty));
@@ -1152,8 +1155,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     free_temp_reg(code);
                 } else {
                     long long dst_offset;
-                    if (node->ret_buffer)
-                        dst_offset = (long long)node->ret_buffer->offset;
+                    if (node_misc(node)->ret_buffer)
+                        dst_offset =
+                            (long long)node_misc(node)->ret_buffer->offset;
                     else
                         dst_offset = alloc_decimal_temp(vm, operand_ty->size);
 
@@ -1229,8 +1233,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 bool is_cmp = (node->kind == ND_EQ || node->kind == ND_NE ||
                                node->kind == ND_LT || node->kind == ND_LE);
                 if (!is_cmp && wide_op) {
-                    if (node->ret_buffer) {
-                        dst_offset = (long long)node->ret_buffer->offset;
+                    if (node_misc(node)->ret_buffer) {
+                        dst_offset =
+                            (long long)node_misc(node)->ret_buffer->offset;
                     } else {
                         dst_offset = alloc_wide_bitint_temp(vm, words);
                     }
@@ -1881,15 +1886,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // final mov and the r_addr free below both still need them live
             // across this block's own temp allocations.
             if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                node->checked_assign_dst_lo) {
+                node_chk(node)->assign_dst_lo) {
                 mark_temp_reg_used(r_val);
                 if (r_addr >= 0)
                     mark_temp_reg_used(r_addr);
                 int r_slo = alloc_temp_reg();
-                gen_expr(vm, node->checked_assign_src_lo, r_slo);
+                gen_expr(vm, node_chk(node)->assign_src_lo, r_slo);
                 mark_temp_reg_used(r_slo);
                 int r_shi = alloc_temp_reg();
-                gen_expr(vm, node->checked_assign_src_hi, r_shi);
+                gen_expr(vm, node_chk(node)->assign_src_hi, r_shi);
                 mark_temp_reg_used(r_shi);
 
                 int r_dlo = alloc_temp_reg();
@@ -1899,15 +1904,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // the store to `t` matters. Must happen here, after the store
                 // above, not folded into the pre-store src snapshot -- see
                 // Node.checked_assign_dst_obj_init's comment (src/cccc.h).
-                if (node->checked_assign_dst_obj_init)
-                    gen_expr(vm, node->checked_assign_dst_obj_init, r_dlo);
-                gen_expr(vm, node->checked_assign_dst_lo, r_dlo);
+                if (node_chk(node)->assign_dst_obj_init)
+                    gen_expr(vm, node_chk(node)->assign_dst_obj_init, r_dlo);
+                gen_expr(vm, node_chk(node)->assign_dst_lo, r_dlo);
                 emit_chkab(vm, r_dlo, r_slo, r_shi, false,
                            node->checked_assign_src_optional);
                 free_temp_reg(r_dlo);
 
                 int r_dhi = alloc_temp_reg();
-                gen_expr(vm, node->checked_assign_dst_hi, r_dhi);
+                gen_expr(vm, node_chk(node)->assign_dst_hi, r_dhi);
                 emit_chkab(vm, r_dhi, r_slo, r_shi, true,
                            node->checked_assign_src_optional);
                 free_temp_reg(r_dhi);
@@ -1968,17 +1973,17 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // free it before generating the branches.
             int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
             mark_temp_reg_used(r_cond);
-            gen_cond_expr(vm, node->cond, r_cond);
+            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
             Pc jz_else = emit_jz3(vm, r_cond);
             if (r_cond != dest_reg)
                 free_temp_reg(r_cond);
 
-            gen_expr(vm, node->then, dest_reg);
+            gen_expr(vm, node_ctl(node)->then, dest_reg);
             emit(vm, JMP);
             Pc jmp_end            = emit_word_ptr(vm);
 
             vm->text_seg[jz_else] = vm->text_ptr + 1;
-            gen_expr(vm, node->els, dest_reg);
+            gen_expr(vm, node_ctl(node)->els, dest_reg);
             vm->text_seg[jmp_end] = vm->text_ptr + 1;
             return;
         }
@@ -2188,8 +2193,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 Type *dst = node->ty;
                 if (is_decimal(dst) && !is_decimal(src)) {
                     long long dst_offset =
-                        node->ret_buffer ? (long long)node->ret_buffer->offset
-                                         : alloc_decimal_temp(vm, dst->size);
+                        node_misc(node)->ret_buffer
+                            ? (long long)node_misc(node)->ret_buffer->offset
+                            : alloc_decimal_temp(vm, dst->size);
                     emit_lea3(vm, REG_A0, dst_offset);
                     if (is_flonum(src)) {
                         // binary float/double -> decimal: bit-reinterpret via
@@ -2339,8 +2345,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                     // identical and independent of that implementation detail).
                     mark_temp_reg_used(r_src);
                     long long dst_offset =
-                        node->ret_buffer ? (long long)node->ret_buffer->offset
-                                         : alloc_decimal_temp(vm, dst->size);
+                        node_misc(node)->ret_buffer
+                            ? (long long)node_misc(node)->ret_buffer->offset
+                            : alloc_decimal_temp(vm, dst->size);
                     emit_mov3(vm, REG_A1, r_src);
                     emit_lea3(vm, REG_A0, dst_offset);
                     emit_li3(vm, REG_A2, dec_width_code(dst));
@@ -3652,7 +3659,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 return;
             }
             // Subobject query: pass the offset into the member too.
-            gen_expr(vm, node->cond, ptr_reg);
+            gen_expr(vm, node_ctl(node)->cond, ptr_reg);
             emit_psh3(vm, ptr_reg);
             int off_reg = alloc_temp_reg();
             gen_expr(vm, node->rhs, off_reg);
@@ -3711,13 +3718,14 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // Checked arithmetic: val=0/1/2 (add/sub/mul)
             // a→REG_A0, b→REG_A1, ptr→REG_A2; result bool→dest_reg
             // Encode op_type and result type kind in a single immediate
-            Type *result_ty = node->cas_addr->ty->base;
+            Type *result_ty = node_atom(node)->cas_addr->ty->base;
             // type_kind encoding: (size_bytes << 1) | is_unsigned
             int kind_enc =
                 (result_ty->size << 1) | (result_ty->is_unsigned ? 1 : 0);
             long long packed = ((long long)node->val << 8) | kind_enc;
             gen_operands_to_arg_regs(
-                vm, (Node *[]){node->lhs, node->rhs, node->cas_addr}, 3);
+                vm, (Node *[]){node->lhs, node->rhs, node_atom(node)->cas_addr},
+                3);
             emit_with_arg(vm, IOVFL, packed);
             if (dest_reg != REG_A0)
                 emit_mov3(vm, dest_reg, REG_A0);
@@ -3843,7 +3851,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // compare_and_swap(obj_ptr, expected_ptr, desired) → bool
             // Operands: REG_A0 = obj_ptr (T*), REG_A1 = expected_ptr (T*),
             //           REG_A2 = desired (T); result bool in REG_A0.
-            Type *base_ty = node->cas_addr->ty->base;
+            Type *base_ty = node_atom(node)->cas_addr->ty->base;
             int   sz      = base_ty->size;
             if ((sz != 1 && sz != 2 && sz != 4 && sz != 8) ||
                 is_flonum(base_ty))
@@ -3852,9 +3860,11 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                           "1/2/4/8-byte integer or pointer)");
             long long width_enc =
                 ((long long)sz << 1) | (base_ty->is_unsigned ? 1 : 0);
-            gen_operands_to_arg_regs(
-                vm, (Node *[]){node->cas_addr, node->cas_old, node->cas_new},
-                3);
+            gen_operands_to_arg_regs(vm,
+                                     (Node *[]){node_atom(node)->cas_addr,
+                                                node_atom(node)->cas_old,
+                                                node_atom(node)->cas_new},
+                                     3);
 
             // #937: an `_Atomic` [[cccc::ntarray]] element's `+=`/`++`/`--`
             // desugars (to_assign(), src/parse.c) into this ND_CAS rather than
@@ -3932,12 +3942,12 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // would key the patch on a name no define_label() ever emits (they
             // emit `.L..N`), leaving LTA3 at offset 0 and crashing a later
             // `goto *p`.
-            if (!node->unique_label)
+            if (!node_ctl(node)->unique_label)
                 error_tok(vm, node->tok,
                           "internal error: unresolved label address '&&%s'",
-                          node->label ? node->label : "?");
+                          node_ctl(node)->label ? node_ctl(node)->label : "?");
             Pc label_addr_loc = emit_lta3(vm, dest_reg, 0);
-            add_label_patch(node->unique_label, label_addr_loc, true);
+            add_label_patch(node_ctl(node)->unique_label, label_addr_loc, true);
             return;
         }
 
@@ -3959,12 +3969,12 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // invocation its own descriptor, so multiple calls to the same
             // function return independent block instances without aliasing.
 
-            int  num_captures    = node->num_block_captures;
-            long descriptor_size = node->block_desc_var->ty->size;
+            int  num_captures    = node_misc(node)->num_block_captures;
+            long descriptor_size = node_misc(node)->block_desc_var->ty->size;
 
             // Load address of the pre-allocated stack descriptor slot
             int r_desc = alloc_temp_reg();
-            emit_lea3(vm, r_desc, node->block_desc_var->offset);
+            emit_lea3(vm, r_desc, node_misc(node)->block_desc_var->offset);
             mark_temp_reg_used(r_desc);
 
             // Load function address (will be patched later)
@@ -3977,7 +3987,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
                 .location = invoke_addr_loc;
             vm->compiler.func_addr_patches[vm->compiler.num_func_addr_patches]
-                .function = node->block_fn;
+                .function = node_misc(node)->block_fn;
             vm->compiler.num_func_addr_patches++;
 
             // Store invoke pointer at descriptor[0]
@@ -4008,7 +4018,7 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // MCPY -- an exact ty->size copy, not a truncating 8-byte load.
             Obj *enc_fn = vm->compiler.current_fn;
             for (int i = 0; i < num_captures; i++) {
-                Obj *cap         = node->block_captures[i];
+                Obj *cap         = node_misc(node)->block_captures[i];
                 int  r_val       = alloc_temp_reg();
 
                 int  enc_cap_idx = (enc_fn && enc_fn->is_block)
@@ -4106,8 +4116,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 // Store at descriptor[cc_block_capture_offset(node->block_fn,
                 // i)]
                 int r_cap_addr = alloc_temp_reg();
-                emit_addi3(vm, r_cap_addr, r_desc,
-                           cc_block_capture_offset(node->block_fn, i));
+                emit_addi3(
+                    vm, r_cap_addr, r_desc,
+                    cc_block_capture_offset(node_misc(node)->block_fn, i));
                 if (wide_copy) {
                     // #983: destination is always this call's own freshly
                     // allocated descriptor local -- a compile-time-known frame

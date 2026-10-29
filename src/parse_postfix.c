@@ -133,8 +133,8 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
     // [GNU] labels-as-values
     if (equal(tok, "&&")) {
         Node *node         = new_node(vm, ND_LABEL_VAL, tok);
-        node->label        = get_ident(vm, tok->next);
-        node->goto_next    = vm->compiler.gotos;
+        node_ctl_mut(vm, node)->label     = get_ident(vm, tok->next);
+        node_ctl_mut(vm, node)->goto_next = vm->compiler.gotos;
         vm->compiler.gotos = node;
         *rest              = tok->next->next;
         return node;
@@ -1281,8 +1281,8 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     // If a function returns a struct, it is caller's responsibility
     // to allocate a space for the return value.
     if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
-        node->ret_buffer                = new_lvar(vm, "", 0, node->ty);
-        node->ret_buffer->is_ret_buffer = true;
+        node_misc_mut(vm, node)->ret_buffer = new_lvar(vm, "", 0, node->ty);
+        node_misc(node)->ret_buffer->is_ret_buffer = true;
     }
     if (prelude) {
         Node *wrapped         = new_binary(vm, ND_COMMA, prelude, node, tok);
@@ -2120,8 +2120,8 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
         tok);
 
     Node *loop       = new_node(vm, ND_DO, tok);
-    loop->brk_label  = new_unique_name(vm);
-    loop->cont_label = new_unique_name(vm);
+    node_ctl_mut(vm, loop)->brk_label  = new_unique_name(vm);
+    node_ctl_mut(vm, loop)->cont_label = new_unique_name(vm);
 
     Node *oldv       = new_var_node(vm, old, tok);
     Node *valv       = new_var_node(vm, val, tok);
@@ -2149,16 +2149,17 @@ static Node *build_atomic_fetch_op(VirtualMachine *vm, Token *tok, Node *obj,
     }
     Node *body =
         new_binary(vm, ND_ASSIGN, new_var_node(vm, newv, tok), combined, tok);
-    loop->then       = new_node(vm, ND_BLOCK, tok);
-    loop->then->body = new_unary(vm, ND_EXPR_STMT, body, tok);
+    node_ctl_mut(vm, loop)->then     = new_node(vm, ND_BLOCK, tok);
+    node_ctl(loop)->then->body       = new_unary(vm, ND_EXPR_STMT, body, tok);
 
     Node *cas        = new_node(vm, ND_CAS, tok);
-    cas->cas_addr    = new_var_node(vm, addr, tok);
-    cas->cas_old     = new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
-    cas->cas_new     = new_var_node(vm, newv, tok);
+    node_atom_mut(vm, cas)->cas_addr = new_var_node(vm, addr, tok);
+    node_atom_mut(vm, cas)->cas_old =
+        new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
+    node_atom_mut(vm, cas)->cas_new = new_var_node(vm, newv, tok);
     cas->atomic_mo      = mo;
     cas->atomic_mo_fail = atomic_load_order(mo);
-    loop->cond          = new_unary(vm, ND_NOT, cas, tok);
+    node_ctl_mut(vm, loop)->cond    = new_unary(vm, ND_NOT, cas, tok);
 
     cur = cur->next = loop;
     cur = cur->next = new_unary(
@@ -2205,9 +2206,10 @@ static Node *build_sync_cas(VirtualMachine *vm, Token *tok, Node *obj,
                   tok);
 
     Node *cas     = new_node(vm, ND_CAS, tok);
-    cas->cas_addr = new_var_node(vm, addr, tok);
-    cas->cas_old  = new_unary(vm, ND_ADDR, new_var_node(vm, expv, tok), tok);
-    cas->cas_new  = new_cast(vm, newexpr, pointee);
+    node_atom_mut(vm, cas)->cas_addr = new_var_node(vm, addr, tok);
+    node_atom_mut(vm, cas)->cas_old =
+        new_unary(vm, ND_ADDR, new_var_node(vm, expv, tok), tok);
+    node_atom_mut(vm, cas)->cas_new = new_cast(vm, newexpr, pointee);
     cur = cur->next = new_unary(vm, ND_EXPR_STMT, cas, tok);
     if (want_val)
         cur = cur->next =
@@ -2236,7 +2238,7 @@ static Node *stmt_expr_body(VirtualMachine *vm, Node *blk) {
     Node *last = blk->body;
     while (last && last->next)
         last = last->next;
-    if (!blk->cleanup_vars || !last || last->kind != ND_EXPR_STMT)
+    if (!node_ctl(blk)->cleanup_vars || !last || last->kind != ND_EXPR_STMT)
         return blk->body;
 
     add_type(vm, last->lhs);
@@ -2319,7 +2321,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
         Node *sn               = new_ulong(vm, ty->size, start);
         sn->is_sizeof_ptr_expr = (ty->kind == TY_PTR);
-        sn->layout_ty          = ty; // #1031
+        node_misc_mut(vm, sn)->layout_ty = ty; // #1031
         return sn;
     }
 
@@ -2339,7 +2341,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         }
         Node *sn               = new_ulong(vm, node->ty->size, tok);
         sn->is_sizeof_ptr_expr = (node->ty->kind == TY_PTR);
-        sn->layout_ty          = node->ty; // #1031
+        node_misc_mut(vm, sn)->layout_ty = node->ty; // #1031
         return sn;
     }
 
@@ -2352,8 +2354,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest    = skip(vm, tok, ")");
         Node *sn = new_ulong(
             vm, is_gnu_alignof ? type_alignof(ty) : c11_alignof(vm, ty), tok);
-        sn->layout_ty       = ty; // #1031
-        sn->layout_is_align = is_gnu_alignof ? LAYOUT_ALIGN_GNU : LAYOUT_ALIGN;
+        node_misc_mut(vm, sn)->layout_ty = ty; // #1031
+        node_misc_mut(vm, sn)->layout_is_align =
+            is_gnu_alignof ? LAYOUT_ALIGN_GNU : LAYOUT_ALIGN;
         return sn;
     }
 
@@ -2372,8 +2375,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // Only a type's own alignment can be re-materialized from the host.
         // The operand is an expression, so gcc does not cap it.
         if (align == node->ty->align) {
-            sn->layout_ty       = node->ty; // #1031
-            sn->layout_is_align = LAYOUT_ALIGN_GNU;
+            node_misc_mut(vm, sn)->layout_ty       = node->ty; // #1031
+            node_misc_mut(vm, sn)->layout_is_align = LAYOUT_ALIGN_GNU;
         }
         return sn;
     }
@@ -2465,9 +2468,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
         add_type(vm, last);
-        impl->va_form = VA_START;
-        impl->va_ap   = ap;
-        impl->va_last = last;
+        node_misc_mut(vm, impl)->va_form = VA_START;
+        node_misc_mut(vm, impl)->va_ap   = ap;
+        node_misc_mut(vm, impl)->va_last = last;
         return impl;
     }
 
@@ -2480,9 +2483,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *impl = assign(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
-        impl->va_form = VA_ARG;
-        impl->va_ap   = ap;
-        impl->va_type = type;
+        node_misc_mut(vm, impl)->va_form = VA_ARG;
+        node_misc_mut(vm, impl)->va_ap   = ap;
+        node_misc_mut(vm, impl)->va_type = type;
         return impl;
     }
 
@@ -2496,9 +2499,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest      = skip(vm, tok, ")");
         add_type(vm, dest);
         add_type(vm, src);
-        impl->va_form = VA_COPY;
-        impl->va_ap   = dest;
-        impl->va_src  = src;
+        node_misc_mut(vm, impl)->va_form = VA_COPY;
+        node_misc_mut(vm, impl)->va_ap   = dest;
+        node_misc_mut(vm, impl)->va_src  = src;
         return impl;
     }
 
@@ -2509,8 +2512,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *impl = assign(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         add_type(vm, ap);
-        impl->va_form = VA_END;
-        impl->va_ap   = ap;
+        node_misc_mut(vm, impl)->va_form = VA_END;
+        node_misc_mut(vm, impl)->va_ap   = ap;
         return impl;
     }
 
@@ -2598,7 +2601,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node = new_node(vm, ND_DECIMAL_TO_CHARS, start);
         node->lhs  = buf;
         node->rhs  = n;
-        node->cond = val;
+        node_ctl_mut(vm, node)->cond = val;
         node->ty   = ty_int;
         return node;
     }
@@ -2810,9 +2813,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                     vector_lane_ref(vm, new_var_node(vm, v2var, start), elem_ty,
                                     els_idx, start);
                 Node *cond = new_node(vm, ND_COND, start);
-                cond->cond = cmp;
-                cond->then = then_lane;
-                cond->els  = els_lane;
+                node_ctl_mut(vm, cond)->cond = cmp;
+                node_ctl_mut(vm, cond)->then = then_lane;
+                node_ctl_mut(vm, cond)->els  = els_lane;
                 src_lane   = new_binary(vm, ND_COMMA, idx_init, cond, start);
             }
             Node *assign_lane =
@@ -2826,11 +2829,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "__builtin_compare_and_swap")) {
         Node *node     = new_node(vm, ND_CAS, tok);
         tok            = skip(vm, tok->next, "(");
-        node->cas_addr = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_addr = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_old  = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_old  = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_new  = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_new  = assign(vm, &tok, tok);
         *rest          = skip(vm, tok, ")");
         return node;
     }
@@ -2929,11 +2932,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // -c=native emits the recorded flag and orders.
         Node *node     = new_node(vm, ND_CAS, tok);
         tok            = skip(vm, tok->next, "(");
-        node->cas_addr = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_addr = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_old  = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_old  = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_new  = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_new  = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
         node->atomic_weak    = atomic_weak_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
@@ -3018,11 +3021,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // ND_CAS's cas_new wants.
         Node *node     = new_node(vm, ND_CAS, tok);
         tok            = skip(vm, tok->next, "(");
-        node->cas_addr = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_addr = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_old  = assign(vm, &tok, tok);
+        node_atom_mut(vm, node)->cas_old  = assign(vm, &tok, tok);
         tok            = skip(vm, tok, ",");
-        node->cas_new  = new_unary(vm, ND_DEREF, assign(vm, &tok, tok), tok);
+        node_atom_mut(vm, node)->cas_new =
+            new_unary(vm, ND_DEREF, assign(vm, &tok, tok), tok);
         tok            = skip(vm, tok, ",");
         node->atomic_weak    = atomic_weak_arg(vm, &tok, tok);
         tok = skip(vm, tok, ",");
@@ -3333,8 +3337,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             // min (type 2/3).  If either branch is unresolvable, keep the
             // conservative default.
             ObjSizeInfo ti, ei;
-            if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
-                objsize_resolve_ptr(vm, ptr->els, &ei)) {
+            if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
+                objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
                 size_t sa = OBJSZ_REMAINING(ti);
                 size_t sb = OBJSZ_REMAINING(ei);
                 result =
@@ -3468,8 +3472,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
             size_t fold_result = 0;
             if (ptr->kind == ND_COND) {
                 ObjSizeInfo ti, ei;
-                if (objsize_resolve_ptr(vm, ptr->then, &ti) &&
-                    objsize_resolve_ptr(vm, ptr->els, &ei)) {
+                if (objsize_resolve_ptr(vm, node_ctl(ptr)->then, &ti) &&
+                    objsize_resolve_ptr(vm, node_ctl(ptr)->els, &ei)) {
                     size_t sa   = DYNOSZ_REMAINING(ti);
                     size_t sb   = DYNOSZ_REMAINING(ei);
                     fold_result = (type_arg & 2) ? (sa < sb ? sa : sb)
@@ -3505,7 +3509,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         if ((type_arg & 1) &&
             objsize_resolve_subobject(vm, ptr, &m, &sub_base, &sub_off)) {
             node->member = m;
-            node->cond   = sub_base;
+            node_ctl_mut(vm, node)->cond = sub_base;
             node->rhs    = sub_off;
         }
         return node;
@@ -3516,7 +3520,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok->next, "(");
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
-        node->fval = HUGE_VAL;
+        node_lit_mut(vm, node)->fval = HUGE_VAL;
         node->ty   = ty_double;
         return node;
     }
@@ -3526,7 +3530,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok->next, "(");
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
-        node->fval = (float)HUGE_VAL;
+        node_lit_mut(vm, node)->fval = (float)HUGE_VAL;
         node->ty   = ty_float;
         return node;
     }
@@ -3536,7 +3540,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok->next, "(");
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
-        node->fval = HUGE_VAL;
+        node_lit_mut(vm, node)->fval = HUGE_VAL;
         node->ty   = ty_ldouble;
         return node;
     }
@@ -3555,7 +3559,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok              = skip(vm, tok->next, "(");
         *rest            = skip(vm, tok, ")");
         Node *node       = new_node(vm, ND_NUM, start);
-        node->dec_digits = "Inf";
+        node_lit_mut(vm, node)->dec_digits = "Inf";
         node->ty         = ty;
         return node;
     }
@@ -3573,7 +3577,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         (void)tag;
         *rest            = skip(vm, tok, ")");
         Node *node       = new_node(vm, ND_NUM, start);
-        node->dec_digits = "NaN";
+        node_lit_mut(vm, node)->dec_digits = "NaN";
         node->ty         = ty;
         return node;
     }
@@ -3587,7 +3591,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok->next, "(");
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
-        node->fval = INFINITY;
+        node_lit_mut(vm, node)->fval = INFINITY;
         node->ty   = ty;
         return node;
     }
@@ -3605,7 +3609,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         (void)tag;
         *rest      = skip(vm, tok, ")");
         Node *node = new_node(vm, ND_NUM, start);
-        node->fval = NAN;
+        node_lit_mut(vm, node)->fval = NAN;
         node->ty   = ty;
         return node;
     }
@@ -3633,13 +3637,13 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 uint32_t u;
                 float    f;
             } snan     = {.u = 0x7F800001u};
-            node->fval = snan.f;
+            node_lit_mut(vm, node)->fval = snan.f;
         } else {
             union {
                 uint64_t u;
                 double   d;
             } snan     = {.u = 0x7FF0000000000001ULL};
-            node->fval = snan.d;
+            node_lit_mut(vm, node)->fval = snan.d;
         }
         node->ty = ty;
         return node;
@@ -3662,7 +3666,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *arg      = assign(vm, &tok, tok);
         *rest          = skip(vm, tok, ")");
         Node *huge     = new_node(vm, ND_NUM, start);
-        huge->fval     = HUGE_VAL;
+        node_lit_mut(vm, huge)->fval = HUGE_VAL;
         huge->ty       = ty_double;
         Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
         // PLACEHOLDER: arg is evaluated twice; should use a temp for
@@ -3679,7 +3683,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *arg      = assign(vm, &tok, tok);
         *rest          = skip(vm, tok, ")");
         Node *huge     = new_node(vm, ND_NUM, start);
-        huge->fval     = HUGE_VAL;
+        node_lit_mut(vm, huge)->fval = HUGE_VAL;
         huge->ty       = ty_double;
         Node *neg_huge = new_unary(vm, ND_NEG, huge, start);
         // PLACEHOLDER: arg is evaluated multiple times; should use a temp
@@ -3698,7 +3702,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *arg  = assign(vm, &tok, tok);
         *rest      = skip(vm, tok, ")");
         Node *zero = new_node(vm, ND_NUM, start);
-        zero->fval = 0.0;
+        node_lit_mut(vm, zero)->fval = 0.0;
         zero->ty   = ty_double;
         Node *node = new_binary(vm, ND_LT, arg, zero, start);
         return node;
@@ -3939,7 +3943,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 args[n++] = eval_double(vm, a);
             if (libm_builtin_fold(libm_row, libm_variant, args, &folded)) {
                 Node *num = new_node(vm, ND_NUM, start);
-                num->fval = folded;
+                node_lit_mut(vm, num)->fval = folded;
                 num->ty   = fn->ty->return_ty;
                 return num;
             }
@@ -4076,7 +4080,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *node     = new_node(vm, ND_OVERFLOW_ARITH, start);
         node->lhs      = a;
         node->rhs      = b;
-        node->cas_addr = ptr;
+        node_atom_mut(vm, node)->cas_addr = ptr;
         node->val      = op;
         node->ty       = ty_int;
         return node;
@@ -4398,8 +4402,11 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 // serialize_expr -- without this the body would print
                 // "N = sizeof(struct statfs)" while every reference to N
                 // printed the guest-folded literal.
-                num->layout_ty       = sc->enum_layout_ty;
-                num->layout_is_align = sc->enum_layout_is_align;
+                if (sc->enum_layout_ty) {
+                    NodeMisc *misc        = node_misc_mut(vm, num);
+                    misc->layout_ty       = sc->enum_layout_ty;
+                    misc->layout_is_align = sc->enum_layout_is_align;
+                }
                 return num;
             }
         }
@@ -4429,10 +4436,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 *rest                 = tok->next; // Skip ')'
 
                 Node *node            = new_node(vm, ND_MACRO_CALL, macro_tok);
-                node->macro_name      = pm->name;
+                node_misc_mut(vm, node)->macro_name      = pm->name;
                 node->args            = head.next;
-                node->macro_arg_count = arg_count;
-                node->macro_scope     = vm->compiler.scope;
+                node_misc_mut(vm, node)->macro_arg_count = arg_count;
+                node_misc_mut(vm, node)->macro_scope     = vm->compiler.scope;
                 // Type will be determined after macro expansion
                 node->ty =
                     ty_long; // Placeholder - macros return Node* (pointer)
@@ -4587,10 +4594,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (is_flonum(tok->ty)) {
             node       = new_node(vm, ND_NUM, tok);
-            node->fval = tok->fval;
+            node_lit_mut(vm, node)->fval = tok->fval;
             if (vm->debug_vm)
                 printf("  primary: created flonum node, fval=%Lf\n",
-                       node->fval);
+                       node_lit(node)->fval);
         } else if (is_decimal(tok->ty)) {
             // _Decimal32/64/128 literal (#402): node->fval stays 0.0 (never
             // populated for these -- see tokenize.c); node->dec_digits below
@@ -4603,9 +4610,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         }
 
         node->ty          = tok->ty;
-        node->wide_digits = tok->wide_digits;
-        node->wide_base   = tok->wide_base;
-        node->dec_digits  = tok->dec_digits;
+        if (tok->wide_digits || tok->dec_digits) {
+            NodeLit *lit     = node_lit_mut(vm, node);
+            lit->wide_digits = tok->wide_digits;
+            lit->wide_base   = tok->wide_base;
+            lit->dec_digits  = tok->dec_digits;
+        }
         if (vm->debug_vm)
             printf(" primary: set node->ty to tok->ty, kind=%d\n",
                    node->ty ? node->ty->kind : -1);

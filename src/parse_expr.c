@@ -73,8 +73,9 @@ double eval_double(VirtualMachine *vm, Node *node) {
         case ND_NEG:
             return -eval_double(vm, node->lhs);
         case ND_COND:
-            return eval_double(vm, node->cond) ? eval_double(vm, node->then)
-                                               : eval_double(vm, node->els);
+            return eval_double(vm, node_ctl(node)->cond)
+                       ? eval_double(vm, node_ctl(node)->then)
+                       : eval_double(vm, node_ctl(node)->els);
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
             return eval_double(vm, node->rhs);
@@ -129,7 +130,7 @@ double eval_double(VirtualMachine *vm, Node *node) {
             return node->val == 1 ? cre : cim;
         }
         case ND_NUM:
-            return node->fval;
+            return node_lit(node)->fval;
         default:
             error_tok(vm, node->tok, "not a compile-time constant");
             return 0;
@@ -215,10 +216,10 @@ void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im) {
             *im = -*im;
             break;
         case ND_COND:
-            if (eval_double(vm, node->cond))
-                eval_complex(vm, node->then, re, im);
+            if (eval_double(vm, node_ctl(node)->cond))
+                eval_complex(vm, node_ctl(node)->then, re, im);
             else
-                eval_complex(vm, node->els, re, im);
+                eval_complex(vm, node_ctl(node)->els, re, im);
             break;
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
@@ -281,9 +282,9 @@ static void eval_decimal_rec(VirtualMachine *vm, Node *node, int w, void *out) {
 
     switch (node->kind) {
         case ND_NUM:
-            if (!node->dec_digits)
+            if (!node_lit(node)->dec_digits)
                 error_tok(vm, node->tok, "not a compile-time constant");
-            if (!cccc_dec_encode_literal(node->dec_digits, w, out))
+            if (!cccc_dec_encode_literal(node_lit(node)->dec_digits, w, out))
                 error_tok(vm, node->tok,
                           "_Decimal literals require a build with "
                           "CCCC_HAS_DECIMAL=1");
@@ -361,10 +362,10 @@ static void eval_decimal_rec(VirtualMachine *vm, Node *node, int w, void *out) {
             // Mirrors eval_double's ND_COND handling: the condition itself is
             // never decimal-typed in practice (C's ?: condition is an ordinary
             // scalar test), so eval_double's own int/flonum handling covers it.
-            if (eval_double(vm, node->cond))
-                eval_decimal_rec(vm, node->then, w, out);
+            if (eval_double(vm, node_ctl(node)->cond))
+                eval_decimal_rec(vm, node_ctl(node)->then, w, out);
             else
-                eval_decimal_rec(vm, node->els, w, out);
+                eval_decimal_rec(vm, node_ctl(node)->els, w, out);
             return;
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
@@ -533,8 +534,8 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
             tok);
 
         Node *loop       = new_node(vm, ND_DO, tok);
-        loop->brk_label  = new_unique_name(vm);
-        loop->cont_label = new_unique_name(vm);
+        node_ctl_mut(vm, loop)->brk_label  = new_unique_name(vm);
+        node_ctl_mut(vm, loop)->cont_label = new_unique_name(vm);
 
         Node *body =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, new, tok),
@@ -542,14 +543,15 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
                                   new_var_node(vm, val, tok), tok),
                        tok);
 
-        loop->then       = new_node(vm, ND_BLOCK, tok);
-        loop->then->body = new_unary(vm, ND_EXPR_STMT, body, tok);
+        node_ctl_mut(vm, loop)->then = new_node(vm, ND_BLOCK, tok);
+        node_ctl(loop)->then->body   = new_unary(vm, ND_EXPR_STMT, body, tok);
 
         Node *cas        = new_node(vm, ND_CAS, tok);
-        cas->cas_addr    = new_var_node(vm, addr, tok);
-        cas->cas_old = new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
-        cas->cas_new = new_var_node(vm, new, tok);
-        loop->cond   = new_unary(vm, ND_NOT, cas, tok);
+        node_atom_mut(vm, cas)->cas_addr = new_var_node(vm, addr, tok);
+        node_atom_mut(vm, cas)->cas_old =
+            new_unary(vm, ND_ADDR, new_var_node(vm, old, tok), tok);
+        node_atom_mut(vm, cas)->cas_new = new_var_node(vm, new, tok);
+        node_ctl_mut(vm, loop)->cond    = new_unary(vm, ND_NOT, cas, tok);
 
         // #937: an `_Atomic` ntarray element's `+=`/`++`/`--` takes this
         // CAS-loop desugar rather than the plain ND_ASSIGN one above -- the
@@ -570,19 +572,19 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         // #950: a member of the element (`tbl[n].a += 1`) takes the element's
         // hi and slot size from the root deref instead.
         Node *nt_root = checked_nt_store_root(binary->lhs);
-        if (nt_root && nt_root->checked_bounds_hi) {
-            cas->checked_bounds_hi =
-                clone_bounds_node(vm, nt_root->checked_bounds_hi);
-            cas->checked_access_size   = nt_root->checked_access_size;
-            cas->checked_nt_slot       = checked_nt_slot_size(nt_root);
+        if (nt_root && node_chk(nt_root)->bounds_hi) {
+            node_chk_mut(vm, cas)->bounds_hi =
+                clone_bounds_node(vm, node_chk(nt_root)->bounds_hi);
+            node_chk_mut(vm, cas)->access_size = node_chk(nt_root)->access_size;
+            node_chk_mut(vm, cas)->nt_slot     = checked_nt_slot_size(nt_root);
             cas->checked_nt_terminator = true;
             // #945: carry the object-expression hoist init across too (if
             // any) -- `hi` above may read `*t`, so codegen's CHKNT site for
             // `cas` must re-run the same `t = &obj` init immediately before
             // it, exactly like every other checked_bounds_hi consumer.
-            if (nt_root->checked_bounds_obj_init)
-                cas->checked_bounds_obj_init =
-                    clone_bounds_node(vm, nt_root->checked_bounds_obj_init);
+            if (node_chk(nt_root)->bounds_obj_init)
+                node_chk_mut(vm, cas)->bounds_obj_init =
+                    clone_bounds_node(vm, node_chk(nt_root)->bounds_obj_init);
         }
         // #943: back-link so propagate_checked_bounds()'s walk 3
         // (checked_prop_attach_scan(), which runs after to_assign() has
@@ -594,7 +596,7 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
         // being set yet): binary->lhs may be an as-yet-unresolved propagated
         // deref at this point in parsing.
         if (binary->lhs->kind == ND_DEREF)
-            binary->lhs->checked_rmw_mirror = cas;
+            node_chk_mut(vm, binary->lhs)->rmw_mirror = cas;
 
         cur = cur->next = loop;
         // The result goes through a plain-typed temporary: Apple clang
@@ -649,13 +651,13 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
             vm, ND_MEMBER,
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
         expr2->member          = binary->lhs->member;
-        expr2->lhs->rmw_lvalue = binary->lhs->lhs;
+        node_chk_mut(vm, expr2->lhs)->rmw_lvalue = binary->lhs->lhs;
 
         Node *expr3            = new_unary(
             vm, ND_MEMBER,
             new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok), tok);
         expr3->member          = binary->lhs->member;
-        expr3->lhs->rmw_lvalue = binary->lhs->lhs;
+        node_chk_mut(vm, expr3->lhs)->rmw_lvalue = binary->lhs->lhs;
 
         Node *expr4            = new_binary(
             vm, ND_ASSIGN, expr2,
@@ -680,7 +682,7 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
 
     Node *store_deref =
         new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
-    store_deref->rmw_lvalue = binary->lhs;
+    node_chk_mut(vm, store_deref)->rmw_lvalue = binary->lhs;
 
     // #937: `binary->lhs` (the original `*p`/`p[i]`/`p->x` deref, e.g. `s[n]`
     // in `s[n] += 1`) already carries checked-pointer bounds if
@@ -706,34 +708,37 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // store both range-check the same address) -- acceptable at this
     // magnitude, not worth deduping.
     Node *nt_root_rmw = checked_nt_store_root(binary->lhs);
-    if (binary->lhs->kind == ND_DEREF && binary->lhs->checked_bounds_lo &&
-        binary->lhs->checked_bounds_hi) {
-        store_deref->checked_bounds_lo =
-            clone_bounds_node(vm, binary->lhs->checked_bounds_lo);
-        store_deref->checked_bounds_hi =
-            clone_bounds_node(vm, binary->lhs->checked_bounds_hi);
-        store_deref->checked_access_size   = binary->lhs->checked_access_size;
+    if (binary->lhs->kind == ND_DEREF && node_chk(binary->lhs)->bounds_lo &&
+        node_chk(binary->lhs)->bounds_hi) {
+        node_chk_mut(vm, store_deref)->bounds_lo =
+            clone_bounds_node(vm, node_chk(binary->lhs)->bounds_lo);
+        node_chk_mut(vm, store_deref)->bounds_hi =
+            clone_bounds_node(vm, node_chk(binary->lhs)->bounds_hi);
+        node_chk_mut(vm, store_deref)->access_size =
+            node_chk(binary->lhs)->access_size;
         store_deref->checked_nt_terminator = binary->lhs->checked_nt_terminator;
         // #945: see the ND_CAS branch above -- same reasoning, this is the
         // non-atomic RMW desugar's synthesized store.
-        if (binary->lhs->checked_bounds_obj_init)
-            store_deref->checked_bounds_obj_init =
-                clone_bounds_node(vm, binary->lhs->checked_bounds_obj_init);
-    } else if (nt_root_rmw && nt_root_rmw->checked_bounds_lo &&
-               nt_root_rmw->checked_bounds_hi) {
+        if (node_chk(binary->lhs)->bounds_obj_init)
+            node_chk_mut(vm, store_deref)->bounds_obj_init =
+                clone_bounds_node(vm, node_chk(binary->lhs)->bounds_obj_init);
+    } else if (nt_root_rmw && node_chk(nt_root_rmw)->bounds_lo &&
+               node_chk(nt_root_rmw)->bounds_hi) {
         // #950: `tbl[n].a += 1` stores into a member of the element; carry
         // the element's bounds and slot size, with the member's own size as
         // the range-checked access.
-        store_deref->checked_bounds_lo =
-            clone_bounds_node(vm, nt_root_rmw->checked_bounds_lo);
-        store_deref->checked_bounds_hi =
-            clone_bounds_node(vm, nt_root_rmw->checked_bounds_hi);
-        store_deref->checked_access_size   = get_vm_size(binary->lhs->ty);
+        node_chk_mut(vm, store_deref)->bounds_lo =
+            clone_bounds_node(vm, node_chk(nt_root_rmw)->bounds_lo);
+        node_chk_mut(vm, store_deref)->bounds_hi =
+            clone_bounds_node(vm, node_chk(nt_root_rmw)->bounds_hi);
+        node_chk_mut(vm, store_deref)->access_size =
+            get_vm_size(binary->lhs->ty);
         store_deref->checked_nt_terminator = true;
-        store_deref->checked_nt_slot       = checked_nt_slot_size(nt_root_rmw);
-        if (nt_root_rmw->checked_bounds_obj_init)
-            store_deref->checked_bounds_obj_init =
-                clone_bounds_node(vm, nt_root_rmw->checked_bounds_obj_init);
+        node_chk_mut(vm, store_deref)->nt_slot =
+            checked_nt_slot_size(nt_root_rmw);
+        if (node_chk(nt_root_rmw)->bounds_obj_init)
+            node_chk_mut(vm, store_deref)->bounds_obj_init =
+                clone_bounds_node(vm, node_chk(nt_root_rmw)->bounds_obj_init);
     }
     // #943: back-link so propagate_checked_bounds()'s walk 3
     // (checked_prop_attach_scan()) can mirror a PROPAGATED terminator-slot
@@ -742,10 +747,10 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // above already does for an already-resolved one. Unconditional, same
     // reasoning as the ND_CAS branch above.
     if (binary->lhs->kind == ND_DEREF)
-        binary->lhs->checked_rmw_mirror = store_deref;
+        node_chk_mut(vm, binary->lhs)->rmw_mirror = store_deref;
 
     Node *load_deref = new_unary(vm, ND_DEREF, new_var_node(vm, var, tok), tok);
-    load_deref->rmw_lvalue = binary->lhs;
+    node_chk_mut(vm, load_deref)->rmw_lvalue = binary->lhs;
 
     Node *expr2            = new_binary(
         vm, ND_ASSIGN, store_deref,
@@ -784,7 +789,7 @@ static bool is_compound_assign(Token *tok) {
 Node *assign(VirtualMachine *vm, Token **rest, Token *tok) {
     Node *node = conditional(vm, &tok, tok);
 
-    if (node->swizzle_store) {
+    if (node_misc(node)->swizzle_store) {
         if (equal(tok, "="))
             return opencl_swizzle_assign(vm, node, assign(vm, rest, tok->next),
                                          tok);
@@ -885,11 +890,11 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
 
         if (cheap_reread) {
             Node *rhs = new_node(vm, ND_COND, tok);
-            rhs->cond = cond;
-            rhs->then = clone_bounds_node(vm, cond);
+            node_ctl_mut(vm, rhs)->cond = cond;
+            node_ctl_mut(vm, rhs)->then = clone_bounds_node(vm, cond);
             if (elvis_els_dead)
                 vm->compiler.dead_code_depth++;
-            rhs->els = conditional(vm, rest, tok->next->next);
+            node_ctl_mut(vm, rhs)->els = conditional(vm, rest, tok->next->next);
             if (elvis_els_dead)
                 vm->compiler.dead_code_depth--;
             return rhs;
@@ -900,18 +905,18 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         Node *lhs =
             new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok), cond, tok);
         Node *rhs = new_node(vm, ND_COND, tok);
-        rhs->cond = new_var_node(vm, var, tok);
-        rhs->then = new_var_node(vm, var, tok);
+        node_ctl_mut(vm, rhs)->cond = new_var_node(vm, var, tok);
+        node_ctl_mut(vm, rhs)->then = new_var_node(vm, var, tok);
         if (elvis_els_dead)
             vm->compiler.dead_code_depth++;
-        rhs->els = conditional(vm, rest, tok->next->next);
+        node_ctl_mut(vm, rhs)->els = conditional(vm, rest, tok->next->next);
         if (elvis_els_dead)
             vm->compiler.dead_code_depth--;
         return new_binary(vm, ND_COMMA, lhs, rhs, tok);
     }
 
     Node *node = new_node(vm, ND_COND, tok);
-    node->cond = cond;
+    node_ctl_mut(vm, node)->cond = cond;
 
     // DCE-aware suppression: 0 ? dead() : live() — then branch is dead;
     // 1 ? live() : dead() — else branch is dead.
@@ -921,7 +926,7 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (then_dead)
         vm->compiler.dead_code_depth++;
-    node->then = expr(vm, &tok, tok->next);
+    node_ctl_mut(vm, node)->then = expr(vm, &tok, tok->next);
     if (then_dead)
         vm->compiler.dead_code_depth--;
 
@@ -930,7 +935,7 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
         if (vm->collect_errors &&
             error_tok_recover(vm, tok, "expected ':' in ternary operator")) {
             // Use 'then' expression as 'else' placeholder
-            node->els = node->then;
+            node_ctl_mut(vm, node)->els = node_ctl(node)->then;
             *rest     = tok;
             return node;
         }
@@ -941,7 +946,7 @@ Node *conditional(VirtualMachine *vm, Token **rest, Token *tok) {
 
     if (else_dead)
         vm->compiler.dead_code_depth++;
-    node->els = conditional(vm, rest, tok);
+    node_ctl_mut(vm, node)->els = conditional(vm, rest, tok);
     if (else_dead)
         vm->compiler.dead_code_depth--;
     return node;
@@ -1453,7 +1458,7 @@ static Node *shift(VirtualMachine *vm, Token **rest, Token *tok) {
 // C does not sequence the two operands of `+`/`-`/`/`.
 bool node_assigns(const Node *n) {
     return n && (n->kind == ND_ASSIGN || node_assigns(n->lhs) ||
-                 node_assigns(n->rhs) || node_assigns(n->cond));
+                 node_assigns(n->rhs) || node_assigns(node_ctl(n)->cond));
 }
 
 static Node *spill_if_assigns(VirtualMachine *vm, Node **operand, Node *prefix,

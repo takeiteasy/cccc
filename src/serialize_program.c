@@ -255,19 +255,19 @@ void serialize_ast_walk(Node *root, void (*visit)(Node *, void *), void *ctx) {
         visit(n, ctx);
         AST_WALK_1044_PUSH(n->lhs);
         AST_WALK_1044_PUSH(n->rhs);
-        AST_WALK_1044_PUSH(n->cond);
-        AST_WALK_1044_PUSH(n->then);
-        AST_WALK_1044_PUSH(n->els);
-        AST_WALK_1044_PUSH(n->init);
-        AST_WALK_1044_PUSH(n->inc);
+        AST_WALK_1044_PUSH(node_ctl(n)->cond);
+        AST_WALK_1044_PUSH(node_ctl(n)->then);
+        AST_WALK_1044_PUSH(node_ctl(n)->els);
+        AST_WALK_1044_PUSH(node_ctl(n)->init);
+        AST_WALK_1044_PUSH(node_ctl(n)->inc);
         AST_WALK_1044_PUSH(n->body);
         AST_WALK_1044_PUSH(n->args);
-        AST_WALK_1044_PUSH(n->case_next);
-        AST_WALK_1044_PUSH(n->default_case);
-        AST_WALK_1044_PUSH(n->cas_addr);
-        AST_WALK_1044_PUSH(n->cas_old);
-        AST_WALK_1044_PUSH(n->cas_new);
-        AST_WALK_1044_PUSH(n->atomic_expr);
+        AST_WALK_1044_PUSH(node_ctl(n)->case_next);
+        AST_WALK_1044_PUSH(node_ctl(n)->default_case);
+        AST_WALK_1044_PUSH(node_atom(n)->cas_addr);
+        AST_WALK_1044_PUSH(node_atom(n)->cas_old);
+        AST_WALK_1044_PUSH(node_atom(n)->cas_new);
+        AST_WALK_1044_PUSH(node_atom(n)->atomic_expr);
         AST_WALK_1044_PUSH(n->next);
     }
 #undef AST_WALK_1044_PUSH
@@ -304,30 +304,32 @@ void serialize_collect_outer_jumps(SerializeContext *ctx, Node *body) {
         Node        *n  = it.n;
         if (!node_set_add(&seen, n))
             continue;
-        if (n->kind == ND_GOTO && !n->label && n->unique_label &&
-            n->unique_label != it.brk && n->unique_label != it.cont)
-            hashmap_put(&ctx->outer_jumps, n->unique_label, (void *)1);
+        if (n->kind == ND_GOTO && !node_ctl(n)->label &&
+            node_ctl(n)->unique_label && node_ctl(n)->unique_label != it.brk &&
+            node_ctl(n)->unique_label != it.cont)
+            hashmap_put(&ctx->outer_jumps, node_ctl(n)->unique_label,
+                        (void *)1);
         char *brk  = it.brk;
         char *cont = it.cont;
         if (n->kind == ND_FOR || n->kind == ND_DO) {
-            brk  = n->brk_label;
-            cont = n->cont_label;
+            brk  = node_ctl(n)->brk_label;
+            cont = node_ctl(n)->cont_label;
         } else if (n->kind == ND_SWITCH) {
-            brk = n->brk_label;
+            brk = node_ctl(n)->brk_label;
         }
         bool scoped = n->kind == ND_FOR || n->kind == ND_DO ||
                       n->kind == ND_SWITCH;
         JUMP_WALK_PUSH(n->lhs, it.brk, it.cont);
         JUMP_WALK_PUSH(n->rhs, it.brk, it.cont);
-        JUMP_WALK_PUSH(n->cond, it.brk, it.cont);
-        JUMP_WALK_PUSH(n->then, scoped ? brk : it.brk,
+        JUMP_WALK_PUSH(node_ctl(n)->cond, it.brk, it.cont);
+        JUMP_WALK_PUSH(node_ctl(n)->then, scoped ? brk : it.brk,
                        scoped ? cont : it.cont);
-        JUMP_WALK_PUSH(n->els, it.brk, it.cont);
-        JUMP_WALK_PUSH(n->init, it.brk, it.cont);
-        JUMP_WALK_PUSH(n->inc, it.brk, it.cont);
+        JUMP_WALK_PUSH(node_ctl(n)->els, it.brk, it.cont);
+        JUMP_WALK_PUSH(node_ctl(n)->init, it.brk, it.cont);
+        JUMP_WALK_PUSH(node_ctl(n)->inc, it.brk, it.cont);
         JUMP_WALK_PUSH(n->body, it.brk, it.cont);
         JUMP_WALK_PUSH(n->args, it.brk, it.cont);
-        JUMP_WALK_PUSH(n->atomic_expr, it.brk, it.cont);
+        JUMP_WALK_PUSH(node_atom(n)->atomic_expr, it.brk, it.cont);
         JUMP_WALK_PUSH(n->next, it.brk, it.cont);
     }
 #undef JUMP_WALK_PUSH
@@ -351,29 +353,33 @@ typedef struct {
 } LabelDedupeCtx;
 
 static void label_dedupe_scan(Node *n, void *vctx) {
-    if (n->kind != ND_LABEL || !n->unique_label || !n->label)
+    if (n->kind != ND_LABEL || !node_ctl(n)->unique_label ||
+        !node_ctl(n)->label)
         return;
     LabelDedupeCtx *d     = vctx;
-    char           *first = hashmap_get(&d->first_seen, n->label);
+    char           *first = hashmap_get(&d->first_seen, node_ctl(n)->label);
     if (!first) {
-        hashmap_put(&d->first_seen, n->label, n->unique_label);
+        hashmap_put(&d->first_seen, node_ctl(n)->label,
+                    node_ctl(n)->unique_label);
         return;
     }
-    if (first == n->unique_label || hashmap_get(&d->renames, n->unique_label))
+    if (first == node_ctl(n)->unique_label ||
+        hashmap_get(&d->renames, node_ctl(n)->unique_label))
         return; // same label reached twice, or already renamed
-    char *fresh = arena_format(d->vm, "%s__cccc_q%d", n->label, d->counter++);
-    hashmap_put(&d->renames, n->unique_label, fresh);
+    char *fresh =
+        arena_format(d->vm, "%s__cccc_q%d", node_ctl(n)->label, d->counter++);
+    hashmap_put(&d->renames, node_ctl(n)->unique_label, fresh);
 }
 
 static void label_dedupe_apply(Node *n, void *vctx) {
     if ((n->kind != ND_LABEL && n->kind != ND_GOTO &&
          n->kind != ND_LABEL_VAL) ||
-        !n->unique_label)
+        !node_ctl(n)->unique_label)
         return;
     LabelDedupeCtx *d     = vctx;
-    char           *fresh = hashmap_get(&d->renames, n->unique_label);
+    char           *fresh = hashmap_get(&d->renames, node_ctl(n)->unique_label);
     if (fresh)
-        n->label = fresh;
+        node_ctl_mut(d->vm, n)->label = fresh;
 }
 
 // Run over one function body before it is serialized.
@@ -394,10 +400,10 @@ typedef struct {
 } LabelCollectCtx;
 
 static void collect_label_visit(Node *n, void *vctx) {
-    if (n->kind != ND_LABEL || !n->unique_label)
+    if (n->kind != ND_LABEL || !node_ctl(n)->unique_label)
         return;
     LabelCollectCtx *lc = vctx;
-    if (find_label_owner(lc->ctx, n->unique_label))
+    if (find_label_owner(lc->ctx, node_ctl(n)->unique_label))
         return; // already recorded (e.g. reached twice via case_next)
     if (lc->ctx->label_owners_len == lc->ctx->label_owners_cap) {
         lc->ctx->label_owners_cap =
@@ -407,8 +413,8 @@ static void collect_label_visit(Node *n, void *vctx) {
                     lc->ctx->label_owners_cap * sizeof(*lc->ctx->label_owners));
     }
     LabelOwner *entry   = &lc->ctx->label_owners[lc->ctx->label_owners_len++];
-    entry->unique_label = n->unique_label;
-    entry->label        = n->label;
+    entry->unique_label = node_ctl(n)->unique_label;
+    entry->label        = node_ctl(n)->label;
     entry->owner_fn     = lc->owner_fn;
 }
 
@@ -1730,11 +1736,11 @@ static bool node_calls_obj(Node *node, Obj *target) {
         return true;
     return node_calls_obj(node->lhs, target) ||
            node_calls_obj(node->rhs, target) ||
-           node_calls_obj(node->cond, target) ||
-           node_calls_obj(node->then, target) ||
-           node_calls_obj(node->els, target) ||
-           node_calls_obj(node->init, target) ||
-           node_calls_obj(node->inc, target) ||
+           node_calls_obj(node_ctl(node)->cond, target) ||
+           node_calls_obj(node_ctl(node)->then, target) ||
+           node_calls_obj(node_ctl(node)->els, target) ||
+           node_calls_obj(node_ctl(node)->init, target) ||
+           node_calls_obj(node_ctl(node)->inc, target) ||
            node_calls_obj(node->body, target) ||
            node_calls_obj(node->args, target) ||
            node_calls_obj(node->next, target);
@@ -1872,11 +1878,11 @@ static bool node_calls_named_builtin(Node *node, const char *name) {
         return true;
     return node_calls_named_builtin(node->lhs, name) ||
            node_calls_named_builtin(node->rhs, name) ||
-           node_calls_named_builtin(node->cond, name) ||
-           node_calls_named_builtin(node->then, name) ||
-           node_calls_named_builtin(node->els, name) ||
-           node_calls_named_builtin(node->init, name) ||
-           node_calls_named_builtin(node->inc, name) ||
+           node_calls_named_builtin(node_ctl(node)->cond, name) ||
+           node_calls_named_builtin(node_ctl(node)->then, name) ||
+           node_calls_named_builtin(node_ctl(node)->els, name) ||
+           node_calls_named_builtin(node_ctl(node)->init, name) ||
+           node_calls_named_builtin(node_ctl(node)->inc, name) ||
            node_calls_named_builtin(node->body, name) ||
            node_calls_named_builtin(node->args, name) ||
            node_calls_named_builtin(node->next, name);
@@ -2059,11 +2065,11 @@ static void node_scan_f2i_native(Node *node, F2ISynthNeed *need) {
     }
     node_scan_f2i_native(node->lhs, need);
     node_scan_f2i_native(node->rhs, need);
-    node_scan_f2i_native(node->cond, need);
-    node_scan_f2i_native(node->then, need);
-    node_scan_f2i_native(node->els, need);
-    node_scan_f2i_native(node->init, need);
-    node_scan_f2i_native(node->inc, need);
+    node_scan_f2i_native(node_ctl(node)->cond, need);
+    node_scan_f2i_native(node_ctl(node)->then, need);
+    node_scan_f2i_native(node_ctl(node)->els, need);
+    node_scan_f2i_native(node_ctl(node)->init, need);
+    node_scan_f2i_native(node_ctl(node)->inc, need);
     node_scan_f2i_native(node->body, need);
     node_scan_f2i_native(node->args, need);
     node_scan_f2i_native(node->next, need);
@@ -2240,11 +2246,11 @@ static void node_scan_complex_native(Node *node, bool *want,
         type_scan_complex_native(node->func_ty, want, seen);
     node_scan_complex_native(node->lhs, want, seen);
     node_scan_complex_native(node->rhs, want, seen);
-    node_scan_complex_native(node->cond, want, seen);
-    node_scan_complex_native(node->then, want, seen);
-    node_scan_complex_native(node->els, want, seen);
-    node_scan_complex_native(node->init, want, seen);
-    node_scan_complex_native(node->inc, want, seen);
+    node_scan_complex_native(node_ctl(node)->cond, want, seen);
+    node_scan_complex_native(node_ctl(node)->then, want, seen);
+    node_scan_complex_native(node_ctl(node)->els, want, seen);
+    node_scan_complex_native(node_ctl(node)->init, want, seen);
+    node_scan_complex_native(node_ctl(node)->inc, want, seen);
     node_scan_complex_native(node->body, want, seen);
     node_scan_complex_native(node->args, want, seen);
     node_scan_complex_native(node->next, want, seen);
@@ -2455,11 +2461,16 @@ static bool node_needs_synth_typedef_header(SerializeContext *ctx, Node *node,
 
     return node_needs_synth_typedef_header(ctx, node->lhs, header, seen) ||
            node_needs_synth_typedef_header(ctx, node->rhs, header, seen) ||
-           node_needs_synth_typedef_header(ctx, node->cond, header, seen) ||
-           node_needs_synth_typedef_header(ctx, node->then, header, seen) ||
-           node_needs_synth_typedef_header(ctx, node->els, header, seen) ||
-           node_needs_synth_typedef_header(ctx, node->init, header, seen) ||
-           node_needs_synth_typedef_header(ctx, node->inc, header, seen) ||
+           node_needs_synth_typedef_header(ctx, node_ctl(node)->cond, header,
+                                           seen) ||
+           node_needs_synth_typedef_header(ctx, node_ctl(node)->then, header,
+                                           seen) ||
+           node_needs_synth_typedef_header(ctx, node_ctl(node)->els, header,
+                                           seen) ||
+           node_needs_synth_typedef_header(ctx, node_ctl(node)->init, header,
+                                           seen) ||
+           node_needs_synth_typedef_header(ctx, node_ctl(node)->inc, header,
+                                           seen) ||
            node_needs_synth_typedef_header(ctx, node->body, header, seen) ||
            node_needs_synth_typedef_header(ctx, node->args, header, seen) ||
            node_needs_synth_typedef_header(ctx, node->next, header, seen);
@@ -2569,10 +2580,13 @@ static bool node_mentions_block(Node *node) {
     // #1005: no ND_SWITCH/ND_CASE special case (see collect_node_types());
     // the generic traversal below already reaches every case via node->then.
     return node_mentions_block(node->lhs) || node_mentions_block(node->rhs) ||
-           node_mentions_block(node->cond) || node_mentions_block(node->then) ||
-           node_mentions_block(node->els) || node_mentions_block(node->init) ||
-           node_mentions_block(node->inc) || node_mentions_block(node->body) ||
-           node_mentions_block(node->args) || node_mentions_block(node->next);
+           node_mentions_block(node_ctl(node)->cond) ||
+           node_mentions_block(node_ctl(node)->then) ||
+           node_mentions_block(node_ctl(node)->els) ||
+           node_mentions_block(node_ctl(node)->init) ||
+           node_mentions_block(node_ctl(node)->inc) ||
+           node_mentions_block(node->body) || node_mentions_block(node->args) ||
+           node_mentions_block(node->next);
 }
 
 // #990/#993: mirrors collect_obj_types()'s traversal shape.
@@ -2860,8 +2874,9 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
         // the same env chase (nested_env_ptr_expr) instead of printing an
         // unnameable `cap->name`.
         if (node->kind == ND_BLOCK_LITERAL && fn->is_nested && !fn->is_block) {
-            for (int __bc_i = 0; __bc_i < node->num_block_captures; __bc_i++) {
-                Obj *cap = node->block_captures[__bc_i];
+            for (int __bc_i = 0; __bc_i < node_misc(node)->num_block_captures;
+                 __bc_i++) {
+                Obj *cap = node_misc(node)->block_captures[__bc_i];
                 if (cap->is_local && !nested_var_is_own(fn, cap))
                     record_nested_upvar(vm, ctx, fn, node, cap);
             }
@@ -2900,15 +2915,15 @@ static void collect_nested_refs(VirtualMachine *vm, SerializeContext *ctx,
         if (!lhs_is_direct_nested_call)
             collect_nested_refs(vm, ctx, fn, node->lhs);
         collect_nested_refs(vm, ctx, fn, node->rhs);
-        collect_nested_refs(vm, ctx, fn, node->cond);
-        collect_nested_refs(vm, ctx, fn, node->then);
-        collect_nested_refs(vm, ctx, fn, node->els);
-        collect_nested_refs(vm, ctx, fn, node->init);
-        collect_nested_refs(vm, ctx, fn, node->inc);
+        collect_nested_refs(vm, ctx, fn, node_ctl(node)->cond);
+        collect_nested_refs(vm, ctx, fn, node_ctl(node)->then);
+        collect_nested_refs(vm, ctx, fn, node_ctl(node)->els);
+        collect_nested_refs(vm, ctx, fn, node_ctl(node)->init);
+        collect_nested_refs(vm, ctx, fn, node_ctl(node)->inc);
         collect_nested_refs(vm, ctx, fn, node->body);
-        collect_nested_refs(vm, ctx, fn, node->cas_addr);
-        collect_nested_refs(vm, ctx, fn, node->cas_old);
-        collect_nested_refs(vm, ctx, fn, node->cas_new);
+        collect_nested_refs(vm, ctx, fn, node_atom(node)->cas_addr);
+        collect_nested_refs(vm, ctx, fn, node_atom(node)->cas_old);
+        collect_nested_refs(vm, ctx, fn, node_atom(node)->cas_new);
         for (Node *a = node->args; a; a = a->next)
             collect_nested_refs(vm, ctx, fn, a);
     }

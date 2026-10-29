@@ -750,9 +750,10 @@ static const char *atomic_fetch_builtin(VirtualMachine *vm, Node *n, Node **obj,
     // An `_Atomic` ntarray element's update keeps the loop: its compare-
     // exchange carries the terminator check.
     for (Node *s = n->body; s; s = s->next)
-        if (s->kind == ND_DO && s->cond && s->cond->lhs &&
-            s->cond->lhs->checked_nt_terminator &&
-            s->cond->lhs->checked_bounds_hi && serialize_lowers_checks(vm))
+        if (s->kind == ND_DO && node_ctl(s)->cond && node_ctl(s)->cond->lhs &&
+            node_ctl(s)->cond->lhs->checked_nt_terminator &&
+            node_chk(node_ctl(s)->cond->lhs)->bounds_hi &&
+            serialize_lowers_checks(vm))
             return NULL;
     *obj = n->body->lhs->rhs;
     *val = n->body->next->lhs->rhs;
@@ -1340,7 +1341,7 @@ static bool serialize_wide_bitint_expr(FILE *f, VirtualMachine *vm,
 
     switch (node->kind) {
         case ND_NUM:
-            if (!result_wide || !node->wide_digits)
+            if (!result_wide || !node_lit(node)->wide_digits)
                 return false;
             break;
         case ND_NEG:
@@ -1381,8 +1382,8 @@ static bool serialize_wide_bitint_expr(FILE *f, VirtualMachine *vm,
             fprintf(f,
                     "({ __cccc_bi%d __cccc_bi_r%d; __cccc_bitint_from_str("
                     "__cccc_bi_r%d.w, \"%s\", %d, %d, %d); __cccc_bi_r%d; })",
-                    words, seq, seq, node->wide_digits, node->wide_base, words,
-                    ty->bit_width, seq);
+                    words, seq, seq, node_lit(node)->wide_digits,
+                    node_lit(node)->wide_base, words, ty->bit_width, seq);
             return true;
         }
         case ND_NEG:
@@ -1747,14 +1748,14 @@ static void serialize_checked_ptr(FILE *f, VirtualMachine *vm,
 // through (gen_checked_nt_hi's counterpart).
 static void serialize_checked_hi(FILE *f, VirtualMachine *vm,
                                  SerializeContext *ctx, Node *n) {
-    if (!n->checked_bounds_obj_init) {
-        serialize_checked_ptr(f, vm, ctx, n->checked_bounds_hi);
+    if (!node_chk(n)->bounds_obj_init) {
+        serialize_checked_ptr(f, vm, ctx, node_chk(n)->bounds_hi);
         return;
     }
     fprintf(f, "((void)(");
-    serialize_expr(f, vm, ctx, n->checked_bounds_obj_init, 0);
+    serialize_expr(f, vm, ctx, node_chk(n)->bounds_obj_init, 0);
     fprintf(f, "), ");
-    serialize_checked_ptr(f, vm, ctx, n->checked_bounds_hi);
+    serialize_checked_ptr(f, vm, ctx, node_chk(n)->bounds_hi);
     fprintf(f, ")");
 }
 
@@ -1779,9 +1780,9 @@ static void serialize_checked_deref(FILE *f, VirtualMachine *vm,
     fprintf(f, sequenced ? "(" : "(*(");
     serialize_type(f, ctx, pty);
     fprintf(f, ")(");
-    if (node->checked_bounds_obj_init) {
+    if (node_chk(node)->bounds_obj_init) {
         fprintf(f, "(void)(");
-        serialize_expr(f, vm, ctx, node->checked_bounds_obj_init, 0);
+        serialize_expr(f, vm, ctx, node_chk(node)->bounds_obj_init, 0);
         fprintf(f, "), ");
     }
     fprintf(f, "__cccc_chkr(");
@@ -1790,26 +1791,26 @@ static void serialize_checked_deref(FILE *f, VirtualMachine *vm,
     else
         serialize_expr(f, vm, ctx, node->lhs, 2);
     fprintf(f, ", ");
-    serialize_checked_ptr(f, vm, ctx, node->checked_bounds_lo);
+    serialize_checked_ptr(f, vm, ctx, node_chk(node)->bounds_lo);
     fprintf(f, ", ");
-    serialize_checked_ptr(f, vm, ctx, node->checked_bounds_hi);
-    fprintf(f, ", %lldLL, %d))%s", (long long)node->checked_access_size,
+    serialize_checked_ptr(f, vm, ctx, node_chk(node)->bounds_hi);
+    fprintf(f, ", %lldLL, %d))%s", (long long)node_chk(node)->access_size,
             node->checked_bounds_optional ? 1 : 0, sequenced ? "; }))" : ")");
 }
 
 static bool checked_deref_lowered(VirtualMachine *vm, Node *node) {
-    return node->kind == ND_DEREF && node->checked_bounds_lo &&
-           node->checked_bounds_hi && serialize_lowers_checks(vm);
+    return node->kind == ND_DEREF && node_chk(node)->bounds_lo &&
+           node_chk(node)->bounds_hi && serialize_lowers_checks(vm);
 }
 
 // The ntarray element deref whose terminator slot a store to `lhs` can hit.
 static Node *checked_nt_store(Node *lhs) {
     Node *root = checked_nt_store_root(lhs);
-    return root && root->checked_bounds_hi ? root : NULL;
+    return root && node_chk(root)->bounds_hi ? root : NULL;
 }
 
 static bool checked_assign_lowered(VirtualMachine *vm, Node *node) {
-    return (checked_nt_store(node->lhs) || node->checked_assign_dst_lo) &&
+    return (checked_nt_store(node->lhs) || node_chk(node)->assign_dst_lo) &&
            serialize_lowers_checks(vm);
 }
 
@@ -1876,20 +1877,20 @@ static void serialize_checked_assign(FILE *f, VirtualMachine *vm,
         serialize_value_expr(f, vm, ctx, node->rhs, 2);
         fprintf(f, "); ");
     }
-    if (node->checked_assign_dst_lo) {
-        if (node->checked_assign_dst_obj_init) {
-            serialize_expr(f, vm, ctx, node->checked_assign_dst_obj_init, 0);
+    if (node_chk(node)->assign_dst_lo) {
+        if (node_chk(node)->assign_dst_obj_init) {
+            serialize_expr(f, vm, ctx, node_chk(node)->assign_dst_obj_init, 0);
             fprintf(f, "; ");
         }
-        Node *dst[2] = {node->checked_assign_dst_lo,
-                        node->checked_assign_dst_hi};
+        Node *dst[2] = {node_chk(node)->assign_dst_lo,
+                        node_chk(node)->assign_dst_hi};
         for (int is_hi = 0; is_hi < 2; is_hi++) {
             fprintf(f, "__cccc_chkab(");
             serialize_checked_ptr(f, vm, ctx, dst[is_hi]);
             fprintf(f, ", ");
-            serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_lo);
+            serialize_checked_ptr(f, vm, ctx, node_chk(node)->assign_src_lo);
             fprintf(f, ", ");
-            serialize_checked_ptr(f, vm, ctx, node->checked_assign_src_hi);
+            serialize_checked_ptr(f, vm, ctx, node_chk(node)->assign_src_hi);
             fprintf(f, ", %d, %d); ", is_hi,
                     node->checked_assign_src_optional ? 1 : 0);
         }
@@ -1941,32 +1942,33 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
     // `#include_next` hand-off (the #1040 follow-on) already resolves it
     // to the real host header whenever a genuine host compiler (not
     // CCCC's own preprocessor) is the one reading it.
-    if (node->va_form != VA_NONE) {
-        switch (node->va_form) {
+    if (node_misc(node)->va_form != VA_NONE) {
+        switch (node_misc(node)->va_form) {
             case VA_START:
                 fprintf(f, "va_start(");
-                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_ap, 2);
                 fprintf(f, ", ");
-                serialize_expr(f, vm, ctx, node->va_last, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_last, 2);
                 fprintf(f, ")");
                 return;
             case VA_ARG:
                 fprintf(f, "va_arg(");
-                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_ap, 2);
                 fprintf(f, ", ");
-                serialize_type(f, ctx, va_arg_promoted_type(node->va_type));
+                serialize_type(f, ctx,
+                               va_arg_promoted_type(node_misc(node)->va_type));
                 fprintf(f, ")");
                 return;
             case VA_COPY:
                 fprintf(f, "va_copy(");
-                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_ap, 2);
                 fprintf(f, ", ");
-                serialize_expr(f, vm, ctx, node->va_src, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_src, 2);
                 fprintf(f, ")");
                 return;
             case VA_END:
                 fprintf(f, "va_end(");
-                serialize_expr(f, vm, ctx, node->va_ap, 2);
+                serialize_expr(f, vm, ctx, node_misc(node)->va_ap, 2);
                 fprintf(f, ")");
                 return;
             default:
@@ -2034,7 +2036,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 const char *suffix = dec_width_code(node->ty) == 0   ? "df"
                                      : dec_width_code(node->ty) == 1 ? "dd"
                                                                      : "dl";
-                fprintf(f, "%s%s", node->dec_digits ? node->dec_digits : "0",
+                fprintf(f, "%s%s",
+                        node_lit(node)->dec_digits ? node_lit(node)->dec_digits
+                                                   : "0",
                         suffix);
             } else if (node->ty && is_flonum(node->ty)) {
                 // #1038: this used to funnel every flonum type -- TY_FLOAT,
@@ -2051,10 +2055,11 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // arms (this is the ND_NUM/expression-literal counterpart of
                 // that global-initializer path).
                 if (node->ty->kind == TY_FLOAT) {
-                    if (!serialize_flonum_special(f, node->fval, "f")) {
+                    if (!serialize_flonum_special(f, node_lit(node)->fval,
+                                                  "f")) {
                         char buf[64];
                         format_float_literal(buf, sizeof buf,
-                                             (double)node->fval);
+                                             (double)node_lit(node)->fval);
                         fprintf(f, "%sf", buf);
                     }
                 } else if (node->ty->kind == TY_LDOUBLE) {
@@ -2062,9 +2067,11 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // ("L") are cased differently --
                     // __builtin_infl/__builtin_nanl vs. the `L` token suffix --
                     // don't conflate them.
-                    if (!serialize_flonum_special(f, node->fval, "l")) {
+                    if (!serialize_flonum_special(f, node_lit(node)->fval,
+                                                  "l")) {
                         char buf[64];
-                        format_ldouble_literal(buf, sizeof buf, node->fval);
+                        format_ldouble_literal(buf, sizeof buf,
+                                               node_lit(node)->fval);
                         fprintf(f, "%sL", buf);
                     }
                 } else { // TY_DOUBLE
@@ -2077,16 +2084,18 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     // enclosing (double) cast, a wrong answer wherever the
                     // literal's own text is what supplies its type (e.g. a
                     // double vararg passed positionally, #1018).
-                    if (!serialize_flonum_special(f, node->fval, "")) {
+                    if (!serialize_flonum_special(f, node_lit(node)->fval,
+                                                  "")) {
                         char buf[64];
                         format_double_literal(buf, sizeof buf,
-                                              (double)node->fval);
+                                              (double)node_lit(node)->fval);
                         fprintf(f, "%s", buf);
                     }
                 }
-            } else if (node->layout_ty &&
-                       serialize_layout_const(f, ctx, node->layout_ty,
-                                              node->layout_is_align)) {
+            } else if (node_misc(node)->layout_ty &&
+                       serialize_layout_const(
+                           f, ctx, node_misc(node)->layout_ty,
+                           node_misc(node)->layout_is_align)) {
                 // #1031: this ND_NUM was folded from sizeof/_Alignof of a
                 // type whose own definition is suppressed elsewhere in
                 // this TU (a from_include struct/union, or something that
@@ -2119,7 +2128,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // remain -- see docs/native.md's own entry for why those
                 // three are not merely deferred.
             } else if (node->ty && node->ty->kind == TY_BITINT &&
-                       node->ty->bit_width > 64 && node->wide_digits) {
+                       node->ty->bit_width > 64 &&
+                       node_lit(node)->wide_digits) {
                 // #1121: a wb/uwb literal beyond 64 bits carries its full
                 // precision out-of-band in wide_digits/wide_base (cccc.h) --
                 // node->val alone is truncated to 64 bits by the tokenizer
@@ -2127,8 +2137,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // wide_digits (codegen_expr.c); this arm is the -m/-c=native
                 // counterpart. bit_width > 128 doesn't reach here:
                 // serialize_wide_bitint_expr() handles it first.
-                unsigned __int128 v =
-                    decode_wide_digits(node->wide_digits, node->wide_base);
+                unsigned __int128 v = decode_wide_digits(
+                    node_lit(node)->wide_digits, node_lit(node)->wide_base);
                 fprintf(f,
                         "((%s%s)(((unsigned __int128)0x%llxULL << 64) | "
                         "0x%llxULL))",
@@ -2743,25 +2753,25 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // An ordinary C ternary with a *scalar* condition and vector arms
             // (standard C, not this GNU extension) falls through to the plain
             // `?:` below unchanged -- real clang already accepts that form.
-            if (is_vector(node->cond->ty)) {
+            if (is_vector(node_ctl(node)->cond->ty)) {
                 fprintf(f, "__extension__ ({ ");
-                serialize_type(f, ctx, node->cond->ty);
+                serialize_type(f, ctx, node_ctl(node)->cond->ty);
                 fprintf(f, " __cccc_vsel_m = (");
-                serialize_expr(f, vm, ctx, node->cond, 0);
+                serialize_expr(f, vm, ctx, node_ctl(node)->cond, 0);
                 fprintf(f, ") != 0; ");
                 serialize_type(f, ctx, node->ty);
                 fprintf(f, " __cccc_vsel_t = (");
-                serialize_expr(f, vm, ctx, node->then, 0);
+                serialize_expr(f, vm, ctx, node_ctl(node)->then, 0);
                 fprintf(f, "); ");
                 serialize_type(f, ctx, node->ty);
                 fprintf(f, " __cccc_vsel_f = (");
-                serialize_expr(f, vm, ctx, node->els, 0);
+                serialize_expr(f, vm, ctx, node_ctl(node)->els, 0);
                 fprintf(f, "); (");
                 serialize_type(f, ctx, node->ty);
                 fprintf(f, ")((__cccc_vsel_m & (");
-                serialize_type(f, ctx, node->cond->ty);
+                serialize_type(f, ctx, node_ctl(node)->cond->ty);
                 fprintf(f, ")__cccc_vsel_t) | (~__cccc_vsel_m & (");
-                serialize_type(f, ctx, node->cond->ty);
+                serialize_type(f, ctx, node_ctl(node)->cond->ty);
                 fprintf(f, ")__cccc_vsel_f)); })");
                 break;
             }
@@ -2784,13 +2794,13 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // leaving a right-associated nested ternary in the else-branch
             // bare; +1 additionally parenthesizes a nested ternary sitting in
             // the condition.
-            if (!serialize_wide_bitint_truth(f, vm, ctx, node->cond))
-                serialize_expr(f, vm, ctx, node->cond,
+            if (!serialize_wide_bitint_truth(f, vm, ctx, node_ctl(node)->cond))
+                serialize_expr(f, vm, ctx, node_ctl(node)->cond,
                                get_precedence(ND_COND) + 1);
             fprintf(f, " ? ");
-            serialize_value_expr(f, vm, ctx, node->then, 0);
+            serialize_value_expr(f, vm, ctx, node_ctl(node)->then, 0);
             fprintf(f, " : ");
-            serialize_value_expr(f, vm, ctx, node->els,
+            serialize_value_expr(f, vm, ctx, node_ctl(node)->els,
                                  get_precedence(ND_COND));
             break;
 
@@ -3205,7 +3215,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, ", ");
             serialize_expr(f, vm, ctx, node->rhs, 2);
             fprintf(f, ", ");
-            serialize_expr(f, vm, ctx, node->cas_addr, 2);
+            serialize_expr(f, vm, ctx, node_atom(node)->cas_addr, 2);
             fprintf(f, ")");
             break;
         }
@@ -3306,34 +3316,34 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // An _Atomic ntarray element's RMW store checks its terminator
             // slot first (CHKNT); cas_addr is to_assign()'s side-effect-free
             // temp, so reading it twice is safe.
-            bool nt  = node->checked_nt_terminator && node->checked_bounds_hi &&
-                       serialize_lowers_checks(vm);
+            bool nt  = node->checked_nt_terminator &&
+                       node_chk(node)->bounds_hi && serialize_lowers_checks(vm);
             int  seq = nt ? ctx->checked_seq++ : 0;
             if (nt) {
                 fprintf(f, "({ __typeof__(");
-                serialize_type(f, ctx, node->cas_new->ty);
+                serialize_type(f, ctx, node_atom(node)->cas_new->ty);
                 fprintf(f, ") __cccc_chkv%d = ", seq);
-                serialize_expr(f, vm, ctx, node->cas_new, 2);
+                serialize_expr(f, vm, ctx, node_atom(node)->cas_new, 2);
                 fprintf(f, "; __cccc_chknt(");
-                serialize_checked_ptr(f, vm, ctx, node->cas_addr);
+                serialize_checked_ptr(f, vm, ctx, node_atom(node)->cas_addr);
                 fprintf(f, ", ");
                 serialize_checked_hi(f, vm, ctx, node);
                 fprintf(f, ", &__cccc_chkv%d, %lldLL, %lldLL, 1); ", seq,
                         (long long)checked_nt_slot_size(node),
-                        (long long)node->cas_new->ty->size);
+                        (long long)node_atom(node)->cas_new->ty->size);
             }
             fprintf(f, "__atomic_compare_exchange_n(");
             // #1101: strip _Atomic from both pointer operands' static types
             // (the address, and the pointer to the expected value -- the
             // builtin wants both to point at unqualified objects).
-            serialize_atomic_addr(f, vm, ctx, node->cas_addr);
+            serialize_atomic_addr(f, vm, ctx, node_atom(node)->cas_addr);
             fprintf(f, ", ");
-            serialize_atomic_addr(f, vm, ctx, node->cas_old);
+            serialize_atomic_addr(f, vm, ctx, node_atom(node)->cas_old);
             fprintf(f, ", ");
             if (nt)
                 fprintf(f, "__cccc_chkv%d", seq);
             else
-                serialize_expr(f, vm, ctx, node->cas_new, 2);
+                serialize_expr(f, vm, ctx, node_atom(node)->cas_new, 2);
             const char *succ, *fail;
             atomic_cas_mo_names(node, &succ, &fail);
             fprintf(f, ", %d, %s, %s)", node->atomic_weak ? 1 : 0, succ, fail);
@@ -3346,7 +3356,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // [GNU] labels-as-values. node->label is the source identifier, the
             // same one ND_LABEL/ND_GOTO already serialize.
             fprintf(f, "&&%s",
-                    node->label ? node->label : "/* unknown label */");
+                    node_ctl(node)->label ? node_ctl(node)->label
+                                          : "/* unknown label */");
             break;
 
         case ND_COMPLEX: {
@@ -3415,9 +3426,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // named local (rather than a temporary), which is what keeps the
             // block value's address stable for the rest of the enclosing
             // scope.
-            Obj        *block_fn = node->block_fn;
+            Obj        *block_fn = node_misc(node)->block_fn;
             const char *env = block_fn ? find_block_env(ctx, block_fn) : NULL;
-            if (!node->block_desc_var || !block_fn || !env) {
+            if (!node_misc(node)->block_desc_var || !block_fn || !env) {
                 // #963c: this used to fall back to the same
                 // "/* unsupported expr kind N */" comment as the generic
                 // default: arm below -- a silent drop inside a *handled* case,
@@ -3451,12 +3462,12 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                           "scope");
             }
 
-            const char *desc = node->block_desc_var->name;
+            const char *desc = node_misc(node)->block_desc_var->name;
             fprintf(f,
                     "(%s.__invoke = (void *)%s, %s.__size = (long)sizeof(%s)",
                     desc, block_fn->name, desc, desc);
-            for (int i = 0; i < node->num_block_captures; i++) {
-                Obj *cap = node->block_captures[i];
+            for (int i = 0; i < node_misc(node)->num_block_captures; i++) {
+                Obj *cap = node_misc(node)->block_captures[i];
                 // #994: a by-value capture whose type is an array (accepted by
                 // the parser like clang rejects but this compiler doesn't --
                 // collect_captures_in_node has no guard) can't use plain `=` --

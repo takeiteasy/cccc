@@ -495,8 +495,8 @@ Node *checked_nt_store_root(Node *lhs);
 // Terminator-slot size of an ntarray deref that checked_nt_store_root()
 // returned (see Node.checked_nt_slot).
 static inline int64_t checked_nt_slot_size(const Node *root) {
-    return root->checked_nt_slot ? root->checked_nt_slot
-                                 : root->checked_access_size;
+    return node_chk(root)->nt_slot ? node_chk(root)->nt_slot
+                                   : node_chk(root)->access_size;
 }
 
 static inline int cc_instr_words(int op) {
@@ -911,6 +911,8 @@ bool token_is_from_include(VirtualMachine *vm, Token *tok);
 bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);
 void type_assign(VirtualMachine *vm, Type *dst, const Type *src);
+void node_assign(VirtualMachine *vm, Node *dst, const Node *src);
+Node *node_clone(VirtualMachine *vm, const Node *src);
 // `ty` without its address space: the type of a private temporary that holds a
 // value read from global/local/constant memory.
 Type *without_addr_space(VirtualMachine *vm, Type *ty);

@@ -86,11 +86,11 @@ bool contains_funcall(Node *node) {
         return true;
     if (contains_funcall(node->rhs))
         return true;
-    if (contains_funcall(node->cond))
+    if (contains_funcall(node_ctl(node)->cond))
         return true;
-    if (contains_funcall(node->then))
+    if (contains_funcall(node_ctl(node)->then))
         return true;
-    if (contains_funcall(node->els))
+    if (contains_funcall(node_ctl(node)->els))
         return true;
 
     // Check arguments for nested calls
@@ -176,8 +176,8 @@ static bool tail_arg_carries_frame_addr(Obj *fn, Node *n) {
                 return tail_arg_carries_frame_addr(fn, n->lhs) ||
                        tail_arg_carries_frame_addr(fn, n->rhs);
             case ND_COND:
-                return tail_arg_carries_frame_addr(fn, n->then) ||
-                       tail_arg_carries_frame_addr(fn, n->els);
+                return tail_arg_carries_frame_addr(fn, node_ctl(n)->then) ||
+                       tail_arg_carries_frame_addr(fn, node_ctl(n)->els);
             case ND_ADDR:
                 return addr_roots_at_frame_local(fn, n->lhs);
             case ND_ADD:

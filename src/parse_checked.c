@@ -39,14 +39,13 @@
 Node *clone_bounds_node(VirtualMachine *vm, Node *n) {
     if (!n)
         return NULL;
-    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c      = *n;
+    Node *c                   = node_clone(vm, n);
     c->next = NULL;
     c->lhs  = clone_bounds_node(vm, n->lhs);
     c->rhs  = clone_bounds_node(vm, n->rhs);
-    c->cond = clone_bounds_node(vm, n->cond);
-    c->then = clone_bounds_node(vm, n->then);
-    c->els  = clone_bounds_node(vm, n->els);
+    node_ctl_mut(vm, c)->cond = clone_bounds_node(vm, node_ctl(n)->cond);
+    node_ctl_mut(vm, c)->then = clone_bounds_node(vm, node_ctl(n)->then);
+    node_ctl_mut(vm, c)->els  = clone_bounds_node(vm, node_ctl(n)->els);
     return c;
 }
 
@@ -70,14 +69,16 @@ static Node *clone_member_bounds_node(VirtualMachine *vm, Node *n, Node *obj) {
         add_type(vm, member_node);
         return member_node;
     }
-    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c      = *n;
+    Node *c = node_clone(vm, n);
     c->next = NULL;
     c->lhs  = clone_member_bounds_node(vm, n->lhs, obj);
     c->rhs  = clone_member_bounds_node(vm, n->rhs, obj);
-    c->cond = clone_member_bounds_node(vm, n->cond, obj);
-    c->then = clone_member_bounds_node(vm, n->then, obj);
-    c->els  = clone_member_bounds_node(vm, n->els, obj);
+    node_ctl_mut(vm, c)->cond =
+        clone_member_bounds_node(vm, node_ctl(n)->cond, obj);
+    node_ctl_mut(vm, c)->then =
+        clone_member_bounds_node(vm, node_ctl(n)->then, obj);
+    node_ctl_mut(vm, c)->els =
+        clone_member_bounds_node(vm, node_ctl(n)->els, obj);
     return c;
 }
 
@@ -135,7 +136,7 @@ static CheckedBase find_checked_base_ex(Node *n, bool allow_optional_row) {
                 if (n->ty &&
                     ((n->ty->kind == TY_ARRAY && n->ty->array_len > 0) ||
                      checked_vla_row_ready(n->ty)) &&
-                    n->checked_bounds_lo &&
+                    node_chk(n)->bounds_lo &&
                     (allow_optional_row || !n->checked_bounds_optional))
                     return (CheckedBase){.row = n->ty, .obj = n};
                 return (CheckedBase){0};
@@ -263,9 +264,9 @@ static bool checked_ret_tmpl_ok(Node *n, Type *params, Node *args) {
     }
     return checked_ret_tmpl_ok(n->lhs, params, args) &&
            checked_ret_tmpl_ok(n->rhs, params, args) &&
-           checked_ret_tmpl_ok(n->cond, params, args) &&
-           checked_ret_tmpl_ok(n->then, params, args) &&
-           checked_ret_tmpl_ok(n->els, params, args);
+           checked_ret_tmpl_ok(node_ctl(n)->cond, params, args) &&
+           checked_ret_tmpl_ok(node_ctl(n)->then, params, args) &&
+           checked_ret_tmpl_ok(node_ctl(n)->els, params, args);
 }
 
 // The call `n` roots in (through the same `+`, `-` and cast descent as
@@ -634,9 +635,9 @@ static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
     Node *inside = plain_array_guard(vm, base.obj, tok);
     if (inside) {
         Node *cond = new_node(vm, ND_COND, tok);
-        cond->cond = inside;
-        cond->then = hi;
-        cond->els  = clone_bounds_node(vm, lo);
+        node_ctl_mut(vm, cond)->cond = inside;
+        node_ctl_mut(vm, cond)->then = hi;
+        node_ctl_mut(vm, cond)->els  = clone_bounds_node(vm, lo);
         add_type(vm, cond);
         hi = cond;
     }
@@ -717,9 +718,9 @@ Node *checked_nt_store_root(Node *lhs) {
             n = n->lhs;
             continue;
         }
-        if (n->kind == ND_DEREF && n->rmw_lvalue) {
+        if (n->kind == ND_DEREF && node_chk(n)->rmw_lvalue) {
             // `*tmp` of an `A.x op= B` / `*tmp op= B` desugar: back to A.
-            n = n->rmw_lvalue;
+            n = node_chk(n)->rmw_lvalue;
             continue;
         }
         if (n->kind == ND_DEREF) {
@@ -741,21 +742,24 @@ static Obj *new_checked_prop_temp(VirtualMachine *vm, Obj *fn, Type *ty);
 
 // An array-typed deref only computes an address; the real access carries the
 // check, so the hoisted `&row` clone drops it.
-static void strip_row_checks(Node *n) {
+static void strip_row_checks(VirtualMachine *vm, Node *n) {
     if (!n)
         return;
     if (n->kind == ND_DEREF && n->ty && n->ty->kind == TY_ARRAY) {
-        n->checked_bounds_lo       = NULL;
-        n->checked_bounds_hi       = NULL;
-        n->checked_bounds_obj_init = NULL;
+        if (node_chk(n)->bounds_lo || node_chk(n)->bounds_hi ||
+            node_chk(n)->bounds_obj_init) {
+            node_chk_mut(vm, n)->bounds_lo       = NULL;
+            node_chk_mut(vm, n)->bounds_hi       = NULL;
+            node_chk_mut(vm, n)->bounds_obj_init = NULL;
+        }
         n->checked_nt_terminator   = false;
         n->checked_bounds_optional = false;
     }
-    strip_row_checks(n->lhs);
-    strip_row_checks(n->rhs);
-    strip_row_checks(n->cond);
-    strip_row_checks(n->then);
-    strip_row_checks(n->els);
+    strip_row_checks(vm, n->lhs);
+    strip_row_checks(vm, n->rhs);
+    strip_row_checks(vm, node_ctl(n)->cond);
+    strip_row_checks(vm, node_ctl(n)->then);
+    strip_row_checks(vm, node_ctl(n)->els);
 }
 
 // A row whose length is only known at run time carries its byte size in a
@@ -809,9 +813,9 @@ static Node *checked_guard_products(VirtualMachine *vm, Node *n) {
         return NULL;
     n->lhs  = checked_guard_products(vm, n->lhs);
     n->rhs  = checked_guard_products(vm, n->rhs);
-    n->cond = checked_guard_products(vm, n->cond);
-    n->then = checked_guard_products(vm, n->then);
-    n->els  = checked_guard_products(vm, n->els);
+    node_ctl_mut(vm, n)->cond = checked_guard_products(vm, node_ctl(n)->cond);
+    node_ctl_mut(vm, n)->then = checked_guard_products(vm, node_ctl(n)->then);
+    node_ctl_mut(vm, n)->els  = checked_guard_products(vm, node_ctl(n)->els);
     if (n->kind == ND_MUL && n->ty && is_integer(n->ty))
         return checked_guard_mul(vm, n);
     return n;
@@ -875,7 +879,7 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
                                                    pointer_to(vm, base.obj->ty))
                            : new_lvar(vm, "", 0, pointer_to(vm, base.obj->ty));
         Node *obj_clone = clone_bounds_node(vm, base.obj);
-        strip_row_checks(obj_clone);
+        strip_row_checks(vm, obj_clone);
         Node *addr = new_unary(vm, ND_ADDR, obj_clone, tok);
         add_type(vm, addr);
         Node *init =
@@ -1049,8 +1053,7 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
         Node *croot = checked_call_root(addr);
         if (croot) {
             Node *store = split_checked_call_result(vm, croot, NULL);
-            Node *read  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-            *read       = *croot;
+            Node *read  = node_clone(vm, croot);
             read->next  = NULL;
             Node *comma = new_binary(vm, ND_COMMA, store, read, tok);
             add_type(vm, comma);
@@ -1063,11 +1066,11 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
     if (!checked_base_is_declared(base))
         return;
     Type *pty = checked_base_type(base);
-    deref->checked_access_size = checked_access_bytes(pty->base);
-    compute_checked_bounds(vm, base, pty, tok, &deref->checked_bounds_lo,
-                           &deref->checked_bounds_hi,
-                           &deref->checked_nt_terminator,
-                           &deref->checked_bounds_obj_init, NULL);
+    node_chk_mut(vm, deref)->access_size = checked_access_bytes(pty->base);
+    compute_checked_bounds(
+        vm, base, pty, tok, &node_chk_mut(vm, deref)->bounds_lo,
+        &node_chk_mut(vm, deref)->bounds_hi, &deref->checked_nt_terminator,
+        &node_chk_mut(vm, deref)->bounds_obj_init, NULL);
 }
 
 // Bounds of a row reached through an OPT inner deref (`p[0]` of an OPT
@@ -1080,11 +1083,11 @@ static void checked_guard_optional_row(VirtualMachine *vm, Node *inner,
     Node *is_sentinel[2];
     for (int k = 0; k < 2; k++) {
         Node *at = new_binary(vm, ND_EQ,
-                              clone_bounds_node(vm, inner->checked_bounds_lo),
+                              clone_bounds_node(vm, node_chk(inner)->bounds_lo),
                               new_cast(vm, new_num(vm, -1, tok), cp), tok);
         add_type(vm, at);
         Node *ht = new_binary(vm, ND_EQ,
-                              clone_bounds_node(vm, inner->checked_bounds_hi),
+                              clone_bounds_node(vm, node_chk(inner)->bounds_hi),
                               new_cast(vm, new_num(vm, 0, tok), cp), tok);
         add_type(vm, ht);
         is_sentinel[k] = new_binary(vm, ND_LOGAND, at, ht, tok);
@@ -1093,9 +1096,9 @@ static void checked_guard_optional_row(VirtualMachine *vm, Node *inner,
     int64_t sent[2] = {-1, 0};
     for (int k = 0; k < 2; k++) {
         Node *c = new_node(vm, ND_COND, tok);
-        c->cond = is_sentinel[k];
-        c->then = new_cast(vm, new_num(vm, sent[k], tok), cp);
-        c->els  = new_cast(vm, *out[k], cp);
+        node_ctl_mut(vm, c)->cond = is_sentinel[k];
+        node_ctl_mut(vm, c)->then = new_cast(vm, new_num(vm, sent[k], tok), cp);
+        node_ctl_mut(vm, c)->els  = new_cast(vm, *out[k], cp);
         add_type(vm, c);
         *out[k] = c;
     }
@@ -1374,11 +1377,11 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
         }
         checked_prop_poison_scan(vm, node->lhs);
         checked_prop_poison_scan(vm, node->rhs);
-        checked_prop_poison_scan(vm, node->cond);
-        checked_prop_poison_scan(vm, node->then);
-        checked_prop_poison_scan(vm, node->els);
-        checked_prop_poison_scan(vm, node->init);
-        checked_prop_poison_scan(vm, node->inc);
+        checked_prop_poison_scan(vm, node_ctl(node)->cond);
+        checked_prop_poison_scan(vm, node_ctl(node)->then);
+        checked_prop_poison_scan(vm, node_ctl(node)->els);
+        checked_prop_poison_scan(vm, node_ctl(node)->init);
+        checked_prop_poison_scan(vm, node_ctl(node)->inc);
         checked_prop_poison_scan(vm, node->body);
         for (Node *a = node->args; a; a = a->next)
             checked_prop_poison_scan(vm, a);
@@ -1599,8 +1602,7 @@ static void checked_prop_rewrite_assign(VirtualMachine *vm, Obj *fn,
         add_type(vm, snapshot);
     }
 
-    Node *orig  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *orig       = *assign_node;
+    Node *orig  = node_clone(vm, assign_node);
     orig->next  = NULL;
 
     Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
@@ -1657,11 +1659,11 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 
         checked_prop_rewrite_scan(vm, fn, node->lhs);
         checked_prop_rewrite_scan(vm, fn, node->rhs);
-        checked_prop_rewrite_scan(vm, fn, node->cond);
-        checked_prop_rewrite_scan(vm, fn, node->then);
-        checked_prop_rewrite_scan(vm, fn, node->els);
-        checked_prop_rewrite_scan(vm, fn, node->init);
-        checked_prop_rewrite_scan(vm, fn, node->inc);
+        checked_prop_rewrite_scan(vm, fn, node_ctl(node)->cond);
+        checked_prop_rewrite_scan(vm, fn, node_ctl(node)->then);
+        checked_prop_rewrite_scan(vm, fn, node_ctl(node)->els);
+        checked_prop_rewrite_scan(vm, fn, node_ctl(node)->init);
+        checked_prop_rewrite_scan(vm, fn, node_ctl(node)->inc);
         checked_prop_rewrite_scan(vm, fn, node->body);
         for (Node *a = node->args; a; a = a->next)
             checked_prop_rewrite_scan(vm, fn, a);
@@ -1688,21 +1690,22 @@ static void checked_prop_rewrite_scan(VirtualMachine *vm, Obj *fn, Node *node) {
 // on checked_nt_pointee_supported(), matching compute_checked_bounds() (#939).
 // Mirrors a deref's just-attached bounds onto its RMW store node.
 static void checked_attach_mirror(VirtualMachine *vm, Node *node) {
-    Node *mirror = node->checked_rmw_mirror;
+    Node *mirror = node_chk(node)->rmw_mirror;
     if (!mirror)
         return;
     if (mirror->kind == ND_DEREF) {
-        mirror->checked_bounds_lo =
-            clone_bounds_node(vm, node->checked_bounds_lo);
-        mirror->checked_bounds_obj_init =
-            clone_bounds_node(vm, node->checked_bounds_obj_init);
+        node_chk_mut(vm, mirror)->bounds_lo =
+            clone_bounds_node(vm, node_chk(node)->bounds_lo);
+        node_chk_mut(vm, mirror)->bounds_obj_init =
+            clone_bounds_node(vm, node_chk(node)->bounds_obj_init);
         mirror->checked_bounds_optional = node->checked_bounds_optional;
     }
     // ND_CAS (the `_Atomic` desugar) -- lo is deliberately omitted, matching
     // to_assign()'s own direct-access ND_CAS copy (it has no gen_addr-driven
     // CHKR path to feed lo into).
-    mirror->checked_bounds_hi = clone_bounds_node(vm, node->checked_bounds_hi);
-    mirror->checked_access_size   = node->checked_access_size;
+    node_chk_mut(vm, mirror)->bounds_hi =
+        clone_bounds_node(vm, node_chk(node)->bounds_hi);
+    node_chk_mut(vm, mirror)->access_size = node_chk(node)->access_size;
     mirror->checked_nt_terminator = node->checked_nt_terminator;
 }
 
@@ -1712,16 +1715,16 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
         // (`p[0]` in `p[0][j]`) receives here.
         checked_prop_attach_scan(vm, fn, node->lhs);
         checked_prop_attach_scan(vm, fn, node->rhs);
-        checked_prop_attach_scan(vm, fn, node->cond);
-        checked_prop_attach_scan(vm, fn, node->then);
-        checked_prop_attach_scan(vm, fn, node->els);
-        checked_prop_attach_scan(vm, fn, node->init);
-        checked_prop_attach_scan(vm, fn, node->inc);
+        checked_prop_attach_scan(vm, fn, node_ctl(node)->cond);
+        checked_prop_attach_scan(vm, fn, node_ctl(node)->then);
+        checked_prop_attach_scan(vm, fn, node_ctl(node)->els);
+        checked_prop_attach_scan(vm, fn, node_ctl(node)->init);
+        checked_prop_attach_scan(vm, fn, node_ctl(node)->inc);
         checked_prop_attach_scan(vm, fn, node->body);
         for (Node *a = node->args; a; a = a->next)
             checked_prop_attach_scan(vm, fn, a);
 
-        if (node->kind != ND_DEREF || node->checked_bounds_lo)
+        if (node->kind != ND_DEREF || node_chk(node)->bounds_lo)
             continue;
         CheckedBase base = find_checked_base_ex(node->lhs, true);
         if (base.var && base.var->checked_prop_candidate &&
@@ -1731,8 +1734,8 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             add_type(vm, lo);
             Node *hi = new_var_node(vm, base.var->checked_prop_hi, node->tok);
             add_type(vm, hi);
-            node->checked_bounds_lo = lo;
-            node->checked_bounds_hi = hi;
+            node_chk_mut(vm, node)->bounds_lo = lo;
+            node_chk_mut(vm, node)->bounds_hi = hi;
             // #942: OPT survivors' snapshot temps can legitimately hold
             // the sentinel range at runtime (any path that hasn't yet
             // executed a checked-rooted store), so this deref must go
@@ -1741,9 +1744,10 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             node->checked_bounds_optional = base.var->checked_prop_optional;
             Type *access_ty               = node->lhs->ty;
             Type *pointee_ty              = access_ty ? access_ty->base : NULL;
-            node->checked_access_size     = checked_access_bytes(pointee_ty);
+            node_chk_mut(vm, node)->access_size =
+                checked_access_bytes(pointee_ty);
             if (base.var->checked_prop_nt_elem != 0 &&
-                node->checked_access_size == base.var->checked_prop_nt_elem &&
+                node_chk(node)->access_size == base.var->checked_prop_nt_elem &&
                 checked_nt_pointee_supported(pointee_ty))
                 node->checked_nt_terminator = true;
             // #943: to_assign()'s RMW desugar built its store node before
@@ -1753,17 +1757,20 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             // An element of a row reached through a propagated pointer.
             Type *pty = node->lhs->ty;
             compute_checked_bounds(
-                vm, base, pty, node->tok, &node->checked_bounds_lo,
-                &node->checked_bounds_hi, &node->checked_nt_terminator,
-                &node->checked_bounds_obj_init, fn);
-            if (node->checked_bounds_lo && node->checked_bounds_hi) {
+                vm, base, pty, node->tok, &node_chk_mut(vm, node)->bounds_lo,
+                &node_chk_mut(vm, node)->bounds_hi,
+                &node->checked_nt_terminator,
+                &node_chk_mut(vm, node)->bounds_obj_init, fn);
+            if (node_chk(node)->bounds_lo && node_chk(node)->bounds_hi) {
                 if (base.obj->checked_bounds_optional) {
-                    checked_guard_optional_row(vm, base.obj, node->tok,
-                                               &node->checked_bounds_lo,
-                                               &node->checked_bounds_hi);
+                    checked_guard_optional_row(
+                        vm, base.obj, node->tok,
+                        &node_chk_mut(vm, node)->bounds_lo,
+                        &node_chk_mut(vm, node)->bounds_hi);
                     node->checked_bounds_optional = true;
                 }
-                node->checked_access_size = checked_access_bytes(pty->base);
+                node_chk_mut(vm, node)->access_size =
+                    checked_access_bytes(pty->base);
                 checked_attach_mirror(vm, node);
             }
         }
@@ -2135,17 +2142,16 @@ static void verify_checked_assign_rewrite(VirtualMachine *vm, Obj *fn,
         add_type(vm, snapshot);
     }
 
-    Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *orig      = *assign_node;
+    Node *orig                                  = node_clone(vm, assign_node);
     orig->next = NULL;
-    orig->checked_assign_dst_lo       = dst_lo;
-    orig->checked_assign_dst_hi       = dst_hi;
-    orig->checked_assign_dst_obj_init = dst_obj_init;
+    node_chk_mut(vm, orig)->assign_dst_lo       = dst_lo;
+    node_chk_mut(vm, orig)->assign_dst_hi       = dst_hi;
+    node_chk_mut(vm, orig)->assign_dst_obj_init = dst_obj_init;
     orig->checked_assign_src_optional = src_optional;
-    orig->checked_assign_src_lo       = new_var_node(vm, slo_var, tok);
-    add_type(vm, orig->checked_assign_src_lo);
-    orig->checked_assign_src_hi = new_var_node(vm, shi_var, tok);
-    add_type(vm, orig->checked_assign_src_hi);
+    node_chk_mut(vm, orig)->assign_src_lo = new_var_node(vm, slo_var, tok);
+    add_type(vm, node_chk(orig)->assign_src_lo);
+    node_chk_mut(vm, orig)->assign_src_hi = new_var_node(vm, shi_var, tok);
+    add_type(vm, node_chk(orig)->assign_src_hi);
 
     Node *comma = new_binary(vm, ND_COMMA, snapshot, orig, tok);
     add_type(vm, comma);
@@ -2249,11 +2255,11 @@ static void verify_checked_assign_scan(VirtualMachine *vm, Obj *fn,
 
         verify_checked_assign_scan(vm, fn, node->lhs);
         verify_checked_assign_scan(vm, fn, node->rhs);
-        verify_checked_assign_scan(vm, fn, node->cond);
-        verify_checked_assign_scan(vm, fn, node->then);
-        verify_checked_assign_scan(vm, fn, node->els);
-        verify_checked_assign_scan(vm, fn, node->init);
-        verify_checked_assign_scan(vm, fn, node->inc);
+        verify_checked_assign_scan(vm, fn, node_ctl(node)->cond);
+        verify_checked_assign_scan(vm, fn, node_ctl(node)->then);
+        verify_checked_assign_scan(vm, fn, node_ctl(node)->els);
+        verify_checked_assign_scan(vm, fn, node_ctl(node)->init);
+        verify_checked_assign_scan(vm, fn, node_ctl(node)->inc);
         verify_checked_assign_scan(vm, fn, node->body);
         for (Node *a = node->args; a; a = a->next)
             verify_checked_assign_scan(vm, fn, a);
@@ -2373,9 +2379,12 @@ static bool checked_param_bounds_args_ok(Node *n, Node **arg_by_idx, int nargs,
     }
     return checked_param_bounds_args_ok(n->lhs, arg_by_idx, nargs, self_idx) &&
            checked_param_bounds_args_ok(n->rhs, arg_by_idx, nargs, self_idx) &&
-           checked_param_bounds_args_ok(n->cond, arg_by_idx, nargs, self_idx) &&
-           checked_param_bounds_args_ok(n->then, arg_by_idx, nargs, self_idx) &&
-           checked_param_bounds_args_ok(n->els, arg_by_idx, nargs, self_idx);
+           checked_param_bounds_args_ok(node_ctl(n)->cond, arg_by_idx, nargs,
+                                        self_idx) &&
+           checked_param_bounds_args_ok(node_ctl(n)->then, arg_by_idx, nargs,
+                                        self_idx) &&
+           checked_param_bounds_args_ok(node_ctl(n)->els, arg_by_idx, nargs,
+                                        self_idx);
 }
 
 // Like clone_bounds_node()/clone_member_bounds_node(), but for a
@@ -2406,19 +2415,18 @@ static Node *clone_param_bounds_node(VirtualMachine *vm, Node *n,
         Node *v = clone_bounds_node(vm, arg_by_idx[k - 1]);
         return v;
     }
-    Node *c = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c      = *n;
+    Node *c = node_clone(vm, n);
     c->next = NULL;
     c->lhs =
         clone_param_bounds_node(vm, n->lhs, arg_by_idx, nargs, self_idx, ca);
     c->rhs =
         clone_param_bounds_node(vm, n->rhs, arg_by_idx, nargs, self_idx, ca);
-    c->cond =
-        clone_param_bounds_node(vm, n->cond, arg_by_idx, nargs, self_idx, ca);
-    c->then =
-        clone_param_bounds_node(vm, n->then, arg_by_idx, nargs, self_idx, ca);
-    c->els =
-        clone_param_bounds_node(vm, n->els, arg_by_idx, nargs, self_idx, ca);
+    node_ctl_mut(vm, c)->cond = clone_param_bounds_node(
+        vm, node_ctl(n)->cond, arg_by_idx, nargs, self_idx, ca);
+    node_ctl_mut(vm, c)->then = clone_param_bounds_node(
+        vm, node_ctl(n)->then, arg_by_idx, nargs, self_idx, ca);
+    node_ctl_mut(vm, c)->els = clone_param_bounds_node(
+        vm, node_ctl(n)->els, arg_by_idx, nargs, self_idx, ca);
     return c;
 }
 
@@ -2475,8 +2483,7 @@ static Obj *new_checked_arg_temp(VirtualMachine *vm, Type *p, Node **arg_by_idx,
 }
 
 static Node *copy_arg_node(VirtualMachine *vm, Node *a) {
-    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *copy      = *a;
+    Node *copy = node_clone(vm, a);
     copy->next = NULL;
     return copy;
 }
@@ -2537,8 +2544,7 @@ static void hoist_ret_bounds_args(VirtualMachine *vm, Node *n, Type *params,
         Type *ty   = plain_value_type(vm, p);
         Obj  *tmp  = alloc_fn ? new_checked_prop_temp(vm, alloc_fn, ty)
                               : new_checked_call_temp(vm, ty);
-        Node *orig = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-        *orig      = *a;
+        Node *orig = node_clone(vm, a);
         orig->next = NULL;
         Node *lhs  = new_var_node(vm, tmp, tok);
         add_type(vm, lhs);
@@ -2554,9 +2560,12 @@ static void hoist_ret_bounds_args(VirtualMachine *vm, Node *n, Type *params,
     }
     hoist_ret_bounds_args(vm, n->lhs, params, args, reads, alloc_fn, tok);
     hoist_ret_bounds_args(vm, n->rhs, params, args, reads, alloc_fn, tok);
-    hoist_ret_bounds_args(vm, n->cond, params, args, reads, alloc_fn, tok);
-    hoist_ret_bounds_args(vm, n->then, params, args, reads, alloc_fn, tok);
-    hoist_ret_bounds_args(vm, n->els, params, args, reads, alloc_fn, tok);
+    hoist_ret_bounds_args(vm, node_ctl(n)->cond, params, args, reads, alloc_fn,
+                          tok);
+    hoist_ret_bounds_args(vm, node_ctl(n)->then, params, args, reads, alloc_fn,
+                          tok);
+    hoist_ret_bounds_args(vm, node_ctl(n)->els, params, args, reads, alloc_fn,
+                          tok);
 }
 
 // Splits a call to a checked-return function (one checked_call_root()
@@ -2594,8 +2603,7 @@ static Node *split_checked_call_result(VirtualMachine *vm, Node *call,
     cr->checked_bounds_hi = clone_param_bounds_node(
         vm, type_chk(fty)->ret_bounds_hi, reads, nargs, 0, cr);
 
-    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *copy      = *call;
+    Node *copy = node_clone(vm, call);
     copy->next = NULL;
     Node *lhs  = new_var_node(vm, cr, tok);
     add_type(vm, lhs);
@@ -2688,12 +2696,12 @@ static bool checked_param_hoist_siblings(Node *n, Type *params,
                                         self_idx, need, vneed) &&
            checked_param_hoist_siblings(n->rhs, params, arg_by_idx, nargs,
                                         self_idx, need, vneed) &&
-           checked_param_hoist_siblings(n->cond, params, arg_by_idx, nargs,
-                                        self_idx, need, vneed) &&
-           checked_param_hoist_siblings(n->then, params, arg_by_idx, nargs,
-                                        self_idx, need, vneed) &&
-           checked_param_hoist_siblings(n->els, params, arg_by_idx, nargs,
-                                        self_idx, need, vneed);
+           checked_param_hoist_siblings(node_ctl(n)->cond, params, arg_by_idx,
+                                        nargs, self_idx, need, vneed) &&
+           checked_param_hoist_siblings(node_ctl(n)->then, params, arg_by_idx,
+                                        nargs, self_idx, need, vneed) &&
+           checked_param_hoist_siblings(node_ctl(n)->els, params, arg_by_idx,
+                                        nargs, self_idx, need, vneed);
 }
 
 // Hoists the side-effecting siblings that verified parameters name into temps,
@@ -3137,16 +3145,16 @@ static void group_collect_siblings(Node *n, Obj *self, GroupTarget *t) {
     }
     group_collect_siblings(n->lhs, self, t);
     group_collect_siblings(n->rhs, self, t);
-    group_collect_siblings(n->cond, self, t);
-    group_collect_siblings(n->then, self, t);
-    group_collect_siblings(n->els, self, t);
+    group_collect_siblings(node_ctl(n)->cond, self, t);
+    group_collect_siblings(node_ctl(n)->then, self, t);
+    group_collect_siblings(node_ctl(n)->els, self, t);
 }
 
 // The pointer a stamped assignment stores into, with the variables and
 // members its bounds name. False when it names none, or is a compiler temp.
 static bool group_anchor_target(Node *leaf, GroupTarget *t) {
     memset(t, 0, sizeof(*t));
-    if (leaf->kind != ND_ASSIGN || !leaf->checked_assign_dst_lo || !leaf->lhs)
+    if (leaf->kind != ND_ASSIGN || !node_chk(leaf)->assign_dst_lo || !leaf->lhs)
         return false;
     Node *l = leaf->lhs;
     if (l->kind == ND_VAR && l->var && l->var->name && l->var->name[0]) {
@@ -3179,8 +3187,9 @@ static bool group_reads_target(Node *n, const GroupTarget *t) {
     if (n->kind == ND_MEMBER && t->mem && n->member == t->mem)
         return true;
     if (group_reads_target(n->lhs, t) || group_reads_target(n->rhs, t) ||
-        group_reads_target(n->cond, t) || group_reads_target(n->then, t) ||
-        group_reads_target(n->els, t))
+        group_reads_target(node_ctl(n)->cond, t) ||
+        group_reads_target(node_ctl(n)->then, t) ||
+        group_reads_target(node_ctl(n)->els, t))
         return true;
     for (Node *a = n->args; a; a = a->next)
         if (group_reads_target(a, t))
@@ -3271,8 +3280,7 @@ static bool group_anchors_related(const GroupTarget *a, const GroupTarget *b) {
 }
 
 static void group_wrap_leaf(VirtualMachine *vm, Node *leaf, Node *extra) {
-    Node *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *copy       = *leaf;
+    Node *copy  = node_clone(vm, leaf);
     copy->next  = NULL;
     Node *comma = new_binary(vm, ND_COMMA, copy, extra, leaf->tok);
     add_type(vm, comma);
@@ -3290,16 +3298,17 @@ static void group_move_stamp(VirtualMachine *vm, Obj *fn, Node *from,
         new_binary(vm, ND_ASSIGN, lhs,
                    new_cast(vm, new_long(vm, 0, from->tok), ty_int), from->tok);
     add_type(vm, carrier);
-    carrier->checked_assign_dst_lo       = from->checked_assign_dst_lo;
-    carrier->checked_assign_dst_hi       = from->checked_assign_dst_hi;
-    carrier->checked_assign_dst_obj_init = from->checked_assign_dst_obj_init;
-    carrier->checked_assign_src_lo       = from->checked_assign_src_lo;
-    carrier->checked_assign_src_hi       = from->checked_assign_src_hi;
-    from->checked_assign_dst_lo          = NULL;
-    from->checked_assign_dst_hi          = NULL;
-    from->checked_assign_dst_obj_init    = NULL;
-    from->checked_assign_src_lo          = NULL;
-    from->checked_assign_src_hi          = NULL;
+    node_chk_mut(vm, carrier)->assign_dst_lo = node_chk(from)->assign_dst_lo;
+    node_chk_mut(vm, carrier)->assign_dst_hi = node_chk(from)->assign_dst_hi;
+    node_chk_mut(vm, carrier)->assign_dst_obj_init =
+        node_chk(from)->assign_dst_obj_init;
+    node_chk_mut(vm, carrier)->assign_src_lo    = node_chk(from)->assign_src_lo;
+    node_chk_mut(vm, carrier)->assign_src_hi    = node_chk(from)->assign_src_hi;
+    node_chk_mut(vm, from)->assign_dst_lo       = NULL;
+    node_chk_mut(vm, from)->assign_dst_hi       = NULL;
+    node_chk_mut(vm, from)->assign_dst_obj_init = NULL;
+    node_chk_mut(vm, from)->assign_src_lo       = NULL;
+    node_chk_mut(vm, from)->assign_src_hi       = NULL;
     group_wrap_leaf(vm, after, carrier);
 }
 
@@ -3339,11 +3348,11 @@ static void track_note(TrackAnchors *t, int idx, Node *leaf,
     t->v[t->n++] =
         (TrackAnchor){.at           = *at,
                       .leaf         = leaf,
-                      .dst_lo       = leaf->checked_assign_dst_lo,
-                      .dst_hi       = leaf->checked_assign_dst_hi,
-                      .dst_obj_init = leaf->checked_assign_dst_obj_init,
-                      .src_lo       = leaf->checked_assign_src_lo,
-                      .src_hi       = leaf->checked_assign_src_hi,
+                      .dst_lo       = node_chk(leaf)->assign_dst_lo,
+                      .dst_hi       = node_chk(leaf)->assign_dst_hi,
+                      .dst_obj_init = node_chk(leaf)->assign_dst_obj_init,
+                      .src_lo       = node_chk(leaf)->assign_src_lo,
+                      .src_hi       = node_chk(leaf)->assign_src_hi,
                       .resume       = idx + 1};
 }
 
@@ -3356,7 +3365,7 @@ static void track_set_resume(TrackAnchors *t, Node *leaf, int resume) {
 // A `__cg = 0` carrying a checked-assignment stamp, from a group or a recheck.
 static bool track_is_carrier(Node *n) {
     return n && n->kind == ND_ASSIGN && group_is_temp(n->lhs) &&
-           n->checked_assign_dst_lo;
+           node_chk(n)->assign_dst_lo;
 }
 
 // `n` leaves in evaluation order; the last `protect_last` ones never take a
@@ -3393,7 +3402,7 @@ static void group_process(VirtualMachine *vm, Obj *fn, Node **leaves, int n,
             }
             if (track_is_carrier(l))
                 continue;
-            if (l->checked_assign_dst_lo)
+            if (node_chk(l)->assign_dst_lo)
                 break;
             if (group_is_temp(l->lhs)) {
                 if (node_has_side_effects(l->rhs))
@@ -3646,11 +3655,11 @@ static void track_scan_one(Node *n, TrackFn *tf) {
     }
     track_scan_one(n->lhs, tf);
     track_scan_one(n->rhs, tf);
-    track_scan_one(n->cond, tf);
-    track_scan_one(n->then, tf);
-    track_scan_one(n->els, tf);
-    track_scan_one(n->init, tf);
-    track_scan_one(n->inc, tf);
+    track_scan_one(node_ctl(n)->cond, tf);
+    track_scan_one(node_ctl(n)->then, tf);
+    track_scan_one(node_ctl(n)->els, tf);
+    track_scan_one(node_ctl(n)->init, tf);
+    track_scan_one(node_ctl(n)->inc, tf);
     track_scan_list(n->body, tf);
     track_scan_list(n->args, tf);
 }
@@ -3692,8 +3701,9 @@ static bool track_collect_vars(Node *n, TrackCtx *cx) {
         return true;
     }
     return track_collect_vars(n->lhs, cx) && track_collect_vars(n->rhs, cx) &&
-           track_collect_vars(n->cond, cx) && track_collect_vars(n->then, cx) &&
-           track_collect_vars(n->els, cx);
+           track_collect_vars(node_ctl(n)->cond, cx) &&
+           track_collect_vars(node_ctl(n)->then, cx) &&
+           track_collect_vars(node_ctl(n)->els, cx);
 }
 
 // Reached only through its own function: no address is taken, except to
@@ -3850,15 +3860,15 @@ static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
                 cx->committed = cx->unit.n;
             return track_child(n->rhs, cx, true);
         case ND_COND:
-            if (track_child(n->cond, cx, true) == TV_STOP)
+            if (track_child(node_ctl(n)->cond, cx, true) == TV_STOP)
                 return TV_STOP;
             if (cx->spine)
                 cx->committed = cx->unit.n;
-            if (track_child(n->then, cx, true) == TV_STOP)
+            if (track_child(node_ctl(n)->then, cx, true) == TV_STOP)
                 return TV_STOP;
             if (cx->spine)
                 cx->committed = cx->unit.n; // the branches are exclusive
-            return track_child(n->els, cx, true);
+            return track_child(node_ctl(n)->els, cx, true);
         case ND_FUNCALL:
         case ND_ASM:
         case ND_CAS:
@@ -3870,9 +3880,9 @@ static TrackVerdict track_node(Node *n, TrackCtx *cx, bool top) {
     }
     if (track_child(n->lhs, cx, false) == TV_STOP ||
         track_child(n->rhs, cx, false) == TV_STOP ||
-        track_child(n->cond, cx, false) == TV_STOP ||
-        track_child(n->then, cx, false) == TV_STOP ||
-        track_child(n->els, cx, false) == TV_STOP)
+        track_child(node_ctl(n)->cond, cx, false) == TV_STOP ||
+        track_child(node_ctl(n)->then, cx, false) == TV_STOP ||
+        track_child(node_ctl(n)->els, cx, false) == TV_STOP)
         return TV_STOP;
     for (Node *a = n->args; a; a = a->next)
         if (track_child(a, cx, false) == TV_STOP)
@@ -3892,12 +3902,12 @@ static Node *track_carrier(VirtualMachine *vm, Obj *fn, Token *tok,
     Node *carrier = new_binary(vm, ND_ASSIGN, lhs,
                                new_cast(vm, new_long(vm, 0, tok), ty_int), tok);
     add_type(vm, carrier);
-    carrier->checked_assign_dst_lo = clone_bounds_node(vm, a->dst_lo);
-    carrier->checked_assign_dst_hi = clone_bounds_node(vm, a->dst_hi);
-    carrier->checked_assign_dst_obj_init =
+    node_chk_mut(vm, carrier)->assign_dst_lo = clone_bounds_node(vm, a->dst_lo);
+    node_chk_mut(vm, carrier)->assign_dst_hi = clone_bounds_node(vm, a->dst_hi);
+    node_chk_mut(vm, carrier)->assign_dst_obj_init =
         clone_bounds_node(vm, a->dst_obj_init);
-    carrier->checked_assign_src_lo = clone_bounds_node(vm, a->src_lo);
-    carrier->checked_assign_src_hi = clone_bounds_node(vm, a->src_hi);
+    node_chk_mut(vm, carrier)->assign_src_lo = clone_bounds_node(vm, a->src_lo);
+    node_chk_mut(vm, carrier)->assign_src_hi = clone_bounds_node(vm, a->src_hi);
     return carrier;
 }
 
@@ -3911,8 +3921,7 @@ static void track_wrap_value(VirtualMachine *vm, Obj *fn, Node *w,
     if (!w->ty || !is_integer(w->ty))
         return;
     Obj  *v    = new_checked_prop_temp(vm, fn, w->ty);
-    Node *copy = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *copy      = *w;
+    Node *copy = node_clone(vm, w);
     copy->next = NULL;
     Node *dst  = new_var_node(vm, v, w->tok);
     add_type(vm, dst);
@@ -3982,11 +3991,12 @@ static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx);
 static bool track_loop(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx) {
     int held = cx->held.n, wraps = cx->wraps.n;
     cx->loops++;
-    bool ok = s->kind == ND_DO ? track_stmt(vm, fn, s->then, cx) &&
-                                     track_expr(vm, fn, s->cond, false, cx)
-                               : track_expr(vm, fn, s->cond, false, cx) &&
-                                     track_stmt(vm, fn, s->then, cx) &&
-                                     track_expr(vm, fn, s->inc, true, cx);
+    bool ok = s->kind == ND_DO
+                  ? track_stmt(vm, fn, node_ctl(s)->then, cx) &&
+                        track_expr(vm, fn, node_ctl(s)->cond, false, cx)
+                  : track_expr(vm, fn, node_ctl(s)->cond, false, cx) &&
+                        track_stmt(vm, fn, node_ctl(s)->then, cx) &&
+                        track_expr(vm, fn, node_ctl(s)->inc, true, cx);
     cx->loops--;
     if (!ok) {
         cx->held.n  = held;
@@ -4010,16 +4020,17 @@ static bool track_stmt(VirtualMachine *vm, Obj *fn, Node *s, TrackCtx *cx) {
                     return false;
             return true;
         case ND_IF:
-            return track_expr(vm, fn, s->cond, false, cx) &&
-                   track_stmt(vm, fn, s->then, cx) &&
-                   track_stmt(vm, fn, s->els, cx);
+            return track_expr(vm, fn, node_ctl(s)->cond, false, cx) &&
+                   track_stmt(vm, fn, node_ctl(s)->then, cx) &&
+                   track_stmt(vm, fn, node_ctl(s)->els, cx);
         case ND_FOR:
-            return track_stmt(vm, fn, s->init, cx) && track_loop(vm, fn, s, cx);
+            return track_stmt(vm, fn, node_ctl(s)->init, cx) &&
+                   track_loop(vm, fn, s, cx);
         case ND_DO:
             return track_loop(vm, fn, s, cx);
         case ND_SWITCH:
-            return track_expr(vm, fn, s->cond, false, cx) &&
-                   track_stmt(vm, fn, s->then, cx);
+            return track_expr(vm, fn, node_ctl(s)->cond, false, cx) &&
+                   track_stmt(vm, fn, node_ctl(s)->then, cx);
         case ND_RETURN:
             return track_expr(vm, fn, s->lhs, false, cx);
         case ND_LABEL:
@@ -4109,11 +4120,11 @@ static void group_walk_children(VirtualMachine *vm, Obj *fn, TrackFn *tf,
                                 Node *node) {
     group_walk_one(vm, fn, tf, node->lhs);
     group_walk_one(vm, fn, tf, node->rhs);
-    group_walk_one(vm, fn, tf, node->cond);
-    group_walk_one(vm, fn, tf, node->then);
-    group_walk_one(vm, fn, tf, node->els);
-    group_walk_one(vm, fn, tf, node->init);
-    group_walk_one(vm, fn, tf, node->inc);
+    group_walk_one(vm, fn, tf, node_ctl(node)->cond);
+    group_walk_one(vm, fn, tf, node_ctl(node)->then);
+    group_walk_one(vm, fn, tf, node_ctl(node)->els);
+    group_walk_one(vm, fn, tf, node_ctl(node)->init);
+    group_walk_one(vm, fn, tf, node_ctl(node)->inc);
     group_walk(vm, fn, tf, node->body);
     group_walk(vm, fn, tf, node->args);
 }
@@ -4202,9 +4213,9 @@ static void retarget_ret_params(VirtualMachine *vm, Obj *fn, Node *n,
     }
     retarget_ret_params(vm, fn, n->lhs, map, count);
     retarget_ret_params(vm, fn, n->rhs, map, count);
-    retarget_ret_params(vm, fn, n->cond, map, count);
-    retarget_ret_params(vm, fn, n->then, map, count);
-    retarget_ret_params(vm, fn, n->els, map, count);
+    retarget_ret_params(vm, fn, node_ctl(n)->cond, map, count);
+    retarget_ret_params(vm, fn, node_ctl(n)->then, map, count);
+    retarget_ret_params(vm, fn, node_ctl(n)->els, map, count);
 }
 
 // Declares the local a checked return value is assigned through; see
@@ -4446,8 +4457,8 @@ static bool checked_source_ok(Node *e, bool visible_ok) {
         case ND_ADDR:
             return visible_ok;
         case ND_COND:
-            return checked_source_ok(e->then, visible_ok) &&
-                   checked_source_ok(e->els, visible_ok);
+            return checked_source_ok(node_ctl(e)->then, visible_ok) &&
+                   checked_source_ok(node_ctl(e)->els, visible_ok);
         case ND_COMMA:
             return checked_source_ok(e->rhs, visible_ok);
         case ND_ADD:
@@ -4712,10 +4723,10 @@ static Node *static_init_bounds(VirtualMachine *vm, Node *n,
             return si->expr;
         return new_long(vm, 0, n->tok);
     }
-    Node *c       = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-    *c            = *n;
+    Node *c       = node_clone(vm, n);
     c->next       = NULL;
-    Node **kids[] = {&c->lhs, &c->rhs, &c->cond, &c->then, &c->els};
+    Node **kids[] = {&c->lhs, &c->rhs, &node_ctl_mut(vm, c)->cond,
+                     &node_ctl_mut(vm, c)->then, &node_ctl_mut(vm, c)->els};
     for (int i = 0; i < 5; i++) {
         Node *k = *kids[i];
         if (!k)

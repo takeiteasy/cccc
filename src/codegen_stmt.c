@@ -124,9 +124,9 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             // Push a cleanup scope entry if this block declared cleanup vars.
             CleanupScopeEntry  cleanup_entry = {};
             CleanupScopeEntry *saved_cleanup = g_cleanup_scope;
-            if (node->cleanup_vars) {
-                cleanup_entry.vars  = node->cleanup_vars;
-                cleanup_entry.depth = node->cleanup_scope_depth;
+            if (node_ctl(node)->cleanup_vars) {
+                cleanup_entry.vars  = node_ctl(node)->cleanup_vars;
+                cleanup_entry.depth = node_ctl(node)->cleanup_scope_depth;
                 cleanup_entry.outer = g_cleanup_scope;
                 g_cleanup_scope     = &cleanup_entry;
             }
@@ -136,7 +136,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             }
 
             // Emit cleanups at natural block exit (LIFO order).
-            if (node->cleanup_vars)
+            if (node_ctl(node)->cleanup_vars)
                 emit_scope_cleanups(vm, g_cleanup_scope);
 
             g_cleanup_scope = saved_cleanup;
@@ -161,8 +161,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_EXPR_STMT:
             reset_temp_regs();
             gen_expr(vm, node->lhs, REG_ZERO);
-            if (node->cleanup_open)
-                cleanup_range_open(vm, node->cleanup_open);
+            if (node_ctl(node)->cleanup_open)
+                cleanup_range_open(vm, node_ctl(node)->cleanup_open);
             return;
 
         case ND_RETURN:
@@ -323,7 +323,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                                 cur_fn->cleanup_fp_retval_offset);
                     }
                 }
-                emit_cleanups_to_depth(vm, 0, node->cleanup_seq_limit);
+                emit_cleanups_to_depth(vm, 0,
+                                       node_ctl(node)->cleanup_seq_limit);
                 if (!is_void_ret) {
                     if (!is_float_ret) {
                         emit_pop3(vm, REG_A0);
@@ -345,17 +346,17 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_IF: {
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
-            gen_cond_expr(vm, node->cond, r_cond);
+            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
             Pc jz_else = emit_jz3(vm, r_cond);
             free_temp_reg(r_cond);
 
-            gen_stmt(vm, node->then);
+            gen_stmt(vm, node_ctl(node)->then);
 
-            if (node->els) {
+            if (node_ctl(node)->els) {
                 emit(vm, JMP);
                 Pc jmp_end            = emit_word_ptr(vm);
                 vm->text_seg[jz_else] = vm->text_ptr + 1;
-                gen_stmt(vm, node->els);
+                gen_stmt(vm, node_ctl(node)->els);
                 vm->text_seg[jmp_end] = vm->text_ptr + 1;
             } else {
                 vm->text_seg[jz_else] = vm->text_ptr + 1;
@@ -365,34 +366,34 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
         case ND_FOR: {
             // Init
-            if (node->init) {
-                gen_stmt(vm, node->init);
+            if (node_ctl(node)->init) {
+                gen_stmt(vm, node_ctl(node)->init);
             }
 
             Pc loop_start = vm->text_ptr + 1;
 
             // Condition
             Pc jz_end = CCCC_INVALID_PC;
-            if (node->cond) {
+            if (node_ctl(node)->cond) {
                 reset_temp_regs();
                 int r_cond = alloc_temp_reg();
-                gen_cond_expr(vm, node->cond, r_cond);
+                gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
                 jz_end = emit_jz3(vm, r_cond);
                 free_temp_reg(r_cond);
             }
 
             // Body
-            gen_stmt(vm, node->then);
+            gen_stmt(vm, node_ctl(node)->then);
 
             // Define continue label (jumps to increment)
-            if (node->cont_label) {
-                define_label(vm, node->cont_label);
+            if (node_ctl(node)->cont_label) {
+                define_label(vm, node_ctl(node)->cont_label);
             }
 
             // Increment
-            if (node->inc) {
+            if (node_ctl(node)->inc) {
                 reset_temp_regs();
-                gen_expr(vm, node->inc, REG_ZERO);
+                gen_expr(vm, node_ctl(node)->inc, REG_ZERO);
             }
 
             // Jump back to start
@@ -400,8 +401,8 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             emit_word(vm, loop_start);
 
             // Define break label (jumps past loop)
-            if (node->brk_label) {
-                define_label(vm, node->brk_label);
+            if (node_ctl(node)->brk_label) {
+                define_label(vm, node_ctl(node)->brk_label);
             }
 
             // Patch exit
@@ -414,23 +415,23 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_DO: {
             Pc loop_start = vm->text_ptr + 1;
 
-            gen_stmt(vm, node->then);
+            gen_stmt(vm, node_ctl(node)->then);
 
             // Define continue label (jumps to condition)
-            if (node->cont_label) {
-                define_label(vm, node->cont_label);
+            if (node_ctl(node)->cont_label) {
+                define_label(vm, node_ctl(node)->cont_label);
             }
 
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
-            gen_cond_expr(vm, node->cond, r_cond);
+            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
             Pc jnz_start            = emit_jnz3(vm, r_cond);
             vm->text_seg[jnz_start] = loop_start;
             free_temp_reg(r_cond);
 
             // Define break label (jumps past loop)
-            if (node->brk_label) {
-                define_label(vm, node->brk_label);
+            if (node_ctl(node)->brk_label) {
+                define_label(vm, node_ctl(node)->brk_label);
             }
             return;
         }
@@ -438,11 +439,13 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_SWITCH: {
             reset_temp_regs();
             int r_val = alloc_temp_reg();
-            gen_expr(vm, node->cond, r_val);
+            gen_expr(vm, node_ctl(node)->cond, r_val);
             // Case values are held as int, so a 32-bit condition is compared
             // as one.
-            if (node->cond->ty && node->cond->ty->size == 4 &&
-                node->cond->ty->is_unsigned && is_integer(node->cond->ty))
+            if (node_ctl(node)->cond->ty &&
+                node_ctl(node)->cond->ty->size == 4 &&
+                node_ctl(node)->cond->ty->is_unsigned &&
+                is_integer(node_ctl(node)->cond->ty))
                 emit_rr(vm, SX4, r_val, r_val);
             // A call in the controlling expression resets the temp registers.
             mark_temp_reg_used(r_val);
@@ -464,7 +467,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
             if (num_cases == 0) {
                 emit(vm, JMP);
-                if (node->default_case)
+                if (node_ctl(node)->default_case)
                     default_patch = emit_word_ptr(vm);
                 else
                     end_patch = emit_word_ptr(vm);
@@ -492,7 +495,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 emit_sparse_switch_tree(vm, cases, 0, num_cases - 1, r_val,
                                         r_cmp, &fail_patches);
                 free_temp_reg(r_cmp);
-                if (node->default_case) {
+                if (node_ctl(node)->default_case) {
                     emit(vm, JMP);
                     default_patch = emit_word_ptr(vm);
                 }
@@ -511,10 +514,10 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             vm->compiler.current_switch_table_start = table_start;
             vm->compiler.current_switch_min         = min_case;
             vm->compiler.current_switch_size        = span;
-            vm->compiler.current_switch_default     = node->default_case;
+            vm->compiler.current_switch_default = node_ctl(node)->default_case;
             vm->compiler.current_default_patch      = default_patch;
 
-            gen_stmt(vm, node->then);
+            gen_stmt(vm, node_ctl(node)->then);
 
             vm->compiler.current_switch_cases       = saved_cases;
             vm->compiler.current_switch_num         = saved_num_cases;
@@ -524,23 +527,24 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             vm->compiler.current_switch_default     = saved_default;
             vm->compiler.current_default_patch      = saved_default_patch;
 
-            if (node->brk_label) {
-                define_label(vm, node->brk_label);
+            if (node_ctl(node)->brk_label) {
+                define_label(vm, node_ctl(node)->brk_label);
             }
             Pc end_target = vm->text_ptr + 1;
             if (end_patch != CCCC_INVALID_PC) {
                 vm->text_seg[end_patch] = end_target;
             }
-            if (!node->default_case && default_patch != CCCC_INVALID_PC) {
+            if (!node_ctl(node)->default_case &&
+                default_patch != CCCC_INVALID_PC) {
                 vm->text_seg[default_patch] = end_target;
             }
             for (int i = 0; i < fail_patches.len; i++) {
                 vm->text_seg[fail_patches.items[i]] =
-                    node->default_case ? vm->text_seg[default_patch]
-                                       : end_target;
+                    node_ctl(node)->default_case ? vm->text_seg[default_patch]
+                                                 : end_target;
             }
             if (use_jump_table) {
-                Pc default_target = node->default_case
+                Pc default_target = node_ctl(node)->default_case
                                         ? vm->text_seg[default_patch]
                                         : end_target;
                 for (long i = 0; i < span; i++) {
@@ -600,17 +604,17 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             // unique_label and cleanup_target_depth on every goto (named,
             // break, continue). A NULL here is a compiler bug, not a
             // fall-through.
-            if (!node->unique_label)
+            if (!node_ctl(node)->unique_label)
                 error_tok(vm, node->tok,
                           "internal error: unresolved goto to label '%s'",
-                          node->label ? node->label : "?");
+                          node_ctl(node)->label ? node_ctl(node)->label : "?");
             if (g_cleanup_scope)
-                emit_cleanups_to_depth(vm, node->cleanup_target_depth,
-                                       node->cleanup_seq_limit);
+                emit_cleanups_to_depth(vm, node_ctl(node)->cleanup_target_depth,
+                                       node_ctl(node)->cleanup_seq_limit);
             emit(vm, JMP);
             Pc patch            = emit_word_ptr(vm);
             vm->text_seg[patch] = 0;
-            add_label_patch(node->unique_label, patch, false);
+            add_label_patch(node_ctl(node)->unique_label, patch, false);
             cleanup_ranges_reopen(vm);
             return;
         }
@@ -619,18 +623,18 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             // Named label statement - define the label and generate the body.
             // unique_label is always set post-resolution; the raw-name branch
             // would silently mismatch a patch keyed on a `.L..N` and is a bug.
-            if (!node->unique_label)
+            if (!node_ctl(node)->unique_label)
                 error_tok(vm, node->tok,
                           "internal error: label '%s' was never resolved",
-                          node->label ? node->label : "?");
-            define_label(vm, node->unique_label);
+                          node_ctl(node)->label ? node_ctl(node)->label : "?");
+            define_label(vm, node_ctl(node)->unique_label);
             gen_stmt(vm, node->lhs);
             return;
 
         case ND_ASM: {
             // The callback sees only the template, never the operands.
             if (vm->compiler.asm_callback) {
-                vm->compiler.asm_callback(vm, node->asm_str,
+                vm->compiler.asm_callback(vm, node_asm(node)->asm_str,
                                           vm->compiler.asm_user_data);
             } else if (vm->compiler.asm_passthru) {
                 cccc_default_asm_passthru(vm, node);

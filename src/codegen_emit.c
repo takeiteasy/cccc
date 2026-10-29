@@ -620,8 +620,8 @@ void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
     int   words = ty->size / 8;
     int   r_src = alloc_temp_reg();
     gen_expr(vm, node->lhs, r_src); // wide operand → address
-    long long dst_offset = node->ret_buffer
-                               ? (long long)node->ret_buffer->offset
+    long long dst_offset = node_misc(node)->ret_buffer
+                               ? (long long)node_misc(node)->ret_buffer->offset
                                : alloc_wide_bitint_temp(vm, words);
     emit_lea3(vm, REG_A0, dst_offset);
     emit_mov3(vm, REG_A1, r_src);
@@ -1082,7 +1082,7 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
 
     *num_cases      = 0;
     *covered_values = 0;
-    for (Node *n = node->case_next; n; n = n->case_next) {
+    for (Node *n = node_ctl(node)->case_next; n; n = node_ctl(n)->case_next) {
         if (*num_cases == cap) {
             cap *= 2;
             SwitchCasePatch *new_cases =
@@ -1094,8 +1094,8 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
             cases = new_cases;
         }
 
-        long begin                    = n->begin;
-        long end                      = n->end;
+        long begin                    = node_ctl(n)->begin;
+        long end                      = node_ctl(n)->end;
         cases[*num_cases].node        = n;
         cases[*num_cases].begin       = begin;
         cases[*num_cases].end         = end;
@@ -1852,11 +1852,12 @@ static bool may_store_within(Node *n, int *budget) {
             default:
                 break;
         }
-        if (n->body || n->init || n->inc || may_store_within(n->lhs, budget) ||
+        if (n->body || node_ctl(n)->init || node_ctl(n)->inc ||
+            may_store_within(n->lhs, budget) ||
             may_store_within(n->rhs, budget) ||
-            may_store_within(n->cond, budget) ||
-            may_store_within(n->then, budget) ||
-            may_store_within(n->els, budget) ||
+            may_store_within(node_ctl(n)->cond, budget) ||
+            may_store_within(node_ctl(n)->then, budget) ||
+            may_store_within(node_ctl(n)->els, budget) ||
             may_store_within(n->args, budget))
             return true;
     }

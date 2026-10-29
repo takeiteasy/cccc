@@ -354,12 +354,12 @@ static void exempt_loop_var(VirtualMachine *vm, Obj *var) {
 
 static void exempt_loop_vars(VirtualMachine *vm, Node *loop, int depth) {
     for (int level = 0; loop && level < depth; level++) {
-        Node *init = loop->kind == ND_FOR ? loop->init : NULL;
+        Node *init = loop->kind == ND_FOR ? node_ctl(loop)->init : NULL;
         if (init && init->kind == ND_EXPR_STMT && init->lhs &&
             init->lhs->kind == ND_ASSIGN && init->lhs->lhs &&
             init->lhs->lhs->kind == ND_VAR)
             exempt_loop_var(vm, init->lhs->lhs->var);
-        loop = loop->kind == ND_FOR ? single_stmt(loop->then) : NULL;
+        loop = loop->kind == ND_FOR ? single_stmt(node_ctl(loop)->then) : NULL;
     }
 }
 
@@ -1312,7 +1312,7 @@ static char *linear_assign(VirtualMachine *vm, OmpClause *c, int id,
 // The innermost loop of a collapse(depth) nest.
 static Node *innermost_loop(Node *loop, int depth) {
     for (int level = 1; level < depth; level++)
-        loop = single_stmt(loop->then);
+        loop = single_stmt(node_ctl(loop)->then);
     return loop;
 }
 
@@ -1332,10 +1332,10 @@ static void linear_inject(VirtualMachine *vm, OmpDirective *d, int id,
                 snippet(vm, "%s",
                         linear_assign(vm, c, id,
                                       arena_format(vm, "__omp_%d_it", id))));
-    body_push(vm, &it, inner->then);
+    body_push(vm, &it, node_ctl(inner)->then);
     Node *block = new_node(vm, ND_BLOCK, tok);
     block->body = head.next;
-    inner->then = block;
+    node_ctl_mut(vm, inner)->then = block;
 }
 
 static void merges(VirtualMachine *vm, OmpDirective *d, OmpBody *body, int id) {
@@ -1386,13 +1386,13 @@ static void merges(VirtualMachine *vm, OmpDirective *d, OmpBody *body, int id) {
 
 static void check_loop(VirtualMachine *vm, Node *loop, int depth, Token *tok) {
     for (int level = 0; level < depth; level++) {
-        if (!loop || loop->kind != ND_FOR || !loop->init || !loop->cond ||
-            !loop->inc)
+        if (!loop || loop->kind != ND_FOR || !node_ctl(loop)->init ||
+            !node_ctl(loop)->cond || !node_ctl(loop)->inc)
             error_tok(vm, tok,
                       "the statement after '#pragma omp for' must be a for "
                       "loop in canonical form");
         if (level + 1 < depth)
-            loop = single_stmt(loop->then);
+            loop = single_stmt(node_ctl(loop)->then);
     }
 }
 
@@ -2074,7 +2074,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     Node *for_node = first_loop(loop);
     if (!for_node)
         error_tok(vm, for_tok, "internal error: omp loop shape");
-    for_node->cont_label = body_cont;
+    node_ctl_mut(vm, for_node)->cont_label = body_cont;
 
     Node    head = {};
     OmpBody it   = {&head, &head};
@@ -2101,7 +2101,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
     body_push(vm, &it, inner);
     Node *iter_block = new_node(vm, ND_BLOCK, for_tok);
     iter_block->body = head.next;
-    for_node->then   = iter_block;
+    node_ctl_mut(vm, for_node)->then = iter_block;
 
     // One pass of the outer loop is one chunk; a static loop without a chunk
     // size has a single one.
@@ -2129,7 +2129,7 @@ static Token *threaded_for(VirtualMachine *vm, OmpDirective *d, OmpBody *body,
                       id, id, id, id, id));
     Node *chunk_block = new_node(vm, ND_BLOCK, for_tok);
     chunk_block->body = chead.next;
-    chunks_node->then = chunk_block;
+    node_ctl_mut(vm, chunks_node)->then = chunk_block;
     body_push(vm, body, chunks);
     if (d->ordered_n)
         body_push(vm, body, snippet(vm, "__cccc_omp_doacross_fini();"));
@@ -2892,12 +2892,12 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
         Node *ifn     = find_node(guarded, ND_IF);
         if (!ifn)
             error_tok(vm, start, "internal error: omp sections shape");
-        ifn->then = secs[j];
+        node_ctl_mut(vm, ifn)->then = secs[j];
         body_push(vm, &it, guarded);
     }
     Node *iter_block = new_node(vm, ND_BLOCK, start);
     iter_block->body = head.next;
-    for_node->then   = iter_block;
+    node_ctl_mut(vm, for_node)->then = iter_block;
 
     Node *claims = snippet(vm,
                            "while (__cccc_omp_loop_next(2, 1, %d, &__omp%d_c, "
@@ -2913,7 +2913,7 @@ static void threaded_sections(VirtualMachine *vm, OmpDirective *d,
               snippet(vm, "__omp%d_last |= __omp%d_e == %d;", id, id, n));
     Node *claim_block = new_node(vm, ND_BLOCK, start);
     claim_block->body = chead.next;
-    claims_node->then = claim_block;
+    node_ctl_mut(vm, claims_node)->then = claim_block;
     body_push(vm, body, claims);
     body_push(vm, body, snippet(vm, "__cccc_omp_loop_end(2, %d);", n));
 
@@ -3174,7 +3174,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                     snippet(vm, "__cccc_omp_copyprivate_set(__omp%d_cp);", id));
             Node *then = new_node(vm, ND_BLOCK, start);
             then->body = head.next;
-            ifn->then  = then;
+            node_ctl_mut(vm, ifn)->then = then;
             body_push(vm, body, guarded);
             if (!d->nowait)
                 body_push(vm, body, snippet(vm, "__cccc_omp_barrier();"));
@@ -3220,7 +3220,7 @@ static Node *threaded_directive(VirtualMachine *vm, OmpDirective *d,
                     ifn = ifn->kind == ND_BLOCK ? ifn->body : NULL;
                 if (!ifn)
                     error_tok(vm, start, "internal error: omp master shape");
-                ifn->then = inner;
+                node_ctl_mut(vm, ifn)->then = inner;
                 body_push(vm, body, guarded);
             }
             return block;
@@ -3265,7 +3265,7 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok) {
     memset(d, 0, sizeof(*d));
 
     Node *block = new_node(vm, ND_BLOCK, start);
-    block->omp  = d;
+    node_misc_mut(vm, block)->omp = d;
 
     enter_scope(vm);
     Node    head = {};

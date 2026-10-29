@@ -1525,7 +1525,7 @@ static void debugger_capture_visit(Node *n, void *vctx) {
         Obj *proxy = debugger_capture_proxy(w->map, n->var, n->tok);
         n->var     = proxy;
         debugger_walk_add_used(w, proxy);
-    } else if (n->kind == ND_BLOCK_LITERAL && n->block_fn) {
+    } else if (n->kind == ND_BLOCK_LITERAL && node_misc(n)->block_fn) {
         debugger_capture_block(w->map, n, w);
     }
 }
@@ -1535,7 +1535,8 @@ static void debugger_capture_visit(Node *n, void *vctx) {
 // block must capture what its inner block reads.
 static void debugger_capture_block(ProxyMap *m, Node *lit, BlockWalk *parent) {
     BlockWalk w = {.map = m};
-    serialize_ast_walk(lit->block_fn->body, debugger_capture_visit, &w);
+    serialize_ast_walk(node_misc(lit)->block_fn->body, debugger_capture_visit,
+                       &w);
     for (int i = 0; i < w.n; i++) {
         cc_block_add_capture(m->vm, lit, w.used[i]);
         if (parent)
@@ -1551,7 +1552,7 @@ typedef struct {
 
 static void debugger_gather_literal(Node *n, void *vctx) {
     LiteralList *l = vctx;
-    if (n->kind != ND_BLOCK_LITERAL || !n->block_fn)
+    if (n->kind != ND_BLOCK_LITERAL || !node_misc(n)->block_fn)
         return;
     if (l->n == l->cap) {
         l->cap = l->cap ? l->cap * 2 : 4;
@@ -1573,8 +1574,7 @@ static void debugger_capture_blocks(VirtualMachine *vm, Obj *current_fn,
         debugger_capture_block(&m, lit, NULL);
 
         if (m.n) {
-            Node *copy  = arena_alloc(&vm->compiler.parser_arena, sizeof(Node));
-            *copy       = *lit;
+            Node *copy  = node_clone(vm, lit);
             copy->next  = NULL;
 
             Node *chain = NULL;

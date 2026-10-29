@@ -150,7 +150,7 @@ static AddrSpace ptr_space(KernelCtx *ctx, Node *node) {
         case ND_COMMA:
             return ptr_space(ctx, node->rhs);
         case ND_COND:
-            return ptr_space(ctx, node->then);
+            return ptr_space(ctx, node_ctl(node)->then);
         case ND_ADDR:
             return effective_space(lvalue_space(ctx, node->lhs));
         case ND_CAST:
@@ -338,7 +338,7 @@ static void walk_node(KernelCtx *ctx, Node *node) {
         ctx->fn_reported_float = true;
         kernel_error(ctx, node->tok, "double or long double");
     }
-    if (node->va_form != VA_NONE)
+    if (node_misc(node)->va_form != VA_NONE)
         kernel_error(ctx, node->tok, "va_start, va_arg or va_copy");
 
     switch (node->kind) {
@@ -399,8 +399,8 @@ static void walk_node(KernelCtx *ctx, Node *node) {
             break;
         }
         case ND_CAS:
-            if (node->cas_addr &&
-                pointee_space(node->cas_addr->ty) == AS_CONSTANT)
+            if (node_atom(node)->cas_addr &&
+                pointee_space(node_atom(node)->cas_addr->ty) == AS_CONSTANT)
                 kernel_error(ctx, node->tok, "writing to constant memory");
             break;
         case ND_EXCH:
@@ -426,7 +426,7 @@ static void walk_node(KernelCtx *ctx, Node *node) {
             kernel_error(ctx, node->tok, "inline asm");
             return;
         case ND_GOTO:
-            if (node->label)
+            if (node_ctl(node)->label)
                 kernel_error(ctx, node->tok, "goto");
             return;
         case ND_GOTO_EXPR:
@@ -446,20 +446,20 @@ static void walk_node(KernelCtx *ctx, Node *node) {
 
     walk(ctx, node->lhs);
     walk(ctx, node->rhs);
-    walk(ctx, node->cond);
-    walk(ctx, node->then);
-    walk(ctx, node->els);
-    walk(ctx, node->init);
-    walk(ctx, node->inc);
+    walk(ctx, node_ctl(node)->cond);
+    walk(ctx, node_ctl(node)->then);
+    walk(ctx, node_ctl(node)->els);
+    walk(ctx, node_ctl(node)->init);
+    walk(ctx, node_ctl(node)->inc);
     walk(ctx, node->body);
-    walk(ctx, node->va_ap);
-    walk(ctx, node->va_last);
-    walk(ctx, node->va_src);
-    walk(ctx, node->cas_addr);
-    walk(ctx, node->cas_old);
-    walk(ctx, node->cas_new);
-    walk(ctx, node->atomic_expr);
-    walk(ctx, node->init_tail);
+    walk(ctx, node_misc(node)->va_ap);
+    walk(ctx, node_misc(node)->va_last);
+    walk(ctx, node_misc(node)->va_src);
+    walk(ctx, node_atom(node)->cas_addr);
+    walk(ctx, node_atom(node)->cas_old);
+    walk(ctx, node_atom(node)->cas_new);
+    walk(ctx, node_atom(node)->atomic_expr);
+    walk(ctx, node_ctl(node)->init_tail);
 }
 
 static void walk(KernelCtx *ctx, Node *node) {
