@@ -7,7 +7,7 @@ packages:
   - libgdbm-compat-dev
   - python3
 sources:
-  - https://git.sr.ht/~takeiteasy/cccc#devel
+  - https://git.sr.ht/~takeiteasy/cccc
 environment:
   CC: clang
 tasks:
@@ -21,6 +21,8 @@ tasks:
   - build: |
       cd cccc
       set -e
+      # A manual submit clones the default branch.
+      git checkout devel
       git submodule update --init
       make
   - sandbox: |
