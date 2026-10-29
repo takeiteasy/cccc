@@ -137,6 +137,10 @@ int cc_cdata_index_for_obj(VirtualMachine *vm, Obj *var) {
             if (hd->name_len != name_len ||
                 memcmp(hd->name, name, name_len) != 0)
                 continue;
+            if (hd->placeholder) {
+                hd->referenced = true;
+                return i;
+            }
             if (var->ty && var->ty->size > 0 &&
                 (size_t)var->ty->size > hd->size)
                 error_tok(vm, var->tok,
@@ -308,10 +312,16 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                 // silently gets an address into an inert zero slot.
                 int cd = cc_cdata_index_for_obj(vm, target);
                 if (cd >= 0) {
+                    long long slot = var->offset + rel->offset;
+                    if (vm->compiler.cdata_table[cd].placeholder) {
+                        cc_add_cdata_reloc(vm, (HostDataReloc){cd, slot,
+                                                               rel->addend,
+                                                               var->is_tls});
+                        continue;
+                    }
                     long long host =
                         (long long)(intptr_t)vm->compiler.cdata_table[cd].addr +
                         rel->addend;
-                    long long slot = var->offset + rel->offset;
                     if (var->is_tls)
                         *(long long *)(vm->tls_template + slot) = host;
                     else

@@ -6070,6 +6070,10 @@ static inline int op_LDHA3_fn(VirtualMachine *vm) {
             return -1;
         if (vm->comptime_depth != 0) {
             cccc_comptime_enforce(vm, hd->name);
+            if (!addr)
+                return cccc_handle_ffi_policy_error(
+                    vm, "Unresolved Symbol", hd->name,
+                    "library symbols load after compile-time evaluation");
             addr = cccc_comptime_host_data(vm, hd->name, addr, hd->size);
         }
     }

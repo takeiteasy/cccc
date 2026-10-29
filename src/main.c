@@ -1145,7 +1145,19 @@ static int count_params(Type *ty) {
 static void register_dynamic_externs(VirtualMachine *vm, Obj *prog) {
     for (Obj *obj = prog; obj; obj = obj->next) {
         const char *extern_name = obj_external_name(obj);
-        if (!obj->is_function || obj->is_definition || !extern_name ||
+        if (!obj->is_function) {
+            if (extern_name && !obj->is_static && !obj->is_tls &&
+                !obj->is_definition && !obj->is_tentative && !obj->init_data) {
+#ifdef __APPLE__
+                // dlsym takes the C name without the Mach-O underscore.
+                if (obj->asm_label && extern_name[0] == '_')
+                    extern_name++;
+#endif
+                cc_register_cdata_placeholder(vm, extern_name);
+            }
+            continue;
+        }
+        if (obj->is_definition || !extern_name ||
             ffi_index_by_name(vm, extern_name) >= 0)
             continue;
 
@@ -1170,6 +1182,14 @@ static int verify_dynamic_externs(VirtualMachine *vm) {
             (!ff->func_ptr || ff->func_ptr == (void *)1)) {
             fprintf(stderr, "error: unresolved dynamic library symbol '%s'\n",
                     ff->name);
+            ok = 0;
+        }
+    }
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        HostData *hd = &vm->compiler.cdata_table[i];
+        if (hd->placeholder && hd->referenced && !hd->addr) {
+            fprintf(stderr, "error: unresolved dynamic library symbol '%s'\n",
+                    hd->name);
             ok = 0;
         }
     }
@@ -3870,6 +3890,7 @@ int main(int argc, const char *argv[]) {
         exit_code = 1;
         goto BAIL;
     }
+    cc_patch_cdata_relocs(&vm);
 
     if (disassemble) {
         cc_disassemble(&vm);

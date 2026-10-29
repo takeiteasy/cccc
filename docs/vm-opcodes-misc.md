@@ -51,6 +51,13 @@ list before FFI resolution:
 extern double sqrt(double x);
 ```
 
+Data works the same way: `extern int counter;` binds to the library's
+`counter`, and a static initialiser such as `static int *p = &counter;` points
+at it. The library loads when the program runs, so comptime code cannot read
+library data. A referenced symbol the library does not export is an error
+(`unresolved dynamic library symbol`); a declaration the program never uses is
+ignored.
+
 The pragma accepts one or more comma-separated string literals (`link("a", "b")`)
 and goes through the same `find_requested_library` / `cc_dlopen` /
 `register_dynamic_externs` path as `-l`, so the requested libraries are also

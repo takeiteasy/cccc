@@ -1808,6 +1808,7 @@ void cc_destroy(VirtualMachine *vm) {
         free(hd->name);
     }
     free(vm->compiler.cdata_table);
+    free(vm->compiler.cdata_relocs);
 
     // Free FFI table
     if (vm->compiler.ffi_table) {
@@ -2315,6 +2316,42 @@ void *cc_cdata_addr(VirtualMachine *vm, const char *name) {
     return hd ? hd->addr : NULL;
 }
 
+int cc_register_cdata_placeholder(VirtualMachine *vm, const char *name) {
+    if (!vm || !name)
+        return -1;
+    if (find_cdata(vm, name))
+        return 0;
+    new_cdata(vm, name)->placeholder = true;
+    return 0;
+}
+
+void cc_add_cdata_reloc(VirtualMachine *vm, HostDataReloc reloc) {
+    if (vm->compiler.cdata_reloc_count == vm->compiler.cdata_reloc_capacity) {
+        int            cap = vm->compiler.cdata_reloc_capacity
+                                 ? vm->compiler.cdata_reloc_capacity * 2
+                                 : 16;
+        HostDataReloc *grown =
+            realloc(vm->compiler.cdata_relocs, (size_t)cap * sizeof *grown);
+        if (!grown)
+            error("out of memory");
+        vm->compiler.cdata_relocs         = grown;
+        vm->compiler.cdata_reloc_capacity = cap;
+    }
+    vm->compiler.cdata_relocs[vm->compiler.cdata_reloc_count++] = reloc;
+}
+
+void cc_patch_cdata_relocs(VirtualMachine *vm) {
+    for (int i = 0; i < vm->compiler.cdata_reloc_count; i++) {
+        HostDataReloc *r    = &vm->compiler.cdata_relocs[i];
+        void          *addr = vm->compiler.cdata_table[r->cdata].addr;
+        if (!addr)
+            continue;
+        long long host = (long long)(intptr_t)addr + r->addend;
+        *(long long *)((r->tls ? vm->tls_template : vm->data_seg) + r->slot) =
+            host;
+    }
+}
+
 static void reset_cdata(VirtualMachine *vm) {
     for (int i = 0; i < vm->compiler.cdata_count; i++) {
         HostData *hd = &vm->compiler.cdata_table[i];
@@ -2481,6 +2518,22 @@ int cc_dlopen(VirtualMachine *vm, const char *lib_path) {
                        func_ptr);
         }
 #endif
+    }
+
+    for (int i = 0; i < vm->compiler.cdata_count; i++) {
+        HostData *hd = &vm->compiler.cdata_table[i];
+        if (!hd->placeholder || hd->addr)
+            continue;
+        total_count++;
+#ifdef _WIN32
+        void *addr = (void *)GetProcAddress(handle, hd->name);
+#else
+        void *addr = dlsym(handle, hd->name);
+#endif
+        if (addr) {
+            hd->addr = addr;
+            success_count++;
+        }
     }
 
     if (success_count == 0 && total_count > 0) {

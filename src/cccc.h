@@ -3744,7 +3744,17 @@ typedef struct {
     void  *addr;
     size_t size;
     void  *init; // owned slots: value restored at each run start, else NULL
+    bool   placeholder; // extern from a -l library: addr is set by dlsym
+    bool   referenced;  // codegen bound a use to this placeholder
 } HostData;
+
+// A static initialiser slot holding the address of a placeholder HostData.
+typedef struct {
+    int       cdata;
+    long long slot;
+    long long addend;
+    bool      tls;
+} HostDataReloc;
 
 typedef struct DynamicLibrary {
     void *handle;
@@ -4920,6 +4930,11 @@ typedef struct Compiler {
     HostData *cdata_table;
     int       cdata_count;
     int       cdata_capacity;
+    // Static initialisers taking the address of a placeholder, patched once
+    // its library is loaded.
+    HostDataReloc *cdata_relocs;
+    int            cdata_reloc_count;
+    int            cdata_reloc_capacity;
 
     // Current function being compiled (for VLA cleanup)
     Obj *current_codegen_fn;
@@ -5747,6 +5762,20 @@ void *cc_register_cdata_owned(VirtualMachine *vm, const char *name, size_t size,
 
 /*! @brief Address registered for `name`, or NULL. */
 void *cc_cdata_addr(VirtualMachine *vm, const char *name);
+
+/*!
+ @brief Reserve an `extern` global for a symbol of a library loaded later.
+ @details `cc_dlopen` fills the address with dlsym. A name already registered
+          keeps its binding.
+ @return 0 on success, -1 on a NULL argument.
+*/
+int cc_register_cdata_placeholder(VirtualMachine *vm, const char *name);
+
+/*! @brief Store resolved placeholder addresses into static initialisers. */
+void cc_patch_cdata_relocs(VirtualMachine *vm);
+
+// Queue a static-initialiser slot for cc_patch_cdata_relocs.
+void cc_add_cdata_reloc(VirtualMachine *vm, HostDataReloc reloc);
 
 /*!
  @brief Register a C function with detailed argument type information for
