@@ -2,10 +2,10 @@
 """Cross-compiler benchmark runner for CCCC.
 
 Compiles and runs a set of portable C99/C11 benchmark programs under CCCC
-(the VM has no optimiser -- one configuration) and under GCC (across
--O0..-O3), verifies that the programs produce identical output under each
-compiler, and reports wall clock timings as a human-readable table and as a
-machine-readable JSON file.
+(the VM has no optimiser -- one configuration) and under GCC (-O0 and -O2),
+runs the Lua ports in tests/benchmarks/lua/ as a reference interpreter,
+verifies that every configuration produces identical output, and reports wall
+clock timings as a human-readable table and as a machine-readable JSON file.
 
 Usage:
     python3 bench.py [options]
@@ -16,6 +16,8 @@ Options:
     --warmup N          warmup iterations discarded (default: 1)
     --cccc PATH          path to cccc binary (default: ./cccc)
     --gcc PATH          path to gcc binary (default: gcc)
+    --lua PATH          lua interpreter for the reference column (default: lua;
+                        the column is skipped when it is not installed)
     --include PATH      include flag for cccc (default: -I./include)
     --format FMT        output: table, json, both (default: both)
     --json-out PATH     json output file (default: profile/bench-results/run-<utc>.json)
@@ -32,6 +34,7 @@ import fnmatch
 import json
 import os
 import platform
+import shutil
 import statistics
 import subprocess
 import sys
@@ -44,10 +47,10 @@ CCCC_CONFIGS = [
 
 GCC_CONFIGS = [
     ("gcc-O0", "O0"),
-    ("gcc-O1", "O1"),
     ("gcc-O2", "O2"),
-    ("gcc-O3", "O3"),
 ]
+
+LUA_LABEL = "lua"
 
 GCC_EXTRA_FLAGS = ["-ffp-contract=off", "-std=c11"]
 
@@ -81,7 +84,7 @@ def is_clang_disguised_as_gcc(gcc_path):
 
 
 def find_real_gcc():
-    for cand in ("gcc-15", "gcc-14", "gcc-13", "gcc-12", "gcc-11"):
+    for cand in ("gcc-16", "gcc-15", "gcc-14", "gcc-13", "gcc-12", "gcc-11"):
         for prefix in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"):
             p = Path(prefix) / cand
             if p.exists():
@@ -173,6 +176,21 @@ def run_benchmark(src, args, root, build_dir, log):
             f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
         )
 
+    lua_src = args.lua_dir / f"{src.stem}.lua"
+    if args.lua and lua_src.exists():
+        log("  running lua...")
+
+        def make_lua():
+            return run_cmd([args.lua, str(lua_src)], root)
+
+        r = time_runs(make_lua, args.runs, args.warmup)
+        results[LUA_LABEL] = r
+        log(
+            f"    {LUA_LABEL:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+        )
+    elif args.lua:
+        log(f"  no lua port: {lua_src.relative_to(root)}")
+
     correctness = {"status": "ok", "matches": {}, "ref": "cccc"}
     if not args.no_correctness and "cccc" in results:
         ref = results["cccc"]["stdout"]
@@ -224,11 +242,18 @@ def detect_platform_info():
     return info
 
 
-def render_table(records, cccc_configs, gcc_configs):
-    all_configs = (
+def config_columns(records, cccc_configs, gcc_configs):
+    """cccc, then lua when any benchmark ran it, then gcc."""
+    has_lua = any(LUA_LABEL in rec["configs"] for rec in records)
+    return (
         [c[0] for c in cccc_configs]
+        + ([LUA_LABEL] if has_lua else [])
         + [c[0] for c in gcc_configs]
     )
+
+
+def render_table(records, cccc_configs, gcc_configs):
+    all_configs = config_columns(records, cccc_configs, gcc_configs)
     headers = ["benchmark"] + all_configs
     rows = []
     for rec in records:
@@ -264,10 +289,7 @@ def render_table(records, cccc_configs, gcc_configs):
 
 def render_speedup_table(records, cccc_configs, gcc_configs):
     lines = []
-    all_configs = (
-        [c[0] for c in cccc_configs]
-        + [c[0] for c in gcc_configs]
-    )
+    all_configs = config_columns(records, cccc_configs, gcc_configs)
     header = ["benchmark"] + all_configs
     rows = []
     speedups_by_cfg = {cfg: [] for cfg in all_configs}
@@ -329,6 +351,7 @@ def main():
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--cccc", default="./cccc")
     p.add_argument("--gcc", default="gcc")
+    p.add_argument("--lua", default="lua")
     p.add_argument("--include", default="-I./include")
     p.add_argument("--format", choices=["table", "json", "both"], default="both")
     p.add_argument("--json-out", default=None)
@@ -379,6 +402,13 @@ def main():
             msg += " Install with `brew install gcc` or pass --gcc PATH."
         print(msg, file=sys.stderr)
 
+    args.lua_dir = bench_dir / "lua"
+    if args.lua:
+        args.lua = shutil.which(args.lua)
+        if not args.lua:
+            print("note: lua not found; skipping the lua reference column",
+                  file=sys.stderr)
+
     sources = sorted(bench_dir.glob("*.c"))
     if args.filter:
         sources = [s for s in sources if fnmatch.fnmatch(s.name, args.filter)]
@@ -392,9 +422,8 @@ def main():
 
     log(f"Benchmarks: {[s.name for s in sources]}")
     log(f"Runs: {args.runs} (warmup: {args.warmup})")
-    log(f"CCCC: {args.cccc}    GCC: {args.gcc}")
-    cccc_cfg_str = " × {none,O1,O2,O3,O4}"
-    log(f"Configs: cccc{cccc_cfg_str}    gcc × {{O0,O1,O2,O3}}")
+    log(f"CCCC: {args.cccc}    GCC: {args.gcc}    Lua: {args.lua}")
+    log(f"Configs: cccc    lua ({args.lua or 'skipped'})    gcc × {{O0,O2}}")
     if args.vm_profile:
         log(f"VM opcode profiles: {args.vm_profile_dir}")
 
@@ -469,6 +498,7 @@ def main():
             "compilers": {
                 "cccc": compiler_version(args.cccc),
                 "gcc": compiler_version(args.gcc),
+                "lua": compiler_version(args.lua) if args.lua else None,
             },
             "config": {
                 "runs": args.runs,

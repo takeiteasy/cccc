@@ -1,10 +1,8 @@
-# CCCC Benchmark Suite
+# Benchmark Suite
 
-Cross-compiler micro-benchmarks for comparing **CCCC** (across all `--optimize` levels, in both parse+exec and precompiled-bytecode modes) against **GCC** (across `-O0..-O3`).
+Micro-benchmarks comparing the **cccc** VM with **Lua** (a reference interpreter) and **GCC** (`-O0`, `-O2`). Results and how to read them are in [docs/benchmarks.md](../../docs/benchmarks.md).
 
-Each program is plain C99/C11, prints a single `result: …` line on stdout, and exits with code `42`. They are auto-discovered by `tools/bench.py`; the test targets do not run them.
-
-## Programs
+Each C program is plain C99/C11, prints a single `result: …` line on stdout and exits with code `42`. `lua/<name>.lua` is the matching port. `tools/bench.py` discovers the programs; the test targets do not run them.
 
 | File | Workload | Default size |
 |------|----------|--------------|
@@ -20,21 +18,19 @@ Each program is plain C99/C11, prints a single `result: …` line on stdout, and
 
 ## Running
 
-```bash
-# From the repo root
-make bench-compare            # full run (~10 min)
-make bench-compare-quick      # 2 iterations (~5 min)
-python3 tools/bench.py --filter fib.c             # one benchmark only
-python3 tools/bench.py --no-c4 --filter fib.c    # skip the cccc-c4* (precompiled bytecode) columns
-python3 tools/bench.py --filter fib.c --vm-profile # write VM opcode profiles too
+```sh
+./cccc --build build.c --build-target=bench_compare         # builds build/cccc-release, then runs everything
+./cccc --build build.c --build-target=bench_compare_quick   # 2 timed runs
+python3 tools/bench.py --cccc build/cccc-release --filter fib.c   # one benchmark
+python3 tools/bench.py --cccc build/cccc-release --vm-profile     # also write VM opcode profiles
 ```
+
+`bench.py` skips the Lua column when `lua` is not on `PATH` (`--lua PATH` picks another interpreter), and uses a real GCC rather than Apple's `gcc` alias for clang (`--gcc PATH` overrides).
 
 ## Results
 
-Each run writes a JSON report to `results/run-<UTC>.json` with raw timings, compiler versions, host info, and per-`cccc-c4*` `compile_ms` (the one-time cost of producing the bytecode file). All of this is included so results are reproducible and comparable across machines.
+Each run writes a JSON report to `profile/bench-results/run-<UTC>.json` with raw timings, compiler versions and host info. `--vm-profile` adds dynamic opcode counts under `profile/bench-results/vm-profile-<UTC>/`.
 
-With `--vm-profile`, CCCC and CCCC-C4 configs also write dynamic opcode count
-profiles under `results/vm-profile-<UTC>/`, and each profiled timing record
-contains its `vm_profile_json` path.
+## Changing a program
 
-The VM dispatch loop was converted to a fully-inlined threaded interpreter in ticket #227 — a **1.2–1.7× speedup** on VM-bound workloads at `-O2` (fib: 1.21×, nqueens: 1.50×, sieve: 1.69×). Any stored results predating this change will not reflect the improvement.
+A change to a C program needs the same change in its Lua port; `bench.py` fails the run when the outputs differ.

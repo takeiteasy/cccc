@@ -7,6 +7,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: build API `AddSystemInclude`, `AddFrameworkPath` and `UseSystemHeaders` (`CcccExecutable` and `CcccObject` only).
+- Added: the `ouroboros` build target builds cccc with `cccc -c=native` and runs the result's `--version`.
+- Added: Lua ports of the benchmark programs in `tests/benchmarks/lua/` and a `lua` column in `tools/bench.py`.
+- Changed: `tools/bench.py` compares against `gcc -O0` and `-O2`; the `bench_compare*` build targets run the release binary.
+- Fixed: a command-line `-i DIR` default reached a `CcccExecutable` as `-isystem DIR`, which `cccc` read as `-i system`.
+- Fixed: `ExcludeSource` had no effect on a `CcccExecutable` target.
+- Fixed: `-c=native` of cccc's own sources failed with a duplicate `__cccc_native_strtol` runtime.
+
 ## [0.28.0] - 2026-10-29
 
 - Added: the VM fuses `*(base + idx*k + c)` into one indexed load or store opcode, and `x + a*b`, `a*K` and floating-point `c + a*b` into multiply-add opcodes. Fusion is off under any pointer, type, overflow, uninitialised-read or instrumentation check.

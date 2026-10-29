@@ -282,6 +282,14 @@ void __builtin_build_exclude_source(BuildTarget *t, const char *pattern);
 void __builtin_build_add_include(BuildTarget *t, const char *path);
 
 /*!
+ * @brief Add a system include search path (@c -isystem) to the target's
+ * compiles.
+ * @param t Target to modify.
+ * @param path System include search path.
+ */
+void __builtin_build_add_system_include(BuildTarget *t, const char *path);
+
+/*!
  * @brief Add a preprocessor define (-D).
  * @param t Target to modify.
  * @param name Macro name.
@@ -521,6 +529,21 @@ int __builtin_build_have_build_option(Builder *ctx, const char *name);
  * @param name Framework name.
  */
 void __builtin_build_add_framework(BuildTarget *t, const char *name);
+
+/*!
+ * @brief Add a macOS framework search path (@c -F, or @c --iframework for a
+ * cccc-compiled target).
+ * @param t Target to modify.
+ * @param path Framework search path.
+ */
+void __builtin_build_add_framework_path(BuildTarget *t, const char *path);
+
+/*!
+ * @brief Compile a cccc-compiled target against the host's own system headers
+ * (@c --use-system-headers).
+ * @param t A @c CcccExecutable or @c CcccObject target.
+ */
+void __builtin_build_use_system_headers(BuildTarget *t);
 
 /*!
  * @brief Number of positional arguments forwarded via @c -- on the CLI.
@@ -859,6 +882,13 @@ int __builtin_build_run_default(Builder *ctx);
  * @param p Include search path. */
 #define AddInclude(t, p) __builtin_build_add_include(t, p)
 
+/*! @def AddSystemInclude
+ * @brief Add a system include search path (@c -isystem) to the target's
+ * compiles.
+ * @param t Target to modify.
+ * @param p System include search path. */
+#define AddSystemInclude(t, p) __builtin_build_add_system_include(t, p)
+
 /*! @def AddDefine
  * @brief Add a preprocessor define (-D).
  * @param t Target to modify.
@@ -1049,6 +1079,19 @@ int __builtin_build_run_default(Builder *ctx);
  * @param t Target to modify.
  * @param name Framework name. */
 #define AddFramework(t, name) __builtin_build_add_framework(t, name)
+
+/*! @def AddFrameworkPath
+ * @brief Add a macOS framework search path (@c -F, or @c --iframework for a
+ * @c CcccExecutable / @c CcccObject target).
+ * @param t Target to modify.
+ * @param p Framework search path. */
+#define AddFrameworkPath(t, p) __builtin_build_add_framework_path(t, p)
+
+/*! @def UseSystemHeaders
+ * @brief Compile a @c CcccExecutable / @c CcccObject target against the host's
+ * own system headers (@c --use-system-headers); an error on other kinds.
+ * @param t Target to modify. */
+#define UseSystemHeaders(t) __builtin_build_use_system_headers(t)
 
 /*! @def BuildArgc
  * @brief Number of positional arguments forwarded via @c -- on the CLI.

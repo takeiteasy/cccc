@@ -4,27 +4,23 @@ Build cccc with itself: `cccc -c=native` compiles cccc's own sources into a work
 
 ## Recipe
 
-Run it from the repository root, because `src/std_table.c`'s `.incbin` paths are relative to the working directory.
+Run the `ouroboros` build target from the repository root, because `src/std_table.c`'s `.incbin` paths are relative to the working directory:
 
 ```sh
-SDK=$(xcrun --show-sdk-path)
-cccc --use-system-headers -c=native \
-  $(ls src/*.c src/stdlib/*.c | grep -v -e src/ops.c) \
-  -I include -I src -i "$SDK/usr/include" -I "$SDK/usr/include/ffi" \
-  --iframework "$SDK/System/Library/Frameworks" \
-  --link-arg=-framework --link-arg=CoreServices \
-  -l pthread -l iconv -l ffi -L /opt/homebrew/opt/libffi/lib \
-  -o /tmp/cccc_selfhost
+./cccc --build build.c --build-target=release     # build/cccc-release
+build/cccc-release --build build.c --build-target=ouroboros
 ```
 
-| Platform | Changes |
+The result is `build/cccc-ouroboros`; the target runs its `--version` as a smoke check.
+
+| Platform | The target sets |
 |---|---|
-| Linux | Drop `-i`, `--iframework`, the ffi `-I` and the CoreServices link args; `pkg-config --cflags libffi` covers libffi as `Makefile` does; drop `-l iconv` (glibc has it in libc). `src/watch.c` builds against inotify |
-| macOS | Keep `--use-system-headers`: `src/watch.c` (with `src/dmon.h`) includes CoreServices, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`. Without it every file but `src/watch.c` compiles and the link fails on `cc_watch_*` |
+| macOS | The SDK (`xcrun --show-sdk-path`) as system headers and framework path, `CoreServices`, `iconv`, libffi from Homebrew |
+| Linux | libffi flags from `pkg-config`, plus `/usr/include` and the multiarch include directory. `src/watch.c` builds against inotify. Not verified: in a 4 GiB aarch64 container the build exhausts memory |
 
-`-i` is CCCC's `--isystem` short flag, not `-isystem` (getopt would read that as `-i` with the argument `system`). `--sysroot` and `-i "$SDK/usr/include"` are equivalent here.
+`--use-system-headers` is set on macOS: `src/watch.c` (with `src/dmon.h`) includes CoreServices on macOS, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`. Without it every file but `src/watch.c` compiles and the link fails on `cc_watch_*`.
 
-The recipe takes about 2 minutes on an Apple M1 with a release-built `cccc`; see [benchmarks.md](benchmarks.md#compiling-cccc). A `make` build of `cccc` is about 3x slower.
+Building with the release `cccc` takes about 2 minutes on an Apple M1; see [benchmarks.md](benchmarks.md#compiling-cccc). A `make` build of `cccc` is about 3x slower.
 
 ## What to check
 

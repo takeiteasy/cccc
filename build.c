@@ -1014,10 +1014,10 @@ BuildTarget *docs(Builder *ctx) {
 
 static BuildTarget *make_bench_compare(Builder *ctx, const char *name,
                                        const char *pyflags) {
-    BuildTarget *bt   = make_libbacktrace(ctx);
-    BuildTarget *cccc = make_cccc_exe_named(ctx, bt, "cccc");
+    BuildTarget *cccc = release(ctx);
     char         cmd[512];
-    snprintf(cmd, sizeof(cmd), "python3 tools/bench.py %s", pyflags);
+    snprintf(cmd, sizeof(cmd), "python3 tools/bench.py --cccc %s %s",
+             TargetOutput(cccc), pyflags);
     BuildTarget *step = RunCustom(ctx, name, cmd);
     DependsOn(step, cccc);
     return step;
@@ -1286,6 +1286,80 @@ BuildTarget *linux_amd64_msan_test(Builder *ctx) {
                                   "cccc-linux-amd64 cccc-linux-amd64 8");
     DependsOn(step, linux_amd64_build(ctx));
     return step;
+}
+
+// ---- ouroboros: cccc built by cccc ---------------------------------------
+// Whole-program `cccc -c=native` build of cccc's own sources (see
+// docs/selfhosting.md). Run from the repository root: src/std_table.c's
+// `.incbin` paths are cwd-relative.
+
+// Adds the -I/-L entries `pkg-config <flag> libffi` prints. CcccExecutable
+// takes no PkgConfig() or AddCFlag(), so the flags are split by hand.
+static void ouroboros_pkg_flags(Builder *ctx, BuildTarget *t, const char *cmd,
+                                bool include) {
+    const char *out = CaptureCommand(ctx, cmd);
+    if (!out)
+        return;
+    char *copy = strdup(out);
+    for (char *tok = strtok(copy, " \t\n\r"); tok;
+         tok       = strtok(NULL, " \t\n\r")) {
+        if (include && strncmp(tok, "-I", 2) == 0)
+            AddInclude(t, tok + 2);
+        else if (!include && strncmp(tok, "-L", 2) == 0)
+            AddLibPath(t, tok + 2);
+    }
+    free(copy);
+}
+
+[[cccc::build_target]]
+BuildTarget *ouroboros(Builder *ctx) {
+    BuildTarget *t = CcccExecutable(ctx, "cccc-ouroboros");
+    SetOutput(t, "cccc-ouroboros");
+    AddSourcesGlob(t, "src/*.c");
+    AddSourcesGlob(t, "src/stdlib/*.c");
+    ExcludeSource(t, "src/ops.c");
+    AddInclude(t, "include");
+    AddInclude(t, "src");
+    AddLib(t, "pthread");
+    AddLib(t, "ffi");
+    if (strcmp(BuildHost(ctx), "darwin") == 0) {
+        // CoreServices' SDK headers cannot share a unit with cccc's bundled
+        // <signal.h> and <sys/*.h>.
+        UseSystemHeaders(t);
+        const char *sdk = CaptureCommand(ctx, "xcrun --show-sdk-path");
+        char        path[1024];
+        snprintf(path, sizeof(path), "%s/usr/include", sdk);
+        AddSystemInclude(t, path);
+        snprintf(path, sizeof(path), "%s/usr/include/ffi", sdk);
+        AddInclude(t, path);
+        snprintf(path, sizeof(path), "%s/System/Library/Frameworks", sdk);
+        AddFrameworkPath(t, path);
+        AddFramework(t, "CoreServices");
+        AddLib(t, "iconv");
+        AddLibPath(t, "/opt/homebrew/opt/libffi/lib");
+        AddLibPath(t, "/usr/local/opt/libffi/lib");
+    } else if (HaveTool(ctx, "pkg-config")) {
+        ouroboros_pkg_flags(ctx, t, "pkg-config --cflags-only-I libffi", true);
+        ouroboros_pkg_flags(ctx, t, "pkg-config --libs-only-L libffi", false);
+    }
+    if (strcmp(BuildHost(ctx), "linux") == 0) {
+        // Headers outside cccc's default search: Debian-style multiarch
+        // (libffi's ffi.h, asm/*.h) and the kernel's linux/*.h. -I, not
+        // --isystem, which would replace the default system search.
+        const char **ffi = GlobFiles(ctx, "/usr/include/*/ffi.h");
+        if (ffi[0]) {
+            char dir[256];
+            snprintf(dir, sizeof(dir), "%s", ffi[0]);
+            *strrchr(dir, '/') = '\0';
+            AddInclude(t, dir);
+        }
+        AddInclude(t, "/usr/include"); // linux/*.h, used by src/os_sandbox.c
+    }
+    char cmd[1100];
+    snprintf(cmd, sizeof(cmd), "%s --version", TargetOutput(t));
+    BuildTarget *smoke = RunCustom(ctx, "ouroboros-smoke", cmd);
+    DependsOn(smoke, t);
+    return smoke;
 }
 
 [[cccc::build_target]]

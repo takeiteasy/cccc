@@ -1387,6 +1387,12 @@ void serialize_c23_mem_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
 void serialize_c23_strtol_shims(FILE *f, VirtualMachine *vm, Obj *prog) {
     if (vm->compiler.emit_cccc)
         return;
+    // Self-hosting: src/stdlib/stdlib.c is part of the program and already
+    // defines the runtime.
+    for (Obj *obj = prog; obj; obj = obj->next)
+        if (obj->is_function && obj->body &&
+            strcmp(obj->name, "__cccc_bin_strip") == 0)
+            return;
     bool                     any     = false;
     static const char *const names[] = {"strtol", "strtoll", "strtoul",
                                         "strtoull"};

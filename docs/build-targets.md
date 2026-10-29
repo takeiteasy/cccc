@@ -83,7 +83,9 @@ bin/<name>` invocation, so its sources may contain `[[cccc::comptime]]`. It has
 no per-source object files — it caches per target, not per source (see
 [Incremental builds](build-incremental.md#ccccexecutable-and-ccccobject) below) — and
 accepts only the flags `cccc --compile=native` understands:
-`-I`/`-isystem`/`-D`/`-U`/`-L`/`-l`/`--std=`/`--link-arg`. `AddLdFlag` and
+`-I`/`--isystem`/`--iframework`/`--use-system-headers`/`-D`/`-U`/`-L`/`-l`/`--std=`/`--link-arg`.
+`AddSystemInclude`, `AddFrameworkPath` and `UseSystemHeaders` map onto those
+(`UseSystemHeaders` is an error on other kinds). `AddLdFlag` and
 `AddFramework` are sent as `--link-arg` to the host link line; add an object
 passed that way with `AddInput` too, so the target rebuilds when it changes.
 `AddCFlag`, `SetProfile`, and `SetTargetTriple` are rejected on this kind;
@@ -106,8 +108,8 @@ LinkWith(app, core);                        // links obj/core.o
 
 An `Executable` or `DynamicLib` links the object, a `StaticLib` archives it,
 and a `CcccExecutable` passes it as `--link-arg`. Each consumer rebuilds when
-the object changes. `AddSource`, `AddInclude`, `AddDefine`, `AddUndef`,
-`AddInput`, `DependsOn`, `SetOutput` and `SetTargetEnv` apply. Link options
+the object changes. `AddSource`, `AddInclude`, `AddSystemInclude`,
+`AddFrameworkPath`, `UseSystemHeaders`, `AddDefine`, `AddUndef`, `AddInput`, `DependsOn`, `SetOutput` and `SetTargetEnv` apply. Link options
 (`AddLdFlag`, `AddFramework`, `AddLib`, `AddLibPath`, `LinkWith`,
 `PkgConfig`) and `AddCFlag`, `SetProfile` and `SetTargetTriple` are errors;
 put link options on the consuming target. `InstallArtifact` does not accept it.
@@ -148,6 +150,9 @@ void ExcludeSource(BuildTarget *t, const char *pattern);  // fnmatch or exact pa
 
 // Flags
 void AddInclude(BuildTarget *t, const char *path);
+void AddSystemInclude(BuildTarget *t, const char *path);  // -isystem (--isystem on cccc kinds)
+void AddFrameworkPath(BuildTarget *t, const char *path);  // macOS -F (--iframework on cccc kinds)
+void UseSystemHeaders(BuildTarget *t);                    // CcccExecutable/CcccObject: --use-system-headers
 void AddDefine(BuildTarget *t, const char *name, const char *value);
 void AddUndef(BuildTarget *t, const char *name);
 void AddCFlag(BuildTarget *t, const char *flag);

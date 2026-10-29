@@ -109,6 +109,9 @@ struct BuildTarget {
                         // matched files first.
     StringArray excludes; // glob/path patterns excluded from sources (#542)
     StringArray includes;
+    StringArray sys_includes;       // AddSystemInclude(): -isystem / --isystem
+    StringArray framework_paths;    // AddFrameworkPath(): -F / --iframework
+    bool        use_system_headers; // UseSystemHeaders(): cccc kinds only
     StringArray defines;  // "NAME=VALUE" or "NAME"
     StringArray undefs;
     StringArray cflags;
@@ -513,14 +516,17 @@ static long long impl_cccc_object(long long ctx, long long name) {
 // declaration-time, fatal.
 static void reject_for_cccc_target(const BuildTarget *t, const char *call) {
     if (t->kind == CCCC_TGT_NATIVE_CCCC)
-        error("build: %s is not supported on a CcccExecutable target ('%s') — "
-              "cccc --compile=native takes only -I/-D/-U/-L/-l/--std=/-O<n> "
-              "and --link-arg",
-              call, t->name);
+        error(
+            "build: %s is not supported on a CcccExecutable target ('%s') — "
+            "cccc --compile=native takes only -I/--isystem/--iframework/-D/-U/"
+            "-L/-l/--std=/-O<n> and --link-arg",
+            call, t->name);
     if (t->kind == CCCC_TGT_OBJECT_CCCC)
-        error("build: %s is not supported on a CcccObject target ('%s') — "
-              "cccc --compile=object takes only -I/-D/-U/--std=/-O<n>",
-              call, t->name);
+        error(
+            "build: %s is not supported on a CcccObject target ('%s') — "
+            "cccc --compile=object takes only -I/--isystem/--iframework/-D/-U/"
+            "--std=/-O<n>",
+            call, t->name);
 }
 
 // A CcccObject is not linked, so link-only calls on it are errors.
@@ -642,6 +648,32 @@ static long long impl_add_source(long long t, long long path) {
 static long long impl_add_include(long long t, long long path) {
     strarray_push(&((BuildTarget *)(intptr_t)t)->includes,
                   xstrdup((const char *)path));
+    return 0;
+}
+static long long impl_add_system_include(long long t, long long path) {
+    strarray_push(&((BuildTarget *)(intptr_t)t)->sys_includes,
+                  xstrdup((const char *)path));
+    return 0;
+}
+static long long impl_add_framework_path(long long t, long long path) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    strarray_push(&tgt->framework_paths, xstrdup((const char *)path));
+    // Host kinds need -F on the link line too; cccc kinds take it as
+    // --iframework on the compile.
+    if (tgt->kind != CCCC_TGT_NATIVE_CCCC &&
+        tgt->kind != CCCC_TGT_OBJECT_CCCC) {
+        strarray_push(&tgt->ldflags, xstrdup("-F"));
+        strarray_push(&tgt->ldflags, xstrdup((const char *)path));
+    }
+    return 0;
+}
+static long long impl_use_system_headers(long long t) {
+    BuildTarget *tgt = (BuildTarget *)(intptr_t)t;
+    if (tgt->kind != CCCC_TGT_NATIVE_CCCC && tgt->kind != CCCC_TGT_OBJECT_CCCC)
+        error("build: UseSystemHeaders is only supported on a CcccExecutable "
+              "or CcccObject target ('%s')",
+              tgt->name);
+    tgt->use_system_headers = true;
     return 0;
 }
 static long long impl_add_define(long long t, long long name, long long value) {
@@ -1488,6 +1520,12 @@ void cc_load_build_runtime(VirtualMachine *vm) {
                       (void *)impl_have_build_option, 2, 0);
     cc_register_cfunc(vm, "__builtin_build_add_framework",
                       (void *)impl_add_framework, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_system_include",
+                      (void *)impl_add_system_include, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_add_framework_path",
+                      (void *)impl_add_framework_path, 2, 0);
+    cc_register_cfunc(vm, "__builtin_build_use_system_headers",
+                      (void *)impl_use_system_headers, 1, 0);
     // #560
     cc_register_cfunc(vm, "__builtin_build_set_install_prefix",
                       (void *)impl_set_install_prefix, 2, 0);
@@ -1684,6 +1722,14 @@ static void push_compile_flags(ArgVec *args, const Builder *ctx,
     for (int i = 0; i < t->includes.len; i++) {
         argv_push(args, "-I");
         argv_push(args, t->includes.data[i]);
+    }
+    for (int i = 0; i < t->sys_includes.len; i++) {
+        argv_push(args, "-isystem");
+        argv_push(args, t->sys_includes.data[i]);
+    }
+    for (int i = 0; i < t->framework_paths.len; i++) {
+        argv_push(args, "-F");
+        argv_push(args, t->framework_paths.data[i]);
     }
     for (int i = 0; i < t->defines.len; i++) {
         char *f = malloc(strlen(t->defines.data[i]) + 3);
@@ -2131,7 +2177,7 @@ static void push_compile_flags_cccc(ArgVec *args, const Builder *ctx,
         argv_push(args, d->inc_paths[i]);
     }
     for (int i = 0; d && i < d->sys_inc_paths_count; i++) {
-        argv_push(args, "-isystem");
+        argv_push(args, "--isystem");
         argv_push(args, d->sys_inc_paths[i]);
     }
     for (int i = 0; d && i < d->defines_count; i++) {
@@ -2150,6 +2196,16 @@ static void push_compile_flags_cccc(ArgVec *args, const Builder *ctx,
         argv_push(args, "-I");
         argv_push(args, t->includes.data[i]);
     }
+    for (int i = 0; i < t->sys_includes.len; i++) {
+        argv_push(args, "--isystem");
+        argv_push(args, t->sys_includes.data[i]);
+    }
+    for (int i = 0; i < t->framework_paths.len; i++) {
+        argv_push(args, "--iframework");
+        argv_push(args, t->framework_paths.data[i]);
+    }
+    if (t->use_system_headers)
+        argv_push(args, "--use-system-headers");
     for (int i = 0; i < t->defines.len; i++) {
         char *f = malloc(strlen(t->defines.data[i]) + 3);
         snprintf(f, strlen(t->defines.data[i]) + 3, "-D%s", t->defines.data[i]);
@@ -2266,7 +2322,8 @@ static uint64_t cccc_native_cache_key(Builder *ctx, char *const *argv,
         h = fnv1a_update(h, "\0", 1);
     }
     for (int i = 0; i < t->sources.len; i++)
-        h = fnv1a_file(t->sources.data[i], h);
+        if (!source_is_excluded(t, t->sources.data[i]))
+            h = fnv1a_file(t->sources.data[i], h);
     for (int i = 0; i < t->inputs.len; i++)
         h = fnv1a_file(t->inputs.data[i], h);
     for (int i = 0; i < t->deps_count; i++) {
@@ -2322,6 +2379,8 @@ static int cccc_native_output_is_current(Builder *ctx, const BuildTarget *t,
         return 0;
     for (int i = 0; i < t->sources.len; i++) {
         struct stat s_st;
+        if (source_is_excluded(t, t->sources.data[i]))
+            continue;
         if (stat(t->sources.data[i], &s_st) != 0 ||
             out_st.st_mtime < s_st.st_mtime)
             return 0;
@@ -2373,7 +2432,8 @@ static int build_cccc_native_target(Builder *ctx, BuildTarget *t,
     StringArray owned = {0};
     argv_push(&a, (char *)ctx->cccc_self);
     for (int i = 0; i < t->sources.len; i++)
-        argv_push(&a, t->sources.data[i]);
+        if (!source_is_excluded(t, t->sources.data[i]))
+            argv_push(&a, t->sources.data[i]);
     // Long form: `-c` takes an optional_argument, so the space-separated short
     // form would swallow the next token as a source file (same reason the
     // retired --compile=bytecode path used the long form).
@@ -3651,6 +3711,8 @@ static void free_target(BuildTarget *t) {
     free_strarray(&t->sources);
     free_strarray(&t->excludes);
     free_strarray(&t->includes);
+    free_strarray(&t->sys_includes);
+    free_strarray(&t->framework_paths);
     free_strarray(&t->defines);
     free_strarray(&t->undefs);
     free_strarray(&t->cflags);
