@@ -65,6 +65,7 @@ struct MacroArg {
     MacroArg *next;
     char     *name;
     bool      is_va_args;
+    int       uses; // occurrences of the parameter in the macro body
     Token    *tok;
 };
 
@@ -1447,6 +1448,18 @@ static Token *append(VirtualMachine *vm, Token *tok1, Token *tok2) {
     return head.next;
 }
 
+// Links `body` ahead of tok2 in place, where append() would copy every token.
+// The caller owns every token before body's EOF, and the EOF is left alone.
+static Token *append_owned(Token *body, Token *tok2) {
+    if (body->kind == TK_EOF)
+        return tok2;
+    Token *last = body;
+    while (last->next->kind != TK_EOF)
+        last = last->next;
+    last->next = tok2;
+    return body;
+}
+
 // Links a freshly tokenized header (no other owner) ahead of `tok` in place of
 // its EOF, where append() would copy every token.
 static Token *splice_fresh(Token *fresh, Token *tok) {
@@ -1494,6 +1507,15 @@ static void release_skipped(VirtualMachine *vm, Token *start, Token *first,
         return;
     prev->next = end;
     cc_token_release(vm, first, last);
+}
+
+// Recycles the consumed directive tokens start..end (exclusive). Nothing keeps
+// them: callers pass a directive head, not one the conditional stack holds.
+static void release_line(VirtualMachine *vm, Token *start, Token *end) {
+    Token *last = start;
+    while (last->next != end)
+        last = last->next;
+    cc_token_release(vm, start, last);
 }
 
 // Skip until next `#else`, `#elif` or `#endif`.
@@ -2383,6 +2405,7 @@ static Token *read_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
 static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     Token *start = tok;
     Token *expr  = read_const_expr(vm, rest, tok->next);
+    release_skipped(vm, start, start->next, *rest);
     // #889: defined(...) / __has_include(...) inside expr are rewritten by
     // read_const_expr into synthetic tokens minted via new_num_token(), which
     // allocates a fresh File*. The recursive preprocess2() below must not let
@@ -2603,8 +2626,10 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest,
     release_skipped(vm, name_tok, name_tok->next, *rest);
 }
 
+// Reads one argument. With `owned` the argument's tokens are the caller's
+// stream and are cut out in place; otherwise they are copied.
 static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest,
-                                    Token *tok, bool read_rest) {
+                                    Token *tok, bool read_rest, bool owned) {
     Token  head  = {};
     Token *cur   = &head;
     int    level = 0;
@@ -2623,8 +2648,14 @@ static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest,
         else if (equal(tok, ")"))
             level--;
 
-        cur = cur->next = copy_token(vm, tok);
-        tok             = tok->next;
+        if (owned) {
+            if (cur == &head)
+                head.next = tok;
+            cur = tok;
+        } else {
+            cur = cur->next = copy_token(vm, tok);
+        }
+        tok = tok->next;
     }
 
     cur->next     = new_eof(vm, tok);
@@ -2639,16 +2670,20 @@ static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest,
 static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
                                  MacroParam *params, char *va_args_name) {
     Token *start     = tok;
-    tok              = tok->next->next;
+    Token *lparen    = tok->next;
+    tok              = lparen->next;
 
     MacroArg    head = {};
     MacroArg   *cur  = &head;
 
     MacroParam *pp   = params;
     for (; pp; pp = pp->next) {
-        if (cur != &head)
-            tok = skip(vm, tok, ",");
-        cur = cur->next = read_macro_arg_one(vm, &tok, tok, false);
+        if (cur != &head) {
+            Token *comma = tok;
+            tok          = skip(vm, tok, ",");
+            cc_token_release(vm, comma, comma);
+        }
+        cur = cur->next = read_macro_arg_one(vm, &tok, tok, false, true);
         cur->name       = pp->name;
     }
 
@@ -2659,9 +2694,12 @@ static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
             memset(arg, 0, sizeof(MacroArg));
             arg->tok = new_eof(vm, tok);
         } else {
-            if (pp != params)
-                tok = skip(vm, tok, ",");
-            arg = read_macro_arg_one(vm, &tok, tok, true);
+            if (pp != params) {
+                Token *comma = tok;
+                tok          = skip(vm, tok, ",");
+                cc_token_release(vm, comma, comma);
+            }
+            arg = read_macro_arg_one(vm, &tok, tok, true, true);
         }
         arg->name = va_args_name;
         ;
@@ -2673,7 +2711,19 @@ static MacroArg *read_macro_args(VirtualMachine *vm, Token **rest, Token *tok,
     }
 
     skip(vm, tok, ")");
-    *rest = tok;
+    *rest       = tok;
+    start->next = NULL;
+    cc_token_release(vm, lparen, lparen);
+    return head.next;
+}
+
+// Copies the EOF-terminated list `tok`, EOF included.
+static Token *copy_list(VirtualMachine *vm, Token *tok) {
+    Token  head = {};
+    Token *cur  = &head;
+    for (; tok->kind != TK_EOF; tok = tok->next)
+        cur = cur->next = copy_token(vm, tok);
+    cur->next = new_eof(vm, tok);
     return head.next;
 }
 
@@ -2748,6 +2798,13 @@ static bool has_varargs(MacroArg *args) {
 static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
     Token  head = {};
     Token *cur  = &head;
+
+    if (args)
+        for (Token *t = tok; t->kind != TK_EOF; t = t->next) {
+            MacroArg *a = find_arg(args, t);
+            if (a)
+                a->uses++;
+        }
 
     while (tok->kind != TK_EOF) {
         // "#" followed by a parameter is replaced with stringized actuals.
@@ -2829,17 +2886,21 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
         // If __VA_ARG__ is empty, __VA_OPT__(x) is expanded to the
         // empty token list. Otherwise, __VA_OPT__(x) is expanded to x.
         if (equal(tok, "__VA_OPT__") && equal(tok->next, "(")) {
-            MacroArg *arg = read_macro_arg_one(vm, &tok, tok->next->next, true);
+            MacroArg *arg =
+                read_macro_arg_one(vm, &tok, tok->next->next, true, false);
             if (has_varargs(args)) {
                 // Manually substitute parameters in __VA_OPT__ content
                 for (Token *t = arg->tok; t->kind != TK_EOF; t = t->next) {
                     MacroArg *a = find_arg(args, t);
                     if (a) {
                         // Expand and copy the parameter's tokens
-                        Token *expanded = preprocess2(vm, a->tok);
-                        for (Token *e = expanded; e->kind != TK_EOF;
-                             e        = e->next)
-                            cur = cur->next = copy_token(vm, e);
+                        Token *e = preprocess2(vm, copy_list(vm, a->tok));
+                        while (e->kind != TK_EOF) {
+                            Token *next = e->next;
+                            cur = cur->next = e;
+                            e               = next;
+                        }
+                        cc_token_release(vm, e, e);
                     } else {
                         // Not a parameter, just copy the token
                         cur = cur->next = copy_token(vm, t);
@@ -2853,14 +2914,19 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
         // Handle a macro token. Macro arguments are completely macro-expanded
         // before they are substituted into a macro body.
         if (arg) {
-            Token *t     = preprocess2(vm, arg->tok);
+            // The argument list is the caller's own, so a parameter used once
+            // is expanded in place rather than copied.
+            Token *t = preprocess2(
+                vm, arg->uses == 1 ? arg->tok : copy_list(vm, arg->tok));
             t->at_bol    = tok->at_bol;
             t->has_space = tok->has_space;
-            for (; t->kind != TK_EOF; t = t->next) {
-                Token *c   = copy_token(vm, t);
-                c->hideset = NULL;
-                cur = cur->next = c;
+            while (t->kind != TK_EOF) {
+                Token *next = t->next;
+                t->hideset  = NULL;
+                cur = cur->next = t;
+                t               = next;
             }
+            cc_token_release(vm, t, t);
             tok = tok->next;
             continue;
         }
@@ -2913,10 +2979,15 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
         Token   *body = add_hideset(vm, m->body, hs);
         for (Token *t = body; t->kind != TK_EOF; t = t->next)
             t->origin = tok;
-        *rest = append(vm, body, tok->next);
+        bool   empty = body->kind == TK_EOF;
+        Token *eof   = body;
+        while (eof->kind != TK_EOF)
+            eof = eof->next;
+        *rest = append_owned(body, tok->next);
+        cc_token_release(vm, eof, eof);
         // An empty expansion leaves tok->next as the head; it keeps its own
         // line-start state.
-        if (body->kind != TK_EOF) {
+        if (!empty) {
             (*rest)->at_bol    = tok->at_bol;
             (*rest)->has_space = tok->has_space;
         }
@@ -2943,14 +3014,16 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     hs          = hideset_union(vm, hs, new_hideset(vm, m->name));
 
     Token *body = subst(vm, m->body, args);
-    body        = add_hideset(vm, body, hs);
+    for (Token *t = body; t->kind != TK_EOF; t = t->next)
+        t->hideset = hideset_union(vm, t->hideset, hs);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
         t->origin = macro_token;
-    *rest = append(vm, body, tok->next);
+    *rest = append_owned(body, tok->next);
     if (body->kind != TK_EOF) {
         (*rest)->at_bol    = macro_token->at_bol;
         (*rest)->has_space = macro_token->has_space;
     }
+    cc_token_release(vm, rparen, rparen);
     return true;
 }
 
@@ -7481,6 +7554,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             }
             case PP_DEFINE:
                 read_macro_definition(vm, &tok, tok->next);
+                cc_token_release(vm, start, start->next);
                 break;
             case PP_UNDEF:
                 tok = tok->next;
@@ -7570,12 +7644,15 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 tok                         = skip_line(vm, tok->next);
                 if (vm->compiler.cond_incl->included)
                     tok = skip_cond_incl(vm, start, tok);
+                else
+                    release_line(vm, start, tok);
                 break;
             case PP_ENDIF:
                 if (!vm->compiler.cond_incl)
                     error_tok(vm, start, "stray #endif without matching #if");
                 vm->compiler.cond_incl = vm->compiler.cond_incl->next;
                 tok                    = skip_line(vm, tok->next);
+                release_line(vm, start, tok);
                 break;
             case PP_LINE:
                 read_line_marker(vm, &tok, tok->next);
