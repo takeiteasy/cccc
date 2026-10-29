@@ -11,6 +11,7 @@ CI is split by host and by when it runs, because no one provider covers all thre
 | Linux amd64 build and test (**canonical**) | sr.ht | [`.builds/linux-amd64.yml`](../.builds/linux-amd64.yml) | Every push to `devel` (other refs exit in a guard task) |
 | Doxygen build, link check, publish to GitHub Pages | GitHub Actions | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Every push to `trunk`; build-only on pull requests |
 | Linux aarch64 and macOS arm64 build, test and package | GitHub Actions | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | `v*` tag push only |
+| `--sandbox` host test on native x86-64 (seccomp, x32 rule) | GitHub Actions | [`.github/workflows/sandbox-x86.yml`](../.github/workflows/sandbox-x86.yml) | Manual dispatch only; fails if the sandbox is unavailable |
 
 sr.ht runs (`-j 8`) `make`, then `./cccc --build build.c --build-target=test --build-jobs=8 --build-keep-going`. `release.yml` runs `test_release` (the suites against the `-O2` binary) then `test_extra` (all area targets plus `test_smoke`) with `--build-jobs=4`, since hosted runners have fewer cores and parallel-load timing is what surfaced the flaky signal tests. Area targets and smoke scripts therefore run only at release time: run the matching area target locally when touching that area. The release procedure is in [releasing.md](releasing.md).
 
