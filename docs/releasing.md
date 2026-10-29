@@ -65,9 +65,8 @@ once the host compiler optimizes across it. A systematic failure here
 root cause before proceeding; an isolated failure gets its own ticket and
 ships in the next patch release instead.
 
-`linux-x86_64-msan-test`'s known uninstrumented-libc/libffi blind spot
-(documented in [test-infrastructure.md](test-infrastructure.md)) is expected noise, not a release
-blocker.
+The `linux-aarch64` job also runs `test_msan`; a failure there blocks the
+release. Run it locally as described in [ci.md](ci.md#memorysanitizer).
 
 ## Tagging
 

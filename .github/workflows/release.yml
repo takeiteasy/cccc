@@ -123,6 +123,12 @@ jobs:
         run: ./cccc --build build.c --build-target=release
       - name: Test release binary
         run: ./cccc --build build.c --build-target=test_release --build-jobs=4
+      - name: Test with MemorySanitizer
+        timeout-minutes: 40
+        # MSan aborts on a kernel with high ASLR entropy.
+        run: |
+          sudo sysctl vm.mmap_rnd_bits=28
+          ./cccc --build build.c --build-target=test_msan --build-jobs=4
       - name: Test loose tests
         run: ./cccc --build build.c --build-target=test_extra --build-jobs=4 --build-keep-going
       - name: Package

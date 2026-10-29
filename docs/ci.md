@@ -84,13 +84,15 @@ The smoke target checks `uname -m` and that `file ./cccc` shows an aarch64 ELF; 
 
 ### MemorySanitizer
 
-MSan is Linux-only (clang). `linux_amd64_msan_test` builds `cccc-msan` (`--build-target=cccc_msan`) in the container and runs `test_msan` against it. It catches uninitialized reads ASan cannot.
+MSan is Linux-only (clang). The `linux-aarch64` release job runs `test_msan` on every tag; a failure blocks the release. `linux_amd64_msan_test` builds `cccc-msan` (`--build-target=cccc_msan`) in the container and runs `test_msan` against it. It catches uninitialized reads ASan cannot.
 
 ```sh
 ./cccc --build build.c --build-target=linux_amd64_msan_test
 ```
 
-**Known limitation:** hundreds of use-of-uninitialized-value reports (about 262 of 700 tests, across pthread, macros, math, sockets and minilua) appear inside the dispatch loop (`op_JZ3_fn`, `ld_i32`, `op_LDR_W_fn` in `src/ops.c`). They are not cccc bugs: the `VirtualMachine` is fully zeroed before execution (`src/vm.c`), and cccc links `-lffi` and calls system libc, neither MSan-instrumented in the project image, so writes made inside those calls read back as uninitialized. A real fix needs an MSan-instrumented libc and libffi sysroot ([MemorySanitizerLibcxxHowTo](https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo)). Until then the target is excluded from release gating and its failures are expected noise.
+The host libc and libffi are not MSan-instrumented, so `cccc_call_native_function` (`src/ops.c`) marks host-call results, the bytes a host function writes through its pointer arguments, returned host allocations and guest-callback arguments as initialised.[^msan] In a container, run with `--security-opt seccomp=unconfined`; on a hosted runner, lower `vm.mmap_rnd_bits` to 28.
+
+[^msan]: Stack buffers use a fixed 4096-byte window, so a larger buffer filled by an unclassified host function can stay partly poisoned (#1873).
 
 ### Current results
 
