@@ -4688,6 +4688,7 @@ typedef struct Compiler {
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
     Arena       parser_arena;         // Fast bump-pointer allocator
+    Token      *token_free; // Recycled Tokens the preprocessor dropped
 
     StringArray include_paths;        // Quote include search paths
     StringArray system_include_paths; // System header search paths for <...>

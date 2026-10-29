@@ -621,6 +621,8 @@ File *new_file(VirtualMachine *vm, const char *name, int file_no, char *contents
 Token *tokenize_string_literal(VirtualMachine *vm, Token *tok, Type *basety);
 Token *tokenize(VirtualMachine *vm, File *file);
 Token *tokenize_file(VirtualMachine *vm, char *filename, bool allow_shebang);
+Token *cc_token_alloc(VirtualMachine *vm);
+void cc_token_release(VirtualMachine *vm, Token *first, Token *last);
 Token *tokenize_string(VirtualMachine *vm, const char *name, const char *contents);
 unsigned char *read_binary_file(VirtualMachine *vm, char *path,
                                 size_t *out_size);

@@ -851,10 +851,26 @@ bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str) {
 }
 
 // Create a new token.
+// A zeroed Token, taken from the recycled list when it has one.
+Token *cc_token_alloc(VirtualMachine *vm) {
+    Token *tok = vm->compiler.token_free;
+    if (tok)
+        vm->compiler.token_free = tok->next;
+    else
+        tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    memset(tok, 0, sizeof(Token));
+    return tok;
+}
+
+// Recycles the chain first..last (inclusive). Nothing may point into it.
+void cc_token_release(VirtualMachine *vm, Token *first, Token *last) {
+    last->next              = vm->compiler.token_free;
+    vm->compiler.token_free = first;
+}
+
 static Token *new_token(VirtualMachine *vm, TokenKind kind, char *start,
                         char *end) {
-    Token *tok = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
-    memset(tok, 0, sizeof(Token));
+    Token *tok          = cc_token_alloc(vm);
     tok->kind           = kind;
     tok->loc            = start;
     tok->len            = end - start;

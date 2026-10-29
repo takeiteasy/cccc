@@ -1041,7 +1041,7 @@ static bool is_pragma_omp(Token *hash) {
 }
 
 static Token *copy_token(VirtualMachine *vm, Token *tok) {
-    Token *t = arena_alloc(&vm->compiler.parser_arena, sizeof(Token));
+    Token *t = cc_token_alloc(vm);
     *t       = *tok;
     t->next  = NULL;
     return t;
@@ -1447,6 +1447,18 @@ static Token *append(VirtualMachine *vm, Token *tok1, Token *tok2) {
     return head.next;
 }
 
+// Links a freshly tokenized header (no other owner) ahead of `tok` in place of
+// its EOF, where append() would copy every token.
+static Token *splice_fresh(Token *fresh, Token *tok) {
+    if (fresh->kind == TK_EOF)
+        return tok;
+    Token *last = fresh;
+    while (last->next->kind != TK_EOF)
+        last = last->next;
+    last->next = tok;
+    return fresh;
+}
+
 static Token *skip_cond_incl2(VirtualMachine *vm, Token *tok, int depth) {
     if (depth > MAX_PP_NESTING)
         error_tok(vm, tok, "too many nested conditional includes");
@@ -1465,9 +1477,29 @@ static Token *skip_cond_incl2(VirtualMachine *vm, Token *tok, int depth) {
     return tok;
 }
 
+// Recycles the skipped tokens first..end (exclusive) and relinks the
+// directive at `start` past them. Nothing reads them again: the region is
+// inactive and a directive line is consumed before the skip begins.
+static void release_skipped(VirtualMachine *vm, Token *start, Token *first,
+                            Token *end) {
+    if (first == end)
+        return;
+    Token *prev = start;
+    while (prev && prev->next != first)
+        prev = prev->next;
+    Token *last = first;
+    while (last->next != end)
+        last = last->next;
+    if (!prev)
+        return;
+    prev->next = end;
+    cc_token_release(vm, first, last);
+}
+
 // Skip until next `#else`, `#elif` or `#endif`.
 // Nested `#if` and `#endif` are skipped.
-static Token *skip_cond_incl(VirtualMachine *vm, Token *tok) {
+static Token *skip_cond_incl(VirtualMachine *vm, Token *start, Token *tok) {
+    Token *first = tok;
     while (tok->kind != TK_EOF) {
         if (is_hash(tok) &&
             (equal(tok->next, "if") || equal(tok->next, "ifdef") ||
@@ -1483,6 +1515,7 @@ static Token *skip_cond_incl(VirtualMachine *vm, Token *tok) {
             break;
         tok = tok->next;
     }
+    release_skipped(vm, start, first, tok);
     return tok;
 }
 
@@ -2410,6 +2443,11 @@ static long eval_const_expr(VirtualMachine *vm, Token **rest, Token *tok) {
     long   val = pp_const_expr(vm, &rest2, expr);
     if (rest2->kind != TK_EOF)
         error_tok(vm, rest2, "extra tokens after #if expression");
+    // The expression list is private to this call.
+    Token *last = expr;
+    while (last->kind != TK_EOF)
+        last = last->next;
+    cc_token_release(vm, expr, last);
     return val;
 }
 
@@ -2560,6 +2598,9 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest,
                       name_tok);
     }
     m->is_shared = is_shared;
+    // The macro keeps name_tok (define_tok) and copies of its body; the rest
+    // of the line is dead.
+    release_skipped(vm, name_tok, name_tok->next, *rest);
 }
 
 static MacroArg *read_macro_arg_one(VirtualMachine *vm, Token **rest,
@@ -3824,7 +3865,7 @@ static Token *include_file(VirtualMachine *vm, Token *tok, char *path,
         hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
     }
 
-    return append(vm, tok2, tok);
+    return splice_fresh(tok2, tok);
 }
 
 // The embedded table also carries CCCC's three *private* headers under
@@ -3904,7 +3945,7 @@ static Token *include_embedded_header(VirtualMachine *vm, Token *tok,
         hashmap_put(&vm->compiler.guard_macros, guard_name, (void *)1);
     }
 
-    return append(vm, tok2, tok);
+    return splice_fresh(tok2, tok);
 }
 
 // Read #line arguments
@@ -7469,7 +7510,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 long val = eval_const_expr(vm, &tok, tok);
                 push_cond_incl(vm, start, val);
                 if (!val)
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             }
             case PP_IFDEF: {
@@ -7479,7 +7520,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 push_cond_incl(vm, tok, ifdef_m != NULL);
                 tok = skip_line(vm, tok->next->next);
                 if (!ifdef_m)
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             }
             case PP_IFNDEF: {
@@ -7489,7 +7530,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 push_cond_incl(vm, tok, ifndef_m == NULL);
                 tok = skip_line(vm, tok->next->next);
                 if (ifndef_m)
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             }
             case PP_ELIF:
@@ -7502,7 +7543,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                     eval_const_expr(vm, &tok, tok))
                     vm->compiler.cond_incl->included = true;
                 else
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             case PP_ELIFDEF: {
                 if (!vm->compiler.cond_incl)
@@ -7517,7 +7558,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 if (!vm->compiler.cond_incl->included && elifdef_m)
                     vm->compiler.cond_incl->included = true;
                 else
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             }
             case PP_ELIFNDEF: {
@@ -7534,7 +7575,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 if (!vm->compiler.cond_incl->included && !elifndef_m)
                     vm->compiler.cond_incl->included = true;
                 else
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             }
             case PP_ELSE:
@@ -7545,7 +7586,7 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
                 vm->compiler.cond_incl->ctx = IN_ELSE;
                 tok                         = skip_line(vm, tok->next);
                 if (vm->compiler.cond_incl->included)
-                    tok = skip_cond_incl(vm, tok);
+                    tok = skip_cond_incl(vm, start, tok);
                 break;
             case PP_ENDIF:
                 if (!vm->compiler.cond_incl)
