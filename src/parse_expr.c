@@ -620,11 +620,11 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // A plain variable needs no address temporary: `A = A op B`.
     if (binary->lhs->kind == ND_VAR) {
         Obj *var = binary->lhs->var;
-        return new_binary(
-            vm, ND_ASSIGN, new_var_node(vm, var, tok),
-            new_binary(vm, binary->kind, new_var_node(vm, var, tok),
-                       binary->rhs, tok),
-            tok);
+        return new_binary(vm, ND_ASSIGN, new_var_node(vm, var, tok),
+                          new_binary(vm, binary->kind,
+                                     new_var_node(vm, var, tok), binary->rhs,
+                                     tok),
+                          tok);
     }
 
     // Convert `A.x op= C` to `tmp = &A, (*tmp).x = (*tmp).x op C`.
