@@ -84,6 +84,7 @@ static int     g_stp_cap = 0;
 
 static HashMap g_same_type_memo; // key: 2 Type* ; val: 1 NEQ / 2 EQ
 static bool    g_same_type_memo_on = false;
+#define SAME_TYPE_MEMO_MAX (1 << 21)
 // Shallowest ancestor-frame stack index whose co-inductive "assume equal"
 // was used by the subtree currently being evaluated; INT_MAX == none. A
 // result is memoizable only if this stays >= the frame's own depth.
@@ -213,9 +214,16 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
         // caching if either side is an incomplete tagged type: it can be
         // completed in place later this pass, staling the entry.
         if (g_same_type_memo_on && !type_is_incomplete_tagged(a) &&
-            !type_is_incomplete_tagged(b))
+            !type_is_incomplete_tagged(b)) {
+            // Bounded: at whole-program scale the pair count grows with the
+            // square of the input files.
+            if (g_same_type_memo.used > SAME_TYPE_MEMO_MAX) {
+                hashmap_deinit(&g_same_type_memo);
+                g_same_type_memo = (HashMap){0};
+            }
             hashmap_put2(&g_same_type_memo, (char *)key, (int)sizeof key,
                          r ? (void *)2 : (void *)1);
+        }
         g_stm_min_assume = saved_min;
     } else {
         // An ancestor's assumption is baked into r; propagate the debt so
