@@ -44,11 +44,42 @@ The VM is 2.1x to 4.5x slower than Lua (3.3x on the geometric mean) and 14x to 2
 
 `-c=native` hands the program to a host compiler and runs at native speed.
 
+## Memory
+
+Peak memory, measured by `tools/bench.py` as the maximum resident set of each process (the footprint on macOS, which counts compressed pages).
+
+Compiling cccc's own 103 sources, release-built `cccc`:
+
+| Step | Peak |
+|---|---|
+| `cccc --ast` (parse and link every file) | 3.0 GB |
+| `cccc -m` (plus the serializer that `-c=native` runs before the host compiler) | 3.4 GB |
+| `gcc -c`, the largest single file | 45 MB |
+
+`cccc` holds every file in one program, so its peak grows with the number of files (about 30 MB each); `gcc` compiles one file per process.
+
+Running the benchmarks, in MB. The `cccc` column is compile and run in one process, `gcc` is the prebuilt binary alone, and `lua` is the interpreter.
+
+| Benchmark | `cccc` | `lua` | `gcc-O0` | `gcc-O2` |
+|---|---|---|---|---|
+| ackermann | 6.9 | 1.8 | 1.2 | 1.2 |
+| binary_tree | 17.7 | 11.8 | 4.2 | 4.2 |
+| dispatch | 6.8 | 1.5 | 1.2 | 1.2 |
+| fib | 6.8 | 1.4 | 1.2 | 1.2 |
+| mandelbrot | 7.2 | 1.5 | 1.2 | 1.2 |
+| matrix_mul | 8.2 | 3.8 | 2.1 | 2.1 |
+| nqueens | 6.8 | 1.5 | 1.2 | 1.2 |
+| quicksort | 7.7 | 3.6 | 1.6 | 1.6 |
+| sieve | 16.4 | 238.1 | 10.7 | 10.7 |
+
+The VM's baseline is about 7 MB, so it stays within a few megabytes of `gcc` on small programs. `sieve` is the exception: the C versions use a 10 MB byte array, while the Lua port keeps its 10 million flags in a table.
+
 ## Reproducing
 
 ```sh
 ./cccc --build build.c --build-target=bench_compare   # builds the release binary, runs everything
 python3 tools/bench.py --cccc build/cccc-release --filter fib.c   # one benchmark
+./cccc --build build.c --build-target=bench_memory   # peak memory, including compiling cccc itself
 ```
 
 The C programs are in `tests/benchmarks/` and the Lua ports in `tests/benchmarks/lua/`. `tools/bench.py` pins `-ffp-contract=off -std=c11` for GCC so floating-point results match the VM, and checks that every configuration prints the same output. The Lua column is skipped when `lua` is not installed (`--lua PATH` picks another interpreter).

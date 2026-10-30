@@ -5,7 +5,10 @@ Compiles and runs a set of portable C99/C11 benchmark programs under CCCC
 (the VM has no optimiser -- one configuration) and under GCC (-O0 and -O2),
 runs the Lua ports in tests/benchmarks/lua/ as a reference interpreter,
 verifies that every configuration produces identical output, and reports wall
-clock timings as a human-readable table and as a machine-readable JSON file.
+clock timings and peak resident memory as human-readable tables and as a
+machine-readable JSON file. The cccc column covers compiling and running in one
+process; the gcc columns cover the prebuilt binary alone (its compile peak is
+in the JSON as compile_peak_rss_mb) and lua covers the interpreter.
 
 Usage:
     python3 bench.py [options]
@@ -24,6 +27,8 @@ Options:
     --filter PATTERN    glob filter on benchmark source names
     --no-correctness    skip the stdout-equality check
     --vm-profile        collect VM opcode profile JSON for CCCC configs
+    --selfhost          also measure peak memory compiling cccc's own sources
+                        (cccc --ast and -m versus gcc -c per file)
     --keep-builds       keep compiled gcc binaries in build/ (default: clean)
     --quiet             suppress per-benchmark progress output
 """
@@ -38,7 +43,9 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 CCCC_CONFIGS = [
@@ -56,9 +63,23 @@ GCC_EXTRA_FLAGS = ["-ffp-contract=off", "-std=c11"]
 
 
 def run_cmd(cmd, cwd, env=None):
-    start = time.perf_counter()
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, env=env)
-    elapsed = time.perf_counter() - start
+    """Runs cmd; returns (result, elapsed seconds) with result.peak_rss_mb."""
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        start = time.perf_counter()
+        proc = subprocess.Popen(cmd, stdout=out, stderr=err, cwd=cwd, env=env)
+        _, status, usage = os.wait4(proc.pid, 0)
+        elapsed = time.perf_counter() - start
+        out.seek(0)
+        err.seek(0)
+        result = SimpleNamespace(
+            stdout=out.read().decode(errors="replace"),
+            stderr=err.read().decode(errors="replace"),
+            returncode=os.waitstatus_to_exitcode(status),
+            # ru_maxrss is bytes on macOS and kilobytes elsewhere.
+            peak_rss_mb=usage.ru_maxrss
+            / (1024 * 1024 if sys.platform == "darwin" else 1024),
+        )
+    proc.returncode = result.returncode
     return result, elapsed
 
 
@@ -94,6 +115,7 @@ def find_real_gcc():
 
 def time_runs(runs_fn, n_runs, n_warmup):
     times = []
+    peaks = []
     stdout = None
     exit_code = None
     stable = True
@@ -101,6 +123,7 @@ def time_runs(runs_fn, n_runs, n_warmup):
         r, t = runs_fn()
         times.append(t)
         if i >= n_warmup:
+            peaks.append(r.peak_rss_mb)
             if stdout is None:
                 stdout = r.stdout
                 exit_code = r.returncode
@@ -114,6 +137,7 @@ def time_runs(runs_fn, n_runs, n_warmup):
         "min_ms": min(timed),
         "median_ms": statistics.median(timed),
         "mean_ms": statistics.mean(timed),
+        "peak_rss_mb": statistics.median(peaks),
         "stable": stable,
         "exit_code": exit_code,
         "stdout": stdout or "",
@@ -121,23 +145,27 @@ def time_runs(runs_fn, n_runs, n_warmup):
 
 
 def build_gcc(src, out, gcc, opt, root, log):
+    """Returns the compile's peak RSS in MB, or None when the build fails."""
     cmd = [gcc, f"-{opt}", *GCC_EXTRA_FLAGS, "-o", str(out), str(src)]
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=root)
+    r, _ = run_cmd(cmd, root)
     if r.returncode != 0:
         log(f"  gcc -O{opt[-1]} build failed for {src.name}:\n{r.stderr.strip()}")
-        return False
-    return True
+        return None
+    return r.peak_rss_mb
 
 
 def run_benchmark(src, args, root, build_dir, log):
     log(f"\n=== {src.name} ===")
     log("  compiling gcc variants...")
     binaries = {}
+    compile_peaks = {}
     for label, opt in GCC_CONFIGS:
         out = build_dir / f"{src.stem}-{opt}"
-        if not build_gcc(src, out, args.gcc, opt, root, log):
+        compile_peak = build_gcc(src, out, args.gcc, opt, root, log)
+        if compile_peak is None:
             continue
         binaries[label] = out
+        compile_peaks[label] = compile_peak
 
     results = {}
 
@@ -159,6 +187,7 @@ def run_benchmark(src, args, root, build_dir, log):
         results[label] = r
         log(
             f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+            f"  peak={r['peak_rss_mb']:>7.1f}MB"
         )
 
     log("  running gcc variants...")
@@ -171,9 +200,11 @@ def run_benchmark(src, args, root, build_dir, log):
             return run_cmd([str(binp)], root)
 
         r = time_runs(make_gcc, args.runs, args.warmup)
+        r["compile_peak_rss_mb"] = compile_peaks[label]
         results[label] = r
         log(
             f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+            f"  peak={r['peak_rss_mb']:>7.1f}MB"
         )
 
     lua_src = args.lua_dir / f"{src.stem}.lua"
@@ -187,6 +218,7 @@ def run_benchmark(src, args, root, build_dir, log):
         results[LUA_LABEL] = r
         log(
             f"    {LUA_LABEL:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+            f"  peak={r['peak_rss_mb']:>7.1f}MB"
         )
     elif args.lua:
         log(f"  no lua port: {lua_src.relative_to(root)}")
@@ -287,6 +319,32 @@ def render_table(records, cccc_configs, gcc_configs):
     return "\n".join(lines)
 
 
+def render_memory_table(records, cccc_configs, gcc_configs):
+    all_configs = config_columns(records, cccc_configs, gcc_configs)
+    headers = ["benchmark"] + all_configs
+    rows = []
+    for rec in records:
+        row = [rec["stem"]]
+        for cfg in all_configs:
+            r = rec["configs"].get(cfg)
+            row.append("-" if r is None else f"{r['peak_rss_mb']:.1f}")
+        rows.append(row)
+    widths = [
+        max(len(h), max((len(r[i]) for r in rows), default=0))
+        for i, h in enumerate(headers)
+    ]
+    sep = "  "
+    lines = [sep.join(h.ljust(widths[i]) for i, h in enumerate(headers))]
+    lines.append(sep.join("-" * widths[i] for i in range(len(headers))))
+    for r in rows:
+        lines.append(sep.join(r[i].ljust(widths[i]) for i in range(len(headers))))
+    lines.append(
+        "cccc = compile and run in one process; gcc = the prebuilt binary alone;"
+        " lua = the interpreter"
+    )
+    return "\n".join(lines)
+
+
 def render_speedup_table(records, cccc_configs, gcc_configs):
     lines = []
     all_configs = config_columns(records, cccc_configs, gcc_configs)
@@ -340,6 +398,85 @@ def render_speedup_table(records, cccc_configs, gcc_configs):
     return "\n".join(out)
 
 
+def selfhost_flags(root):
+    """The cccc flags and gcc include flags the ouroboros target uses."""
+    cccc = ["--use-system-headers", "-I", "include", "-I", "src"]
+    gcc = ["-I", "include", "-I", "src"]
+    if sys.platform == "darwin":
+        sdk = subprocess.run(
+            ["xcrun", "--show-sdk-path"], capture_output=True, text=True
+        ).stdout.strip()
+        cccc += [
+            "--isystem", f"{sdk}/usr/include", "-I", f"{sdk}/usr/include/ffi",
+            "-F", f"{sdk}/System/Library/Frameworks",
+        ]
+        gcc += ["-I", f"{sdk}/usr/include/ffi"]
+    else:
+        ffi = sorted(Path("/usr/include").glob("*/ffi.h"))
+        if ffi:
+            cccc += ["--isystem", str(ffi[0].parent)]
+            gcc += ["-I", str(ffi[0].parent)]
+        cccc += ["--isystem", "/usr/include"]
+    return cccc, gcc
+
+
+def peak_footprint_mb(cmd, cwd):
+    """Peak memory of cmd in MB: macOS reports the footprint (ru_maxrss leaves
+    out compressed pages), elsewhere the peak RSS. Returns (mb, returncode)."""
+    if sys.platform != "darwin":
+        r, _ = run_cmd(cmd, cwd)
+        return r.peak_rss_mb, r.returncode
+    r, _ = run_cmd(["/usr/bin/time", "-l", *cmd], cwd)
+    for line in r.stderr.splitlines():
+        if line.strip().endswith("peak memory footprint"):
+            return int(line.split()[0]) / (1024 * 1024), r.returncode
+    return r.peak_rss_mb, r.returncode
+
+
+def run_selfhost(args, root, log):
+    """Peak memory compiling cccc's own sources: the whole-program front end
+    (--ast) and front end plus serializer (-m) of cccc, and the largest single
+    translation unit of gcc -c."""
+    srcs = sorted(
+        str(p.relative_to(root))
+        for p in [*root.glob("src/*.c"), *root.glob("src/stdlib/*.c")]
+        if p.name != "ops.c"
+    )
+    cccc_flags, gcc_flags = selfhost_flags(root)
+    out = {"sources": len(srcs)}
+    for label, mode in (("cccc --ast", "--ast"), ("cccc -m", "-m")):
+        log(f"  {label} over {len(srcs)} sources...")
+        mb, code = peak_footprint_mb([args.cccc, *cccc_flags, mode, *srcs], root)
+        out[label] = {"peak_mb": mb, "exit_code": code}
+    log("  gcc -c per source...")
+    worst = (0.0, "")
+    for src in srcs:
+        # wait4's peak includes the driver's cc1 child; the footprint would not.
+        r, _ = run_cmd(
+            [args.gcc, "-c", "-w", *gcc_flags, "-o", os.devnull, src], root
+        )
+        if r.returncode == 0 and r.peak_rss_mb > worst[0]:
+            worst = (r.peak_rss_mb, src)
+    out["gcc -c"] = {"peak_mb": worst[0], "largest": worst[1]}
+    return out
+
+
+def render_selfhost(res):
+    lines = [f"Compiling cccc's {res['sources']} sources, peak memory in MB:"]
+    for label in ("cccc --ast", "cccc -m", "gcc -c"):
+        r = res[label]
+        note = ""
+        if label == "gcc -c":
+            note = f"  (largest single file: {r['largest']})"
+        elif r["exit_code"] != 0:
+            note = f"  (exit {r['exit_code']})"
+        lines.append(f"  {label:<12} {r['peak_mb']:>9.0f}{note}")
+    lines.append(
+        "cccc holds every file in one program; gcc compiles one file per process."
+    )
+    return "\n".join(lines)
+
+
 def make_run_id():
     return datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
 
@@ -362,6 +499,7 @@ def main():
         action="store_true",
         help="write VM opcode profile JSON for CCCC configs",
     )
+    p.add_argument("--selfhost", action="store_true")
     p.add_argument("--keep-builds", action="store_true")
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
@@ -471,6 +609,9 @@ def main():
             )
         )
         print()
+        print("Peak memory (MB, lower is better):")
+        print(render_memory_table(records, CCCC_CONFIGS, GCC_CONFIGS))
+        print()
         bad = [r for r in records if r["correctness"]["status"] != "ok"]
         if bad:
             print("Correctness: FAILED")
@@ -480,6 +621,14 @@ def main():
             print(
                 "Correctness: all benchmarks produce identical output across all configs"
             )
+
+    selfhost = None
+    if args.selfhost:
+        log("\n=== self-host compile memory ===")
+        selfhost = run_selfhost(args, root, log)
+        if args.format in ("table", "both"):
+            print()
+            print(render_selfhost(selfhost))
 
     if args.format in ("json", "both"):
         run_id = args.run_id
@@ -508,6 +657,7 @@ def main():
             },
             "cccc_configs": [c[0] for c in CCCC_CONFIGS],
             "gcc_configs": [c[0] for c in GCC_CONFIGS],
+            "selfhost": selfhost,
             "benchmarks": [
                 {
                     "name": r["name"],

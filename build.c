@@ -15,7 +15,7 @@
 //   fuzz_harness       libFuzzer + ASan harness         → fuzz_harness
 //   afl / afl_asan     AFL++ builds (needs afl-clang-fast/afl-clang)
 //   bench              hyperfine benchmark
-//   bench_compare{,_quick,_json}, profile_cpu, profile_mem, dsym
+//   bench_compare{,_quick,_json}, bench_memory, profile_cpu, profile_mem, dsym
 //   clean, host_tests (also run by test), fuzz_replay, test_smoke,
 //   test_leaks,
 //   test / test_vm /
@@ -1038,6 +1038,13 @@ BuildTarget *bench_compare_quick(Builder *ctx) {
 BuildTarget *bench_compare_json(Builder *ctx) {
     return make_bench_compare(ctx, "bench-compare-json",
                               "--format json --runs 3 --warmup 1");
+}
+
+// Peak memory per benchmark plus compiling cccc's own sources (cccc and gcc).
+[[cccc::build_target]]
+BuildTarget *bench_memory(Builder *ctx) {
+    return make_bench_compare(ctx, "bench-memory",
+                              "--runs 1 --warmup 0 --selfhost");
 }
 
 // ---- profile-cpu / profile-mem (Makefile:566-599) --------------------------
