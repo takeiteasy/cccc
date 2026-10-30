@@ -36,11 +36,19 @@
 // table's targets are successors of its JMPT; every label of a function with a
 // computed goto is a successor of its JMPI.
 //
+// An operation whose operands all hold a single known value is replaced by an
+// instruction of the same width: a 4-word one (ADDI3, the compares against an
+// immediate, ...) by `LI3 rd, result`, a 2-word one only when the result is 0
+// (`MOV3 rd, r0`). An operand that is the identity (`x + 0`, `x * 1`, `x & -1`)
+// makes it a copy of the other operand, and a `MULADDI3` with a known index an
+// `ADDI3`. A register loaded with 0 is read as the zero register afterwards.
+//
 // TODO: an extension after arithmetic is kept when it needs a relation between
 // two registers rather than an interval
 // (https://todo.sr.ht/~takeiteasy/cccc/1892), or follows a call result
-// (https://todo.sr.ht/~takeiteasy/cccc/1893). LI3-fed operations that survive
-// codegen are not folded here (https://todo.sr.ht/~takeiteasy/cccc/1876).
+// (https://todo.sr.ht/~takeiteasy/cccc/1893). A 2-word operation with a
+// non-zero constant result is kept, and so is its LI3 operand
+// (https://todo.sr.ht/~takeiteasy/cccc/1894).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -827,37 +835,6 @@ static int ext_bitwise(int op, int a, int b) {
     return x;
 }
 
-// The interval `op` leaves in its destination, when it is tighter than what the
-// extension facts give. A sum or difference that may wrap in 64 bits gives up.
-static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
-                         long long *lo, long long *hi) {
-    int rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
-    switch (op) {
-        case MOV3:
-            *lo = f->lo[rs1];
-            *hi = f->hi[rs1];
-            return true;
-        case LI3:
-            *lo = *hi = cc_read_i64_at(p->vm, in->pc + 2);
-            return true;
-        case ADDI3: {
-            long long imm = cc_read_i64_at(p->vm, in->pc + 2);
-            return !__builtin_add_overflow(f->lo[rs1], imm, lo) &&
-                   !__builtin_add_overflow(f->hi[rs1], imm, hi);
-        }
-        case ADD3:
-            return !__builtin_add_overflow(f->lo[rs1], f->lo[rs2], lo) &&
-                   !__builtin_add_overflow(f->hi[rs1], f->hi[rs2], hi);
-        case SUB3:
-            return !__builtin_sub_overflow(f->lo[rs1], f->hi[rs2], lo) &&
-                   !__builtin_sub_overflow(f->hi[rs1], f->lo[rs2], hi);
-        default:
-            return false;
-    }
-}
-
-// ---- Compares: what a branch on one tells about its operands ----
-
 enum { REL_LT, REL_LE, REL_EQ, REL_NE };
 
 // `a REL b` after swapping the operands if `swap`; `uns`: unsigned order;
@@ -927,6 +904,193 @@ static bool cmp_form(int op, CmpForm *c) {
             return false;
     }
 }
+
+static bool point_of(const Facts *f, int r, long long *v) {
+    *v = f->lo[r];
+    return f->lo[r] == f->hi[r];
+}
+
+// The value of the pure integer op `op` when every register it reads holds a
+// single known value. Arithmetic wraps and shifts by 0-63 only, as in ops.c.
+static bool fold_point(Peep *p, const Insn *in, int op, const Facts *f,
+                       long long *out) {
+    int       rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
+    int       rs3 = get_byte(p, in, 3);
+    long long a, b = 0, c = 0, imm = 0;
+    if (!in->known || !(in->spec.flags & SP_PURE) || in->spec.role[1] != R_IU ||
+        !point_of(f, rs1, &a))
+        return false;
+    unsigned long long ua = (unsigned long long)a;
+    switch (op) {
+        case NEG3:
+            *out = (long long)(0ULL - ua);
+            return true;
+        case NOT3:
+            *out = !a;
+            return true;
+        case BNOT3:
+            *out = ~a;
+            return true;
+        case SX1:
+            *out = (signed char)a;
+            return true;
+        case SX2:
+            *out = (short)a;
+            return true;
+        case SX4:
+            *out = (int)a;
+            return true;
+        case ZX1:
+            *out = (unsigned char)a;
+            return true;
+        case ZX2:
+            *out = (unsigned short)a;
+            return true;
+        case ZX4:
+            *out = (unsigned int)a;
+            return true;
+        case ADDI3:
+            imm  = cc_read_i64_at(p->vm, in->pc + 2);
+            *out = (long long)(ua + (unsigned long long)imm);
+            return true;
+        case MULI3:
+            imm  = cc_read_i64_at(p->vm, in->pc + 2);
+            *out = (long long)(ua * (unsigned long long)imm);
+            return true;
+        case SEQI3:
+        case SNEI3:
+        case SLTI3:
+        case SLEI3:
+        case SGTI3:
+        case SGEI3:
+        case ULTI3:
+        case ULEI3:
+        case UGTI3:
+        case UGEI3: {
+            CmpForm cf;
+            imm = cc_read_i64_at(p->vm, in->pc + 2);
+            cmp_form(op, &cf);
+            long long x = cf.swap ? imm : a, y = cf.swap ? a : imm;
+            bool      lt =
+                cf.uns ? (unsigned long long)x < (unsigned long long)y : x < y;
+            bool eq = x == y;
+            *out    = cf.rel == REL_LT   ? lt
+                      : cf.rel == REL_LE ? lt || eq
+                      : cf.rel == REL_EQ ? eq
+                                         : !eq;
+            return true;
+        }
+        case MULADDI3:
+            imm = cc_read_i64_at(p->vm, in->pc + 2);
+            if (!point_of(f, rs2, &b))
+                return false;
+            *out = (long long)(ua +
+                               (unsigned long long)b * (unsigned long long)imm);
+            return true;
+        case MULADD3:
+            if (!point_of(f, rs2, &b) || !point_of(f, rs3, &c))
+                return false;
+            *out =
+                (long long)(ua + (unsigned long long)b * (unsigned long long)c);
+            return true;
+        default:
+            break;
+    }
+    if (in->spec.role[2] != R_IU || !point_of(f, rs2, &b))
+        return false;
+    unsigned long long ub = (unsigned long long)b;
+    switch (op) {
+        case ADD3:
+            *out = (long long)(ua + ub);
+            return true;
+        case SUB3:
+            *out = (long long)(ua - ub);
+            return true;
+        case MUL3:
+            *out = (long long)(ua * ub);
+            return true;
+        case AND3:
+            *out = a & b;
+            return true;
+        case OR3:
+            *out = a | b;
+            return true;
+        case XOR3:
+            *out = a ^ b;
+            return true;
+        case SHL3:
+        case SHR3:
+        case USHR3:
+            if (b < 0 || b > 63)
+                return false;
+            *out = op == SHL3   ? (long long)(ua << b)
+                   : op == SHR3 ? a >> b
+                                : (long long)(ua >> b);
+            return true;
+        case SEQ3:
+            *out = a == b;
+            return true;
+        case SNE3:
+            *out = a != b;
+            return true;
+        case SLT3:
+            *out = a < b;
+            return true;
+        case SGE3:
+            *out = a >= b;
+            return true;
+        case SGT3:
+            *out = a > b;
+            return true;
+        case SLE3:
+            *out = a <= b;
+            return true;
+        case ULT3:
+            *out = ua < ub;
+            return true;
+        case ULE3:
+            *out = ua <= ub;
+            return true;
+        default:
+            return false;
+    }
+}
+
+// The interval `op` leaves in its destination, when it is tighter than what the
+// extension facts give. A sum or difference that may wrap in 64 bits gives up
+// unless both operands are single values.
+static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
+                         long long *lo, long long *hi) {
+    int rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
+    if (op != LI3 && op != MOV3 && fold_point(p, in, op, f, lo)) {
+        *hi = *lo;
+        return true;
+    }
+    switch (op) {
+        case MOV3:
+            *lo = f->lo[rs1];
+            *hi = f->hi[rs1];
+            return true;
+        case LI3:
+            *lo = *hi = cc_read_i64_at(p->vm, in->pc + 2);
+            return true;
+        case ADDI3: {
+            long long imm = cc_read_i64_at(p->vm, in->pc + 2);
+            return !__builtin_add_overflow(f->lo[rs1], imm, lo) &&
+                   !__builtin_add_overflow(f->hi[rs1], imm, hi);
+        }
+        case ADD3:
+            return !__builtin_add_overflow(f->lo[rs1], f->lo[rs2], lo) &&
+                   !__builtin_add_overflow(f->hi[rs1], f->hi[rs2], hi);
+        case SUB3:
+            return !__builtin_sub_overflow(f->lo[rs1], f->hi[rs2], lo) &&
+                   !__builtin_sub_overflow(f->hi[rs1], f->lo[rs2], hi);
+        default:
+            return false;
+    }
+}
+
+// ---- Compares: what a branch on one tells about its operands ----
 
 static void record_cmp(Peep *p, const Insn *in, Facts *f) {
     CmpForm cf;
@@ -1054,6 +1218,89 @@ static void branch_facts(Peep *p, const Insn *br, Facts *taken, Facts *fall) {
     refine_cmp(fall, &taken->cmp, !jumps_when_true);
 }
 
+static void make_mov(Peep *p, Insn *in, int src) {
+    p->vm->text_seg[in->pc] = MOV3;
+    in->op                  = MOV3;
+    op_spec(MOV3, &in->spec);
+    set_byte(p, in, 1, src);
+    set_byte(p, in, 2, 0);
+}
+
+static void make_imm_op(Peep *p, Insn *in, int op, long long imm) {
+    p->vm->text_seg[in->pc] = op;
+    in->op                  = op;
+    op_spec(op, &in->spec);
+    cc_write_i64_at(p->vm, in->pc + 2, imm);
+}
+
+// Rewrites `in` to an instruction of the same width that gives the same
+// result: the constant itself, or a copy of one operand (or of the zero
+// register). Instructions never change size, so nothing needs remapping.
+static bool fold_in_place(Peep *p, Insn *in, const Facts *f) {
+    int op = in->op;
+    int rd = get_byte(p, in, 0);
+    if (!(in->spec.flags & SP_PURE) || in->spec.role[0] != R_ID ||
+        in->spec.role[1] != R_IU || rd == REG_ZERO || op == LI3 || op == MOV3)
+        return false;
+    int       rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
+    long long v, a = 0, b = 0;
+    if (fold_point(p, in, op, f, &v)) {
+        if (in->size == 4) {
+            make_imm_op(p, in, LI3, v);
+            p->vm->text_seg[in->pc + 1] = (InstrWord)rd;
+        } else if (v == 0) {
+            make_mov(p, in, REG_ZERO);
+        } else {
+            return false;
+        }
+        p->changed = true;
+        return true;
+    }
+    if (op == MULADDI3 && point_of(f, rs2, &b)) {
+        long long imm = cc_read_i64_at(p->vm, in->pc + 2);
+        make_imm_op(
+            p, in, ADDI3,
+            (long long)((unsigned long long)b * (unsigned long long)imm));
+        set_byte(p, in, 2, 0);
+        p->changed = true;
+        return true;
+    }
+    if (in->size != 2 || in->spec.role[2] != R_IU || in->spec.role[3] != R_NO)
+        return false;
+    bool pa = point_of(f, rs1, &a), pb = point_of(f, rs2, &b);
+    int  src = -1;
+    switch (op) {
+        case ADD3:
+        case OR3:
+        case XOR3:
+            src = pb && b == 0 ? rs1 : pa && a == 0 ? rs2 : -1;
+            break;
+        case SUB3:
+        case SHL3:
+        case SHR3:
+        case USHR3:
+            src = pb && b == 0 ? rs1 : -1;
+            break;
+        case MUL3:
+            src = pb && b == 1                       ? rs1
+                  : pa && a == 1                     ? rs2
+                  : (pa && a == 0) || (pb && b == 0) ? REG_ZERO
+                                                     : -1;
+            break;
+        case AND3:
+            src = (pa && a == 0) || (pb && b == 0) ? REG_ZERO
+                  : pb && b == -1                  ? rs1
+                  : pa && a == -1                  ? rs2
+                                                   : -1;
+            break;
+    }
+    if (src < 0)
+        return false;
+    make_mov(p, in, src);
+    p->changed = true;
+    return true;
+}
+
 // Walks `blk` from the facts in `*f`, leaving the facts at its end. With
 // `rewrite` it also edits the code; without it, it only models what the edits
 // would do, so the facts it yields do not depend on them.
@@ -1127,6 +1374,9 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
             }
         }
 
+        if (rewrite && fold_in_place(p, in, f))
+            op = in->op;
+
         Eff e;
         effects(p, in, &e);
         int ext = ext_result(op);
@@ -1155,8 +1405,12 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
         record_cmp(p, in, f);
         if (op == MOV3) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
-            if (rd != rs && rd != REG_ZERO && rs != REG_ZERO)
+            if (rd != rs && rd != REG_ZERO)
                 f->icopy[rd] = rs;
+        } else if (op == LI3 && lo == 0 && hi == 0) {
+            int rd = get_byte(p, in, 0);
+            if (rd != REG_ZERO)
+                f->icopy[rd] = REG_ZERO;
         } else if (op == FMOV3) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
             if (rd != rs)

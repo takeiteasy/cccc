@@ -1,10 +1,10 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
 // CCCC_EXPECT_STDOUT: MULADD3
-// CCCC_REJECT_STDOUT: MOV3
+// CCCC_REJECT_STDOUT: MOV3 +[0-9]{3,}
 // An index, a base, a multiply-add operand and a compare operand that are
 // promoted locals are read from their registers: no move copies one into a
-// temporary first.
+// temporary first. A counter starting at 0 is moved from the zero register.
 long data[8];
 
 long work(long n) {
