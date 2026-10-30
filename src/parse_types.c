@@ -4036,10 +4036,8 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
             // (`#pragma pack(1) struct{char c; int:0; char d;}` is 8/4 on
             // Linux/aarch64, not capped to 1/1 or 2/1).
             bits = align_to(bits, mem->ty->size * 8);
-#if CCCC_ALIGN_ANON_BITFIELDS
-            if (ty->align < mem->align)
+            if (CCCC_ALIGN_ANON_BITFIELDS && ty->align < mem->align)
                 ty->align = mem->align;
-#endif
         } else if (mem->is_bitfield) {
             int sz = mem->ty->size;
 

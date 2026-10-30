@@ -651,18 +651,14 @@ Type *vector_of(VirtualMachine *vm, Type *base, int bytes) {
     // Alignment follows the host ABI so -c=native, struct layout and FFI
     // agree with the VM: aarch64 and macOS cap vector_size alignment at 16,
     // Linux x86_64 aligns to the full width.
-#if CCCC_HOST_FULL_WIDTH_VECTORS
-    int align = bytes;
-#else
-    int align = bytes < 16 ? bytes : 16;
-#endif
+    int align =
+        CCCC_HOST_FULL_WIDTH_VECTORS ? bytes : (bytes < 16 ? bytes : 16);
     Type *ty    = new_type(vm, TY_VECTOR, bytes, align);
     ty->base    = base;
     type_arr_mut(vm, ty)->vec_len = bytes / base->size;
     return ty;
 }
 
-#if CCCC_HOST_FULL_WIDTH_VECTORS
 // True if `ty`, or something it holds by value, carries an aligned(N) /
 // _Alignas(N) request rather than only a natural alignment.
 static bool type_has_user_align(Type *ty, int depth) {
@@ -678,7 +674,6 @@ static bool type_has_user_align(Type *ty, int depth) {
                 return true;
     return false;
 }
-#endif
 
 // `_Alignof`/`__alignof__` of a type: its natural alignment, raised by an
 // aligned(N) written on the type itself (`typedef int i64 aligned(64)`).
@@ -692,7 +687,8 @@ int type_alignof(Type *ty) {
 // `__alignof__` and `_Alignof expr` keep the uncapped value. clang never caps.
 int c11_alignof(VirtualMachine *vm, Type *ty) {
     int align = type_alignof(ty);
-#if CCCC_HOST_FULL_WIDTH_VECTORS
+    if (!CCCC_HOST_FULL_WIDTH_VECTORS)
+        return align;
     int cap = vm->compiler.x86_isa >= 3   ? 64
               : vm->compiler.x86_isa >= 1 ? 32
                                           : 16;
@@ -700,9 +696,6 @@ int c11_alignof(VirtualMachine *vm, Type *ty) {
         vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC &&
         !type_has_user_align(ty, 0))
         return cap;
-#else
-    (void)vm;
-#endif
     return align;
 }
 
