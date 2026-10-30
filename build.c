@@ -19,7 +19,7 @@
 //   clean, host_tests (also run by test), fuzz_replay, test_smoke,
 //   test_leaks,
 //   test / test_vm /
-//   test_native / test_release / test_msan / test_ubsan / test_asan /
+//   test_native / test_ouroboros / test_release / test_msan / test_ubsan / test_asan /
 //   test_tsan; test_extra (the loose tests) =
 //   test_warnings / test_serialize / test_build_mode / test_safety /
 //   test_parallel / test_macros / test_misc / test_native_loose (the loose
@@ -1406,8 +1406,7 @@ static void ouroboros_link_objects(Builder *ctx, BuildTarget *exe,
     }
 }
 
-[[cccc::build_target]]
-BuildTarget *ouroboros(Builder *ctx) {
+static BuildTarget *ouroboros_exe(Builder *ctx) {
     BuildTarget *t = CcccExecutable(ctx, "cccc-ouroboros");
     SetOutput(t, "cccc-ouroboros");
     AddSource(t, "src/main.c");
@@ -1415,7 +1414,18 @@ BuildTarget *ouroboros(Builder *ctx) {
     ouroboros_link_flags(ctx, t);
     ouroboros_link_objects(ctx, t, "src/*.c");
     ouroboros_link_objects(ctx, t, "src/stdlib/*.c");
-    return ouroboros_smoke(ctx, t, "ouroboros-smoke");
+    return t;
+}
+
+[[cccc::build_target]]
+BuildTarget *ouroboros(Builder *ctx) {
+    return ouroboros_smoke(ctx, ouroboros_exe(ctx), "ouroboros-smoke");
+}
+
+// The suites against the self-hosted binary.
+[[cccc::build_target]]
+BuildTarget *test_ouroboros(Builder *ctx) {
+    return make_test_step(ctx, ouroboros_exe(ctx), "test-ouroboros");
 }
 
 [[cccc::build_target]]
