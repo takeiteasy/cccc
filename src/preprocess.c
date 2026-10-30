@@ -2546,6 +2546,53 @@ static Macro *add_macro(VirtualMachine *vm, char *name, int name_len,
     return m;
 }
 
+// glibc's `#define sa_handler __sigaction_handler.sa_handler`. The AST holds
+// the expansion, so serialized output spells the member path and the host
+// preprocessor would expand its final `sa_handler` a second time.
+static void note_member_alias_macro(VirtualMachine *vm, Token *name_tok,
+                                    Token *body) {
+    if (!name_tok->file || !name_tok->file->is_system_header)
+        return;
+    Token *last  = NULL;
+    int    count = 0;
+    for (Token *t = body; t && t->kind != TK_EOF; t = t->next, count++) {
+        bool want_ident = count % 2 == 0;
+        if (want_ident ? t->kind != TK_IDENT : !equal(t, "."))
+            return;
+        last = t;
+    }
+    if (count < 3 || count % 2 == 0 || last->len != name_tok->len ||
+        memcmp(last->loc, name_tok->loc, name_tok->len))
+        return;
+    for (MemberAlias *a = vm->compiler.member_aliases; a; a = a->next)
+        if (strlen(a->name) == (size_t)name_tok->len &&
+            !memcmp(a->name, name_tok->loc, name_tok->len))
+            return;
+    MemberAlias *a =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(MemberAlias));
+    a->name = arena_strndup(vm, name_tok->loc, name_tok->len);
+    a->next = vm->compiler.member_aliases;
+    vm->compiler.member_aliases = a;
+}
+
+static int member_alias_cmp(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+char **cc_member_alias_macro_names(VirtualMachine *vm) {
+    int n = 0;
+    for (MemberAlias *a = vm->compiler.member_aliases; a; a = a->next)
+        n++;
+    char **names =
+        arena_alloc(&vm->compiler.parser_arena, (n + 1) * sizeof(char *));
+    n = 0;
+    for (MemberAlias *a = vm->compiler.member_aliases; a; a = a->next)
+        names[n++] = a->name;
+    names[n] = NULL;
+    qsort(names, n, sizeof(char *), member_alias_cmp);
+    return names;
+}
+
 static MacroParam *read_macro_params(VirtualMachine *vm, Token **rest,
                                      Token *tok, char **va_args_name) {
     MacroParam  head = {};
@@ -2619,6 +2666,7 @@ static void read_macro_definition(VirtualMachine *vm, Token **rest,
         // Object-like macro
         m = add_macro(vm, name, name_len, true, copy_line(vm, rest, tok),
                       name_tok);
+        note_member_alias_macro(vm, name_tok, m->body);
     }
     m->is_shared = is_shared;
     // The macro keeps name_tok (define_tok) and copies of its body; the rest

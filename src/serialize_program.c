@@ -6097,6 +6097,13 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     serialize_wide_bitint_preamble(f, prog);
     serialize_asm_prefix_preamble(f, prog);
 
+    // The AST already holds the expansion of glibc's member-alias macros
+    // (`sa_handler` -> `__sigaction_handler.sa_handler`), so the replayed
+    // headers' definitions must not rewrite it again.
+    if (!generated_only)
+        for (char **n = cc_member_alias_macro_names(vm); *n; n++)
+            fprintf(f, "#undef %s\n", *n);
+
     // Serialize file-scope type definitions before declarations that reference
     // them.
     serialize_type_defs_for_owner(f, &ctx, NULL);

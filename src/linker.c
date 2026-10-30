@@ -99,6 +99,11 @@ void cc_print_tokens(Token *tok) {
     fprintf(out, "\n");
 }
 
+static bool decl_written_in_input(VirtualMachine *vm, Obj *obj) {
+    return obj->is_function && obj->tok && obj->tok->file &&
+           cc_file_is_command_line_input(vm, obj->tok->file->name);
+}
+
 Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
     if (!vm || !progs || count <= 0)
         error("cc_link_progs: invalid arguments");
@@ -174,7 +179,14 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                     obj_set_rel(vm, obj, obj_init(existing)->rel);
                     obj->ty            = existing->ty;
                 }
-                // Otherwise both are declarations, keep first one
+                // Otherwise both are declarations, keep the first one, but
+                // let a prototype written in an input file be its canonical
+                // token: the serializer drops a bodyless declaration it
+                // believes a replayed header supplies, and the first TU's
+                // header (e.g. under _GNU_SOURCE) may not be the host's.
+                else if (decl_written_in_input(vm, obj) &&
+                         !decl_written_in_input(vm, existing))
+                    existing->tok = obj->tok;
             }
         }
     }

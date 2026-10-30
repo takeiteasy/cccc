@@ -2701,6 +2701,12 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    if (preprocess_only && out_file && input_files_count > 1) {
+        fprintf(stderr, "error: cannot specify -o with -E and multiple input "
+                        "files\n");
+        usage(argv[0], 1);
+    }
+
     // --deps-file (#1308) only makes sense for a mode that opens the full set
     // of source and header files and then exits without running the VM: it is
     // read by src/build.c to invalidate a CcccExecutable's cache. `dump_

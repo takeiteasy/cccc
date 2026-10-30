@@ -3962,10 +3962,16 @@ typedef struct {
     Obj        *fn;
 } MethodEntry;
 
+typedef struct MemberAlias {
+    struct MemberAlias *next;
+    char               *name;
+} MemberAlias;
+
 typedef struct Compiler {
     // Preprocessor state
-    bool      skip_preprocess; // Skip preprocessing step
-    HashMap   macros;          // Macro definitions
+    bool         skip_preprocess; // Skip preprocessing step
+    HashMap      macros;          // Macro definitions
+    MemberAlias *member_aliases;  // see note_member_alias_macro(); survives TUs
     CondIncl *cond_incl;       // Conditional inclusion stack
     HashMap   pragma_once;     // #pragma once tracking
     HashMap included_headers;  // Track included headers for lazy stdlib loading
