@@ -21,7 +21,9 @@
 // output directories and bind a socket is stopped by the OS, while a write to
 // the temp directory and a -c=native build still work. The binary is
 // $CCCC_BIN, else build/cccc, else ./cccc. Skipped when none exists or the
-// kernel cannot enforce the sandbox (Linux without landlock).
+// kernel cannot enforce the sandbox (Linux without landlock). A write to the
+// working directory must be denied too, except from inside a temp directory,
+// which the sandbox leaves writable.
 
 #include <limits.h>
 #include <stdarg.h>
@@ -44,6 +46,30 @@ static bool find_cccc(void) {
         if (candidates[i] && realpath(candidates[i], cccc) &&
             access(cccc, X_OK) == 0)
             return true;
+    return false;
+}
+
+static bool under_dir(const char *path, const char *dir) {
+    char rp[PATH_MAX], rd[PATH_MAX];
+    if (!dir || !*dir || !realpath(path, rp) || !realpath(dir, rd))
+        return false;
+    size_t n = strlen(rd);
+    return !strncmp(rp, rd, n) && (n == 1 || rp[n] == '/' || !rp[n]);
+}
+
+// The sandbox leaves the temp directories writable, so a working directory
+// inside one can be written to by design.
+static bool cwd_in_open_dir(const char *cwd) {
+    if (under_dir(cwd, "/tmp") || under_dir(cwd, getenv("TMPDIR")))
+        return true;
+#ifdef __APPLE__
+    char dir[PATH_MAX];
+    if ((confstr(_CS_DARWIN_USER_TEMP_DIR, dir, sizeof dir) &&
+         under_dir(cwd, dir)) ||
+        (confstr(_CS_DARWIN_USER_CACHE_DIR, dir, sizeof dir) &&
+         under_dir(cwd, dir)))
+        return true;
+#endif
     return false;
 }
 
@@ -70,7 +96,8 @@ static void write_file(const char *path, const char *text) {
 // Bit 1: ran a command. 2: wrote outside the allowed directories.
 // 4: bound a socket. 8: wrote into the temp directory.
 // 16: read a file outside the allowed directories. 32: read the input's
-// neighbour. 64: started the host C compiler.
+// neighbour. 64: started the host C compiler. 128: wrote into the working
+// directory.
 static const char probe_src[] =
     "#include[[cccc::comptime]] <stdio.h>\n"
     "#include[[cccc::comptime]] <stdlib.h>\n"
@@ -95,6 +122,8 @@ static const char probe_src[] =
     "    if (f) { fclose(f); r |= 16; }\n"
     "    f = fopen(\"%s/ok.c\", \"r\");\n"
     "    if (f) { fclose(f); r |= 32; }\n"
+    "    f = fopen(\"%s/cwd_escape\", \"w\");\n"
+    "    if (f) { fclose(f); r |= 128; }\n"
     "    pid_t pid; char *av[] = {\"cc\", \"--version\", 0}; char *ev[] = "
     "{0};\n"
     "    if (posix_spawnp(&pid, \"cc\", 0, 0, av, ev) == 0) {\n"
@@ -126,23 +155,30 @@ int main(void) {
 
     // Outside the working directory and the temp directories, which are open.
     const char *home = getenv("HOME");
-    char        secret[PATH_MAX], indir[PATH_MAX];
+    char        secret[PATH_MAX], indir[PATH_MAX], outside[PATH_MAX];
     snprintf(secret, sizeof secret, "%s/.cccc_sandbox_secret_XXXXXX",
              home ? home : "");
     snprintf(indir, sizeof indir, "%s/.cccc_sandbox_input_XXXXXX",
              home ? home : "");
-    if (!home || !mkdtemp(secret) || !mkdtemp(indir)) {
+    snprintf(outside, sizeof outside, "%s/.cccc_sandbox_outside_XXXXXX",
+             home ? home : "");
+    if (!home || !mkdtemp(secret) || !mkdtemp(indir) || !mkdtemp(outside)) {
         printf("SKIP: sandbox (no writable $HOME for the read probe)\n");
-        run("rm -rf %s %s %s", root, secret, indir);
+        run("rm -rf %s %s %s %s", root, secret, indir, outside);
         return 0;
     }
+    char escape[PATH_MAX + 16], cwd_escape[PATH_MAX + 16];
+    snprintf(escape, sizeof escape, "%s/escape", outside);
+    snprintf(cwd_escape, sizeof cwd_escape, "%s/cwd_escape", cwd);
+    // The working directory is only checked where the sandbox keeps it closed.
+    int  confined_bits = cwd_in_open_dir(cwd) ? 127 : 255;
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s/key", secret);
     write_file(path, "secret\n");
     snprintf(path, sizeof path, "%s/ok.c", indir);
     write_file(path, "int main(void) { return 42; }\n");
-    char src[sizeof probe_src + 4 * PATH_MAX];
-    snprintf(src, sizeof src, probe_src, cwd, root, secret, indir);
+    char src[sizeof probe_src + 5 * PATH_MAX];
+    snprintf(src, sizeof src, probe_src, outside, root, secret, indir, cwd);
     char probe[PATH_MAX];
     snprintf(probe, sizeof probe, "%s/probe.c", indir);
     write_file(probe, src);
@@ -155,17 +191,17 @@ int main(void) {
     }
 
     rc = run("%s --comptime-allow=all %s >/dev/null 2>&1", cccc, probe);
-    if (rc != 127) {
+    if ((rc & 127) != 127) {
         printf("SKIP: sandbox (unconfined probe exited %d, not 127)\n", rc);
         goto done;
     }
 
-    snprintf(path, sizeof path, "%s/escape", cwd);
-    unlink(path); // the unconfined run above wrote it
+    unlink(escape); // the unconfined run above wrote both
+    unlink(cwd_escape);
 
     rc = run("%s --sandbox --comptime-allow=all %s >/dev/null 2>&1", cccc,
              probe);
-    if (rc != 40) {
+    if ((rc & confined_bits) != 40) {
         fprintf(stderr, "FAIL: sandboxed probe exited %d, expected 40\n", rc);
         failed = 1;
     }
@@ -173,26 +209,26 @@ int main(void) {
     rc = run("%s --sandbox --sandbox-read=%s --comptime-allow=all %s "
              ">/dev/null 2>&1",
              cccc, secret, probe);
-    if (rc != 56) {
+    if ((rc & confined_bits) != 56) {
         fprintf(stderr, "FAIL: --sandbox-read probe exited %d, expected 56\n",
                 rc);
         failed = 1;
     }
-    snprintf(path, sizeof path, "%s/escape", cwd);
-    unlink(path);
+    unlink(escape);
+    unlink(cwd_escape);
 
     // --sandbox-exec lets the run start a program: sh runs `true` (macOS's
     // sh re-executes bash).
     rc = run("%s --sandbox --sandbox-exec=/bin/sh --sandbox-exec=/bin/bash "
              "--comptime-allow=all %s >/dev/null 2>&1",
              cccc, probe);
-    if (rc != 41) {
+    if ((rc & confined_bits) != 41) {
         fprintf(stderr, "FAIL: --sandbox-exec probe exited %d, expected 41\n",
                 rc);
         failed = 1;
     }
-    snprintf(path, sizeof path, "%s/escape", cwd);
-    unlink(path);
+    unlink(escape);
+    unlink(cwd_escape);
 
     char out[PATH_MAX];
     snprintf(out, sizeof out, "%s/ok.out", root);
@@ -374,15 +410,15 @@ int main(void) {
         failed = 1;
     }
 
-    if (access(path, F_OK) == 0) {
-        fprintf(stderr, "FAIL: sandboxed comptime created %s\n", path);
-        unlink(path);
+    if (access(escape, F_OK) == 0) {
+        fprintf(stderr, "FAIL: sandboxed comptime created %s\n", escape);
+        unlink(escape);
         failed = 1;
     }
     if (!failed)
         printf("PASS: sandbox\n");
 
 done:
-    run("rm -rf %s %s %s", root, secret, indir);
+    run("rm -rf %s %s %s %s", root, secret, indir, outside);
     return failed;
 }
