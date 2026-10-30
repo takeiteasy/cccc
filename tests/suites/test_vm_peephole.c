@@ -911,3 +911,330 @@ void test_cleanup_function_flow(void) {
         AssertEq(cl_log[1], a);
     }
 }
+
+// ---- Value ranges narrowed by a branch ----
+// Each function does what a loop index does when the bound sits at an `int`
+// limit; the reference runs the same loop in `long`, where nothing wraps.
+
+typedef struct {
+    long lo, hi;
+} Span;
+
+#define N_SPANS(a) (int)(sizeof(a) / sizeof((a)[0]))
+
+long loop_lt(int lo, int hi) {
+    long n = 0;
+    int  j;
+    for (j = lo; j < hi; j++) {
+        opaque(j);
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long loop_lt_ref(long lo, long hi) {
+    long n = 0, j;
+    for (j = lo; j < hi; j++)
+        n++;
+    return j * 8 + n;
+}
+
+long loop_le(int lo, int hi) {
+    long n = 0;
+    int  j;
+    for (j = lo; j <= hi; j++) {
+        opaque(j);
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long loop_le_ref(long lo, long hi) {
+    long n = 0, j;
+    for (j = lo; j <= hi; j++)
+        n++;
+    return j * 8 + n;
+}
+
+long loop_gt(int lo, int hi) {
+    long n = 0;
+    int  j;
+    for (j = hi; j > lo; j--) {
+        opaque(j);
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long loop_gt_ref(long lo, long hi) {
+    long n = 0, j;
+    for (j = hi; j > lo; j--)
+        n++;
+    return j * 8 + n;
+}
+
+long loop_ge(int lo, int hi) {
+    long n = 0;
+    int  j;
+    for (j = hi; j >= lo; j--) {
+        opaque(j);
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long loop_ge_ref(long lo, long hi) {
+    long n = 0, j;
+    for (j = hi; j >= lo; j--)
+        n++;
+    return j * 8 + n;
+}
+
+long loop_ult(unsigned lo, unsigned hi) {
+    long     n = 0;
+    unsigned j;
+    for (j = lo; j < hi; j++) {
+        opaque(j);
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long loop_ult_ref(unsigned long lo, unsigned long hi) {
+    long          n = 0;
+    unsigned long j;
+    for (j = lo; j < hi; j++)
+        n++;
+    return (long)j * 8 + n;
+}
+
+[[cccc::test]]
+void test_range_signed_loops_at_int_limits(void) {
+    static const Span lt[] = {{INT_MAX - 3L, INT_MAX},
+                              {INT_MIN, INT_MIN + 3L},
+                              {-2, 2},
+                              {5, 5},
+                              {INT_MAX, INT_MAX},
+                              {3, 1}};
+    for (int i = 0; i < N_SPANS(lt); i++)
+        AssertEq(loop_lt((int)opaque(lt[i].lo), (int)opaque(lt[i].hi)),
+                 loop_lt_ref(lt[i].lo, lt[i].hi));
+
+    static const Span le[] = {
+        {INT_MAX - 3L, INT_MAX - 1L}, {INT_MIN, INT_MIN + 2L}, {-2, 1}, {5, 4}};
+    for (int i = 0; i < N_SPANS(le); i++)
+        AssertEq(loop_le((int)opaque(le[i].lo), (int)opaque(le[i].hi)),
+                 loop_le_ref(le[i].lo, le[i].hi));
+
+    static const Span gt[] = {{INT_MIN, INT_MIN + 3L},
+                              {INT_MAX - 3L, INT_MAX},
+                              {-2, 2},
+                              {5, 5},
+                              {INT_MIN, INT_MIN}};
+    for (int i = 0; i < N_SPANS(gt); i++)
+        AssertEq(loop_gt((int)opaque(gt[i].lo), (int)opaque(gt[i].hi)),
+                 loop_gt_ref(gt[i].lo, gt[i].hi));
+
+    static const Span ge[] = {
+        {INT_MIN + 1L, INT_MIN + 3L}, {INT_MAX - 3L, INT_MAX}, {-2, 2}, {5, 4}};
+    for (int i = 0; i < N_SPANS(ge); i++)
+        AssertEq(loop_ge((int)opaque(ge[i].lo), (int)opaque(ge[i].hi)),
+                 loop_ge_ref(ge[i].lo, ge[i].hi));
+}
+
+[[cccc::test]]
+void test_range_unsigned_loop_at_uint_limit(void) {
+    static const Span ult[] = {
+        {UINT_MAX - 3L, UINT_MAX}, {0, 3}, {5, 5}, {3, 1}};
+    for (int i = 0; i < N_SPANS(ult); i++)
+        AssertEq(
+            loop_ult((unsigned)opaque(ult[i].lo), (unsigned)opaque(ult[i].hi)),
+            loop_ult_ref((unsigned long)ult[i].lo, (unsigned long)ult[i].hi));
+}
+
+// The index is replaced after the compare that bounded it.
+long redefined_in_body(int hi, long v) {
+    int j = 0;
+    for (int k = 0; k < 2; k++) {
+        if (j < hi) {
+            j = (int)opaque(v);
+            j++;
+        }
+    }
+    return j;
+}
+
+long redefined_in_body_ref(long hi, long v) {
+    long j = 0;
+    for (int k = 0; k < 2; k++) {
+        if (j < hi) {
+            j = (int)v;
+            j = (int)(j + 1);
+        }
+    }
+    return j;
+}
+
+[[cccc::test]]
+void test_range_index_redefined_after_compare(void) {
+    static const long his[] = {1, 5, INT_MIN, INT_MAX};
+    static const long vs[]  = {INT_MAX, INT_MIN, 0, -1, 4294967296L + 5};
+    for (int a = 0; a < N_SPANS(his); a++)
+        for (int b = 0; b < N_SPANS(vs); b++)
+            AssertEq(redefined_in_body((int)opaque(his[a]), opaque(vs[b])),
+                     redefined_in_body_ref(his[a], vs[b]));
+}
+
+// The compare is used in a later block, after its result may have changed.
+long flag_after_join(int j, int hi, long flag) {
+    for (int k = 0; k < 1; k++) {
+        int c = j < hi;
+        if (opaque(flag))
+            c = 1;
+        if (c)
+            j++;
+    }
+    return j;
+}
+
+long flag_after_join_ref(long j, long hi, long flag) {
+    long c = j < hi || flag;
+    return c ? (int)(j + 1) : j;
+}
+
+// An operand of the compare is replaced before the branch.
+long operand_replaced_before_branch(int j, int hi) {
+    for (int k = 0; k < 1; k++) {
+        int c = j < hi;
+        j     = j ^ INT_MAX;
+        if (c)
+            j++;
+    }
+    return j;
+}
+
+long operand_replaced_before_branch_ref(long j, long hi) {
+    long c = j < hi;
+    j      = (int)(j ^ INT_MAX);
+    return c ? (int)(j + 1) : j;
+}
+
+[[cccc::test]]
+void test_range_compare_does_not_outlive_its_operands(void) {
+    static const long js[]  = {0, 1, -1, INT_MAX, INT_MIN};
+    static const long his[] = {1, 0, INT_MAX, INT_MIN};
+    for (int a = 0; a < N_SPANS(js); a++)
+        for (int b = 0; b < N_SPANS(his); b++) {
+            for (long flag = 0; flag < 2; flag++)
+                AssertEq(flag_after_join((int)opaque(js[a]),
+                                         (int)opaque(his[b]), flag),
+                         flag_after_join_ref(js[a], his[b], flag));
+            AssertEq(operand_replaced_before_branch((int)opaque(js[a]),
+                                                    (int)opaque(his[b])),
+                     operand_replaced_before_branch_ref(js[a], his[b]));
+        }
+}
+
+// An unsigned order on operands that may be negative is not the signed one.
+long unsigned_order_on_signed(int j, int n) {
+    for (int k = 0; k < 1; k++) {
+        if ((unsigned long)j < (unsigned long)n)
+            j++;
+    }
+    return j;
+}
+
+[[cccc::test]]
+void test_range_unsigned_order_on_negative_operands(void) {
+    static const long js[] = {INT_MAX, 0, -1, 5};
+    static const long ns[] = {-1, 0, 5, INT_MIN};
+    for (int a = 0; a < N_SPANS(js); a++)
+        for (int b = 0; b < N_SPANS(ns); b++) {
+            bool lt   = (unsigned long)js[a] < (unsigned long)ns[b];
+            long want = lt ? (long)(int)(js[a] + 1) : js[a];
+            AssertEq(unsigned_order_on_signed((int)opaque(js[a]),
+                                              (int)opaque(ns[b])),
+                     want);
+        }
+}
+
+// A throw out of the branch that bounded the index does not leave the bound
+// behind on the path that lands after setjmp.
+static jmp_buf range_jb;
+
+static void range_throw(void) {
+    longjmp(range_jb, 1);
+}
+
+long setjmp_after_bound(int j, int hi) {
+    long n = 0;
+    for (int k = 0; k < 3; k++) {
+        if (setjmp(range_jb) == 0) {
+            if (j < hi)
+                range_throw();
+        } else if (j < hi) {
+            j++;
+        }
+        n++;
+    }
+    return (long)j * 8 + n;
+}
+
+long setjmp_after_bound_ref(long j, long hi) {
+    for (int k = 0; k < 3; k++)
+        if (j < hi)
+            j++;
+    return j * 8 + 3;
+}
+
+[[cccc::test]]
+void test_range_setjmp_after_bound(void) {
+    static const Span spans[] = {
+        {INT_MAX - 1L, INT_MAX}, {0, 5}, {5, 0}, {INT_MIN, INT_MIN + 1L}};
+    for (int i = 0; i < N_SPANS(spans); i++)
+        AssertEq(setjmp_after_bound((int)opaque(spans[i].lo),
+                                    (int)opaque(spans[i].hi)),
+                 setjmp_after_bound_ref(spans[i].lo, spans[i].hi));
+}
+
+// The index is stepped once more after the loop that bounded it, where the
+// bound no longer holds.
+long step_after_loop_lt(int lo, int hi) {
+    int j;
+    for (j = lo; j < hi; j++)
+        opaque(j);
+    j++;
+    return j;
+}
+
+long step_after_loop_gt(int lo, int hi) {
+    int j;
+    for (j = hi; j > lo; j--)
+        opaque(j);
+    j--;
+    return j;
+}
+
+[[cccc::test]]
+void test_range_step_after_loop_exit(void) {
+    static const Span spans[] = {{INT_MAX - 2L, INT_MAX},
+                                 {INT_MAX, INT_MAX},
+                                 {INT_MIN, INT_MIN},
+                                 {INT_MIN, INT_MIN + 2L},
+                                 {0, 3},
+                                 {3, 0}};
+    for (int i = 0; i < N_SPANS(spans); i++) {
+        long j = spans[i].lo;
+        while (j < spans[i].hi)
+            j++;
+        AssertEq(step_after_loop_lt((int)opaque(spans[i].lo),
+                                    (int)opaque(spans[i].hi)),
+                 (long)(int)(j + 1));
+        j = spans[i].hi;
+        while (j > spans[i].lo)
+            j--;
+        AssertEq(step_after_loop_gt((int)opaque(spans[i].lo),
+                                    (int)opaque(spans[i].hi)),
+                 (long)(int)(j - 1));
+    }
+}

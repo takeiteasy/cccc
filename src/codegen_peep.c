@@ -26,16 +26,20 @@
 // opcode is opaque: it reads every register, ends every fact about register
 // contents and is never removed, so a new opcode is never mis-optimised.
 //
-// Extension facts flow across the block graph (meet = intersection over
-// predecessors); copy facts stay inside a block. A block that can be entered
-// from outside the graph (the function entry, an address-taken label) starts
-// from the promoted-register seed alone. A switch table's targets are
-// successors of its JMPT; every label of a function with a computed goto is a
-// successor of its JMPI.
+// Extension facts and value intervals flow across the block graph (meet =
+// intersection / hull over predecessors, widened on a backward edge); copy
+// facts and the latest compare stay inside a block. A conditional branch on a
+// compare narrows the operands' intervals along each of its edges. A call keeps
+// what is known about promoted registers: the callee restores them. A block
+// that can be entered from outside the graph (the function entry, an
+// address-taken label) starts from the promoted-register seed alone. A switch
+// table's targets are successors of its JMPT; every label of a function with a
+// computed goto is a successor of its JMPI.
 //
-// TODO: an extension after arithmetic (`ADDI3; SX4`) is kept because the pass
-// has no value ranges; branch-refined ranges would drop the loop-index ones
-// (https://todo.sr.ht/~takeiteasy/cccc/1875). LI3-fed operations that survive
+// TODO: an extension after arithmetic is kept when it needs a relation between
+// two registers rather than an interval
+// (https://todo.sr.ht/~takeiteasy/cccc/1892), or follows a call result
+// (https://todo.sr.ht/~takeiteasy/cccc/1893). LI3-fed operations that survive
 // codegen are not folded here (https://todo.sr.ht/~takeiteasy/cccc/1876).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
@@ -238,12 +242,24 @@ typedef struct {
     uint32_t iuse, idef, fuse, fdef;
 } Eff;
 
-// What is known about the registers at one point: icopy[r] / fcopy[r] is a
-// register r currently equals, ext[r] the extensions r already satisfies.
+// A compare whose result register has not changed since, nor its operands:
+// `dst = a OP b` (`b < 0`: `a OP imm`).
 typedef struct {
-    int     icopy[NUM_REGS];
-    int     fcopy[NUM_REGS];
-    uint8_t ext[NUM_REGS];
+    int       op, dst, a, b;
+    long long imm;
+    bool      valid;
+} Cmp;
+
+// What is known about the registers at one point: icopy[r] / fcopy[r] is a
+// register r currently equals, ext[r] the extensions r already satisfies,
+// [lo[r], hi[r]] an interval holding it (ext[r] and the interval imply each
+// other), cmp the latest compare.
+typedef struct {
+    int       icopy[NUM_REGS];
+    int       fcopy[NUM_REGS];
+    uint8_t   ext[NUM_REGS];
+    long long lo[NUM_REGS], hi[NUM_REGS];
+    Cmp       cmp;
 } Facts;
 
 typedef struct {
@@ -283,6 +299,7 @@ typedef struct {
     int             nlabels;
     bool            changed;
     uint8_t         seed[NUM_REGS]; // extension facts that hold throughout
+    uint32_t        promoted;       // registers holding promoted locals
 } Peep;
 
 enum { C_NONE, C_JMP, C_COND, C_EXIT };
@@ -614,22 +631,36 @@ enum {
     X_ALL = 63,
 };
 
+static const struct {
+    int       bit;
+    long long lo, hi;
+} EXT_LIMITS[] = {
+    {X_SX1, -128, 127}, {X_SX2, -32768, 32767}, {X_SX4, INT_MIN, INT_MAX},
+    {X_ZX1, 0, 255},    {X_ZX2, 0, 65535},      {X_ZX4, 0, 4294967295LL},
+};
+#define N_EXT_LIMITS (int)(sizeof EXT_LIMITS / sizeof EXT_LIMITS[0])
+
 // Extension facts a value in [lo, hi] satisfies.
 static int ext_of_range(long long lo, long long hi) {
     int x = 0;
-    if (lo >= -128 && hi <= 127)
-        x |= X_SX1;
-    if (lo >= -32768 && hi <= 32767)
-        x |= X_SX2;
-    if (lo >= INT_MIN && hi <= INT_MAX)
-        x |= X_SX4;
-    if (lo >= 0 && hi <= 255)
-        x |= X_ZX1;
-    if (lo >= 0 && hi <= 65535)
-        x |= X_ZX2;
-    if (lo >= 0 && hi <= 4294967295LL)
-        x |= X_ZX4;
+    for (int i = 0; i < N_EXT_LIMITS; i++)
+        if (lo >= EXT_LIMITS[i].lo && hi <= EXT_LIMITS[i].hi)
+            x |= EXT_LIMITS[i].bit;
     return x;
+}
+
+// The tightest interval the extension facts `x` confine a value to.
+static void range_of_ext(int x, long long *lo, long long *hi) {
+    *lo = LLONG_MIN;
+    *hi = LLONG_MAX;
+    for (int i = 0; i < N_EXT_LIMITS; i++) {
+        if (!(x & EXT_LIMITS[i].bit))
+            continue;
+        if (EXT_LIMITS[i].lo > *lo)
+            *lo = EXT_LIMITS[i].lo;
+        if (EXT_LIMITS[i].hi < *hi)
+            *hi = EXT_LIMITS[i].hi;
+    }
 }
 
 static int ext_needed(int op) {
@@ -709,6 +740,21 @@ static int ext_result(int op) {
     }
 }
 
+// Makes r's extension facts and interval imply each other.
+static void fit_reg(Facts *f, int r) {
+    long long lo, hi;
+    range_of_ext(f->ext[r], &lo, &hi);
+    if (f->lo[r] < lo)
+        f->lo[r] = lo;
+    if (f->hi[r] > hi)
+        f->hi[r] = hi;
+    if (f->lo[r] > f->hi[r]) {
+        f->lo[r] = lo;
+        f->hi[r] = hi;
+    }
+    f->ext[r] |= ext_of_range(f->lo[r], f->hi[r]);
+}
+
 // A promoted local's register is written only through emit_promoted_write,
 // which normalises it to the variable's type, and a callee restores it, so it
 // holds an in-range value at every point of the body.
@@ -716,8 +762,29 @@ static void facts_reset(Facts *f, const uint8_t *seed) {
     for (int r = 0; r < NUM_REGS; r++) {
         f->icopy[r] = f->fcopy[r] = -1;
         f->ext[r]                 = seed[r];
+        range_of_ext(seed[r], &f->lo[r], &f->hi[r]);
     }
     f->ext[REG_ZERO] = X_ALL;
+    f->lo[REG_ZERO] = f->hi[REG_ZERO] = 0;
+    f->cmp.valid                      = false;
+}
+
+// A call ends what is known except about promoted registers, which the callee
+// saves and restores (emit_save_promoted_registers).
+static void facts_after_call(const Peep *p, Facts *f) {
+    Facts before = *f;
+    facts_reset(f, p->seed);
+    for (int r = 1; r < NUM_REGS; r++) {
+        if (!(p->promoted & BIT(r)))
+            continue;
+        f->ext[r] = before.ext[r];
+        f->lo[r]  = before.lo[r];
+        f->hi[r]  = before.hi[r];
+    }
+}
+
+static bool is_call(int op) {
+    return op == CALL || op == CALLI || op == CALLN || op == CALLF;
 }
 
 static void kill_int(Facts *f, int d) {
@@ -725,6 +792,8 @@ static void kill_int(Facts *f, int d) {
     for (int r = 0; r < NUM_REGS; r++)
         if (f->icopy[r] == d)
             f->icopy[r] = -1;
+    if (f->cmp.valid && (f->cmp.dst == d || f->cmp.a == d || f->cmp.b == d))
+        f->cmp.valid = false;
 }
 
 static void kill_float(Facts *f, int d) {
@@ -758,6 +827,233 @@ static int ext_bitwise(int op, int a, int b) {
     return x;
 }
 
+// The interval `op` leaves in its destination, when it is tighter than what the
+// extension facts give. A sum or difference that may wrap in 64 bits gives up.
+static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
+                         long long *lo, long long *hi) {
+    int rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
+    switch (op) {
+        case MOV3:
+            *lo = f->lo[rs1];
+            *hi = f->hi[rs1];
+            return true;
+        case LI3:
+            *lo = *hi = cc_read_i64_at(p->vm, in->pc + 2);
+            return true;
+        case ADDI3: {
+            long long imm = cc_read_i64_at(p->vm, in->pc + 2);
+            return !__builtin_add_overflow(f->lo[rs1], imm, lo) &&
+                   !__builtin_add_overflow(f->hi[rs1], imm, hi);
+        }
+        case ADD3:
+            return !__builtin_add_overflow(f->lo[rs1], f->lo[rs2], lo) &&
+                   !__builtin_add_overflow(f->hi[rs1], f->hi[rs2], hi);
+        case SUB3:
+            return !__builtin_sub_overflow(f->lo[rs1], f->hi[rs2], lo) &&
+                   !__builtin_sub_overflow(f->hi[rs1], f->lo[rs2], hi);
+        default:
+            return false;
+    }
+}
+
+// ---- Compares: what a branch on one tells about its operands ----
+
+enum { REL_LT, REL_LE, REL_EQ, REL_NE };
+
+// `a REL b` after swapping the operands if `swap`; `uns`: unsigned order;
+// `imm`: b is an immediate.
+typedef struct {
+    int  rel;
+    bool swap, uns, imm;
+} CmpForm;
+
+static bool cmp_form(int op, CmpForm *c) {
+    switch (op) {
+        case SLT3:
+            *c = (CmpForm){REL_LT, false, false, false};
+            return true;
+        case SLE3:
+            *c = (CmpForm){REL_LE, false, false, false};
+            return true;
+        case SGT3:
+            *c = (CmpForm){REL_LT, true, false, false};
+            return true;
+        case SGE3:
+            *c = (CmpForm){REL_LE, true, false, false};
+            return true;
+        case SEQ3:
+            *c = (CmpForm){REL_EQ, false, false, false};
+            return true;
+        case SNE3:
+            *c = (CmpForm){REL_NE, false, false, false};
+            return true;
+        case ULT3:
+            *c = (CmpForm){REL_LT, false, true, false};
+            return true;
+        case ULE3:
+            *c = (CmpForm){REL_LE, false, true, false};
+            return true;
+        case SLTI3:
+            *c = (CmpForm){REL_LT, false, false, true};
+            return true;
+        case SLEI3:
+            *c = (CmpForm){REL_LE, false, false, true};
+            return true;
+        case SGTI3:
+            *c = (CmpForm){REL_LT, true, false, true};
+            return true;
+        case SGEI3:
+            *c = (CmpForm){REL_LE, true, false, true};
+            return true;
+        case SEQI3:
+            *c = (CmpForm){REL_EQ, false, false, true};
+            return true;
+        case SNEI3:
+            *c = (CmpForm){REL_NE, false, false, true};
+            return true;
+        case ULTI3:
+            *c = (CmpForm){REL_LT, false, true, true};
+            return true;
+        case ULEI3:
+            *c = (CmpForm){REL_LE, false, true, true};
+            return true;
+        case UGTI3:
+            *c = (CmpForm){REL_LT, true, true, true};
+            return true;
+        case UGEI3:
+            *c = (CmpForm){REL_LE, true, true, true};
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void record_cmp(Peep *p, const Insn *in, Facts *f) {
+    CmpForm cf;
+    if (!cmp_form(in->op, &cf))
+        return;
+    int rd = get_byte(p, in, 0), a = get_byte(p, in, 1);
+    int b = cf.imm ? -1 : get_byte(p, in, 2);
+    if (rd == REG_ZERO || rd == a || rd == b)
+        return;
+    f->cmp = (Cmp){
+        in->op, rd, a, b, cf.imm ? cc_read_i64_at(p->vm, in->pc + 2) : 0, true};
+}
+
+typedef struct {
+    long long *lo, *hi;
+} Interval;
+
+// Narrows x and y given x < y (`strict`) or x <= y. An edge the intervals show
+// cannot be taken is left alone.
+static void clip_le(Interval x, Interval y, bool strict) {
+    long long x_hi = *y.hi, y_lo = *x.lo;
+    if (strict) {
+        if (*y.hi == LLONG_MIN || *x.lo == LLONG_MAX)
+            return;
+        x_hi = *y.hi - 1;
+        y_lo = *x.lo + 1;
+    }
+    if (x_hi >= *x.lo && x_hi < *x.hi)
+        *x.hi = x_hi;
+    if (y_lo <= *y.hi && y_lo > *y.lo)
+        *y.lo = y_lo;
+}
+
+static void clip_eq(Interval x, Interval y) {
+    long long lo = *x.lo > *y.lo ? *x.lo : *y.lo;
+    long long hi = *x.hi < *y.hi ? *x.hi : *y.hi;
+    if (lo > hi)
+        return;
+    *x.lo = *y.lo = lo;
+    *x.hi = *y.hi = hi;
+}
+
+static void exclude_point(Interval v, long long k) {
+    if (*v.lo == k && *v.hi > k)
+        ++*v.lo;
+    else if (*v.hi == k && *v.lo < k)
+        --*v.hi;
+}
+
+static void clip_ne(Interval x, Interval y) {
+    if (*y.lo == *y.hi)
+        exclude_point(x, *y.lo);
+    if (*x.lo == *x.hi)
+        exclude_point(y, *x.lo);
+}
+
+// Narrows the operands of `c` in `f` for the edge on which the compare is
+// `truth`. An unsigned order is the signed one when both sides are known
+// non-negative.
+static void refine_cmp(Facts *f, const Cmp *c, bool truth) {
+    CmpForm cf;
+    if (!cmp_form(c->op, &cf) || c->a == c->b)
+        return;
+    long long imm_lo = c->imm, imm_hi = c->imm;
+    Interval  x = {&f->lo[c->a], &f->hi[c->a]};
+    Interval  y = c->b >= 0 ? (Interval){&f->lo[c->b], &f->hi[c->b]}
+                            : (Interval){&imm_lo, &imm_hi};
+    if (cf.uns && (*x.lo < 0 || *y.lo < 0))
+        return;
+    bool swap = cf.swap;
+    int  rel  = cf.rel;
+    if (!truth) {
+        switch (rel) {
+            case REL_LT:
+                rel  = REL_LE;
+                swap = !swap;
+                break;
+            case REL_LE:
+                rel  = REL_LT;
+                swap = !swap;
+                break;
+            case REL_EQ:
+                rel = REL_NE;
+                break;
+            default:
+                rel = REL_EQ;
+                break;
+        }
+    }
+    if (swap) {
+        Interval t = x;
+        x          = y;
+        y          = t;
+    }
+    switch (rel) {
+        case REL_LT:
+            clip_le(x, y, true);
+            break;
+        case REL_LE:
+            clip_le(x, y, false);
+            break;
+        case REL_EQ:
+            clip_eq(x, y);
+            break;
+        default:
+            clip_ne(x, y);
+            break;
+    }
+    fit_reg(f, c->a);
+    if (c->b >= 0)
+        fit_reg(f, c->b);
+}
+
+// Given two copies of the facts at the end of a block that ends in JZ3/JNZ3,
+// narrows `taken` to what holds on the edge the branch jumps along and `fall`
+// to what holds on the other.
+static void branch_facts(Peep *p, const Insn *br, Facts *taken, Facts *fall) {
+    int r = get_byte(p, br, 0);
+    if (!fall->cmp.valid || r <= REG_ZERO || r >= NUM_REGS)
+        return;
+    if (fall->cmp.dst != r && fall->icopy[r] != fall->cmp.dst)
+        return;
+    bool jumps_when_true = br->op == JNZ3;
+    refine_cmp(taken, &fall->cmp, jumps_when_true);
+    refine_cmp(fall, &taken->cmp, !jumps_when_true);
+}
+
 // Walks `blk` from the facts in `*f`, leaving the facts at its end. With
 // `rewrite` it also edits the code; without it, it only models what the edits
 // would do, so the facts it yields do not depend on them.
@@ -785,7 +1081,10 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
                     p->changed = true;
                 }
             } else if (kind == C_NONE) {
-                facts_reset(f, p->seed);
+                if (is_call(in->op))
+                    facts_after_call(p, f);
+                else
+                    facts_reset(f, p->seed);
             }
             continue;
         }
@@ -839,14 +1138,21 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
         else if (op == LI3)
             ext = ext_of_range(cc_read_i64_at(vm, in->pc + 2),
                                cc_read_i64_at(vm, in->pc + 2));
+        long long lo, hi;
+        if (!result_range(p, in, op, f, &lo, &hi))
+            range_of_ext(ext, &lo, &hi);
         for (int r = 1; r < NUM_REGS; r++) {
             if (e.idef & BIT(r)) {
                 kill_int(f, r);
                 f->ext[r] = (uint8_t)ext;
+                f->lo[r]  = lo;
+                f->hi[r]  = hi;
+                fit_reg(f, r);
             }
             if (e.fdef & BIT(r))
                 kill_float(f, r);
         }
+        record_cmp(p, in, f);
         if (op == MOV3) {
             int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
             if (rd != rs && rd != REG_ZERO && rs != REG_ZERO)
@@ -859,29 +1165,68 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
     }
 }
 
-// Intersects the extension facts of `src` into `dst`; true if `dst` lost one.
-static bool meet_ext(Facts *dst, const Facts *src) {
-    bool lost = false;
-    for (int r = 0; r < NUM_REGS; r++) {
-        uint8_t x = dst->ext[r] & src->ext[r];
-        if (x != dst->ext[r]) {
-            dst->ext[r] = x;
-            lost        = true;
-        }
-    }
-    return lost;
+// The bounds an interval that keeps growing is pushed out to, so a loop that
+// counts settles after a few passes instead of one per step.
+static const long long WIDEN_STEPS[] = {
+    LLONG_MIN, INT_MIN, -32768,  -128,         0,        127, 255,
+    32767,     65535,   INT_MAX, 4294967295LL, LLONG_MAX};
+#define N_WIDEN_STEPS (int)(sizeof WIDEN_STEPS / sizeof WIDEN_STEPS[0])
+
+static long long widen_down(long long x) {
+    long long w = LLONG_MIN;
+    for (int i = 0; i < N_WIDEN_STEPS; i++)
+        if (WIDEN_STEPS[i] <= x)
+            w = WIDEN_STEPS[i];
+    return w;
 }
 
+static long long widen_up(long long x) {
+    for (int i = 0; i < N_WIDEN_STEPS; i++)
+        if (WIDEN_STEPS[i] >= x)
+            return WIDEN_STEPS[i];
+    return LLONG_MAX;
+}
+
+// Merges the extension facts and intervals of `src` into `dst` (intersection
+// and hull); with `widen`, a bound that grows jumps to the next step. True if
+// `dst` changed.
+static bool meet_facts(Facts *dst, const Facts *src, bool widen) {
+    bool changed = false;
+    for (int r = 0; r < NUM_REGS; r++) {
+        uint8_t   ext = dst->ext[r] & src->ext[r];
+        long long lo = dst->lo[r], hi = dst->hi[r];
+        if (src->lo[r] < lo)
+            lo = widen ? widen_down(src->lo[r]) : src->lo[r];
+        if (src->hi[r] > hi)
+            hi = widen ? widen_up(src->hi[r]) : src->hi[r];
+        if (ext == dst->ext[r] && lo == dst->lo[r] && hi == dst->hi[r])
+            continue;
+        uint8_t   old_ext = dst->ext[r];
+        long long old_lo = dst->lo[r], old_hi = dst->hi[r];
+        dst->ext[r] = ext;
+        dst->lo[r]  = lo;
+        dst->hi[r]  = hi;
+        fit_reg(dst, r);
+        if (dst->ext[r] != old_ext || dst->lo[r] != old_lo ||
+            dst->hi[r] != old_hi)
+            changed = true;
+    }
+    return changed;
+}
+
+// Drops what does not cross a block boundary: a copy forwarded across one
+// keeps the source register live and defeats retargeting.
 static void forget_copies(Facts *f) {
     for (int r = 0; r < NUM_REGS; r++)
         f->icopy[r] = f->fcopy[r] = -1;
+    f->cmp.valid = false;
 }
 
 // Facts at the start of every block: the function entry and any block that
 // can be entered from outside the graph start from the seed, the rest from the
-// intersection over the blocks that reach them. A block nothing reaches is
-// given the seed as well. Only extension facts cross a block boundary: a copy
-// forwarded across one keeps the source register live and defeats retargeting.
+// merge over the blocks that reach them. A block nothing reaches is given the
+// seed as well. A conditional branch on a compare narrows the facts along each
+// of its edges; an edge back to an earlier block widens the intervals.
 // TODO: each pass models every block again; a worklist would visit only those
 // whose entry changed if compile time on very large functions shows it.
 static void compute_entry_facts(Peep *p) {
@@ -891,7 +1236,14 @@ static void compute_entry_facts(Peep *p) {
         facts_reset(&blk->in, p->seed);
     }
     bool again = true;
-    while (again) {
+    for (int pass = 0; again; pass++) {
+        // Widening makes this settle in a few passes; if it ever does not, the
+        // seed holds everywhere.
+        if (pass == 256) {
+            for (int b = 0; b < p->nblocks; b++)
+                facts_reset(&p->blocks[b].in, p->seed);
+            return;
+        }
         again = false;
         for (int b = 0; b < p->nblocks; b++) {
             Block *blk = &p->blocks[b];
@@ -899,16 +1251,26 @@ static void compute_entry_facts(Peep *p) {
                 continue;
             Facts out = blk->in;
             forward_block(p, blk, &out, false);
+            const Insn *last     = &p->ins[blk->last - 1];
+            bool        cond     = ctrl_kind(last) == C_COND;
+            bool        has_fall = cond && b + 1 < p->nblocks;
+            Facts       jump     = out;
+            if (cond)
+                branch_facts(p, last, &jump, &out);
             forget_copies(&out);
+            forget_copies(&jump);
             for (int s = 0; s < blk->nsucc; s++) {
-                Block *sb = &p->blocks[p->edges[blk->eoff + s]];
+                int    si = p->edges[blk->eoff + s];
+                Block *sb = &p->blocks[si];
                 if (sb->ext_entry)
                     continue;
+                const Facts *edge =
+                    cond && !(has_fall && s == 0) ? &jump : &out;
                 if (!sb->reached) {
-                    sb->in      = out;
+                    sb->in      = *edge;
                     sb->reached = true;
                     again       = true;
-                } else if (meet_ext(&sb->in, &out)) {
+                } else if (meet_facts(&sb->in, edge, si <= b)) {
                     again = true;
                 }
             }
@@ -1200,9 +1562,11 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
         return;
     }
     pin_patched(&p, m);
-    for (int i = 0; i < vm->compiler.promoted_count; i++)
+    for (int i = 0; i < vm->compiler.promoted_count; i++) {
         p.seed[vm->compiler.promoted_regs[i]] =
             promoted_ext(vm->compiler.promoted_locals[i]->ty);
+        p.promoted |= BIT(vm->compiler.promoted_regs[i]);
+    }
     build_blocks(&p);
 
     bool any = false;
