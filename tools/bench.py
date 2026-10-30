@@ -186,7 +186,7 @@ def run_benchmark(src, args, root, build_dir, log):
             r["vm_profile_json"] = str(profile_path)
         results[label] = r
         log(
-            f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+            f"    {label:<14} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
             f"  peak={r['peak_rss_mb']:>7.1f}MB"
         )
 
@@ -203,7 +203,7 @@ def run_benchmark(src, args, root, build_dir, log):
         r["compile_peak_rss_mb"] = compile_peaks[label]
         results[label] = r
         log(
-            f"    {label:<12} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
+            f"    {label:<14} median={r['median_ms']:>10.1f}ms  min={r['min_ms']:>10.1f}ms"
             f"  peak={r['peak_rss_mb']:>7.1f}MB"
         )
 
@@ -458,21 +458,33 @@ def run_selfhost(args, root, log):
         if r.returncode == 0 and r.peak_rss_mb > worst[0]:
             worst = (r.peak_rss_mb, src)
     out["gcc -c"] = {"peak_mb": worst[0], "largest": worst[1]}
+    log("  cccc -c=object per source...")
+    worst = (0.0, "")
+    for src in srcs:
+        if src == "src/main.c":
+            continue
+        mb, code = peak_footprint_mb(
+            [args.cccc, *cccc_flags, "-c=object", "-o", os.devnull, src], root
+        )
+        if code == 0 and mb > worst[0]:
+            worst = (mb, src)
+    out["cccc -c=object"] = {"peak_mb": worst[0], "largest": worst[1]}
     return out
 
 
 def render_selfhost(res):
     lines = [f"Compiling cccc's {res['sources']} sources, peak memory in MB:"]
-    for label in ("cccc --ast", "cccc -m", "gcc -c"):
+    for label in ("cccc --ast", "cccc -m", "cccc -c=object", "gcc -c"):
         r = res[label]
         note = ""
-        if label == "gcc -c":
+        if label in ("cccc -c=object", "gcc -c"):
             note = f"  (largest single file: {r['largest']})"
         elif r["exit_code"] != 0:
             note = f"  (exit {r['exit_code']})"
-        lines.append(f"  {label:<12} {r['peak_mb']:>9.0f}{note}")
+        lines.append(f"  {label:<14} {r['peak_mb']:>9.0f}{note}")
     lines.append(
-        "cccc holds every file in one program; gcc compiles one file per process."
+        "cccc --ast and -m hold every file in one program; -c=object and gcc compile\n"
+        "one file per process."
     )
     return "\n".join(lines)
 

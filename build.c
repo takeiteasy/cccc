@@ -1296,9 +1296,11 @@ BuildTarget *linux_amd64_msan_test(Builder *ctx) {
 }
 
 // ---- ouroboros: cccc built by cccc ---------------------------------------
-// Whole-program `cccc -c=native` build of cccc's own sources (see
-// docs/selfhosting.md). Run from the repository root: src/std_table.c's
-// `.incbin` paths are cwd-relative.
+// `ouroboros` compiles each source to its own object (`cccc --compile=object`,
+// 95 to 158 MB per file) and links them into a CcccExecutable that holds
+// src/main.c. `ouroboros_single` is the whole-program `cccc -c=native` build
+// of every source in one front end. See docs/selfhosting.md. Run from the
+// repository root: src/std_table.c's `.incbin` paths are cwd-relative.
 
 // Adds the -I/-L entries `pkg-config <flag> libffi` prints. CcccExecutable
 // takes no PkgConfig() or AddCFlag(), so the flags are split by hand.
@@ -1318,17 +1320,11 @@ static void ouroboros_pkg_flags(Builder *ctx, BuildTarget *t, const char *cmd,
     free(copy);
 }
 
-[[cccc::build_target]]
-BuildTarget *ouroboros(Builder *ctx) {
-    BuildTarget *t = CcccExecutable(ctx, "cccc-ouroboros");
-    SetOutput(t, "cccc-ouroboros");
-    AddSourcesGlob(t, "src/*.c");
-    AddSourcesGlob(t, "src/stdlib/*.c");
-    ExcludeSource(t, "src/ops.c");
+// Include and header flags every ouroboros unit needs; a CcccObject takes
+// these but no link options.
+static void ouroboros_compile_flags(Builder *ctx, BuildTarget *t) {
     AddInclude(t, "include");
     AddInclude(t, "src");
-    AddLib(t, "pthread");
-    AddLib(t, "ffi");
     if (strcmp(BuildHost(ctx), "darwin") == 0) {
         // CoreServices' SDK headers cannot share a unit with cccc's bundled
         // <signal.h> and <sys/*.h>.
@@ -1341,13 +1337,8 @@ BuildTarget *ouroboros(Builder *ctx) {
         AddInclude(t, path);
         snprintf(path, sizeof(path), "%s/System/Library/Frameworks", sdk);
         AddFrameworkPath(t, path);
-        AddFramework(t, "CoreServices");
-        AddLib(t, "iconv");
-        AddLibPath(t, "/opt/homebrew/opt/libffi/lib");
-        AddLibPath(t, "/usr/local/opt/libffi/lib");
     } else if (HaveTool(ctx, "pkg-config")) {
         ouroboros_pkg_flags(ctx, t, "pkg-config --cflags-only-I libffi", true);
-        ouroboros_pkg_flags(ctx, t, "pkg-config --libs-only-L libffi", false);
     }
     if (strcmp(BuildHost(ctx), "linux") == 0) {
         // glibc's real headers, as on macOS: cccc's bundled ones lack POSIX
@@ -1363,11 +1354,80 @@ BuildTarget *ouroboros(Builder *ctx) {
         }
         AddSystemInclude(t, "/usr/include");
     }
+}
+
+// Link options of the executable: libraries and frameworks.
+static void ouroboros_link_flags(Builder *ctx, BuildTarget *t) {
+    AddLib(t, "pthread");
+    AddLib(t, "ffi");
+    if (strcmp(BuildHost(ctx), "darwin") == 0) {
+        AddFramework(t, "CoreServices");
+        AddLib(t, "iconv");
+        AddLibPath(t, "/opt/homebrew/opt/libffi/lib");
+        AddLibPath(t, "/usr/local/opt/libffi/lib");
+    } else if (HaveTool(ctx, "pkg-config")) {
+        ouroboros_pkg_flags(ctx, t, "pkg-config --libs-only-L libffi", false);
+    }
+}
+
+// Runs `<exe> --version` once the executable is built.
+static BuildTarget *ouroboros_smoke(Builder *ctx, BuildTarget *t,
+                                    const char *name) {
     char cmd[1100];
     snprintf(cmd, sizeof(cmd), "%s --version", TargetOutput(t));
-    BuildTarget *smoke = RunCustom(ctx, "ouroboros-smoke", cmd);
+    BuildTarget *smoke = RunCustom(ctx, name, cmd);
     DependsOn(smoke, t);
     return smoke;
+}
+
+// "src/stdlib/ctype.c" -> "ouroboros-stdlib-ctype"
+static void ouroboros_object_name(const char *src, char *out, size_t cap) {
+    const char *rel = strncmp(src, "src/", 4) == 0 ? src + 4 : src;
+    snprintf(out, cap, "ouroboros-%s", rel);
+    char *dot = strrchr(out, '.');
+    if (dot)
+        *dot = '\0';
+    for (char *c = out; *c; c++)
+        if (*c == '/')
+            *c = '-';
+}
+
+static void ouroboros_link_objects(Builder *ctx, BuildTarget *exe,
+                                   const char *pattern) {
+    for (const char **f = GlobFiles(ctx, pattern); *f; f++) {
+        if (!strcmp(*f, "src/ops.c") || !strcmp(*f, "src/main.c"))
+            continue;
+        char name[256];
+        ouroboros_object_name(*f, name, sizeof(name));
+        BuildTarget *obj = CcccObject(ctx, name);
+        AddSource(obj, *f);
+        ouroboros_compile_flags(ctx, obj);
+        LinkWith(exe, obj);
+    }
+}
+
+[[cccc::build_target]]
+BuildTarget *ouroboros(Builder *ctx) {
+    BuildTarget *t = CcccExecutable(ctx, "cccc-ouroboros");
+    SetOutput(t, "cccc-ouroboros");
+    AddSource(t, "src/main.c");
+    ouroboros_compile_flags(ctx, t);
+    ouroboros_link_flags(ctx, t);
+    ouroboros_link_objects(ctx, t, "src/*.c");
+    ouroboros_link_objects(ctx, t, "src/stdlib/*.c");
+    return ouroboros_smoke(ctx, t, "ouroboros-smoke");
+}
+
+[[cccc::build_target]]
+BuildTarget *ouroboros_single(Builder *ctx) {
+    BuildTarget *t = CcccExecutable(ctx, "cccc-ouroboros-single");
+    SetOutput(t, "cccc-ouroboros-single");
+    AddSourcesGlob(t, "src/*.c");
+    AddSourcesGlob(t, "src/stdlib/*.c");
+    ExcludeSource(t, "src/ops.c");
+    ouroboros_compile_flags(ctx, t);
+    ouroboros_link_flags(ctx, t);
+    return ouroboros_smoke(ctx, t, "ouroboros-single-smoke");
 }
 
 [[cccc::build_target]]

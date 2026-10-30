@@ -1,6 +1,11 @@
 # Self-Hosting
 
-Build cccc with itself: `cccc -c=native` compiles cccc's own sources into a working `cccc`. This is a manual check, run when touching serializer or parser completeness; it is not wired into CI.
+Build cccc with itself: `cccc` compiles its own sources into a working `cccc`. This is a manual check, run when touching serializer or parser completeness; it is not wired into CI.
+
+| Target | Output | Front end holds |
+|---|---|---|
+| `ouroboros` | `build/cccc-ouroboros` | One source at a time (`--compile=object` per file, then a cccc link) |
+| `ouroboros_single` | `build/cccc-ouroboros-single` | Every source at once (one `-c=native` unit) |
 
 ## Recipe
 
@@ -11,12 +16,17 @@ Run the `ouroboros` build target from the repository root, because `src/std_tabl
 build/cccc-release --build build.c --build-target=ouroboros
 ```
 
-The result is `build/cccc-ouroboros`; the target runs its `--version` as a smoke check.
+The result is `build/cccc-ouroboros`; the target runs its `--version` as a smoke check. `ouroboros` compiles each of the 103 sources to `build/obj/ouroboros-<name>.o` (jobs run in parallel with `--build-jobs`) and links them through a `CcccExecutable` that holds `src/main.c`. `ouroboros_single` takes the same flags with every source in one unit, which needs several GB on Linux. `./cccc --build build.c --build-target=bench_memory` prints the peak memory of each route:
+
+| Route | Peak memory (macOS) |
+|---|---|
+| `ouroboros_single` front end (`--ast` / `-m`) | 3.0 / 3.4 GB |
+| `ouroboros`, largest file (`src/watch.c`) | 128 MB |
 
 | Platform | The target sets |
 |---|---|
 | macOS | The SDK (`xcrun --show-sdk-path`) as system headers and framework path, `CoreServices`, `iconv`, libffi from Homebrew |
-| Linux | glibc's headers (`/usr/include` and the multiarch directory) as system headers, libffi flags from `pkg-config`. `src/watch.c` builds against inotify. Verified on aarch64 in a 4 GiB container (cccc's own phases peak at about 3.6 GB) |
+| Linux | glibc's headers (`/usr/include` and the multiarch directory) as system headers, libffi flags from `pkg-config`. `src/watch.c` builds against inotify. Verified on aarch64 in a 4 GiB container (`ouroboros_single`: cccc's own phases peak at about 3.6 GB) |
 
 `--use-system-headers` is set on both platforms. On Linux, CCCC's bundled headers lack POSIX functions its own sources call (`strnlen`, `stpcpy`). On macOS, `src/watch.c` (with `src/dmon.h`) includes CoreServices, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`; without the flag every file but `src/watch.c` compiles and the link fails on `cc_watch_*`.
 
