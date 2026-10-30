@@ -60,6 +60,9 @@ SOFTWARE.
 
 ## dmon
 
+This copy carries one local patch: the inotify thread skips a failed `select()`
+(EINTR) instead of blocking in `read()` with its mutex held.
+
 Copyright 2019 Sepehr Taghdisian. All rights reserved.
 
 BSD 2-clause license:

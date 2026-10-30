@@ -1,5 +1,7 @@
 /*
- * Vendored from https://github.com/septag/dmon (dmon.h 1.3.10), unmodified.
+ * Vendored from https://github.com/septag/dmon (dmon.h 1.3.10) with one local
+ * patch: the inotify thread skips a failed select() (EINTR) instead of blocking
+ * in read() with its mutex held.
  *
  * Copyright 2019 Sepehr Taghdisian. All rights reserved.
  *
@@ -1136,7 +1138,7 @@ static void* _dmon_thread(void* arg)
 
         timeout.tv_sec = 0;
         timeout.tv_usec = 100000;
-        if (select(FD_SETSIZE, &rfds, NULL, NULL, &timeout)) {
+        if (select(FD_SETSIZE, &rfds, NULL, NULL, &timeout) > 0) {
             int i;
             for (i = 0; i < _dmon.num_watches; i++) {
                 dmon__watch_state* watch = _dmon.watches[i];
