@@ -654,4 +654,40 @@ int test_compound_literal_is_assignable(void) {
     return 42;
 }
 
+// A bit-field left out of a static initializer must not drop the members
+// after it (values or address relocations).
+struct tc_gvar_bitfield_Bits {
+    int b : 3;
+    int x;
+};
+
+struct tc_gvar_bitfield_Node {
+    int                           k;
+    _Bool                         flag : 1;
+    struct tc_gvar_bitfield_Node *base;
+};
+
+static struct tc_gvar_bitfield_Bits tc_gvar_bitfield_skipped = {.x = 5};
+static struct tc_gvar_bitfield_Bits tc_gvar_bitfield_set     = {.b = 2, .x = 7};
+static struct tc_gvar_bitfield_Node tc_gvar_bitfield_target;
+static struct tc_gvar_bitfield_Node tc_gvar_bitfield_ref = {
+    .k = 1, .base = &tc_gvar_bitfield_target};
+static struct tc_gvar_bitfield_Node *tc_gvar_bitfield_lit =
+    &(struct tc_gvar_bitfield_Node){
+        .k = 1, .base = &(struct tc_gvar_bitfield_Node){.k = 2}};
+
+[[cccc::test(return = 42)]]
+int test_gvar_init_after_unset_bitfield(void) {
+    if (tc_gvar_bitfield_skipped.x != 5)
+        return 1;
+    if (tc_gvar_bitfield_set.b != 2 || tc_gvar_bitfield_set.x != 7)
+        return 2;
+    if (tc_gvar_bitfield_ref.k != 1 ||
+        tc_gvar_bitfield_ref.base != &tc_gvar_bitfield_target)
+        return 3;
+    if (!tc_gvar_bitfield_lit->base || tc_gvar_bitfield_lit->base->k != 2)
+        return 4;
+    return 42;
+}
+
 #pragma cccc suite end

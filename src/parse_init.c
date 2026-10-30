@@ -1820,7 +1820,7 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
             if (mem->is_bitfield) {
                 Node *expr = init->children[mem->idx]->expr;
                 if (!expr)
-                    break;
+                    continue;
 
                 char *loc = buf + offset + mem->offset;
                 if (mem->ty->size > 8) {

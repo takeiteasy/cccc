@@ -38,7 +38,7 @@ Building with the release `cccc` takes about 2 minutes on an Apple M1; see [benc
 |---|---|
 | Build and link | The recipe completes |
 | Smoke | The binary passes `--version`, `-E`, a VM run and a `-c=native` build |
-| Suites | `--build-target=test_ouroboros` passes every `tests/suites` suite in VM mode and its `-c=native` results match `build/cccc`'s. Four suites currently segfault in the parser (#1888) |
+| Suites | `--build-target=test_ouroboros` passes every `tests/suites` suite in VM mode and its `-c=native` results match `build/cccc`'s. |
 | Loose tests | All `tests/test_*.c` and `tests/macros/test_*.c` pass |
 
 `tests/host/test_watch_selfhost.c` builds `src/watch.c` next to a small driver and checks that a real file change is seen; `tests/host/test_sdk_headers.c` covers `va_list`, `__signed` and the SDK-only declarations under the SDK headers.
