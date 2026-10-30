@@ -285,6 +285,9 @@ void apply_global_relocations(VirtualMachine *vm, Obj *prog, Obj *stop) {
                              obj_is_reserved_builtin(target, "sigsetjmp")))
                             error("cannot take the address of '%s'",
                                   target->name);
+                        // -c: the host linker resolves the symbol.
+                        if (!stub && vm->compiler.compile_only)
+                            continue;
                         if (!stub)
                             error("unsupported relocation to undefined "
                                   "function: %s",

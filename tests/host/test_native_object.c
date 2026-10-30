@@ -106,7 +106,29 @@ int main(void) {
         failed = 1;
     }
 
-    const char *files[] = {"helper.c", "helper.o", "named.o", "main.c", "app"};
+    // A static table of an extern function's address resolves at link time.
+    if (!failed) {
+        snprintf(path, sizeof path, "%s/table.c", root);
+        write_file(path, "int helper(void);\n"
+                         "static int (*const tbl[])(void) = {helper};\n"
+                         "int call(void) { return tbl[0](); }\n");
+        snprintf(path, sizeof path, "%s/main2.c", root);
+        write_file(path,
+                   "int call(void);\nint main(void) { return call(); }\n");
+        if (run("%s -c=object %s/table.c -o %s/table.o >/dev/null 2>&1", cccc,
+                root, root) != 0 ||
+            run("cc %s/main2.c %s/table.o %s/named.o -o %s/app2 >/dev/null "
+                "2>&1",
+                root, root, root, root) != 0 ||
+            run("%s/app2", root) != 42) {
+            fprintf(stderr, "FAIL: static table of an extern function\n");
+            failed = 1;
+        }
+    }
+
+    const char *files[] = {"helper.c", "helper.o", "named.o", "main.c",
+                           "app",      "table.c",  "table.o", "main2.c",
+                           "app2"};
     for (size_t i = 0; i < sizeof files / sizeof *files; i++) {
         snprintf(path, sizeof path, "%s/%s", root, files[i]);
         unlink(path);
