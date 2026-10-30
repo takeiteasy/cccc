@@ -26,7 +26,7 @@ The result is `build/cccc-ouroboros`; the target runs its `--version` as a smoke
 | Platform | The target sets |
 |---|---|
 | macOS | The SDK (`xcrun --show-sdk-path`) as system headers and framework path, `CoreServices`, `iconv`, libffi from Homebrew |
-| Linux | glibc's headers (`/usr/include` and the multiarch directory) as system headers, libffi flags from `pkg-config`. `src/watch.c` builds against inotify. Verified on aarch64 in a 4 GiB container (`ouroboros_single`: cccc's own phases peak at about 3.6 GB) |
+| Linux | glibc's headers (`/usr/include` and the multiarch directory) as system headers, libffi flags from `pkg-config`. `src/watch.c` builds against inotify. `test_ouroboros` passes in 4 GiB Linux containers on aarch64 and x86_64. `ouroboros_single` peaks at about 3.6 GB for cccc's own phases |
 
 `--use-system-headers` is set on both platforms. On Linux, CCCC's bundled headers lack POSIX functions its own sources call (`strnlen`, `stpcpy`). On macOS, `src/watch.c` (with `src/dmon.h`) includes CoreServices, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`; without the flag every file but `src/watch.c` compiles and the link fails on `cc_watch_*`.
 

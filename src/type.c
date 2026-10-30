@@ -673,7 +673,7 @@ static bool type_has_user_align(Type *ty, int depth) {
     if (ty->kind == TY_ARRAY)
         return type_has_user_align(ty->base, depth + 1);
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION)
-        for (Member *m = ty->members; m; m = m->next)
+        for (Member *m = type_agg(ty)->members; m; m = m->next)
             if (m->explicit_align || type_has_user_align(m->ty, depth + 1))
                 return true;
     return false;
