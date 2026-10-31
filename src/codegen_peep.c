@@ -325,15 +325,22 @@ typedef struct {
 
 enum { C_NONE, C_JMP, C_COND, C_EXIT };
 
-static int ctrl_kind(const Insn *in) {
+static InstrWord operand(Peep *p, const Insn *in);
+
+// `JZ3 r0` always jumps and `JNZ3 r0` never does; a decided branch is
+// rewritten to one of them because it keeps its width.
+static int ctrl_kind(Peep *p, const Insn *in) {
     if (in->dead)
         return C_NONE;
+    bool on_zero = (in->op == JZ3 || in->op == JNZ3) &&
+                   (operand(p, in) & 0xFF) == REG_ZERO;
     switch (in->op) {
         case JMP:
             return C_JMP;
         case JZ3:
+            return on_zero ? C_JMP : C_COND;
         case JNZ3:
-            return C_COND;
+            return on_zero ? C_NONE : C_COND;
         case JMPT:
         case LEV3:
         case CALLT:
@@ -542,7 +549,7 @@ static int count_blocks(const Peep *p) {
     for (int i = 0; i < p->n; i++) {
         if (!open || p->ins[i].leader)
             count++;
-        open = ctrl_kind(&p->ins[i]) == C_NONE;
+        open = ctrl_kind(p, &p->ins[i]) == C_NONE;
     }
     return count;
 }
@@ -567,7 +574,7 @@ static void build_blocks(Peep *p) {
             open = true;
         }
         bi[i] = p->nblocks - 1;
-        if (ctrl_kind(&p->ins[i]) != C_NONE) {
+        if (ctrl_kind(p, &p->ins[i]) != C_NONE) {
             p->blocks[p->nblocks - 1].last = i + 1;
             open                           = false;
         }
@@ -602,11 +609,11 @@ static void compute_succs(Peep *p) {
         Block *blk       = &p->blocks[b];
         blk->eoff        = p->nedges;
         const Insn *last = &p->ins[blk->last - 1];
-        int         kind = ctrl_kind(last);
+        int         kind = ctrl_kind(p, last);
         if ((kind == C_NONE || kind == C_COND) && b + 1 < p->nblocks)
             add_edge(p, b + 1);
         if (kind == C_JMP || kind == C_COND)
-            add_target(p, vm->text_seg[last->pc + (kind == C_JMP ? 1 : 2)]);
+            add_target(p, vm->text_seg[last->pc + (last->op == JMP ? 1 : 2)]);
         else if (last->op == JMPT && !last->dead) {
             add_target(p, vm->text_seg[last->pc + 3]);
             InstrWord count = vm->text_seg[last->pc + 2];
@@ -936,6 +943,46 @@ static bool point_of(const Facts *f, int r, long long *v) {
     return f->lo[r] == f->hi[r];
 }
 
+static Cmp cmp_of(Peep *p, const Insn *in, const CmpForm *cf) {
+    return (Cmp){in->op,
+                 get_byte(p, in, 0),
+                 get_byte(p, in, 1),
+                 cf->imm ? -1 : get_byte(p, in, 2),
+                 cf->imm ? cc_read_i64_at(p->vm, in->pc + 2) : 0,
+                 true};
+}
+
+// Whether the intervals of the operands of `c` decide it: 1 or 0, or -1. An
+// unsigned order is the signed one when both sides are known non-negative.
+static int cmp_decide(const Facts *f, const Cmp *c) {
+    CmpForm cf;
+    if (!cmp_form(c->op, &cf))
+        return -1;
+    long long xl = f->lo[c->a], xh = f->hi[c->a];
+    long long yl = c->b >= 0 ? f->lo[c->b] : c->imm;
+    long long yh = c->b >= 0 ? f->hi[c->b] : c->imm;
+    if (cf.uns && (xl < 0 || yl < 0))
+        return -1;
+    if (cf.swap) {
+        long long t = xl;
+        xl          = yl;
+        yl          = t;
+        t           = xh;
+        xh          = yh;
+        yh          = t;
+    }
+    switch (cf.rel) {
+        case REL_LT:
+            return xh < yl ? 1 : xl >= yh ? 0 : -1;
+        case REL_LE:
+            return xh <= yl ? 1 : xl > yh ? 0 : -1;
+        case REL_EQ:
+            return xh < yl || xl > yh ? 0 : xl == xh && yl == yh ? 1 : -1;
+        default:
+            return xh < yl || xl > yh ? 1 : xl == xh && yl == yh ? 0 : -1;
+    }
+}
+
 // The value of the pure integer op `op` when every register it reads holds a
 // single known value. Arithmetic wraps and shifts by 0-63 only, as in ops.c.
 static bool fold_point(Peep *p, const Insn *in, int op, const Facts *f,
@@ -943,6 +990,15 @@ static bool fold_point(Peep *p, const Insn *in, int op, const Facts *f,
     int       rs1 = get_byte(p, in, 1), rs2 = get_byte(p, in, 2);
     int       rs3 = get_byte(p, in, 3);
     long long a, b = 0, c = 0, imm = 0;
+    CmpForm   cf;
+    if (in->known && (in->spec.flags & SP_PURE) && cmp_form(op, &cf)) {
+        Cmp cmp = cmp_of(p, in, &cf);
+        int d   = cmp_decide(f, &cmp);
+        if (d >= 0) {
+            *out = d;
+            return true;
+        }
+    }
     if (!in->known || !(in->spec.flags & SP_PURE) || in->spec.role[1] != R_IU ||
         !point_of(f, rs1, &a))
         return false;
@@ -1105,6 +1161,11 @@ static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
         *hi = *lo;
         return true;
     }
+    if (ext_result(op) == ext_of_range(0, 1)) {
+        *lo = 0;
+        *hi = 1;
+        return true;
+    }
     switch (op) {
         case MOV3:
             *lo = f->lo[rs1];
@@ -1159,12 +1220,10 @@ static void record_cmp(Peep *p, const Insn *in, Facts *f) {
     CmpForm cf;
     if (!cmp_form(in->op, &cf))
         return;
-    int rd = get_byte(p, in, 0), a = get_byte(p, in, 1);
-    int b = cf.imm ? -1 : get_byte(p, in, 2);
-    if (rd == REG_ZERO || rd == a || rd == b)
+    Cmp c = cmp_of(p, in, &cf);
+    if (c.dst == REG_ZERO || c.dst == c.a || c.dst == c.b)
         return;
-    f->cmp = (Cmp){
-        in->op, rd, a, b, cf.imm ? cc_read_i64_at(p->vm, in->pc + 2) : 0, true};
+    f->cmp = c;
 }
 
 typedef struct {
@@ -1375,7 +1434,7 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
         Insn *in = &p->ins[i];
         if (in->dead)
             continue;
-        int kind = ctrl_kind(in);
+        int kind = ctrl_kind(p, in);
         if ((in->op == MOV3 || in->op == FMOV3) &&
             get_byte(p, in, 0) == get_byte(p, in, 1)) {
             if (rewrite) {
@@ -1391,6 +1450,20 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
                     f->icopy[r] >= 0) {
                     set_byte(p, in, 0, f->icopy[r]);
                     p->changed = true;
+                    r          = f->icopy[r];
+                }
+                long long v;
+                if (rewrite && r >= REG_ZERO && r < NUM_REGS &&
+                    point_of(f, r, &v)) {
+                    if ((in->op == JZ3) != (v == 0)) {
+                        in->dead   = true;
+                        p->changed = true;
+                    } else if (in->op != JZ3 || r != REG_ZERO) {
+                        p->vm->text_seg[in->pc] = JZ3;
+                        in->op                  = JZ3;
+                        set_byte(p, in, 0, REG_ZERO);
+                        p->changed = true;
+                    }
                 }
             } else if (kind == C_NONE) {
                 if (is_call(in->op)) {
@@ -1581,7 +1654,7 @@ static void exit_facts(Peep *p, int b, Facts *out, Facts *jump, bool *is_cond,
     *out       = blk->in;
     forward_block(p, blk, out, false);
     const Insn *last = &p->ins[blk->last - 1];
-    *is_cond         = ctrl_kind(last) == C_COND;
+    *is_cond         = ctrl_kind(p, last) == C_COND;
     *has_fall        = *is_cond && b + 1 < p->nblocks;
     *jump            = *out;
     if (*is_cond)
@@ -1845,14 +1918,14 @@ static void backward_block(Peep *p, Block *blk) {
     }
 }
 
-// A jump to the next live instruction goes nowhere.
+// A branch to the next live instruction goes nowhere.
 static void drop_jump_to_next(Peep *p) {
     VirtualMachine *vm = p->vm;
     for (int i = 0; i < p->n; i++) {
         Insn *in = &p->ins[i];
-        if (in->dead || in->op != JMP)
+        if (in->dead || (in->op != JMP && in->op != JZ3 && in->op != JNZ3))
             continue;
-        Pc  target = vm->text_seg[in->pc + 1];
+        Pc  target = vm->text_seg[in->pc + (in->op == JMP ? 1 : 2)];
         int j      = i + 1;
         while (j < p->n && p->ins[j].dead)
             j++;
@@ -1864,7 +1937,68 @@ static void drop_jump_to_next(Peep *p) {
     }
 }
 
+// Marks the instructions no path reaches from the function entry or an
+// address-taken label.
+static void drop_unreachable(Peep *p) {
+    bool *seen  = calloc((size_t)p->nblocks, sizeof(bool));
+    int  *stack = malloc((size_t)p->nblocks * sizeof(int));
+    if (!seen || !stack)
+        error("out of memory");
+    int top = 0;
+    for (int b = 0; b < p->nblocks; b++)
+        if (p->blocks[b].ext_entry) {
+            seen[b]      = true;
+            stack[top++] = b;
+        }
+    while (top > 0) {
+        const Block *blk = &p->blocks[stack[--top]];
+        for (int s = 0; s < blk->nsucc; s++) {
+            int t = p->edges[blk->eoff + s];
+            if (!seen[t]) {
+                seen[t]      = true;
+                stack[top++] = t;
+            }
+        }
+    }
+    for (int b = 0; b < p->nblocks; b++)
+        for (int i = p->blocks[b].first; !seen[b] && i < p->blocks[b].last; i++)
+            if (!p->ins[i].dead) {
+                p->ins[i].dead = true;
+                p->changed     = true;
+            }
+    free(seen);
+    free(stack);
+}
+
 // ---- Compaction ----
+
+// Whether the instruction holding the patch at `loc` is deleted.
+static bool patch_in_dead(const Peep *p, Pc loc) {
+    if (!in_window(p, loc))
+        return false;
+    for (Pc w = loc; w >= p->start && loc - w < 8; w--) {
+        int k = p->at[w - p->start];
+        if (k >= 0)
+            return p->ins[k].dead;
+    }
+    return false;
+}
+
+// Forgets the call and function-address patches that sit in a deleted
+// instruction, so they cannot be written over what follows it.
+static void drop_dead_patches(Peep *p, PeepMark m) {
+    Compiler *c = &p->vm->compiler;
+    int       n = m.calls;
+    for (int i = m.calls; i < c->num_call_patches; i++)
+        if (!patch_in_dead(p, c->call_patches[i].location))
+            c->call_patches[n++] = c->call_patches[i];
+    c->num_call_patches = n;
+    n                   = m.faddrs;
+    for (int i = m.faddrs; i < c->num_func_addr_patches; i++)
+        if (!patch_in_dead(p, c->func_addr_patches[i].location))
+            c->func_addr_patches[n++] = c->func_addr_patches[i];
+    c->num_func_addr_patches = n;
+}
 
 static Pc remap(const Peep *p, const Pc *map, Pc t) {
     if (t < p->start || t > p->end)
@@ -2046,6 +2180,7 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
     for (int round = 0; round < 6; round++) {
         p.changed = false;
         compute_succs(&p);
+        drop_unreachable(&p);
         compute_entry_facts(&p);
         for (int b = 0; b < p.nblocks; b++) {
             Facts f = p.blocks[b].in;
@@ -2059,8 +2194,10 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
             break;
         any = true;
     }
-    if (any)
+    if (any) {
+        drop_dead_patches(&p, m);
         compact(&p, m);
+    }
     free_peep(&p);
 
     if (any) {

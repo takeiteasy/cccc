@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `--vm-profile` printed no report when the program called `exit()`; the report is written after the `atexit` handlers and destructors run (`_Exit()`, `quick_exit()` and `abort()` still end the run without one).
+- Changed: the VM bytecode clean-up folds a comparison whose operand intervals decide it, folds or removes a branch on a known value, and deletes code no path reaches.
 - Fixed: a `return` built by a macro or template (`@from_string` on an enum returning `-1LL`) is converted to the function's integer return type, so callers see a value normalised to it.
 - Changed: the VM bytecode clean-up folds a constant that one operation reads into that operation (`LI3 t, c; SLT3 d, a, t` becomes `SLTI3 d, a, c`, a `switch`'s comparisons and a pointer stepped back by a constant), and a call reads only the argument and saved registers, so a temporary or result copy nothing reads afterwards is removed.
 - Changed: the operand of an immediate-form operation may be any constant expression, not only a literal (`x & (1 + 2)`, `x < -(1 << 4)`).
