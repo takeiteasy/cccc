@@ -1,6 +1,6 @@
 # Benchmarks
 
-The VM runs about 3x slower than Lua and about 32x slower than `gcc -O2`; compile speed is close to a host compiler's. Use `-c=native` when speed matters.
+The VM runs about 3x slower than Lua and about 30x slower than `gcc -O2`; compile speed is close to a host compiler's. Use `-c=native` when speed matters.
 
 ## Compiling cccc
 
@@ -30,18 +30,18 @@ Apple M1, release-built `cccc`, 3 timed runs after 1 warmup.
 
 | Benchmark | `cccc` | `lua` | `gcc-O0` | `gcc-O2` |
 |---|---|---|---|---|
-| ackermann | 192.5 | 47.8 | 17.4 | 3.6 |
-| binary_tree | 239.4 | 132.3 | 20.0 | 17.6 |
-| dispatch | 359.5 | 169.3 | 17.7 | 7.7 |
-| fib | 171.4 | 52.0 | 9.7 | 7.5 |
-| mandelbrot | 771.0 | 386.7 | 60.7 | 27.7 |
-| matrix_mul | 714.4 | 233.6 | 20.0 | 3.6 |
-| nqueens | 128.7 | 62.4 | 12.6 | 8.7 |
-| quicksort | 210.0 | 62.4 | 16.9 | 12.5 |
-| sieve | 585.5 | 322.1 | 34.2 | 19.6 |
-| **Geometric mean** | **307.7** | **122.7** | **20.1** | **9.7** |
+| ackermann | 181.5 | 47.8 | 17.4 | 3.6 |
+| binary_tree | 236.3 | 132.3 | 20.0 | 17.6 |
+| dispatch | 333.0 | 169.3 | 17.7 | 7.7 |
+| fib | 166.6 | 52.0 | 9.7 | 7.5 |
+| mandelbrot | 759.8 | 386.7 | 60.7 | 27.7 |
+| matrix_mul | 703.6 | 233.6 | 20.0 | 3.6 |
+| nqueens | 125.0 | 62.4 | 12.6 | 8.7 |
+| quicksort | 203.1 | 62.4 | 16.9 | 12.5 |
+| sieve | 490.1 | 322.1 | 34.2 | 19.6 |
+| **Geometric mean** | **292.8** | **122.7** | **20.1** | **9.7** |
 
-The VM is 1.8x to 4.0x slower than Lua (2.5x on the geometric mean) and 14x to 198x slower than `gcc -O2` (32x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
+The VM is 1.5x to 3.8x slower than Lua (2.4x on the geometric mean) and 13x to 195x slower than `gcc -O2` (30x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
 
 `-c=native` hands the program to a host compiler and runs at native speed.
 

@@ -6304,6 +6304,20 @@ DEFINE_CMP_IMM_OP(UGEI3, unsigned long long, >=)
         return 0;                                                              \
     }
 
+// [op][rs:8|imm hi24][target][imm lo32]; the immediate is 56 bits,
+// sign-extended
+#define DEFINE_BR_WIDE_OP(NAME, TYPE, OPER)                                    \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        InstrWord operands = cc_read_word(vm);                                 \
+        Pc        target   = cc_read_word(vm);                                 \
+        InstrWord lo       = cc_read_word(vm);                                 \
+        long long imm =                                                        \
+            (long long)((int32_t)operands >> 8) * 0x100000000LL + lo;          \
+        if ((TYPE)vm->regs[operands & 0xFF] OPER(TYPE) imm)                    \
+            vm->pc = target;                                                   \
+        return 0;                                                              \
+    }
+
 DEFINE_BR_OP(BEQ3, long long, ==)
 DEFINE_BR_OP(BNE3, long long, !=)
 DEFINE_BR_OP(BLT3, long long, <)
@@ -6320,6 +6334,16 @@ DEFINE_BR_IMM_OP(BULTI3, unsigned long long, <)
 DEFINE_BR_IMM_OP(BULEI3, unsigned long long, <=)
 DEFINE_BR_IMM_OP(BUGTI3, unsigned long long, >)
 DEFINE_BR_IMM_OP(BUGEI3, unsigned long long, >=)
+DEFINE_BR_WIDE_OP(BEQW3, long long, ==)
+DEFINE_BR_WIDE_OP(BNEW3, long long, !=)
+DEFINE_BR_WIDE_OP(BLTW3, long long, <)
+DEFINE_BR_WIDE_OP(BLEW3, long long, <=)
+DEFINE_BR_WIDE_OP(BGTW3, long long, >)
+DEFINE_BR_WIDE_OP(BGEW3, long long, >=)
+DEFINE_BR_WIDE_OP(BULTW3, unsigned long long, <)
+DEFINE_BR_WIDE_OP(BULEW3, unsigned long long, <=)
+DEFINE_BR_WIDE_OP(BUGTW3, unsigned long long, >)
+DEFINE_BR_WIDE_OP(BUGEW3, unsigned long long, >=)
 
 // ========== Shift and AND with an immediate ==========
 

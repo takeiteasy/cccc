@@ -3,7 +3,7 @@
 // A condition branches straight on the comparison (BLT3, BGEI3, ...). Every
 // relation, both polarities, register and immediate operands, signed and
 // unsigned, must agree with the same comparison taken as a value, which is not
-// fused. The constants straddle the 24-bit immediate limit.
+// fused. The constants straddle the 24-bit and 56-bit immediate limits.
 
 #include <limits.h>
 
@@ -11,7 +11,9 @@
 static const long long vals[] = {
     0,        1,         -1,        5,          127,      128,
     255,      256,       8388607,   8388608,    -8388608, -8388609,
-    INT_MAX,  INT_MIN,   4294967295LL, LLONG_MAX, LLONG_MIN};
+    INT_MAX,  INT_MIN,   4294967295LL, LLONG_MAX, LLONG_MIN,
+    10000000, 1000000000LL, 36028797018963967LL, 36028797018963968LL,
+    -36028797018963968LL, -36028797018963969LL};
 #define NV (int)(sizeof vals / sizeof vals[0])
 
 #define FOR_OPS(M, ...)                                                        \
@@ -21,7 +23,13 @@ static const long long vals[] = {
 #define FOR_KS(M, ...)                                                         \
     M(k0, 0, __VA_ARGS__) M(km1, -1, __VA_ARGS__) M(k5, 5, __VA_ARGS__)       \
     M(kmax, 8388607, __VA_ARGS__) M(kover, 8388608, __VA_ARGS__)               \
-    M(kmin, -8388608, __VA_ARGS__) M(kunder, -8388609, __VA_ARGS__)
+    M(kmin, -8388608, __VA_ARGS__) M(kunder, -8388609, __VA_ARGS__)           \
+    M(kten7, 10000000, __VA_ARGS__) M(kgiga, 1000000000, __VA_ARGS__)          \
+    M(kmask, 4294967295LL, __VA_ARGS__)                                        \
+    M(kw56, 36028797018963967LL, __VA_ARGS__)                                  \
+    M(kw56n, -36028797018963968LL, __VA_ARGS__)                                \
+    M(kover56, 36028797018963968LL, __VA_ARGS__)                               \
+    M(kllmax, 9223372036854775807LL, __VA_ARGS__)
 
 #define RR_DEF(OPN, OP, S, T)                                                  \
     static int rr_if_##S##_##OPN(T a, T b) { if (a OP b) return 1; return 0; } \
@@ -103,7 +111,7 @@ DEFINE_TYPE(u64, unsigned long long)
             hits += 1;
         AssertEq(r, a < 5);
     }
-    AssertEq(hits, 7);
+    AssertEq(hits, 9);
 }
 
 // The result of the comparison is read again after the branch.
@@ -116,7 +124,26 @@ DEFINE_TYPE(u64, unsigned long long)
             hits++;
         hits += r;
     }
-    AssertEq(hits, 14);
+    AssertEq(hits, 18);
     AssertEq(r, vals[NV - 1] < 5);
+}
+
+// A store between the compare and its jump leaves the branch unfused; the
+// store still runs on both paths.
+static int store_between(long long a, int *p) {
+    int r = a < 10000000;
+    *p    = 1;
+    if (r)
+        return 1;
+    return 0;
+}
+
+[[cccc::test]] void store_between_compare_and_branch(void) {
+    int p = 0;
+    AssertEq(store_between(5, &p), 1);
+    AssertEq(p, 1);
+    p = 0;
+    AssertEq(store_between(10000000, &p), 0);
+    AssertEq(p, 1);
 }
 // clang-format on

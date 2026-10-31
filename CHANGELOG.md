@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a compare against a constant beyond 24 bits (a loop bound of `10000000`, `x != 0xFFFFFFFF`) tested by the branch right after it is one compare-and-branch opcode with a 56-bit immediate (`BLTW3`, `BNEW3`, ... 10 in all).
+- Fixed: the clean-up pass checked the bytecode of a function only when it had rewritten something other than a branch fusion; a function changed only by fusion is now checked too.
 - Changed: the VM bytecode clean-up narrows a loop counter's interval back to its bounds after widening it around the loop, so a test inside `for (i = 0; i < 5; i++)` that the bounds decide (`i < 10`) is folded.
 - Added: VM compare-and-branch opcodes (`BEQ3`, `BLT3`, `BGEI3`, ... 16 in all): an integer compare tested by a branch is one instruction instead of a compare and a `JZ3` / `JNZ3`.
 - Fixed: `--vm-profile` printed no report when the program called `exit()`; the report is written after the `atexit` handlers and destructors run (`_Exit()`, `quick_exit()` and `abort()` still end the run without one).

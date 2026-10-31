@@ -328,7 +328,8 @@ enum { C_NONE, C_JMP, C_COND, C_EXIT };
 
 static InstrWord operand(Peep *p, const Insn *in);
 
-#define IS_FUSED_BR(op) ((op) >= BEQ3 && (op) <= BUGEI3)
+#define FUSED_BR_LAST   BUGEW3
+#define IS_FUSED_BR(op) ((op) >= BEQ3 && (op) <= FUSED_BR_LAST)
 
 // `JZ3 r0` always jumps and `JNZ3 r0` never does; a decided branch is
 // rewritten to one of them because it keeps its width.
@@ -377,7 +378,7 @@ static void effects(Peep *p, const Insn *in, Eff *e) {
         return;
     }
     if (IS_FUSED_BR(in->op)) {
-        e->iuse  = BIT(w & 0xFF) | (in->op < BEQI3 ? BIT((w >> 8) & 0xFF) : 0);
+        e->iuse  = BIT(w & 0xFF) | (in->op <= BULE3 ? BIT((w >> 8) & 0xFF) : 0);
         e->iuse &= ~BIT(REG_ZERO);
         return;
     }
@@ -526,7 +527,7 @@ static bool mark_leaders(Peep *p, PeepMark m) {
             case JNZ3:
                 ok = mark_target(p, vm->text_seg[in->pc + 2]);
                 break;
-            case BEQ3 ... BUGEI3:
+            case BEQ3 ... FUSED_BR_LAST:
                 ok = mark_target(p, vm->text_seg[in->pc + 2]);
                 break;
             case JMPT: {
@@ -2043,19 +2044,28 @@ static void drop_unreachable(Peep *p) {
 // registers when they jump, so nothing between may redefine them. Runs once,
 // after the analysis, which only knows the unfused form.
 
-// The immediate of a branch is 24 bits.
+// The immediate of a branch is 24 bits. A compare directly before its jump
+// becomes a 4-word branch with a 56-bit immediate in the compare's slot.
 static bool fits_imm24(long long v) {
     return v >= -(1LL << 23) && v < (1LL << 23);
 }
 
+static bool fits_imm56(long long v) {
+    return v >= -(1LL << 55) && v < (1LL << 55);
+}
+
 enum { A_LT, A_LE, A_GT, A_GE, A_EQ, A_NE };
 
-// The branch taken when `cmp`'s result is `when` (nonzero or zero). Fills the
-// operand word; the target stays as it is.
+// The branch taken when `cmp`'s result is `when` (nonzero or zero), or -1.
+// Fills word[0], the operand word, and for a wide branch word[1], the low half
+// of the immediate; the target stays as it is. `adjacent`: no live instruction
+// sits between the compare and the jump, so the wide form may replace the
+// compare.
 static int fused_branch(const CmpForm *cf, const Cmp *c, bool when,
-                        InstrWord *word) {
+                        bool adjacent, InstrWord word[2]) {
     if (cf->imm) {
-        if (!fits_imm24(c->imm))
+        bool narrow = fits_imm24(c->imm);
+        if (!narrow && !(adjacent && fits_imm56(c->imm)))
             return -1;
         int ra = cf->rel == REL_EQ   ? A_EQ
                  : cf->rel == REL_NE ? A_NE
@@ -2068,8 +2078,19 @@ static int fused_branch(const CmpForm *cf, const Cmp *c, bool when,
                  : ra == A_GE ? A_LT
                  : ra == A_EQ ? A_NE
                               : A_EQ;
-        *word = (InstrWord)(c->a & 0xFF) |
-                ((InstrWord)((unsigned long long)c->imm & 0xFFFFFF) << 8);
+        if (!narrow) {
+            unsigned long long u    = (unsigned long long)c->imm;
+            word[0]                 = (InstrWord)(c->a & 0xFF) |
+                                      ((InstrWord)((u >> 32) & 0xFFFFFF) << 8);
+            word[1]                 = (InstrWord)u;
+            static const int wsgn[] = {BLTW3, BLEW3, BGTW3,
+                                       BGEW3, BEQW3, BNEW3};
+            static const int wuns[] = {BULTW3, BULEW3, BUGTW3,
+                                       BUGEW3, BEQW3,  BNEW3};
+            return (cf->uns ? wuns : wsgn)[ra];
+        }
+        word[0] = (InstrWord)(c->a & 0xFF) |
+                  ((InstrWord)((unsigned long long)c->imm & 0xFFFFFF) << 8);
         static const int sgn[] = {BLTI3, BLEI3, BGTI3, BGEI3, BEQI3, BNEI3};
         static const int uns[] = {BULTI3, BULEI3, BUGTI3, BUGEI3, BEQI3, BNEI3};
         return (cf->uns ? uns : sgn)[ra];
@@ -2085,7 +2106,7 @@ static int fused_branch(const CmpForm *cf, const Cmp *c, bool when,
         }
     }
     int x = sw ? c->b : c->a, y = sw ? c->a : c->b;
-    *word = (InstrWord)(x & 0xFF) | ((InstrWord)(y & 0xFF) << 8);
+    word[0] = (InstrWord)(x & 0xFF) | ((InstrWord)(y & 0xFF) << 8);
     return rel == REL_EQ   ? BEQ3
            : rel == REL_NE ? BNE3
            : rel == REL_LT ? (cf->uns ? BULT3 : BLT3)
@@ -2102,7 +2123,8 @@ static void fuse_block(Peep *p, Block *blk) {
     int   r  = get_byte(p, br, 0);
     if (r <= REG_ZERO || r >= NUM_REGS || (blk->iout & BIT(r)))
         return;
-    uint32_t between = 0; // defined by the instructions after the compare
+    uint32_t between  = 0; // defined by the instructions after the compare
+    bool     adjacent = true;
     for (int j = i - 1; j >= blk->first; j--) {
         Insn *d = &p->ins[j];
         if (d->dead)
@@ -2114,7 +2136,8 @@ static void fuse_block(Peep *p, Block *blk) {
         if (!(e.idef & BIT(r))) {
             if (e.iuse & BIT(r))
                 return;
-            between |= e.idef;
+            between  |= e.idef;
+            adjacent  = false;
             continue;
         }
         CmpForm cf;
@@ -2123,15 +2146,25 @@ static void fuse_block(Peep *p, Block *blk) {
         Cmp c = cmp_of(p, d, &cf);
         if (c.dst != r || (between & (BIT(c.a) | (c.b >= 0 ? BIT(c.b) : 0))))
             return;
-        InstrWord word;
-        int       op = fused_branch(&cf, &c, br->op == JNZ3, &word);
+        InstrWord word[2];
+        int       op = fused_branch(&cf, &c, br->op == JNZ3, adjacent, word);
         if (op < 0)
             return;
-        p->vm->text_seg[br->pc]     = (InstrWord)op;
-        p->vm->text_seg[br->pc + 1] = word;
-        br->op                      = op;
-        d->dead                     = true;
-        p->changed                  = true;
+        InstrWord *text = p->vm->text_seg;
+        if (op >= BEQW3) {
+            text[d->pc]     = (InstrWord)op;
+            text[d->pc + 1] = word[0];
+            text[d->pc + 2] = text[br->pc + 2];
+            text[d->pc + 3] = word[1];
+            d->op           = op;
+            br->dead        = true;
+        } else {
+            text[br->pc]     = (InstrWord)op;
+            text[br->pc + 1] = word[0];
+            br->op           = op;
+            d->dead          = true;
+        }
+        p->changed = true;
         return;
     }
 }
@@ -2209,7 +2242,7 @@ static void compact(Peep *p, PeepMark m) {
                 break;
             case JZ3:
             case JNZ3:
-            case BEQ3 ... BUGEI3:
+            case BEQ3 ... FUSED_BR_LAST:
                 vm->text_seg[np + 2] = remap(p, map, vm->text_seg[np + 2]);
                 break;
             case JMPT: {
@@ -2369,13 +2402,14 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
         any = true;
     }
     fuse_branches(&p);
-    if (any || p.changed) {
+    bool compacted = any || p.changed;
+    if (compacted) {
         drop_dead_patches(&p, m);
         compact(&p, m);
     }
     free_peep(&p);
 
-    if (any) {
+    if (compacted) {
         Peep v = {
             .vm = vm, .fn = fn, .start = p.start, .end = vm->text_ptr + 1};
         if (!decode_window(&v) || !mark_leaders(&v, m) ||

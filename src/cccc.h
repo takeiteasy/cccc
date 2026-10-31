@@ -797,7 +797,17 @@ extern "C" {
     X(BULTI3, 2)   /* branch to target if rs < imm24, unsigned */                    \
     X(BULEI3, 2)   /* branch to target if rs <= imm24, unsigned */                   \
     X(BUGTI3, 2)   /* branch to target if rs > imm24, unsigned */                    \
-    X(BUGEI3, 2)   /* branch to target if rs >= imm24, unsigned */
+    X(BUGEI3, 2)   /* branch to target if rs >= imm24, unsigned */                   \
+    X(BEQW3, 3)    /* branch to target if rs == imm56 */                             \
+    X(BNEW3, 3)    /* branch to target if rs != imm56 */                             \
+    X(BLTW3, 3)    /* branch to target if rs < imm56, signed */                      \
+    X(BLEW3, 3)    /* branch to target if rs <= imm56, signed */                     \
+    X(BGTW3, 3)    /* branch to target if rs > imm56, signed */                      \
+    X(BGEW3, 3)    /* branch to target if rs >= imm56, signed */                     \
+    X(BULTW3, 3)   /* branch to target if rs < imm56, unsigned */                    \
+    X(BULEW3, 3)   /* branch to target if rs <= imm56, unsigned */                   \
+    X(BUGTW3, 3)   /* branch to target if rs > imm56, unsigned */                    \
+    X(BUGEW3, 3)   /* branch to target if rs >= imm56, unsigned */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

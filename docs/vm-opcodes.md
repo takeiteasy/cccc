@@ -110,8 +110,12 @@ Same format as `ADDI3` (so are `MULI3`, `SHLI3`, `SHRI3`, `USHRI3` and `ANDI3`; 
 | `BEQI3`, `BNEI3` | `rs == imm`, `rs != imm` |
 | `BLTI3`, `BLEI3`, `BGTI3`, `BGEI3` | `rs <`, `<=`, `>`, `>=` `imm`, signed |
 | `BULTI3`, `BULEI3`, `BUGTI3`, `BUGEI3` | `rs <`, `<=`, `>`, `>=` `imm`, unsigned 64-bit |
+| `BEQW3`, `BNEW3`, `BLTW3`, `BLEW3`, `BGTW3`, `BGEW3` | as the `I3` forms, wide immediate, signed |
+| `BULTW3`, `BULEW3`, `BUGTW3`, `BUGEW3` | as the `I3` forms, wide immediate, unsigned 64-bit |
 
-The register forms are `[op][rs1|rs2][target]`; `a > b` is `BLT3 b, a`. The immediate forms are `[op][rs | imm24 << 8][target]`: the constant is a signed 24-bit value, sign-extended to 64 bits (also for the unsigned forms), and a comparison against a larger constant stays a compare and a `JZ3`.
+The register forms are `[op][rs1|rs2][target]`; `a > b` is `BLT3 b, a`. The immediate forms are `[op][rs | imm24 << 8][target]`: the constant is a signed 24-bit value, sign-extended to 64 bits (also for the unsigned forms).
+
+The wide forms are `[op][rs | imm hi24 << 8][target][imm lo32]`, four words, the width of the `SLTI3` family. The constant is a signed 56-bit value (`-2^55` to `2^55 - 1`), sign-extended to 64 bits. A wide branch takes the place of the compare, so it is used only when the compare is the instruction directly before its jump. A compare against a constant outside 56 bits, or one with another instruction before the jump, stays a compare and a `JZ3`.
 
 ### Wide _BitInt Operations (N > 64)
 
