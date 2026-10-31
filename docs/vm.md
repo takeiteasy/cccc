@@ -50,7 +50,7 @@ A third register file, `vregs[32]` (`VReg`, see [SIMD / Vector Operations](vm-op
 
 All segments are reserved upfront as large virtual ranges and committed in `poolsize` chunks (default 256 KiB elements, max 64 MiB elements).  This gives the VM stable base pointers while keeping resident memory modest.
 
-A global (and TLS, see below) object is placed at its own **declared alignment**, not a hardcoded 8 bytes: an explicit `_Alignas(N)` overrides the type's own alignment, capped at `CCCC_MAX_DATA_ALIGN` (64 bytes — the widest alignment any type requests today, a 512-bit vector). `_Alignas(N)` with `N > 64` is accepted but only gets 64-byte placement, a known limitation. `cc_effective_align()` (`src/codegen_emit.c`) computes this for every data-segment/TLS-template allocation site. **Local** (stack-frame) variables get the same alignment and cap through a different mechanism — see [Function Frame](vm-opcodes.md#function-frame).
+A global (and TLS, see below) object is placed at its own **declared alignment**, not a hardcoded 8 bytes: an explicit `_Alignas(N)` overrides the type's own alignment, capped at `CCCC_MAX_DATA_ALIGN` (64 bytes — the widest alignment any type requests today, a 512-bit vector). `_Alignas(N)` with `N > 64` is accepted but only gets 64-byte placement, a known limitation ([#1902](https://todo.sr.ht/~takeiteasy/cccc/1902)). `cc_effective_align()` (`src/codegen_emit.c`) computes this for every data-segment/TLS-template allocation site. **Local** (stack-frame) variables get the same alignment and cap through a different mechanism — see [Function Frame](vm-opcodes.md#function-frame).
 
 ### Thread-Local Storage (TLS)
 

@@ -73,6 +73,8 @@ void check_data_capacity(VirtualMachine *vm, long long needed) {
 // the full N -- a documented limitation (see docs/vm.md), not a silent
 // truncation bug: the object is still more correctly placed than the
 // pre-#1136 hardcoded 8-byte rounding.
+// TODO: raise the cap or reject N > 64 with a diagnostic
+// (https://todo.sr.ht/~takeiteasy/cccc/1902).
 int cc_effective_align(int obj_align, int ty_align) {
     int a = obj_align > ty_align ? obj_align : ty_align;
     if (a < 8)
