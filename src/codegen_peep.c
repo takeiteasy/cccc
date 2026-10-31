@@ -1474,9 +1474,25 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
 
 // The bounds an interval that keeps growing is pushed out to, so a loop that
 // counts settles after a few passes instead of one per step.
-static const long long WIDEN_STEPS[] = {
-    LLONG_MIN, INT_MIN, -32768,  -128,         0,        127, 255,
-    32767,     65535,   INT_MAX, 4294967295LL, LLONG_MAX};
+// A step sits just below each maximum so that a counter bounded by `i < n`,
+// which stops at max - 1, settles there and `i + 1` still provably fits.
+static const long long WIDEN_STEPS[] = {LLONG_MIN,
+                                        LLONG_MIN + 1,
+                                        INT_MIN,
+                                        INT_MIN + 1,
+                                        -32768,
+                                        -128,
+                                        0,
+                                        127,
+                                        255,
+                                        32767,
+                                        65535,
+                                        INT_MAX - 1,
+                                        INT_MAX,
+                                        4294967294LL,
+                                        4294967295LL,
+                                        LLONG_MAX - 1,
+                                        LLONG_MAX};
 #define N_WIDEN_STEPS (int)(sizeof WIDEN_STEPS / sizeof WIDEN_STEPS[0])
 
 static long long widen_down(long long x) {
@@ -1547,50 +1563,6 @@ static void exit_facts(Peep *p, int b, Facts *out, Facts *jump, bool *is_cond,
     forget_copies(jump);
 }
 
-// After the fixpoint a bound that was widened is recomputed from the
-// predecessors' exits without widening, so a narrowing on an edge (`i < n`)
-// survives the join. Each pass starts from a sound solution and so ends in one.
-#define NARROW_PASSES 2
-
-static void narrow_entry_facts(Peep *p) {
-    Facts *acc = malloc((size_t)p->nblocks * sizeof *acc);
-    bool  *has = malloc((size_t)p->nblocks * sizeof *has);
-    if (!acc || !has) {
-        free(acc);
-        free(has);
-        return;
-    }
-    for (int pass = 0; pass < NARROW_PASSES; pass++) {
-        memset(has, 0, (size_t)p->nblocks * sizeof *has);
-        for (int b = 0; b < p->nblocks; b++) {
-            Block *blk = &p->blocks[b];
-            if (!blk->reached)
-                continue;
-            Facts out, jump;
-            bool  is_cond, has_fall;
-            exit_facts(p, b, &out, &jump, &is_cond, &has_fall);
-            for (int s = 0; s < blk->nsucc; s++) {
-                int si = p->edges[blk->eoff + s];
-                if (p->blocks[si].ext_entry)
-                    continue;
-                const Facts *edge =
-                    is_cond && !(has_fall && s == 0) ? &jump : &out;
-                if (!has[si]) {
-                    acc[si] = *edge;
-                    has[si] = true;
-                } else {
-                    meet_facts(&acc[si], edge, false);
-                }
-            }
-        }
-        for (int b = 0; b < p->nblocks; b++)
-            if (has[b])
-                p->blocks[b].in = acc[b];
-    }
-    free(acc);
-    free(has);
-}
-
 // Facts at the start of every block: the function entry and any block that
 // can be entered from outside the graph start from the seed, the rest from the
 // merge over the blocks that reach them. A block nothing reaches is given the
@@ -1638,7 +1610,6 @@ static void compute_entry_facts(Peep *p) {
             }
         }
     }
-    narrow_entry_facts(p);
     for (int b = 0; b < p->nblocks; b++)
         if (!p->blocks[b].reached)
             facts_reset(&p->blocks[b].in, p->seed);
