@@ -1492,7 +1492,9 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
     if (node_reaches(body, switch_node))
         reflect_link_error(vm, "switch would contain itself");
     Node   *case_node = alloc_node(vm, ND_CASE);
-    int64_t v         = cc_eval(vm, value);
+    add_type(vm, node_ctl(switch_node)->cond);
+    Type *cond_ty = node_ctl(switch_node)->cond->ty;
+    long  v       = case_value(cond_ty, cc_eval(vm, value));
     node_ctl_mut(vm, case_node)->begin = v;
     node_ctl_mut(vm, case_node)->end   = v;
     case_node->lhs    = body;
@@ -1501,7 +1503,8 @@ void __builtin_ast_switch_add_case(Node *switch_node, Node *value, Node *body) {
     // switch, same as the parser does for hand-written switches. Must run
     // before the splice below -- once case_node is linked into case_next it
     // would trivially "collide" with itself.
-    check_case_conflict(vm, node_ctl(switch_node)->case_next, case_node);
+    check_case_conflict(vm, cond_ty, node_ctl(switch_node)->case_next,
+                        case_node);
 
     // Add to switch's case list
     node_ctl_mut(vm, case_node)->case_next   = node_ctl(switch_node)->case_next;

@@ -312,6 +312,29 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     return node;
 }
 
+bool case_unsigned(Type *cond_ty) {
+    return cond_ty && is_integer(cond_ty) && !is_wide_bitint(cond_ty) &&
+           cond_ty->size == 8 && cond_ty->is_unsigned;
+}
+
+long case_value(Type *cond_ty, int64_t v) {
+    if (!cond_ty || !is_integer(cond_ty) || is_wide_bitint(cond_ty) ||
+        cond_ty->size > 8)
+        return v;
+    bool is_unsigned = cond_ty->is_unsigned && cond_ty->size >= 4;
+    int  bits =
+        cond_ty->kind == TY_BITINT ? cond_ty->bit_width : cond_ty->size * 8;
+    if (cond_ty->size < 4)
+        bits = 32;
+    if (bits >= 64)
+        return v;
+    uint64_t mask = ((uint64_t)1 << bits) - 1;
+    uint64_t u    = (uint64_t)v & mask;
+    if (!is_unsigned && (u >> (bits - 1)))
+        u |= ~mask;
+    return (long)u;
+}
+
 // #815/#816: report a case label ("c") whose value range collides with any
 // node already in "chain". Shared by the parser's switch epilogue below and
 // the comptime reflection switch builders (reflection.c's
@@ -325,10 +348,12 @@ static Node *asm_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
 // can be unset -- see alloc_node in reflection.c), so this can't
 // unconditionally deref tok->file/tok->loc the way plain error_tok() call sites
 // do.
-void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
+void check_case_conflict(VirtualMachine *vm, Type *cond_ty, Node *chain,
+                         Node *c) {
+    bool uns = case_unsigned(cond_ty);
     for (Node *o = chain; o; o = node_ctl(o)->case_next) {
-        if (node_ctl(c)->begin > node_ctl(o)->end ||
-            node_ctl(o)->begin > node_ctl(c)->end)
+        if (case_lt(uns, node_ctl(o)->end, node_ctl(c)->begin) ||
+            case_lt(uns, node_ctl(c)->end, node_ctl(o)->begin))
             continue;
 
         Node *later = o;
@@ -340,8 +365,12 @@ void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c) {
         char  buf[64];
         if (node_ctl(c)->begin == node_ctl(c)->end &&
             node_ctl(o)->begin == node_ctl(o)->end) {
-            snprintf(buf, sizeof(buf), "duplicate case value '%ld'",
-                     node_ctl(c)->begin);
+            if (uns)
+                snprintf(buf, sizeof(buf), "duplicate case value '%lu'",
+                         (unsigned long)node_ctl(c)->begin);
+            else
+                snprintf(buf, sizeof(buf), "duplicate case value '%ld'",
+                         node_ctl(c)->begin);
             msg = buf;
         } else {
             msg = "duplicate (or overlapping) case value";
@@ -682,6 +711,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         tok        = skip(vm, tok->next, "(");
         node_ctl_mut(vm, node)->cond = expr(vm, &tok, tok);
         require_value(vm, node_ctl(node)->cond);
+        add_type(vm, node_ctl(node)->cond);
         tok        = skip(vm, tok, ")");
 
         // DCE-aware diagnostic suppression: when saw_diag_attr is set, check
@@ -776,7 +806,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         // identically.
         for (Node *c1 = node_ctl(node)->case_next; c1;
              c1       = node_ctl(c1)->case_next)
-            check_case_conflict(vm, node_ctl(c1)->case_next, c1);
+            check_case_conflict(vm, node_ctl(node)->cond->ty,
+                                node_ctl(c1)->case_next, c1);
 
         if (vm->compiler.warnings &
             (CCCC_WARN_SWITCH | CCCC_WARN_SWITCH_ENUM)) {
@@ -863,22 +894,23 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_node(vm, ND_NULL_EXPR, tok);
         }
 
-        // TODO: begin/end are int, so a case label beyond 32 bits is truncated
-        // (https://todo.sr.ht/~takeiteasy/cccc/1905).
         Node *node                  = new_node(vm, ND_CASE, tok);
         Type *begin_layout_ty       = NULL;
         LayoutOp begin_layout_is_align = LAYOUT_SIZEOF;
-        int   begin = const_expr_layout(vm, &tok, tok->next, &begin_layout_ty,
-                                        &begin_layout_is_align);
-        int   end;
+        Type    *cond_ty = node_ctl(vm->compiler.current_switch)->cond->ty;
+        long     begin   = case_value(
+            cond_ty, const_expr_layout(vm, &tok, tok->next, &begin_layout_ty,
+                                       &begin_layout_is_align));
+        long     end;
         Type *end_layout_ty       = begin_layout_ty;
         LayoutOp end_layout_is_align = begin_layout_is_align;
 
         if (equal(tok, "...")) {
             // [GNU] Case ranges, e.g. "case 1 ... 5:"
-            end = const_expr_layout(vm, &tok, tok->next, &end_layout_ty,
-                                    &end_layout_is_align);
-            if (end < begin)
+            end = case_value(cond_ty, const_expr_layout(vm, &tok, tok->next,
+                                                        &end_layout_ty,
+                                                        &end_layout_is_align));
+            if (case_lt(case_unsigned(cond_ty), end, begin))
                 error_tok(vm, tok, "empty case range specified");
         } else {
             end = begin;

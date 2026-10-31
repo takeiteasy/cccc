@@ -1087,6 +1087,16 @@ static int compare_switch_cases(const void *a, const void *b) {
     return 0;
 }
 
+static int compare_switch_cases_unsigned(const void *a, const void *b) {
+    const SwitchCasePatch *ca = a;
+    const SwitchCasePatch *cb = b;
+    if ((unsigned long)ca->begin < (unsigned long)cb->begin)
+        return -1;
+    if ((unsigned long)ca->begin > (unsigned long)cb->begin)
+        return 1;
+    return 0;
+}
+
 SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
                                       long *min_case, long *max_case,
                                       long *covered_values) {
@@ -1095,6 +1105,7 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
     if (!cases)
         error("out of memory");
 
+    bool uns        = case_unsigned(node_ctl(node)->cond->ty);
     *num_cases      = 0;
     *covered_values = 0;
     for (Node *n = node_ctl(node)->case_next; n; n = node_ctl(n)->case_next) {
@@ -1116,15 +1127,22 @@ SwitchCasePatch *collect_switch_cases(Node *node, int *num_cases,
         cases[*num_cases].end         = end;
         cases[*num_cases].table_entry = CCCC_INVALID_PC;
 
-        if (*num_cases == 0 || begin < *min_case)
+        if (*num_cases == 0 || case_lt(uns, begin, *min_case))
             *min_case = begin;
-        if (*num_cases == 0 || end > *max_case)
+        if (*num_cases == 0 || case_lt(uns, *max_case, end))
             *max_case = end;
-        *covered_values += end - begin + 1;
+        // Capped so that a range as wide as the type cannot overflow.
+        unsigned long width = (unsigned long)end - (unsigned long)begin;
+        *covered_values =
+            width >= (unsigned long)SWITCH_COVERED_CAP ||
+                    *covered_values >= SWITCH_COVERED_CAP - (long)width
+                ? SWITCH_COVERED_CAP
+                : *covered_values + (long)width + 1;
         (*num_cases)++;
     }
 
-    qsort(cases, *num_cases, sizeof(SwitchCasePatch), compare_switch_cases);
+    qsort(cases, *num_cases, sizeof(SwitchCasePatch),
+          uns ? compare_switch_cases_unsigned : compare_switch_cases);
     return cases;
 }
 
@@ -1137,7 +1155,7 @@ void free_switch_cases(SwitchCasePatch *cases, int num_cases) {
 }
 
 void emit_sparse_switch_tree(VirtualMachine *vm, SwitchCasePatch *cases, int lo,
-                             int hi, int r_val, int r_cmp,
+                             int hi, int r_val, int r_cmp, bool is_unsigned,
                              PatchList *fail_patches) {
     if (lo > hi) {
         emit(vm, JMP);
@@ -1147,16 +1165,21 @@ void emit_sparse_switch_tree(VirtualMachine *vm, SwitchCasePatch *cases, int lo,
 
     int mid = lo + (hi - lo) / 2;
     emit_li3(vm, r_cmp, cases[mid].begin);
-    emit_rrr(vm, SLT3, r_cmp, r_val, r_cmp);
+    emit_rrr(vm, is_unsigned ? ULT3 : SLT3, r_cmp, r_val, r_cmp);
     Pc left_patch = emit_jnz3(vm, r_cmp);
 
     emit_li3(vm, r_cmp, cases[mid].end);
-    emit_rrr(vm, SGT3, r_cmp, r_val, r_cmp);
+    if (is_unsigned)
+        emit_rrr(vm, ULT3, r_cmp, r_cmp, r_val);
+    else
+        emit_rrr(vm, SGT3, r_cmp, r_val, r_cmp);
     add_case_patch(&cases[mid], emit_jz3(vm, r_cmp));
 
-    emit_sparse_switch_tree(vm, cases, mid + 1, hi, r_val, r_cmp, fail_patches);
+    emit_sparse_switch_tree(vm, cases, mid + 1, hi, r_val, r_cmp, is_unsigned,
+                            fail_patches);
     vm->text_seg[left_patch] = vm->text_ptr + 1;
-    emit_sparse_switch_tree(vm, cases, lo, mid - 1, r_val, r_cmp, fail_patches);
+    emit_sparse_switch_tree(vm, cases, lo, mid - 1, r_val, r_cmp, is_unsigned,
+                            fail_patches);
 }
 
 // PSH3: push register value onto stack

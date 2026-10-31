@@ -201,6 +201,19 @@ static void serialize_break_label(FILE *f, SerializeContext *ctx,
     fprintf(f, ": ;\n");
 }
 
+// A case label as a host C constant of the switch's own type, so a value that
+// does not fit in `long` (or is LONG_MIN) reads back the same.
+static void serialize_case_value(FILE *f, SerializeContext *ctx, long v) {
+    Type *cond_ty =
+        ctx->cur_switch ? node_ctl(ctx->cur_switch)->cond->ty : NULL;
+    if (case_unsigned(cond_ty))
+        fprintf(f, "%luULL", (unsigned long)v);
+    else if (v == LONG_MIN)
+        fprintf(f, "(-9223372036854775807LL - 1)");
+    else
+        fprintf(f, "%ld", v);
+}
+
 void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     Node *node, int indent) {
     if (!node)
@@ -537,7 +550,7 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 if (!serialize_layout_const(
                         f, ctx, node_ctl(node)->case_begin_layout_ty,
                         node_ctl(node)->case_begin_layout_is_align))
-                    fprintf(f, "%ld", node_ctl(node)->begin);
+                    serialize_case_value(f, ctx, node_ctl(node)->begin);
                 fprintf(f, ":\n");
             } else {
                 // [GNU] Case ranges, e.g. "case 1 ... 5:"
@@ -545,12 +558,12 @@ void serialize_stmt(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                 if (!serialize_layout_const(
                         f, ctx, node_ctl(node)->case_begin_layout_ty,
                         node_ctl(node)->case_begin_layout_is_align))
-                    fprintf(f, "%ld", node_ctl(node)->begin);
+                    serialize_case_value(f, ctx, node_ctl(node)->begin);
                 fprintf(f, " ... ");
                 if (!serialize_layout_const(
                         f, ctx, node_ctl(node)->case_end_layout_ty,
                         node_ctl(node)->case_end_layout_is_align))
-                    fprintf(f, "%ld", node_ctl(node)->end);
+                    serialize_case_value(f, ctx, node_ctl(node)->end);
                 fprintf(f, ":\n");
             }
             serialize_stmt(f, vm, ctx, node->lhs, indent);

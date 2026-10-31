@@ -531,13 +531,12 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             reset_temp_regs();
             int r_val = alloc_temp_reg();
             gen_expr(vm, node_ctl(node)->cond, r_val);
-            // Case values are held as int, so a 32-bit condition is compared
-            // as one.
+            // Case values are zero-extended for an unsigned 32-bit condition.
             if (node_ctl(node)->cond->ty &&
                 node_ctl(node)->cond->ty->size == 4 &&
                 node_ctl(node)->cond->ty->is_unsigned &&
                 is_integer(node_ctl(node)->cond->ty))
-                emit_rr(vm, SX4, r_val, r_val);
+                emit_rr(vm, ZX4, r_val, r_val);
             // A call in the controlling expression resets the temp registers.
             mark_temp_reg_used(r_val);
 
@@ -547,9 +546,13 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             long             covered_values = 0;
             SwitchCasePatch *cases          = collect_switch_cases(
                 node, &num_cases, &min_case, &max_case, &covered_values);
-            long      span           = num_cases ? max_case - min_case + 1 : 0;
-            bool      use_jump_table = num_cases > 0 && covered_values >= 4 &&
-                                       span <= covered_values * 2;
+            bool          uns   = case_unsigned(node_ctl(node)->cond->ty);
+            unsigned long span  = num_cases ? (unsigned long)max_case -
+                                                  (unsigned long)min_case + 1
+                                            : 0;
+            bool use_jump_table = num_cases > 0 && covered_values >= 4 &&
+                                  span != 0 && span <= SWITCH_TABLE_MAX_SPAN &&
+                                  span <= (unsigned long)covered_values * 2;
 
             Pc        default_patch  = CCCC_INVALID_PC;
             Pc        end_patch      = CCCC_INVALID_PC;
@@ -563,20 +566,24 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 else
                     end_patch = emit_word_ptr(vm);
             } else if (use_jump_table) {
-                emit_addi3(vm, REG_A0, r_val, -min_case);
+                emit_addi3(vm, REG_A0, r_val,
+                           (long long)(0ULL - (unsigned long long)min_case));
                 emit(vm, JMPT);
                 Pc table_operand = emit_word_ptr(vm);
                 emit_word(vm, (InstrWord)span);
                 default_patch               = emit_word_ptr(vm);
                 table_start                 = vm->text_ptr + 1;
                 vm->text_seg[table_operand] = table_start;
-                for (long i = 0; i < span; i++)
+                for (unsigned long i = 0; i < span; i++)
                     emit_word(vm, 0);
 
                 for (int i = 0; i < num_cases; i++) {
-                    for (long value = cases[i].begin; value <= cases[i].end;
-                         value++) {
-                        Pc entry = table_start + (Pc)(value - min_case);
+                    unsigned long width = (unsigned long)cases[i].end -
+                                          (unsigned long)cases[i].begin;
+                    for (unsigned long off = 0; off <= width; off++) {
+                        Pc entry =
+                            table_start + (Pc)((unsigned long)cases[i].begin -
+                                               (unsigned long)min_case + off);
                         vm->text_seg[entry]  = CCCC_INVALID_PC;
                         cases[i].table_entry = entry;
                     }
@@ -584,7 +591,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             } else {
                 int r_cmp = alloc_temp_reg();
                 emit_sparse_switch_tree(vm, cases, 0, num_cases - 1, r_val,
-                                        r_cmp, &fail_patches);
+                                        r_cmp, uns, &fail_patches);
                 free_temp_reg(r_cmp);
                 if (node_ctl(node)->default_case) {
                     emit(vm, JMP);
@@ -604,7 +611,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             vm->compiler.current_switch_num         = num_cases;
             vm->compiler.current_switch_table_start = table_start;
             vm->compiler.current_switch_min         = min_case;
-            vm->compiler.current_switch_size        = span;
+            vm->compiler.current_switch_size        = (long)span;
             vm->compiler.current_switch_default = node_ctl(node)->default_case;
             vm->compiler.current_default_patch      = default_patch;
 
@@ -638,7 +645,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 Pc default_target = node_ctl(node)->default_case
                                         ? vm->text_seg[default_patch]
                                         : end_target;
-                for (long i = 0; i < span; i++) {
+                for (unsigned long i = 0; i < span; i++) {
                     Pc entry = table_start + (Pc)i;
                     if (vm->text_seg[entry] == 0)
                         vm->text_seg[entry] = default_target;
@@ -668,11 +675,15 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 if (entry) {
                     if (vm->compiler.current_switch_table_start !=
                         CCCC_INVALID_PC) {
-                        for (long value = entry->begin; value <= entry->end;
-                             value++) {
+                        unsigned long width = (unsigned long)entry->end -
+                                              (unsigned long)entry->begin;
+                        for (unsigned long off = 0; off <= width; off++) {
                             Pc table_entry =
                                 vm->compiler.current_switch_table_start +
-                                (Pc)(value - vm->compiler.current_switch_min);
+                                (Pc)((unsigned long)entry->begin -
+                                     (unsigned long)
+                                         vm->compiler.current_switch_min +
+                                     off);
                             vm->text_seg[table_entry] = target;
                         }
                     }

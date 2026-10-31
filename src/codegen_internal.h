@@ -23,6 +23,7 @@
 #ifndef CCCC_CODEGEN_INTERNAL_H
 #define CCCC_CODEGEN_INTERNAL_H
 
+#include <limits.h>
 #include "./internal.h"
 
 // #1132 self-hosting spike: declare_builtin_functions() (parse_decl.c) runs
@@ -103,6 +104,12 @@ typedef struct {
     int       scale;
     long long offset;
 } IndexedRegs;
+
+// collect_switch_cases saturates its covered-value count here.
+#define SWITCH_COVERED_CAP (LONG_MAX / 4)
+// The widest jump table a switch gets; a wider one (a huge case range) is
+// compared instead.
+#define SWITCH_TABLE_MAX_SPAN (1UL << 16)
 
 // One `switch` case's jump-table bookkeeping. Defined/used in
 // codegen_emit.c and codegen_stmt.c.
@@ -319,7 +326,7 @@ void emit_scopein(VirtualMachine *vm, int scope_id);
 void emit_scopeout(VirtualMachine *vm, int scope_id);
 void emit_source_location(VirtualMachine *vm, Node *node);
 void emit_sparse_switch_tree(VirtualMachine *vm, SwitchCasePatch *cases, int lo,
-                             int hi, int r_val, int r_cmp,
+                             int hi, int r_val, int r_cmp, bool is_unsigned,
                              PatchList *fail_patches);
 void emit_store_ex(VirtualMachine *vm, Type *ty, int rd_val, int rs_addr,
                    bool dangling_check);

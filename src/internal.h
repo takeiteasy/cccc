@@ -696,7 +696,16 @@ int64_t const_expr_layout(VirtualMachine *vm, Token **rest, Token *tok,
 // #815/#816: shared duplicate/overlapping case-label check -- used by the
 // switch-statement epilogue here and by the comptime reflection switch
 // builders in reflection.c.
-void check_case_conflict(VirtualMachine *vm, Node *chain, Node *c);
+void check_case_conflict(VirtualMachine *vm, Type *cond_ty, Node *chain,
+                         Node *c);
+// A case label as the controlling expression's register holds it: converted to
+// the promoted type, then sign- or zero-extended to 64 bits. Only an unsigned
+// 64-bit switch (case_unsigned) orders its labels as unsigned.
+long case_value(Type *cond_ty, int64_t v);
+bool case_unsigned(Type *cond_ty);
+static inline bool case_lt(bool is_unsigned, long a, long b) {
+    return is_unsigned ? (unsigned long)a < (unsigned long)b : a < b;
+}
 bool node_int_const_fits(VirtualMachine *vm, Node *expr, Type *to);
 Obj *parse(VirtualMachine *vm, Token *tok);
 Scope *cc_parse_file_isolated(VirtualMachine *vm, Token *tok);
