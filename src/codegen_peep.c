@@ -30,7 +30,9 @@
 // intersection / hull over predecessors, widened on a backward edge); copy
 // facts and the latest compare stay inside a block. A conditional branch on a
 // compare narrows the operands' intervals along each of its edges. A call keeps
-// what is known about promoted registers: the callee restores them. A block
+// what is known about promoted registers: the callee restores them. A direct
+// call to a guest function leaves A0 normalised to the declared return type;
+// the other calls (CALLI, CALLN, CALLF) say nothing about it. A block
 // that can be entered from outside the graph (the function entry, an
 // address-taken label) starts from the promoted-register seed alone. A switch
 // table's targets are successors of its JMPT; every label of a function with a
@@ -44,12 +46,8 @@
 // makes it a copy of the other operand, and a `MULADDI3` with a known index an
 // `ADDI3`. A register loaded with 0 is read as the zero register afterwards.
 //
-// TODO: an extension after arithmetic is kept when it needs a relation between
-// two registers rather than an interval
-// (https://todo.sr.ht/~takeiteasy/cccc/1892), or follows a call result
-// (https://todo.sr.ht/~takeiteasy/cccc/1893). A 2-word operation with a
-// non-zero constant result is kept, and so is its LI3 operand
-// (https://todo.sr.ht/~takeiteasy/cccc/1894).
+// TODO: a 2-word operation with a non-zero constant result is kept, and so is
+// its LI3 operand (https://todo.sr.ht/~takeiteasy/cccc/1894).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -286,6 +284,7 @@ typedef struct {
     bool    addr_target; // a label whose address may be jumped to
     bool    known;   // op_spec() applies and every register byte is in range
     uint8_t src_ext; // an extension's source facts, set by the forward pass
+    uint8_t ret_ext; // a CALL's result satisfies these extensions
     OpSpec  spec;
 } Insn;
 
@@ -1374,9 +1373,14 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
                     p->changed = true;
                 }
             } else if (kind == C_NONE) {
-                if (is_call(in->op))
+                if (is_call(in->op)) {
                     facts_after_call(p, f);
-                else
+                    if (in->ret_ext) {
+                        f->ext[REG_A0] = in->ret_ext;
+                        range_of_ext(in->ret_ext, &f->lo[REG_A0],
+                                     &f->hi[REG_A0]);
+                    }
+                } else
                     facts_reset(f, p->seed);
             }
             continue;
@@ -1835,22 +1839,30 @@ static bool cleanup_ranges_aligned(const Peep *p) {
 }
 
 // An instruction holding a not-yet-resolved text address is left alone.
-static void pin_location(Peep *p, Pc loc) {
+static Insn *pin_location(Peep *p, Pc loc) {
     if (!in_window(p, loc))
-        return;
+        return NULL;
     for (Pc w = loc; w >= p->start && loc - w < 8; w--) {
         int k = p->at[w - p->start];
         if (k >= 0) {
             p->ins[k].known = false;
-            return;
+            return &p->ins[k];
         }
     }
+    return NULL;
 }
 
+static uint8_t promoted_ext(const Type *ty);
+
+// A CALL's callee returns its value normalised to the declared return type.
 static void pin_patched(Peep *p, PeepMark m) {
     VirtualMachine *vm = p->vm;
-    for (int i = m.calls; i < vm->compiler.num_call_patches; i++)
-        pin_location(p, vm->compiler.call_patches[i].location);
+    for (int i = m.calls; i < vm->compiler.num_call_patches; i++) {
+        Insn      *in = pin_location(p, vm->compiler.call_patches[i].location);
+        const Obj *callee = vm->compiler.call_patches[i].function;
+        if (in && in->op == CALL && callee->ty && callee->ty->return_ty)
+            in->ret_ext = promoted_ext(callee->ty->return_ty);
+    }
     for (int i = m.faddrs; i < vm->compiler.num_func_addr_patches; i++)
         pin_location(p, vm->compiler.func_addr_patches[i].location);
 }

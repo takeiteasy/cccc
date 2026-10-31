@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the VM bytecode clean-up keeps no sign or zero extension after a direct call to a function whose declared return type is `int`, `unsigned`, `short`, `char` or `_Bool` (`int p = partition(lo, hi)`), since the callee returns the value normalised.
 - Fixed: a tail call `return g(x);` of a wider value to a `char`-, `short`- or `int`-sized enum return type skipped the narrowing, so the caller saw the wider value.
 - Changed: a `for` or `while` loop with a small scalar condition tests it at the bottom and branches back into the body, so each iteration runs one branch instead of a test and a `JMP`.
 - Fixed: a `float`, `double` or `_Complex` value used as a truth value (`if (d)`, `!d`, `d && x`, `(_Bool)d`, a `_Bool` initializer or store) tested the wrong register or truncated to an integer; it is now true when nonzero, NaN included, in the VM, in constant expressions and under `-c=native`. New VM opcodes `FNZ3` and `FNZ3_F32`.
