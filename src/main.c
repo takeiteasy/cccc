@@ -1507,6 +1507,35 @@ static void watch_begin(VirtualMachine *vm, const CcWatchOptions *wo,
                         "watched\n");
 }
 
+typedef struct {
+    const char *mode;
+    const char *input;
+    bool        text;
+    bool        json;
+    bool        ran;
+} VmProfileReport;
+
+// Modes that never run the program report the comptime profile only, and
+// write its JSON (in place of the text report) to stderr so it can't mix
+// with C written to stdout.
+static int report_vm_profile(VirtualMachine *vm, const VmProfileReport *r,
+                             int exit_code) {
+    if (r->text && (r->ran || !r->json))
+        cc_vm_profile_print(vm, stderr, r->ran);
+    if (r->json && cc_vm_profile_write_json(vm, r->ran ? stdout : stderr,
+                                            r->mode, r->input, r->ran) != 0) {
+        fprintf(stderr, "error: failed to write VM profile JSON\n");
+        if (exit_code == 0 || exit_code == 42)
+            exit_code = 1;
+    }
+    return exit_code;
+}
+
+static void report_vm_profile_on_exit(VirtualMachine *vm, void *ctx) {
+    fflush(stdout);
+    report_vm_profile(vm, ctx, 0);
+}
+
 int main(int argc, const char *argv[]) {
     /* Initialise and install libbacktrace crash handler as early as possible
      * so that any fault during parse/codegen/VM produces a symbolic host
@@ -1616,6 +1645,7 @@ int main(int argc, const char *argv[]) {
     int          vm_profile               = 0;
     int          vm_profile_text          = 0;
     int          vm_profile_ran           = 0;
+    VmProfileReport profile_ctx                 = {0};
     const char  *entry_name               = NULL; // -e / --entry
     enum {
         COMPILE_NONE,
@@ -2955,8 +2985,17 @@ int main(int argc, const char *argv[]) {
     }
     vm.ffi_errors_fatal         = ffi_errors_fatal;
     vm.enable_ffi_type_checking = enable_ffi_type_checking;
-    if (vm_profile)
+    if (vm_profile) {
         cc_vm_profile_enable(&vm);
+        profile_ctx.mode = compile_format == COMPILE_NATIVE      ? "native"
+                           : compile_format == COMPILE_GENERATED ? "generated"
+                           : dump_expanded_only                  ? "expand"
+                                                                 : "source";
+        profile_ctx.input =
+            input_files_count == 1 ? input_files[0] : "multiple";
+        profile_ctx.text = vm_profile_text;
+        profile_ctx.json = output_json;
+    }
     for (int i = 0; i < ffi_allow_args_count; i++)
         configure_ffi_name_list(&vm, ffi_allow_args[i], cc_ffi_allow);
     for (int i = 0; i < ffi_deny_args_count; i++)
@@ -3930,6 +3969,11 @@ int main(int argc, const char *argv[]) {
         watch_begin(&vm, &watch_opts, watch_paths, watch_paths_count,
                     watch_ignores, watch_ignores_count);
     }
+    if (vm_profile) {
+        profile_ctx.ran      = true;
+        vm.on_guest_exit     = report_vm_profile_on_exit;
+        vm.on_guest_exit_ctx = &profile_ctx;
+    }
     exit_code      = cc_run(&vm, prog_argc, prog_argv);
     vm_profile_ran = 1;
     free(prog_argv);
@@ -3960,29 +4004,12 @@ BAIL:
         cc_watch_wait();
         cc_watch_reexec();
     }
-    // Modes that never run the program report the comptime profile only, and
-    // write its JSON (in place of the text report) to stderr so it can't mix
-    // with C written to stdout.
-    if (vm_profile && (vm_profile_ran || ((compile_format == COMPILE_NATIVE ||
-                                           dump_expanded_only) &&
-                                          exit_code == 0))) {
-        const char *vm_profile_mode =
-            compile_format == COMPILE_NATIVE      ? "native"
-            : compile_format == COMPILE_GENERATED ? "generated"
-            : dump_expanded_only                  ? "expand"
-                                                  : "source";
-        const char *vm_profile_input =
-            input_files_count == 1 ? input_files[0] : "multiple";
-        if (vm_profile_text && (vm_profile_ran || !output_json))
-            cc_vm_profile_print(&vm, stderr, vm_profile_ran);
-        if (output_json &&
-            cc_vm_profile_write_json(&vm, vm_profile_ran ? stdout : stderr,
-                                     vm_profile_mode, vm_profile_input,
-                                     vm_profile_ran) != 0) {
-            fprintf(stderr, "error: failed to write VM profile JSON\n");
-            if (exit_code == 0 || exit_code == 42)
-                exit_code = 1;
-        }
+    if (vm_profile) {
+        profile_ctx.ran = vm_profile_ran;
+        if (vm_profile_ran ||
+            ((compile_format == COMPILE_NATIVE || dump_expanded_only) &&
+             exit_code == 0))
+            exit_code = report_vm_profile(&vm, &profile_ctx, exit_code);
     }
     cc_destroy(&vm);
     if (input_tokens)

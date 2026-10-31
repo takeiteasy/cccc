@@ -5133,6 +5133,12 @@ struct VirtualMachine {
     bool run_started;
     bool dtors_drained;
 
+    // Called once by an explicit guest exit() after atexit handlers and
+    // destructors, before the host exit(); main.c uses it to print the
+    // --vm-profile report.
+    void (*on_guest_exit)(struct VirtualMachine *vm, void *ctx);
+    void *on_guest_exit_ctx;
+
     // GIL-backed pthread runtime state. Concrete pthread objects are kept
     // internal so the public CCCC struct does not expose host pthread ABI
     // types.

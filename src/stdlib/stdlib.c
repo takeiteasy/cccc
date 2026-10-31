@@ -257,6 +257,10 @@ void cccc_guest_exit(int status) {
     if (vm) {
         drain_exit_handlers_nested(vm, &vm->atexit_handlers, &vm->atexit_count);
         drain_destructors_nested(vm);
+        void (*hook)(VirtualMachine *, void *) = vm->on_guest_exit;
+        vm->on_guest_exit                      = NULL;
+        if (hook)
+            hook(vm, vm->on_guest_exit_ctx);
     }
     exit(status);
 }

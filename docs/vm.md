@@ -221,7 +221,7 @@ The VM can collect dynamic execution statistics:
 * **Bigram profile** — Transition frequencies `prev → cur` (stored in a flat `OP_COUNT × OP_COUNT` array).
 * **Trigram profile** — Transition frequencies `prev2 → prev → cur` (heap-allocated `OP_COUNT³` array, enabled on demand).
 
-Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages.
+Enable profiling with `--vm-profile` (text report to stderr). Combine it with `--json` to also write the same data as JSON to stdout.  The JSON schema includes `total_opcodes`, `total_bigrams`, per-opcode arrays, and per-bigram arrays with percentages. The report is also written when the program calls `exit()`, after its `atexit` handlers and destructors; `_Exit()`, `quick_exit()` and `abort()` end the run without one.
 
 Comptime execution (`execute_macro_fn_ex`, `__builtin_comptime_init`) is counted into a separate `VmProfileCounts` bucket while `vm->vm_profile_in_comptime` is set, and emitted as a nested `"comptime"` object with the same keys. Counts accumulate across all top-level `cc_run_at` calls (init entries, `main`, atexit entries); nothing resets them between calls. Under `-c=native`/`-c=generated`/`-m` the JSON goes to stderr, without the run keys.
 
