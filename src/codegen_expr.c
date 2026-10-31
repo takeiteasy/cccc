@@ -896,7 +896,8 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
 
         case ND_NOT:
             if (node->lhs &&
-                (is_wide_bitint(node->lhs->ty) || is_decimal(node->lhs->ty))) {
+                (is_wide_bitint(node->lhs->ty) || is_decimal(node->lhs->ty) ||
+                 is_flonum(node->lhs->ty) || is_complex(node->lhs->ty))) {
                 gen_cond_expr(vm, node->lhs, dest_reg); // 0/1
                 emit_rr(vm, NOT3, dest_reg, dest_reg);  // logical negate of 0/1
                 return;
@@ -2054,6 +2055,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 while (rmw->kind == ND_CAST && rmw->lhs)
                     rmw = rmw->lhs;
                 gen_expr(vm, rmw, REG_ZERO);
+                return;
+            }
+            // C truthiness, not truncation: (_Bool)0.5 is 1.
+            if (node->ty->kind == TY_BOOL && !is_decimal(node->lhs->ty) &&
+                (is_flonum(node->lhs->ty) || is_complex(node->lhs->ty))) {
+                if (dest_reg == REG_ZERO)
+                    gen_expr(vm, node->lhs, REG_ZERO);
+                else
+                    gen_cond_expr(vm, node->lhs, dest_reg);
                 return;
             }
             if (is_complex(node->lhs->ty)) {

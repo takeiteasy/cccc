@@ -229,6 +229,7 @@ The `FMADD3`/`FMSUB3`/`FNMSUB3` family replaces a multiply feeding an add or sub
 | `FADD3_F32` … `FDIV3_F32` | f32 arithmetic |
 | `FNEG3_F32` | f32 negation |
 | `FEQ3_F32` … `FGE3_F32` | f32 comparisons |
+| `FNZ3` / `FNZ3_F32` | `regs[rd] = (fregs[rs] != 0)`; NaN is nonzero. Tests a float, double or complex part used as a truth value (`if (d)`, `!d`, `(_Bool)d`) |
 | `FLDR` | `fregs[rd] = *(double*)regs[rs]` |
 | `FSTR` | `*(double*)regs[rs] = fregs[rd]` |
 | `FLDR_F32` | `fregs[rd] = *(float*)regs[rs]` |

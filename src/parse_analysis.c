@@ -119,14 +119,22 @@ static void wide_extend_into(WideVal v, int words, int width, uint64_t *dst) {
                          !v.is_unsigned);
 }
 
-// True if `node` (already add_type'd) is non-zero, folding wide operands via
-// __cccc_bitint_nonzero instead of a truncating eval2 call.
-static bool eval_wide_truthy(VirtualMachine *vm, Node *node) {
+// True if `node` is non-zero. A wide operand folds via __cccc_bitint_nonzero, a
+// floating one by comparing the double (NaN is true), a complex one by either
+// part; eval2 would truncate all three to an int64_t first.
+bool eval_truthy(VirtualMachine *vm, Node *node) {
     add_type(vm, node);
     if (is_wide_bitint(node->ty)) {
         WideVal v = eval_wide_operand(vm, node);
         return __cccc_bitint_nonzero(v.buf, v.words) != 0;
     }
+    if (is_complex(node->ty)) {
+        double re, im;
+        eval_complex(vm, node, &re, &im);
+        return re != 0 || im != 0;
+    }
+    if (is_flonum(node->ty))
+        return eval_double(vm, node) != 0;
     return eval2(vm, node, NULL) != 0;
 }
 
@@ -242,7 +250,7 @@ static void eval_wide_node(VirtualMachine *vm, Node *node, uint64_t *dst) {
             return;
         }
         case ND_COND:
-            if (eval_wide_truthy(vm, node_ctl(node)->cond))
+            if (eval_truthy(vm, node_ctl(node)->cond))
                 eval_wide_node(vm, node_ctl(node)->then, dst);
             else
                 eval_wide_node(vm, node_ctl(node)->els, dst);
@@ -456,28 +464,20 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 return (uint64_t)eval(vm, node->lhs) <= eval(vm, node->rhs);
             return eval(vm, node->lhs) <= eval(vm, node->rhs);
         case ND_COND:
-            return eval(vm, node_ctl(node)->cond)
+            return eval_truthy(vm, node_ctl(node)->cond)
                        ? eval2(vm, node_ctl(node)->then, label)
                        : eval2(vm, node_ctl(node)->els, label);
         case ND_COMMA:
             require_const_comma_lhs(vm, node);
             return eval2(vm, node->rhs, label);
         case ND_NOT:
-            if (is_wide_bitint(node->lhs->ty))
-                return !eval_wide_truthy(vm, node->lhs);
-            return !eval(vm, node->lhs);
+            return !eval_truthy(vm, node->lhs);
         case ND_BITNOT:
             return wrap_to_int_type(node->ty, ~eval(vm, node->lhs));
         case ND_LOGAND:
-            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
-                return eval_wide_truthy(vm, node->lhs) &&
-                       eval_wide_truthy(vm, node->rhs);
-            return eval(vm, node->lhs) && eval(vm, node->rhs);
+            return eval_truthy(vm, node->lhs) && eval_truthy(vm, node->rhs);
         case ND_LOGOR:
-            if (is_wide_bitint(node->lhs->ty) || is_wide_bitint(node->rhs->ty))
-                return eval_wide_truthy(vm, node->lhs) ||
-                       eval_wide_truthy(vm, node->rhs);
-            return eval(vm, node->lhs) || eval(vm, node->rhs);
+            return eval_truthy(vm, node->lhs) || eval_truthy(vm, node->rhs);
         case ND_CAST: {
             // #832: a decimal-to-integer cast (e.g. `(int)1.5dd`, legal in an
             // ICE since 1.5dd is the cast's immediate operand) folds via
@@ -499,6 +499,9 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                               "CCCC_HAS_DECIMAL=1");
                 return wrap_to_int_type(node->ty, out);
             }
+            if (node->ty->kind == TY_BOOL &&
+                (is_flonum(node->lhs->ty) || is_complex(node->lhs->ty)))
+                return eval_truthy(vm, node->lhs);
             if (is_flonum(node->lhs->ty) && is_integer(node->ty) &&
                 node->ty->is_unsigned && node->ty->size == 8)
                 // #780: an unsigned 64-bit destination saturates against
@@ -749,7 +752,7 @@ int static_branch_value(VirtualMachine *vm, Node *cond) {
 
     // Tier 1: plain constant fold.
     if (is_const_expr(vm, cond))
-        return eval(vm, cond) ? 1 : 0;
+        return eval_truthy(vm, cond) ? 1 : 0;
 
     // Tier 2: unsigned tautology on relational ops.
     if (cond->kind != ND_LT && cond->kind != ND_LE)

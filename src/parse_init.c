@@ -1961,6 +1961,13 @@ static Relocation *write_gvar_data(VirtualMachine *vm, Relocation *cur,
         return cur;
     }
 
+    add_type(vm, init->expr);
+    if (ty->kind == TY_BOOL &&
+        (is_flonum(init->expr->ty) || is_complex(init->expr->ty))) {
+        write_buf(buf + offset, eval_truthy(vm, init->expr), ty->size);
+        return cur;
+    }
+
     char   **label = NULL;
     uint64_t val   = eval2(vm, init->expr, &label);
 

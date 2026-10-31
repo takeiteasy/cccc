@@ -428,6 +428,9 @@ double eval_double(VirtualMachine *vm, Node *node);
 // arithmetic (src/codegen_addr.c) so a global initializer and the identical
 // expression in a local fold to the same bits.
 void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im);
+// True if a constant expression is nonzero (a float or complex one by value,
+// not truncated to an integer first).
+bool eval_truthy(VirtualMachine *vm, Node *node);
 // Compile-time fold of a constant expression at arbitrary integer width
 // (#1122). ty->size bytes are written to dst (little-endian words); ty must
 // be an integer type. Reuses the src/stdlib/wide_bitint.c runtime helpers so

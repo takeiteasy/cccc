@@ -214,6 +214,8 @@ static bool op_spec(int op, OpSpec *s) {
             return true;
         case F2I3:
         case F2I3_F32:
+        case FNZ3:
+        case FNZ3_F32:
             *s = SPEC(ID, FU, NO, NO, 0);
             return true;
         case FLDR:
@@ -741,8 +743,10 @@ static int ext_result(int op) {
         case FLE3:
         case FGT3:
         case FGE3:
+        case FNZ3:
         case FEQ3_F32:
         case FNE3_F32:
+        case FNZ3_F32:
         case FLT3_F32:
         case FLE3_F32:
         case FGT3_F32:

@@ -766,20 +766,22 @@ extern "C" {
     /* Compare against an immediate: rd = (rs1 OP imm), 0 or 1. Format as            \
        ADDI3. SGT/SGE/UGT/UGE serve a constant on the left: `5 < x` is               \
        SGTI3 x, 5. */                                                                \
-    X(SEQI3, 3)  /* rs1 == imm */                                                    \
-    X(SNEI3, 3)  /* rs1 != imm */                                                    \
-    X(SLTI3, 3)  /* rs1 < imm, signed */                                             \
-    X(SLEI3, 3)  /* rs1 <= imm, signed */                                            \
-    X(SGTI3, 3)  /* rs1 > imm, signed */                                             \
-    X(SGEI3, 3)  /* rs1 >= imm, signed */                                            \
-    X(ULTI3, 3)  /* rs1 < imm, unsigned */                                           \
-    X(ULEI3, 3)  /* rs1 <= imm, unsigned */                                          \
-    X(UGTI3, 3)  /* rs1 > imm, unsigned */                                           \
-    X(UGEI3, 3)  /* rs1 >= imm, unsigned */                                          \
-    X(SHLI3, 3)  /* rd = rs1 << imm, imm in 0..63 */                                 \
-    X(SHRI3, 3)  /* rd = rs1 >> imm, arithmetic, imm in 0..63 */                     \
-    X(USHRI3, 3) /* rd = rs1 >> imm, logical, imm in 0..63 */                        \
-    X(ANDI3, 3)  /* rd = rs1 & imm */
+    X(SEQI3, 3)    /* rs1 == imm */                                                  \
+    X(SNEI3, 3)    /* rs1 != imm */                                                  \
+    X(SLTI3, 3)    /* rs1 < imm, signed */                                           \
+    X(SLEI3, 3)    /* rs1 <= imm, signed */                                          \
+    X(SGTI3, 3)    /* rs1 > imm, signed */                                           \
+    X(SGEI3, 3)    /* rs1 >= imm, signed */                                          \
+    X(ULTI3, 3)    /* rs1 < imm, unsigned */                                         \
+    X(ULEI3, 3)    /* rs1 <= imm, unsigned */                                        \
+    X(UGTI3, 3)    /* rs1 > imm, unsigned */                                         \
+    X(UGEI3, 3)    /* rs1 >= imm, unsigned */                                        \
+    X(SHLI3, 3)    /* rd = rs1 << imm, imm in 0..63 */                               \
+    X(SHRI3, 3)    /* rd = rs1 >> imm, arithmetic, imm in 0..63 */                   \
+    X(USHRI3, 3)   /* rd = rs1 >> imm, logical, imm in 0..63 */                      \
+    X(ANDI3, 3)    /* rd = rs1 & imm */                                              \
+    X(FNZ3, 1)     /* rd = (fregs[rs] != 0), NaN is nonzero */                       \
+    X(FNZ3_F32, 1) /* rd = ((float)fregs[rs] != 0) */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

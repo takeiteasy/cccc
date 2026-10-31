@@ -382,6 +382,8 @@ int fop_for_type(Type *ty, int f64_op) {
             return FEQ3_F32;
         case FNE3:
             return FNE3_F32;
+        case FNZ3:
+            return FNZ3_F32;
         case FLT3:
             return FLT3_F32;
         case FLE3:
@@ -644,12 +646,24 @@ void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
 // address-based, so OR-reduce their words to a single 0/1 via the runtime.
 // _Decimal32/64/128 (#402) is likewise address-based -- test != 0 via DCMP
 // against a zero literal of the same width (C truthiness: nonzero is true,
-// including -0, which DCMP's quiet_equal already treats as == 0).
+// including -0, which DCMP's quiet_equal already treats as == 0). A float is
+// tested with FNZ3 (NaN is true); a complex is true if either part is.
 void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
-    // TODO: a float/double operand is left in a float register that the branch
-    // ops do not test (#1899).
+    if (is_complex(node->ty)) {
+        int imag_reg = (dest_reg == FREG_A7) ? FREG_A6 : FREG_A7;
+        gen_complex_expr(vm, node, dest_reg, imag_reg);
+        mark_temp_reg_used(dest_reg); // a call in `node` resets the temps
+        int r_imag = alloc_temp_reg();
+        emit_rr(vm, fop_for_type(node->ty->base, FNZ3), r_imag, imag_reg);
+        emit_rr(vm, fop_for_type(node->ty->base, FNZ3), dest_reg, dest_reg);
+        emit_rrr(vm, OR3, dest_reg, dest_reg, r_imag);
+        free_temp_reg(r_imag);
+        return;
+    }
     gen_expr(vm, node, dest_reg);
-    if (is_wide_bitint(node->ty)) {
+    if (is_flonum(node->ty)) {
+        emit_rr(vm, fop_for_type(node->ty, FNZ3), dest_reg, dest_reg);
+    } else if (is_wide_bitint(node->ty)) {
         emit_mov3(vm, REG_A0, dest_reg); // address of the wide value
         emit_li3(vm, REG_A1, node->ty->size / 8);
         emit_wide_helper(vm, "__cccc_bitint_nonzero", 2);

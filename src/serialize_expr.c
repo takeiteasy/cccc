@@ -2611,8 +2611,9 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // is_u64_int(), codegen_emit.c -- narrower unsigned destinations
             // are already correct via F2I3's signed saturation plus an ordinary
             // truncating narrow cast, which the outer "(dst_type)" below still
-            // supplies), F2I3 (signed helper) for everything else including
-            // TY_BOOL. A destination wider than 64 bits (an over-64-bit
+            // supplies), F2I3 (signed helper) for everything else except
+            // TY_BOOL, whose plain cast is already a nonzero test. A
+            // destination wider than 64 bits (an over-64-bit
             // _BitInt) takes a completely different VM codegen path (raw
             // bit-copy, not this numeric conversion) and is excluded here to
             // match. A TY_VECTOR destination is also excluded: that's #1019's
@@ -2630,7 +2631,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // real->integer conversion; the per-part real cast inside the
             // ND_COMPLEX construction arm handles the element type.
             bool f2i_native = src && dst && is_flonum(src) && !is_flonum(dst) &&
-                              dst->kind != TY_VECTOR &&
+                              dst->kind != TY_VECTOR && dst->kind != TY_BOOL &&
                               dst->kind != TY_COMPLEX &&
                               !(dst->kind == TY_BITINT && dst->bit_width > 64);
             if (f2i_native) {

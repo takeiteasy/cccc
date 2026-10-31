@@ -216,7 +216,7 @@ void eval_complex(VirtualMachine *vm, Node *node, double *re, double *im) {
             *im = -*im;
             break;
         case ND_COND:
-            if (eval_double(vm, node_ctl(node)->cond))
+            if (eval_truthy(vm, node_ctl(node)->cond))
                 eval_complex(vm, node_ctl(node)->then, re, im);
             else
                 eval_complex(vm, node_ctl(node)->els, re, im);

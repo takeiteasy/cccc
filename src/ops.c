@@ -1348,6 +1348,25 @@ static inline int op_FNE3_fn(VirtualMachine *vm) {
     return 0;
 }
 
+static inline int op_FNZ3_fn(VirtualMachine *vm) {
+    // regs[rd] = (fregs[rs1] != 0), NaN is nonzero
+    // Format: [FNZ3] [rd:8|rs1:8|unused:48]
+    long long operands = cc_read_word(vm);
+    int       rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+
+    vm->regs[rd] = (cccc_freg_get_f64(vm, rs1) != 0.0);
+    return 0;
+}
+
+static inline int op_FNZ3_F32_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs1;
+    DECODE_RR(operands, rd, rs1);
+    vm->regs[rd] = (cccc_freg_get_f32(vm, rs1) != 0.0f);
+    return 0;
+}
+
 static inline int op_FLT3_fn(VirtualMachine *vm) {
     // regs[rd] = (fregs[rs1] < fregs[rs2])
     // Format: [FLT3] [rd:8|rs1:8|rs2:8|unused:40]
