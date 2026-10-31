@@ -1410,7 +1410,10 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
             for (int k = 0; k < 4; k++) {
                 int role = in->spec.role[k];
                 int r    = get_byte(p, in, k);
-                if (role == R_IU && r > REG_ZERO && f->icopy[r] >= 0) {
+                // A promoted register's copy is never removed, so reading the
+                // source instead only keeps the source live.
+                if (role == R_IU && r > REG_ZERO && f->icopy[r] >= 0 &&
+                    !(p->promoted & BIT(r))) {
                     set_byte(p, in, k, f->icopy[r]);
                     p->changed = true;
                 } else if (role == R_FU && f->fcopy[r] >= 0) {
@@ -1526,6 +1529,68 @@ static void forget_copies(Facts *f) {
     f->cmp.valid = false;
 }
 
+// The facts leaving block `b` along its fall-through (`*out`) and, for a
+// conditional branch, along the jump (`*jump`); `*jump_edge` says which of the
+
+static void exit_facts(Peep *p, int b, Facts *out, Facts *jump, bool *is_cond,
+                       bool *has_fall) {
+    Block *blk = &p->blocks[b];
+    *out       = blk->in;
+    forward_block(p, blk, out, false);
+    const Insn *last = &p->ins[blk->last - 1];
+    *is_cond         = ctrl_kind(last) == C_COND;
+    *has_fall        = *is_cond && b + 1 < p->nblocks;
+    *jump            = *out;
+    if (*is_cond)
+        branch_facts(p, last, jump, out);
+    forget_copies(out);
+    forget_copies(jump);
+}
+
+// After the fixpoint a bound that was widened is recomputed from the
+// predecessors' exits without widening, so a narrowing on an edge (`i < n`)
+// survives the join. Each pass starts from a sound solution and so ends in one.
+#define NARROW_PASSES 2
+
+static void narrow_entry_facts(Peep *p) {
+    Facts *acc = malloc((size_t)p->nblocks * sizeof *acc);
+    bool  *has = malloc((size_t)p->nblocks * sizeof *has);
+    if (!acc || !has) {
+        free(acc);
+        free(has);
+        return;
+    }
+    for (int pass = 0; pass < NARROW_PASSES; pass++) {
+        memset(has, 0, (size_t)p->nblocks * sizeof *has);
+        for (int b = 0; b < p->nblocks; b++) {
+            Block *blk = &p->blocks[b];
+            if (!blk->reached)
+                continue;
+            Facts out, jump;
+            bool  is_cond, has_fall;
+            exit_facts(p, b, &out, &jump, &is_cond, &has_fall);
+            for (int s = 0; s < blk->nsucc; s++) {
+                int si = p->edges[blk->eoff + s];
+                if (p->blocks[si].ext_entry)
+                    continue;
+                const Facts *edge =
+                    is_cond && !(has_fall && s == 0) ? &jump : &out;
+                if (!has[si]) {
+                    acc[si] = *edge;
+                    has[si] = true;
+                } else {
+                    meet_facts(&acc[si], edge, false);
+                }
+            }
+        }
+        for (int b = 0; b < p->nblocks; b++)
+            if (has[b])
+                p->blocks[b].in = acc[b];
+    }
+    free(acc);
+    free(has);
+}
+
 // Facts at the start of every block: the function entry and any block that
 // can be entered from outside the graph start from the seed, the rest from the
 // merge over the blocks that reach them. A block nothing reaches is given the
@@ -1553,23 +1618,16 @@ static void compute_entry_facts(Peep *p) {
             Block *blk = &p->blocks[b];
             if (!blk->reached)
                 continue;
-            Facts out = blk->in;
-            forward_block(p, blk, &out, false);
-            const Insn *last     = &p->ins[blk->last - 1];
-            bool        cond     = ctrl_kind(last) == C_COND;
-            bool        has_fall = cond && b + 1 < p->nblocks;
-            Facts       jump     = out;
-            if (cond)
-                branch_facts(p, last, &jump, &out);
-            forget_copies(&out);
-            forget_copies(&jump);
+            Facts out, jump;
+            bool  is_cond, has_fall;
+            exit_facts(p, b, &out, &jump, &is_cond, &has_fall);
             for (int s = 0; s < blk->nsucc; s++) {
                 int    si = p->edges[blk->eoff + s];
                 Block *sb = &p->blocks[si];
                 if (sb->ext_entry)
                     continue;
                 const Facts *edge =
-                    cond && !(has_fall && s == 0) ? &jump : &out;
+                    is_cond && !(has_fall && s == 0) ? &jump : &out;
                 if (!sb->reached) {
                     sb->in      = *edge;
                     sb->reached = true;
@@ -1580,6 +1638,7 @@ static void compute_entry_facts(Peep *p) {
             }
         }
     }
+    narrow_entry_facts(p);
     for (int b = 0; b < p->nblocks; b++)
         if (!p->blocks[b].reached)
             facts_reset(&p->blocks[b].in, p->seed);

@@ -50,6 +50,74 @@ void emit_source_location(VirtualMachine *vm, Node *node) {
     vm->dbg.last_debug_col  = node->tok->col_no;
 }
 
+// A loop condition small and simple enough to generate twice: its code is
+// emitted once as the entry guard and once as the bottom test. Only scalar
+// arithmetic, comparisons, variable and memory access, simple assignment and
+// calls qualify; anything that defines a label or storage when generated (a
+// statement expression, a block literal, a compound literal) or is not worth
+// copying (a large expression) keeps the test at the top.
+#define ROTATE_COND_MAX_NODES 32
+
+static bool scalar_value_type(Type *ty) {
+    return ty && ((is_integer(ty) && ty->size <= 8) ||
+                  (is_flonum(ty) && !is_complex(ty)) || ty->kind == TY_PTR);
+}
+
+static bool rotatable_cond(Node *node, int *budget) {
+    if (!node)
+        return true;
+    if (--*budget < 0)
+        return false;
+    switch (node->kind) {
+        case ND_NUM:
+            return scalar_value_type(node->ty);
+        case ND_VAR:
+            return !node->var || !node->var->ty ||
+                   node->var->ty->kind != TY_VLA;
+        case ND_MEMBER:
+        case ND_ADDR:
+        case ND_DEREF:
+            return rotatable_cond(node->lhs, budget);
+        case ND_FUNCALL:
+            if (!scalar_value_type(node->ty) || node->func_ty == NULL ||
+                !rotatable_cond(node->lhs, budget))
+                return false;
+            for (Node *a = node->args; a; a = a->next)
+                if (!scalar_value_type(a->ty) || !rotatable_cond(a, budget))
+                    return false;
+            return true;
+        case ND_CAST:
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+            return scalar_value_type(node->ty) &&
+                   rotatable_cond(node->lhs, budget);
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_ASSIGN:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_COMMA:
+            return scalar_value_type(node->ty) &&
+                   rotatable_cond(node->lhs, budget) &&
+                   rotatable_cond(node->rhs, budget);
+        default:
+            return false;
+    }
+}
+
 // #981: true if `blk` (a real, non-is_decl_group C block scope) declares a
 // VLA anywhere among its *immediate* statements, looking exactly one level
 // through a declaration()-built synthetic wrapper (Node.is_decl_group,
@@ -370,7 +438,10 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 gen_stmt(vm, node_ctl(node)->init);
             }
 
-            Pc loop_start = vm->text_ptr + 1;
+            Pc   loop_start = vm->text_ptr + 1;
+            int  budget     = ROTATE_COND_MAX_NODES;
+            bool rotate     = node_ctl(node)->cond && cg_opt_enabled(vm) &&
+                              rotatable_cond(node_ctl(node)->cond, &budget);
 
             // Condition
             PatchList to_end = {0};
@@ -382,6 +453,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             }
 
             // Body
+            Pc body_start = vm->text_ptr + 1;
             gen_stmt(vm, node_ctl(node)->then);
 
             // Define continue label (jumps to increment)
@@ -395,9 +467,20 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
                 gen_expr(vm, node_ctl(node)->inc, REG_ZERO);
             }
 
-            // Jump back to start
-            emit(vm, JMP);
-            emit_word(vm, loop_start);
+            if (rotate) {
+                // Test again at the bottom and branch back into the body, so an
+                // iteration runs one branch instead of a test and a JMP.
+                reset_temp_regs();
+                int r_cond = alloc_temp_reg();
+                emit_source_location(vm, node_ctl(node)->cond);
+                PatchList to_body = {0};
+                gen_branch(vm, node_ctl(node)->cond, true, r_cond, &to_body);
+                patch_list_resolve(vm, &to_body, body_start);
+                free_temp_reg(r_cond);
+            } else {
+                emit(vm, JMP);
+                emit_word(vm, loop_start);
+            }
 
             // Define break label (jumps past loop)
             if (node_ctl(node)->brk_label) {
