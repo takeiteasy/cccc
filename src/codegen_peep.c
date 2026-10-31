@@ -26,9 +26,8 @@
 // opcode is opaque: it reads every register, ends every fact about register
 // contents and is never removed, so a new opcode is never mis-optimised. A call
 // reads A0-A7 and S0-S7 (and its target register) only; the temporaries are
-// dead across it.
-// TODO: a call reads every argument register, not just the first nargs and the
-// float masks' registers (https://todo.sr.ht/~takeiteasy/cccc/1908).
+// dead across it. Codegen leaves no dead argument-register definition before a
+// call, so reading fewer argument registers would remove nothing.
 //
 // Extension facts and value intervals flow across the block graph (meet =
 // intersection / hull over predecessors, widened on a backward edge); copy
