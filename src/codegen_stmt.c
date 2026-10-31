@@ -235,6 +235,17 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
         case ND_RETURN:
             reset_temp_regs();
+            // A return built outside the parser (reflection, templates) has no
+            // cast to the return type; callers rely on the value being
+            // normalised to it.
+            if (node->lhs && node->lhs->ty && vm->compiler.current_fn &&
+                vm->compiler.current_fn->ty) {
+                Type *rt = vm->compiler.current_fn->ty->return_ty;
+                if (rt && is_integer(rt) && is_integer(node->lhs->ty) &&
+                    !is_wide_bitint(rt) && !is_wide_bitint(node->lhs->ty) &&
+                    !cast_is_repr_noop(rt, node->lhs->ty))
+                    node->lhs = new_cast(vm, node->lhs, rt);
+            }
             // Tail-call optimisation: return f(args) → CALLT instead of
             // CALL+LEV3. Guards: vm->compiler.tail_calls,
             // predicate checks FFI/variadic/nested/etc. After gen_expr,
