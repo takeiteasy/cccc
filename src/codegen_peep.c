@@ -24,7 +24,8 @@
 // retargeting `OP t; MOV x,t`, redundant sign/zero extensions and jumps to the
 // next instruction. Only opcodes listed in op_spec() are understood; any other
 // opcode is opaque: it reads every register, ends every fact about register
-// contents and is never removed, so a new opcode is never mis-optimised. A call
+// contents and is never removed, so a new opcode is never mis-optimised; a new
+// branch must also be known to ctrl_kind, mark_leaders and compact. A call
 // reads A0-A7 and S0-S7 (and its target register) only; the temporaries are
 // dead across it. Codegen leaves no dead argument-register definition before a
 // call, so reading fewer argument registers would remove nothing.
@@ -327,6 +328,8 @@ enum { C_NONE, C_JMP, C_COND, C_EXIT };
 
 static InstrWord operand(Peep *p, const Insn *in);
 
+#define IS_FUSED_BR(op) ((op) >= BEQ3 && (op) <= BUGEI3)
+
 // `JZ3 r0` always jumps and `JNZ3 r0` never does; a decided branch is
 // rewritten to one of them because it keeps its width.
 static int ctrl_kind(Peep *p, const Insn *in) {
@@ -348,7 +351,7 @@ static int ctrl_kind(Peep *p, const Insn *in) {
         case LONGJMP:
             return C_EXIT;
         default:
-            return C_NONE;
+            return IS_FUSED_BR(in->op) ? C_COND : C_NONE;
     }
 }
 
@@ -371,6 +374,11 @@ static void effects(Peep *p, const Insn *in, Eff *e) {
             e->iuse = BIT(r);
         else if (r >= NUM_REGS)
             e->iuse = ALL_REGS;
+        return;
+    }
+    if (IS_FUSED_BR(in->op)) {
+        e->iuse  = BIT(w & 0xFF) | (in->op < BEQI3 ? BIT((w >> 8) & 0xFF) : 0);
+        e->iuse &= ~BIT(REG_ZERO);
         return;
     }
     if (in->op == LEV3 || in->op == CALLT) {
@@ -516,6 +524,9 @@ static bool mark_leaders(Peep *p, PeepMark m) {
                 break;
             case JZ3:
             case JNZ3:
+                ok = mark_target(p, vm->text_seg[in->pc + 2]);
+                break;
+            case BEQ3 ... BUGEI3:
                 ok = mark_target(p, vm->text_seg[in->pc + 2]);
                 break;
             case JMPT: {
@@ -1970,6 +1981,113 @@ static void drop_unreachable(Peep *p) {
     free(stack);
 }
 
+// ---- Fused compare-and-branch ----
+
+// `cmp t, a, b; JZ3/JNZ3 t` with t dead afterwards becomes one branch in the
+// jump's slot (same width, so nothing moves). The fused ops read their
+// registers when they jump, so nothing between may redefine them. Runs once,
+// after the analysis, which only knows the unfused form.
+
+// The immediate of a branch is 24 bits.
+static bool fits_imm24(long long v) {
+    return v >= -(1LL << 23) && v < (1LL << 23);
+}
+
+enum { A_LT, A_LE, A_GT, A_GE, A_EQ, A_NE };
+
+// The branch taken when `cmp`'s result is `when` (nonzero or zero). Fills the
+// operand word; the target stays as it is.
+static int fused_branch(const CmpForm *cf, const Cmp *c, bool when,
+                        InstrWord *word) {
+    if (cf->imm) {
+        if (!fits_imm24(c->imm))
+            return -1;
+        int ra = cf->rel == REL_EQ   ? A_EQ
+                 : cf->rel == REL_NE ? A_NE
+                 : cf->rel == REL_LT ? (cf->swap ? A_GT : A_LT)
+                                     : (cf->swap ? A_GE : A_LE);
+        if (!when)
+            ra = ra == A_LT   ? A_GE
+                 : ra == A_LE ? A_GT
+                 : ra == A_GT ? A_LE
+                 : ra == A_GE ? A_LT
+                 : ra == A_EQ ? A_NE
+                              : A_EQ;
+        *word = (InstrWord)(c->a & 0xFF) |
+                ((InstrWord)((unsigned long long)c->imm & 0xFFFFFF) << 8);
+        static const int sgn[] = {BLTI3, BLEI3, BGTI3, BGEI3, BEQI3, BNEI3};
+        static const int uns[] = {BULTI3, BULEI3, BUGTI3, BUGEI3, BEQI3, BNEI3};
+        return (cf->uns ? uns : sgn)[ra];
+    }
+    int  rel = cf->rel;
+    bool sw  = cf->swap;
+    if (!when) {
+        if (rel == REL_LT || rel == REL_LE) {
+            rel = rel == REL_LT ? REL_LE : REL_LT;
+            sw  = !sw;
+        } else {
+            rel = rel == REL_EQ ? REL_NE : REL_EQ;
+        }
+    }
+    int x = sw ? c->b : c->a, y = sw ? c->a : c->b;
+    *word = (InstrWord)(x & 0xFF) | ((InstrWord)(y & 0xFF) << 8);
+    return rel == REL_EQ   ? BEQ3
+           : rel == REL_NE ? BNE3
+           : rel == REL_LT ? (cf->uns ? BULT3 : BLT3)
+                           : (cf->uns ? BULE3 : BLE3);
+}
+
+static void fuse_block(Peep *p, Block *blk) {
+    int i = blk->last - 1;
+    while (i >= blk->first && p->ins[i].dead)
+        i--;
+    if (i < blk->first || (p->ins[i].op != JZ3 && p->ins[i].op != JNZ3))
+        return;
+    Insn *br = &p->ins[i];
+    int   r  = get_byte(p, br, 0);
+    if (r <= REG_ZERO || r >= NUM_REGS || (blk->iout & BIT(r)))
+        return;
+    uint32_t between = 0; // defined by the instructions after the compare
+    for (int j = i - 1; j >= blk->first; j--) {
+        Insn *d = &p->ins[j];
+        if (d->dead)
+            continue;
+        if (!d->known)
+            return;
+        Eff e;
+        effects(p, d, &e);
+        if (!(e.idef & BIT(r))) {
+            if (e.iuse & BIT(r))
+                return;
+            between |= e.idef;
+            continue;
+        }
+        CmpForm cf;
+        if (!cmp_form(d->op, &cf))
+            return;
+        Cmp c = cmp_of(p, d, &cf);
+        if (c.dst != r || (between & (BIT(c.a) | (c.b >= 0 ? BIT(c.b) : 0))))
+            return;
+        InstrWord word;
+        int       op = fused_branch(&cf, &c, br->op == JNZ3, &word);
+        if (op < 0)
+            return;
+        p->vm->text_seg[br->pc]     = (InstrWord)op;
+        p->vm->text_seg[br->pc + 1] = word;
+        br->op                      = op;
+        d->dead                     = true;
+        p->changed                  = true;
+        return;
+    }
+}
+
+static void fuse_branches(Peep *p) {
+    compute_succs(p);
+    compute_liveness(p);
+    for (int b = 0; b < p->nblocks; b++)
+        fuse_block(p, &p->blocks[b]);
+}
+
 // ---- Compaction ----
 
 // Whether the instruction holding the patch at `loc` is deleted.
@@ -2036,6 +2154,7 @@ static void compact(Peep *p, PeepMark m) {
                 break;
             case JZ3:
             case JNZ3:
+            case BEQ3 ... BUGEI3:
                 vm->text_seg[np + 2] = remap(p, map, vm->text_seg[np + 2]);
                 break;
             case JMPT: {
@@ -2194,7 +2313,8 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
             break;
         any = true;
     }
-    if (any) {
+    fuse_branches(&p);
+    if (any || p.changed) {
         drop_dead_patches(&p, m);
         compact(&p, m);
     }

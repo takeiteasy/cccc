@@ -1,8 +1,8 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: SLTI3
+// CCCC_EXPECT_STDOUT: B(LT|LE|GT|GE)I3
 // CCCC_EXPECT_STDOUT: ADDI3
-// CCCC_REJECT_STDOUT: SLT3
+// CCCC_REJECT_STDOUT: (SLT3|BLT3)
 // CCCC_REJECT_STDOUT: LI3 +[0-9]+ 4294967295 4294967295
 // A compare against a constant and a discarded increment each cost one
 // instruction: no constant is loaded for the compare, and the increment does

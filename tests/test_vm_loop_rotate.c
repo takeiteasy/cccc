@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: : ADDI3 +[0-9]+ 1 0[^:]*: SLT3 +[0-9]+[^:]*: JNZ3
+// CCCC_EXPECT_STDOUT: : ADDI3 +[0-9]+ 1 0[^:]*: B(LT|LE)3
 // A for loop tests its condition once before the first iteration and again at
 // the bottom, which branches back into the body: one branch per iteration. The
 // counter is incremented in place, with no copy between the ADDI3 and the test.

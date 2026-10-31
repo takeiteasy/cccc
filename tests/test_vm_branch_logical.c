@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: : SLT3 +[0-9]+
+// CCCC_EXPECT_STDOUT: : B(LT|LE)3 +[0-9]+
 // CCCC_REJECT_STDOUT: : NOT3
 // CCCC_REJECT_STDOUT: : LI3 +[0-9]+ 1 0[^:]*: JMP
 // CCCC_REJECT_STDOUT: : LI3 +[0-9]+ 0 0[^:]*: JZ3

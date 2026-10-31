@@ -1,7 +1,7 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: S(LT|GT|LE|GE)I3
-// CCCC_REJECT_STDOUT: LI3[^:]*: S(LT|GT|LE|GE|EQ|NE)3
+// CCCC_EXPECT_STDOUT: B(LT|GT|LE|GE)I3
+// CCCC_REJECT_STDOUT: LI3[^:]*: (S|B)(LT|GT|LE|GE|EQ|NE)3
 // A switch's comparisons against case values are immediate compares: the
 // constant is not loaded into a register first.
 int classify(int c) {

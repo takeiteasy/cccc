@@ -781,7 +781,23 @@ extern "C" {
     X(USHRI3, 3)   /* rd = rs1 >> imm, logical, imm in 0..63 */                      \
     X(ANDI3, 3)    /* rd = rs1 & imm */                                              \
     X(FNZ3, 1)     /* rd = (fregs[rs] != 0), NaN is nonzero */                       \
-    X(FNZ3_F32, 1) /* rd = ((float)fregs[rs] != 0) */
+    X(FNZ3_F32, 1) /* rd = ((float)fregs[rs] != 0) */                                \
+    X(BEQ3, 2)     /* branch to target if rs1 == rs2 */                              \
+    X(BNE3, 2)     /* branch to target if rs1 != rs2 */                              \
+    X(BLT3, 2)     /* branch to target if rs1 < rs2, signed */                       \
+    X(BLE3, 2)     /* branch to target if rs1 <= rs2, signed */                      \
+    X(BULT3, 2)    /* branch to target if rs1 < rs2, unsigned */                     \
+    X(BULE3, 2)    /* branch to target if rs1 <= rs2, unsigned */                    \
+    X(BEQI3, 2)    /* branch to target if rs == imm24 */                             \
+    X(BNEI3, 2)    /* branch to target if rs != imm24 */                             \
+    X(BLTI3, 2)    /* branch to target if rs < imm24, signed */                      \
+    X(BLEI3, 2)    /* branch to target if rs <= imm24, signed */                     \
+    X(BGTI3, 2)    /* branch to target if rs > imm24, signed */                      \
+    X(BGEI3, 2)    /* branch to target if rs >= imm24, signed */                     \
+    X(BULTI3, 2)   /* branch to target if rs < imm24, unsigned */                    \
+    X(BULEI3, 2)   /* branch to target if rs <= imm24, unsigned */                   \
+    X(BUGTI3, 2)   /* branch to target if rs > imm24, unsigned */                    \
+    X(BUGEI3, 2)   /* branch to target if rs >= imm24, unsigned */
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

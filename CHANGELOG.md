@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: VM compare-and-branch opcodes (`BEQ3`, `BLT3`, `BGEI3`, ... 16 in all): an integer compare tested by a branch is one instruction instead of a compare and a `JZ3` / `JNZ3`.
 - Fixed: `--vm-profile` printed no report when the program called `exit()`; the report is written after the `atexit` handlers and destructors run (`_Exit()`, `quick_exit()` and `abort()` still end the run without one).
 - Changed: the VM bytecode clean-up folds a comparison whose operand intervals decide it, folds or removes a branch on a known value, and deletes code no path reaches.
 - Fixed: a `return` built by a macro or template (`@from_string` on an enum returning `-1LL`) is converted to the function's integer return type, so callers see a value normalised to it.

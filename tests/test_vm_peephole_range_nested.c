@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: SLT3
+// CCCC_EXPECT_STDOUT: B(LT|LE)3
 // CCCC_REJECT_STDOUT: ADDI3[^:]*: SX4
 // Counters of nested loops bounded by `<` stay in range after `++`, so neither
 // increment needs a sign extension.

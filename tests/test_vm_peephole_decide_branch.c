@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: SLTI3
+// CCCC_EXPECT_STDOUT: B(LT|GE)I3
 // CCCC_REJECT_STDOUT: CALL[^=]*CALL[^=]*CALL
 // A test inside `a < 5` that the range of `a` decides is folded, and the arm
 // that cannot run -- with its call -- is gone.

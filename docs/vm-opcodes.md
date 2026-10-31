@@ -19,6 +19,7 @@ Opcodes are grouped by function.  Operands are shown as `rd = destination`, `rs 
 | `JMPI` | 1 | Indirect jump through register. Only emitted for computed goto (`goto *expr`); a register that resolves to a dynamic-symbol or FFI token target is not a supported use of computed goto and is a runtime error |
 | `JZ3` | 2 | Branch if `regs[rs] == 0` |
 | `JNZ3` | 2 | Branch if `regs[rs] != 0` |
+| `BEQ3` … `BUGEI3` | 2 | Compare and branch; see [Compare and Branch](#compare-and-branch) |
 
 ### Function Frame
 
@@ -96,6 +97,21 @@ Same format as `ADDI3` (so are `MULI3`, `SHLI3`, `SHRI3`, `USHRI3` and `ANDI3`; 
 | `ULEI3` | `rd = (rs1 <= imm)`, unsigned 64-bit |
 | `UGTI3` | `rd = (rs1 >  imm)`, unsigned 64-bit |
 | `UGEI3` | `rd = (rs1 >= imm)`, unsigned 64-bit |
+
+### Compare and Branch
+
+`[op][operands][target]`, the width of `JZ3`. The branch is taken when the relation holds. The clean-up pass writes one in place of an integer compare and the `JZ3` / `JNZ3` that tests it when nothing else reads the compare's result, and not under a flag in `CCCC_FUSION_UNSAFE_FLAGS`.
+
+| Opcode | Taken when |
+|--------|------------|
+| `BEQ3`, `BNE3` | `rs1 == rs2`, `rs1 != rs2` |
+| `BLT3`, `BLE3` | `rs1 < rs2`, `rs1 <= rs2`, signed |
+| `BULT3`, `BULE3` | `rs1 < rs2`, `rs1 <= rs2`, unsigned 64-bit |
+| `BEQI3`, `BNEI3` | `rs == imm`, `rs != imm` |
+| `BLTI3`, `BLEI3`, `BGTI3`, `BGEI3` | `rs <`, `<=`, `>`, `>=` `imm`, signed |
+| `BULTI3`, `BULEI3`, `BUGTI3`, `BUGEI3` | `rs <`, `<=`, `>`, `>=` `imm`, unsigned 64-bit |
+
+The register forms are `[op][rs1|rs2][target]`; `a > b` is `BLT3 b, a`. The immediate forms are `[op][rs | imm24 << 8][target]`: the constant is a signed 24-bit value, sign-extended to 64 bits (also for the unsigned forms), and a comparison against a larger constant stays a compare and a `JZ3`.
 
 ### Wide _BitInt Operations (N > 64)
 

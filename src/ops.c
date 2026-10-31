@@ -2237,7 +2237,7 @@ static inline int op_R2FR_F32_fn(VirtualMachine *vm) {
 
 static inline int op_JZ3_fn(VirtualMachine *vm) {
     // Branch if zero: if (regs[rs] == 0) pc = target
-    // Format: [JZ3] [rs:8|unused:56] [target:64]
+    // Format: [JZ3] [rs:8|unused:24] [target:32]
     long long operands = cc_read_word(vm);
     int       rs;
     DECODE_R(operands, rs);
@@ -2250,7 +2250,7 @@ static inline int op_JZ3_fn(VirtualMachine *vm) {
 
 static inline int op_JNZ3_fn(VirtualMachine *vm) {
     // Branch if non-zero: if (regs[rs] != 0) pc = target
-    // Format: [JNZ3] [rs:8|unused:56] [target:64]
+    // Format: [JNZ3] [rs:8|unused:24] [target:32]
     long long operands = cc_read_word(vm);
     int       rs;
     DECODE_R(operands, rs);
@@ -6279,6 +6279,47 @@ DEFINE_CMP_IMM_OP(ULTI3, unsigned long long, <)
 DEFINE_CMP_IMM_OP(ULEI3, unsigned long long, <=)
 DEFINE_CMP_IMM_OP(UGTI3, unsigned long long, >)
 DEFINE_CMP_IMM_OP(UGEI3, unsigned long long, >=)
+
+// ========== Compare and branch ==========
+
+#define DEFINE_BR_OP(NAME, TYPE, OPER)                                         \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rs1, rs2;                                                    \
+        DECODE_RR(operands, rs1, rs2);                                         \
+        Pc target = cc_read_word(vm);                                          \
+        if ((TYPE)vm->regs[rs1] OPER(TYPE) vm->regs[rs2])                      \
+            vm->pc = target;                                                   \
+        return 0;                                                              \
+    }
+
+// [op][rs:8|imm24 signed][target]
+#define DEFINE_BR_IMM_OP(NAME, TYPE, OPER)                                     \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        int operands = (int)cc_read_word(vm);                                  \
+        int rs       = operands & 0xFF;                                        \
+        Pc  target   = cc_read_word(vm);                                       \
+        if ((TYPE)vm->regs[rs] OPER(TYPE)(long long)(operands >> 8))           \
+            vm->pc = target;                                                   \
+        return 0;                                                              \
+    }
+
+DEFINE_BR_OP(BEQ3, long long, ==)
+DEFINE_BR_OP(BNE3, long long, !=)
+DEFINE_BR_OP(BLT3, long long, <)
+DEFINE_BR_OP(BLE3, long long, <=)
+DEFINE_BR_OP(BULT3, unsigned long long, <)
+DEFINE_BR_OP(BULE3, unsigned long long, <=)
+DEFINE_BR_IMM_OP(BEQI3, long long, ==)
+DEFINE_BR_IMM_OP(BNEI3, long long, !=)
+DEFINE_BR_IMM_OP(BLTI3, long long, <)
+DEFINE_BR_IMM_OP(BLEI3, long long, <=)
+DEFINE_BR_IMM_OP(BGTI3, long long, >)
+DEFINE_BR_IMM_OP(BGEI3, long long, >=)
+DEFINE_BR_IMM_OP(BULTI3, unsigned long long, <)
+DEFINE_BR_IMM_OP(BULEI3, unsigned long long, <=)
+DEFINE_BR_IMM_OP(BUGTI3, unsigned long long, >)
+DEFINE_BR_IMM_OP(BUGEI3, unsigned long long, >=)
 
 // ========== Shift and AND with an immediate ==========
 
