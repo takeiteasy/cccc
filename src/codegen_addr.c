@@ -680,12 +680,9 @@ void emit_static_chain_var_addr(VirtualMachine *vm, Obj *current_fn,
     emit_addi3(vm, dest_reg, dest_reg, var->offset * 8);
     int align_log = local_align_log(var);
     if (align_log) {
-        long long align  = 8LL << align_log;
-        int       r_mask = alloc_temp_reg();
+        long long align = 8LL << align_log;
         emit_addi3(vm, dest_reg, dest_reg, align - 1);
-        emit_li3(vm, r_mask, -align);
-        emit_rrr(vm, AND3, dest_reg, dest_reg, r_mask);
-        free_temp_reg(r_mask);
+        emit_rri(vm, ANDI3, dest_reg, dest_reg, -align);
     }
 }
 

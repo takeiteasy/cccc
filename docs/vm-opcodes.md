@@ -59,6 +59,10 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `SHR3` | Arithmetic right shift (signed) |
 | `USHR3` | Logical right shift (unsigned) |
 | `ADDI3` | `rd = rs1 + immediate` (RI format) |
+| `SHLI3` | `rd = rs1 << immediate`, count 0-63 (RI format) |
+| `SHRI3` | `rd = rs1 >> immediate`, arithmetic, count 0-63 (RI format) |
+| `USHRI3` | `rd = rs1 >> immediate`, logical, count 0-63 (RI format) |
+| `ANDI3` | `rd = rs1 & immediate` (RI format) |
 | `NEG3` | `rd = -rs1` |
 | `NOT3` | `rd = !rs1` (logical) |
 | `BNOT3` | `rd = ~rs1` (bitwise) |
@@ -78,7 +82,7 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 
 ### Comparisons (Immediate)
 
-Same format as `ADDI3`: `[op][rd|rs1][imm64]`. Codegen emits them when one side of a comparison is an integer constant, and not under a flag in `CCCC_FUSION_UNSAFE_FLAGS`. The `G` forms are the constant on the left: `5 < x` is `SGTI3 x, 5`.
+Same format as `ADDI3` (so are `MULI3`, `SHLI3`, `SHRI3`, `USHRI3` and `ANDI3`; codegen emits the shifts only for a count below the type's width): `[op][rd|rs1][imm64]`. Codegen emits them when one side of a comparison is an integer constant, and not under a flag in `CCCC_FUSION_UNSAFE_FLAGS`. The `G` forms are the constant on the left: `5 < x` is `SGTI3 x, 5`.
 
 | Opcode | Description |
 |--------|-------------|

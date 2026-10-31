@@ -6261,6 +6261,27 @@ DEFINE_CMP_IMM_OP(ULEI3, unsigned long long, <=)
 DEFINE_CMP_IMM_OP(UGTI3, unsigned long long, >)
 DEFINE_CMP_IMM_OP(UGEI3, unsigned long long, >=)
 
+// ========== Shift and AND with an immediate ==========
+
+#define DEFINE_BIT_IMM_OP(NAME, EXPR)                                          \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1;                                                     \
+        DECODE_RR(operands, rd, rs1);                                          \
+        long long          imm = cc_read_i64(vm);                              \
+        long long          a   = vm->regs[rs1];                                \
+        unsigned long long ua  = (unsigned long long)a;                        \
+        (void)ua;                                                              \
+        if (rd != REG_ZERO)                                                    \
+            vm->regs[rd] = (long long)(EXPR);                                  \
+        return 0;                                                              \
+    }
+
+DEFINE_BIT_IMM_OP(SHLI3, ua << imm)
+DEFINE_BIT_IMM_OP(SHRI3, a >> imm)
+DEFINE_BIT_IMM_OP(USHRI3, ua >> imm)
+DEFINE_BIT_IMM_OP(ANDI3, a &imm)
+
 // Comptime code only dereferences VM memory, so host data a builtin returns
 // is handed back as a VM-heap copy.
 static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,

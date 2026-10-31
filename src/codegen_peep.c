@@ -37,8 +37,9 @@
 // computed goto is a successor of its JMPI.
 //
 // An operation whose operands all hold a single known value is replaced by an
-// instruction of the same width: a 4-word one (ADDI3, the compares against an
-// immediate, ...) by `LI3 rd, result`, a 2-word one only when the result is 0
+// instruction of the same width: a 4-word one (ADDI3, the shifts and AND with
+// an immediate, the compares against an immediate, ...) by `LI3 rd, result`, a
+// 2-word one only when the result is 0
 // (`MOV3 rd, r0`). An operand that is the identity (`x + 0`, `x * 1`, `x & -1`)
 // makes it a copy of the other operand, and a `MULADDI3` with a known index an
 // `ADDI3`. A register loaded with 0 is read as the zero register afterwards.
@@ -106,6 +107,10 @@ static bool op_spec(int op, OpSpec *s) {
         case ZX4:
         case ADDI3:
         case MULI3:
+        case SHLI3:
+        case SHRI3:
+        case USHRI3:
+        case ANDI3:
         case SEQI3:
         case SNEI3:
         case SLTI3:
@@ -957,6 +962,19 @@ static bool fold_point(Peep *p, const Insn *in, int op, const Facts *f,
             imm  = cc_read_i64_at(p->vm, in->pc + 2);
             *out = (long long)(ua * (unsigned long long)imm);
             return true;
+        case SHLI3:
+        case SHRI3:
+        case USHRI3:
+            imm = cc_read_i64_at(p->vm, in->pc + 2);
+            if (imm < 0 || imm > 63)
+                return false;
+            *out = op == SHLI3   ? (long long)(ua << imm)
+                   : op == SHRI3 ? a >> imm
+                                 : (long long)(ua >> imm);
+            return true;
+        case ANDI3:
+            *out = a & cc_read_i64_at(p->vm, in->pc + 2);
+            return true;
         case SEQI3:
         case SNEI3:
         case SLTI3:
@@ -1078,6 +1096,30 @@ static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
             long long imm = cc_read_i64_at(p->vm, in->pc + 2);
             return !__builtin_add_overflow(f->lo[rs1], imm, lo) &&
                    !__builtin_add_overflow(f->hi[rs1], imm, hi);
+        }
+        case ANDI3: {
+            long long mask = cc_read_i64_at(p->vm, in->pc + 2);
+            if (mask < 0)
+                return false;
+            *lo = 0;
+            *hi = mask;
+            return true;
+        }
+        case SHRI3: {
+            long long k = cc_read_i64_at(p->vm, in->pc + 2);
+            if (k < 0 || k > 63)
+                return false;
+            *lo = f->lo[rs1] >> k;
+            *hi = f->hi[rs1] >> k;
+            return true;
+        }
+        case USHRI3: {
+            long long k = cc_read_i64_at(p->vm, in->pc + 2);
+            if (k < 1 || k > 63)
+                return false;
+            *lo = 0;
+            *hi = (long long)(ULLONG_MAX >> k);
+            return true;
         }
         case ADD3:
             return !__builtin_add_overflow(f->lo[rs1], f->lo[rs2], lo) &&
@@ -1385,6 +1427,10 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
         else if (op == AND3 || op == OR3 || op == XOR3)
             ext = ext_bitwise(op, f->ext[get_byte(p, in, 1)],
                               f->ext[get_byte(p, in, 2)]);
+        else if (op == ANDI3)
+            ext = ext_bitwise(AND3, f->ext[get_byte(p, in, 1)],
+                              ext_of_range(cc_read_i64_at(vm, in->pc + 2),
+                                           cc_read_i64_at(vm, in->pc + 2)));
         else if (op == LI3)
             ext = ext_of_range(cc_read_i64_at(vm, in->pc + 2),
                                cc_read_i64_at(vm, in->pc + 2));

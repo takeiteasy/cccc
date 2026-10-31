@@ -993,11 +993,8 @@ void emit_bitint_trunc(VirtualMachine *vm, Type *ty, int reg) {
     if (ty->bit_width >= 64)
         return;
     int shift = 64 - ty->bit_width;
-    int tmp   = alloc_temp_reg();
-    emit_li3(vm, tmp, shift);
-    emit_rrr(vm, SHL3, reg, reg, tmp);
-    emit_rrr(vm, ty->is_unsigned ? USHR3 : SHR3, reg, reg, tmp);
-    free_temp_reg(tmp);
+    emit_rri(vm, SHLI3, reg, reg, shift);
+    emit_rri(vm, ty->is_unsigned ? USHRI3 : SHRI3, reg, reg, shift);
 }
 
 // Wrap a 32-bit int/enum arithmetic result to its width, so the 64-bit
@@ -1205,6 +1202,8 @@ static bool const_operand(Node *node, long long *value) {
     return true;
 }
 
+static bool int_constant(Node *node, long long *value);
+
 static bool indexed_type_ok(Type *ty) {
     if (!ty || is_wide_bitint(ty) || is_decimal(ty))
         return false;
@@ -1381,9 +1380,12 @@ static bool gen_muladd_int(VirtualMachine *vm, Node *add, int dest_reg) {
     Node     *addend = mul_r ? add->lhs : add->rhs;
     Node     *x, *y = NULL;
     long long imm;
-    if (const_operand(mul->rhs, &imm)) {
+    // Pointer arithmetic keeps the small-constant rule.
+    bool (*constant)(Node *, long long *) =
+        add->ty->base ? const_operand : int_constant;
+    if (constant(mul->rhs, &imm)) {
         x = mul->lhs;
-    } else if (const_operand(mul->lhs, &imm)) {
+    } else if (constant(mul->lhs, &imm)) {
         x = mul->rhs;
     } else {
         x = mul->lhs;
@@ -1457,9 +1459,9 @@ static bool gen_mul_imm(VirtualMachine *vm, Node *mul, int dest_reg) {
         return false;
     long long imm;
     Node     *x;
-    if (const_operand(mul->rhs, &imm))
+    if (int_constant(mul->rhs, &imm))
         x = mul->lhs;
-    else if (const_operand(mul->lhs, &imm))
+    else if (int_constant(mul->lhs, &imm))
         x = mul->rhs;
     else
         return false;
@@ -1790,6 +1792,22 @@ bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg) {
                          : k);
             emit_int32_wrap(vm, node->ty, dest_reg);
             return true;
+        case ND_SHL:
+        case ND_SHR:
+            if (const_on_left || k < 0 || k >= node->ty->size * 8)
+                return false;
+            gen_expr(vm, x, dest_reg);
+            emit_rri(vm,
+                     node->kind == ND_SHL    ? SHLI3
+                     : node->ty->is_unsigned ? USHRI3
+                                             : SHRI3,
+                     dest_reg, dest_reg, k);
+            if (node->kind == ND_SHL)
+                emit_int32_wrap(vm, node->ty, dest_reg);
+            return true;
+        case ND_BITAND:
+            op = ANDI3;
+            break;
         case ND_EQ:
             op = SEQI3;
             break;
