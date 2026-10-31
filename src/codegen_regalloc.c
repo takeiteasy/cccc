@@ -504,8 +504,28 @@ typedef struct {
 } PromoCand;
 
 typedef struct {
+    int start, end;
+} PromoRegion;
+
+// The body is walked twice in the same order, so a node has the same preorder
+// index `ord` in both walks. The first walk finds the loops formed by gotos,
+// the second counts uses.
+typedef struct {
     PromoCand *cands;
     int        ncands;
+    bool       scoring;
+    int        ord;
+
+    // First walk: backward-goto regions and the span of the computed-goto
+    // labels.
+    HashMap      labels; // unique_label -> label's ord + 1
+    PromoRegion *regions;
+    int          nregions, cap_regions;
+    int          first_label, last_label, last_goto_expr;
+
+    // Second walk: loop depth the gotos add at each ord, NULL when there are
+    // none.
+    int *goto_depth;
 } PromoScan;
 
 int promoted_local_index(VirtualMachine *vm, Obj *var) {
@@ -609,46 +629,87 @@ static void promo_escape_all(PromoScan *s, Node *node) {
     }
 }
 
+static void promo_score_node(PromoScan *s, Node *node, int loop_depth) {
+    if (node->kind == ND_VAR && node->var) {
+        PromoCand *c = promo_find(s, node->var);
+        if (c) {
+            c->score += 1 + loop_depth * 4;
+            if (loop_depth > 0)
+                c->in_loop = true;
+        }
+    }
+
+    if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
+        node->lhs->var) {
+        PromoCand *c = promo_find(s, node->lhs->var);
+        if (c)
+            c->escapes = true;
+    }
+
+    // Only ND_VAR reads and writes a variable through its register; any
+    // other node naming one (ND_MEMZERO, ND_VLA_PTR, ...) uses its slot.
+    Obj *named[] = {node->kind != ND_VAR ? node->var : NULL,
+                    node_misc(node)->ret_buffer, node_atom(node)->atomic_addr,
+                    node_misc(node)->block_desc_var};
+    for (size_t i = 0; i < sizeof named / sizeof *named; i++) {
+        PromoCand *c = named[i] ? promo_find(s, named[i]) : NULL;
+        if (c)
+            c->escapes = true;
+    }
+
+    // Locals reached through these are read by address.
+    if (node->kind == ND_ASM) {
+        for (Node *a = node->args; a; a = a->next)
+            promo_escape_all(s, a);
+    }
+    if (node_misc(node)->va_ap || node_misc(node)->va_src) {
+        promo_escape_all(s, node_misc(node)->va_ap);
+        promo_escape_all(s, node_misc(node)->va_src);
+    }
+}
+
+static void promo_add_region(PromoScan *s, int start, int end) {
+    if (s->nregions == s->cap_regions) {
+        s->cap_regions = s->cap_regions ? s->cap_regions * 2 : 8;
+        s->regions =
+            realloc(s->regions, (size_t)s->cap_regions * sizeof *s->regions);
+        if (!s->regions)
+            error("out of memory");
+    }
+    s->regions[s->nregions++] = (PromoRegion){start, end};
+}
+
+// A goto to a label already seen closes a loop from that label to the goto.
+static void promo_note_goto_loop(PromoScan *s, Node *node, int ord) {
+    const char *label = node_ctl(node)->unique_label;
+    if (!label)
+        return;
+    if (node->kind == ND_LABEL) {
+        if (!hashmap_get(&s->labels, label))
+            hashmap_put_borrowed(&s->labels, label,
+                                 (void *)(intptr_t)(ord + 1));
+        if (s->first_label < 0)
+            s->first_label = ord;
+        s->last_label = ord;
+    } else {
+        intptr_t target = (intptr_t)hashmap_get(&s->labels, label);
+        if (target)
+            promo_add_region(s, (int)target - 1, ord);
+    }
+}
+
 // Walks every node reachable from `node`. The `next` chain is iterated, not
 // recursed on, so the walk stays linear in the number of statements.
 static void promo_scan_node(PromoScan *s, Node *node, int loop_depth) {
     for (; node; node = node->next) {
-        if (node->kind == ND_VAR && node->var) {
-            PromoCand *c = promo_find(s, node->var);
-            if (c) {
-                c->score += 1 + loop_depth * 4;
-                if (loop_depth > 0)
-                    c->in_loop = true;
-            }
-        }
-
-        if (node->kind == ND_ADDR && node->lhs && node->lhs->kind == ND_VAR &&
-            node->lhs->var) {
-            PromoCand *c = promo_find(s, node->lhs->var);
-            if (c)
-                c->escapes = true;
-        }
-
-        // Only ND_VAR reads and writes a variable through its register; any
-        // other node naming one (ND_MEMZERO, ND_VLA_PTR, ...) uses its slot.
-        Obj *named[] = {node->kind != ND_VAR ? node->var : NULL,
-                        node_misc(node)->ret_buffer,
-                        node_atom(node)->atomic_addr,
-                        node_misc(node)->block_desc_var};
-        for (size_t i = 0; i < sizeof named / sizeof *named; i++) {
-            PromoCand *c = named[i] ? promo_find(s, named[i]) : NULL;
-            if (c)
-                c->escapes = true;
-        }
-
-        // Locals reached through these are read by address.
-        if (node->kind == ND_ASM) {
-            for (Node *a = node->args; a; a = a->next)
-                promo_escape_all(s, a);
-        }
-        if (node_misc(node)->va_ap || node_misc(node)->va_src) {
-            promo_escape_all(s, node_misc(node)->va_ap);
-            promo_escape_all(s, node_misc(node)->va_src);
+        int ord = s->ord++;
+        if (s->scoring) {
+            promo_score_node(
+                s, node, loop_depth + (s->goto_depth ? s->goto_depth[ord] : 0));
+        } else if (node->kind == ND_LABEL || node->kind == ND_GOTO) {
+            promo_note_goto_loop(s, node, ord);
+        } else if (node->kind == ND_GOTO_EXPR) {
+            s->last_goto_expr = ord;
         }
 
         int d = loop_depth + (node->kind == ND_FOR || node->kind == ND_DO);
@@ -669,6 +730,34 @@ static void promo_scan_node(PromoScan *s, Node *node, int loop_depth) {
         for (Node *a = node->args; a; a = a->next)
             promo_scan_node(s, a, d);
     }
+}
+
+// Counts the loops formed by gotos as loop depth for scoring: each backward
+// goto, and in a function with a computed goto the span of all its labels
+// (the `&&label` refs often sit in a static initialiser outside the body).
+static void promo_find_goto_loops(PromoScan *s, Node *body) {
+    s->first_label = s->last_label = s->last_goto_expr = -1;
+    promo_scan_node(s, body, 0);
+    int nodes = s->ord;
+    if (s->last_goto_expr >= 0 && s->first_label >= 0)
+        promo_add_region(s, s->first_label,
+                         s->last_goto_expr > s->last_label ? s->last_goto_expr
+                                                           : s->last_label);
+    if (s->nregions) {
+        s->goto_depth = calloc((size_t)nodes + 1, sizeof(int));
+        if (!s->goto_depth)
+            error("out of memory");
+        for (int i = 0; i < s->nregions; i++) {
+            s->goto_depth[s->regions[i].start]++;
+            s->goto_depth[s->regions[i].end + 1]--;
+        }
+        for (int i = 1; i < nodes; i++)
+            s->goto_depth[i] += s->goto_depth[i - 1];
+    }
+    hashmap_deinit_borrowed(&s->labels);
+    free(s->regions);
+    s->scoring = true;
+    s->ord     = 0;
 }
 
 static int promo_cmp(const void *a, const void *b) {
@@ -745,6 +834,7 @@ int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
         if (promotion_candidate_ok(vm, fn, var))
             s.cands[idx++].var = var;
 
+    promo_find_goto_loops(&s, obj_fn(fn)->body);
     promo_scan_node(&s, obj_fn(fn)->body, 0);
 
     qsort(s.cands, (size_t)n, sizeof(PromoCand), promo_cmp);
@@ -776,6 +866,7 @@ int prepare_local_promotion(VirtualMachine *vm, Obj *fn, int base_stack_size) {
         }
     }
 
+    free(s.goto_depth);
     free(s.cands);
     return slots;
 }

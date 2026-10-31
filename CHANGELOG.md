@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: loop locals are promoted to registers in a function whose loop is a backward `goto` or a computed-goto dispatcher (`dispatch.c` runs ~25% faster).
 - Changed: the VM bytecode clean-up replaces an operation on known constants by its result when it fits in place, turns `x + 0`, `x * 1` and `x & -1` into copies, a constant-index `MULADDI3` into `ADDI3`, and reads a register loaded with 0 as the zero register.
 - Added: build API `AddSystemInclude`, `AddFrameworkPath` and `UseSystemHeaders` (`CcccExecutable` and `CcccObject` only).
 - Added: the `ouroboros` build target builds cccc with `cccc -c=native` and runs the result's `--version`.

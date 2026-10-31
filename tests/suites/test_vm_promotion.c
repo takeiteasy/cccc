@@ -272,3 +272,91 @@ again:
     AssertEq(n, 10);
     AssertEq(m, 10);
 }
+
+static long pm_mix(long v) {
+    long a = v, b = 7;
+    for (int i = 0; i < 3; i++) {
+        a  = a * 5 + b;
+        b ^= a;
+    }
+    return a & 0xff;
+}
+
+static long pm_goto_calls(long n) {
+    long sum = 0, i = 0;
+again:
+    sum += pm_mix(i);
+    if (++i < n)
+        goto again;
+    return sum;
+}
+
+[[cccc::test]]
+void test_goto_loop_survives_calls(void) {
+    long expect = 0;
+    for (long i = 0; i < 20; i++)
+        expect += pm_mix(i);
+    AssertEq(pm_goto_calls(20), expect);
+}
+
+static int pm_goto_in_for(int rows) {
+    int total = 0;
+    for (int r = 0; r < rows; r++) {
+        int c = 0;
+    col:
+        total += r * 10 + c;
+        if (++c < 3)
+            goto col;
+    }
+    return total;
+}
+
+[[cccc::test]]
+void test_goto_loop_nested_in_for(void) {
+    AssertEq(pm_goto_in_for(4),
+             0 + 1 + 2 + 10 + 11 + 12 + 20 + 21 + 22 + 30 + 31 + 32);
+}
+
+static long pm_dispatch(const unsigned char *code) {
+    static void *labels[] = {&&op_inc, &&op_dbl, &&op_neg, &&op_end};
+    long         acc      = 1;
+    int          steps    = 0;
+    goto        *labels[*code++];
+op_inc:
+    acc += 3;
+    steps++;
+    goto *labels[*code++];
+op_dbl:
+    acc *= 2;
+    steps++;
+    goto *labels[*code++];
+op_neg:
+    acc = -acc;
+    steps++;
+    goto *labels[*code++];
+op_end:
+    return acc * 100 + steps;
+}
+
+[[cccc::test]]
+void test_computed_goto_dispatch_keeps_state(void) {
+    static const unsigned char prog[] = {0, 1, 2, 0, 3};
+    AssertEq(pm_dispatch(prog), (-((1 + 3) * 2) + 3) * 100 + 4);
+}
+
+static int pm_forward_goto(int n) {
+    int acc = 0;
+    for (int i = 0; i < n; i++) {
+        if (i % 2)
+            goto skip;
+        acc += i;
+    skip:
+        acc++;
+    }
+    return acc;
+}
+
+[[cccc::test]]
+void test_forward_goto_unchanged(void) {
+    AssertEq(pm_forward_goto(6), (0 + 2 + 4) + 6);
+}
