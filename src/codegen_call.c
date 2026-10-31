@@ -236,15 +236,26 @@ static long long return_repr_key(Type *ty) {
             return 20 + (ty->is_unsigned ? 1 : 0);
         case TY_INT:
             return 30 + (ty->is_unsigned ? 1 : 0);
+        case TY_ENUM:
+            // A 1-, 2- or 4-byte enum narrows like the integer of its size.
+            switch (ty->size) {
+                case 1:
+                    return 10 + (ty->is_unsigned ? 1 : 0);
+                case 2:
+                    return 20 + (ty->is_unsigned ? 1 : 0);
+                case 4:
+                    return 30 + (ty->is_unsigned ? 1 : 0);
+                default:
+                    return 0;
+            }
         case TY_BITINT:
             // Narrow (<=64-bit) _BitInt only -- is_wide_bitint already handled
             // above. Key on width/signedness: emit_bitint_trunc's mask depends
             // on both.
             return 1000 + ty->bit_width * 2 + (ty->is_unsigned ? 1 : 0);
         default:
-            // TY_LONG, TY_PTR, TY_ENUM, TY_VOID, TY_NULLPTR_T: gen_expr's
-            // ND_CAST case emits nothing for these -- one shared 64-bit,
-            // no-conversion key.
+            // TY_LONG, TY_PTR, TY_VOID, TY_NULLPTR_T: gen_expr's ND_CAST case
+            // emits nothing for these -- one shared 64-bit, no-conversion key.
             return 0;
     }
 }
