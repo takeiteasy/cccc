@@ -863,6 +863,8 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_node(vm, ND_NULL_EXPR, tok);
         }
 
+        // TODO: begin/end are int, so a case label beyond 32 bits is truncated
+        // (https://todo.sr.ht/~takeiteasy/cccc/1905).
         Node *node                  = new_node(vm, ND_CASE, tok);
         Type *begin_layout_ty       = NULL;
         LayoutOp begin_layout_is_align = LAYOUT_SIZEOF;

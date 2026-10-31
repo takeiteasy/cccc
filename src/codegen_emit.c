@@ -1773,7 +1773,8 @@ static bool plain_int_operands(Node *node) {
 }
 
 // `x + K`, `K + x`, `x - K` as one ADDI3, and a compare against a constant as
-// one *I3 opcode, instead of loading the constant into a register first.
+// one *I3 opcode, instead of loading the constant into a register first. K is
+// any constant expression.
 bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg) {
     if (dest_reg == REG_ZERO || !cg_opt_enabled(vm) || !node->ty ||
         !plain_int_operands(node))
@@ -1781,16 +1782,16 @@ bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg) {
     long long k;
     Node     *x;
     bool      const_on_left;
-    if (int_constant(node->rhs, &k)) {
+    if (fold_int(node->rhs, &k)) {
         x             = node->lhs;
         const_on_left = false;
-    } else if (int_constant(node->lhs, &k)) {
+    } else if (fold_int(node->lhs, &k)) {
         x             = node->rhs;
         const_on_left = true;
     } else {
         return false;
     }
-    if (int_constant(x, &(long long){0}))
+    if (fold_int(x, &(long long){0}))
         return false;
 
     int op;

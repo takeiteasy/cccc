@@ -24,7 +24,11 @@
 // retargeting `OP t; MOV x,t`, redundant sign/zero extensions and jumps to the
 // next instruction. Only opcodes listed in op_spec() are understood; any other
 // opcode is opaque: it reads every register, ends every fact about register
-// contents and is never removed, so a new opcode is never mis-optimised.
+// contents and is never removed, so a new opcode is never mis-optimised. A call
+// reads A0-A7 and S0-S7 (and its target register) only; the temporaries are
+// dead across it.
+// TODO: a call reads every argument register, not just the first nargs and the
+// float masks' registers (https://todo.sr.ht/~takeiteasy/cccc/1908).
 //
 // Extension facts and value intervals flow across the block graph (meet =
 // intersection / hull over predecessors, widened on a backward edge); copy
@@ -46,8 +50,10 @@
 // makes it a copy of the other operand, and a `MULADDI3` with a known index an
 // `ADDI3`. A register loaded with 0 is read as the zero register afterwards.
 //
-// TODO: a 2-word operation with a non-zero constant result is kept, and so is
-// its LI3 operand (https://todo.sr.ht/~takeiteasy/cccc/1894).
+// A 2-word operation with a constant operand loaded by an `LI3` that nothing
+// else reads is merged into the LI3's slot: `LI3 t, c; OP d, a, t` becomes
+// `OPI d, a, c` where an immediate form exists, and `LI3 d, result` when the
+// result is known.
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -285,6 +291,8 @@ typedef struct {
     bool    known;   // op_spec() applies and every register byte is in range
     uint8_t src_ext; // an extension's source facts, set by the forward pass
     uint8_t ret_ext; // a CALL's result satisfies these extensions
+    bool      fold_ok; // the forward pass knows the result: fold_v
+    long long fold_v;
     OpSpec  spec;
 } Insn;
 
@@ -338,6 +346,10 @@ static int ctrl_kind(const Insn *in) {
     }
 }
 
+static bool is_call(int op) {
+    return op == CALL || op == CALLI || op == CALLN || op == CALLF;
+}
+
 static InstrWord operand(Peep *p, const Insn *in) {
     return p->vm->text_seg[in->pc + 1];
 }
@@ -361,6 +373,17 @@ static void effects(Peep *p, const Insn *in, Eff *e) {
     }
     if (in->op == JMPT) {
         e->iuse = BIT(REG_A0);
+        return;
+    }
+    if (is_call(in->op)) {
+        e->iuse = e->fuse = EXIT_LIVE;
+        if (in->op == CALLI || in->op == CALLN) {
+            int r = w & 0xFF;
+            if (r >= NUM_REGS)
+                e->iuse = ALL_REGS;
+            else if (r != REG_ZERO)
+                e->iuse |= BIT(r);
+        }
         return;
     }
     if (in->op == JMPI) {
@@ -797,10 +820,6 @@ static void facts_after_call(const Peep *p, Facts *f) {
         f->lo[r]  = before.lo[r];
         f->hi[r]  = before.hi[r];
     }
-}
-
-static bool is_call(int op) {
-    return op == CALL || op == CALLI || op == CALLN || op == CALLF;
 }
 
 static void kill_int(Facts *f, int d) {
@@ -1296,6 +1315,8 @@ static bool fold_in_place(Peep *p, Insn *in, const Facts *f) {
         } else if (v == 0) {
             make_mov(p, in, REG_ZERO);
         } else {
+            in->fold_ok = true;
+            in->fold_v  = v;
             return false;
         }
         p->changed = true;
@@ -1427,8 +1448,11 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
             }
         }
 
-        if (rewrite && fold_in_place(p, in, f))
-            op = in->op;
+        if (rewrite) {
+            in->fold_ok = false;
+            if (fold_in_place(p, in, f))
+                op = in->op;
+        }
 
         Eff e;
         effects(p, in, &e);
@@ -1657,6 +1681,108 @@ static bool try_retarget(Peep *p, Block *blk, int mov, uint32_t il,
     return false;
 }
 
+// The opcode computing `a OP c` as one instruction with the immediate `c`
+// (`c OP a` when `c_left`), or 0. May rewrite `*c`.
+static int imm_opcode(int op, bool c_left, long long *c) {
+    switch (op) {
+        case ADD3:
+            return ADDI3;
+        case MUL3:
+            return MULI3;
+        case AND3:
+            return ANDI3;
+        case SUB3:
+            if (c_left)
+                return 0;
+            *c = (long long)(0 - (unsigned long long)*c);
+            return ADDI3;
+        case SHL3:
+        case SHR3:
+        case USHR3:
+            if (c_left || *c < 0 || *c > 63)
+                return 0;
+            return op == SHL3 ? SHLI3 : op == SHR3 ? SHRI3 : USHRI3;
+        case SEQ3:
+            return SEQI3;
+        case SNE3:
+            return SNEI3;
+        case SLT3:
+            return c_left ? SGTI3 : SLTI3;
+        case SLE3:
+            return c_left ? SGEI3 : SLEI3;
+        case SGT3:
+            return c_left ? SLTI3 : SGTI3;
+        case SGE3:
+            return c_left ? SLEI3 : SGEI3;
+        case ULT3:
+            return c_left ? UGTI3 : ULTI3;
+        case ULE3:
+            return c_left ? UGEI3 : ULEI3;
+        default:
+            return 0;
+    }
+}
+
+// `LI3 t, c; ...; OP d, a, t` with t dead afterwards (or t == d) becomes one
+// instruction in the LI3's slot, and OP goes. The instructions between must not
+// touch d or t, nor write a, because OP now happens where the LI3 was.
+static bool try_imm_fold(Peep *p, Block *blk, int op_i, uint32_t il) {
+    Insn *o = &p->ins[op_i];
+    if (!o->known || o->size != 2 || !(o->spec.flags & SP_PURE) ||
+        o->spec.role[0] != R_ID || o->spec.role[1] != R_IU)
+        return false;
+    int d = get_byte(p, o, 0);
+    if (d == REG_ZERO)
+        return false;
+    int  src[2] = {get_byte(p, o, 1), get_byte(p, o, 2)};
+    bool binary = o->spec.role[2] == R_IU && o->spec.role[3] == R_NO;
+    for (int k = 0; k < (binary ? 2 : 1); k++) {
+        int t = src[k], a = src[1 - k];
+        if (t == REG_ZERO || (binary && k == 0 && src[0] == src[1]) ||
+            (t != d && (il & BIT(t))))
+            continue;
+        Insn *li   = NULL;
+        int   seen = 0;
+        for (int i = op_i - 1; i >= blk->first && seen < 8; i--) {
+            Insn *x = &p->ins[i];
+            if (x->dead)
+                continue;
+            seen++;
+            if (!x->known)
+                break;
+            Eff e;
+            effects(p, x, &e);
+            if (e.idef & BIT(t)) {
+                if (x->op == LI3 && e.idef == BIT(t) && get_byte(p, x, 0) == t)
+                    li = x;
+                break;
+            }
+            if ((e.iuse & BIT(t)) || ((e.idef | e.iuse) & BIT(d)) ||
+                (binary && (e.idef & BIT(a))))
+                break;
+        }
+        if (!li)
+            continue;
+        if (o->fold_ok) {
+            cc_write_i64_at(p->vm, li->pc + 2, o->fold_v);
+            p->vm->text_seg[li->pc + 1] = (InstrWord)d;
+        } else {
+            if (!binary)
+                continue;
+            long long c   = cc_read_i64_at(p->vm, li->pc + 2);
+            int       iop = imm_opcode(o->op, k == 0, &c);
+            if (!iop)
+                continue;
+            make_imm_op(p, li, iop, c);
+            p->vm->text_seg[li->pc + 1] = (InstrWord)(d | (a << 8));
+        }
+        o->dead    = true;
+        p->changed = true;
+        return true;
+    }
+    return false;
+}
+
 // The facts under which `ext` (SXk / ZXk) keeps a value's zero-ness.
 static int ext_zero_facts(int op) {
     switch (op) {
@@ -1702,6 +1828,8 @@ static void backward_block(Peep *p, Block *blk) {
                 continue;
             }
             if ((in->spec.flags & SP_MOVE) && try_retarget(p, blk, i, il, fl))
+                continue;
+            if (try_imm_fold(p, blk, i, il))
                 continue;
             if (ext_needed(in->op) && next >= 0 &&
                 (p->ins[next].op == JZ3 || p->ins[next].op == JNZ3) &&

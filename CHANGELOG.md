@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the VM bytecode clean-up folds a constant that one operation reads into that operation (`LI3 t, c; SLT3 d, a, t` becomes `SLTI3 d, a, c`, a `switch`'s comparisons and a pointer stepped back by a constant), and a call reads only the argument and saved registers, so a temporary or result copy nothing reads afterwards is removed.
+- Changed: the operand of an immediate-form operation may be any constant expression, not only a literal (`x & (1 + 2)`, `x < -(1 << 4)`).
 - Changed: the VM bytecode clean-up keeps no sign or zero extension after a direct call to a function whose declared return type is `int`, `unsigned`, `short`, `char` or `_Bool` (`int p = partition(lo, hi)`), since the callee returns the value normalised.
 - Fixed: a tail call `return g(x);` of a wider value to a `char`-, `short`- or `int`-sized enum return type skipped the narrowing, so the caller saw the wider value.
 - Changed: a `for` or `while` loop with a small scalar condition tests it at the bottom and branches back into the body, so each iteration runs one branch instead of a test and a `JMP`.
