@@ -1674,11 +1674,65 @@ static void exit_facts(Peep *p, int b, Facts *out, Facts *jump, bool *is_cond,
     forget_copies(jump);
 }
 
+// Tightens `dst` with what `src` also holds: the intersection of the intervals
+// and both sets of extension facts. An empty intersection leaves a register
+// alone.
+static void narrow_facts(Facts *dst, const Facts *src) {
+    for (int r = 0; r < NUM_REGS; r++) {
+        long long lo = dst->lo[r] > src->lo[r] ? dst->lo[r] : src->lo[r];
+        long long hi = dst->hi[r] < src->hi[r] ? dst->hi[r] : src->hi[r];
+        if (lo > hi)
+            continue;
+        dst->lo[r]   = lo;
+        dst->hi[r]   = hi;
+        dst->ext[r] |= src->ext[r];
+        fit_reg(dst, r);
+    }
+}
+
+// Re-runs the transfer functions from the widened entry facts, which still
+// hold, and keeps what both agree on: the test of a loop narrows a counter
+// back from its widening step to its bound.
+static void narrow_entry_facts(Peep *p, int rounds) {
+    Facts *fresh = malloc((size_t)p->nblocks * sizeof(Facts));
+    bool  *seen  = malloc((size_t)p->nblocks * sizeof(bool));
+    for (int round = 0; round < rounds; round++) {
+        memset(seen, 0, (size_t)p->nblocks * sizeof(bool));
+        for (int b = 0; b < p->nblocks; b++) {
+            Block *blk = &p->blocks[b];
+            if (!blk->reached)
+                continue;
+            Facts out, jump;
+            bool  is_cond, has_fall;
+            exit_facts(p, b, &out, &jump, &is_cond, &has_fall);
+            for (int s = 0; s < blk->nsucc; s++) {
+                int si = p->edges[blk->eoff + s];
+                if (p->blocks[si].ext_entry)
+                    continue;
+                const Facts *edge =
+                    is_cond && !(has_fall && s == 0) ? &jump : &out;
+                if (!seen[si]) {
+                    fresh[si] = *edge;
+                    seen[si]  = true;
+                } else {
+                    meet_facts(&fresh[si], edge, false);
+                }
+            }
+        }
+        for (int b = 0; b < p->nblocks; b++)
+            if (seen[b])
+                narrow_facts(&p->blocks[b].in, &fresh[b]);
+    }
+    free(fresh);
+    free(seen);
+}
+
 // Facts at the start of every block: the function entry and any block that
 // can be entered from outside the graph start from the seed, the rest from the
 // merge over the blocks that reach them. A block nothing reaches is given the
 // seed as well. A conditional branch on a compare narrows the facts along each
-// of its edges; an edge back to an earlier block widens the intervals.
+// of its edges; an edge back to an earlier block widens the intervals, and two
+// narrowing rounds then tighten them again.
 // TODO: each pass models every block again; a worklist would visit only those
 // whose entry changed if compile time on very large functions shows it.
 static void compute_entry_facts(Peep *p) {
@@ -1721,6 +1775,7 @@ static void compute_entry_facts(Peep *p) {
             }
         }
     }
+    narrow_entry_facts(p, 2);
     for (int b = 0; b < p->nblocks; b++)
         if (!p->blocks[b].reached)
             facts_reset(&p->blocks[b].in, p->seed);
