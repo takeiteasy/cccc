@@ -644,6 +644,8 @@ void gen_wide_bitint_unary(VirtualMachine *vm, Node *node, int dest_reg,
 // against a zero literal of the same width (C truthiness: nonzero is true,
 // including -0, which DCMP's quiet_equal already treats as == 0).
 void gen_cond_expr(VirtualMachine *vm, Node *node, int dest_reg) {
+    // TODO: a float/double operand is left in a float register that the branch
+    // ops do not test (#1899).
     gen_expr(vm, node, dest_reg);
     if (is_wide_bitint(node->ty)) {
         emit_mov3(vm, REG_A0, dest_reg); // address of the wide value
@@ -1692,6 +1694,58 @@ bool gen_folded_constant(VirtualMachine *vm, Node *node, int dest_reg) {
     if (dest_reg != REG_ZERO)
         emit_li3(vm, dest_reg, v);
     return true;
+}
+
+void patch_list_resolve(VirtualMachine *vm, PatchList *list, Pc target) {
+    for (int i = 0; i < list->len; i++)
+        vm->text_seg[list->items[i]] = target;
+    free(list->items);
+    *list = (PatchList){0};
+}
+
+void gen_branch(VirtualMachine *vm, Node *cond, bool when, int scratch,
+                PatchList *to) {
+    long long v;
+    switch (cond->kind) {
+        case ND_LOGAND:
+        case ND_LOGOR: {
+            // `a && b` is false as soon as either side is; `a || b` is true as
+            // soon as either side is.
+            bool short_when = cond->kind == ND_LOGOR;
+            if (when == short_when) {
+                gen_branch(vm, cond->lhs, when, scratch, to);
+                gen_branch(vm, cond->rhs, when, scratch, to);
+            } else {
+                PatchList skip = {0};
+                gen_branch(vm, cond->lhs, short_when, scratch, &skip);
+                gen_branch(vm, cond->rhs, when, scratch, to);
+                patch_list_resolve(vm, &skip, vm->text_ptr + 1);
+            }
+            return;
+        }
+        case ND_NOT:
+            if (!is_wide_bitint(cond->lhs->ty) && !is_decimal(cond->lhs->ty)) {
+                gen_branch(vm, cond->lhs, !when, scratch, to);
+                return;
+            }
+            break;
+        case ND_COMMA:
+            gen_expr(vm, cond->lhs, REG_ZERO);
+            gen_branch(vm, cond->rhs, when, scratch, to);
+            return;
+        default:
+            break;
+    }
+    if (cg_opt_enabled(vm) && fold_int(cond, &v)) {
+        if ((v != 0) == when) {
+            emit(vm, JMP);
+            add_patch_to_list(to, emit_word_ptr(vm));
+        }
+        return;
+    }
+    gen_cond_expr(vm, cond, scratch);
+    add_patch_to_list(to,
+                      when ? emit_jnz3(vm, scratch) : emit_jz3(vm, scratch));
 }
 
 static bool plain_int_operands(Node *node) {

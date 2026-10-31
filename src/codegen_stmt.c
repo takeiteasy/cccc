@@ -346,20 +346,20 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
         case ND_IF: {
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
-            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
-            Pc jz_else = emit_jz3(vm, r_cond);
+            PatchList to_else = {0};
+            gen_branch(vm, node_ctl(node)->cond, false, r_cond, &to_else);
             free_temp_reg(r_cond);
 
             gen_stmt(vm, node_ctl(node)->then);
 
             if (node_ctl(node)->els) {
                 emit(vm, JMP);
-                Pc jmp_end            = emit_word_ptr(vm);
-                vm->text_seg[jz_else] = vm->text_ptr + 1;
+                Pc jmp_end = emit_word_ptr(vm);
+                patch_list_resolve(vm, &to_else, vm->text_ptr + 1);
                 gen_stmt(vm, node_ctl(node)->els);
                 vm->text_seg[jmp_end] = vm->text_ptr + 1;
             } else {
-                vm->text_seg[jz_else] = vm->text_ptr + 1;
+                patch_list_resolve(vm, &to_else, vm->text_ptr + 1);
             }
             return;
         }
@@ -373,12 +373,11 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             Pc loop_start = vm->text_ptr + 1;
 
             // Condition
-            Pc jz_end = CCCC_INVALID_PC;
+            PatchList to_end = {0};
             if (node_ctl(node)->cond) {
                 reset_temp_regs();
                 int r_cond = alloc_temp_reg();
-                gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
-                jz_end = emit_jz3(vm, r_cond);
+                gen_branch(vm, node_ctl(node)->cond, false, r_cond, &to_end);
                 free_temp_reg(r_cond);
             }
 
@@ -406,9 +405,7 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
             }
 
             // Patch exit
-            if (jz_end != CCCC_INVALID_PC) {
-                vm->text_seg[jz_end] = vm->text_ptr + 1;
-            }
+            patch_list_resolve(vm, &to_end, vm->text_ptr + 1);
             return;
         }
 
@@ -424,9 +421,9 @@ void gen_stmt(VirtualMachine *vm, Node *node) {
 
             reset_temp_regs();
             int r_cond = alloc_temp_reg();
-            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
-            Pc jnz_start            = emit_jnz3(vm, r_cond);
-            vm->text_seg[jnz_start] = loop_start;
+            PatchList to_start = {0};
+            gen_branch(vm, node_ctl(node)->cond, true, r_cond, &to_start);
+            patch_list_resolve(vm, &to_start, loop_start);
             free_temp_reg(r_cond);
 
             // Define break label (jumps past loop)

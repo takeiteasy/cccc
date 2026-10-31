@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: `&&`, `||` and `!` in an `if`, loop or `?:` condition jump straight to the branch targets instead of building a 0/1 value and testing it again (`mandelbrot.c` runs ~12% fewer VM ops, `nqueens.c` ~11%).
 - Changed: loop locals are promoted to registers in a function whose loop is a backward `goto` or a computed-goto dispatcher (`dispatch.c` runs ~25% faster).
 - Changed: the VM bytecode clean-up replaces an operation on known constants by its result when it fits in place, turns `x + 0`, `x * 1` and `x & -1` into copies, a constant-index `MULADDI3` into `ADDI3`, and reads a register loaded with 0 as the zero register.
 - Added: build API `AddSystemInclude`, `AddFrameworkPath` and `UseSystemHeaders` (`CcccExecutable` and `CcccObject` only).

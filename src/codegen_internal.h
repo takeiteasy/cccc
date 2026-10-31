@@ -124,6 +124,13 @@ typedef struct {
     int cap;
 } PatchList;
 
+// Jumps to a slot in *to when `cond`'s truth equals `when`, else falls through.
+// Leaves are evaluated into `scratch` (never REG_ZERO).
+void gen_branch(VirtualMachine *vm, Node *cond, bool when, int scratch,
+                PatchList *to);
+// Points every slot at `target`, then empties the list.
+void patch_list_resolve(VirtualMachine *vm, PatchList *list, Pc target);
+
 // ========== Cross-file forward declarations ==========
 //
 // Every function below is used from at least one codegen_*.c file other

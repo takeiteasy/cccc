@@ -304,16 +304,16 @@ static void gen_vector_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                 int r_cond =
                     (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
                 mark_temp_reg_used(r_cond);
-                gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
-                Pc jz_else = emit_jz3(vm, r_cond);
+                PatchList to_else = {0};
+                gen_branch(vm, node_ctl(node)->cond, false, r_cond, &to_else);
                 if (r_cond != dest_reg)
                     free_temp_reg(r_cond);
 
                 gen_expr(vm, node_ctl(node)->then, dest_reg);
                 emit(vm, JMP);
-                Pc jmp_end            = emit_word_ptr(vm);
+                Pc jmp_end = emit_word_ptr(vm);
 
-                vm->text_seg[jz_else] = vm->text_ptr + 1;
+                patch_list_resolve(vm, &to_else, vm->text_ptr + 1);
                 gen_expr(vm, node_ctl(node)->els, dest_reg);
                 vm->text_seg[jmp_end] = vm->text_ptr + 1;
                 return;
@@ -1973,16 +1973,16 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // free it before generating the branches.
             int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
             mark_temp_reg_used(r_cond);
-            gen_cond_expr(vm, node_ctl(node)->cond, r_cond);
-            Pc jz_else = emit_jz3(vm, r_cond);
+            PatchList to_else = {0};
+            gen_branch(vm, node_ctl(node)->cond, false, r_cond, &to_else);
             if (r_cond != dest_reg)
                 free_temp_reg(r_cond);
 
             gen_expr(vm, node_ctl(node)->then, dest_reg);
             emit(vm, JMP);
-            Pc jmp_end            = emit_word_ptr(vm);
+            Pc jmp_end = emit_word_ptr(vm);
 
-            vm->text_seg[jz_else] = vm->text_ptr + 1;
+            patch_list_resolve(vm, &to_else, vm->text_ptr + 1);
             gen_expr(vm, node_ctl(node)->els, dest_reg);
             vm->text_seg[jmp_end] = vm->text_ptr + 1;
             return;
@@ -3557,62 +3557,28 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             emit(vm, MSET);
             return;
 
-        case ND_LOGAND: {
-            // Logical AND with short-circuit evaluation.
-            // Reuse dest_reg as the condition scratch to avoid O(depth)
-            // register accumulation for deeply nested && chains (#587 gap).
-            // Guard: dest_reg may be REG_ZERO (discarded expression statement)
-            // — the zero register silently discards writes, so both conditions
-            // read back as 0 and jz is always taken, preventing the rhs and any
-            // side-effects from running. Allocate a real temp when dest_reg ==
-            // REG_ZERO and free it after the last jz (before generating the
-            // final 0/1 into dest_reg).
-            int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
-            mark_temp_reg_used(r_cond); // protect from inner allocs
-            gen_cond_expr(vm, node->lhs, r_cond);
-            Pc jz_false = emit_jz3(vm, r_cond);
-
-            gen_cond_expr(vm, node->rhs, r_cond);
-            Pc jz_false2 = emit_jz3(vm, r_cond);
-            if (r_cond != dest_reg)
-                free_temp_reg(r_cond);
-
-            // Both true
-            emit_li3(vm, dest_reg, 1);
-            emit(vm, JMP);
-            Pc jmp_end = emit_word_ptr(vm);
-
-            // At least one false
-            vm->text_seg[jz_false]  = vm->text_ptr + 1;
-            vm->text_seg[jz_false2] = vm->text_ptr + 1;
-            emit_li3(vm, dest_reg, 0);
-            vm->text_seg[jmp_end] = vm->text_ptr + 1;
-            return;
-        }
-
+        case ND_LOGAND:
         case ND_LOGOR: {
-            // Logical OR with short-circuit evaluation.
-            // Same dest_reg reuse + REG_ZERO guard as ND_LOGAND above (see
-            // comment there).
+            // Reuse dest_reg as the branch scratch to avoid O(depth) register
+            // accumulation for deeply nested chains (#587 gap). The zero
+            // register discards writes, so a discarded value needs a real temp
+            // for the tests to read back.
             int r_cond = (dest_reg == REG_ZERO) ? alloc_temp_reg() : dest_reg;
             mark_temp_reg_used(r_cond);
-            gen_cond_expr(vm, node->lhs, r_cond);
-            Pc jnz_true = emit_jnz3(vm, r_cond);
-
-            gen_cond_expr(vm, node->rhs, r_cond);
-            Pc jnz_true2 = emit_jnz3(vm, r_cond);
+            PatchList to_false = {0};
+            gen_branch(vm, node, false, r_cond, &to_false);
             if (r_cond != dest_reg)
                 free_temp_reg(r_cond);
 
-            // Both false
-            emit_li3(vm, dest_reg, 0);
+            if (dest_reg == REG_ZERO) {
+                patch_list_resolve(vm, &to_false, vm->text_ptr + 1);
+                return;
+            }
+            emit_li3(vm, dest_reg, 1);
             emit(vm, JMP);
             Pc jmp_end = emit_word_ptr(vm);
-
-            // At least one true
-            vm->text_seg[jnz_true]  = vm->text_ptr + 1;
-            vm->text_seg[jnz_true2] = vm->text_ptr + 1;
-            emit_li3(vm, dest_reg, 1);
+            patch_list_resolve(vm, &to_false, vm->text_ptr + 1);
+            emit_li3(vm, dest_reg, 0);
             vm->text_seg[jmp_end] = vm->text_ptr + 1;
             return;
         }
