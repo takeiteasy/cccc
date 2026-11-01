@@ -171,6 +171,7 @@ static bool op_spec(int op, OpSpec *s) {
             *s = SPEC(IU, NO, NO, NO, 0);
             return true;
         case LDR_B:
+        case LDR_H:
         case LDR_W:
         case LDR_D:
         case LDR_UB:
@@ -791,6 +792,10 @@ static int ext_result(int op) {
         case LDR_INDEX_B:
         case LDR_LOCAL_B:
             return ext_of_range(-128, 127);
+        case LDR_H:
+        case LDR_INDEX_H:
+        case LDR_LOCAL_H:
+            return ext_of_range(-32768, 32767);
         case LDR_W:
         case LDR_INDEX_W:
         case LDR_LOCAL_W:
