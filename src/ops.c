@@ -218,9 +218,10 @@ static inline int op_SHL3_fn(VirtualMachine *vm) {
     DECODE_RRR(operands, rd, rs1, rs2);
     // Shift in unsigned space: left-shifting a negative value, or shifting a
     // 1-bit into/past the sign bit, is UB on signed long long. The unsigned
-    // result is bit-identical on all two's-complement targets.
+    // result is bit-identical on all two's-complement targets. The count is
+    // masked because a host shift by 64 or more, or a negative one, is UB.
     long long result =
-        (long long)((unsigned long long)vm->regs[rs1] << vm->regs[rs2]);
+        (long long)((unsigned long long)vm->regs[rs1] << (vm->regs[rs2] & 63));
     if (rd != REG_ZERO)
         vm->regs[rd] = result;
     return 0;
@@ -230,7 +231,7 @@ static inline int op_SHR3_fn(VirtualMachine *vm) {
     long long operands = cc_read_word(vm);
     int       rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
-    long long result = vm->regs[rs1] >> vm->regs[rs2];
+    long long result = vm->regs[rs1] >> (vm->regs[rs2] & 63);
     if (rd != REG_ZERO)
         vm->regs[rd] = result;
     return 0;
@@ -285,7 +286,7 @@ static inline int op_USHR3_fn(VirtualMachine *vm) {
     int       rd, rs1, rs2;
     DECODE_RRR(operands, rd, rs1, rs2);
     unsigned long long result =
-        (unsigned long long)vm->regs[rs1] >> vm->regs[rs2];
+        (unsigned long long)vm->regs[rs1] >> (vm->regs[rs2] & 63);
     if (rd != REG_ZERO)
         vm->regs[rd] = (long long)result;
     return 0;
@@ -1485,7 +1486,7 @@ static inline int op_NEG3_fn(VirtualMachine *vm) {
     DECODE_RR(operands, rd, rs1);
 
     if (rd != REG_ZERO)
-        vm->regs[rd] = -vm->regs[rs1];
+        vm->regs[rd] = (long long)(0ULL - (unsigned long long)vm->regs[rs1]);
     return 0;
 }
 

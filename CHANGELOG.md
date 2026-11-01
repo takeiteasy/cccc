@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `NEG3` of the most negative `long long` and a register shift by a count of 64 or more, or a negative count, no longer invoke undefined behaviour in the VM host; the count is taken modulo 64.
 - Changed: the VM bytecode clean-up knows a logical not (`NOT3`) is 0 or 1, a divide by a positive value and a bitwise not stay within their operand's range, and fuses a negation with the wrap after it into `SUBSX3` / `SUBZX3` from the zero register, so none of them emit a separate `SX4` / `ZX4`.
 - Changed: the VM bytecode clean-up knows an unsigned shift right, divide or remainder of a value already known non-negative stays within the source's range, so converting the result back to `unsigned` no longer emits a `ZX4` after `USHRI3`, `USHR3`, `UDIV3` or `UMOD3`.
 - Changed: the VM bytecode clean-up knows a halfword load (`LDR_H`, `LDR_LOCAL_H`, `LDR_INDEX_H`) is already sign-extended, so widening a `short` to `int` or `long` no longer emits an `SX2` / `SX4` after it.

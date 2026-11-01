@@ -56,9 +56,9 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `AND3` | Bitwise AND |
 | `OR3` | Bitwise OR |
 | `XOR3` | Bitwise XOR |
-| `SHL3` | Left shift |
-| `SHR3` | Arithmetic right shift (signed) |
-| `USHR3` | Logical right shift (unsigned) |
+| `SHL3` | Left shift; the count is taken modulo 64 |
+| `SHR3` | Arithmetic right shift (signed); the count is taken modulo 64 |
+| `USHR3` | Logical right shift (unsigned); the count is taken modulo 64 |
 | `ADDI3` | `rd = rs1 + immediate` (RI format) |
 | `SHLI3` | `rd = rs1 << immediate`, count 0-63 (RI format) |
 | `SHRI3` | `rd = rs1 >> immediate`, arithmetic, count 0-63 (RI format) |
