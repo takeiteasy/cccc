@@ -704,9 +704,8 @@ static Node *to_assign_impl(VirtualMachine *vm, Node *binary, bool yield_old) {
     // Gated on ND_DEREF: `p += k`/`p++` (lhs is ND_VAR, #919's
     // is_rmw_temp_addr path) is untouched, matching checked_prop_attach_scan's
     // own propagation model, which only ever attaches bounds to ND_DEREF.
-    // One redundant CHKR results per checked RMW (`&s[n]` and this `*tmp`
-    // store both range-check the same address) -- acceptable at this
-    // magnitude, not worth deduping.
+    // `&s[n]` and this `*tmp` store both range-check the same address;
+    // mark_rmw_mirror() (parse_checked.c) drops the second CHKR.
     Node *nt_root_rmw = checked_nt_store_root(binary->lhs);
     if (binary->lhs->kind == ND_DEREF && node_chk(binary->lhs)->bounds_lo &&
         node_chk(binary->lhs)->bounds_hi) {

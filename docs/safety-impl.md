@@ -42,6 +42,16 @@ An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and abo
 - Every `ND_ADD`/`ND_SUB`/`ND_CAST` between the deref and the base must carry a constant offset. `add_type()` wraps the integer operand in a cast to the pointer type, so the walk looks through it. `[0, extent)` is compared against the offset plus the larger of the accessed and element sizes. An `_Nt_checked` terminator slot is outside that range and keeps `CHKR`/`CHKNT`.
 - `checked_prop_attach_scan()` re-attaches bounds to a bounds-less row element, so it runs the same predicate and skips what was elided.
 
+## Dominated-check elision
+
+`elide_checked_dominated_bounds()` (`src/parse_checked.c`) runs after loop-index elision in `checked_tail_passes()`. It sets `Node.checked_range_proven` on a deref whose `CHKR` an earlier check covers. The VM codegen (`gen_addr`, `ND_DEREF`) and the serializer (`checked_deref_lowered()`) skip only the range check on such a node; its bounds stay, so `CHKNT` still guards an `_Nt_checked` terminator slot.
+
+- **Read-modify-write.** `to_assign()` checks `&A` and then the synthesized `*tmp` store (`rmw_mirror`). `mark_rmw_mirror()` marks the store when its original deref still has bounds of the same kind and size and the right-hand side passes `node_has_side_effects()`; otherwise the right-hand side could change what the bounds read between the two checks.
+- **Statement lists.** `dominate_stmt()` walks a list in order with a cache of available checks. A declaration group shares its enclosing list's cache. Any other statement kind, and every label, `case` and loop, empties it; each nested list starts empty. A function with label addresses or `setjmp` is skipped.
+- **Matching.** `check_covers()` needs the same address, `bounds_lo` and `bounds_hi` (`check_key_equal()`, side-effect-free node kinds only), no larger `access_size`, and a plain earlier check for a plain access. Accesses with `bounds_obj_init` are left alone. Accesses of the same statement never cover each other, since their order is unspecified; only checks made under no `?:`, `&&` or `||` operand are added.
+- **Invalidation.** `note_writes()` collects what a statement writes: variables (a struct member write counts as its variable), memory (a store through a pointer, any call) or everything (any node kind it does not know). Entries mentioning a written variable die, and entries that read memory die on a store or call. A statement's own entries are filtered the same way, so `x = p[i] + (n = 3)` leaves nothing behind.
+- **Memory variables.** A variable counts as memory when it is global, `static`, captured, `__block` or has its own storage addressed (`note_addressed()`). `Obj.addr_taken` is not used because it also marks the pointer in `&p[i]`.
+
 ## Loop-index elision
 
 `elide_checked_loop_bounds()` (`src/parse_checked.c`) runs last in `checked_tail_passes()`, after propagation and sibling-write grouping, because it needs the whole loop body. It finds counted `ND_FOR` loops and removes the bounds from the accesses their variable indexes.

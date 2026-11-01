@@ -1168,7 +1168,8 @@ void gen_addr(VirtualMachine *vm, Node *node, int dest_reg) {
             // resolvable bounds at this access site, so no per-access flag
             // check is needed beyond the one on CCCC_CHECKED_BOUNDS itself.
             if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                node_chk(node)->bounds_lo && node_chk(node)->bounds_hi) {
+                !node->checked_range_proven && node_chk(node)->bounds_lo &&
+                node_chk(node)->bounds_hi) {
                 mark_temp_reg_used(
                     dest_reg); // protect the just-computed address
                 int r_lo = alloc_temp_reg();

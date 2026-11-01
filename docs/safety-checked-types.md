@@ -128,6 +128,27 @@ The loop must be `for (i = L; i < N; i++)` (or `<=`, `++i`, `i += c`) with const
 | `_Nt_checked` over rows that are already checked arrays (`Str t _Nt_checked[3]` with `typedef char Str _Nt_checked[10]`, or over a `_Checked` typedef row) is an error | The terminator belongs to the innermost row, once |
 | A string initializer that fills the last slot (`char s _Nt_checked[3] = "abc"`) is an error | No room is left for the terminator |
 
+### Repeated accesses
+
+An access runs without a second range check when an earlier statement in the same straight-line run made the identical check and nothing since could change what it reads.
+
+```c
+int x = p[i];        // checked
+p[i] = x + 1;        // not checked again
+p[i] += 3;           // one check for the whole read-modify-write
+n = 4;               // writes a bound: the next p[i] is checked again
+```
+
+| Between the two accesses | Checked again |
+|---|---|
+| Nothing, or writes to unrelated variables | No |
+| A write to the pointer, the index or a variable in the bound | Yes |
+| A store or call, when the bound or index reads memory (`b->len`, a global) | Yes |
+| An `if`, loop, `switch`, `case` or label | Yes |
+| A side effect in the right-hand side of `p[i] += ...` | Yes |
+
+The terminator guard of an `_Nt_checked` store is never skipped.
+
 ## Compound literals
 
 `_Checked` and `_Nt_checked` also go in an abstract declarator, so a compound literal, a `sizeof` or a type name can be a checked array:

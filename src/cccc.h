@@ -2427,6 +2427,9 @@ struct Node {
     bool checked_bounds_optional : 1; // bounds attached for a candidate that is
                                       // only checked-rooted on some paths:
                                       // emit CHKRO instead of CHKR
+    bool checked_range_proven : 1;    // an identical earlier check covers this
+                                      // access: skip CHKR, keep the bounds for
+                                      // CHKNT
     bool checked_assign_src_optional : 1; // source is an OPT propagated local,
                                           // whose snapshot may hold the
                                           // [-1, 0) sentinel: emit CHKABO

@@ -4611,6 +4611,466 @@ static void elide_checked_loop_bounds(VirtualMachine *vm, Obj *fn) {
     free(hits.v);
 }
 
+// A second range check on an address an identical earlier check already
+// covered is redundant (#1927): the store half of a read-modify-write repeats
+// the check on `&A`, and a later statement's access repeats an earlier one
+// while nothing its bounds read has changed. The access keeps its bounds, so
+// CHKNT still guards an _Nt_checked terminator slot; only CHKR is skipped.
+
+// The variables of one function whose own storage an `&` reaches.
+// Obj.addr_taken is too coarse here: it also marks the pointer in `&p[i]`.
+typedef struct {
+    Obj **addressed;
+    int   n, cap;
+} DomCtx;
+
+// Memory a store or call could change, as opposed to a plain local.
+static bool check_var_is_memory(const DomCtx *cx, Obj *v) {
+    if (!v->is_local || v->is_static || v->is_captured || v->is_block_var)
+        return true;
+    for (int i = 0; i < cx->n; i++)
+        if (cx->addressed[i] == v)
+            return true;
+    return false;
+}
+
+// Records the variable an `&` takes the address of. Reaching a variable
+// through a dereference or index only addresses it when it is an array.
+static bool note_addressed(Node *n, void *ud) {
+    DomCtx *cx = ud;
+    if (n->kind != ND_ADDR)
+        return true;
+    bool via_value = false;
+    for (Node *t = n->lhs; t;) {
+        switch (t->kind) {
+            case ND_VAR:
+                if (t->var &&
+                    (!via_value || (t->ty && t->ty->kind == TY_ARRAY))) {
+                    if (cx->n == cx->cap) {
+                        cx->cap = cx->cap ? cx->cap * 2 : 8;
+                        cx->addressed =
+                            realloc(cx->addressed, cx->cap * sizeof(Obj *));
+                    }
+                    cx->addressed[cx->n++] = t->var;
+                }
+                return true;
+            case ND_MEMBER:
+                if (via_value && (!t->ty || t->ty->kind != TY_ARRAY))
+                    return true;
+                t = t->lhs;
+                break;
+            case ND_CAST:
+                t = t->lhs;
+                break;
+            case ND_DEREF:
+                via_value = true;
+                t         = t->lhs;
+                break;
+            case ND_ADD:
+            case ND_SUB:
+                via_value = true;
+                t         = t->lhs && t->lhs->ty &&
+                                    (t->lhs->ty->kind == TY_PTR ||
+                                     t->lhs->ty->kind == TY_ARRAY)
+                                ? t->lhs
+                                : t->rhs;
+                break;
+            default:
+                return true;
+        }
+    }
+    return true;
+}
+
+// True for an expression that is a function of its variables and the memory
+// it dereferences; `*reads_mem` is set when it reads memory.
+static bool check_key_pure(const DomCtx *cx, Node *n, bool *reads_mem) {
+    if (!n)
+        return true;
+    if (!n->ty || n->ty->kind == TY_VLA || n->ty->is_volatile ||
+        n->ty->is_atomic)
+        return false;
+    switch (n->kind) {
+        case ND_NUM:
+            return is_integer(n->ty);
+        case ND_VAR:
+            if (!n->var)
+                return false;
+            if (check_var_is_memory(cx, n->var))
+                *reads_mem = true;
+            return true;
+        case ND_DEREF:
+            *reads_mem = true;
+            return check_key_pure(cx, n->lhs, reads_mem);
+        case ND_MEMBER:
+        case ND_ADDR:
+        case ND_CAST:
+        case ND_NEG:
+        case ND_BITNOT:
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_NOT:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_COMMA:
+        case ND_DYNAMIC_CHECK:
+            return check_key_pure(cx, n->lhs, reads_mem) &&
+                   check_key_pure(cx, n->rhs, reads_mem);
+        default:
+            return false;
+    }
+}
+
+static bool check_type_same(Type *a, Type *b) {
+    return a && b &&
+           (a == b ||
+            (a->kind == b->kind && a->size == b->size &&
+             a->is_unsigned == b->is_unsigned && (!a->base) == (!b->base) &&
+             (!a->base || a->base->size == b->base->size)));
+}
+
+static bool check_key_equal(Node *a, Node *b) {
+    if (!a || !b)
+        return a == b;
+    if (a->kind != b->kind || !check_type_same(a->ty, b->ty))
+        return false;
+    if ((a->kind == ND_NUM && a->val != b->val) ||
+        (a->kind == ND_VAR && a->var != b->var) ||
+        (a->kind == ND_MEMBER && a->member != b->member))
+        return false;
+    return check_key_equal(a->lhs, b->lhs) && check_key_equal(a->rhs, b->rhs);
+}
+
+static bool check_key_mentions(Node *n, Obj *v) {
+    return n &&
+           ((n->kind == ND_VAR && n->var == v) ||
+            check_key_mentions(n->lhs, v) || check_key_mentions(n->rhs, v));
+}
+
+// What one statement may change. `all`: unknown effects, nothing survives.
+typedef struct {
+    const DomCtx *cx;
+    Obj         **vars;
+    int           n, cap;
+    bool          mem, all;
+} WriteSet;
+
+static void write_set_var(WriteSet *ws, Obj *v) {
+    if (!v) {
+        ws->all = true;
+        return;
+    }
+    if (ws->n == ws->cap) {
+        ws->cap  = ws->cap ? ws->cap * 2 : 8;
+        ws->vars = realloc(ws->vars, ws->cap * sizeof(Obj *));
+    }
+    ws->vars[ws->n++] = v;
+    if (check_var_is_memory(ws->cx, v))
+        ws->mem = true;
+}
+
+static void note_writes(Node *n, WriteSet *ws) {
+    for (; n && !ws->all; n = n->next) {
+        switch (n->kind) {
+            case ND_ASSIGN: {
+                Node *root = n->lhs;
+                while (root && root->kind == ND_MEMBER)
+                    root = root->lhs;
+                if (root && root->kind == ND_VAR)
+                    write_set_var(ws, root->var);
+                else if (root && root->kind == ND_DEREF)
+                    ws->mem = true;
+                else
+                    ws->all = true;
+                break;
+            }
+            case ND_MEMZERO:
+                write_set_var(ws, n->var);
+                break;
+            case ND_FUNCALL:
+                ws->mem = true;
+                break;
+            case ND_NULL_EXPR:
+            case ND_NUM:
+            case ND_VAR:
+            case ND_CAST:
+            case ND_ADD:
+            case ND_SUB:
+            case ND_MUL:
+            case ND_DIV:
+            case ND_MOD:
+            case ND_NEG:
+            case ND_BITAND:
+            case ND_BITOR:
+            case ND_BITXOR:
+            case ND_BITNOT:
+            case ND_NOT:
+            case ND_SHL:
+            case ND_SHR:
+            case ND_EQ:
+            case ND_NE:
+            case ND_LT:
+            case ND_LE:
+            case ND_COMMA:
+            case ND_COND:
+            case ND_LOGAND:
+            case ND_LOGOR:
+            case ND_MEMBER:
+            case ND_ADDR:
+            case ND_DEREF:
+                break;
+            default:
+                ws->all = true;
+                return;
+        }
+        note_writes(n->lhs, ws);
+        note_writes(n->rhs, ws);
+        note_writes(node_ctl(n)->cond, ws);
+        note_writes(node_ctl(n)->then, ws);
+        note_writes(node_ctl(n)->els, ws);
+        for (Node *a = n->args; a; a = a->next)
+            note_writes(a, ws);
+    }
+}
+
+typedef struct {
+    Node *deref;
+    bool  reads_mem;
+} CheckEntry;
+
+typedef struct {
+    CheckEntry *v;
+    int         n, cap;
+} CheckCache;
+
+static bool entry_killed(const CheckEntry *e, const WriteSet *ws) {
+    if (ws->all || (ws->mem && e->reads_mem))
+        return true;
+    for (int i = 0; i < ws->n; i++)
+        if (check_key_mentions(e->deref->lhs, ws->vars[i]) ||
+            check_key_mentions(node_chk(e->deref)->bounds_lo, ws->vars[i]) ||
+            check_key_mentions(node_chk(e->deref)->bounds_hi, ws->vars[i]))
+            return true;
+    return false;
+}
+
+// A deref carrying a plain range check whose key can be compared.
+static bool check_candidate(const DomCtx *cx, Node *d, bool *reads_mem) {
+    return d->kind == ND_DEREF && !d->checked_range_proven &&
+           node_chk(d)->bounds_lo && node_chk(d)->bounds_hi &&
+           !node_chk(d)->bounds_obj_init &&
+           check_key_pure(cx, d->lhs, reads_mem) &&
+           check_key_pure(cx, node_chk(d)->bounds_lo, reads_mem) &&
+           check_key_pure(cx, node_chk(d)->bounds_hi, reads_mem);
+}
+
+static bool check_covers(const CheckEntry *e, Node *d) {
+    Node *k = e->deref;
+    return (!k->checked_bounds_optional || d->checked_bounds_optional) &&
+           node_chk(d)->access_size <= node_chk(k)->access_size &&
+           check_key_equal(k->lhs, d->lhs) &&
+           check_key_equal(node_chk(k)->bounds_lo, node_chk(d)->bounds_lo) &&
+           check_key_equal(node_chk(k)->bounds_hi, node_chk(d)->bounds_hi);
+}
+
+typedef struct {
+    Node **v;
+    bool  *uncond;
+    int    n, cap;
+} DerefSites;
+
+// The checked derefs of an expression; `uncond` is false under the operand
+// of `?:`, `&&` or `||` that may not run.
+static void gather_derefs(const DomCtx *cx, Node *n, bool uncond,
+                          DerefSites *out) {
+    for (; n; n = n->next) {
+        bool reads;
+        if (n->kind == ND_DEREF && check_candidate(cx, n, &reads)) {
+            if (out->n == out->cap) {
+                out->cap    = out->cap ? out->cap * 2 : 8;
+                out->v      = realloc(out->v, out->cap * sizeof(Node *));
+                out->uncond = realloc(out->uncond, out->cap * sizeof(bool));
+            }
+            out->v[out->n]        = n;
+            out->uncond[out->n++] = uncond;
+        }
+        bool cond = n->kind == ND_COND;
+        bool lazy = n->kind == ND_LOGAND || n->kind == ND_LOGOR;
+        gather_derefs(cx, n->lhs, uncond, out);
+        gather_derefs(cx, n->rhs, uncond && !lazy, out);
+        gather_derefs(cx, node_ctl(n)->cond, uncond, out);
+        gather_derefs(cx, node_ctl(n)->then, uncond && !cond, out);
+        gather_derefs(cx, node_ctl(n)->els, uncond && !cond, out);
+        for (Node *a = n->args; a; a = a->next)
+            gather_derefs(cx, a, uncond, out);
+    }
+}
+
+static void cache_add(CheckCache *c, Node *d, bool reads_mem) {
+    if (c->n == c->cap) {
+        c->cap = c->cap ? c->cap * 2 : 8;
+        c->v   = realloc(c->v, c->cap * sizeof(CheckEntry));
+    }
+    c->v[c->n++] = (CheckEntry){d, reads_mem};
+}
+
+// The checks of one expression statement: the ones an earlier statement's
+// still-valid check covers are marked, the rest become available to later
+// statements. Checks of the same statement never cover each other, since
+// their order is unspecified.
+static void dominate_expr(const DomCtx *cx, Node *e, CheckCache *c) {
+    WriteSet ws = {.cx = cx};
+    note_writes(e, &ws);
+    for (int i = 0; i < c->n;)
+        if (entry_killed(&c->v[i], &ws))
+            c->v[i] = c->v[--c->n];
+        else
+            i++;
+    if (!ws.all) {
+        DerefSites sites = {0};
+        gather_derefs(cx, e, true, &sites);
+        int old = c->n;
+        for (int i = 0; i < sites.n; i++)
+            for (int j = 0; j < old; j++)
+                if (check_covers(&c->v[j], sites.v[i])) {
+                    sites.v[i]->checked_range_proven = true;
+                    break;
+                }
+        for (int i = 0; i < sites.n; i++) {
+            Node *d     = sites.v[i];
+            bool  reads = false;
+            if (!sites.uncond[i] || d->checked_range_proven)
+                continue;
+            check_candidate(cx, d, &reads);
+            CheckEntry cand = {d, reads};
+            bool       dup  = false;
+            for (int j = 0; j < c->n && !dup; j++)
+                dup = check_covers(&c->v[j], d);
+            if (!dup && !entry_killed(&cand, &ws))
+                cache_add(c, d, reads);
+        }
+        free(sites.v);
+        free(sites.uncond);
+    }
+    free(ws.vars);
+}
+
+static bool check_is_stmt(Node *n) {
+    switch (n->kind) {
+        case ND_EXPR_STMT:
+        case ND_RETURN:
+        case ND_IF:
+        case ND_FOR:
+        case ND_DO:
+        case ND_SWITCH:
+        case ND_CASE:
+        case ND_BLOCK:
+        case ND_GOTO:
+        case ND_GOTO_EXPR:
+        case ND_LABEL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void dominate_visit(const DomCtx *cx, Node *n);
+
+static void dominate_children(const DomCtx *cx, Node *n) {
+    dominate_visit(cx, n->lhs);
+    dominate_visit(cx, n->rhs);
+    dominate_visit(cx, node_ctl(n)->cond);
+    dominate_visit(cx, node_ctl(n)->then);
+    dominate_visit(cx, node_ctl(n)->els);
+    dominate_visit(cx, node_ctl(n)->init);
+    dominate_visit(cx, node_ctl(n)->inc);
+    dominate_visit(cx, n->body);
+    for (Node *a = n->args; a; a = a->next)
+        dominate_visit(cx, a);
+}
+
+// One statement of a list sharing `c`. A declaration group is not a scope, so
+// its initialisers belong to the enclosing list. Anything with control flow
+// of its own, and every jump target, ends the straight-line run.
+static void dominate_stmt(const DomCtx *cx, Node *s, CheckCache *c) {
+    if (s->kind == ND_BLOCK && s->is_decl_group) {
+        for (Node *t = s->body; t; t = t->next)
+            dominate_stmt(cx, t, c);
+    } else if (s->kind == ND_EXPR_STMT || s->kind == ND_RETURN) {
+        if (s->lhs)
+            dominate_expr(cx, s->lhs, c);
+        dominate_children(cx, s);
+        if (s->kind == ND_RETURN)
+            c->n = 0;
+    } else {
+        c->n = 0;
+        dominate_children(cx, s);
+    }
+}
+
+// Finds the statement lists below `n`, each analysed from an empty cache.
+static void dominate_visit(const DomCtx *cx, Node *n) {
+    for (; n; n = n->next) {
+        if (n->kind == ND_BLOCK && !n->is_decl_group) {
+            CheckCache c = {0};
+            for (Node *s = n->body; s; s = s->next)
+                dominate_stmt(cx, s, &c);
+            free(c.v);
+        } else if (check_is_stmt(n)) {
+            CheckCache c = {0};
+            dominate_stmt(cx, n, &c);
+            free(c.v);
+        } else {
+            dominate_children(cx, n);
+        }
+    }
+}
+
+// The store of `A op= B` re-checks the address `&A` already checked before
+// B ran. B must not run code that could change what the bounds read.
+static bool mark_rmw_mirror(Node *n, void *ud) {
+    (void)ud;
+    if (n->kind != ND_ASSIGN || !n->lhs || n->lhs->kind != ND_DEREF)
+        return true;
+    Node *store = n->lhs;
+    Node *orig  = node_chk(store)->rmw_lvalue;
+    if (!orig || orig->kind != ND_DEREF || node_chk(orig)->rmw_mirror != store)
+        return true;
+    if (!node_chk(store)->bounds_lo || !node_chk(store)->bounds_hi ||
+        !node_chk(orig)->bounds_lo || !node_chk(orig)->bounds_hi ||
+        store->checked_bounds_optional != orig->checked_bounds_optional ||
+        node_chk(store)->access_size > node_chk(orig)->access_size ||
+        node_has_side_effects(n->rhs))
+        return true;
+    store->checked_range_proven = true;
+    return true;
+}
+
+static void elide_checked_dominated_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !obj_fn(fn)->body ||
+        !walk_nodes(obj_fn(fn)->body, fn_has_entry_hazard, NULL))
+        return;
+    walk_nodes(obj_fn(fn)->body, mark_rmw_mirror, NULL);
+    // TODO: the cache restarts at every `if`, loop and label; carrying it
+    // across joins needs a dominator tree over the function (#1931).
+    DomCtx cx = {0};
+    walk_nodes(obj_fn(fn)->body, note_addressed, &cx);
+    dominate_visit(&cx, obj_fn(fn)->body);
+    free(cx.addressed);
+}
+
 // The tail passes of every function body, in order: propagation, the
 // pending `dynamic` casts it decides, then #944's assignment verification.
 void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
@@ -4619,6 +5079,7 @@ void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
     verify_checked_assign_bounds(vm, fn);
     group_checked_sibling_writes(vm, fn);
     elide_checked_loop_bounds(vm, fn);
+    elide_checked_dominated_bounds(vm, fn);
     if (obj_chk(fn)->checked_ret_entry && obj_fn(fn)->body) {
         Node *init =
             new_unary(vm, ND_EXPR_STMT, obj_chk(fn)->checked_ret_entry, obj_fn(fn)->body->tok);

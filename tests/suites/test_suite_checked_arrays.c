@@ -966,3 +966,52 @@ void test_checked_array_loop_index_in_bounds(void) {
         sum += a[u];
     AssertEq(sum, 4 + 6 + 8 + 10);
 }
+
+// ---------------------------------------------------------------------
+// A second access to an address an earlier statement already checked.
+// ---------------------------------------------------------------------
+
+struct Dom {
+    int *[[cccc::array, cccc::count(len)]] data;
+    int len;
+};
+
+static int dom_rmw(int *[[cccc::array, cccc::count(n)]] p, int n, int i) {
+    p[i] += 3;
+    p[i]++;
+    p[i] *= 2;
+    return p[i];
+}
+
+static int dom_read_write(int *[[cccc::array, cccc::count(n)]] p, int n,
+                          int i) {
+    int x = p[i];
+    p[i]  = x + 1;
+    return p[i] + x;
+}
+
+static int dom_bound_moves(int *[[cccc::array, cccc::count(n)]] p, int n,
+                           int i) {
+    int x = p[i];
+    n     = 4;
+    return x + p[i];
+}
+
+static int dom_through_memory(struct Dom *d, int i) {
+    int x      = d->data[i];
+    d->data[i] = 7;
+    return x + d->data[i];
+}
+
+[[cccc::test]]
+void test_repeated_access_values(void) {
+    int a[4] = {1, 2, 3, 4};
+    AssertEq(dom_rmw(a, 4, 1), 12);
+    AssertEq(a[1], 12);
+    AssertEq(dom_read_write(a, 4, 2), 7);
+    AssertEq(a[2], 4);
+    AssertEq(dom_bound_moves(a, 4, 3), 8);
+    struct Dom d = {a, 4};
+    AssertEq(dom_through_memory(&d, 0), 8);
+    AssertEq(a[0], 7);
+}

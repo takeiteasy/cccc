@@ -1799,8 +1799,9 @@ static void serialize_checked_deref(FILE *f, VirtualMachine *vm,
 }
 
 static bool checked_deref_lowered(VirtualMachine *vm, Node *node) {
-    return node->kind == ND_DEREF && node_chk(node)->bounds_lo &&
-           node_chk(node)->bounds_hi && serialize_lowers_checks(vm);
+    return node->kind == ND_DEREF && !node->checked_range_proven &&
+           node_chk(node)->bounds_lo && node_chk(node)->bounds_hi &&
+           serialize_lowers_checks(vm);
 }
 
 // The ntarray element deref whose terminator slot a store to `lhs` can hit.

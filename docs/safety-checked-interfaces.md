@@ -309,6 +309,7 @@ Declared bounds: [0x16d63a448, 0x16d63a454)
 | Without the flag | No checks, helpers or temporaries are emitted |
 | Constant index inside a checked array | No check is emitted, as in the VM ([details](safety-checked-types.md#constant-indices)) |
 | Loop index proven inside a checked array | No check is emitted, as in the VM ([details](safety-checked-types.md#loop-indices)) |
+| Access repeating an earlier identical check | One check is emitted, as in the VM ([details](safety-checked-types.md#repeated-accesses)) |
 | Comptime code | Runs in the VM, so it is checked there under the flag |
 | `-c=generated` | Warns and drops the flag; it emits no user accesses |
 | Attributes | Always stripped from `-E`/`-m`/`-c=generated`/`-c=native` output |
