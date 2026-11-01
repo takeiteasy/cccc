@@ -1,6 +1,6 @@
 // CCCC_NATIVE_SKIP: -c=native rejects VM bytecode options (-d)
 // CCCC_FLAGS: -d
-// CCCC_EXPECT_STDOUT: ADDI3[^:]*: SX4
+// CCCC_EXPECT_STDOUT: : ADDISX3 
 // With `<=` the index can be INT_MAX, so `j++` still has to wrap to int.
 void mark(int *p) {
     *p = 7;

@@ -4,7 +4,7 @@
 // CCCC_EXPECT_STDOUT: : XORI3 +[0-9]+ 255 0
 // CCCC_EXPECT_STDOUT: : ORI3 +[0-9]+ 1284865837 1481765933
 // CCCC_EXPECT_STDOUT: : XORI3 +[0-9]+ 4294967295 0
-// CCCC_REJECT_STDOUT: : (OR3|XOR3) 
+// CCCC_REJECT_STDOUT: : (OR3|XOR3)
 // An OR or XOR with a constant takes the constant as an immediate, whichever
 // side it is on, and keeps C's results for negative and 64-bit constants.
 long set_bits(long a) {

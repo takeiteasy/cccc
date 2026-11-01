@@ -782,6 +782,20 @@ extern "C" {
     X(ANDI3, 3)    /* rd = rs1 & imm */                                              \
     X(ORI3, 3)     /* rd = rs1 | imm */                                              \
     X(XORI3, 3)    /* rd = rs1 ^ imm */                                              \
+    /* A 32-bit operation and the wrap after it: rd = (int)(rs1 OP rs2) (SX)         \
+       or (unsigned)(rs1 OP rs2) (ZX), sign- or zero-extended to 64 bits. */         \
+    X(ADDSX3, 1)   /* rd = (int)(rs1 + rs2) */                                       \
+    X(ADDZX3, 1)   /* rd = (unsigned)(rs1 + rs2) */                                  \
+    X(SUBSX3, 1)   /* rd = (int)(rs1 - rs2) */                                       \
+    X(SUBZX3, 1)   /* rd = (unsigned)(rs1 - rs2) */                                  \
+    X(MULSX3, 1)   /* rd = (int)(rs1 * rs2) */                                       \
+    X(MULZX3, 1)   /* rd = (unsigned)(rs1 * rs2) */                                  \
+    X(ADDISX3, 3)  /* rd = (int)(rs1 + imm) */                                       \
+    X(ADDIZX3, 3)  /* rd = (unsigned)(rs1 + imm) */                                  \
+    X(MULISX3, 3)  /* rd = (int)(rs1 * imm) */                                       \
+    X(MULIZX3, 3)  /* rd = (unsigned)(rs1 * imm) */                                  \
+    X(SHLISX3, 3)  /* rd = (int)(rs1 << imm), imm in 0..63 */                        \
+    X(SHLIZX3, 3)  /* rd = (unsigned)(rs1 << imm), imm in 0..63 */                   \
     X(FNZ3, 1)     /* rd = (fregs[rs] != 0), NaN is nonzero */                       \
     X(FNZ3_F32, 1) /* rd = ((float)fregs[rs] != 0) */                                \
     X(BEQ3, 2)     /* branch to target if rs1 == rs2 */                              \

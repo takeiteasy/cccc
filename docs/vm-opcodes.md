@@ -70,6 +70,19 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `NOT3` | `rd = !rs1` (logical) |
 | `BNOT3` | `rd = ~rs1` (bitwise) |
 
+### 32-bit Arithmetic with its Wrap
+
+A 32-bit `int` or `unsigned` result is wrapped so the 64-bit register holds the value its type denotes. The clean-up fuses an `ADD3`, `SUB3`, `MUL3`, `ADDI3`, `MULI3` or `SHLI3` with the `SX4` / `ZX4` after it into one opcode of the same operand format; the register read as a source may also be the destination.
+
+| Opcode | Description |
+|--------|-------------|
+| `ADDSX3`, `ADDZX3` | `rd = (int)(rs1 + rs2)`, `rd = (unsigned)(rs1 + rs2)` |
+| `SUBSX3`, `SUBZX3` | `rd = (int)(rs1 - rs2)`, `rd = (unsigned)(rs1 - rs2)` |
+| `MULSX3`, `MULZX3` | `rd = (int)(rs1 * rs2)`, `rd = (unsigned)(rs1 * rs2)` |
+| `ADDISX3`, `ADDIZX3` | `rd = (int)(rs1 + imm)`, `rd = (unsigned)(rs1 + imm)` (RI format) |
+| `MULISX3`, `MULIZX3` | `rd = (int)(rs1 * imm)`, `rd = (unsigned)(rs1 * imm)` (RI format) |
+| `SHLISX3`, `SHLIZX3` | `rd = (int)(rs1 << imm)`, `rd = (unsigned)(rs1 << imm)`, count 0-63 (RI format) |
+
 ### Comparisons (3-Register)
 
 | Opcode | Description |

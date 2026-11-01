@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the VM bytecode clean-up drops the sign or zero extension after a 32-bit `int` / `unsigned` operation whose upper half nothing reads (a 4-byte store, another extension, another 32-bit operation), and fuses the extension that remains into the operation: new opcodes `ADDSX3`, `ADDZX3`, `SUBSX3`, `SUBZX3`, `MULSX3`, `MULZX3`, `ADDISX3`, `ADDIZX3`, `MULISX3`, `MULIZX3`, `SHLISX3` and `SHLIZX3`.
 - Added: VM opcodes `ORI3` and `XORI3` (OR or XOR by an immediate), so `x | 0xf0` and `x ^ 0xff` are one instruction instead of a `LI3` and an `OR3` / `XOR3`.
 - Changed: a compare against a constant beyond 24 bits (a loop bound of `10000000`, `x != 0xFFFFFFFF`) tested by the branch right after it is one compare-and-branch opcode with a 56-bit immediate (`BLTW3`, `BNEW3`, ... 10 in all).
 - Fixed: the clean-up pass checked the bytecode of a function only when it had rewritten something other than a branch fusion; a function changed only by fusion is now checked too.

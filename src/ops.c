@@ -6368,6 +6368,43 @@ DEFINE_BIT_IMM_OP(ANDI3, a &imm)
 DEFINE_BIT_IMM_OP(ORI3, a | imm)
 DEFINE_BIT_IMM_OP(XORI3, a ^ imm)
 
+// ========== 32-bit arithmetic with its wrap ==========
+
+#define DEFINE_WRAP_OP(NAME, EXPR, WRAP)                                       \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1, rs2;                                                \
+        DECODE_RRR(operands, rd, rs1, rs2);                                    \
+        unsigned long long a = (unsigned long long)vm->regs[rs1];              \
+        unsigned long long b = (unsigned long long)vm->regs[rs2];              \
+        vm->regs[rd]         = (long long)(WRAP)(EXPR);                        \
+        return 0;                                                              \
+    }
+
+#define DEFINE_WRAP_IMM_OP(NAME, EXPR, WRAP)                                   \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs1;                                                     \
+        DECODE_RR(operands, rd, rs1);                                          \
+        unsigned long long imm = (unsigned long long)cc_read_i64(vm);          \
+        unsigned long long a   = (unsigned long long)vm->regs[rs1];            \
+        vm->regs[rd]           = (long long)(WRAP)(EXPR);                      \
+        return 0;                                                              \
+    }
+
+DEFINE_WRAP_OP(ADDSX3, a + b, int)
+DEFINE_WRAP_OP(ADDZX3, a + b, unsigned)
+DEFINE_WRAP_OP(SUBSX3, a - b, int)
+DEFINE_WRAP_OP(SUBZX3, a - b, unsigned)
+DEFINE_WRAP_OP(MULSX3, a *b, int)
+DEFINE_WRAP_OP(MULZX3, a *b, unsigned)
+DEFINE_WRAP_IMM_OP(ADDISX3, a + imm, int)
+DEFINE_WRAP_IMM_OP(ADDIZX3, a + imm, unsigned)
+DEFINE_WRAP_IMM_OP(MULISX3, a *imm, int)
+DEFINE_WRAP_IMM_OP(MULIZX3, a *imm, unsigned)
+DEFINE_WRAP_IMM_OP(SHLISX3, a << imm, int)
+DEFINE_WRAP_IMM_OP(SHLIZX3, a << imm, unsigned)
+
 // Comptime code only dereferences VM memory, so host data a builtin returns
 // is handed back as a VM-heap copy.
 static void *copy_builtin_result_to_vm(VirtualMachine *vm, CcBuiltinRet ret,

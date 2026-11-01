@@ -54,6 +54,10 @@
 // else reads is merged into the LI3's slot: `LI3 t, c; OP d, a, t` becomes
 // `OPI d, a, c` where an immediate form exists, and `LI3 d, result` when the
 // result is known.
+//
+// A 32-bit result's sign or zero extension is dropped when no later instruction
+// reads the register's upper half (drop_unread_wraps), and one that remains is
+// fused into the preceding ADD/SUB/MUL/ADDI/MULI/SHLI (fuse_wraps).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -117,6 +121,12 @@ static bool op_spec(int op, OpSpec *s) {
         case ANDI3:
         case ORI3:
         case XORI3:
+        case ADDISX3:
+        case ADDIZX3:
+        case MULISX3:
+        case MULIZX3:
+        case SHLISX3:
+        case SHLIZX3:
         case SEQI3:
         case SNEI3:
         case SLTI3:
@@ -133,6 +143,12 @@ static bool op_spec(int op, OpSpec *s) {
             *s = SPEC(ID, IU, IU, IU, SP_PURE);
             return true;
         case MULADDI3:
+        case ADDSX3:
+        case ADDZX3:
+        case SUBSX3:
+        case SUBZX3:
+        case MULSX3:
+        case MULZX3:
             *s = SPEC(ID, IU, IU, NO, SP_PURE);
             return true;
         case LI3:
@@ -746,12 +762,24 @@ static int ext_result(int op) {
         case SX2:
             return ext_of_range(-32768, 32767);
         case SX4:
+        case ADDSX3:
+        case SUBSX3:
+        case MULSX3:
+        case ADDISX3:
+        case MULISX3:
+        case SHLISX3:
             return ext_of_range(INT_MIN, INT_MAX);
         case ZX1:
             return ext_of_range(0, 255);
         case ZX2:
             return ext_of_range(0, 65535);
         case ZX4:
+        case ADDZX3:
+        case SUBZX3:
+        case MULZX3:
+        case ADDIZX3:
+        case MULIZX3:
+        case SHLIZX3:
             return ext_of_range(0, 4294967295LL);
         case LDR_B:
         case LDR_INDEX_B:
@@ -2052,6 +2080,225 @@ static void drop_unreachable(Peep *p) {
     free(stack);
 }
 
+// ---- Wrap elimination ----
+
+// A 32-bit result is wrapped by an `SX4` / `ZX4` so the 64-bit register holds
+// the value its type denotes. Nothing needs the wrap while only the low 32 bits
+// of the register are read: a 4-byte store, another wrap, or an operation that
+// is itself wrapped later. `hi` below is the set of registers whose upper 32
+// bits a later instruction may read; every other register's upper half is dead.
+
+enum { HK_ALL, HK_LOW, HK_SHL, HK_EXT, HK_STORE };
+
+// How an instruction treats the upper 32 bits of its sources. HK_LOW: the low
+// 32 bits of the result depend only on the low 32 bits of the sources.
+// HK_SHL: the same for the shifted value, but the count is read whole.
+// HK_EXT: only the low bytes of the sources are read (an extension, or an
+// operation fused with one). HK_STORE: the stored
+// value (byte 0) is at most 4 bytes wide. HK_ALL: every source is read whole.
+static int hi_kind(int op) {
+    switch (op) {
+        case ADD3:
+        case SUB3:
+        case MUL3:
+        case AND3:
+        case OR3:
+        case XOR3:
+        case ADDI3:
+        case MULI3:
+        case SHLI3:
+        case ANDI3:
+        case ORI3:
+        case XORI3:
+        case NEG3:
+        case BNOT3:
+        case MOV3:
+        case MULADD3:
+        case MULADDI3:
+            return HK_LOW;
+        case SHL3:
+            return HK_SHL;
+        case SX1:
+        case SX2:
+        case SX4:
+        case ZX1:
+        case ZX2:
+        case ZX4:
+        case ADDSX3:
+        case ADDZX3:
+        case SUBSX3:
+        case SUBZX3:
+        case MULSX3:
+        case MULZX3:
+        case ADDISX3:
+        case ADDIZX3:
+        case MULISX3:
+        case MULIZX3:
+        case SHLISX3:
+        case SHLIZX3:
+            return HK_EXT;
+        case STR_B:
+        case STR_H:
+        case STR_W:
+        case STR_LOCAL_B:
+        case STR_LOCAL_H:
+        case STR_LOCAL_W:
+        case STR_INDEX_B:
+        case STR_INDEX_H:
+        case STR_INDEX_W:
+            return HK_STORE;
+        default:
+            return HK_ALL;
+    }
+}
+
+// The registers whose upper half is read before `in` given those read after it.
+// A promoted register is always read: the debugger and the seed facts see it.
+static uint32_t hi_step(Peep *p, const Insn *in, uint32_t hi) {
+    Eff e;
+    effects(p, in, &e);
+    uint32_t keep = e.iuse;
+    switch (in->known ? hi_kind(in->op) : HK_ALL) {
+        case HK_LOW:
+            if (!(hi & e.idef))
+                keep = 0;
+            break;
+        case HK_SHL:
+            if (!(hi & e.idef))
+                keep = BIT(get_byte(p, in, 2)) & ~BIT(REG_ZERO);
+            break;
+        case HK_EXT:
+            keep = 0;
+            break;
+        case HK_STORE:
+            keep = 0;
+            for (int k = 1; k < 4; k++) {
+                int r = get_byte(p, in, k);
+                if (in->spec.role[k] == R_IU && r != REG_ZERO)
+                    keep |= BIT(r);
+            }
+            break;
+    }
+    return (hi & ~e.idef) | keep | p->promoted;
+}
+
+// The registers whose upper half a block's successors read. A block with no
+// successor that does not return leaves the window, so everything is read.
+static uint32_t hi_out(Peep *p, const Block *blk, const uint32_t *hin) {
+    uint32_t hi = 0;
+    if (!blk->nsucc && ctrl_kind(p, &p->ins[blk->last - 1]) != C_EXIT)
+        hi = ALL_REGS;
+    for (int s = 0; s < blk->nsucc; s++)
+        hi |= hin[p->edges[blk->eoff + s]];
+    return hi;
+}
+
+// Drops every `SX4` / `ZX4` whose result's upper half nothing reads.
+static void drop_unread_wraps(Peep *p) {
+    uint32_t *hin = calloc((size_t)p->nblocks, sizeof *hin);
+    if (!hin)
+        error("out of memory");
+    bool again = true;
+    while (again) {
+        again = false;
+        for (int b = p->nblocks - 1; b >= 0; b--) {
+            Block   *blk = &p->blocks[b];
+            uint32_t hi  = hi_out(p, blk, hin);
+            for (int i = blk->last - 1; i >= blk->first; i--)
+                if (!p->ins[i].dead)
+                    hi = hi_step(p, &p->ins[i], hi);
+            if (hi != hin[b]) {
+                hin[b] = hi;
+                again  = true;
+            }
+        }
+    }
+    for (int b = 0; b < p->nblocks; b++) {
+        Block   *blk = &p->blocks[b];
+        uint32_t hi  = hi_out(p, blk, hin);
+        for (int i = blk->last - 1; i >= blk->first; i--) {
+            Insn *in = &p->ins[i];
+            if (in->dead)
+                continue;
+            int rd = get_byte(p, in, 0), rs = get_byte(p, in, 1);
+            if (in->known && (in->op == SX4 || in->op == ZX4) &&
+                rd != REG_ZERO && !(hi & BIT(rd))) {
+                p->changed = true;
+                if (rd == rs) {
+                    in->dead = true;
+                    continue;
+                }
+                make_mov(p, in, rs);
+            }
+            hi = hi_step(p, in, hi);
+        }
+    }
+    free(hin);
+}
+
+// ---- Fused wraps ----
+
+// The opcode computing `OP` and wrapping the result with `ext` (SX4 or ZX4),
+// or 0.
+static int wrapped_op(int op, int ext) {
+    bool sx = ext == SX4;
+    switch (op) {
+        case ADD3:
+            return sx ? ADDSX3 : ADDZX3;
+        case SUB3:
+            return sx ? SUBSX3 : SUBZX3;
+        case MUL3:
+            return sx ? MULSX3 : MULZX3;
+        case ADDI3:
+            return sx ? ADDISX3 : ADDIZX3;
+        case MULI3:
+            return sx ? MULISX3 : MULIZX3;
+        case SHLI3:
+            return sx ? SHLISX3 : SHLIZX3;
+        default:
+            return 0;
+    }
+}
+
+// `OP t, ...; SX4/ZX4 d, t` with t dead afterwards (or t == d) is one opcode
+// writing d. The operation reads its sources before it writes, so d may be one
+// of them.
+static void fuse_block_wraps(Peep *p, Block *blk) {
+    uint32_t il = blk->iout, fl = blk->fout, after_ext = 0;
+    Insn    *next = NULL;
+    for (int i = blk->last - 1; i >= blk->first; i--) {
+        Insn *in = &p->ins[i];
+        if (in->dead)
+            continue;
+        if (next && in->known && next->known &&
+            (next->op == SX4 || next->op == ZX4)) {
+            int fused = wrapped_op(in->op, next->op);
+            int t = get_byte(p, in, 0), d = get_byte(p, next, 0);
+            if (fused && t != REG_ZERO && d != REG_ZERO &&
+                get_byte(p, next, 1) == t &&
+                (d == t || !(after_ext & BIT(t)))) {
+                set_byte(p, in, 0, d);
+                p->vm->text_seg[in->pc] = fused;
+                in->op                  = fused;
+                op_spec(fused, &in->spec);
+                next->dead = true;
+                p->changed = true;
+                il         = after_ext;
+            }
+        }
+        after_ext = il;
+        step_back(p, in, &il, &fl);
+        next = in;
+    }
+}
+
+static void fuse_wraps(Peep *p) {
+    compute_succs(p);
+    compute_liveness(p);
+    for (int b = 0; b < p->nblocks; b++)
+        fuse_block_wraps(p, &p->blocks[b]);
+}
+
 // ---- Fused compare-and-branch ----
 
 // `cmp t, a, b; JZ3/JNZ3 t` with t dead afterwards becomes one branch in the
@@ -2411,11 +2658,13 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
         compute_liveness(&p);
         for (int b = 0; b < p.nblocks; b++)
             backward_block(&p, &p.blocks[b]);
+        drop_unread_wraps(&p);
         drop_jump_to_next(&p);
         if (!p.changed)
             break;
         any = true;
     }
+    fuse_wraps(&p);
     fuse_branches(&p);
     bool compacted = any || p.changed;
     if (compacted) {
