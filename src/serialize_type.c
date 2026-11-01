@@ -749,12 +749,85 @@ static void cand_index_clear(CandIndex *ix) {
     *ix = (CandIndex){0};
 }
 
+// The records of a registry whose .ty is exactly a given Type*, ascending: the
+// identity lookups need nothing structural. Built on demand like CandIndex,
+// including its retry of records whose .ty was NULL when first visited.
+typedef struct {
+    HashMap head; // Type* -> first record + 1
+    HashMap tail; // Type* -> last record + 1
+    int    *next; // record -> next record with the same .ty, + 1
+    int     cap;
+    int     indexed;
+    IdxList holes;
+} PtrIndex;
+
+static PtrIndex g_tag_pix;
+static PtrIndex g_td_pix;
+
+static void ptr_index_clear(PtrIndex *ix) {
+    hashmap_deinit(&ix->head);
+    hashmap_deinit(&ix->tail);
+    free(ix->next);
+    free(ix->holes.v);
+    *ix = (PtrIndex){0};
+}
+
+static bool ptr_index_add_one(PtrIndex *ix, Type *ty, int i) {
+    if (!ty)
+        return false;
+    long long key  = (long long)(intptr_t)ty;
+    int       head = (int)(intptr_t)hashmap_get_int(&ix->head, key);
+    int       tail = (int)(intptr_t)hashmap_get_int(&ix->tail, key);
+    ix->next[i]    = 0;
+    if (!head) {
+        hashmap_put_int(&ix->head, key, (void *)(intptr_t)(i + 1));
+        hashmap_put_int(&ix->tail, key, (void *)(intptr_t)(i + 1));
+    } else if (tail - 1 < i) {
+        ix->next[tail - 1] = i + 1;
+        hashmap_put_int(&ix->tail, key, (void *)(intptr_t)(i + 1));
+    } else if (head - 1 > i) {
+        ix->next[i] = head;
+        hashmap_put_int(&ix->head, key, (void *)(intptr_t)(i + 1));
+    } else {
+        // A retried hole between existing records.
+        int j = head;
+        while (ix->next[j - 1] && ix->next[j - 1] - 1 < i)
+            j = ix->next[j - 1];
+        ix->next[i]     = ix->next[j - 1];
+        ix->next[j - 1] = i + 1;
+    }
+    return true;
+}
+
+// The first record of `arr` whose .ty is `ty`, + 1 (0: none); the following
+// ones are ix->next[j - 1].
+static int ptr_index_first(PtrIndex *ix, TypeName *arr, int len, Type *ty) {
+    if (len > ix->cap) {
+        ix->cap  = len * 2;
+        ix->next = realloc(ix->next, sizeof(int) * ix->cap);
+    }
+    int w = 0;
+    for (int h = 0; h < ix->holes.len; h++) {
+        int i = ix->holes.v[h];
+        if (!ptr_index_add_one(ix, arr[i].ty, i))
+            ix->holes.v[w++] = i;
+    }
+    ix->holes.len = w;
+    for (int i = ix->indexed; i < len; i++)
+        if (!ptr_index_add_one(ix, arr[i].ty, i))
+            idxlist_add(&ix->holes, i);
+    ix->indexed = len;
+    return (int)(intptr_t)hashmap_get_int(&ix->head, (long long)(intptr_t)ty);
+}
+
 // #1283: called at the start (after the rename passes) and end of
 // cc_serialize_program() so a stale index from a prior program is never
 // carried over.
 void serialize_type_index_reset(void) {
     cand_index_clear(&g_tag_ix);
     cand_index_clear(&g_td_ix);
+    ptr_index_clear(&g_tag_pix);
+    ptr_index_clear(&g_td_pix);
     g_type_index_disabled = -1;
     g_type_index_verify   = -1;
 }
@@ -1190,18 +1263,24 @@ static TypeName *find_typedef_name_exact_vis(SerializeContext *ctx, Type *ty,
     // #1283: probe once for `ty` (every origin-chain hop's candidate set is a
     // subset -- all chain nodes share an origin root), then iterate hop-major
     // over that fixed set to preserve "nearest hop wins" ordering.
-    int cb[TYPE_CAND_CAP];
-    int cn    = type_cand_typedefs(ctx, ty, cb);
-    int total = cn < 0 ? ctx->typedefs_len : cn;
-    int hop   = 0;
+    int hop = 0;
+    if (type_index_off()) {
+        for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++)
+            for (int i = 0; i < ctx->typedefs_len; i++)
+                if (ctx->typedefs[i].ty == cur &&
+                    (!require_visible ||
+                     name_visible(&ctx->typedefs[i], ctx->current_fn)))
+                    return &ctx->typedefs[i];
+        return NULL;
+    }
     for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++)
-        for (int k = 0; k < total; k++) {
-            int i = cn < 0 ? k : cb[k];
-            if (ctx->typedefs[i].ty == cur &&
+        for (int j = ptr_index_first(&g_td_pix, ctx->typedefs,
+                                     ctx->typedefs_len, cur);
+             j; j  = g_td_pix.next[j - 1])
+            if (ctx->typedefs[j - 1].ty == cur &&
                 (!require_visible ||
-                 name_visible(&ctx->typedefs[i], ctx->current_fn)))
-                return &ctx->typedefs[i];
-        }
+                 name_visible(&ctx->typedefs[j - 1], ctx->current_fn)))
+                return &ctx->typedefs[j - 1];
     return NULL;
 }
 
@@ -1413,24 +1492,29 @@ static Obj *type_decl_owner(SerializeContext *ctx, Type *ty) {
     // behaving exactly as before.
     // #1283: probe both registries once for `ty`; every origin-chain hop's
     // candidate set is a subset. Iterate hop-major to keep "nearest hop wins".
+    int hop = 0;
+    for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++) {
+        if (type_index_off()) {
+            for (int i = 0; i < ctx->tags_len; i++)
+                if (ctx->tags[i].ty == cur)
+                    return ctx->tags[i].owner_fn;
+            for (int i = 0; i < ctx->typedefs_len; i++)
+                if (ctx->typedefs[i].ty == cur)
+                    return ctx->typedefs[i].owner_fn;
+            continue;
+        }
+        int j = ptr_index_first(&g_tag_pix, ctx->tags, ctx->tags_len, cur);
+        if (j)
+            return ctx->tags[j - 1].owner_fn;
+        j = ptr_index_first(&g_td_pix, ctx->typedefs, ctx->typedefs_len, cur);
+        if (j)
+            return ctx->typedefs[j - 1].owner_fn;
+    }
     int tcb[TYPE_CAND_CAP], ycb[TYPE_CAND_CAP];
     int tcn  = type_cand_tags(ctx, ty, tcb);
     int ycn  = type_cand_typedefs(ctx, ty, ycb);
     int ttot = tcn < 0 ? ctx->tags_len : tcn;
     int ytot = ycn < 0 ? ctx->typedefs_len : ycn;
-    int hop  = 0;
-    for (Type *cur = ty; cur && hop < 8; cur = cur->origin, hop++) {
-        for (int k = 0; k < ttot; k++) {
-            int i = tcn < 0 ? k : tcb[k];
-            if (ctx->tags[i].ty == cur)
-                return ctx->tags[i].owner_fn;
-        }
-        for (int k = 0; k < ytot; k++) {
-            int i = ycn < 0 ? k : ycb[k];
-            if (ctx->typedefs[i].ty == cur)
-                return ctx->typedefs[i].owner_fn;
-        }
-    }
     for (int k = 0; k < ttot; k++) {
         int i = tcn < 0 ? k : tcb[k];
         if (!synth_rec_mismatch(ty, &ctx->tags[i]) &&
@@ -4435,8 +4519,28 @@ static bool *file_scope_typedef_done(SerializeContext *ctx) {
     return ctx->file_typedef_done;
 }
 
+// Whether any tag or typedef record has named `fn` as its owner. A definition
+// or typedef belongs to `fn` only through such a record.
+static bool record_may_be_owned(SerializeContext *ctx, Obj *fn) {
+    for (; ctx->owners_seen_tags < ctx->tags_len; ctx->owners_seen_tags++) {
+        Obj *o = ctx->tags[ctx->owners_seen_tags].owner_fn;
+        if (o)
+            hashmap_put_int(&ctx->record_owners, (long long)(intptr_t)o, o);
+    }
+    for (; ctx->owners_seen_typedefs < ctx->typedefs_len;
+         ctx->owners_seen_typedefs++) {
+        Obj *o = ctx->typedefs[ctx->owners_seen_typedefs].owner_fn;
+        if (o)
+            hashmap_put_int(&ctx->record_owners, (long long)(intptr_t)o, o);
+    }
+    return hashmap_get_int(&ctx->record_owners, (long long)(intptr_t)fn) !=
+           NULL;
+}
+
 void serialize_type_defs_for_owner(FILE *f, SerializeContext *ctx,
                                    Obj *owner_fn) {
+    if (owner_fn && !record_may_be_owned(ctx, owner_fn))
+        return;
     Obj *saved_fn   = ctx->current_fn;
     ctx->current_fn = owner_fn;
 

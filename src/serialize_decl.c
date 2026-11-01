@@ -928,6 +928,7 @@ static bool            global_index_dirty;
 void serialize_rename_global(Obj *obj, char *new_name) {
     obj->name          = new_name;
     global_index_dirty = true;
+    serialize_shim_fns_invalidate();
 }
 
 // A name no global has (a `&&label` target) misses without a scan.

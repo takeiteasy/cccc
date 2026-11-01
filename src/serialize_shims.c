@@ -188,15 +188,61 @@ static const struct {
     {"__cccc_environ_ptr", CCCC_SHIM_native_accessor___cccc_environ_ptr},
 };
 
+// The function Objs of `prog` by name, so a shim gate is a lookup rather than a
+// scan of the whole program. `next` chains same-named Objs in list order. An
+// in-place rename (serialize_rename_global) marks the index stale.
+static struct {
+    Obj    *prog;
+    Obj   **objs;
+    int    *next;
+    HashMap heads; // name -> first index + 1
+    bool    stale;
+} shim_fns;
+
+void serialize_shim_fns_invalidate(void) {
+    shim_fns.stale = true;
+}
+
+static int shim_fns_first(Obj *prog, const char *name) {
+    if (shim_fns.prog != prog || shim_fns.stale || !shim_fns.objs) {
+        hashmap_deinit_borrowed(&shim_fns.heads);
+        free(shim_fns.objs);
+        free(shim_fns.next);
+        int n = 0;
+        for (Obj *obj = prog; obj; obj = obj->next)
+            n += obj->is_function;
+        shim_fns.objs = malloc(sizeof(Obj *) * (n ? n : 1));
+        shim_fns.next = malloc(sizeof(int) * (n ? n : 1));
+        n             = 0;
+        for (Obj *obj = prog; obj; obj = obj->next)
+            if (obj->is_function)
+                shim_fns.objs[n++] = obj;
+        for (int i = n - 1; i >= 0; i--) {
+            shim_fns.next[i] = (int)(intptr_t)hashmap_get(
+                &shim_fns.heads, shim_fns.objs[i]->name);
+            hashmap_put_borrowed(&shim_fns.heads, shim_fns.objs[i]->name,
+                                 (void *)(intptr_t)(i + 1));
+        }
+        shim_fns.prog  = prog;
+        shim_fns.stale = false;
+    }
+    return (int)(intptr_t)hashmap_get(&shim_fns.heads, name);
+}
+
+// Iterates the function Objs of `prog` currently named `name`, in list order.
+#define FOR_SHIM_FN(var, program, fn_name)                                     \
+    for (int _i = shim_fns_first((program), (fn_name));                        \
+         _i && ((var) = shim_fns.objs[_i - 1], 1); _i = shim_fns.next[_i - 1]) \
+        if (strcmp((var)->name, (fn_name)) == 0)
+
 void serialize_native_accessor_shims(FILE *f, Obj *prog) {
     bool any = false;
     for (size_t i = 0;
          i < sizeof(native_accessor_shims) / sizeof(native_accessor_shims[0]);
          i++) {
-        for (Obj *obj = prog; obj; obj = obj->next) {
-            if (!obj->is_function || !obj->is_used)
-                continue;
-            if (strcmp(obj->name, native_accessor_shims[i].name) != 0)
+        Obj *obj;
+        FOR_SHIM_FN(obj, prog, native_accessor_shims[i].name) {
+            if (!obj->is_used)
                 continue;
             fprintf(f, "%s", native_accessor_shims[i].def);
             any = true;
@@ -226,10 +272,9 @@ void serialize_native_accessor_shims(FILE *f, Obj *prog) {
 // both backends agree on the ENOMEM-without-touching-ptr contract real
 // reallocarray(3) guarantees.
 void serialize_reallocarray_shim(FILE *f, Obj *prog) {
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used)
-            continue;
-        if (strcmp(obj->name, "reallocarray") != 0)
+    Obj *obj;
+    FOR_SHIM_FN(obj, prog, "reallocarray") {
+        if (!obj->is_used)
             continue;
         // #include <errno.h> here rather than relying on the guest's own
         // #include being replayed: reallocarray's failure contract
@@ -283,10 +328,9 @@ void serialize_reallocarray_shim(FILE *f, Obj *prog) {
 // just parameterized on which header's declaration it must trace back to.
 static bool shim_fn_is_used(VirtualMachine *vm, Obj *prog, const char *name,
                             const char *header_basename) {
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
-            continue;
-        if (strcmp(obj->name, name) != 0)
+    Obj *obj;
+    FOR_SHIM_FN(obj, prog, name) {
+        if (!obj->is_used || obj_fn(obj)->body)
             continue;
         Token *t = obj->tok;
         if (!t || !t->file)
@@ -340,10 +384,9 @@ static bool bundled_tag_is_declared(VirtualMachine *vm, const char *tag_name,
 static bool bundled_shim_fn_is_used(VirtualMachine *vm, Obj *prog,
                                     const char *name,
                                     const char *header_basename) {
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
-            continue;
-        if (strcmp(obj->name, name) != 0)
+    Obj *obj;
+    FOR_SHIM_FN(obj, prog, name) {
+        if (!obj->is_used || obj_fn(obj)->body)
             continue;
         Token *t = obj->tok;
         if (!t || !t->file)
@@ -375,10 +418,9 @@ static bool rename_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
                                           const char *name,
                                           const char *header_basename,
                                           bool        any_system_header) {
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (!obj->is_function || !obj->is_used || obj_fn(obj)->body)
-            continue;
-        if (strcmp(obj->name, name) != 0)
+    Obj *obj;
+    FOR_SHIM_FN(obj, prog, name) {
+        if (!obj->is_used || obj_fn(obj)->body)
             continue;
         Token *t = obj->tok;
         if (!t || !t->file)

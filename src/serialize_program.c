@@ -5740,6 +5740,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         hashmap_deinit(&ctx.file_typedef_names);
         hashmap_deinit(&ctx.path_key_memo);
         free(ctx.fenv_typedefs);
+        hashmap_deinit(&ctx.record_owners);
         free(ctx.label_owners);
         free(ctx.deferred_label_statics);
         return;
@@ -6605,6 +6606,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     hashmap_deinit(&ctx.file_typedef_names);
     hashmap_deinit(&ctx.path_key_memo);
     free(ctx.fenv_typedefs);
+    hashmap_deinit(&ctx.record_owners);
     free(ctx.label_owners);
     free(ctx.deferred_label_statics);
 }

@@ -180,6 +180,10 @@ typedef struct {
     // changes (find_fenv_t_typedef()).
     int *fenv_typedefs;
     int  fenv_typedefs_n, fenv_typedefs_scanned;
+    // Every function a tag or typedef record has named as its owner, built
+    // from the records scanned so far (a hoist only clears an owner).
+    HashMap record_owners;
+    int     owners_seen_tags, owners_seen_typedefs;
     // #1302: name -> Obj* for every entry of vm->compiler.globals, and
     // name -> 1 for every file-scope (owner_fn == NULL) ctx->typedefs
     // entry -- both lazily built on first use (built_global_names /
@@ -395,6 +399,7 @@ const LabelOwner *find_label_owner(SerializeContext *ctx, const char *name);
 int block_capture_index(Obj *block_fn, Obj *var);
 Obj *serialize_find_global(VirtualMachine *vm, const char *name);
 void serialize_rename_global(Obj *obj, char *new_name);
+void serialize_shim_fns_invalidate(void);
 const char *serialize_canonical_key(SerializeContext *ctx, const char *path);
 TypeName *find_fenv_t_typedef(SerializeContext *ctx, Type *ty);
 Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var);
