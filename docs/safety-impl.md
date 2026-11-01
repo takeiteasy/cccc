@@ -33,6 +33,15 @@ Enforced in `CHKP3`, the gate before every dereference under `--pointer-checks` 
 
 An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and aborted at function exit, which confused "address taken" with "escaped" and flagged benign code. It was removed.
 
+## Constant-index elision
+
+`set_checked_deref_bounds()` (`src/parse_checked.c`) asks `checked_access_provably_in_bounds()` before building bounds. When it holds, the deref keeps `bounds_lo`/`bounds_hi` NULL, so the VM emits no `CHKR` and `-m`/`-c=native` emit a plain deref.
+
+- The base must be an array that cannot be NULL: a variable, a member of a named object (`s.m`, not `sp->m`), or a row whose own access is checked or elided. `CHKR` also traps address 0, so pointer bases and array parameters keep it.
+- The extent comes from the same resolved `count`/`byte_count` expression the check uses and must be constant. `bounds(lo, hi)`, `single`, VLAs and unresolved bounds do not qualify.
+- Every `ND_ADD`/`ND_SUB`/`ND_CAST` between the deref and the base must carry a constant offset. `add_type()` wraps the integer operand in a cast to the pointer type, so the walk looks through it. `[0, extent)` is compared against the offset plus the larger of the accessed and element sizes. An `_Nt_checked` terminator slot is outside that range and keeps `CHKR`/`CHKNT`.
+- `checked_prop_attach_scan()` re-attaches bounds to a bounds-less row element, so it runs the same predicate and skips what was elided.
+
 ## Terminator guard
 
 - `CHKNT` traps a store of a non-zero value into the widened slot, keyed off the `[lo, hi)` `CHKR` already computed (`addr >= hi - slot_size && val != 0`). `CHKNTZ` traps a non-all-zero-bytes store for pointees whose store never goes through one value register; it scans the source bytes before the `memcpy` runs, so the slot is never clobbered. Its second immediate is the scan size, which is smaller than the slot for a struct-typed member store.

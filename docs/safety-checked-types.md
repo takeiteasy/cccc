@@ -83,6 +83,25 @@ The suffixes are recognised by position (an identifier followed by `[`), so a va
 int *q = a;   // q is a propagation candidate rooted at a's extent; q[i] stays checked
 ```
 
+### Constant indices
+
+A constant offset that lies inside a checked array's extent runs without a range check. The array's address cannot be NULL, and the extent is known at compile time.
+
+```c
+int a _Checked[5];
+a[4] = 1;            // no check
+a[5] = 1;            // checked, traps
+```
+
+| Access | Checked at run time |
+|---|---|
+| Constant index inside a local, global, static or struct-member array | No |
+| Constant row and element index inside a multidimensional array | No |
+| Runtime index, or a constant index outside the extent | Yes |
+| `_Nt_checked` terminator slot | Yes |
+| Array parameter, `count()` pointer or any other pointer base | Yes (a pointer can be NULL) |
+| Member array reached through a pointer (`sp->m[3]`) | Yes |
+
 | Limit | Reason |
 |---|---|
 | `_Nt_checked` over rows that are already checked arrays (`Str t _Nt_checked[3]` with `typedef char Str _Nt_checked[10]`, or over a `_Checked` typedef row) is an error | The terminator belongs to the innermost row, once |

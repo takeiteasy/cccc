@@ -1039,6 +1039,106 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
     }
 }
 
+// A member's object expression that names storage directly (`s`, `s.in`), so
+// the member array's address cannot be NULL.
+static bool checked_obj_is_named_object(Node *n) {
+    while (n && n->kind == ND_MEMBER)
+        n = n->lhs;
+    return n && n->kind == ND_VAR;
+}
+
+// True if the access at `addr` reads a constant offset into a checked array
+// that is entirely inside the array's declared extent, so CHKR cannot trap.
+// CHKR also traps on a NULL address, so only bases that cannot be NULL
+// qualify: an array variable or member of a named object, or a row whose own
+// access is already checked. A pointer base (checked-array parameters
+// included) keeps its check. A _Nt_checked array's terminator slot lies past
+// the extent compared against here, so it keeps CHKR and CHKNT.
+static bool checked_access_provably_in_bounds(VirtualMachine *vm, Node *deref,
+                                              CheckedBase base) {
+    Node *addr = deref->lhs;
+    add_type(vm, addr);
+    Type *aty = checked_base_type(base);
+    if (!aty || aty->kind != TY_ARRAY || !aty->base ||
+        aty->base->kind == TY_VLA)
+        return false;
+    if (base.mem && !checked_obj_is_named_object(base.obj))
+        return false;
+
+    bool plain_row = base.row && base.row->checked_kind == CHECKED_NONE;
+    CheckedKind kind = plain_row  ? CHECKED_ARRAY
+                       : base.row ? base.row->checked_kind
+                       : base.var ? base.var->checked_kind
+                                  : base.mem->ty->checked_kind;
+    if (kind != CHECKED_ARRAY && kind != CHECKED_NTARRAY)
+        return false;
+    CheckedBoundsForm form = plain_row  ? CB_COUNT
+                             : base.row ? type_chk(base.row)->form
+                             : base.var ? obj_chk(base.var)->checked_bounds_form
+                                        : type_chk(base.mem->ty)->form;
+    if (form != CB_COUNT && form != CB_BYTE_COUNT)
+        return false;
+
+    int64_t extent;
+    if (base.row) {
+        extent = plain_row ? base.row->array_len
+                           : type_chk(base.row)->checked_array_extent;
+    } else {
+        Node *hi = base.var ? obj_chk(base.var)->checked_bounds_hi
+                            : base.mem->checked_bounds_hi;
+        if (!hi || !is_const_expr(vm, hi))
+            return false;
+        extent = eval(vm, hi);
+    }
+    int64_t limit;
+    if (extent < 0 ||
+        (form == CB_COUNT
+             ? __builtin_mul_overflow(extent, get_vm_size(aty->base), &limit)
+             : (limit = extent, false)))
+        return false;
+
+    Type *access = addr->ty ? addr->ty->base : NULL;
+    if (!access || access->kind == TY_VLA || access->kind == TY_FUNC)
+        return false;
+    // A plain row reached through a pointer is recognised as checked-rooted
+    // by its deref's bounds (find_checked_base_ex), so it keeps them.
+    if (plain_row && access->kind == TY_ARRAY)
+        return false;
+    int64_t size = get_vm_size(access);
+    if (size < get_vm_size(aty->base))
+        size = get_vm_size(aty->base);
+
+    int64_t off = 0;
+    Node   *n   = addr;
+    for (;; n = n->lhs) {
+        if (n->kind == ND_ADD || n->kind == ND_SUB) {
+            // add_type() wraps the integer operand in a cast to the
+            // pointer type.
+            Node *idx = n->rhs;
+            if (idx->kind == ND_CAST && idx->lhs->ty && is_integer(idx->lhs->ty))
+                idx = idx->lhs;
+            if (!n->lhs->ty || !n->lhs->ty->base || !idx->ty ||
+                !is_integer(idx->ty) || !is_const_expr(vm, idx))
+                return false;
+            int64_t d = eval(vm, idx);
+            if (n->kind == ND_SUB ? __builtin_sub_overflow(off, d, &off)
+                                  : __builtin_add_overflow(off, d, &off))
+                return false;
+        } else if (n->kind == ND_CAST) {
+            if (!n->ty || !n->ty->base || !n->lhs->ty || !n->lhs->ty->base)
+                return false;
+        } else {
+            break;
+        }
+    }
+    bool rooted = base.var   ? n->kind == ND_VAR && n->var == base.var
+                  : base.mem ? n->kind == ND_MEMBER && n->member == base.mem
+                             : n == base.obj;
+    int64_t end;
+    return rooted && off >= 0 && !__builtin_add_overflow(off, size, &end) &&
+           end <= limit;
+}
+
 // Populates `deref` (an ND_DEREF built at a `*p` or `p[i]`/`p->x` site) with
 // the checked-pointer bounds range to enforce, if `addr` (the address
 // expression, i.e. deref->lhs) is rooted at a checked pointer or member with
@@ -1064,6 +1164,9 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
     }
     CheckedBase base = find_checked_deref_base(addr);
     if (!checked_base_is_declared(base))
+        return;
+    if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
+        checked_access_provably_in_bounds(vm, deref, base))
         return;
     Type *pty = checked_base_type(base);
     node_chk_mut(vm, deref)->access_size = checked_access_bytes(pty->base);
@@ -1753,7 +1856,9 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             // #943: to_assign()'s RMW desugar built its store node before
             // this pass ran, so mirror the attached bounds across.
             checked_attach_mirror(vm, node);
-        } else if (base.row && !node_has_side_effects(base.obj)) {
+        } else if (base.row && !node_has_side_effects(base.obj) &&
+                   !((vm->flags & CCCC_CHECKED_BOUNDS) &&
+                     checked_access_provably_in_bounds(vm, node, base))) {
             // An element of a row reached through a propagated pointer.
             Type *pty = node->lhs->ty;
             compute_checked_bounds(

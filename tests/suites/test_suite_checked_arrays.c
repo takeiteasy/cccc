@@ -882,3 +882,40 @@ void test_checked_flexible_array_member_forms(void) {
     AssertEq(o->d[5], 6);
     free(o);
 }
+
+// ---------------------------------------------------------------------
+// Constant in-range offsets (no runtime check) read and write like any other
+// element, across local, global, member, _Nt_checked and nested arrays.
+// ---------------------------------------------------------------------
+
+struct ConstIdx {
+    int m _Checked[8];
+};
+
+int g_const_idx _Checked[4] = {10, 20, 30, 40};
+
+[[cccc::test]]
+void test_checked_array_const_index_in_bounds(void) {
+    int a _Checked[5]      = {1, 2, 3, 4, 5};
+    char s _Nt_checked[4]  = "abc";
+    int grid _Checked[3][5];
+    struct ConstIdx st = {0};
+
+    a[0]  = 9;
+    a[4] += 5;
+    AssertEq(a[0], 9);
+    AssertEq(a[4], 10);
+    AssertEq(*(a + 3), 4);
+    AssertEq(s[2], 'c');
+    AssertEq(g_const_idx[3], 40);
+    g_const_idx[0]++;
+    AssertEq(g_const_idx[0], 11);
+
+    st.m[7] = 3;
+    AssertEq(st.m[7], 3);
+
+    grid[2][4] = 7;
+    grid[0][0] = 1;
+    AssertEq(grid[2][4], 7);
+    AssertEq(grid[0][0], 1);
+}
