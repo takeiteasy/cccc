@@ -42,7 +42,7 @@ builds its own fresh copy, so `make` is not required first. See
 | `test_vm` / `test_native` | One pass only |
 | `test_release` | `test` against the `-O2` `cccc-release` binary |
 | `test_msan` | `test` against an MSan build (Linux + clang) |
-| `test_ubsan` / `test_asan` / `test_tsan` | `test` against a UBSan, ASan+UBSan or TSan build; `test_ubsan` aborts on any report |
+| `test_ubsan` / `test_asan` / `test_tsan` | `test` against a UBSan, ASan+UBSan or TSan build; `test_ubsan` and `test_asan` abort on any UBSan report |
 | `opt_test_O1` / `_O2` / `_O3` | `test` against cccc built at that host `-O` level |
 
 Each suite is its own build target, so `--build-jobs=8` parallelises across

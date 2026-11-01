@@ -378,7 +378,7 @@ static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
     AddCFlag(t, sanitize_flag);
     AddLdFlag(t, sanitize_flag);
     // Any UBSan report aborts, so a regression fails the target.
-    if (strcmp(sanitize_flag, UBSAN_FLAG) == 0)
+    if (strstr(sanitize_flag, "undefined"))
         AddCFlag(t, "-fno-sanitize-recover=undefined");
     return t;
 }
