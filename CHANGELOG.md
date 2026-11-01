@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: VM opcodes `ORI3` and `XORI3` (OR or XOR by an immediate), so `x | 0xf0` and `x ^ 0xff` are one instruction instead of a `LI3` and an `OR3` / `XOR3`.
 - Changed: a compare against a constant beyond 24 bits (a loop bound of `10000000`, `x != 0xFFFFFFFF`) tested by the branch right after it is one compare-and-branch opcode with a 56-bit immediate (`BLTW3`, `BNEW3`, ... 10 in all).
 - Fixed: the clean-up pass checked the bytecode of a function only when it had rewritten something other than a branch fusion; a function changed only by fusion is now checked too.
 - Changed: the VM bytecode clean-up narrows a loop counter's interval back to its bounds after widening it around the loop, so a test inside `for (i = 0; i < 5; i++)` that the bounds decide (`i < 10`) is folded.

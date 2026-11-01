@@ -6345,7 +6345,7 @@ DEFINE_BR_WIDE_OP(BULEW3, unsigned long long, <=)
 DEFINE_BR_WIDE_OP(BUGTW3, unsigned long long, >)
 DEFINE_BR_WIDE_OP(BUGEW3, unsigned long long, >=)
 
-// ========== Shift and AND with an immediate ==========
+// ========== Shift and bitwise ops with an immediate ==========
 
 #define DEFINE_BIT_IMM_OP(NAME, EXPR)                                          \
     static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
@@ -6365,6 +6365,8 @@ DEFINE_BIT_IMM_OP(SHLI3, ua << imm)
 DEFINE_BIT_IMM_OP(SHRI3, a >> imm)
 DEFINE_BIT_IMM_OP(USHRI3, ua >> imm)
 DEFINE_BIT_IMM_OP(ANDI3, a &imm)
+DEFINE_BIT_IMM_OP(ORI3, a | imm)
+DEFINE_BIT_IMM_OP(XORI3, a ^ imm)
 
 // Comptime code only dereferences VM memory, so host data a builtin returns
 // is handed back as a VM-heap copy.

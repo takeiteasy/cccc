@@ -115,6 +115,8 @@ static bool op_spec(int op, OpSpec *s) {
         case SHRI3:
         case USHRI3:
         case ANDI3:
+        case ORI3:
+        case XORI3:
         case SEQI3:
         case SNEI3:
         case SLTI3:
@@ -1064,6 +1066,12 @@ static bool fold_point(Peep *p, const Insn *in, int op, const Facts *f,
         case ANDI3:
             *out = a & cc_read_i64_at(p->vm, in->pc + 2);
             return true;
+        case ORI3:
+            *out = a | cc_read_i64_at(p->vm, in->pc + 2);
+            return true;
+        case XORI3:
+            *out = a ^ cc_read_i64_at(p->vm, in->pc + 2);
+            return true;
         case SEQI3:
         case SNEI3:
         case SLTI3:
@@ -1546,8 +1554,11 @@ static void forward_block(Peep *p, Block *blk, Facts *f, bool rewrite) {
         else if (op == AND3 || op == OR3 || op == XOR3)
             ext = ext_bitwise(op, f->ext[get_byte(p, in, 1)],
                               f->ext[get_byte(p, in, 2)]);
-        else if (op == ANDI3)
-            ext = ext_bitwise(AND3, f->ext[get_byte(p, in, 1)],
+        else if (op == ANDI3 || op == ORI3 || op == XORI3)
+            ext = ext_bitwise(op == ANDI3   ? AND3
+                              : op == ORI3 ? OR3
+                                           : XOR3,
+                              f->ext[get_byte(p, in, 1)],
                               ext_of_range(cc_read_i64_at(vm, in->pc + 2),
                                            cc_read_i64_at(vm, in->pc + 2)));
         else if (op == LI3)
@@ -1830,6 +1841,10 @@ static int imm_opcode(int op, bool c_left, long long *c) {
             return MULI3;
         case AND3:
             return ANDI3;
+        case OR3:
+            return ORI3;
+        case XOR3:
+            return XORI3;
         case SUB3:
             if (c_left)
                 return 0;

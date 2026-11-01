@@ -1848,6 +1848,12 @@ bool gen_imm_operand_op(VirtualMachine *vm, Node *node, int dest_reg) {
         case ND_BITAND:
             op = ANDI3;
             break;
+        case ND_BITOR:
+            op = ORI3;
+            break;
+        case ND_BITXOR:
+            op = XORI3;
+            break;
         case ND_EQ:
             op = SEQI3;
             break;

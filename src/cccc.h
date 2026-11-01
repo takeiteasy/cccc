@@ -780,6 +780,8 @@ extern "C" {
     X(SHRI3, 3)    /* rd = rs1 >> imm, arithmetic, imm in 0..63 */                   \
     X(USHRI3, 3)   /* rd = rs1 >> imm, logical, imm in 0..63 */                      \
     X(ANDI3, 3)    /* rd = rs1 & imm */                                              \
+    X(ORI3, 3)     /* rd = rs1 | imm */                                              \
+    X(XORI3, 3)    /* rd = rs1 ^ imm */                                              \
     X(FNZ3, 1)     /* rd = (fregs[rs] != 0), NaN is nonzero */                       \
     X(FNZ3_F32, 1) /* rd = ((float)fregs[rs] != 0) */                                \
     X(BEQ3, 2)     /* branch to target if rs1 == rs2 */                              \
