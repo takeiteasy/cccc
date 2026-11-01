@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the VM bytecode clean-up knows an unsigned shift right, divide or remainder of a value already known non-negative stays within the source's range, so converting the result back to `unsigned` no longer emits a `ZX4` after `USHRI3`, `USHR3`, `UDIV3` or `UMOD3`.
 - Changed: the VM bytecode clean-up knows a halfword load (`LDR_H`, `LDR_LOCAL_H`, `LDR_INDEX_H`) is already sign-extended, so widening a `short` to `int` or `long` no longer emits an `SX2` / `SX4` after it.
 - Changed: a load of an `unsigned char`, `_Bool` or `unsigned` is one zero-extending VM opcode instead of a sign-extending load followed by `ZX1` / `ZX4`: new opcodes `LDR_UB`, `LDR_UW`, `LDR_LOCAL_UB`, `LDR_LOCAL_UW`, `LDR_INDEX_UB` and `LDR_INDEX_UW`.
 - Changed: the VM bytecode clean-up drops the sign or zero extension after a 32-bit `int` / `unsigned` operation whose upper half nothing reads (a 4-byte store, another extension, another 32-bit operation), and fuses the extension that remains into the operation: new opcodes `ADDSX3`, `ADDZX3`, `SUBSX3`, `SUBZX3`, `MULSX3`, `MULZX3`, `ADDISX3`, `ADDIZX3`, `MULISX3`, `MULIZX3`, `SHLISX3` and `SHLIZX3`.

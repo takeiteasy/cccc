@@ -1264,12 +1264,34 @@ static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
         }
         case USHRI3: {
             long long k = cc_read_i64_at(p->vm, in->pc + 2);
-            if (k < 1 || k > 63)
+            if (k < 0 || k > 63)
+                return false;
+            if (f->lo[rs1] >= 0) {
+                *lo = f->lo[rs1] >> k;
+                *hi = f->hi[rs1] >> k;
+                return true;
+            }
+            if (k < 1)
                 return false;
             *lo = 0;
             *hi = (long long)(ULLONG_MAX >> k);
             return true;
         }
+        case USHR3:
+        case UDIV3:
+            if (f->lo[rs1] < 0)
+                return false;
+            *lo = 0;
+            *hi = f->hi[rs1];
+            return true;
+        case UMOD3:
+            *lo = 0;
+            *hi = LLONG_MAX;
+            if (f->lo[rs1] >= 0)
+                *hi = f->hi[rs1];
+            if (f->lo[rs2] >= 1 && f->hi[rs2] - 1 < *hi)
+                *hi = f->hi[rs2] - 1;
+            return *hi != LLONG_MAX;
         case ADD3:
             return !__builtin_add_overflow(f->lo[rs1], f->lo[rs2], lo) &&
                    !__builtin_add_overflow(f->hi[rs1], f->hi[rs2], hi);
