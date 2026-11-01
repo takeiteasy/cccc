@@ -1039,6 +1039,94 @@ static void compute_checked_bounds(VirtualMachine *vm, CheckedBase base,
     }
 }
 
+// A loop variable proven to stay in [lo, hi] throughout the body of the
+// counted `for` that owns it; `up` chains the enclosing loops' variables.
+typedef struct LoopRange {
+    Obj                    *var;
+    int64_t                 lo, hi;
+    const struct LoopRange *up;
+} LoopRange;
+
+static bool int_type_range(Type *ty, int64_t *min, int64_t *max) {
+    if (!ty || !is_integer(ty))
+        return false;
+    int size = get_vm_size(ty);
+    if (ty->kind == TY_BOOL) {
+        *min = 0;
+        *max = 1;
+        return true;
+    }
+    if (size <= 0 || size > 8 || ty->kind == TY_BITINT)
+        return false;
+    if (ty->is_unsigned) {
+        *min = 0;
+        *max = size == 8 ? INT64_MAX : (1LL << (8 * size)) - 1;
+    } else {
+        *max = size == 8 ? INT64_MAX : (1LL << (8 * size - 1)) - 1;
+        *min = -*max - 1;
+    }
+    return true;
+}
+
+// The values integer expression `n` can take: a constant, or arithmetic over
+// the loop variables in `r`. An intermediate that could leave its own type
+// fails, since the result would then wrap.
+static bool checked_index_interval(VirtualMachine *vm, Node *n,
+                                   const LoopRange *r, int64_t *lo,
+                                   int64_t *hi) {
+    if (!n->ty || !is_integer(n->ty))
+        return false;
+    if (is_const_expr(vm, n)) {
+        *lo = *hi = eval(vm, n);
+        return true;
+    }
+    int64_t a0, a1, b0, b1, tmin, tmax;
+    switch (n->kind) {
+        case ND_VAR:
+            for (; r; r = r->up)
+                if (r->var == n->var) {
+                    *lo = r->lo;
+                    *hi = r->hi;
+                    return true;
+                }
+            return false;
+        case ND_CAST:
+            if (!checked_index_interval(vm, n->lhs, r, lo, hi))
+                return false;
+            return int_type_range(n->ty, &tmin, &tmax) && *lo >= tmin &&
+                   *hi <= tmax;
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+            if (!checked_index_interval(vm, n->lhs, r, &a0, &a1) ||
+                !checked_index_interval(vm, n->rhs, r, &b0, &b1) ||
+                !int_type_range(n->ty, &tmin, &tmax))
+                return false;
+            if (n->kind == ND_MUL) {
+                int64_t c[4];
+                if (__builtin_mul_overflow(a0, b0, &c[0]) ||
+                    __builtin_mul_overflow(a0, b1, &c[1]) ||
+                    __builtin_mul_overflow(a1, b0, &c[2]) ||
+                    __builtin_mul_overflow(a1, b1, &c[3]))
+                    return false;
+                *lo = *hi = c[0];
+                for (int i = 1; i < 4; i++) {
+                    *lo = c[i] < *lo ? c[i] : *lo;
+                    *hi = c[i] > *hi ? c[i] : *hi;
+                }
+            } else if (n->kind == ND_ADD
+                           ? __builtin_add_overflow(a0, b0, lo) ||
+                                 __builtin_add_overflow(a1, b1, hi)
+                           : __builtin_sub_overflow(a0, b1, lo) ||
+                                 __builtin_sub_overflow(a1, b0, hi)) {
+                return false;
+            }
+            return *lo >= tmin && *hi <= tmax;
+        default:
+            return false;
+    }
+}
+
 // A member's object expression that names storage directly (`s`, `s.in`), so
 // the member array's address cannot be NULL.
 static bool checked_obj_is_named_object(Node *n) {
@@ -1054,8 +1142,10 @@ static bool checked_obj_is_named_object(Node *n) {
 // access is already checked. A pointer base (checked-array parameters
 // included) keeps its check. A _Nt_checked array's terminator slot lies past
 // the extent compared against here, so it keeps CHKR and CHKNT.
+// `ranges` names the loop variables the offset may also be built from.
 static bool checked_access_provably_in_bounds(VirtualMachine *vm, Node *deref,
-                                              CheckedBase base) {
+                                              CheckedBase      base,
+                                              const LoopRange *ranges) {
     Node *addr = deref->lhs;
     add_type(vm, addr);
     Type *aty = checked_base_type(base);
@@ -1108,8 +1198,8 @@ static bool checked_access_provably_in_bounds(VirtualMachine *vm, Node *deref,
     if (size < get_vm_size(aty->base))
         size = get_vm_size(aty->base);
 
-    int64_t off = 0;
-    Node   *n   = addr;
+    int64_t off_lo = 0, off_hi = 0;
+    Node   *n = addr;
     for (;; n = n->lhs) {
         if (n->kind == ND_ADD || n->kind == ND_SUB) {
             // add_type() wraps the integer operand in a cast to the
@@ -1117,12 +1207,16 @@ static bool checked_access_provably_in_bounds(VirtualMachine *vm, Node *deref,
             Node *idx = n->rhs;
             if (idx->kind == ND_CAST && idx->lhs->ty && is_integer(idx->lhs->ty))
                 idx = idx->lhs;
+            int64_t d_lo, d_hi;
             if (!n->lhs->ty || !n->lhs->ty->base || !idx->ty ||
-                !is_integer(idx->ty) || !is_const_expr(vm, idx))
+                !is_integer(idx->ty) ||
+                !checked_index_interval(vm, idx, ranges, &d_lo, &d_hi))
                 return false;
-            int64_t d = eval(vm, idx);
-            if (n->kind == ND_SUB ? __builtin_sub_overflow(off, d, &off)
-                                  : __builtin_add_overflow(off, d, &off))
+            if (n->kind == ND_SUB
+                    ? __builtin_sub_overflow(off_lo, d_hi, &off_lo) ||
+                          __builtin_sub_overflow(off_hi, d_lo, &off_hi)
+                    : __builtin_add_overflow(off_lo, d_lo, &off_lo) ||
+                          __builtin_add_overflow(off_hi, d_hi, &off_hi))
                 return false;
         } else if (n->kind == ND_CAST) {
             if (!n->ty || !n->ty->base || !n->lhs->ty || !n->lhs->ty->base)
@@ -1135,8 +1229,8 @@ static bool checked_access_provably_in_bounds(VirtualMachine *vm, Node *deref,
                   : base.mem ? n->kind == ND_MEMBER && n->member == base.mem
                              : n == base.obj;
     int64_t end;
-    return rooted && off >= 0 && !__builtin_add_overflow(off, size, &end) &&
-           end <= limit;
+    return rooted && off_lo >= 0 &&
+           !__builtin_add_overflow(off_hi, size, &end) && end <= limit;
 }
 
 // Populates `deref` (an ND_DEREF built at a `*p` or `p[i]`/`p->x` site) with
@@ -1166,7 +1260,7 @@ void set_checked_deref_bounds(VirtualMachine *vm, Node *deref, Node *addr,
     if (!checked_base_is_declared(base))
         return;
     if ((vm->flags & CCCC_CHECKED_BOUNDS) &&
-        checked_access_provably_in_bounds(vm, deref, base))
+        checked_access_provably_in_bounds(vm, deref, base, NULL))
         return;
     Type *pty = checked_base_type(base);
     node_chk_mut(vm, deref)->access_size = checked_access_bytes(pty->base);
@@ -1858,7 +1952,7 @@ static void checked_prop_attach_scan(VirtualMachine *vm, Obj *fn, Node *node) {
             checked_attach_mirror(vm, node);
         } else if (base.row && !node_has_side_effects(base.obj) &&
                    !((vm->flags & CCCC_CHECKED_BOUNDS) &&
-                     checked_access_provably_in_bounds(vm, node, base))) {
+                     checked_access_provably_in_bounds(vm, node, base, NULL))) {
             // An element of a row reached through a propagated pointer.
             Type *pty = node->lhs->ty;
             compute_checked_bounds(
@@ -4271,6 +4365,252 @@ void group_checked_sibling_writes(VirtualMachine *vm, Obj *fn) {
     free(tf.ptrs);
 }
 
+// ---- Loop-index elision -------------------------------------------------
+// In `for (i = L; i < N; i++) { ... a[i] ... }` the access `a[i]` cannot leave
+// a checked array when [L, N-1] lies inside its extent. That holds only while
+// nothing but the increment writes `i` and the body is entered from the top.
+
+typedef bool (*NodeVisit)(Node *, void *);
+
+// Pre-order walk over the same children the other checked-pointer scans use;
+// stops, returning false, when `pre` does.
+static bool walk_nodes(Node *n, NodeVisit pre, void *ud) {
+    for (; n; n = n->next) {
+        if (!pre(n, ud) || !walk_nodes(n->lhs, pre, ud) ||
+            !walk_nodes(n->rhs, pre, ud) ||
+            !walk_nodes(node_ctl(n)->cond, pre, ud) ||
+            !walk_nodes(node_ctl(n)->then, pre, ud) ||
+            !walk_nodes(node_ctl(n)->els, pre, ud) ||
+            !walk_nodes(node_ctl(n)->init, pre, ud) ||
+            !walk_nodes(node_ctl(n)->inc, pre, ud) ||
+            !walk_nodes(n->body, pre, ud))
+            return false;
+        for (Node *a = n->args; a; a = a->next)
+            if (!walk_nodes(a, pre, ud))
+                return false;
+    }
+    return true;
+}
+
+// A direct call to a function that can return twice.
+static bool is_setjmp_call(Node *n) {
+    if (n->kind != ND_FUNCALL || !n->lhs || n->lhs->kind != ND_VAR ||
+        !n->lhs->var || !n->lhs->var->name)
+        return false;
+    const char *name = n->lhs->var->name;
+    return !strcmp(name, "setjmp") || !strcmp(name, "_setjmp") ||
+           !strcmp(name, "sigsetjmp") || !strcmp(name, "__builtin_setjmp");
+}
+
+// A function that takes label addresses or calls setjmp can enter a loop body
+// from anywhere, so none of its loops qualify.
+static bool fn_has_entry_hazard(Node *n, void *ud) {
+    (void)ud;
+    return n->kind != ND_LABEL_VAL && n->kind != ND_GOTO_EXPR &&
+           !is_setjmp_call(n);
+}
+
+// A label or `case` inside the body is a way in other than the top. The
+// `case` of a switch inside the body is not.
+// TODO: any label disqualifies the loop; accepting labels nothing jumps to
+// needs a goto-target scan (#1930).
+static bool body_has_side_entry(Node *n, int switches) {
+    for (; n; n = n->next) {
+        if (n->kind == ND_LABEL || (n->kind == ND_CASE && !switches))
+            return true;
+        int inner = switches + (n->kind == ND_SWITCH);
+        if (body_has_side_entry(n->lhs, switches) ||
+            body_has_side_entry(n->rhs, switches) ||
+            body_has_side_entry(node_ctl(n)->cond, switches) ||
+            body_has_side_entry(node_ctl(n)->then, inner) ||
+            body_has_side_entry(node_ctl(n)->els, switches) ||
+            body_has_side_entry(node_ctl(n)->init, switches) ||
+            body_has_side_entry(node_ctl(n)->inc, switches) ||
+            body_has_side_entry(n->body, switches))
+            return true;
+        for (Node *a = n->args; a; a = a->next)
+            if (body_has_side_entry(a, switches))
+                return true;
+    }
+    return false;
+}
+
+static Node *peel_int_casts(Node *n) {
+    while (n && n->kind == ND_CAST && n->ty && n->lhs && n->lhs->ty &&
+           is_integer(n->ty) && is_integer(n->lhs->ty) &&
+           get_vm_size(n->ty) >= get_vm_size(n->lhs->ty))
+        n = n->lhs;
+    return n;
+}
+
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *var;
+    int64_t         step; // largest increment seen
+    bool            only_steps;
+    bool            wrote;
+} VarWrites;
+
+// Records every assignment to `ud->var`, and whether each one has the shape
+// `i = i + c` for a positive constant `c`.
+static bool note_var_write(Node *n, void *ud) {
+    VarWrites *w = ud;
+    if (n->kind != ND_ASSIGN || !n->lhs || n->lhs->kind != ND_VAR ||
+        n->lhs->var != w->var)
+        return true;
+    w->wrote  = true;
+    Node *rhs = peel_int_casts(n->rhs);
+    Node *l   = rhs && rhs->kind == ND_ADD ? peel_int_casts(rhs->lhs) : NULL;
+    Node *c   = rhs && rhs->kind == ND_ADD ? rhs->rhs : NULL;
+    if (l && l->kind == ND_VAR && l->var == w->var && c && c->ty &&
+        is_integer(c->ty) && is_const_expr(w->vm, c) && eval(w->vm, c) > 0) {
+        int64_t step = eval(w->vm, c);
+        w->step      = step > w->step ? step : w->step;
+    } else {
+        w->only_steps = false;
+    }
+    return true;
+}
+
+// Recognises `for (i = L; i < N; i += c)` over a local `i` with constant L, N
+// and c > 0, whose body never writes `i`; fills `out` with i's range there.
+static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
+                        LoopRange *out) {
+    Node *init = node_ctl(loop)->init;
+    Node *cond = node_ctl(loop)->cond;
+    if (!init || !cond || !node_ctl(loop)->then)
+        return false;
+    // `int i = L` is a block holding a no-op declaration and the assignment;
+    // `i = L` an expression statement.
+    if (init->kind == ND_BLOCK) {
+        Node *only = NULL;
+        for (Node *t = init->body; t; t = t->next) {
+            if (t->kind == ND_EXPR_STMT && t->lhs &&
+                t->lhs->kind == ND_NULL_EXPR)
+                continue;
+            if (only)
+                return false;
+            only = t;
+        }
+        init = only;
+    }
+    if (init && init->kind == ND_EXPR_STMT)
+        init = init->lhs;
+    if (!init || init->kind != ND_ASSIGN || !init->lhs ||
+        init->lhs->kind != ND_VAR || !init->rhs)
+        return false;
+
+    Obj    *v = init->lhs->var;
+    int64_t tmin, tmax;
+    if (!v || !v->is_local || v->is_static || v->addr_taken || v->is_captured ||
+        v->is_block_var || v->ty->is_volatile || v->ty->is_atomic ||
+        !int_type_range(v->ty, &tmin, &tmax))
+        return false;
+    if (!is_const_expr(vm, init->rhs))
+        return false;
+    int64_t lo = eval(vm, init->rhs);
+
+    if (cond->kind != ND_LT && cond->kind != ND_LE)
+        return false;
+    Node *cv = peel_int_casts(cond->lhs);
+    if (!cv || cv->kind != ND_VAR || cv->var != v || !cond->rhs->ty ||
+        !is_integer(cond->rhs->ty) || !is_const_expr(vm, cond->rhs))
+        return false;
+    int64_t bound = eval(vm, cond->rhs);
+    int64_t hi    = bound;
+    if (cond->kind == ND_LT && __builtin_sub_overflow(bound, 1, &hi))
+        return false;
+    if (lo < 0 || hi < lo)
+        return false;
+
+    // The increment may only add a positive constant, and the body writes
+    // nothing.
+    VarWrites inc = {vm, v, 0, true, false};
+    walk_nodes(node_ctl(loop)->inc, note_var_write, &inc);
+    VarWrites body = {vm, v, 0, true, false};
+    walk_nodes(node_ctl(loop)->then, note_var_write, &body);
+    if (!inc.only_steps || body.wrote)
+        return false;
+
+    // The value `i` takes after the last iteration must still fit its type.
+    int64_t next;
+    if (__builtin_add_overflow(hi, inc.step, &next) || next > tmax)
+        return false;
+
+    if (body_has_side_entry(node_ctl(loop)->then, 0))
+        return false;
+
+    *out = (LoopRange){v, lo, hi, up};
+    return true;
+}
+
+typedef struct {
+    Node **v;
+    int    n, cap;
+} HitList;
+
+static void collect_loop_hits(VirtualMachine *vm, Node *n, const LoopRange *r,
+                              HitList *hits) {
+    for (; n; n = n->next) {
+        if (r && n->kind == ND_DEREF && node_chk(n)->bounds_lo) {
+            CheckedBase base = find_checked_deref_base(n->lhs);
+            if (checked_base_is_declared(base) &&
+                checked_access_provably_in_bounds(vm, n, base, r)) {
+                if (hits->n == hits->cap) {
+                    hits->cap = hits->cap ? hits->cap * 2 : 16;
+                    hits->v   = realloc(hits->v, hits->cap * sizeof(Node *));
+                }
+                hits->v[hits->n++] = n;
+            }
+        }
+        const LoopRange *body_r = r;
+        LoopRange        own;
+        if (n->kind == ND_FOR && loop_header(vm, n, r, &own))
+            body_r = &own;
+        collect_loop_hits(vm, n->lhs, r, hits);
+        collect_loop_hits(vm, n->rhs, r, hits);
+        collect_loop_hits(vm, node_ctl(n)->cond, r, hits);
+        collect_loop_hits(vm, node_ctl(n)->then, body_r, hits);
+        collect_loop_hits(vm, node_ctl(n)->els, r, hits);
+        collect_loop_hits(vm, node_ctl(n)->init, r, hits);
+        collect_loop_hits(vm, node_ctl(n)->inc, r, hits);
+        collect_loop_hits(vm, n->body, r, hits);
+        for (Node *a = n->args; a; a = a->next)
+            collect_loop_hits(vm, a, r, hits);
+    }
+}
+
+// Removes the range check from an access, including the copy a
+// read-modify-write desugar made of it.
+static void checked_drop_bounds(VirtualMachine *vm, Node *node) {
+    if (!node_chk(node)->bounds_lo && !node_chk(node)->bounds_hi)
+        return;
+    node_chk_mut(vm, node)->bounds_lo       = NULL;
+    node_chk_mut(vm, node)->bounds_hi       = NULL;
+    node_chk_mut(vm, node)->bounds_obj_init = NULL;
+    node_chk_mut(vm, node)->access_size     = 0;
+    node_chk_mut(vm, node)->nt_slot         = 0;
+    node->checked_nt_terminator             = false;
+    node->checked_bounds_optional           = false;
+}
+
+static void elide_checked_loop_bounds(VirtualMachine *vm, Obj *fn) {
+    if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !obj_fn(fn)->body ||
+        !walk_nodes(obj_fn(fn)->body, fn_has_entry_hazard, NULL))
+        return;
+    HitList hits = {0};
+    collect_loop_hits(vm, obj_fn(fn)->body, NULL, &hits);
+    // Decide every access before changing any: a row access is only
+    // recognised as checked while the row it indexes still has its bounds.
+    for (int i = 0; i < hits.n; i++) {
+        Node *mirror = node_chk(hits.v[i])->rmw_mirror;
+        checked_drop_bounds(vm, hits.v[i]);
+        if (mirror)
+            checked_drop_bounds(vm, mirror);
+    }
+    free(hits.v);
+}
+
 // The tail passes of every function body, in order: propagation, the
 // pending `dynamic` casts it decides, then #944's assignment verification.
 void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
@@ -4278,6 +4618,7 @@ void checked_tail_passes(VirtualMachine *vm, Obj *fn) {
     resolve_pending_dynamic_casts(vm, fn);
     verify_checked_assign_bounds(vm, fn);
     group_checked_sibling_writes(vm, fn);
+    elide_checked_loop_bounds(vm, fn);
     if (obj_chk(fn)->checked_ret_entry && obj_fn(fn)->body) {
         Node *init =
             new_unary(vm, ND_EXPR_STMT, obj_chk(fn)->checked_ret_entry, obj_fn(fn)->body->tok);

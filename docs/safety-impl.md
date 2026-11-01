@@ -42,6 +42,16 @@ An earlier scope-exit check tracked every `&local` with a `MARKA` opcode and abo
 - Every `ND_ADD`/`ND_SUB`/`ND_CAST` between the deref and the base must carry a constant offset. `add_type()` wraps the integer operand in a cast to the pointer type, so the walk looks through it. `[0, extent)` is compared against the offset plus the larger of the accessed and element sizes. An `_Nt_checked` terminator slot is outside that range and keeps `CHKR`/`CHKNT`.
 - `checked_prop_attach_scan()` re-attaches bounds to a bounds-less row element, so it runs the same predicate and skips what was elided.
 
+## Loop-index elision
+
+`elide_checked_loop_bounds()` (`src/parse_checked.c`) runs last in `checked_tail_passes()`, after propagation and sibling-write grouping, because it needs the whole loop body. It finds counted `ND_FOR` loops and removes the bounds from the accesses their variable indexes.
+
+- `loop_header()` accepts `i = L` (constant, `>= 0`) in the init, `i < N` or `i <= N` (constant `N`) as the whole condition, and an increment whose only write to `i` is `i = i + c` for a constant `c > 0`. `i` must be an `int`-width or wider local that is not `static`, `volatile`, atomic, `__block`, `addr_taken` or `is_captured`; with those, no call or `asm` can write it. A narrower variable does not qualify, because its increment goes through a narrowing cast. `hi + c` must fit the type.
+- The body must not write `i` and must have no `ND_LABEL` or `case` outside a switch of its own. A function with `ND_LABEL_VAL`/`ND_GOTO_EXPR` or a `setjmp` call has no qualifying loop.
+- `checked_access_provably_in_bounds()` takes a `LoopRange` chain and treats the offset as an interval: a constant is `[c, c]`, a loop variable is `[L, hi]`, and `+`, `-`, `*` and integer casts combine intervals, failing when an intermediate could leave its type. The check is `off_lo >= 0 && off_hi + size <= limit`.
+- Only derefs inside the loop's `then` qualify. Nested loops extend the chain, so `grid[i][j]` sees both ranges.
+- Accesses are collected first and stripped afterwards, since a row access is recognised as checked through the bounds of the row it indexes. `checked_drop_bounds()` clears the deref and its `rmw_mirror`, the store or `ND_CAS` copy a read-modify-write desugar made, so `a[i] += 1` loses both checks.
+
 ## Terminator guard
 
 - `CHKNT` traps a store of a non-zero value into the widened slot, keyed off the `[lo, hi)` `CHKR` already computed (`addr >= hi - slot_size && val != 0`). `CHKNTZ` traps a non-all-zero-bytes store for pointees whose store never goes through one value register; it scans the source bytes before the `memcpy` runs, so the slot is never clobbered. Its second immediate is the scan size, which is smaller than the slot for a struct-typed member store.

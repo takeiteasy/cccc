@@ -919,3 +919,50 @@ void test_checked_array_const_index_in_bounds(void) {
     AssertEq(grid[2][4], 7);
     AssertEq(grid[0][0], 1);
 }
+
+// ---------------------------------------------------------------------
+// Loop indices proven inside the extent (no runtime check) read and write
+// like any other element, including read-modify-write and nested loops.
+// ---------------------------------------------------------------------
+
+int g_loop_idx _Checked[4];
+
+[[cccc::test]]
+void test_checked_array_loop_index_in_bounds(void) {
+    int a           _Checked[5]    = {1, 2, 3, 4, 5};
+    char s          _Nt_checked[4] = "abc";
+    int grid        _Checked[3][5];
+    struct ConstIdx st  = {0};
+    int             sum = 0;
+
+    for (int i = 0; i < 5; i++)
+        a[i] += i;
+    for (int i = 0; i < 5; ++i)
+        a[i]++;
+    for (int i = 0; i < 5; i++)
+        sum += a[i];
+    AssertEq(sum, 15 + 10 + 5);
+
+    for (int i = 0; i < 4; i++)
+        g_loop_idx[i] = i * i;
+    AssertEq(g_loop_idx[3], 9);
+
+    for (int i = 0; i < 8; i++)
+        st.m[i] = i;
+    AssertEq(st.m[7], 7);
+
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 5; j++)
+            grid[i][j] = i * 5 + j;
+    AssertEq(grid[2][4], 14);
+
+    sum = 0;
+    for (int i = 0; i < 3; i++)
+        sum += s[i];
+    AssertEq(sum, 'a' + 'b' + 'c');
+
+    sum = 0;
+    for (unsigned long u = 1; u <= 4; u += 1)
+        sum += a[u];
+    AssertEq(sum, 4 + 6 + 8 + 10);
+}

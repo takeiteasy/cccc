@@ -102,6 +102,27 @@ a[5] = 1;            // checked, traps
 | Array parameter, `count()` pointer or any other pointer base | Yes (a pointer can be NULL) |
 | Member array reached through a pointer (`sp->m[3]`) | Yes |
 
+### Loop indices
+
+The index of a counted loop over a checked array runs without a range check when every value it takes is inside the extent.
+
+```c
+int a _Checked[5];
+for (int i = 0; i < 5; i++) a[i] = i;   // no check
+for (int i = 0; i <= 5; i++) a[i] = i;  // checked, traps at i == 5
+```
+
+The loop must be `for (i = L; i < N; i++)` (or `<=`, `++i`, `i += c`) with constant `L >= 0` and `N`, over an `int`-width or wider local that only the increment writes[^loops]. Nested loops combine: `grid[i][j]` is unchecked when both loops fit their rows.
+
+| Loop | Checked at run time |
+|---|---|
+| Counted loop whose range fits the array | No |
+| Bound or offset (`a[i + 1]`) reaching past the extent | Yes |
+| Runtime bound (`i < n`), or a pointer or array-parameter base | Yes |
+| `i` written, address-taken, `static`, global, `volatile` or narrower than `int` in the body | Yes |
+| Label, `case` or `setjmp` in the loop, or label addresses in the function | Yes |
+| The loop's own condition and increment expressions | Yes |
+
 | Limit | Reason |
 |---|---|
 | `_Nt_checked` over rows that are already checked arrays (`Str t _Nt_checked[3]` with `typedef char Str _Nt_checked[10]`, or over a `_Checked` typedef row) is an error | The terminator belongs to the innermost row, once |
@@ -204,3 +225,5 @@ A plain array inside a [checked region](safety-checked-regions.md#what-is-banned
 [^rows]: The row expression would be evaluated a second time to build the inner bounds, so the inner check is skipped rather than changing the program's side effects.
 [^bytes]: A `byte_count(n)` that is not a multiple of `sizeof(T)` widens by exactly `sizeof(T)` bytes, so the slot is misaligned and no element index reaches it; the guard has nothing to protect there.
 [^members]: A `long double` slot is 16 bytes but is stored as an 8-byte double. Internals: [safety-impl.md](safety-impl.md#terminator-guard).
+
+[^loops]: Only a variable no call can write qualifies: a local that is not `static`, `volatile`, atomic, captured by a nested function or address-taken. A label or `case` inside the body is a way in other than the top, and `setjmp` or label addresses let control re-enter the body after the loop, so none of them is allowed.
