@@ -766,22 +766,22 @@ extern "C" {
     /* Compare against an immediate: rd = (rs1 OP imm), 0 or 1. Format as            \
        ADDI3. SGT/SGE/UGT/UGE serve a constant on the left: `5 < x` is               \
        SGTI3 x, 5. */                                                                \
-    X(SEQI3, 3)    /* rs1 == imm */                                                  \
-    X(SNEI3, 3)    /* rs1 != imm */                                                  \
-    X(SLTI3, 3)    /* rs1 < imm, signed */                                           \
-    X(SLEI3, 3)    /* rs1 <= imm, signed */                                          \
-    X(SGTI3, 3)    /* rs1 > imm, signed */                                           \
-    X(SGEI3, 3)    /* rs1 >= imm, signed */                                          \
-    X(ULTI3, 3)    /* rs1 < imm, unsigned */                                         \
-    X(ULEI3, 3)    /* rs1 <= imm, unsigned */                                        \
-    X(UGTI3, 3)    /* rs1 > imm, unsigned */                                         \
-    X(UGEI3, 3)    /* rs1 >= imm, unsigned */                                        \
-    X(SHLI3, 3)    /* rd = rs1 << imm, imm in 0..63 */                               \
-    X(SHRI3, 3)    /* rd = rs1 >> imm, arithmetic, imm in 0..63 */                   \
-    X(USHRI3, 3)   /* rd = rs1 >> imm, logical, imm in 0..63 */                      \
-    X(ANDI3, 3)    /* rd = rs1 & imm */                                              \
-    X(ORI3, 3)     /* rd = rs1 | imm */                                              \
-    X(XORI3, 3)    /* rd = rs1 ^ imm */                                              \
+    X(SEQI3, 3)  /* rs1 == imm */                                                    \
+    X(SNEI3, 3)  /* rs1 != imm */                                                    \
+    X(SLTI3, 3)  /* rs1 < imm, signed */                                             \
+    X(SLEI3, 3)  /* rs1 <= imm, signed */                                            \
+    X(SGTI3, 3)  /* rs1 > imm, signed */                                             \
+    X(SGEI3, 3)  /* rs1 >= imm, signed */                                            \
+    X(ULTI3, 3)  /* rs1 < imm, unsigned */                                           \
+    X(ULEI3, 3)  /* rs1 <= imm, unsigned */                                          \
+    X(UGTI3, 3)  /* rs1 > imm, unsigned */                                           \
+    X(UGEI3, 3)  /* rs1 >= imm, unsigned */                                          \
+    X(SHLI3, 3)  /* rd = rs1 << imm, imm in 0..63 */                                 \
+    X(SHRI3, 3)  /* rd = rs1 >> imm, arithmetic, imm in 0..63 */                     \
+    X(USHRI3, 3) /* rd = rs1 >> imm, logical, imm in 0..63 */                        \
+    X(ANDI3, 3)  /* rd = rs1 & imm */                                                \
+    X(ORI3, 3)   /* rd = rs1 | imm */                                                \
+    X(XORI3, 3)  /* rd = rs1 ^ imm */                                                \
     /* A 32-bit operation and the wrap after it: rd = (int)(rs1 OP rs2) (SX)         \
        or (unsigned)(rs1 OP rs2) (ZX), sign- or zero-extended to 64 bits. */         \
     X(ADDSX3, 1)   /* rd = (int)(rs1 + rs2) */                                       \
@@ -823,7 +823,7 @@ extern "C" {
     X(BULTW3, 3)   /* branch to target if rs < imm56, unsigned */                    \
     X(BULEW3, 3)   /* branch to target if rs <= imm56, unsigned */                   \
     X(BUGTW3, 3)   /* branch to target if rs > imm56, unsigned */                    \
-    X(BUGEW3, 3)   /* branch to target if rs >= imm56, unsigned */ \
+    X(BUGEW3, 3)   /* branch to target if rs >= imm56, unsigned */                   \
     /* Zero-extending loads: rd = *(unsigned char*)addr (UB) or                      \
        *(unsigned*)addr (UW). Same operands as LDR_B/LDR_W, LDR_LOCAL_B/W and        \
        LDR_INDEX_B/W. */                                                             \
@@ -1244,18 +1244,19 @@ typedef struct HashMap {
  @brief Represents the contents and metadata of a source file.
 */
 typedef struct File {
-    const char *name; /**< Original filename string. */
-    int   file_no;  /**< Unique numeric id for the file. */
-    char *contents; /**< File contents as a NUL-terminated buffer. */
+    const char *name;     /**< Original filename string. */
+    int         file_no;  /**< Unique numeric id for the file. */
+    char       *contents; /**< File contents as a NUL-terminated buffer. */
 
     // For #line directive
-    const char *display_name; /**< Optional name emitted by a `#line` directive. */
-    int   line_delta;   /**< Line number delta applied for `#line` handling. */
+    const char
+        *display_name; /**< Optional name emitted by a `#line` directive. */
+    int  line_delta;   /**< Line number delta applied for `#line` handling. */
 
-    bool  is_system_header;   // true when included via <...> from system search
-                              // paths
-    int   include_next_start; // search-path index where #include_next and
-                              // __has_include_next begin; 0 searches all
+    bool is_system_header;   // true when included via <...> from system search
+                             // paths
+    int  include_next_start; // search-path index where #include_next and
+                             // __has_include_next begin; 0 searches all
 } File;
 
 /*!
@@ -1409,7 +1410,7 @@ typedef struct TokenLit {
     int64_t     val;  // If kind is TK_NUM, its value
     long double fval; // If kind is TK_NUM, its value
     Type       *ty;   // Used if TK_NUM or TK_STR
-    char       *str;  /**< For string literals: pointer to the unescaped contents. */
+    char *str; /**< For string literals: pointer to the unescaped contents. */
     char *wide_digits; // wb/uwb _BitInt literal: full-precision digit text
                        // (no prefix/suffix/separators) when bit_width > 64
     int   wide_base;   // base (2/8/10/16) for wide_digits, else unused
@@ -1422,10 +1423,11 @@ typedef struct TokenLit {
 } TokenLit;
 
 // Diagnostic, pack and checked-region state stamped by the preprocessor.
-// Immutable once stamped and shared by the tokens of a run (cc_stamp_token_state).
+// Immutable once stamped and shared by the tokens of a run
+// (cc_stamp_token_state).
 typedef struct TokenState {
-    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask at the
-    // point this token was emitted (overrides vm->compiler.warnings).
+    // Bit 63 is a sentinel: if set, bits 0-62 are the active warning mask at
+    // the point this token was emitted (overrides vm->compiler.warnings).
     uint64_t diag_warnings; // effective CCCCWarning mask (bit63 = stamped)
     uint64_t diag_werror;   // effective warning_errors mask (bit63 = stamped)
     // Effective #pragma pack(N) alignment cap. 0 means "no pack in effect".
@@ -1451,15 +1453,15 @@ typedef struct TokenRare {
 } TokenRare;
 
 typedef struct Token {
-    TokenKind kind; /**< Token kind (see TokenKind). */
-    int       len;  /**< Number of characters in the token text. */
-    int       line_no;    // Line number
-    int       col_no;     // Column number (1-based)
-    int       line_delta; // Line number
-    bool      at_bol : 1;    // True if this token is at beginning of line
-    bool      has_space : 1; // True if this token follows a space character
+    TokenKind     kind;          /**< Token kind (see TokenKind). */
+    int           len;           /**< Number of characters in the token text. */
+    int           line_no;       // Line number
+    int           col_no;        // Column number (1-based)
+    int           line_delta;    // Line number
+    bool          at_bol    : 1; // True if this token is at beginning of line
+    bool          has_space : 1; // True if this token follows a space character
 
-    struct Token *next; // Next token
+    struct Token *next;          // Next token
     char *
         loc; /**< Pointer into the source buffer where the token text begins. */
     File       *file;     // Source location
@@ -1489,7 +1491,7 @@ static inline const TokenRare *tok_rare(const Token *t) {
 static inline const TokenState *tok_state(const Token *t) {
     return t->state ? t->state : &tok_state_none;
 }
-TokenLit  *tok_lit_mut(VirtualMachine *vm, Token *t);
+TokenLit *tok_lit_mut(VirtualMachine *vm, Token *t);
 TokenRare *tok_rare_mut(VirtualMachine *vm, Token *t);
 
 /*!
@@ -1667,8 +1669,8 @@ typedef struct TypeAttrs {
                             // Obj by claim_cleanup()
     uint64_t    nonnull_mask; // 1-based arg indices marked non-null (bit i-1);
                               // >64 args ignored
-    int format_style;         // 0=none, 1=printf, 2=scanf
-    int format_string_index;  // 1-based index of format string arg
+    int         format_style; // 0=none, 1=printf, 2=scanf
+    int         format_string_index; // 1-based index of format string arg
     int format_fmt_first_arg; // 1-based index of first variadic arg to check
     int sentinel_pos; // trailing non-sentinel args allowed before the NULL (0 =
                       // last arg)
@@ -2135,37 +2137,37 @@ typedef struct OmpDepend {
 } OmpDepend;
 
 typedef struct OmpDirective {
-    OmpKind    kind;
-    char      *critical_name; // critical(name); NULL when anonymous
-    OmpClause *clauses;
-    int        collapse;      // loop depth the directive covers (default 1)
-    bool       nowait;
-    bool       ordered;       // the `ordered` clause on a loop
+    OmpKind       kind;
+    char         *critical_name; // critical(name); NULL when anonymous
+    OmpClause    *clauses;
+    int           collapse;      // loop depth the directive covers (default 1)
+    bool          nowait;
+    bool          ordered;       // the `ordered` clause on a loop
     int           ordered_n;     // `ordered(n)`: doacross loops covered, else 0
     OmpLoopLevel *levels;        // ordered_n: the loops of the nest
     OmpSink      *sinks;         // `ordered` with sink clauses
     bool          source;        // `ordered` with a source clause
     int           omp_id; // threaded lowering: number in __omp<id>_ names
-    bool       default_none;
-    bool       default_shared;       // task default(shared)
-    bool       default_firstprivate; // task default(firstprivate)
-    bool       default_private;      // task default(private)
-    int        atomic_kind; // 0 update, 1 read, 2 write, 3 capture
-    bool       atomic_compare; // atomic compare clause
-    bool       atomic_weak;    // atomic weak clause
+    bool          default_none;
+    bool          default_shared;       // task default(shared)
+    bool          default_firstprivate; // task default(firstprivate)
+    bool          default_private;      // task default(private)
+    int           atomic_kind;          // 0 update, 1 read, 2 write, 3 capture
+    bool          atomic_compare;       // atomic compare clause
+    bool          atomic_weak;          // atomic weak clause
     int           atomic_order; // resolved memory order (__ATOMIC_* numbering)
     int           atomic_fail;  // compare: failure order
-    char      *num_threads_text; // threaded lowering: clause expressions
-    char      *if_text;
+    char         *num_threads_text; // threaded lowering: clause expressions
+    char         *if_text;
     int        sched_kind;  // schedule kind (omp_sched_t, 0x10 runtime); 0 none
     char      *sched_chunk; // threaded lowering: the chunk expression, or NULL
-    Obj       *region_fn; // threaded parallel: the outlined region function
-    char        *final_text;     // threaded task: clause expressions
-    char        *priority_text;
-    OmpDepend   *depends;        // threaded task: depend clause addresses
-    bool         task_outlined;  // threaded task: copies live in the payload
-    bool         task_data_decl; // the task function has read its payload
-    int          task_size;      // payload bytes
+    Obj       *region_fn;   // threaded parallel: the outlined region function
+    char      *final_text;  // threaded task: clause expressions
+    char      *priority_text;
+    OmpDepend *depends;     // threaded task: depend clause addresses
+    bool       task_outlined;  // threaded task: copies live in the payload
+    bool       task_data_decl; // the task function has read its payload
+    int        task_size;      // payload bytes
     OmpTaskCopy *copies;
 } OmpDirective;
 
@@ -2524,19 +2526,19 @@ NodeMisc *node_misc_mut(VirtualMachine *vm, Node *n);
 
 // Declaration attribute payloads and cleanup state.
 typedef struct ObjAttr {
-    char *asm_label; // External symbol name from GNU asm("symbol") label
-    char *deprecated_msg;
-    char *nodiscard_msg;
-    char *attr_error_msg;   // __attribute__((error("msg")))
-    char *attr_warning_msg; // __attribute__((warning("msg")))
+    char       *asm_label; // External symbol name from GNU asm("symbol") label
+    char       *deprecated_msg;
+    char       *nodiscard_msg;
+    char       *attr_error_msg;   // __attribute__((error("msg")))
+    char       *attr_warning_msg; // __attribute__((warning("msg")))
     const char *builtin_spelling; // printed verbatim for a private builtin stub
     struct Type
         *def_ty; // the definition's own declarator type (parameter spelling)
-    int init_priority; // constructor/destructor: CCCC_NO_INIT_PRIORITY unless
-                       // an explicit priority was given
-    struct Obj *cleanup_fn;       // non-NULL: void fn(T*) called at scope exit
+    int  init_priority; // constructor/destructor: CCCC_NO_INIT_PRIORITY unless
+                        // an explicit priority was given
+    struct Obj   *cleanup_fn;     // non-NULL: void fn(T*) called at scope exit
                                   // (__attribute__((cleanup)))
-    int cleanup_seq;              // declaration order among cleanup vars
+    int           cleanup_seq;    // declaration order among cleanup vars
     CleanupRange *cleanup_ranges; // function: where each handler is owed
     CleanupRange *cleanup_cur;    // cleanup local: its open range in codegen
     int cleanup_fp_retval_offset; // stack offset for float retval save slot
@@ -2544,8 +2546,9 @@ typedef struct ObjAttr {
     // OpenCL-style kernels
     struct Obj *kernel_vm_launch; // --test-run: the VM cfunc a call to this
                                   // thunk is routed to (codegen_expr.c)
-    int kernel_local_off;  // [[cccc::local]] object's offset in work-group memory
-    int kernel_local_id;   // per-TU number of the [[cccc::local]] object
+    int kernel_local_off;   // [[cccc::local]] object's offset in work-group
+                            // memory
+    int kernel_local_id;    // per-TU number of the [[cccc::local]] object
     int kernel_local_bytes; // size of the entry's [[cccc::local]] objects
 } ObjAttr;
 
@@ -2558,7 +2561,7 @@ typedef struct ObjFn {
     Obj  *alloca_bottom;
     int   stack_size;
     // Nested function support (GNU C extension)
-    struct Obj *parent_fn; // Enclosing function (NULL if top-level)
+    struct Obj *parent_fn;     // Enclosing function (NULL if top-level)
     int         nesting_depth; // 0 = top-level, 1 = one level deep, etc.
     // Every nested function defined directly inside this function/block's
     // body, linked through next_nested_sibling. compound_stmt() never appends
@@ -2620,9 +2623,9 @@ typedef struct ObjSize {
 // Global variable initializer data.
 typedef struct ObjInit {
     Relocation *rel;
-    Node       *init_expr;     // For constexpr: AST of initializer expression
+    Node       *init_expr; // For constexpr: AST of initializer expression
     void
-        *constexpr_init; // For constexpr: private Initializer tree; also used
+        *constexpr_init;   // For constexpr: private Initializer tree; also used
                          // temporarily for pending macro-init Initializer trees
     Node *lazy_quote; // for a $k placeholder whose argument was a
                       // QuoteLazy()/QuoteLazyN() fragment: the ND_QUOTE_LAZY
@@ -2716,46 +2719,47 @@ struct Obj {
     char       *name;         /**< Identifier name of the object. */
     char       *display_name; // Source identifier when storage uses a synthetic
                               // name
-    Type  *ty;                /**< Type of the object. */
-    Token *tok;               // representative token
-    char  *init_data;         // global: initial bytes
-    int    align;             // alignment
-    int    offset;            /**< For local variables: stack offset. */
+    Type       *ty;           /**< Type of the object. */
+    Token      *tok;          // representative token
+    char       *init_data;    // global: initial bytes
+    int         align;        // alignment
+    int         offset;       /**< For local variables: stack offset. */
     CheckedKind checked_kind;
 
-    bool is_local : 1; /**< True for local (stack) variables; false for globals. */
-    bool is_used : 1;
+    bool        is_local
+        : 1; /**< True for local (stack) variables; false for globals. */
+    bool is_used         : 1;
     bool is_maybe_unused : 1;
     // A caller-side struct-return slot allocated by funcall() for every
     // struct/union-returning call. VM codegen reads it purely as a frame
     // offset, so the serializer must never declare it.
-    bool is_ret_buffer : 1;
-    bool is_deprecated : 1;
-    bool is_noreturn : 1;
-    bool is_nodiscard : 1;
-    bool is_pure : 1;
-    bool is_func_const : 1;
-    bool is_kernel : 1;
-    bool is_trusted : 1;    // [[cccc::trusted]] on any declaration
-    bool is_gnu_inline : 1; // GNU extern-inline definition: emitted only if
-                            // called
+    bool is_ret_buffer   : 1;
+    bool is_deprecated   : 1;
+    bool is_noreturn     : 1;
+    bool is_nodiscard    : 1;
+    bool is_pure         : 1;
+    bool is_func_const   : 1;
+    bool is_kernel       : 1;
+    bool is_trusted      : 1; // [[cccc::trusted]] on any declaration
+    bool is_gnu_inline   : 1; // GNU extern-inline definition: emitted only if
+                              // called
     bool is_kernel_thunk : 1; // outlined cccc_launch body; a call to it
                               // serializes as __cccc_kernel_launch
     bool is_kernel_local_obj : 1; // [[cccc::local]] object in a kernel entry's
                                   // body, stored in work-group memory
     bool kernel_uses_barrier : 1; // kernel entry (or a callee) calls
                                   // cccc_barrier
-    bool may_return_null : 1; // function has a provable null-returning path
-                              // (whole-TU summary)
+    bool may_return_null     : 1; // function has a provable null-returning path
+                                  // (whole-TU summary)
     bool always_returns_null : 1; // every reachable return is provably null
-    bool is_local_symbol : 1;
-    bool is_param : 1; // true if this is a function parameter
+    bool is_local_symbol     : 1;
+    bool is_param            : 1; // true if this is a function parameter
     bool is_proto_param : 1; // prototype-scope stand-in for a parameter named
                              // in a later parameter's array length
     bool vla_extent_impure : 1; // param whose pointee extent has side effects:
                                 // -c=native takes it as `void *` and declares
                                 // it after the entry-time size statements
-    bool is_captured : 1; // true if accessed by a nested function
+    bool is_captured       : 1; // true if accessed by a nested function
     // Escape analysis for LEA3 epoch-recording pruning: set whenever this
     // local's address is provably observed escaping its creating frame. False
     // is the safe default (LEA3 records unless proven true).
@@ -2763,19 +2767,19 @@ struct Obj {
     // Set for *every* syntactic `&expr` rooted at this local, even when the
     // address never escapes: precise initialization tracking (CHKI) is
     // suppressed once the address is taken.
-    bool addr_taken : 1;
+    bool addr_taken        : 1;
     bool objsize_has_alloc : 1; // alloc-tracked, directly or derived
-    bool objsize_unsafe : 1;    // reassigned or address-taken in scope
+    bool objsize_unsafe    : 1; // reassigned or address-taken in scope
 
     // Global variable or function
-    bool is_function : 1;        /**< True when this Obj represents a function. */
+    bool is_function   : 1; /**< True when this Obj represents a function. */
     bool is_definition : 1;
-    bool is_static : 1;
-    bool is_builtin_alloca : 1;  // the builtin alloca() used to lower VLAs
-    bool is_constexpr : 1;
-    bool is_implicit : 1;        // synthesized by an implicit function declaration
-    bool is_hidden_builtin : 1; // synthesized prototype not yet on the globals
-                                // list
+    bool is_static     : 1;
+    bool is_builtin_alloca : 1; // the builtin alloca() used to lower VLAs
+    bool is_constexpr      : 1;
+    bool is_implicit : 1; // synthesized by an implicit function declaration
+    bool is_hidden_builtin  : 1; // synthesized prototype not yet on the globals
+                                 // list
     bool is_macro_generated : 1; // created by a #pragma macro via
                                  // $function/$global_var
     bool is_splice_placeholder : 1; // $@k var synthesised by quote_core
@@ -2783,60 +2787,60 @@ struct Obj {
     // storage lives in the *comptime program's* data segment, so a Quote()
     // referencing the same name outside macro mode must not resolve to it.
     bool is_macro_program_global : 1;
-    bool is_tentative : 1;
-    bool is_tls : 1;
+    bool is_tentative            : 1;
+    bool is_tls                  : 1;
     // Codegen materialized this global's storage address. Distinct from
     // is_used, which the parser sets on any identifier lookup including
     // sizeof/typeof.
-    bool is_referenced : 1;
+    bool is_referenced       : 1;
     bool is_compound_literal : 1; // anonymous global holding a compound
                                   // literal's value
     bool is_anon_synthesized : 1; // anonymous global the compiler itself
                                   // synthesized and renamed to a real C
                                   // identifier; it has no source declaration,
                                   // so no header can supply its definition
-    bool is_string_literal : 1;   // anonymous global holding a string literal's
+    bool is_string_literal   : 1; // anonymous global holding a string literal's
                                   // bytes
-    bool has_pending_macro_init : 1; // gvar init deferred: init expr contains
-                                     // ND_MACRO_CALL
-    bool is_inline : 1;
-    bool is_nested : 1;     // defined inside another function
-    bool is_omp_task : 1;   // outlined #pragma omp task body
-    bool is_omp_region : 1; // outlined #pragma omp parallel body
-    bool is_block : 1;      // a block's synthetic function
-    bool is_block_var : 1;  // declared with __block storage qualifier
+    bool has_pending_macro_init  : 1; // gvar init deferred: init expr contains
+                                      // ND_MACRO_CALL
+    bool is_inline               : 1;
+    bool is_nested               : 1; // defined inside another function
+    bool is_omp_task             : 1; // outlined #pragma omp task body
+    bool is_omp_region           : 1; // outlined #pragma omp parallel body
+    bool is_block                : 1; // a block's synthetic function
+    bool is_block_var            : 1; // declared with __block storage qualifier
     bool block_return_ty_pending : 1; // while parsing a block literal whose
                                       // return type wasn't written: the type
                                       // is not final yet
-    bool is_live : 1;
-    bool is_root : 1;
-    bool is_constructor : 1;
-    bool is_destructor : 1;
-    bool local_set_built : 1;
+    bool is_live                 : 1;
+    bool is_root                 : 1;
+    bool is_constructor          : 1;
+    bool is_destructor           : 1;
+    bool local_set_built         : 1;
 
     // Bounds propagation state (see ObjChk). The scan flags are round-local
     // scratch reset by propagate_checked_bounds(); the others are frozen per
     // round.
-    bool checked_prop_unsafe : 1; // a non-checked-rooted store or escape was
-                                  // seen
+    bool checked_prop_unsafe    : 1; // a non-checked-rooted store or escape was
+                                     // seen
     bool checked_prop_candidate : 1; // TY_PTR, CHECKED_NONE local registered as
                                      // a propagation candidate
-    bool checked_prop_optional : 1;  // trustworthy only on SOME paths: derefs
+    bool checked_prop_optional  : 1; // trustworthy only on SOME paths: derefs
                                      // emit CHKRO
-    bool checked_prop_scan_saw_rooted : 1;
+    bool checked_prop_scan_saw_rooted   : 1;
     bool checked_prop_scan_saw_unrooted : 1;
     bool checked_prop_scan_src_optional : 1;
     bool checked_prop_chain_src : 1; // frozen snapshot: a valid chained source
-    bool checked_prop_scan_saw_non_nt : 1;
+    bool checked_prop_scan_saw_non_nt  : 1;
     bool checked_prop_scan_nt_conflict : 1;
     bool checked_prop_plain : 1; // every rooted store is a plain array's own
                                  // extent
     bool checked_prop_scan_saw_plain : 1;
-    bool checked_prop_mixed : 1;
+    bool checked_prop_mixed          : 1;
     bool checked_prop_scan_src_mixed : 1;
     // Marks the compiler-generated local a call to a checked-return function is
     // assigned through (split_checked_call_result()).
-    bool checked_call_result : 1;
+    bool     checked_call_result : 1;
 
     ObjAttr *ext_attr;
     ObjFn   *ext_fn;
@@ -2869,11 +2873,11 @@ OBJ_GROUP_READER(obj_blk, ext_blk, ObjBlk)
 OBJ_GROUP_READER(obj_chk, ext_chk, ObjChk)
 #undef OBJ_GROUP_READER
 ObjAttr *obj_attr_mut(VirtualMachine *vm, Obj *o);
-ObjFn   *obj_fn_mut(VirtualMachine *vm, Obj *o);
+ObjFn *obj_fn_mut(VirtualMachine *vm, Obj *o);
 ObjSize *obj_size_mut(VirtualMachine *vm, Obj *o);
 ObjInit *obj_init_mut(VirtualMachine *vm, Obj *o);
-ObjBlk  *obj_blk_mut(VirtualMachine *vm, Obj *o);
-ObjChk  *obj_chk_mut(VirtualMachine *vm, Obj *o);
+ObjBlk *obj_blk_mut(VirtualMachine *vm, Obj *o);
+ObjChk *obj_chk_mut(VirtualMachine *vm, Obj *o);
 
 /*!
  @brief Stack entry used to track nested #if/#elif/#else processing
@@ -2926,12 +2930,12 @@ typedef struct PendingMemberAttrs {
 typedef struct PendingMethod {
     struct PendingMethod *next;
     Type                 *owner;
-    Token                *tag;          // the owner's tag, or NULL
-    Token                *typedef_name; // set by the typedef naming the owner
-    Token                *start;        // first token of the declaration
-    Token                *name;         // the function's name
-    Token                *end;          // token after the closing `;` or `}`
-    const char           *operator_sym; // set for `operator+(...)`, else NULL
+    Token                *tag;            // the owner's tag, or NULL
+    Token                *typedef_name;   // set by the typedef naming the owner
+    Token                *start;          // first token of the declaration
+    Token                *name;           // the function's name
+    Token                *end;            // token after the closing `;` or `}`
+    const char           *operator_sym;   // set for `operator+(...)`, else NULL
     bool                  operator_unary; // one-parameter operator
     bool                  has_body;
 } PendingMethod;
@@ -3184,9 +3188,9 @@ typedef struct ComptimeVar {
     int64_t int_val;   // Scalar integer value (or 0 for structs)
     double  float_val; // Scalar float/double value
     Obj    *ptr_obj;   // Parent-side shadow object for $get_comptime_ptr
-    bool keep_value;   // A reload keeps the live storage and value
+    bool    keep_value; // A reload keeps the live storage and value
     ComptimeVarMember
-        *members;      // Per-field values for struct vars (NULL for scalars)
+        *members;       // Per-field values for struct vars (NULL for scalars)
     struct ComptimeVar *next;
 } ComptimeVar;
 
@@ -3222,7 +3226,7 @@ typedef struct VarScopeNode {
     char *deprecated_msg;
     // #1095/#1155: mirrors VarScope.enum_layout_ty/enum_layout_is_align
     // exactly -- see this struct's own doc comment above.
-    Type *enum_layout_ty;
+    Type    *enum_layout_ty;
     LayoutOp enum_layout_is_align;
     // Additional fields for linked list
     char                *name;     /**< Variable or typedef name. */
@@ -3495,10 +3499,10 @@ typedef struct AllocHeader {
     size_t size; /**< Size of allocation (excluding header), rounded up for
                     alignment */
     size_t requested_size; /**< Original requested size (for bounds checking) */
-    int    magic; /**< Magic number (0xDEADBEEF) for detecting corruption. */
-    unsigned owner;   /**< Heap owner id of the allocating thread
-                         (vm->heap_owner); a reclamation rewind never sweeps
-                         another thread's storage. */
+    int    magic;   /**< Magic number (0xDEADBEEF) for detecting corruption. */
+    unsigned owner; /**< Heap owner id of the allocating thread
+                       (vm->heap_owner); a reclamation rewind never sweeps
+                       another thread's storage. */
     long long canary; /**< Front canary value for heap overflow detection (when
                          enabled) */
     int freed;        /**< Flag indicating if this block has been freed (for UAF
@@ -3513,7 +3517,7 @@ typedef struct AllocHeader {
                             it are padding, free for the next field without
                             growing sizeof(AllocHeader). */
     long long
-        alloc_pc;   /**< Program counter at allocation site (for debugging) */
+        alloc_pc;     /**< Program counter at allocation site (for debugging) */
     // Per-allocation type_kind was removed (#653): type tracking now lives
     // in a byte-granular shadow (vm->type_shadow_pages) so member/interior
     // accesses can be checked too, not just the base pointer. See CHKT3
@@ -4029,11 +4033,11 @@ typedef struct Compiler {
     bool         skip_preprocess; // Skip preprocessing step
     HashMap      macros;          // Macro definitions
     MemberAlias *member_aliases;  // see note_member_alias_macro(); survives TUs
-    CondIncl *cond_incl;       // Conditional inclusion stack
-    HashMap   pragma_once;     // #pragma once tracking
-    HashMap included_headers;  // Track included headers for lazy stdlib loading
-    HashMap include_guards; // Header include guard cache (path -> guard name)
-    HashMap guard_macros;   // Set of macro names used as include guards
+    CondIncl    *cond_incl;       // Conditional inclusion stack
+    HashMap      pragma_once;     // #pragma once tracking
+    HashMap included_headers; // Track included headers for lazy stdlib loading
+    HashMap include_guards;   // Header include guard cache (path -> guard name)
+    HashMap guard_macros;     // Set of macro names used as include guards
 
     // Compile-time macro state
     MacroFn            *macro_fns; // Linked list of captured macro functions
@@ -4041,8 +4045,8 @@ typedef struct Compiler {
                                         // [[cccc::comptime]] decls (#884)
     StaticAssertRecord *static_asserts; // #1098: file-scope _Static_assert
                                         // records, for native re-emission
-    FileAsmRecord *file_asms;      // file-scope asm("..."), in source order
-    FileAsmRecord *file_asms_tail; // append point for file_asms
+    FileAsmRecord      *file_asms; // file-scope asm("..."), in source order
+    FileAsmRecord      *file_asms_tail; // append point for file_asms
     ComptimeVar
         *comptime_vars;     // Linked list of [[cccc::comptime]] variable decls
     TestFnRecord *test_fns; // Linked list of [[cccc::test]] function names
@@ -4079,7 +4083,7 @@ typedef struct Compiler {
         CheckedScope opened;   // state this begin pushed (its keyword)
         Token       *open_tok; // token of the #pragma cccc checked/unchecked
                                // begin (for "unclosed" diagnostics)
-        bool is_push;          // #pragma CHECKED_SCOPE push, not a begin
+        bool         is_push;  // #pragma CHECKED_SCOPE push, not a begin
     }           *checked_scope_stack;
     int          checked_scope_stack_len;
     int          checked_scope_stack_cap;
@@ -4097,7 +4101,7 @@ typedef struct Compiler {
     ComptimeCtxEntry *ctx_stack;     // Stack of active comptime/emit contexts
     int               ctx_stack_len; // Number of entries in ctx_stack
     int               ctx_stack_cap; // Allocated capacity of ctx_stack
-    bool macro_fns_compiled;         // True after compile_all_macros has run
+    bool        macro_fns_compiled;  // True after compile_all_macros has run
     struct Obj *macro_prog;          // The compiled comptime program, kept so a
                                      // live session can regenerate its code
     bool comptime_on_live_stack;     // Run comptime on top of the paused stack
@@ -4108,15 +4112,15 @@ typedef struct Compiler {
     // call hashmap_restore and clear the flag before returning.
     bool    has_macro_snapshot;
     HashMap macro_snapshot_backup;
-    bool any_block_type; // Set by block_type(); never cleared
-    bool no_comptime; // --no-comptime: skip entire comptime/macro phase (for
-                      // TUs that don't use comptime)
-    bool comptime_include_all;  // --comptime-include-all: forward all #define
-                                // macros to the comptime pass, and widen the
-                                // demand-driven declaration index (#894) to
-                                // include system headers
-    HashMap *macro_scope_stack; // Snapshot stack for per-comptime-fn macro
-                                // isolation (#283)
+    bool    any_block_type; // Set by block_type(); never cleared
+    bool    no_comptime; // --no-comptime: skip entire comptime/macro phase (for
+                         // TUs that don't use comptime)
+    bool    comptime_include_all; // --comptime-include-all: forward all #define
+                                  // macros to the comptime pass, and widen the
+                                  // demand-driven declaration index (#894) to
+                                  // include system headers
+    HashMap *macro_scope_stack;   // Snapshot stack for per-comptime-fn macro
+                                  // isolation (#283)
     int      macro_scope_stack_len;
     int      macro_scope_stack_cap;
     bool
@@ -4185,15 +4189,15 @@ typedef struct Compiler {
     // the #887 stale-global guard, and forcing it broadly during Quote()
     // was found (#894 testing) to wrongly route macro-to-macro calls
     // written inside a Quote() template through the ordinary-call path.
-    bool       comptime_splice_active;
-    Obj       *macro_globals; // Globals defined by inline macros (injected into
-                              // the final program before codegen)
+    bool comptime_splice_active;
+    Obj *macro_globals; // Globals defined by inline macros (injected into
+                        // the final program before codegen)
     bool reload_file_scope_calls; // File-scope calls run by a reload: the live
                                   // Objs they generated earlier may be redone
-    EmitEvent *emit_events_head; // Ordered generated-output events
+    EmitEvent *emit_events_head;  // Ordered generated-output events
     EmitEvent *emit_events_tail;
-    bool macro_emit_recording;   // True while a macro call records generated
-                                 // output
+    bool macro_emit_recording;    // True while a macro call records generated
+                                  // output
 
     // #embed directive limits
     size_t embed_limit;      // Soft limit for #embed size (default: 10MB)
@@ -4261,14 +4265,14 @@ typedef struct Compiler {
     int embedded_file_no; // Next embedded/in-memory file counter (negative file
                           // numbers); was a function-local static in
                           // tokenize_string (#181)
-    HashMap input_file_slots; // path -> input_files index + 1; a path read again
-                              // (a reload) reuses its slot
+    HashMap input_file_slots; // path -> input_files index + 1; a path read
+                              // again (a reload) reuses its slot
 
     // Include graph (--watch): root file realpath -> HashMap* (a set) of the
     // realpaths of the non-system files its preprocessing read.
     HashMap  tu_deps;
-    HashMap *dep_set;           // set being filled by the running preprocess
-    HashMap *dep_replaced;      // set the latest install replaced, for rollback
+    HashMap *dep_set;      // set being filled by the running preprocess
+    HashMap *dep_replaced; // set the latest install replaced, for rollback
 
     // Parser state
     Obj   *locals;    // All local variable instances during parsing
@@ -4300,8 +4304,8 @@ typedef struct Compiler {
     PendingMethod      *pending_methods_tail;
     bool                draining_methods;
     bool                draining_member_attrs;
-    int    fn_nesting_depth;   // Current function nesting depth (0 = top-level)
-    bool   in_type_lookahead;  // Parsing a declarator only to classify it
+    int  fn_nesting_depth;  // Current function nesting depth (0 = top-level)
+    bool in_type_lookahead; // Parsing a declarator only to classify it
     AddrSpace *addr_space_sink; // declspec(): where [[cccc::global]] etc land
     bool  in_generic_assoc;     // Parsing the type-name of a _Generic
                                 // association: a C23 `enum E : T` underlying
@@ -4320,8 +4324,8 @@ typedef struct Compiler {
         *deferred_unused_labels; // #1255: "unused label" candidates held
                                  // until cc_flush_deferred_unused_labels()
     struct ObjSizeQuery
-        *objsize_queries;  // Pending __builtin_object_size(ptr,...)
-                           // queries on malloc-tracked pointers in current
+        *objsize_queries;        // Pending __builtin_object_size(ptr,...)
+                          // queries on malloc-tracked pointers in current
     // function; resolved by resolve_objsize_queries (#642)
     char *brk_label;           // Current break jump target
     char *cont_label;          // Current continue jump target
@@ -4348,10 +4352,10 @@ typedef struct Compiler {
     Obj  *builtin_libm[CCCC_LIBM_BUILTINS]
                       [3];    // __builtin_fabs etc.: [row][d,f,l]
     Obj  *builtin_chk[CCCC_CHK_BUILTINS]; // __builtin___*_chk stubs, lazy
-    Obj  *builtin_setjmp;     // Builtin setjmp function
-    Obj  *builtin_longjmp;    // Builtin longjmp function
-    Obj  *builtin__setjmp;    // Builtin _setjmp (POSIX alias, same semantics as
-                              // setjmp)
+    Obj  *builtin_setjmp;                 // Builtin setjmp function
+    Obj  *builtin_longjmp;                // Builtin longjmp function
+    Obj  *builtin__setjmp;   // Builtin _setjmp (POSIX alias, same semantics as
+                             // setjmp)
     Obj  *builtin__longjmp;  // Builtin _longjmp (POSIX alias, same semantics as
                              // longjmp)
     Obj  *builtin_sigsetjmp; // Builtin sigsetjmp (aliases SETJMP on the VM;
@@ -4375,16 +4379,16 @@ typedef struct Compiler {
     TypeNameRecord *type_names; // Persistent typedef/tag declarations for -m
 
     // Arena allocator for parser frontend (tokens, AST, preprocessor state)
-    Arena       parser_arena;         // Fast bump-pointer allocator
-    Token      *token_free; // Recycled Tokens the preprocessor dropped
+    Arena             parser_arena; // Fast bump-pointer allocator
+    Token            *token_free;   // Recycled Tokens the preprocessor dropped
     const TokenState *token_state_cur; // state the last stamped token shares
 
-    StringArray include_paths;        // Quote include search paths
-    StringArray system_include_paths; // System header search paths for <...>
+    StringArray       include_paths;   // Quote include search paths
+    StringArray system_include_paths;  // System header search paths for <...>
     StringArray framework_paths; // -F: <Name/X.h> -> Name.framework/Headers
     StringArray system_framework_paths; // --iframework, --sysroot: as above
     StringArray framework_hit_paths;    // resolved framework headers (owned)
-    HashMap     include_cache;        // Cache for search_include_paths
+    HashMap     include_cache;          // Cache for search_include_paths
     StringArray file_buffers; // Track allocated file buffers for cleanup
 
     // URL include cache (only used when CCCC_HAS_CURL is enabled)
@@ -4673,30 +4677,30 @@ typedef struct Compiler {
     // #pragma cccc config(...) support
     uint32_t cli_flags_mask; // CCCCFlags bits explicitly set on the CLI; these
                              // win over `#pragma cccc config(...)` (#357)
-    bool        native_mode; // True when compile_format == COMPILE_NATIVE
+    bool     native_mode;    // True when compile_format == COMPILE_NATIVE
     const char *vm_flags_ignored_in; // "-c=native", "-m" or "-c=generated":
                                      // the mode that drops VM-only flags, so
                                      // config()'s flag effects are skipped
-    bool     serializes_output; // -c=native, -m or -c=generated: the AST is
-                                // emitted as C, not run by the VM
-    bool     omp_threaded;   // -fopenmp with -c=native, -m or -c=generated:
-                             // regions are outlined onto the thread pool
-    bool     omp_used;       // a threaded OpenMP directive was lowered
-    struct OmpFrame *omp_frames;     // active default(none) and task directives
+    bool        serializes_output; // -c=native, -m or -c=generated: the AST is
+                                   // emitted as C, not run by the VM
+    bool        omp_threaded;    // -fopenmp with -c=native, -m or -c=generated:
+                                 // regions are outlined onto the thread pool
+    bool        omp_used;        // a threaded OpenMP directive was lowered
+    struct OmpFrame *omp_frames; // active default(none) and task directives
     Scope           *omp_parallel; // scope of the innermost enclosing parallel
     struct OmpDirective
         *omp_enclosing;            // innermost directive whose body is open
-    int omp_sections; // inside a sections body: `section` ends a block
+    int  omp_sections;    // inside a sections body: `section` ends a block
     int  omp_assoc_loops; // for loops of the open `omp for` still to be entered
     char *omp_loop_brk;   // break label of the innermost associated loop, which
                           // `break` may not target
-    int              unevaluated;    // inside sizeof/_Alignof/typeof operand
-    bool     kernel_native;  // -c=native or -m: cccc_launch lowers to C
-    bool     kernel_used;    // a native kernel launch or builtin was lowered
-    bool     opencl;         // the translation unit in flight is OpenCL C
-    bool     kernel_test_run;  // --test-run: a launch thunk is also routed
-                               // to the VM launcher
-    int      kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
+    int   unevaluated;    // inside sizeof/_Alignof/typeof operand
+    bool  kernel_native;  // -c=native or -m: cccc_launch lowers to C
+    bool  kernel_used;    // a native kernel launch or builtin was lowered
+    bool  opencl;         // the translation unit in flight is OpenCL C
+    bool  kernel_test_run;  // --test-run: a launch thunk is also routed
+                            // to the VM launcher
+    int   kernel_local_ids; // per-TU counter naming [[cccc::local]] objects
 
     // Tail-call context (used during codegen for return f(args) TCO)
     bool tail_calls;          // Emit CALLT for eligible return f(args). Always
@@ -4774,10 +4778,11 @@ typedef struct Compiler {
     // Populated by gen(); consumed by cc_run() in vm.c.
     CCCCInitEntry *ctor_list;
     int            kernel_launch_depth; // inside cccc_launch arguments
-    HashMap        kernel_direct_local; // [[cccc::local]] storage for kernels called outside cccc_launch
-    HashMap        kernel_meta; // kernel byte offset -> KernelMeta* (stdlib/kernel.c)
-    int            ctor_count;
-    int            ctor_capacity;
+    HashMap kernel_direct_local; // [[cccc::local]] storage for kernels called
+                                 // outside cccc_launch
+    HashMap kernel_meta; // kernel byte offset -> KernelMeta* (stdlib/kernel.c)
+    int     ctor_count;
+    int     ctor_capacity;
     CCCCInitEntry *dtor_list;
     int            dtor_count;
     int            dtor_capacity;
@@ -5105,7 +5110,8 @@ struct VirtualMachine {
     // (ComptimeClass bits) and how many comptime vm_eval calls are active.
     unsigned comptime_allow;
     int      comptime_depth;
-    void    *comptime_registry; // handle and host-pointer maps, see comptime_args.c
+    void
+        *comptime_registry; // handle and host-pointer maps, see comptime_args.c
     // Saved bp and return address of each live frame entered under comptime,
     // outermost first, kept outside VM memory so guest stores cannot forge
     // them.
@@ -5193,11 +5199,11 @@ struct VirtualMachine {
     // GIL-backed pthread runtime state. Concrete pthread objects are kept
     // internal so the public CCCC struct does not expose host pthread ABI
     // types.
-    void             *gil_mutex;
-    int               gil_initialized;
-    int               gil_depth; // recursive levels held by the GIL owner
-    void *kernel_loop_item;  // work-item of a barrier-free cccc_launch loop
-    int   kernel_max_group;  // --kernel-max-group-size (0 = default 256)
+    void *gil_mutex;
+    int   gil_initialized;
+    int   gil_depth;        // recursive levels held by the GIL owner
+    void *kernel_loop_item; // work-item of a barrier-free cccc_launch loop
+    int   kernel_max_group; // --kernel-max-group-size (0 = default 256)
     ThreadRecord     *active_thread;
     ThreadRecord     *thread_records;
     SyncHandle       *sync_handles; // live host mutex/cond handles
@@ -5826,17 +5832,17 @@ bool cc_session_expand_macros(VirtualMachine *vm, Obj *old_head);
  @brief What a reload needs to undo a rebuild of the comptime program.
 */
 typedef struct CcComptimeReload {
-    bool         rebuilt;  /**< The comptime program was rebuilt. */
-    Obj         *prog;     /**< The comptime program before the rebuild. */
-    Scope       *context_scope;
-    MacroFn    **fn_nodes;
-    MacroFn     *fn_saved;
-    int          fn_count;
+    bool          rebuilt; /**< The comptime program was rebuilt. */
+    Obj          *prog;    /**< The comptime program before the rebuild. */
+    Scope        *context_scope;
+    MacroFn     **fn_nodes;
+    MacroFn      *fn_saved;
+    int           fn_count;
     ComptimeVar **var_nodes;
     ComptimeVar  *var_saved;
     int           var_count;
-    char         *data_ptr;     /**< Data segment top before fresh storage. */
-    int           pending_len;  /**< Queued comptime includes before the reload. */
+    char         *data_ptr; /**< Data segment top before fresh storage. */
+    int pending_len;        /**< Queued comptime includes before the reload. */
 } CcComptimeReload;
 
 /*!
@@ -6524,7 +6530,7 @@ typedef struct {
                              // else given path (#546)
     const char **build_options; // --build-option=key=value strings (#559)
     int          build_options_count;
-    int build_install; // --build-install: copy artifacts after build (#560)
+    int  build_install; // --build-install: copy artifacts after build (#560)
     bool watch;         // --watch: register the build's inputs with the watcher
     const char **user_args; // positional args after -- on the CLI (#558)
     int          user_args_count;
