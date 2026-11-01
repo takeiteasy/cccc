@@ -30,18 +30,18 @@ Apple M1, release-built `cccc`, 3 timed runs after 1 warmup.
 
 | Benchmark | `cccc` | `lua` | `gcc-O0` | `gcc-O2` |
 |---|---|---|---|---|
-| ackermann | 182.1 | 48.2 | 20.4 | 4.9 |
-| binary_tree | 238.1 | 131.1 | 18.4 | 17.7 |
-| dispatch | 223.5 | 169.3 | 15.8 | 5.3 |
-| fib | 169.2 | 51.9 | 6.1 | 9.0 |
-| mandelbrot | 759.2 | 386.9 | 60.6 | 28.0 |
-| matrix_mul | 704.9 | 234.9 | 20.4 | 3.8 |
-| nqueens | 119.3 | 58.6 | 12.3 | 9.0 |
-| quicksort | 199.8 | 62.2 | 15.5 | 10.3 |
-| sieve | 488.2 | 324.5 | 33.7 | 20.5 |
-| **Geometric mean** | **278.9** | **122.0** | **18.8** | **9.8** |
+| ackermann | 189.2 | 50.1 | 14.2 | 3.9 |
+| binary_tree | 264.1 | 159.3 | 21.3 | 17.9 |
+| dispatch | 233.6 | 175.6 | 12.2 | 5.6 |
+| fib | 175.0 | 53.8 | 6.8 | 3.2 |
+| mandelbrot | 787.1 | 401.1 | 63.2 | 29.0 |
+| matrix_mul | 728.4 | 241.6 | 19.2 | 3.7 |
+| nqueens | 121.1 | 61.1 | 8.1 | 5.5 |
+| quicksort | 208.7 | 65.0 | 12.4 | 7.6 |
+| sieve | 503.8 | 341.8 | 34.4 | 17.9 |
+| **Geometric mean** | **290.9** | **129.0** | **16.8** | **7.7** |
 
-The VM is 1.3x to 3.8x slower than Lua (2.3x on the geometric mean) and 13x to 188x slower than `gcc -O2` (28x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
+The VM is 1.3x to 3.8x slower than Lua (2.3x on the geometric mean) and 15x to 196x slower than `gcc -O2` (38x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
 
 `-c=native` hands the program to a host compiler and runs at native speed.
 
@@ -63,15 +63,15 @@ Running the benchmarks, in MB. The `cccc` column is compile and run in one proce
 
 | Benchmark | `cccc` | `lua` | `gcc-O0` | `gcc-O2` |
 |---|---|---|---|---|
-| ackermann | 7.2 | 1.8 | 1.2 | 1.2 |
-| binary_tree | 18.4 | 11.7 | 4.2 | 4.2 |
+| ackermann | 6.9 | 1.8 | 1.2 | 1.2 |
+| binary_tree | 18.5 | 11.7 | 4.2 | 4.2 |
 | dispatch | 7.2 | 1.5 | 1.2 | 1.2 |
 | fib | 7.1 | 1.4 | 1.2 | 1.2 |
 | mandelbrot | 7.5 | 1.5 | 1.2 | 1.2 |
-| matrix_mul | 8.5 | 3.8 | 2.1 | 2.1 |
+| matrix_mul | 8.5 | 3.8 | 2.2 | 2.1 |
 | nqueens | 7.2 | 1.5 | 1.2 | 1.2 |
 | quicksort | 8.0 | 3.6 | 1.6 | 1.6 |
-| sieve | 16.8 | 238.0 | 10.7 | 10.7 |
+| sieve | 16.9 | 238.0 | 10.7 | 10.7 |
 
 The VM's baseline is about 7 MB, so it stays within a few megabytes of `gcc` on small programs. `sieve` is the exception: the C versions use a 10 MB byte array, while the Lua port keeps its 10 million flags in a table.
 

@@ -83,6 +83,8 @@ A 32-bit `int` or `unsigned` result is wrapped so the 64-bit register holds the 
 | `MULISX3`, `MULIZX3` | `rd = (int)(rs1 * imm)`, `rd = (unsigned)(rs1 * imm)` (RI format) |
 | `SHLISX3`, `SHLIZX3` | `rd = (int)(rs1 << imm)`, `rd = (unsigned)(rs1 << imm)`, count 0-63 (RI format) |
 
+A negation and its wrap (`NEG3` then `SX4` / `ZX4`) is `SUBSX3` / `SUBZX3 rd, zero, rs`. A `NOT3`, a divide by a positive value and a `BNOT3` of a sign-extended value need no wrap, because the clean-up knows their result already fits 32 bits.
+
 ### Comparisons (3-Register)
 
 | Opcode | Description |

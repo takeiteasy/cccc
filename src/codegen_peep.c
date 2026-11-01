@@ -57,7 +57,7 @@
 //
 // A 32-bit result's sign or zero extension is dropped when no later instruction
 // reads the register's upper half (drop_unread_wraps), and one that remains is
-// fused into the preceding ADD/SUB/MUL/ADDI/MULI/SHLI (fuse_wraps).
+// fused into the preceding ADD/SUB/NEG/MUL/ADDI/MULI/SHLI (fuse_wraps).
 
 enum { R_NO, R_IU, R_ID, R_FU, R_FD };
 enum { SP_PURE = 1, SP_MOVE = 2 };
@@ -808,6 +808,7 @@ static int ext_result(int op) {
         case LDR_INDEX_UW:
         case LDR_LOCAL_UW:
             return ext_of_range(0, 4294967295LL);
+        case NOT3:
         case SEQ3:
         case SNE3:
         case SLT3:
@@ -1277,6 +1278,23 @@ static bool result_range(Peep *p, const Insn *in, int op, const Facts *f,
             *hi = (long long)(ULLONG_MAX >> k);
             return true;
         }
+        case NEG3:
+            if (f->lo[rs1] == LLONG_MIN)
+                return false;
+            *lo = -f->hi[rs1];
+            *hi = -f->lo[rs1];
+            return true;
+        case BNOT3:
+            *lo = ~f->hi[rs1];
+            *hi = ~f->lo[rs1];
+            return true;
+        case DIV3:
+            // A divisor of -1 can overflow, so only a positive one is covered.
+            if (f->lo[rs2] < 1)
+                return false;
+            *lo = f->lo[rs1] < 0 ? f->lo[rs1] : 0;
+            *hi = f->hi[rs1] > 0 ? f->hi[rs1] : 0;
+            return true;
         case USHR3:
         case UDIV3:
             if (f->lo[rs1] < 0)
@@ -2287,6 +2305,7 @@ static int wrapped_op(int op, int ext) {
         case ADD3:
             return sx ? ADDSX3 : ADDZX3;
         case SUB3:
+        case NEG3:
             return sx ? SUBSX3 : SUBZX3;
         case MUL3:
             return sx ? MULSX3 : MULZX3;
@@ -2301,7 +2320,7 @@ static int wrapped_op(int op, int ext) {
     }
 }
 
-// `OP t, ...; SX4/ZX4 d, t` with t dead afterwards (or t == d) is one opcode
+// `OP t, ...; SX4/ZX4 d, t` (NEG becomes a subtraction from zero) with t dead afterwards (or t == d) is one opcode
 // writing d. The operation reads its sources before it writes, so d may be one
 // of them.
 static void fuse_block_wraps(Peep *p, Block *blk) {
@@ -2319,6 +2338,11 @@ static void fuse_block_wraps(Peep *p, Block *blk) {
                 get_byte(p, next, 1) == t &&
                 (d == t || !(after_ext & BIT(t)))) {
                 set_byte(p, in, 0, d);
+                if (in->op == NEG3) {
+                    // -s is 0 - s
+                    set_byte(p, in, 2, get_byte(p, in, 1));
+                    set_byte(p, in, 1, REG_ZERO);
+                }
                 p->vm->text_seg[in->pc] = fused;
                 in->op                  = fused;
                 op_spec(fused, &in->spec);
