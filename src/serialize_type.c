@@ -3254,8 +3254,18 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
         // parse_postfix.c's primary(), sc->enum_layout_ty), so the body and
         // its uses can't disagree the way an array's declaration and
         // initializer could -- no consistency hazard to guard here.
-        if (!serialize_layout_const(f, ctx, ec->layout_ty, ec->layout_is_align))
-            fprintf(f, "%lld", (long long)ec->value);
+        if (!serialize_layout_const(f, ctx, ec->layout_ty,
+                                    ec->layout_is_align)) {
+            Type *base = type_agg(ty)->enum_base_type;
+            // -9223372036854775808 is not a valid literal: gcc reads the
+            // 9223372036854775808 as unsigned.
+            if (base && base->is_unsigned && base->size == 8)
+                fprintf(f, "%lluULL", (unsigned long long)ec->value);
+            else if ((long long)ec->value == (-9223372036854775807LL - 1))
+                fprintf(f, "(-9223372036854775807LL - 1)");
+            else
+                fprintf(f, "%lld", (long long)ec->value);
+        }
         if (ec->next)
             fprintf(f, ",");
         fprintf(f, "\n");

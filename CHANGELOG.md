@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-c=native` wrote an enumerator of `0x8000000000000000` in an enum with a 64-bit unsigned underlying type as `-9223372036854775808`, which gcc rejects; it is now written as `9223372036854775808ULL`, and a plain `LLONG_MIN` enumerator as `(-9223372036854775807LL - 1)`.
 ## [0.29.0] - 2026-11-01
 
 - Changed: against 0.28.0 the benchmark programs run 1.4x faster on the geometric mean (278 ms against 396 ms; `sieve` 2.4x, `dispatch` 2.3x, `nqueens` 1.7x, none slower), and `cccc -m` over cccc's own 103 sources takes 18 s and 3.4 GB instead of 149 s and 19 GB.
