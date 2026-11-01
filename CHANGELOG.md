@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-01
+
+- Changed: against 0.28.0 the benchmark programs run 1.4x faster on the geometric mean (278 ms against 396 ms; `sieve` 2.4x, `dispatch` 2.3x, `nqueens` 1.7x, none slower), and `cccc -m` over cccc's own 103 sources takes 18 s and 3.4 GB instead of 149 s and 19 GB.
+- Fixed: a bit-field store at bit 63 (`long long y : 1` after 62 bits) shifted a signed value into the sign bit when the optimiser is off or a safety flag is set.
 - Changed: the `-c=native` serializer skips the type definitions of a function that owns no local type, looks up the function Objs a shim needs by name instead of scanning the program for each, and resolves a type's own typedef or tag record by pointer; `cccc -m` over cccc's 103 sources takes 19 s instead of 29 s (45 s before the previous change).
 - Changed: the `-c=native` serializer's rename passes (tag, tagless-typedef and enumerator collisions, and a program typedef shadowing a header one) compare a type only with the groups and records that can be the same type, and the type-comparison memo is a flat table; serializing cccc's own 103 sources with `-m` takes 29 s instead of 45 s.
 - Added: VM opcodes `UBFX`, `SBFX` and `BFI` (bit-field extract and insert). A bit-field read, `(x >> 8) & 0xff` and `(x << 44) >> 52` are one extract opcode, and a bit-field write is one insert opcode instead of four to six (`minilua` runs Lua programs 2-3% faster). They are not used under any flag that checks or instruments the access.

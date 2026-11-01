@@ -30,7 +30,7 @@ The result is `build/cccc-ouroboros`; the target runs its `--version` as a smoke
 
 `--use-system-headers` is set on both platforms. On Linux, CCCC's bundled headers lack POSIX functions its own sources call (`strnlen`, `stpcpy`). On macOS, `src/watch.c` (with `src/dmon.h`) includes CoreServices, whose SDK headers cannot share a unit with CCCC's bundled `<signal.h>` and `<sys/*.h>`; without the flag every file but `src/watch.c` compiles and the link fails on `cc_watch_*`.
 
-Building with the release `cccc` takes about 50 seconds on an Apple M1; see [benchmarks.md](benchmarks.md#compiling-cccc). A `make` build of `cccc` is about 3x slower.
+Building with the release `cccc` takes about 22 seconds on an Apple M1; see [benchmarks.md](benchmarks.md#compiling-cccc). A `make` build of `cccc` is about 3x slower.
 
 ## What to check
 
