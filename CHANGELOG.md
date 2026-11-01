@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the `-c=native` serializer's rename passes (tag, tagless-typedef and enumerator collisions, and a program typedef shadowing a header one) compare a type only with the groups and records that can be the same type, and the type-comparison memo is a flat table; serializing cccc's own 103 sources with `-m` takes 29 s instead of 45 s.
 - Added: VM opcodes `UBFX`, `SBFX` and `BFI` (bit-field extract and insert). A bit-field read, `(x >> 8) & 0xff` and `(x << 44) >> 52` are one extract opcode, and a bit-field write is one insert opcode instead of four to six (`minilua` runs Lua programs 2-3% faster). They are not used under any flag that checks or instruments the access.
 - Changed: the VM bytecode clean-up turns an immediate op that leaves its operand unchanged (`ADDI3`, `ORI3`, `XORI3`, `SHLI3`, `SHRI3`, `USHRI3` by 0, `ANDI3` by -1, `MULI3` by 1) into a `MOV3`, and `ANDI3` / `MULI3` by 0 into a `MOV3` from the zero register.
 - Fixed: `NEG3` of the most negative `long long` and a register shift by a count of 64 or more, or a negative count, no longer invoke undefined behaviour in the VM host; the count is taken modulo 64.

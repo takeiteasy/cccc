@@ -892,30 +892,54 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
 #endif
 }
 
-// #1014: does `ty` (or anything reachable through a PTR/ARRAY/VLA/FUNC
-// chain -- deliberately not through struct/union members, mirroring
-// hoist_local_type_to_file_scope()'s own reasoning: a member's type is
-// reached through its own uses/definitions elsewhere, and this scan doesn't
-// need a cycle guard as a result) match `group_ty` under same_type_strong()?
-// Used to decide whether an externally-visible Obj's signature "votes for"
-// a tag-collision group (rename_colliding_type_tags()'s tier-2 keeper
-// signal).
-static bool type_reaches_group(Type *ty, Type *group_ty) {
+// Iterates the records of a name registry (`len` of them) that may be the same
+// type as `ty`, binding `ivar` in ascending order. `buf` holds
+// SERIALIZE_CAND_CAP ints.
+#define REC_CAND_FOR(ivar, buf, candfn, ctx, ty, len)                          \
+    for (int _n = candfn((ctx), (ty), (buf)), _t = _n < 0 ? (len) : _n,        \
+             _k = 0, ivar = 0;                                                 \
+         _k < _t && (ivar = _n < 0 ? _k : (buf)[_k], 1); _k++)
+
+// Sets hit[g] for every group (of those `only` allows, or all) whose reps[g]
+// matches `ty` or anything reachable from it through a PTR/ARRAY/VLA/FUNC chain
+// -- deliberately not through struct/union members, mirroring
+// hoist_local_type_to_file_scope()'s own reasoning: a member's type is reached
+// through its own uses/definitions elsewhere, and this walk needs no cycle
+// guard as a result. Used to decide whether an externally-visible Obj's
+// signature "votes for" a collision group (the tier-2 keeper signal).
+static void mark_groups_reached(Type *ty, TypeGroupIndex *gx, Type **reps,
+                                const bool *only, bool *hit) {
     if (!ty)
-        return false;
-    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM)
-        return same_type_strong(ty, group_ty);
-    if (ty->kind == TY_PTR || ty->kind == TY_ARRAY || ty->kind == TY_VLA)
-        return type_reaches_group(ty->base, group_ty);
-    if (ty->kind == TY_FUNC) {
-        if (type_reaches_group(ty->return_ty, group_ty))
-            return true;
+        return;
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ENUM) {
+        const int *cands;
+        int        n = type_group_index_cands(gx, ty, &cands);
+        for (int k = 0; k < n; k++) {
+            int g = cands[k];
+            if (!hit[g] && (!only || only[g]) && same_type_strong(ty, reps[g]))
+                hit[g] = true;
+        }
+    } else if (ty->kind == TY_PTR || ty->kind == TY_ARRAY ||
+               ty->kind == TY_VLA) {
+        mark_groups_reached(ty->base, gx, reps, only, hit);
+    } else if (ty->kind == TY_FUNC) {
+        mark_groups_reached(ty->return_ty, gx, reps, only, hit);
         for (Type *p = ty->params; p; p = p->next)
-            if (type_reaches_group(p, group_ty))
-                return true;
-        return false;
+            mark_groups_reached(p, gx, reps, only, hit);
     }
-    return false;
+}
+
+// mark_groups_reached() over the type of every externally-visible definition.
+static void mark_extern_refs(Obj *prog, TypeGroupIndex *gx, Type **reps,
+                             const bool *only, bool *hit) {
+    for (Obj *obj = prog; obj; obj = obj->next) {
+        if (obj->is_static)
+            continue;
+        bool is_defining =
+            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
+        if (is_defining && obj->ty)
+            mark_groups_reached(obj->ty, gx, reps, only, hit);
+    }
 }
 
 // #1014: two translation units can each independently *complete* a
@@ -972,7 +996,12 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
     int       groups_len = 0, groups_cap = 0;
     // Names seen more than once by more than one distinct group -- only
     // these need renaming at all.
-    bool *collided = NULL;
+    bool          *collided      = NULL;
+    Type         **reps          = NULL;
+    bool          *hit           = NULL;
+    TypeGroupIndex gx            = {0};
+    HashMap        first_by_name = {0}; // name -> first group + 1
+    int            cand_buf[SERIALIZE_CAND_CAP];
 
     // ctx->tags is in reverse record-creation order (record_type_name()
     // prepends; collect_scope_names() walks head-first) -- walk it back to
@@ -994,14 +1023,17 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         // shaped record instead falls through and becomes its own new
         // group below -- the dedicated pass right after this loop is what
         // actually detects and marks the resulting name collision.
-        int found = -1;
-        for (int g = 0; g < groups_len; g++) {
+        // Candidates are the groups that may be the same type; a group joins
+        // only when its name matches too.
+        int        found = -1;
+        const int *cands;
+        int        nc = type_group_index_cands(&gx, rec->ty, &cands);
+        for (int k = 0; k < nc && found < 0; k++) {
+            int g = cands[k];
             if (groups[g].name_len == rec->name_len &&
                 strncmp(groups[g].name, rec->name, rec->name_len) == 0 &&
-                same_type_strong(groups[g].rep, rec->ty)) {
+                same_type_strong(groups[g].rep, rec->ty))
                 found = g;
-                break;
-            }
         }
         if (found >= 0)
             continue;
@@ -1019,65 +1051,56 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
         groups[groups_len].header_exposed = false;
         groups[groups_len].extern_ref     = false;
         collided[groups_len]              = false;
+        type_group_index_add(&gx, rec->ty, groups_len);
+        // A second distinct group under one name is a collision.
+        int first = (int)(intptr_t)hashmap_get2(&first_by_name, rec->name,
+                                                rec->name_len);
+        if (first) {
+            collided[groups_len] = true;
+            collided[first - 1]  = true;
+        } else {
+            hashmap_put2(&first_by_name, rec->name, rec->name_len,
+                         (void *)(intptr_t)(groups_len + 1));
+        }
         groups_len++;
     }
-
-    if (groups_len == 0)
-        return;
-
-    // Mark actual name collisions: any two distinct groups sharing a name.
-    for (int g1 = 0; g1 < groups_len; g1++)
-        for (int g2 = g1 + 1; g2 < groups_len; g2++)
-            if (groups[g1].name_len == groups[g2].name_len &&
-                strncmp(groups[g1].name, groups[g2].name,
-                        groups[g1].name_len) == 0) {
-                collided[g1] = true;
-                collided[g2] = true;
-            }
 
     bool any_collision = false;
     for (int g = 0; g < groups_len; g++)
         if (collided[g])
             any_collision = true;
-    if (!any_collision) {
-        free(groups);
-        free(collided);
-        return;
-    }
+    if (!any_collision)
+        goto done;
 
     // Tier 1: header-exposed -- a from_include tag or typedef record names
     // this group (from_include is command-line-input-keyed since #1006, so
     // this is exactly "a replayed #include names this tag").
-    for (int i = 0; i < ctx->tags_len; i++) {
-        if (!ctx->tags[i].from_include || ctx->tags[i].always_emit)
+    for (int g = 0; g < groups_len; g++) {
+        if (!collided[g])
             continue;
-        for (int g = 0; g < groups_len; g++)
-            if (collided[g] && same_type_strong(ctx->tags[i].ty, groups[g].rep))
-                groups[g].header_exposed = true;
-    }
-    for (int i = 0; i < ctx->typedefs_len; i++) {
-        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (collided[g] &&
-                same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
-                groups[g].header_exposed = true;
+        REC_CAND_FOR(i, cand_buf, serialize_tag_cands, ctx, groups[g].rep,
+                     ctx->tags_len)
+        if (ctx->tags[i].from_include && !ctx->tags[i].always_emit &&
+            same_type_strong(ctx->tags[i].ty, groups[g].rep))
+            groups[g].header_exposed = true;
+        REC_CAND_FOR(i, cand_buf, serialize_typedef_cands, ctx, groups[g].rep,
+                     ctx->typedefs_len)
+        if (ctx->typedefs[i].from_include && !ctx->typedefs[i].always_emit &&
+            same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+            groups[g].header_exposed = true;
     }
 
     // Tier 2: an externally-visible definition's type reaches this group --
     // needed because tier 1 alone can't pick the implementation TU's group
     // when the private TU happens to be listed (and hence created) first.
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_static)
-            continue;
-        bool is_defining =
-            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
-        if (!is_defining || !obj->ty)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (collided[g] && type_reaches_group(obj->ty, groups[g].rep))
-                groups[g].extern_ref = true;
-    }
+    reps = malloc(sizeof(Type *) * groups_len);
+    hit  = calloc(groups_len, sizeof(bool));
+    for (int g = 0; g < groups_len; g++)
+        reps[g] = groups[g].rep;
+    mark_extern_refs(prog, &gx, reps, collided, hit);
+    for (int g = 0; g < groups_len; g++)
+        if (hit[g])
+            groups[g].extern_ref = true;
 
     // Keeper choice per colliding name, composed as successive filters:
     // restrict to header-exposed groups if any exist among that name's
@@ -1132,22 +1155,29 @@ static void rename_colliding_type_tags(VirtualMachine *vm, Obj *prog,
                              groups[idx].name, ctx->anon_global_counter++);
             int   new_len = (int)strlen(new_name);
             Type *victim  = groups[idx].rep;
-            for (int i = 0; i < ctx->tags_len; i++)
-                if (same_type_strong(ctx->tags[i].ty, victim)) {
-                    ctx->tags[i].name     = new_name;
-                    ctx->tags[i].name_len = new_len;
-                }
-            for (int i = 0; i < ctx->typedefs_len; i++)
-                if (!(ctx->typedefs[i].from_include &&
-                      !ctx->typedefs[i].always_emit) &&
-                    same_type_strong(ctx->typedefs[i].ty, victim))
-                    ctx->typedefs[i].name     = new_name,
-                    ctx->typedefs[i].name_len = new_len;
+            REC_CAND_FOR(i, cand_buf, serialize_tag_cands, ctx, victim,
+                         ctx->tags_len)
+            if (same_type_strong(ctx->tags[i].ty, victim)) {
+                ctx->tags[i].name     = new_name;
+                ctx->tags[i].name_len = new_len;
+            }
+            REC_CAND_FOR(i, cand_buf, serialize_typedef_cands, ctx, victim,
+                         ctx->typedefs_len)
+            if (!(ctx->typedefs[i].from_include &&
+                  !ctx->typedefs[i].always_emit) &&
+                same_type_strong(ctx->typedefs[i].ty, victim))
+                ctx->typedefs[i].name     = new_name,
+                ctx->typedefs[i].name_len = new_len;
             groups[idx].rep  = NULL; // mark resolved
             ctx->tag_renamed = true;
         }
     }
 
+done:
+    type_group_index_free(&gx);
+    hashmap_deinit(&first_by_name);
+    free(reps);
+    free(hit);
     free(groups);
     free(collided);
 }
@@ -1206,6 +1236,11 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
     TypedefGroup *groups     = NULL;
     int           groups_len = 0, groups_cap = 0;
     bool         *collided = NULL;
+    Type         **reps          = NULL;
+    bool          *hit           = NULL;
+    TypeGroupIndex gx            = {0};
+    HashMap        first_by_name = {0}; // name -> first group + 1
+    int            cand_buf[SERIALIZE_CAND_CAP];
 
     for (int i = 0; i < ctx->typedefs_len; i++) {
         TypeName *rec = &ctx->typedefs[i];
@@ -1220,14 +1255,15 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
         if (!tagless || !type_is_complete_tagged(ty))
             continue;
 
-        int found = -1;
-        for (int g = 0; g < groups_len; g++) {
+        int        found = -1;
+        const int *cands;
+        int        nc = type_group_index_cands(&gx, ty, &cands);
+        for (int k = 0; k < nc && found < 0; k++) {
+            int g = cands[k];
             if (groups[g].name_len == rec->name_len &&
                 strncmp(groups[g].name, rec->name, rec->name_len) == 0 &&
-                same_type_strong(groups[g].rep, ty)) {
+                same_type_strong(groups[g].rep, ty))
                 found = g;
-                break;
-            }
         }
         if (found >= 0)
             continue;
@@ -1244,51 +1280,44 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
         groups[groups_len].header_exposed = false;
         groups[groups_len].extern_ref     = false;
         collided[groups_len]              = false;
+        type_group_index_add(&gx, ty, groups_len);
+        int first = (int)(intptr_t)hashmap_get2(&first_by_name, rec->name,
+                                                rec->name_len);
+        if (first) {
+            collided[groups_len] = true;
+            collided[first - 1]  = true;
+        } else {
+            hashmap_put2(&first_by_name, rec->name, rec->name_len,
+                         (void *)(intptr_t)(groups_len + 1));
+        }
         groups_len++;
     }
-
-    if (groups_len == 0)
-        return;
-
-    for (int g1 = 0; g1 < groups_len; g1++)
-        for (int g2 = g1 + 1; g2 < groups_len; g2++)
-            if (groups[g1].name_len == groups[g2].name_len &&
-                strncmp(groups[g1].name, groups[g2].name,
-                        groups[g1].name_len) == 0) {
-                collided[g1] = true;
-                collided[g2] = true;
-            }
 
     bool any_collision = false;
     for (int g = 0; g < groups_len; g++)
         if (collided[g])
             any_collision = true;
-    if (!any_collision) {
-        free(groups);
-        free(collided);
-        return;
+    if (!any_collision)
+        goto done;
+
+    for (int g = 0; g < groups_len; g++) {
+        if (!collided[g])
+            continue;
+        REC_CAND_FOR(i, cand_buf, serialize_typedef_cands, ctx, groups[g].rep,
+                     ctx->typedefs_len)
+        if (ctx->typedefs[i].from_include && !ctx->typedefs[i].always_emit &&
+            same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
+            groups[g].header_exposed = true;
     }
 
-    for (int i = 0; i < ctx->typedefs_len; i++) {
-        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (collided[g] &&
-                same_type_strong(ctx->typedefs[i].ty, groups[g].rep))
-                groups[g].header_exposed = true;
-    }
-
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_static)
-            continue;
-        bool is_defining =
-            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
-        if (!is_defining || !obj->ty)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (collided[g] && type_reaches_group(obj->ty, groups[g].rep))
-                groups[g].extern_ref = true;
-    }
+    reps = malloc(sizeof(Type *) * groups_len);
+    hit  = calloc(groups_len, sizeof(bool));
+    for (int g = 0; g < groups_len; g++)
+        reps[g] = groups[g].rep;
+    mark_extern_refs(prog, &gx, reps, collided, hit);
+    for (int g = 0; g < groups_len; g++)
+        if (hit[g])
+            groups[g].extern_ref = true;
 
     for (int g = 0; g < groups_len; g++) {
         if (!collided[g] || groups[g].rep == NULL)
@@ -1337,16 +1366,22 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
                              groups[idx].name, ctx->anon_global_counter++);
             int   new_len = (int)strlen(new_name);
             Type *victim  = groups[idx].rep;
-            for (int i = 0; i < ctx->typedefs_len; i++)
-                if (!(ctx->typedefs[i].from_include &&
-                      !ctx->typedefs[i].always_emit) &&
-                    same_type_strong(ctx->typedefs[i].ty, victim))
-                    ctx->typedefs[i].name     = new_name,
-                    ctx->typedefs[i].name_len = new_len;
+            REC_CAND_FOR(i, cand_buf, serialize_typedef_cands, ctx, victim,
+                         ctx->typedefs_len)
+            if (!(ctx->typedefs[i].from_include &&
+                  !ctx->typedefs[i].always_emit) &&
+                same_type_strong(ctx->typedefs[i].ty, victim))
+                ctx->typedefs[i].name     = new_name,
+                ctx->typedefs[i].name_len = new_len;
             groups[idx].rep = NULL;
         }
     }
 
+done:
+    type_group_index_free(&gx);
+    hashmap_deinit(&first_by_name);
+    free(reps);
+    free(hit);
     free(groups);
     free(collided);
 }
@@ -1358,6 +1393,21 @@ static void rename_colliding_typedef_names(VirtualMachine *vm, Obj *prog,
 // only the typedef declaration changes.
 static void rename_typedefs_shadowing_header(VirtualMachine   *vm,
                                              SerializeContext *ctx) {
+    // Header typedefs by name: `heads` maps a name to its newest record + 1
+    // and `next` chains the older ones. Only program typedefs are renamed
+    // below, so the header names never change.
+    HashMap heads = {0};
+    int    *next =
+        malloc(sizeof(int) * (ctx->typedefs_len ? ctx->typedefs_len : 1));
+    for (int j = 0; j < ctx->typedefs_len; j++) {
+        TypeName *hdr = &ctx->typedefs[j];
+        next[j]       = 0;
+        if (!hdr->from_include || hdr->always_emit || hdr->owner_fn)
+            continue;
+        next[j] = (int)(intptr_t)hashmap_get2(&heads, hdr->name, hdr->name_len);
+        hashmap_put2(&heads, hdr->name, hdr->name_len,
+                     (void *)(intptr_t)(j + 1));
+    }
     for (int i = 0; i < ctx->typedefs_len; i++) {
         TypeName *rec = &ctx->typedefs[i];
         if (rec->owner_fn || (rec->from_include && !rec->always_emit) ||
@@ -1366,12 +1416,10 @@ static void rename_typedefs_shadowing_header(VirtualMachine   *vm,
              rec->ty->kind != TY_ENUM))
             continue;
         bool shadows = false;
-        for (int j = 0; j < ctx->typedefs_len && !shadows; j++) {
-            TypeName *hdr = &ctx->typedefs[j];
-            shadows       = hdr->from_include && !hdr->always_emit &&
-                            !hdr->owner_fn && hdr->name_len == rec->name_len &&
-                            !strncmp(hdr->name, rec->name, rec->name_len) &&
-                            hdr->ty && !same_type_strong(hdr->ty, rec->ty);
+        int  j = (int)(intptr_t)hashmap_get2(&heads, rec->name, rec->name_len);
+        for (; j && !shadows; j = next[j - 1]) {
+            TypeName *hdr = &ctx->typedefs[j - 1];
+            shadows       = hdr->ty && !same_type_strong(hdr->ty, rec->ty);
         }
         if (!shadows)
             continue;
@@ -1380,6 +1428,8 @@ static void rename_typedefs_shadowing_header(VirtualMachine   *vm,
         rec->name      = new_name;
         rec->name_len  = (int)strlen(new_name);
     }
+    hashmap_deinit(&heads);
+    free(next);
 }
 
 // #1015: two translation units can each independently declare a same-named
@@ -1442,8 +1492,12 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
         // warning falls back to not naming a header.
         const char *header_path;
     } EnumGroup;
-    EnumGroup *groups     = NULL;
-    int        groups_len = 0, groups_cap = 0;
+    EnumGroup     *groups     = NULL;
+    int            groups_len = 0, groups_cap = 0;
+    Type         **reps = NULL;
+    bool          *hit  = NULL;
+    TypeGroupIndex gx   = {0};
+    int            cand_buf[SERIALIZE_CAND_CAP];
 
     // #1016: neither this pass nor rename_colliding_type_tags()/
     // rename_colliding_static_names() looks at the other's namespace, but C
@@ -1487,12 +1541,11 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             if (!type_is_complete_tagged(rec->ty))
                 continue;
 
-            bool found = false;
-            for (int g = 0; g < groups_len; g++)
-                if (same_type_strong(groups[g].rep, rec->ty)) {
-                    found = true;
-                    break;
-                }
+            bool       found = false;
+            const int *cands;
+            int        nc = type_group_index_cands(&gx, rec->ty, &cands);
+            for (int k = 0; k < nc && !found; k++)
+                found = same_type_strong(groups[cands[k]].rep, rec->ty);
             if (found)
                 continue;
 
@@ -1505,6 +1558,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
             groups[groups_len].header_exposed = false;
             groups[groups_len].extern_ref     = false;
             groups[groups_len].header_path    = NULL;
+            type_group_index_add(&gx, rec->ty, groups_len);
             groups_len++;
         }
     }
@@ -1513,6 +1567,7 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     // old groups_len < 2 bail-out (nothing to compare a lone group against)
     // is only safe when there are no Obj names to check it against either.
     if (groups_len < 1 || (groups_len < 2 && obj_names.used == 0)) {
+        type_group_index_free(&gx);
         free(groups);
         hashmap_deinit_borrowed(&obj_names);
         return;
@@ -1520,39 +1575,35 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
 
     // Tier 1: header-exposed -- a from_include tag or typedef record names
     // this group.
-    for (int i = 0; i < ctx->tags_len; i++) {
-        if (!ctx->tags[i].from_include || ctx->tags[i].always_emit)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (same_type_strong(ctx->tags[i].ty, groups[g].rep)) {
-                groups[g].header_exposed = true;
-                if (!groups[g].header_path)
-                    groups[g].header_path = ctx->tags[i].file_path;
-            }
-    }
-    for (int i = 0; i < ctx->typedefs_len; i++) {
-        if (!ctx->typedefs[i].from_include || ctx->typedefs[i].always_emit)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (same_type_strong(ctx->typedefs[i].ty, groups[g].rep)) {
-                groups[g].header_exposed = true;
-                if (!groups[g].header_path)
-                    groups[g].header_path = ctx->typedefs[i].file_path;
-            }
+    // The first matching tag, then typedef, supplies header_path.
+    for (int g = 0; g < groups_len; g++) {
+        REC_CAND_FOR(i, cand_buf, serialize_tag_cands, ctx, groups[g].rep,
+                     ctx->tags_len)
+        if (ctx->tags[i].from_include && !ctx->tags[i].always_emit &&
+            same_type_strong(ctx->tags[i].ty, groups[g].rep)) {
+            groups[g].header_exposed = true;
+            if (!groups[g].header_path)
+                groups[g].header_path = ctx->tags[i].file_path;
+        }
+        REC_CAND_FOR(i, cand_buf, serialize_typedef_cands, ctx, groups[g].rep,
+                     ctx->typedefs_len)
+        if (ctx->typedefs[i].from_include && !ctx->typedefs[i].always_emit &&
+            same_type_strong(ctx->typedefs[i].ty, groups[g].rep)) {
+            groups[g].header_exposed = true;
+            if (!groups[g].header_path)
+                groups[g].header_path = ctx->typedefs[i].file_path;
+        }
     }
 
     // Tier 2: an externally-visible definition's type reaches this group.
-    for (Obj *obj = prog; obj; obj = obj->next) {
-        if (obj->is_static)
-            continue;
-        bool is_defining =
-            obj->is_function ? obj_fn(obj)->body != NULL : obj->is_definition;
-        if (!is_defining || !obj->ty)
-            continue;
-        for (int g = 0; g < groups_len; g++)
-            if (type_reaches_group(obj->ty, groups[g].rep))
-                groups[g].extern_ref = true;
-    }
+    reps = malloc(sizeof(Type *) * groups_len);
+    hit  = calloc(groups_len, sizeof(bool));
+    for (int g = 0; g < groups_len; g++)
+        reps[g] = groups[g].rep;
+    mark_extern_refs(prog, &gx, reps, NULL, hit);
+    for (int g = 0; g < groups_len; g++)
+        if (hit[g])
+            groups[g].extern_ref = true;
 
     // Every distinct enumerator name declared by at least one group,
     // resolved exactly once below.
@@ -1677,6 +1728,9 @@ static void rename_colliding_enum_constants(VirtualMachine *vm, Obj *prog,
     }
 
     free(names);
+    type_group_index_free(&gx);
+    free(reps);
+    free(hit);
     free(groups);
     hashmap_deinit_borrowed(&obj_names);
 }

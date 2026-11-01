@@ -82,9 +82,78 @@ static Type  **g_stp_b   = NULL;
 static int     g_stp_len = 0;
 static int     g_stp_cap = 0;
 
-static HashMap g_same_type_memo; // key: 2 Type* ; val: 1 NEQ / 2 EQ
-static bool    g_same_type_memo_on = false;
+// Open-addressed table keyed on the ordered pair of Type*: `a` carries the
+// result in its low bit (set: equal), a == 0 marks an empty slot.
+typedef struct {
+    uintptr_t a, b;
+} MemoSlot;
+static MemoSlot *g_memo              = NULL;
+static size_t    g_memo_cap          = 0; // power of two
+static size_t    g_memo_used         = 0;
+static bool      g_same_type_memo_on = false;
 #define SAME_TYPE_MEMO_MAX (1 << 21)
+#define SAME_TYPE_MEMO_MIN_CAP (1 << 12)
+
+static size_t memo_slot(uintptr_t a, uintptr_t b, size_t cap) {
+    unsigned long long h  = ((unsigned long long)a * 0x9E3779B97F4A7C15ull) ^
+                            ((unsigned long long)b * 0xC2B2AE3D27D4EB4Full);
+    h                    ^= h >> 32;
+    h                    *= 0x165667B19E3779F9ull;
+    h                    ^= h >> 29;
+    return (size_t)h & (cap - 1);
+}
+
+// 0: not memoized, 1: different, 2: equal.
+static int memo_get(Type *a, Type *b) {
+    if (!g_memo_cap)
+        return 0;
+    for (size_t i = memo_slot((uintptr_t)a, (uintptr_t)b, g_memo_cap);;
+         i        = (i + 1) & (g_memo_cap - 1)) {
+        MemoSlot *s = &g_memo[i];
+        if (!s->a)
+            return 0;
+        if ((s->a & ~(uintptr_t)1) == (uintptr_t)a && s->b == (uintptr_t)b)
+            return (s->a & 1) ? 2 : 1;
+    }
+}
+
+static void memo_insert(MemoSlot *table, size_t cap, uintptr_t a, uintptr_t b) {
+    size_t i = memo_slot(a & ~(uintptr_t)1, b, cap);
+    while (table[i].a)
+        i = (i + 1) & (cap - 1);
+    table[i] = (MemoSlot){a, b};
+}
+
+static void memo_put(Type *a, Type *b, bool equal) {
+    if (g_memo_used >= SAME_TYPE_MEMO_MAX) {
+        // Bounded: at whole-program scale the pair count grows with the
+        // square of the input files.
+        memset(g_memo, 0, sizeof(MemoSlot) * g_memo_cap);
+        g_memo_used = 0;
+    }
+    if (g_memo_used * 2 >= g_memo_cap) {
+        size_t    cap   = g_memo_cap ? g_memo_cap * 2 : SAME_TYPE_MEMO_MIN_CAP;
+        MemoSlot *table = calloc(cap, sizeof(MemoSlot));
+        if (!table)
+            error("out of memory");
+        for (size_t i = 0; i < g_memo_cap; i++)
+            if (g_memo[i].a)
+                memo_insert(table, cap, g_memo[i].a, g_memo[i].b);
+        free(g_memo);
+        g_memo     = table;
+        g_memo_cap = cap;
+    }
+    memo_insert(g_memo, g_memo_cap, (uintptr_t)a | (equal ? 1 : 0),
+                (uintptr_t)b);
+    g_memo_used++;
+}
+
+static void memo_free(void) {
+    free(g_memo);
+    g_memo      = NULL;
+    g_memo_cap  = 0;
+    g_memo_used = 0;
+}
 // Shallowest ancestor-frame stack index whose co-inductive "assume equal"
 // was used by the subtree currently being evaluated; INT_MAX == none. A
 // result is memoizable only if this stays >= the frame's own depth.
@@ -125,21 +194,16 @@ static void same_type_pair_push(Type *a, Type *b) {
 // swap during the same collect walk, which would otherwise stale a cached
 // comparison against it.
 void same_type_memo_begin(void) {
-    hashmap_deinit(&g_same_type_memo);
-    g_same_type_memo    = (HashMap){0};
+    memo_free();
     g_same_type_memo_on = !getenv("CCCC_TYPE_SAME_MEMO_DISABLE");
 }
 
 void same_type_memo_clear(void) {
-    bool was_on = g_same_type_memo_on;
-    hashmap_deinit(&g_same_type_memo);
-    g_same_type_memo    = (HashMap){0};
-    g_same_type_memo_on = was_on;
+    memo_free();
 }
 
 void same_type_memo_end(void) {
-    hashmap_deinit(&g_same_type_memo);
-    g_same_type_memo    = (HashMap){0};
+    memo_free();
     g_same_type_memo_on = false;
 }
 
@@ -189,14 +253,11 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
             return true;              // co-inductive: assumed equal higher up
         }
 
-    unsigned char key[2 * sizeof(Type *)];
-    memcpy(key, &k1, sizeof k1);
-    memcpy(key + sizeof k1, &k2, sizeof k2);
     if (g_same_type_memo_on) {
-        void *m = hashmap_get2(&g_same_type_memo, (char *)key, (int)sizeof key);
+        int m = memo_get(k1, k2);
         if (m) {
             g_sto_memo_hits++;
-            return m == (void *)2;
+            return m == 2;
         }
     }
 
@@ -215,14 +276,7 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
         // completed in place later this pass, staling the entry.
         if (g_same_type_memo_on && !type_is_incomplete_tagged(a) &&
             !type_is_incomplete_tagged(b)) {
-            // Bounded: at whole-program scale the pair count grows with the
-            // square of the input files.
-            if (g_same_type_memo.used > SAME_TYPE_MEMO_MAX) {
-                hashmap_deinit(&g_same_type_memo);
-                g_same_type_memo = (HashMap){0};
-            }
-            hashmap_put2(&g_same_type_memo, (char *)key, (int)sizeof key,
-                         r ? (void *)2 : (void *)1);
+            memo_put(k1, k2, r);
         }
         g_stm_min_assume = saved_min;
     } else {
@@ -528,7 +582,7 @@ void collect_scope_names(SerializeContext *ctx, VirtualMachine *vm) {
 // next ensure rather than skipping it forever.
 // ===========================================================================
 
-#define TYPE_CAND_CAP 1024
+#define TYPE_CAND_CAP SERIALIZE_CAND_CAP
 
 typedef struct {
     int *v;
@@ -828,6 +882,76 @@ static int type_cand_tags(SerializeContext *ctx, Type *ty, int *buf) {
 static int type_cand_typedefs(SerializeContext *ctx, Type *ty, int *buf) {
     return cand_index_probe(&g_td_ix, ctx->typedefs, ctx->typedefs_len, ty,
                             buf);
+}
+
+int serialize_tag_cands(SerializeContext *ctx, Type *ty, int *buf) {
+    return type_cand_tags(ctx, ty, buf);
+}
+
+int serialize_typedef_cands(SerializeContext *ctx, Type *ty, int *buf) {
+    return type_cand_typedefs(ctx, ty, buf);
+}
+
+void type_group_index_add(TypeGroupIndex *ix, Type *rep, int id) {
+    if (id >= ix->cap) {
+        int cap   = ix->cap ? ix->cap * 2 : 64;
+        cap       = id >= cap ? id + 1 : cap;
+        ix->stamp = realloc(ix->stamp, sizeof(int) * cap);
+        ix->out   = realloc(ix->out, sizeof(int) * cap);
+        memset(ix->stamp + ix->cap, 0, sizeof(int) * (cap - ix->cap));
+        ix->cap = cap;
+    }
+    cand_bucket_add(&ix->by_root, (long long)(intptr_t)type_origin_root(rep),
+                    id);
+    if (type_agg(rep)->struct_tag)
+        cand_bucket_add(&ix->by_tag, type_tag_key(rep), id);
+    if (type_kind_has_fp(rep->kind))
+        cand_bucket_add(&ix->by_fp, type_fp_key(rep), id);
+}
+
+int type_group_index_cands(TypeGroupIndex *ix, Type *ty, const int **ids) {
+    int n = 0;
+    *ids  = ix->out;
+    if (!ty || !ix->cap)
+        return 0;
+    ix->epoch++;
+    for (int pass = 0; pass < 3; pass++) {
+        HashMap  *m;
+        long long key;
+        if (pass == 0) {
+            m   = &ix->by_root;
+            key = (long long)(intptr_t)type_origin_root(ty);
+        } else if (pass == 1) {
+            if (!type_agg(ty)->struct_tag)
+                continue;
+            m   = &ix->by_tag;
+            key = type_tag_key(ty);
+        } else {
+            if (!type_kind_has_fp(ty->kind))
+                continue;
+            m   = &ix->by_fp;
+            key = type_fp_key(ty);
+        }
+        IdxList *l = hashmap_get_int(m, key);
+        for (int j = 0; l && j < l->len; j++)
+            if (ix->stamp[l->v[j]] != ix->epoch) {
+                ix->stamp[l->v[j]] = ix->epoch;
+                ix->out[n++]       = l->v[j];
+            }
+    }
+    return n;
+}
+
+void type_group_index_free(TypeGroupIndex *ix) {
+    hashmap_foreach(&ix->by_root, free_idxlist_cb, NULL);
+    hashmap_foreach(&ix->by_tag, free_idxlist_cb, NULL);
+    hashmap_foreach(&ix->by_fp, free_idxlist_cb, NULL);
+    hashmap_deinit(&ix->by_root);
+    hashmap_deinit(&ix->by_tag);
+    hashmap_deinit(&ix->by_fp);
+    free(ix->stamp);
+    free(ix->out);
+    *ix = (TypeGroupIndex){0};
 }
 
 // Candidate-index scratch pool: each TYPE_CAND_FOR loop takes one slot for

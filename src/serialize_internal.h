@@ -509,6 +509,28 @@ void serialize_type_stats_report(SerializeContext *ctx);
 // #1283: free the type-name candidate index and re-read its env toggles.
 // Called after the rename passes and at the end of cc_serialize_program().
 void serialize_type_index_reset(void);
+
+#define SERIALIZE_CAND_CAP 1024
+
+// Fill `buf` (SERIALIZE_CAND_CAP ints) with the ascending indices of the
+// ctx->tags / ctx->typedefs records that may be the same type as `ty`. Returns
+// the count, or -1 when the caller has to scan every record.
+int serialize_tag_cands(SerializeContext *ctx, Type *ty, int *buf);
+int serialize_typedef_cands(SerializeContext *ctx, Type *ty, int *buf);
+
+// A set of types numbered by the caller, answering which of them may be the
+// same type as another. The result is a superset of the members for which
+// same_type_or_origin() holds, in no particular order. Zero-initialise, add,
+// query, free.
+typedef struct {
+    HashMap by_root, by_tag, by_fp;
+    int    *stamp, *out;
+    int     cap;
+    int     epoch;
+} TypeGroupIndex;
+void type_group_index_add(TypeGroupIndex *ix, Type *rep, int id);
+int type_group_index_cands(TypeGroupIndex *ix, Type *ty, const int **ids);
+void type_group_index_free(TypeGroupIndex *ix);
 // #1283: the same_type_or_origin() (a, b)-result memo. Live for the whole
 // serialize pass: begin() before collect_scope_names(), clear() after the
 // rename passes (they mutate struct_tag), end() at each cleanup path.
