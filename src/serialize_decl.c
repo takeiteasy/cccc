@@ -1457,7 +1457,7 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
         memcpy(&iv, var->init_data + offset, sz);
         if (sz < 8 && ty->kind != TY_PTR && ty->kind != TY_NULLPTR_T &&
             (iv >> (sz * 8 - 1)) & 1)
-            iv |= (-1LL << (sz * 8));
+            iv |= (int64_t)(~0ULL << (sz * 8));
         fprintf(f, "%lld", (long long)iv);
         return;
     }
@@ -1477,7 +1477,7 @@ static void serialize_init_bytes(FILE *f, VirtualMachine *vm,
             memcpy(&iv, var->init_data + offset, ty->size);
             if (ty->size < 8 && !ty->is_unsigned &&
                 (iv >> (ty->size * 8 - 1)) & 1)
-                iv |= (-1LL << (ty->size * 8));
+                iv |= (int64_t)(~0ULL << (ty->size * 8));
             fprintf(f, "%lld", (long long)iv);
             return;
         }

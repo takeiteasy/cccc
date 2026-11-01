@@ -366,6 +366,8 @@ static BuildTarget *make_cccc_exe_named(Builder *ctx, BuildTarget *bt,
 // `bt` -- calling make_libbacktrace() once per factory, as each did
 // standalone, would declare four "backtrace" targets in the same graph and
 // trip the duplicate-name check added in #842 Step 1).
+#define UBSAN_FLAG "-fsanitize=undefined"
+
 static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
                                            const char *name,
                                            const char *sanitize_flag) {
@@ -375,6 +377,9 @@ static BuildTarget *make_sanitizer_variant(Builder *ctx, BuildTarget *bt,
     add_cccc_flags(ctx, t, bt);
     AddCFlag(t, sanitize_flag);
     AddLdFlag(t, sanitize_flag);
+    // Any UBSan report aborts, so a regression fails the target.
+    if (strcmp(sanitize_flag, UBSAN_FLAG) == 0)
+        AddCFlag(t, "-fno-sanitize-recover=undefined");
     return t;
 }
 
@@ -389,7 +394,7 @@ BuildTarget *cccc_asan(Builder *ctx) {
 BuildTarget *cccc_ubsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     return make_sanitizer_variant(ctx, bt, "cccc-ubsan",
-                                  "-fsanitize=undefined");
+                                  UBSAN_FLAG);
 }
 
 [[cccc::build_target]]
@@ -576,7 +581,7 @@ BuildTarget *sanitizers(Builder *ctx) {
     BuildTarget *asan = make_sanitizer_variant(ctx, bt, "cccc-asan",
                                                "-fsanitize=address,undefined");
     BuildTarget *ubsan =
-        make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined");
+        make_sanitizer_variant(ctx, bt, "cccc-ubsan", UBSAN_FLAG);
     BuildTarget *tsan =
         make_sanitizer_variant(ctx, bt, "cccc-tsan", "-fsanitize=thread");
     BuildTarget *step = RunCustom(ctx, "sanitizers", "true");
@@ -710,7 +715,7 @@ BuildTarget *test_ubsan(Builder *ctx) {
     BuildTarget *bt = make_libbacktrace(ctx);
     return make_test_step(
         ctx,
-        make_sanitizer_variant(ctx, bt, "cccc-ubsan", "-fsanitize=undefined"),
+        make_sanitizer_variant(ctx, bt, "cccc-ubsan", UBSAN_FLAG),
         "test-ubsan");
 }
 

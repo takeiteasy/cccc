@@ -282,6 +282,13 @@ static long long wrap_getnetbyaddr_gil(long long net, long long type) {
 // Required buffer size for a NULL-terminated char* array of `count` non-NULL
 // entries (whose combined string bytes, each including its NUL, are
 // `str_bytes`) plus alignment padding for the pointer array itself.
+// The host's alias/address arrays are not guaranteed pointer-aligned.
+static char *nss_list_at(char **list, int i) {
+    char *p;
+    memcpy(&p, (const char *)list + (size_t)i * sizeof(char *), sizeof p);
+    return p;
+}
+
 static size_t nss_r_layout_size(int count, size_t str_bytes) {
     size_t ptrs = (size_t)(count + 1) * sizeof(char *);
     return ptrs + sizeof(char *) /* worst-case alignment padding */ + str_bytes;
@@ -302,10 +309,10 @@ static char **nss_r_copy_ptr_array(char **list, int count, char **cursor,
         return NULL;
     char *strp = (char *)(arr + count + 1);
     for (int i = 0; i < count; i++) {
-        size_t len = strlen(list[i]) + 1;
+        size_t len = strlen(nss_list_at(list, i)) + 1;
         if (strp + len > end)
             return NULL;
-        memcpy(strp, list[i], len);
+        memcpy(strp, nss_list_at(list, i), len);
         arr[i]  = strp;
         strp   += len;
     }
@@ -317,7 +324,7 @@ static char **nss_r_copy_ptr_array(char **list, int count, char **cursor,
 static int nss_count_list(char **list) {
     int n = 0;
     if (list)
-        while (list[n])
+        while (nss_list_at(list, n))
             n++;
     return n;
 }
@@ -351,7 +358,7 @@ static long long nss_gethostbyname_r_shim(long long name, long long ret,
         int    naddrs   = nss_count_list(src->h_addr_list);
         size_t need     = strlen(src->h_name) + 1;
         for (int i = 0; i < naliases; i++)
-            need += strlen(src->h_aliases[i]) + 1;
+            need += strlen(nss_list_at(src->h_aliases, i)) + 1;
         need =
             nss_r_layout_size(naliases, need) +
             nss_r_layout_size(naddrs, (size_t)naddrs * (size_t)src->h_length);
@@ -403,7 +410,7 @@ static long long nss_gethostbyname_r_shim(long long name, long long ret,
                     *resultp = 0;
                     goto done;
                 }
-                memcpy(ap, src->h_addr_list[i], (size_t)src->h_length);
+                memcpy(ap, nss_list_at(src->h_addr_list, i), (size_t)src->h_length);
                 addrs[i]  = ap;
                 ap       += src->h_length;
             }
@@ -453,7 +460,7 @@ static long long nss_gethostbyaddr_r_shim(long long addr, long long len,
         int    naddrs   = nss_count_list(src->h_addr_list);
         size_t need     = strlen(src->h_name) + 1;
         for (int i = 0; i < naliases; i++)
-            need += strlen(src->h_aliases[i]) + 1;
+            need += strlen(nss_list_at(src->h_aliases, i)) + 1;
         need =
             nss_r_layout_size(naliases, need) +
             nss_r_layout_size(naddrs, (size_t)naddrs * (size_t)src->h_length);
@@ -501,7 +508,7 @@ static long long nss_gethostbyaddr_r_shim(long long addr, long long len,
                     *resultp = 0;
                     goto done2;
                 }
-                memcpy(ap, src->h_addr_list[i], (size_t)src->h_length);
+                memcpy(ap, nss_list_at(src->h_addr_list, i), (size_t)src->h_length);
                 addrs[i]  = ap;
                 ap       += src->h_length;
             }
@@ -547,7 +554,7 @@ static long long nss_getnetbyname_r_shim(long long name, long long ret,
         int    naliases = nss_count_list(src->n_aliases);
         size_t need     = strlen(src->n_name) + 1;
         for (int i = 0; i < naliases; i++)
-            need += strlen(src->n_aliases[i]) + 1;
+            need += strlen(nss_list_at(src->n_aliases, i)) + 1;
         need = nss_r_layout_size(naliases, need);
         if (need > blen) {
             rc       = ERANGE;

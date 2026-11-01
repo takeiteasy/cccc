@@ -4453,18 +4453,8 @@ static inline int op_REALC_fn(VirtualMachine *vm) {
 
 static inline int op_CALC_fn(VirtualMachine *vm) {
     // calloc: nmemb in REG_A0, size in REG_A1, return in REG_A0
-    long long nmemb  = vm->regs[REG_A0];
-    long long size   = vm->regs[REG_A1];
-    long long total  = nmemb * size;
-
-    vm->regs[REG_A0] = total;
-    int result       = op_MALC_fn(vm);
-    if (result != 0 || vm->regs[REG_A0] == 0) {
-        return result;
-    }
-
-    // Zero the memory
-    memset((void *)vm->regs[REG_A0], 0, total);
+    vm->regs[REG_A0] = (long long)cccc_vm_heap_calloc(vm, vm->regs[REG_A0],
+                                                      vm->regs[REG_A1]);
     return 0;
 }
 
@@ -4501,8 +4491,14 @@ static inline int op_REALCA_fn(VirtualMachine *vm) {
 // cccc_vm_heap_free), so the opcode functions above are untouched and their
 // direct-call behavior carries zero risk from this addition.
 void *cccc_vm_heap_calloc(VirtualMachine *vm, long long nmemb, long long size) {
-    long long total = nmemb * size;
-    void     *ptr   = cccc_vm_heap_malloc(vm, total);
+    size_t total;
+    if (nmemb < 0 || size < 0 ||
+        __builtin_mul_overflow((size_t)nmemb, (size_t)size, &total) ||
+        total > (size_t)INT64_MAX) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    void *ptr = cccc_vm_heap_malloc(vm, (long long)total);
     if (ptr)
         memset(ptr, 0, total);
     return ptr;
