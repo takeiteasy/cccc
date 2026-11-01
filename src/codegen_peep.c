@@ -1450,6 +1450,7 @@ static void branch_facts(Peep *p, const Insn *br, Facts *taken, Facts *fall) {
 static void make_mov(Peep *p, Insn *in, int src) {
     p->vm->text_seg[in->pc] = MOV3;
     in->op                  = MOV3;
+    in->size                = cc_instr_words(MOV3);
     op_spec(MOV3, &in->spec);
     set_byte(p, in, 1, src);
     set_byte(p, in, 2, 0);
@@ -1462,9 +1463,29 @@ static void make_imm_op(Peep *p, Insn *in, int op, long long imm) {
     cc_write_i64_at(p->vm, in->pc + 2, imm);
 }
 
-// Rewrites `in` to an instruction of the same width that gives the same
-// result: the constant itself, or a copy of one operand (or of the zero
-// register). Instructions never change size, so nothing needs remapping.
+// The register an immediate op copies unchanged (`x + 0`, `x & -1`, `x * 1`),
+// REG_ZERO when it always gives 0, or -1 when it is neither.
+static int imm_identity_src(int op, long long imm, int rs1) {
+    switch (op) {
+        case ADDI3:
+        case ORI3:
+        case XORI3:
+        case SHLI3:
+        case SHRI3:
+        case USHRI3:
+            return imm == 0 ? rs1 : -1;
+        case ANDI3:
+            return imm == 0 ? REG_ZERO : imm == -1 ? rs1 : -1;
+        case MULI3:
+            return imm == 0 ? REG_ZERO : imm == 1 ? rs1 : -1;
+        default:
+            return -1;
+    }
+}
+
+// Rewrites `in` to an instruction that gives the same result: the constant
+// itself, or a copy of one operand (or of the zero register). A rewrite to a
+// MOV from a four-word immediate op shrinks it, which compact() closes up.
 static bool fold_in_place(Peep *p, Insn *in, const Facts *f) {
     int op = in->op;
     int rd = get_byte(p, in, 0);
@@ -1493,6 +1514,17 @@ static bool fold_in_place(Peep *p, Insn *in, const Facts *f) {
             p, in, ADDI3,
             (long long)((unsigned long long)b * (unsigned long long)imm));
         set_byte(p, in, 2, 0);
+        p->changed = true;
+        return true;
+    }
+    if (in->size == 4) {
+        int src = imm_identity_src(op, cc_read_i64_at(p->vm, in->pc + 2), rs1);
+        if (src < 0)
+            return false;
+        if (src == rd)
+            in->dead = true;
+        else
+            make_mov(p, in, src);
         p->changed = true;
         return true;
     }
@@ -2547,9 +2579,11 @@ static void compact(Peep *p, PeepMark m) {
         error("out of memory");
     Pc out = p->start;
     for (int i = 0; i < p->n; i++) {
-        Insn *in = &p->ins[i];
-        for (int w = 0; w < in->size; w++)
-            map[in->pc - p->start + (Pc)w] = in->dead ? out : out + (Pc)w;
+        Insn *in   = &p->ins[i];
+        Pc    next = i + 1 < p->n ? p->ins[i + 1].pc : p->end;
+        for (Pc w = 0; w < next - in->pc; w++)
+            map[in->pc - p->start + w] =
+                in->dead ? out : out + (w < (Pc)in->size ? w : (Pc)in->size);
         if (!in->dead)
             out += (Pc)in->size;
     }
