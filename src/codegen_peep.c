@@ -137,7 +137,12 @@ static bool op_spec(int op, OpSpec *s) {
         case ULEI3:
         case UGTI3:
         case UGEI3:
+        case UBFX:
+        case SBFX:
             *s = SPEC(ID, IU, NO, NO, SP_PURE);
+            return true;
+        case BFI:
+            *s = SPEC(ID, IU, IU, NO, SP_PURE);
             return true;
         case MULADD3:
             *s = SPEC(ID, IU, IU, IU, SP_PURE);
@@ -2389,6 +2394,74 @@ static void fuse_block_wraps(Peep *p, Block *blk) {
     }
 }
 
+// ---- Fused bit-field extracts ----
+
+// `[U]SHRI3 t, s, off; ANDI3 d, t, 2^w - 1` and `SHLI3 t, s, a; [U]SHRI3 d, t,
+// b` (a <= b) extract a bit range of s. The shift pair's result is zero- or
+// sign-extended according to its second shift. Fills the opcode, offset and
+// width of the one UBFX / SBFX that computes the same value.
+static bool bfx_form(const Peep *p, const Insn *a, const Insn *b, int *op,
+                     int *off, int *w) {
+    long long k = cc_read_i64_at(p->vm, a->pc + 2);
+    long long m = cc_read_i64_at(p->vm, b->pc + 2);
+    if (k < 0 || k > 63)
+        return false;
+    if (b->op == ANDI3 && (a->op == USHRI3 || a->op == SHRI3)) {
+        if (m <= 0 || (m & (m + 1)) != 0 || k + __builtin_popcountll(m) > 64)
+            return false;
+        *op  = UBFX;
+        *off = (int)k;
+        *w   = __builtin_popcountll(m);
+        return true;
+    }
+    if (a->op == SHLI3 && (b->op == SHRI3 || b->op == USHRI3)) {
+        if (m < k || m > 63)
+            return false;
+        *op  = b->op == SHRI3 ? SBFX : UBFX;
+        *off = (int)(m - k);
+        *w   = (int)(64 - m);
+        return true;
+    }
+    return false;
+}
+
+static void fuse_block_bitfields(Peep *p, Block *blk) {
+    uint32_t il = blk->iout, fl = blk->fout, after_next = 0;
+    Insn    *next = NULL;
+    for (int i = blk->last - 1; i >= blk->first; i--) {
+        Insn *in = &p->ins[i];
+        if (in->dead)
+            continue;
+        int op, off, w;
+        if (next && in->known && next->known && in->size == 4 &&
+            next->size == 4 && bfx_form(p, in, next, &op, &off, &w)) {
+            int t = get_byte(p, in, 0), d = get_byte(p, next, 0);
+            int s = get_byte(p, in, 1);
+            if (t != REG_ZERO && d != REG_ZERO && get_byte(p, next, 1) == t &&
+                (d == t || !(after_next & BIT(t)))) {
+                p->vm->text_seg[in->pc]     = op;
+                p->vm->text_seg[in->pc + 1] = ENCODE_BF(d, s, off, w);
+                in->op                      = op;
+                in->size                    = 2;
+                op_spec(op, &in->spec);
+                next->dead = true;
+                p->changed = true;
+                il         = after_next;
+            }
+        }
+        after_next = il;
+        step_back(p, in, &il, &fl);
+        next = in;
+    }
+}
+
+static void fuse_bitfields(Peep *p) {
+    compute_succs(p);
+    compute_liveness(p);
+    for (int b = 0; b < p->nblocks; b++)
+        fuse_block_bitfields(p, &p->blocks[b]);
+}
+
 static void fuse_wraps(Peep *p) {
     compute_succs(p);
     compute_liveness(p);
@@ -2763,6 +2836,7 @@ void cg_peep_function(VirtualMachine *vm, Obj *fn, PeepMark m) {
             break;
         any = true;
     }
+    fuse_bitfields(&p);
     fuse_wraps(&p);
     fuse_branches(&p);
     bool compacted = any || p.changed;

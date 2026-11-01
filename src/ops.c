@@ -6397,6 +6397,47 @@ DEFINE_BIT_IMM_OP(ANDI3, a &imm)
 DEFINE_BIT_IMM_OP(ORI3, a | imm)
 DEFINE_BIT_IMM_OP(XORI3, a ^ imm)
 
+// ========== Bit-field extract and insert ==========
+
+static inline unsigned long long bf_mask(int w) {
+    return w >= 64 ? ~0ULL : (1ULL << w) - 1;
+}
+
+static inline int op_UBFX_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs, off, w;
+    DECODE_BF(operands, rd, rs, off, w);
+    if (rd != REG_ZERO)
+        vm->regs[rd] =
+            (long long)(((unsigned long long)vm->regs[rs] >> off) & bf_mask(w));
+    return 0;
+}
+
+static inline int op_SBFX_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd, rs, off, w;
+    DECODE_BF(operands, rd, rs, off, w);
+    if (rd != REG_ZERO)
+        vm->regs[rd] =
+            (long long)((unsigned long long)vm->regs[rs] << (64 - w - off)) >>
+            (64 - w);
+    return 0;
+}
+
+static inline int op_BFI_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    long long fw       = cc_read_word(vm);
+    int       rd, rs1, rs2, off, w;
+    DECODE_RRR(operands, rd, rs1, rs2);
+    DECODE_BFW(fw, off, w);
+    unsigned long long m = bf_mask(w);
+    if (rd != REG_ZERO)
+        vm->regs[rd] =
+            (long long)(((unsigned long long)vm->regs[rs1] & ~(m << off)) |
+                        (((unsigned long long)vm->regs[rs2] & m) << off));
+    return 0;
+}
+
 // ========== 32-bit arithmetic with its wrap ==========
 
 #define DEFINE_WRAP_OP(NAME, EXPR, WRAP)                                       \

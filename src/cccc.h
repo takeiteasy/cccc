@@ -782,6 +782,10 @@ extern "C" {
     X(ANDI3, 3)  /* rd = rs1 & imm */                                                \
     X(ORI3, 3)   /* rd = rs1 | imm */                                                \
     X(XORI3, 3)  /* rd = rs1 ^ imm */                                                \
+    /* Bit-field extract and insert; off and w ride in the operand word. */          \
+    X(UBFX, 1) /* rd = (rs1 >> off) & mask(w), zero-extended */                      \
+    X(SBFX, 1) /* rd = bits [off, off+w) of rs1, sign-extended */                    \
+    X(BFI, 2)  /* rd = rs1 with [off, off+w) taken from the low w of rs2 */          \
     /* A 32-bit operation and the wrap after it: rd = (int)(rs1 OP rs2) (SX)         \
        or (unsigned)(rs1 OP rs2) (ZX), sign- or zero-extended to 64 bits. */         \
     X(ADDSX3, 1)   /* rd = (int)(rs1 + rs2) */                                       \

@@ -451,20 +451,25 @@ void emit_bitfield_load(VirtualMachine *vm, Member *mem, int dest, int r_addr,
 void emit_bitfield_store(VirtualMachine *vm, Member *mem, int r_val,
                          int r_addr, bool dangling_check) {
     int       r_container = alloc_temp_reg();
-    int       r_new       = alloc_temp_reg();
     long long mask        = bitfield_mask(mem);
 
     emit_load_ex(vm, mem->ty, r_container, r_addr, dangling_check);
-    emit_rri(vm, ANDI3, r_container, r_container, ~(mask << mem->bit_offset));
-
-    emit_mov3(vm, r_new, r_val);
-    emit_rri(vm, ANDI3, r_new, r_new, mask);
-    if (mem->bit_offset > 0)
-        emit_rri(vm, SHLI3, r_new, r_new, mem->bit_offset);
-    emit_rrr(vm, OR3, r_container, r_container, r_new);
+    if (cg_opt_enabled(vm)) {
+        emit_bfi(vm, r_container, r_container, r_val, mem->bit_offset,
+                 mem->bit_width);
+    } else {
+        int r_new = alloc_temp_reg();
+        emit_rri(vm, ANDI3, r_container, r_container,
+                 ~(mask << mem->bit_offset));
+        emit_mov3(vm, r_new, r_val);
+        emit_rri(vm, ANDI3, r_new, r_new, mask);
+        if (mem->bit_offset > 0)
+            emit_rri(vm, SHLI3, r_new, r_new, mem->bit_offset);
+        emit_rrr(vm, OR3, r_container, r_container, r_new);
+        free_temp_reg(r_new);
+    }
     emit_store_ex(vm, mem->ty, r_container, r_addr, dangling_check);
 
-    free_temp_reg(r_new);
     free_temp_reg(r_container);
 }
 

@@ -185,6 +185,25 @@ static inline bool obj_is_inline_only(const Obj *fn) {
         rs1 = ((operands) >> 8) & 0xFF;                                        \
     } while (0)
 
+// Bit-field extract: [OPCODE] [rd:8|rs:8|off:6|w-1:6|unused:4], w in 1..64.
+// Bit-field insert: [OPCODE] [rd:8|rs1:8|rs2:8|unused:8]
+// [off:6|w-1:6|unused:20]
+#define ENCODE_BF(rd, rs, off, w)                                              \
+    (ENCODE_RR((rd), (rs)) | ((InstrWord)(off) << 16) |                        \
+     ((InstrWord)((w) - 1) << 22))
+#define DECODE_BF(operands, rd, rs, off, w)                                    \
+    do {                                                                       \
+        DECODE_RR((operands), rd, rs);                                         \
+        off = ((operands) >> 16) & 0x3F;                                       \
+        w   = (((operands) >> 22) & 0x3F) + 1;                                 \
+    } while (0)
+#define ENCODE_BFW(off, w) ((InstrWord)(off) | ((InstrWord)((w) - 1) << 6))
+#define DECODE_BFW(word, off, w)                                               \
+    do {                                                                       \
+        off = (word) & 0x3F;                                                   \
+        w   = (((word) >> 6) & 0x3F) + 1;                                      \
+    } while (0)
+
 // RI format: [OPCODE] [rd:8|unused:24] [immediate:64 split low, high]
 #define ENCODE_R(rd) ((InstrWord)(rd))
 #define DECODE_R(operands, rd)                                                 \

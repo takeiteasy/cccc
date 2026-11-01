@@ -66,6 +66,9 @@ The rounding lives in `LEA3` and `STKTAG` (a 3-bit `log2(A/8)` field, see below)
 | `ANDI3` | `rd = rs1 & immediate` (RI format) |
 | `ORI3` | `rd = rs1 \| immediate` (RI format) |
 | `XORI3` | `rd = rs1 ^ immediate` (RI format) |
+| `UBFX` | `rd = (rs1 >> off) & mask(w)`, zero-extended; `off` 0-63 and `w` 1-64 are in the operand word |
+| `SBFX` | `rd` = bits `[off, off + w)` of `rs1`, sign-extended from bit `off + w - 1` |
+| `BFI` | `rd = rs1` with bits `[off, off + w)` replaced by the low `w` bits of `rs2`; `off` and `w` are in a second word |
 | `NEG3` | `rd = -rs1` |
 | `NOT3` | `rd = !rs1` (logical) |
 | `BNOT3` | `rd = ~rs1` (bitwise) |

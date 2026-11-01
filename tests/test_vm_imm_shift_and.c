@@ -20,7 +20,7 @@ unsigned long lcg(unsigned long m) {
 }
 
 long scale(long s, unsigned long m) {
-    return ((s >> 4) & 0xff) + m * 6364136223846793005UL;
+    return (s >> 4) + m * 6364136223846793005UL;
 }
 
 // A variable whose address is taken is updated in its frame slot.
@@ -33,5 +33,8 @@ int framed(int n) {
 }
 
 int main(void) {
-    return rotate(8) == 1 && lcg(0) == 0 && scale(-32, 0) == 0xfe && framed(33) == 16 ? 42 : 1;
+    return rotate(8) == 1 && lcg(0) == 0 && scale(-32, 0) == -2 &&
+                   framed(33) == 16
+               ? 42
+               : 1;
 }

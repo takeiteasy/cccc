@@ -136,6 +136,17 @@ void emit_rr(VirtualMachine *vm, int op, int rd, int rs1) {
     emit_word(vm, ENCODE_RR(rd, rs1));
 }
 
+void emit_bfx(VirtualMachine *vm, int op, int rd, int rs, int off, int w) {
+    emit_word(vm, op);
+    emit_word(vm, ENCODE_BF(rd, rs, off, w));
+}
+
+void emit_bfi(VirtualMachine *vm, int rd, int rs1, int rs2, int off, int w) {
+    emit_word(vm, BFI);
+    emit_word(vm, ENCODE_RRR(rd, rs1, rs2));
+    emit_word(vm, ENCODE_BFW(off, w));
+}
+
 // 3-register + 8-bit "scale" ops: [OP] [rd:8|rs1:8|rs2:8|scale:8|unused:32].
 // Used by the wide-vector opcodes (#722) to carry a runtime lane count/byte
 // width alongside up to 3 register operands -- see the SIMD opcode block in

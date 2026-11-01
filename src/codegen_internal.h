@@ -317,6 +317,8 @@ void emit_pop3(VirtualMachine *vm, int rd);
 void emit_psh3(VirtualMachine *vm, int rs);
 void emit_rr(VirtualMachine *vm, int op, int rd, int rs1);
 void emit_rrr(VirtualMachine *vm, int op, int rd, int rs1, int rs2);
+void emit_bfx(VirtualMachine *vm, int op, int rd, int rs, int off, int w);
+void emit_bfi(VirtualMachine *vm, int rd, int rs1, int rs2, int off, int w);
 void emit_rrrs(VirtualMachine *vm, int op, int rd, int rs1, int rs2, int scale);
 void emit_rrs(VirtualMachine *vm, int op, int rd, int rs1, int scale);
 void emit_scope_cleanups(VirtualMachine *vm, CleanupScopeEntry *scope);
