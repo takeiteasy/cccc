@@ -460,7 +460,7 @@ void emit_bitfield_store(VirtualMachine *vm, Member *mem, int r_val,
     } else {
         int r_new = alloc_temp_reg();
         emit_rri(vm, ANDI3, r_container, r_container,
-                 ~(mask << mem->bit_offset));
+                 (long long)~((unsigned long long)mask << mem->bit_offset));
         emit_mov3(vm, r_new, r_val);
         emit_rri(vm, ANDI3, r_new, r_new, mask);
         if (mem->bit_offset > 0)
