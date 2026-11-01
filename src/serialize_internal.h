@@ -176,6 +176,10 @@ typedef struct {
     // struct (see e.g. the `anchors`/`claimed` locals in
     // rename_colliding_static_names).
     HashMap path_key_memo;
+    // Indices of the `fenv_t` entries of typedefs, rebuilt when typedefs_len
+    // changes (find_fenv_t_typedef()).
+    int *fenv_typedefs;
+    int  fenv_typedefs_n, fenv_typedefs_scanned;
     // #1302: name -> Obj* for every entry of vm->compiler.globals, and
     // name -> 1 for every file-scope (owner_fn == NULL) ctx->typedefs
     // entry -- both lazily built on first use (built_global_names /
@@ -390,6 +394,9 @@ const char *find_block_env(SerializeContext *ctx, Obj *block_fn);
 const LabelOwner *find_label_owner(SerializeContext *ctx, const char *name);
 int block_capture_index(Obj *block_fn, Obj *var);
 Obj *serialize_find_global(VirtualMachine *vm, const char *name);
+void serialize_rename_global(Obj *obj, char *new_name);
+const char *serialize_canonical_key(SerializeContext *ctx, const char *path);
+TypeName *find_fenv_t_typedef(SerializeContext *ctx, Type *ty);
 Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var);
 TypeName *find_typedef_name(SerializeContext *ctx, Type *ty);
 TypeName *find_typedef_name_exact(SerializeContext *ctx, Type *ty);

@@ -2539,9 +2539,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 Node *inner = node;
                 while (inner->kind == ND_CAST && inner->ty &&
                        inner->ty->kind == TY_PTR) {
-                    TypeName *pointee = find_typedef_name(ctx, inner->ty->base);
-                    if (!pointee || pointee->name_len != 6 ||
-                        strncmp(pointee->name, "fenv_t", 6) != 0)
+                    if (!find_fenv_t_typedef(ctx, inner->ty->base))
                         break;
                     inner = inner->lhs;
                 }

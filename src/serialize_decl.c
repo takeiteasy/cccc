@@ -918,26 +918,28 @@ static void index_globals(HashMap *index, VirtualMachine *vm) {
             hashmap_put_borrowed(index, g->name, g);
 }
 
-// The serializer renames globals in place, so the index can go stale: a hit
-// is checked against the current name and a miss falls back to the scan.
+static HashMap         global_index;
+static VirtualMachine *global_index_vm;
+static Obj            *global_index_head;
+static bool            global_index_dirty;
+
+// Every in-place rename of an Obj in vm->compiler.globals goes through here
+// so the next serialize_find_global() rebuilds the index.
+void serialize_rename_global(Obj *obj, char *new_name) {
+    obj->name          = new_name;
+    global_index_dirty = true;
+}
+
+// A name no global has (a `&&label` target) misses without a scan.
 Obj *serialize_find_global(VirtualMachine *vm, const char *name) {
-    static HashMap         index;
-    static VirtualMachine *indexed_vm;
-    static Obj            *indexed_head;
-    if (indexed_vm != vm || indexed_head != vm->compiler.globals) {
-        index_globals(&index, vm);
-        indexed_vm   = vm;
-        indexed_head = vm->compiler.globals;
+    if (global_index_vm != vm || global_index_head != vm->compiler.globals ||
+        global_index_dirty) {
+        index_globals(&global_index, vm);
+        global_index_vm    = vm;
+        global_index_head  = vm->compiler.globals;
+        global_index_dirty = false;
     }
-    Obj *hit = hashmap_get(&index, name);
-    if (hit && strcmp(hit->name, name) == 0)
-        return hit;
-    for (Obj *g = vm->compiler.globals; g; g = g->next)
-        if (strcmp(g->name, name) == 0) {
-            index_globals(&index, vm);
-            return g;
-        }
-    return NULL;
+    return hashmap_get(&global_index, name);
 }
 
 // Find the Relocation (if any) covering byte `offset` within `var`'s

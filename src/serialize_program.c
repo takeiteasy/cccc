@@ -124,8 +124,9 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
         // two stay paired without extra state.
         if (obj->is_function) {
             if (obj->is_block && obj->name[0] == '.')
-                obj->name = arena_format(vm, "__cccc_block_%d",
-                                         ctx->anon_global_counter++);
+                serialize_rename_global(
+                    obj, arena_format(vm, "__cccc_block_%d",
+                                      ctx->anon_global_counter++));
             continue;
         }
         if (obj->name[0] != '.' || obj->is_string_literal)
@@ -139,8 +140,8 @@ static void rename_anon_globals(VirtualMachine *vm, Obj *prog,
         const char *tag = (obj->display_name && obj->display_name[0] != '.')
                               ? obj->display_name
                               : "anon";
-        obj->name =
-            arena_format(vm, "__cccc_%s_%d", tag, ctx->anon_global_counter++);
+        serialize_rename_global(obj, arena_format(vm, "__cccc_%s_%d", tag,
+                                                  ctx->anon_global_counter++));
         // #1286: this object has no declaration of its own -- ty->name (a
         // compound literal, via postfix()) or nothing at all (a reflection-
         // API anon global, reflect_new_anon_gvar()) is all obj->tok can
@@ -657,10 +658,8 @@ static bool files_are_same(const char *a, const char *b) {
 // obj->name, since every emit site (serialize_function_signature, ND_VAR,
 // serialize_global_var, ...) resolves the name through the Obj pointer, so
 // a rename here is automatically consistent everywhere except the one
-// string-keyed lookup, serialize_find_global()'s first-match strcmp scan
-// over vm->compiler.globals -- that scan runs after this pass too, so it
-// resolves a relocation's label against the (possibly already renamed)
-// Obj it actually points at, not a stale name.
+// string-keyed lookup, serialize_find_global(); renames go through
+// serialize_rename_global() so its index is rebuilt before the next lookup.
 // #1075: a nested function is always Obj.is_static (#1039), but its name
 // may now legally collide with an ordinary, non-static, SAME-FILE outer
 // function (distinct scope+linkage, C17 6.2.1p4) -- something this pass
@@ -843,8 +842,9 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
 
         if (libc_handle && strcmp(obj->name, "main") != 0 &&
             dlsym(libc_handle, obj->name)) {
-            obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
-                                     ctx->anon_global_counter++);
+            serialize_rename_global(
+                obj, arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                  ctx->anon_global_counter++));
             continue;
         }
 
@@ -853,8 +853,9 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
             // keep it; always rename this one (covers #1075's nested
             // function shadowing a same-named outer function, same file or
             // not).
-            obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
-                                     ctx->anon_global_counter++);
+            serialize_rename_global(
+                obj, arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                  ctx->anon_global_counter++));
             continue;
         }
 
@@ -879,8 +880,9 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
                                (first->is_nested && !first->is_block);
         if (same_file && !nested_involved)
             continue;
-        obj->name = arena_format(vm, "%s__cccc_dup%d", obj->name,
-                                 ctx->anon_global_counter++);
+        serialize_rename_global(obj,
+                                arena_format(vm, "%s__cccc_dup%d", obj->name,
+                                             ctx->anon_global_counter++));
     }
     hashmap_deinit_borrowed(&anchors);
     hashmap_deinit_borrowed(&claimed);
@@ -4904,6 +4906,7 @@ typedef struct {
     int               nreplayed, replayed_cap;
     const char *synth[8]; // standard headers printed for a missing typedef
     int         nsynth;
+    HashMap reach; // header -> HashMap of the canonical paths it reaches
 } PreludeScan;
 
 static bool prelude_target_is_input_def(VirtualMachine *vm, Obj *v) {
@@ -4955,7 +4958,7 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
             continue;
         s->fn     = obj;
         s->header = site->file->name;
-        s->site   = cc_canonical_path_key(vm, site->file->name);
+        s->site   = serialize_canonical_key(ctx, site->file->name);
         // Its weak declaration must precede the header's definition.
         if (gnu_inline_needs_body(obj))
             prelude_add(s, obj);
@@ -4963,29 +4966,41 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
     }
 }
 
-// Is `target_key` the file `from`, or one it reaches through plain #includes?
-static bool include_reaches(VirtualMachine *vm, const char *from,
-                            const char *target_key, HashMap *seen) {
-    const char *key = cc_canonical_path_key(vm, from);
-    if (!strcmp(key, target_key))
-        return true;
+static void include_reach_add(PreludeScan *s, const char *from, HashMap *seen) {
+    const char *key = serialize_canonical_key(s->ctx, from);
     if (hashmap_get(seen, key))
-        return false;
+        return;
     hashmap_put(seen, key, (void *)1);
-    StringArray *kids = hashmap_get(&vm->compiler.include_children, from);
+    StringArray *kids = hashmap_get(&s->vm->compiler.include_children, from);
     for (int i = 0; kids && i < kids->len; i++)
-        if (include_reaches(vm, kids->data[i], target_key, seen))
-            return true;
-    return false;
+        include_reach_add(s, kids->data[i], seen);
 }
 
-static bool prelude_include_reaches(VirtualMachine *vm, const char *from,
+// The canonical paths of `from` and the files it reaches through plain
+// #includes, built once per header.
+static HashMap *prelude_reach_set(PreludeScan *s, const char *from) {
+    HashMap *set = hashmap_get(&s->reach, from);
+    if (!set) {
+        set = calloc(1, sizeof *set);
+        include_reach_add(s, from, set);
+        hashmap_put(&s->reach, from, set);
+    }
+    return set;
+}
+
+static bool prelude_include_reaches(PreludeScan *s, const char *from,
                                     const char *target) {
-    HashMap seen = {0};
-    bool    r =
-        include_reaches(vm, from, cc_canonical_path_key(vm, target), &seen);
-    hashmap_deinit(&seen);
-    return r;
+    return hashmap_get(prelude_reach_set(s, from),
+                       serialize_canonical_key(s->ctx, target)) != NULL;
+}
+
+static int prelude_free_reach(char *key, int keylen, void *val, void *user) {
+    (void)key;
+    (void)keylen;
+    (void)user;
+    hashmap_deinit(val);
+    free(val);
+    return 0;
 }
 
 // A type a replayed header supplies is visible once that header, or one it
@@ -4995,7 +5010,7 @@ static bool prelude_include_reaches(VirtualMachine *vm, const char *from,
 static bool prelude_type_visible(void *vs, FILE *f, TypeName *tn) {
     PreludeScan *s = vs;
     for (int i = 0; tn->file_path && i < s->nreplayed; i++)
-        if (prelude_include_reaches(s->vm, s->replayed[i], tn->file_path))
+        if (prelude_include_reaches(s, s->replayed[i], tn->file_path))
             return true;
     const char *header = synth_typedef_header_for_name(tn->name, tn->name_len);
     if (!header || has_colliding_user_typedef(s->ctx, tn->name, tn->name_len))
@@ -5026,7 +5041,7 @@ static void prelude_emit(FILE *f, SerializeContext *ctx, PreludeScan *s,
                          const char *resolved) {
     for (int i = 0; i < s->len; i++) {
         PreludeRef *r = &s->refs[i];
-        if (r->emitted || !prelude_include_reaches(s->vm, resolved, r->site))
+        if (r->emitted || !prelude_include_reaches(s, resolved, r->site))
             continue;
         Obj *t = r->target;
         if (!prelude_declare_types(NULL, ctx, t->ty, true, prelude_type_visible,
@@ -5058,15 +5073,37 @@ static void prelude_check(VirtualMachine *vm, PreludeScan *s) {
     }
 }
 
-// TODO(#1719): O(local records x all records) scan; build a name -> records
-// map once per pass if local type names become common.
+// Record indices by name: `heads` maps a name to its newest record and
+// `next` chains the older ones. A record renamed after the build no longer
+// matches its old name, so lookups still compare the current name.
+typedef struct {
+    HashMap heads;
+    int    *next;
+} NameChains;
+
+static void name_chains_build(NameChains *nc, TypeName *recs, int len) {
+    nc->next = malloc(sizeof(int) * (len ? len : 1));
+    for (int i = 0; i < len; i++) {
+        nc->next[i] = (int)(intptr_t)hashmap_get2(&nc->heads, recs[i].name,
+                                                  recs[i].name_len);
+        hashmap_put2(&nc->heads, recs[i].name, recs[i].name_len,
+                     (void *)(intptr_t)(i + 1));
+    }
+}
+
+static void name_chains_free(NameChains *nc) {
+    hashmap_deinit(&nc->heads);
+    free(nc->next);
+}
+
 static bool local_type_name_collides(VirtualMachine *vm, SerializeContext *ctx,
-                                     TypeName *recs, int len, TypeName *rec,
-                                     bool is_tag) {
+                                     TypeName *recs, NameChains *nc,
+                                     TypeName *rec, bool is_tag) {
     if (is_tag && !type_is_complete_tagged(rec->ty))
         return false;
-    for (int j = 0; j < len; j++) {
-        TypeName *other = &recs[j];
+    int j = (int)(intptr_t)hashmap_get2(&nc->heads, rec->name, rec->name_len);
+    for (; j; j = nc->next[j - 1]) {
+        TypeName *other = &recs[j - 1];
         if (other == rec || other->name_len != rec->name_len ||
             strncmp(other->name, rec->name, rec->name_len) != 0 ||
             (other->owner_fn && other->owner_fn != rec->owner_fn))
@@ -5092,10 +5129,17 @@ static void rename_colliding_local_type_names(VirtualMachine   *vm,
                                               SerializeContext *ctx,
                                               TypeName *recs, int len,
                                               bool is_tag) {
+    NameChains nc    = {0};
+    bool       built = false;
     for (int i = 0; i < len; i++) {
         TypeName *rec = &recs[i];
-        if (!rec->owner_fn ||
-            !local_type_name_collides(vm, ctx, recs, len, rec, is_tag))
+        if (!rec->owner_fn)
+            continue;
+        if (!built) {
+            name_chains_build(&nc, recs, len);
+            built = true;
+        }
+        if (!local_type_name_collides(vm, ctx, recs, &nc, rec, is_tag))
             continue;
         char *old_name = rec->name;
         int   old_len  = rec->name_len;
@@ -5111,6 +5155,8 @@ static void rename_colliding_local_type_names(VirtualMachine   *vm,
         if (is_tag)
             ctx->tag_renamed = true;
     }
+    if (built)
+        name_chains_free(&nc);
 }
 
 typedef struct {
@@ -5118,28 +5164,49 @@ typedef struct {
     Obj  *fn;
 } LocalEnum;
 
-// TODO(#1719): O(local enums x (enumerators + locals + typedefs)) scan; share
-// the name -> records map once local type names become common.
-static bool local_enum_name_taken(VirtualMachine *vm, SerializeContext *ctx,
-                                  LocalEnum *groups, int g, const char *name) {
-    Obj *fn = groups[g].fn;
-    for (int h = 0; h < g; h++) {
-        if (groups[h].fn != fn)
-            continue;
-        for (EnumConstant *ec = type_agg(groups[h].rep)->enum_constants; ec;
-             ec               = ec->next)
-            if (ec->name && strcmp(ec->name, name) == 0)
-                return true;
+// The names a function's block-scope enumerators must not reuse.
+typedef struct {
+    HashMap enums;    // enumerators of the groups handled so far
+    HashMap locals;   // the function's locals, built on first use
+    HashMap typedefs; // its local typedefs
+    bool    locals_built;
+} LocalFnNames;
+
+static LocalFnNames *local_fn_names(HashMap *all, Obj *fn) {
+    LocalFnNames *st = hashmap_get2(all, (char *)&fn, sizeof fn);
+    if (!st) {
+        st = calloc(1, sizeof *st);
+        hashmap_put2(all, (char *)&fn, sizeof fn, st);
     }
-    for (Obj *var = obj_fn(fn)->locals; var; var = var->next)
-        if (var->name && strcmp(var->name, name) == 0)
-            return true;
-    size_t len = strlen(name);
-    for (int i = 0; i < ctx->typedefs_len; i++)
-        if (ctx->typedefs[i].owner_fn == fn &&
-            (size_t)ctx->typedefs[i].name_len == len &&
-            strncmp(ctx->typedefs[i].name, name, len) == 0)
-            return true;
+    return st;
+}
+
+static int local_fn_names_free(char *key, int keylen, void *val, void *user) {
+    (void)key;
+    (void)keylen;
+    (void)user;
+    LocalFnNames *st = val;
+    hashmap_deinit(&st->enums);
+    hashmap_deinit(&st->locals);
+    hashmap_deinit(&st->typedefs);
+    free(st);
+    return 0;
+}
+
+static bool local_enum_name_taken(VirtualMachine *vm, SerializeContext *ctx,
+                                  LocalFnNames *st, Obj *fn, const char *name) {
+    int len = (int)strlen(name);
+    if (hashmap_get2(&st->enums, name, len))
+        return true;
+    if (!st->locals_built) {
+        for (Obj *var = obj_fn(fn)->locals; var; var = var->next)
+            if (var->name)
+                hashmap_put(&st->locals, var->name, (void *)1);
+        st->locals_built = true;
+    }
+    if (hashmap_get2(&st->locals, name, len) ||
+        hashmap_get2(&st->typedefs, name, len))
+        return true;
     ensure_global_name_index(vm, ctx);
     return hashmap_get(&ctx->global_names, (char *)name) != NULL;
 }
@@ -5170,11 +5237,29 @@ static void rename_colliding_local_enum_constants(VirtualMachine   *vm,
             groups[groups_len++] = (LocalEnum){rec->ty, rec->owner_fn};
         }
     }
-    for (int g = 0; g < groups_len; g++)
+    HashMap fn_names = {0};
+    if (groups_len)
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].owner_fn)
+                hashmap_put2(
+                    &local_fn_names(&fn_names, ctx->typedefs[i].owner_fn)
+                         ->typedefs,
+                    ctx->typedefs[i].name, ctx->typedefs[i].name_len,
+                    (void *)1);
+    for (int g = 0; g < groups_len; g++) {
+        LocalFnNames *st = local_fn_names(&fn_names, groups[g].fn);
         for (EnumConstant *ec = type_agg(groups[g].rep)->enum_constants; ec;
              ec               = ec->next)
-            if (ec->name && local_enum_name_taken(vm, ctx, groups, g, ec->name))
+            if (ec->name &&
+                local_enum_name_taken(vm, ctx, st, groups[g].fn, ec->name))
                 add_enum_rename(vm, ctx, groups[g].rep, ec->name);
+        for (EnumConstant *ec = type_agg(groups[g].rep)->enum_constants; ec;
+             ec               = ec->next)
+            if (ec->name)
+                hashmap_put(&st->enums, ec->name, (void *)1);
+    }
+    hashmap_foreach(&fn_names, local_fn_names_free, NULL);
+    hashmap_deinit(&fn_names);
     free(groups);
 }
 
@@ -5600,6 +5685,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         hashmap_deinit(&ctx.outer_jumps);
         hashmap_deinit(&ctx.file_typedef_names);
         hashmap_deinit(&ctx.path_key_memo);
+        free(ctx.fenv_typedefs);
         free(ctx.label_owners);
         free(ctx.deferred_label_statics);
         return;
@@ -6041,6 +6127,8 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     undef_live_user_macros(f, macro_lines, macro_lines_len);
     free(macro_lines);
     hashmap_deinit(&candidate_index);
+    hashmap_foreach(&prelude.reach, prelude_free_reach, NULL);
+    hashmap_deinit(&prelude.reach);
     free(prelude.refs);
     free(prelude.replayed);
     if (vm->compiler.emit_directives.len > 0)
@@ -6462,6 +6550,7 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     hashmap_deinit(&ctx.global_names);
     hashmap_deinit(&ctx.file_typedef_names);
     hashmap_deinit(&ctx.path_key_memo);
+    free(ctx.fenv_typedefs);
     free(ctx.label_owners);
     free(ctx.deferred_label_statics);
 }

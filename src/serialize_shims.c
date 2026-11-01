@@ -387,7 +387,8 @@ static bool rename_extern_for_native_shim(VirtualMachine *vm, Obj *prog,
                        path_basename_is(t->file->name, header_basename);
         if (!bundled && !(any_system_header && t->file->is_system_header))
             continue;
-        obj->name = arena_format(vm, "__cccc_native_%s", name);
+        serialize_rename_global(obj,
+                                arena_format(vm, "__cccc_native_%s", name));
         return true;
     }
     return false;

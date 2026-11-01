@@ -1005,6 +1005,39 @@ TypeName *find_typedef_name(SerializeContext *ctx, Type *ty) {
     return NULL;
 }
 
+// find_typedef_name(ctx, ty) when it is spelled `fenv_t`, else NULL. The full
+// lookup scans every typedef, so it runs only once a visible `fenv_t`
+// typedef could match: an exact or structural hit both imply
+// same_type_or_origin() against `ty`.
+TypeName *find_fenv_t_typedef(SerializeContext *ctx, Type *ty) {
+    if (!ctx || !ty)
+        return NULL;
+    if (ctx->fenv_typedefs_scanned != ctx->typedefs_len) {
+        ctx->fenv_typedefs_n = 0;
+        ctx->fenv_typedefs =
+            realloc(ctx->fenv_typedefs,
+                    sizeof(int) * (ctx->typedefs_len ? ctx->typedefs_len : 1));
+        for (int i = 0; i < ctx->typedefs_len; i++)
+            if (ctx->typedefs[i].name_len == 6 &&
+                strncmp(ctx->typedefs[i].name, "fenv_t", 6) == 0)
+                ctx->fenv_typedefs[ctx->fenv_typedefs_n++] = i;
+        ctx->fenv_typedefs_scanned = ctx->typedefs_len;
+    }
+    bool may_match = false;
+    for (int k = 0; k < ctx->fenv_typedefs_n && !may_match; k++) {
+        TypeName *rec = &ctx->typedefs[ctx->fenv_typedefs[k]];
+        may_match     = name_visible(rec, ctx->current_fn) &&
+                        same_type_or_origin(rec->ty, ty);
+    }
+    if (!may_match)
+        return NULL;
+    TypeName *found = find_typedef_name(ctx, ty);
+    return found && found->name_len == 6 &&
+                   strncmp(found->name, "fenv_t", 6) == 0
+               ? found
+               : NULL;
+}
+
 // #999: pointer-identity counterpart to find_typedef_name's structural
 // same_type_or_origin match, used for a non-aggregate (scalar/pointer)
 // typedef -- struct/union/enum already spell by name via find_typedef_name
@@ -3319,6 +3352,16 @@ bool path_basename_is(const char *path, const char *name) {
            strcmp(path + plen - nlen, name) == 0;
 }
 
+// cc_canonical_path_key() behind ctx->path_key_memo: realpath() is a syscall.
+const char *serialize_canonical_key(SerializeContext *ctx, const char *path) {
+    const char *key = hashmap_get(&ctx->path_key_memo, path);
+    if (!key) {
+        key = cc_canonical_path_key(ctx->vm, path);
+        hashmap_put(&ctx->path_key_memo, path, (void *)key);
+    }
+    return key;
+}
+
 bool path_is_captured(SerializeContext *ctx, const char *path) {
     if (!path)
         return false;
@@ -3330,11 +3373,7 @@ bool path_is_captured(SerializeContext *ctx, const char *path) {
     // ("typedef redefinition"/"redefinition of ..."). Memoized: this runs
     // once per bodiless declaration/typedef lookup across the whole
     // program, and realpath() is a syscall.
-    const char *key = hashmap_get(&ctx->path_key_memo, path);
-    if (!key) {
-        key = cc_canonical_path_key(ctx->vm, path);
-        hashmap_put(&ctx->path_key_memo, path, (void *)key);
-    }
+    const char *key = serialize_canonical_key(ctx, path);
     for (int i = 0; i < ctx->captured_paths_len; i++)
         if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], key) == 0)
             return true;
