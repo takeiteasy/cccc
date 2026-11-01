@@ -160,6 +160,8 @@ static bool op_spec(int op, OpSpec *s) {
         case LDR_LOCAL_H:
         case LDR_LOCAL_W:
         case LDR_LOCAL_D:
+        case LDR_LOCAL_UB:
+        case LDR_LOCAL_UW:
             *s = SPEC(ID, NO, NO, NO, 0);
             return true;
         case STR_LOCAL_B:
@@ -171,6 +173,8 @@ static bool op_spec(int op, OpSpec *s) {
         case LDR_B:
         case LDR_W:
         case LDR_D:
+        case LDR_UB:
+        case LDR_UW:
             *s = SPEC(ID, IU, NO, NO, 0);
             return true;
         case STR_B:
@@ -183,6 +187,8 @@ static bool op_spec(int op, OpSpec *s) {
         case LDR_INDEX_H:
         case LDR_INDEX_W:
         case LDR_INDEX_D:
+        case LDR_INDEX_UB:
+        case LDR_INDEX_UW:
             *s = SPEC(ID, IU, IU, NO, 0);
             return true;
         case STR_INDEX_B:
@@ -789,6 +795,14 @@ static int ext_result(int op) {
         case LDR_INDEX_W:
         case LDR_LOCAL_W:
             return ext_of_range(INT_MIN, INT_MAX);
+        case LDR_UB:
+        case LDR_INDEX_UB:
+        case LDR_LOCAL_UB:
+            return ext_of_range(0, 255);
+        case LDR_UW:
+        case LDR_INDEX_UW:
+        case LDR_LOCAL_UW:
+            return ext_of_range(0, 4294967295LL);
         case SEQ3:
         case SNE3:
         case SLT3:

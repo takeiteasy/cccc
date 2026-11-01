@@ -728,10 +728,14 @@ static int indexed_form(int op) {
     switch (op) {
         case LDR_B:
             return LDR_INDEX_B;
+        case LDR_UB:
+            return LDR_INDEX_UB;
         case LDR_H:
             return LDR_INDEX_H;
         case LDR_W:
             return LDR_INDEX_W;
+        case LDR_UW:
+            return LDR_INDEX_UW;
         case LDR_D:
             return LDR_INDEX_D;
         case STR_B:
@@ -768,22 +772,17 @@ static void emit_load_impl(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
     if (!ix)
         emit_load_safety_checks(vm, ty, rs_addr, dangling_check);
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
-        emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
-        if (ty->is_unsigned || ty->kind == TY_BOOL)
-            emit_rr(vm, ZX1, rd, rd);
+        emit_mem_rr(vm, ty->is_unsigned || ty->kind == TY_BOOL ? LDR_UB : LDR_B,
+                    rd, rs_addr, ix);
     } else if (ty->kind == TY_SHORT) {
         emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
         if (ty->is_unsigned)
             emit_rr(vm, ZX2, rd, rd);
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
-        emit_mem_rr(vm, LDR_W, rd, rs_addr, ix);
-        if (ty->is_unsigned)
-            emit_rr(vm, ZX4, rd, rd);
+        emit_mem_rr(vm, ty->is_unsigned ? LDR_UW : LDR_W, rd, rs_addr, ix);
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1) {
-            emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
-            if (ty->is_unsigned)
-                emit_rr(vm, ZX1, rd, rd);
+            emit_mem_rr(vm, ty->is_unsigned ? LDR_UB : LDR_B, rd, rs_addr, ix);
         } else if (ty->size == 2) {
             emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
             if (ty->is_unsigned)
@@ -799,14 +798,16 @@ static void emit_load_impl(VirtualMachine *vm, Type *ty, int rd, int rs_addr,
             if (rd != rs_addr)
                 emit_mov3(vm, rd, rs_addr);
         } else if (ty->size == 1) {
-            emit_mem_rr(vm, LDR_B, rd, rs_addr, ix);
-            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
+            emit_mem_rr(vm, ty->is_unsigned ? LDR_UB : LDR_B, rd, rs_addr, ix);
+            if (!ty->is_unsigned)
+                emit_rr(vm, SX1, rd, rd);
         } else if (ty->size == 2) {
             emit_mem_rr(vm, LDR_H, rd, rs_addr, ix);
             emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, rd, rd);
         } else if (ty->size == 4) {
-            emit_mem_rr(vm, LDR_W, rd, rs_addr, ix);
-            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, rd, rd);
+            emit_mem_rr(vm, ty->is_unsigned ? LDR_UW : LDR_W, rd, rs_addr, ix);
+            if (!ty->is_unsigned)
+                emit_rr(vm, SX4, rd, rd);
         } else {
             emit_mem_rr(vm, LDR_D, rd, rs_addr, ix);
         }
@@ -842,22 +843,20 @@ void emit_load(VirtualMachine *vm, Type *ty, int rd, int rs_addr) {
 // Fused load from bp-relative local slot — replaces LEA3+LDR
 void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
     if (ty->kind == TY_CHAR || ty->kind == TY_BOOL) {
-        emit_ri(vm, LDR_LOCAL_B, rd, offset);
-        if (ty->is_unsigned || ty->kind == TY_BOOL)
-            emit_rr(vm, ZX1, rd, rd);
+        emit_ri(vm,
+                ty->is_unsigned || ty->kind == TY_BOOL ? LDR_LOCAL_UB
+                                                       : LDR_LOCAL_B,
+                rd, offset);
     } else if (ty->kind == TY_SHORT) {
         emit_ri(vm, LDR_LOCAL_H, rd, offset);
         if (ty->is_unsigned)
             emit_rr(vm, ZX2, rd, rd);
     } else if (ty->kind == TY_INT || (ty->kind == TY_ENUM && ty->size == 4)) {
-        emit_ri(vm, LDR_LOCAL_W, rd, offset);
-        if (ty->is_unsigned)
-            emit_rr(vm, ZX4, rd, rd);
+        emit_ri(vm, ty->is_unsigned ? LDR_LOCAL_UW : LDR_LOCAL_W, rd, offset);
     } else if (ty->kind == TY_ENUM) {
         if (ty->size == 1) {
-            emit_ri(vm, LDR_LOCAL_B, rd, offset);
-            if (ty->is_unsigned)
-                emit_rr(vm, ZX1, rd, rd);
+            emit_ri(vm, ty->is_unsigned ? LDR_LOCAL_UB : LDR_LOCAL_B, rd,
+                    offset);
         } else if (ty->size == 2) {
             emit_ri(vm, LDR_LOCAL_H, rd, offset);
             if (ty->is_unsigned)
@@ -867,14 +866,18 @@ void emit_local_load(VirtualMachine *vm, Type *ty, int rd, long long offset) {
         }
     } else if (ty->kind == TY_BITINT) {
         if (ty->size == 1) {
-            emit_ri(vm, LDR_LOCAL_B, rd, offset);
-            emit_rr(vm, ty->is_unsigned ? ZX1 : SX1, rd, rd);
+            emit_ri(vm, ty->is_unsigned ? LDR_LOCAL_UB : LDR_LOCAL_B, rd,
+                    offset);
+            if (!ty->is_unsigned)
+                emit_rr(vm, SX1, rd, rd);
         } else if (ty->size == 2) {
             emit_ri(vm, LDR_LOCAL_H, rd, offset);
             emit_rr(vm, ty->is_unsigned ? ZX2 : SX2, rd, rd);
         } else if (ty->size == 4) {
-            emit_ri(vm, LDR_LOCAL_W, rd, offset);
-            emit_rr(vm, ty->is_unsigned ? ZX4 : SX4, rd, rd);
+            emit_ri(vm, ty->is_unsigned ? LDR_LOCAL_UW : LDR_LOCAL_W, rd,
+                    offset);
+            if (!ty->is_unsigned)
+                emit_rr(vm, SX4, rd, rd);
         } else {
             emit_ri(vm, LDR_LOCAL_D, rd, offset);
         }

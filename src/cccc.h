@@ -823,7 +823,16 @@ extern "C" {
     X(BULTW3, 3)   /* branch to target if rs < imm56, unsigned */                    \
     X(BULEW3, 3)   /* branch to target if rs <= imm56, unsigned */                   \
     X(BUGTW3, 3)   /* branch to target if rs > imm56, unsigned */                    \
-    X(BUGEW3, 3)   /* branch to target if rs >= imm56, unsigned */
+    X(BUGEW3, 3)   /* branch to target if rs >= imm56, unsigned */ \
+    /* Zero-extending loads: rd = *(unsigned char*)addr (UB) or                      \
+       *(unsigned*)addr (UW). Same operands as LDR_B/LDR_W, LDR_LOCAL_B/W and        \
+       LDR_INDEX_B/W. */                                                             \
+    X(LDR_UB, 1)                                                                     \
+    X(LDR_UW, 1)                                                                     \
+    X(LDR_LOCAL_UB, 3)                                                               \
+    X(LDR_LOCAL_UW, 3)                                                               \
+    X(LDR_INDEX_UB, 3)                                                               \
+    X(LDR_INDEX_UW, 3)
 
 typedef uint32_t InstrWord;
 typedef uint32_t Pc;

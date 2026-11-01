@@ -1514,6 +1514,14 @@ static inline long long ld_i32(const void *p) {
     __builtin_memcpy(&v, p, 4);
     return v;
 }
+static inline long long ld_u8(const void *p) {
+    return *(const unsigned char *)p;
+}
+static inline long long ld_u32(const void *p) {
+    unsigned v;
+    __builtin_memcpy(&v, p, 4);
+    return v;
+}
 static inline long long ld_i64(const void *p) {
     long long v;
     __builtin_memcpy(&v, p, 8);
@@ -1578,6 +1586,24 @@ static inline int op_LDR_H_fn(VirtualMachine *vm) {
     }
     return 0;
 }
+
+#define DEFINE_LOAD_U(NAME, SIZE, LOAD)                                        \
+    static inline int op_##NAME##_fn(VirtualMachine *vm) {                     \
+        long long operands = cc_read_word(vm);                                 \
+        int       rd, rs;                                                      \
+        DECODE_RR(operands, rd, rs);                                           \
+        check_race_access(vm, (void *)vm->regs[rs], 0);                        \
+        WATCHPOINT_CHECK(vm, (void *)vm->regs[rs], SIZE, WATCH_READ);          \
+        if (rd != REG_ZERO) {                                                  \
+            COMPTIME_CONTAIN(vm, vm->regs[rs], SIZE, false);                   \
+            vm->regs[rd] = LOAD((void *)vm->regs[rs]);                         \
+        }                                                                      \
+        return 0;                                                              \
+    }
+
+// Zero-extending counterparts of LDR_B / LDR_W.
+DEFINE_LOAD_U(LDR_UB, 1, ld_u8)
+DEFINE_LOAD_U(LDR_UW, 4, ld_u32)
 
 static inline int op_LDR_W_fn(VirtualMachine *vm) {
     // Load word (sign-extend): regs[rd] = *(int*)regs[rs]
@@ -6146,6 +6172,8 @@ DEFINE_INDEX_LOAD(LDR_INDEX_B, 1, LD_INDEX_I8)
 DEFINE_INDEX_LOAD(LDR_INDEX_H, 2, ld_i16)
 DEFINE_INDEX_LOAD(LDR_INDEX_W, 4, ld_i32)
 DEFINE_INDEX_LOAD(LDR_INDEX_D, 8, ld_i64)
+DEFINE_INDEX_LOAD(LDR_INDEX_UB, 1, ld_u8)
+DEFINE_INDEX_LOAD(LDR_INDEX_UW, 4, ld_u32)
 DEFINE_INDEX_STORE(STR_INDEX_B, 1, ST_INDEX_I8)
 DEFINE_INDEX_STORE(STR_INDEX_H, 2, st_i16)
 DEFINE_INDEX_STORE(STR_INDEX_W, 4, st_i32)
@@ -7505,6 +7533,28 @@ static inline int op_LDR_LOCAL_W_fn(VirtualMachine *vm) {
     check_race_access(vm, (void *)(vm->bp + offset), 0);
     if (rd != REG_ZERO)
         vm->regs[rd] = *(int *)(vm->bp + offset);
+    return 0;
+}
+
+static inline int op_LDR_LOCAL_UB_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = ld_u8((void *)(vm->bp + offset));
+    return 0;
+}
+
+static inline int op_LDR_LOCAL_UW_fn(VirtualMachine *vm) {
+    long long operands = cc_read_word(vm);
+    int       rd;
+    DECODE_R(operands, rd);
+    long long offset = cc_read_i64(vm);
+    check_race_access(vm, (void *)(vm->bp + offset), 0);
+    if (rd != REG_ZERO)
+        vm->regs[rd] = ld_u32((void *)(vm->bp + offset));
     return 0;
 }
 

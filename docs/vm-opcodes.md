@@ -204,13 +204,15 @@ own word-array loop, which had the same past-the-object overwrite risk.
 
 ### Load / Store
 
-Sizes: **B** = byte, **H** = half-word (16-bit), **W** = word (32-bit), **D** = double-word (64-bit).  Integer loads sign-extend to 64 bits.
+Sizes: **B** = byte, **H** = half-word (16-bit), **W** = word (32-bit), **D** = double-word (64-bit).  Integer loads sign-extend to 64 bits; the **U** forms (`LDR_UB`, `LDR_UW`) zero-extend. An `unsigned char`, `_Bool` or `unsigned` load is one of those, not a sign-extending load followed by `ZX1` / `ZX4`.
 
 | Opcode | Description |
 |--------|-------------|
 | `LDR_B` | `regs[rd] = *(char*)regs[rs]` |
 | `LDR_H` | `regs[rd] = *(short*)regs[rs]` |
 | `LDR_W` | `regs[rd] = *(int*)regs[rs]` |
+| `LDR_UB` | `regs[rd] = *(unsigned char*)regs[rs]` |
+| `LDR_UW` | `regs[rd] = *(unsigned*)regs[rs]` |
 | `LDR_D` | `regs[rd] = *(long long*)regs[rs]` |
 | `STR_B` | `*(char*)regs[rs] = regs[rd]` |
 | `STR_H` | `*(short*)regs[rs] = regs[rd]` |
@@ -226,6 +228,7 @@ Codegen emits them for `*(base + index * k + c)` with `k` in 1..255 and a consta
 | Opcode | Description |
 |--------|-------------|
 | `LDR_INDEX_B` / `_H` / `_W` / `_D` | `regs[rd] = *(T*)(regs[base] + regs[index] * scale + offset)`, sign-extended |
+| `LDR_INDEX_UB` / `_UW` | the same load of an `unsigned char` / `unsigned`, zero-extended |
 | `STR_INDEX_B` / `_H` / `_W` / `_D` | `*(T*)(regs[base] + regs[index] * scale + offset) = regs[rd]` |
 | `FLDR_INDEX` / `FLDR_INDEX_F32` | load a double / float into `fregs[rd]` |
 | `FSTR_INDEX` / `FSTR_INDEX_F32` | store `fregs[rd]` as a double / float |

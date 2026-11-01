@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a load of an `unsigned char`, `_Bool` or `unsigned` is one zero-extending VM opcode instead of a sign-extending load followed by `ZX1` / `ZX4`: new opcodes `LDR_UB`, `LDR_UW`, `LDR_LOCAL_UB`, `LDR_LOCAL_UW`, `LDR_INDEX_UB` and `LDR_INDEX_UW`.
 - Changed: the VM bytecode clean-up drops the sign or zero extension after a 32-bit `int` / `unsigned` operation whose upper half nothing reads (a 4-byte store, another extension, another 32-bit operation), and fuses the extension that remains into the operation: new opcodes `ADDSX3`, `ADDZX3`, `SUBSX3`, `SUBZX3`, `MULSX3`, `MULZX3`, `ADDISX3`, `ADDIZX3`, `MULISX3`, `MULIZX3`, `SHLISX3` and `SHLIZX3`.
 - Added: VM opcodes `ORI3` and `XORI3` (OR or XOR by an immediate), so `x | 0xf0` and `x ^ 0xff` are one instruction instead of a `LI3` and an `OR3` / `XOR3`.
 - Changed: a compare against a constant beyond 24 bits (a loop bound of `10000000`, `x != 0xFFFFFFFF`) tested by the branch right after it is one compare-and-branch opcode with a 56-bit immediate (`BLTW3`, `BNEW3`, ... 10 in all).

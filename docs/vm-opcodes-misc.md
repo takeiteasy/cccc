@@ -129,6 +129,8 @@ These replace the common `LEA3 + LDR/STR` two-opcode sequence for local variable
 | `LDR_LOCAL_B` | `regs[rd] = *(char*)(bp + offset)` |
 | `LDR_LOCAL_H` | `regs[rd] = *(short*)(bp + offset)` |
 | `LDR_LOCAL_W` | `regs[rd] = *(int*)(bp + offset)` |
+| `LDR_LOCAL_UB` | `regs[rd] = *(unsigned char*)(bp + offset)` |
+| `LDR_LOCAL_UW` | `regs[rd] = *(unsigned*)(bp + offset)` |
 | `LDR_LOCAL_D` | `regs[rd] = *(long long*)(bp + offset)` |
 | `STR_LOCAL_B` | `*(char*)(bp + offset) = regs[rd]` |
 | `STR_LOCAL_H` | `*(short*)(bp + offset) = regs[rd]` |

@@ -30,18 +30,18 @@ Apple M1, release-built `cccc`, 3 timed runs after 1 warmup.
 
 | Benchmark | `cccc` | `lua` | `gcc-O0` | `gcc-O2` |
 |---|---|---|---|---|
-| ackermann | 181.7 | 47.6 | 16.3 | 3.6 |
-| binary_tree | 237.5 | 136.4 | 18.4 | 16.6 |
-| dispatch | 336.8 | 169.3 | 12.4 | 8.9 |
-| fib | 167.4 | 52.0 | 9.1 | 7.5 |
-| mandelbrot | 755.0 | 386.9 | 60.6 | 27.7 |
-| matrix_mul | 701.6 | 233.6 | 19.4 | 3.6 |
-| nqueens | 118.9 | 58.8 | 10.9 | 7.8 |
-| quicksort | 199.5 | 62.3 | 16.0 | 10.9 |
-| sieve | 494.8 | 325.1 | 33.8 | 19.7 |
-| **Geometric mean** | **291.4** | **122.4** | **18.3** | **9.6** |
+| ackermann | 182.9 | 47.9 | 18.5 | 3.6 |
+| binary_tree | 240.8 | 119.1 | 19.8 | 17.6 |
+| dispatch | 222.3 | 169.9 | 15.7 | 5.4 |
+| fib | 169.4 | 52.1 | 8.2 | 7.7 |
+| mandelbrot | 763.6 | 388.7 | 61.0 | 27.7 |
+| matrix_mul | 705.8 | 233.8 | 20.8 | 3.7 |
+| nqueens | 119.4 | 58.9 | 12.5 | 7.5 |
+| quicksort | 200.2 | 62.8 | 15.8 | 9.3 |
+| sieve | 488.3 | 325.2 | 34.3 | 20.5 |
+| **Geometric mean** | **279.6** | **120.9** | **19.5** | **9.0** |
 
-The VM is 1.5x to 3.8x slower than Lua (2.4x on the geometric mean) and 14x to 195x slower than `gcc -O2` (30x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
+The VM is 1.3x to 3.8x slower than Lua (2.3x on the geometric mean) and 14x to 189x slower than `gcc -O2` (31x), worst on tight double-precision loops such as `matrix_mul`. Tiny native timings (`fib`, `binary_tree`) are dominated by process start-up, so `gcc-O0` can beat `gcc-O2` there.
 
 `-c=native` hands the program to a host compiler and runs at native speed.
 
