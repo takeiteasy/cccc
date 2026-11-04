@@ -167,6 +167,9 @@ typedef struct {
     // Declared inside a struct/union member list, where a bare `struct S;`
     // keeps referring to the visible tag instead of redeclaring it.
     bool in_member_list;
+
+    // The specifier defined a struct/union/enum body (`struct S { ... }`).
+    bool defines_tag;
 } VarAttr;
 
 // This struct represents a variable initializer. Since initializers

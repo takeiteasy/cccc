@@ -63,6 +63,15 @@ Every attribute accepts both `struct T {...};` and `typedef ... T;`. Applying
 one to the wrong kind of type (an enum attribute on a struct, say) is a compile
 error.
 
+A struct defined together with variables takes the attribute after the tag or
+the closing brace, where it belongs to the type. A leading attribute belongs to
+the variables and is a compile error:
+
+```c
+struct Point { int x; int y; } @ctor origin;   // Point_new, and origin
+struct @equals Pair { int a; int b; } pair;    // Pair_equals, and pair
+```
+
 Using one of these attributes without the include is a compile error that
 names `<cccc/derive.h>`. The header adds no code to the program: the handlers
 run at compile time, and `-c=native` output carries only the generated

@@ -183,3 +183,15 @@ static void fill(struct Everything *e, int fill_byte) {
     AssertEq(!!(a == b), 1);
     AssertEq(!!(a != c), 1);
 }
+
+struct Pt {
+    int x;
+    int y;
+} @equals @hash origin, other;
+
+[[cccc::test]] void test_equals_on_a_tag_defined_with_variables(void) {
+    origin.x = 1;
+    other.x  = 1;
+    AssertEq(!!(Pt_equals(&origin, &other)), 1);
+    AssertEq(!!(Pt_hash(&origin) == Pt_hash(&other)), 1);
+}

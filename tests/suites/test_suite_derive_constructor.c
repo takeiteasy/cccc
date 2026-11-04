@@ -115,3 +115,25 @@ typedef struct {
     AssertEq(Late_new().a, 1);
     AssertEq(Aliased_new().b, 2);
 }
+
+// clang-format off
+struct Placed {
+    int a = 1;
+} @ctor placed;
+
+struct @ctor Tagged {
+    int b = 2;
+} tagged, *tagged_ptr = &tagged;
+
+[[cccc::test]] void test_ctor_on_a_tag_defined_with_variables(void) {
+    AssertEq(Placed_new().a, 1);
+    AssertEq(Tagged_new().b, 2);
+    AssertEq(placed.a, 0);
+    AssertEq(tagged_ptr == &tagged, 1);
+}
+
+[[cccc::test]] void test_tag_reuse_does_not_rerun_the_attribute(void) {
+    struct Placed again = Placed_new();
+    AssertEq(again.a, 1);
+}
+// clang-format on

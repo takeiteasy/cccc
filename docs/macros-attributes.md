@@ -62,6 +62,12 @@ macros. The target helpers are:
 
 Applying a custom attribute to a local variable is a compile error.
 
+An attribute written after the tag or the closing brace of a `struct`, `union`
+or `enum` that is defined together with variables
+(`struct S { ... } @attr g;`) runs once as an `ATTR_TARGET_TYPE` target. A
+leading attribute (`@attr struct S { ... } g;`) targets the variables as
+`ATTR_TARGET_GLOBAL`.
+
 ## Member attributes
 
 A custom attribute can sit on a struct or union member, in any declarator

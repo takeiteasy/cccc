@@ -230,14 +230,15 @@ DeclKw declspec_kw(Token *tok) {
     return DK_NONE;
 }
 
-static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok);
+static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
+                            bool *defined);
 static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                         bool bare_decl);
+                         bool bare_decl, bool *defined);
 static Type *typeof_specifier(VirtualMachine *vm, Token **rest, Token *tok);
 static Type *typeof_unqual_specifier(VirtualMachine *vm, Token **rest,
                                      Token *tok);
 static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                        bool bare_decl);
+                        bool bare_decl, bool *defined);
 
 // declspec = ("void" | "_Bool" | "char" | "short" | "int" | "long"
 //             | "typedef" | "static" | "extern" | "inline"
@@ -495,12 +496,13 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                     goto declspec_done;
                 // C11 6.7.2.3p7: a lone `struct S;` declares S in this scope.
                 bool bare_decl = attr && !attr->in_member_list && tok == start;
+                bool defined   = false;
                 if (dk == DK_STRUCT)
-                    ty = struct_decl(vm, &tok, tok->next, bare_decl);
+                    ty = struct_decl(vm, &tok, tok->next, bare_decl, &defined);
                 else if (dk == DK_UNION)
-                    ty = union_decl(vm, &tok, tok->next, bare_decl);
+                    ty = union_decl(vm, &tok, tok->next, bare_decl, &defined);
                 else if (dk == DK_ENUM)
-                    ty = enum_specifier(vm, &tok, tok->next);
+                    ty = enum_specifier(vm, &tok, tok->next, &defined);
                 else if (dk == DK_TYPEOF)
                     ty = typeof_specifier(vm, &tok, tok->next);
                 else if (dk == DK_TYPEOF_UNQUAL)
@@ -529,6 +531,8 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                               : ty2;
                     tok = tok->next;
                 }
+                if (defined && attr)
+                    attr->defines_tag = true;
                 counter += OTHER;
                 continue;
             }
@@ -1709,7 +1713,8 @@ static Type *install_tag_definition(VirtualMachine *vm, Token *tag, Type *ty,
 //
 // C23: optional ": integer-type" specifies the underlying type.
 // C23: "enum tag : underlying-type ;" is a forward declaration (complete type).
-static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
+static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
+                            bool *defined) {
     Type *ty = enum_type(vm);
 
     // Read a tag.
@@ -1793,7 +1798,8 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok) {
     if (existing_tag && existing_tag->kind != TY_ENUM)
         error_tok(vm, tag, "not an enum tag");
 
-    tok = skip(vm, tok, "{");
+    tok      = skip(vm, tok, "{");
+    *defined = true;
 
     // Read an enum-list.
     int                  i         = 0;
@@ -4048,10 +4054,11 @@ static Type *struct_union_decl(VirtualMachine *vm, Token **rest, Token *tok,
 
 // struct-decl = struct-union-decl
 static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                         bool bare_decl) {
+                         bool bare_decl, bool *defined) {
     bool  is_definition = false;
     Type *ty =
         struct_union_decl(vm, rest, tok, TY_STRUCT, &is_definition, bare_decl);
+    *defined = is_definition;
 
     if (ty->size < 0)
         return ty;
@@ -4226,10 +4233,11 @@ static Type *struct_decl(VirtualMachine *vm, Token **rest, Token *tok,
 
 // union-decl = struct-union-decl
 static Type *union_decl(VirtualMachine *vm, Token **rest, Token *tok,
-                        bool bare_decl) {
+                        bool bare_decl, bool *defined) {
     bool  is_definition = false;
     Type *ty =
         struct_union_decl(vm, rest, tok, TY_UNION, &is_definition, bare_decl);
+    *defined = is_definition;
 
     if (ty->size < 0)
         return ty;

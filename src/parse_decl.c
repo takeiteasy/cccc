@@ -2351,6 +2351,16 @@ void run_pending_methods(VirtualMachine *vm) {
     c->draining_methods = false;
 }
 
+// A tag's attributes run once, where it is defined; later `struct S g;`
+// uses of the shared Type must not run them again.
+static void detach_type_custom_attrs(VirtualMachine *vm, Type *ty) {
+    type_attrs_mut(vm, ty)->custom_attrs = NULL;
+}
+
+static char *type_tag_name(VirtualMachine *vm, Type *ty) {
+    return ty->name ? arena_strndup(vm, ty->name->loc, ty->name->len) : NULL;
+}
+
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         reject_member_initializers(vm, NULL, NULL);
@@ -2438,15 +2448,23 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         // File-scope type declaration such as @serialize struct Point { ... };
         if (equal(tok, ";")) {
             if (has_custom_attrs(basety, &attr)) {
-                char *name = NULL;
-                if (basety->name)
-                    name =
-                        arena_strndup(vm, basety->name->loc, basety->name->len);
-                run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE, name,
-                                      basety, NULL, basety->name);
+                run_decl_custom_attrs(vm, basety, &attr, ATTR_TARGET_TYPE,
+                                      type_tag_name(vm, basety), basety, NULL,
+                                      basety->name);
+                if (attr.defines_tag)
+                    detach_type_custom_attrs(vm, basety);
             }
             tok = tok->next;
             continue;
+        }
+
+        // Attributes written inside `struct S { ... } @attr g;` belong to S.
+        if (attr.defines_tag && type_attrs(basety)->custom_attrs) {
+            VarAttr none = {};
+            run_decl_custom_attrs(vm, basety, &none, ATTR_TARGET_TYPE,
+                                  type_tag_name(vm, basety), basety, NULL,
+                                  basety->name);
+            detach_type_custom_attrs(vm, basety);
         }
 
         // Global variable

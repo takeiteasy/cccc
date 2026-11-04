@@ -31,12 +31,23 @@
 
 // The Type an attribute target names, or a diagnostic for `attr` when the
 // target is not a struct/union (want_enum == false) or enum (true) type.
-@comptime Type *__builtin_attr_type_target(AttrTarget *target, const char *attr,
-                                           bool want_enum) {
+@comptime void __builtin_attr_require_type_kind(AttrTarget *target,
+                                                const char *attr) {
     int kind = GetAttrTargetKind(target);
+    if (kind == ATTR_TARGET_GLOBAL)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "%s expects a type or typedef target, not a variable: "
+                     "write 'struct S { ... } %s g;' or declare the type "
+                     "on its own",
+                     attr, attr);
     if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
         MacroErrorAt(MakeIntLiteral(0), "%s expects a type or typedef target",
                      attr);
+}
+
+@comptime Type *__builtin_attr_type_target(AttrTarget *target, const char *attr,
+                                           bool want_enum) {
+    __builtin_attr_require_type_kind(target, attr);
 
     Type *ty = AttrTargetType(target);
     if (!ty)
@@ -2128,10 +2139,7 @@
 // P_Color_to_string.
 @comptime(attribute("to_string")) void __builtin_attr_to_string(
     AttrTarget *target, ...) {
-    int kind = GetAttrTargetKind(target);
-    if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@to_string expects a type or typedef target");
+    __builtin_attr_require_type_kind(target, "@to_string");
     const char *prefix = __builtin_attr_prefix_arg("@to_string");
     Type       *ty     = AttrTargetType(target);
     if (!ty || GetTypeKind(ty) != TK_ENUM) {
@@ -2587,10 +2595,7 @@
 // above. @from_string("P") publishes P_Color_from_string.
 @comptime(attribute("from_string")) void __builtin_attr_from_string(
     AttrTarget *target, ...) {
-    int kind = GetAttrTargetKind(target);
-    if (kind != ATTR_TARGET_TYPE && kind != ATTR_TARGET_TYPEDEF)
-        MacroErrorAt(MakeIntLiteral(0),
-                     "@from_string expects a type or typedef target");
+    __builtin_attr_require_type_kind(target, "@from_string");
     const char *prefix = __builtin_attr_prefix_arg("@from_string");
     Type       *ty     = AttrTargetType(target);
     if (!ty || GetTypeKind(ty) != TK_ENUM) {
