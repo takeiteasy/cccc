@@ -4566,6 +4566,7 @@ static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
     // nothing.
     VarWrites inc = {vm, v, 0, true, false};
     walk_nodes(node_ctl(loop)->inc, note_var_write, &inc);
+    // TODO: a macro call not yet expanded may write `i` (#1938).
     VarWrites body = {vm, v, 0, true, false};
     walk_nodes(node_ctl(loop)->then, note_var_write, &body);
     if (!inc.only_steps || body.wrote)

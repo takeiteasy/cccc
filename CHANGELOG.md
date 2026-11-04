@@ -7,8 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-04
+
+- Changed: a checked access whose identical check already ran on every path to it skips the range check across `if`/`else` joins, in loop bodies and conditions, past `break`/`continue` and through `switch` cases, not only within one straight-line run. A kernel with branches and loops over `p[i]` goes from 7 range checks to 1 and runs 1.5x faster; the benchmark programs do not use `--checked-pointers` and are unchanged.
+- Changed: a label no `goto` or asm goto names no longer stops a counted loop's index from being proven in range, or ends a run of dominated checks.
 - Changed: the compile-time reflect operator is `^^name` instead of `$name`. `$` is an ordinary identifier character again outside quasi-quote templates, so `int $x;` compiles.
 - Fixed: `-c=native` wrote an enumerator of `0x8000000000000000` in an enum with a 64-bit unsigned underlying type as `-9223372036854775808`, which gcc rejects; it is now written as `9223372036854775808ULL`, and a plain `LLONG_MIN` enumerator as `(-9223372036854775807LL - 1)`.
+
 ## [0.29.0] - 2026-11-01
 
 - Changed: against 0.28.0 the benchmark programs run 1.4x faster on the geometric mean (278 ms against 396 ms; `sieve` 2.4x, `dispatch` 2.3x, `nqueens` 1.7x, none slower), and `cccc -m` over cccc's own 103 sources takes 18 s and 3.4 GB instead of 149 s and 19 GB.
