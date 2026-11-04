@@ -70,7 +70,10 @@
 //     computation consumed no co-inductive assumption from an ancestor
 //     frame (tracked via g_stm_min_assume): a result derived under "assume
 //     (x, y) equal" is not sound to reuse in a context where that
-//     assumption does not hold. The memo is explicitly begin/end-scoped
+//     assumption does not hold. Such a positive waits in a pending list and
+//     is memoized when the frame it leaned on succeeds, dropped when any
+//     frame above it fails. A mismatch never depends on an assumption, so it
+//     is memoized at once. The memo is explicitly begin/end-scoped
 //     (same_type_memo_begin/end) around the one hot consumer; every other
 //     caller uses the un-memoized but still guard-protected path.
 //
@@ -90,9 +93,33 @@ typedef struct {
 static MemoSlot *g_memo              = NULL;
 static size_t    g_memo_cap          = 0; // power of two
 static size_t    g_memo_used         = 0;
+static long long g_memo_wipes        = 0;
+static int       g_pending_peak      = 0;
 static bool      g_same_type_memo_on = false;
 #define SAME_TYPE_MEMO_MAX (1 << 21)
 #define SAME_TYPE_MEMO_MIN_CAP (1 << 12)
+
+// Positives that leaned on an ancestor's assumption, held until that ancestor
+// succeeds (then memoized) or fails (then dropped).
+static Type **g_stm_pending_a   = NULL;
+static Type **g_stm_pending_b   = NULL;
+static int    g_stm_pending_len = 0;
+static int    g_stm_pending_cap = 0;
+
+static void same_type_pending_push(Type *a, Type *b) {
+    if (g_stm_pending_len >= g_stm_pending_cap) {
+        g_stm_pending_cap = g_stm_pending_cap ? g_stm_pending_cap * 2 : 256;
+        g_stm_pending_a =
+            realloc(g_stm_pending_a, sizeof(Type *) * g_stm_pending_cap);
+        g_stm_pending_b =
+            realloc(g_stm_pending_b, sizeof(Type *) * g_stm_pending_cap);
+    }
+    g_stm_pending_a[g_stm_pending_len] = a;
+    g_stm_pending_b[g_stm_pending_len] = b;
+    g_stm_pending_len++;
+    if (g_stm_pending_len > g_pending_peak)
+        g_pending_peak = g_stm_pending_len;
+}
 
 static size_t memo_slot(uintptr_t a, uintptr_t b, size_t cap) {
     unsigned long long h  = ((unsigned long long)a * 0x9E3779B97F4A7C15ull) ^
@@ -130,6 +157,7 @@ static void memo_put(Type *a, Type *b, bool equal) {
         // square of the input files.
         memset(g_memo, 0, sizeof(MemoSlot) * g_memo_cap);
         g_memo_used = 0;
+        g_memo_wipes++;
     }
     if (g_memo_used * 2 >= g_memo_cap) {
         size_t    cap   = g_memo_cap ? g_memo_cap * 2 : SAME_TYPE_MEMO_MIN_CAP;
@@ -143,12 +171,22 @@ static void memo_put(Type *a, Type *b, bool equal) {
         g_memo     = table;
         g_memo_cap = cap;
     }
-    memo_insert(g_memo, g_memo_cap, (uintptr_t)a | (equal ? 1 : 0),
-                (uintptr_t)b);
-    g_memo_used++;
+    // A pair can be flushed from the pending list more than once.
+    for (size_t i = memo_slot((uintptr_t)a, (uintptr_t)b, g_memo_cap);;
+         i        = (i + 1) & (g_memo_cap - 1)) {
+        MemoSlot *s = &g_memo[i];
+        if (!s->a) {
+            *s = (MemoSlot){(uintptr_t)a | (equal ? 1 : 0), (uintptr_t)b};
+            g_memo_used++;
+            return;
+        }
+        if ((s->a & ~(uintptr_t)1) == (uintptr_t)a && s->b == (uintptr_t)b)
+            return;
+    }
 }
 
 static void memo_free(void) {
+    g_stm_pending_len = 0;
     free(g_memo);
     g_memo      = NULL;
     g_memo_cap  = 0;
@@ -266,24 +304,45 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
     int my_depth = g_stp_len;
     same_type_pair_push(k1, k2);
     int saved_min    = g_stm_min_assume;
+    int pending_mark = g_stm_pending_len;
     g_stm_min_assume = INT_MAX; // fresh accounting for this subtree
     bool r           = same_type_or_origin_impl(a, b);
     int  subtree_min = g_stm_min_assume;
     g_stp_len--;
 
-    if (subtree_min >= my_depth) {
+    // Skip caching if either side is an incomplete tagged type: it can be
+    // completed in place later this pass, staling the entry.
+    bool cacheable = g_same_type_memo_on && !type_is_incomplete_tagged(a) &&
+                     !type_is_incomplete_tagged(b);
+
+    if (!r) {
+        // The relation is monotone in its assumptions, so a mismatch holds
+        // with or without them. Positives still pending below may have leaned
+        // on this frame's assumption: drop them.
+        g_stm_pending_len = pending_mark;
+        if (cacheable)
+            memo_put(k1, k2, false);
+        g_stm_min_assume =
+            subtree_min >= my_depth
+                ? saved_min
+                : (saved_min < subtree_min ? saved_min : subtree_min);
+    } else if (subtree_min >= my_depth) {
         // Self-contained: the only assumption in play was (k1, k2) itself,
-        // now fully resolved -> the result is unconditionally valid. Skip
-        // caching if either side is an incomplete tagged type: it can be
-        // completed in place later this pass, staling the entry.
-        if (g_same_type_memo_on && !type_is_incomplete_tagged(a) &&
-            !type_is_incomplete_tagged(b)) {
-            memo_put(k1, k2, r);
-        }
-        g_stm_min_assume = saved_min;
+        // now fully resolved, so this result and every positive pending
+        // beneath it are unconditionally valid.
+        if (cacheable)
+            memo_put(k1, k2, true);
+        if (g_same_type_memo_on)
+            for (int i = pending_mark; i < g_stm_pending_len; i++)
+                memo_put(g_stm_pending_a[i], g_stm_pending_b[i], true);
+        g_stm_pending_len = pending_mark;
+        g_stm_min_assume  = saved_min;
     } else {
         // An ancestor's assumption is baked into r; propagate the debt so
-        // that ancestor's frame decides, and do not memoize here.
+        // that ancestor's frame decides. The positive waits in the pending
+        // list until that frame succeeds.
+        if (cacheable)
+            same_type_pending_push(k1, k2);
         g_stm_min_assume = saved_min < subtree_min ? saved_min : subtree_min;
     }
     return r;
@@ -311,13 +370,14 @@ void serialize_type_stats_report(SerializeContext *ctx) {
     fprintf(stderr,
             "[cccc type-stats #1283] same_type_or_origin: total=%lld "
             "toplevel=%lld ratio=%.1f max_depth=%d cycle_hits=%lld "
-            "memo_hits=%lld | tags=%d typedefs=%d defs=%d\n",
+            "memo_hits=%lld wipes=%lld pending_peak=%d | tags=%d typedefs=%d "
+            "defs=%d\n",
             g_sto_calls_total, g_sto_calls_toplevel,
             g_sto_calls_toplevel
                 ? (double)g_sto_calls_total / (double)g_sto_calls_toplevel
                 : 0.0,
-            g_sto_max_depth, g_sto_cycle_hits, g_sto_memo_hits, ctx->tags_len,
-            ctx->typedefs_len, ctx->defs.len);
+            g_sto_max_depth, g_sto_cycle_hits, g_sto_memo_hits, g_memo_wipes,
+            g_pending_peak, ctx->tags_len, ctx->typedefs_len, ctx->defs.len);
 }
 
 static bool same_type_or_origin_impl(Type *a, Type *b) {

@@ -11,7 +11,7 @@ Building cccc's own sources (about 100 files) on an Apple M1, 8 cores, macOS 15.
 | Host `cc -O2` via `./cccc --build build.c --build-target=release` | 6 s | Parallel, one `cc` per file |
 | `cccc --compile=object` per file ([`ouroboros`](selfhosting.md#recipe)) | 7 s | One cccc process per file, parallel |
 | `cccc -c=native` ([`ouroboros_single`](selfhosting.md#recipe)) | 22 s | One merged unit, single thread front end |
-| `cccc -m` over the 103 sources (the front end and serializer, no host compiler) | 16 s | Single thread |
+| `cccc -m` over the 103 sources (the front end and serializer, no host compiler) | 15 s | Single thread |
 
 `cccc -c=native` over every file parses them into one program and writes it as C before the host compiler runs, so the frontend does not scale with `--build-jobs`; per-file objects do.
 
