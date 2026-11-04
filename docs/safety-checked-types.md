@@ -121,6 +121,7 @@ The loop must be `for (i = L; i < N; i++)` (or `<=`, `++i`, `i += c`) with const
 | Runtime bound (`i < n`), or a pointer or array-parameter base | Yes |
 | `i` written, address-taken, `static`, global, `volatile` or narrower than `int` in the body | Yes |
 | A label some `goto` names, a `case` or `setjmp` in the loop, or label addresses in the function | Yes |
+| A comptime macro call in the loop's init, condition, increment or body | Yes |
 | The loop's own condition and increment expressions | Yes |
 
 | Limit | Reason |

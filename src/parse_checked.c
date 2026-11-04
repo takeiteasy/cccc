@@ -4511,6 +4511,12 @@ static bool note_var_write(Node *n, void *ud) {
     return true;
 }
 
+// A macro call not yet expanded may write anything or splice a jump.
+static bool no_macro_call(Node *n, void *ud) {
+    (void)ud;
+    return n->kind != ND_MACRO_CALL;
+}
+
 // Recognises `for (i = L; i < N; i += c)` over a local `i` with constant L, N
 // and c > 0, whose body never writes `i`; fills `out` with i's range there.
 static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
@@ -4566,10 +4572,13 @@ static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
     // nothing.
     VarWrites inc = {vm, v, 0, true, false};
     walk_nodes(node_ctl(loop)->inc, note_var_write, &inc);
-    // TODO: a macro call not yet expanded may write `i` (#1938).
     VarWrites body = {vm, v, 0, true, false};
     walk_nodes(node_ctl(loop)->then, note_var_write, &body);
     if (!inc.only_steps || body.wrote)
+        return false;
+    if (!walk_nodes(cond, no_macro_call, NULL) ||
+        !walk_nodes(node_ctl(loop)->inc, no_macro_call, NULL) ||
+        !walk_nodes(node_ctl(loop)->then, no_macro_call, NULL))
         return false;
 
     // The value `i` takes after the last iteration must still fit its type.
@@ -5167,6 +5176,19 @@ static void dominate_children(DomCtx *cx, Node *n) {
 
 static void dominate_stmt(DomCtx *cx, Node *s, Flow *f);
 
+// Tells every enclosing frame that nothing is known at its jump targets.
+static void flow_forget_frames(DomCtx *cx) {
+    Flow none = {0};
+    for (DomFrame *fr = cx->frames; fr; fr = fr->up) {
+        flow_meet(&fr->brk_acc, &none);
+        flow_meet(&fr->cont_acc, &none);
+    }
+}
+
+static bool has_macro_call(Node *n) {
+    return !walk_nodes(n, no_macro_call, NULL);
+}
+
 static void dominate_list(DomCtx *cx, Node *s, Flow *f) {
     for (; s; s = s->next)
         dominate_stmt(cx, s, f);
@@ -5177,8 +5199,12 @@ static void dominate_list(DomCtx *cx, Node *s, Flow *f) {
 static void dominate_cond(DomCtx *cx, Node *e, Flow *f) {
     if (!e)
         return;
-    if (!f->dead)
+    if (!f->dead) {
         dominate_expr(cx, e, &f->c);
+        // The expansion may splice a break or continue.
+        if (has_macro_call(e))
+            flow_forget_frames(cx);
+    }
     dominate_visit(cx, e);
 }
 
@@ -5198,16 +5224,10 @@ static void dominate_jump(DomCtx *cx, Node *s, Flow *f) {
         if (cx->cleanup_depth)
             flow_kill_mem(cx, f);
         Flow *acc = dominate_target(cx, node_ctl(s)->unique_label);
-        if (acc) {
+        if (acc)
             flow_meet(acc, f);
-        } else {
-            // A target outside this walk: tell every frame nothing is known.
-            Flow none = {0};
-            for (DomFrame *fr = cx->frames; fr; fr = fr->up) {
-                flow_meet(&fr->brk_acc, &none);
-                flow_meet(&fr->cont_acc, &none);
-            }
-        }
+        else
+            flow_forget_frames(cx);
     }
     flow_die(f);
 }

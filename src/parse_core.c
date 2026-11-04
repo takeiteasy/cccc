@@ -1077,6 +1077,7 @@ bool node_has_side_effects(Node *n) {
         case ND_ASSIGN:
         case ND_FUNCALL:
         case ND_BLOCK_CALL:
+        case ND_MACRO_CALL: // not yet expanded; may run anything
         case ND_CAS:
         case ND_EXCH:
         case ND_ALOAD:
