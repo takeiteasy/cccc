@@ -4410,26 +4410,65 @@ static bool fn_has_entry_hazard(Node *n, void *ud) {
            !is_setjmp_call(n);
 }
 
-// A label or `case` inside the body is a way in other than the top. The
-// `case` of a switch inside the body is not.
-// TODO: any label disqualifies the loop; accepting labels nothing jumps to
-// needs a goto-target scan (#1930).
-static bool body_has_side_entry(Node *n, int switches) {
+// The labels a `goto` or an asm goto names. Any other label cannot be entered,
+// unless `any`: a macro call not yet expanded may splice in a goto to any
+// label.
+typedef struct {
+    const char **v;
+    int          n, cap;
+    bool         any;
+} NameSet;
+
+static void name_set_add(NameSet *s, const char *name) {
+    if (!name)
+        return;
+    if (s->n == s->cap) {
+        s->cap = s->cap ? s->cap * 2 : 8;
+        s->v   = realloc(s->v, s->cap * sizeof(char *));
+    }
+    s->v[s->n++] = name;
+}
+
+static bool name_set_has(const NameSet *s, const char *name) {
+    if (!name || s->any)
+        return true;
+    for (int i = 0; i < s->n; i++)
+        if (!strcmp(s->v[i], name))
+            return true;
+    return false;
+}
+
+static bool note_goto_target(Node *n, void *ud) {
+    if (n->kind == ND_MACRO_CALL)
+        ((NameSet *)ud)->any = true;
+    else if (n->kind == ND_GOTO)
+        name_set_add(ud, node_ctl(n)->label);
+    else if (n->kind == ND_ASM)
+        for (Node *g = node_asm(n)->asm_labels; g; g = g->next)
+            name_set_add(ud, node_ctl(g)->label);
+    return true;
+}
+
+// A targeted label or a `case` inside the body is a way in other than the
+// top. The `case` of a switch inside the body is not.
+static bool body_has_side_entry(Node *n, int switches, const NameSet *targets) {
     for (; n; n = n->next) {
-        if (n->kind == ND_LABEL || (n->kind == ND_CASE && !switches))
+        if ((n->kind == ND_LABEL &&
+             name_set_has(targets, node_ctl(n)->label)) ||
+            (n->kind == ND_CASE && !switches))
             return true;
         int inner = switches + (n->kind == ND_SWITCH);
-        if (body_has_side_entry(n->lhs, switches) ||
-            body_has_side_entry(n->rhs, switches) ||
-            body_has_side_entry(node_ctl(n)->cond, switches) ||
-            body_has_side_entry(node_ctl(n)->then, inner) ||
-            body_has_side_entry(node_ctl(n)->els, switches) ||
-            body_has_side_entry(node_ctl(n)->init, switches) ||
-            body_has_side_entry(node_ctl(n)->inc, switches) ||
-            body_has_side_entry(n->body, switches))
+        if (body_has_side_entry(n->lhs, switches, targets) ||
+            body_has_side_entry(n->rhs, switches, targets) ||
+            body_has_side_entry(node_ctl(n)->cond, switches, targets) ||
+            body_has_side_entry(node_ctl(n)->then, inner, targets) ||
+            body_has_side_entry(node_ctl(n)->els, switches, targets) ||
+            body_has_side_entry(node_ctl(n)->init, switches, targets) ||
+            body_has_side_entry(node_ctl(n)->inc, switches, targets) ||
+            body_has_side_entry(n->body, switches, targets))
             return true;
         for (Node *a = n->args; a; a = a->next)
-            if (body_has_side_entry(a, switches))
+            if (body_has_side_entry(a, switches, targets))
                 return true;
     }
     return false;
@@ -4475,7 +4514,7 @@ static bool note_var_write(Node *n, void *ud) {
 // Recognises `for (i = L; i < N; i += c)` over a local `i` with constant L, N
 // and c > 0, whose body never writes `i`; fills `out` with i's range there.
 static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
-                        LoopRange *out) {
+                        const NameSet *targets, LoopRange *out) {
     Node *init = node_ctl(loop)->init;
     Node *cond = node_ctl(loop)->cond;
     if (!init || !cond || !node_ctl(loop)->then)
@@ -4537,7 +4576,7 @@ static bool loop_header(VirtualMachine *vm, Node *loop, const LoopRange *up,
     if (__builtin_add_overflow(hi, inc.step, &next) || next > tmax)
         return false;
 
-    if (body_has_side_entry(node_ctl(loop)->then, 0))
+    if (body_has_side_entry(node_ctl(loop)->then, 0, targets))
         return false;
 
     *out = (LoopRange){v, lo, hi, up};
@@ -4550,7 +4589,7 @@ typedef struct {
 } HitList;
 
 static void collect_loop_hits(VirtualMachine *vm, Node *n, const LoopRange *r,
-                              HitList *hits) {
+                              const NameSet *targets, HitList *hits) {
     for (; n; n = n->next) {
         if (r && n->kind == ND_DEREF && node_chk(n)->bounds_lo) {
             CheckedBase base = find_checked_deref_base(n->lhs);
@@ -4565,18 +4604,18 @@ static void collect_loop_hits(VirtualMachine *vm, Node *n, const LoopRange *r,
         }
         const LoopRange *body_r = r;
         LoopRange        own;
-        if (n->kind == ND_FOR && loop_header(vm, n, r, &own))
+        if (n->kind == ND_FOR && loop_header(vm, n, r, targets, &own))
             body_r = &own;
-        collect_loop_hits(vm, n->lhs, r, hits);
-        collect_loop_hits(vm, n->rhs, r, hits);
-        collect_loop_hits(vm, node_ctl(n)->cond, r, hits);
-        collect_loop_hits(vm, node_ctl(n)->then, body_r, hits);
-        collect_loop_hits(vm, node_ctl(n)->els, r, hits);
-        collect_loop_hits(vm, node_ctl(n)->init, r, hits);
-        collect_loop_hits(vm, node_ctl(n)->inc, r, hits);
-        collect_loop_hits(vm, n->body, r, hits);
+        collect_loop_hits(vm, n->lhs, r, targets, hits);
+        collect_loop_hits(vm, n->rhs, r, targets, hits);
+        collect_loop_hits(vm, node_ctl(n)->cond, r, targets, hits);
+        collect_loop_hits(vm, node_ctl(n)->then, body_r, targets, hits);
+        collect_loop_hits(vm, node_ctl(n)->els, r, targets, hits);
+        collect_loop_hits(vm, node_ctl(n)->init, r, targets, hits);
+        collect_loop_hits(vm, node_ctl(n)->inc, r, targets, hits);
+        collect_loop_hits(vm, n->body, r, targets, hits);
         for (Node *a = n->args; a; a = a->next)
-            collect_loop_hits(vm, a, r, hits);
+            collect_loop_hits(vm, a, r, targets, hits);
     }
 }
 
@@ -4598,8 +4637,10 @@ static void elide_checked_loop_bounds(VirtualMachine *vm, Obj *fn) {
     if (!(vm->flags & CCCC_CHECKED_BOUNDS) || !obj_fn(fn)->body ||
         !walk_nodes(obj_fn(fn)->body, fn_has_entry_hazard, NULL))
         return;
+    NameSet targets = {0};
+    walk_nodes(obj_fn(fn)->body, note_goto_target, &targets);
     HitList hits = {0};
-    collect_loop_hits(vm, obj_fn(fn)->body, NULL, &hits);
+    collect_loop_hits(vm, obj_fn(fn)->body, NULL, &targets, &hits);
     // Decide every access before changing any: a row access is only
     // recognised as checked while the row it indexes still has its bounds.
     for (int i = 0; i < hits.n; i++) {
@@ -4609,6 +4650,7 @@ static void elide_checked_loop_bounds(VirtualMachine *vm, Obj *fn) {
             checked_drop_bounds(vm, mirror);
     }
     free(hits.v);
+    free(targets.v);
 }
 
 // A second range check on an address an identical earlier check already
@@ -4619,9 +4661,13 @@ static void elide_checked_loop_bounds(VirtualMachine *vm, Obj *fn) {
 
 // The variables of one function whose own storage an `&` reaches.
 // Obj.addr_taken is too coarse here: it also marks the pointer in `&p[i]`.
+struct DomFrame;
 typedef struct {
-    Obj **addressed;
-    int   n, cap;
+    Obj            **addressed;
+    int              n, cap;
+    struct DomFrame *frames;        // enclosing loops and switches
+    int              cleanup_depth; // enclosing blocks that run handlers
+    const NameSet   *targets;
 } DomCtx;
 
 // Memory a store or call could change, as opposed to a plain local.
@@ -4866,6 +4912,14 @@ static bool entry_killed(const CheckEntry *e, const WriteSet *ws) {
     return false;
 }
 
+static void cache_kill(CheckCache *c, const WriteSet *ws) {
+    for (int i = 0; i < c->n;)
+        if (entry_killed(&c->v[i], ws))
+            c->v[i] = c->v[--c->n];
+        else
+            i++;
+}
+
 // A deref carrying a plain range check whose key can be compared.
 static bool check_candidate(const DomCtx *cx, Node *d, bool *reads_mem) {
     return d->kind == ND_DEREF && !d->checked_range_proven &&
@@ -4933,11 +4987,7 @@ static void cache_add(CheckCache *c, Node *d, bool reads_mem) {
 static void dominate_expr(const DomCtx *cx, Node *e, CheckCache *c) {
     WriteSet ws = {.cx = cx};
     note_writes(e, &ws);
-    for (int i = 0; i < c->n;)
-        if (entry_killed(&c->v[i], &ws))
-            c->v[i] = c->v[--c->n];
-        else
-            i++;
+    cache_kill(c, &ws);
     if (!ws.all) {
         DerefSites sites = {0};
         gather_derefs(cx, e, true, &sites);
@@ -4986,9 +5036,122 @@ static bool check_is_stmt(Node *n) {
     }
 }
 
-static void dominate_visit(const DomCtx *cx, Node *n);
+// The checks available at a program point; `dead` when no path reaches it, so
+// that it is the identity of a join.
+typedef struct {
+    CheckCache c;
+    bool       dead;
+} Flow;
 
-static void dominate_children(const DomCtx *cx, Node *n) {
+// The state at the jumps to the `break`/`continue` labels of a loop, or at
+// the `break`s of a switch (whose `entry` is the state at its `case` jumps).
+typedef struct DomFrame {
+    struct DomFrame *up;
+    const char      *brk, *cont;
+    Flow             brk_acc, cont_acc, entry;
+    bool             is_switch;
+} DomFrame;
+
+static Flow flow_copy(const Flow *f) {
+    Flow o = {.dead = f->dead};
+    if (f->c.n) {
+        o.c.v = malloc(f->c.n * sizeof(CheckEntry));
+        memcpy(o.c.v, f->c.v, f->c.n * sizeof(CheckEntry));
+        o.c.n = o.c.cap = f->c.n;
+    }
+    return o;
+}
+
+static void flow_free(Flow *f) {
+    free(f->c.v);
+    *f = (Flow){0};
+}
+
+static void flow_die(Flow *f) {
+    f->dead = true;
+    f->c.n  = 0;
+}
+
+static bool cache_covers(const CheckCache *c, Node *d) {
+    for (int i = 0; i < c->n; i++)
+        if (check_covers(&c->v[i], d))
+            return true;
+    return false;
+}
+
+// Joins two paths: what both have checked. A dead side adds nothing.
+static void flow_meet(Flow *into, const Flow *other) {
+    if (other->dead)
+        return;
+    if (into->dead) {
+        free(into->c.v);
+        *into = flow_copy(other);
+        return;
+    }
+    CheckCache out = {0};
+    for (int i = 0; i < into->c.n; i++)
+        if (cache_covers(&other->c, into->c.v[i].deref))
+            cache_add(&out, into->c.v[i].deref, into->c.v[i].reads_mem);
+    for (int i = 0; i < other->c.n; i++)
+        if (cache_covers(&into->c, other->c.v[i].deref) &&
+            !cache_covers(&out, other->c.v[i].deref))
+            cache_add(&out, other->c.v[i].deref, other->c.v[i].reads_mem);
+    free(into->c.v);
+    into->c = out;
+}
+
+static void flow_kill_mem(const DomCtx *cx, Flow *f) {
+    WriteSet ws = {.cx = cx, .mem = true};
+    cache_kill(&f->c, &ws);
+}
+
+// What a statement subtree may change; a node kind it does not know sets `all`.
+// A loop rescans its own subtree, so nested loops cost depth x size.
+static void note_stmt_writes(Node *s, WriteSet *ws) {
+    for (; s && !ws->all; s = s->next) {
+        switch (s->kind) {
+            case ND_NULL_EXPR:
+            case ND_GOTO:
+                break;
+            case ND_EXPR_STMT:
+            case ND_RETURN:
+                note_writes(s->lhs, ws);
+                break;
+            case ND_BLOCK:
+                if (node_ctl(s)->cleanup_vars)
+                    ws->mem = true;
+                note_stmt_writes(s->body, ws);
+                break;
+            case ND_IF:
+                note_writes(node_ctl(s)->cond, ws);
+                note_stmt_writes(node_ctl(s)->then, ws);
+                note_stmt_writes(node_ctl(s)->els, ws);
+                break;
+            case ND_FOR:
+                note_stmt_writes(node_ctl(s)->init, ws);
+                note_writes(node_ctl(s)->cond, ws);
+                note_writes(node_ctl(s)->inc, ws);
+                note_stmt_writes(node_ctl(s)->then, ws);
+                break;
+            case ND_DO:
+            case ND_SWITCH:
+                note_writes(node_ctl(s)->cond, ws);
+                note_stmt_writes(node_ctl(s)->then, ws);
+                break;
+            case ND_CASE:
+            case ND_LABEL:
+                note_stmt_writes(s->lhs, ws);
+                break;
+            default:
+                ws->all = true;
+                return;
+        }
+    }
+}
+
+static void dominate_visit(DomCtx *cx, Node *n);
+
+static void dominate_children(DomCtx *cx, Node *n) {
     dominate_visit(cx, n->lhs);
     dominate_visit(cx, n->rhs);
     dominate_visit(cx, node_ctl(n)->cond);
@@ -5001,37 +5164,209 @@ static void dominate_children(const DomCtx *cx, Node *n) {
         dominate_visit(cx, a);
 }
 
-// One statement of a list sharing `c`. A declaration group is not a scope, so
-// its initialisers belong to the enclosing list. Anything with control flow
-// of its own, and every jump target, ends the straight-line run.
-static void dominate_stmt(const DomCtx *cx, Node *s, CheckCache *c) {
-    if (s->kind == ND_BLOCK && s->is_decl_group) {
-        for (Node *t = s->body; t; t = t->next)
-            dominate_stmt(cx, t, c);
-    } else if (s->kind == ND_EXPR_STMT || s->kind == ND_RETURN) {
-        if (s->lhs)
-            dominate_expr(cx, s->lhs, c);
-        dominate_children(cx, s);
-        if (s->kind == ND_RETURN)
-            c->n = 0;
+static void dominate_stmt(DomCtx *cx, Node *s, Flow *f);
+
+static void dominate_list(DomCtx *cx, Node *s, Flow *f) {
+    for (; s; s = s->next)
+        dominate_stmt(cx, s, f);
+}
+
+// An expression that controls a statement: its checks, then the statement
+// lists nested in it, which start from nothing.
+static void dominate_cond(DomCtx *cx, Node *e, Flow *f) {
+    if (!e)
+        return;
+    if (!f->dead)
+        dominate_expr(cx, e, &f->c);
+    dominate_visit(cx, e);
+}
+
+// The accumulator of the `break`/`continue` target `label`, or NULL.
+static Flow *dominate_target(DomCtx *cx, const char *label) {
+    for (DomFrame *fr = cx->frames; label && fr; fr = fr->up) {
+        if (fr->brk && !strcmp(fr->brk, label))
+            return &fr->brk_acc;
+        if (fr->cont && !strcmp(fr->cont, label))
+            return &fr->cont_acc;
+    }
+    return NULL;
+}
+
+static void dominate_jump(DomCtx *cx, Node *s, Flow *f) {
+    if (!node_ctl(s)->label && !f->dead) {
+        if (cx->cleanup_depth)
+            flow_kill_mem(cx, f);
+        Flow *acc = dominate_target(cx, node_ctl(s)->unique_label);
+        if (acc) {
+            flow_meet(acc, f);
+        } else {
+            // A target outside this walk: tell every frame nothing is known.
+            Flow none = {0};
+            for (DomFrame *fr = cx->frames; fr; fr = fr->up) {
+                flow_meet(&fr->brk_acc, &none);
+                flow_meet(&fr->cont_acc, &none);
+            }
+        }
+    }
+    flow_die(f);
+}
+
+static void dominate_loop(DomCtx *cx, Node *s, Flow *f) {
+    bool  is_do = s->kind == ND_DO;
+    Node *cond  = node_ctl(s)->cond;
+    Node *inc   = node_ctl(s)->inc;
+    Node *body  = node_ctl(s)->then;
+    if (!is_do)
+        dominate_list(cx, node_ctl(s)->init, f);
+
+    // A checked made inside the loop is not available at its head, so the head
+    // keeps only what nothing in the loop can change, and nothing at all when
+    // the body can be entered other than from the top. `do { } while (0)` has
+    // no back edge.
+    bool once = is_do && cond && cond->kind == ND_NUM && cond->val == 0;
+    if (!once) {
+        WriteSet ws = {.cx = cx};
+        note_writes(cond, &ws);
+        note_writes(inc, &ws);
+        note_stmt_writes(body, &ws);
+        cache_kill(&f->c, &ws);
+        free(ws.vars);
+        if (body_has_side_entry(body, 0, cx->targets) ||
+            body_has_side_entry(cond, 0, cx->targets) ||
+            body_has_side_entry(inc, 0, cx->targets))
+            f->c.n = 0;
+    }
+
+    DomFrame fr = {.up       = cx->frames,
+                   .brk      = node_ctl(s)->brk_label,
+                   .cont     = node_ctl(s)->cont_label,
+                   .brk_acc  = {.dead = true},
+                   .cont_acc = {.dead = true}};
+    cx->frames  = &fr;
+    Flow exit;
+    if (is_do) {
+        dominate_list(cx, body, f);
+        flow_meet(f, &fr.cont_acc);
+        dominate_cond(cx, cond, f);
+        exit = flow_copy(f);
     } else {
-        c->n = 0;
-        dominate_children(cx, s);
+        dominate_cond(cx, cond, f);
+        exit = flow_copy(f);
+        if (!cond)
+            flow_die(&exit);
+        dominate_list(cx, body, f);
+        flow_meet(f, &fr.cont_acc);
+        dominate_cond(cx, inc, f);
+    }
+    flow_meet(&exit, &fr.brk_acc);
+    cx->frames = fr.up;
+    flow_free(&fr.brk_acc);
+    flow_free(&fr.cont_acc);
+    flow_free(f);
+    *f = exit;
+}
+
+static void dominate_switch(DomCtx *cx, Node *s, Flow *f) {
+    dominate_cond(cx, node_ctl(s)->cond, f);
+    DomFrame fr = {.up        = cx->frames,
+                   .brk       = node_ctl(s)->brk_label,
+                   .brk_acc   = {.dead = true},
+                   .cont_acc  = {.dead = true},
+                   .entry     = flow_copy(f),
+                   .is_switch = true};
+    cx->frames  = &fr;
+    flow_die(f);
+    dominate_list(cx, node_ctl(s)->then, f);
+    flow_meet(f, &fr.brk_acc);
+    if (!node_ctl(s)->default_case)
+        flow_meet(f, &fr.entry);
+    cx->frames = fr.up;
+    flow_free(&fr.brk_acc);
+    flow_free(&fr.entry);
+}
+
+// One statement. Control flow is followed through `if`, loops, `switch` and
+// the jumps out of them; a label something jumps to, and any statement kind
+// not handled here, restarts from nothing.
+static void dominate_stmt(DomCtx *cx, Node *s, Flow *f) {
+    switch (s->kind) {
+        case ND_NULL_EXPR:
+            return;
+        case ND_BLOCK: {
+            // A declaration group is not a scope: its initialisers belong to
+            // the enclosing list.
+            bool cleanup       = !s->is_decl_group && node_ctl(s)->cleanup_vars;
+            cx->cleanup_depth += cleanup;
+            dominate_list(cx, s->body, f);
+            cx->cleanup_depth -= cleanup;
+            if (cleanup)
+                flow_kill_mem(cx, f);
+            return;
+        }
+        case ND_EXPR_STMT:
+            dominate_cond(cx, s->lhs, f);
+            return;
+        case ND_RETURN:
+            dominate_cond(cx, s->lhs, f);
+            flow_die(f);
+            return;
+        case ND_IF: {
+            dominate_cond(cx, node_ctl(s)->cond, f);
+            Flow other = flow_copy(f);
+            dominate_list(cx, node_ctl(s)->then, f);
+            dominate_list(cx, node_ctl(s)->els, &other);
+            flow_meet(f, &other);
+            flow_free(&other);
+            return;
+        }
+        case ND_FOR:
+        case ND_DO:
+            dominate_loop(cx, s, f);
+            return;
+        case ND_SWITCH:
+            dominate_switch(cx, s, f);
+            return;
+        case ND_CASE: {
+            DomFrame *sw = cx->frames;
+            while (sw && !sw->is_switch)
+                sw = sw->up;
+            if (sw) {
+                flow_meet(f, &sw->entry);
+            } else {
+                f->dead = false;
+                f->c.n  = 0;
+            }
+            dominate_list(cx, s->lhs, f);
+            return;
+        }
+        case ND_LABEL:
+            if (name_set_has(cx->targets, node_ctl(s)->label)) {
+                f->dead = false;
+                f->c.n  = 0;
+            }
+            dominate_list(cx, s->lhs, f);
+            return;
+        case ND_GOTO:
+            dominate_jump(cx, s, f);
+            return;
+        case ND_GOTO_EXPR:
+            dominate_cond(cx, s->lhs, f);
+            flow_die(f);
+            return;
+        default:
+            f->c.n = 0;
+            dominate_children(cx, s);
+            return;
     }
 }
 
-// Finds the statement lists below `n`, each analysed from an empty cache.
-static void dominate_visit(const DomCtx *cx, Node *n) {
+// Finds the statements below `n`, each analysed from an empty state.
+static void dominate_visit(DomCtx *cx, Node *n) {
     for (; n; n = n->next) {
-        if (n->kind == ND_BLOCK && !n->is_decl_group) {
-            CheckCache c = {0};
-            for (Node *s = n->body; s; s = s->next)
-                dominate_stmt(cx, s, &c);
-            free(c.v);
-        } else if (check_is_stmt(n)) {
-            CheckCache c = {0};
-            dominate_stmt(cx, n, &c);
-            free(c.v);
+        if (check_is_stmt(n)) {
+            Flow f = {0};
+            dominate_stmt(cx, n, &f);
+            flow_free(&f);
         } else {
             dominate_children(cx, n);
         }
@@ -5063,12 +5398,13 @@ static void elide_checked_dominated_bounds(VirtualMachine *vm, Obj *fn) {
         !walk_nodes(obj_fn(fn)->body, fn_has_entry_hazard, NULL))
         return;
     walk_nodes(obj_fn(fn)->body, mark_rmw_mirror, NULL);
-    // TODO: the cache restarts at every `if`, loop and label; carrying it
-    // across joins needs a dominator tree over the function (#1931).
-    DomCtx cx = {0};
+    NameSet targets = {0};
+    walk_nodes(obj_fn(fn)->body, note_goto_target, &targets);
+    DomCtx cx = {.targets = &targets};
     walk_nodes(obj_fn(fn)->body, note_addressed, &cx);
     dominate_visit(&cx, obj_fn(fn)->body);
     free(cx.addressed);
+    free(targets.v);
 }
 
 // The tail passes of every function body, in order: propagation, the

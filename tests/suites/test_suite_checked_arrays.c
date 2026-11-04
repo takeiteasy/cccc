@@ -1015,3 +1015,67 @@ void test_repeated_access_values(void) {
     AssertEq(dom_through_memory(&d, 0), 8);
     AssertEq(a[0], 7);
 }
+
+// ---------------------------------------------------------------------
+// A check carried across joins, loops and switches.
+// ---------------------------------------------------------------------
+
+static int dom_arms(int *[[cccc::array, cccc::count(n)]] p, int n, int i,
+                    int c) {
+    int x = p[i];
+    if (c)
+        x += p[i];
+    else
+        n = 4;
+    return x + p[i];
+}
+
+static int dom_loop_shrinks(int *[[cccc::array, cccc::count(n)]] p, int n,
+                            int i, int k) {
+    int s = p[i];
+    for (int j = 0; j < k; j++) {
+        s += p[i];
+        n  = 4;
+    }
+    return s;
+}
+
+static int dom_break_continue(int *[[cccc::array, cccc::count(n)]] p, int n,
+                              int i, int k) {
+    int s = 0;
+    for (int j = 0; j < k; j++) {
+        if (j == 1)
+            continue;
+        s += p[i];
+        if (j == 2)
+            break;
+    }
+    return s + p[i];
+}
+
+static int dom_fallthrough(int *[[cccc::array, cccc::count(n)]] p, int n, int i,
+                           int c) {
+    int x = 0;
+    switch (c) {
+        case 1:
+            x = p[i];
+        case 2:
+            x += p[i];
+            break;
+        default:
+            x = -1;
+    }
+    return x + p[i];
+}
+
+[[cccc::test]]
+void test_repeated_access_across_control_flow(void) {
+    int a[4] = {1, 2, 3, 4};
+    AssertEq(dom_arms(a, 4, 1, 1), 6);
+    AssertEq(dom_arms(a, 4, 1, 0), 4);
+    AssertEq(dom_loop_shrinks(a, 4, 2, 3), 12);
+    AssertEq(dom_break_continue(a, 4, 0, 5), 3);
+    AssertEq(dom_fallthrough(a, 4, 3, 1), 12);
+    AssertEq(dom_fallthrough(a, 4, 3, 2), 8);
+    AssertEq(dom_fallthrough(a, 4, 3, 0), 3);
+}

@@ -120,7 +120,7 @@ The loop must be `for (i = L; i < N; i++)` (or `<=`, `++i`, `i += c`) with const
 | Bound or offset (`a[i + 1]`) reaching past the extent | Yes |
 | Runtime bound (`i < n`), or a pointer or array-parameter base | Yes |
 | `i` written, address-taken, `static`, global, `volatile` or narrower than `int` in the body | Yes |
-| Label, `case` or `setjmp` in the loop, or label addresses in the function | Yes |
+| A label some `goto` names, a `case` or `setjmp` in the loop, or label addresses in the function | Yes |
 | The loop's own condition and increment expressions | Yes |
 
 | Limit | Reason |
@@ -130,12 +130,14 @@ The loop must be `for (i = L; i < N; i++)` (or `<=`, `++i`, `i += c`) with const
 
 ### Repeated accesses
 
-An access runs without a second range check when an earlier statement in the same straight-line run made the identical check and nothing since could change what it reads.
+An access runs without a second range check when the identical check ran on every path to it and nothing since could change what it reads.
 
 ```c
 int x = p[i];        // checked
 p[i] = x + 1;        // not checked again
 p[i] += 3;           // one check for the whole read-modify-write
+if (c)
+    x += p[i];       // not checked again, in either arm
 n = 4;               // writes a bound: the next p[i] is checked again
 ```
 
@@ -144,7 +146,15 @@ n = 4;               // writes a bound: the next p[i] is checked again
 | Nothing, or writes to unrelated variables | No |
 | A write to the pointer, the index or a variable in the bound | Yes |
 | A store or call, when the bound or index reads memory (`b->len`, a global) | Yes |
-| An `if`, loop, `switch`, `case` or label | Yes |
+| An `if` or `switch` whose every path made the check | No |
+| An `if` or `switch` where one path did not, or wrote what it reads | Yes |
+| A loop that writes nothing the check reads | No, in the body and condition |
+| A loop that writes the pointer, the index or a bound anywhere in its body, condition or increment | Yes, in the loop and after it |
+| A check made inside a loop body, after the loop | Yes (the body may not have run) |
+| A `break` or `continue` that left after a write | Yes, at the target |
+| A label some `goto` names, or a `case` entered by the `switch` jump | Yes, unless every path in made the check |
+| A label nothing jumps to | No |
+| The end of a block with a `cleanup` variable, when the bound reads memory | Yes |
 | A side effect in the right-hand side of `p[i] += ...` | Yes |
 
 The terminator guard of an `_Nt_checked` store is never skipped.
@@ -247,4 +257,4 @@ A plain array inside a [checked region](safety-checked-regions.md#what-is-banned
 [^bytes]: A `byte_count(n)` that is not a multiple of `sizeof(T)` widens by exactly `sizeof(T)` bytes, so the slot is misaligned and no element index reaches it; the guard has nothing to protect there.
 [^members]: A `long double` slot is 16 bytes but is stored as an 8-byte double. Internals: [safety-impl.md](safety-impl.md#terminator-guard).
 
-[^loops]: Only a variable no call can write qualifies: a local that is not `static`, `volatile`, atomic, captured by a nested function or address-taken. A label or `case` inside the body is a way in other than the top, and `setjmp` or label addresses let control re-enter the body after the loop, so none of them is allowed.
+[^loops]: Only a variable no call can write qualifies: a local that is not `static`, `volatile`, atomic, captured by a nested function or address-taken. A `goto`-targeted label or a `case` inside the body is a way in other than the top, and `setjmp` or label addresses let control re-enter the body after the loop, so none of them is allowed. A label no `goto` names is harmless.
