@@ -245,14 +245,8 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
     Type *k1 = a < b ? a : b; // symmetric relation -> order-normalized key
     Type *k2 = a < b ? b : a;
 
-    for (int i = 0; i < g_stp_len; i++)
-        if (g_stp_a[i] == k1 && g_stp_b[i] == k2) {
-            g_sto_cycle_hits++;
-            if (i < g_stm_min_assume)
-                g_stm_min_assume = i; // record which ancestor we leaned on
-            return true;              // co-inductive: assumed equal higher up
-        }
-
+    // A memoized pair was never pushed, so the memo is checked first: it is a
+    // hash probe, the stack is a scan.
     if (g_same_type_memo_on) {
         int m = memo_get(k1, k2);
         if (m) {
@@ -260,6 +254,14 @@ static bool same_type_or_origin_guarded(Type *a, Type *b) {
             return m == 2;
         }
     }
+
+    for (int i = 0; i < g_stp_len; i++)
+        if (g_stp_a[i] == k1 && g_stp_b[i] == k2) {
+            g_sto_cycle_hits++;
+            if (i < g_stm_min_assume)
+                g_stm_min_assume = i; // record which ancestor we leaned on
+            return true;              // co-inductive: assumed equal higher up
+        }
 
     int my_depth = g_stp_len;
     same_type_pair_push(k1, k2);
