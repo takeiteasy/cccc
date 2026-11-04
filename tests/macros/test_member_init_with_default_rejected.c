@@ -4,7 +4,7 @@
 #include <cccc/derive.h>
 
 @ctor struct S {
-    int a @default(2) = 1;
+    int a @ default(2) = 1;
 };
 
 int main(void) {

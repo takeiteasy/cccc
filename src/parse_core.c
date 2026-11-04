@@ -419,9 +419,9 @@ static bool attrs_have(CustomAttrUse *list, const char *name) {
 
 // Whether `owner` is `target` or an anonymous struct/union flattened into it.
 static bool owner_reaches(Type *target, Type *owner) {
-    if (target == owner || (type_agg(target)->members &&
-                            type_agg(target)->members ==
-                                type_agg(owner)->members))
+    if (target == owner ||
+        (type_agg(target)->members &&
+         type_agg(target)->members == type_agg(owner)->members))
         return true;
     if (target->kind != TY_STRUCT && target->kind != TY_UNION)
         return false;
@@ -440,13 +440,12 @@ void reject_member_initializers(VirtualMachine *vm, Type *target,
                                 CustomAttrUse *decl_attrs) {
     if (vm->compiler.in_macro_mode || vm->compiler.draining_member_attrs)
         return;
-    bool has_ctor = target && (attrs_have(decl_attrs, "ctor") ||
-                               attrs_have(type_attrs(target)->custom_attrs,
-                                          "ctor"));
+    bool has_ctor =
+        target && (attrs_have(decl_attrs, "ctor") ||
+                   attrs_have(type_attrs(target)->custom_attrs, "ctor"));
     for (PendingMemberAttrs *p = vm->compiler.pending_member_attrs; p;
          p                     = p->next)
-        if (p->mem->init_tok &&
-            !(has_ctor && owner_reaches(target, p->owner)))
+        if (p->mem->init_tok && !(has_ctor && owner_reaches(target, p->owner)))
             error_member_init_needs_ctor(vm, p->mem->init_tok, p->owner);
 }
 

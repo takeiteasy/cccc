@@ -76,9 +76,9 @@ static int initial_retries(void) {
 }
 
 @ctor struct Init {
-    int   port = DEFAULT_PORT;
-    int   retries = initial_retries();
-    char *label = "untitled";
+    int   port      = DEFAULT_PORT;
+    int   retries   = initial_retries();
+    char *label     = "untitled";
     int   flags : 3 = 2;
     struct {
         int y = -1;
@@ -96,7 +96,8 @@ static int initial_retries(void) {
     AssertEq(i.n, 5);
 }
 
-[[cccc::test]] void test_member_initializers_leave_c_initialization_alone(void) {
+[[cccc::test]] void
+test_member_initializers_leave_c_initialization_alone(void) {
     struct Init z = {0};
     AssertEq(z.port, 0);
     AssertEq(z.y, 0);
