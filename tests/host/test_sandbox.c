@@ -263,7 +263,16 @@ int main(void) {
 
     // A compiler outside the system directories reads its own tree.
     const char *other_cc = "/opt/homebrew/opt/llvm/bin/clang";
-    if (access(other_cc, X_OK) == 0) {
+    char        probe_out[PATH_MAX];
+    snprintf(probe_out, sizeof probe_out, "%s/other_cc.out", root);
+    // A Homebrew clang whose SDK is missing cannot link even outside the
+    // sandbox.
+    if (access(other_cc, X_OK) == 0 && run("%s -o %s %s/ok.c >/dev/null 2>&1",
+                                           other_cc, probe_out, indir) != 0)
+        printf("SKIP: sandbox checks with %s (it cannot build outside the "
+               "sandbox)\n",
+               other_cc);
+    else if (access(other_cc, X_OK) == 0) {
         snprintf(built, sizeof built, "%s/bo2/bin/app", root);
         if (run("%s --sandbox --build-cc=%s --build-out-dir=%s/bo2 --build %s "
                 ">/dev/null 2>&1",
