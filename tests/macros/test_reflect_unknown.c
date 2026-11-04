@@ -1,10 +1,10 @@
 // EXPECT_COMPILE_ERROR
-// Test $identifier reflect operator: $UnknownName must produce a compile-time
+// Test ^^identifier reflect operator: ^^UnknownName must produce a compile-time
 // error.
 
 [[cccc::comptime]]
 Node *bad_reflect(void) {
-    Type *ty = $UnknownName;
+    Type *ty = ^^UnknownName;
     return MakeIntLiteral(0);
 }
 

@@ -32,12 +32,56 @@ static void check_unary_operand(VirtualMachine *vm, const char *sym,
         error_tok(vm, tok, "invalid operand to unary %s", sym);
 }
 
+// `^^name` is two adjacent `^` tokens followed by an identifier.
+static bool is_reflect_op(Token *tok) {
+    return equal(tok, "^") && equal(tok->next, "^") && !tok->next->has_space &&
+           tok->next->next->kind == TK_IDENT;
+}
+
+// ^^name: a typedef or tag becomes a `Type *`, a variable or function an
+// `Obj *`, both resolved at parse time to a pointer constant.
+static Node *reflect_name(VirtualMachine *vm, Token **rest, Token *tok) {
+    Token *name = tok->next->next;
+
+    // Look up the handle typedefs from reflection.h; fall back to void *.
+    Token type_name = {.kind = TK_IDENT, .loc = "Type", .len = 4};
+    Token obj_name  = {.kind = TK_IDENT, .loc = "Obj", .len = 3};
+
+    Type *found_ty  = find_typedef(vm, name);
+    if (!found_ty)
+        found_ty = find_tag(vm, name);
+    if (found_ty) {
+        cccc_comptime_handle_add(vm, found_ty, CC_H_TYPE);
+        Node *node = new_ulong(vm, (uint64_t)(uintptr_t)found_ty, tok);
+        Type *meta = find_typedef(vm, &type_name);
+        node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+        *rest      = name->next;
+        return node;
+    }
+
+    VarScope *vs = find_var(vm, name);
+    if (vs && vs->var) {
+        cccc_comptime_handle_add(vm, vs->var, CC_H_OBJ);
+        Node *node = new_ulong(vm, (uint64_t)(uintptr_t)vs->var, tok);
+        Type *meta = find_typedef(vm, &obj_name);
+        node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
+        *rest      = name->next;
+        return node;
+    }
+
+    error_tok(vm, name, "^^%.*s: unknown name", name->len, name->loc);
+}
+
 // unary = ("+" | "-" | "*" | "&" | "!" | "~") cast
 //       | ("++" | "--") unary
 //       | "&&" ident
+//       | "^^" ident  (reflect)
 //       | "^" block-literal  (Apple blocks extension)
 //       | postfix
 Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
+    if (is_reflect_op(tok))
+        return reflect_name(vm, rest, tok);
+
     // Apple blocks: ^{ ... } or ^(params){ ... } or ^returntype(params){ ... }
     if (equal(tok, "^") && tok->next &&
         (equal(tok->next, "{") || equal(tok->next, "(") ||
@@ -4196,48 +4240,6 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return call;
     }
 
-    // $identifier: compile-time reflect operator.
-    // $TypeName → Type *, $varname/$fnname → Obj *
-    // Resolved at parse time; result is a ND_NUM constant holding the pointer.
-    if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
-        (isalpha((unsigned char)tok->loc[1]) || tok->loc[1] == '_')) {
-        Token fake = *tok;
-        fake.loc   = tok->loc + 1;
-        fake.len   = tok->len - 1;
-
-        // Helper to get Type* or Obj* as the node's C type.
-        // Look up the typedef name from reflection.h; fall back to void*.
-        Token type_fake = {.kind = TK_IDENT, .loc = "Type", .len = 4};
-        Token obj_fake  = {.kind = TK_IDENT, .loc = "Obj", .len = 3};
-
-        // 1. Typedef (e.g. typedef struct Foo Foo)
-        Type *found_ty = find_typedef(vm, &fake);
-        // 2. Struct/union/enum tag (e.g. struct Foo)
-        if (!found_ty)
-            found_ty = find_tag(vm, &fake);
-        if (found_ty) {
-            cccc_comptime_handle_add(vm, found_ty, CC_H_TYPE);
-            Node *node = new_ulong(vm, (uint64_t)(uintptr_t)found_ty, tok);
-            Type *meta = find_typedef(vm, &type_fake);
-            node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
-            *rest      = tok->next;
-            return node;
-        }
-
-        // 3. Variable or function (Obj)
-        VarScope *vs = find_var(vm, &fake);
-        if (vs && vs->var) {
-            cccc_comptime_handle_add(vm, vs->var, CC_H_OBJ);
-            Node *node = new_ulong(vm, (uint64_t)(uintptr_t)vs->var, tok);
-            Type *meta = find_typedef(vm, &obj_fake);
-            node->ty   = meta ? pointer_to(vm, meta) : pointer_to(vm, ty_void);
-            *rest      = tok->next;
-            return node;
-        }
-
-        error_tok(vm, tok, "$%.*s: unknown name", tok->len - 1, tok->loc + 1);
-    }
-
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
@@ -4260,11 +4262,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         // non-local, non-function global that isn't actually part of this
         // macro program's own (freshly nulled-and-rebuilt) global list, and
         // let it fall through to the ordinary undefined-variable path below.
-        // The $symbol reflection path (above, in this same TK_IDENT branch's
-        // sibling handling) is deliberately exempt: reaching into the runtime
-        // Obj table for its address is that path's entire purpose.
-        // Bounds-template placeholders (a parameter or member named in a
-        // checked bound) are not globals and are exempt.
+        // The ^^symbol reflection path (reflect_name()) is deliberately exempt:
+        // reaching into the runtime Obj table for its address is that path's
+        // entire purpose. Bounds-template placeholders (a parameter or member
+        // named in a checked bound) are not globals and are exempt.
         if (vm->compiler.in_macro_mode && sc && sc->var && !sc->var->is_local &&
             !sc->var->is_function && !obj_chk(sc->var)->checked_self_param_idx &&
             !obj_chk(sc->var)->checked_self_member) {

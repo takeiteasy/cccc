@@ -51,7 +51,7 @@ Node *ignored_braces_splice(Node *x) {
 
 [[cccc::comptime]]
 Node *reflect_in_quote(void) {
-    return `return sizeof($Point);
+    return `return sizeof(^^Point);
     `;
 }
 

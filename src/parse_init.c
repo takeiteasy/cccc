@@ -2012,7 +2012,7 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
 
     // If the scalar initializer expression contains a macro call, defer
     // write_gvar_data to cc_finalize_macro_gvar_inits (after cc_expand_macros).
-    // This avoids premature compile_all_macros which would break $symbol
+    // This avoids premature compile_all_macros which would break ^^symbol
     // forward-reference lookups in other comptime functions (#613).
     if (!var->is_constexpr && init->expr &&
         cc_expr_contains_macro_call(init->expr)) {

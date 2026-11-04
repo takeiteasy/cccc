@@ -88,7 +88,7 @@ pre-standard uses, or `-Werror=pedantic` to reject them.
 | `_Bool` | ✓ | |
 | `_Float16` | ~ | Storage only: declarations, `sizeof`/`_Alignof` (2), struct layout, pointers, typedefs, `_Generic` and prototypes work, and `-c=native` spells it through. [^n3] |
 | `_Complex` | ✓ | Native scalar representation with arithmetic, casts, assignment, and equality; unary `~z` is the GNU conjugate (`double _Complex w = ~z;` is `conj(z)`) |
-| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type. Tickets [#278](https://todo.sr.ht/~takeiteasy/cccc/278) / [#279](https://todo.sr.ht/~takeiteasy/cccc/279) closed WONT_FIX |
+| `_Imaginary` | ~ | Accepted as compatibility spelling for the corresponding complex type |
 | Mixed declarations and statements | ✓ | |
 | Variable declaration in `for` initialiser | ✓ | |
 | Variable-length arrays (VLA) | ✓ | Allocated via VM heap (block scope only; a variably modified type at file scope is a compile error, matching C11 6.7.6.2p4/6.9.2p3). [^n4] |
@@ -226,7 +226,7 @@ groups from that ticket.
 | `__declspec(naked)` | ✗ | No-op in the VM — pending |
 | `__declspec(noalias)` / `noinline` / `inline` | ✗ | Hint-only — pending |
 | `__declspec(noreturn)` / `nothrow` | ✗ | C11 equivalents exist — pending |
-| `__declspec(restrict)` | ✗ | Not yet implemented (the #267–#269 restrict work covers the `restrict` qualifier, not this MSVC spelling) — future ticket |
+| `__declspec(restrict)` | ✗ | Not yet implemented (the `restrict` qualifier is supported, not this MSVC spelling) |
 | `__declspec(safebuffers)` / `selectany` / `code_seg` / `allocate` | ✗ | No-op shims — pending |
 | `__declspec(thread)` | ✗ | TLS via VM per-thread storage — pending |
 | `__cdecl` / `__stdcall` / `__fastcall` / `__thiscall` / `__vectorcall` | ✗ | Calling-convention keywords, no-op (CCCC has a single VM ABI) — pending |

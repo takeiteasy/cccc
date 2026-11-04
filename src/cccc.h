@@ -2787,8 +2787,8 @@ struct Obj {
     bool is_implicit : 1; // synthesized by an implicit function declaration
     bool is_hidden_builtin  : 1; // synthesized prototype not yet on the globals
                                  // list
-    bool is_macro_generated : 1; // created by a #pragma macro via
-                                 // $function/$global_var
+    bool is_macro_generated    : 1; // created by a #pragma macro via
+                                    // MakeFunction/GlobalVar
     bool is_splice_placeholder : 1; // $@k var synthesised by quote_core
     // Created by new_gvar() while vm->compiler.in_macro_mode is set: its
     // storage lives in the *comptime program's* data segment, so a Quote()
@@ -3194,7 +3194,7 @@ typedef struct ComptimeVar {
     bool is_float;     // True for float/double scalar types
     int64_t int_val;   // Scalar integer value (or 0 for structs)
     double  float_val; // Scalar float/double value
-    Obj    *ptr_obj;   // Parent-side shadow object for $get_comptime_ptr
+    Obj    *ptr_obj;   // Parent-side shadow object for GetComptimePtr
     bool    keep_value; // A reload keeps the live storage and value
     ComptimeVarMember
         *members;       // Per-field values for struct vars (NULL for scalars)

@@ -2591,12 +2591,12 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
 // compile_macro_program() (macros.c). The latter deliberately relies on
 // the runtime TU's own file scope still being reachable when it does its
 // own enter_scope() -- a macro function's body can reference a runtime
-// global via the `$identifier` reflect operator (parse.c's primary(),
-// resolved through find_var() at parse time), and compile_macro_program
-// runs after every real TU has already been parsed (cc_expand_macros,
-// called from main.c after cc_link_progs). parse() itself therefore must
-// not leave_scope() unconditionally, and neither can cc_parse() do it
-// unconditionally after every call -- only *between* two real TUs, never
+// global via the `^^identifier` reflect operator (parse_postfix.c's
+// reflect_name(), resolved through find_var() at parse time), and
+// compile_macro_program runs after every real TU has already been parsed
+// (cc_expand_macros, called from main.c after cc_link_progs). parse() itself
+// therefore must not leave_scope() unconditionally, and neither can cc_parse()
+// do it unconditionally after every call -- only *between* two real TUs, never
 // after the last one. Exposed here as a separate step main.c's parse loop
 // calls directly, once per boundary between two command-line input files
 // (never before the first, never after the last), rather than baked into

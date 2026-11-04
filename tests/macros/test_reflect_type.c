@@ -1,4 +1,4 @@
-// Test $identifier reflect operator: $SomeStruct yields a Type*
+// Test ^^identifier reflect operator: ^^SomeStruct yields a Type*
 // Verified by passing it to GetTypeKind and checking TK_STRUCT.
 
 typedef struct {
@@ -8,7 +8,7 @@ typedef struct {
 
 [[cccc::comptime]]
 Node *reflect_type_kind(void) {
-    Type *ty = $Point;
+    Type *ty = ^^Point;
     if (GetTypeKind(ty) != TK_STRUCT)
         return MakeIntLiteral(1);
     return MakeIntLiteral(42);

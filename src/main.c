@@ -3389,7 +3389,7 @@ int main(int argc, const char *argv[]) {
         // after every parse (e.g. inside cc_parse() itself): the *last*
         // TU's file scope must stay reachable afterward, since
         // compile_macro_program() (macros.c, run later via
-        // cc_expand_macros) relies on it to resolve a `$identifier`
+        // cc_expand_macros) relies on it to resolve a `^^identifier`
         // reflect-operator reference to a runtime symbol from inside a
         // macro function body -- see cc_leave_top_file_scope's comment
         // (parse.c) for the full reasoning.

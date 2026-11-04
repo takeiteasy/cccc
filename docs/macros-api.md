@@ -126,7 +126,6 @@ Lookup tables for the comptime API.
 | `PublishNode(obj_or_type)` | Publish a generated function/global in current scope; accepted as a no-op for generated types |
 | `PublishNodeAt(obj_or_type, tok)` | Publish with an explicit diagnostic token |
 | `MakeFunction(name, ret_type)` | Create a function object |
-| `$forward_declare(fn)` | Deprecated alias for `PublishNode(fn)` |
 | `FunctionAddParam(fn, name, ty)` | Add function parameter |
 | `FunctionSetBody(fn, body)` | Set function body |
 | `FunctionSetStatic(fn, flag)` | Set static linkage |

@@ -17,7 +17,7 @@ static int pick(int v) {
 
 [[cccc::comptime]]
 Node *late_size(void) {
-    return MakeIntLiteral(TypeSize($Late));
+    return MakeIntLiteral(TypeSize(^^Late));
 }
 
 struct Late {

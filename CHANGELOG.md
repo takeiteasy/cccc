@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: the compile-time reflect operator is `^^name` instead of `$name`. `$` is an ordinary identifier character again outside quasi-quote templates, so `int $x;` compiles.
 - Fixed: `-c=native` wrote an enumerator of `0x8000000000000000` in an enum with a 64-bit unsigned underlying type as `-9223372036854775808`, which gcc rejects; it is now written as `9223372036854775808ULL`, and a plain `LLONG_MIN` enumerator as `(-9223372036854775807LL - 1)`.
 ## [0.29.0] - 2026-11-01
 

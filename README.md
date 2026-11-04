@@ -1,6 +1,6 @@
 # cccc
 
-> **WARNING!** Work in progress. The interpreter and compile times are *long*. But it is able to fully compile itself
+> **WARNING!** Work in progress. It is able to fully compile itself.
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
 
@@ -115,6 +115,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 | **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
+| **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](docs/syntax.md)) |
 | **C23 and extensions** | C89 through C23, GNU and MS extensions ([coverage.md](docs/coverage.md)) |
 | **Decimal floating point** | `_Decimal32/64/128` via the Intel BID library, opt-in ([install.md](docs/install.md)) |
 | **Kernels** | `[[cccc::kernel]]` and OpenCL C 1.2 over a grid of work-items; `-fopenmp` ([kernels.md](docs/kernels.md), [opencl.md](docs/opencl.md), [openmp.md](docs/openmp.md)) |
@@ -278,6 +279,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 | Guide | Covers |
 |---|---|
 | [attributes.md](docs/attributes.md) | *hub* — `__attribute__`, `[[...]]` and `@name` support |
+| [syntax.md](docs/syntax.md) | CCCC-only syntax at a glance: `@name`, struct-body methods and operators, `<=>`, `^^`, quasi-quotes |
 | [methods.md](docs/methods.md) | `[[cccc::method(T)]]` struct methods: `s.f(x)` call-site lowering |
 | [operators.md](docs/operators.md) | `[[cccc::operator(...)]]` operator overloading for structs |
 | [types.md](docs/types.md) | Type compatibility, `_Generic`, `--compiler-family` |

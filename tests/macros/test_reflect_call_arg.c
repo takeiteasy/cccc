@@ -1,4 +1,4 @@
-// Test $identifier reflect operator: $SomeStruct as a direct call argument
+// Test ^^identifier reflect operator: ^^SomeStruct as a direct call argument
 // to a comptime macro.
 
 typedef struct {
@@ -16,7 +16,7 @@ Node *check_is_struct(Type *ty) {
 
 [[cccc::comptime]]
 Node *test_reflect_arg(void) {
-    return check_is_struct($Color);
+    return check_is_struct(^^Color);
 }
 
 int main(void) {

@@ -522,8 +522,6 @@ This table tracks shims that **reimplement** a standard function — not ABI-com
 > `scanf` side stores `%Lf` results as a flat `double` for the same
 > reason (the VM reads the object back with an 8-byte load).
 
-> **Known limitation ([#407](https://todo.sr.ht/~takeiteasy/cccc/407)):** when a user-defined variadic function forwards its `va_list` to `vprintf`/`vfprintf`/`vsprintf`/`vsnprintf`/`vscanf`/`vfscanf`/`vsscanf`, only the *first* variadic argument is passed through correctly; subsequent arguments are garbage. This is a pre-existing VM/FFI limitation, not specific to `%b`/`%B`.
-
 [^libm-fold]: Arguments are evaluated as `double`, so a `long double` argument folds at double precision.
 
 [^n1]: Where gcc and clang genuinely disagree — a *top-level* `_Atomic`, an array element's `_Atomic`, a function type's own return-type `const`/`volatile` — `--compiler-family` selects the reading (default gcc: `_Atomic int` / `int` → `1`; `--compiler-family=clang`: → `0`). See [types.md](types.md).

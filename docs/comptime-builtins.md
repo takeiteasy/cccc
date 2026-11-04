@@ -5,7 +5,7 @@ Contributor notes: how comptime builtins are declared and registered.
 The macro API is private to macro compilation. CCCC embeds its own `cccc/reflection.h`
 and injects it automatically while macro and comptime helper functions are
 compiled, but that bundled header is not on the public include path. Macro code
-can use the `$*`, `Quote*`, `MacroErrorAt`, `Gensym`, and `$dump_*`
+can use the `Quote*`, `MacroErrorAt`, `Gensym`, and `Dump*`
 convenience macros directly.
 
 `include/cccc/reflection.h` is the single source of truth for every comptime

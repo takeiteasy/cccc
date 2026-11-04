@@ -4560,7 +4560,7 @@ void cc_execute_inline_macros(VirtualMachine *vm, Token **input_tokens,
     // Quick check: are there any file-scope macro calls in the token streams?
     // If not, skip init+compile here — they will happen lazily in
     // cc_expand_macros after parsing, when all symbols are defined. This avoids
-    // premature $symbol lookups in macros that are only called in expression
+    // premature ^^symbol lookups in macros that are only called in expression
     // position.
     bool any_file_scope_call = false;
     for (int fi = 0; fi < count && !any_file_scope_call; fi++) {

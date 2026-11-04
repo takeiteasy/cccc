@@ -40,7 +40,7 @@ bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice) {
     // typedef the demand-driven declaration index has seen but not yet
     // spliced in. Retry find_typedef() once after a successful splice --
     // deliberately NOT folded into find_typedef() itself, since the
-    // $Name/$type(Name) reflection operators (primary(), parse_postfix.c)
+    // ^^Name reflection operator (reflect_name(), parse_postfix.c)
     // call find_typedef() directly to reach into the *runtime*
     // Obj/Type tables, which must never be redirected through this index.
     if (allow_splice &&
@@ -678,10 +678,10 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
         *rest     = skip(vm, tok, ";");
 
         add_type(vm, exp);
-        // current_fn may be NULL when a $quote template is parsed at file scope
-        // (e.g. inside a top-level pragma macro call that uses $quote("return
+        // current_fn may be NULL when a Quote template is parsed at file scope
+        // (e.g. inside a top-level pragma macro call that uses Quote("return
         // x;")). Guard the implicit return-type cast; types will be resolved by
-        // add_type later, or by the caller establishing context via $with_fn.
+        // add_type later, or by the caller establishing context via WithFn.
         if (vm->compiler.current_fn && !block_infer_pending) {
             Type *ty = vm->compiler.current_fn->ty->return_ty;
             if (ty->kind == TY_VOID) {
@@ -1514,9 +1514,7 @@ static Node *expr_stmt(VirtualMachine *vm, Token **rest, Token *tok) {
     // lazy placeholder used as a sub-expression is handled instead (and, if
     // it turns out to hold a statement-kind fragment, diagnosed there rather
     // than silently only consuming `$1` and leaving `+ 0;` behind for
-    // skip(vm, tok->next, ";") to choke on). Other '$'-prefixed forms (the
-    // $identifier reflect operator, $dump_*/$forward_declare) are
-    // '$'+alpha/'_', not '$'+digit, so this never touches them regardless.
+    // skip(vm, tok->next, ";") to choke on).
     if (tok->kind == TK_IDENT && tok->len > 1 && tok->loc[0] == '$' &&
         tok->loc[1] >= '0' && tok->loc[1] <= '9' && equal(tok->next, ";")) {
         VarScope *vs = find_var(vm, tok);

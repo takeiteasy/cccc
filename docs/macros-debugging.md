@@ -52,7 +52,7 @@ AST dump helpers are available while developing macros:
 The interactive VM debugger (`-g`) does not currently stop inside macro
 execution. Macro bytecode runs during compilation, before the final program is
 started under the debugger, and CCCC suppresses VM debug tracing while invoking
-macro functions. Use `$dump_*` helpers and source-located diagnostics for macro
+macro functions. Use the `DumpTree` / `DumpAstGen` helpers and source-located diagnostics for macro
 debugging.
 
 ### Expansion backtrace

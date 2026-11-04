@@ -672,7 +672,7 @@ static bool checked_plain_array_source(VirtualMachine *vm, Node *rhs,
 // verify_checked_assign_scan(), both of which call this function AFTER
 // their function's own leave_scope()/`fn->locals = vm->compiler.locals`
 // snapshot, where new_lvar()'s prepend-to-vm->compiler.locals would
-// silently produce a temp with no stack slot (the $with_fn-locals hazard
+// silently produce a temp with no stack slot (the WithFn-locals hazard
 // class). #947 folded that per-assignment-site hoist in; the only
 // remaining NULL-out_obj_init callers are phase-A-style usability probes
 // that discard lo/hi and must not allocate a temp per probe.
@@ -1593,7 +1593,7 @@ static void checked_prop_poison_scan(VirtualMachine *vm, Node *node) {
 // necessarily the same list head -- new_lvar() prepends to
 // vm->compiler.locals, which assign_stack_offsets() (codegen.c) never
 // reads; a temp allocated that way gets no stack slot at all (offset stays
-// 0), the same class of bug as the documented $with_fn-locals hazard
+// 0), the same class of bug as the documented WithFn-locals hazard
 // elsewhere in this codebase. No scope entry needed either: these temps are
 // never looked up by name, only ever referenced directly through the Obj*
 // stored on Obj.checked_prop_lo/hi.

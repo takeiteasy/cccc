@@ -36,9 +36,3 @@ Ignored attributes include (but are not limited to):
 | `format_arg` | GNU | |
 | `unsequenced` | C23 | |
 | `reproducible` | C23 | |
-
-## Open Tickets
-
-| # | Attribute | Priority | Description |
-|---|-----------|----------|-------------|
-| [#215](https://todo.sr.ht/~takeiteasy/cccc/215) | Catch-all | medium | Remaining GNU builtins and attributes |

@@ -51,8 +51,7 @@ make_helper();
 
 `PublishNodeAt(obj, tok)` is the same operation with an explicit diagnostic
 token. Pass `SyntheticToken("label")` when the declaration belongs to
-generated code rather than a source token. `$forward_declare(fn)` remains as
-a compatibility alias for `PublishNode(fn)`.
+generated code rather than a source token.
 
 ## Global Variable Generation
 

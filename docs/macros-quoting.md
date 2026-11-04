@@ -31,8 +31,8 @@ Node *choose_second(Node *a, Node *b) {
 }
 ```
 
-`$identifier` remains the reflect operator inside the generated template, so
-for example `` `return sizeof($Point);` `` reflects `Point` when the template
+`^^identifier` is the reflect operator inside the generated template, so
+for example `` `return sizeof(^^Point);` `` reflects `Point` when the template
 is parsed. Backtick interpolation is scalar and uses the same variadic capacity
 as `Quote(...)` (up to 64 splice nodes). Use `Quote(...)` directly for `$N`,
 `$$`, or `$@` list splicing, and use `QuoteN(...)` when more splice nodes are

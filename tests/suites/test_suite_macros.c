@@ -551,8 +551,8 @@ void test_comptime_inline_in_test(void) {
 // [#613] Comptime Node*-returning functions in global variable initializers.
 // Before #613 these produced "not a compile-time constant (expression)".
 // The macro call is now deferred to cc_finalize_macro_gvar_inits (called from
-// cc_expand_macros after full parsing), so $symbol forward-refs in other macros
-// are not broken.
+// cc_expand_macros after full parsing), so ^^symbol forward-refs in other
+// macros are not broken.
 #pragma cccc suite begin "macros/comptime_gvar_init_613"
 
 [[cccc::comptime]]
@@ -577,12 +577,12 @@ static float ct_gvar_float = ct_gvar_val_613();
 // Macro call nested inside an arithmetic expression in the initializer.
 static int ct_gvar_nested = ct_gvar_add_613(1, 1) + 40;
 
-// $symbol forward-reference: 'fwd_613' is declared AFTER uses_fwd_613 is
+// ^^symbol forward-reference: 'fwd_613' is declared AFTER uses_fwd_613 is
 // defined but the deferred path compiles macros after full parsing, so the
-// $fwd_613 lookup succeeds at execute time (#613 correctness invariant).
+// ^^fwd_613 lookup succeeds at execute time (#613 correctness invariant).
 [[cccc::comptime]]
 Node *uses_fwd_613(void) {
-    Obj *o = $fwd_613;
+    Obj *o = ^^fwd_613;
     return MakeIntLiteral(o ? 42 : 1);
 }
 
