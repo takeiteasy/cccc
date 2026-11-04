@@ -311,6 +311,8 @@ bool has_custom_attrs(Type *ty, VarAttr *attr) {
 void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
                            AttrTargetKind kind, char *name, Type *target_ty,
                            Obj *obj, Token *tok) {
+    reject_member_initializers(vm, ty ? ty : target_ty,
+                               attr ? attr->custom_attrs : NULL);
     run_pending_member_attrs(vm);
     if (attr && attr->custom_attrs)
         run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
@@ -371,6 +373,81 @@ void run_pending_member_attrs(VirtualMachine *vm) {
             NULL, p->mem->name ? p->mem->name : p->mem->tok, p->mem, p->owner);
     }
     vm->compiler.draining_member_attrs = false;
+}
+
+bool attribute_handler_exists(VirtualMachine *vm, const char *name) {
+    for (MacroFn *m = vm->compiler.macro_fns; m; m = m->next)
+        if (m->is_attribute_handler && m->attribute_name &&
+            !strcmp(m->attribute_name, name))
+            return true;
+    return false;
+}
+
+void append_member_init_attr(VirtualMachine *vm, CustomAttrUse **list,
+                             Token *eq_tok, Node *value) {
+    CustomAttrUse *use =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(CustomAttrUse));
+    memset(use, 0, sizeof(CustomAttrUse));
+    use->name      = "default";
+    use->tok       = eq_tok;
+    use->args      = value;
+    use->arg_count = 1;
+    append_custom_attr_list(list, use);
+}
+
+void error_member_init_needs_ctor(VirtualMachine *vm, Token *eq_tok,
+                                  Type *owner) {
+    const char *kind = owner->kind == TY_UNION ? "union" : "struct";
+    Token      *tag  = type_agg(owner)->struct_tag;
+    if (tag)
+        error_tok(vm, eq_tok,
+                  "member initializer needs @ctor on %s '%.*s' (add @ctor, or "
+                  "use @default only with @ctor)",
+                  kind, tag->len, tag->loc);
+    error_tok(vm, eq_tok,
+              "member initializer needs @ctor on an anonymous %s (add @ctor, "
+              "or use @default only with @ctor)",
+              kind);
+}
+
+static bool attrs_have(CustomAttrUse *list, const char *name) {
+    for (; list; list = list->next)
+        if (!strcmp(list->name, name))
+            return true;
+    return false;
+}
+
+// Whether `owner` is `target` or an anonymous struct/union flattened into it.
+static bool owner_reaches(Type *target, Type *owner) {
+    if (target == owner || (type_agg(target)->members &&
+                            type_agg(target)->members ==
+                                type_agg(owner)->members))
+        return true;
+    if (target->kind != TY_STRUCT && target->kind != TY_UNION)
+        return false;
+    for (Member *m = type_agg(target)->members; m; m = m->next)
+        if (!m->name && (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) &&
+            owner_reaches(m->ty, owner))
+            return true;
+    return false;
+}
+
+// A member initializer stands for @default, which only `@ctor` on the owning
+// struct gives a meaning to. `target` is the declaration being finished
+// (NULL when it carries no attributes), `decl_attrs` the attributes written
+// on it.
+void reject_member_initializers(VirtualMachine *vm, Type *target,
+                                CustomAttrUse *decl_attrs) {
+    if (vm->compiler.in_macro_mode || vm->compiler.draining_member_attrs)
+        return;
+    bool has_ctor = target && (attrs_have(decl_attrs, "ctor") ||
+                               attrs_have(type_attrs(target)->custom_attrs,
+                                          "ctor"));
+    for (PendingMemberAttrs *p = vm->compiler.pending_member_attrs; p;
+         p                     = p->next)
+        if (p->mem->init_tok &&
+            !(has_ctor && owner_reaches(target, p->owner)))
+            error_member_init_needs_ctor(vm, p->mem->init_tok, p->owner);
 }
 
 // Ticket #619: generic programmatic attribute application for AST-generated

@@ -2240,6 +2240,8 @@ static bool member_is_method(VirtualMachine *vm, Token *tok, Token **name,
                 continue;
             }
         }
+        if (equal(t, "="))
+            return false;
         if (is_attribute_start(t)) {
             t    = skip_attribute(t);
             prev = NULL;
@@ -2447,7 +2449,50 @@ static void struct_members(VirtualMachine *vm, Token **rest, Token *tok,
 
                 mem->ty = apply_var_attrs_to_type(vm, mem->ty, &bf_attr);
             }
+            if (equal(tok, "=")) {
+                Token *eq = tok;
+                if (mem->ty->kind == TY_ARRAY)
+                    error_tok(vm, eq,
+                              "@default does not apply to an array member");
+                if (equal(eq->next, "{"))
+                    error_tok(vm, eq,
+                              "a member initializer is an expression, not a "
+                              "brace list");
+                tok = eq->next;
+                if (vm->compiler.in_type_lookahead) {
+                    for (int depth = 0; tok->kind != TK_EOF; tok = tok->next) {
+                        if (equal(tok, "(") || equal(tok, "[") ||
+                            equal(tok, "{"))
+                            depth++;
+                        else if (equal(tok, ")") || equal(tok, "]") ||
+                                 equal(tok, "}"))
+                            depth--;
+                        else if (depth == 0 &&
+                                 (equal(tok, ",") || equal(tok, ";")))
+                            break;
+                    }
+                } else {
+                    if (!vm->compiler.in_macro_mode &&
+                        !attribute_handler_exists(vm, "default"))
+                        error_member_init_needs_ctor(vm, eq, ty);
+                    Node *value = assign(vm, &tok, tok);
+                    if (!vm->compiler.in_macro_mode) {
+                        mem->init_tok = eq;
+                        append_member_init_attr(vm, &mem_extra_attrs, eq,
+                                                value);
+                    }
+                }
+            }
             collect_member_attrs(vm, mem, &attr, mem_extra_attrs, ty, false);
+            if (mem->init_tok) {
+                int defaults = 0;
+                for (CustomAttrUse *u = mem->custom_attrs; u; u = u->next)
+                    defaults += !strcmp(u->name, "default");
+                if (defaults > 1)
+                    error_tok(vm, mem->init_tok,
+                              "a member initializer and @default cannot "
+                              "share a member");
+            }
             drop_cleanup_attr(vm, mem->ty, &attr, mem->name);
 
             cur = cur->next = mem;

@@ -42,7 +42,7 @@ int main(void) {
 | `@destroy` | struct | `void T_destroy(T *self)` |
 | `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable`, `@ordered` | struct/union | a pair of the above, see [Bundles](#bundles) |
 | `@owned` / `@owned("n")` | member | marks a pointer member as heap memory for `@clone` / `@destroy`; `@equals`, `@hash`, `@dump`, `@compare`, `@to_json` and `@from_json` use its content |
-| `@default(expr)` | member | the value `T_new` gives the member instead of a parameter |
+| `@default(expr)` or `T m = expr;` | member | the value `T_new` gives the member instead of a parameter |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@validate` | struct | `_Bool T_validate(const T *self)` |
 | `@clamp` | struct | `void T_clamp(T *self)` |
@@ -204,6 +204,28 @@ struct Config {
 `@default` takes one expression that is valid where the struct is used
 (constants, enumerators, `sizeof`, string literals). It does not apply to array
 members, and a member cannot carry both `@default` and `@ctor_skip`.
+
+### Member initializers
+
+`T m = expr;` in the struct body means `T m @default(expr);`. It applies only
+through `T_new`: `S s;`, `S s = {0};`, `calloc` and `memset` leave the member
+as C does, and the C emitted for `-c=native` has no initializers.
+
+```c
+@ctor struct Config {
+    char *host;
+    int   port    = 8080;
+    int   retries : 3 = 2;
+};
+// struct Config Config_new(char *host);
+```
+
+| Case | Result |
+|---|---|
+| struct without `@ctor` | compile error at the `=` |
+| array member (`int a[2] = {1, 2};`) | compile error |
+| member also marked `@ctor_skip` or `@default(...)` | compile error |
+| member of a named nested struct | needs `@ctor` on that struct |
 
 
 ## Bundles

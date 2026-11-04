@@ -1904,6 +1904,10 @@ typedef struct Member {
     // Custom comptime attributes written on this member (@name / [[name]]).
     // Read through the Member* query builtins; run by the attribute handlers.
     struct CustomAttrUse *custom_attrs;
+
+    // The `=` of a member initializer (`int x = 1;`), which stands for
+    // @default(1) and needs @ctor on the owning struct. NULL when absent.
+    Token *init_tok;
 } Member;
 
 /*!

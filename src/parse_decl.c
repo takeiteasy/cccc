@@ -2353,6 +2353,7 @@ void run_pending_methods(VirtualMachine *vm) {
 
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
+        reject_member_initializers(vm, NULL, NULL);
         run_pending_member_attrs(vm);
         run_pending_methods(vm);
         // _Static_assert or static_assert (C23) - check before declspec
@@ -2451,6 +2452,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         // Global variable
         tok = global_variable(vm, tok, basety, &attr);
     }
+    reject_member_initializers(vm, NULL, NULL);
     run_pending_member_attrs(vm);
     run_pending_methods(vm);
     return tok;

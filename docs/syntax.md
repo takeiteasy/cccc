@@ -84,14 +84,14 @@ Node *add_one(Node *x) { return `return ${x} + 1;`; }
 
 ## Member defaults
 
-`@default(expr)` on a member removes it from the `@ctor` constructor's parameters and assigns `expr` instead. An initializer in the struct body (`int x = 1;`) is not accepted.
+`@default(expr)` on a member removes it from the `@ctor` constructor's parameters and assigns `expr` instead. A member initializer, `T m = expr;`, is the same thing written in C++ style.
 
 ```c
 #include <cccc/derive.h>
 
 @ctor struct Server {
     int   port  @default(8080);
-    char *label @default("untitled");
+    char *label = "untitled"; // same as @default("untitled")
 };
 
 struct Server s = Server_new();
