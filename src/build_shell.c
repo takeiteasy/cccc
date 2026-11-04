@@ -1017,11 +1017,13 @@ static int builtin_cd(int argc, char **argv) {
             perror("cd");
             return 1;
         }
+        cc_cwd_changed();
     } else if (argc == 2) {
         if (chdir(argv[1]) == -1) {
             perror("cd");
             return 1;
         }
+        cc_cwd_changed();
     } else {
         eprintf("cd: too many arguments\n");
         return 1;

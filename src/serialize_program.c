@@ -5012,7 +5012,7 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
             continue;
         s->fn     = obj;
         s->header = site->file->name;
-        s->site   = serialize_canonical_key(ctx, site->file->name);
+        s->site   = cc_canonical_path_key(ctx->vm, site->file->name);
         // Its weak declaration must precede the header's definition.
         if (gnu_inline_needs_body(obj))
             prelude_add(s, obj);
@@ -5021,7 +5021,7 @@ static void prelude_collect(VirtualMachine *vm, SerializeContext *ctx,
 }
 
 static void include_reach_add(PreludeScan *s, const char *from, HashMap *seen) {
-    const char *key = serialize_canonical_key(s->ctx, from);
+    const char *key = cc_canonical_path_key(s->ctx->vm, from);
     if (hashmap_get(seen, key))
         return;
     hashmap_put(seen, key, (void *)1);
@@ -5045,7 +5045,7 @@ static HashMap *prelude_reach_set(PreludeScan *s, const char *from) {
 static bool prelude_include_reaches(PreludeScan *s, const char *from,
                                     const char *target) {
     return hashmap_get(prelude_reach_set(s, from),
-                       serialize_canonical_key(s->ctx, target)) != NULL;
+                       cc_canonical_path_key(s->ctx->vm, target)) != NULL;
 }
 
 static int prelude_free_reach(char *key, int keylen, void *val, void *user) {
@@ -5738,7 +5738,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
         hashmap_deinit(&ctx.global_names);
         hashmap_deinit(&ctx.outer_jumps);
         hashmap_deinit(&ctx.file_typedef_names);
-        hashmap_deinit(&ctx.path_key_memo);
         free(ctx.fenv_typedefs);
         hashmap_deinit(&ctx.record_owners);
         free(ctx.label_owners);
@@ -6604,7 +6603,6 @@ void cc_serialize_program(FILE *f, VirtualMachine *vm, Obj *prog,
     free(ctx.enum_renames); // #1016: was missing from this list
     hashmap_deinit(&ctx.global_names);
     hashmap_deinit(&ctx.file_typedef_names);
-    hashmap_deinit(&ctx.path_key_memo);
     free(ctx.fenv_typedefs);
     hashmap_deinit(&ctx.record_owners);
     free(ctx.label_owners);

@@ -3856,13 +3856,31 @@ static void register_stdlib_for_header(VirtualMachine *vm,
 // against an un-canonicalized key let one TU's replayed #include register
 // under a spelling the other TU's check never matched, so the same header
 // got replayed twice under -c=generated ("typedef redefinition").
+static unsigned g_cwd_epoch;
+
+void cc_cwd_changed(void) {
+    __atomic_add_fetch(&g_cwd_epoch, 1, __ATOMIC_RELAXED);
+}
+
+// Only successes are memoized: a path that fails to resolve may be created
+// later.
 const char *cc_canonical_path_key(VirtualMachine *vm, const char *path) {
     if (!path)
         return path;
+    unsigned epoch = __atomic_load_n(&g_cwd_epoch, __ATOMIC_RELAXED);
+    if (vm->compiler.canon_path_epoch != epoch) {
+        hashmap_deinit(&vm->compiler.canon_path_memo);
+        vm->compiler.canon_path_epoch = epoch;
+    }
+    const char *key = hashmap_get(&vm->compiler.canon_path_memo, path);
+    if (key)
+        return key;
     char resolved[PATH_MAX];
-    if (realpath(path, resolved))
-        return arena_strdup(vm, resolved);
-    return path;
+    if (!realpath(path, resolved))
+        return path;
+    key = arena_strdup(vm, resolved);
+    hashmap_put(&vm->compiler.canon_path_memo, path, (void *)key);
+    return key;
 }
 
 static const char *pragma_once_key(VirtualMachine *vm, const char *path) {

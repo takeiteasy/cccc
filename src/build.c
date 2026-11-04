@@ -2583,7 +2583,10 @@ static long long impl_set_cwd(long long ctx, long long path) {
         if (getcwd(buf, sizeof(buf)))
             s_ctx->original_cwd = xstrdup(buf);
     }
-    return chdir(p) == 0 ? 0 : -1;
+    if (chdir(p) != 0)
+        return -1;
+    cc_cwd_changed();
+    return 0;
 }
 
 static long long impl_get_cwd(long long ctx) {
@@ -3848,7 +3851,8 @@ static void teardown_builder_ctx(Builder *ctx) {
     free(ctx->install_prefix);
     free(ctx->install_targets);
     if (ctx->original_cwd) {
-        chdir(ctx->original_cwd);
+        if (chdir(ctx->original_cwd) == 0)
+            cc_cwd_changed();
         free(ctx->original_cwd);
     }
 }

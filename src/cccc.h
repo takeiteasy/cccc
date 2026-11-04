@@ -4520,6 +4520,11 @@ typedef struct Compiler {
     // mark_include_target_captured() in preprocess.c.
     HashMap captured_include_targets;
 
+    // cc_canonical_path_key()'s successful realpath() results (raw path ->
+    // canonical key), valid while canon_path_epoch matches cc_cwd_epoch().
+    HashMap  canon_path_memo;
+    unsigned canon_path_epoch;
+
     // #1299: true once some ac_transitive_capture-reached header (a
     // captured, ordinary project header that itself contains `#include
     // <setjmp.h>`, e.g. src/cccc.h) has been seen this run -- narrower than
@@ -5775,6 +5780,9 @@ Token *cc_rewrite_pragma_operators(VirtualMachine *vm, Token *toks);
 // captured_paths/emit_include_paths keys go through the identical
 // canonicalization -- see this function's own doc comment in preprocess.c.
 const char *cc_canonical_path_key(VirtualMachine *vm, const char *path);
+// A relative path resolves against the process-wide cwd, so every successful
+// chdir()/fchdir() must call cc_cwd_changed() to drop the memoized keys.
+void cc_cwd_changed(void);
 void cc_reset_preprocessor_state_for_next_tu(VirtualMachine *vm); // #1001
 
 // The preprocessor state a file reload swaps out.

@@ -1941,6 +1941,7 @@ void cc_destroy(VirtualMachine *vm) {
     hashmap_deinit(&c->cccc_bundled_files);
     hashmap_deinit(&c->cccc_bundled_include_dirs);
     hashmap_deinit(&c->captured_include_targets);
+    hashmap_deinit(&c->canon_path_memo);
     hashmap_deinit(&c->emit_include_paths);
     hashmap_deinit(&c->comptime_decl_index);
     hashmap_deinit(&c->comptime_tag_index);

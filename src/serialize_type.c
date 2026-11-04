@@ -3570,16 +3570,6 @@ bool path_basename_is(const char *path, const char *name) {
            strcmp(path + plen - nlen, name) == 0;
 }
 
-// cc_canonical_path_key() behind ctx->path_key_memo: realpath() is a syscall.
-const char *serialize_canonical_key(SerializeContext *ctx, const char *path) {
-    const char *key = hashmap_get(&ctx->path_key_memo, path);
-    if (!key) {
-        key = cc_canonical_path_key(ctx->vm, path);
-        hashmap_put(&ctx->path_key_memo, path, (void *)key);
-    }
-    return key;
-}
-
 bool path_is_captured(SerializeContext *ctx, const char *path) {
     if (!path)
         return false;
@@ -3588,10 +3578,8 @@ bool path_is_captured(SerializeContext *ctx, const char *path) {
     // spellings of one on-disk header (e.g. "./cccc.h" vs "cccc.h") compare
     // unequal here even though the #include really was replayed, and this
     // type's definition is wrongly re-derived from scratch alongside it
-    // ("typedef redefinition"/"redefinition of ..."). Memoized: this runs
-    // once per bodiless declaration/typedef lookup across the whole
-    // program, and realpath() is a syscall.
-    const char *key = serialize_canonical_key(ctx, path);
+    // ("typedef redefinition"/"redefinition of ...").
+    const char *key = cc_canonical_path_key(ctx->vm, path);
     for (int i = 0; i < ctx->captured_paths_len; i++)
         if (ctx->captured_paths[i] && strcmp(ctx->captured_paths[i], key) == 0)
             return true;

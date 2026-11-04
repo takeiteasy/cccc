@@ -167,15 +167,6 @@ typedef struct {
     VirtualMachine *vm;
     char          **captured_paths;
     int             captured_paths_len;
-    // #1292: memoizes cc_canonical_path_key()'s realpath() call for
-    // path_is_captured()'s query side (raw path -> canonical key) --
-    // path_is_captured() runs once per bodiless Obj/TypeName lookup across
-    // the whole program, and realpath() is a syscall the #1283 perf wall
-    // work made a point of keeping off any whole-program-scale path.
-    // Zero-initialized like every other ad-hoc HashMap field on this
-    // struct (see e.g. the `anchors`/`claimed` locals in
-    // rename_colliding_static_names).
-    HashMap path_key_memo;
     // Indices of the `fenv_t` entries of typedefs, rebuilt when typedefs_len
     // changes (find_fenv_t_typedef()).
     int *fenv_typedefs;
@@ -400,7 +391,6 @@ int block_capture_index(Obj *block_fn, Obj *var);
 Obj *serialize_find_global(VirtualMachine *vm, const char *name);
 void serialize_rename_global(Obj *obj, char *new_name);
 void serialize_shim_fns_invalidate(void);
-const char *serialize_canonical_key(SerializeContext *ctx, const char *path);
 TypeName *find_fenv_t_typedef(SerializeContext *ctx, Type *ty);
 Type *nested_upvar_field_type(VirtualMachine *vm, Obj *var);
 TypeName *find_typedef_name(SerializeContext *ctx, Type *ty);

@@ -288,7 +288,16 @@ static long long wrap_rmdir(long long path) {
     return (long long)rmdir((const char *)path);
 }
 static long long wrap_chdir(long long path) {
-    return (long long)chdir((const char *)path);
+    int r = chdir((const char *)path);
+    if (r == 0)
+        cc_cwd_changed();
+    return (long long)r;
+}
+static long long wrap_fchdir(long long fd) {
+    int r = fchdir((int)fd);
+    if (r == 0)
+        cc_cwd_changed();
+    return (long long)r;
 }
 static long long wrap_fork(void) {
     return (long long)fork();
@@ -501,7 +510,7 @@ void register_posix_io_functions(VirtualMachine *vm) {
     cc_register_cfunc(vm, "setsid", (void *)setsid, 0, 0);
     cc_register_cfunc(vm, "getsid", (void *)getsid, 1, 0);
     cc_register_cfunc(vm, "alarm", (void *)alarm, 1, 0);
-    cc_register_cfunc(vm, "fchdir", (void *)fchdir, 1, 0);
+    cc_register_cfunc(vm, "fchdir", (void *)wrap_fchdir, 1, 0);
     cc_register_cfunc(vm, "gethostname", (void *)gethostname, 2, 0);
     cc_register_cfunc(vm, "sethostname", (void *)sethostname, 2, 0);
     cc_register_cfunc(vm, "lchown", (void *)lchown, 3, 0);
