@@ -137,3 +137,24 @@ struct @ctor Tagged {
     AssertEq(again.a, 1);
 }
 // clang-format on
+
+// clang-format off
+typedef struct {
+    int b = 3;
+} Used @ctor;
+Used used_g;
+
+typedef struct @ctor TagT {
+    int c = 4;
+} TagT;
+TagT tag_g;
+
+[[cccc::test]] void test_typedef_attribute_does_not_rerun_on_use(void) {
+    Used local = Used_new();
+    TagT tag_local = TagT_new();
+    AssertEq(local.b, 3);
+    AssertEq(tag_local.c, 4);
+    AssertEq(used_g.b, 0);
+    AssertEq(tag_g.c, 0);
+}
+// clang-format on

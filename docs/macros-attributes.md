@@ -68,6 +68,9 @@ or `enum` that is defined together with variables
 leading attribute (`@attr struct S { ... } g;`) targets the variables as
 `ATTR_TARGET_GLOBAL`.
 
+An attribute on a typedef (`typedef struct { ... } T @attr;`) runs once as an
+`ATTR_TARGET_TYPEDEF` target. Variables declared with `T` do not run it again.
+
 ## Member attributes
 
 A custom attribute can sit on a struct or union member, in any declarator

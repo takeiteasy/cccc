@@ -194,13 +194,23 @@ static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
     return vm ? vm->compiler.expansion_stack : NULL;
 }
 
+// The token a diagnostic reports its location at.
+static Token *diag_site(Token *tok) {
+    return tok && tok_rare(tok)->src_site ? tok_rare(tok)->src_site : tok;
+}
+
+// A frame's call token, mapped back to the source for a rewritten `@name`.
+static Token *frame_site(ExpansionFrame *fr) {
+    return fr->call_tok ? diag_site(fr->call_tok) : NULL;
+}
+
 // One frame's note text, no "note: " prefix or trailing newline -- callers
 // add those per output mode (plain text vs. JSON).
 static char *format_expansion_frame(VirtualMachine *vm, ExpansionFrame *fr) {
-    int         line_no = fr->call_tok ? tok_line_no(fr->call_tok) : 0;
-    int         col_no  = fr->call_tok ? tok_col_no(fr->call_tok) : 0;
-    const char *fname =
-        (fr->call_tok && fr->call_tok->file) ? fr->call_tok->file->name : "?";
+    Token      *site    = frame_site(fr);
+    int         line_no = site ? tok_line_no(site) : 0;
+    int         col_no  = site ? tok_col_no(site) : 0;
+    const char *fname   = (site && site->file) ? site->file->name : "?";
     const char *name = fr->name ? fr->name : "?";
     switch (fr->kind) {
         case EXPANSION_ATTR_HANDLER:
@@ -262,11 +272,10 @@ static CompileError *build_expansion_notes(VirtualMachine *vm,
         memset(note, 0, sizeof(CompileError));
         note->message =
             arena_format(vm, "  note: %s\n", format_expansion_frame(vm, fr));
-        note->filename = (fr->call_tok && fr->call_tok->file)
-                             ? fr->call_tok->file->name
-                             : NULL;
-        note->line_no  = fr->call_tok ? tok_line_no(fr->call_tok) : 0;
-        note->col_no   = fr->call_tok ? tok_col_no(fr->call_tok) : 0;
+        Token *site    = frame_site(fr);
+        note->filename = (site && site->file) ? site->file->name : NULL;
+        note->line_no  = site ? tok_line_no(site) : 0;
+        note->col_no   = site ? tok_col_no(site) : 0;
         note->severity = 2; // note
         if (!head)
             head = tail = note;
@@ -345,15 +354,14 @@ static void vdiagnostic_at(VirtualMachine *vm, const char *filename, char *input
                  fr                 = fr->parent, i++) {
                 if (i)
                     fprintf(stderr, ",");
-                char *note_msg = format_expansion_frame(vm, fr);
+                char  *note_msg = format_expansion_frame(vm, fr);
+                Token *site     = frame_site(fr);
                 fprintf(stderr, "{\"file\":\"");
-                print_escaped_string_fp(stderr,
-                                        fr->call_tok && fr->call_tok->file
-                                            ? fr->call_tok->file->name
-                                            : "?");
+                print_escaped_string_fp(
+                    stderr, site && site->file ? site->file->name : "?");
                 fprintf(stderr, "\",\"line\":%d,\"column\":%d,\"message\":\"",
-                        fr->call_tok ? tok_line_no(fr->call_tok) : 0,
-                        fr->call_tok ? tok_col_no(fr->call_tok) : 0);
+                        site ? tok_line_no(site) : 0,
+                        site ? tok_col_no(site) : 0);
                 print_escaped_string_fp(stderr, note_msg);
                 fprintf(stderr, "\"}");
             }
@@ -535,11 +543,6 @@ void error_at(VirtualMachine *vm, char *loc, char *fmt, ...) {
         jump_to_error_handler(vm);
     }
     exit(1);
-}
-
-// The token a diagnostic reports its location at.
-static Token *diag_site(Token *tok) {
-    return tok && tok_rare(tok)->src_site ? tok_rare(tok)->src_site : tok;
 }
 
 void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...) {

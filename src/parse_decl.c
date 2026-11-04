@@ -58,6 +58,13 @@ static void check_typedef_redefinition(VirtualMachine *vm, Type *ty,
         error_tok(vm, ty->name, fmt, name);
 }
 
+// Attributes run once, where the tag or typedef is declared; later uses of the
+// shared Type (`struct S g;`, `A g;`) must not run them again.
+static void detach_type_custom_attrs(VirtualMachine *vm, Type *ty) {
+    if (type_attrs(ty)->custom_attrs)
+        type_attrs_mut(vm, ty)->custom_attrs = NULL;
+}
+
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
                      VarAttr *attr, Node **cur) {
     bool first = true;
@@ -124,12 +131,17 @@ Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
         record_type_name(vm, ty, name, ty->name->len, false, ty->name);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_TYPEDEF, name, ty, NULL,
                               ty->name);
+        // A tag body's attributes (ty == basety) run for each declarator and
+        // are detached after the loop.
+        if (ty != basety)
+            detach_type_custom_attrs(vm, ty);
         // A block-scope typedef of a variably modified type evaluates its
         // lengths here, when the declaration is reached.
         if (cur && type_contains_vla(ty))
             *cur = (*cur)->next = new_unary(
                 vm, ND_EXPR_STMT, compute_vla_size(vm, ty, ty->name), ty->name);
     }
+    detach_type_custom_attrs(vm, basety);
     return tok;
 }
 
@@ -2349,12 +2361,6 @@ void run_pending_methods(VirtualMachine *vm) {
         }
     }
     c->draining_methods = false;
-}
-
-// A tag's attributes run once, where it is defined; later `struct S g;`
-// uses of the shared Type must not run them again.
-static void detach_type_custom_attrs(VirtualMachine *vm, Type *ty) {
-    type_attrs_mut(vm, ty)->custom_attrs = NULL;
 }
 
 static char *type_tag_name(VirtualMachine *vm, Type *ty) {
