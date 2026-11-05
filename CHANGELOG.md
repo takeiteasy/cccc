@@ -7,8 +7,11 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-05
+
 - Fixed: a function built by a macro (`FunctionAddParam`), such as an `@ctor` `T_new`, accepts keyed arguments: `Win_new(.d = 2, .w = 1)`.
 - Fixed: `f(.a = 3, )` reports "expected an expression" instead of "positional argument after a keyed argument", and "too few arguments" names the first parameter with neither an argument nor a default.
+- Fixed: the smoke tests skip a host compiler that cannot build a program (a Homebrew llvm clang with no matching SDK), and the release workflow's hang-watchdog trap no longer fails a passing job.
 
 ## [0.31.0] - 2026-11-05
 
