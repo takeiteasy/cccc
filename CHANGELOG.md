@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a function built by a macro (`FunctionAddParam`), such as an `@ctor` `T_new`, accepts keyed arguments: `Win_new(.d = 2, .w = 1)`.
+- Fixed: `f(.a = 3, )` reports "expected an expression" instead of "positional argument after a keyed argument", and "too few arguments" names the first parameter with neither an argument nor a default.
+
 ## [0.31.0] - 2026-11-05
 
 - Added: a custom attribute can sit on a parameter of a function declared at file scope (`int area(int w @default(80), int h @default(24));`). Its handler runs with an `ATTR_TARGET_PARAM` target (`AttrTargetParam`, `AttrTargetParamIndex`), and `ParamHasAttr`, `ParamAttrArg` and five more accessors read the attributes from the parameter `Type *`. A parameter's attribute is written on one declaration only and the definition inherits it. `@default` accepts a parameter, and every parameter after a defaulted one needs a default.

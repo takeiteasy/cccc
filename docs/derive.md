@@ -197,6 +197,14 @@ An optional string literal prefix names it `<prefix>_<T>_new`, as for `@to_json`
 `expr` instead; `@ctor_skip` removes it and leaves it zero. A struct whose
 members are all defaulted or skipped gets `T_new()` with no parameters.
 
+The parameters are named after the members, so `T_new` takes keyed arguments
+(see [Parameter defaults](#parameter-defaults)):
+
+```c
+@ctor struct Win { int w; int h @default(24); int d; };
+Win_new(.d = 2, .w = 1);   // w = 1, h = 24, d = 2
+```
+
 ```c
 enum { DEFAULT_PORT = 8080 };
 
@@ -236,7 +244,7 @@ A call that leaves out trailing arguments takes their defaults, and
 | Any named parameter can be keyed, with or without a default | `f(.a = 1)` |
 | A key names a parameter once, and not one already given positionally | `area(1, .w = 2)` is an error |
 | Keyed arguments are reordered into parameter order | `area(.h = 1, .w = 2)` is `area(2, 1)` |
-| A parameter with neither argument nor default is "too few arguments" | `f()` for `int f(int a)` |
+| A parameter with neither argument nor default is "too few arguments", naming the first such parameter | `f()` for `int f(int a)` reports `a` |
 
 Defaults and keys apply to a direct call of a named function and to a method
 call. A call through a function pointer, `(*f)()` or `(&f)()` needs every

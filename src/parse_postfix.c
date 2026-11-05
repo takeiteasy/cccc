@@ -1230,8 +1230,12 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
         cur = cur->next;
 
     if (!deferred_splice && param_ty) {
-        if (vm->collect_errors &&
-            error_tok_recover(vm, tok, "too few arguments")) {
+        const char *missing = "too few arguments";
+        if (param_ty->name)
+            missing = arena_format(
+                vm, "too few arguments: no argument for parameter '%.*s'",
+                param_ty->name->len, param_ty->name->loc);
+        if (vm->collect_errors && error_tok_recover(vm, tok, "%s", missing)) {
             // Create placeholder arguments for missing parameters
             while (param_ty) {
                 Node *placeholder = new_node(vm, ND_NUM, tok);
@@ -1241,7 +1245,7 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
                 param_ty        = param_ty->next;
             }
         } else {
-            error_tok(vm, tok, "too few arguments");
+            error_tok(vm, tok, "%s", missing);
         }
     }
     head_next = head.next;
@@ -1503,7 +1507,7 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
             keyed_tail  = &k->next;
             continue;
         }
-        if (keyed)
+        if (keyed && !equal(tok, ")"))
             error_tok(vm, tok, "positional argument after a keyed argument");
 
         Node *arg = assign(vm, &tok, tok);
