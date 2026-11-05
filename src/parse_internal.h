@@ -314,6 +314,10 @@ void append_custom_attr_list(CustomAttrUse **dst, CustomAttrUse *src);
 CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src);
 void queue_member_attrs(VirtualMachine *vm, Member *mem, Type *owner);
 void run_pending_member_attrs(VirtualMachine *vm);
+void queue_param_attrs(VirtualMachine *vm, Type *params, Token *tok);
+void claim_param_attrs(VirtualMachine *vm, Obj *fn, Type *decl_ty);
+void run_param_custom_attrs(VirtualMachine *vm, Obj *fn, Type *decl_ty);
+void reject_stray_param_attrs(VirtualMachine *vm);
 bool attribute_handler_exists(VirtualMachine *vm, const char *name);
 void append_member_init_attr(VirtualMachine *vm, CustomAttrUse **list,
                              Token *eq_tok, Node *value);

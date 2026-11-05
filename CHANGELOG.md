@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: a custom attribute can sit on a parameter of a function declared at file scope (`int area(int w @default(80), int h @default(24));`). Its handler runs with an `ATTR_TARGET_PARAM` target (`AttrTargetParam`, `AttrTargetParamIndex`), and `ParamHasAttr`, `ParamAttrArg` and five more accessors read the attributes from the parameter `Type *`. A parameter's attribute is written on one declaration only and the definition inherits it. `@default` accepts a parameter, and every parameter after a defaulted one needs a default; calls do not use the value yet.
+
 ## [0.30.0] - 2026-11-04
 
 - Changed: a checked access whose identical check already ran on every path to it skips the range check across `if`/`else` joins, in loop bodies and conditions, past `break`/`continue` and through `switch` cases, not only within one straight-line run. A kernel with branches and loops over `p[i]` goes from 7 range checks to 1 and runs 1.5x faster; the benchmark programs do not use `--checked-pointers` and are unchanged.

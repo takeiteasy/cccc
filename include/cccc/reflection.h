@@ -226,6 +226,7 @@ typedef enum {
     ATTR_TARGET_FUNCTION = 3,
     ATTR_TARGET_GLOBAL   = 4,
     ATTR_TARGET_MEMBER   = 5,
+    ATTR_TARGET_PARAM    = 6,
 } AttrTargetKind;
 #endif // CCCC_REFLECTION_PROTOTYPES_ONLY
 
@@ -884,9 +885,19 @@ Token *__builtin_attr_target_token(AttrTarget *target);
 Member *__builtin_attr_target_member(AttrTarget *target);
 
 /*! @brief Return the struct or union declaring an ATTR_TARGET_MEMBER target's
- * member, else NULL.
+ * member, or the function type of an ATTR_TARGET_PARAM target, else NULL.
  */
 Type *__builtin_attr_target_owner(AttrTarget *target);
+
+/*! @brief Return the attributed parameter's type of an ATTR_TARGET_PARAM
+ * target, else NULL.
+ */
+Type *__builtin_attr_target_param(AttrTarget *target);
+
+/*! @brief Return the position of an ATTR_TARGET_PARAM target in its parameter
+ * list, else -1.
+ */
+int __builtin_attr_target_param_index(AttrTarget *target);
 
 /*! @brief Return 1 if the member carries the custom attribute `name`.
  */
@@ -917,6 +928,39 @@ int __builtin_ast_member_attr_arg_count_at(Member *m, int index);
 /*! @brief Return argument `arg` of the member's attribute use `index`, or NULL.
  */
 Node *__builtin_ast_member_attr_arg_at(Member *m, int index, int arg);
+
+/*! @brief Return 1 if the parameter type `p` carries the custom attribute
+ * `name`. `p` comes from TypeParamAt() on the function type.
+ */
+int __builtin_ast_param_has_attr(Type *p, const char *name);
+
+/*! @brief Return the argument count of the parameter's first use of `name`, or
+ * -1 when absent.
+ */
+int __builtin_ast_param_attr_arg_count(Type *p, const char *name);
+
+/*! @brief Return argument `index` of the parameter's first use of `name`, or
+ * NULL.
+ */
+Node *__builtin_ast_param_attr_arg(Type *p, const char *name, int index);
+
+/*! @brief Return the number of custom attribute uses on the parameter.
+ */
+int __builtin_ast_param_attr_count(Type *p);
+
+/*! @brief Return the name of the parameter's attribute use `index`, or NULL.
+ */
+const char *__builtin_ast_param_attr_name_at(Type *p, int index);
+
+/*! @brief Return the argument count of the parameter's attribute use `index`,
+ * or -1.
+ */
+int __builtin_ast_param_attr_arg_count_at(Type *p, int index);
+
+/*! @brief Return argument `arg` of the parameter's attribute use `index`, or
+ * NULL.
+ */
+Node *__builtin_ast_param_attr_arg_at(Type *p, int index, int arg);
 
 // ============================================================================
 // AST Node Construction - Literals
@@ -2267,9 +2311,18 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 #define AttrTargetMember(target) __builtin_attr_target_member(target)
 /*! @def AttrTargetOwner
  * @brief Return the struct or union declaring an ATTR_TARGET_MEMBER target's
- * member.
+ * member, or the function type of an ATTR_TARGET_PARAM target.
  * @param target The attribute target to inspect. */
 #define AttrTargetOwner(target) __builtin_attr_target_owner(target)
+/*! @def AttrTargetParam
+ * @brief Return the attributed parameter's type of an ATTR_TARGET_PARAM target.
+ * @param target The attribute target to inspect. */
+#define AttrTargetParam(target) __builtin_attr_target_param(target)
+/*! @def AttrTargetParamIndex
+ * @brief Return the position of an ATTR_TARGET_PARAM target in its parameter
+ * list, or -1.
+ * @param target The attribute target to inspect. */
+#define AttrTargetParamIndex(target) __builtin_attr_target_param_index(target)
 /*! @def MemberHasAttr
  * @brief Return 1 if the member carries the custom attribute `name`.
  * @param m The member. @param name Attribute name without the `@`. */
@@ -2298,6 +2351,36 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Return argument `j` of attribute use `i` as an expression node.
  * @param m The member. @param i Use index. @param j Argument index. */
 #define MemberAttrArgAt(m, i, j) __builtin_ast_member_attr_arg_at(m, i, j)
+/*! @def ParamHasAttr
+ * @brief Return 1 if the parameter carries the custom attribute `name`.
+ * @param p The parameter type (from TypeParamAt). @param name Attribute name
+ * without the `@`. */
+#define ParamHasAttr(p, name) __builtin_ast_param_has_attr(p, name)
+/*! @def ParamAttrArgCount
+ * @brief Return the argument count of the first use of `name`, or -1 if absent.
+ * @param p The parameter type. @param name Attribute name. */
+#define ParamAttrArgCount(p, name) __builtin_ast_param_attr_arg_count(p, name)
+/*! @def ParamAttrArg
+ * @brief Return argument `i` of the first use of `name` as an expression node.
+ * @param p The parameter type. @param name Attribute name. @param i Argument
+ * index. */
+#define ParamAttrArg(p, name, i) __builtin_ast_param_attr_arg(p, name, i)
+/*! @def ParamAttrCount
+ * @brief Return the number of custom attribute uses on the parameter.
+ * @param p The parameter type. */
+#define ParamAttrCount(p) __builtin_ast_param_attr_count(p)
+/*! @def ParamAttrNameAt
+ * @brief Return the name of attribute use `i`.
+ * @param p The parameter type. @param i Use index. */
+#define ParamAttrNameAt(p, i) __builtin_ast_param_attr_name_at(p, i)
+/*! @def ParamAttrArgCountAt
+ * @brief Return the argument count of attribute use `i`.
+ * @param p The parameter type. @param i Use index. */
+#define ParamAttrArgCountAt(p, i) __builtin_ast_param_attr_arg_count_at(p, i)
+/*! @def ParamAttrArgAt
+ * @brief Return argument `j` of attribute use `i` as an expression node.
+ * @param p The parameter type. @param i Use index. @param j Argument index. */
+#define ParamAttrArgAt(p, i, j) __builtin_ast_param_attr_arg_at(p, i, j)
 
 /*! @def MakeFunction
  * @brief Create a new function object, automatically added to the globals list.

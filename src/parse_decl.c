@@ -499,6 +499,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
 
     apply_checked_libc_bounds(vm, fn, ty->name);
     fn->is_root = !obj_is_inline_only(fn);
+    claim_param_attrs(vm, fn, ty);
+    run_param_custom_attrs(vm, fn, ty);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
                           fn, fn->tok);
     return fn;
@@ -814,6 +816,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_inline = attr->is_inline;
         obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
     }
+    claim_param_attrs(vm, fn, ty);
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
     if (type_attrs(ty)->method_of)
@@ -845,6 +848,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                       "body");
         cc_check_checked_scope_decl(vm, ty->return_ty, ty->name,
                                     "return type of function");
+        run_param_custom_attrs(vm, fn, ty);
         run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name,
                               fn->ty, fn, fn->tok);
         return tok;
@@ -1255,6 +1259,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         vm->compiler.current_fn = NULL;
     }
 
+    run_param_custom_attrs(vm, fn, ty);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
                           fn, fn->tok);
 
@@ -2370,6 +2375,7 @@ static char *type_tag_name(VirtualMachine *vm, Type *ty) {
 static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     while (tok->kind != TK_EOF) {
         reject_member_initializers(vm, NULL, NULL);
+        reject_stray_param_attrs(vm);
         run_pending_member_attrs(vm);
         run_pending_methods(vm);
         // _Static_assert or static_assert (C23) - check before declspec
@@ -2477,6 +2483,7 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
         tok = global_variable(vm, tok, basety, &attr);
     }
     reject_member_initializers(vm, NULL, NULL);
+    reject_stray_param_attrs(vm);
     run_pending_member_attrs(vm);
     run_pending_methods(vm);
     return tok;

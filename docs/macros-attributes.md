@@ -52,13 +52,15 @@ macros. The target helpers are:
 
 | Helper | Description |
 |---|---|
-| `GetAttrTargetKind(target)` | `ATTR_TARGET_TYPE`, `ATTR_TARGET_FUNCTION`, `ATTR_TARGET_GLOBAL`, `ATTR_TARGET_TYPEDEF`, or `ATTR_TARGET_MEMBER` |
+| `GetAttrTargetKind(target)` | `ATTR_TARGET_TYPE`, `ATTR_TARGET_FUNCTION`, `ATTR_TARGET_GLOBAL`, `ATTR_TARGET_TYPEDEF`, `ATTR_TARGET_MEMBER`, or `ATTR_TARGET_PARAM` |
 | `AttrTargetName(target)` | Source name when available |
-| `$ATTR_TARGET_TYPE(target)` | Target type (the member's type for a member) |
-| `AttrTargetObj(target)` | Function/global object, or `NULL` for type/typedef/member targets |
+| `$ATTR_TARGET_TYPE(target)` | Target type (the member's or parameter's type for those targets) |
+| `AttrTargetObj(target)` | Function/global object, or `NULL` for type/typedef/member/parameter targets |
 | `AttrTargetToken(target)` | Source token for diagnostics |
 | `AttrTargetMember(target)` | The `Member *` of a member target, else `NULL` |
-| `AttrTargetOwner(target)` | The struct/union declaring a member target, else `NULL` |
+| `AttrTargetOwner(target)` | The struct/union declaring a member target, or the function type of a parameter target, else `NULL` |
+| `AttrTargetParam(target)` | The parameter's `Type *` of a parameter target, else `NULL` |
+| `AttrTargetParamIndex(target)` | Position of a parameter target in its parameter list, else `-1` |
 
 Applying a custom attribute to a local variable is a compile error.
 
@@ -119,3 +121,45 @@ error. A member handler that has nothing to do can be an empty function.
 
 Member attributes are not allowed on the members of a struct defined inside a
 function body.
+
+## Parameter attributes
+
+A custom attribute can sit on a parameter of a function declared at file
+scope, before the type or after the declarator:
+
+```c
+int area(int w @default(80), @weight("2") int h);
+```
+
+A handler registered for the name runs once per attributed parameter with an
+`ATTR_TARGET_PARAM` target, after the declaration is complete. A function-level
+handler reads the attributes by walking the function type:
+
+```c
+@comptime(attribute("describe")) void describe(AttrTarget *target) {
+    Type *fn = AttrTargetType(target);
+    for (int i = 0; i < TypeParamCount(fn); i++)
+        if (ParamHasAttr(TypeParamAt(fn, i), "weight"))
+            use(StringLiteralValue(ParamAttrArg(TypeParamAt(fn, i), "weight", 0)));
+}
+```
+
+| Helper | Description |
+|---|---|
+| `ParamHasAttr(p, "name")` | 1 if the parameter carries the attribute |
+| `ParamAttrArgCount(p, "name")` | Argument count of the first use, `-1` if absent |
+| `ParamAttrArg(p, "name", i)` | Argument `i` of the first use as a `Node *`, or `NULL` |
+| `ParamAttrCount(p)` | Number of attribute uses on the parameter |
+| `ParamAttrNameAt(p, i)` | Name of use `i`, or `NULL` |
+| `ParamAttrArgCountAt(p, i)` | Argument count of use `i`, `-1` if out of range |
+| `ParamAttrArgAt(p, i, j)` | Argument `j` of use `i`, or `NULL` |
+
+`p` is the `Type *` from `TypeParamAt(fn, i)`.
+
+A parameter's attribute is written on one declaration only. Later
+declarations of the function, including the definition, inherit it, and
+repeating the same attribute name on the same parameter is a compile error. A
+later declaration may add an attribute to a parameter that has none.
+
+Parameter attributes are rejected on function pointers, typedefs, nested
+parameter lists and block-scope declarations.

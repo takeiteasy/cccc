@@ -751,9 +751,10 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         return func_type(vm, ty);
     }
 
-    Type  head        = {};
-    Type *cur         = &head;
-    bool  is_variadic = false;
+    Type   head        = {};
+    Type  *cur         = &head;
+    bool   is_variadic = false;
+    Token *attrs_tok   = NULL;
 
     // Open a temporary prototype scope so that each parameter is visible to
     // subsequent parameters' VLA size expressions (C99 §6.7.6.3p12).
@@ -779,10 +780,19 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         ty2               = declarator(vm, &tok, tok, ty2);
         ty2               = apply_var_attrs_to_type(vm, ty2, &attr);
         drop_cleanup_attr(vm, ty2, &attr, ty2->name ? ty2->name : param_tok);
-        if (has_custom_attrs(ty2, &attr))
-            error_tok(vm, ty2->name ? ty2->name : tok,
-                      "custom attributes are only supported on file-scope "
-                      "declarations");
+        CustomAttrUse *param_uses = NULL;
+        if (has_custom_attrs(ty2, &attr) && !vm->compiler.in_type_lookahead) {
+            if (vm->compiler.current_fn)
+                error_tok(vm, ty2->name ? ty2->name : tok,
+                          "custom attributes on parameters are only supported "
+                          "on a function declaration at file scope");
+            param_uses = clone_custom_attr_list(vm, attr.custom_attrs);
+            append_custom_attr_list(
+                &param_uses,
+                clone_custom_attr_list(vm, type_attrs(ty2)->custom_attrs));
+            if (!attrs_tok)
+                attrs_tok = param_uses->tok;
+        }
 
         Token *name = ty2->name;
 
@@ -861,6 +871,8 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         }
 
         cur = cur->next = copy_type(vm, ty2);
+        if (param_uses)
+            type_attrs_mut(vm, cur)->custom_attrs = param_uses;
     }
 
     vm->compiler.proto_params--;
@@ -879,7 +891,9 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
     ty              = func_type(vm, ty);
     ty->params      = head.next;
     ty->is_variadic = is_variadic;
-    *rest           = tok->next;
+    if (attrs_tok)
+        queue_param_attrs(vm, ty->params, attrs_tok);
+    *rest = tok->next;
     return ty;
 }
 

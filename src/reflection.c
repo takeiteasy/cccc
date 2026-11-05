@@ -991,27 +991,52 @@ Type *__builtin_attr_target_owner(AttrTarget *target) {
     return target ? target->owner : NULL;
 }
 
+CC_BUILTIN(__builtin_attr_target_param, 1);
+Type *__builtin_attr_target_param(AttrTarget *target) {
+    return target && target->kind == ATTR_TARGET_PARAM ? target->ty : NULL;
+}
+
+CC_BUILTIN(__builtin_attr_target_param_index, 1);
+int __builtin_attr_target_param_index(AttrTarget *target) {
+    return target && target->kind == ATTR_TARGET_PARAM ? target->param_index
+                                                       : -1;
+}
+
 // ============================================================================
-// Member attributes
+// Member and parameter attributes
 // ============================================================================
 
-static CustomAttrUse *member_attr_nth(Member *m, int index) {
-    if (!m || index < 0)
+static CustomAttrUse *attr_list_nth(CustomAttrUse *use, int index) {
+    if (index < 0)
         return NULL;
-    CustomAttrUse *use = m->custom_attrs;
     for (int i = 0; i < index && use; i++)
         use = use->next;
     return use;
 }
 
-// First use of `name` on the member.
-static CustomAttrUse *member_attr_find(Member *m, const char *name) {
-    if (!m || !name)
+// First use of `name` in the list.
+static CustomAttrUse *attr_list_find(CustomAttrUse *use, const char *name) {
+    if (!name)
         return NULL;
-    for (CustomAttrUse *use = m->custom_attrs; use; use = use->next)
+    for (; use; use = use->next)
         if (!strcmp(use->name, name))
             return use;
     return NULL;
+}
+
+static CustomAttrUse *member_attrs(Member *m) {
+    return m ? m->custom_attrs : NULL;
+}
+
+static CustomAttrUse *param_attrs(Type *p) {
+    return p ? type_attrs(p)->custom_attrs : NULL;
+}
+
+static int attr_list_count(CustomAttrUse *use) {
+    int n = 0;
+    for (; use; use = use->next)
+        n++;
+    return n;
 }
 
 static Node *attr_use_arg(CustomAttrUse *use, int index) {
@@ -1025,43 +1050,78 @@ static Node *attr_use_arg(CustomAttrUse *use, int index) {
 
 CC_BUILTIN(__builtin_ast_member_has_attr, 2);
 int __builtin_ast_member_has_attr(Member *m, const char *name) {
-    return member_attr_find(m, name) != NULL;
+    return attr_list_find(member_attrs(m), name) != NULL;
 }
 
 CC_BUILTIN(__builtin_ast_member_attr_arg_count, 2);
 int __builtin_ast_member_attr_arg_count(Member *m, const char *name) {
-    CustomAttrUse *use = member_attr_find(m, name);
+    CustomAttrUse *use = attr_list_find(member_attrs(m), name);
     return use ? use->arg_count : -1;
 }
 
 CC_BUILTIN(__builtin_ast_member_attr_arg, 3);
 Node *__builtin_ast_member_attr_arg(Member *m, const char *name, int index) {
-    return attr_use_arg(member_attr_find(m, name), index);
+    return attr_use_arg(attr_list_find(member_attrs(m), name), index);
 }
 
 CC_BUILTIN(__builtin_ast_member_attr_count, 1);
 int __builtin_ast_member_attr_count(Member *m) {
-    int n = 0;
-    for (CustomAttrUse *use = m ? m->custom_attrs : NULL; use; use = use->next)
-        n++;
-    return n;
+    return attr_list_count(member_attrs(m));
 }
 
 CC_BUILTIN_CSTR(__builtin_ast_member_attr_name_at, 2);
 const char *__builtin_ast_member_attr_name_at(Member *m, int index) {
-    CustomAttrUse *use = member_attr_nth(m, index);
+    CustomAttrUse *use = attr_list_nth(member_attrs(m), index);
     return use ? use->name : NULL;
 }
 
 CC_BUILTIN(__builtin_ast_member_attr_arg_count_at, 2);
 int __builtin_ast_member_attr_arg_count_at(Member *m, int index) {
-    CustomAttrUse *use = member_attr_nth(m, index);
+    CustomAttrUse *use = attr_list_nth(member_attrs(m), index);
     return use ? use->arg_count : -1;
 }
 
 CC_BUILTIN(__builtin_ast_member_attr_arg_at, 3);
 Node *__builtin_ast_member_attr_arg_at(Member *m, int index, int arg) {
-    return attr_use_arg(member_attr_nth(m, index), arg);
+    return attr_use_arg(attr_list_nth(member_attrs(m), index), arg);
+}
+
+CC_BUILTIN(__builtin_ast_param_has_attr, 2);
+int __builtin_ast_param_has_attr(Type *p, const char *name) {
+    return attr_list_find(param_attrs(p), name) != NULL;
+}
+
+CC_BUILTIN(__builtin_ast_param_attr_arg_count, 2);
+int __builtin_ast_param_attr_arg_count(Type *p, const char *name) {
+    CustomAttrUse *use = attr_list_find(param_attrs(p), name);
+    return use ? use->arg_count : -1;
+}
+
+CC_BUILTIN(__builtin_ast_param_attr_arg, 3);
+Node *__builtin_ast_param_attr_arg(Type *p, const char *name, int index) {
+    return attr_use_arg(attr_list_find(param_attrs(p), name), index);
+}
+
+CC_BUILTIN(__builtin_ast_param_attr_count, 1);
+int __builtin_ast_param_attr_count(Type *p) {
+    return attr_list_count(param_attrs(p));
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_param_attr_name_at, 2);
+const char *__builtin_ast_param_attr_name_at(Type *p, int index) {
+    CustomAttrUse *use = attr_list_nth(param_attrs(p), index);
+    return use ? use->name : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_param_attr_arg_count_at, 2);
+int __builtin_ast_param_attr_arg_count_at(Type *p, int index) {
+    CustomAttrUse *use = attr_list_nth(param_attrs(p), index);
+    return use ? use->arg_count : -1;
+}
+
+CC_BUILTIN(__builtin_ast_param_attr_arg_at, 3);
+Node *__builtin_ast_param_attr_arg_at(Type *p, int index, int arg) {
+    return attr_use_arg(attr_list_nth(param_attrs(p), index), arg);
 }
 
 // ============================================================================
@@ -2269,7 +2329,7 @@ static void reflect_serdes_members(VirtualMachine *vm, SerdesCalls *calls,
             continue;
         }
 
-        if (member_attr_find(m, "serialize_skip"))
+        if (attr_list_find(member_attrs(m), "serialize_skip"))
             continue;
 
         if (m->is_bitfield) {

@@ -10,7 +10,7 @@ Syntax that standard C does not have. Each section is a summary with a link to t
 | `a <=> b` | three-way comparison | [operators.md](operators.md) |
 | `^^name` | compile-time `Type *` / `Obj *` for a name | [macros-reflection.md](macros-reflection.md) |
 | `` `return ${x} + 1;` `` | quasi-quote with `${...}` splices | [macros-quoting.md](macros-quoting.md) |
-| `@default(expr)` | member value used by a derived constructor | [derive.md](derive.md) |
+| `@default(expr)` | member value used by a derived constructor, or a parameter's default | [derive.md](derive.md) |
 
 `$` is an ordinary identifier character (`int $x;`) except inside quasi-quote templates.
 
@@ -96,3 +96,5 @@ Node *add_one(Node *x) { return `return ${x} + 1;`; }
 
 struct Server s = Server_new();
 ```
+
+On a function parameter, `@default(expr)` records the value for reflection (`int area(int w @default(80), int h @default(24));`); see [derive.md](derive.md#parameter-defaults).

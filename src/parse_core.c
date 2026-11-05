@@ -271,7 +271,8 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
 
 static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
                              AttrTargetKind kind, char *name, Type *ty,
-                             Obj *obj, Token *tok, Member *mem, Type *owner) {
+                             Obj *obj, Token *tok, Member *mem, Type *owner,
+                             int param_index) {
     // Serialize/Deserialize and the enum-string builders call memcpy/strcmp,
     // which the runtime TU may not declare.
     if (attrs && !vm->compiler.no_comptime)
@@ -299,6 +300,7 @@ static void run_custom_attrs(VirtualMachine *vm, CustomAttrUse *attrs,
         target->tok  = tok ? tok : use->tok;
         target->mem   = mem;
         target->owner = owner;
+        target->param_index = param_index;
         cc_execute_attribute_macro(vm, pm, use->tok, target, use->args,
                                    use->arg_count);
     }
@@ -316,10 +318,10 @@ void run_decl_custom_attrs(VirtualMachine *vm, Type *ty, VarAttr *attr,
     run_pending_member_attrs(vm);
     if (attr && attr->custom_attrs)
         run_custom_attrs(vm, attr->custom_attrs, kind, name, target_ty, obj,
-                         tok, NULL, NULL);
+                         tok, NULL, NULL, 0);
     if (ty && type_attrs(ty)->custom_attrs)
         run_custom_attrs(vm, type_attrs(ty)->custom_attrs, kind, name,
-                         target_ty, obj, tok, NULL, NULL);
+                         target_ty, obj, tok, NULL, NULL, 0);
 }
 
 CustomAttrUse *clone_custom_attr_list(VirtualMachine *vm, CustomAttrUse *src) {
@@ -368,11 +370,91 @@ void run_pending_member_attrs(VirtualMachine *vm) {
         char *name = p->mem->name ? arena_strndup(vm, p->mem->name->loc,
                                                   p->mem->name->len)
                                   : NULL;
-        run_custom_attrs(
-            vm, p->mem->custom_attrs, ATTR_TARGET_MEMBER, name, p->mem->ty,
-            NULL, p->mem->name ? p->mem->name : p->mem->tok, p->mem, p->owner);
+        run_custom_attrs(vm, p->mem->custom_attrs, ATTR_TARGET_MEMBER, name,
+                         p->mem->ty, NULL,
+                         p->mem->name ? p->mem->name : p->mem->tok, p->mem,
+                         p->owner, 0);
     }
     vm->compiler.draining_member_attrs = false;
+}
+
+static bool attrs_have(CustomAttrUse *list, const char *name);
+
+void queue_param_attrs(VirtualMachine *vm, Type *params, Token *tok) {
+    PendingParamAttrs *p =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(PendingParamAttrs));
+    p->params                        = params;
+    p->tok                           = tok;
+    p->next                          = vm->compiler.pending_param_attrs;
+    vm->compiler.pending_param_attrs = p;
+}
+
+// Takes the queued attributes of `decl_ty`'s parameter list for the function
+// `fn` it declares, and merges them onto fn's canonical type. A parameter's
+// attribute is written on one declaration only; later declarations inherit it.
+void claim_param_attrs(VirtualMachine *vm, Obj *fn, Type *decl_ty) {
+    PendingParamAttrs **pp = &vm->compiler.pending_param_attrs;
+    while (*pp && (*pp)->params != decl_ty->params)
+        pp = &(*pp)->next;
+    if (!*pp)
+        return;
+    *pp         = (*pp)->next;
+
+    Type *canon = fn->ty;
+    if (canon == decl_ty)
+        return;
+    Type *cp = canon->params;
+    for (Type *p = decl_ty->params; p; p = p->next) {
+        CustomAttrUse *uses = type_attrs(p)->custom_attrs;
+        if (uses && !cp)
+            error_tok(vm, uses->tok,
+                      "parameter attributes need a prior declaration with a "
+                      "parameter list");
+        for (CustomAttrUse *use = uses; use; use = use->next)
+            if (attrs_have(type_attrs(cp)->custom_attrs, use->name))
+                error_tok(vm, use->tok,
+                          "parameter attribute '@%s' is already given on an "
+                          "earlier declaration of '%s'",
+                          use->name, fn->name);
+        if (uses)
+            append_custom_attr_list(&type_attrs_mut(vm, cp)->custom_attrs,
+                                    clone_custom_attr_list(vm, uses));
+        cp = cp ? cp->next : NULL;
+    }
+}
+
+// Runs the handlers of the attributes written on `decl_ty`'s parameters, once
+// claim_param_attrs has merged them onto fn's canonical type.
+void run_param_custom_attrs(VirtualMachine *vm, Obj *fn, Type *decl_ty) {
+    if (vm->compiler.in_macro_mode || vm->compiler.draining_member_attrs)
+        return;
+    // A handler's comptime program parses declarations of its own.
+    vm->compiler.draining_member_attrs = true;
+    Type *cp                           = fn->ty->params;
+    int   index                        = 0;
+    for (Type *p = decl_ty->params; p && cp;
+         p = p->next, cp = cp->next, index++) {
+        CustomAttrUse *uses = type_attrs(p)->custom_attrs;
+        if (!uses)
+            continue;
+        char *name =
+            cp->name ? arena_strndup(vm, cp->name->loc, cp->name->len) : NULL;
+        run_custom_attrs(vm, uses, ATTR_TARGET_PARAM, name, cp, NULL,
+                         cp->name ? cp->name : uses->tok, NULL, fn->ty, index);
+    }
+    vm->compiler.draining_member_attrs = false;
+}
+
+// A parameter list still queued once its file-scope declaration is complete
+// belongs to something other than a function declaration.
+void reject_stray_param_attrs(VirtualMachine *vm) {
+    PendingParamAttrs *p = vm->compiler.pending_param_attrs;
+    if (!p)
+        return;
+    vm->compiler.pending_param_attrs = NULL;
+    error_tok(vm, p->tok,
+              "custom attributes on parameters are only supported on a "
+              "function declaration at file scope");
 }
 
 bool attribute_handler_exists(VirtualMachine *vm, const char *name) {

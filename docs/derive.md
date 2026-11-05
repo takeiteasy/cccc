@@ -42,7 +42,7 @@ int main(void) {
 | `@destroy` | struct | `void T_destroy(T *self)` |
 | `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable`, `@ordered` | struct/union | a pair of the above, see [Bundles](#bundles) |
 | `@owned` / `@owned("n")` | member | marks a pointer member as heap memory for `@clone` / `@destroy`; `@equals`, `@hash`, `@dump`, `@compare`, `@to_json` and `@from_json` use its content |
-| `@default(expr)` or `T m = expr;` | member | the value `T_new` gives the member instead of a parameter |
+| `@default(expr)` or `T m = expr;` | member, function parameter | the value `T_new` gives the member instead of a parameter; the value of an omitted argument |
 | `@compare` | struct | `int T_compare(const T *a, const T *b)` |
 | `@validate` | struct | `_Bool T_validate(const T *self)` |
 | `@clamp` | struct | `void T_clamp(T *self)` |
@@ -213,6 +213,21 @@ struct Config {
 `@default` takes one expression that is valid where the struct is used
 (constants, enumerators, `sizeof`, string literals). It does not apply to array
 members, and a member cannot carry both `@default` and `@ctor_skip`.
+
+### Parameter defaults
+
+`@default(expr)` also marks a function parameter. Every parameter after a
+defaulted one needs a default too, and the attribute is written on one
+declaration only; the definition inherits it.
+
+```c
+int area(int w @default(80), int h @default(24));
+```
+
+Calls do not use the value yet, and the handler only validates it. The
+attribute is readable through `ParamHasAttr` and `ParamAttrArg`, see
+[macros-attributes.md](macros-attributes.md#parameter-attributes). Call-site
+defaults are tracked in #1683.
 
 ### Member initializers
 

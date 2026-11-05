@@ -2916,17 +2916,30 @@ typedef enum {
     ATTR_TARGET_FUNCTION = 3,
     ATTR_TARGET_GLOBAL   = 4,
     ATTR_TARGET_MEMBER   = 5,
+    ATTR_TARGET_PARAM    = 6,
 } AttrTargetKind;
 
 typedef struct AttrTarget {
     AttrTargetKind kind;
     char          *name;
-    Type          *ty;
+    Type          *ty;    // ATTR_TARGET_PARAM: the parameter's type
     Obj           *obj;
     Token         *tok;
     Member        *mem;   // ATTR_TARGET_MEMBER: the attributed member
-    Type          *owner; // ATTR_TARGET_MEMBER: the struct/union declaring it
+    Type          *owner; // MEMBER: the struct/union declaring it; PARAM: the
+                          // function type
+    int param_index;      // ATTR_TARGET_PARAM: position in the parameter list
 } AttrTarget;
+
+// A parameter list carrying custom attributes, queued by func_params() until
+// the function declaration it belongs to claims it (see
+// run_param_custom_attrs). One still queued at the end of a file-scope
+// declaration sits on something that is not a function declaration.
+typedef struct PendingParamAttrs {
+    struct PendingParamAttrs *next;
+    Type                     *params; // first parameter of the list
+    Token                    *tok;
+} PendingParamAttrs;
 
 // A member carrying custom attributes, queued by struct_members() until the
 // enclosing file-scope declaration is complete (see run_pending_member_attrs).
@@ -4311,6 +4324,7 @@ typedef struct Compiler {
     int                 nmethods, methods_cap;
     HashMap             binding_index;   // (aggregate, symbol|name) -> entry
     PendingMemberAttrs *pending_member_attrs_tail;
+    PendingParamAttrs  *pending_param_attrs;
     PendingMethod      *pending_methods; // FIFO head; tail via _tail
     PendingMethod      *pending_methods_tail;
     bool                draining_methods;

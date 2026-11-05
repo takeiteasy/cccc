@@ -274,11 +274,24 @@
 
 @comptime(attribute("default")) void __builtin_attr_default(AttrTarget *target,
                                                             ...) {
-    if (GetAttrTargetKind(target) != ATTR_TARGET_MEMBER)
-        MacroErrorAt(MakeIntLiteral(0), "@default applies to a struct member");
+    int kind = GetAttrTargetKind(target);
+    if (kind != ATTR_TARGET_MEMBER && kind != ATTR_TARGET_PARAM)
+        MacroErrorAt(MakeIntLiteral(0),
+                     "@default applies to a struct member or function "
+                     "parameter");
     if (VarargCount() != 1)
         MacroErrorAt(MakeIntLiteral(0),
                      "@default takes one default value expression");
+    if (kind == ATTR_TARGET_PARAM) {
+        Type *fn = AttrTargetOwner(target);
+        for (int i = AttrTargetParamIndex(target) + 1; i < TypeParamCount(fn);
+             i++)
+            if (!ParamHasAttr(TypeParamAt(fn, i), "default"))
+                MacroErrorAt(MakeIntLiteral(0),
+                             "a parameter after a @default parameter needs "
+                             "a @default");
+        return;
+    }
     Member *m = AttrTargetMember(target);
     if (MemberHasAttr(m, "ctor_skip"))
         MacroErrorAt(MakeIntLiteral(0),
