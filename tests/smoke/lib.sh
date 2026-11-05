@@ -61,13 +61,22 @@ cc_family() {
     esac
 }
 
-# find_family WANT NAME...: the first NAME on PATH whose cc_family is WANT.
+# cc_builds CC: true when CC compiles and links a program that includes a
+# system header (a compiler whose SDK is missing cannot).
+cc_builds() {
+    printf '#include <stdio.h>\nint main(void) { return 0; }\n' >cc_builds.c
+    "$1" -w -o cc_builds_out cc_builds.c </dev/null >/dev/null 2>&1
+}
+
+# find_family WANT NAME...: the first NAME on PATH that can build a program and
+# whose cc_family is WANT.
 find_family() {
     want=$1
     shift
     for n in "$@"; do
         p=$(command -v "$n" 2>/dev/null) || continue
-        [ "$(cc_family "$p")" = "$want" ] && { echo "$p"; return 0; }
+        [ "$(cc_family "$p")" = "$want" ] && cc_builds "$p" &&
+            { echo "$p"; return 0; }
     done
     return 1
 }

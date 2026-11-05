@@ -224,7 +224,8 @@ The scripts cover what one `testcheck` run cannot: the argv handed to the host
 compiler through a `CCCC_NATIVE_CC` wrapper, artifacts written or refused by
 `--test-run`/`--testing`, default output names (`a.out`, `a.gen.c`), linking
 `-c=generated` output, and the width-0 bit-field layout guard against a real
-clang and gcc.
+clang and gcc. `find_family` skips a compiler that cannot build a program that
+includes `<stdio.h>`, such as a Homebrew llvm clang with no matching SDK.
 
 **Known gap.** `test_native_ctor_dtor_native_1020` fails when `CCCC_NATIVE_CC`
 is gcc on macOS: gcc on Darwin rejects `__attribute__((constructor(150)))`.
