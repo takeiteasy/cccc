@@ -2818,6 +2818,7 @@ void __builtin_ast_function_add_param(Obj *fn, const char *name, Type *type) {
     Type *param_type = arena_alloc(&vm->compiler.parser_arena, sizeof(Type));
     type_assign(vm, param_type, type);
     param_type->next = NULL;
+    param_type->name = __builtin_ast_synthetic_token(param->name);
     if (fn->ty->params == NULL) {
         fn->ty->params = param_type;
     } else {

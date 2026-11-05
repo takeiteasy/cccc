@@ -60,6 +60,33 @@ typedef enum { LOW, HIGH } Level;
     AssertEq(strcmp(i.tag, "abc"), 0);
 }
 
+@ctor struct Win {
+    int w;
+    int h @ default(24);
+    int d;
+};
+
+[[cccc::test]] void test_keyed_arguments_reorder_to_parameters(void) {
+    struct Win win = Win_new(.d = 2, .w = 1);
+    AssertEq(win.w, 1);
+    AssertEq(win.h, 24);
+    AssertEq(win.d, 2);
+}
+
+[[cccc::test]] void test_keyed_arguments_follow_positional_ones(void) {
+    struct Win win = Win_new(1, .d = 2);
+    AssertEq(win.w, 1);
+    AssertEq(win.h, 24);
+    AssertEq(win.d, 2);
+}
+
+[[cccc::test]] void test_keyed_argument_names_a_flattened_member(void) {
+    struct Config c = Config_new(.x = 5, .name = "srv");
+    AssertEq(strcmp(c.name, "srv"), 0);
+    AssertEq(c.x, 5);
+    AssertEq(c.port, 8080);
+}
+
 @ctor("app") struct Point {
     int x;
     int y @ default(2);
