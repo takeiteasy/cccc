@@ -82,7 +82,7 @@ jobs:
             done
             echo "::endgroup::"
           ) &
-          trap 'pkill -P $! 2>/dev/null; kill $! 2>/dev/null' EXIT
+          trap 'pkill -P $! 2>/dev/null || true; kill $! 2>/dev/null || true' EXIT
           ./cccc --build build.c --build-target=test_release --build-jobs=4
       - name: Test loose tests
         timeout-minutes: 30
