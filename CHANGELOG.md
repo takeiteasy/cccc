@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-05
+
 - Added: a custom attribute can sit on a parameter of a function declared at file scope (`int area(int w @default(80), int h @default(24));`). Its handler runs with an `ATTR_TARGET_PARAM` target (`AttrTargetParam`, `AttrTargetParamIndex`), and `ParamHasAttr`, `ParamAttrArg` and five more accessors read the attributes from the parameter `Type *`. A parameter's attribute is written on one declaration only and the definition inherits it. `@default` accepts a parameter, and every parameter after a defaulted one needs a default.
 - Added: a call that leaves out trailing arguments takes the parameters' `@default` values (`area()` is `area(80, 24)`), and `f(.name = v)` gives an argument by parameter name, after the positional ones (`area(.h = 10)` is `area(80, 10)`). Defaults and keys apply to direct calls and method calls, not calls through function pointers; a default cannot name another parameter.
 
