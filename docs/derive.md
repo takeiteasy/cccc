@@ -222,12 +222,42 @@ declaration only; the definition inherits it.
 
 ```c
 int area(int w @default(80), int h @default(24));
+
+area();          // area(80, 24)
+area(.h = 10);   // area(80, 10)
 ```
 
-Calls do not use the value yet, and the handler only validates it. The
-attribute is readable through `ParamHasAttr` and `ParamAttrArg`, see
-[macros-attributes.md](macros-attributes.md#parameter-attributes). Call-site
-defaults are tracked in #1683.
+A call that leaves out trailing arguments takes their defaults, and
+`.name = value` gives an argument by parameter name.
+
+| Rule | Example |
+|---|---|
+| Positional arguments come first, then keyed ones | `area(7, .h = 9)` |
+| Any named parameter can be keyed, with or without a default | `f(.a = 1)` |
+| A key names a parameter once, and not one already given positionally | `area(1, .w = 2)` is an error |
+| Keyed arguments are reordered into parameter order | `area(.h = 1, .w = 2)` is `area(2, 1)` |
+| A parameter with neither argument nor default is "too few arguments" | `f()` for `int f(int a)` |
+
+Defaults and keys apply to a direct call of a named function and to a method
+call. A call through a function pointer, `(*f)()` or `(&f)()` needs every
+argument, and keys are an error there. Names for keys come from the first
+declaration that writes them, so `int f(int, int);` followed by
+`int f(int a, int b) {...}` accepts `f(.a = 1, .b = 2)`.
+
+The default is written in the declaration and evaluated at each call that
+omits it, in the caller's function but with file-scope names only, so a local
+of the caller never changes its meaning.[^default-eval] A default cannot name
+another parameter. On a variadic function, defaults fill only the fixed
+parameters.
+
+The attribute is readable through `ParamHasAttr` and `ParamAttrArg`, see
+[macros-attributes.md](macros-attributes.md#parameter-attributes).
+
+[^default-eval]: The default's tokens are parsed again at the call, so a
+    compound literal gets fresh storage per call and `@default(tick())` runs
+    once per call. Argument evaluation order is unspecified, as in C, and
+    keyed arguments are not evaluated in the order written. Naming an earlier
+    parameter is tracked in #1940.
 
 ### Member initializers
 

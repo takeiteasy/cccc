@@ -853,8 +853,7 @@ bool consume(VirtualMachine *vm, Token **rest, Token *tok, char *str) {
     return false;
 }
 
-// Create a new token.
-// A zeroed Token, taken from the recycled list when it has one.
+// Allocators for a token's lazily created cold-field groups.
 #define TOK_GROUP_MUT(fn, field, T)                                            \
     T *fn(VirtualMachine *vm, Token *t) {                                      \
         if (!t->field) {                                                       \

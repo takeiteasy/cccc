@@ -4331,6 +4331,7 @@ typedef struct Compiler {
     bool                draining_member_attrs;
     int  fn_nesting_depth;  // Current function nesting depth (0 = top-level)
     bool in_type_lookahead; // Parsing a declarator only to classify it
+    bool in_param_default;  // Parsing a parameter's @default argument
     AddrSpace *addr_space_sink; // declspec(): where [[cccc::global]] etc land
     bool  in_generic_assoc;     // Parsing the type-name of a _Generic
                                 // association: a C23 `enum E : T` underlying

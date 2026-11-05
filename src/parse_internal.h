@@ -541,8 +541,9 @@ bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base,
 bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 bool objsize_resolve_subobject(VirtualMachine *vm, Node *node, Member **mem,
                                Node **base, Node **offset);
-Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
-                              int *arg_count);
+Token *parse_custom_attr_args(VirtualMachine *vm, Token *name_tok, Token *tok,
+                              Node **args, int *arg_count);
+void merge_param_names(Obj *fn, Type *decl_ty);
 bool   node_assigns(const Node *n);
 Token *parse_typedef(VirtualMachine *vm, Token *tok, Type *basety,
                      VarAttr *attr, Node **cur);

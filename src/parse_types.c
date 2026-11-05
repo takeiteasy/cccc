@@ -3421,7 +3421,8 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                 tok             = tok->next;
                 Node *args      = NULL;
                 int   arg_count = 0;
-                tok = parse_custom_attr_args(vm, tok, &args, &arg_count);
+                tok = parse_custom_attr_args(vm, name_tok, tok, &args,
+                                             &arg_count);
                 if (!vm->compiler.in_type_lookahead) {
                     if (attr)
                         append_custom_attr(vm, &attr->custom_attrs, name_tok,
@@ -3837,7 +3838,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 if (find_attribute_macro(vm, name_tok)) {
                     Node *args      = NULL;
                     int   arg_count = 0;
-                    tok = parse_custom_attr_args(vm, tok, &args, &arg_count);
+                    tok = parse_custom_attr_args(vm, name_tok, tok, &args,
+                                                 &arg_count);
                     if (!vm->compiler.in_type_lookahead) {
                         if (attr)
                             append_custom_attr(vm, &attr->custom_attrs,

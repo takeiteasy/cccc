@@ -245,8 +245,8 @@ bool is_type_name_start(VirtualMachine *vm, Token *tok) {
     return is_typename(vm, tok);
 }
 
-Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
-                              int *arg_count) {
+Token *parse_custom_attr_args(VirtualMachine *vm, Token *name_tok, Token *tok,
+                              Node **args, int *arg_count) {
     *args      = NULL;
     *arg_count = 0;
     if (!equal(tok, "("))
@@ -255,7 +255,12 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
     if (vm->compiler.in_type_lookahead)
         return skip_paren_group(vm, tok);
 
-    tok        = tok->next;
+    tok = tok->next;
+    // A parameter's default is re-parsed at each call, where the earlier
+    // parameters do not exist.
+    bool saved_in_default = vm->compiler.in_param_default;
+    vm->compiler.in_param_default =
+        vm->compiler.proto_params > 0 && equal(name_tok, "default");
     Node  head = {};
     Node *cur  = &head;
     while (!equal(tok, ")")) {
@@ -265,6 +270,7 @@ Token *parse_custom_attr_args(VirtualMachine *vm, Token *tok, Node **args,
         cur = cur->next = arg;
         (*arg_count)++;
     }
+    vm->compiler.in_param_default = saved_in_default;
     *args = head.next;
     return tok->next;
 }
@@ -387,6 +393,17 @@ void queue_param_attrs(VirtualMachine *vm, Type *params, Token *tok) {
     p->tok                           = tok;
     p->next                          = vm->compiler.pending_param_attrs;
     vm->compiler.pending_param_attrs = p;
+}
+
+// Gives the unnamed parameters of fn's canonical type the names a later
+// declaration of the function writes, so keyed arguments can name them.
+void merge_param_names(Obj *fn, Type *decl_ty) {
+    if (fn->ty == decl_ty)
+        return;
+    Type *cp = fn->ty->params;
+    for (Type *p = decl_ty->params; p && cp; p = p->next, cp = cp->next)
+        if (!cp->name && p->name)
+            cp->name = p->name;
 }
 
 // Takes the queued attributes of `decl_ty`'s parameter list for the function

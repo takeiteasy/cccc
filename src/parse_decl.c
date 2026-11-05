@@ -499,6 +499,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
 
     apply_checked_libc_bounds(vm, fn, ty->name);
     fn->is_root = !obj_is_inline_only(fn);
+    merge_param_names(fn, ty);
     claim_param_attrs(vm, fn, ty);
     run_param_custom_attrs(vm, fn, ty);
     run_decl_custom_attrs(vm, ty, attr, ATTR_TARGET_FUNCTION, fn->name, fn->ty,
@@ -816,6 +817,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         fn->is_inline = attr->is_inline;
         obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
     }
+    merge_param_names(fn, ty);
     claim_param_attrs(vm, fn, ty);
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);

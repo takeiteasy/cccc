@@ -1362,6 +1362,102 @@ Node *new_call(VirtualMachine *vm, Node *fn, Node **args, int nargs,
     return finish_call(vm, fn, ty, head.next, param_ty, tok, false, &watch);
 }
 
+// A keyed argument `.name = value` of a call, waiting for its parameter.
+typedef struct KeyedArg {
+    struct KeyedArg *next;
+    Token           *key;
+    Node            *value;
+} KeyedArg;
+
+static bool is_keyed_arg(Token *tok) {
+    return equal(tok, ".") && tok->next->kind == TK_IDENT &&
+           equal(tok->next->next, "=");
+}
+
+static bool token_is_name(Token *tok, Token *name) {
+    return name && tok->len == name->len &&
+           !strncmp(tok->loc, name->loc, tok->len);
+}
+
+static CustomAttrUse *param_default_use(Type *param) {
+    for (CustomAttrUse *use = type_attrs(param)->custom_attrs; use;
+         use                = use->next)
+        if (!strcmp(use->name, "default"))
+            return use;
+    return NULL;
+}
+
+// Re-parses a parameter's @default argument for a call that omits it. Names
+// resolve at file scope, so a local of the caller cannot change the value; a
+// compound literal gets its storage in the caller.
+static Node *parse_param_default(VirtualMachine *vm, CustomAttrUse *use) {
+    Scope *saved = vm->compiler.scope;
+    Scope *file  = saved;
+    while (file->next)
+        file = file->next;
+    bool in_function   = saved->next != NULL;
+    vm->compiler.scope = file;
+    if (in_function)
+        enter_scope(vm);
+
+    Token *tok = use->tok->next->next;
+    Node  *arg = assign(vm, &tok, tok);
+    if (!equal(tok, ")"))
+        error_tok(vm, tok, "@default takes one default value expression");
+
+    if (in_function)
+        leave_scope(vm);
+    vm->compiler.scope = saved;
+    add_type(vm, arg);
+    return arg;
+}
+
+// Supplies the parameters a call leaves out from its keyed arguments and from
+// the parameters' @default values, checking each against its parameter.
+// Stops at the first parameter with neither, which finish_call reports.
+static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
+                              Type *ty, Type **param_ty, int *index, Node **cur,
+                              KeyedArg *keyed, bool direct, Token *tok) {
+    if (keyed && !direct)
+        error_tok(vm, keyed->key,
+                  "keyed arguments need a direct call to a function");
+
+    for (KeyedArg *k = keyed; k; k = k->next) {
+        int   pos = 0;
+        Type *p   = ty->params;
+        for (; p && !token_is_name(k->key, p->name); p = p->next)
+            pos++;
+        if (!p)
+            error_tok(vm, k->key, "no parameter named '%.*s'", k->key->len,
+                      k->key->loc);
+        if (pos < *index - 1)
+            error_tok(vm, k->key,
+                      "parameter '%.*s' already has a positional argument",
+                      k->key->len, k->key->loc);
+        for (KeyedArg *prev = keyed; prev != k; prev = prev->next)
+            if (token_is_name(k->key, prev->key))
+                error_tok(vm, k->key, "parameter '%.*s' is given twice",
+                          k->key->len, k->key->loc);
+    }
+
+    while (*param_ty) {
+        Node *arg = NULL;
+        for (KeyedArg *k = keyed; k && !arg; k = k->next)
+            if (token_is_name(k->key, (*param_ty)->name))
+                arg = k->value;
+        if (!arg && direct) {
+            CustomAttrUse *use = param_default_use(*param_ty);
+            if (use)
+                arg = parse_param_default(vm, use);
+        }
+        if (!arg)
+            return;
+        arg = check_call_arg(vm, watch, ty, param_ty, index, arg, tok);
+        if (arg)
+            *cur = (*cur)->next = arg;
+    }
+}
+
 // `recv`, when set, is an already-built first argument (a method receiver).
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv) {
@@ -1378,6 +1474,9 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
     Node *cur             = &head;
     bool  deferred_splice = false;
     bool  parsed_arg      = false;
+    bool       direct = fn->kind == ND_VAR && fn->var && fn->var->is_function;
+    KeyedArg  *keyed  = NULL;
+    KeyedArg **keyed_tail            = &keyed;
     CheckedCallWatch watch           = cc_checked_call_watch(vm, fn, tok);
     int              index           = 1;
 
@@ -1392,6 +1491,20 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
         if (parsed_arg)
             tok = skip(vm, tok, ",");
         parsed_arg = true;
+
+        if (!deferred_splice && is_keyed_arg(tok)) {
+            KeyedArg *k =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(KeyedArg));
+            k->key   = tok->next;
+            tok      = tok->next->next->next;
+            k->value = assign(vm, &tok, tok);
+            add_type(vm, k->value);
+            *keyed_tail = k;
+            keyed_tail  = &k->next;
+            continue;
+        }
+        if (keyed)
+            error_tok(vm, tok, "positional argument after a keyed argument");
 
         Node *arg = assign(vm, &tok, tok);
         add_type(vm, arg);
@@ -1410,6 +1523,10 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
 
         cur = cur->next = arg;
     }
+
+    if (!deferred_splice && (keyed || (param_ty && direct)))
+        fill_omitted_args(vm, &watch, ty, &param_ty, &index, &cur, keyed,
+                          direct, tok);
 
     Node *node = finish_call(vm, fn, ty, head.next, param_ty, tok,
                              deferred_splice, &watch);
@@ -4243,6 +4360,9 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
+        if (vm->compiler.in_param_default && sc && sc->var &&
+            sc->var->is_proto_param)
+            error_tok(vm, tok, "a @default cannot name another parameter");
         if (vm->compiler.omp_frames && !vm->compiler.unevaluated)
             sc = omp_note_use(vm, tok, sc);
 
