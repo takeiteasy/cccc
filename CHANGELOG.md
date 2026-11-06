@@ -7,9 +7,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-11-06
+
 - Fixed: a block call converts each argument to its parameter's type (`int (^b)(int)` called with `42.9` passes `42`) and reports too few or too many arguments, like a function call.
 - Fixed: a `@comptime` function call with too few or too many arguments is an error.
 - Fixed: `blk(.a = 1)` on a block reports "keyed arguments need a direct call to a function", `f(.a = 1)` on a `@comptime` function reports "keyed arguments do not apply to a @comptime function", and `@default` on a `@comptime` parameter reports "@default does not apply to a parameter of a @comptime function".
+- Fixed: a block literal can be variadic (`^(int n, ...)`), reading its tail with `<stdarg.h>`; a block literal needs a named parameter before `...`.
+- Fixed: a block literal with an explicit return type and parameters (`^double(int n) { ... }`) parses.
 
 ## [0.31.1] - 2026-11-05
 
