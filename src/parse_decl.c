@@ -404,6 +404,45 @@ static bool adopt_hidden_builtin(VirtualMachine *vm, Obj *fn, Type *ty,
     return true;
 }
 
+// Folds a redeclaration's attributes into the type already on `fn`. A prototype
+// following an unprototyped `()` declaration then becomes the function's type
+// (C17 6.2.7p3 composite), keeping the attributes the `()` declaration carried.
+static void merge_fn_type_attrs(VirtualMachine *vm, Type *dst, Type *src) {
+    if (type_attrs(src)->format_style) {
+        type_attrs_mut(vm, dst)->format_style = type_attrs(src)->format_style;
+        type_attrs_mut(vm, dst)->format_string_index =
+            type_attrs(src)->format_string_index;
+        type_attrs_mut(vm, dst)->format_fmt_first_arg =
+            type_attrs(src)->format_fmt_first_arg;
+    }
+    if (src->nonnull_all)
+        dst->nonnull_all = true;
+    type_attrs_mut(vm, dst)->nonnull_mask |= type_attrs(src)->nonnull_mask;
+    if (src->returns_nonnull)
+        dst->returns_nonnull = true;
+    if (src->is_sentinel) {
+        dst->is_sentinel                      = true;
+        type_attrs_mut(vm, dst)->sentinel_pos = type_attrs(src)->sentinel_pos;
+    }
+    if (type_attrs(src)->alloc_size_idx) {
+        type_attrs_mut(vm, dst)->alloc_size_idx =
+            type_attrs(src)->alloc_size_idx;
+        type_attrs_mut(vm, dst)->alloc_size_idx2 =
+            type_attrs(src)->alloc_size_idx2;
+    }
+    dst->is_malloc |= src->is_malloc;
+}
+
+static void merge_redeclared_fn_type(VirtualMachine *vm, Obj *fn, Type *ty) {
+    if (!fn->ty)
+        return;
+    merge_fn_type_attrs(vm, fn->ty, ty);
+    if (fn->ty->is_unprototyped && !ty->is_unprototyped) {
+        merge_fn_type_attrs(vm, ty, fn->ty);
+        fn->ty = ty;
+    }
+}
+
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
                                        VarAttr *attr, Token *tok) {
     if (!ty->name)
@@ -455,34 +494,7 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
             obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
-        if (type_attrs(ty)->format_style && fn->ty) {
-            type_attrs_mut(vm, fn->ty)->format_style =
-                type_attrs(ty)->format_style;
-            type_attrs_mut(vm, fn->ty)->format_string_index =
-                type_attrs(ty)->format_string_index;
-            type_attrs_mut(vm, fn->ty)->format_fmt_first_arg =
-                type_attrs(ty)->format_fmt_first_arg;
-        }
-        if (fn->ty) {
-            if (ty->nonnull_all)
-                fn->ty->nonnull_all = true;
-            type_attrs_mut(vm, fn->ty)->nonnull_mask |=
-                type_attrs(ty)->nonnull_mask;
-            if (ty->returns_nonnull)
-                fn->ty->returns_nonnull = true;
-            if (ty->is_sentinel) {
-                fn->ty->is_sentinel  = true;
-                type_attrs_mut(vm, fn->ty)->sentinel_pos =
-                    type_attrs(ty)->sentinel_pos;
-            }
-            if (type_attrs(ty)->alloc_size_idx) {
-                type_attrs_mut(vm, fn->ty)->alloc_size_idx =
-                    type_attrs(ty)->alloc_size_idx;
-                type_attrs_mut(vm, fn->ty)->alloc_size_idx2 =
-                    type_attrs(ty)->alloc_size_idx2;
-            }
-            fn->ty->is_malloc |= ty->is_malloc;
-        }
+        merge_redeclared_fn_type(vm, fn, ty);
     } else {
         fn                = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function   = true;
@@ -780,34 +792,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
-        if (type_attrs(ty)->format_style && fn->ty) {
-            type_attrs_mut(vm, fn->ty)->format_style =
-                type_attrs(ty)->format_style;
-            type_attrs_mut(vm, fn->ty)->format_string_index =
-                type_attrs(ty)->format_string_index;
-            type_attrs_mut(vm, fn->ty)->format_fmt_first_arg =
-                type_attrs(ty)->format_fmt_first_arg;
-        }
-        if (fn->ty) {
-            if (ty->nonnull_all)
-                fn->ty->nonnull_all = true;
-            type_attrs_mut(vm, fn->ty)->nonnull_mask |=
-                type_attrs(ty)->nonnull_mask;
-            if (ty->returns_nonnull)
-                fn->ty->returns_nonnull = true;
-            if (ty->is_sentinel) {
-                fn->ty->is_sentinel  = true;
-                type_attrs_mut(vm, fn->ty)->sentinel_pos =
-                    type_attrs(ty)->sentinel_pos;
-            }
-            if (type_attrs(ty)->alloc_size_idx) {
-                type_attrs_mut(vm, fn->ty)->alloc_size_idx =
-                    type_attrs(ty)->alloc_size_idx;
-                type_attrs_mut(vm, fn->ty)->alloc_size_idx2 =
-                    type_attrs(ty)->alloc_size_idx2;
-            }
-            fn->ty->is_malloc |= ty->is_malloc;
-        }
+        merge_redeclared_fn_type(vm, fn, ty);
     } else {
         fn                = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function   = true;
