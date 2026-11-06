@@ -1,5 +1,4 @@
 // CCCC_FLAGS: --std=c17
-// CCCC_NATIVE_SKIP: the -c=native serializer prints an unprototyped declaration as (...) or (void)
 double sqrt();
 int  (*fp)();
 

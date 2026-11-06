@@ -457,7 +457,8 @@ static bool same_type_or_origin_impl(Type *a, Type *b) {
     // chain. `params` is itself a Type linked list (one node per parameter,
     // walked via `->next`); no name to compare, only each parameter's type.
     if (a && b && a->kind == TY_FUNC && b->kind == TY_FUNC) {
-        if (a->is_variadic != b->is_variadic)
+        if (a->is_variadic != b->is_variadic ||
+            a->is_unprototyped != b->is_unprototyped)
             return false;
         if (!same_type_or_origin(a->return_ty, b->return_ty))
             return false;
@@ -742,6 +743,7 @@ static long long type_fp_key(Type *t) {
             for (Type *p = t->params; p; p = p->next)
                 np++;
             h = fp_step(h, t->is_variadic ? 1u : 0u);
+            h = fp_step(h, t->is_unprototyped ? 1u : 0u);
             h = fp_step(h, (unsigned)np);
             break;
         }
@@ -2446,7 +2448,9 @@ void serialize_type_decl(FILE *f, SerializeContext *ctx, Type *ty,
             serialize_type(out, ctx, p);
         }
         ctx->proto_depth--;
-        if (ty->is_variadic) {
+        if (ty->is_unprototyped) {
+            // `()` stays empty.
+        } else if (ty->is_variadic) {
             if (!first)
                 fprintf(out, ", ");
             fprintf(out, "...");

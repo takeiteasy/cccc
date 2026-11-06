@@ -295,7 +295,9 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
 
     ctx->proto_depth--;
 
-    if (fn->ty && fn->ty->is_variadic && !first) {
+    if (fn->ty && fn->ty->is_unprototyped) {
+        // `()` stays empty: `(void)` rejects arguments, `(...)` is not ISO C.
+    } else if (fn->ty && fn->ty->is_variadic && !first) {
         fprintf(df, ", ...");
     } else if (first) {
         fprintf(df, "void");
