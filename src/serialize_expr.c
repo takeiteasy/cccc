@@ -914,6 +914,16 @@ static Type *va_arg_promoted_type(Type *ty) {
     return ty;
 }
 
+// Parameter type an unprototyped call passes `ty` as: the default argument
+// promotions, with arrays and functions decayed to pointers.
+static Type *unprototyped_arg_type(VirtualMachine *vm, Type *ty) {
+    if (ty && (ty->kind == TY_ARRAY || ty->kind == TY_VLA))
+        return pointer_to(vm, ty->base);
+    if (ty && ty->kind == TY_FUNC)
+        return pointer_to(vm, ty);
+    return va_arg_promoted_type(ty);
+}
+
 // #1102: the rightmost operand of a comma chain, drilling through nested
 // ND_COMMA nodes (an initializer's balanced-comma tree nests both ways, but
 // the compound literal's hidden temp always sits on the right spine).
@@ -3568,15 +3578,24 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, "); ((");
             serialize_type(f, ctx, node->ty);
             fprintf(f, " (*)(void *");
-            // TODO: an unprototyped block type has no params, so this cast
-            // rejects the call's arguments; build it from the call (#1946).
             Type *block_ty =
                 (node->lhs && node->lhs->ty && node->lhs->ty->kind == TY_BLOCK)
                     ? node->lhs->ty
                     : NULL;
-            for (Type *p = block_ty ? block_ty->params : NULL; p; p = p->next) {
-                fprintf(f, ", ");
-                serialize_type(f, ctx, p);
+            // An unprototyped block type has no params; the cast takes the
+            // call's promoted argument types instead (a `, ...` cast would use
+            // the variadic convention).
+            if (block_ty && block_ty->is_variadic && !block_ty->params) {
+                for (Node *arg = node->args; arg; arg = arg->next) {
+                    fprintf(f, ", ");
+                    serialize_type(f, ctx, unprototyped_arg_type(vm, arg->ty));
+                }
+            } else {
+                for (Type *p = block_ty ? block_ty->params : NULL; p;
+                     p       = p->next) {
+                    fprintf(f, ", ");
+                    serialize_type(f, ctx, p);
+                }
             }
             fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
             for (Node *arg = node->args; arg; arg = arg->next) {
