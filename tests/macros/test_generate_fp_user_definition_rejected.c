@@ -2,7 +2,7 @@
 // A user-written sum_int is not silently replaced by the generator.
 // CCCC_EXPECT_STDERR: redefinition of sum_int
 
-int sum_int(int *a, int n) {
+int sum_int(int *a, unsigned long n) {
     return n;
 }
 

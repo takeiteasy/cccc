@@ -443,6 +443,19 @@ static void merge_redeclared_fn_type(VirtualMachine *vm, Obj *fn, Type *ty) {
     }
 }
 
+static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
+                            bool old_def, Type *ty, bool new_def) {
+    // The respelled prototype of a generated function drops qualifiers.
+    bool synthesized = ty->name && ty->name->file &&
+                       !strcmp(ty->name->file->name, "<inline-macro-fwd>");
+    if (synthesized || !old_ty || old_ty->kind != TY_FUNC ||
+        is_error_type(old_ty) ||
+        is_compatible_fn_redecl(old_ty, old_def, ty, new_def,
+                                vm->compiler.compiler_family))
+        return;
+    error_tok(vm, ty->name, "conflicting types for '%s'", fn->name);
+}
+
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
                                        VarAttr *attr, Token *tok) {
     if (!ty->name)
@@ -470,6 +483,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     if (fn) {
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
+        if (!fn->is_implicit && !adopted)
+            check_fn_redecl(vm, fn, fn->ty, fn->is_definition, ty, false);
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
@@ -730,6 +745,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
              ? !fn->ty->is_variadic // C23: () == (void); non-variadic = full
                                     // proto
              : fn->ty->params != NULL); // pre-C23: need an explicit params list
+    Type *knr_old_ty  = NULL;
+    bool  knr_old_def = false;
     bool is_reload = fn && fn->is_function && fn->is_definition &&
                      equal(tok, "{") && vm->compiler.allow_fn_redefinition &&
                      !is_nested;
@@ -756,6 +773,16 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         // Redeclaration
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
+        if (!fn->is_implicit && !adopted) {
+            // A K&R declaration list has not typed the parameters yet.
+            if (!equal(tok, "{") && !equal(tok, ";")) {
+                knr_old_ty  = fn->ty;
+                knr_old_def = fn->is_definition;
+            } else {
+                check_fn_redecl(vm, fn, fn->ty, fn->is_definition, ty,
+                                defines_body);
+            }
+        }
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
@@ -949,6 +976,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         !equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok))
         warn_tok(vm, fn->tok, CCCC_WARN_OLD_STYLE_DEFINITION,
                  "old-style (K&R) function definition");
+    bool had_knr_list =
+        !equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok);
     while (!equal(tok, "{") && tok->kind != TK_EOF && is_typename(vm, tok)) {
         VarAttr knr_attr = {};
         Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
@@ -978,6 +1007,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
                 break;
         }
         tok = skip(vm, tok, ";");
+    }
+
+    if (had_knr_list) {
+        ty->is_knr_def = true;
+        if (knr_old_ty)
+            check_fn_redecl(vm, fn, knr_old_ty, knr_old_def, ty, true);
     }
 
     for (Type *p = ty->params; p; p = p->next)

@@ -365,6 +365,12 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
     if (t2->kind == TY_ENUM && t1->kind != TY_ENUM)
         return compat_body(t1, enum_compat_type(t2), strict, family);
 
+    // A variable length array is compatible with an array or another VLA of a
+    // compatible element type (C17 6.7.6.2p6).
+    if ((t1->kind == TY_VLA && (t2->kind == TY_VLA || t2->kind == TY_ARRAY)) ||
+        (t2->kind == TY_VLA && t1->kind == TY_ARRAY))
+        return compat_nested(t1->base, t2->base, strict, family);
+
     if (t1->kind != t2->kind)
         return false;
 
@@ -850,6 +856,82 @@ Node *promote_operand(VirtualMachine *vm, Node *n) {
         return n;
     Type *promoted = unqualified(vm, integer_promotion(n->ty));
     return promoted == n->ty ? n : new_cast(vm, n, promoted);
+}
+
+static Type *default_promoted(Type *p) {
+    return p->kind == TY_FLOAT ? ty_double : integer_promotion(p);
+}
+
+// An identifier-list definition (`int f(a) char a; {}`) is compatible with a
+// prototype whose parameters are its parameters' promoted types; against `()`
+// only the return type matters. A definition following the prototype is also
+// accepted with its parameters as written, as gcc does.
+static bool knr_params_compatible(Type *old_ty, Type *new_ty) {
+    if (old_ty->is_unprototyped || new_ty->is_unprototyped)
+        return true;
+    if (old_ty->is_variadic != new_ty->is_variadic)
+        return false;
+    Type *po = old_ty->params;
+    Type *pn = new_ty->params;
+    for (; po && pn; po = po->next, pn = pn->next) {
+        Type *to = old_ty->is_knr_def ? default_promoted(po) : po;
+        Type *tn = new_ty->is_knr_def ? default_promoted(pn) : pn;
+        bool  ok = is_compatible(to, tn);
+        if (!ok && new_ty->is_knr_def && !old_ty->is_knr_def)
+            ok = is_compatible(po, pn);
+        if (!ok)
+            return false;
+    }
+    return !po && !pn;
+}
+
+// A parameter an unprototyped declaration can be paired with: its type must
+// survive the default argument promotions unchanged (C17 6.7.6.3p15).
+static bool survives_default_promotion(Type *p) {
+    return default_promoted(p) == p;
+}
+
+static bool fn_return_compatible(Type *a, Type *b, CCCCCompilerFamily family) {
+    return family == CCCC_COMPILER_FAMILY_CLANG
+               ? is_compatible_qualified_strict(a, b)
+               : is_compatible_qualified(a, b, family);
+}
+
+// Whether a function redeclaration agrees with the earlier declaration
+// (C17 6.2.7, 6.7.6.3p15). `()` before C23 is compatible with any
+// non-variadic prototype whose parameters are unchanged by the default
+// argument promotions; an unprototyped definition takes no parameters.
+bool is_compatible_fn_redecl(Type *old_ty, bool old_def, Type *new_ty,
+                             bool new_def, CCCCCompilerFamily family) {
+    if (!fn_return_compatible(old_ty->return_ty, new_ty->return_ty, family))
+        return false;
+    if (old_ty->is_unprototyped && new_ty->is_unprototyped)
+        return true;
+    if (old_ty->is_knr_def || new_ty->is_knr_def)
+        return knr_params_compatible(old_ty, new_ty);
+    if (!old_ty->is_unprototyped && !new_ty->is_unprototyped) {
+        // Not is_compatible_qualified(old_ty, new_ty): a function type copied
+        // to apply an attribute compares against its pre-attribute origin.
+        if (old_ty->is_variadic != new_ty->is_variadic)
+            return false;
+        Type *po = old_ty->params;
+        Type *pn = new_ty->params;
+        for (; po && pn; po = po->next, pn = pn->next)
+            if (!is_compatible_qualified(po, pn, family))
+                return false;
+        return !po && !pn;
+    }
+
+    Type *proto       = old_ty->is_unprototyped ? new_ty : old_ty;
+    bool  unproto_def = old_ty->is_unprototyped ? old_def : new_def;
+    if (proto->is_variadic)
+        return false;
+    if (unproto_def && proto->params)
+        return false;
+    for (Type *p = proto->params; p; p = p->next)
+        if (!survives_default_promotion(p))
+            return false;
+    return true;
 }
 
 void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {

@@ -500,7 +500,7 @@ int test_heap_canary_clean(void) {
 // captured).
 [[cccc::test(exit_code = 255, flags = "--heap-canaries -V")]]
 void test_heap_canary_overflow(void) {
-    void *malloc(long);
+    void *malloc(unsigned long);
     void free(void *);
     char *buf = (char *)malloc(8);
     buf[0]    = 'A';
@@ -534,7 +534,7 @@ int test_memory_leak_detect_clean(void) {
 // This verifies the program runs and exits 42 with leak detection enabled.
 [[cccc::test(return = 42, flags = "--memory-leak-detection -V")]]
 int test_memory_leak_detect_leak(void) {
-    void *malloc(long);
+    void *malloc(unsigned long);
     int *p = (int *)malloc(sizeof(int) * 8);
     p[0]   = 42;
     return 42;
@@ -561,7 +561,7 @@ int test_memory_poisoning_clean(void) {
 // Note: CCCC_EXPECT_STDERR not preserved (exit_code= uses fork).
 [[cccc::test(exit_code = 255, flags = "--memory-tagging -V")]]
 void test_memory_tagging_basic(void) {
-    void *malloc(long);
+    void *malloc(unsigned long);
     void free(void *);
     int *ptr1      = (int *)malloc(sizeof(int) * 10);
     *ptr1          = 42;
@@ -577,7 +577,7 @@ void test_memory_tagging_basic(void) {
 // Memory tagging: multiple alloc/free cycles, stale pointer access → exit 255.
 [[cccc::test(exit_code = 255, flags = "--memory-tagging -V")]]
 void test_memory_tagging_multiple_gens(void) {
-    void *malloc(long);
+    void *malloc(unsigned long);
     void free(void *);
     int *ptr1   = (int *)malloc(sizeof(int) * 10);
     *ptr1       = 10;
@@ -600,7 +600,7 @@ void test_memory_tagging_multiple_gens(void) {
 // Memory tagging: struct UAF via stale pointer → exit 255.
 [[cccc::test(exit_code = 255, flags = "--memory-tagging -V")]]
 void test_memory_tagging_reuse(void) {
-    void *malloc(long);
+    void *malloc(unsigned long);
     void free(void *);
     struct MemTagData {
         int value;

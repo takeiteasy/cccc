@@ -119,6 +119,14 @@ plain type's alignment under `gcc` and `N` under `clang`.
 Likewise `x + g` for `int x` and an aligned `i64 g` is `N` under `gcc` (the
 right operand's type wins) and plain under `clang`.
 
+Before C23, a parameter list that starts with `...` (`int f(...)`) is a
+`-Wpedantic` warning under `gcc` and an error under `clang`.
+
+A function redeclaration must agree with the earlier declaration, otherwise
+it is an error (`conflicting types for 'g'`): `int g(int); int g(double);`
+fails, as does `int h(); int h(float);` (a `float` parameter changes under
+the default argument promotions, so `()` cannot match it before C23).
+
 `_Generic` arm selection is **not** affected by `--compiler-family` — its
 behaviour is the one both families already agree on.
 

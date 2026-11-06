@@ -1769,6 +1769,9 @@ struct Type {
     // Pre-C23 `()` or an implicit declaration: accepts any arguments (with
     // is_variadic set) but calls use the fixed-parameter convention.
     bool is_unprototyped      : 1;
+    // Defined with an identifier list (`int f(a) char a; {}`): the parameter
+    // types are the declared ones, but callers still promote arguments.
+    bool is_knr_def           : 1;
     bool is_maybe_unused      : 1;
     bool is_deprecated        : 1;
     bool is_noreturn          : 1;

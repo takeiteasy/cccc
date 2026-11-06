@@ -940,6 +940,8 @@ void register_decimal_math_functions(VirtualMachine *vm);
 bool is_compatible(Type *t1, Type *t2);
 bool is_compatible_qualified(Type *t1, Type *t2, CCCCCompilerFamily family);
 bool is_compatible_qualified_strict(Type *t1, Type *t2);
+bool is_compatible_fn_redecl(Type *old_ty, bool old_def, Type *new_ty,
+                             bool new_def, CCCCCompilerFamily family);
 bool token_is_from_include(VirtualMachine *vm, Token *tok);
 bool types_same_layout(Type *a, Type *b);
 Type *copy_type(VirtualMachine *vm, Type *ty);

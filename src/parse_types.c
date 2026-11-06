@@ -767,6 +767,16 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             tok = skip(vm, tok, ",");
 
         if (equal(tok, "...")) {
+            if (cur == &head && vm->compiler.c_std < CCCC_STD_C23 &&
+                !vm->compiler.in_type_lookahead &&
+                !vm->compiler.in_macro_mode) {
+                const char *msg =
+                    "ISO C requires a named parameter before '...'";
+                if (vm->compiler.compiler_family == CCCC_COMPILER_FAMILY_GCC)
+                    warn_tok(vm, tok, CCCC_WARN_PEDANTIC, "%s", msg);
+                else
+                    error_tok(vm, tok, "%s", msg);
+            }
             is_variadic = true;
             tok         = tok->next;
             skip(vm, tok, ")");
@@ -886,7 +896,7 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
     leave_scope(vm);
 
     bool is_unprototyped = false;
-    if (cur == &head) {
+    if (cur == &head && !is_variadic) {
         if (vm->compiler.c_std < CCCC_STD_C23) {
             is_unprototyped = !is_variadic;
             is_variadic     = true;
