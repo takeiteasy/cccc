@@ -3047,6 +3047,9 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int static_link_offset =
                 calling_nested ? 1 : 0; // Reserve A0 for static link
 
+            // TODO(#1949): an unprototyped callee (is_variadic, no params) gets
+            // its floating args in integer registers; use the fixed-param
+            // convention there.
             bool is_variadic_call = node->func_ty && node->func_ty->is_variadic;
             int  fixed_param_count = 0;
             if (is_variadic_call) {
@@ -4148,7 +4151,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             // separately. Pre-existing bug, found and fixed alongside #712.
             int int_arg_idx   = 1;
             int float_arg_idx = 0;
-            for (Node *a = node->args; a; a = a->next) {
+            // A prototyped variadic block takes its tail in integer registers;
+            // an unprototyped one (no params) keeps the fixed-param convention.
+            Type *blk_ty = node->lhs->ty;
+            int   nfixed = 0;
+            for (Type *p = blk_ty->params; p; p = p->next)
+                nfixed++;
+            bool blk_variadic = blk_ty->is_variadic && nfixed > 0;
+            int  arg_i        = 0;
+            for (Node *a = node->args; a; a = a->next, arg_i++) {
                 add_type(vm, a);
                 if (is_vector(a->ty)) {
                     // Block invocation has no by-memory ABI for aggregates at
@@ -4159,7 +4170,15 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
                               "vector arguments to block calls are not "
                               "supported");
                 }
-                if (is_flonum(a->ty)) {
+                if (is_flonum(a->ty) && blk_variadic && arg_i >= nfixed) {
+                    if (int_arg_idx >= 8) {
+                        error_tok(vm, a->tok, "too many block arguments");
+                    }
+                    int fs = gen_flonum_arg_to_scratch(vm, a);
+                    emit_rr(vm, FR2R, REG_A0 + int_arg_idx, fs);
+                    free_temp_reg(fs);
+                    int_arg_idx++;
+                } else if (is_flonum(a->ty)) {
                     if (float_arg_idx >= 8) {
                         error_tok(vm, a->tok, "too many block arguments");
                     }

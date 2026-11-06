@@ -3584,7 +3584,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     : NULL;
             // An unprototyped block type has no params; the cast takes the
             // call's promoted argument types instead (a `, ...` cast would use
-            // the variadic convention).
+            // the variadic convention). A prototyped variadic block keeps its
+            // `...` so the host passes the tail the variadic way.
             if (block_ty && block_ty->is_variadic && !block_ty->params) {
                 for (Node *arg = node->args; arg; arg = arg->next) {
                     fprintf(f, ", ");
@@ -3596,6 +3597,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                     fprintf(f, ", ");
                     serialize_type(f, ctx, p);
                 }
+                if (block_ty && block_ty->is_variadic)
+                    fprintf(f, ", ...");
             }
             fprintf(f, "))__cccc_blk->__invoke)(__cccc_blk");
             for (Node *arg = node->args; arg; arg = arg->next) {

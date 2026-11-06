@@ -233,6 +233,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Determine return type and parameters
     Type *return_ty          = ty_void;
     Type *params             = NULL;
+    bool  is_variadic        = false;
     bool  return_ty_explicit = false;
     // bool has_params = false;
 
@@ -254,6 +255,15 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
             while (!equal(tok, ")")) {
                 if (cur != &head)
                     tok = skip(vm, tok, ",");
+
+                if (equal(tok, "...")) {
+                    if (cur == &head)
+                        error_tok(vm, tok,
+                                  "a named parameter is required before '...'");
+                    is_variadic = true;
+                    tok         = tok->next;
+                    break;
+                }
 
                 VarAttr attr     = {};
                 Type   *param_ty = declspec(vm, &tok, tok, &attr);
@@ -294,7 +304,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
     // Create a synthetic function for this block
     char *block_name      = new_unique_name(vm);
     Type *block_func_ty   = func_type(vm, return_ty);
-    block_func_ty->params = params;
+    block_func_ty->params      = params;
+    block_func_ty->is_variadic = is_variadic;
 
     Obj *block_fn = new_gvar(vm, block_name, strlen(block_name), block_func_ty);
     block_fn->is_function   = true;
@@ -470,7 +481,8 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Block type: pointer to function type (blocks are first-class callable
     // values)
-    node->ty = block_type(vm, return_ty, params);
+    node->ty              = block_type(vm, return_ty, params);
+    node->ty->is_variadic = is_variadic;
 
     *rest    = tok;
     return node;

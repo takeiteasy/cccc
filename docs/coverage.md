@@ -194,7 +194,7 @@ language coverage figures apply.
 | Zero-length arrays `int arr[0]` | ✓ | |
 | Empty structs and unions | ✓ | GNU extension; empty aggregates have size 0 |
 | Nested functions | ✓ | Access to parent-scope variables via static link. Serializes under `-c=native`/`-m`/`-c=generated` too — see [Serialized-output divergences](native-differences.md#behaviour-differences) for the lowering shape and its residual gaps |
-| Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. [^n17] |
+| Blocks `^{ ... }` (Clang/Apple) | ✓ | Capture-by-value plus `__block` by-reference; nest to arbitrary depth (transitive capture through enclosing descriptors); `Block_copy` heap-duplicates the descriptor so a block can escape its frame, `Block_release` frees that copy. A block literal can be variadic (`^(int n, ...)`, with at least one named parameter) and reads its tail through `<stdarg.h>`. [^n17] |
 | `__builtin_*` | ✓ | Lowered by the compiler; see [Built-in Functions](stdlib.md#built-in-functions) |
 | `__atomic_*` / `__sync_*` builtins | ✓ | 1/2/4/8-byte integers and pointers; sequentially consistent in the VM, memory orders and single-instruction fetch-and-op honoured by `-c=native`; see [Atomic Operations](stdlib.md#atomic-operations) |
 | `__thread` storage class | ✓ | TLS segment; per-thread private storage. Accepted under every `--std` |
