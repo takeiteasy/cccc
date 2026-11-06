@@ -594,6 +594,7 @@ Node *to_assign_post(VirtualMachine *vm, Node *binary);
 Type *type_after_deprecated_use(VirtualMachine *vm, Type *ty);
 bool type_has_restrict(Type *ty);
 Type *typename(VirtualMachine *vm, Token **rest, Token *tok);
+Type *return_typename(VirtualMachine *vm, Token **rest, Token *tok);
 Node *unary(VirtualMachine *vm, Token **rest, Token *tok);
 void validate_nonnull_call(VirtualMachine *vm, Type *func_ty, Node *args);
 void validate_sentinel_call(VirtualMachine *vm, Token *tok, Type *func_ty,

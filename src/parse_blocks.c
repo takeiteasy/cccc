@@ -239,7 +239,7 @@ Node *block_literal(VirtualMachine *vm, Token **rest, Token *tok) {
 
     // Check for explicit return type (anything before '(' that's a type)
     if (!equal(tok, "{") && !equal(tok, "(") && is_typename(vm, tok)) {
-        return_ty          = typename(vm, &tok, tok);
+        return_ty          = return_typename(vm, &tok, tok);
         return_ty_explicit = true;
     }
 

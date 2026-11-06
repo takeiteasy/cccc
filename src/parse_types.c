@@ -1533,6 +1533,13 @@ Type *typename(VirtualMachine *vm, Token **rest, Token *tok) {
     return abstract_declarator(vm, rest, tok, ty);
 }
 
+// A type name without a function suffix, so `^double(int n)` leaves the
+// parameter list for the caller.
+Type *return_typename(VirtualMachine *vm, Token **rest, Token *tok) {
+    Type *ty = declspec(vm, &tok, tok, NULL);
+    return pointers(vm, rest, tok, ty, NULL);
+}
+
 bool is_end(Token *tok) {
     return equal(tok, "}") || (equal(tok, ",") && equal(tok->next, "}"));
 }
