@@ -371,6 +371,12 @@ bool is_compound_literal_head(VirtualMachine *vm, Token *tok) {
 static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
                      Node *recv);
 static Node *primary(VirtualMachine *vm, Token **rest, Token *tok);
+static bool is_keyed_arg(Token *tok);
+static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
+                            Type *ty, Type **param_ty_p, int *index, Node *arg,
+                            Token *tok);
+static void report_missing_args(VirtualMachine *vm, Token *tok, Type *param_ty,
+                                Node *cur);
 
 // postfix = "(" type-name ")" "{" initializer-list "}"
 //         = ident "(" func-args ")" postfix-tail*
@@ -504,14 +510,29 @@ static Node *postfix(VirtualMachine *vm, Token **rest, Token *tok) {
                 tok          = tok->next; // Skip '('
 
                 // Parse arguments
-                Node  head = {};
-                Node *cur  = &head;
+                Node             head       = {};
+                Node            *cur        = &head;
+                CheckedCallWatch watch      = {0};
+                Type            *param_ty   = node->ty->params;
+                int              index      = 1;
+                bool             parsed_arg = false;
                 while (!equal(tok, ")")) {
-                    if (cur != &head)
+                    if (parsed_arg)
                         tok = skip(vm, tok, ",");
+                    parsed_arg = true;
+                    if (is_keyed_arg(tok))
+                        error_tok(vm, tok->next,
+                                  "keyed arguments need a direct call to a "
+                                  "function");
                     Node *arg = assign(vm, &tok, tok);
-                    cur = cur->next = arg;
+                    add_type(vm, arg);
+                    arg = check_call_arg(vm, &watch, node->ty, &param_ty,
+                                         &index, arg, tok);
+                    if (arg)
+                        cur = cur->next = arg;
                 }
+                if (param_ty)
+                    report_missing_args(vm, tok, param_ty, cur);
                 tok        = tok->next; // Skip ')'
 
                 Node *call = new_node(vm, ND_BLOCK_CALL, start);
@@ -1218,6 +1239,25 @@ static Node *check_call_arg(VirtualMachine *vm, CheckedCallWatch *watch,
     return arg;
 }
 
+// Reports the first parameter a call leaves without an argument. Under error
+// recovery, appends placeholder arguments after `cur` instead of exiting.
+static void report_missing_args(VirtualMachine *vm, Token *tok, Type *param_ty,
+                                Node *cur) {
+    const char *missing = "too few arguments";
+    if (param_ty->name)
+        missing = arena_format(
+            vm, "too few arguments: no argument for parameter '%.*s'",
+            param_ty->name->len, param_ty->name->loc);
+    if (!vm->collect_errors || !error_tok_recover(vm, tok, "%s", missing))
+        error_tok(vm, tok, "%s", missing);
+    for (; param_ty; param_ty = param_ty->next) {
+        Node *placeholder = new_node(vm, ND_NUM, tok);
+        placeholder->ty   = param_ty;
+        placeholder->val  = 0;
+        cur = cur->next = placeholder;
+    }
+}
+
 // Arity check and call-site validation of an already-checked argument list
 // (`head` = first argument, `param_ty` = first unconsumed parameter), then
 // builds the ND_FUNCALL.
@@ -1229,25 +1269,8 @@ static Node *finish_call(VirtualMachine *vm, Node *fn, Type *ty,
     while (cur->next)
         cur = cur->next;
 
-    if (!deferred_splice && param_ty) {
-        const char *missing = "too few arguments";
-        if (param_ty->name)
-            missing = arena_format(
-                vm, "too few arguments: no argument for parameter '%.*s'",
-                param_ty->name->len, param_ty->name->loc);
-        if (vm->collect_errors && error_tok_recover(vm, tok, "%s", missing)) {
-            // Create placeholder arguments for missing parameters
-            while (param_ty) {
-                Node *placeholder = new_node(vm, ND_NUM, tok);
-                placeholder->ty   = param_ty;
-                placeholder->val  = 0;
-                cur = cur->next = placeholder;
-                param_ty        = param_ty->next;
-            }
-        } else {
-            error_tok(vm, tok, "%s", missing);
-        }
-    }
+    if (!deferred_splice && param_ty)
+        report_missing_args(vm, tok, param_ty, cur);
     head_next = head.next;
 
     // __attribute__((error("msg"))): emit a compile-time error on every live
@@ -4554,10 +4577,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                 while (!equal(tok, ")")) {
                     if (cur != &head)
                         tok = skip(vm, tok, ",");
+                    if (is_keyed_arg(tok))
+                        error_tok(vm, tok->next,
+                                  "keyed arguments do not apply to a "
+                                  "@comptime function");
                     Node *arg = assign(vm, &tok, tok);
                     cur = cur->next = arg;
                     arg_count++;
                 }
+                cc_check_macro_arity(vm, pm, macro_tok, arg_count);
                 *rest                 = tok->next; // Skip ')'
 
                 Node *node            = new_node(vm, ND_MACRO_CALL, macro_tok);

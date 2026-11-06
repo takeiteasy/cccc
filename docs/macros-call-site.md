@@ -39,6 +39,10 @@ int main(void) {
 Macro arguments are `Node *` pointers to the original argument ASTs. A macro
 can reuse, inspect, wrap, or replace those nodes.
 
+A call passes exactly one argument per parameter. A `@comptime` function takes
+no `@default` on a parameter and no keyed arguments (`f(.a = 1)`); both are
+errors.
+
 Inline macros also support a trailing `...` parameter. Fixed arguments are
 passed as normal `Node *` parameters, and the variadic tail is available
 through `VarargCount()`, `VarargAt(i)`, and

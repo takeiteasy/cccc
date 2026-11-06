@@ -734,6 +734,8 @@ void cc_leave_top_file_scope(
     VirtualMachine *vm); // #1001, parse.c -- see comment there
 void cc_execute_top_level_macro(VirtualMachine *vm, char *name, Token *tok,
                                 Node *args, int arg_count);
+void cc_check_macro_arity(VirtualMachine *vm, MacroFn *pm, Token *tok,
+                          int arg_count);
 void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
                                 AttrTarget *target, Node *args, int arg_count);
 bool is_derive_builtin_attr(const char *name, int len);

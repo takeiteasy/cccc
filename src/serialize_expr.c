@@ -3568,6 +3568,8 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             fprintf(f, "); ((");
             serialize_type(f, ctx, node->ty);
             fprintf(f, " (*)(void *");
+            // TODO: an unprototyped block type has no params, so this cast
+            // rejects the call's arguments; build it from the call (#1946).
             Type *block_ty =
                 (node->lhs && node->lhs->ty && node->lhs->ty->kind == TY_BLOCK)
                     ? node->lhs->ty

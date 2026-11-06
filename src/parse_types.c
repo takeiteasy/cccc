@@ -778,7 +778,14 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
         Type   *ty2       = declspec(vm, &tok, tok, &attr);
         cc_reject_checked_scope_here(vm, &attr);
         ty2               = declarator(vm, &tok, tok, ty2);
-        ty2               = apply_var_attrs_to_type(vm, ty2, &attr);
+        // A @comptime body is captured unrewritten, so `@name` stays an `@`.
+        if (vm->compiler.in_macro_mode && equal(tok, "@") &&
+            tok->next->kind != TK_EOF)
+            error_tok(vm, tok,
+                      "@%.*s does not apply to a parameter of a @comptime "
+                      "function",
+                      tok->next->len, tok->next->loc);
+        ty2 = apply_var_attrs_to_type(vm, ty2, &attr);
         drop_cleanup_attr(vm, ty2, &attr, ty2->name ? ty2->name : param_tok);
         CustomAttrUse *param_uses = NULL;
         if (has_custom_attrs(ty2, &attr) && !vm->compiler.in_type_lookahead) {
@@ -1405,6 +1412,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
 
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
+        block_ty->is_variadic = func_ty->is_variadic;
         inherit_semantic_attrs(vm, block_ty, ty);
         block_ty->name       = name;
         block_ty->name_pos   = name_pos;
@@ -1496,7 +1504,9 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
         Type *func_ty = type_suffix(vm, rest, tok, ty);
 
         // Create a block type
-        return block_type(vm, func_ty->return_ty, func_ty->params);
+        Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
+        block_ty->is_variadic = func_ty->is_variadic;
+        return block_ty;
     }
 
     if (equal(tok, "(")) {

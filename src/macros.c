@@ -3452,6 +3452,18 @@ void cc_execute_attribute_macro(VirtualMachine *vm, MacroFn *pm, Token *tok,
     vm->compiler.macro_vararg_string_mode = saved_vararg_string_mode;
 }
 
+// A call passes every fixed parameter, and more only to a variadic macro.
+void cc_check_macro_arity(VirtualMachine *vm, MacroFn *pm, Token *tok,
+                          int arg_count) {
+    if (pm->is_variadic && arg_count < pm->fixed_param_count)
+        error_tok(vm, tok,
+                  "macro '%s' called with %d arguments; expected at least %d",
+                  pm->name, arg_count, pm->fixed_param_count);
+    if (!pm->is_variadic && arg_count != pm->fixed_param_count)
+        error_tok(vm, tok, "macro '%s' called with %d arguments; expected %d",
+                  pm->name, arg_count, pm->fixed_param_count);
+}
+
 // Find macro function by name
 static MacroFn *find_macro_fn_by_name(VirtualMachine *vm, const char *name) {
     for (MacroFn *pm = vm->compiler.macro_fns; pm; pm = pm->next) {
@@ -4230,14 +4242,7 @@ static void scan_and_execute_global_calls(VirtualMachine *vm,
                             }
                             arg_strs[arg_count++] = str;
                         }
-                        if (pm->is_variadic &&
-                            arg_count < pm->fixed_param_count) {
-                            error_tok(vm, tok,
-                                      "macro '%.*s' called with %d arguments; "
-                                      "expected at least %d",
-                                      tok->len, tok->loc, arg_count,
-                                      pm->fixed_param_count);
-                        }
+                        cc_check_macro_arity(vm, pm, tok, arg_count);
                         // Place char* values using the VM calling convention
                         // before calling execute_macro_fn with NULL args so
                         // the arg-setup loop inside does not overwrite them.

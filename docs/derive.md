@@ -247,8 +247,9 @@ A call that leaves out trailing arguments takes their defaults, and
 | A parameter with neither argument nor default is "too few arguments", naming the first such parameter | `f()` for `int f(int a)` reports `a` |
 
 Defaults and keys apply to a direct call of a named function and to a method
-call. A call through a function pointer, `(*f)()` or `(&f)()` needs every
-argument, and keys are an error there. Names for keys come from the first
+call. A call through a function pointer, `(*f)()` or `(&f)()`, or through a
+block needs every argument, and keys are an error there. A `@comptime` function
+takes neither. Names for keys come from the first
 declaration that writes them, so `int f(int, int);` followed by
 `int f(int a, int b) {...}` accepts `f(.a = 1, .b = 2)`.
 

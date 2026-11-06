@@ -590,4 +590,13 @@ int test_blocks_large_capture_bounds_checked(void) {
     return r() == 42 ? 42 : 1;
 }
 
+// A block call converts each argument to the parameter type.
+[[cccc::test(return = 42)]]
+int test_blocks_call_converts_args(void) {
+    int (^id)(int) = ^(int a) {
+      return a;
+    };
+    return id(42.9);
+}
+
 #pragma cccc suite end
