@@ -1766,6 +1766,9 @@ struct Type {
     // identifier still has type `int` (C17/C23 6.7.2.2p3).
     bool enum_members_are_int : 1;
     bool is_variadic          : 1;
+    // Pre-C23 `()` or an implicit declaration: accepts any arguments (with
+    // is_variadic set) but calls use the fixed-parameter convention.
+    bool is_unprototyped      : 1;
     bool is_maybe_unused      : 1;
     bool is_deprecated        : 1;
     bool is_noreturn          : 1;

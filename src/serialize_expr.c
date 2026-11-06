@@ -3586,7 +3586,7 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             // call's promoted argument types instead (a `, ...` cast would use
             // the variadic convention). A prototyped variadic block keeps its
             // `...` so the host passes the tail the variadic way.
-            if (block_ty && block_ty->is_variadic && !block_ty->params) {
+            if (block_ty && block_ty->is_unprototyped) {
                 for (Node *arg = node->args; arg; arg = arg->next) {
                     fprintf(f, ", ");
                     serialize_type(f, ctx, unprototyped_arg_type(vm, arg->ty));

@@ -1944,6 +1944,7 @@ Obj *new_private_func_obj(VirtualMachine *vm, const char *name, Type *ty) {
 Obj *new_implicit_function(VirtualMachine *vm, Token *tok) {
     Type *ty           = func_type(vm, ty_int);
     ty->is_variadic    = true;
+    ty->is_unprototyped = true;
 
     Scope *saved_scope = vm->compiler.scope;
     while (vm->compiler.scope->next)

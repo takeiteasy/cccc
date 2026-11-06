@@ -3047,10 +3047,10 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int static_link_offset =
                 calling_nested ? 1 : 0; // Reserve A0 for static link
 
-            // TODO(#1949): an unprototyped callee (is_variadic, no params) gets
-            // its floating args in integer registers; use the fixed-param
-            // convention there.
-            bool is_variadic_call = node->func_ty && node->func_ty->is_variadic;
+            // An unprototyped callee keeps the fixed-param convention.
+            bool is_variadic_call = node->func_ty &&
+                                    node->func_ty->is_variadic &&
+                                    !node->func_ty->is_unprototyped;
             int  fixed_param_count = 0;
             if (is_variadic_call) {
                 for (Type *p = node->func_ty->params; p; p = p->next) {
@@ -4152,12 +4152,12 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             int int_arg_idx   = 1;
             int float_arg_idx = 0;
             // A prototyped variadic block takes its tail in integer registers;
-            // an unprototyped one (no params) keeps the fixed-param convention.
+            // an unprototyped one keeps the fixed-param convention.
             Type *blk_ty = node->lhs->ty;
             int   nfixed = 0;
             for (Type *p = blk_ty->params; p; p = p->next)
                 nfixed++;
-            bool blk_variadic = blk_ty->is_variadic && nfixed > 0;
+            bool blk_variadic = blk_ty->is_variadic && !blk_ty->is_unprototyped;
             int  arg_i        = 0;
             for (Node *a = node->args; a; a = a->next, arg_i++) {
                 add_type(vm, a);

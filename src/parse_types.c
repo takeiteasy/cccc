@@ -885,9 +885,11 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
     vm->compiler.proto_params--;
     leave_scope(vm);
 
+    bool is_unprototyped = false;
     if (cur == &head) {
         if (vm->compiler.c_std < CCCC_STD_C23) {
-            is_variadic = true;
+            is_unprototyped = !is_variadic;
+            is_variadic     = true;
             if (!vm->compiler.in_type_lookahead)
                 warn_tok(vm, tok, CCCC_WARN_STRICT_PROTOTYPES,
                          "function declaration is not a prototype");
@@ -897,7 +899,8 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
 
     ty              = func_type(vm, ty);
     ty->params      = head.next;
-    ty->is_variadic = is_variadic;
+    ty->is_variadic     = is_variadic;
+    ty->is_unprototyped = is_unprototyped;
     if (attrs_tok)
         queue_param_attrs(vm, ty->params, attrs_tok);
     *rest = tok->next;
@@ -1413,6 +1416,7 @@ Type *declarator(VirtualMachine *vm, Token **rest, Token *tok, Type *ty) {
         // Create a block type instead of function pointer
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         block_ty->is_variadic = func_ty->is_variadic;
+        block_ty->is_unprototyped = func_ty->is_unprototyped;
         inherit_semantic_attrs(vm, block_ty, ty);
         block_ty->name       = name;
         block_ty->name_pos   = name_pos;
@@ -1506,6 +1510,7 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
         // Create a block type
         Type *block_ty = block_type(vm, func_ty->return_ty, func_ty->params);
         block_ty->is_variadic = func_ty->is_variadic;
+        block_ty->is_unprototyped = func_ty->is_unprototyped;
         return block_ty;
     }
 
