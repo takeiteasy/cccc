@@ -1069,13 +1069,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         VarAttr knr_attr = {};
         Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
         cc_reject_checked_scope_here(vm, &knr_attr);
-        // TODO: `int a, b;` fails -- the trailing consume(",") below and this
-        // skip both eat the comma (#1960)
-        bool    first    = true;
         for (;;) {
-            if (!first)
-                tok = skip(vm, tok, ",");
-            first         = false;
             Type *decl_ty = declarator(vm, &tok, tok, basety);
             if (decl_ty->name) {
                 char *pname = decl_ty->name->loc;
