@@ -127,6 +127,13 @@ it is an error (`conflicting types for 'g'`): `int g(int); int g(double);`
 fails, as does `int h(); int h(float);` (a `float` parameter changes under
 the default argument promotions, so `()` cannot match it before C23).
 
+Every declaration of a name in the file must agree, including a block-scope one
+whose block has closed: `void k(void) { int q(int); } int q(double);` fails.
+A block-scope prototype sets the type only inside its block, so after
+`int g(); void f(void) { int g(int, int); }` a call `g(1)` outside `f` is still
+an unprototyped call. A block-scope `extern int q;` followed by a file-scope
+function `q` is an error (`redeclared as a different kind of symbol`).
+
 `_Generic` arm selection is **not** affected by `--compiler-family` — its
 behaviour is the one both families already agree on.
 

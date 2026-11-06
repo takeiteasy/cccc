@@ -4501,7 +4501,10 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                                                 /*want_stmt=*/false);
                 if (sc->var->is_kernel_local_obj)
                     return kernel_local_ref(vm, sc->var, tok);
-                return new_var_node(vm, sc->var, tok);
+                Node *var_node = new_var_node(vm, sc->var, tok);
+                if (sc->fn_ty)
+                    var_node->ty = pointer_to(vm, sc->fn_ty);
+                return var_node;
             }
             if (sc->enum_ty) {
                 if (sc->is_deprecated)

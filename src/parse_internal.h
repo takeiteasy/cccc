@@ -74,6 +74,9 @@ typedef struct {
     // between a declaration and its initializer.
     Type *enum_layout_ty;
     LayoutOp enum_layout_is_align;
+    // A block-scope function declaration's type, visible only in its block;
+    // NULL means var->ty.
+    Type *fn_ty;
     // #1155: every field above must appear in VarScopeNode (cccc.h), same
     // order, as a leading prefix -- push_scope() (parse_core.c) allocates a
     // VarScopeNode and callers cast it to VarScope*. See VarScopeNode's own

@@ -2575,6 +2575,9 @@ typedef struct ObjFn {
     Node *body;
     Obj  *locals;
     Obj  *va_area;
+    // Composite of every declaration of this name in the TU, including block-
+    // scope ones no longer visible; NULL when it equals Obj.ty.
+    Type *link_ty;
     Obj  *alloca_bottom;
     int   stack_size;
     // Nested function support (GNU C extension)
@@ -3258,6 +3261,8 @@ typedef struct VarScopeNode {
     // exactly -- see this struct's own doc comment above.
     Type    *enum_layout_ty;
     LayoutOp enum_layout_is_align;
+    Type    *fn_ty; /**< Block-scope function declaration's own type (NULL means
+                       var->ty). */
     // Additional fields for linked list
     char                *name;     /**< Variable or typedef name. */
     int                  name_len; /**< Length of name. */

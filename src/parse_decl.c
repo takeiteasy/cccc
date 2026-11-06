@@ -362,10 +362,38 @@ static Obj *find_func(VirtualMachine *vm, char *name, int name_len) {
     return NULL;
 }
 
-static Obj *find_func_in_current_scope(VirtualMachine *vm, char *name,
-                                       int name_len) {
-    VarScope *vs = find_var_in_current_scope(vm, name, name_len);
-    return vs && vs->var && vs->var->is_function ? vs->var : NULL;
+// A function a declaration names: `visible_ty` is its type in the current
+// scope, NULL when only a block-scope declaration whose block has closed
+// names it (C17 6.2.2p4: same entity, 6.2.7p2: types must still be compatible).
+typedef struct {
+    Obj  *fn;
+    Type *visible_ty;
+} FnDecl;
+
+static FnDecl find_fn_decl(VirtualMachine *vm, char *name, int name_len,
+                           bool current_scope_only, Token *tok) {
+    FnDecl    d  = {0};
+    VarScope *vs = NULL;
+    if (current_scope_only) {
+        vs = find_var_in_current_scope(vm, name, name_len);
+    } else {
+        for (Scope *sc = vm->compiler.scope; sc && !vs; sc = sc->next)
+            vs = scope_find_var(sc, name, name_len);
+    }
+    if (vs) {
+        if (vs->var && vs->var->is_function) {
+            d.fn         = vs->var;
+            d.visible_ty = vs->fn_ty ? vs->fn_ty : vs->var->ty;
+        }
+        return d;
+    }
+    if (current_scope_only)
+        return d;
+    Obj *hidden = hashmap_get(&vm->compiler.global_decl_map, name);
+    if (hidden && !hidden->is_function)
+        error_tok(vm, tok, "redeclared as a different kind of symbol");
+    d.fn = hidden;
+    return d;
 }
 
 // #696: __attribute__((sentinel)) / [[gnu::sentinel]] only makes sense on a
@@ -433,14 +461,17 @@ static void merge_fn_type_attrs(VirtualMachine *vm, Type *dst, Type *src) {
     dst->is_malloc |= src->is_malloc;
 }
 
-static void merge_redeclared_fn_type(VirtualMachine *vm, Obj *fn, Type *ty) {
-    if (!fn->ty)
-        return;
-    merge_fn_type_attrs(vm, fn->ty, ty);
-    if (fn->ty->is_unprototyped && !ty->is_unprototyped) {
-        merge_fn_type_attrs(vm, ty, fn->ty);
-        fn->ty = ty;
+static Type *link_type(Obj *fn) {
+    return obj_fn(fn)->link_ty ? obj_fn(fn)->link_ty : fn->ty;
+}
+
+static Type *fn_composite(VirtualMachine *vm, Type *prior, Type *ty) {
+    merge_fn_type_attrs(vm, prior, ty);
+    if (prior->is_unprototyped && !ty->is_unprototyped) {
+        merge_fn_type_attrs(vm, ty, prior);
+        return ty;
     }
+    return prior;
 }
 
 static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
@@ -454,6 +485,45 @@ static void check_fn_redecl(VirtualMachine *vm, Obj *fn, Type *old_ty,
                                 vm->compiler.compiler_family))
         return;
     error_tok(vm, ty->name, "conflicting types for '%s'", fn->name);
+}
+
+// Folds redeclaration `ty` into `fn`. A file-scope declaration sets the type
+// calls see; a block-scope one (`scoped`) gives only its own block that type,
+// and leaves `fn->ty` for the rest of the file (C17 6.2.7p3). The link type
+// keeps the composite of all of them for later compatibility checks.
+static void merge_redeclared_fn_type(VirtualMachine *vm, Obj *fn, Type *visible,
+                                     Type *ty, bool scoped, char *name,
+                                     int name_len) {
+    if (!fn->ty)
+        return;
+    Type *link     = link_type(fn);
+    Type *new_link = fn_composite(vm, link, ty);
+    Type *new_vis  = ty;
+    if (visible)
+        new_vis = fn_composite(vm, visible, ty);
+    else
+        merge_fn_type_attrs(vm, ty, link);
+
+    if (!visible || (scoped && new_vis != visible)) {
+        VarScope *sc = push_scope(vm, name, name_len);
+        sc->var      = fn;
+        if (scoped)
+            sc->fn_ty = new_vis;
+    }
+    if (!scoped)
+        fn->ty = new_vis;
+    if (new_link != fn->ty || obj_fn(fn)->link_ty)
+        obj_fn_mut(vm, fn)->link_ty = new_link == fn->ty ? NULL : new_link;
+}
+
+// merge_checked_interface() may swap fn->ty for a copy that adopted bounds;
+// the visible type follows it.
+static void merge_fn_checked_interface(VirtualMachine *vm, Obj *fn, Type *ty,
+                                       FnDecl *found) {
+    Type *before = fn->ty;
+    merge_checked_interface(vm, fn, ty);
+    if (found->visible_ty == before)
+        found->visible_ty = fn->ty;
 }
 
 static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
@@ -476,25 +546,31 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
     // (C17 6.2.2p5): it must never be marked is_nested/is_static here just
     // because the current parse happens to be inside another function's
     // body (see the matching, larger comment in function()).
-    Obj *fn = attr->is_static
-                  ? find_func_in_current_scope(vm, name_str, ty->name->len)
-                  : find_func(vm, name_str, ty->name->len);
+    bool   scoped = vm->compiler.current_fn && !attr->is_static;
+    FnDecl found =
+        find_fn_decl(vm, name_str, ty->name->len, attr->is_static, tok);
+    Obj *fn      = found.fn;
     bool adopted = adopt_hidden_builtin(vm, fn, ty, attr);
     if (fn) {
         if (!fn->is_function)
             error_tok(vm, tok, "redeclared as a different kind of symbol");
         if (!fn->is_implicit && !adopted)
-            check_fn_redecl(vm, fn, fn->ty, fn->is_definition, ty, false);
+            check_fn_redecl(vm, fn, link_type(fn), fn->is_definition, ty,
+                            false);
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
+            found.visible_ty = ty;
+            if (obj_fn(fn)->link_ty)
+                obj_fn_mut(vm, fn)->link_ty = NULL;
         } else if (!adopted) {
-            merge_checked_interface(vm, fn, ty);
+            merge_fn_checked_interface(vm, fn, ty, &found);
         }
         if (!fn->is_static && attr->is_static)
             error_tok(vm, tok,
                       "static declaration follows a non-static declaration");
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
+            found.visible_ty &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
@@ -509,7 +585,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
             obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
-        merge_redeclared_fn_type(vm, fn, ty);
+        merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
+                                 ty->name->len);
     } else {
         fn                = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function   = true;
@@ -518,6 +595,8 @@ static Obj *declare_function_prototype(VirtualMachine *vm, Type *ty,
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
         obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
+        if (scoped)
+            hashmap_put(&vm->compiler.global_decl_map, name_str, fn);
     }
     if (type_attrs(ty)->operator_sym)
         register_operator(vm, fn, ty, tok);
@@ -732,10 +811,12 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // as the existing bodyless early-return below (consume(";")), not
     // equal(tok, "{"), since that would miss a K&R definition (#1043's
     // lesson, called out in #1056's own comment on this same function).
-    bool defines_body = !equal(tok, ";");
-    Obj *fn = (attr->is_static || (is_nested && defines_body))
-                  ? find_func_in_current_scope(vm, name_str, ty->name->len)
-                  : find_func(vm, name_str, ty->name->len);
+    bool   defines_body = !equal(tok, ";");
+    bool   scoped       = is_nested && !defines_body && !attr->is_static;
+    FnDecl found =
+        find_fn_decl(vm, name_str, ty->name->len,
+                     attr->is_static || (is_nested && defines_body), ty->name);
+    Obj *fn           = found.fn;
     bool adopted      = adopt_hidden_builtin(vm, fn, ty, attr);
     // Save prototype state before the if/else can mutate fn->is_implicit.
     bool had_prior_decl = (fn != NULL) && !fn->is_implicit && !adopted;
@@ -776,18 +857,21 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         if (!fn->is_implicit && !adopted) {
             // A K&R declaration list has not typed the parameters yet.
             if (!equal(tok, "{") && !equal(tok, ";")) {
-                knr_old_ty  = fn->ty;
+                knr_old_ty  = link_type(fn);
                 knr_old_def = fn->is_definition;
             } else {
-                check_fn_redecl(vm, fn, fn->ty, fn->is_definition, ty,
+                check_fn_redecl(vm, fn, link_type(fn), fn->is_definition, ty,
                                 defines_body);
             }
         }
         if (fn->is_implicit) {
             fn->ty          = ty;
             fn->is_implicit = false;
+            found.visible_ty = ty;
+            if (obj_fn(fn)->link_ty)
+                obj_fn_mut(vm, fn)->link_ty = NULL;
         } else if (!adopted) {
-            merge_checked_interface(vm, fn, ty);
+            merge_fn_checked_interface(vm, fn, ty, &found);
         }
         // GNU lets a non-inline definition replace a gnu_inline one.
         bool replaces_gnu_inline = fn->is_definition && fn->is_gnu_inline &&
@@ -803,7 +887,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             obj_fn_mut(vm, fn)->refs      = (StringArray){0};
         }
         if (!adopted && !fn->is_implicit && !fn->is_definition &&
-            !equal(tok, "{") &&
+            found.visible_ty && !equal(tok, "{") &&
             (vm->compiler.warnings & CCCC_WARN_REDUNDANT_DECLS))
             warn_tok(vm, ty->name, CCCC_WARN_REDUNDANT_DECLS,
                      "redundant redeclaration of '%s'", fn->name);
@@ -819,7 +903,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
         if (type_attrs(ty)->deprecated_msg)
             obj_set_deprecated_msg(vm, fn, type_attrs(ty)->deprecated_msg);
-        merge_redeclared_fn_type(vm, fn, ty);
+        merge_redeclared_fn_type(vm, fn, found.visible_ty, ty, scoped, name_str,
+                                 ty->name->len);
     } else {
         fn                = new_gvar(vm, name_str, ty->name->len, ty);
         fn->is_function   = true;
@@ -828,6 +913,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
             attr->is_static || (attr->is_inline && !attr->is_extern);
         fn->is_inline = attr->is_inline;
         obj_set_asm_label(vm, fn, type_attrs(ty)->asm_label);
+        if (scoped)
+            hashmap_put(&vm->compiler.global_decl_map, name_str, fn);
     }
     merge_param_names(fn, ty);
     claim_param_attrs(vm, fn, ty);
@@ -882,7 +969,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // declaration with no storage-class specifier has *external* linkage
     // (C17 6.2.2p5); it names the enclosing file-scope function, it does not
     // introduce a nested one. Running this unconditionally on whatever `fn`
-    // find_func()/find_func_in_current_scope() returned above used to
+    // find_fn_decl() returned above used to
     // retroactively flip an already-defined, already-codegen'd file-scope
     // function to is_nested/is_static merely because the current parse
     // happens to be inside another function's body -- corrupting the ABI of
@@ -982,6 +1069,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
         VarAttr knr_attr = {};
         Type   *basety   = declspec(vm, &tok, tok, &knr_attr);
         cc_reject_checked_scope_here(vm, &knr_attr);
+        // TODO: `int a, b;` fails -- the trailing consume(",") below and this
+        // skip both eat the comma (#1960)
         bool    first    = true;
         for (;;) {
             if (!first)
@@ -1301,6 +1390,8 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
 // already started changing.
 static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
                               VarAttr *attr, Token *name_tok) {
+    if (prev->is_function)
+        error_tok(vm, name_tok, "redeclared as a different kind of symbol");
     bool is_def_now = !attr->is_extern;
 
     if (is_def_now)
