@@ -858,7 +858,7 @@ Node *promote_operand(VirtualMachine *vm, Node *n) {
     return promoted == n->ty ? n : new_cast(vm, n, promoted);
 }
 
-static Type *default_promoted(Type *p) {
+Type *default_promoted(Type *p) {
     return p->kind == TY_FLOAT ? ty_double : integer_promotion(p);
 }
 
