@@ -7,6 +7,9 @@ int h(double);
 int f32(float);
 int nar();
 int (*np)();
+int nb();
+int (*bp)();
+int pb(_Bool);
 
 int g(f)
 float f;
@@ -31,6 +34,16 @@ char  c;
 short s;
 {
     return c + s;
+}
+
+int nb(b) _Bool b;
+{
+    return b;
+}
+
+int pb(b) _Bool b;
+{
+    return b;
 }
 
 float write_back(f)
@@ -58,5 +71,16 @@ int main(void) {
         return 5;
     if (h(7.5) != 7)
         return 6;
+    bp = nb;
+    if (bp(2) != 1)
+        return 8;
+    if (bp(256) != 1)
+        return 9;
+    if (bp(0) != 0)
+        return 10;
+    if (nb(2) != 1)
+        return 11;
+    if (pb(2) != 1)
+        return 12;
     return 42;
 }

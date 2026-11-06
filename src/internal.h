@@ -985,6 +985,8 @@ Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
 bool type_contains_vla(Type *ty);
 bool type_vla_extent_impure(Type *ty);
 Type *default_promoted(Type *p);
+Type *knr_param_passed_type(Obj *fn, Type *def_ty, Obj *param,
+                            Type *call_param);
 bool type_has_unspecified_vla(Type *ty);
 Type *enum_type(VirtualMachine *vm);
 Type *struct_type(VirtualMachine *vm);

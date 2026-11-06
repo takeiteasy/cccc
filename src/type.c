@@ -862,6 +862,19 @@ Type *default_promoted(Type *p) {
     return p->kind == TY_FLOAT ? ty_double : integer_promotion(p);
 }
 
+// A K&R definition receives its arguments as the caller passes them: after the
+// default promotions, or as an earlier prototype declared them. Returns that
+// type when it differs from the declared parameter type, else NULL.
+Type *knr_param_passed_type(Obj *fn, Type *def_ty, Obj *param,
+                            Type *call_param) {
+    if (!def_ty || !def_ty->is_knr_def)
+        return NULL;
+    Type *passed = default_promoted(param->ty);
+    if (fn->ty != def_ty && !fn->ty->is_knr_def && call_param)
+        passed = call_param;
+    return is_compatible(passed, param->ty) ? NULL : passed;
+}
+
 // An identifier-list definition (`int f(a) char a; {}`) is compatible with a
 // prototype whose parameters are its parameters' promoted types; against `()`
 // only the return type matters. A definition following the prototype is also

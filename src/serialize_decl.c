@@ -134,19 +134,6 @@ static const char *va_list_shim_param_name(char *buf, size_t bufsz,
     return buf;
 }
 
-// A K&R definition receives its arguments as the caller passes them: after the
-// default promotions, or as an earlier prototype declared them. Returns that
-// type when it differs from the declared parameter type, else NULL.
-static Type *knr_passed_type(Obj *fn, Type *def_ty, Obj *param,
-                             Type *call_param) {
-    if (!def_ty || !def_ty->is_knr_def)
-        return NULL;
-    Type *passed = default_promoted(param->ty);
-    if (fn->ty != def_ty && !fn->ty->is_knr_def && call_param)
-        passed = call_param;
-    return is_compatible(passed, param->ty) ? NULL : passed;
-}
-
 static const char *knr_param_shim_name(char *buf, size_t bufsz,
                                        const char *orig) {
     snprintf(buf, bufsz, "__cccc_knr_param_%s", orig);
@@ -250,7 +237,8 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
             if (!first)
                 fprintf(df, ", ");
             first = false;
-            Type *knr_passed = knr_passed_type(fn, def_ty, param, call_param);
+            Type *knr_passed =
+                knr_param_passed_type(fn, def_ty, param, call_param);
             if (knr_passed) {
                 char shimbuf[64];
                 serialize_type_decl(
@@ -613,13 +601,14 @@ void serialize_function(FILE *f, VirtualMachine *vm, SerializeContext *ctx,
                     param->name, shimbuf);
         }
 
-        // A K&R parameter taken at its promoted type (see knr_passed_type) is
-        // narrowed back to its declared type in a local of the original name.
+        // A K&R parameter taken at its promoted type (see
+        // knr_param_passed_type) is narrowed back to its declared type in a
+        // local of the original name.
         Type *def_ty     = obj_attr(fn)->def_ty ? obj_attr(fn)->def_ty : fn->ty;
         Type *call_param = fn->ty ? fn->ty->params : NULL;
         for (Obj *param = obj_fn(fn)->params; param; param = param->next,
                  call_param = call_param ? call_param->next : NULL) {
-            if (!knr_passed_type(fn, def_ty, param, call_param))
+            if (!knr_param_passed_type(fn, def_ty, param, call_param))
                 continue;
             char shimbuf[64];
             fprintf(f, "    ");

@@ -312,6 +312,26 @@ void gen_function(VirtualMachine *vm, Obj *fn) {
         free_temp_reg(r_dst);
     }
 
+    // A K&R _Bool parameter arrives as the promoted int: convert it to 0/1.
+    {
+        Type *def_ty     = obj_attr(fn)->def_ty ? obj_attr(fn)->def_ty : fn->ty;
+        Type *call_param = fn->ty ? fn->ty->params : NULL;
+        for (Obj *param = obj_fn(fn)->params; param; param = param->next,
+                 call_param = call_param ? call_param->next : NULL) {
+            if (param->ty->kind != TY_BOOL ||
+                !knr_param_passed_type(fn, def_ty, param, call_param))
+                continue;
+            int r_addr = alloc_temp_reg();
+            int r_val  = alloc_temp_reg();
+            emit_lea3_internal(vm, r_addr, param->offset);
+            emit_rr(vm, LDR_W, r_val, r_addr);
+            emit_rrr(vm, SNE3, r_val, r_val, REG_ZERO);
+            emit_rr(vm, STR_B, r_val, r_addr);
+            free_temp_reg(r_val);
+            free_temp_reg(r_addr);
+        }
+    }
+
     emit_save_promoted_registers(vm);
 
     // Generate function body
