@@ -127,6 +127,11 @@ it is an error (`conflicting types for 'g'`): `int g(int); int g(double);`
 fails, as does `int h(); int h(float);` (a `float` parameter changes under
 the default argument promotions, so `()` cannot match it before C23).
 
+An object redeclaration must agree the same way, qualifiers included:
+`extern int x; extern double x;` and `extern const int y; extern int y;` fail
+(`conflicting types for 'x'`). An incomplete array type completes
+(`extern int a[]; extern int a[5];`).
+
 `long` and `long long` are distinct types even though both are 64 bits:
 `int f(long); int f(long long);` is a conflict, `long *p = &ll;` warns, and
 `_Generic` tells them apart. `LL` and `ULL` literals are `long long`.

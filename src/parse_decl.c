@@ -1371,6 +1371,20 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     return tok;
 }
 
+// Every declaration of an object must agree on its type (C17 6.7p4). A clash
+// in a system header is a warning, as for typedefs, so the SDK still builds.
+static void check_object_redecl(VirtualMachine *vm, Obj *prev, Type *ty,
+                                Token *name_tok) {
+    if (vm->compiler.allow_fn_redefinition || is_error_type(prev->ty) ||
+        is_error_type(ty) || is_compatible_qualified_strict(prev->ty, ty))
+        return;
+    if (name_tok->file && name_tok->file->is_system_header)
+        warn_tok(vm, name_tok, CCCC_WARN_PEDANTIC, "conflicting types for '%s'",
+                 prev->name);
+    else
+        error_tok(vm, name_tok, "conflicting types for '%s'", prev->name);
+}
+
 // #957: fold a redeclaration of an existing global variable (`prev`) into
 // it, rather than creating a second Obj. Every rule below only strengthens
 // prev's state -- never clears something a prior declaration established --
@@ -1386,6 +1400,7 @@ static void merge_global_decl(VirtualMachine *vm, Obj *prev, Type *ty,
                               VarAttr *attr, Token *name_tok) {
     if (prev->is_function)
         error_tok(vm, name_tok, "redeclared as a different kind of symbol");
+    check_object_redecl(vm, prev, ty, name_tok);
     bool is_def_now = !attr->is_extern;
 
     if (is_def_now)
