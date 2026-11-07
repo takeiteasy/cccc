@@ -185,15 +185,15 @@ int main(void) {
     write_file("new.txt", "x\n");
     expect_one("glob", "new.txt");
 
-    // Events of different directories arrive on different threads at once.
-    // The names differ: dmon merges same-named events of different watches.
+    // Events of different directories arrive on different threads at once,
+    // for files that share a name.
     enum { FANOUT = 8, ROUNDS = 40 };
     char file[48];
     for (int i = 0; i < FANOUT; i++) {
         snprintf(file, sizeof file, "d%d", i);
         path(p, file);
         mkdir(p, 0755);
-        snprintf(file, sizeof file, "d%d/f%d.c", i, i);
+        snprintf(file, sizeof file, "d%d/f.c", i);
         write_file(file, "1\n");
         path(p, file);
         cc_watch_add(p);
@@ -202,10 +202,9 @@ int main(void) {
     drain();
     for (int round = 0; round < ROUNDS; round++) {
         for (int i = 0; i < FANOUT; i++) {
-            snprintf(file, sizeof file, "d%d/f%d.c", i, i);
+            snprintf(file, sizeof file, "d%d/f.c", i);
             write_file(file, "x\n");
         }
-        msleep(10);
     }
     char first[PATH_MAX];
     int  n = next_burst(first, sizeof first);

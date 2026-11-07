@@ -6,7 +6,9 @@
  *  - the FSEvents callbacks (one dispatch queue per watch) push to the shared
  *    event list under a lock, and the dmon thread takes the list under it;
  *  - the FSEvents callback skips an event for the watched directory itself
- *    instead of asserting that it lies under the root.
+ *    instead of asserting that it lies under the root;
+ *  - dedup and move/rename pairing also compare the watch id, so same-named
+ *    files of different watches stay separate events.
  *
  * Copyright 2019 Sepehr Taghdisian. All rights reserved.
  *
@@ -950,11 +952,13 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
         }
 
         // remove redundant modify events on a single file
-        // TODO: compares the root-relative path only, so same-named files of different watches merge (#1971)
         if (ev->mask & IN_MODIFY) {
             int j;
             for (j = i + 1; j < c; j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
+                if (check_ev->watch_id.id != ev->watch_id.id) {
+                    continue;
+                }
                 if ((check_ev->mask & IN_MODIFY) && strcmp(ev->filepath, check_ev->filepath) == 0) {
                     ev->skip = true;
                     break;
@@ -977,6 +981,9 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
             bool loop_break = false;
             for (j = i + 1; j < c && !loop_break; j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
+                if (check_ev->watch_id.id != ev->watch_id.id) {
+                    continue;
+                }
                 if ((check_ev->mask & IN_MOVED_FROM) && strcmp(ev->filepath, check_ev->filepath) == 0) {
                     // there is a case where some programs (like gedit):
                     // when we save, it creates a temp file, and moves it to the file being modified
@@ -984,7 +991,8 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
                     int k;
                     for (k = j + 1; k < c; k++) {
                         dmon__inotify_event* third_ev = &_dmon.events[k];
-                        if (third_ev->mask & IN_MOVED_TO && check_ev->cookie == third_ev->cookie) {
+                        if (third_ev->mask & IN_MOVED_TO && check_ev->cookie == third_ev->cookie &&
+                            third_ev->watch_id.id == ev->watch_id.id) {
                             third_ev->mask = IN_MODIFY;    // change to modified
                             ev->skip = check_ev->skip = true;
                             loop_break = true;
@@ -1002,7 +1010,8 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
             int j;
             for (j = i + 1; j < c; j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
-                if (check_ev->mask & IN_MOVED_TO && ev->cookie == check_ev->cookie) {
+                if (check_ev->mask & IN_MOVED_TO && ev->cookie == check_ev->cookie &&
+                    check_ev->watch_id.id == ev->watch_id.id) {
                     move_valid = true;
                     break;
                 }
@@ -1019,7 +1028,8 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
             int j;
             for (j = 0; j < i; j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
-                if (check_ev->mask & IN_MOVED_FROM && ev->cookie == check_ev->cookie) {
+                if (check_ev->mask & IN_MOVED_FROM && ev->cookie == check_ev->cookie &&
+                    check_ev->watch_id.id == ev->watch_id.id) {
                     move_valid = true;
                     break;
                 }
@@ -1036,7 +1046,8 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
             for (j = i + 1; j < c; j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
                 // if the file is DELETED and then MODIFIED after, just ignore the modify event
-                if ((check_ev->mask & IN_MODIFY) && strcmp(ev->filepath, check_ev->filepath) == 0) {
+                if ((check_ev->mask & IN_MODIFY) && check_ev->watch_id.id == ev->watch_id.id &&
+                    strcmp(ev->filepath, check_ev->filepath) == 0) {
                     check_ev->skip = true;
                     break;
                 }
@@ -1092,7 +1103,8 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
             int j;
             for (j = i + 1; j < stb_sb_count(_dmon.events); j++) {
                 dmon__inotify_event* check_ev = &_dmon.events[j];
-                if (check_ev->mask & IN_MOVED_TO && ev->cookie == check_ev->cookie) {
+                if (check_ev->mask & IN_MOVED_TO && ev->cookie == check_ev->cookie &&
+                    check_ev->watch_id.id == ev->watch_id.id) {
                     watch->watch_cb(check_ev->watch_id, DMON_ACTION_MOVE, watch->rootdir,
                                     check_ev->filepath, ev->filepath, watch->user_data);
                     break;
@@ -1453,12 +1465,12 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
         }
 
         // remove redundant modify events on a single file
-        // TODO: compares the root-relative path only, so same-named files of different watches merge (#1971)
         if (ev->event_flags & kFSEventStreamEventFlagItemModified) {
             int j;
             for (j = i + 1; j < c; j++) {
                 dmon__fsevent_event* check_ev = &events[j];
                 if ((check_ev->event_flags & kFSEventStreamEventFlagItemModified) &&
+                    check_ev->watch_id.id == ev->watch_id.id &&
                     strcmp(ev->filepath, check_ev->filepath) == 0) {
                     ev->skip = true;
                     break;
@@ -1469,6 +1481,7 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
             for (j = i + 1; j < c; j++) {
                 dmon__fsevent_event* check_ev = &events[j];
                 if ((check_ev->event_flags & kFSEventStreamEventFlagItemRenamed) &&
+                    check_ev->watch_id.id == ev->watch_id.id &&
                     check_ev->event_id == (ev->event_id + 1)) {
                     ev->move_valid = check_ev->move_valid = true;
                     break;
@@ -1520,7 +1533,8 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
             int j;
             for (j = i + 1; j < c; j++) {
                 dmon__fsevent_event* check_ev = &events[j];
-                if (check_ev->event_flags & kFSEventStreamEventFlagItemRenamed) {
+                if ((check_ev->event_flags & kFSEventStreamEventFlagItemRenamed) &&
+                    check_ev->watch_id.id == ev->watch_id.id) {
                     watch->watch_cb(check_ev->watch_id, DMON_ACTION_MOVE, watch->rootdir_unmod,
                                     check_ev->filepath, ev->filepath, watch->user_data);
                     break;
