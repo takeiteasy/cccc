@@ -89,6 +89,36 @@ static int after_overaligned_one_arg(int n, Aligned16 last, ...) {
     return total;
 }
 
+static int extra_args(int n, ...) {
+    va_list ap;
+    va_start(ap, n, 1 + 2);
+    int total = 0;
+    for (int i = 0; i < n; i++)
+        total += va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
+static int extra_args_unparsed(int n, ...) {
+    va_list ap;
+    va_start(ap, n, not_declared anywhere);
+    int total = 0;
+    for (int i = 0; i < n; i++)
+        total += va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
+static int extra_args_builtin(int n, ...) {
+    va_list ap;
+    __builtin_va_start(ap, n, 0);
+    int total = 0;
+    for (int i = 0; i < n; i++)
+        total += va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
 #pragma cccc suite begin "va_start_c23"
 
 [[cccc::test(return = 42)]]
@@ -138,6 +168,21 @@ int test_overaligned_last_two_arg(void) {
 int test_overaligned_last_one_arg(void) {
     Aligned16 a = {2};
     return after_overaligned_one_arg(2, a, 10, 30);
+}
+
+[[cccc::test(return = 42)]]
+int test_extra_args_ignored(void) {
+    return extra_args(3, 10, 20, 12);
+}
+
+[[cccc::test(return = 42)]]
+int test_extra_args_not_parsed(void) {
+    return extra_args_unparsed(3, 10, 20, 12);
+}
+
+[[cccc::test(return = 42)]]
+int test_extra_args_builtin(void) {
+    return extra_args_builtin(3, 10, 20, 12);
 }
 
 #pragma cccc suite end

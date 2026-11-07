@@ -133,7 +133,7 @@ typedef struct __cccc_va_list va_list;
  * va_start(ap, last) / va_start(ap) - Initialize va_list
  * @ap:   va_list to initialize
  * @last: name of the last fixed parameter before '...'; optional in C23 and
- *        never evaluated
+ *        never evaluated. C23 ignores any further arguments.
  *
  * Computes:
  * - reg_ptr: address of the first variadic arg's register-spill slot
@@ -171,8 +171,11 @@ typedef struct __cccc_va_list va_list;
     })
 
 #if __STDC_VERSION__ >= 202311L
+/* C23: arguments after the first one following `ap` are ignored. */
+#define __CCCC_VA_FIRST(last, ...) last
 #define va_start(ap, ...)                                                      \
-    __cccc_va_start(ap __VA_OPT__(, ) __VA_ARGS__, __CCCC_VA_START_IMPL(ap))
+    __cccc_va_start(ap __VA_OPT__(, __CCCC_VA_FIRST(__VA_ARGS__)),             \
+                    __CCCC_VA_START_IMPL(ap))
 #else
 #define va_start(ap, last) __cccc_va_start(ap, last, __CCCC_VA_START_IMPL(ap))
 #endif

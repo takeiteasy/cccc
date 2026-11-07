@@ -154,7 +154,7 @@ language coverage figures apply.
 | `u8` character literals (`u8'x'`) | ✓ | |
 | Unnamed function parameters (`void f(int, double)`) | ✓ | |
 | `static_assert` without message | ✓ | C23 one-argument form |
-| `va_start(ap)` without `last`; `int f(...)` | ✓ | One-argument `va_start` in `--std=c23`/`gnu23`; earlier standards keep the two-argument form. `last` is parsed as one expression, so `va_start(ap, a, b)` is rejected (#1966). |
+| `va_start(ap)` without `last`; `int f(...)` | ✓ | One-argument `va_start` in `--std=c23`/`gnu23`; earlier standards keep the two-argument form. Arguments after `last` are ignored. |
 | Improved `enum` — underlying type, forward declaration, wide values | ✓ | `enum E : unsigned char { … }` sets size/align/signedness; `enum E : int;` forward-declares; values stored as `int64_t` (C23 §6.7.2.2). [^n13] |
 | Compatible tag redeclarations | ✓ | C23 same-scope compatible `struct`, `union`, and `enum` redeclarations are accepted; incompatible redeclarations are diagnosed |
 | Decimal floating-point (`_Decimal32`, etc.) | ✓ | Real IEEE-754-2008 decimal encoding via the Intel BID library, opt-in with `make CCCC_HAS_DECIMAL=1`; declarations/`sizeof`/struct layout always work, decimal literals and arithmetic require the flag. [^n14] |
