@@ -131,6 +131,9 @@ the default argument promotions, so `()` cannot match it before C23).
 `int f(long); int f(long long);` is a conflict, `long *p = &ll;` warns, and
 `_Generic` tells them apart. `LL` and `ULL` literals are `long long`.
 
+Across input files, `struct S` and `union S` with one tag are compatible when
+either side is incomplete (an opaque declaration) or their layouts match.
+
 Every declaration of a name in the file must agree, including a block-scope one
 whose block has closed: `void k(void) { int q(int); } int q(double);` fails.
 A block-scope prototype sets the type only inside its block, so after

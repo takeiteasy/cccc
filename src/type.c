@@ -335,6 +335,8 @@ static bool compat_nested(Type *t1, Type *t2, bool strict,
     return compat_q(t1, t2, strict, family);
 }
 
+static bool token_text_equal(const Token *a, const Token *b);
+
 static bool compat_body(Type *t1, Type *t2, bool strict,
                         CCCCCompilerFamily family) {
     if (t1 == t2)
@@ -451,6 +453,16 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
         case TY_VECTOR:
             return type_arr(t1)->vec_len == type_arr(t2)->vec_len &&
                    compat_nested(t1->base, t2->base, strict, family);
+        case TY_STRUCT:
+        case TY_UNION: {
+            // Each translation unit of a multi-file run has its own Type for
+            // a tag, complete in one and opaque in another.
+            Token *tag1 = type_agg(t1)->struct_tag;
+            Token *tag2 = type_agg(t2)->struct_tag;
+            if (!tag1 || !tag2 || !token_text_equal(tag1, tag2))
+                return false;
+            return t1->size < 0 || t2->size < 0 || types_same_layout(t1, t2);
+        }
         default:
             return false;
     }
