@@ -60,8 +60,14 @@ SOFTWARE.
 
 ## dmon
 
-This copy carries one local patch: the inotify thread skips a failed `select()`
-(EINTR) instead of blocking in `read()` with its mutex held.
+This copy carries three local patches:
+
+- the inotify thread skips a failed `select()` (EINTR) instead of blocking in
+  `read()` with its mutex held;
+- the FSEvents callbacks push to the shared event list under a lock, and the
+  dmon thread takes the list under it;
+- the FSEvents callback skips an event for the watched directory itself instead
+  of asserting that it lies under the root.
 
 Copyright 2019 Sepehr Taghdisian. All rights reserved.
 

@@ -1,7 +1,12 @@
 /*
- * Vendored from https://github.com/septag/dmon (dmon.h 1.3.10) with one local
- * patch: the inotify thread skips a failed select() (EINTR) instead of blocking
- * in read() with its mutex held.
+ * Vendored from https://github.com/septag/dmon (dmon.h 1.3.10) with local
+ * patches:
+ *  - the inotify thread skips a failed select() (EINTR) instead of blocking in
+ *    read() with its mutex held;
+ *  - the FSEvents callbacks (one dispatch queue per watch) push to the shared
+ *    event list under a lock, and the dmon thread takes the list under it;
+ *  - the FSEvents callback skips an event for the watched directory itself
+ *    instead of asserting that it lies under the root.
  *
  * Copyright 2019 Sepehr Taghdisian. All rights reserved.
  *
@@ -945,6 +950,7 @@ _DMON_PRIVATE void _dmon_inotify_process_events(void)
         }
 
         // remove redundant modify events on a single file
+        // TODO: compares the root-relative path only, so same-named files of different watches merge (#1971)
         if (ev->mask & IN_MODIFY) {
             int j;
             for (j = i + 1; j < c; j++) {
@@ -1396,6 +1402,7 @@ typedef struct dmon__state {
     pthread_t thread_handle;
     dispatch_semaphore_t thread_sem;
     pthread_mutex_t mutex;
+    pthread_mutex_t events_mutex; // guards events
     CFRunLoopRef cf_loop_ref;
     CFAllocatorRef cf_alloc_ref;
     bool quit;
@@ -1431,18 +1438,26 @@ _DMON_PRIVATE void* _dmon_cf_realloc(void* ptr, CFIndex newsize, CFOptionFlags h
 
 _DMON_PRIVATE void _dmon_fsevent_process_events(void)
 {
+    // Each stream's callback pushes to _dmon.events from its own dispatch
+    // queue: take the batch under the lock and run the user callbacks without it.
+    pthread_mutex_lock(&_dmon.events_mutex);
+    dmon__fsevent_event* events = _dmon.events;
+    _dmon.events = NULL;
+    pthread_mutex_unlock(&_dmon.events_mutex);
+
     int i, c;
-    for (i = 0, c = stb_sb_count(_dmon.events); i < c; i++) {
-        dmon__fsevent_event* ev = &_dmon.events[i];
+    for (i = 0, c = stb_sb_count(events); i < c; i++) {
+        dmon__fsevent_event* ev = &events[i];
         if (ev->skip) {
             continue;
         }
 
         // remove redundant modify events on a single file
+        // TODO: compares the root-relative path only, so same-named files of different watches merge (#1971)
         if (ev->event_flags & kFSEventStreamEventFlagItemModified) {
             int j;
             for (j = i + 1; j < c; j++) {
-                dmon__fsevent_event* check_ev = &_dmon.events[j];
+                dmon__fsevent_event* check_ev = &events[j];
                 if ((check_ev->event_flags & kFSEventStreamEventFlagItemModified) &&
                     strcmp(ev->filepath, check_ev->filepath) == 0) {
                     ev->skip = true;
@@ -1452,7 +1467,7 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
         } else if ((ev->event_flags & kFSEventStreamEventFlagItemRenamed) && !ev->move_valid) {
             int j;
             for (j = i + 1; j < c; j++) {
-                dmon__fsevent_event* check_ev = &_dmon.events[j];
+                dmon__fsevent_event* check_ev = &events[j];
                 if ((check_ev->event_flags & kFSEventStreamEventFlagItemRenamed) &&
                     check_ev->event_id == (ev->event_id + 1)) {
                     ev->move_valid = check_ev->move_valid = true;
@@ -1483,8 +1498,8 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
     }
 
     // trigger user callbacks
-    for (i = 0, c = stb_sb_count(_dmon.events); i < c; i++) {
-        dmon__fsevent_event* ev = &_dmon.events[i];
+    for (i = 0, c = stb_sb_count(events); i < c; i++) {
+        dmon__fsevent_event* ev = &events[i];
         if (ev->skip) {
             continue;
         }
@@ -1504,7 +1519,7 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
         } else if (ev->event_flags & kFSEventStreamEventFlagItemRenamed) {
             int j;
             for (j = i + 1; j < c; j++) {
-                dmon__fsevent_event* check_ev = &_dmon.events[j];
+                dmon__fsevent_event* check_ev = &events[j];
                 if (check_ev->event_flags & kFSEventStreamEventFlagItemRenamed) {
                     watch->watch_cb(check_ev->watch_id, DMON_ACTION_MOVE, watch->rootdir_unmod,
                                     check_ev->filepath, ev->filepath, watch->user_data);
@@ -1517,7 +1532,15 @@ _DMON_PRIVATE void _dmon_fsevent_process_events(void)
         }
     }
 
-    stb_sb_reset(_dmon.events);
+    // Hand the array back so its capacity is reused.
+    stb_sb_reset(events);
+    pthread_mutex_lock(&_dmon.events_mutex);
+    if (!_dmon.events) {
+        _dmon.events = events;
+        events = NULL;
+    }
+    pthread_mutex_unlock(&_dmon.events_mutex);
+    stb_sb_free(events);
 }
 
 _DMON_PRIVATE void* _dmon_thread(void* arg)
@@ -1581,6 +1604,7 @@ DMON_API_IMPL void dmon_init(void)
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&_dmon.mutex, &attr);
+    pthread_mutex_init(&_dmon.events_mutex, NULL);
 
     CFAllocatorContext cf_alloc_ctx = { 0 };
     cf_alloc_ctx.allocate = _dmon_cf_malloc;
@@ -1623,6 +1647,7 @@ DMON_API_IMPL void dmon_deinit(void)
     }
 
     pthread_mutex_destroy(&_dmon.mutex);
+    pthread_mutex_destroy(&_dmon.events_mutex);
     stb_sb_free(_dmon.events);
     if (_dmon.cf_alloc_ref)
         CFRelease(_dmon.cf_alloc_ref);
@@ -1646,6 +1671,7 @@ _DMON_PRIVATE void _dmon_fsevent_callback(ConstFSEventStreamRef stream_ref, void
     char abs_filepath[DMON_MAX_PATH];
     char abs_filepath_lower[DMON_MAX_PATH];
 
+    pthread_mutex_lock(&_dmon.events_mutex);
     {
         size_t i;
         for (i = 0; i < num_events; i++) {
@@ -1660,7 +1686,11 @@ _DMON_PRIVATE void _dmon_fsevent_callback(ConstFSEventStreamRef stream_ref, void
 
             // normalize path, so it would be the same on both MacOS file-system types (case/nocase)
             _dmon_tolower(abs_filepath_lower, sizeof(abs_filepath), abs_filepath);
-            DMON_ASSERT(strstr(abs_filepath_lower, watch->rootdir) == abs_filepath_lower);
+            // the watched directory itself (removed or renamed) is reported
+            // without the trailing slash of rootdir
+            if (strncmp(abs_filepath_lower, watch->rootdir, strlen(watch->rootdir)) != 0) {
+                continue;
+            }
 
             // strip the root dir from the beginning
             _dmon_strcpy(ev.filepath, sizeof(ev.filepath), abs_filepath + strlen(watch->rootdir));
@@ -1671,6 +1701,7 @@ _DMON_PRIVATE void _dmon_fsevent_callback(ConstFSEventStreamRef stream_ref, void
             stb_sb_push(_dmon.events, ev);
         }
     }
+    pthread_mutex_unlock(&_dmon.events_mutex);
 }
 
 DMON_API_IMPL dmon_watch_id dmon_watch(const char* rootdir,
