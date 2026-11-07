@@ -317,10 +317,8 @@ bool __builtin_ast_type_exists(const char *name) {
 // ("unsigned char", "long long", "signed int", "long double _Complex") --
 // to its canonical Type*. This mirrors the counter->Type switch in
 // declspec() (src/parse_types.c) and must stay in sync with it, including
-// the two places cccc is deliberately not C-pedantic: `long long` resolves
-// to ty_llong (a spelling-only wider variant of ty_long, so -c=native/
-// -c=generated reproduce the spelling the caller asked for) and `signed
-// char` resolves to ty_char (cccc conflates the two). Word order is
+// the one place cccc is deliberately not C-pedantic: `signed char` resolves
+// to ty_char (cccc conflates the two). Word order is
 // irrelevant, matching C23 6.7.2p2. Returns NULL for anything that is not a
 // recognised base-type spelling; the caller then falls back to a typedef/
 // tag lookup. declspec() itself is not reused: it is a parser entry point

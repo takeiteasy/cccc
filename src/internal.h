@@ -771,8 +771,8 @@ extern Type *ty_ushort;
 extern Type *ty_uint;
 extern Type *ty_ulong;
 
-// #1234: TY_LONG with the is_long_long spelling bit set (same type as
-// ty_long/ty_ulong -- serialization spelling only).
+// TY_LONG with is_long_long set: `long long`, same size as ty_long/ty_ulong
+// but a distinct type.
 extern Type *ty_llong;
 extern Type *ty_ullong;
 

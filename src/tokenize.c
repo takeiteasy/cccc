@@ -1434,6 +1434,7 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
 
     // Read U, L or LL suffixes, plus C23 wb/uwb (_BitInt) suffixes.
     bool l  = false;
+    bool ll = false;
     bool u  = false;
     bool wb = false;
 
@@ -1451,13 +1452,14 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
                startswith(vm, p, "ULL") || startswith(vm, p, "Ull") ||
                startswith(vm, p, "uLL") || startswith(vm, p, "ull")) {
         p += 3;
-        l = u = true;
+        l = ll = u = true;
     } else if (!strncasecmp(p, "lu", 2) || !strncasecmp(p, "ul", 2)) {
         p += 2;
         l = u = true;
     } else if (startswith(vm, p, "LL") || startswith(vm, p, "ll")) {
-        p += 2;
-        l  = true;
+        p  += 2;
+        l   = true;
+        ll  = true;
     } else if (*p == 'L' || *p == 'l') {
         p++;
         l = true;
@@ -1498,18 +1500,19 @@ static bool convert_pp_int(VirtualMachine *vm, Token *tok) {
     Type *ty;
     if (base == 10) {
         if (l && u)
-            ty = ty_ulong;
+            ty = ll ? ty_ullong : ty_ulong;
         else if (l)
-            ty = ty_long;
+            ty = ll ? ty_llong : ty_long;
         else if (u)
             ty = (val >> 32) ? ty_ulong : ty_uint;
         else
             ty = (val >> 31) ? ty_long : ty_int;
     } else {
         if (l && u)
-            ty = ty_ulong;
+            ty = ll ? ty_ullong : ty_ulong;
         else if (l)
-            ty = (val >> 63) ? ty_ulong : ty_long;
+            ty = (val >> 63) ? (ll ? ty_ullong : ty_ulong)
+                             : (ll ? ty_llong : ty_long);
         else if (u)
             ty = (val >> 32) ? ty_ulong : ty_uint;
         else if (val >> 63)

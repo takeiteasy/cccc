@@ -45,8 +45,7 @@ Type *ty_ushort    = &(Type){TY_SHORT, 2, 2, true};
 Type *ty_uint      = &(Type){TY_INT, 4, 4, true};
 Type *ty_ulong     = &(Type){TY_LONG, 8, 8, true};
 
-// #1234: same type as ty_long/ty_ulong (TY_LONG, 8/8) -- the is_long_long
-// bit is a serialization-only spelling channel, see struct Type's comment.
+// Same size as ty_long/ty_ulong (TY_LONG, 8/8), distinct by is_long_long.
 Type *ty_llong = &(Type){TY_LONG, 8, 8, .is_long_long = true};
 Type *ty_ullong =
     &(Type){TY_LONG, 8, 8, .is_unsigned = true, .is_long_long = true};
@@ -378,8 +377,10 @@ static bool compat_body(Type *t1, Type *t2, bool strict,
         case TY_CHAR:
         case TY_SHORT:
         case TY_INT:
-        case TY_LONG:
             return t1->is_unsigned == t2->is_unsigned;
+        case TY_LONG:
+            return t1->is_unsigned == t2->is_unsigned &&
+                   t1->is_long_long == t2->is_long_long;
         case TY_BOOL:
         case TY_FLOAT:
         case TY_DOUBLE:
@@ -962,7 +963,7 @@ void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {
 static int get_integer_rank(Type *ty) {
     switch (ty->kind) {
         case TY_LONG:
-            return 64;
+            return ty->is_long_long ? 65 : 64;
         case TY_INT:
             return 32;
         case TY_SHORT:
@@ -1091,6 +1092,7 @@ static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
     // needed. For _BitInt, also require matching bit_width (different widths go
     // to step 6).
     if (ty1->kind == ty2->kind && ty1->is_unsigned == ty2->is_unsigned &&
+        ty1->is_long_long == ty2->is_long_long &&
         (ty1->kind != TY_BITINT || ty1->bit_width == ty2->bit_width)) {
         if (ty1->decl_align == ty2->decl_align)
             return ty1;
@@ -1129,6 +1131,9 @@ static Type *arith_common_type(VirtualMachine *vm, Type *ty1, Type *ty2) {
 
     // Step 9: Otherwise, both operands are converted to the unsigned integer
     // type corresponding to the type of the operand with signed integer type
+    // A copy's `origin` is the signed type, which compatibility unwraps to.
+    if (signed_ty->kind == TY_LONG)
+        return signed_ty->is_long_long ? ty_ullong : ty_ulong;
     Type *result        = copy_type(vm, signed_ty);
     result->is_unsigned = true;
     result->decl_align  = 0;

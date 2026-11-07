@@ -127,6 +127,10 @@ it is an error (`conflicting types for 'g'`): `int g(int); int g(double);`
 fails, as does `int h(); int h(float);` (a `float` parameter changes under
 the default argument promotions, so `()` cannot match it before C23).
 
+`long` and `long long` are distinct types even though both are 64 bits:
+`int f(long); int f(long long);` is a conflict, `long *p = &ll;` warns, and
+`_Generic` tells them apart. `LL` and `ULL` literals are `long long`.
+
 Every declaration of a name in the file must agree, including a block-scope one
 whose block has closed: `void k(void) { int q(int); } int q(double);` fails.
 A block-scope prototype sets the type only inside its block, so after

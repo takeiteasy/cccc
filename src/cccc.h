@@ -1745,9 +1745,8 @@ struct Type {
     int      size; /**< sizeof() value in bytes. */
     int      align;           /**< Alignment requirement in bytes. */
     bool     is_unsigned : 1; // unsigned or signed
-    // Spelling only: `long` and `long long` share TY_LONG. Never consult it for
-    // compatibility, rank, conversions or _Generic; only serialize_type.c's
-    // TY_LONG arm reads it.
+    // `long long`: a distinct type from `long` (compatibility, rank, _Generic)
+    // that shares TY_LONG's size and representation.
     bool is_long_long : 1;
     bool is_atomic    : 1; // true if _Atomic
     bool is_const     : 1; // true if const-qualified
