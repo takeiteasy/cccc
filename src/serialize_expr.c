@@ -924,6 +924,28 @@ static Type *unprototyped_arg_type(VirtualMachine *vm, Type *ty) {
     return va_arg_promoted_type(ty);
 }
 
+// A call made through an unprototyped declaration whose arguments disagree
+// with the prototype the output declares the function with: the host compiler
+// would reject it, so the callee is cast to the call's own argument types.
+static bool unprototyped_call_mismatch(VirtualMachine *vm, Node *call) {
+    Node *callee = call->lhs;
+    if (!call->func_ty || !call->func_ty->is_unprototyped || !callee ||
+        callee->kind != ND_VAR || !callee->var || !callee->var->is_function ||
+        callee->var->is_nested || callee->var->is_block)
+        return false;
+    Type *decl = callee->var->ty;
+    if (!decl || decl->kind != TY_FUNC || decl->is_unprototyped)
+        return false;
+    Node *arg = call->args;
+    Type *p   = decl->params;
+    for (; arg && p; arg = arg->next, p = p->next) {
+        Type *want = decl->is_knr_def ? va_arg_promoted_type(p) : p;
+        if (!is_compatible(unprototyped_arg_type(vm, arg->ty), want))
+            return true;
+    }
+    return p || (arg && !decl->is_variadic);
+}
+
 // #1102: the rightmost operand of a comma chain, drilling through nested
 // ND_COMMA nodes (an initializer's balanced-comma tree nests both ways, but
 // the compound literal's hidden temp always sits on the right spine).
@@ -2979,6 +3001,20 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
                 // work-item; the env pointer and launch arguments follow.
                 fprintf(f, "__cccc_kernel_launch((void (*)(void *))%s, ",
                         node->lhs->var->name);
+            } else if (unprototyped_call_mismatch(vm, node)) {
+                fprintf(f, "((");
+                serialize_type(f, ctx, node->func_ty->return_ty);
+                fprintf(f, " (*)(");
+                for (Node *arg = node->args; arg; arg = arg->next) {
+                    serialize_type(f, ctx, unprototyped_arg_type(vm, arg->ty));
+                    if (arg->next)
+                        fprintf(f, ", ");
+                }
+                if (!node->args)
+                    fprintf(f, "void");
+                fprintf(f, "))");
+                serialize_expr(f, vm, ctx, node->lhs, get_precedence(ND_CAST));
+                fprintf(f, ")(");
             } else {
                 serialize_expr(f, vm, ctx, node->lhs, node_prec);
                 fprintf(f, "(");
