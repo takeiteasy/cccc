@@ -1464,6 +1464,8 @@ typedef struct Token {
     int           line_delta;    // Line number
     bool          at_bol    : 1; // True if this token is at beginning of line
     bool          has_space : 1; // True if this token follows a space character
+    bool          from_arg  : 1; // Substituted from a macro argument written by
+                                 // the user: diagnostics stop at its spelling
 
     struct Token *next;          // Next token
     char *
@@ -1506,6 +1508,7 @@ typedef enum {
     EXPANSION_MACRO_CALL,   // inline/expression- or declaration-position macro
     EXPANSION_ATTR_HANDLER, // @attr handler running against a decl
     EXPANSION_FILE_SCOPE,   // pre-parse file-scope generation
+    EXPANSION_MACRO_BODY,   // preprocessor macro: call_tok is in the macro body
 } ExpansionKind;
 
 /*!

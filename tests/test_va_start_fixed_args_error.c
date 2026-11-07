@@ -2,7 +2,7 @@
 // CCCC_FLAGS: --std=c23
 // CCCC_EXPECT_STDERR: 'va_start' used in function with fixed arguments
 // CCCC_EXPECT_STDERR: test_va_start_fixed_args_error\.c:11:
-// CCCC_REJECT_STDERR: stdarg\.h
+// CCCC_REJECT_STDERR: stdarg\.h:[0-9]+:[^0-9]
 
 #include <stdarg.h>
 

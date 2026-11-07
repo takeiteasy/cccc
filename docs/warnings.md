@@ -37,6 +37,26 @@ Options apply left to right. `-Werror=<name>` is sticky: a later `-Wno-error=<na
 int test_no_conversion(void) { return 42; }
 ```
 
+## Diagnostics inside macros
+
+A diagnostic on a token from a macro body points at the invocation in your code, with a note
+for each macro the token was expanded from, innermost first:
+
+```
+foo.c:12:     int b = BAD();
+                      ^ error: undefined variable 'undeclared_b'
+  note: expanded from macro 'BAD' at foo.c:3:15
+```
+
+| Token | Reported at |
+|---|---|
+| In a macro body | The outermost invocation, plus a note per macro |
+| Written as a macro argument | Where you wrote it, no note |
+| A macro invoked inside an argument | That invocation, plus a note for its macro |
+
+Under `--json` the notes are the diagnostic's `"notes"` array. Comptime macros add their own
+frames after these ([expansion backtrace](macros-debugging.md#expansion-backtrace)).
+
 ## Machine-readable output
 
 `--json` replaces the human format; the `N warnings generated.` line is suppressed.

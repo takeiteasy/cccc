@@ -188,20 +188,66 @@ static int tok_col_no(Token *tok);
 // it) takes priority; the live expansion stack is the fallback, for an
 // error raised *while* comptime code is still executing. tok may be NULL
 // (error_at/warn_at report by raw source location, not by token).
-static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
+static ExpansionFrame *comptime_chain(VirtualMachine *vm, Token *tok) {
     if (tok && tok_rare(tok)->expansion)
         return tok_rare(tok)->expansion;
     return vm ? vm->compiler.expansion_stack : NULL;
 }
 
-// The token a diagnostic reports its location at.
-static Token *diag_site(Token *tok) {
+// The token's own spelling, mapped back to the source for a rewritten `@name`.
+static Token *spelling_site(Token *tok) {
     return tok && tok_rare(tok)->src_site ? tok_rare(tok)->src_site : tok;
+}
+
+// The invocation a macro body token was expanded from. A token the user wrote
+// as a macro argument, or that comptime made, is spelled where it is reported.
+static Token *macro_parent(Token *tok) {
+    if (!tok->origin || tok->from_arg || tok_rare(tok)->expansion ||
+        tok_rare(tok)->src_site)
+        return NULL;
+    return tok->origin;
+}
+
+// The token a diagnostic reports its location at: a macro body token is
+// reported at the outermost invocation in user code.
+static Token *diag_site(Token *tok) {
+    Token *site = spelling_site(tok);
+    while (site && macro_parent(site))
+        site = macro_parent(site);
+    return site;
 }
 
 // A frame's call token, mapped back to the source for a rewritten `@name`.
 static Token *frame_site(ExpansionFrame *fr) {
-    return fr->call_tok ? diag_site(fr->call_tok) : NULL;
+    return fr->call_tok ? spelling_site(fr->call_tok) : NULL;
+}
+
+// One frame per macro expansion `tok` came out of, innermost first, ahead of
+// the comptime frames.
+static ExpansionFrame *resolve_expansion_chain(VirtualMachine *vm, Token *tok) {
+    ExpansionFrame *chain = comptime_chain(vm, tok);
+    if (!vm || !tok)
+        return chain;
+    ExpansionFrame *head = NULL, *tail = NULL;
+    for (Token *t = spelling_site(tok); t && macro_parent(t);
+         t        = macro_parent(t)) {
+        Token          *macro = macro_parent(t);
+        ExpansionFrame *fr =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(ExpansionFrame));
+        memset(fr, 0, sizeof(ExpansionFrame));
+        fr->kind     = EXPANSION_MACRO_BODY;
+        fr->name     = arena_format(vm, "%.*s", macro->len, macro->loc);
+        fr->call_tok = t;
+        if (tail)
+            tail->parent = fr;
+        else
+            head = fr;
+        tail = fr;
+    }
+    if (!head)
+        return chain;
+    tail->parent = chain;
+    return head;
 }
 
 // One frame's note text, no "note: " prefix or trailing newline -- callers
@@ -226,6 +272,9 @@ static char *format_expansion_frame(VirtualMachine *vm, ExpansionFrame *fr) {
         case EXPANSION_FILE_SCOPE:
             return arena_format(vm,
                                 "in file-scope generation by '%s' at %s:%d:%d",
+                                name, fname, line_no, col_no);
+        case EXPANSION_MACRO_BODY:
+            return arena_format(vm, "expanded from macro '%s' at %s:%d:%d",
                                 name, fname, line_no, col_no);
         case EXPANSION_MACRO_CALL:
         default:

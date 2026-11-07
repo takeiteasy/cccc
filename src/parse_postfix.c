@@ -2649,11 +2649,7 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (equal(tok, "__cccc_va_named_count")) {
         tok        = skip(vm, tok->next, "(");
         *rest      = skip(vm, tok, ")");
-        // Report at the user's va_start call, not the stdarg.h macro body.
-        Token *site = start;
-        while (site->origin)
-            site = site->origin;
-        Node *node = new_node(vm, ND_VA_NAMED_COUNT, site);
+        Node *node = new_node(vm, ND_VA_NAMED_COUNT, start);
         node->ty   = ty_int;
         return node;
     }

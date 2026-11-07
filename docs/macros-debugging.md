@@ -57,6 +57,9 @@ debugging.
 
 ### Expansion backtrace
 
+(Errors inside ordinary preprocessor macros have their own notes: see
+[Diagnostics inside macros](warnings.md#diagnostics-inside-macros).)
+
 A diagnostic raised against generated code carries a note chain back to the
 source that produced it, so a bug several macro/attribute frames deep does
 not just point at an anonymous `<cccc macro: ...>` location:

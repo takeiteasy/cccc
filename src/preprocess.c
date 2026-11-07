@@ -2828,6 +2828,14 @@ static bool has_varargs(MacroArg *args) {
     return false;
 }
 
+// A token substituted from a macro argument keeps its own spelling in
+// diagnostics; one that already came out of an expansion keeps that origin.
+static Token *arg_token(Token *t) {
+    if (!t->origin)
+        t->from_arg = true;
+    return t;
+}
+
 // Replace func-like macro parameters with given arguments.
 static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
     Token  head = {};
@@ -2883,7 +2891,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                     *cur = *paste(vm, cur, arg->tok);
                     for (Token *t = arg->tok->next; t->kind != TK_EOF;
                          t        = t->next)
-                        cur = cur->next = copy_token(vm, t);
+                        cur = cur->next = arg_token(copy_token(vm, t));
                 }
                 tok = tok->next->next;
                 continue;
@@ -2903,7 +2911,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                 MacroArg *arg2 = find_arg(args, rhs);
                 if (arg2) {
                     for (Token *t = arg2->tok; t->kind != TK_EOF; t = t->next)
-                        cur = cur->next = copy_token(vm, t);
+                        cur = cur->next = arg_token(copy_token(vm, t));
                 } else {
                     cur = cur->next = copy_token(vm, rhs);
                 }
@@ -2912,7 +2920,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
             }
 
             for (Token *t = arg->tok; t->kind != TK_EOF; t = t->next)
-                cur = cur->next = copy_token(vm, t);
+                cur = cur->next = arg_token(copy_token(vm, t));
             tok = tok->next;
             continue;
         }
@@ -2931,7 +2939,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
                         Token *e = preprocess2(vm, copy_list(vm, a->tok));
                         while (e->kind != TK_EOF) {
                             Token *next = e->next;
-                            cur = cur->next = e;
+                            cur = cur->next = arg_token(e);
                             e               = next;
                         }
                         cc_token_release(vm, e, e);
@@ -2957,7 +2965,7 @@ static Token *subst(VirtualMachine *vm, Token *tok, MacroArg *args) {
             while (t->kind != TK_EOF) {
                 Token *next = t->next;
                 t->hideset  = NULL;
-                cur = cur->next = t;
+                cur = cur->next = arg_token(t);
                 t               = next;
             }
             cc_token_release(vm, t, t);
@@ -3051,7 +3059,8 @@ static bool expand_macro(VirtualMachine *vm, Token **rest, Token *tok) {
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
         t->hideset = hideset_union(vm, t->hideset, hs);
     for (Token *t = body; t->kind != TK_EOF; t = t->next)
-        t->origin = macro_token;
+        if (!t->origin)
+            t->origin = macro_token;
     *rest = append_owned(body, tok->next);
     if (body->kind != TK_EOF) {
         (*rest)->at_bol    = macro_token->at_bol;
