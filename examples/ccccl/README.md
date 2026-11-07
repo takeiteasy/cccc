@@ -18,7 +18,7 @@ That one invocation reads `examples/append.lisp`, lowers it to C, and
 compiles and links the whole program in a single step — no intermediate
 `.gen.c`, no separate `cc`. `build.c` declares that invocation as a
 `CcccExecutable` target — a build target whose compiler is `cccc` itself — so
-`cccc --build build.c` builds every example below the same way, with
+`cccc --build build.c --comptime-allow=fs` builds every example below the same way, with
 incremental caching. That is the whole reason this directory has a `build.c`
 rather than a hand-written `Makefile`.
 
@@ -40,7 +40,7 @@ See [Toplevel forms and `main`](#toplevel-forms-and-main) below.
 
 This is a condensed copy kept as a worked example of cccc's comptime pass,
 not a full project checkout — it has no test suite or `docs/` subdirectory
-of its own, and `cccc --build build.c` here is separate and opt-in: nothing
+of its own, and `cccc --build build.c --comptime-allow=fs` here is separate and opt-in: nothing
 in cccc's own `test` build or CI runs it.
 
 ## Two universes
@@ -86,9 +86,9 @@ defines it. Every operation goes through an accessor function (`ccccl_car`,
 Run from this directory:
 
 ```sh
-cccc --build build.c                    # build + check every example
-cccc --build build.c --build-target=fib # just one native binary
-cccc --build build.c --build-cache      # incremental
+cccc --build build.c --comptime-allow=fs                    # build + check every example
+cccc --build build.c --comptime-allow=fs --build-target=fib # just one native binary
+cccc --build build.c --comptime-allow=fs --build-cache      # incremental
 ```
 
 Every example is built two ways and both must produce identical output:
@@ -106,7 +106,7 @@ Every example is built two ways and both must produce identical output:
   generated C needs nothing but a C compiler from that point on.
 
 The `check` target depends on both and diffs each binary's output against
-`examples/NAME.expected`; a plain `cccc --build build.c` runs it.
+`examples/NAME.expected`; a plain `cccc --build build.c --comptime-allow=fs` runs it.
 
 `build.c` uses the running `cccc` as the compiler for its `CcccExecutable`
 targets — the same binary you invoked `--build` with. The repo-root `./cccc`
@@ -205,7 +205,7 @@ parameters aren't clobbered mid-update) plus setting a repeat flag, inside
 a loop wrapping the whole function body:
 
 ```sh
-cccc --build build.c --build-target=reverse.gen && cat build/reverse.gen.c
+cccc --build build.c --comptime-allow=fs --build-target=reverse.gen && cat build/reverse.gen.c
 ```
 
 ```c
@@ -339,7 +339,7 @@ defines" and "after all the defines" are the same observable behaviour.
 ```
 
 ```sh
-cccc --build build.c --build-target=hello.gen && cat build/hello.gen.c
+cccc --build build.c --comptime-allow=fs --build-target=hello.gen && cat build/hello.gen.c
 ```
 
 `print` writes no newline of its own, so a program's output is the
@@ -369,7 +369,7 @@ this compiler could do, just not one built here.
 
 Every example has a `NAME.lisp` and a `NAME.expected`; the library ones also
 have a hand-written `NAME_main.c` (`hello`, being a program, does not).
-`cccc --build build.c` builds each one both ways, runs it, and diffs the
+`cccc --build build.c --comptime-allow=fs` builds each one both ways, runs it, and diffs the
 output.
 
 ## Lowering, worked example

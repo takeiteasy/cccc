@@ -1,7 +1,11 @@
 // Build script for the ccccl example. Run from this directory with:
 //
-//     cccc --build build.c                 # build + check every example
-//     cccc --build build.c --build-target=fib   # just one native binary
+//     cccc --build build.c --comptime-allow=fs
+//     cccc --build build.c --comptime-allow=fs --build-target=fib
+//
+// The first builds and checks every example, the second one native binary.
+// The comptime pass reads the `.lisp` file, so the build needs fs access; a
+// native target takes that policy from this command line.
 //
 // Every example is built two ways, and both must produce identical output:
 //
@@ -92,7 +96,8 @@ int build_main(Builder *ctx) {
 
         // --- generated: `cccc -c=generated` then a plain `cc` link ---
         snprintf(cmd, sizeof(cmd),
-                 "mkdir -p build && %s -c=generated src/ccccl_comptime.c "
+                 "mkdir -p build && %s -c=generated --comptime-allow=fs "
+                 "src/ccccl_comptime.c "
                  "src/ccccl_ir.c src/ccccl_form.c src/ccccl_lower.c "
                  "-Iinclude/ccccl -Iruntime -DCCCCL_LISP_PATH='%s' -o %s",
                  CcccPath(ctx), lispdef, genc);
