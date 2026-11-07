@@ -2034,6 +2034,11 @@ typedef enum {
             // flag off, parsing yields plain ND_NULL_EXPR instead (same
             // convention as __builtin_assume). Lowers to CHKDC, or to
             // __cccc_chkdc() in -c=native/-m output.
+    ND_VA_NAMED_COUNT =
+        66, // __cccc_va_named_count() (<stdarg.h>'s va_start): int leaf that
+            // codegen replaces with the length of the enclosing function's
+            // parameter list -- resolved there, not at parse time, so it is
+            // right under quote templates and reflection-built bodies.
 } NodeKind;
 
 // Linked list of locals with __attribute__((cleanup(fn))) in one block scope.

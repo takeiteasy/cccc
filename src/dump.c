@@ -131,6 +131,8 @@ static const char *node_kind_name(NodeKind kind) {
             return "DYNAMIC_CHECK";
         case ND_FRAME_ADDR:
             return "FRAME_ADDR";
+        case ND_VA_NAMED_COUNT:
+            return "VA_NAMED_COUNT";
         case ND_RETURN_ADDR:
             return "RETURN_ADDR";
         case ND_BLOCK_LITERAL:
@@ -519,6 +521,7 @@ static void dump_node(FILE *f, Node *node, int depth, int verbose) {
         case ND_VLA_PTR:
         case ND_MEMZERO:
         case ND_FRAME_ADDR:
+        case ND_VA_NAMED_COUNT:
         case ND_RETURN_ADDR:
         case ND_ASM:
             dump_node_list(f, "operands", node->args, depth + 1, verbose);
@@ -1464,6 +1467,7 @@ static void dump_ast_json_node(FILE *f, Node *node, int indent) {
         case ND_VLA_PTR:
         case ND_MEMZERO:
         case ND_FRAME_ADDR:
+        case ND_VA_NAMED_COUNT:
         case ND_RETURN_ADDR:
         case ND_NULL_EXPR:
         case ND_UNREACHABLE:

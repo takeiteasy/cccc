@@ -1958,8 +1958,10 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
             case VA_START:
                 fprintf(f, "va_start(");
                 serialize_expr(f, vm, ctx, node_misc(node)->va_ap, 2);
-                fprintf(f, ", ");
-                serialize_expr(f, vm, ctx, node_misc(node)->va_last, 2);
+                if (node_misc(node)->va_last) {
+                    fprintf(f, ", ");
+                    serialize_expr(f, vm, ctx, node_misc(node)->va_last, 2);
+                }
                 fprintf(f, ")");
                 return;
             case VA_ARG:
@@ -3117,6 +3119,12 @@ static void serialize_expr_raw(FILE *f, VirtualMachine *vm,
 
         case ND_NULL_EXPR:
             // Empty expression
+            break;
+
+        case ND_VA_NAMED_COUNT:
+            error_tok(vm, node->tok,
+                      "internal error: va_start expansion reached the "
+                      "serializer");
             break;
 
         case ND_FRAME_ADDR:

@@ -22,6 +22,28 @@ static int sum(int count, ...) {
     return total;
 }
 
+// C23 one-argument va_start: the named-parameter count, not &last, locates
+// the tail, so it must also account for the canary slot.
+static int sum_unnamed(...) {
+    va_list ap;
+    va_start(ap);
+    int total = 0;
+    for (int i = 0; i < 10; i++)
+        total += va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
+static int sum_one_arg(int count, ...) {
+    va_list ap;
+    va_start(ap);
+    int total = 0;
+    for (int i = 0; i < count; i++)
+        total += va_arg(ap, int);
+    va_end(ap);
+    return total;
+}
+
 #pragma cccc suite begin "canary_variadic"
 
 // test_stack_canary_variadic
@@ -33,6 +55,18 @@ int test_stack_canary_variadic(void) {
     // area.
     if (sum(10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10) != 55)
         return 2;
+    return 42;
+}
+
+[[cccc::test(return = 42)]]
+int test_canary_va_start_one_arg(void) {
+    if (sum_unnamed(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) != 55)
+        return 1;
+    if (sum_one_arg(3, 10, 20, 12) != 42)
+        return 2;
+    // Past the register area into the caller's stack.
+    if (sum_one_arg(10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10) != 55)
+        return 3;
     return 42;
 }
 

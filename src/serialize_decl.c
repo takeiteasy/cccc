@@ -318,6 +318,8 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
         // `()` stays empty: `(void)` rejects arguments, `(...)` is not ISO C.
     } else if (fn->ty && fn->ty->is_variadic && !first) {
         fprintf(df, ", ...");
+    } else if (first && fn->ty && fn->ty->is_variadic) {
+        fprintf(df, "..."); // C23 `f(...)`
     } else if (first) {
         fprintf(df, "void");
     }

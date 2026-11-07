@@ -3603,6 +3603,21 @@ void gen_expr(VirtualMachine *vm, Node *node, int dest_reg) {
             return;
         }
 
+        case ND_VA_NAMED_COUNT: {
+            // <stdarg.h>'s va_start: count of named parameters, the same list
+            // ENT3 spills. An unprototyped definition is flagged variadic too.
+            Obj *cur = vm->compiler.current_fn;
+            if (!cur || !cur->ty || !cur->ty->is_variadic ||
+                cur->ty->is_unprototyped)
+                error_tok(vm, node->tok,
+                          "'va_start' used in function with fixed arguments");
+            int named = 0;
+            for (Obj *p = obj_fn(cur)->params; p; p = p->next)
+                named++;
+            emit_li3(vm, dest_reg, named);
+            return;
+        }
+
         case ND_FRAME_ADDR:
             // __builtin_frame_address(0) - returns current base pointer
             // LEA3 with offset 0 loads bp + 0 = bp into dest_reg

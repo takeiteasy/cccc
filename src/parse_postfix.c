@@ -2646,16 +2646,33 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     // VM-internal subtree under -c=native. Never reached directly from
     // user source -- only from these four macros' own expansion -- so no
     // diagnostic-quality error text is needed for malformed input.
+    if (equal(tok, "__cccc_va_named_count")) {
+        tok        = skip(vm, tok->next, "(");
+        *rest      = skip(vm, tok, ")");
+        Node *node = new_node(vm, ND_VA_NAMED_COUNT, start);
+        node->ty   = ty_int;
+        return node;
+    }
+
+    // `last` is absent in C23's one-argument va_start(ap): the form is then
+    // __cccc_va_start(ap, impl).
     if (equal(tok, "__cccc_va_start")) {
         tok        = skip(vm, tok->next, "(");
         Node *ap   = assign(vm, &tok, tok);
         tok        = skip(vm, tok, ",");
         Node *last = assign(vm, &tok, tok);
-        tok        = skip(vm, tok, ",");
-        Node *impl = assign(vm, &tok, tok);
-        *rest      = skip(vm, tok, ")");
+        Node *impl = NULL;
+        if (equal(tok, ",")) {
+            tok  = skip(vm, tok, ",");
+            impl = assign(vm, &tok, tok);
+        } else {
+            impl = last;
+            last = NULL;
+        }
+        *rest = skip(vm, tok, ")");
         add_type(vm, ap);
-        add_type(vm, last);
+        if (last)
+            add_type(vm, last);
         node_misc_mut(vm, impl)->va_form = VA_START;
         node_misc_mut(vm, impl)->va_ap   = ap;
         node_misc_mut(vm, impl)->va_last = last;

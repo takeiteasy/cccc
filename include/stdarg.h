@@ -130,82 +130,52 @@ struct __cccc_va_list {
 typedef struct __cccc_va_list va_list;
 
 /*
- * va_start(ap, last) - Initialize va_list
+ * va_start(ap, last) / va_start(ap) - Initialize va_list
  * @ap:   va_list to initialize
- * @last: name of the last fixed parameter before '...'
+ * @last: name of the last fixed parameter before '...'; optional in C23 and
+ *        never evaluated
  *
  * Computes:
- * - reg_ptr: address of first variadic arg = &last - 8 (one slot before last)
- * - stack_ptr: address of first stack variadic arg
- * - reg_count: how many varargs fit in remaining register spill slots
+ * - reg_ptr: address of the first variadic arg's register-spill slot
+ * - stack_ptr: address of the first stack variadic arg
+ * - reg_count: how many varargs fit in the remaining register spill slots
  *
- * Stack geometry: last is at bp[-(param_idx+1)], bp[-8] is last reg slot.
- * reg_count = 8 - (param_idx + 1) = 7 - param_idx
+ * Stack geometry: ENT3 spills the 8 argument registers to bp[-1-canary]
+ * downward, so named parameter i lives at bp[-(i+1)-canary] and the first
+ * variadic one at bp[-(N+1)-canary] for N named parameters. Params past the
+ * eighth are copied into local slots by ENT3; the first stack variadic arg
+ * follows them in the caller's frame.
  *
- * We compute this by measuring distance from last to bp[-8]:
- * bp[-8] = bp - 64, and &last = bp - (param_idx+1)*8
- * Distance in slots = (bp - (param_idx+1)*8) - (bp - 64) / 8 = (64 -
- * (param_idx+1)*8) / 8 = 8 - param_idx - 1 = 7 - param_idx
+ * N comes from __cccc_va_named_count(), which codegen replaces with the length
+ * of the enclosing function's parameter list (the list ENT3 spills), so the
+ * geometry never depends on where `last` itself ended up.
+ * __builtin_frame_address compiles to LEA 0, which gives bp. Under
+ * --stack-canaries, ENT3 reserves bp[-1] for the canary and shifts everything
+ * one slot lower (#445);
+ * __CCCC_STACK_CANARIES__ is 1 when canaries are on, else 0.
  *
- * Simpler: reg_count = (reg_end - &last) / 8 - 1 where reg_end is at a known
- * offset.
- *
- * The trick: bp can be recovered as ((long long *)&last) + (param_offset / 8)
- * where param_offset = &last's position below bp. But param_offset is encoded
- * in the stack layout.
- *
- * Practical approach: From &last, we walk back to find bp. ENT3 stores old_bp
- * at bp[-0], but we have a simpler method: assume fixed params start at bp[-1].
- * The number of fixed params = (&(bp[-1]) - &last) / 8 + 1.
- *
- * Since we can't easily find bp from &last alone, we use
- * __builtin_frame_address. CCCC compiles this to LEA 0 which gives bp. When the
- * last fixed parameter itself was stack-passed, ENT3 has copied it into a local
- * slot, so the first stack variadic argument is after those stack-passed fixed
- * arguments in the caller's frame.
- *
- * #1018: -c=native used to print this expansion verbatim -- CCCC-internal
- * struct-member/pointer-arithmetic text with no meaning to a real host
- * compiler, and no relation to the real host va_start()/its own va_list
- * layout -- while replaying the user's own `#include <stdarg.h>` line,
- * which resolves to the real host header at native-compile time. Fixed by
- * wrapping this exact expansion (unchanged, now a GNU statement expression
- * so it can be passed as an argument rather than used as a standalone
- * statement) as the third argument to __cccc_va_start(), a compiler
- * builtin (src/parse_postfix.c) that parses `ap`/`last` a second,
- * independent time purely to stamp them as serializer annotation
- * (Node.va_form, src/cccc.h) on the returned impl node -- VM codegen
- * always sees exactly this impl expression, unchanged; only the
- * serializer (serialize_stmt, src/serialize.c) reads the annotation, to
- * print the real host `va_start(ap, last)` form instead of walking this
- * subtree.
+ * -c=native: __cccc_va_start() (src/parse_postfix.c) wraps this expansion as
+ * its trailing argument and stamps `ap`/`last` onto it as serializer
+ * annotation (Node.va_form, src/cccc.h). VM codegen sees only this expansion;
+ * the serializer (serialize_stmt, src/serialize.c) prints the real host
+ * `va_start(ap, last)` instead of walking it.
  */
-#define va_start(ap, last)                                                     \
-    __cccc_va_start(ap, last, ({                                               \
-                        long long *__bp =                                      \
-                            (long long *)__builtin_frame_address(0);           \
-                        (ap).reg_ptr = (char *)((long long *)&(last) - 1);     \
-                        /* Count remaining reg slots: last is at __bp[-(N+1)], \
-                         * reg area ends at __bp[-8] */                        \
-                        /* Remaining = 8 - (N+1) = number of slots from        \
-                         * (last-1) down to __bp[-8] */                        \
-                        int __param_slot = (int)(__bp - (long long *)&(last)); \
-                        /* Under --stack-canaries, ENT3 reserves bp[-1] for    \
-                         * the canary and shifts params one slot lower,        \
-                         * inflating this bp-to-&last distance by one. The     \
-                         * relative reg_ptr above is unaffected; only the slot \
-                         * count needs the fix                                 \
-                         * (#445). __CCCC_STACK_CANARIES__ is 1 when canaries  \
-                         * are on, else 0. */                                  \
-                        __param_slot   -= __CCCC_STACK_CANARIES__;             \
-                        (ap).reg_count  = 8 - __param_slot;                    \
-                        if ((ap).reg_count < 0)                                \
-                            (ap).reg_count = 0;                                \
-                        int __stack_fixed =                                    \
-                            __param_slot > 8 ? __param_slot - 8 : 0;           \
-                        (ap).stack_ptr = (char *)(__bp + 2 + __stack_fixed);   \
-                        (void)0;                                               \
-                    }))
+#define __CCCC_VA_START_IMPL(ap)                                                 \
+    ({                                                                           \
+        long long *__bp    = (long long *)__builtin_frame_address(0);            \
+        int        __named = __cccc_va_named_count();                            \
+        (ap).reg_ptr   = (char *)(__bp - __named - 1 - __CCCC_STACK_CANARIES__); \
+        (ap).reg_count = __named < 8 ? 8 - __named : 0;                          \
+        (ap).stack_ptr = (char *)(__bp + 2 + (__named > 8 ? __named - 8 : 0));   \
+        (void)0;                                                                 \
+    })
+
+#if __STDC_VERSION__ >= 202311L
+#define va_start(ap, ...)                                                      \
+    __cccc_va_start(ap __VA_OPT__(, ) __VA_ARGS__, __CCCC_VA_START_IMPL(ap))
+#else
+#define va_start(ap, last) __cccc_va_start(ap, last, __CCCC_VA_START_IMPL(ap))
+#endif
 
 /*
  * va_arg(ap, type) - Retrieve next argument
@@ -318,7 +288,11 @@ typedef struct __cccc_va_list va_list;
  * 'struct __cccc_va_list' (preprocess.c), so system headers' own va_list
  * typedefs name this same struct.
  */
+#if __STDC_VERSION__ >= 202311L
+#define __builtin_va_start(ap, ...) va_start(ap __VA_OPT__(, ) __VA_ARGS__)
+#else
 #define __builtin_va_start(ap, last) va_start(ap, last)
+#endif
 #define __builtin_va_end(ap)         va_end(ap)
 #define __builtin_va_copy(d, s)      va_copy(d, s)
 #define __builtin_va_arg(ap, type)   va_arg(ap, type)
