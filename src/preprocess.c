@@ -1434,21 +1434,7 @@ static Token *add_hideset(VirtualMachine *vm, Token *tok, Hideset *hs) {
     return head.next;
 }
 
-// Append tok2 to the end of tok1.
-static Token *append(VirtualMachine *vm, Token *tok1, Token *tok2) {
-    if (tok1->kind == TK_EOF)
-        return tok2;
-
-    Token  head = {};
-    Token *cur  = &head;
-
-    for (; tok1->kind != TK_EOF; tok1 = tok1->next)
-        cur = cur->next = copy_token(vm, tok1);
-    cur->next = tok2;
-    return head.next;
-}
-
-// Links `body` ahead of tok2 in place, where append() would copy every token.
+// Links `body` ahead of tok2 in place, without copying tokens.
 // The caller owns every token before body's EOF, and the EOF is left alone.
 static Token *append_owned(Token *body, Token *tok2) {
     if (body->kind == TK_EOF)
@@ -1461,7 +1447,7 @@ static Token *append_owned(Token *body, Token *tok2) {
 }
 
 // Links a freshly tokenized header (no other owner) ahead of `tok` in place of
-// its EOF, where append() would copy every token.
+// its EOF, without copying tokens.
 static Token *splice_fresh(Token *fresh, Token *tok) {
     if (fresh->kind == TK_EOF)
         return tok;

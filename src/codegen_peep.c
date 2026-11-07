@@ -356,14 +356,14 @@ typedef struct {
 
 enum { C_NONE, C_JMP, C_COND, C_EXIT };
 
-static InstrWord operand(Peep *p, const Insn *in);
+static InstrWord operand(const Peep *p, const Insn *in);
 
 #define FUSED_BR_LAST   BUGEW3
 #define IS_FUSED_BR(op) ((op) >= BEQ3 && (op) <= FUSED_BR_LAST)
 
 // `JZ3 r0` always jumps and `JNZ3 r0` never does; a decided branch is
 // rewritten to one of them because it keeps its width.
-static int ctrl_kind(Peep *p, const Insn *in) {
+static int ctrl_kind(const Peep *p, const Insn *in) {
     if (in->dead)
         return C_NONE;
     bool on_zero = (in->op == JZ3 || in->op == JNZ3) &&
@@ -390,7 +390,7 @@ static bool is_call(int op) {
     return op == CALL || op == CALLI || op == CALLN || op == CALLF;
 }
 
-static InstrWord operand(Peep *p, const Insn *in) {
+static InstrWord operand(const Peep *p, const Insn *in) {
     return p->vm->text_seg[in->pc + 1];
 }
 

@@ -617,9 +617,9 @@ Token *preprocess(VirtualMachine *vm, Token *tok);
 noreturn void error(char *fmt, ...) __attribute__((cold, format(printf, 1, 2)));
 uint64_t cccc_warning_mask_for_name(const char *name);
 bool cccc_warning_is_group_name(const char *name);
-void error_at(VirtualMachine *vm, char *loc, char *fmt, ...)
+noreturn void error_at(VirtualMachine *vm, char *loc, char *fmt, ...)
     __attribute__((cold, format(printf, 3, 4)));
-void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
+noreturn void error_tok(VirtualMachine *vm, Token *tok, char *fmt, ...)
     __attribute__((cold, format(printf, 3, 4)));
 bool error_tok_recover(VirtualMachine *vm, Token *tok, char *fmt, ...)
     __attribute__((cold, format(printf, 3, 4)));
