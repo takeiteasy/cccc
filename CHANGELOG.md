@@ -8,6 +8,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 ## [Unreleased]
 
 - Changed: a struct `return =` with an ordered comparison, a malformed or too deeply nested compound literal, and `exit_code =` together with `return =` are compile errors instead of `-Wattributes` warnings that skipped the assertion.
+- Fixed: under `--testing=native`, a float `return =` assertion applies its operator (`!=`, `<`, `<=`, `>`, `>=`) as the VM does instead of always testing equality.
 - Changed: `[[cccc::test(return = ...)]]` takes any integer or floating constant expression, so enum names, `#define` names, casts, `sizeof` and arithmetic work, as struct field values do. An undeclared or non-constant operand is a compile error instead of a skipped assertion that always passed.
 - Fixed: `return = 0xBEEF` is no longer read as a float, `return = 'A'` asserts 65 instead of 0, and `return = -1.5` asserts a float instead of the integer -1.
 

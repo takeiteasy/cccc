@@ -4454,24 +4454,30 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                         (long long)r->ret_expect.ret_int);
                 break;
             case RET_FLOAT: {
-                // TODO: always an equality check; apply `op` like the VM does
-                // (#1973)
                 double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
                 fprintf(f,
                         "    double __ret = (double)%s();\n"
                         "    if (__st.failed) goto __cccc_wfail;\n",
                         fn->name);
+                // Same rule as apply_cmp_op_f64: eps only for == and !=.
+                char cond[160];
+                if (r->ret_op == CMP_EQ || r->ret_op == CMP_NE)
+                    snprintf(cond, sizeof(cond),
+                             "%s(__d < %.17g && __d > -%.17g)",
+                             r->ret_op == CMP_NE ? "!" : "", eps, eps);
+                else
+                    snprintf(cond, sizeof(cond), "__ret %s (%.17g)", op,
+                             r->ret_expect.ret_float);
                 fprintf(f,
-                        "    { double __diff = __ret - (%.17g); if (__diff "
-                        "< 0) __diff = -__diff;\n"
-                        "      if (__diff > %.17g) {\n"
+                        "    { double __d = __ret - (%.17g);\n"
+                        "      if (!(%s)) {\n"
                         "        __cccc_s_run = NULL;\n"
                         "        if (__msg) snprintf(__msg, __cap, "
                         "\"expected return value %%s %%g, got %%g\", "
                         "\"%s\", (double)(%.17g), __ret);\n"
                         "        return 0;\n"
                         "      } }\n",
-                        r->ret_expect.ret_float, eps, op,
+                        r->ret_expect.ret_float, cond, op,
                         r->ret_expect.ret_float);
                 break;
             }

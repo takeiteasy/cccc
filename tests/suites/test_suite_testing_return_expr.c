@@ -93,6 +93,31 @@ double test_float_expression(void) {
     return 0.25;
 }
 
+[[cccc::test(return != 99.0)]]
+double test_float_ne(void) {
+    return 1.0;
+}
+
+[[cccc::test(return < 2.0)]]
+double test_float_lt(void) {
+    return 1.0;
+}
+
+[[cccc::test(return <= 1.0)]]
+double test_float_le(void) {
+    return 1.0;
+}
+
+[[cccc::test(return > 0.5)]]
+double test_float_gt(void) {
+    return 1.0;
+}
+
+[[cccc::test(return >= 1.0)]]
+double test_float_ge(void) {
+    return 1.0;
+}
+
 [[cccc::test(return = GREETING)]]
 const char *test_string_macro(void) {
     return "hello";
