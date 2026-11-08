@@ -12,6 +12,16 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: a parameter's `@default` can name an earlier parameter (`int box(int w, int h @default(w * 2))`; `box(10)` is `box(10, 20)`). The call stores the arguments up to the last one a default names in temporaries, left to right, so each is evaluated once; a keyed or defaulted earlier argument counts as its resolved value, and a method receiver can be named. The temporaries are plain C under `-c=native`.
 - Changed: a `@default` that names its own parameter or a later one (`int f(int a @default(a))` with a global `a`) is an error instead of binding the global, and one that uses a constant declared in the parameter list (`int f(enum { A, B } v @default(B))`) is an error at the declaration instead of at every call.
 - Changed: a `@default` cannot name a checked pointer parameter, and an argument for a checked pointer parameter stays in the call so its bounds are still verified.
+- Changed: `long long` is a distinct type from `long`: `int f(long); int f(long long);` is a conflicting declaration, and `_Generic`, integer conversion rank and `LL`/`ULL` literals tell them apart.
+- Changed: a conflicting redeclaration of an object (`int x; long x;`) and of a function, including one that conflicts with a block-scope declaration, is an error; a leading `...` (`int f(...)`) is an error before C23.
+- Fixed: C23 `va_start(ap)` with one argument works, a `va_start` argument after the first one is ignored, and a `va_start` in a function that is not variadic is reported at the call.
+- Fixed: a prototype after an unprototyped `()` declaration becomes the function's type, so later calls convert to its parameter types; a block-scope prototype's type applies only inside its block.
+- Fixed: a call through an unprototyped declaration passes floating-point arguments with the fixed-parameter convention, and `-c=native` and `-m` print the type as `()` and cast the callee to its argument types when they differ from the prototype.
+- Fixed: a K&R definition takes `float`, `char` and `short` parameters at their promoted type in `-c=native` and `-m` output, converts a `_Bool` parameter on entry in the VM, and accepts several declarators in one parameter declaration (`int a, b;`).
+- Fixed: structs with the same tag from separate input files, such as a complete type from a comptime-generated function and an opaque one in a host file, are compatible instead of reporting conflicting types.
+- Fixed: a diagnostic inside a macro body is reported at the invocation with an `expanded from macro` note.
+- Fixed: `--watch` events for the watched directory itself are skipped, the FSEvents event list is locked, and files with the same name in different watches no longer merge into one event.
+- Fixed: the `ccccl` `-c=generated` step passes `--comptime-allow=fs`, and the `make` build compiles without three warnings.
 
 ## [0.31.2] - 2026-11-06
 
@@ -31,6 +41,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: a custom attribute can sit on a parameter of a function declared at file scope (`int area(int w @default(80), int h @default(24));`). Its handler runs with an `ATTR_TARGET_PARAM` target (`AttrTargetParam`, `AttrTargetParamIndex`), and `ParamHasAttr`, `ParamAttrArg` and five more accessors read the attributes from the parameter `Type *`. A parameter's attribute is written on one declaration only and the definition inherits it. `@default` accepts a parameter, and every parameter after a defaulted one needs a default.
 - Added: a call that leaves out trailing arguments takes the parameters' `@default` values (`area()` is `area(80, 24)`), and `f(.name = v)` gives an argument by parameter name, after the positional ones (`area(.h = 10)` is `area(80, 10)`). Defaults and keys apply to direct calls and method calls, not calls through function pointers; a default cannot name another parameter.
+- Fixed: a checked access keeps its range check across a macro call that has not been expanded: a loop holding one is not treated as having a provable index, and a macro call in a loop condition forgets the `break`/`continue` state.
 
 ## [0.30.0] - 2026-11-04
 
@@ -38,6 +49,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Changed: a label no `goto` or asm goto names no longer stops a counted loop's index from being proven in range, or ends a run of dominated checks.
 - Changed: the compile-time reflect operator is `^^name` instead of `$name`. `$` is an ordinary identifier character again outside quasi-quote templates, so `int $x;` compiles.
 - Fixed: `-c=native` wrote an enumerator of `0x8000000000000000` in an enum with a 64-bit unsigned underlying type as `-9223372036854775808`, which gcc rejects; it is now written as `9223372036854775808ULL`, and a plain `LLONG_MIN` enumerator as `(-9223372036854775807LL - 1)`.
+- Added: a member initializer in a struct body (`int n = 3;`) is sugar for `@default(3)` through the `@ctor` constructor; it needs `@ctor` on the struct and rejects array members and a member that also has `@default` or `@ctor_skip`.
+- Fixed: a custom attribute on a tag defined with variables (`struct S { ... } @attr g;`) runs once as a type target where the tag is defined, and a typedef's attribute runs once instead of again for each variable of that type; an attribute handler's note points at the `@name` source line.
+- Fixed: `calloc` overflow returns `NULL` with `ENOMEM`, a sign-extending shift and negating `INT_MIN` use unsigned arithmetic, and the NSS shims copy unaligned pointers with `memcpy`, so a UBSan build reports nothing.
+- Changed: `cccc -m` over cccc's own sources is faster: the preprocessor memoizes canonical include paths, and the serializer memoizes type comparisons proven under a co-inductive assumption.
 
 ## [0.29.0] - 2026-11-01
 
@@ -84,6 +99,14 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: `__restrict` and `__restrict__` are accepted inside an array parameter's brackets (`int a[__restrict 4]`).
 - Added: the GNU predefined identifier `__PRETTY_FUNCTION__`.
 - Changed: the `ouroboros` target uses the system headers on Linux, as on macOS.
+- Changed: `Type`, `Node`, `Obj` and `Token` keep their rarely used fields in lazily allocated groups, so they shrink from 456, 808, 752 and 176 bytes to 128, 168, 120 and 96, and the front end recycles the tokens the preprocessor drops; compiling cccc's own sources needs far less memory.
+- Fixed: a `case` label keeps all 64 bits, and an unsigned 64-bit `switch` is ordered as unsigned, so two labels beyond 32 bits no longer collide.
+- Fixed: a bound operator under `-c=native` evaluates its left operand first when an operand has side effects, where the host compiler may have evaluated them right to left.
+- Fixed: an uninitialized bit-field no longer drops the later members of a static initializer.
+- Fixed: `-c=object` leaves a static initializer's address of an undefined function to the linker.
+- Fixed: `--sandbox` on Linux refuses a raw `syscall()` that opens a socket through `io_uring`, an x32-ABI number or a foreign-architecture syscall.
+- Fixed: the `--watch` inotify thread no longer blocks in `read()` after an interrupted `select()`, which deadlocked the next `dmon_watch()`.
+- Fixed: `-c=native` on Linux undefines glibc's member-alias macros (`sa_handler`, `si_status`) before the type definitions, and keeps a prototype written in an input file (`mremap`, `fallocate`, `splice`).
 
 ## [0.28.0] - 2026-10-29
 
