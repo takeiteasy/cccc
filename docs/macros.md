@@ -127,6 +127,7 @@ A template can hold `_Pragma("omp ...")` to build an OpenMP region; see
 | [macros-quoting.md](macros-quoting.md) | `Quote`, `QuoteN` and splicing |
 | [macros-templates.md](macros-templates.md) | Templates in generated bodies, `QuoteLazy`, labels |
 | [macros-reflection.md](macros-reflection.md) | Type and symbol reflection, `^^identifier` |
+| [macros-ast-walk.md](macros-ast-walk.md) | Walking function bodies: node kinds, operands, calls, switch cases |
 | [macros-builders.md](macros-builders.md) | Function, global, local and initializer builders |
 | [macros-stdlib.md](macros-stdlib.md) | The bundled macro standard library |
 | [macros-debugging.md](macros-debugging.md) | Diagnostics, `macroexpand`, profiling |

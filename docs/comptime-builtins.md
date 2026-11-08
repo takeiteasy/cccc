@@ -31,7 +31,9 @@ Adding a builtin means a prototype in `reflection.h`, the definition in
 state), and its `CC_BUILTIN` line.
 
 `reflection.h` also hand-copies three of the compiler's internal enums for
-macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, a deliberate
-subset), and `AttrTargetKind` (`ATTR_TARGET_*`, an exact copy). Their
-numeric values must match `src/cccc.h`'s internal `TypeKind`/`NodeKind`/
-`AttrTargetKind` exactly.
+macro code to use: `TypeKind` (`TK_*`), `NodeKind` (`NK_*`, one per `ND_*`),
+and `AttrTargetKind` (`ATTR_TARGET_*`). Their numeric values must match
+`src/cccc.h`'s internal `TypeKind`/`NodeKind`/`AttrTargetKind` exactly.
+`tests/host/test_reflection_node_kinds.c` checks `NodeKind`; a new `ND_*` kind
+needs an `NK_*` twin in `reflection.h`, a row in that test, and a name in
+`reflection_enum_names` in `src/macros.c`.

@@ -191,7 +191,10 @@ overlapping case values and multiple default labels.
 
 ### Node Kinds
 
-Use these constants with `MakeBinary()` and `MakeUnary()`:
+`NodeKind` has one `NK_*` constant per compiler node kind. `GetNodeKind(n)`
+returns one when walking a function body
+([macros-ast-walk.md](macros-ast-walk.md)); `MakeBinary()` and `MakeUnary()`
+take these:
 
 ```c
 NK_ADD, NK_SUB, NK_MUL, NK_DIV, NK_MOD, NK_NEG

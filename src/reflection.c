@@ -954,6 +954,295 @@ bool __builtin_ast_obj_is_static(Obj *obj) {
     return obj ? obj->is_static : false;
 }
 
+// ============================================================================
+// Read-only AST accessors. Every one tolerates NULL and a node of the wrong
+// kind (NULL/0): comptime code walks trees it did not build.
+// ============================================================================
+
+// NK_* values equal ND_* values: tests/host/test_reflection_node_kinds.c.
+
+static Node *ast_list_at(Node *head, int index) {
+    if (index < 0)
+        return NULL;
+    for (; head && index > 0; head = head->next)
+        index--;
+    return head;
+}
+
+static int ast_list_count(Node *head) {
+    int n = 0;
+    for (; head; head = head->next)
+        n++;
+    return n;
+}
+
+// A call whose arguments were hoisted into temporaries is an ND_COMMA wrapper
+// around the ND_FUNCALL.
+static Node *ast_call_of(Node *n) {
+    if (n && n->kind == ND_COMMA && n->call_prelude)
+        n = n->rhs;
+    return n && n->kind == ND_FUNCALL ? n : NULL;
+}
+
+static bool ast_is_user_local(Obj *o) {
+    return !o->is_param && o->name && o->name[0] && o->name[0] != '.' &&
+           strcmp(o->name, "__alloca_size__") != 0 &&
+           strcmp(o->name, "__va_area__") != 0 &&
+           strcmp(o->name, "__static_link") != 0;
+}
+
+// Locals chain newest-first; callers want declaration order.
+static Obj *ast_local_at(Obj *fn, int index) {
+    if (!fn || !fn->is_function || index < 0)
+        return NULL;
+    int total = 0;
+    for (Obj *o = obj_fn(fn)->locals; o; o = o->next)
+        total += ast_is_user_local(o);
+    int want = total - 1 - index;
+    if (want < 0)
+        return NULL;
+    for (Obj *o = obj_fn(fn)->locals; o; o = o->next)
+        if (ast_is_user_local(o) && want-- == 0)
+            return o;
+    return NULL;
+}
+
+static bool ast_is_user_param(Obj *o) {
+    return strcmp(o->name, "__static_link") != 0;
+}
+
+static Obj *ast_param_at(Obj *fn, int index) {
+    if (!fn || !fn->is_function || index < 0)
+        return NULL;
+    for (Obj *o = obj_fn(fn)->params; o; o = o->next)
+        if (ast_is_user_param(o) && index-- == 0)
+            return o;
+    return NULL;
+}
+
+CC_BUILTIN(__builtin_ast_function_body, 1);
+Node *__builtin_ast_function_body(Obj *fn) {
+    return fn && fn->is_function ? obj_fn(fn)->body : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_function_param_count, 1);
+int __builtin_ast_function_param_count(Obj *fn) {
+    int n = 0;
+    while (ast_param_at(fn, n))
+        n++;
+    return n;
+}
+
+CC_BUILTIN(__builtin_ast_function_param_at, 2);
+Obj *__builtin_ast_function_param_at(Obj *fn, int index) {
+    return ast_param_at(fn, index);
+}
+
+CC_BUILTIN(__builtin_ast_function_local_count, 1);
+int __builtin_ast_function_local_count(Obj *fn) {
+    int n = 0;
+    if (fn && fn->is_function)
+        for (Obj *o = obj_fn(fn)->locals; o; o = o->next)
+            n += ast_is_user_local(o);
+    return n;
+}
+
+CC_BUILTIN(__builtin_ast_function_local_at, 2);
+Obj *__builtin_ast_function_local_at(Obj *fn, int index) {
+    return ast_local_at(fn, index);
+}
+
+CC_BUILTIN(__builtin_ast_obj_next, 1);
+Obj *__builtin_ast_obj_next(Obj *obj) {
+    return obj ? obj->next : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_kind, 1);
+NodeKind __builtin_ast_node_kind(Node *node) {
+    return node ? node->kind : ND_NULL_EXPR;
+}
+
+CC_BUILTIN(__builtin_ast_node_type, 1);
+Type *__builtin_ast_node_type(Node *node) {
+    return node ? node->ty : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_next, 1);
+Node *__builtin_ast_node_next(Node *node) {
+    return node ? node->next : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_lhs, 1);
+Node *__builtin_ast_node_lhs(Node *node) {
+    return node ? node->lhs : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_rhs, 1);
+Node *__builtin_ast_node_rhs(Node *node) {
+    return node ? node->rhs : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_body, 1);
+Node *__builtin_ast_node_body(Node *node) {
+    return node && (node->kind == ND_BLOCK || node->kind == ND_STMT_EXPR)
+               ? node->body
+               : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_cond, 1);
+Node *__builtin_ast_node_cond(Node *node) {
+    return node ? node_ctl(node)->cond : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_then, 1);
+Node *__builtin_ast_node_then(Node *node) {
+    return node ? node_ctl(node)->then : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_else, 1);
+Node *__builtin_ast_node_else(Node *node) {
+    return node ? node_ctl(node)->els : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_init, 1);
+Node *__builtin_ast_node_init(Node *node) {
+    return node ? node_ctl(node)->init : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_inc, 1);
+Node *__builtin_ast_node_inc(Node *node) {
+    return node ? node_ctl(node)->inc : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_block_count, 1);
+int __builtin_ast_block_count(Node *block) {
+    return ast_list_count(__builtin_ast_node_body(block));
+}
+
+CC_BUILTIN(__builtin_ast_block_at, 2);
+Node *__builtin_ast_block_at(Node *block, int index) {
+    return ast_list_at(__builtin_ast_node_body(block), index);
+}
+
+CC_BUILTIN(__builtin_ast_call_callee, 1);
+Node *__builtin_ast_call_callee(Node *call) {
+    call = ast_call_of(call);
+    return call ? call->lhs : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_call_arg_count, 1);
+int __builtin_ast_call_arg_count(Node *call) {
+    call = ast_call_of(call);
+    return call ? ast_list_count(call->args) : 0;
+}
+
+CC_BUILTIN(__builtin_ast_call_arg_at, 2);
+Node *__builtin_ast_call_arg_at(Node *call, int index) {
+    call = ast_call_of(call);
+    return call ? ast_list_at(call->args, index) : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_int_value, 1);
+long long __builtin_ast_node_int_value(Node *node) {
+    return node && node->kind == ND_NUM && !is_flonum(node->ty) ? node->val : 0;
+}
+
+CC_BUILTIN_DOUBLE(__builtin_ast_node_float_value, 1);
+double __builtin_ast_node_float_value(Node *node) {
+    return node && node->kind == ND_NUM && is_flonum(node->ty)
+               ? (double)node_lit(node)->fval
+               : 0.0;
+}
+
+CC_BUILTIN(__builtin_ast_node_var_obj, 1);
+Obj *__builtin_ast_node_var_obj(Node *node) {
+    return node && (node->kind == ND_VAR || node->kind == ND_MEMZERO)
+               ? node->var
+               : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_member, 1);
+Member *__builtin_ast_node_member(Node *node) {
+    return node && node->kind == ND_MEMBER ? node->member : NULL;
+}
+
+// A switch's cases are prepended as they are parsed: the chain is newest-first.
+static int ast_switch_case_total(Node *sw) {
+    int n = 0;
+    if (sw && sw->kind == ND_SWITCH)
+        for (Node *c = node_ctl(sw)->case_next; c; c = node_ctl(c)->case_next)
+            n++;
+    return n;
+}
+
+CC_BUILTIN(__builtin_ast_switch_case_count, 1);
+int __builtin_ast_switch_case_count(Node *sw) {
+    return ast_switch_case_total(sw);
+}
+
+CC_BUILTIN(__builtin_ast_switch_case_at, 2);
+Node *__builtin_ast_switch_case_at(Node *sw, int index) {
+    int want = ast_switch_case_total(sw) - 1 - index;
+    if (index < 0 || want < 0)
+        return NULL;
+    Node *c = node_ctl(sw)->case_next;
+    for (; c && want > 0; want--)
+        c = node_ctl(c)->case_next;
+    return c;
+}
+
+CC_BUILTIN(__builtin_ast_switch_default, 1);
+Node *__builtin_ast_switch_default(Node *sw) {
+    return sw && sw->kind == ND_SWITCH ? node_ctl(sw)->default_case : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_case_begin, 1);
+long long __builtin_ast_case_begin(Node *node) {
+    return node && node->kind == ND_CASE ? node_ctl(node)->begin : 0;
+}
+
+CC_BUILTIN(__builtin_ast_case_end, 1);
+long long __builtin_ast_case_end(Node *node) {
+    return node && node->kind == ND_CASE ? node_ctl(node)->end : 0;
+}
+
+CC_BUILTIN(__builtin_ast_case_body, 1);
+Node *__builtin_ast_case_body(Node *node) {
+    return node && node->kind == ND_CASE ? node->lhs : NULL;
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_macro_call_name, 1);
+const char *__builtin_ast_macro_call_name(Node *node) {
+    return node && node->kind == ND_MACRO_CALL ? node_misc(node)->macro_name
+                                               : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_macro_call_arg_count, 1);
+int __builtin_ast_macro_call_arg_count(Node *node) {
+    return node && node->kind == ND_MACRO_CALL
+               ? node_misc(node)->macro_arg_count
+               : 0;
+}
+
+CC_BUILTIN(__builtin_ast_macro_call_arg_at, 2);
+Node *__builtin_ast_macro_call_arg_at(Node *node, int index) {
+    return node && node->kind == ND_MACRO_CALL ? ast_list_at(node->args, index)
+                                               : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_node_strip_implicit, 1);
+Node *__builtin_ast_node_strip_implicit(Node *node) {
+    while (node) {
+        if (node->kind == ND_CAST && !node->is_explicit_cast && node->lhs)
+            node = node->lhs;
+        else if (node->kind == ND_COMMA && node->call_prelude && node->rhs)
+            node = node->rhs;
+        else
+            break;
+    }
+    return node;
+}
+
 CC_BUILTIN(__builtin_attr_target_kind, 1);
 int __builtin_attr_target_kind(AttrTarget *target) {
     return target ? target->kind : 0;

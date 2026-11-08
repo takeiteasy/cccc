@@ -87,6 +87,7 @@ Useful reflection entry points include:
 | Count struct/union members | `StructMemberCount(ty)` |
 | Read members | `StructMemberAt(ty, i)`, `MemberName(m)`, `MemberType(m)`, `MemberOffset(m)` |
 | Find globals | `FindGlobal(name)`, `GlobalCount()`, `GlobalAt(i)` |
+| Read a function's parameters, locals and body | `FnParamAt(fn, i)`, `FnLocalAt(fn, i)`, `FnBody(fn)` — see [macros-ast-walk.md](macros-ast-walk.md) |
 
 `GetType(name)` resolves any standard base-type spelling regardless of word
 order — `"int"`, `"unsigned char"`, `"long long"`, `"signed int"`, `"long

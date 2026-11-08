@@ -169,52 +169,78 @@ typedef enum {
 } TypeKind;
 
 /*! @brief Discriminates the operator/statement kind of a Node, e.g. as passed
- *           to @c MakeBinary / @c MakeUnary or matched against a node's
- *           @c ->kind field.
- * @details A subset of cccc.h's internal @c ND_* node kinds relevant to
- *             comptime functions; the numeric values match cccc.h's @c NodeKind
- *             exactly, so the gaps (33-36, 39, 41, 44-50) are internal-only
- *             kinds not exposed here, not omissions. */
+ *           to @c MakeBinary / @c MakeUnary, returned by @c GetNodeKind, or
+ *           matched against a node's @c ->kind field.
+ * @details Mirrors cccc.h's internal @c ND_* node kinds one for one; the
+ *             numeric values are identical. */
 typedef enum {
-    NK_NULL_EXPR  = 0,
-    NK_ADD        = 1,
-    NK_SUB        = 2,
-    NK_MUL        = 3,
-    NK_DIV        = 4,
-    NK_NEG        = 5,
-    NK_MOD        = 6,
-    NK_BITAND     = 7,
-    NK_BITOR      = 8,
-    NK_BITXOR     = 9,
-    NK_SHL        = 10,
-    NK_SHR        = 11,
-    NK_EQ         = 12,
-    NK_NE         = 13,
-    NK_LT         = 14,
-    NK_LE         = 15,
-    NK_ASSIGN     = 16,
-    NK_COND       = 17,
-    NK_COMMA      = 18,
-    NK_MEMBER     = 19,
-    NK_ADDR       = 20,
-    NK_DEREF      = 21,
-    NK_NOT        = 22,
-    NK_BITNOT     = 23,
-    NK_LOGAND     = 24,
-    NK_LOGOR      = 25,
-    NK_RETURN     = 26,
-    NK_IF         = 27,
-    NK_FOR        = 28,
-    NK_DO         = 29,
-    NK_SWITCH     = 30,
-    NK_CASE       = 31,
-    NK_BLOCK      = 32,
-    NK_FUNCALL    = 37,
-    NK_EXPR_STMT  = 38,
-    NK_VAR        = 40,
-    NK_NUM        = 42,
-    NK_CAST       = 43,
-    NK_MACRO_CALL = 51,
+    NK_NULL_EXPR        = 0,
+    NK_ADD              = 1,
+    NK_SUB              = 2,
+    NK_MUL              = 3,
+    NK_DIV              = 4,
+    NK_NEG              = 5,
+    NK_MOD              = 6,
+    NK_BITAND           = 7,
+    NK_BITOR            = 8,
+    NK_BITXOR           = 9,
+    NK_SHL              = 10,
+    NK_SHR              = 11,
+    NK_EQ               = 12,
+    NK_NE               = 13,
+    NK_LT               = 14,
+    NK_LE               = 15,
+    NK_ASSIGN           = 16,
+    NK_COND             = 17,
+    NK_COMMA            = 18,
+    NK_MEMBER           = 19,
+    NK_ADDR             = 20,
+    NK_DEREF            = 21,
+    NK_NOT              = 22,
+    NK_BITNOT           = 23,
+    NK_LOGAND           = 24,
+    NK_LOGOR            = 25,
+    NK_RETURN           = 26,
+    NK_IF               = 27,
+    NK_FOR              = 28, /* also `while` */
+    NK_DO               = 29,
+    NK_SWITCH           = 30,
+    NK_CASE             = 31,
+    NK_BLOCK            = 32,
+    NK_GOTO             = 33,
+    NK_GOTO_EXPR        = 34,
+    NK_LABEL            = 35,
+    NK_LABEL_VAL        = 36,
+    NK_FUNCALL          = 37,
+    NK_EXPR_STMT        = 38,
+    NK_STMT_EXPR        = 39,
+    NK_VAR              = 40,
+    NK_VLA_PTR          = 41,
+    NK_NUM              = 42,
+    NK_CAST             = 43,
+    NK_MEMZERO          = 44,
+    NK_ASM              = 45,
+    NK_CAS              = 46,
+    NK_EXCH             = 47,
+    NK_FRAME_ADDR       = 48,
+    NK_BLOCK_LITERAL    = 49,
+    NK_BLOCK_CALL       = 50,
+    NK_MACRO_CALL       = 51,
+    NK_COMPLEX          = 52,
+    NK_UNREACHABLE      = 53,
+    NK_BITOP            = 54,
+    NK_OVERFLOW_ARITH   = 55,
+    NK_INIT_SPLICE      = 56,
+    NK_ALOAD            = 57,
+    NK_ASTORE           = 58,
+    NK_RETURN_ADDR      = 59,
+    NK_DYNOBJ_SIZE      = 60,
+    NK_CONVERTVECTOR    = 61,
+    NK_DECIMAL_TO_CHARS = 62,
+    NK_FENCE            = 63,
+    NK_QUOTE_LAZY       = 64,
+    NK_DYNAMIC_CHECK    = 65,
+    NK_VA_NAMED_COUNT   = 66,
 } NodeKind;
 
 /*! @brief Discriminates the kind of declaration an AttrTarget refers to,
@@ -857,6 +883,268 @@ bool __builtin_ast_obj_is_definition(Obj *obj);
  * @details Convenience wrapper: ObjIsStatic(obj).
  */
 bool __builtin_ast_obj_is_static(Obj *obj);
+
+/*! @brief Return the top-level block of a function definition.
+ * @param fn A function Obj.
+ * @return The body NK_BLOCK, or NULL for a declaration or a non-function.
+ * @details Convenience wrapper: FnBody(fn).
+ */
+Node *__builtin_ast_function_body(Obj *fn);
+
+/*! @brief Return the number of parameters of a function definition.
+ * @param fn A function Obj.
+ * @return The parameter count, 0 for a declaration.
+ * @details Convenience wrapper: FnParamCount(fn).
+ */
+int __builtin_ast_function_param_count(Obj *fn);
+
+/*! @brief Return a parameter of a function definition, in declaration order.
+ * @param fn A function Obj.
+ * @param index Zero-based parameter index.
+ * @return The parameter Obj (name and type), or NULL when out of range.
+ * @details Convenience wrapper: FnParamAt(fn, i).
+ */
+Obj *__builtin_ast_function_param_at(Obj *fn, int index);
+
+/*! @brief Return the number of source-level locals of a function definition.
+ * @param fn A function Obj.
+ * @return The local count; parameters and compiler temporaries are excluded.
+ * @details Convenience wrapper: FnLocalCount(fn).
+ */
+int __builtin_ast_function_local_count(Obj *fn);
+
+/*! @brief Return a local variable of a function definition, in declaration
+ * order.
+ * @param fn A function Obj.
+ * @param index Zero-based local index.
+ * @return The local Obj, or NULL when out of range.
+ * @details Convenience wrapper: FnLocalAt(fn, i).
+ */
+Obj *__builtin_ast_function_local_at(Obj *fn, int index);
+
+/*! @brief Return the next Obj in the list that holds obj.
+ * @param obj A parameter, local or global Obj.
+ * @return The next Obj, or NULL at the end.
+ * @details Convenience wrapper: ObjNext(obj).
+ */
+Obj *__builtin_ast_obj_next(Obj *obj);
+
+/*! @brief Return the kind of a node.
+ * @param node The node to inspect.
+ * @return The NodeKind, or NK_NULL_EXPR for NULL.
+ * @details Convenience wrapper: GetNodeKind(node).
+ */
+NodeKind __builtin_ast_node_kind(Node *node);
+
+/*! @brief Return the resolved type of an expression node.
+ * @param node The node to inspect.
+ * @return The Type*, or NULL for statements and untyped nodes.
+ * @details Convenience wrapper: GetNodeType(node).
+ */
+Type *__builtin_ast_node_type(Node *node);
+
+/*! @brief Return the next node in a statement or argument list.
+ * @param node The node to inspect.
+ * @return The next sibling, or NULL at the end.
+ * @details Convenience wrapper: NodeNext(node).
+ */
+Node *__builtin_ast_node_next(Node *node);
+
+/*! @brief Return the left operand (or sole operand) of a node.
+ * @param node The node to inspect.
+ * @return The operand, or NULL when the kind has none.
+ * @details Convenience wrapper: NodeLhs(node).
+ */
+Node *__builtin_ast_node_lhs(Node *node);
+
+/*! @brief Return the right operand of a node.
+ * @param node The node to inspect.
+ * @return The operand, or NULL when the kind has none.
+ * @details Convenience wrapper: NodeRhs(node).
+ */
+Node *__builtin_ast_node_rhs(Node *node);
+
+/*! @brief Return the statement list of an NK_BLOCK or NK_STMT_EXPR.
+ * @param node The node to inspect.
+ * @return The first statement, or NULL. For for/while/do the body is NodeThen.
+ * @details Convenience wrapper: NodeBody(node).
+ */
+Node *__builtin_ast_node_body(Node *node);
+
+/*! @brief Return the condition of an if, loop, switch or ?: node.
+ * @param node The node to inspect.
+ * @return The condition, or NULL.
+ * @details Convenience wrapper: NodeCond(node).
+ */
+Node *__builtin_ast_node_cond(Node *node);
+
+/*! @brief Return the then-branch of an if or ?: node, or the body of a loop or
+ * switch.
+ * @param node The node to inspect.
+ * @return The branch, or NULL.
+ * @details Convenience wrapper: NodeThen(node).
+ */
+Node *__builtin_ast_node_then(Node *node);
+
+/*! @brief Return the else-branch of an if or ?: node.
+ * @param node The node to inspect.
+ * @return The branch, or NULL.
+ * @details Convenience wrapper: NodeElse(node).
+ */
+Node *__builtin_ast_node_else(Node *node);
+
+/*! @brief Return the initialiser of a for node.
+ * @param node The node to inspect.
+ * @return The initialiser, or NULL.
+ * @details Convenience wrapper: NodeInit(node).
+ */
+Node *__builtin_ast_node_init(Node *node);
+
+/*! @brief Return the increment of a for node.
+ * @param node The node to inspect.
+ * @return The increment, or NULL.
+ * @details Convenience wrapper: NodeInc(node).
+ */
+Node *__builtin_ast_node_inc(Node *node);
+
+/*! @brief Return the number of statements in an NK_BLOCK or NK_STMT_EXPR.
+ * @param block The block node.
+ * @return The statement count, 0 for other kinds.
+ * @details Convenience wrapper: BlockCount(block).
+ */
+int __builtin_ast_block_count(Node *block);
+
+/*! @brief Return a statement of an NK_BLOCK or NK_STMT_EXPR.
+ * @param block The block node.
+ * @param index Zero-based statement index.
+ * @return The statement, or NULL when out of range.
+ * @details Convenience wrapper: BlockAt(block, i).
+ */
+Node *__builtin_ast_block_at(Node *block, int index);
+
+/*! @brief Return the callee expression of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one).
+ * @return The callee, or NULL for other kinds.
+ * @details Convenience wrapper: CallCallee(call).
+ */
+Node *__builtin_ast_call_callee(Node *call);
+
+/*! @brief Return the number of arguments of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one).
+ * @return The argument count, 0 for other kinds.
+ * @details Convenience wrapper: CallArgCount(call).
+ */
+int __builtin_ast_call_arg_count(Node *call);
+
+/*! @brief Return an argument of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one).
+ * @param index Zero-based argument index.
+ * @return The argument, or NULL when out of range.
+ * @details Convenience wrapper: CallArgAt(call, i).
+ */
+Node *__builtin_ast_call_arg_at(Node *call, int index);
+
+/*! @brief Return the value of an integer NK_NUM literal.
+ * @param node The node to inspect.
+ * @return The value, 0 for other kinds.
+ * @details Convenience wrapper: NodeIntValue(node).
+ */
+long long __builtin_ast_node_int_value(Node *node);
+
+/*! @brief Return the value of a floating NK_NUM literal.
+ * @param node The node to inspect.
+ * @return The value, 0 for other kinds.
+ * @details Convenience wrapper: NodeFloatValue(node).
+ */
+double __builtin_ast_node_float_value(Node *node);
+
+/*! @brief Return the variable an NK_VAR (or NK_MEMZERO) node refers to.
+ * @param node The node to inspect.
+ * @return The Obj, or NULL.
+ * @details Convenience wrapper: NodeVarObj(node).
+ */
+Obj *__builtin_ast_node_var_obj(Node *node);
+
+/*! @brief Return the member an NK_MEMBER node selects.
+ * @param node The node to inspect.
+ * @return The Member, or NULL.
+ * @details Convenience wrapper: NodeMember(node).
+ */
+Member *__builtin_ast_node_member(Node *node);
+
+/*! @brief Return the number of case labels of a switch (excluding default).
+ * @param sw An NK_SWITCH node.
+ * @return The case count, 0 for other kinds.
+ * @details Convenience wrapper: SwitchCaseCount(sw).
+ */
+int __builtin_ast_switch_case_count(Node *sw);
+
+/*! @brief Return a case label of a switch, in source order.
+ * @param sw An NK_SWITCH node.
+ * @param index Zero-based case index.
+ * @return An NK_CASE node, or NULL when out of range.
+ * @details Convenience wrapper: SwitchCaseAt(sw, i).
+ */
+Node *__builtin_ast_switch_case_at(Node *sw, int index);
+
+/*! @brief Return the default label of a switch.
+ * @param sw An NK_SWITCH node.
+ * @return The default NK_CASE node, or NULL.
+ * @details Convenience wrapper: SwitchDefault(sw).
+ */
+Node *__builtin_ast_switch_default(Node *sw);
+
+/*! @brief Return the first value of an NK_CASE label.
+ * @param node An NK_CASE node.
+ * @return The value, 0 for other kinds.
+ * @details Convenience wrapper: CaseBegin(node).
+ */
+long long __builtin_ast_case_begin(Node *node);
+
+/*! @brief Return the last value of an NK_CASE label (equal to CaseBegin unless
+ * a GNU range).
+ * @param node An NK_CASE node.
+ * @return The value, 0 for other kinds.
+ * @details Convenience wrapper: CaseEnd(node).
+ */
+long long __builtin_ast_case_end(Node *node);
+
+/*! @brief Return the statement that follows an NK_CASE label.
+ * @param node An NK_CASE node.
+ * @return The statement, or NULL.
+ * @details Convenience wrapper: CaseBody(node).
+ */
+Node *__builtin_ast_case_body(Node *node);
+
+/*! @brief Return the macro name of a not-yet-expanded NK_MACRO_CALL.
+ * @param node The node to inspect.
+ * @return The name, or NULL for other kinds.
+ * @details Convenience wrapper: MacroCallName(node).
+ */
+const char *__builtin_ast_macro_call_name(Node *node);
+
+/*! @brief Return the argument count of an NK_MACRO_CALL.
+ * @param node The node to inspect.
+ * @return The count, 0 for other kinds.
+ * @details Convenience wrapper: MacroCallArgCount(node).
+ */
+int __builtin_ast_macro_call_arg_count(Node *node);
+
+/*! @brief Return an argument of an NK_MACRO_CALL.
+ * @param node The node to inspect.
+ * @param index Zero-based argument index.
+ * @return The argument, or NULL when out of range.
+ * @details Convenience wrapper: MacroCallArgAt(node, i).
+ */
+Node *__builtin_ast_macro_call_arg_at(Node *node, int index);
+
+/*! @brief Peel compiler-inserted casts and call wrappers off a node.
+ * @param node The node to inspect.
+ * @return The first node that is not an implicit cast or call wrapper. Explicit
+ * `(T)x` casts stay.
+ * @details Convenience wrapper: StripImplicit(node).
+ */
+Node *__builtin_ast_node_strip_implicit(Node *node);
 
 /*! @brief Return the kind of declaration decorated by a custom attribute.
  */
@@ -2284,6 +2572,159 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Test whether a global object has internal (static) linkage.
  * @param obj The object to inspect. */
 #define ObjIsStatic(obj) __builtin_ast_obj_is_static(obj)
+/*! @def FnBody
+ * @brief Return the top-level block of a function definition.
+ * @param fn A function Obj. */
+#define FnBody(fn) __builtin_ast_function_body(fn)
+/*! @def FnParamCount
+ * @brief Return the number of parameters of a function definition.
+ * @param fn A function Obj. */
+#define FnParamCount(fn) __builtin_ast_function_param_count(fn)
+/*! @def FnParamAt
+ * @brief Return a parameter of a function definition, in declaration order.
+ * @param fn A function Obj.
+ * @param index Zero-based parameter index. */
+#define FnParamAt(fn, i) __builtin_ast_function_param_at(fn, i)
+/*! @def FnLocalCount
+ * @brief Return the number of source-level locals of a function definition.
+ * @param fn A function Obj. */
+#define FnLocalCount(fn) __builtin_ast_function_local_count(fn)
+/*! @def FnLocalAt
+ * @brief Return a local variable of a function definition, in declaration
+ * order.
+ * @param fn A function Obj.
+ * @param index Zero-based local index. */
+#define FnLocalAt(fn, i) __builtin_ast_function_local_at(fn, i)
+/*! @def ObjNext
+ * @brief Return the next Obj in the list that holds obj.
+ * @param obj A parameter, local or global Obj. */
+#define ObjNext(obj) __builtin_ast_obj_next(obj)
+/*! @def GetNodeKind
+ * @brief Return the kind of a node.
+ * @param node The node to inspect. */
+#define GetNodeKind(node) __builtin_ast_node_kind(node)
+/*! @def GetNodeType
+ * @brief Return the resolved type of an expression node.
+ * @param node The node to inspect. */
+#define GetNodeType(node) __builtin_ast_node_type(node)
+/*! @def NodeNext
+ * @brief Return the next node in a statement or argument list.
+ * @param node The node to inspect. */
+#define NodeNext(node) __builtin_ast_node_next(node)
+/*! @def NodeLhs
+ * @brief Return the left operand (or sole operand) of a node.
+ * @param node The node to inspect. */
+#define NodeLhs(node) __builtin_ast_node_lhs(node)
+/*! @def NodeRhs
+ * @brief Return the right operand of a node.
+ * @param node The node to inspect. */
+#define NodeRhs(node) __builtin_ast_node_rhs(node)
+/*! @def NodeBody
+ * @brief Return the statement list of an NK_BLOCK or NK_STMT_EXPR.
+ * @param node The node to inspect. */
+#define NodeBody(node) __builtin_ast_node_body(node)
+/*! @def NodeCond
+ * @brief Return the condition of an if, loop, switch or ?: node.
+ * @param node The node to inspect. */
+#define NodeCond(node) __builtin_ast_node_cond(node)
+/*! @def NodeThen
+ * @brief Return the then-branch of an if or ?: node, or the body of a loop or
+ * switch.
+ * @param node The node to inspect. */
+#define NodeThen(node) __builtin_ast_node_then(node)
+/*! @def NodeElse
+ * @brief Return the else-branch of an if or ?: node.
+ * @param node The node to inspect. */
+#define NodeElse(node) __builtin_ast_node_else(node)
+/*! @def NodeInit
+ * @brief Return the initialiser of a for node.
+ * @param node The node to inspect. */
+#define NodeInit(node) __builtin_ast_node_init(node)
+/*! @def NodeInc
+ * @brief Return the increment of a for node.
+ * @param node The node to inspect. */
+#define NodeInc(node) __builtin_ast_node_inc(node)
+/*! @def BlockCount
+ * @brief Return the number of statements in an NK_BLOCK or NK_STMT_EXPR.
+ * @param block The block node. */
+#define BlockCount(block) __builtin_ast_block_count(block)
+/*! @def BlockAt
+ * @brief Return a statement of an NK_BLOCK or NK_STMT_EXPR.
+ * @param block The block node.
+ * @param index Zero-based statement index. */
+#define BlockAt(block, i) __builtin_ast_block_at(block, i)
+/*! @def CallCallee
+ * @brief Return the callee expression of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one). */
+#define CallCallee(call) __builtin_ast_call_callee(call)
+/*! @def CallArgCount
+ * @brief Return the number of arguments of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one). */
+#define CallArgCount(call) __builtin_ast_call_arg_count(call)
+/*! @def CallArgAt
+ * @brief Return an argument of a call.
+ * @param call An NK_FUNCALL node (or the comma wrapper around one).
+ * @param index Zero-based argument index. */
+#define CallArgAt(call, i) __builtin_ast_call_arg_at(call, i)
+/*! @def NodeIntValue
+ * @brief Return the value of an integer NK_NUM literal.
+ * @param node The node to inspect. */
+#define NodeIntValue(node) __builtin_ast_node_int_value(node)
+/*! @def NodeFloatValue
+ * @brief Return the value of a floating NK_NUM literal.
+ * @param node The node to inspect. */
+#define NodeFloatValue(node) __builtin_ast_node_float_value(node)
+/*! @def NodeVarObj
+ * @brief Return the variable an NK_VAR (or NK_MEMZERO) node refers to.
+ * @param node The node to inspect. */
+#define NodeVarObj(node) __builtin_ast_node_var_obj(node)
+/*! @def NodeMember
+ * @brief Return the member an NK_MEMBER node selects.
+ * @param node The node to inspect. */
+#define NodeMember(node) __builtin_ast_node_member(node)
+/*! @def SwitchCaseCount
+ * @brief Return the number of case labels of a switch (excluding default).
+ * @param sw An NK_SWITCH node. */
+#define SwitchCaseCount(sw) __builtin_ast_switch_case_count(sw)
+/*! @def SwitchCaseAt
+ * @brief Return a case label of a switch, in source order.
+ * @param sw An NK_SWITCH node.
+ * @param index Zero-based case index. */
+#define SwitchCaseAt(sw, i) __builtin_ast_switch_case_at(sw, i)
+/*! @def SwitchDefault
+ * @brief Return the default label of a switch.
+ * @param sw An NK_SWITCH node. */
+#define SwitchDefault(sw) __builtin_ast_switch_default(sw)
+/*! @def CaseBegin
+ * @brief Return the first value of an NK_CASE label.
+ * @param node An NK_CASE node. */
+#define CaseBegin(node) __builtin_ast_case_begin(node)
+/*! @def CaseEnd
+ * @brief Return the last value of an NK_CASE label (equal to CaseBegin unless a
+ * GNU range).
+ * @param node An NK_CASE node. */
+#define CaseEnd(node) __builtin_ast_case_end(node)
+/*! @def CaseBody
+ * @brief Return the statement that follows an NK_CASE label.
+ * @param node An NK_CASE node. */
+#define CaseBody(node) __builtin_ast_case_body(node)
+/*! @def MacroCallName
+ * @brief Return the macro name of a not-yet-expanded NK_MACRO_CALL.
+ * @param node The node to inspect. */
+#define MacroCallName(node) __builtin_ast_macro_call_name(node)
+/*! @def MacroCallArgCount
+ * @brief Return the argument count of an NK_MACRO_CALL.
+ * @param node The node to inspect. */
+#define MacroCallArgCount(node) __builtin_ast_macro_call_arg_count(node)
+/*! @def MacroCallArgAt
+ * @brief Return an argument of an NK_MACRO_CALL.
+ * @param node The node to inspect.
+ * @param index Zero-based argument index. */
+#define MacroCallArgAt(node, i) __builtin_ast_macro_call_arg_at(node, i)
+/*! @def StripImplicit
+ * @brief Peel compiler-inserted casts and call wrappers off a node.
+ * @param node The node to inspect. */
+#define StripImplicit(node) __builtin_ast_node_strip_implicit(node)
 /*! @def GetAttrTargetKind
  * @brief Return the kind of declaration decorated by a custom attribute.
  * @param target The attribute target to inspect. */

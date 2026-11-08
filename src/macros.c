@@ -1342,9 +1342,18 @@ static const char *reflection_enum_names[] = {
     "NK_LT", "NK_LE", "NK_ASSIGN", "NK_COND", "NK_COMMA", "NK_MEMBER",
     "NK_ADDR", "NK_DEREF", "NK_NOT", "NK_BITNOT", "NK_LOGAND", "NK_LOGOR",
     "NK_RETURN", "NK_IF", "NK_FOR", "NK_DO", "NK_SWITCH", "NK_CASE", "NK_BLOCK",
-    "NK_FUNCALL", "NK_EXPR_STMT", "NK_VAR", "NK_NUM", "NK_CAST",
-    "NK_MACRO_CALL", NULL};
-#define REFLECTION_ENUM_NAMES_COUNT 55
+    "NK_GOTO", "NK_GOTO_EXPR", "NK_LABEL", "NK_LABEL_VAL", "NK_FUNCALL",
+    "NK_EXPR_STMT", "NK_STMT_EXPR", "NK_VAR", "NK_VLA_PTR", "NK_NUM", "NK_CAST",
+    "NK_MEMZERO", "NK_ASM", "NK_CAS", "NK_EXCH", "NK_FRAME_ADDR",
+    "NK_BLOCK_LITERAL", "NK_BLOCK_CALL", "NK_MACRO_CALL", "NK_COMPLEX",
+    "NK_UNREACHABLE", "NK_BITOP", "NK_OVERFLOW_ARITH", "NK_INIT_SPLICE",
+    "NK_ALOAD", "NK_ASTORE", "NK_RETURN_ADDR", "NK_DYNOBJ_SIZE",
+    "NK_CONVERTVECTOR", "NK_DECIMAL_TO_CHARS", "NK_FENCE", "NK_QUOTE_LAZY",
+    "NK_DYNAMIC_CHECK", "NK_VA_NAMED_COUNT", NULL};
+#define REFLECTION_ENUM_NAMES_COUNT 84
+_Static_assert(sizeof(reflection_enum_names) / sizeof(*reflection_enum_names) ==
+                   REFLECTION_ENUM_NAMES_COUNT,
+               "REFLECTION_ENUM_NAMES_COUNT must match reflection_enum_names");
 
 // Remove reflection.h enum-constant macros from the live table, storing each
 // previous value in saved[] (indexed by position in reflection_enum_names[]).
