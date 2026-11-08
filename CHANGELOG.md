@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-08
+
 - Added: comptime code reads the typed AST of a function definition: `FnBody`, `FnParamAt`, `FnLocalAt`, `GetNodeKind`, `GetNodeType`, operand accessors (`NodeLhs`, `NodeRhs`, `NodeCond`, `NodeThen`, `NodeElse`, `NodeInit`, `NodeInc`), `BlockAt`, `CallCallee`/`CallArgAt`, `NodeIntValue`/`NodeFloatValue`, `NodeVarObj`, `NodeMember`, switch and case accessors, `MacroCallName`/`MacroCallArgAt` for comptime calls not yet expanded, and `StripImplicit`.
 - Changed: `NodeKind` has an `NK_*` constant for every node kind (`NK_GOTO`, `NK_LABEL`, `NK_STMT_EXPR`, `NK_ASM` and the rest).
 
