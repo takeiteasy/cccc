@@ -4509,12 +4509,9 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                 break;
             }
             case RET_STRUCT:
-                // #1033 v1: struct return= assertions need type-directed
-                // per-field comparison codegen (see testing.c's
-                // cmp_ret_aggregate) -- narrow enough in practice (a
-                // handful of tests repo-wide) that it's deferred rather
-                // than attempted here. The test still runs (asserts inside
-                // it are honored); only the return-value check is skipped.
+                // TODO: the return value is not checked, so a struct return=
+                // always passes natively; needs per-field comparison codegen
+                // like testing.c's cmp_ret_aggregate, or an error (#1974)
                 (void)ret_kind;
                 fprintf(f,
                         "    (void)%s();\n"
