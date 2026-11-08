@@ -75,7 +75,8 @@ sh tools/release.sh 0.1.0
 ```
 
 Verifies: clean working tree, `CCCC_RELEASE_VERSION` matches the requested
-version, `CHANGELOG.md` has a matching `## [0.1.0]` section, then runs the
+version, `CHANGELOG.md` has a matching `## [0.1.0]` section, that sr.ht's
+Linux amd64 job passed for the commit (below), then runs the
 full `test` and `test_extra` build targets. On success it creates an annotated `v0.1.0` tag
 locally (message = the matching `CHANGELOG.md` section) and prints the push
 commands — it does **not** push anything itself.
@@ -106,6 +107,21 @@ non-amd64 quadrants (Linux aarch64, macOS arm64) get built and tested —
 `mirror` (sr.ht) always runs `.builds/linux-amd64.yml` on every push
 regardless of tags, but GitHub's regular-push workflow is docs-only, so those
 two quadrants are only exercised at release time.
+
+### sr.ht check
+
+`tools/check_srht.sh` needs `hut` and `jq`. It finds the `devel` job of
+`.builds/linux-amd64.yml` for the commit and requires its `test` task to have
+passed. It fails when the job is missing, still running or red, printing the
+job URL.
+
+| Situation | Result |
+|-----------|--------|
+| `HEAD` is devel's tip, or has devel's tree (a merge) | checked |
+| `HEAD` differs from devel (a hotfix off `trunk`) | fails |
+| `CCCC_RELEASE_SKIP_SRHT=1 sh tools/release.sh 0.1.1` | check skipped |
+
+A failed `linux-amd64.yml` job also emails the maintainer.
 
 ## GitHub release automation
 

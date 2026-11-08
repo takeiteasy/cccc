@@ -33,12 +33,20 @@ if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
     exit 1
 fi
 
-# 4. Full test suite and the loose-test areas (what the release workflow runs)
+# 4. sr.ht builds Linux amd64, which nothing local covers. A red job there has
+#    to block the tag; CCCC_RELEASE_SKIP_SRHT=1 skips it (hotfixes off trunk).
+if [ "${CCCC_RELEASE_SKIP_SRHT:-}" = 1 ]; then
+    echo "release: skipping the sr.ht build check (CCCC_RELEASE_SKIP_SRHT=1)"
+else
+    sh tools/check_srht.sh
+fi
+
+# 5. Full test suite and the loose-test areas (what the release workflow runs)
 #    must pass before anything is tagged.
 ./cccc --build build.c --build-target=test --build-jobs=8 --build-keep-going
 ./cccc --build build.c --build-target=test_extra --build-jobs=8 --build-keep-going
 
-# 5. Extract the CHANGELOG section for this version as the tag message.
+# 6. Extract the CHANGELOG section for this version as the tag message.
 NOTES=$(mktemp)
 trap 'rm -f "$NOTES"' EXIT
 awk -v ver="$VERSION" '

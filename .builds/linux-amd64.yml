@@ -26,6 +26,10 @@ environment:
   # whichever compiler `cc` resolves to, so both sides of this split
   # stay covered instead of being flattened to one.
   CC: clang
+triggers:
+  - action: email
+    condition: failure
+    to: George Watson <gigolo@hotmail.co.uk>
 tasks:
   - guard: |
       # sr.ht submits one job per pushed ref; only devel is built here.
