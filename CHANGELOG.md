@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-11-08
+
 - Added: a struct or union `return =` assertion accepts a typedef name as the compound literal type: `return = (Pt){.x = 3, .y = 4}`.
 - Changed: the type of a `return =` compound literal, `(struct TAG){...}` as well as `(TYPEDEF){...}`, and of each literal nested in it, must match the return type or the member or element it initialises; a mismatch is a compile error.
 - Changed: a compound-literal `return =` on a function that does not return a struct or union is a compile error instead of a runtime "(type mismatch)" failure.
