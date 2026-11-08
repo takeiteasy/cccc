@@ -289,8 +289,10 @@ The attribute is readable through `ParamHasAttr` and `ParamAttrArg`, see
     once per call. Keyed arguments are evaluated in parameter order, not the order
     written. When a default names an earlier parameter, the arguments up to the
     last one it names are stored in temporaries first, left to right, and the
-    call reads them back. An argument for a checked pointer parameter stays in
-    the call, where its bounds are verified, so it is evaluated after those.
+    call reads them back. A literal, or a plain local in a call with no side
+    effects, is read in place of its temporary. An argument for a checked
+    pointer parameter stays in the call, where its bounds are verified, so it
+    is evaluated after those.
 
 ### Member initializers
 

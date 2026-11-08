@@ -1493,22 +1493,188 @@ static Obj *default_temp(VirtualMachine *vm, Type *ty, Token *tok) {
     return obj;
 }
 
-// Stores an argument in a temporary ahead of the call and returns a read of it.
-static Node *hoist_arg(VirtualMachine *vm, Obj **temp, Node *arg,
-                       Node **prelude, Token *tok) {
+// Binds an argument to a temporary that the call's defaults read by name.
+// settle_temps then stores the argument in it ahead of the call, or drops the
+// temporary when the argument can stand in for it.
+static void bind_temp(VirtualMachine *vm, Obj **temp, Node *arg, Token *tok) {
     add_type(vm, arg);
     Type *ty        = copy_type(vm, arg->ty);
     ty->is_const    = false;
     ty->is_volatile = false;
     ty->name        = NULL;
     *temp           = default_temp(vm, ty, tok);
-    Node *store =
-        new_binary(vm, ND_ASSIGN, new_var_node(vm, *temp, tok), arg, tok);
-    *prelude =
-        *prelude ? new_binary(vm, ND_COMMA, *prelude, store, tok) : store;
-    Node *read = new_var_node(vm, *temp, tok);
-    add_type(vm, read);
-    return read;
+}
+
+// Whether every temporary read in `n` can be replaced by the argument it holds.
+// Only plain arithmetic qualifies: a default that assigns to a parameter, takes
+// its address or sizes a VLA from it keeps the temporary.
+static bool temp_reads_replaceable(const Node *n) {
+    if (!n)
+        return true;
+    switch (n->kind) {
+        case ND_NUM:
+        case ND_VAR:
+        case ND_CAST:
+        case ND_NEG:
+        case ND_NOT:
+        case ND_BITNOT:
+        case ND_ADD:
+        case ND_SUB:
+        case ND_MUL:
+        case ND_DIV:
+        case ND_MOD:
+        case ND_BITAND:
+        case ND_BITOR:
+        case ND_BITXOR:
+        case ND_SHL:
+        case ND_SHR:
+        case ND_EQ:
+        case ND_NE:
+        case ND_LT:
+        case ND_LE:
+        case ND_LOGAND:
+        case ND_LOGOR:
+        case ND_COND:
+        case ND_COMMA:
+            break;
+        default:
+            return false;
+    }
+    for (const Type *t = n->ty; t; t = t->base)
+        if (t->kind == TY_VLA)
+            return false;
+    const NodeCtl *ctl = node_ctl((Node *)n);
+    return temp_reads_replaceable(n->lhs) && temp_reads_replaceable(n->rhs) &&
+           temp_reads_replaceable(ctl->cond) &&
+           temp_reads_replaceable(ctl->then) &&
+           temp_reads_replaceable(ctl->els);
+}
+
+// A copy of an argument that stands in for a temporary: conversions over one
+// leaf.
+static Node *clone_stand_in(VirtualMachine *vm, const Node *n) {
+    Node *copy = node_clone(vm, n);
+    copy->next = NULL;
+    if (n->kind == ND_CAST)
+        copy->lhs = clone_stand_in(vm, n->lhs);
+    return copy;
+}
+
+// Replaces the reads of temporaries that have a stand-in (`with[k]` for the
+// temporary of parameter k) and returns the new root.
+static Node *replace_temp_reads(VirtualMachine *vm, Node *n, Obj **temps,
+                                Node **with, int count) {
+    if (!n)
+        return NULL;
+    if (n->kind == ND_VAR) {
+        for (int k = 1; k < count; k++)
+            if (with[k] && temps[k] == n->var)
+                return clone_stand_in(vm, with[k]);
+        return n;
+    }
+    n->lhs             = replace_temp_reads(vm, n->lhs, temps, with, count);
+    n->rhs             = replace_temp_reads(vm, n->rhs, temps, with, count);
+    const NodeCtl *ctl = node_ctl(n);
+    Node          *c   = replace_temp_reads(vm, ctl->cond, temps, with, count);
+    Node          *t   = replace_temp_reads(vm, ctl->then, temps, with, count);
+    Node          *e   = replace_temp_reads(vm, ctl->els, temps, with, count);
+    if (c != ctl->cond || t != ctl->then || e != ctl->els) {
+        NodeCtl *w = node_ctl_mut(vm, n);
+        w->cond    = c;
+        w->then    = t;
+        w->els     = e;
+    }
+    return n;
+}
+
+// A literal, or a plain local when the call has no side effects, reads the same
+// where the default is evaluated.
+static bool arg_stands_in(const Node *arg, Obj **temps, int count, bool pure) {
+    const Node *leaf = arg;
+    while (leaf->kind == ND_CAST)
+        leaf = leaf->lhs;
+    if (leaf->kind == ND_NUM)
+        return true;
+    if (!pure || leaf->kind != ND_VAR)
+        return false;
+    const Obj *v = leaf->var;
+    if (!v || !v->is_local || v->is_static || v->is_function)
+        return false;
+    if (v->ty->is_volatile || v->ty->is_atomic)
+        return false;
+    if (v->ty->kind < TY_BOOL || v->ty->kind > TY_PTR)
+        return false;
+    for (int k = 1; k < count; k++)
+        if (temps[k] == v)
+            return false;
+    return true;
+}
+
+static void unlink_local(VirtualMachine *vm, Obj *temp) {
+    Obj **link = &vm->compiler.locals;
+    while (*link && *link != temp)
+        link = &(*link)->next;
+    if (*link)
+        *link = temp->next;
+}
+
+// Settles the temporaries bound for a call's defaults. An argument that can
+// stand in for its temporary is read in place of it; the others are stored in
+// their temporary ahead of the call (`*prelude`), in parameter order.
+// `first_omitted` is the position of the first argument a default or keyed
+// value supplied.
+static void settle_temps(VirtualMachine *vm, Node *head, Obj **temps,
+                         int nparams, int extent, int first_omitted,
+                         Node **prelude, Token *tok) {
+    int     count = nparams + 2;
+    Node ***slot  = arena_alloc(&vm->compiler.parser_arena,
+                                sizeof(Node **) * (size_t)(count + 1));
+    Node  **with =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Node *) * (size_t)count);
+    memset(with, 0, sizeof(Node *) * (size_t)count);
+    static Node *none = NULL;
+    for (int i = 0; i <= count; i++)
+        slot[i] = &none;
+    slot[1] = &head->next;
+    for (int pos = 1; pos <= nparams && *slot[pos]; pos++)
+        slot[pos + 1] = &(*slot[pos])->next;
+
+    bool pure = true;
+    for (Node *a = head->next; a; a = a->next)
+        pure = pure && !node_has_side_effects(a);
+    bool replaceable = true;
+    for (int pos = first_omitted; pos <= nparams && *slot[pos]; pos++)
+        replaceable = replaceable && temp_reads_replaceable(*slot[pos]);
+
+    for (int pos = 1; pos <= nparams && *slot[pos]; pos++) {
+        Node *arg = *slot[pos];
+        if (replaceable && pos >= first_omitted) {
+            Node *replaced = replace_temp_reads(vm, arg, temps, with, count);
+            replaced->next = arg->next;
+            *slot[pos] = arg = replaced;
+            slot[pos + 1]    = &arg->next;
+        }
+        Obj *temp = pos <= extent ? temps[pos] : NULL;
+        if (!temp)
+            continue;
+        if (replaceable && arg_stands_in(arg, temps, count, pure)) {
+            with[pos] = arg;
+            if (vm->compiler.current_fn)
+                unlink_local(vm, temp);
+            continue;
+        }
+        Node *next = arg->next;
+        arg->next  = NULL;
+        Node *store =
+            new_binary(vm, ND_ASSIGN, new_var_node(vm, temp, tok), arg, tok);
+        *prelude =
+            *prelude ? new_binary(vm, ND_COMMA, *prelude, store, tok) : store;
+        Node *read = new_var_node(vm, temp, tok);
+        add_type(vm, read);
+        read->next    = next;
+        *slot[pos]    = read;
+        slot[pos + 1] = &read->next;
+    }
 }
 
 // A checked pointer argument stays in the call, where its bounds are verified,
@@ -1602,25 +1768,14 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
     memset(named, 0, sizeof(bool) * (nparams + 2));
     int extent =
         direct ? default_hoist_extent(keyed, *param_ty, *index, named) : 0;
+    int first_omitted = *index;
     if (extent) {
-        Node **link = &head->next;
-        Type  *p    = ty->params;
-        for (int pos = 1; *link && pos < *index && pos <= extent;
-             pos++, p = p->next) {
-            if (hoists_param(vm, p, named[pos], tok)) {
-                Node *arg  = *link;
-                Node *next = arg->next;
-                arg->next  = NULL;
-                Node *read = hoist_arg(vm, &temps[pos], arg, prelude, tok);
-                read->next = next;
-                *link      = read;
-            }
-            link = &(*link)->next;
-        }
-        Node *tail = head;
-        while (tail->next)
-            tail = tail->next;
-        *cur = tail;
+        Node *arg = head->next;
+        Type *p   = ty->params;
+        for (int pos = 1; arg && pos < *index && pos <= extent;
+             pos++, p = p->next, arg = arg->next)
+            if (hoists_param(vm, p, named[pos], tok))
+                bind_temp(vm, &temps[pos], arg, tok);
     }
 
     while (*param_ty) {
@@ -1635,14 +1790,17 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
                 arg = parse_param_default(vm, use, temps, pos);
         }
         if (!arg)
-            return;
+            break;
         Type *param = *param_ty;
         arg         = check_call_arg(vm, watch, ty, param_ty, index, arg, tok);
         if (arg && pos <= extent && hoists_param(vm, param, named[pos], tok))
-            arg = hoist_arg(vm, &temps[pos], arg, prelude, tok);
+            bind_temp(vm, &temps[pos], arg, tok);
         if (arg)
             *cur = (*cur)->next = arg;
     }
+    if (extent)
+        settle_temps(vm, head, temps, nparams, extent, first_omitted, prelude,
+                     tok);
 }
 
 // Puts `prelude` ahead of a call, in the call's own argument prelude when it

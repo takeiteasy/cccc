@@ -264,3 +264,50 @@ int file_scope_size = sizeof(widths(1));
 void test_naming_default_in_unevaluated_call(void) {
     AssertEq(file_scope_size, 4);
 }
+
+enum { SEVEN = 7 };
+
+int *alias;
+
+int pair_of(int a, int b @ default(a * 2), int c @ default(a + b)) {
+    return a * 10000 + b * 100 + c;
+}
+
+[[cccc::test]]
+void test_argument_that_reads_the_same_where_the_default_runs(void) {
+    int local = 3;
+    AssertEq(pair_of(1), 10203);
+    AssertEq(pair_of(SEVEN), 71421);
+    AssertEq(pair_of(local), 30609);
+    AssertEq(pair_of(local, 1), 30104);
+    AssertEq(pair_of(.a = local), 30609);
+}
+
+[[cccc::test]]
+void test_volatile_and_static_locals_are_read_once(void) {
+    volatile int vol   = 4;
+    static int   fixed = 5;
+    AssertEq(twice(vol), 408);
+    AssertEq(twice(fixed), 510);
+}
+
+[[cccc::test]]
+void test_default_reads_the_value_the_argument_had(void) {
+    int local = 3;
+    alias     = &local;
+    AssertEq(twice((*alias = 5, local)), 510);
+    AssertEq(local, 5);
+    local = 2;
+    AssertEq(pair_of(local, (local = 9, 1)), 20103);
+    AssertEq(twice(local++), 918);
+    AssertEq(local, 10);
+}
+
+[[cccc::test]]
+void test_default_naming_a_converted_argument(void) {
+    char  small = 7;
+    float f     = 2.5f;
+    AssertEq(twice(small), 714);
+    AssertEq(widths(small), 4);
+    AssertEq(twice((int)f), 204);
+}
