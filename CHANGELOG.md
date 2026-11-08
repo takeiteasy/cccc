@@ -7,6 +7,12 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-08
+
+- Added: a parameter's `@default` can name an earlier parameter (`int box(int w, int h @default(w * 2))`; `box(10)` is `box(10, 20)`). The call stores the arguments up to the last one a default names in temporaries, left to right, so each is evaluated once; a keyed or defaulted earlier argument counts as its resolved value, and a method receiver can be named. The temporaries are plain C under `-c=native`.
+- Changed: a `@default` that names its own parameter or a later one (`int f(int a @default(a))` with a global `a`) is an error instead of binding the global, and one that uses a constant declared in the parameter list (`int f(enum { A, B } v @default(B))`) is an error at the declaration instead of at every call.
+- Changed: a `@default` cannot name a checked pointer parameter, and an argument for a checked pointer parameter stays in the call so its bounds are still verified.
+
 ## [0.31.2] - 2026-11-06
 
 - Fixed: a block call converts each argument to its parameter's type (`int (^b)(int)` called with `42.9` passes `42`) and reports too few or too many arguments, like a function call.
