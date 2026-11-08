@@ -217,4 +217,20 @@ struct Pair {
     return (struct Pair){{1, 2}, {9}};
 }
 
+[[cccc::test(return = (_Atomic Pt){.x = 3, .y = 4})]] Pt
+    test_atomic_typedef_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (Pt _Atomic){.x = 3, .y = 4})]] Pt
+    test_trailing_atomic_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (struct Pair){.a = (_Atomic Pt){.x = 1, .y = 2},
+                                    .b = {.v = 9}})]] struct Pair
+    test_atomic_nested_literal(void) {
+    return (struct Pair){{1, 2}, {9}};
+}
+
 #pragma cccc suite end

@@ -66,7 +66,7 @@ const char *test_status(void) {
 }
 ```
 
-**Struct / union**: use an inline compound literal to assert a struct or union return value. The literal's type is `struct TAG`, `union TAG` or a typedef name, optionally qualified with `const` or `volatile` (`(const Pt){...}`), and it must be the function's return type; the function must return a struct or union, and any other type is a compile error. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
+**Struct / union**: use an inline compound literal to assert a struct or union return value. The literal's type is `struct TAG`, `union TAG` or a typedef name, optionally qualified with `const`, `volatile` or `_Atomic` (`(const Pt){...}`; `restrict` and the `_Atomic(Pt)` specifier form are compile errors), and it must be the function's return type; the function must return a struct or union, and any other type is a compile error. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
 
 ```c
 struct Point { int x; int y; };

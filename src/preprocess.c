@@ -4729,22 +4729,51 @@ void cc_free_ret_fields(TestRetField *f) {
     }
 }
 
-static Token *skip_ret_qualifiers(Token *t) {
-    while (t && (equal(t, "const") || equal(t, "volatile")))
+static bool is_ret_restrict(Token *t) {
+    return equal(t, "restrict") || equal(t, "__restrict") ||
+           equal(t, "__restrict__");
+}
+
+// Skips `const`, `volatile`, `_Atomic` and `restrict`; *restrict_tok records
+// the first `restrict`. Stops at an `_Atomic(` specifier.
+static Token *skip_ret_qualifiers(Token *t, Token **restrict_tok) {
+    while (t) {
+        if (is_ret_restrict(t)) {
+            if (!*restrict_tok)
+                *restrict_tok = t;
+        } else if (!equal(t, "const") && !equal(t, "volatile") &&
+                   !(equal(t, "_Atomic") &&
+                     !(t->next && equal(t->next, "(")))) {
+            break;
+        }
         t = t->next;
+    }
     return t;
 }
 
 // Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p, with optional
-// `const`/`volatile` before or after the type. Returns the token after the
-// '{' (NULL when p is not a typed compound literal); *type_tok is the
-// `struct`/`union` keyword or the typedef name.
-static Token *ret_literal_body(Token *p, Token **type_tok) {
+// `const`/`volatile`/`_Atomic` before or after the type. Returns the token
+// after the '{' (NULL when p is not a typed compound literal); *type_tok is
+// the `struct`/`union` keyword or the typedef name. A `restrict` qualifier or
+// an `_Atomic(TYPE)` specifier is a compile error.
+static Token *ret_literal_body(VirtualMachine *vm, Token *p, Token **type_tok) {
     if (!equal(p, "(") || !p->next)
         return NULL;
-    Token *t = skip_ret_qualifiers(p->next);
+    Token *restrict_tok = NULL;
+    Token *t            = skip_ret_qualifiers(p->next, &restrict_tok);
     if (!t)
         return NULL;
+    if (equal(t, "_Atomic") && t->next && equal(t->next, "(")) {
+        Token *u = t->next->next;
+        while (u && u->kind != TK_EOF && !equal(u, ")") && !equal(u, "{"))
+            u = u->next;
+        if (u && equal(u, ")") && u->next && equal(u->next, ")") &&
+            u->next->next && equal(u->next->next, "{"))
+            error_tok(vm, t,
+                      "the '_Atomic(...)' specifier is not supported in a "
+                      "return= literal type; write '_Atomic TYPE'");
+        return NULL;
+    }
     Token *type = t;
     if (equal(t, "struct") || equal(t, "union")) {
         if (!t->next || t->next->kind != TK_IDENT)
@@ -4753,9 +4782,20 @@ static Token *ret_literal_body(Token *p, Token **type_tok) {
     } else if (t->kind != TK_IDENT) {
         return NULL;
     }
-    Token *end = skip_ret_qualifiers(t->next);
+    Token *end = skip_ret_qualifiers(t->next, &restrict_tok);
     if (!end || !equal(end, ")") || !end->next || !equal(end->next, "{"))
         return NULL;
+    if (restrict_tok) {
+        char name[160];
+        if (type != t)
+            snprintf(name, sizeof(name), "%.*s %.*s", type->len, type->loc,
+                     t->len, t->loc);
+        else
+            snprintf(name, sizeof(name), "%.*s", t->len, t->loc);
+        error_tok(vm, restrict_tok,
+                  "'%.*s' cannot qualify the return= literal type '%s'",
+                  restrict_tok->len, restrict_tok->loc, name);
+    }
     *type_tok = type;
     return end->next->next;
 }
@@ -4811,7 +4851,7 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         // else: no designator -- positional entry (array-element list)
 
         Token        *nested_type     = NULL;
-        Token        *nested_body     = ret_literal_body(p, &nested_type);
+        Token        *nested_body     = ret_literal_body(vm, p, &nested_type);
         bool          is_nested_typed = nested_body != NULL;
         bool          is_nested_bare = equal(p, "{");
 
@@ -4967,7 +5007,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
 
             // Compound literal: (struct|union TAG){...} or (TYPEDEF){...}
             Token *lit_type = NULL;
-            Token *lit_body = ret_literal_body(x, &lit_type);
+            Token *lit_body = ret_literal_body(vm, x, &lit_type);
             if (lit_body) {
                 if (op != CMP_EQ && op != CMP_NE)
                     error_tok(vm, x,
