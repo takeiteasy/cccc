@@ -4734,14 +4734,22 @@ static bool is_ret_restrict(Token *t) {
            equal(t, "__restrict__");
 }
 
-// Skips `const`, `volatile`, `_Atomic` and `restrict`; *restrict_tok records
-// the first `restrict`. Stops at an `_Atomic(` specifier.
+static bool is_ret_storage_class(Token *t) {
+    return equal(t, "static") || equal(t, "constexpr") ||
+           equal(t, "register") || equal(t, "thread_local") ||
+           equal(t, "_Thread_local");
+}
+
+// Skips `const`, `volatile`, `_Atomic`, the C23 compound-literal storage-class
+// specifiers and `restrict`; *restrict_tok records the first `restrict`. Stops
+// at an `_Atomic(` specifier.
 static Token *skip_ret_qualifiers(Token *t, Token **restrict_tok) {
     while (t) {
         if (is_ret_restrict(t)) {
             if (!*restrict_tok)
                 *restrict_tok = t;
         } else if (!equal(t, "const") && !equal(t, "volatile") &&
+                   !is_ret_storage_class(t) &&
                    !(equal(t, "_Atomic") &&
                      !(t->next && equal(t->next, "(")))) {
             break;
@@ -4752,10 +4760,11 @@ static Token *skip_ret_qualifiers(Token *t, Token **restrict_tok) {
 }
 
 // Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p, with optional
-// `const`/`volatile`/`_Atomic` before or after the type. Returns the token
-// after the '{' (NULL when p is not a typed compound literal); *type_tok is
-// the `struct`/`union` keyword or the typedef name. A `restrict` qualifier or
-// an `_Atomic(TYPE)` specifier is a compile error.
+// `const`/`volatile`/`_Atomic` and C23 storage-class specifiers before or
+// after the type. Returns the token after the '{' (NULL when p is not a typed
+// compound literal); *type_tok is the `struct`/`union` keyword or the typedef
+// name. A `restrict` qualifier or an `_Atomic(TYPE)` specifier is a compile
+// error.
 static Token *ret_literal_body(VirtualMachine *vm, Token *p, Token **type_tok) {
     if (!equal(p, "(") || !p->next)
         return NULL;

@@ -233,4 +233,30 @@ struct Pair {
     return (struct Pair){{1, 2}, {9}};
 }
 
+[[cccc::test(return = (static Pt){.x = 3, .y = 4})]] Pt
+    test_static_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (constexpr Pt){.x = 3, .y = 4})]] Pt
+    test_constexpr_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (register Pt){.x = 3, .y = 4})]] Pt
+    test_register_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (thread_local Pt){.x = 3, .y = 4})]] Pt
+    test_thread_local_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (static struct Pair){.a = (constexpr Pt){.x = 1, .y = 2},
+                                           .b = {.v = 9}})]] struct Pair
+    test_storage_class_nested_literal(void) {
+    return (struct Pair){{1, 2}, {9}};
+}
+
 #pragma cccc suite end
