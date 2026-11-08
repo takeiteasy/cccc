@@ -2583,7 +2583,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def FnParamAt
  * @brief Return a parameter of a function definition, in declaration order.
  * @param fn A function Obj.
- * @param index Zero-based parameter index. */
+ * @param i Zero-based parameter index. */
 #define FnParamAt(fn, i) __builtin_ast_function_param_at(fn, i)
 /*! @def FnLocalCount
  * @brief Return the number of source-level locals of a function definition.
@@ -2593,7 +2593,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Return a local variable of a function definition, in declaration
  * order.
  * @param fn A function Obj.
- * @param index Zero-based local index. */
+ * @param i Zero-based local index. */
 #define FnLocalAt(fn, i) __builtin_ast_function_local_at(fn, i)
 /*! @def ObjNext
  * @brief Return the next Obj in the list that holds obj.
@@ -2651,7 +2651,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def BlockAt
  * @brief Return a statement of an NK_BLOCK or NK_STMT_EXPR.
  * @param block The block node.
- * @param index Zero-based statement index. */
+ * @param i Zero-based statement index. */
 #define BlockAt(block, i) __builtin_ast_block_at(block, i)
 /*! @def CallCallee
  * @brief Return the callee expression of a call.
@@ -2664,7 +2664,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def CallArgAt
  * @brief Return an argument of a call.
  * @param call An NK_FUNCALL node (or the comma wrapper around one).
- * @param index Zero-based argument index. */
+ * @param i Zero-based argument index. */
 #define CallArgAt(call, i) __builtin_ast_call_arg_at(call, i)
 /*! @def NodeIntValue
  * @brief Return the value of an integer NK_NUM literal.
@@ -2689,7 +2689,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def SwitchCaseAt
  * @brief Return a case label of a switch, in source order.
  * @param sw An NK_SWITCH node.
- * @param index Zero-based case index. */
+ * @param i Zero-based case index. */
 #define SwitchCaseAt(sw, i) __builtin_ast_switch_case_at(sw, i)
 /*! @def SwitchDefault
  * @brief Return the default label of a switch.
@@ -2719,7 +2719,7 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
 /*! @def MacroCallArgAt
  * @brief Return an argument of an NK_MACRO_CALL.
  * @param node The node to inspect.
- * @param index Zero-based argument index. */
+ * @param i Zero-based argument index. */
 #define MacroCallArgAt(node, i) __builtin_ast_macro_call_arg_at(node, i)
 /*! @def StripImplicit
  * @brief Peel compiler-inserted casts and call wrappers off a node.
