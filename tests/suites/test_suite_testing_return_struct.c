@@ -149,6 +149,15 @@ typedef struct {
     Pt pts[2];
 } Box;
 
+struct Q {
+    int v;
+};
+
+struct Pair {
+    Pt        a;
+    struct Q  b;
+};
+
 [[cccc::test(return = (Pt){.x = 3, .y = 4})]] Pt test_typedef_literal(void) {
     return (Pt){3, 4};
 }
@@ -169,6 +178,25 @@ typedef struct {
                                     {.x = 5, .y = 6}}})]] Box
     test_typedef_nested(void) {
     return (Box){{1, 2}, {{3, 4}, {5, 6}}};
+}
+
+[[cccc::test(return = (struct W){.u   = (union U){.i = 7},
+                                 .ax  = 3,
+                                 .ins = {(struct In){.p = 1, .c = 'a'},
+                                         {.p = 2, .c = 'b'}}})]] struct W
+    test_tag_literals_nested(void) {
+    struct W w = {0};
+    w.u.i      = 7;
+    w.ax       = 3;
+    w.ins[0]   = (struct In){1, 'a'};
+    w.ins[1]   = (struct In){2, 'b'};
+    return w;
+}
+
+[[cccc::test(return = (struct Pair){.a = (Pt){.x = 1, .y = 2},
+                                    .b = (struct Q){.v = 9}})]] struct Pair
+    test_typedef_and_tag_mixed(void) {
+    return (struct Pair){{1, 2}, {9}};
 }
 
 #pragma cccc suite end

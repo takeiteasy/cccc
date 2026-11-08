@@ -3051,6 +3051,7 @@ struct TestRetField {
         TestRetField *sub; // RET_STRUCT — nested struct/union/array child list
         Token        *expr; // RET_PENDING — EOF-terminated expression tokens
     } val;
+    Token        *type_tok; // RET_STRUCT: `(TYPE){...}` type start, else NULL
     TestRetField *next;
 };
 
@@ -3108,7 +3109,7 @@ struct TestFnRecord {
         *ret_struct_text; // raw source span of compound literal (for error msg)
     Token *ret_expr;      // RET_PENDING: EOF-terminated expression tokens
     Token *ret_lit_tok;   // RET_STRUCT: first token of the compound literal
-    Token *ret_type_name; // RET_STRUCT: `(NAME){...}` typedef name, else NULL
+    Token *ret_type_tok;  // RET_STRUCT: `struct`/`union` or typedef name
     double ret_epsilon;   // 0.0 = use default 1e-9; set by return_epsilon=
     int expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit
                           // code

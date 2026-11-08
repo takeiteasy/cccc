@@ -4653,7 +4653,7 @@ typedef struct {
     char  *ret_struct_text; // heap-alloc'd strndup of the literal source span
     Token *ret_expr;        // RET_PENDING: expanded operand tokens
     Token *ret_lit_tok;     // RET_STRUCT: first token of the literal
-    Token *ret_type_name;   // RET_STRUCT: typedef name of `(NAME){...}`
+    Token *ret_type_tok;    // RET_STRUCT: `struct`/`union` or typedef name
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] /
@@ -4730,27 +4730,24 @@ void cc_free_ret_fields(TestRetField *f) {
 }
 
 // Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p. Returns the token
-// after the '{' (NULL when p is not a typed compound literal); *type_name is
-// the typedef name for the second form and NULL for the first.
-static Token *ret_literal_body(Token *p, Token **type_name) {
+// after the '{' (NULL when p is not a typed compound literal); *type_tok is
+// the `struct`/`union` keyword or the typedef name.
+static Token *ret_literal_body(Token *p, Token **type_tok) {
     if (!equal(p, "(") || !p->next)
         return NULL;
-    Token *t    = p->next;
-    Token *name = NULL;
+    Token *t = p->next;
     if (equal(t, "struct") || equal(t, "union")) {
-        t = t->next;
-        if (!t || t->kind != TK_IDENT)
+        if (!t->next || t->next->kind != TK_IDENT)
             return NULL;
-    } else if (t->kind == TK_IDENT) {
-        name = t;
-    } else {
+        t = t->next;
+    } else if (t->kind != TK_IDENT) {
         return NULL;
     }
-    t = t->next;
-    if (!t || !equal(t, ")") || !t->next || !equal(t->next, "{"))
+    Token *end = t->next;
+    if (!end || !equal(end, ")") || !end->next || !equal(end->next, "{"))
         return NULL;
-    *type_name = name;
-    return t->next->next;
+    *type_tok = p->next;
+    return end->next->next;
 }
 
 // Max nesting depth accepted for a compound-literal return= assertion
@@ -4801,8 +4798,8 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         }
         // else: no designator -- positional entry (array-element list)
 
-        Token        *nested_name     = NULL;
-        Token        *nested_body     = ret_literal_body(p, &nested_name);
+        Token        *nested_type     = NULL;
+        Token        *nested_body     = ret_literal_body(p, &nested_type);
         bool          is_nested_typed = nested_body != NULL;
         bool          is_nested_bare = equal(p, "{");
 
@@ -4838,8 +4835,10 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         f->op           = fop;
         if (fkind == RET_STR)
             f->val.s = sval ? strdup(sval) : NULL;
-        else if (fkind == RET_STRUCT)
-            f->val.sub = sub;
+        else if (fkind == RET_STRUCT) {
+            f->val.sub  = sub;
+            f->type_tok = nested_type;
+        }
         else
             f->val.expr = fexpr;
         *ftail = f;
@@ -4954,8 +4953,8 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             p                = opnd_end;
 
             // Compound literal: (struct|union TAG){...} or (TYPEDEF){...}
-            Token *lit_name = NULL;
-            Token *lit_body = ret_literal_body(x, &lit_name);
+            Token *lit_type = NULL;
+            Token *lit_body = ret_literal_body(x, &lit_type);
             if (lit_body) {
                 if (op != CMP_EQ && op != CMP_NE)
                     error_tok(vm, x,
@@ -4964,7 +4963,7 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 Token *q           = lit_body;
                 out->ret_fields    = parse_ret_init_list(vm, &q, NULL, 1);
                 out->ret_lit_tok   = x;
-                out->ret_type_name = lit_name;
+                out->ret_type_tok  = lit_type;
                 if (q->kind != TK_EOF)
                     error_tok(vm, q,
                               "unexpected tokens after the compound literal "
@@ -5488,7 +5487,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                     rec->ret_expect.ret_fields = ta.ret_fields;
                     rec->ret_struct_text       = ta.ret_struct_text;
                     rec->ret_lit_tok           = ta.ret_lit_tok;
-                    rec->ret_type_name         = ta.ret_type_name;
+                    rec->ret_type_tok          = ta.ret_type_tok;
                 }
                 rec->expect_exit_code = ta.exit_code_val;
                 // Link into the list before cc_parse_test_flags so that

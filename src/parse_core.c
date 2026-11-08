@@ -76,10 +76,89 @@ static void resolve_ret_operand(VirtualMachine *vm, Token *expr, RetKind *kind,
     }
 }
 
-static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f) {
+// Spells a literal's type for diagnostics: `Pt` or `struct Pt`.
+static void ret_type_spelling(Token *tok, char *buf, size_t cap) {
+    if (equal(tok, "struct") || equal(tok, "union"))
+        snprintf(buf, cap, "%.*s %.*s", tok->len, tok->loc, tok->next->len,
+                 tok->next->loc);
+    else
+        snprintf(buf, cap, "%.*s", tok->len, tok->loc);
+}
+
+// The struct or union type named by a `(struct|union TAG)` or `(TYPEDEF)`
+// literal prefix.
+static Type *resolve_ret_literal_type(VirtualMachine *vm, Token *tok) {
+    char name[160];
+    ret_type_spelling(tok, name, sizeof(name));
+    Type *ty;
+    if (equal(tok, "struct") || equal(tok, "union")) {
+        ty = find_tag(vm, tok->next);
+        if (!ty)
+            error_tok(vm, tok, "'%s' is not declared", name);
+    } else {
+        ty = find_typedef(vm, tok);
+        if (!ty)
+            error_tok(vm, tok, "'%s' is not a typedef name", name);
+    }
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        error_tok(vm, tok, "'%s' is not a struct or union type", name);
+    if (tok->next && (equal(tok, "struct") || equal(tok, "union")) &&
+        (ty->kind == TY_UNION) != equal(tok, "union"))
+        error_tok(vm, tok, "'%s' names a %s", name,
+                  ty->kind == TY_UNION ? "union" : "struct");
+    return ty;
+}
+
+// Type of the member `name`, looking through anonymous members.
+static Type *ret_member_type(Type *ty, const char *name) {
+    size_t n = strlen(name);
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
+        if (!m->name) {
+            if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION) {
+                Type *found = ret_member_type(m->ty, name);
+                if (found)
+                    return found;
+            }
+            continue;
+        }
+        if (m->name->len == n && strncmp(m->name->loc, name, n) == 0)
+            return m->ty;
+    }
+    return NULL;
+}
+
+// Resolves pending operands and checks each typed nested literal against the
+// member or element it initialises. `ty` is the type the list initialises
+// (NULL when unknown); a member it does not have is skipped.
+static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f, Type *ty) {
     for (; f; f = f->next) {
+        Type *slot = NULL;
+        if (ty && ty->kind == TY_ARRAY)
+            slot = ty->base;
+        else if (ty && f->name)
+            slot = ret_member_type(ty, f->name);
+
         if (f->kind == RET_STRUCT) {
-            resolve_ret_fields(vm, f->val.sub);
+            Type *sub_ty = slot;
+            if (f->type_tok) {
+                sub_ty = resolve_ret_literal_type(vm, f->type_tok);
+                if (slot && !is_compatible(sub_ty, slot)) {
+                    char name[160];
+                    ret_type_spelling(f->type_tok, name, sizeof(name));
+                    if (f->name)
+                        error_tok(vm, f->type_tok,
+                                  "'%s' does not match the type of member '%s'",
+                                  name, f->name);
+                    error_tok(vm, f->type_tok,
+                              "'%s' does not match the type of the array "
+                              "element",
+                              name);
+                }
+            }
+            if (sub_ty && sub_ty->kind != TY_STRUCT &&
+                sub_ty->kind != TY_UNION && sub_ty->kind != TY_ARRAY)
+                sub_ty = NULL;
+            resolve_ret_fields(vm, f->val.sub, sub_ty);
         } else if (f->kind == RET_PENDING) {
             RetKind kind;
             int64_t i = 0;
@@ -94,8 +173,8 @@ static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f) {
     }
 }
 
-// A compound-literal return= needs a struct or union return type, and a
-// `(TYPEDEF){...}` literal must name a typedef of that type.
+// A compound-literal return= needs a struct or union return type, and its
+// `(struct|union TAG)` or `(TYPEDEF)` prefix must name that type.
 static void check_ret_literal_type(VirtualMachine *vm, TestFnRecord *r,
                                    Type *return_ty) {
     if (!return_ty ||
@@ -103,19 +182,13 @@ static void check_ret_literal_type(VirtualMachine *vm, TestFnRecord *r,
         error_tok(vm, r->ret_lit_tok,
                   "a compound-literal return= needs a struct or union return "
                   "type");
-    Token *name = r->ret_type_name;
-    if (!name)
-        return;
-    Type *ty = find_typedef(vm, name);
-    if (!ty)
-        error_tok(vm, name, "'%.*s' is not a typedef name", name->len,
-                  name->loc);
-    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
-        error_tok(vm, name, "'%.*s' is not a struct or union type", name->len,
-                  name->loc);
-    if (!is_compatible(ty, return_ty))
-        error_tok(vm, name, "'%.*s' does not match the function's return type",
-                  name->len, name->loc);
+    Type *ty = resolve_ret_literal_type(vm, r->ret_type_tok);
+    if (!is_compatible(ty, return_ty)) {
+        char name[160];
+        ret_type_spelling(r->ret_type_tok, name, sizeof(name));
+        error_tok(vm, r->ret_type_tok,
+                  "'%s' does not match the function's return type", name);
+    }
 }
 
 // Resolves the return= operands of the tests named `name` against the file
@@ -149,7 +222,7 @@ void resolve_test_returns(VirtualMachine *vm, const char *name,
             r->ret_expr = NULL;
         } else {
             check_ret_literal_type(vm, r, return_ty);
-            resolve_ret_fields(vm, r->ret_expect.ret_fields);
+            resolve_ret_fields(vm, r->ret_expect.ret_fields, return_ty);
         }
         vm->compiler.scope = saved;
     }
