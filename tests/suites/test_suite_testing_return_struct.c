@@ -199,4 +199,22 @@ struct Pair {
     return (struct Pair){{1, 2}, {9}};
 }
 
+[[cccc::test(return = (const Pt){.x = 3, .y = 4})]] Pt
+    test_const_typedef_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (Pt const){.x = 3, .y = 4})]] Pt
+    test_trailing_const_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return =
+                        (const struct Pair){
+                            .a = (const Pt){.x = 1, .y = 2},
+                            .b = (volatile struct Q){.v = 9}})]] struct Pair
+    test_qualified_nested_literals(void) {
+    return (struct Pair){{1, 2}, {9}};
+}
+
 #pragma cccc suite end

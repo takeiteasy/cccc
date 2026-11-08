@@ -66,7 +66,7 @@ const char *test_status(void) {
 }
 ```
 
-**Struct / union**: use an inline compound literal to assert a struct or union return value. The literal's type is `struct TAG`, `union TAG` or a typedef name, and it must be the function's return type; the function must return a struct or union, and any other type is a compile error. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
+**Struct / union**: use an inline compound literal to assert a struct or union return value. The literal's type is `struct TAG`, `union TAG` or a typedef name, optionally qualified with `const` or `volatile` (`(const Pt){...}`), and it must be the function's return type; the function must return a struct or union, and any other type is a compile error. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
 
 ```c
 struct Point { int x; int y; };
@@ -98,7 +98,7 @@ If the assertion fails:
 expected return value = (struct Point){.x = 1, .y = 2}, got {.x = 99, .y = 2}
 ```
 
-**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` or `(TYPEDEF)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. A prefix must name the type of the member or array element it initialises; a different type, or a member that is not a struct or union, is a compile error. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that is a compile error.
+**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` or `(TYPEDEF)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. A prefix must name the type of the member or array element it initialises; a different type, or a member that is not a struct or union, is a compile error. A designator must name a member of the type it initialises (`'Pt' has no member named 'nope'`), and an array list takes no member designators. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that is a compile error.
 
 ```c
 struct Inner { int a; int b; };

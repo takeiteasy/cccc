@@ -10,6 +10,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: a struct or union `return =` assertion accepts a typedef name as the compound literal type: `return = (Pt){.x = 3, .y = 4}`.
 - Changed: the type of a `return =` compound literal, `(struct TAG){...}` as well as `(TYPEDEF){...}`, and of each literal nested in it, must match the return type or the member or element it initialises; a mismatch is a compile error.
 - Changed: a compound-literal `return =` on a function that does not return a struct or union is a compile error instead of a runtime "(type mismatch)" failure.
+- Added: the type of a `return =` compound literal may carry `const` or `volatile`, before or after the type: `return = (const Pt){.x = 3, .y = 4}`.
+- Changed: a designator in a `return =` compound literal that names no member of its type is a compile error instead of an entry that is never compared.
 - Changed: a call that leaves out a parameter whose `@default` names an earlier parameter reads a literal argument, or a plain local argument in a call with no side effects, directly instead of through a temporary: `box(10)` is `box(10, 10 * 2)` in `-c=native` output.
 - Fixed: under `--testing=native`, a struct or union `return =` assertion is checked field by field as in the VM instead of always passing.
 - Fixed: a struct `return =` assertion reads bit-field members by value and `long double` members as floating point instead of comparing the raw storage.

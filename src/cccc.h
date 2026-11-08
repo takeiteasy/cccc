@@ -3051,6 +3051,7 @@ struct TestRetField {
         TestRetField *sub; // RET_STRUCT — nested struct/union/array child list
         Token        *expr; // RET_PENDING — EOF-terminated expression tokens
     } val;
+    Token        *name_tok; // the designator's name token; NULL = positional
     Token        *type_tok; // RET_STRUCT: `(TYPE){...}` type start, else NULL
     TestRetField *next;
 };

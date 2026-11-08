@@ -4729,13 +4729,23 @@ void cc_free_ret_fields(TestRetField *f) {
     }
 }
 
-// Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p. Returns the token
-// after the '{' (NULL when p is not a typed compound literal); *type_tok is
-// the `struct`/`union` keyword or the typedef name.
+static Token *skip_ret_qualifiers(Token *t) {
+    while (t && (equal(t, "const") || equal(t, "volatile")))
+        t = t->next;
+    return t;
+}
+
+// Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p, with optional
+// `const`/`volatile` before or after the type. Returns the token after the
+// '{' (NULL when p is not a typed compound literal); *type_tok is the
+// `struct`/`union` keyword or the typedef name.
 static Token *ret_literal_body(Token *p, Token **type_tok) {
     if (!equal(p, "(") || !p->next)
         return NULL;
-    Token *t = p->next;
+    Token *t = skip_ret_qualifiers(p->next);
+    if (!t)
+        return NULL;
+    Token *type = t;
     if (equal(t, "struct") || equal(t, "union")) {
         if (!t->next || t->next->kind != TK_IDENT)
             return NULL;
@@ -4743,10 +4753,10 @@ static Token *ret_literal_body(Token *p, Token **type_tok) {
     } else if (t->kind != TK_IDENT) {
         return NULL;
     }
-    Token *end = t->next;
+    Token *end = skip_ret_qualifiers(t->next);
     if (!end || !equal(end, ")") || !end->next || !equal(end->next, "{"))
         return NULL;
-    *type_tok = p->next;
+    *type_tok = type;
     return end->next->next;
 }
 
@@ -4781,14 +4791,16 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
     TestRetField *fields = NULL, **ftail = &fields;
 
     while (p->kind != TK_EOF && !equal(p, "}")) {
-        char *fname = NULL;
-        CmpOp fop   = CMP_NONE;
+        char  *fname     = NULL;
+        Token *fname_tok = NULL;
+        CmpOp  fop       = CMP_NONE;
         if (equal(p, ".")) {
             p = p->next;
             if (p->kind != TK_IDENT)
                 error_tok(vm, p, "expected a field name after '.' in return=");
-            fname = strndup(p->loc, p->len);
-            p     = p->next;
+            fname     = strndup(p->loc, p->len);
+            fname_tok = p;
+            p         = p->next;
             if (!equal(p, "=") && !equal(p, "!="))
                 error_tok(vm, p,
                           "expected '=' or '!=' after the field name '%s'",
@@ -4831,6 +4843,7 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
 
         TestRetField *f = calloc(1, sizeof(TestRetField));
         f->name         = fname;
+        f->name_tok     = fname_tok;
         f->kind         = fkind;
         f->op           = fop;
         if (fkind == RET_STR)

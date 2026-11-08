@@ -127,16 +127,52 @@ static Type *ret_member_type(Type *ty, const char *name) {
     return NULL;
 }
 
+// Names what a list initialises, for diagnostics: the literal's type prefix,
+// else the type's tag, else the member or array element holding the list.
+static void ret_list_subject(Type *ty, Token *type_tok, const char *member,
+                             char *buf, size_t cap) {
+    char name[160];
+    if (type_tok) {
+        ret_type_spelling(type_tok, name, sizeof(name));
+        snprintf(buf, cap, "'%s'", name);
+    } else if (type_agg(ty)->struct_tag) {
+        Token *tag = type_agg(ty)->struct_tag;
+        snprintf(buf, cap, "'%s %.*s'",
+                 ty->kind == TY_UNION ? "union" : "struct", tag->len, tag->loc);
+    } else if (member) {
+        snprintf(buf, cap, "member '%s'", member);
+    } else {
+        snprintf(buf, cap, "the array element");
+    }
+}
+
 // Resolves pending operands and checks each typed nested literal against the
-// member or element it initialises. `ty` is the type the list initialises
-// (NULL when unknown); a member it does not have is skipped.
-static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f, Type *ty) {
+// member or element it initialises, and each designator against the members of
+// the type. `ty` is the type the list initialises (NULL when unknown); `lit`
+// is the literal's type prefix (NULL for a bare list) and `member` the
+// designator of the member holding the list (NULL for an array element).
+static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f, Type *ty,
+                               Token *lit, const char *member) {
     for (; f; f = f->next) {
         Type *slot = NULL;
-        if (ty && ty->kind == TY_ARRAY)
+        if (ty && ty->kind == TY_ARRAY) {
+            if (f->name) {
+                char subject[200];
+                ret_list_subject(ty, lit, member, subject, sizeof(subject));
+                error_tok(vm, f->name_tok,
+                          "a member designator '%s' does not apply to %s",
+                          f->name, subject);
+            }
             slot = ty->base;
-        else if (ty && f->name)
+        } else if (ty && f->name) {
             slot = ret_member_type(ty, f->name);
+            if (!slot) {
+                char subject[200];
+                ret_list_subject(ty, lit, member, subject, sizeof(subject));
+                error_tok(vm, f->name_tok, "%s has no member named '%s'",
+                          subject, f->name);
+            }
+        }
 
         if (f->kind == RET_STRUCT) {
             Type *sub_ty = slot;
@@ -158,7 +194,7 @@ static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f, Type *ty) {
             if (sub_ty && sub_ty->kind != TY_STRUCT &&
                 sub_ty->kind != TY_UNION && sub_ty->kind != TY_ARRAY)
                 sub_ty = NULL;
-            resolve_ret_fields(vm, f->val.sub, sub_ty);
+            resolve_ret_fields(vm, f->val.sub, sub_ty, f->type_tok, f->name);
         } else if (f->kind == RET_PENDING) {
             RetKind kind;
             int64_t i = 0;
@@ -222,7 +258,8 @@ void resolve_test_returns(VirtualMachine *vm, const char *name,
             r->ret_expr = NULL;
         } else {
             check_ret_literal_type(vm, r, return_ty);
-            resolve_ret_fields(vm, r->ret_expect.ret_fields, return_ty);
+            resolve_ret_fields(vm, r->ret_expect.ret_fields, return_ty,
+                               r->ret_type_tok, NULL);
         }
         vm->compiler.scope = saved;
     }
