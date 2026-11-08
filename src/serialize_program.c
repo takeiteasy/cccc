@@ -4454,6 +4454,8 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                         (long long)r->ret_expect.ret_int);
                 break;
             case RET_FLOAT: {
+                // TODO: always an equality check; apply `op` like the VM does
+                // (#1973)
                 double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
                 fprintf(f,
                         "    double __ret = (double)%s();\n"
@@ -4512,6 +4514,13 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                         "    (void)%s();\n"
                         "    if (__st.failed) goto __cccc_wfail;\n",
                         fn->name);
+                break;
+            case RET_PENDING:
+                fputs("    __cccc_s_run = NULL;\n"
+                      "    if (__msg) snprintf(__msg, __cap, "
+                      "\"return= operand was not resolved\");\n"
+                      "    return 0;\n",
+                      f);
                 break;
             case RET_NONE:
             default:

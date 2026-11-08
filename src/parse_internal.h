@@ -457,6 +457,7 @@ Node *expr(VirtualMachine *vm, Token **rest, Token *tok);
 MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok);
 MacroFn *find_macro_fn(VirtualMachine *vm, Token *tok);
 TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name);
+void resolve_test_returns(VirtualMachine *vm, const char *name);
 Type *find_tag(VirtualMachine *vm, Token *tok);
 Type *find_tag_in_current_scope(VirtualMachine *vm, Token *tok);
 Type *find_typedef(VirtualMachine *vm, Token *tok);

@@ -44,10 +44,11 @@ int test_warn_back_to_base(void) {
     return 42;
 }
 
-// Unrecognized return= operand with -Wattributes per-test: assertion is
-// silently skipped (ret_kind = RET_NONE), test still passes (#350, #621).
+// An enum-name return= operand is asserted under a per-test recompile.
+enum { GREEN = 42 };
+
 [[cccc::test(return = GREEN, flags = "-Wattributes")]]
-int test_unrecognized_return_operand(void) {
+int test_enum_name_return_operand(void) {
     return 42;
 }
 

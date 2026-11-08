@@ -60,9 +60,8 @@ Four keys check what the test (and its setup hooks) print:
 Patterns are searched anywhere in the output, as with `re.search` and `MULTILINE`.
 
 ```c
-[[cccc::test(flags = "-Wattributes",
-             expect_stderr = "warning: unrecognized return= operand")]]
-int test_unrecognized_operand(void) { return 42; }
+[[cccc::test(expect_stderr = "warning: low disk")]]
+int test_warns(void) { fprintf(stderr, "warning: low disk\n"); return 42; }
 
 [[cccc::test(reject_stderr = "fatal")]]
 void test_no_fatal_output(void) { printf("hello\n"); }

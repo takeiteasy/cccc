@@ -936,7 +936,16 @@ static bool check_output_pattern(const char *pat, const char *buf, bool negate,
 }
 #endif
 
+static bool ret_fields_pending(const TestRetField *f) {
+    for (; f; f = f->next)
+        if (f->kind == RET_PENDING ||
+            (f->kind == RET_STRUCT && ret_fields_pending(f->val.sub)))
+            return true;
+    return false;
+}
+
 // --- RET_STRUCT comparison (#353, #489) ---------------------------------
+
 //
 // A return= compound-literal assertion is compared recursively against the
 // captured return buffer: cmp_ret_aggregate walks a struct/union/array
@@ -1951,6 +1960,11 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                         break;
                     }
                     case RET_STRUCT: {
+                        if (ret_fields_pending(r->ret_expect.ret_fields)) {
+                            snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                     "return= operand was not resolved");
+                            break;
+                        }
                         Type *st = (fn->ty && fn->ty->return_ty)
                                        ? fn->ty->return_ty
                                        : NULL;
@@ -1986,8 +2000,11 @@ int cc_run_tests(VirtualMachine *vm, Obj *prog, const CcTestOptions *opts) {
                                      got_str);
                         break;
                     }
+                    case RET_PENDING:
                     default:
-                        ret_ok = true;
+                        ret_ok = false;
+                        snprintf(run.fail_msg, sizeof(run.fail_msg),
+                                 "return= operand was not resolved");
                         break;
                 }
                 if (!ret_ok)

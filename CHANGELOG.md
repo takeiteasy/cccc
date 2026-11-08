@@ -7,6 +7,9 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: `[[cccc::test(return = ...)]]` takes any integer or floating constant expression, so enum names, `#define` names, casts, `sizeof` and arithmetic work, as struct field values do. An undeclared or non-constant operand is a compile error instead of a skipped assertion that always passed.
+- Fixed: `return = 0xBEEF` is no longer read as a float, `return = 'A'` asserts 65 instead of 0, and `return = -1.5` asserts a float instead of the integer -1.
+
 ## [0.32.0] - 2026-11-08
 
 - Added: a parameter's `@default` can name an earlier parameter (`int box(int w, int h @default(w * 2))`; `box(10)` is `box(10, 20)`). The call stores the arguments up to the last one a default names in temporaries, left to right, so each is evaluated once; a keyed or defaulted earlier argument counts as its resolved value, and a method receiver can be named. The temporaries are plain C under `-c=native`.

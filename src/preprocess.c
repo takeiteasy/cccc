@@ -4636,8 +4636,6 @@ typedef struct {
     CmpOp       error_count_op;
     RetKind     ret_kind;
     CmpOp       ret_op;
-    int64_t     ret_int_val;
-    double      ret_float_val;
     const char *ret_str_val;
     double      ret_epsilon_val;
     int         exit_code_val; // -1 = not set
@@ -4652,7 +4650,8 @@ typedef struct {
     // RET_STRUCT: compound-literal field list and raw source span text
     TestRetField
          *ret_fields; // heap-alloc'd; ownership transferred to TestFnRecord
-    char *ret_struct_text; // heap-alloc'd strndup of the literal source span
+    char  *ret_struct_text; // heap-alloc'd strndup of the literal source span
+    Token *ret_expr;        // RET_PENDING: expanded operand tokens
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] /
@@ -4664,61 +4663,51 @@ typedef struct {
     bool        inherit;
 } TestSetupArgs;
 
-// Classify one scalar token (or a leading "-" then NUM) from the token stream
-// into a RetKind and value.  Advances *p_ptr past the consumed tokens.
-// Returns true on success; leaves *p_ptr unchanged on failure.
-// For RET_STR the caller must strdup val->s (it points into token string data).
-static bool parse_scalar_operand(Token **p_ptr, RetKind *out_kind,
-                                 int64_t *out_i, double *out_f,
-                                 const char **out_s) {
-    Token *p = *p_ptr;
-    if (!p)
-        return false;
-    if (p->kind == TK_STR) {
-        *out_kind = RET_STR;
-        *out_s    = tok_lit(p)->str;
-        *p_ptr    = p->next;
-        return true;
+static void join_adjacent_string_literals(VirtualMachine *vm, Token *tok);
+
+// First token at bracket depth 0 that is "," or `closer` (or TK_EOF).
+static Token *scan_ret_operand(Token *p, const char *closer) {
+    int depth = 0;
+    for (; p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "(") || equal(p, "[") || equal(p, "{"))
+            depth++;
+        else if (depth == 0 && (equal(p, ",") || equal(p, closer)))
+            break;
+        else if (depth > 0 && (equal(p, ")") || equal(p, "]") || equal(p, "}")))
+            depth--;
     }
-    if (p->kind == TK_NUM || p->kind == TK_PP_NUM) {
-        bool is_float = false;
-        for (int _i = 0; _i < (int)p->len; _i++) {
-            char _c = p->loc[_i];
-            if (_c == '.' || _c == 'e' || _c == 'E') {
-                is_float = true;
-                break;
-            }
-        }
-        if (!is_float && p->len > 0 &&
-            (p->loc[p->len - 1] == 'f' || p->loc[p->len - 1] == 'F'))
-            is_float = true;
-        char _buf[64];
-        int  _n = p->len < 63 ? (int)p->len : 63;
-        memcpy(_buf, p->loc, _n);
-        _buf[_n] = '\0';
-        if (is_float) {
-            *out_kind = RET_FLOAT;
-            *out_f    = strtod(_buf, NULL);
-        } else {
-            *out_kind = RET_INT;
-            *out_i    = (int64_t)strtoll(_buf, NULL, 0);
-        }
-        *p_ptr = p->next;
-        return true;
-    }
-    // Negative number: "-" followed by NUM/PP_NUM
-    if (equal(p, "-") && p->next &&
-        (p->next->kind == TK_NUM || p->next->kind == TK_PP_NUM)) {
-        char _buf[64];
-        int  _n = p->next->len < 63 ? (int)p->next->len : 63;
-        memcpy(_buf, p->next->loc, _n);
-        _buf[_n]  = '\0';
-        *out_kind = RET_INT;
-        *out_i    = -(int64_t)strtoll(_buf, NULL, 0);
-        *p_ptr    = p->next->next;
-        return true;
-    }
-    return false;
+    return p;
+}
+
+// Copy of [first, end) as an EOF-terminated list.
+static Token *copy_token_range(VirtualMachine *vm, Token *first, Token *end) {
+    Token  head = {};
+    Token *cur  = &head;
+    for (Token *t = first; t != end; t = t->next)
+        cur = cur->next = copy_token(vm, t);
+    cur->next = new_eof(vm, end);
+    return head.next;
+}
+
+// Macro-expand [first, end) and run the post-preprocess passes the main stream
+// gets, so the parser can read the result as an expression.
+static Token *expand_ret_operand(VirtualMachine *vm, Token *first, Token *end) {
+    Token *list = preprocess2(vm, copy_token_range(vm, first, end));
+    convert_pp_tokens(vm, list);
+    join_adjacent_string_literals(vm, list);
+    for (Token *t = list; t; t = t->next)
+        t->line_no += t->line_delta;
+    return list;
+}
+
+// Source text of [first, end), or NULL when it does not lie in one buffer.
+static char *ret_operand_text(Token *first, Token *end) {
+    Token *last = first;
+    while (last->next != end && last->next->kind != TK_EOF)
+        last = last->next;
+    if (last->file != first->file || last->loc < first->loc)
+        return NULL;
+    return strndup(first->loc, (last->loc + last->len) - first->loc);
 }
 
 // Free a TestRetField linked list (heap-allocated by parse_test_args),
@@ -4830,9 +4819,8 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         bool          is_nested_bare = p && equal(p, "{");
 
         RetKind       fkind          = RET_NONE;
-        int64_t       ival           = 0;
-        double        fval           = 0.0;
         const char   *sval           = NULL;
+        Token        *fexpr          = NULL;
         TestRetField *sub            = NULL;
 
         if (is_nested_typed || is_nested_bare) {
@@ -4849,34 +4837,42 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
             }
             fkind = RET_STRUCT;
             sub   = children;
-        } else if (!parse_scalar_operand(&p, &fkind, &ival, &fval, &sval)) {
-            if (fname)
-                warn_tok(
-                    vm, p, CCCC_WARN_ATTRIBUTES,
-                    "unrecognized value for field '%s' in compound-literal "
-                    "return= assertion; skipping",
-                    fname);
-            else
-                warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                         "unrecognized value in compound-literal return= "
-                         "assertion; skipping");
-            free(fname);
-            parse_ok = false;
-            warned   = true;
-            break;
+        } else {
+            Token *vend = scan_ret_operand(p, "}");
+            if (vend == p) {
+                if (fname)
+                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                             "missing value for field '%s' in compound-literal "
+                             "return= assertion; skipping",
+                             fname);
+                else
+                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
+                             "missing value in compound-literal return= "
+                             "assertion; skipping");
+                free(fname);
+                parse_ok = false;
+                warned   = true;
+                break;
+            }
+            if (p->kind == TK_STR && p->next == vend) {
+                fkind = RET_STR;
+                sval  = tok_lit(p)->str;
+            } else {
+                fkind = RET_PENDING;
+                fexpr = copy_token_range(vm, p, vend);
+            }
+            p = vend;
         }
 
         TestRetField *f = calloc(1, sizeof(TestRetField));
         f->name         = fname;
         f->kind         = fkind;
-        if (fkind == RET_INT)
-            f->val.i = ival;
-        else if (fkind == RET_FLOAT)
-            f->val.f = fval;
-        else if (fkind == RET_STR)
+        if (fkind == RET_STR)
             f->val.s = sval ? strdup(sval) : NULL;
         else if (fkind == RET_STRUCT)
             f->val.sub = sub;
+        else if (fkind == RET_PENDING)
+            f->val.expr = fexpr;
         *ftail = f;
         ftail  = &f->next;
 
@@ -4979,8 +4975,9 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 p                   = p->next;
             }
         } else if (equal(p, "return")) {
-            p        = p->next;
-            CmpOp op = CMP_EQ;
+            Token *ret_tok = p;
+            p              = p->next;
+            CmpOp op       = CMP_EQ;
             if (p && (equal(p, "=") || equal(p, "==") || equal(p, "!=") ||
                       equal(p, "<") || equal(p, "<=") || equal(p, ">") ||
                       equal(p, ">="))) {
@@ -4996,68 +4993,58 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                     op = CMP_GT;
                 p = p->next;
             }
-            // Compound literal: (struct|union TAG){...}
-            if (p && equal(p, "(") && p->next &&
-                (equal(p->next, "struct") || equal(p->next, "union")) &&
-                p->next->next && p->next->next->kind == TK_IDENT &&
-                p->next->next->next && equal(p->next->next->next, ")") &&
-                p->next->next->next->next &&
-                equal(p->next->next->next->next, "{")) {
+            Token *opnd_end = scan_ret_operand(p, ")");
+            if (opnd_end == p)
+                error_tok(vm, ret_tok, "return= needs a value");
+            char  *opnd_text = ret_operand_text(p, opnd_end);
+            Token *x         = expand_ret_operand(vm, p, opnd_end);
+            p                = opnd_end;
 
+            // Compound literal: (struct|union TAG){...}
+            if (equal(x, "(") && x->next &&
+                (equal(x->next, "struct") || equal(x->next, "union")) &&
+                x->next->next && x->next->next->kind == TK_IDENT &&
+                x->next->next->next && equal(x->next->next->next, ")") &&
+                x->next->next->next->next &&
+                equal(x->next->next->next->next, "{")) {
                 if (op != CMP_EQ && op != CMP_NE) {
                     warn_tok(
-                        vm, p, CCCC_WARN_ATTRIBUTES,
+                        vm, x, CCCC_WARN_ATTRIBUTES,
                         "struct return= assertion only supports '=' or '!='; "
                         "ordered comparisons are not meaningful for structs; "
                         "assertion skipped");
-                    // Skip to closing brace (depth-aware: the literal may
-                    // itself contain nested compound literals).
-                    p = p->next->next->next->next
-                            ->next; // past ( struct|union TAG ) {
-                    skip_balanced_braces(&p);
+                    free(opnd_text);
                 } else {
-                    const char *span_start = p->loc; // points to '('
-                    // Advance past: ( struct|union TAG ) {
-                    p                         = p->next->next->next->next->next;
-
+                    Token        *q           = x->next->next->next->next->next;
                     TestRetField *fields      = NULL;
                     Token        *close_brace = NULL;
-                    if (parse_ret_init_list(vm, &p, &fields, &close_brace, 1)) {
-                        size_t span_len =
-                            (close_brace->loc + close_brace->len) - span_start;
-                        out->ret_struct_text = strndup(span_start, span_len);
+                    if (parse_ret_init_list(vm, &q, &fields, &close_brace, 1)) {
+                        if (q->kind != TK_EOF)
+                            error_tok(vm, q,
+                                      "unexpected tokens after the "
+                                      "compound literal in return=");
+                        out->ret_struct_text = opnd_text;
                         out->ret_fields      = fields;
                         out->ret_kind        = RET_STRUCT;
                         out->ret_op          = op;
+                    } else {
+                        free(opnd_text);
                     }
-                    // On failure, parse_ret_init_list already warned, freed
-                    // the partial list, and left p past the matching '}'.
+                    // On failure, parse_ret_init_list already warned and
+                    // freed the partial list.
                 }
+            } else if (x->kind == TK_STR && x->next->kind == TK_EOF) {
+                out->ret_kind    = RET_STR;
+                out->ret_op      = op;
+                out->ret_str_val = tok_lit(x)->str;
+                free(opnd_text);
             } else {
-                // Scalar operands: use helper (handles STR / NUM / PP_NUM /
-                // negative int)
-                int64_t     ival = 0;
-                double      fval = 0.0;
-                const char *sval = NULL;
-                RetKind     sk   = RET_NONE;
-                if (parse_scalar_operand(&p, &sk, &ival, &fval, &sval)) {
-                    out->ret_kind = sk;
-                    out->ret_op   = op;
-                    if (sk == RET_INT)
-                        out->ret_int_val = ival;
-                    else if (sk == RET_FLOAT)
-                        out->ret_float_val = fval;
-                    else if (sk == RET_STR)
-                        out->ret_str_val = sval;
-                } else if (p && p->kind != TK_EOF && !equal(p, ")") &&
-                           !equal(p, ",")) {
-                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                             "unrecognized return= operand '%.*s';"
-                             " assertion skipped (enum names not"
-                             " supported, use the integer value)",
-                             (int)p->len, p->loc);
-                    p = p->next;
-                }
+                // Names, casts, sizeof and arithmetic fold at parse time
+                // (resolve_test_returns).
+                out->ret_kind = RET_PENDING;
+                out->ret_op   = op;
+                out->ret_expr = x;
+                free(opnd_text);
             }
         } else if (equal(p, "exit_code") && p->next && equal(p->next, "=") &&
                    p->next->next &&
@@ -5551,10 +5538,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                 rec->ret_kind = ta.ret_kind;
                 rec->ret_op   = (ta.ret_kind != RET_NONE) ? ta.ret_op : CMP_EQ;
                 rec->ret_epsilon = ta.ret_epsilon_val;
-                if (ta.ret_kind == RET_INT)
-                    rec->ret_expect.ret_int = ta.ret_int_val;
-                else if (ta.ret_kind == RET_FLOAT)
-                    rec->ret_expect.ret_float = ta.ret_float_val;
+                if (ta.ret_kind == RET_PENDING)
+                    rec->ret_expr = ta.ret_expr;
                 else if (ta.ret_kind == RET_STR)
                     rec->ret_expect.ret_str =
                         ta.ret_str_val ? strdup(ta.ret_str_val) : NULL;
@@ -5606,6 +5591,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                              "exit_code= and return= are mutually exclusive; "
                              "return= ignored");
                     rec->ret_kind = RET_NONE;
+                    rec->ret_expr = NULL;
                 }
                 break;
             }

@@ -4,33 +4,37 @@
 
 Use `return = value` to assert that a test function returns a specific value. The comparison type is inferred from the literal:
 
-**Integer** (and `char`/`enum`): the function's return value is compared as a 64-bit integer. `char` and `enum` values must be written as their numeric equivalent — enum *names* (`return = GREEN`) are not resolved and will silently skip the assertion.
+**Integer** (and `char`/`enum`): the function's return value is compared as a 64-bit integer. The operand is any integer constant expression: a literal, an enum name, a `#define` name, a character literal, or a cast, `sizeof` or arithmetic over those.
 
 ```c
-[[cccc::test(return = 42)]]
+enum Color { RED, GREEN };
+#define ANSWER 42
+
+[[cccc::test(return = ANSWER)]]
 int test_the_answer(void) {
     return 6 * 7;
+}
+
+[[cccc::test(return = GREEN)]]
+int test_enum(void) {
+    return GREEN;
+}
+
+[[cccc::test(return = 'A')]]
+int test_char_a(void) {
+    return 65;
 }
 
 [[cccc::test(return = -1)]]
 int test_neg(void) {
     return -1;
 }
-
-[[cccc::test(return = 65)]]
-int test_char_a(void) {
-    return (int)'A';  // 'A' == 65; use the integer value, not the char literal
-}
-
-// enum: write the integer value, not the enum name
-// [[cccc::test(return = 1)]]  ← correct
-// [[cccc::test(return = GREEN)]]  ← warns and skips assertion (enum names not supported)
 ```
 
-Passing an unrecognized operand (such as an enum name) emits a `-Wattributes` warning and skips the assertion rather than silently passing:
+Names resolve against what is declared above the test function. An undeclared name or an operand that is not a constant (such as a function call) is a compile error:
 
 ```
-warning: unrecognized return= operand 'GREEN'; assertion skipped (enum names not supported, use the integer value)
+error: undefined variable 'LIME'
 ```
 
 **Float/double**: the return value is compared within an absolute tolerance of `1e-9` for `=`/`!=`. For ordered comparisons (`<`, `>`, etc.) no tolerance is applied.
@@ -147,11 +151,12 @@ union Val make_val(void) {
 }
 ```
 
+Field values are constant expressions too, so `(struct Pair){.a = GREEN, .b = 6 * 7}` works.
+
 **Scope limitations** — the following are not supported and are deferred to follow-up tickets:
 
 - *Bitfields* — a bitfield member is compared as its whole storage unit, not its individual bit-width.
 - *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
-- *Pre-declared constants* — field values must be compile-time literals; named constants (enum names, `#define` values) are not resolved in this context (see [the earlier work](https://todo.sr.ht/~takeiteasy/cccc/349)).
 
 **Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
 

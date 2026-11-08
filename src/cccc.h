@@ -3032,6 +3032,7 @@ typedef enum {
     RET_FLOAT,    // float / double (via vm->fregs[FREG_A0])
     RET_STR,      // char* compared with strcmp (pointer via vm->regs[REG_A0])
     RET_STRUCT,   // struct/union: compound literal; field-by-field comparison
+    RET_PENDING,  // constant expression awaiting resolution at parse time
 } RetKind;
 
 // One expected field value for a RET_STRUCT return assertion.
@@ -3041,12 +3042,13 @@ typedef enum {
 typedef struct TestRetField TestRetField;
 struct TestRetField {
     char   *name;        // designated field name (e.g. "x"); NULL = positional
-    RetKind kind;        // RET_INT / RET_FLOAT / RET_STR / RET_STRUCT per field
+    RetKind kind; // RET_INT / RET_FLOAT / RET_STR / RET_STRUCT / RET_PENDING
     union {
         int64_t       i; // RET_INT
         double        f; // RET_FLOAT
         char         *s; // RET_STR — heap-allocated strdup
         TestRetField *sub; // RET_STRUCT — nested struct/union/array child list
+        Token        *expr; // RET_PENDING — EOF-terminated expression tokens
     } val;
     TestRetField *next;
 };
@@ -3099,6 +3101,7 @@ struct TestFnRecord {
     } ret_expect;
     char
         *ret_struct_text; // raw source span of compound literal (for error msg)
+    Token *ret_expr;      // RET_PENDING: EOF-terminated expression tokens
     double ret_epsilon;   // 0.0 = use default 1e-9; set by return_epsilon=
     int expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit
                           // code

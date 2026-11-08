@@ -1199,6 +1199,7 @@ Token *function(VirtualMachine *vm, Token *tok, Type *basety, VarAttr *attr) {
     // treated the same as recoverable errors (#615): the function body is
     // entered, any error terminates it, and the error is counted and matched
     // normally.
+    resolve_test_returns(vm, fn->name);
     TestFnRecord *neg_rec = find_neg_test_record(vm, fn->name);
     if (neg_rec) {
         bool          old_collect = vm->collect_errors;

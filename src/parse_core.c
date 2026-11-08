@@ -40,6 +40,83 @@ TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name) {
     return NULL;
 }
 
+// Folds one return= operand to an integer or floating constant.
+static void resolve_ret_operand(VirtualMachine *vm, Token *expr, RetKind *kind,
+                                int64_t *out_i, double *out_f) {
+    Token *tok    = expr;
+    int    errors = vm->error_count;
+    Node  *node   = cc_expand_const_macro_calls(vm, conditional(vm, &tok, tok));
+    if (vm->error_count != errors) { // already reported; avoid a second error
+        *kind  = RET_INT;
+        *out_i = 0;
+        return;
+    }
+    if (tok->kind != TK_EOF)
+        error_tok(vm, tok, "return= takes a single value");
+    add_type(vm, node);
+    if (!(is_integer(node->ty) || is_flonum(node->ty)) ||
+        !is_const_expr(vm, node))
+        error_tok(vm, expr,
+                  "return= operand is not an integer or floating constant "
+                  "expression");
+    if (is_flonum(node->ty)) {
+        *kind  = RET_FLOAT;
+        *out_f = eval_double(vm, node);
+    } else {
+        *kind  = RET_INT;
+        *out_i = eval(vm, node);
+    }
+}
+
+static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f) {
+    for (; f; f = f->next) {
+        if (f->kind == RET_STRUCT) {
+            resolve_ret_fields(vm, f->val.sub);
+        } else if (f->kind == RET_PENDING) {
+            RetKind kind;
+            int64_t i = 0;
+            double  d = 0.0;
+            resolve_ret_operand(vm, f->val.expr, &kind, &i, &d);
+            f->kind = kind;
+            if (kind == RET_FLOAT)
+                f->val.f = d;
+            else
+                f->val.i = i;
+        }
+    }
+}
+
+// Resolves the return= operands of the tests named `name` against the file
+// scope as it stands. Must run outside any negative-test error collection.
+void resolve_test_returns(VirtualMachine *vm, const char *name) {
+    Scope *saved = vm->compiler.scope;
+    for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
+        if (r->ret_kind != RET_PENDING && r->ret_kind != RET_STRUCT)
+            continue;
+        if (strcmp(r->name, name) != 0)
+            continue;
+        Scope *file = saved;
+        while (file->next)
+            file = file->next;
+        vm->compiler.scope = file;
+        if (r->ret_kind == RET_PENDING) {
+            RetKind kind;
+            int64_t i = 0;
+            double  d = 0.0;
+            resolve_ret_operand(vm, r->ret_expr, &kind, &i, &d);
+            r->ret_kind = kind;
+            if (kind == RET_FLOAT)
+                r->ret_expect.ret_float = d;
+            else
+                r->ret_expect.ret_int = i;
+            r->ret_expr = NULL;
+        } else {
+            resolve_ret_fields(vm, r->ret_expect.ret_fields);
+        }
+        vm->compiler.scope = saved;
+    }
+}
+
 int align_down(int n, int align) {
     return align_to(n - align + 1, align);
 }
@@ -583,8 +660,10 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
     // emit_scan=true: register records but do NOT re-extract as a comptime
     // function.
     Token *tok_ptr = toks;
-    if (try_extract_attr_macro(vm, &tok_ptr, /*emit_scan=*/true))
+    if (try_extract_attr_macro(vm, &tok_ptr, /*emit_scan=*/true)) {
+        resolve_test_returns(vm, fn->name);
         return;
+    }
 
     // Try standard C23 / GNU attributes.  Both parsers fill a VarAttr and
     // advance past the attribute syntax; custom @attrs land in
