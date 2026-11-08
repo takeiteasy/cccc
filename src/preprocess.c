@@ -4766,7 +4766,8 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
             fname = strndup(p->loc, p->len);
             p     = p->next;
             if (!equal(p, "=") && !equal(p, "!="))
-                error_tok(vm, p, "expected '=' or '!=' after the field name '%s'",
+                error_tok(vm, p,
+                          "expected '=' or '!=' after the field name '%s'",
                           fname);
             fop = equal(p, "!=") ? CMP_NE : CMP_EQ;
             p   = p->next;

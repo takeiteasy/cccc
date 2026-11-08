@@ -54,8 +54,8 @@ static void resolve_ret_operand(VirtualMachine *vm, Token *expr, RetKind *kind,
     if (tok->kind != TK_EOF)
         error_tok(vm, tok, "return= takes a single value");
     add_type(vm, node);
-    bool is_ptr = node->ty && (node->ty->kind == TY_PTR ||
-                               node->ty->kind == TY_NULLPTR_T);
+    bool is_ptr = node->ty &&
+                  (node->ty->kind == TY_PTR || node->ty->kind == TY_NULLPTR_T);
     if (!(is_integer(node->ty) || is_flonum(node->ty) || is_ptr) ||
         !is_const_expr(vm, node))
         error_tok(vm, expr,
