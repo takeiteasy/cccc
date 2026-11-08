@@ -7,8 +7,6 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
-- Fixed: on Linux, a struct `return =` assertion on a `long double` member reads the value the test stored instead of always seeing 0.
-
 ## [0.32.1] - 2026-11-08
 
 - Added: a struct or union `return =` assertion accepts a typedef name as the compound literal type: `return = (Pt){.x = 3, .y = 4}`.
@@ -25,6 +23,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Fixed: under `--testing=native`, a float `return =` assertion applies its operator (`!=`, `<`, `<=`, `>`, `>=`) as the VM does instead of always testing equality.
 - Changed: `[[cccc::test(return = ...)]]` takes any integer or floating constant expression, so enum names, `#define` names, casts, `sizeof` and arithmetic work, as struct field values do. An undeclared or non-constant operand is a compile error instead of a skipped assertion that always passed.
 - Fixed: `return = 0xBEEF` is no longer read as a float, `return = 'A'` asserts 65 instead of 0, and `return = -1.5` asserts a float instead of the integer -1.
+- Fixed: on Linux, a struct `return =` assertion on a `long double` member reads the value the test stored instead of always seeing 0.
 
 ## [0.32.0] - 2026-11-08
 
