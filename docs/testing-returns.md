@@ -90,6 +90,8 @@ struct Named test_result(void) {
 
 Struct assertions support `=` and `!=` operators only; ordered comparisons (`<`, `<=`, `>`, `>=`) are not meaningful for structs and are a compile error.
 
+Bit-field and `long double` members compare by value, and `--testing=native` checks struct and union assertions the same way as the VM, with the same failure message.
+
 If the assertion fails:
 
 ```

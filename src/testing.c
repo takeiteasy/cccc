@@ -936,7 +936,7 @@ static bool check_output_pattern(const char *pat, const char *buf, bool negate,
 }
 #endif
 
-static bool ret_fields_pending(const TestRetField *f) {
+bool ret_fields_pending(const TestRetField *f) {
     for (; f; f = f->next)
         if (f->kind == RET_PENDING ||
             (f->kind == RET_STRUCT && ret_fields_pending(f->val.sub)))
@@ -974,8 +974,24 @@ static bool cmp_ret_aggregate(const char *buf, int base_off, Type *ty,
 // `mty` living at `addr` against expected field `ef` (NULL => expect
 // zero/default). Writes the rendered actual value (no field name prefix)
 // into field_val/field_val_cap. Returns whether it matched.
-static bool cmp_ret_scalar(const char *addr, Type *mty, const TestRetField *ef,
-                           double eps, char *field_val, size_t field_val_cap) {
+static bool cmp_ret_scalar(const char *addr, Type *mty, const Member *bf,
+                           const TestRetField *ef, double eps, char *field_val,
+                           size_t field_val_cap) {
+    if (mty->kind == TY_LDOUBLE) {
+        double actual = 0.0;
+        if (mty->size == (int)sizeof(long double)) {
+            long double lv = 0.0L;
+            memcpy(&lv, addr, sizeof(lv));
+            actual = (double)lv;
+        } else {
+            memcpy(&actual, addr, sizeof(actual));
+        }
+        double expect = 0.0;
+        if (ef)
+            expect = (ef->kind == RET_INT) ? (double)ef->val.i : ef->val.f;
+        snprintf(field_val, field_val_cap, "%g", actual);
+        return (actual - expect < eps && expect - actual < eps);
+    }
     if (mty->kind == TY_FLOAT) {
         float fv = 0.0f;
         memcpy(&fv, addr, sizeof(fv));
@@ -1013,7 +1029,17 @@ static bool cmp_ret_scalar(const char *addr, Type *mty, const TestRetField *ef,
     int     sz     = mty->size < 8 ? mty->size : 8;
     if (sz <= 0)
         sz = 1;
-    if (mty->is_unsigned) {
+    if (bf && bf->is_bitfield && bf->bit_width > 0 && bf->bit_width <= 64) {
+        uint64_t uv = 0;
+        memcpy(&uv, addr, sz);
+        uv >>= bf->bit_offset;
+        if (bf->bit_width < 64) {
+            uv &= (UINT64_C(1) << bf->bit_width) - 1;
+            if (!mty->is_unsigned && (uv >> (bf->bit_width - 1)) & 1)
+                uv |= ~UINT64_C(0) << bf->bit_width;
+        }
+        actual = (int64_t)uv;
+    } else if (mty->is_unsigned) {
         uint64_t uv = 0;
         memcpy(&uv, addr, sz);
         actual = (int64_t)uv;
@@ -1039,8 +1065,8 @@ static bool cmp_ret_scalar(const char *addr, Type *mty, const TestRetField *ef,
 // cmp_ret_aggregate, everything else is a scalar leaf via cmp_ret_scalar.
 // Appends the rendered actual value to got/got_cap either way.
 static bool cmp_ret_value(const char *buf, int base_off, Type *ty,
-                          const TestRetField *ef, double eps, char *got,
-                          size_t got_cap) {
+                          const Member *bf, const TestRetField *ef, double eps,
+                          char *got, size_t got_cap) {
     if (ty->kind == TY_ARRAY && ef && ef->kind == RET_STR) {
         // char[] compared against a string literal (C zero-initialization
         // semantics: bytes past the literal's NUL are expected to be zero).
@@ -1076,7 +1102,7 @@ static bool cmp_ret_value(const char *buf, int base_off, Type *ty,
         return false;
     }
     char field_val[64];
-    bool ok = cmp_ret_scalar(buf + base_off, ty, ef, eps, field_val,
+    bool ok = cmp_ret_scalar(buf + base_off, ty, bf, ef, eps, field_val,
                              sizeof(field_val));
     sb_appendf(got, got_cap, "%s", field_val);
     return (ef && ef->op == CMP_NE) ? !ok : ok;
@@ -1122,7 +1148,7 @@ static bool cmp_ret_struct_body(const char *buf, int base_off, Type *ty,
         if (!*first)
             sb_appendf(got, got_cap, ", ");
         sb_appendf(got, got_cap, ".%.*s = ", (int)m->name->len, m->name->loc);
-        if (!cmp_ret_value(buf, base_off + m->offset, m->ty, ef, eps, got,
+        if (!cmp_ret_value(buf, base_off + m->offset, m->ty, m, ef, eps, got,
                            got_cap))
             all_eq = false;
         *first = false;
@@ -1151,8 +1177,8 @@ static bool cmp_ret_aggregate(const char *buf, int base_off, Type *ty,
             if (cur)
                 cur = cur->next;
             if (elem_ty) {
-                if (!cmp_ret_value(buf, base_off + i * elem_size, elem_ty, ef,
-                                   eps, got, got_cap))
+                if (!cmp_ret_value(buf, base_off + i * elem_size, elem_ty, NULL,
+                                   ef, eps, got, got_cap))
                     all_eq = false;
             }
         }

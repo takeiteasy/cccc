@@ -3059,6 +3059,10 @@ struct TestRetField {
 // path (src/preprocess.c) and TestFnRecord teardown (src/vm.c).
 void cc_free_ret_fields(TestRetField *f);
 
+// True when any field of the list (or a nested child list) is still
+// RET_PENDING.
+bool ret_fields_pending(const TestRetField *f);
+
 // Output bundle for cc_parse_test_flags(). Holds the full delta to apply when
 // lazily recompiling for a per-test flags= attribute.
 typedef struct {

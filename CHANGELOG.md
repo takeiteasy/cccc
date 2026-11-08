@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: under `--testing=native`, a struct or union `return =` assertion is checked field by field as in the VM instead of always passing.
+- Fixed: a struct `return =` assertion reads bit-field members by value and `long double` members as floating point instead of comparing the raw storage.
 - Added: `return =` asserts pointers: `NULL`, `nullptr` or `0` for a null pointer field or return value, and `.field != value` (any scalar field in a compound literal) or `return != NULL` for non-null. A non-null pointer constant is a compile error.
 - Changed: a struct `return =` with an ordered comparison, a malformed or too deeply nested compound literal, and `exit_code =` together with `return =` are compile errors instead of `-Wattributes` warnings that skipped the assertion.
 - Fixed: under `--testing=native`, a float `return =` assertion applies its operator (`!=`, `<`, `<=`, `>`, `>=`) as the VM does instead of always testing equality.

@@ -1,4 +1,3 @@
-// CCCC_NATIVE_SKIP: struct return= assertions are not checked under --testing=native
 // CCCC_FLAGS: --testing
 // CCCC_EXPECT_STDOUT: not ok 1 - test_null_field_but_pointer
 // CCCC_EXPECT_STDOUT: not ok 2 - test_non_null_field_but_null

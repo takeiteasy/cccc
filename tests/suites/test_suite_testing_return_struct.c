@@ -1,0 +1,138 @@
+// CCCC_FLAGS: --testing
+// Suite: struct and union return= assertions compare field by field, in the VM
+// and under --testing=native.
+
+#include <stddef.h>
+
+#pragma cccc suite begin "return_struct"
+
+struct In {
+    int  p;
+    char c;
+};
+
+struct N {
+    int           a;
+    struct In     in;
+    int           arr[4];
+    char          name[6];
+    const char   *s;
+    struct N     *next;
+    float         f;
+    double        d;
+    unsigned char u;
+};
+
+union U {
+    int   i;
+    float f;
+};
+
+struct W {
+    union U u;
+    struct {
+        int ax;
+        int ay;
+    };
+    long      big[64];
+    char      buf[4096];
+    struct In ins[2];
+};
+
+struct Bits {
+    int      a : 3;
+    unsigned b : 5;
+    int      c;
+};
+
+struct Wide {
+    long double x;
+    int         y;
+};
+
+static struct N                                        other;
+
+[[cccc::test(return = (struct N){.a    = 1,
+                                 .in   = {.p = 2, .c = 'x'},
+                                 .arr  = {1, 2, 3, 4},
+                                 .name = "hey",
+                                 .s    = "str",
+                                 .next = NULL,
+                                 .f    = 1.5,
+                                 .d    = 2.5,
+                                 .u = 200})]] struct N test_every_field(void) {
+    return (struct N){1,    {2, 'x'}, {1, 2, 3, 4}, "hey", "str",
+                      NULL, 1.5f,     2.5,          200};
+}
+
+[[cccc::test(return = (struct N){.a = 1})]] struct N
+    test_unlisted_fields_are_zero(void) {
+    struct N n = {1};
+    return n;
+}
+
+[[cccc::test(return = (struct N){.arr = {1, 2}})]] struct N
+    test_array_tail_is_zero(void) {
+    struct N n = {0};
+    n.arr[0]   = 1;
+    n.arr[1]   = 2;
+    return n;
+}
+
+[[cccc::test(return = (struct N){.next != NULL})]] struct N
+    test_pointer_field_non_null(void) {
+    struct N n = {0};
+    n.next     = &other;
+    return n;
+}
+
+[[cccc::test(return = (struct N){.s != NULL})]] struct N
+    test_string_field_non_null(void) {
+    struct N n = {0};
+    n.s        = "x";
+    return n;
+}
+
+[[cccc::test(return != (struct N){.a = 9})]] struct N
+    test_whole_value_differs(void) {
+    struct N n = {1};
+    return n;
+}
+
+[[cccc::test(return = (struct N){.a != 9})]] struct N test_field_differs(void) {
+    struct N n = {1};
+    return n;
+}
+
+[[cccc::test(return = (union U){.i = 5})]] union U test_union_arm(void) {
+    union U u;
+    u.i = 5;
+    return u;
+}
+
+[[cccc::test(return = (struct W){.u   = {.i = 7},
+                                 .ax  = 3,
+                                 .ay  = 4,
+                                 .ins = {{.p = 1, .c = 'a'},
+                                         {.p = 2, .c = 'b'}}})]] struct W
+    test_union_anonymous_and_nested_arrays(void) {
+    struct W w = {0};
+    w.u.i      = 7;
+    w.ax       = 3;
+    w.ay       = 4;
+    w.ins[0]   = (struct In){1, 'a'};
+    w.ins[1]   = (struct In){2, 'b'};
+    return w;
+}
+
+[[cccc::test(return = (struct Bits){.a = -2, .b = 9, .c = 7})]] struct Bits
+    test_bit_fields(void) {
+    return (struct Bits){-2, 9, 7};
+}
+
+[[cccc::test(return = (struct Wide){.x = 1.5, .y = 3})]] struct Wide
+    test_long_double_field(void) {
+    return (struct Wide){1.5L, 3};
+}
+
+#pragma cccc suite end

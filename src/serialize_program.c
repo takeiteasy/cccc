@@ -4323,6 +4323,245 @@ static const char *const CCCC_TEST_ASSERT_RUNTIME_SRC =
 // negative tests) that keep this function's own scope narrow -- by the
 // time this runs, vm->compiler.test_setups is guaranteed NULL and no
 // vm->compiler.test_fns record has error_pat/expect_compile_error set.
+// --testing=native struct/union return= check. The emitted C compares the
+// value the way testing.c's cmp_ret_aggregate does: a mismatch clears __eq and
+// the actual value is rendered into __got for the failure message. Keep the
+// two in step.
+
+// A zero-expected array tail shorter than this is unrolled instead of looped.
+#define RET_UNROLL_TAIL 3
+
+static char *ret_path(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    char *s = malloc((size_t)n + 1);
+    va_start(ap, fmt);
+    vsnprintf(s, (size_t)n + 1, fmt, ap);
+    va_end(ap);
+    return s;
+}
+
+static void emit_got_text(FILE *f, const char *text) {
+    fputs("__cccc_sbf(__got, \"%s\", ", f);
+    serialize_string_n(f, text, (int)strlen(text));
+    fputs(");\n", f);
+}
+
+static void emit_ret_mismatch(FILE *f, const char *text) {
+    emit_got_text(f, text);
+    fputs("__eq = 0;\n", f);
+}
+
+static void emit_ret_check(FILE *f, bool negate, const char *cond) {
+    fprintf(f, "if (!(%s(%s))) __eq = 0;\n", negate ? "!" : "", cond);
+}
+
+static double ret_field_num(const TestRetField *ef) {
+    if (!ef)
+        return 0.0;
+    return ef->kind == RET_INT     ? (double)ef->val.i
+           : ef->kind == RET_FLOAT ? ef->val.f
+                                   : 0.0;
+}
+
+static void emit_ret_scalar(FILE *f, const char *path, Type *ty,
+                            const TestRetField *ef, double eps) {
+    bool negate = ef && ef->op == CMP_NE;
+    switch (ty->kind) {
+        case TY_FLOAT:
+        case TY_DOUBLE:
+        case TY_LDOUBLE: {
+            double e = ret_field_num(ef);
+            char   cond[160];
+            snprintf(cond, sizeof(cond),
+                     "__a - (%.17g) < %.17g && (%.17g) - __a < %.17g", e, eps,
+                     e, eps);
+            fprintf(f, "{ double __a = (double)(%s);\n", path);
+            fputs("__cccc_sbf(__got, \"%g\", __a);\n", f);
+            emit_ret_check(f, negate, cond);
+            fputs("}\n", f);
+            return;
+        }
+        case TY_PTR:
+            if (ef && ef->kind == RET_STR) {
+                fprintf(f, "{ const char *__a = (const char *)(%s);\n", path);
+                fputs("const char *__e = ", f);
+                if (ef->val.s)
+                    serialize_string_n(f, ef->val.s, (int)strlen(ef->val.s));
+                else
+                    fputs("NULL", f);
+                fputs(";\n", f);
+                fputs("__cccc_sbf(__got, \"\\\"%s\\\"\", __a ? __a : "
+                      "\"(null)\");\n",
+                      f);
+                emit_ret_check(f, negate,
+                               "((__a && __e) ? strcmp(__a, __e) : (__a ? 1 : "
+                               "(__e ? -1 : 0))) == 0");
+                fputs("}\n", f);
+                return;
+            }
+            break;
+        case TY_BOOL:
+        case TY_CHAR:
+        case TY_SHORT:
+        case TY_INT:
+        case TY_LONG:
+        case TY_ENUM:
+        case TY_BITINT:
+            break;
+        default:
+            emit_ret_mismatch(f, "(unsupported type)");
+            return;
+    }
+    fprintf(f, "{ long long __a = (long long)(%s);\n", path);
+    fputs("__cccc_sbf(__got, \"%lld\", __a);\n", f);
+    if (ef && ef->kind == RET_STR) {
+        fputs("__eq = 0; }\n", f);
+        return;
+    }
+    long long e = !ef                     ? 0
+                  : ef->kind == RET_FLOAT ? (long long)ef->val.f
+                                          : (long long)ef->val.i;
+    char      cond[80];
+    snprintf(cond, sizeof(cond), "__a == (long long)0x%llxULL",
+             (unsigned long long)e);
+    emit_ret_check(f, negate, cond);
+    fputs("}\n", f);
+}
+
+static void emit_ret_aggregate(FILE *f, const char *path, Type *ty,
+                               const TestRetField *expected, double eps,
+                               int depth);
+
+static void emit_ret_value(FILE *f, const char *path, Type *ty,
+                           const TestRetField *ef, double eps, int depth) {
+    if (ty->kind == TY_ARRAY && ef && ef->kind == RET_STR) {
+        const char *s      = ef->val.s ? ef->val.s : "";
+        int         elen   = (int)strlen(s);
+        bool        negate = ef->op == CMP_NE;
+        fprintf(f, "{ const char *__a = (const char *)(%s);\n", path);
+        fputs("const char __e[] = ", f);
+        serialize_string_n(f, s, elen);
+        fputs(";\nint __ok = 1; int __j;\n", f);
+        fprintf(f,
+                "for (__j = 0; __j < %d; __j++) { char __x = __j < %d ? "
+                "__e[__j] : 0; if (__a[__j] != __x) { __ok = 0; break; } }\n",
+                ty->array_len, elen);
+        fprintf(f, "__cccc_sbf(__got, \"\\\"%%.*s\\\"\", %d, __a);\n",
+                ty->array_len);
+        emit_ret_check(f, negate, "__ok");
+        fputs("}\n", f);
+        return;
+    }
+    if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ARRAY) {
+        if (ef && ef->kind != RET_STRUCT) {
+            emit_ret_mismatch(f, "(type mismatch)");
+            return;
+        }
+        emit_ret_aggregate(f, path, ty, ef ? ef->val.sub : NULL, eps, depth);
+        return;
+    }
+    if (ef && ef->kind == RET_STRUCT) {
+        emit_ret_mismatch(f, "(type mismatch)");
+        return;
+    }
+    if (ty->kind == TY_PTR && ef && ef->kind == RET_INT && ef->val.i != 0) {
+        emit_ret_mismatch(f, "(only NULL can be asserted for a pointer)");
+        return;
+    }
+    emit_ret_scalar(f, path, ty, ef, eps);
+}
+
+static void emit_ret_struct_body(FILE *f, const char *path, Type *ty,
+                                 const TestRetField *expected, double eps,
+                                 int depth, bool *first) {
+    bool is_union = ty->kind == TY_UNION;
+    for (Member *m = type_agg(ty)->members; m; m = m->next) {
+        if (!m->name) {
+            // Anonymous members are reached by their fields' own names.
+            if (m->ty->kind == TY_STRUCT || m->ty->kind == TY_UNION)
+                emit_ret_struct_body(f, path, m->ty, expected, eps, depth,
+                                     first);
+            continue;
+        }
+        const TestRetField *ef = NULL;
+        for (const TestRetField *e = expected; e; e = e->next) {
+            if (e->name && m->name->len == (int)strlen(e->name) &&
+                strncmp(m->name->loc, e->name, m->name->len) == 0) {
+                ef = e;
+                break;
+            }
+        }
+        // A union arm the literal does not name shares storage with one it
+        // does.
+        if (is_union && !ef)
+            continue;
+        char *label = ret_path(".%.*s = ", (int)m->name->len, m->name->loc);
+        if (!*first)
+            emit_got_text(f, ", ");
+        emit_got_text(f, label);
+        free(label);
+        char *member =
+            ret_path("%s.%.*s", path, (int)m->name->len, m->name->loc);
+        emit_ret_value(f, member, m->ty, ef, eps, depth);
+        free(member);
+        *first = false;
+    }
+}
+
+static void emit_ret_aggregate(FILE *f, const char *path, Type *ty,
+                               const TestRetField *expected, double eps,
+                               int depth) {
+    if (ty->kind == TY_ARRAY) {
+        emit_got_text(f, "{");
+        Type *elem   = ty->base;
+        int   n      = ty->array_len;
+        int   listed = 0;
+        for (const TestRetField *e = expected; e && listed < n; e = e->next)
+            listed++;
+        const TestRetField *cur = expected;
+        for (int i = 0; elem && i < listed; i++, cur = cur->next) {
+            if (i > 0)
+                emit_got_text(f, ", ");
+            char *el = ret_path("%s[%d]", path, i);
+            emit_ret_value(f, el, elem, cur, eps, depth);
+            free(el);
+        }
+        int tail = n - listed;
+        if (elem && tail > 0 && tail < RET_UNROLL_TAIL) {
+            for (int i = listed; i < n; i++) {
+                if (i > 0)
+                    emit_got_text(f, ", ");
+                char *el = ret_path("%s[%d]", path, i);
+                emit_ret_value(f, el, elem, NULL, eps, depth);
+                free(el);
+            }
+        } else if (elem && tail > 0) {
+            fprintf(f,
+                    "{ int __i%d;\nfor (__i%d = %d; __i%d < %d; __i%d++) {\n",
+                    depth, depth, listed, depth, n, depth);
+            fprintf(f, "if (__i%d > 0) ", depth);
+            emit_got_text(f, ", ");
+            char *el = ret_path("%s[__i%d]", path, depth);
+            emit_ret_value(f, el, elem, NULL, eps, depth + 1);
+            free(el);
+            fputs("} }\n", f);
+        }
+        emit_got_text(f, "}");
+        return;
+    }
+    if (!type_agg(ty)->members) {
+        emit_got_text(f, "{}");
+        return;
+    }
+    emit_got_text(f, "{");
+    bool first = true;
+    emit_ret_struct_body(f, path, ty, expected, eps, depth, &first);
+    emit_got_text(f, "}");
+}
+
 static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
     if (vm->compiler.emit_cccc || !vm->compiler.test_fns)
         return;
@@ -4363,6 +4602,17 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
           "#define __CCCC_SIG_DFL ((void (*)(int))0)\n"
           "extern void (*signal(int, void (*)(int)))(int);\n"
           "extern int kill(pid_t, int);\n\n",
+          f);
+    // Bounded append into a 512-byte buffer, for the struct return= message.
+    fputs("static void __attribute__((unused, format(printf, 2, 3)))\n"
+          "__cccc_sbf(char *dst, const char *fmt, ...) {\n"
+          "    size_t n = strlen(dst);\n"
+          "    __builtin_va_list ap;\n"
+          "    if (n >= 512) return;\n"
+          "    __builtin_va_start(ap, fmt);\n"
+          "    vsnprintf(dst + n, 512 - n, fmt, ap);\n"
+          "    __builtin_va_end(ap);\n"
+          "}\n\n",
           f);
 
     // Reverse to declaration order (test_fns is built by prepending, same
@@ -4433,8 +4683,6 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
               "    }\n",
               f);
 
-        TypeKind ret_kind =
-            (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty->kind : TY_VOID;
         const char *op = cmp_op_c_operator(r->ret_op);
         switch (r->ret_kind) {
             case RET_INT:
@@ -4508,16 +4756,57 @@ static void serialize_test_harness(FILE *f, VirtualMachine *vm, Obj *prog) {
                         op, op);
                 break;
             }
-            case RET_STRUCT:
-                // TODO: the return value is not checked, so a struct return=
-                // always passes natively; needs per-field comparison codegen
-                // like testing.c's cmp_ret_aggregate, or an error (#1974)
-                (void)ret_kind;
+            case RET_STRUCT: {
+                Type *rt =
+                    (fn->ty && fn->ty->return_ty) ? fn->ty->return_ty : NULL;
+                bool agg = rt &&
+                           (rt->kind == TY_STRUCT || rt->kind == TY_UNION) &&
+                           type_agg(rt)->members;
+                if (!agg) {
+                    fprintf(f,
+                            "    (void)%s();\n"
+                            "    if (__st.failed) goto __cccc_wfail;\n",
+                            fn->name);
+                    break;
+                }
+                double eps = (r->ret_epsilon > 0.0) ? r->ret_epsilon : 1e-9;
                 fprintf(f,
-                        "    (void)%s();\n"
+                        "    {\n"
+                        "    __typeof__(%s()) __ret = %s();\n"
+                        "    char __got[512] = {0};\n"
+                        "    int __eq = 1;\n"
                         "    if (__st.failed) goto __cccc_wfail;\n",
-                        fn->name);
+                        fn->name, fn->name);
+                if (ret_fields_pending(r->ret_expect.ret_fields)) {
+                    fputs("    __cccc_s_run = NULL;\n"
+                          "    if (__msg) snprintf(__msg, __cap, "
+                          "\"return= operand was not resolved\");\n"
+                          "    return 0;\n"
+                          "    }\n",
+                          f);
+                    break;
+                }
+                emit_ret_aggregate(f, "__ret", rt, r->ret_expect.ret_fields,
+                                   eps, 0);
+                const char *text =
+                    r->ret_struct_text ? r->ret_struct_text : "(struct)";
+                fprintf(f, "    if (!(%s__eq)) {\n",
+                        r->ret_op == CMP_EQ ? "" : "!");
+                fputs("        __cccc_s_run = NULL;\n"
+                      "        if (__msg) snprintf(__msg, __cap, "
+                      "\"expected return value %s %s, got %s\", ",
+                      f);
+                serialize_string_n(f, cmp_op_str(r->ret_op),
+                                   (int)strlen(cmp_op_str(r->ret_op)));
+                fputs(", ", f);
+                serialize_string_n(f, text, (int)strlen(text));
+                fputs(", __got);\n"
+                      "        return 0;\n"
+                      "    }\n"
+                      "    }\n",
+                      f);
                 break;
+            }
             case RET_PENDING:
                 fputs("    __cccc_s_run = NULL;\n"
                       "    if (__msg) snprintf(__msg, __cap, "
