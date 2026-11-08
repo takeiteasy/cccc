@@ -3043,6 +3043,7 @@ typedef struct TestRetField TestRetField;
 struct TestRetField {
     char   *name;        // designated field name (e.g. "x"); NULL = positional
     RetKind kind; // RET_INT / RET_FLOAT / RET_STR / RET_STRUCT / RET_PENDING
+    CmpOp   op; // CMP_EQ or CMP_NE; CMP_NONE for a positional entry (as CMP_EQ)
     union {
         int64_t       i; // RET_INT
         double        f; // RET_FLOAT

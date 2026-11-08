@@ -4758,16 +4758,18 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
 
     while (p->kind != TK_EOF && !equal(p, "}")) {
         char *fname = NULL;
+        CmpOp fop   = CMP_NONE;
         if (equal(p, ".")) {
             p = p->next;
             if (p->kind != TK_IDENT)
                 error_tok(vm, p, "expected a field name after '.' in return=");
             fname = strndup(p->loc, p->len);
             p     = p->next;
-            if (!equal(p, "="))
-                error_tok(vm, p, "expected '=' after the field name '%s'",
+            if (!equal(p, "=") && !equal(p, "!="))
+                error_tok(vm, p, "expected '=' or '!=' after the field name '%s'",
                           fname);
-            p = p->next;
+            fop = equal(p, "!=") ? CMP_NE : CMP_EQ;
+            p   = p->next;
         }
         // else: no designator -- positional entry (array-element list)
 
@@ -4785,6 +4787,9 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         TestRetField *sub            = NULL;
 
         if (is_nested_typed || is_nested_bare) {
+            if (fop == CMP_NE)
+                error_tok(vm, p,
+                          "'!=' does not apply to a nested compound literal");
             p = is_nested_typed ? p->next->next->next->next
                                       ->next // past ( struct|union TAG ) {
                                 : p->next;   // past {
@@ -4807,6 +4812,7 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         TestRetField *f = calloc(1, sizeof(TestRetField));
         f->name         = fname;
         f->kind         = fkind;
+        f->op           = fop;
         if (fkind == RET_STR)
             f->val.s = sval ? strdup(sval) : NULL;
         else if (fkind == RET_STRUCT)

@@ -153,10 +153,26 @@ union Val make_val(void) {
 
 Field values are constant expressions too, so `(struct Pair){.a = GREEN, .b = 6 * 7}` works.
 
+**Pointers**: a pointer field or return value can be asserted null or non-null. `NULL`, `nullptr` and `0` assert null; `!=` asserts non-null. An address cannot be asserted, so any other pointer constant is a compile error (a struct field with a non-null integer fails the test).
+
+```c
+struct Node { int val; struct Node *next; };
+
+[[cccc::test(return = (struct Node){.val = 1, .next = NULL})]]
+struct Node last(void) { return (struct Node){1, NULL}; }
+
+[[cccc::test(return = (struct Node){.val = 1, .next != NULL})]]
+struct Node middle(void) { static struct Node t; return (struct Node){1, &t}; }
+
+[[cccc::test(return != NULL)]]
+int *find(void) { static int x; return &x; }
+```
+
+`!=` after a field name works on any scalar field (`.val != 2`), not on a nested literal.
+
 **Scope limitations** — the following are not supported and are deferred to follow-up tickets:
 
 - *Bitfields* — a bitfield member is compared as its whole storage unit, not its individual bit-width.
-- *Non-`char *` pointer fields* — pointer fields other than `char *` are read as integers.
 
 **Comparison operators** (`=`, `!=`, `<`, `<=`, `>`, `>=`): use a comparison operator instead of equality. The default (no operator) is `=`.
 

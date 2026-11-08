@@ -1057,7 +1057,7 @@ static bool cmp_ret_value(const char *buf, int base_off, Type *ty,
             }
         }
         sb_appendf(got, got_cap, "\"%.*s\"", (int)n, actual);
-        return ok;
+        return ef->op == CMP_NE ? !ok : ok;
     }
     if (ty->kind == TY_STRUCT || ty->kind == TY_UNION || ty->kind == TY_ARRAY) {
         if (ef && ef->kind != RET_STRUCT) {
@@ -1071,11 +1071,15 @@ static bool cmp_ret_value(const char *buf, int base_off, Type *ty,
         sb_appendf(got, got_cap, "(type mismatch)");
         return false;
     }
+    if (ty->kind == TY_PTR && ef && ef->kind == RET_INT && ef->val.i != 0) {
+        sb_appendf(got, got_cap, "(only NULL can be asserted for a pointer)");
+        return false;
+    }
     char field_val[64];
     bool ok = cmp_ret_scalar(buf + base_off, ty, ef, eps, field_val,
                              sizeof(field_val));
     sb_appendf(got, got_cap, "%s", field_val);
-    return ok;
+    return (ef && ef->op == CMP_NE) ? !ok : ok;
 }
 
 // Compares the members of one struct/union type against `expected`,

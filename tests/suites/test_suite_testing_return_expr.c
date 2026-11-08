@@ -1,6 +1,8 @@
 // CCCC_FLAGS: --testing
 // Suite: return= operands that are names, macros and constant expressions.
 
+#include <stddef.h>
+
 #pragma cccc suite begin "return_expr"
 
 enum Color { RED, GREEN, BLUE };
@@ -16,6 +18,12 @@ enum Color { RED, GREEN, BLUE };
 struct Point {
     int x;
     int y;
+};
+
+struct Node {
+    int          val;
+    struct Node *next;
+    int (*hook)(void);
 };
 
 struct Shape {
@@ -137,6 +145,40 @@ struct Point test_struct_macro(void) {
                                      .scale = -0.5})]] struct Shape
     test_nested_struct_field_expressions(void) {
     return (struct Shape){{2, 42}, -0.5};
+}
+
+static struct Node tail_node;
+static int hook_fn(void) {
+    return 0;
+}
+
+[[cccc::test(return = (struct Node){.val  = 1,
+                                    .next = NULL,
+                                    .hook = nullptr})]] struct Node
+    test_pointer_fields_null(void) {
+    return (struct Node){1, NULL, NULL};
+}
+
+[[cccc::test(return = (struct Node){.val = 1,
+                                    .next != NULL,
+                                    .hook != NULL})]] struct Node
+    test_pointer_fields_non_null(void) {
+    return (struct Node){1, &tail_node, hook_fn};
+}
+
+[[cccc::test(return = (struct Node){.val != 2, .next = 0})]] struct Node
+    test_field_operator_on_int(void) {
+    return (struct Node){1, NULL, NULL};
+}
+
+[[cccc::test(return != NULL)]]
+int *test_pointer_return_non_null(void) {
+    return &tail_node.val;
+}
+
+[[cccc::test(return = NULL)]]
+int *test_pointer_return_null(void) {
+    return NULL;
 }
 
 #pragma cccc suite end

@@ -1,6 +1,6 @@
 // EXPECT_COMPILE_ERROR
 // CCCC_FLAGS: --testing
-// CCCC_EXPECT_STDERR: expected '=' after the field name 'b'
+// CCCC_EXPECT_STDERR: expected '=' or '!=' after the field name 'b'
 
 struct P {
     int a;

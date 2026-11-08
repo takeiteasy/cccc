@@ -165,7 +165,7 @@ void test_add_commutative(void) {
 
 - Test functions must take no arguments and return `void`, `int`, `double`, `float`, `char *`, or a flat struct/union. Use `return = value` to assert on the return value.
 - `return =` assertions support string literals, compound struct/union literals (`(struct T){.f = v, ...}`) and any integer or floating constant expression: literals, enum names, `#define` names, casts, `sizeof` and arithmetic. An operand that is undeclared or not a constant is a compile error.
-- Struct `return =` supports nested struct/union/array fields and anonymous struct/union members (recursing to a maximum of 8 levels), in addition to scalar and `char *` fields. Bitfield members and non-`char *` pointer fields are not supported.
+- Struct `return =` supports nested struct/union/array fields and anonymous struct/union members (recursing to a maximum of 8 levels), in addition to scalar and `char *` fields. Pointer fields can be asserted null or non-null. Bitfield members are not supported.
 - Setup and teardown hook functions must also have signature `void name(void)`.
 - Teardown hooks are skipped on test timeout (VM state is unknown after `SIGALRM`). They run in all other cases, including after test or setup failure.
 - Calling `exit()` directly in a normal test terminates the entire process rather than failing just that test. Use `Assert*` macros instead, or use `exit_code =` if testing that the function exits with a specific code.

@@ -54,12 +54,20 @@ static void resolve_ret_operand(VirtualMachine *vm, Token *expr, RetKind *kind,
     if (tok->kind != TK_EOF)
         error_tok(vm, tok, "return= takes a single value");
     add_type(vm, node);
-    if (!(is_integer(node->ty) || is_flonum(node->ty)) ||
+    bool is_ptr = node->ty && (node->ty->kind == TY_PTR ||
+                               node->ty->kind == TY_NULLPTR_T);
+    if (!(is_integer(node->ty) || is_flonum(node->ty) || is_ptr) ||
         !is_const_expr(vm, node))
         error_tok(vm, expr,
-                  "return= operand is not an integer or floating constant "
-                  "expression");
-    if (is_flonum(node->ty)) {
+                  "return= operand is not an integer, floating or null "
+                  "pointer constant expression");
+    if (is_ptr) {
+        if (eval(vm, node) != 0)
+            error_tok(vm, expr,
+                      "only a null pointer can be asserted for a pointer");
+        *kind  = RET_INT;
+        *out_i = 0;
+    } else if (is_flonum(node->ty)) {
         *kind  = RET_FLOAT;
         *out_f = eval_double(vm, node);
     } else {
@@ -88,7 +96,8 @@ static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f) {
 
 // Resolves the return= operands of the tests named `name` against the file
 // scope as it stands. Must run outside any negative-test error collection.
-void resolve_test_returns(VirtualMachine *vm, const char *name) {
+void resolve_test_returns(VirtualMachine *vm, const char *name,
+                          Type *return_ty) {
     Scope *saved = vm->compiler.scope;
     for (TestFnRecord *r = vm->compiler.test_fns; r; r = r->next) {
         if (r->ret_kind != RET_PENDING && r->ret_kind != RET_STRUCT)
@@ -104,6 +113,10 @@ void resolve_test_returns(VirtualMachine *vm, const char *name) {
             int64_t i = 0;
             double  d = 0.0;
             resolve_ret_operand(vm, r->ret_expr, &kind, &i, &d);
+            if (kind == RET_INT && i != 0 && return_ty &&
+                return_ty->kind == TY_PTR)
+                error_tok(vm, r->ret_expr,
+                          "only a null pointer can be asserted for a pointer");
             r->ret_kind = kind;
             if (kind == RET_FLOAT)
                 r->ret_expect.ret_float = d;
@@ -661,7 +674,7 @@ void cc_apply_attr_to_fn(VirtualMachine *vm, Obj *fn, const char *attr_text,
     // function.
     Token *tok_ptr = toks;
     if (try_extract_attr_macro(vm, &tok_ptr, /*emit_scan=*/true)) {
-        resolve_test_returns(vm, fn->name);
+        resolve_test_returns(vm, fn->name, fn->ty ? fn->ty->return_ty : NULL);
         return;
     }
 
