@@ -4652,6 +4652,8 @@ typedef struct {
          *ret_fields; // heap-alloc'd; ownership transferred to TestFnRecord
     char  *ret_struct_text; // heap-alloc'd strndup of the literal source span
     Token *ret_expr;        // RET_PENDING: expanded operand tokens
+    Token *ret_lit_tok;     // RET_STRUCT: first token of the literal
+    Token *ret_type_name;   // RET_STRUCT: typedef name of `(NAME){...}`
 } TestArgs;
 
 // Parsed arguments from [[cccc::test_setup(...)]] /
@@ -4727,6 +4729,30 @@ void cc_free_ret_fields(TestRetField *f) {
     }
 }
 
+// Matches `( struct|union TAG ) {` or `( TYPEDEF ) {` at p. Returns the token
+// after the '{' (NULL when p is not a typed compound literal); *type_name is
+// the typedef name for the second form and NULL for the first.
+static Token *ret_literal_body(Token *p, Token **type_name) {
+    if (!equal(p, "(") || !p->next)
+        return NULL;
+    Token *t    = p->next;
+    Token *name = NULL;
+    if (equal(t, "struct") || equal(t, "union")) {
+        t = t->next;
+        if (!t || t->kind != TK_IDENT)
+            return NULL;
+    } else if (t->kind == TK_IDENT) {
+        name = t;
+    } else {
+        return NULL;
+    }
+    t = t->next;
+    if (!t || !equal(t, ")") || !t->next || !equal(t->next, "{"))
+        return NULL;
+    *type_name = name;
+    return t->next->next;
+}
+
 // Max nesting depth accepted for a compound-literal return= assertion
 // (struct-in-struct, array-of-struct, etc). Guards against runaway
 // recursion on a malformed/adversarial attribute; deeper literals are a
@@ -4738,7 +4764,8 @@ void cc_free_ret_fields(TestRetField *f) {
 // to the first token *after* the opening '{'; it is left just past the
 // matching '}' and the parsed field list is returned (caller owns, free with
 // cc_free_ret_fields). A `value` may itself be a nested initializer --
-// `(struct|union TAG){...}` or a bare `{...}` -- which recurses with depth+1,
+// `(struct|union TAG){...}`, `(TYPEDEF){...}` or a bare `{...}` -- which
+// recurses with depth+1,
 // producing a RET_STRUCT field whose `val.sub` is the child list. Entries
 // without a `.name =` designator are positional (used for array-element
 // lists) and get `name == NULL`. If out_close is non-NULL, *out_close receives
@@ -4774,12 +4801,9 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
         }
         // else: no designator -- positional entry (array-element list)
 
-        bool is_nested_typed =
-            equal(p, "(") && p->next &&
-            (equal(p->next, "struct") || equal(p->next, "union")) &&
-            p->next->next && p->next->next->kind == TK_IDENT &&
-            p->next->next->next && equal(p->next->next->next, ")") &&
-            p->next->next->next->next && equal(p->next->next->next->next, "{");
+        Token        *nested_name     = NULL;
+        Token        *nested_body     = ret_literal_body(p, &nested_name);
+        bool          is_nested_typed = nested_body != NULL;
         bool          is_nested_bare = equal(p, "{");
 
         RetKind       fkind          = RET_NONE;
@@ -4791,9 +4815,7 @@ static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
             if (fop == CMP_NE)
                 error_tok(vm, p,
                           "'!=' does not apply to a nested compound literal");
-            p = is_nested_typed ? p->next->next->next->next
-                                      ->next // past ( struct|union TAG ) {
-                                : p->next;   // past {
+            p     = is_nested_typed ? nested_body : p->next;
             sub   = parse_ret_init_list(vm, &p, NULL, depth + 1);
             fkind = RET_STRUCT;
         } else {
@@ -4931,19 +4953,18 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
             Token *x         = expand_ret_operand(vm, p, opnd_end);
             p                = opnd_end;
 
-            // Compound literal: (struct|union TAG){...}
-            if (equal(x, "(") && x->next &&
-                (equal(x->next, "struct") || equal(x->next, "union")) &&
-                x->next->next && x->next->next->kind == TK_IDENT &&
-                x->next->next->next && equal(x->next->next->next, ")") &&
-                x->next->next->next->next &&
-                equal(x->next->next->next->next, "{")) {
+            // Compound literal: (struct|union TAG){...} or (TYPEDEF){...}
+            Token *lit_name = NULL;
+            Token *lit_body = ret_literal_body(x, &lit_name);
+            if (lit_body) {
                 if (op != CMP_EQ && op != CMP_NE)
                     error_tok(vm, x,
                               "a struct return= assertion supports only '=' "
                               "and '!='");
-                Token *q        = x->next->next->next->next->next;
-                out->ret_fields = parse_ret_init_list(vm, &q, NULL, 1);
+                Token *q           = lit_body;
+                out->ret_fields    = parse_ret_init_list(vm, &q, NULL, 1);
+                out->ret_lit_tok   = x;
+                out->ret_type_name = lit_name;
                 if (q->kind != TK_EOF)
                     error_tok(vm, q,
                               "unexpected tokens after the compound literal "
@@ -5466,6 +5487,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                     // transferred here.
                     rec->ret_expect.ret_fields = ta.ret_fields;
                     rec->ret_struct_text       = ta.ret_struct_text;
+                    rec->ret_lit_tok           = ta.ret_lit_tok;
+                    rec->ret_type_name         = ta.ret_type_name;
                 }
                 rec->expect_exit_code = ta.exit_code_val;
                 // Link into the list before cc_parse_test_flags so that

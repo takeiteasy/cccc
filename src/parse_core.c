@@ -94,6 +94,30 @@ static void resolve_ret_fields(VirtualMachine *vm, TestRetField *f) {
     }
 }
 
+// A compound-literal return= needs a struct or union return type, and a
+// `(TYPEDEF){...}` literal must name a typedef of that type.
+static void check_ret_literal_type(VirtualMachine *vm, TestFnRecord *r,
+                                   Type *return_ty) {
+    if (!return_ty ||
+        (return_ty->kind != TY_STRUCT && return_ty->kind != TY_UNION))
+        error_tok(vm, r->ret_lit_tok,
+                  "a compound-literal return= needs a struct or union return "
+                  "type");
+    Token *name = r->ret_type_name;
+    if (!name)
+        return;
+    Type *ty = find_typedef(vm, name);
+    if (!ty)
+        error_tok(vm, name, "'%.*s' is not a typedef name", name->len,
+                  name->loc);
+    if (ty->kind != TY_STRUCT && ty->kind != TY_UNION)
+        error_tok(vm, name, "'%.*s' is not a struct or union type", name->len,
+                  name->loc);
+    if (!is_compatible(ty, return_ty))
+        error_tok(vm, name, "'%.*s' does not match the function's return type",
+                  name->len, name->loc);
+}
+
 // Resolves the return= operands of the tests named `name` against the file
 // scope as it stands. Must run outside any negative-test error collection.
 void resolve_test_returns(VirtualMachine *vm, const char *name,
@@ -124,6 +148,7 @@ void resolve_test_returns(VirtualMachine *vm, const char *name,
                 r->ret_expect.ret_int = i;
             r->ret_expr = NULL;
         } else {
+            check_ret_literal_type(vm, r, return_ty);
             resolve_ret_fields(vm, r->ret_expect.ret_fields);
         }
         vm->compiler.scope = saved;

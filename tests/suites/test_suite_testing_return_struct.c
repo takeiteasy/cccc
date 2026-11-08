@@ -135,4 +135,40 @@ static struct N                                        other;
     return (struct Wide){1.5L, 3};
 }
 
+typedef struct {
+    int x, y;
+} Pt;
+
+typedef union {
+    int   i;
+    float f;
+} Num;
+
+typedef struct {
+    Pt tl;
+    Pt pts[2];
+} Box;
+
+[[cccc::test(return = (Pt){.x = 3, .y = 4})]] Pt test_typedef_literal(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return != (Pt){.x = 3, .y = 5})]] Pt
+    test_typedef_literal_ne(void) {
+    return (Pt){3, 4};
+}
+
+[[cccc::test(return = (Num){.i = 7})]] Num test_typedef_union(void) {
+    Num n;
+    n.i = 7;
+    return n;
+}
+
+[[cccc::test(return = (Box){.tl  = (Pt){.x = 1, .y = 2},
+                            .pts = {(Pt){.x = 3, .y = 4},
+                                    {.x = 5, .y = 6}}})]] Box
+    test_typedef_nested(void) {
+    return (Box){{1, 2}, {{3, 4}, {5, 6}}};
+}
+
 #pragma cccc suite end

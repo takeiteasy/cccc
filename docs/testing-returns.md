@@ -66,7 +66,7 @@ const char *test_status(void) {
 }
 ```
 
-**Struct / union**: use an inline compound literal to assert a struct or union return value. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
+**Struct / union**: use an inline compound literal to assert a struct or union return value. The literal's type is `struct TAG`, `union TAG` or a typedef name, and the function must return a struct or union. Fields are compared field-by-field using the same per-type rules as the scalar paths (epsilon for `float`/`double`, `strcmp` for `char *`, integer equality for all other types). Fields omitted from the compound literal are expected to be zero (C zero-initialisation), with one exception — see **Unions**, below.
 
 ```c
 struct Point { int x; int y; };
@@ -140,7 +140,18 @@ struct Buf make_buf(void) {
 }
 ```
 
-An array of structs takes a positional list of (optionally `(struct TAG)`-prefixed) nested literals: `.items = {(struct Pair){.a=1,.b=2}, (struct Pair){.a=3,.b=4}}`.
+A typedef name is the only way to name an anonymous struct:
+
+```c
+typedef struct { int x, y; } Pt;
+
+[[cccc::test(return = (Pt){.x = 3, .y = 4})]]
+Pt test_typedef(void) { return (Pt){3, 4}; }
+```
+
+The name must be a typedef of a struct or union that matches the return type; anything else is a compile error.
+
+An array of structs takes a positional list of (optionally `(struct TAG)` or `(TYPEDEF)` prefixed) nested literals: `.items = {(struct Pair){.a=1,.b=2}, (struct Pair){.a=3,.b=4}}`.
 
 **Unions**: union arms alias the same storage, so — unlike a struct — an arm *not* named in the literal is not asserted on at all (it is not "expected zero", since reading it back would just reinterpret whichever arm actually was asserted). Only the arms named in the literal are compared.
 

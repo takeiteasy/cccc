@@ -3107,6 +3107,8 @@ struct TestFnRecord {
     char
         *ret_struct_text; // raw source span of compound literal (for error msg)
     Token *ret_expr;      // RET_PENDING: EOF-terminated expression tokens
+    Token *ret_lit_tok;   // RET_STRUCT: first token of the compound literal
+    Token *ret_type_name; // RET_STRUCT: `(NAME){...}` typedef name, else NULL
     double ret_epsilon;   // 0.0 = use default 1e-9; set by return_epsilon=
     int expect_exit_code; // -1 = disabled; >=0 = expected shell-convention exit
                           // code
