@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: on Linux, a struct `return =` assertion on a `long double` member reads the value the test stored instead of always seeing 0.
+
 ## [0.32.1] - 2026-11-08
 
 - Added: a struct or union `return =` assertion accepts a typedef name as the compound literal type: `return = (Pt){.x = 3, .y = 4}`.

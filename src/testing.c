@@ -978,14 +978,10 @@ static bool cmp_ret_scalar(const char *addr, Type *mty, const Member *bf,
                            const TestRetField *ef, double eps, char *field_val,
                            size_t field_val_cap) {
     if (mty->kind == TY_LDOUBLE) {
+        // The VM keeps a long double as a plain double in its (possibly
+        // 16-byte) slot.
         double actual = 0.0;
-        if (mty->size == (int)sizeof(long double)) {
-            long double lv = 0.0L;
-            memcpy(&lv, addr, sizeof(lv));
-            actual = (double)lv;
-        } else {
-            memcpy(&actual, addr, sizeof(actual));
-        }
+        memcpy(&actual, addr, sizeof(actual));
         double expect = 0.0;
         if (ef)
             expect = (ef->kind == RET_INT) ? (double)ef->val.i : ef->val.f;
