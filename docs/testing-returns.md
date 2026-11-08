@@ -88,7 +88,7 @@ struct Named test_result(void) {
 }
 ```
 
-Struct assertions support `=` and `!=` operators only; ordered comparisons (`<`, `<=`, `>`, `>=`) are not meaningful for structs and produce a `-Wattributes` warning with the assertion skipped.
+Struct assertions support `=` and `!=` operators only; ordered comparisons (`<`, `<=`, `>`, `>=`) are not meaningful for structs and are a compile error.
 
 If the assertion fails:
 
@@ -96,7 +96,7 @@ If the assertion fails:
 expected return value = (struct Point){.x = 1, .y = 2}, got {.x = 99, .y = 2}
 ```
 
-**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that produces a `-Wattributes` warning and the whole assertion is skipped.
+**Nested fields**: a field that is itself a struct, union, or array can be asserted with a nested compound literal. The nested literal may repeat the `(struct|union TAG)` prefix or, more commonly, be a bare brace list — its type is inferred from the field being initialized. Nesting recurses to a maximum of 8 levels; a literal nested deeper than that is a compile error.
 
 ```c
 struct Inner { int a; int b; };

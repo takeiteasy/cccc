@@ -4727,96 +4727,57 @@ void cc_free_ret_fields(TestRetField *f) {
     }
 }
 
-// Skip tokens until the '}' that closes the currently-open brace list,
-// tracking nested '{'/'}' pairs. *p_ptr must point somewhere inside an
-// already-opened '{' (i.e. at brace depth 1 relative to that '{'). Leaves
-// *p_ptr just past the matching top-level '}' (or at TK_EOF if unbalanced).
-static void skip_balanced_braces(Token **p_ptr) {
-    Token *p     = *p_ptr;
-    int    depth = 1;
-    while (p && p->kind != TK_EOF && depth > 0) {
-        if (equal(p, "{"))
-            depth++;
-        else if (equal(p, "}"))
-            depth--;
-        p = p->next;
-    }
-    *p_ptr = p;
-}
-
 // Max nesting depth accepted for a compound-literal return= assertion
 // (struct-in-struct, array-of-struct, etc). Guards against runaway
-// recursion on a malformed/adversarial attribute; deeper literals produce a
-// -Wattributes warning and the assertion is skipped.
+// recursion on a malformed/adversarial attribute; deeper literals are a
+// compile error.
 #define CCCC_RET_FIELD_MAX_DEPTH 8
 
 // Recursively parse a brace-delimited initializer list for a return=
 // compound-literal assertion: `{ [.name =] value, ... }`. *p_ptr must point
-// to the first token *after* the opening '{'; on success it is left just
-// past the matching '}' and *out holds the parsed field list (caller owns,
-// free with cc_free_ret_fields). A `value` may itself be a nested
-// initializer -- `(struct|union TAG){...}` or a bare `{...}` -- which
-// recurses with depth+1, producing a RET_STRUCT field whose `val.sub` is the
-// child list. Entries without a `.name =` designator are positional (used
-// for array-element lists) and get `name == NULL`.
+// to the first token *after* the opening '{'; it is left just past the
+// matching '}' and the parsed field list is returned (caller owns, free with
+// cc_free_ret_fields). A `value` may itself be a nested initializer --
+// `(struct|union TAG){...}` or a bare `{...}` -- which recurses with depth+1,
+// producing a RET_STRUCT field whose `val.sub` is the child list. Entries
+// without a `.name =` designator are positional (used for array-element
+// lists) and get `name == NULL`. If out_close is non-NULL, *out_close receives
+// the matching '}' token.
 //
-// On failure (malformed syntax or depth exceeded), warns via warn_tok,
-// frees any partially-built list, advances *p_ptr past the matching '}' via
-// skip_balanced_braces (so the caller's token stream stays in sync even
-// with nested braces), and returns false. If out_close is non-NULL, *out_close
-// receives the matching '}' token on success (used by the top-level caller
-// to compute the source span for diagnostics); it is left NULL on failure.
-static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
-                                TestRetField **out, Token **out_close,
-                                int depth) {
+// Malformed syntax or excess depth is a compile error.
+static TestRetField *parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
+                                         Token **out_close, int depth) {
     Token *p = *p_ptr;
-    *out     = NULL;
-    if (out_close)
-        *out_close = NULL;
-
-    if (depth > CCCC_RET_FIELD_MAX_DEPTH) {
-        warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                 "compound-literal return= assertion nested too deeply "
-                 "(max %d levels); assertion skipped",
-                 CCCC_RET_FIELD_MAX_DEPTH);
-        skip_balanced_braces(&p);
-        *p_ptr = p;
-        return false;
-    }
+    if (depth > CCCC_RET_FIELD_MAX_DEPTH)
+        error_tok(vm, p,
+                  "compound-literal return= assertion nested too deeply "
+                  "(max %d levels)",
+                  CCCC_RET_FIELD_MAX_DEPTH);
 
     TestRetField *fields = NULL, **ftail = &fields;
-    bool          parse_ok = true;
-    bool   warned = false; // true once a specific diagnostic has been emitted,
-                           // so the generic "malformed compound literal"
-                           // fallback below doesn't double-warn
-    Token *close_brace = NULL;
 
-    while (p && !equal(p, "}") && p->kind != TK_EOF) {
+    while (p->kind != TK_EOF && !equal(p, "}")) {
         char *fname = NULL;
         if (equal(p, ".")) {
             p = p->next;
-            if (!p || p->kind != TK_IDENT) {
-                parse_ok = false;
-                break;
-            }
+            if (p->kind != TK_IDENT)
+                error_tok(vm, p, "expected a field name after '.' in return=");
             fname = strndup(p->loc, p->len);
             p     = p->next;
-            if (!p || !equal(p, "=")) {
-                free(fname);
-                parse_ok = false;
-                break;
-            }
+            if (!equal(p, "="))
+                error_tok(vm, p, "expected '=' after the field name '%s'",
+                          fname);
             p = p->next;
         }
         // else: no designator -- positional entry (array-element list)
 
         bool is_nested_typed =
-            p && equal(p, "(") && p->next &&
+            equal(p, "(") && p->next &&
             (equal(p->next, "struct") || equal(p->next, "union")) &&
             p->next->next && p->next->next->kind == TK_IDENT &&
             p->next->next->next && equal(p->next->next->next, ")") &&
             p->next->next->next->next && equal(p->next->next->next->next, "{");
-        bool          is_nested_bare = p && equal(p, "{");
+        bool          is_nested_bare = equal(p, "{");
 
         RetKind       fkind          = RET_NONE;
         const char   *sval           = NULL;
@@ -4827,33 +4788,12 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
             p = is_nested_typed ? p->next->next->next->next
                                       ->next // past ( struct|union TAG ) {
                                 : p->next;   // past {
-            TestRetField *children = NULL;
-            if (!parse_ret_init_list(vm, &p, &children, NULL, depth + 1)) {
-                // Inner call already warned and skipped past its own '}'.
-                free(fname);
-                parse_ok = false;
-                warned   = true;
-                break;
-            }
+            sub   = parse_ret_init_list(vm, &p, NULL, depth + 1);
             fkind = RET_STRUCT;
-            sub   = children;
         } else {
             Token *vend = scan_ret_operand(p, "}");
-            if (vend == p) {
-                if (fname)
-                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                             "missing value for field '%s' in compound-literal "
-                             "return= assertion; skipping",
-                             fname);
-                else
-                    warn_tok(vm, p, CCCC_WARN_ATTRIBUTES,
-                             "missing value in compound-literal return= "
-                             "assertion; skipping");
-                free(fname);
-                parse_ok = false;
-                warned   = true;
-                break;
-            }
+            if (vend == p)
+                error_tok(vm, p, "missing value in return= compound literal");
             if (p->kind == TK_STR && p->next == vend) {
                 fkind = RET_STR;
                 sval  = tok_lit(p)->str;
@@ -4871,37 +4811,21 @@ static bool parse_ret_init_list(VirtualMachine *vm, Token **p_ptr,
             f->val.s = sval ? strdup(sval) : NULL;
         else if (fkind == RET_STRUCT)
             f->val.sub = sub;
-        else if (fkind == RET_PENDING)
+        else
             f->val.expr = fexpr;
         *ftail = f;
         ftail  = &f->next;
 
-        if (p && equal(p, ","))
+        if (equal(p, ","))
             p = p->next;
     }
 
-    if (p && equal(p, "}")) {
-        close_brace = p;
-        p           = p->next;
-    }
-
-    if (!parse_ok || !close_brace) {
-        cc_free_ret_fields(fields);
-        if (!warned) {
-            warn_tok(vm, p ? p : close_brace, CCCC_WARN_ATTRIBUTES,
-                     "malformed compound literal in return= assertion; "
-                     "skipping");
-        }
-        skip_balanced_braces(&p);
-        *p_ptr = p;
-        return false;
-    }
-
-    *out = fields;
+    if (!equal(p, "}"))
+        error_tok(vm, p, "unterminated compound literal in return=");
     if (out_close)
-        *out_close = close_brace;
-    *p_ptr = p;
-    return true;
+        *out_close = p;
+    *p_ptr = p->next;
+    return fields;
 }
 
 // Parse test(...) argument list. *p_ptr must point to the first token inside
@@ -5007,32 +4931,19 @@ static void parse_test_args(VirtualMachine *vm, Token **p_ptr, TestArgs *out) {
                 x->next->next->next && equal(x->next->next->next, ")") &&
                 x->next->next->next->next &&
                 equal(x->next->next->next->next, "{")) {
-                if (op != CMP_EQ && op != CMP_NE) {
-                    warn_tok(
-                        vm, x, CCCC_WARN_ATTRIBUTES,
-                        "struct return= assertion only supports '=' or '!='; "
-                        "ordered comparisons are not meaningful for structs; "
-                        "assertion skipped");
-                    free(opnd_text);
-                } else {
-                    Token        *q           = x->next->next->next->next->next;
-                    TestRetField *fields      = NULL;
-                    Token        *close_brace = NULL;
-                    if (parse_ret_init_list(vm, &q, &fields, &close_brace, 1)) {
-                        if (q->kind != TK_EOF)
-                            error_tok(vm, q,
-                                      "unexpected tokens after the "
-                                      "compound literal in return=");
-                        out->ret_struct_text = opnd_text;
-                        out->ret_fields      = fields;
-                        out->ret_kind        = RET_STRUCT;
-                        out->ret_op          = op;
-                    } else {
-                        free(opnd_text);
-                    }
-                    // On failure, parse_ret_init_list already warned and
-                    // freed the partial list.
-                }
+                if (op != CMP_EQ && op != CMP_NE)
+                    error_tok(vm, x,
+                              "a struct return= assertion supports only '=' "
+                              "and '!='");
+                Token *q        = x->next->next->next->next->next;
+                out->ret_fields = parse_ret_init_list(vm, &q, NULL, 1);
+                if (q->kind != TK_EOF)
+                    error_tok(vm, q,
+                              "unexpected tokens after the compound literal "
+                              "in return=");
+                out->ret_struct_text = opnd_text;
+                out->ret_kind        = RET_STRUCT;
+                out->ret_op          = op;
             } else if (x->kind == TK_STR && x->next->kind == TK_EOF) {
                 out->ret_kind    = RET_STR;
                 out->ret_op      = op;
@@ -5586,13 +5497,10 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                              "error= ignored");
                     rec->error_pat = NULL;
                 }
-                if (ta.exit_code_val >= 0 && ta.ret_kind != RET_NONE) {
-                    warn_tok(vm, probe, CCCC_WARN_ATTRIBUTES,
-                             "exit_code= and return= are mutually exclusive; "
-                             "return= ignored");
-                    rec->ret_kind = RET_NONE;
-                    rec->ret_expr = NULL;
-                }
+                if (ta.exit_code_val >= 0 && ta.ret_kind != RET_NONE)
+                    error_tok(vm, probe,
+                              "exit_code= and return= are mutually "
+                              "exclusive");
                 break;
             }
             probe = probe->next;

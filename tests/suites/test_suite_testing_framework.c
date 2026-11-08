@@ -821,63 +821,6 @@ struct FwAnonU {
     return (struct FwAnonU){.i = 1, .z = 3};
 }
 
-// Malformed nested literal: the inner brace list is missing a value, so
-// only that field's assertion is skipped (with a -Wattributes warning) --
-// parsing recovers past the *matching* '}' rather than desyncing on the
-// first inner '}', so the sibling `name =` attribute after it still applies.
-[[cccc::test(
-    return = (struct FwOuter){.p = {.a = 1, .b}, .z = 3},
-           name = "malformed nested literal recovers cleanly")]] struct FwOuter
-    test_nested_malformed_recovery(void) {
-    return (struct FwOuter){.p = {.a = 1, .b = 2}, .z = 3};
-}
-
-// Depth cap: a compound literal nested past CCCC_RET_FIELD_MAX_DEPTH (8)
-// levels produces a -Wattributes warning and the whole assertion is
-// skipped (test still runs and passes -- there's simply no return=
-// assertion left to check).
-struct FwD0 {
-    int v;
-};
-struct FwD1 {
-    struct FwD0 a;
-};
-struct FwD2 {
-    struct FwD1 a;
-};
-struct FwD3 {
-    struct FwD2 a;
-};
-struct FwD4 {
-    struct FwD3 a;
-};
-struct FwD5 {
-    struct FwD4 a;
-};
-struct FwD6 {
-    struct FwD5 a;
-};
-struct FwD7 {
-    struct FwD6 a;
-};
-struct FwD8 {
-    struct FwD7 a;
-};
-struct FwD9 {
-    struct FwD8 a;
-};
-
-[[cccc::test(
-    return =
-               (struct FwD9){
-                   .a =
-                       {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.a = {.v = 1}}}}}}}}}},
-           name = "nested past max depth is skipped, not crashed")]] struct FwD9
-    test_nested_too_deep(void) {
-    struct FwD9 r = {0};
-    return r;
-}
-
 // [from test_return_types.c]
 // Return value assertions: string, float, operator forms (tickets #346, #343).
 #pragma cccc suite begin "framework/return_types"

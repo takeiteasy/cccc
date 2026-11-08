@@ -117,7 +117,7 @@ Exit codes follow the shell convention: a normal exit via `return` or `exit(N)` 
 | SIGFPE | 8 | 136 |
 | SIGILL | 4 | 132 |
 
-`exit_code` may be combined with `suite`, `name`, and `timeout`. It is **mutually exclusive** with `error =` (compile-time) and `return =` (can't read a crashed child's return register); combining them emits a `-Wattributes` warning and the conflicting argument is ignored.
+`exit_code` may be combined with `suite`, `name`, and `timeout`. It is **mutually exclusive** with `error =` (compile-time) and `return =` (can't read a crashed child's return register); combining `exit_code` with `return` is a compile error, and combining it with `error` emits a `-Wattributes` warning that ignores `error`.
 
 When a test does not produce the expected exit code, the failure message shows both the expected and actual values:
 
