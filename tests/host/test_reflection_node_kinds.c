@@ -18,7 +18,7 @@
 */
 
 // reflection.h's public NK_* values must equal the internal ND_* ones: comptime
-// code receives raw `Node::kind` numbers.
+// code receives raw `Node::kind` numbers. AST_JUMP_* is JumpKind + 1.
 
 #define __CCCC_TAG(n)        n
 #define NodeKind             PublicNodeKind
@@ -124,6 +124,17 @@ int main(void) {
     }
     NODE_KINDS(CHECK_KIND)
 #undef CHECK_KIND
+#define CHECK_JUMP(name)                                                       \
+    if ((int)AST_JUMP_##name != (int)JUMP_##name + 1) {                        \
+        fprintf(stderr,                                                        \
+                "FAIL: AST_JUMP_" #name " = %d, JUMP_" #name " = %d\n",        \
+                (int)AST_JUMP_##name, (int)JUMP_##name);                       \
+        failed = 1;                                                            \
+    }
+    CHECK_JUMP(GOTO)
+    CHECK_JUMP(BREAK)
+    CHECK_JUMP(CONTINUE)
+#undef CHECK_JUMP
     if (failed)
         return 1;
     printf("PASS: reflection node kinds\n");

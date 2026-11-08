@@ -243,6 +243,32 @@ typedef enum {
     NK_VA_NAMED_COUNT   = 66,
 } NodeKind;
 
+/*! @brief Which statement an NK_GOTO node came from, returned by
+ *           @c GotoJumpKind(node). */
+typedef enum {
+    AST_JUMP_GOTO     = 1,
+    AST_JUMP_BREAK    = 2,
+    AST_JUMP_CONTINUE = 3,
+} AstJumpKind;
+
+/*! @brief The operation of an NK_BITOP node, returned by @c BitopOp(node). */
+typedef enum {
+    AST_BITOP_CLZ      = 1,
+    AST_BITOP_CTZ      = 2,
+    AST_BITOP_POPCOUNT = 3,
+    AST_BITOP_PARITY   = 4,
+    AST_BITOP_FFS      = 5,
+    AST_BITOP_BSWAP    = 6,
+} AstBitop;
+
+/*! @brief The operation of an NK_OVERFLOW_ARITH node, returned by
+ *           @c OverflowOp(node). */
+typedef enum {
+    AST_OVERFLOW_ADD = 1,
+    AST_OVERFLOW_SUB = 2,
+    AST_OVERFLOW_MUL = 3,
+} AstOverflowOp;
+
 /*! @brief Discriminates the kind of declaration an AttrTarget refers to,
  *           returned by @c GetAttrTargetKind(target) inside a custom
  *           @c \@attribute handler. */
@@ -1145,6 +1171,191 @@ Node *__builtin_ast_macro_call_arg_at(Node *node, int index);
  * @details Convenience wrapper: StripImplicit(node).
  */
 Node *__builtin_ast_node_strip_implicit(Node *node);
+
+/*! @brief Return the name of an NK_GOTO, NK_LABEL or NK_LABEL_VAL.
+ * @param node The node to inspect.
+ * @return The label name, or NULL for other kinds and for break and continue.
+ * @details Convenience wrapper: LabelName(node).
+ */
+const char *__builtin_ast_label_name(Node *node);
+
+/*! @brief Return which statement an NK_GOTO came from.
+ * @param node The node to inspect.
+ * @return AST_JUMP_GOTO, AST_JUMP_BREAK or AST_JUMP_CONTINUE; 0 for other
+ * kinds.
+ * @details Convenience wrapper: GotoJumpKind(node).
+ */
+int __builtin_ast_goto_jump_kind(Node *node);
+
+/*! @brief Return the template string of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @return The template, or NULL for other kinds.
+ * @details Convenience wrapper: AsmTemplate(node).
+ */
+const char *__builtin_ast_asm_template(Node *node);
+
+/*! @brief Return the number of output operands of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @return The count, 0 for other kinds.
+ * @details Convenience wrapper: AsmOutputCount(node).
+ */
+int __builtin_ast_asm_output_count(Node *node);
+
+/*! @brief Return the number of input operands of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @return The count, 0 for other kinds.
+ * @details Convenience wrapper: AsmInputCount(node).
+ */
+int __builtin_ast_asm_input_count(Node *node);
+
+/*! @brief Return the constraint string of an asm operand.
+ * @param node An NK_ASM node.
+ * @param index Zero-based operand index; outputs come before inputs.
+ * @return The constraint (e.g. "=r"), or NULL when out of range.
+ * @details Convenience wrapper: AsmOperandConstraint(node, i).
+ */
+const char *__builtin_ast_asm_operand_constraint(Node *node, int index);
+
+/*! @brief Return the symbolic name of an asm operand.
+ * @param node An NK_ASM node.
+ * @param index Zero-based operand index; outputs come before inputs.
+ * @return The name written as `[name]`, or NULL when unnamed or out of range.
+ * @details Convenience wrapper: AsmOperandName(node, i).
+ */
+const char *__builtin_ast_asm_operand_name(Node *node, int index);
+
+/*! @brief Return the expression of an asm operand.
+ * @param node An NK_ASM node.
+ * @param index Zero-based operand index; outputs come before inputs.
+ * @return The operand expression, or NULL when out of range.
+ * @details Convenience wrapper: AsmOperandExpr(node, i).
+ */
+Node *__builtin_ast_asm_operand_expr(Node *node, int index);
+
+/*! @brief Return the number of clobbers of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @return The count, 0 for other kinds.
+ * @details Convenience wrapper: AsmClobberCount(node).
+ */
+int __builtin_ast_asm_clobber_count(Node *node);
+
+/*! @brief Return a clobber of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @param index Zero-based clobber index.
+ * @return The clobber string, or NULL when out of range.
+ * @details Convenience wrapper: AsmClobberAt(node, i).
+ */
+const char *__builtin_ast_asm_clobber_at(Node *node, int index);
+
+/*! @brief Return whether an NK_ASM statement is written `volatile`.
+ * @param node An NK_ASM node.
+ * @return True for volatile asm, false otherwise.
+ * @details Convenience wrapper: AsmIsVolatile(node).
+ */
+bool __builtin_ast_asm_is_volatile(Node *node);
+
+/*! @brief Return whether an NK_ASM statement is an `asm goto`.
+ * @param node An NK_ASM node.
+ * @return True for `asm goto`, false otherwise.
+ * @details Convenience wrapper: AsmIsGoto(node).
+ */
+bool __builtin_ast_asm_is_goto(Node *node);
+
+/*! @brief Return the number of jump labels of an `asm goto`.
+ * @param node An NK_ASM node.
+ * @return The count, 0 for other kinds.
+ * @details Convenience wrapper: AsmGotoLabelCount(node).
+ */
+int __builtin_ast_asm_goto_label_count(Node *node);
+
+/*! @brief Return a jump label name of an `asm goto`.
+ * @param node An NK_ASM node.
+ * @param index Zero-based label index.
+ * @return The label name, or NULL when out of range.
+ * @details Convenience wrapper: AsmGotoLabelAt(node, i).
+ */
+const char *__builtin_ast_asm_goto_label_at(Node *node, int index);
+
+/*! @brief Return the memory order of an NK_CAS, NK_EXCH, NK_ALOAD or NK_ASTORE.
+ * @param node The node to inspect.
+ * @return The `__ATOMIC_*` value (0 relaxed to 5 seq_cst); seq_cst when the
+ * order is not a constant. -1 for other kinds, since 0 is a valid order.
+ * @details Convenience wrapper: AtomicOrder(node).
+ */
+int __builtin_ast_atomic_order(Node *node);
+
+/*! @brief Return the failure memory order of an NK_CAS.
+ * @param node An NK_CAS node.
+ * @return The `__ATOMIC_*` value, as AtomicOrder; -1 for other kinds.
+ * @details Convenience wrapper: AtomicFailOrder(node).
+ */
+int __builtin_ast_atomic_fail_order(Node *node);
+
+/*! @brief Return whether an NK_CAS was written as a weak compare-exchange.
+ * @param node An NK_CAS node.
+ * @return True for weak, false otherwise.
+ * @details Convenience wrapper: AtomicIsWeak(node).
+ */
+bool __builtin_ast_atomic_is_weak(Node *node);
+
+/*! @brief Return the address operand of an NK_CAS.
+ * @param node An NK_CAS node.
+ * @return The address expression, or NULL for other kinds.
+ * @details Convenience wrapper: CasAddr(node).
+ */
+Node *__builtin_ast_cas_addr(Node *node);
+
+/*! @brief Return the expected-value operand of an NK_CAS.
+ * @param node An NK_CAS node.
+ * @return The expression (the pointer to the expected value), or NULL for
+ * other kinds.
+ * @details Convenience wrapper: CasExpected(node).
+ */
+Node *__builtin_ast_cas_expected(Node *node);
+
+/*! @brief Return the desired-value operand of an NK_CAS.
+ * @param node An NK_CAS node.
+ * @return The desired-value expression, or NULL for other kinds.
+ * @details Convenience wrapper: CasDesired(node).
+ */
+Node *__builtin_ast_cas_desired(Node *node);
+
+/*! @brief Return whether an NK_FENCE is a signal fence.
+ * @param node An NK_FENCE node.
+ * @return True for a signal fence, false for a thread fence or other kinds.
+ * @details Convenience wrapper: FenceIsSignal(node).
+ */
+bool __builtin_ast_fence_is_signal(Node *node);
+
+/*! @brief Return the operation of an NK_BITOP.
+ * @param node An NK_BITOP node.
+ * @return An AST_BITOP_* value, 0 for other kinds.
+ * @details Convenience wrapper: BitopOp(node).
+ */
+int __builtin_ast_bitop_op(Node *node);
+
+/*! @brief Return the bit width of an NK_BITOP's builtin.
+ * @param node An NK_BITOP node.
+ * @return 32 or 64 for clz, ctz and ffs; the swapped width in bits for bswap;
+ * 0 for popcount, parity and other kinds.
+ * @details Convenience wrapper: BitopWidth(node).
+ */
+int __builtin_ast_bitop_width(Node *node);
+
+/*! @brief Return the operation of an NK_OVERFLOW_ARITH.
+ * @param node An NK_OVERFLOW_ARITH node.
+ * @return An AST_OVERFLOW_* value, 0 for other kinds.
+ * @details Convenience wrapper: OverflowOp(node).
+ */
+int __builtin_ast_overflow_op(Node *node);
+
+/*! @brief Return the result pointer of an NK_OVERFLOW_ARITH.
+ * @param node An NK_OVERFLOW_ARITH node.
+ * @return The expression the result is stored through, or NULL for other
+ * kinds. The operands are NodeLhs and NodeRhs.
+ * @details Convenience wrapper: OverflowResultPtr(node).
+ */
+Node *__builtin_ast_overflow_result_ptr(Node *node);
 
 /*! @brief Return the kind of declaration decorated by a custom attribute.
  */
@@ -2725,6 +2936,113 @@ const char *__builtin_dump_ast_gen_to_string(Node *node);
  * @brief Peel compiler-inserted casts and call wrappers off a node.
  * @param node The node to inspect. */
 #define StripImplicit(node) __builtin_ast_node_strip_implicit(node)
+/*! @def LabelName
+ * @brief Return the name of an NK_GOTO, NK_LABEL or NK_LABEL_VAL.
+ * @param node The node to inspect. */
+#define LabelName(node) __builtin_ast_label_name(node)
+/*! @def GotoJumpKind
+ * @brief Return which statement an NK_GOTO came from (AST_JUMP_*).
+ * @param node The node to inspect. */
+#define GotoJumpKind(node) __builtin_ast_goto_jump_kind(node)
+/*! @def AsmTemplate
+ * @brief Return the template string of an NK_ASM statement.
+ * @param node An NK_ASM node. */
+#define AsmTemplate(node) __builtin_ast_asm_template(node)
+/*! @def AsmOutputCount
+ * @brief Return the number of output operands of an NK_ASM statement.
+ * @param node An NK_ASM node. */
+#define AsmOutputCount(node) __builtin_ast_asm_output_count(node)
+/*! @def AsmInputCount
+ * @brief Return the number of input operands of an NK_ASM statement.
+ * @param node An NK_ASM node. */
+#define AsmInputCount(node) __builtin_ast_asm_input_count(node)
+/*! @def AsmOperandConstraint
+ * @brief Return the constraint string of an asm operand.
+ * @param node An NK_ASM node.
+ * @param i Zero-based operand index; outputs come before inputs. */
+#define AsmOperandConstraint(node, i)                                          \
+    __builtin_ast_asm_operand_constraint(node, i)
+/*! @def AsmOperandName
+ * @brief Return the symbolic name of an asm operand, or NULL.
+ * @param node An NK_ASM node.
+ * @param i Zero-based operand index; outputs come before inputs. */
+#define AsmOperandName(node, i) __builtin_ast_asm_operand_name(node, i)
+/*! @def AsmOperandExpr
+ * @brief Return the expression of an asm operand.
+ * @param node An NK_ASM node.
+ * @param i Zero-based operand index; outputs come before inputs. */
+#define AsmOperandExpr(node, i) __builtin_ast_asm_operand_expr(node, i)
+/*! @def AsmClobberCount
+ * @brief Return the number of clobbers of an NK_ASM statement.
+ * @param node An NK_ASM node. */
+#define AsmClobberCount(node) __builtin_ast_asm_clobber_count(node)
+/*! @def AsmClobberAt
+ * @brief Return a clobber of an NK_ASM statement.
+ * @param node An NK_ASM node.
+ * @param i Zero-based clobber index. */
+#define AsmClobberAt(node, i) __builtin_ast_asm_clobber_at(node, i)
+/*! @def AsmIsVolatile
+ * @brief Return whether an NK_ASM statement is written `volatile`.
+ * @param node An NK_ASM node. */
+#define AsmIsVolatile(node) __builtin_ast_asm_is_volatile(node)
+/*! @def AsmIsGoto
+ * @brief Return whether an NK_ASM statement is an `asm goto`.
+ * @param node An NK_ASM node. */
+#define AsmIsGoto(node) __builtin_ast_asm_is_goto(node)
+/*! @def AsmGotoLabelCount
+ * @brief Return the number of jump labels of an `asm goto`.
+ * @param node An NK_ASM node. */
+#define AsmGotoLabelCount(node) __builtin_ast_asm_goto_label_count(node)
+/*! @def AsmGotoLabelAt
+ * @brief Return a jump label name of an `asm goto`.
+ * @param node An NK_ASM node.
+ * @param i Zero-based label index. */
+#define AsmGotoLabelAt(node, i) __builtin_ast_asm_goto_label_at(node, i)
+/*! @def AtomicOrder
+ * @brief Return the `__ATOMIC_*` memory order of an atomic node, -1 for other
+ * kinds.
+ * @param node An NK_CAS, NK_EXCH, NK_ALOAD or NK_ASTORE node. */
+#define AtomicOrder(node) __builtin_ast_atomic_order(node)
+/*! @def AtomicFailOrder
+ * @brief Return the failure memory order of an NK_CAS, -1 for other kinds.
+ * @param node An NK_CAS node. */
+#define AtomicFailOrder(node) __builtin_ast_atomic_fail_order(node)
+/*! @def AtomicIsWeak
+ * @brief Return whether an NK_CAS was written as a weak compare-exchange.
+ * @param node An NK_CAS node. */
+#define AtomicIsWeak(node) __builtin_ast_atomic_is_weak(node)
+/*! @def CasAddr
+ * @brief Return the address operand of an NK_CAS.
+ * @param node An NK_CAS node. */
+#define CasAddr(node) __builtin_ast_cas_addr(node)
+/*! @def CasExpected
+ * @brief Return the expected-value operand of an NK_CAS.
+ * @param node An NK_CAS node. */
+#define CasExpected(node) __builtin_ast_cas_expected(node)
+/*! @def CasDesired
+ * @brief Return the desired-value operand of an NK_CAS.
+ * @param node An NK_CAS node. */
+#define CasDesired(node) __builtin_ast_cas_desired(node)
+/*! @def FenceIsSignal
+ * @brief Return whether an NK_FENCE is a signal fence.
+ * @param node An NK_FENCE node. */
+#define FenceIsSignal(node) __builtin_ast_fence_is_signal(node)
+/*! @def BitopOp
+ * @brief Return the operation (AST_BITOP_*) of an NK_BITOP.
+ * @param node An NK_BITOP node. */
+#define BitopOp(node) __builtin_ast_bitop_op(node)
+/*! @def BitopWidth
+ * @brief Return the bit width of an NK_BITOP's builtin.
+ * @param node An NK_BITOP node. */
+#define BitopWidth(node) __builtin_ast_bitop_width(node)
+/*! @def OverflowOp
+ * @brief Return the operation (AST_OVERFLOW_*) of an NK_OVERFLOW_ARITH.
+ * @param node An NK_OVERFLOW_ARITH node. */
+#define OverflowOp(node) __builtin_ast_overflow_op(node)
+/*! @def OverflowResultPtr
+ * @brief Return the result pointer of an NK_OVERFLOW_ARITH.
+ * @param node An NK_OVERFLOW_ARITH node. */
+#define OverflowResultPtr(node) __builtin_ast_overflow_result_ptr(node)
 /*! @def GetAttrTargetKind
  * @brief Return the kind of declaration decorated by a custom attribute.
  * @param target The attribute target to inspect. */

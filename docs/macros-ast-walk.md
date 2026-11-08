@@ -13,7 +13,8 @@ Node *count_statements(void) {
 ```
 
 Every accessor accepts `NULL` and a node of the wrong kind, and answers `NULL`
-or `0`. Walking never changes the tree.
+or `0` (`AtomicOrder` and `AtomicFailOrder` answer -1). Walking never changes
+the tree.
 
 ## Get a function
 
@@ -40,6 +41,10 @@ block; parameters and compiler temporaries are left out.
 | Literals | `NodeIntValue(n)`, `NodeFloatValue(n)` |
 | Variables and members | `NodeVarObj(n)`, `NodeMember(n)` |
 | Switch | `SwitchCaseCount(n)`, `SwitchCaseAt(n, i)`, `SwitchDefault(n)`, `CaseBegin(c)`, `CaseEnd(c)`, `CaseBody(c)` |
+| Goto, break, continue, labels | `LabelName(n)`, `GotoJumpKind(n)` |
+| Inline asm | `AsmTemplate(n)`, `AsmOperandConstraint(n, i)`, `AsmClobberAt(n, i)` and more ([asm](#jumps-asm-atomics-and-bit-operations)) |
+| Atomics and fences | `AtomicOrder(n)`, `AtomicIsWeak(n)`, `CasAddr(n)`, `FenceIsSignal(n)` |
+| Bit operations, checked arithmetic | `BitopOp(n)`, `BitopWidth(n)`, `OverflowOp(n)`, `OverflowResultPtr(n)` |
 | Comptime calls not yet expanded | `MacroCallName(n)`, `MacroCallArgCount(n)`, `MacroCallArgAt(n, i)` |
 | Drop implicit conversions | `StripImplicit(n)` |
 
@@ -64,6 +69,16 @@ Which operands each kind uses:
 | `NK_BLOCK`, `NK_STMT_EXPR` | the block accessors |
 | `NK_VAR` | `NodeVarObj` |
 | `NK_NUM` | `NodeIntValue` or `NodeFloatValue`, by `GetNodeType` |
+| `NK_GOTO` | `LabelName` (`NULL` for `break` and `continue`), `GotoJumpKind` |
+| `NK_LABEL` | `LabelName`, `NodeLhs` (the labelled statement) |
+| `NK_LABEL_VAL` (`&&name`) | `LabelName` |
+| `NK_GOTO_EXPR` (`goto *p`) | `NodeLhs` (the target address) |
+| `NK_ASM` | the asm accessors |
+| `NK_ALOAD`, `NK_ASTORE`, `NK_EXCH` | `NodeLhs` (the address), `NodeRhs` (the value, not for loads), `AtomicOrder` |
+| `NK_CAS` | `CasAddr`, `CasExpected`, `CasDesired`, `AtomicOrder`, `AtomicFailOrder`, `AtomicIsWeak` |
+| `NK_FENCE` | `NodeLhs` (the order), `FenceIsSignal` |
+| `NK_BITOP` | `NodeLhs` (the argument), `BitopOp`, `BitopWidth` |
+| `NK_OVERFLOW_ARITH` | `NodeLhs`, `NodeRhs`, `OverflowResultPtr`, `OverflowOp` |
 
 `SwitchCaseAt` lists cases in source order. A `case 5 ... 9:` range has
 different `CaseBegin` and `CaseEnd`; a default label comes from
@@ -84,9 +99,47 @@ A walker sees the tree code generation sees, not the source text.
 written in the source. It also unwraps a call whose arguments were hoisted
 into temporaries, so `CallCallee` and `CallArgAt` work on either form.[^wrap]
 
-Node kinds not listed above (`NK_GOTO`, `NK_LABEL`, `NK_ASM`, atomics, and so
-on) are named in the `NodeKind` enum and readable with `GetNodeKind`. Their
-details have no accessors.
+## Jumps, asm, atomics and bit operations
+
+`break` and `continue` are `NK_GOTO` nodes with no label name:
+
+```c
+if (GetNodeKind(n) == NK_GOTO) {
+    switch (GotoJumpKind(n)) {
+        case AST_JUMP_GOTO:     /* LabelName(n) is the target */ break;
+        case AST_JUMP_BREAK:    break;
+        case AST_JUMP_CONTINUE: break;
+    }
+}
+```
+
+Inline asm operands are numbered outputs first, then inputs. An output written
+`+r` counts as an output.
+
+| Task | API |
+|------|-----|
+| Template | `AsmTemplate(n)` |
+| Counts | `AsmOutputCount(n)`, `AsmInputCount(n)`, `AsmClobberCount(n)`, `AsmGotoLabelCount(n)` |
+| Operand `i` | `AsmOperandConstraint(n, i)`, `AsmOperandName(n, i)` (`NULL` when unnamed), `AsmOperandExpr(n, i)` |
+| Clobber `i`, `asm goto` label `i` | `AsmClobberAt(n, i)`, `AsmGotoLabelAt(n, i)` |
+| Qualifiers | `AsmIsVolatile(n)`, `AsmIsGoto(n)` |
+
+`AtomicOrder` and `AtomicFailOrder` return the `__ATOMIC_*` value, 0 (relaxed)
+to 5 (seq_cst). A memory order that is not a constant, and a builtin without
+one such as `__builtin_atomic_load`, read as 5. A node of any other kind
+returns -1, because 0 is a valid order.
+
+`BitopOp` returns an `AST_BITOP_*` value and `OverflowOp` an `AST_OVERFLOW_*`
+value; both return 0 for another kind.
+
+| `BitopOp` | `BitopWidth` |
+|-----------|--------------|
+| `AST_BITOP_CLZ`, `_CTZ`, `_FFS` | 32 for `__builtin_clz`, 64 for `__builtin_clzll` |
+| `AST_BITOP_BSWAP` | 16, 32 or 64 |
+| `AST_BITOP_POPCOUNT`, `_PARITY` | 0 (the width of the argument is `GetNodeType(NodeLhs(n))`) |
+
+`AST_OVERFLOW_ADD`, `_SUB` and `_MUL` are `__builtin_add_overflow` and its two
+siblings; the result pointer is the third argument.
 
 ## Comptime calls inside a body
 

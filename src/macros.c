@@ -1349,8 +1349,13 @@ static const char *reflection_enum_names[] = {
     "NK_UNREACHABLE", "NK_BITOP", "NK_OVERFLOW_ARITH", "NK_INIT_SPLICE",
     "NK_ALOAD", "NK_ASTORE", "NK_RETURN_ADDR", "NK_DYNOBJ_SIZE",
     "NK_CONVERTVECTOR", "NK_DECIMAL_TO_CHARS", "NK_FENCE", "NK_QUOTE_LAZY",
-    "NK_DYNAMIC_CHECK", "NK_VA_NAMED_COUNT", NULL};
-#define REFLECTION_ENUM_NAMES_COUNT 84
+    "NK_DYNAMIC_CHECK", "NK_VA_NAMED_COUNT",
+    // AstJumpKind, AstBitop, AstOverflowOp
+    "AST_JUMP_GOTO", "AST_JUMP_BREAK", "AST_JUMP_CONTINUE", "AST_BITOP_CLZ",
+    "AST_BITOP_CTZ", "AST_BITOP_POPCOUNT", "AST_BITOP_PARITY", "AST_BITOP_FFS",
+    "AST_BITOP_BSWAP", "AST_OVERFLOW_ADD", "AST_OVERFLOW_SUB",
+    "AST_OVERFLOW_MUL", NULL};
+#define REFLECTION_ENUM_NAMES_COUNT 96
 _Static_assert(sizeof(reflection_enum_names) / sizeof(*reflection_enum_names) ==
                    REFLECTION_ENUM_NAMES_COUNT,
                "REFLECTION_ENUM_NAMES_COUNT must match reflection_enum_names");

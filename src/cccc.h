@@ -2218,6 +2218,12 @@ typedef struct AsmOperand {
     char *name; // symbolic `[name]`, NULL if absent
 } AsmOperand;
 
+typedef enum {
+    JUMP_GOTO = 0,
+    JUMP_BREAK,
+    JUMP_CONTINUE,
+} JumpKind;
+
 enum {
     ASM_VOLATILE = 1 << 0,
     ASM_INLINE   = 1 << 1,
@@ -2411,6 +2417,8 @@ struct Node {
     uint8_t atomic_mo, atomic_mo_fail;
     uint8_t asm_flags;
     bool    atomic_weak : 1;
+    // ND_GOTO: which statement spelled it (a JumpKind).
+    uint8_t jump_kind : 2;
 
     // Function call
     bool pass_by_stack  : 1;

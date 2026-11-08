@@ -1243,6 +1243,182 @@ Node *__builtin_ast_node_strip_implicit(Node *node) {
     return node;
 }
 
+// Jumps and labels.
+
+CC_BUILTIN_CSTR(__builtin_ast_label_name, 1);
+const char *__builtin_ast_label_name(Node *node) {
+    return node && (node->kind == ND_GOTO || node->kind == ND_LABEL ||
+                    node->kind == ND_LABEL_VAL)
+               ? node_ctl(node)->label
+               : NULL;
+}
+
+// Public AST_JUMP_* is JumpKind + 1.
+CC_BUILTIN(__builtin_ast_goto_jump_kind, 1);
+int __builtin_ast_goto_jump_kind(Node *node) {
+    return node && node->kind == ND_GOTO ? node->jump_kind + 1 : 0;
+}
+
+// Inline asm.
+
+static const NodeAsm *ast_asm(Node *node) {
+    return node && node->kind == ND_ASM ? node_asm(node) : NULL;
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_asm_template, 1);
+const char *__builtin_ast_asm_template(Node *node) {
+    const NodeAsm *a = ast_asm(node);
+    return a ? a->asm_str : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_asm_output_count, 1);
+int __builtin_ast_asm_output_count(Node *node) {
+    const NodeAsm *a = ast_asm(node);
+    return a ? a->asm_n_outputs : 0;
+}
+
+CC_BUILTIN(__builtin_ast_asm_input_count, 1);
+int __builtin_ast_asm_input_count(Node *node) {
+    const NodeAsm *a = ast_asm(node);
+    return a ? a->asm_n_inputs : 0;
+}
+
+static const AsmOperand *ast_asm_operand(Node *node, int index) {
+    const NodeAsm *a = ast_asm(node);
+    if (!a || index < 0 || index >= a->asm_n_outputs + a->asm_n_inputs)
+        return NULL;
+    return &a->asm_ops[index];
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_asm_operand_constraint, 2);
+const char *__builtin_ast_asm_operand_constraint(Node *node, int index) {
+    const AsmOperand *op = ast_asm_operand(node, index);
+    return op ? op->constraint : NULL;
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_asm_operand_name, 2);
+const char *__builtin_ast_asm_operand_name(Node *node, int index) {
+    const AsmOperand *op = ast_asm_operand(node, index);
+    return op ? op->name : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_asm_operand_expr, 2);
+Node *__builtin_ast_asm_operand_expr(Node *node, int index) {
+    return ast_asm_operand(node, index) ? ast_list_at(node->args, index) : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_asm_clobber_count, 1);
+int __builtin_ast_asm_clobber_count(Node *node) {
+    const NodeAsm *a = ast_asm(node);
+    return a ? a->asm_n_clobbers : 0;
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_asm_clobber_at, 2);
+const char *__builtin_ast_asm_clobber_at(Node *node, int index) {
+    const NodeAsm *a = ast_asm(node);
+    return a && index >= 0 && index < a->asm_n_clobbers ? a->asm_clobbers[index]
+                                                        : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_asm_is_volatile, 1);
+bool __builtin_ast_asm_is_volatile(Node *node) {
+    return ast_asm(node) && (node->asm_flags & ASM_VOLATILE);
+}
+
+CC_BUILTIN(__builtin_ast_asm_is_goto, 1);
+bool __builtin_ast_asm_is_goto(Node *node) {
+    return ast_asm(node) && (node->asm_flags & ASM_GOTO);
+}
+
+CC_BUILTIN(__builtin_ast_asm_goto_label_count, 1);
+int __builtin_ast_asm_goto_label_count(Node *node) {
+    const NodeAsm *a = ast_asm(node);
+    return a ? ast_list_count(a->asm_labels) : 0;
+}
+
+CC_BUILTIN_CSTR(__builtin_ast_asm_goto_label_at, 2);
+const char *__builtin_ast_asm_goto_label_at(Node *node, int index) {
+    const NodeAsm *a = ast_asm(node);
+    Node          *g = a ? ast_list_at(a->asm_labels, index) : NULL;
+    return g ? node_ctl(g)->label : NULL;
+}
+
+// Atomics. Orders are the __ATOMIC_* values; the node stores order + 1, with
+// 0 meaning none recorded, which is seq_cst.
+
+static bool ast_is_atomic(Node *node) {
+    return node && (node->kind == ND_CAS || node->kind == ND_EXCH ||
+                    node->kind == ND_ALOAD || node->kind == ND_ASTORE);
+}
+
+static int ast_atomic_order(uint8_t stored) {
+    return stored ? stored - 1 : 5;
+}
+
+CC_BUILTIN(__builtin_ast_atomic_order, 1);
+int __builtin_ast_atomic_order(Node *node) {
+    return ast_is_atomic(node) ? ast_atomic_order(node->atomic_mo) : -1;
+}
+
+CC_BUILTIN(__builtin_ast_atomic_fail_order, 1);
+int __builtin_ast_atomic_fail_order(Node *node) {
+    return node && node->kind == ND_CAS ? ast_atomic_order(node->atomic_mo_fail)
+                                        : -1;
+}
+
+CC_BUILTIN(__builtin_ast_atomic_is_weak, 1);
+bool __builtin_ast_atomic_is_weak(Node *node) {
+    return node && node->kind == ND_CAS && node->atomic_weak;
+}
+
+CC_BUILTIN(__builtin_ast_cas_addr, 1);
+Node *__builtin_ast_cas_addr(Node *node) {
+    return node && node->kind == ND_CAS ? node_atom(node)->cas_addr : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_cas_expected, 1);
+Node *__builtin_ast_cas_expected(Node *node) {
+    return node && node->kind == ND_CAS ? node_atom(node)->cas_old : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_cas_desired, 1);
+Node *__builtin_ast_cas_desired(Node *node) {
+    return node && node->kind == ND_CAS ? node_atom(node)->cas_new : NULL;
+}
+
+CC_BUILTIN(__builtin_ast_fence_is_signal, 1);
+bool __builtin_ast_fence_is_signal(Node *node) {
+    return node && node->kind == ND_FENCE && node->val == 1;
+}
+
+// Bit operations and checked arithmetic. Public AST_BITOP_* and
+// AST_OVERFLOW_* are the parser's selector + 1: 0 is not this kind.
+
+CC_BUILTIN(__builtin_ast_bitop_op, 1);
+int __builtin_ast_bitop_op(Node *node) {
+    return node && node->kind == ND_BITOP ? (int)(node->val >> 8) + 1 : 0;
+}
+
+// BSWAP records bytes, popcount/parity record nothing.
+CC_BUILTIN(__builtin_ast_bitop_width, 1);
+int __builtin_ast_bitop_width(Node *node) {
+    if (!node || node->kind != ND_BITOP)
+        return 0;
+    int op = (int)(node->val >> 8), width = (int)(node->val & 0xff);
+    return op == 5 ? width * 8 : width;
+}
+
+CC_BUILTIN(__builtin_ast_overflow_op, 1);
+int __builtin_ast_overflow_op(Node *node) {
+    return node && node->kind == ND_OVERFLOW_ARITH ? (int)node->val + 1 : 0;
+}
+
+CC_BUILTIN(__builtin_ast_overflow_result_ptr, 1);
+Node *__builtin_ast_overflow_result_ptr(Node *node) {
+    return node && node->kind == ND_OVERFLOW_ARITH ? node_atom(node)->cas_addr
+                                                   : NULL;
+}
+
 CC_BUILTIN(__builtin_attr_target_kind, 1);
 int __builtin_attr_target_kind(AttrTarget *target) {
     return target ? target->kind : 0;

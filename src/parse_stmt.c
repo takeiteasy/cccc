@@ -1162,6 +1162,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             vm->compiler.brk_label == vm->compiler.omp_loop_brk)
             error_tok(vm, tok, "break statement used with OpenMP for loop");
         Node *node                 = new_node(vm, ND_GOTO, tok);
+        node->jump_kind                      = JUMP_BREAK;
         node_ctl_mut(vm, node)->unique_label = vm->compiler.brk_label;
         node_ctl_mut(vm, node)->cleanup_target_depth =
             vm->compiler.brk_cleanup_depth;
@@ -1194,6 +1195,7 @@ Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
             return new_node(vm, ND_NULL_EXPR, tok);
         }
         Node *node                 = new_node(vm, ND_GOTO, tok);
+        node->jump_kind                      = JUMP_CONTINUE;
         node_ctl_mut(vm, node)->unique_label = vm->compiler.cont_label;
         node_ctl_mut(vm, node)->cleanup_target_depth =
             vm->compiler.cont_cleanup_depth;
