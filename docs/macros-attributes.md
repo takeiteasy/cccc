@@ -161,5 +161,9 @@ declarations of the function, including the definition, inherit it, and
 repeating the same attribute name on the same parameter is a compile error. A
 later declaration may add an attribute to a parameter that has none.
 
+`ParamAttrArg` on a `@default` that names an earlier parameter returns a node
+that reads that parameter; use it to inspect the default, not to splice it into
+a body.
+
 Parameter attributes are rejected on function pointers, typedefs, nested
 parameter lists and block-scope declarations.

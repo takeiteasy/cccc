@@ -889,6 +889,24 @@ static Type *func_params(VirtualMachine *vm, Token **rest, Token *tok,
             type_attrs_mut(vm, cur)->custom_attrs = param_uses;
     }
 
+    int pos = 1;
+    for (Type *p = head.next; p; p = p->next, pos++)
+        for (CustomAttrUse *use = type_attrs(p)->custom_attrs; use;
+             use                = use->next) {
+            if (strcmp(use->name, "default"))
+                continue;
+            use->params = head.next;
+            Token *bad;
+            int    bad_index;
+            param_default_scan(use, head.next, pos, &bad, &bad_index, NULL);
+            if (bad)
+                error_tok(vm, bad,
+                          bad_index == pos
+                              ? "a @default cannot name its own parameter"
+                              : "a @default can only name an earlier "
+                                "parameter");
+        }
+
     vm->compiler.proto_params--;
     leave_scope(vm);
 

@@ -544,6 +544,8 @@ bool objsize_peel_offset_chain(VirtualMachine *vm, Node *node, Obj **out_base,
 bool objsize_resolve_ptr(VirtualMachine *vm, Node *node, ObjSizeInfo *r);
 bool objsize_resolve_subobject(VirtualMachine *vm, Node *node, Member **mem,
                                Node **base, Node **offset);
+int param_default_scan(CustomAttrUse *use, Type *params, int pos, Token **bad,
+                       int *bad_index, bool *named);
 Token *parse_custom_attr_args(VirtualMachine *vm, Token *name_tok, Token *tok,
                               Node **args, int *arg_count);
 void merge_param_names(Obj *fn, Type *decl_ty);

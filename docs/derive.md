@@ -255,18 +255,42 @@ declaration that writes them, so `int f(int, int);` followed by
 
 The default is written in the declaration and evaluated at each call that
 omits it, in the caller's function but with file-scope names only, so a local
-of the caller never changes its meaning.[^default-eval] A default cannot name
-another parameter. On a variadic function, defaults fill only the fixed
-parameters.
+of the caller never changes its meaning.[^default-eval] On a variadic function,
+defaults fill only the fixed parameters.
+
+A default can name an earlier parameter, and sees the value the call gives it:
+
+```c
+int box(int w, int h @default(w * 2));
+
+box(10);          // box(10, 20)
+box(10, 5);       // box(10, 5)
+box(.w = 3);      // box(3, 6)
+```
+
+Each earlier argument is evaluated once, however often the default names it.
+A keyed or defaulted earlier argument counts as its resolved value.
+
+| Rule | Example |
+|---|---|
+| Only earlier parameters are visible | `int f(int a @default(b), int b @default(0))` is an error |
+| A parameter does not name itself | `int f(int a @default(a))` is an error |
+| Constants declared in the parameter list are not visible | `int f(enum { A, B } v @default(B))` is an error |
+| Names resolve against the declaration the default is written on | `int f(int x, int y); int f(int a, int b @default(a));` |
+| Names declared before the declaration work, enum constants included | `int paint(enum Color c @default(GREEN))` |
+| A checked pointer parameter cannot be named | `int g(int *[[cccc::array, cccc::count(n)]] p, int n, int q @default(p[0]))` is an error at the call |
+| The call needs a function to run in | `int g = box(1);` is an error at file scope, `sizeof(box(1))` is fine |
 
 The attribute is readable through `ParamHasAttr` and `ParamAttrArg`, see
 [macros-attributes.md](macros-attributes.md#parameter-attributes).
 
 [^default-eval]: The default's tokens are parsed again at the call, so a
     compound literal gets fresh storage per call and `@default(tick())` runs
-    once per call. Argument evaluation order is unspecified, as in C, and
-    keyed arguments are not evaluated in the order written. Naming an earlier
-    parameter is tracked in #1940.
+    once per call. Keyed arguments are evaluated in parameter order, not the order
+    written. When a default names an earlier parameter, the arguments up to the
+    last one it names are stored in temporaries first, left to right, and the
+    call reads them back. An argument for a checked pointer parameter stays in
+    the call, where its bounds are verified, so it is evaluated after those.
 
 ### Member initializers
 

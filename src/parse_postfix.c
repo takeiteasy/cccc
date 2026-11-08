@@ -1414,25 +1414,146 @@ static CustomAttrUse *param_default_use(Type *param) {
     return NULL;
 }
 
+// Scans a parameter's @default tokens for names of `params`, skipping member
+// names. Returns the highest 1-based index named and marks each one in `named`;
+// `bad` and `bad_index` take the first token naming parameter `pos` or a later
+// one (NULL/0 when none).
+int param_default_scan(CustomAttrUse *use, Type *params, int pos, Token **bad,
+                       int *bad_index, bool *named) {
+    int highest = 0;
+    if (bad)
+        *bad = NULL;
+    if (bad_index)
+        *bad_index = 0;
+    if (!params)
+        return 0;
+    Token *prev  = use->tok->next;
+    int    depth = 0;
+    for (Token *tok = prev->next; tok->kind != TK_EOF;
+         prev = tok, tok = tok->next) {
+        if (equal(tok, "("))
+            depth++;
+        else if (equal(tok, ")") && depth-- == 0)
+            break;
+        if (tok->kind != TK_IDENT || equal(prev, ".") || equal(prev, "->"))
+            continue;
+        int i = 1;
+        for (Type *p = params; p; p = p->next, i++) {
+            if (!token_is_name(tok, p->name))
+                continue;
+            if (i > highest)
+                highest = i;
+            if (named)
+                named[i] = true;
+            if (i >= pos && bad && !*bad) {
+                *bad = tok;
+                if (bad_index)
+                    *bad_index = i;
+            }
+            break;
+        }
+    }
+    return highest;
+}
+
+// The earlier parameters named by the defaults a call will use, as the highest
+// 1-based position: those arguments are bound to temporaries.
+static int default_hoist_extent(KeyedArg *keyed, Type *param, int pos,
+                                bool *named) {
+    int extent = 0;
+    for (; param; param = param->next, pos++) {
+        KeyedArg *k = keyed;
+        while (k && !token_is_name(k->key, param->name))
+            k = k->next;
+        if (k)
+            continue;
+        CustomAttrUse *use = param_default_use(param);
+        if (!use)
+            break;
+        int highest =
+            param_default_scan(use, use->params, pos, NULL, NULL, named);
+        if (highest > extent)
+            extent = highest;
+    }
+    return extent;
+}
+
+static Obj *default_temp(VirtualMachine *vm, Type *ty, Token *tok) {
+    if (vm->compiler.current_fn)
+        return new_lvar(vm, "", 0, ty);
+    if (!vm->compiler.unevaluated)
+        error_tok(vm, tok,
+                  "a @default that names a parameter needs a call inside a "
+                  "function");
+    Obj *obj = arena_alloc(&vm->compiler.parser_arena, sizeof(Obj));
+    memset(obj, 0, sizeof(Obj));
+    obj->ty       = ty;
+    obj->align    = ty->align;
+    obj->is_local = true;
+    return obj;
+}
+
+// Stores an argument in a temporary ahead of the call and returns a read of it.
+static Node *hoist_arg(VirtualMachine *vm, Obj **temp, Node *arg,
+                       Node **prelude, Token *tok) {
+    add_type(vm, arg);
+    Type *ty        = copy_type(vm, arg->ty);
+    ty->is_const    = false;
+    ty->is_volatile = false;
+    ty->name        = NULL;
+    *temp           = default_temp(vm, ty, tok);
+    Node *store =
+        new_binary(vm, ND_ASSIGN, new_var_node(vm, *temp, tok), arg, tok);
+    *prelude =
+        *prelude ? new_binary(vm, ND_COMMA, *prelude, store, tok) : store;
+    Node *read = new_var_node(vm, *temp, tok);
+    add_type(vm, read);
+    return read;
+}
+
+// A checked pointer argument stays in the call, where its bounds are verified,
+// so a default cannot name one.
+static bool hoists_param(VirtualMachine *vm, Type *param, bool named,
+                         Token *tok) {
+    if (param->checked_kind == CHECKED_NONE)
+        return true;
+    if (named)
+        error_tok(vm, tok,
+                  "a @default cannot name the checked pointer parameter "
+                  "'%.*s'",
+                  param->name->len, param->name->loc);
+    return false;
+}
+
 // Re-parses a parameter's @default argument for a call that omits it. Names
 // resolve at file scope, so a local of the caller cannot change the value; a
-// compound literal gets its storage in the caller.
-static Node *parse_param_default(VirtualMachine *vm, CustomAttrUse *use) {
+// compound literal gets its storage in the caller. The parameters before `pos`
+// that were bound to `temps` are visible by name.
+static Node *parse_param_default(VirtualMachine *vm, CustomAttrUse *use,
+                                 Obj **temps, int pos) {
     Scope *saved = vm->compiler.scope;
     Scope *file  = saved;
     while (file->next)
         file = file->next;
-    bool in_function   = saved->next != NULL;
+    bool in_function = saved->next != NULL;
+    bool bound       = false;
+    int  i           = 1;
+    for (Type *p = use->params; p && i < pos; p = p->next, i++)
+        bound |= p->name && temps[i];
     vm->compiler.scope = file;
-    if (in_function)
+    if (in_function || bound)
         enter_scope(vm);
+    i = 1;
+    for (Type *p = use->params; p && i < pos; p = p->next, i++)
+        if (p->name && temps[i])
+            push_scope(vm, p->name->loc, p->name->len)->var = temps[i];
 
     Token *tok = use->tok->next->next;
     Node  *arg = assign(vm, &tok, tok);
     if (!equal(tok, ")"))
         error_tok(vm, tok, "@default takes one default value expression");
 
-    if (in_function)
+    if (in_function || bound)
         leave_scope(vm);
     vm->compiler.scope = saved;
     add_type(vm, arg);
@@ -1441,10 +1562,13 @@ static Node *parse_param_default(VirtualMachine *vm, CustomAttrUse *use) {
 
 // Supplies the parameters a call leaves out from its keyed arguments and from
 // the parameters' @default values, checking each against its parameter.
-// Stops at the first parameter with neither, which finish_call reports.
+// Stops at the first parameter with neither, which finish_call reports. The
+// arguments up to the last parameter a default names go through temporaries
+// (`*prelude`), in parameter order.
 static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
-                              Type *ty, Type **param_ty, int *index, Node **cur,
-                              KeyedArg *keyed, bool direct, Token *tok) {
+                              Type *ty, Type **param_ty, int *index, Node *head,
+                              Node **cur, KeyedArg *keyed, bool direct,
+                              Token *tok, Node **prelude) {
     if (keyed && !direct)
         error_tok(vm, keyed->key,
                   "keyed arguments need a direct call to a function");
@@ -1467,7 +1591,40 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
                           k->key->len, k->key->loc);
     }
 
+    int nparams = 0;
+    for (Type *p = ty->params; p; p = p->next)
+        nparams++;
+    Obj **temps =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Obj *) * (nparams + 2));
+    bool *named =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(bool) * (nparams + 2));
+    memset(temps, 0, sizeof(Obj *) * (nparams + 2));
+    memset(named, 0, sizeof(bool) * (nparams + 2));
+    int extent =
+        direct ? default_hoist_extent(keyed, *param_ty, *index, named) : 0;
+    if (extent) {
+        Node **link = &head->next;
+        Type  *p    = ty->params;
+        for (int pos = 1; *link && pos < *index && pos <= extent;
+             pos++, p = p->next) {
+            if (hoists_param(vm, p, named[pos], tok)) {
+                Node *arg  = *link;
+                Node *next = arg->next;
+                arg->next  = NULL;
+                Node *read = hoist_arg(vm, &temps[pos], arg, prelude, tok);
+                read->next = next;
+                *link      = read;
+            }
+            link = &(*link)->next;
+        }
+        Node *tail = head;
+        while (tail->next)
+            tail = tail->next;
+        *cur = tail;
+    }
+
     while (*param_ty) {
+        int   pos = *index;
         Node *arg = NULL;
         for (KeyedArg *k = keyed; k && !arg; k = k->next)
             if (token_is_name(k->key, (*param_ty)->name))
@@ -1475,14 +1632,32 @@ static void fill_omitted_args(VirtualMachine *vm, CheckedCallWatch *watch,
         if (!arg && direct) {
             CustomAttrUse *use = param_default_use(*param_ty);
             if (use)
-                arg = parse_param_default(vm, use);
+                arg = parse_param_default(vm, use, temps, pos);
         }
         if (!arg)
             return;
-        arg = check_call_arg(vm, watch, ty, param_ty, index, arg, tok);
+        Type *param = *param_ty;
+        arg         = check_call_arg(vm, watch, ty, param_ty, index, arg, tok);
+        if (arg && pos <= extent && hoists_param(vm, param, named[pos], tok))
+            arg = hoist_arg(vm, &temps[pos], arg, prelude, tok);
         if (arg)
             *cur = (*cur)->next = arg;
     }
+}
+
+// Puts `prelude` ahead of a call, in the call's own argument prelude when it
+// has one.
+static Node *prepend_call_prelude(VirtualMachine *vm, Node *call, Node *prelude,
+                                  Token *tok) {
+    if (call->kind == ND_COMMA && call->call_prelude) {
+        call->lhs = new_binary(vm, ND_COMMA, prelude, call->lhs, tok);
+        add_type(vm, call);
+        return call;
+    }
+    Node *wrapped         = new_binary(vm, ND_COMMA, prelude, call, tok);
+    wrapped->call_prelude = true;
+    add_type(vm, wrapped);
+    return wrapped;
 }
 
 // `recv`, when set, is an already-built first argument (a method receiver).
@@ -1551,12 +1726,15 @@ static Node *funcall(VirtualMachine *vm, Token **rest, Token *tok, Node *fn,
         cur = cur->next = arg;
     }
 
+    Node *hoisted = NULL;
     if (!deferred_splice && (keyed || (param_ty && direct)))
-        fill_omitted_args(vm, &watch, ty, &param_ty, &index, &cur, keyed,
-                          direct, tok);
+        fill_omitted_args(vm, &watch, ty, &param_ty, &index, &head, &cur, keyed,
+                          direct, tok, &hoisted);
 
     Node *node = finish_call(vm, fn, ty, head.next, param_ty, tok,
                              deferred_splice, &watch);
+    if (hoisted)
+        node = prepend_call_prelude(vm, node, hoisted, tok);
     *rest = skip(vm, tok, ")");
     return node;
 }
@@ -4404,9 +4582,15 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);
-        if (vm->compiler.in_param_default && sc && sc->var &&
-            sc->var->is_proto_param)
-            error_tok(vm, tok, "a @default cannot name another parameter");
+        if (vm->compiler.in_param_default && sc && sc->enum_ty) {
+            Scope *file = vm->compiler.scope;
+            while (file->next)
+                file = file->next;
+            if (scope_find_var(file, tok->loc, tok->len) != sc)
+                error_tok(vm, tok,
+                          "a @default cannot use a name declared in the "
+                          "parameter list");
+        }
         if (vm->compiler.omp_frames && !vm->compiler.unevaluated)
             sc = omp_note_use(vm, tok, sc);
 

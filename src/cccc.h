@@ -2923,6 +2923,7 @@ struct CustomAttrUse {
     Token         *tok;
     Node          *args;
     int            arg_count;
+    Type          *params; // a parameter @default: the list it was written in
     CustomAttrUse *next;
 };
 

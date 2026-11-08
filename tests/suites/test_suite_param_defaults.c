@@ -126,3 +126,141 @@ void test_function_pointers_take_every_argument(void) {
     int (*fp)(int, int) = area;
     AssertEq(fp(5, 6), 506);
 }
+
+int log_[8];
+int nlog;
+
+int note(int v) {
+    log_[nlog++] = v;
+    return v;
+}
+
+int twice(int a, int b @ default(a * 2)) {
+    return a * 100 + b;
+}
+
+[[cccc::test]]
+void test_default_names_an_earlier_parameter(void) {
+    AssertEq(twice(3), 306);
+    AssertEq(twice(3, 1), 301);
+    AssertEq(twice(.a = 4), 408);
+}
+
+int once(int a, int b @ default(a + a + a)) {
+    return b;
+}
+
+[[cccc::test]]
+void test_earlier_argument_is_evaluated_once(void) {
+    ticks = 0;
+    AssertEq(once(tick()), 3);
+    AssertEq(ticks, 1);
+}
+
+int chain(int a @ default(1), int b @ default(a + 1), int c @ default(b + 1)) {
+    return a * 100 + b * 10 + c;
+}
+
+[[cccc::test]]
+void test_defaults_chain_through_defaulted_parameters(void) {
+    AssertEq(chain(), 123);
+    AssertEq(chain(5), 567);
+    AssertEq(chain(.b = 9), 200);
+}
+
+int widths(int a, int n @ default(sizeof(a))) {
+    return n;
+}
+
+int pair_sum(Pair p, int k @ default(p.a + p.b)) {
+    return k;
+}
+
+int with_literal(int a, Pair p @ default((Pair){.a = a, .b = 2})) {
+    return p.a * 10 + p.b;
+}
+
+[[cccc::test]]
+void test_default_uses_earlier_parameter_in_other_forms(void) {
+    AssertEq(widths(1), 4);
+    AssertEq(pair_sum((Pair){3, 4}), 7);
+    AssertEq(with_literal(4), 42);
+}
+
+int sum3(int a, int b, int c @ default(a + b + a)) {
+    return c;
+}
+
+[[cccc::test]]
+void test_arguments_keep_left_to_right_order(void) {
+    nlog = 0;
+    AssertEq(sum3(note(1), note(2)), 4);
+    AssertEq(nlog, 2);
+    AssertEq(log_[0], 1);
+    AssertEq(log_[1], 2);
+}
+
+Pair make_pair(int a, int b @ default(a + 1)) {
+    return (Pair){a, b};
+}
+
+[[cccc::method(Vec2)]]
+int scaled(Vec2 *self, int dx @ default(self->x * 10)) {
+    return dx;
+}
+
+[[cccc::test]]
+void test_struct_return_and_receiver_defaults(void) {
+    AssertEq(make_pair(5).b, 6);
+    Vec2 v = {2, 3};
+    AssertEq(v.scaled(), 20);
+}
+
+// The default names the declaration's parameters, not the definition's.
+int renamed(int x, int y);
+int renamed(int a, int b @ default(a + 1));
+int renamed(int p, int q) {
+    return q;
+}
+
+[[cccc::test]]
+void test_default_names_come_from_its_declaration(void) {
+    AssertEq(renamed(41), 42);
+}
+
+enum Color { RED, GREEN = 7, BLUE };
+typedef enum { SMALL = 1, BIG = 40 } Size;
+
+int paint(enum Color c @ default(GREEN)) {
+    return c;
+}
+
+int pick(Size s @ default(BIG),
+         int  n @ default(BLUE * 2 + (int)sizeof(enum Color))) {
+    return s + n;
+}
+
+[[cccc::test]]
+void test_enum_defaults(void) {
+    AssertEq(paint(), GREEN);
+    AssertEq(paint(.c = BLUE), 8);
+    AssertEq(pick(), 40 + 20);
+    AssertEq(pick(SMALL), 1 + 20);
+}
+
+const char *join(const char *a @ default("x"
+                                         "y")) {
+    return a;
+}
+
+[[cccc::test]]
+void test_concatenated_string_default(void) {
+    AssertEq(join()[1], 'y');
+}
+
+int file_scope_size = sizeof(widths(1));
+
+[[cccc::test]]
+void test_naming_default_in_unevaluated_call(void) {
+    AssertEq(file_scope_size, 4);
+}
