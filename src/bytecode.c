@@ -18,6 +18,7 @@
 */
 
 #include "./internal.h"
+#include <pthread.h>
 
 static int source_index_cmp(const void *a, const void *b) {
     const SourceIndex *sa = (const SourceIndex *)a;
@@ -100,6 +101,51 @@ void cc_build_source_index(VirtualMachine *vm) {
     vm->dbg.source_index_count = dedup_count;
 }
 
+// Codegen recurses once per expression level and a sanitizer build's gen_expr
+// frame is tens of KB, so a deep expression overflows the 8 MB main stack.
+// Generate on a thread with a large lazily committed stack. A codegen error
+// longjmps to a landing pad on that thread and is re-raised after the join.
+#define CODEGEN_STACK_BYTES ((size_t)256 << 20)
+
+typedef struct {
+    VirtualMachine *vm;
+    Obj            *prog;
+    volatile bool   failed;
+} GenJob;
+
+static void *gen_thread(void *arg) {
+    GenJob *job = arg;
+    jmp_buf jb;
+    if (job->vm->error_jmp_buf)
+        job->vm->error_jmp_buf = &jb;
+    if (setjmp(jb) == 0)
+        gen(job->vm, job->prog);
+    else
+        job->failed = true;
+    return NULL;
+}
+
+static void gen_on_large_stack(VirtualMachine *vm, Obj *prog) {
+    GenJob         job   = {.vm = vm, .prog = prog};
+    jmp_buf       *saved = vm->error_jmp_buf;
+    pthread_attr_t attr;
+    pthread_t      tid;
+    bool           ran = false;
+    if (pthread_attr_init(&attr) == 0) {
+        ran = pthread_attr_setstacksize(&attr, CODEGEN_STACK_BYTES) == 0 &&
+              pthread_create(&tid, &attr, gen_thread, &job) == 0;
+        pthread_attr_destroy(&attr);
+    }
+    if (!ran) {
+        gen(vm, prog);
+        return;
+    }
+    pthread_join(tid, NULL);
+    vm->error_jmp_buf = saved;
+    if (job.failed)
+        longjmp(*saved, 1);
+}
+
 void cc_compile(VirtualMachine *vm, Obj *prog) {
     if (!vm) {
         error("VM instance is NULL");
@@ -137,7 +183,7 @@ void cc_compile(VirtualMachine *vm, Obj *prog) {
     // Generate bytecode from AST using new register-based codegen. The VM has
     // no bytecode optimiser: -O<n> only affects -c=native, where it is
     // forwarded to the host cc (#1159).
-    gen(vm, prog);
+    gen_on_large_stack(vm, prog);
 
     cc_build_source_index(vm);
 }

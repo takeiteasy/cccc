@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: deeply nested expressions no longer overflow the compiler's native stack, which crashed `cccc` built with AddressSanitizer; code generation runs on a larger stack.
+
 ## [0.33.1] - 2026-11-09
 
 - Fixed: a member of a call result, such as `f().x`, as an asm memory operand under `--asm-passthru` is a compile error ("not addressable") instead of being passed to the host.
