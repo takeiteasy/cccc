@@ -69,6 +69,10 @@ selection — they are distinct, so this is not a "two compatible types"
 error — but an unqualified controlling expression can only ever pick the
 plain one.
 
+The strip is unconditional, so a non-lvalue controlling expression such as
+`(_Atomic int)0` also matches the plain `int:` arm. gcc agrees; clang keeps the
+`_Atomic` there and selects `default`, whatever `--compiler-family` says.
+
 A top-level-qualified arm (`const int:`) is likewise unreachable from an
 unqualified control, for the same reason.
 
