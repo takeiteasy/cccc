@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: a function type-name written inline, such as `int(void)` or `void(const int)`, parses as an operand of `__builtin_types_compatible_p`, `sizeof` and casts.
 - Added: comptime code reads the details of goto, break, continue and label nodes (`LabelName`, `GotoJumpKind`), inline asm (`AsmTemplate`, `AsmOperandConstraint`, `AsmOperandName`, `AsmOperandExpr`, `AsmClobberAt`, `AsmIsVolatile`, `AsmIsGoto`, `AsmGotoLabelAt` and the counts), atomics and fences (`AtomicOrder`, `AtomicFailOrder`, `AtomicIsWeak`, `CasAddr`, `CasExpected`, `CasDesired`, `FenceIsSignal`), and bit operations and checked arithmetic (`BitopOp`, `BitopWidth`, `OverflowOp`, `OverflowResultPtr`).
 
 ## [0.33.0] - 2026-11-08

@@ -1539,7 +1539,10 @@ Type *abstract_declarator(VirtualMachine *vm, Token **rest, Token *tok,
         return block_ty;
     }
 
-    if (equal(tok, "(")) {
+    // `(` opens a nested declarator unless a parameter list follows:
+    // `int(void)`
+    if (equal(tok, "(") && !equal(tok->next, ")") && !equal(tok->next, "...") &&
+        !is_typename_ex(vm, tok->next, false)) {
         Token *start = tok;
         Type   dummy = {};
         abstract_declarator(vm, &tok, start->next, &dummy);
