@@ -212,7 +212,7 @@ int main(void) {
     char *seen[FANOUT * 2] = {0};
     int   nseen            = 0;
     while (nseen < FANOUT) {
-        int    n = 0;
+        int n = 0;
         cc_watch_wait();
         char **v = cc_watch_take(&n);
         for (int i = 0; i < n; i++) {
