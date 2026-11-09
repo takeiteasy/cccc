@@ -300,14 +300,7 @@ static Node *new_inc_dec(VirtualMachine *vm, Node *node, Token *tok,
 // into a hidden local first: `(tmp = n, &tmp)`.
 Node *addr_of_operand(VirtualMachine *vm, Node *n, Token *tok) {
     add_type(vm, n);
-    Node *root = n;
-    while (root->kind == ND_MEMBER && root->lhs)
-        root = root->lhs;
-    bool is_lvalue = root->kind == ND_VAR || root->kind == ND_DEREF ||
-                     root->kind == ND_VLA_PTR ||
-                     (root->kind == ND_COMMA && !root->is_user_comma &&
-                      !root->is_operator_seq);
-    if (is_lvalue)
+    if (node_is_lvalue(n, LV_TEMP_COMMA))
         return new_unary(vm, ND_ADDR, n, tok);
     Obj  *tmp = new_lvar(vm, "", 0, n->ty);
     Node *set = new_binary(vm, ND_ASSIGN, new_var_node(vm, tmp, tok), n, tok);

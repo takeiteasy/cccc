@@ -188,14 +188,12 @@ static bool passthru_scalar_type(Type *ty, char *out, size_t cap) {
     }
 }
 
-static bool passthru_is_bitfield(Node *n) {
-    return n->kind == ND_MEMBER && n->member->is_bitfield;
+static bool passthru_is_lvalue(Node *n) {
+    return node_is_lvalue(n, LV_NO_BITFIELD | LV_TEMP_COMMA);
 }
 
-static bool passthru_is_lvalue(Node *n) {
-    if (n->kind == ND_MEMBER)
-        return !n->member->is_bitfield;
-    return n->kind == ND_VAR || n->kind == ND_DEREF;
+static bool passthru_is_bitfield(Node *n) {
+    return n->kind == ND_MEMBER && n->member->is_bitfield;
 }
 
 static void passthru_write_operand(FILE *f, Node *arg, int idx, void *ud) {

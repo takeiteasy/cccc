@@ -960,13 +960,35 @@ bool is_compatible_fn_redecl(Type *old_ty, bool old_def, Type *new_ty,
     return true;
 }
 
-void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {
+// Whether `n` names storage whose address can be taken. A member chain is
+// judged by its root; an error-typed node passes so one error does not cascade.
+bool node_is_lvalue(Node *n, int flags) {
+    if (n->ty && is_error_type(n->ty))
+        return true;
     Node *root = n;
-    while (root->kind == ND_MEMBER && root->lhs)
+    while (root->kind == ND_MEMBER && root->lhs) {
+        if ((flags & LV_NO_BITFIELD) && root->member &&
+            root->member->is_bitfield)
+            return false;
         root = root->lhs;
-    if ((root->kind == ND_COMMA &&
-         (root->is_user_comma || root->is_operator_seq)) ||
-        root->kind == ND_FUNCALL || root->kind == ND_CAST)
+    }
+    if ((flags & LV_NO_ARRAY) && n->ty && n->ty->kind == TY_ARRAY)
+        return false;
+    switch (root->kind) {
+        case ND_VAR:
+        case ND_DEREF:
+        case ND_VLA_PTR:
+            return true;
+        case ND_COMMA:
+            return (flags & LV_TEMP_COMMA) && !root->is_user_comma &&
+                   !root->is_operator_seq;
+        default:
+            return false;
+    }
+}
+
+void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg) {
+    if (!node_is_lvalue(n, LV_TEMP_COMMA))
         error_tok(vm, n->tok, "%s", msg);
 }
 

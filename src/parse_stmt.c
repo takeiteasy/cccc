@@ -77,9 +77,7 @@ static char *asm_string_literal(VirtualMachine *vm, Token *tok,
 static void asm_check_output(VirtualMachine *vm, Node *e, Token *tok) {
     add_type(vm, e);
     reject_rvalue(vm, e, "asm output operand is not an lvalue");
-    bool storage =
-        e->kind == ND_VAR || e->kind == ND_DEREF || e->kind == ND_MEMBER;
-    if (!storage || e->ty->kind == TY_ARRAY)
+    if (!node_is_lvalue(e, LV_TEMP_COMMA | LV_NO_ARRAY))
         error_tok(vm, tok, "asm output operand is not an lvalue");
     if (e->ty->is_const)
         error_tok(vm, tok, "asm output operand is const-qualified");

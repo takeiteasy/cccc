@@ -961,8 +961,7 @@ static Node *comma_chain_tail(Node *node) {
 // result, another rvalue) falls back to the generic spelling.
 static bool addr_comma_tail_is_lvalue(Node *chain) {
     Node *tail = comma_chain_tail(chain);
-    return tail && (tail->kind == ND_VAR || tail->kind == ND_MEMBER ||
-                    tail->kind == ND_DEREF);
+    return tail && node_is_lvalue(tail, 0);
 }
 
 // #1102 followup: drill through a postfix lvalue shell -- member accesses,
@@ -1546,19 +1545,6 @@ static bool opaque_member_access(Node *node) {
            type_needs_opaque_storage(node->lhs->ty);
 }
 
-static bool opaque_base_is_lvalue(Node *n) {
-    switch (n->kind) {
-        case ND_VAR:
-        case ND_VLA_PTR:
-        case ND_DEREF:
-            return true;
-        case ND_MEMBER:
-            return n->lhs && opaque_base_is_lvalue(n->lhs);
-        default:
-            return false;
-    }
-}
-
 typedef struct {
     Node *base;
     int   seq;
@@ -1570,7 +1556,7 @@ static void opaque_base_begin(FILE *f, VirtualMachine *vm,
                               Node *base) {
     ob->base   = base;
     ob->seq    = ctx->wide_bitint_seq++;
-    ob->staged = !opaque_base_is_lvalue(base);
+    ob->staged = !node_is_lvalue(base, 0);
     if (!ob->staged)
         return;
     fprintf(f, "({ __typeof__(");
@@ -1694,7 +1680,7 @@ static void serialize_opaque_bitfield_write(FILE *f, VirtualMachine *vm,
     Member *m   = lhs->member;
     Type   *ty  = m->ty;
     int     seq = ctx->wide_bitint_seq++;
-    if (!opaque_base_is_lvalue(lhs->lhs))
+    if (!node_is_lvalue(lhs->lhs, 0))
         error("cccc: cannot serialize an assignment to a bit-field of a "
               "non-lvalue in native mode\n\n1 error generated.");
     OpaqueBase ob = {lhs->lhs, seq, false};

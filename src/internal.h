@@ -975,6 +975,8 @@ Node *promote_operand(VirtualMachine *vm, Node *n);
 // Reports `msg` at `n` when it is a source-level comma, a call result or a cast
 // (or a member of one): a value, not an lvalue.
 void reject_rvalue(VirtualMachine *vm, Node *n, const char *msg);
+enum { LV_NO_BITFIELD = 1, LV_TEMP_COMMA = 2, LV_NO_ARRAY = 4 };
+bool node_is_lvalue(Node *n, int flags);
 int c11_alignof(VirtualMachine *vm, Type *ty);
 Type *vector_mask_type(VirtualMachine *vm, Type *vecty);
 Type *vla_of(VirtualMachine *vm, Type *base, Node *expr);
