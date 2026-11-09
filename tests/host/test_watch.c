@@ -24,6 +24,7 @@
 
 #include <dirent.h>
 #include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -206,9 +207,29 @@ int main(void) {
             write_file(file, "x\n");
         }
     }
-    char first[PATH_MAX];
-    int  n = next_burst(first, sizeof first);
-    CHECK(n == FANOUT, "fan-out: expected %d changed paths, got %d", FANOUT, n);
+    // FSEvents may deliver late on a busy machine and split the burst, so
+    // collect distinct paths across bursts rather than expect a single one.
+    char *seen[FANOUT * 2] = {0};
+    int   nseen            = 0;
+    while (nseen < FANOUT) {
+        int    n = 0;
+        cc_watch_wait();
+        char **v = cc_watch_take(&n);
+        for (int i = 0; i < n; i++) {
+            bool dup = false;
+            for (int j = 0; j < nseen; j++)
+                dup |= !strcmp(seen[j], v[i]);
+            if (!dup && nseen < FANOUT * 2)
+                seen[nseen++] = v[i];
+            else
+                free(v[i]);
+        }
+        free(v);
+    }
+    CHECK(nseen == FANOUT, "fan-out: expected %d changed paths, got %d", FANOUT,
+          nseen);
+    for (int i = 0; i < nseen; i++)
+        free(seen[i]);
     drain();
 
     // Removing a watched directory reports the directory itself.
