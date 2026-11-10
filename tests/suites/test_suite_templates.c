@@ -62,6 +62,14 @@ enum Flags { FA = 1, FB = 2 };
     return (int)N;
 }
 
+@template(T) typedef T *Ptr;
+@template(T, int N) typedef T Row[N];
+@template(R, A) typedef R (*Op)(A, A);
+@template(T) typedef struct Link { T val; struct Link *next; } Link;
+@template(T) typedef struct { T lo, hi; } Range;
+@template(T) enum Level : T { LOW, MID = LOW + 2, HIGH = MID + 1 };
+@template(int N) enum Cap { SMALL = N, LARGE = N * 2 };
+
 struct Point { int x, y; };
 
 [[cccc::test]]
@@ -334,4 +342,86 @@ void test_enum_through_type_parameter(void) {
 void test_bool_constant_named_true_false(void) {
     AssertEq(flag__true(), 1);
     AssertEq(flag__false(), 2);
+}
+
+[[cccc::test]]
+void test_typedef_template_is_a_named_typedef(void) {
+    int x = 42;
+    @inst(Ptr, int) p = &x;
+    Ptr__int q        = p;
+    AssertEq(*q, 42);
+    AssertEq(sizeof(@inst(Ptr, char)), sizeof(char *));
+    @inst(Ptr, long) lp = 0;
+    Ptr__long        lq = lp;
+    AssertEq(sizeof(lq), sizeof(long *));
+}
+
+[[cccc::test]]
+void test_typedef_template_with_constant_parameter(void) {
+    @inst(Row, int, 4) r = {1, 2, 3, 4};
+    AssertEq(sizeof(r), 4 * sizeof(int));
+    Row__int__4 *same = &r;
+    AssertEq((*same)[3], 4);
+}
+
+static int add2(int a, int b) { return a + b; }
+static int sub2(int a, int b) { return a - b; }
+
+[[cccc::test]]
+void test_typedef_template_function_pointer(void) {
+    @inst(Op, int, int) f = add2;
+    Op__int__int        g = sub2;
+    AssertEq(f(40, 2), 42);
+    AssertEq(g(44, 2), 42);
+}
+
+[[cccc::test]]
+void test_typedef_template_of_tagged_struct(void) {
+    @inst(Link, int) b = {2, 0};
+    @inst(Link, int) a = {40, &b};
+    struct Link__int *n = a.next;
+    AssertEq(a.val + n->val, 42);
+    @inst(Link, char) c = {1, 0};
+    AssertEq(sizeof(c.val), (size_t)1);
+}
+
+[[cccc::test]]
+void test_typedef_template_of_anonymous_struct(void) {
+    @inst(Range, int)  r = {40, 42};
+    @inst(Range, long) w = {1, 2};
+    Range__long        v = w;
+    AssertEq(v.lo, 1);
+    AssertEq(r.hi, 42);
+    AssertEq(w.hi, 2);
+}
+
+[[cccc::test]]
+void test_enum_template_renames_enumerators(void) {
+    @inst(Level, int) lv = Level__int__HIGH;
+    AssertEq(lv, 3);
+    AssertEq(Level__int__LOW, 0);
+    AssertEq(Level__int__MID, 2);
+    @inst(Level, char) small = Level__char__MID;
+    AssertEq(sizeof(small), (size_t)1);
+    AssertEq(sizeof(@inst(Level, long)), sizeof(long));
+}
+
+@inst(Cap, 4);
+@inst(Cap, 10);
+
+[[cccc::test]]
+void test_enum_template_constant_parameter(void) {
+    AssertEq(Cap__4__SMALL, 4);
+    AssertEq(Cap__4__LARGE, 8);
+    AssertEq(Cap__10__LARGE, 20);
+}
+
+@template(int N) int cap_of(void) {
+    @inst(Cap, N) c = (@inst(Cap, N))N;
+    return c;
+}
+
+[[cccc::test]]
+void test_enum_template_inside_function_template(void) {
+    AssertEq(@inst(cap_of, 21)(), 21);
 }

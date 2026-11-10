@@ -19,7 +19,7 @@
 
 // `@template(T, int N...)` and `@inst(Name, Arg...)`. The preprocessor turns
 // the two into the identifiers `__cccc_template` and `__cccc_inst`. A template
-// is kept as unparsed tokens; the first `@inst` of an argument list clones them
+// (struct, union, enum, typedef or function) is kept as unparsed tokens; the first `@inst` of an argument list clones them
 // under a mangled name and parses the clone at file scope with each type
 // parameter bound to its argument type and each constant parameter to an
 // enumerator-style constant.
@@ -78,6 +78,91 @@ static bool is_typeof_kw(Token *tok) {
     return equal(tok, "typeof") || equal(tok, "__typeof__") ||
            equal(tok, "__typeof") || equal(tok, "typeof_unqual") ||
            equal(tok, "_Alignas");
+}
+
+// `@template(...) typedef ...;` declares one name. The name is the last
+// identifier outside brace bodies, brackets, parameter lists and attributes;
+// `(` opens a parameter list after an identifier or `)` unless it starts a
+// grouped declarator (`T (*Fn)(int)`).
+static int scan_typedef_template(Token *p, Template *t, const char **err,
+                                 Token **err_tok) {
+    Token *name = NULL, *def_tag = NULL, *prev = NULL;
+    Token *q = p->next;
+    while (q->kind != TK_EOF && !equal(q, ";")) {
+        Token *g = skip_attr_groups(q);
+        if (g != q) {
+            q = g;
+            continue;
+        }
+        if (is_typeof_kw(q) && equal(q->next, "(")) {
+            q = skip_parens(q->next);
+            continue;
+        }
+        if (equal(q, "struct") || equal(q, "union") || equal(q, "enum")) {
+            Token *tag = skip_attr_groups(q->next);
+            if (tag->kind == TK_IDENT) {
+                Token *after = skip_attr_groups(tag->next);
+                if (equal(after, "{") || (equal(q, "enum") && equal(after, ":")))
+                    def_tag = tag;
+            }
+        }
+        if (equal(q, "{")) {
+            Token *end = match_brace(q);
+            if (!end) {
+                *err     = "unterminated template body";
+                *err_tok = q;
+                return -1;
+            }
+            q = end->next;
+            continue;
+        }
+        if (equal(q, "[")) {
+            int depth = 0;
+            for (; q->kind != TK_EOF; q = q->next) {
+                if (equal(q, "["))
+                    depth++;
+                else if (equal(q, "]") && --depth == 0)
+                    break;
+            }
+            if (q->kind != TK_EOF)
+                q = q->next;
+            continue;
+        }
+        if (equal(q, ",")) {
+            *err     = "a typedef template declares one name";
+            *err_tok = q;
+            return -1;
+        }
+        if (equal(q, "(")) {
+            bool grouped = !prev || !(prev->kind == TK_IDENT || equal(prev, ")")) ||
+                           equal(q->next, "*") || equal(q->next, "^") ||
+                           equal(q->next, "(");
+            if (!grouped) {
+                q = skip_parens(q);
+                continue;
+            }
+        }
+        if (q->kind == TK_IDENT)
+            name = q;
+        prev = q;
+        q    = q->next;
+    }
+    if (!equal(q, ";") || !name) {
+        *err     = "a typedef template must declare a name";
+        *err_tok = q;
+        return -1;
+    }
+    if (def_tag && (def_tag->len != name->len ||
+                    strncmp(def_tag->loc, name->loc, name->len))) {
+        *err     = "the tag in a typedef template must be omitted or match "
+                   "the typedef name";
+        *err_tok = def_tag;
+        return -1;
+    }
+    t->kind     = TMPL_TYPEDEF;
+    t->name_tok = name;
+    t->end      = q->next;
+    return 1;
 }
 
 // Classifies the declaration at `start`. Returns 0 when it is not a template,
@@ -212,10 +297,34 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         return 1;
     }
     if (equal(p, "enum")) {
-        *err     = "enum templates are not supported";
-        *err_tok = p;
-        return -1;
+        t->kind = TMPL_ENUM;
+        p       = skip_attr_groups(p->next);
+        if (p->kind != TK_IDENT) {
+            *err     = "a template enum needs a tag name";
+            *err_tok = p;
+            return -1;
+        }
+        t->name_tok = p;
+        p           = skip_attr_groups(p->next);
+        if (equal(p, ":"))
+            while (p->kind != TK_EOF && !equal(p, "{") && !equal(p, ";"))
+                p = p->next;
+        if (!equal(p, "{")) {
+            *err     = "a template must be a definition";
+            *err_tok = p;
+            return -1;
+        }
+        Token *end = match_brace(p);
+        if (!end || !equal(end->next, ";")) {
+            *err     = "a template enum cannot declare variables";
+            *err_tok = end ? end->next : p;
+            return -1;
+        }
+        t->end = end->next->next;
+        return 1;
     }
+    if (equal(p, "typedef"))
+        return scan_typedef_template(p, t, err, err_tok);
 
     Token *prev = NULL, *name = NULL, *q = p;
     while (q->kind != TK_EOF) {
@@ -235,7 +344,8 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
             break;
         }
         if (equal(q, ";") || equal(q, "{") || equal(q, "=")) {
-            *err = "@template must be a struct, union or function definition";
+            *err = "@template must be a struct, union, enum, typedef or "
+                   "function definition";
             *err_tok = q;
             return -1;
         }
@@ -243,7 +353,8 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         q    = q->next;
     }
     if (!name || name->kind != TK_IDENT) {
-        *err     = "@template must be a struct, union or function definition";
+        *err     = "@template must be a struct, union, enum, typedef or function "
+                    "definition";
         *err_tok = p;
         return -1;
     }
@@ -305,8 +416,8 @@ Template *cc_find_template(VirtualMachine *vm, Token *name) {
 // Reports a stray `@template` the capture arm did not consume.
 void cc_template_misplaced(VirtualMachine *vm, Token *tok) {
     error_tok(vm, tok,
-              "@template is only allowed on a file-scope struct, union or "
-              "function definition");
+              "@template is only allowed on a file-scope struct, union, enum, "
+              "typedef or function definition");
 }
 
 // ---- mangling -------------------------------------------------------------
@@ -456,6 +567,45 @@ static bool has_linkage_static(Template *t) {
     return false;
 }
 
+// The enumerator name tokens of an enum template.
+static Token **enumerator_names(VirtualMachine *vm, Template *t, int *count) {
+    Token *open = t->name_tok;
+    while (!equal(open, "{"))
+        open = open->next;
+    int n = 0;
+    for (Token *p = open->next; p != t->end && p->kind != TK_EOF; p = p->next)
+        n++;
+    Token **names =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Token *) * (n + 1));
+    *count    = 0;
+    int depth = 0;
+    for (Token *p = open->next; p->kind != TK_EOF;) {
+        p = skip_attr_groups(p);
+        if (p->kind == TK_IDENT)
+            names[(*count)++] = p;
+        for (; p->kind != TK_EOF; p = p->next) {
+            if (equal(p, "(") || equal(p, "[") || equal(p, "{"))
+                depth++;
+            else if (equal(p, ")") || equal(p, "]"))
+                depth--;
+            else if (equal(p, "}") && depth-- == 0)
+                return names;
+            else if (equal(p, ",") && depth == 0)
+                break;
+        }
+        if (p->kind != TK_EOF)
+            p = p->next;
+    }
+    return names;
+}
+
+static bool is_enumerator(Token **names, int count, Token *p) {
+    for (int i = 0; i < count; i++)
+        if (names[i]->len == p->len && !strncmp(names[i]->loc, p->loc, p->len))
+            return true;
+    return false;
+}
+
 // The template's tokens up to `limit` (NULL: all of them) under `mangled`,
 // the `@template(...)` marker removed and the chain ended by `tail` (a
 // synthesised ";" for a prototype) and an EOF.
@@ -466,6 +616,10 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
     Token *cur  = &head;
     if (t->kind == TMPL_FUNC && !has_linkage_static(t))
         cur = cur->next = synth_token(vm, "static");
+
+    int     nenum = 0;
+    Token **enums =
+        t->kind == TMPL_ENUM ? enumerator_names(vm, t, &nenum) : NULL;
 
     Token *prev = NULL, *prev2 = NULL;
     for (Token *p                                              = t->start;
@@ -480,21 +634,36 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
         bool rename = p->kind == TK_IDENT && p->len == (size_t)t->name_len &&
                       !strncmp(p->loc, t->name, t->name_len);
         if (rename) {
-            if (t->kind == TMPL_FUNC)
-                rename =
-                    !(prev && (equal(prev, ".") || equal(prev, "->") ||
-                               equal(prev, "struct") || equal(prev, "union") ||
-                               equal(prev, "enum"))) &&
-                    !(prev && prev2 && equal(prev, "(") &&
-                      equal(prev2, "__cccc_inst"));
-            else
-                rename = prev &&
-                         (equal(prev, "struct") || equal(prev, "union")) &&
-                         !(prev2 && equal(prev2, "__cccc_inst"));
+            bool member = prev && (equal(prev, ".") || equal(prev, "->"));
+            bool inst_arg =
+                prev && prev2 && equal(prev, "(") && equal(prev2, "__cccc_inst");
+            switch (t->kind) {
+                case TMPL_FUNC:
+                    rename = !(prev && (member || equal(prev, "struct") ||
+                                        equal(prev, "union") ||
+                                        equal(prev, "enum"))) &&
+                             !inst_arg;
+                    break;
+                case TMPL_TYPEDEF:
+                    rename = !member && !inst_arg;
+                    break;
+                case TMPL_ENUM:
+                    rename = prev && equal(prev, "enum") && !inst_arg;
+                    break;
+                default:
+                    rename = prev &&
+                             (equal(prev, "struct") || equal(prev, "union")) &&
+                             !inst_arg;
+            }
         }
         if (rename) {
             c->loc = (char *)mangled;
             c->len = strlen(mangled);
+        } else if (enums && p->kind == TK_IDENT && is_enumerator(enums, nenum, p) &&
+                   !(prev && (equal(prev, ".") || equal(prev, "->")))) {
+            char *renamed = arena_format(vm, "%s__%.*s", mangled, (int)p->len, p->loc);
+            c->loc        = renamed;
+            c->len        = strlen(renamed);
         }
         prev2 = prev;
         prev  = p;
@@ -683,6 +852,24 @@ static char *mangle_arg(VirtualMachine *vm, Template *t, int i, Type *ty,
     return num;
 }
 
+// Records the instance's function, tag type or typedef once declared.
+static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
+                        Token *name_probe) {
+    switch (inst->tmpl->kind) {
+        case TMPL_FUNC: {
+            VarScope *vs = scope_find_var(vm->compiler.runtime_file_scope,
+                                          inst->mangled, strlen(inst->mangled));
+            inst->fn     = vs ? vs->var : NULL;
+            break;
+        }
+        case TMPL_TYPEDEF:
+            inst->ty = find_typedef(vm, name_probe);
+            break;
+        default:
+            inst->ty = find_tag(vm, name_probe);
+    }
+}
+
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        TemplateArg *args, int nargs,
                                        Token *site) {
@@ -753,11 +940,11 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     frame->parent      = tok_rare(site)->expansion;
 
     // The prototype or `struct M;` is declared first so the body can refer to
-    // the instance (recursion, `struct M *next`).
-    Token *forward;
+    // the instance (recursion, `struct M *next`). Enums and typedefs have none.
+    Token *forward = NULL;
     if (t->kind == TMPL_FUNC) {
         forward = clone_template(vm, t, mangled, t->body_open, true, frame);
-    } else {
+    } else if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION) {
         forward = tokenize_string(
             vm, "<template>",
             arena_format(vm, "%s %s;",
@@ -766,23 +953,14 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     }
     Token *whole = clone_template(vm, t, mangled, NULL, false, frame);
 
-    cc_parse_file_scope_chain(vm, forward);
     Token *name_probe = synth_token(vm, mangled);
-    if (t->kind == TMPL_FUNC) {
-        VarScope *vs = scope_find_var(vm->compiler.runtime_file_scope, mangled,
-                                      strlen(mangled));
-        inst->fn     = vs ? vs->var : NULL;
-    } else {
-        inst->ty = find_tag(vm, name_probe);
+    if (forward) {
+        cc_parse_file_scope_chain(vm, forward);
+        inst_lookup(vm, inst, name_probe);
     }
     cc_parse_file_scope_chain(vm, whole);
-    if (t->kind == TMPL_FUNC && !inst->fn) {
-        VarScope *vs = scope_find_var(vm->compiler.runtime_file_scope, mangled,
-                                      strlen(mangled));
-        inst->fn     = vs ? vs->var : NULL;
-    }
-    if (t->kind != TMPL_FUNC && !inst->ty)
-        inst->ty = find_tag(vm, name_probe);
+    if (!inst->fn && !inst->ty)
+        inst_lookup(vm, inst, name_probe);
 
     vm->compiler.tmpl_depth--;
     snapshot_restore(vm, &snap);

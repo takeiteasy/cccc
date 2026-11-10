@@ -4093,7 +4093,13 @@ typedef struct MemberAlias {
     char               *name;
 } MemberAlias;
 
-typedef enum { TMPL_STRUCT, TMPL_UNION, TMPL_FUNC } TemplateKind;
+typedef enum {
+    TMPL_STRUCT,
+    TMPL_UNION,
+    TMPL_FUNC,
+    TMPL_ENUM,
+    TMPL_TYPEDEF
+} TemplateKind;
 
 // One `@template` parameter: a type name, or an integer constant (`int N`)
 // whose type is the tokens from `type_start` up to `name`.
@@ -4128,7 +4134,7 @@ typedef struct TemplateInstance {
     Template         *tmpl;
     char             *mangled;
     TemplateInstState state;
-    Type             *ty; // struct/union instances
+    Type             *ty; // struct, union, enum and typedef instances
     Obj              *fn; // function instances
 } TemplateInstance;
 
