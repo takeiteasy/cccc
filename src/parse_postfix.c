@@ -4730,6 +4730,18 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return call;
     }
 
+    if (vm->compiler.saw_templates && equal(tok, "__cccc_template"))
+        cc_template_misplaced(vm, tok);
+
+    if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {
+        TemplateInstance *inst = cc_parse_template_inst(vm, rest, tok);
+        if (inst->tmpl->kind != TMPL_FUNC)
+            error_tok(vm, tok, "template '%s' is a type, not a function",
+                      inst->tmpl->name);
+        mark_function_referenced(vm, inst->fn);
+        return new_var_node(vm, inst->fn, tok);
+    }
+
     if (tok->kind == TK_IDENT) {
         // Variable or enum constant
         VarScope *sc = find_var(vm, tok);

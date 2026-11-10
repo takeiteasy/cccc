@@ -13,6 +13,8 @@ The `@` shorthand, where attributes may appear, and `asm` labels.
 | 3 | Custom comptime | The handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 | 4 | GNU or unknown | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 
+`@template` and `@inst` are not attributes: the compiler handles them before this table applies ([templates.md](templates.md)).
+
 ```c
 @comptime
 Node *make_answer(void) { return MakeIntLiteral(42); }

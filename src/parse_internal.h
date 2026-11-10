@@ -416,6 +416,19 @@ Node *omp_directive(VirtualMachine *vm, Token **rest, Token *tok);
 VarScope *omp_note_use(VirtualMachine *vm, Token *tok, VarScope *sc);
 bool omp_at_section(VirtualMachine *vm, Token *tok);
 Token *omp_file_scope(VirtualMachine *vm, Token *tok);
+
+// parse_template.c: `@template` / `@inst`.
+int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
+                     const char **err, Token **err_tok);
+Token *cc_template_capture(VirtualMachine *vm, Token *tok);
+Template *cc_find_template(VirtualMachine *vm, Token *name);
+void cc_template_misplaced(VirtualMachine *vm, Token *tok);
+TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
+                                       Type **args, int nargs, Token *site);
+TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
+                                         Token *tok);
+void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);
+Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok);
 Node *kernel_local_ref(VirtualMachine *vm, Obj *var, Token *tok);
 int64_t classify_type_code(Type *ty);
 Node *clone_bounds_node(VirtualMachine *vm, Node *n);

@@ -1,6 +1,6 @@
 # cccc
 
-> **WARNING!** Work in progress. It is able to fully compile itself.
+> **WARNING!** Work in progress. It relatively stable and able to fully compile itself but expect api/syntax/features changes.
 
 `CCCC` (**C**omprehensive **C** **C**ompensation **C**ompiler) is a C bytecode compiler + VM interpreter. C is compiled to custom bytecode, then interpreted in a built-in VM. CCCC is not designed to be a replacement for existing compilers (`cc` / `clang` / `gcc`), instead it's a drop-in frontend for them.
 
@@ -113,6 +113,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 |---|---|
 | **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](docs/macros.md)) |
 | **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
+| **Templates** | `@template(T)` structs, unions and functions, instantiated with `@inst(Name, Type)` ([templates.md](docs/templates.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](docs/syntax.md)) |
@@ -236,6 +237,7 @@ Each guide covers one topic. Hub pages (marked *hub*) link to their sub-pages.
 |---|---|
 | [macros.md](docs/macros.md) | *hub* — `@comptime` functions, the return model, AST building and quoting |
 | [derive.md](docs/derive.md) | *hub* — attributes that generate code for a type: `@serialize`, `@to_json`, `@to_string`, ... |
+| [templates.md](docs/templates.md) | `@template` and `@inst`: generic structs, unions and functions |
 | [comptime-policy.md](docs/comptime-policy.md) | What comptime code may call, and `--comptime-allow` |
 | [comptime-limits.md](docs/comptime-limits.md) | Memory confinement and node-list checks for comptime code |
 | [security.md](docs/security.md) | What runs or downloads while compiling, `--sandbox`, untrusted code |

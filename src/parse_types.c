@@ -519,6 +519,9 @@ Type *declspec(VirtualMachine *vm, Token **rest, Token *tok, VarAttr *attr) {
                 } else if (dk == DK_FLOAT16) {
                     ty  = ty_float16;
                     tok = tok->next;
+                } else if (dk == DK_NONE && vm->compiler.saw_templates &&
+                           equal(tok, "__cccc_inst")) {
+                    ty = cc_template_inst_type(vm, &tok, tok);
                 } else {
                     VarScope *sc = find_var(vm, tok);
                     if (!vm->compiler.in_type_lookahead && sc &&

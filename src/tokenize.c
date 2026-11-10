@@ -273,6 +273,11 @@ static char *format_expansion_frame(VirtualMachine *vm, ExpansionFrame *fr) {
             return arena_format(vm,
                                 "in file-scope generation by '%s' at %s:%d:%d",
                                 name, fname, line_no, col_no);
+        case EXPANSION_TEMPLATE_INST:
+            return arena_format(vm,
+                                "in instantiation of template '%s' (%s) at "
+                                "%s:%d:%d",
+                                name, fr->target_desc, fname, line_no, col_no);
         case EXPANSION_MACRO_BODY:
             return arena_format(vm, "expanded from macro '%s' at %s:%d:%d",
                                 name, fname, line_no, col_no);

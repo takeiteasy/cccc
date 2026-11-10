@@ -1509,6 +1509,8 @@ typedef enum {
     EXPANSION_ATTR_HANDLER, // @attr handler running against a decl
     EXPANSION_FILE_SCOPE,   // pre-parse file-scope generation
     EXPANSION_MACRO_BODY,   // preprocessor macro: call_tok is in the macro body
+    EXPANSION_TEMPLATE_INST, // @inst: name is the template, target_desc the
+                             // instance
 } ExpansionKind;
 
 /*!
@@ -4091,9 +4093,41 @@ typedef struct MemberAlias {
     char               *name;
 } MemberAlias;
 
+typedef enum { TMPL_STRUCT, TMPL_UNION, TMPL_FUNC } TemplateKind;
+
+// A `@template(P...)` definition, kept as unparsed tokens until `@inst`.
+typedef struct Template {
+    char        *name;
+    int          name_len;
+    TemplateKind kind;
+    Token      **params;
+    int          nparams;
+    Token       *start, *end;         // captured [start, end), marker included
+    Token       *marker, *marker_end; // `__cccc_template ( ... )` to strip
+    Token       *body_open;           // functions: the body's `{`
+    Token       *name_tok;
+} Template;
+
+typedef enum { TI_IN_PROGRESS, TI_DONE, TI_FAILED } TemplateInstState;
+
+typedef struct TemplateInstance {
+    Template         *tmpl;
+    char             *mangled;
+    TemplateInstState state;
+    Type             *ty; // struct/union instances
+    Obj              *fn; // function instances
+} TemplateInstance;
+
 typedef struct Compiler {
     // Preprocessor state
     bool         skip_preprocess; // Skip preprocessing step
+    bool         saw_templates;   // `@template`/`@inst` appeared in the input
+    HashMap      templates;       // name -> Template *
+    HashMap      template_insts;  // mangled name -> TemplateInstance *
+    Scope       *runtime_file_scope;
+    Scope       *tmpl_bindings;   // detached scope holding the type parameters
+    Scope       *tmpl_anchor;     // scope in which tmpl_bindings is consulted
+    int          tmpl_depth;
     HashMap      macros;          // Macro definitions
     MemberAlias *member_aliases;  // see note_member_alias_macro(); survives TUs
     CondIncl    *cond_incl;       // Conditional inclusion stack

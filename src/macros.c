@@ -304,7 +304,8 @@ static Token *find_matching_brace(Token *tok) {
 }
 
 static bool starts_file_scope_call(Token *tok) {
-    return tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "(");
+    return tok && tok->kind == TK_IDENT && tok->next && equal(tok->next, "(") &&
+           !equal(tok, "__cccc_inst");
 }
 
 // #890: a file-scope declaration is forwarded to the comptime pass if it
@@ -807,6 +808,17 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
         Token *tok = input_tokens[fi];
         while (tok && tok->kind != TK_EOF) {
             Token *start = tok;
+
+            // A template is unparsed tokens, not a declaration.
+            if (vm->compiler.saw_templates) {
+                Template    tmpl;
+                const char *err;
+                Token      *err_tok;
+                if (cc_template_scan(vm, tok, &tmpl, &err, &err_tok) > 0) {
+                    tok = tmpl.end;
+                    continue;
+                }
+            }
 
             if (starts_file_scope_call(tok)) {
                 while (tok && tok->kind != TK_EOF && !equal(tok, ";"))

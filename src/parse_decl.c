@@ -2527,6 +2527,14 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
             continue;
         }
 
+        if (vm->compiler.saw_templates) {
+            Token *after = cc_template_capture(vm, tok);
+            if (after) {
+                tok = after;
+                continue;
+            }
+        }
+
         if (is_file_scope_asm(tok)) {
             tok = file_scope_asm(vm, tok);
             continue;
@@ -2610,6 +2618,10 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
     run_pending_member_attrs(vm);
     run_pending_methods(vm);
     return tok;
+}
+
+void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok) {
+    parse_file_scope_decls(vm, tok);
 }
 
 // #894: parse an already-materialized, EOF-terminated file-scope declaration
@@ -2702,6 +2714,8 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     // inside a comptime function body's block scope.
     if (vm->compiler.in_macro_mode)
         vm->compiler.macro_file_scope = vm->compiler.scope;
+    else
+        vm->compiler.runtime_file_scope = vm->compiler.scope;
 
     declare_builtin_functions(vm);
     vm->compiler.globals = NULL;
@@ -2714,6 +2728,15 @@ Obj *parse(VirtualMachine *vm, Token *tok) {
     hashmap_deinit(&vm->compiler.global_decl_map);
     memset(&vm->compiler.global_decl_map, 0,
            sizeof(vm->compiler.global_decl_map));
+    // The comptime program is parsed in the middle of the runtime parse; it
+    // does not use templates, so it must not discard theirs.
+    if (!vm->compiler.in_macro_mode) {
+        hashmap_deinit(&vm->compiler.templates);
+        memset(&vm->compiler.templates, 0, sizeof(vm->compiler.templates));
+        hashmap_deinit(&vm->compiler.template_insts);
+        memset(&vm->compiler.template_insts, 0,
+               sizeof(vm->compiler.template_insts));
+    }
 
     tok = parse_file_scope_decls(vm, tok);
 

@@ -4483,6 +4483,41 @@ static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
     return true;
 }
 
+// Rewrite `@template` / `@inst` into the single identifiers `__cccc_template` /
+// `__cccc_inst`; the parser handles both, and the `(...)` stays ordinary
+// tokens.
+static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
+        return false;
+    Token      *name_tok = tok->next;
+    const char *marker   = NULL;
+    if (name_tok->len == 8 && !strncmp(name_tok->loc, "template", 8))
+        marker = "__cccc_template ";
+    else if (name_tok->len == 4 && !strncmp(name_tok->loc, "inst", 4))
+        marker = "__cccc_inst ";
+    if (!marker)
+        return false;
+    if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
+        error_tok(vm, tok, "@%.*s is not supported in comptime code",
+                  (int)name_tok->len, name_tok->loc);
+
+    Token *new_toks = tokenize(
+        vm, new_file(vm, tok->file->name, tok->file->file_no, (char *)marker));
+    Token *last = new_toks;
+    while (last->next && last->next->kind != TK_EOF)
+        last = last->next;
+    tok_rare_mut(vm, last)->src_site = name_tok;
+    last->next                       = name_tok->next;
+    new_toks->at_bol                 = tok->at_bol;
+    new_toks->has_space              = tok->has_space;
+
+    vm->compiler.saw_templates       = true;
+    mark_cccc_only_file(vm, tok->file->name);
+    *tok_ptr = new_toks;
+    return true;
+}
+
 // Rewrite @identifier or @identifier(args) into the equivalent attribute form
 // before try_extract_attr_macro runs. The target form depends on the attribute
 // registry: ATTR_CCCC -> [[cccc::name(args)]], ATTR_STD -> [[name(args)]],
@@ -6857,6 +6892,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             // @name / @name(args) is rewritten to the canonical attribute form
             // so that try_extract_attr_macro sees [[cccc::name(...)]] as usual.
             if (try_rewrite_at_directive(vm, &tok))
+                continue;
+            if (try_rewrite_template_marker(vm, &tok))
                 continue;
             if (try_rewrite_at_attr(vm, &tok))
                 continue;

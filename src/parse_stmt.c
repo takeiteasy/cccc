@@ -32,6 +32,13 @@
 bool is_typename_ex(VirtualMachine *vm, Token *tok, bool allow_splice) {
     pthread_once(&typename_map_once, init_typename_map);
 
+    if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {
+        // A function template is an expression; an unknown name is left to
+        // the type path so it reports "not a template".
+        Template *t = cc_find_template(vm, tok->next->next);
+        return !t || t->kind != TMPL_FUNC;
+    }
+
     if (hashmap_get2(&typename_map, tok->loc, tok->len) ||
         find_typedef(vm, tok))
         return true;

@@ -339,7 +339,11 @@ VarScope *scope_find_var(Scope *sc, char *name, int name_len) {
 
 VarScope *find_var(VirtualMachine *vm, Token *tok) {
     for (Scope *sc = vm->compiler.scope; sc; sc = sc->next) {
-        VarScope *vs = scope_find_var(sc, tok->loc, tok->len);
+        VarScope *vs = NULL;
+        if (sc == vm->compiler.tmpl_anchor && vm->compiler.tmpl_bindings)
+            vs = scope_find_var(vm->compiler.tmpl_bindings, tok->loc, tok->len);
+        if (!vs)
+            vs = scope_find_var(sc, tok->loc, tok->len);
         if (vs)
             return vs;
     }
