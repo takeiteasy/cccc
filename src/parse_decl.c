@@ -2529,6 +2529,8 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
 
         if (vm->compiler.saw_templates) {
             Token *after = cc_template_capture(vm, tok);
+            if (!after)
+                after = cc_template_force_inst(vm, tok);
             if (after) {
                 tok = after;
                 continue;

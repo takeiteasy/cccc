@@ -421,6 +421,7 @@ Token *omp_file_scope(VirtualMachine *vm, Token *tok);
 int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
                      const char **err, Token **err_tok);
 Token *cc_template_capture(VirtualMachine *vm, Token *tok);
+Token *cc_template_force_inst(VirtualMachine *vm, Token *tok);
 Template *cc_find_template(VirtualMachine *vm, Token *name);
 void cc_template_misplaced(VirtualMachine *vm, Token *tok);
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,

@@ -711,3 +711,15 @@ Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
                   inst->tmpl->name);
     return inst->ty;
 }
+
+// File-scope `@inst(Name, Types...);` instantiates without using the result.
+// Returns the token after the `;`, or NULL when `tok` starts something else.
+Token *cc_template_force_inst(VirtualMachine *vm, Token *tok) {
+    if (!equal(tok, "__cccc_inst") || !equal(tok->next, "("))
+        return NULL;
+    Token *after = skip_parens(tok->next);
+    if (!equal(after, ";"))
+        return NULL;
+    cc_parse_template_inst(vm, &after, tok);
+    return skip(vm, after, ";");
+}

@@ -169,3 +169,24 @@ void test_pointer_parameter_in_function_template(void) {
     int x = 42;
     AssertEq(@inst(first_of, int)(&x), 42);
 }
+
+// A file-scope `@inst(...);` instantiates without declaring anything to use.
+@inst(Cell, long);
+@inst(twice, long);
+
+[[cccc::test]]
+void test_forced_instance_exists(void) {
+    struct Cell__long a = {1, 2}, b = {1, 2};
+    AssertTrue(Cell__long_equals(&a, &b));
+    AssertEq(twice__long(21), 42);
+}
+
+typedef @inst(Vec, short) ShortVec;
+#define twice_char @inst(twice, char)
+
+[[cccc::test]]
+void test_typedef_and_macro_aliases(void) {
+    ShortVec v = {0, 3, 0};
+    AssertEq(v.len, (size_t)3);
+    AssertEq(twice_char(21), 42);
+}

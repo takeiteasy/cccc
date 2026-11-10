@@ -36,6 +36,16 @@ int m = @inst(max, long)(5, 3);
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct or union template names a type, a function template names a function; using one as the other is an error.
 
+### Pre-defining and aliasing
+
+At file scope, `@inst(Name, Type, ...);` creates the instance without using it. This is how a derive attribute's functions come into existence when nothing else names the instance. A `typedef` or `#define` shortens repeated uses:
+
+```c
+@inst(Cell, int);                   // Cell__int and Cell__int_equals exist
+typedef @inst(Vec, int) IntVec;     // type alias
+#define max_int @inst(max, int)     // function alias
+```
+
 ## Instance names
 
 An instance is named `Name__Arg` for each argument, built from the argument's resolved type, so `size_t` and `unsigned long` are the same instance. Use the mangled name directly once the instance exists.
