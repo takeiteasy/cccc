@@ -42,6 +42,7 @@ int r = @inst(add_n, long, 40)(2);  // add_n__long__40
 | Value | Must fit the type, or the instantiation is an error: `template argument 300 does not fit 'unsigned char'` |
 | Same value | `16`, `0x10` and `8 * 2` name one instance |
 | Negative | Named with an `n` prefix: `-3` gives `signed_n__n3` |
+| Enum or bool | Named by the enumerator (`Pick__GREEN`) or `true`/`false`; a value with no enumerator keeps its number[^enumname] |
 
 ## Instantiating
 
@@ -74,6 +75,7 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `int`, `unsigned int`, `long long`, `unsigned char` | `int`, `unsigned_int`, `long_long`, `unsigned_char` |
 | `size_t` (an alias of `unsigned long`) | `unsigned_long` |
 | Constant `16`, `-3` | `16`, `n3` |
+| Enum constant `GREEN`, bool `1` | `GREEN`, `true` |
 | `int *`, `const char *`, `int * const` | `int_ptr`, `const_char_ptr`, `int_ptr_const` |
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
@@ -136,3 +138,5 @@ error: not a struct nor a union
 ```
 
 [^linkage]: A template in a header is safe to include from several files for the same reason. Sharing one definition across translation units is a possible refinement.
+
+[^enumname]: Enumerators sharing a value name one instance, by the first enumerator declared with it. When a value without an enumerator would be spelled like an existing enumerator (`n3` for `-3`), the instantiation is an error.

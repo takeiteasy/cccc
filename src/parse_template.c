@@ -616,9 +616,10 @@ static bool const_fits(Type *ty, int64_t v, bool v_unsigned) {
            (bits >= 64 ? (uint64_t)INT64_MAX : (1ULL << (bits - 1)) - 1);
 }
 
-// Binds parameter `i` in `bindings` to `arg`. A constant parameter's type is
-// parsed here so it can name the type parameters bound before it.
-static void bind_param(VirtualMachine *vm, Template *t, int i,
+// Binds parameter `i` in `bindings` to `arg` and returns the parameter's type.
+// A constant parameter's type is parsed here so it can name the type
+// parameters bound before it.
+static Type *bind_param(VirtualMachine *vm, Template *t, int i,
                        const TemplateArg *arg, Scope *bindings, Token *site) {
     TemplateParam *p = &t->params[i];
     Type          *ty;
@@ -653,16 +654,33 @@ static void bind_param(VirtualMachine *vm, Template *t, int i,
                        ty->kind == TY_ENUM;
         vs->type_def = tagged ? ty : copy_type(vm, ty);
     }
+    return ty;
 }
 
-static char *mangle_arg(VirtualMachine *vm, Template *t, int i,
+// A constant argument is spelled by the first enumerator of its enum type with
+// that value, `true`/`false` for bool, else by its number (`n` prefix when
+// negative).
+static char *mangle_arg(VirtualMachine *vm, Template *t, int i, Type *ty,
                         const TemplateArg *arg, Token *site) {
-    if (t->params[i].type_start) {
-        if (!arg->val_unsigned && arg->val < 0)
-            return arena_format(vm, "n%llu", -(unsigned long long)arg->val);
-        return arena_format(vm, "%llu", (unsigned long long)arg->val);
-    }
-    return mangle_type(vm, arg->ty, site);
+    if (!t->params[i].type_start)
+        return mangle_type(vm, arg->ty, site);
+    if (ty->kind == TY_BOOL)
+        return arg->val ? "true" : "false";
+    char *num = !arg->val_unsigned && arg->val < 0
+                    ? arena_format(vm, "n%llu", -(unsigned long long)arg->val)
+                    : arena_format(vm, "%llu", (unsigned long long)arg->val);
+    if (ty->kind != TY_ENUM)
+        return num;
+    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
+        if (ec->value == arg->val)
+            return ec->name;
+    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
+        if (!strcmp(ec->name, num))
+            error_tok(vm, site,
+                      "cannot name the instance: enumerator '%s' clashes with "
+                      "the number %s",
+                      num, num);
+    return num;
 }
 
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
@@ -698,9 +716,9 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
 
     char *mangled = t->name;
     for (int i = 0; i < nargs; i++) {
-        bind_param(vm, t, i, &args[i], bindings, site);
-        mangled = arena_format(vm, "%s__%s", mangled,
-                               mangle_arg(vm, t, i, &args[i], site));
+        Type *pty = bind_param(vm, t, i, &args[i], bindings, site);
+        mangled   = arena_format(vm, "%s__%s", mangled,
+                                 mangle_arg(vm, t, i, pty, &args[i], site));
     }
 
     TemplateInstance *found =

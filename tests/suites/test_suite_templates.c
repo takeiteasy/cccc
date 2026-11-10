@@ -52,6 +52,16 @@
     @inst(Arr, T, N * 2) inner;
 };
 
+enum Color { RED, GREEN, BLUE, CRIMSON = RED };
+enum Flags { FA = 1, FB = 2 };
+
+@template(enum Color C) int shade(void) {
+    return C;
+}
+@template(T, T N) int tagged(void) {
+    return (int)N;
+}
+
 struct Point { int x, y; };
 
 [[cccc::test]]
@@ -290,4 +300,38 @@ void test_nested_instance_uses_constant_expression(void) {
 void test_derive_on_constant_template(void) {
     struct Pad__int__2 a = {{1, 2}}, b = {{1, 2}};
     AssertTrue(Pad__int__2_equals(&a, &b));
+}
+
+[[cccc::test]]
+void test_enum_constant_named_by_enumerator(void) {
+    AssertEq(@inst(shade, GREEN)(), 1);
+    AssertEq(shade__GREEN(), 1);
+    AssertEq(@inst(shade, BLUE)(), 2);
+}
+
+[[cccc::test]]
+void test_aliased_enumerators_share_first_name(void) {
+    AssertEq(@inst(shade, CRIMSON)(), 0);
+    AssertEq(shade__RED(), 0);
+    AssertEq(@inst(shade, RED)(), @inst(shade, CRIMSON)());
+}
+
+[[cccc::test]]
+void test_enum_value_without_enumerator_uses_number(void) {
+    AssertEq(@inst(shade, (enum Color)7)(), 7);
+    AssertEq(shade__7(), 7);
+}
+
+[[cccc::test]]
+void test_enum_through_type_parameter(void) {
+    AssertEq(@inst(tagged, enum Flags, FB)(), 2);
+    AssertEq(tagged__enum_Flags__FB(), 2);
+    AssertEq(@inst(tagged, enum Flags, FA | FB)(), 3);
+    AssertEq(tagged__enum_Flags__3(), 3);
+}
+
+[[cccc::test]]
+void test_bool_constant_named_true_false(void) {
+    AssertEq(flag__true(), 1);
+    AssertEq(flag__false(), 2);
 }

@@ -21,6 +21,11 @@
     return 0;
 }
 
+enum Odd { n3 = 5, below = -1 };
+@template(enum Odd O) int odd(void) {
+    return O;
+}
+
 #pragma cccc suite begin "templates_errors"
 
 [[cccc::test(error = "takes 2 arguments, 1 given")]]
@@ -94,6 +99,11 @@ void test_type_for_constant_slot(void) {
 [[cccc::test(error = "expected")]]
 void test_constant_for_type_slot(void) {
     @inst(Arr, 4, 4) a;
+}
+
+[[cccc::test(error = "enumerator 'n3' clashes with the number n3")]]
+void test_enumerator_clashes_with_negative_number(void) {
+    @inst(odd, (enum Odd)-3)();
 }
 
 #pragma cccc suite end
