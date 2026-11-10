@@ -1,6 +1,6 @@
 # Templates
 
-Generic structs, unions and functions: write the definition once with type parameters, instantiate it per type.
+Generic structs, unions and functions: write the definition once with type and integer constant parameters, instantiate it per argument list.
 
 ```c
 @template(T) struct Vec { T *data; size_t len, cap; };
@@ -18,11 +18,30 @@ int main(void) {
 
 | Rule | Detail |
 |---|---|
-| Parameters | One or more type names: `@template(K, V)` |
+| Parameters | One or more type names (`@template(K, V)`) or integer constants (`@template(T, int N)`) |
 | Allowed on | A struct, union or function definition at file scope |
 | Not allowed on | Prototypes, `typedef`, `extern`, enums, a struct that declares variables, anything inside a function |
 | Attributes | Other attributes on the declaration stay with it and apply to every instance: `@template(T) @equals struct Cell { T a; T b; };` |
 | Name | One template per name; a second definition is an error |
+
+## Constant parameters
+
+A parameter written as a type followed by a name is an integer constant. The matching `@inst` argument is a constant expression, and the name is a constant of that type inside the body: usable in array sizes, `case` labels and `_Static_assert`, and hidden by a local of the same name.
+
+```c
+@template(T, int N) struct Arr { T v[N]; };
+@template(T, T N) T add_n(T x) { return x + N; }
+
+@inst(Arr, int, 16) a;              // struct Arr__int__16
+int r = @inst(add_n, long, 40)(2);  // add_n__long__40
+```
+
+| Rule | Detail |
+|---|---|
+| Type | Any integer type up to 64 bits (`bool`, `char`, an enum, `_BitInt(N)`); it may name an earlier type parameter |
+| Value | Must fit the type, or the instantiation is an error: `template argument 300 does not fit 'unsigned char'` |
+| Same value | `16`, `0x10` and `8 * 2` name one instance |
+| Negative | Named with an `n` prefix: `-3` gives `signed_n__n3` |
 
 ## Instantiating
 
@@ -54,6 +73,7 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 |---|---|
 | `int`, `unsigned int`, `long long`, `unsigned char` | `int`, `unsigned_int`, `long_long`, `unsigned_char` |
 | `size_t` (an alias of `unsigned long`) | `unsigned_long` |
+| Constant `16`, `-3` | `16`, `n3` |
 | `int *`, `const char *`, `int * const` | `int_ptr`, `const_char_ptr`, `int_ptr_const` |
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
@@ -98,7 +118,7 @@ _Bool same = Cell__int_equals(&x, &y);
 
 | Not supported | Result |
 |---|---|
-| Constant parameters (`@template(T, int N)`) | Compile error |
+| Non-integer constant parameters (`double`, pointers, `_BitInt` over 64 bits) | Compile error |
 | Specialization | A template has one definition |
 | Enum templates, `typedef` templates | Compile error |
 | Argument that is a checked pointer, address-space type, block, or variable-length array | Compile error naming the kind |

@@ -4095,12 +4095,26 @@ typedef struct MemberAlias {
 
 typedef enum { TMPL_STRUCT, TMPL_UNION, TMPL_FUNC } TemplateKind;
 
+// One `@template` parameter: a type name, or an integer constant (`int N`)
+// whose type is the tokens from `type_start` up to `name`.
+typedef struct TemplateParam {
+    Token *name;
+    Token *type_start; // NULL for a type parameter
+} TemplateParam;
+
+// One `@inst` argument: a type, or a constant with its signedness.
+typedef struct TemplateArg {
+    Type   *ty;
+    int64_t val;
+    bool    val_unsigned;
+} TemplateArg;
+
 // A `@template(P...)` definition, kept as unparsed tokens until `@inst`.
 typedef struct Template {
-    char        *name;
-    int          name_len;
-    TemplateKind kind;
-    Token      **params;
+    char          *name;
+    int            name_len;
+    TemplateKind   kind;
+    TemplateParam *params;
     int          nparams;
     Token       *start, *end;         // captured [start, end), marker included
     Token       *marker, *marker_end; // `__cccc_template ( ... )` to strip

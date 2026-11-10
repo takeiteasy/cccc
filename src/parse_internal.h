@@ -425,7 +425,8 @@ Token *cc_template_force_inst(VirtualMachine *vm, Token *tok);
 Template *cc_find_template(VirtualMachine *vm, Token *name);
 void cc_template_misplaced(VirtualMachine *vm, Token *tok);
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
-                                       Type **args, int nargs, Token *site);
+                                       TemplateArg *args, int nargs,
+                                       Token *site);
 TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok);
 void cc_parse_file_scope_chain(VirtualMachine *vm, Token *tok);

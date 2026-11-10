@@ -9,6 +9,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 - Added: `@template(T)` marks a struct, union or function definition as a template, and `@inst(Name, Type, ...)` instantiates it as `Name__Type` in any type or expression position, at file scope or inside a function; function instances are `static`, and attributes such as `@equals` apply to each instance.
 - Added: a file-scope `@inst(Name, Type, ...);` creates a template instance without using it, so its derive attributes' functions exist.
+- Added: `@template(T, int N)` takes integer constant parameters, bound as constants inside the body and given as constant expressions in `@inst(Arr, int, 16)`; the instance is `Arr__int__16`, a negative value is spelled with an `n` prefix, and a value that does not fit the parameter's type is an error.
 
 ## [0.33.2] - 2026-11-09
 

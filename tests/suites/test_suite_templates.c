@@ -15,6 +15,43 @@
 @template(T) union Bits { T value; unsigned char raw[sizeof(T)]; };
 @template(T) T first_of(T *p) { T v = *p; return v; }
 
+@template(T, int N) struct Arr {
+    T v[N];
+};
+@template(T, T N) T add_n(T x) {
+    return x + N;
+}
+@template(int N) int signed_n(void) {
+    return N;
+}
+@template(unsigned char N) int byte_n(void) {
+    return N;
+}
+@template(bool B) int flag(void) {
+    return B ? 1 : 2;
+}
+@template(int N) int pick(int i) {
+    switch (i) {
+        case N:
+            return 1;
+        default:
+            return 0;
+    }
+}
+@template(int N) int shadowed(void) {
+    int N = 5;
+    return N;
+}
+@template(unsigned long N) unsigned long big_n(void) {
+    return N;
+}
+@template(T, int N) @equals struct Pad {
+    T v[N];
+};
+@template(T, int N) struct Outer {
+    @inst(Arr, T, N * 2) inner;
+};
+
 struct Point { int x, y; };
 
 [[cccc::test]]
@@ -189,4 +226,68 @@ void test_typedef_and_macro_aliases(void) {
     ShortVec v = {0, 3, 0};
     AssertEq(v.len, (size_t)3);
     AssertEq(twice_char(21), 42);
+}
+
+[[cccc::test]]
+void test_constant_parameter_sizes_array(void) {
+    @inst(Arr, int, 16) a;
+    AssertEq(sizeof(a), 16 * sizeof(int));
+    AssertEq(sizeof(@inst(Arr, char, 3)), (size_t)3);
+}
+
+[[cccc::test]]
+void test_constant_expressions_share_an_instance(void) {
+    @inst(Arr, int, 16) a;
+    struct Arr__int__16 *p = &a;
+    @inst(Arr, int, 0x10) b;
+    @inst(Arr, int, 8 * 2) c;
+    AssertEq(sizeof(*p), sizeof(b));
+    AssertEq(sizeof(b), sizeof(c));
+    AssertEq((void *)&b.v[0] == (void *)&b, 1);
+}
+
+[[cccc::test]]
+void test_constant_parameter_type_names_type_parameter(void) {
+    AssertEq(@inst(add_n, long, 40)(2), 42);
+    AssertEq(@inst(add_n, char, 2)(40), 42);
+}
+
+[[cccc::test]]
+void test_negative_constant(void) {
+    AssertEq(@inst(signed_n, -3)(), -3);
+    AssertEq(signed_n__n3(), -3);
+}
+
+[[cccc::test]]
+void test_constant_range_edges(void) {
+    AssertEq(@inst(byte_n, 255)(), 255);
+    AssertEq(@inst(byte_n, 0)(), 0);
+    AssertEq(@inst(big_n, 18446744073709551615UL)(), 18446744073709551615UL);
+    AssertEq(@inst(flag, 1)(), 1);
+    AssertEq(@inst(flag, 0)(), 2);
+}
+
+[[cccc::test]]
+void test_constant_in_case_label(void) {
+    AssertEq(@inst(pick, 3)(3), 1);
+    AssertEq(@inst(pick, 3)(4), 0);
+}
+
+[[cccc::test]]
+void test_local_shadows_constant(void) {
+    AssertEq(@inst(shadowed, 9)(), 5);
+}
+
+[[cccc::test]]
+void test_nested_instance_uses_constant_expression(void) {
+    @inst(Outer, short, 4) o;
+    AssertEq(sizeof(o.inner), 8 * sizeof(short));
+}
+
+@inst(Pad, int, 2);
+
+[[cccc::test]]
+void test_derive_on_constant_template(void) {
+    struct Pad__int__2 a = {{1, 2}}, b = {{1, 2}};
+    AssertTrue(Pad__int__2_equals(&a, &b));
 }

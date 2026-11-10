@@ -113,7 +113,7 @@ More attributes (`@serialize`, `@accessors`, `@hash`, `@bitflags`, ...) are in [
 |---|---|
 | **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](docs/macros.md)) |
 | **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](docs/derive.md)) |
-| **Templates** | `@template(T)` structs, unions and functions, instantiated with `@inst(Name, Type)` ([templates.md](docs/templates.md)) |
+| **Templates** | `@template(T, int N)` structs, unions and functions, instantiated with `@inst(Name, Type, 16)` ([templates.md](docs/templates.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](docs/attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](docs/operators.md), [methods.md](docs/methods.md)) |
 | **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](docs/syntax.md)) |

@@ -17,11 +17,12 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// `@template(T...)` and `@inst(Name, Type...)`. The preprocessor turns the two
-// into the identifiers `__cccc_template` and `__cccc_inst`. A template is kept
-// as unparsed tokens; the first `@inst` of an argument list clones them under a
-// mangled name and parses the clone at file scope with each parameter bound to
-// its argument type.
+// `@template(T, int N...)` and `@inst(Name, Arg...)`. The preprocessor turns
+// the two into the identifiers `__cccc_template` and `__cccc_inst`. A template
+// is kept as unparsed tokens; the first `@inst` of an argument list clones them
+// under a mangled name and parses the clone at file scope with each type
+// parameter bound to its argument type and each constant parameter to an
+// enumerator-style constant.
 
 #include "./parse_internal.h"
 
@@ -125,29 +126,39 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     t->marker_end = close;
 
     int n         = 0;
-    for (Token *a = p->next; a != close->next && !equal(a, ")"); a = a->next) {
-        if (equal(a, ","))
-            continue;
+    for (Token *a = p->next; a != close->next && !equal(a, ")"); a = a->next)
         n++;
-    }
-    t->params =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(Token *) * (n + 1));
+    t->params = arena_alloc(&vm->compiler.parser_arena,
+                            sizeof(TemplateParam) * (n + 1));
     for (Token *a = p->next; !equal(a, ")");) {
-        if (a->kind != TK_IDENT) {
-            *err     = "@template parameters must be type names; constant "
-                       "parameters are not supported";
-            *err_tok = a;
+        Token *last  = NULL;
+        int    depth = 0;
+        Token *e     = a;
+        for (; e->kind != TK_EOF; e = e->next) {
+            if (equal(e, "("))
+                depth++;
+            else if (equal(e, ")") && depth-- == 0)
+                break;
+            else if (equal(e, ",") && depth == 0)
+                break;
+            last = e;
+        }
+        if (!last || last->kind != TK_IDENT) {
+            *err     = "expected a parameter name in @template";
+            *err_tok = e;
             return -1;
         }
         for (int i = 0; i < t->nparams; i++)
-            if (t->params[i]->len == a->len &&
-                !strncmp(t->params[i]->loc, a->loc, a->len)) {
+            if (t->params[i].name->len == last->len &&
+                !strncmp(t->params[i].name->loc, last->loc, last->len)) {
                 *err     = "duplicate template parameter";
-                *err_tok = a;
+                *err_tok = last;
                 return -1;
             }
-        t->params[t->nparams++] = a;
-        a                       = a->next;
+        t->params[t->nparams].name       = last;
+        t->params[t->nparams].type_start = last == a ? NULL : a;
+        t->nparams++;
+        a = e;
         if (equal(a, ","))
             a = a->next;
         else if (!equal(a, ")")) {
@@ -574,23 +585,133 @@ static void snapshot_clear(VirtualMachine *vm) {
 #undef X
 }
 
+// The tokens `[from, to)` as a NUL-terminated chain ending in EOF.
+static Token *clone_range(VirtualMachine *vm, Token *from, Token *to) {
+    Token  head = {};
+    Token *cur  = &head;
+    for (Token *p = from; p != to; p = p->next)
+        cur = cur->next = copy_tok(vm, p);
+    cur->next = synth_token(vm, "");
+    return head.next;
+}
+
+static char *range_text(VirtualMachine *vm, Token *from, Token *to) {
+    char *s = "";
+    for (Token *p = from; p != to; p = p->next)
+        s = arena_format(vm, "%s%s%.*s", s, *s ? " " : "", (int)p->len, p->loc);
+    return s;
+}
+
+static bool const_fits(Type *ty, int64_t v, bool v_unsigned) {
+    int  bits   = ty->kind == TY_BOOL     ? 1
+                  : ty->kind == TY_BITINT ? ty->bit_width
+                                          : ty->size * 8;
+    bool is_uns = ty->kind == TY_BOOL || ty->is_unsigned;
+    bool neg    = !v_unsigned && v < 0;
+    if (is_uns)
+        return !neg && (bits >= 64 || (uint64_t)v < (1ULL << bits));
+    if (neg)
+        return bits >= 64 || v >= -(int64_t)(1ULL << (bits - 1));
+    return (uint64_t)v <=
+           (bits >= 64 ? (uint64_t)INT64_MAX : (1ULL << (bits - 1)) - 1);
+}
+
+// Binds parameter `i` in `bindings` to `arg`. A constant parameter's type is
+// parsed here so it can name the type parameters bound before it.
+static void bind_param(VirtualMachine *vm, Template *t, int i,
+                       const TemplateArg *arg, Scope *bindings, Token *site) {
+    TemplateParam *p = &t->params[i];
+    Type          *ty;
+    if (!p->type_start) {
+        ty = arg->ty;
+    } else {
+        Token *rest;
+        Token *toks = clone_range(vm, p->type_start, p->name);
+        ty          = typename(vm, &rest, toks);
+        if (rest->kind != TK_EOF || !is_integer(ty) ||
+            (ty->kind == TY_BITINT && ty->bit_width > 64))
+            error_tok(vm, p->name,
+                      "constant template parameter '%.*s' must have an "
+                      "integer type of at most 64 bits",
+                      (int)p->name->len, p->name->loc);
+        if (!const_fits(ty, arg->val, arg->val_unsigned))
+            error_tok(
+                vm, site, "template argument %s does not fit '%s'",
+                arg->val_unsigned
+                    ? arena_format(vm, "%llu", (unsigned long long)arg->val)
+                    : arena_format(vm, "%lld", (long long)arg->val),
+                range_text(vm, p->type_start, p->name));
+    }
+    vm->compiler.scope = bindings;
+    VarScope *vs       = push_scope(vm, p->name->loc, p->name->len);
+    vm->compiler.scope = vm->compiler.runtime_file_scope;
+    if (p->type_start) {
+        vs->enum_ty  = ty;
+        vs->enum_val = arg->val;
+    } else {
+        bool tagged  = ty->kind == TY_STRUCT || ty->kind == TY_UNION ||
+                       ty->kind == TY_ENUM;
+        vs->type_def = tagged ? ty : copy_type(vm, ty);
+    }
+}
+
+static char *mangle_arg(VirtualMachine *vm, Template *t, int i,
+                        const TemplateArg *arg, Token *site) {
+    if (t->params[i].type_start) {
+        if (!arg->val_unsigned && arg->val < 0)
+            return arena_format(vm, "n%llu", -(unsigned long long)arg->val);
+        return arena_format(vm, "%llu", (unsigned long long)arg->val);
+    }
+    return mangle_type(vm, arg->ty, site);
+}
+
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
-                                       Type **args, int nargs, Token *site) {
+                                       TemplateArg *args, int nargs,
+                                       Token *site) {
     if (nargs != t->nparams)
-        error_tok(vm, site, "template '%s' takes %d type argument%s, %d given",
+        error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
                   t->name, t->nparams, t->nparams == 1 ? "" : "s", nargs);
 
-    char *mangled = t->name;
-    for (int i = 0; i < nargs; i++)
-        mangled =
-            arena_format(vm, "%s__%s", mangled, mangle_type(vm, args[i], site));
+    TemplateInstance *volatile inst = NULL;
+    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+    memset(bindings, 0, sizeof(Scope));
 
-    TemplateInstance *inst = hashmap_get(&vm->compiler.template_insts, mangled);
-    if (inst) {
-        if (inst->state == TI_FAILED)
+    TmplSnapshot snap;
+    snapshot_save(vm, &snap);
+    jmp_buf  jb;
+    jmp_buf *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+    if (setjmp(jb)) {
+        snapshot_restore(vm, &snap);
+        vm->error_jmp_buf = saved_jb;
+        if (inst) {
+            vm->compiler.tmpl_depth--;
+            inst->state = TI_FAILED;
+        }
+        longjmp(*saved_jb, 1);
+    }
+
+    snapshot_clear(vm);
+    vm->compiler.scope         = vm->compiler.runtime_file_scope;
+    vm->compiler.tmpl_bindings = bindings;
+    vm->compiler.tmpl_anchor   = vm->compiler.runtime_file_scope;
+
+    char *mangled = t->name;
+    for (int i = 0; i < nargs; i++) {
+        bind_param(vm, t, i, &args[i], bindings, site);
+        mangled = arena_format(vm, "%s__%s", mangled,
+                               mangle_arg(vm, t, i, &args[i], site));
+    }
+
+    TemplateInstance *found =
+        hashmap_get(&vm->compiler.template_insts, mangled);
+    if (found) {
+        snapshot_restore(vm, &snap);
+        vm->error_jmp_buf = saved_jb;
+        if (found->state == TI_FAILED)
             error_tok(vm, site, "instantiation of '%s' failed earlier",
                       mangled);
-        return inst;
+        return found;
     }
     if (vm->compiler.tmpl_depth >= TMPL_MAX_DEPTH)
         error_tok(vm, site, "template instantiation depth exceeds %d",
@@ -602,6 +723,7 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     inst->mangled = mangled;
     inst->state   = TI_IN_PROGRESS;
     hashmap_put(&vm->compiler.template_insts, mangled, inst);
+    vm->compiler.tmpl_depth++;
 
     ExpansionFrame *frame =
         arena_alloc(&vm->compiler.parser_arena, sizeof(ExpansionFrame));
@@ -624,37 +746,7 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                          t->kind == TMPL_UNION ? "union" : "struct", mangled));
         convert_pp_tokens(vm, forward);
     }
-    Token *whole    = clone_template(vm, t, mangled, NULL, false, frame);
-
-    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(bindings, 0, sizeof(Scope));
-
-    TmplSnapshot snap;
-    snapshot_save(vm, &snap);
-    jmp_buf  jb;
-    jmp_buf *saved_jb = vm->error_jmp_buf;
-    vm->error_jmp_buf = &jb;
-    if (setjmp(jb)) {
-        snapshot_restore(vm, &snap);
-        vm->compiler.tmpl_depth--;
-        inst->state       = TI_FAILED;
-        vm->error_jmp_buf = saved_jb;
-        longjmp(*saved_jb, 1);
-    }
-
-    snapshot_clear(vm);
-    vm->compiler.scope = vm->compiler.runtime_file_scope;
-    for (int i = 0; i < nargs; i++) {
-        vm->compiler.scope = bindings;
-        VarScope *vs = push_scope(vm, t->params[i]->loc, t->params[i]->len);
-        vm->compiler.scope = vm->compiler.runtime_file_scope;
-        bool tagged = args[i]->kind == TY_STRUCT || args[i]->kind == TY_UNION ||
-                      args[i]->kind == TY_ENUM;
-        vs->type_def = tagged ? args[i] : copy_type(vm, args[i]);
-    }
-    vm->compiler.tmpl_bindings = bindings;
-    vm->compiler.tmpl_anchor   = vm->compiler.runtime_file_scope;
-    vm->compiler.tmpl_depth++;
+    Token *whole = clone_template(vm, t, mangled, NULL, false, frame);
 
     cc_parse_file_scope_chain(vm, forward);
     Token *name_probe = synth_token(vm, mangled);
@@ -681,8 +773,9 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     return inst;
 }
 
-// Parses `( Name , Type {, Type} )` after the `__cccc_inst` marker at `tok` and
-// returns the (possibly new) instance.
+// Parses `( Name {, Arg} )` after the `__cccc_inst` marker at `tok` and returns
+// the (possibly new) instance. Each argument is a type or a constant
+// expression according to the template's parameter at that position.
 TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok) {
     Token *site = tok;
@@ -692,12 +785,21 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
         error_tok(vm, tok, "'%.*s' is not a template", (int)tok->len, tok->loc);
     tok = tok->next;
 
-    Type *args[16];
-    int   n = 0;
+    TemplateArg args[16];
+    int         n = 0;
     while (equal(tok, ",")) {
         if (n == 16)
             error_tok(vm, tok, "too many template arguments");
-        args[n++] = typename(vm, &tok, tok->next);
+        memset(&args[n], 0, sizeof(args[n]));
+        if (n < t->nparams && t->params[n].type_start) {
+            Node *e = cc_expand_const_macro_calls(
+                vm, conditional(vm, &tok, tok->next));
+            args[n].val          = eval(vm, e);
+            args[n].val_unsigned = e->ty && e->ty->is_unsigned;
+        } else {
+            args[n].ty = typename(vm, &tok, tok->next);
+        }
+        n++;
     }
     *rest = skip(vm, tok, ")");
     return instantiate_template(vm, t, args, n, site);
