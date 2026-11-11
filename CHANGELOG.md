@@ -12,6 +12,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: `@template(T, int N)` takes integer constant parameters, bound as constants inside the body and given as constant expressions in `@inst(Arr, int, 16)`; the instance is `Arr__int__16`, a negative value is spelled with an `n` prefix, and a value that does not fit the parameter's type is an error.
 - Added: `@template` on an enum or a typedef. An enum instance is `Level__char` with enumerators renamed `Level__char__HIGH`; a typedef instance is a file-scope typedef named `Ptr__int`.
 - Changed: an enum constant argument to a template names the instance by its enumerator (`Pick__GREEN`, the first with that value; a value with none keeps its number) and a bool argument by `true` or `false`.
+- Added: `@template` parameters take defaults, `@template(T, int N = 8)` and `@template(K, V = K)`, so `@inst(Arr, int)` may leave out trailing arguments; a default may name earlier parameters, and the instance is named with every argument (`Arr__int__8`) whether or not it was written.
 
 ## [0.33.2] - 2026-11-09
 

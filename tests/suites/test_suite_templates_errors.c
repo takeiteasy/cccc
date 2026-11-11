@@ -21,6 +21,16 @@
     return 0;
 }
 
+@template(T, int N = 2) struct Dflt {
+    T v[N];
+};
+@template(T, unsigned char N = 300) int big_dflt(void) {
+    return N;
+}
+@template(T, int N = missing_name) int nonconst_dflt(void) {
+    return N;
+}
+
 enum Odd { n3 = 5, below = -1 };
 @template(enum Odd O) int odd(void) {
     return O;
@@ -107,3 +117,23 @@ void test_enumerator_clashes_with_negative_number(void) {
 }
 
 #pragma cccc suite end
+
+[[cccc::test(error = "takes 1 to 2 arguments, 0 given")]]
+void test_default_too_few(void) {
+    @inst(Dflt) d;
+}
+
+[[cccc::test(error = "takes 1 to 2 arguments, 3 given")]]
+void test_default_too_many(void) {
+    @inst(Dflt, int, 2, int) d;
+}
+
+[[cccc::test(error = "template argument 300 does not fit 'unsigned char'")]]
+void test_default_does_not_fit(void) {
+    @inst(big_dflt, int)();
+}
+
+[[cccc::test(error = "missing_name")]]
+void test_default_not_constant(void) {
+    @inst(nonconst_dflt, int)();
+}

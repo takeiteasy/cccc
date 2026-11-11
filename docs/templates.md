@@ -18,7 +18,7 @@ int main(void) {
 
 | Rule | Detail |
 |---|---|
-| Parameters | One or more type names (`@template(K, V)`) or integer constants (`@template(T, int N)`) |
+| Parameters | One or more type names (`@template(K, V)`) or integer constants (`@template(T, int N)`), optionally with defaults |
 | Allowed on | A struct, union, enum, typedef or function definition at file scope |
 | Not allowed on | Prototypes, `extern`, a struct or enum that declares variables, a typedef that declares more than one name, anything inside a function |
 | Attributes | Other attributes on the declaration stay with it and apply to every instance: `@template(T) @equals struct Cell { T a; T b; };` |
@@ -43,6 +43,28 @@ int r = @inst(add_n, long, 40)(2);  // add_n__long__40
 | Same value | `16`, `0x10` and `8 * 2` name one instance |
 | Negative | Named with an `n` prefix: `-3` gives `signed_n__n3` |
 | Enum or bool | Named by the enumerator (`Pick__GREEN`) or `true`/`false`; a value with no enumerator keeps its number[^enumname] |
+
+## Default arguments
+
+A parameter may end in `= value`, and `@inst` then leaves its argument out. A type parameter takes a type, a constant parameter a constant expression.
+
+```c
+@template(T, int N = 8) struct Arr { T v[N]; };
+@template(K, V = K) struct Map { K key; V val; };
+@template(T, T N = 0) T add_n(T x) { return x + N; }
+
+@inst(Arr, int) a;            // struct Arr__int__8
+@inst(Arr, int, 8) b;         // the same type
+@inst(Map, int) m;            // struct Map__int__int
+```
+
+| Rule | Detail |
+|---|---|
+| Order | Defaulted parameters come last; a parameter after a default needs a default |
+| Value | May name earlier parameters (`T N = 0`, `int N = sizeof(T)`); naming itself or a later parameter is an error |
+| Evaluated | Per instance, after the earlier arguments are bound |
+| Name | Every argument is in the instance name, so `@inst(Arr, int)` and `@inst(Arr, int, 8)` are one instance |
+| Too few or many | `template 'Arr' takes 1 to 2 arguments, 0 given` |
 
 ## Enum and typedef templates
 

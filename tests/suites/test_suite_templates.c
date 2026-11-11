@@ -425,3 +425,69 @@ void test_enum_template_constant_parameter(void) {
 void test_enum_template_inside_function_template(void) {
     AssertEq(@inst(cap_of, 21)(), 21);
 }
+
+@template(T, int N = 8) struct Dflt {
+    T v[N];
+};
+@template(K, V = K) struct Same {
+    K k;
+    V v;
+};
+@template(T = int) struct Opt {
+    T val;
+};
+@template(T, T N = 0) T plus_n(T x) {
+    return x + N;
+}
+@template(T, int N = sizeof(T) * 4) struct Buf {
+    T v[N];
+};
+enum Shade { RED_D, GREEN_D };
+@template(enum Shade S = GREEN_D) int shade_of(void) {
+    return S;
+}
+
+@inst(Dflt, char);
+
+[[cccc::test]]
+void test_default_constant_argument(void) {
+    @inst(Dflt, int) a;
+    AssertEq(sizeof(a), sizeof(int) * 8);
+    struct Dflt__int__8 *p = &a;
+    @inst(Dflt, int, 8) b;
+    p = &b;
+    AssertEq(sizeof(@inst(Dflt, int, 4)), sizeof(int) * 4);
+    AssertEq(sizeof(struct Dflt__char__8), (size_t)8);
+}
+
+[[cccc::test]]
+void test_default_type_argument(void) {
+    @inst(Same, int) s       = {1, 2};
+    struct Same__int__int *p = &s;
+    AssertEq(p->k + p->v, 3);
+    @inst(Same, int, char) t = {1, 2};
+    AssertEq(sizeof(t.v), (size_t)1);
+}
+
+[[cccc::test]]
+void test_default_for_every_parameter(void) {
+    @inst(Opt) o       = {5};
+    struct Opt__int *p = &o;
+    AssertEq(p->val, 5);
+    @inst(Opt, char) c = {1};
+    AssertEq(sizeof(c.val), (size_t)1);
+}
+
+[[cccc::test]]
+void test_default_names_earlier_parameter(void) {
+    AssertEq(@inst(plus_n, long)(40), 40L);
+    AssertEq(@inst(plus_n, long, 2)(40), 42L);
+    AssertEq(sizeof(@inst(Buf, short)), sizeof(short) * sizeof(short) * 4);
+    AssertEq(sizeof(@inst(Buf, int)), sizeof(int) * sizeof(int) * 4);
+}
+
+[[cccc::test]]
+void test_default_enum_constant_is_named_by_enumerator(void) {
+    AssertEq(@inst(shade_of)(), 1);
+    AssertEq(shade_of__GREEN_D(), 1);
+}

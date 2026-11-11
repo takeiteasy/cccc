@@ -216,7 +216,7 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     t->params = arena_alloc(&vm->compiler.parser_arena,
                             sizeof(TemplateParam) * (n + 1));
     for (Token *a = p->next; !equal(a, ")");) {
-        Token *last  = NULL;
+        Token *last = NULL, *eq = NULL;
         int    depth = 0;
         Token *e     = a;
         for (; e->kind != TK_EOF; e = e->next) {
@@ -226,11 +226,19 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
                 break;
             else if (equal(e, ",") && depth == 0)
                 break;
-            last = e;
+            else if (equal(e, "=") && depth == 0 && !eq)
+                eq = e;
+            if (!eq)
+                last = e;
         }
         if (!last || last->kind != TK_IDENT) {
             *err     = "expected a parameter name in @template";
             *err_tok = e;
+            return -1;
+        }
+        if (eq && eq->next == e) {
+            *err     = "expected a default value in @template";
+            *err_tok = eq;
             return -1;
         }
         for (int i = 0; i < t->nparams; i++)
@@ -240,8 +248,18 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
                 *err_tok = last;
                 return -1;
             }
+        if (!eq && t->nparams && t->params[t->nparams - 1].def) {
+            *err     = arena_format(vm,
+                                    "template parameter '%.*s' needs a default "
+                                    "after a defaulted parameter",
+                                    (int)last->len, last->loc);
+            *err_tok = last;
+            return -1;
+        }
         t->params[t->nparams].name       = last;
         t->params[t->nparams].type_start = last == a ? NULL : a;
+        t->params[t->nparams].def        = eq ? eq->next : NULL;
+        t->params[t->nparams].def_end    = eq ? e : NULL;
         t->nparams++;
         a = e;
         if (equal(a, ","))
@@ -250,6 +268,28 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
             *err     = "expected ',' or ')' in @template parameter list";
             *err_tok = a;
             return -1;
+        }
+    }
+    for (int i = 0; i < t->nparams; i++) {
+        TemplateParam *d    = &t->params[i];
+        Token         *prev = NULL;
+        for (Token *k = d->def; d->def && k != d->def_end;
+             prev = k, k = k->next) {
+            if (k->kind != TK_IDENT ||
+                (prev && (equal(prev, "struct") || equal(prev, "union") ||
+                          equal(prev, "enum") || equal(prev, ".") ||
+                          equal(prev, "->"))))
+                continue;
+            for (int j = i; j < t->nparams; j++)
+                if (t->params[j].name->len == k->len &&
+                    !strncmp(t->params[j].name->loc, k->loc, k->len)) {
+                    *err = arena_format(
+                        vm, "default of '%.*s' names %s parameter '%.*s'",
+                        (int)d->name->len, d->name->loc,
+                        j == i ? "its own" : "later", (int)k->len, k->loc);
+                    *err_tok = k;
+                    return -1;
+                }
         }
     }
     if (t->nparams == 0) {
@@ -852,6 +892,31 @@ static char *mangle_arg(VirtualMachine *vm, Template *t, int i, Type *ty,
     return num;
 }
 
+// Parses a constant template argument at `tok` into `out`.
+static void eval_const_arg(VirtualMachine *vm, Token **rest, Token *tok,
+                           TemplateArg *out) {
+    Node *e  = cc_expand_const_macro_calls(vm, conditional(vm, rest, tok));
+    out->val = eval(vm, e);
+    out->val_unsigned = e->ty && e->ty->is_unsigned;
+}
+
+// Fills argument `i` from its default. Earlier parameters are already bound,
+// so the default may name them.
+static void default_arg(VirtualMachine *vm, Template *t, int i,
+                        TemplateArg *out) {
+    TemplateParam *p    = &t->params[i];
+    Token         *toks = clone_range(vm, p->def, p->def_end);
+    Token         *rest;
+    memset(out, 0, sizeof(*out));
+    if (p->type_start)
+        eval_const_arg(vm, &rest, toks, out);
+    else
+        out->ty = typename(vm, &rest, toks);
+    if (rest->kind != TK_EOF)
+        error_tok(vm, rest, "unexpected token in the default of '%.*s'",
+                  (int)p->name->len, p->name->loc);
+}
+
 // Records the instance's function, tag type or typedef once declared.
 static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
                         Token *name_probe) {
@@ -873,9 +938,20 @@ static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        TemplateArg *args, int nargs,
                                        Token *site) {
-    if (nargs != t->nparams)
-        error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
-                  t->name, t->nparams, t->nparams == 1 ? "" : "s", nargs);
+    int required = t->nparams;
+    while (required > 0 && t->params[required - 1].def)
+        required--;
+    if (nargs < required || nargs > t->nparams) {
+        if (required == t->nparams)
+            error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
+                      t->name, t->nparams, t->nparams == 1 ? "" : "s", nargs);
+        error_tok(vm, site, "template '%s' takes %d to %d arguments, %d given",
+                  t->name, required, t->nparams, nargs);
+    }
+    TemplateArg *given = args;
+    args               = arena_alloc(&vm->compiler.parser_arena,
+                                     sizeof(TemplateArg) * t->nparams);
+    memcpy(args, given, sizeof(TemplateArg) * nargs);
 
     TemplateInstance *volatile inst = NULL;
     Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
@@ -902,7 +978,9 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     vm->compiler.tmpl_anchor   = vm->compiler.runtime_file_scope;
 
     char *mangled = t->name;
-    for (int i = 0; i < nargs; i++) {
+    for (int i = 0; i < t->nparams; i++) {
+        if (i >= nargs)
+            default_arg(vm, t, i, &args[i]);
         Type *pty = bind_param(vm, t, i, &args[i], bindings, site);
         mangled   = arena_format(vm, "%s__%s", mangled,
                                  mangle_arg(vm, t, i, pty, &args[i], site));
@@ -988,10 +1066,7 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
             error_tok(vm, tok, "too many template arguments");
         memset(&args[n], 0, sizeof(args[n]));
         if (n < t->nparams && t->params[n].type_start) {
-            Node *e = cc_expand_const_macro_calls(
-                vm, conditional(vm, &tok, tok->next));
-            args[n].val          = eval(vm, e);
-            args[n].val_unsigned = e->ty && e->ty->is_unsigned;
+            eval_const_arg(vm, &tok, tok->next, &args[n]);
         } else {
             args[n].ty = typename(vm, &tok, tok->next);
         }

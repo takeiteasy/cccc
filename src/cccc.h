@@ -4102,10 +4102,12 @@ typedef enum {
 } TemplateKind;
 
 // One `@template` parameter: a type name, or an integer constant (`int N`)
-// whose type is the tokens from `type_start` up to `name`.
+// whose type is the tokens from `type_start` up to `name`. A default is the
+// tokens `[def, def_end)`.
 typedef struct TemplateParam {
     Token *name;
     Token *type_start; // NULL for a type parameter
+    Token *def, *def_end; // NULL without a default
 } TemplateParam;
 
 // One `@inst` argument: a type, or a constant with its signedness.
