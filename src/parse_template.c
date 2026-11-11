@@ -754,14 +754,6 @@ static Token *copy_tok(VirtualMachine *vm, Token *src) {
     return copy;
 }
 
-static bool has_linkage_static(Template *t) {
-    for (Token *p = t->start; p != t->name_tok && p->kind != TK_EOF;
-         p        = p->next)
-        if (equal(p, "static"))
-            return true;
-    return false;
-}
-
 // The enumerator name tokens of an enum template.
 static Token **enumerator_names(VirtualMachine *vm, Template *t, int *count) {
     Token *open = t->name_tok;
@@ -809,9 +801,6 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
                              ExpansionFrame *frame) {
     Token  head = {};
     Token *cur  = &head;
-    if (t->kind == TMPL_FUNC && !has_linkage_static(t))
-        cur = cur->next = synth_token(vm, "static");
-
     int     nenum = 0;
     Token **enums =
         t->kind == TMPL_ENUM ? enumerator_names(vm, t, &nenum) : NULL;
@@ -1292,6 +1281,16 @@ static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
     }
 }
 
+// Tags a function instance so the linker can merge the copies of it that
+// several translation units each instantiate.
+static void mark_instance(VirtualMachine *vm, TemplateInstance *inst,
+                          Template *t) {
+    if (!inst->fn)
+        return;
+    inst->fn->is_tmpl_inst                = true;
+    obj_fn_mut(vm, inst->fn)->tmpl_origin = t->start;
+}
+
 #define TMPL_STACK_PARAMS 16
 
 // Per-parameter state of one instantiation.
@@ -1495,10 +1494,12 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     if (forward) {
         cc_parse_file_scope_chain(vm, forward);
         inst_lookup(vm, inst, name_probe);
+        mark_instance(vm, inst, t);
     }
     cc_parse_file_scope_chain(vm, whole);
     if (!inst->fn && !inst->ty)
         inst_lookup(vm, inst, name_probe);
+    mark_instance(vm, inst, t);
 
     vm->compiler.tmpl_depth--;
     snapshot_restore(vm, &snap);

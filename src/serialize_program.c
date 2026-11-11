@@ -878,7 +878,9 @@ static void rename_colliding_static_names(VirtualMachine *vm, Obj *prog,
         bool same_file       = files_are_same(first_file, this_file);
         bool nested_involved = (obj->is_nested && !obj->is_block) ||
                                (first->is_nested && !first->is_block);
-        if (same_file && !nested_involved)
+        // Same-named instances are from different TUs: one TU has one.
+        bool tmpl_pair = obj->is_tmpl_inst && first->is_tmpl_inst;
+        if (same_file && !nested_involved && !tmpl_pair)
             continue;
         serialize_rename_global(obj,
                                 arena_format(vm, "%s__cccc_dup%d", obj->name,

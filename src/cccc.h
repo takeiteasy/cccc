@@ -2617,6 +2617,7 @@ typedef struct ObjFn {
     long long code_end_addr; // Address after function code in text segment
     Token    *def_begin, *def_end; // source span of a file-scope definition
     Token    *gen_site; // file-scope comptime call that generated this Obj
+    Token    *tmpl_origin; // is_tmpl_inst: start of the @template/@specialize
     // Hot reload (REPL / cc_redefine_function): a redefinition is a fresh Obj
     // whose reload_of is the Obj it replaces. The oldest Obj stays the
     // canonical entry; its ENT3 is overwritten with a JMP to the newest body.
@@ -2780,6 +2781,7 @@ struct Obj {
     bool is_trusted      : 1; // [[cccc::trusted]] on any declaration
     bool is_gnu_inline   : 1; // GNU extern-inline definition: emitted only if
                               // called
+    bool is_tmpl_inst    : 1; // function template instance (ObjFn.tmpl_origin)
     bool is_kernel_thunk : 1; // outlined cccc_launch body; a call to it
                               // serializes as __cccc_kernel_launch
     bool is_kernel_local_obj : 1; // [[cccc::local]] object in a kernel entry's

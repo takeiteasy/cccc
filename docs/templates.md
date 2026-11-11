@@ -255,7 +255,14 @@ Instantiation nests up to 64 levels deep.
 
 ## Functions and linkage
 
-A function instance is `static`, so each translation unit has its own copy and two files that instantiate the same template link cleanly. A function pointer to the same instance therefore compares unequal across translation units.[^linkage]
+A function instance is shared: the program has one copy, and a pointer to it compares equal in every translation unit. Two files that instantiate the same template, or a header that holds one, link cleanly.[^linkage]
+
+| Written | Instance |
+|---|---|
+| `@template(T) T max(...)` | One shared copy |
+| `@template(T) static T max(...)` | A private copy per translation unit |
+
+Two translation units whose templates of the same name produce the same instance are an error (`conflicting definitions of template instance 'max__int'`), as is an ordinary function with the instance's mangled name.
 
 ## Derive attributes
 
@@ -288,6 +295,6 @@ error: not a struct nor a union
   note: in instantiation of template 'bad' (bad__int) at main.c:7:13
 ```
 
-[^linkage]: A template in a header is safe to include from several files for the same reason. Sharing one definition across translation units is a possible refinement.
+[^linkage]: A shared instance is a weak symbol named by its mangled name in objects written with `-c=object`, so separately compiled files merge when linked. A whole program built with `-c=native` keeps it `static`, which lets the host compiler inline it.
 
 [^enumname]: Enumerators sharing a value name one instance, by the first enumerator declared with it. When a value without an enumerator would be spelled like an existing enumerator (`n3` for `-3`), the instantiation is an error.

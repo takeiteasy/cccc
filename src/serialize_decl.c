@@ -187,7 +187,12 @@ void serialize_function_signature(FILE *f, SerializeContext *ctx, Obj *fn,
 
     if (fn->is_static)
         fprintf(f, "static ");
-    else if (fn->is_gnu_inline && !gnu_inline_needs_body(fn))
+    else if (fn->is_tmpl_inst) {
+        // The linker kept one copy, so a whole program can keep it private
+        // (and inlinable); a separately linked object must let copies merge.
+        fprintf(f, ctx->vm->compiler.compile_only ? "__attribute__((weak)) "
+                                                  : "static ");
+    } else if (fn->is_gnu_inline && !gnu_inline_needs_body(fn))
         fprintf(f, "extern __inline __attribute__((__gnu_inline__)) ");
 
     // #1026: a function returning a function pointer (`int (*f(void))(int,

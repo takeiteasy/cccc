@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Changed: a function template instance is shared across translation units: one copy per program, and a pointer to it compares equal everywhere. `static` on the template keeps a private copy per file. Files that define different templates producing the same instance are an error. This also fixes multi-file `-c=native` builds that redefined an instance. Objects from `-c=object` carry the instance as a weak symbol.
 - Fixed: `-E` keeps `int * @single q;` on one line instead of breaking after `*`.
 - Fixed: `--attr-target=msvc` prints `aligned(N)` as `__declspec(align(N))` and separates `__declspec` items with spaces. Attributes MSVC lacks are dropped, and `packed` warns.
 - Changed: the structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace; `[[gnu::test]]`, `[[clang::comptime]]` and `[[gnu::template(T)]]` are errors that name the `cccc::` spelling instead of silently becoming a test or a comptime block.

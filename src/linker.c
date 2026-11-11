@@ -104,6 +104,17 @@ static bool decl_written_in_input(VirtualMachine *vm, Obj *obj) {
            cc_file_is_command_line_input(vm, obj->tok->file->name);
 }
 
+// Whether two template instances were generated from the same definition.
+// The TUs may spell the header's path differently.
+static bool same_template_origin(VirtualMachine *vm, Obj *a, Obj *b) {
+    Token *ta = obj_fn(a)->tmpl_origin, *tb = obj_fn(b)->tmpl_origin;
+    if (!ta || !tb || !ta->file || !tb->file)
+        return ta == tb;
+    return ta->line_no == tb->line_no &&
+           !strcmp(cc_canonical_path_key(vm, ta->file->name),
+                   cc_canonical_path_key(vm, tb->file->name));
+}
+
 Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
     if (!vm || !progs || count <= 0)
         error("cc_link_progs: invalid arguments");
@@ -151,8 +162,15 @@ Obj *cc_link_progs(VirtualMachine *vm, Obj **progs, int count) {
                     (!existing->is_function && existing->init_data);
 
                 bool both_def = obj_is_def && existing_is_def;
-                if (both_def && obj->is_function && obj->is_gnu_inline &&
-                    existing->is_function) {
+                if (both_def && obj->is_tmpl_inst && existing->is_tmpl_inst) {
+                    // One instance per program, however many TUs made it.
+                    if (!same_template_origin(vm, obj, existing))
+                        error_tok(vm, obj->tok,
+                                  "conflicting definitions of template "
+                                  "instance '%s'",
+                                  obj->name);
+                } else if (both_def && obj->is_function && obj->is_gnu_inline &&
+                           existing->is_function) {
                     // A GNU inline-only body yields to a real definition,
                     // and a second copy of the same body (one per TU that
                     // includes the header) is dropped silently.
