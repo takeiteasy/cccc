@@ -2379,6 +2379,7 @@ typedef struct {
     AttrOutKind kind;
     const char *prefix; // C23 namespace for a known home, else NULL
     Token      *ns;     // foreign namespace, spelled as written
+    const char *rename; // GNU name replacing the written one, args dropped
 } AttrOut;
 
 static bool attr_ns_is(Token *ns, const char *name) {
@@ -2430,7 +2431,8 @@ static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
     int  home      = attr_output_home(name, strlen(name));
     bool foreign   = false;
     if (home < 0) {
-        if (attr_ns_is(it->ns, "cccc"))
+        if (attr_ns_is(it->ns, "cccc") ||
+            (vm && find_attribute_macro(vm, it->name)))
             home = ATTR_CCCC;
         else if (!it->ns || attr_ns_is(it->ns, "gnu"))
             home = ATTR_GNU;
@@ -2451,7 +2453,12 @@ static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
         bool c23 = target == CCCC_ATTR_TARGET_C23 ||
                    (target == CCCC_ATTR_TARGET_AUTO && vm &&
                     vm->compiler.c_std >= CCCC_STD_C23);
-        return (AttrOut){c23 ? OUT_C23 : OUT_GNU, NULL, NULL};
+        if (c23)
+            return (AttrOut){OUT_C23, NULL, NULL, NULL};
+        const AttrDef *def = lookup_attr(name, strlen(name));
+        if (def->flags & ATTR_OUT_NO_GNU)
+            return (AttrOut){OUT_DROP, NULL, NULL, NULL};
+        return (AttrOut){OUT_GNU, NULL, NULL, def->gnu_name};
     }
     if (target == CCCC_ATTR_TARGET_C23)
         return (AttrOut){OUT_C23, "gnu::", NULL};
@@ -2506,7 +2513,10 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
                 else if (out.ns)
                     fprintf(f, "%.*s::", out.ns->len, out.ns->loc);
             }
-            print_attr_payload(f, it.name, it.end);
+            if (out.rename)
+                fputs(out.rename, f);
+            else
+                print_attr_payload(f, it.name, it.end);
         }
         if (open)
             close_attr_group(f, order[k]);

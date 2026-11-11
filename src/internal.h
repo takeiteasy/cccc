@@ -686,6 +686,9 @@ void isolate_comptime_macros(VirtualMachine *vm);
 void drop_system_function_macros(VirtualMachine *vm);
 bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             bool emit_scan);
+// The user @comptime(attribute("name")) handler for the attribute `tok` names,
+// or NULL.
+MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok);
 // The attribute registry (src/attr_registry.c).
 typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
 enum {
@@ -693,6 +696,8 @@ enum {
                       // it as GNU
     ATTR_NS_CCCC = 2, // applies only when written under `cccc::`
     ATTR_KEYWORD_ALIAS = 4, // also spelled `__name` / `__name__` outside [[ ]]
+    ATTR_OUT_NO_GNU = 8, // a standard attribute with no GNU form: dropped from
+                         // GNU-spelled output
 };
 // A name the preprocessor consumes structurally instead of the parser.
 typedef enum {
@@ -739,6 +744,7 @@ typedef struct AttrDef {
     AttrApplyFn *apply; // NULL: not applied by the parser
     AttrMarker   marker;
     IncludeRoute route; // INCLUDE_ROUTE_NORMAL: not an include route
+    const char  *gnu_name; // a standard attribute's GNU name, when it differs
 } AttrDef;
 // The parse-time handlers the registry rows name (src/parse_types.c).
 AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,

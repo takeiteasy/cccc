@@ -71,14 +71,16 @@ static const AttrDef attr_table[] = {
     CCCC_ROW("generic", ATTR_NS_CCCC, attr_addr_space),
     {"cccc_visible_lanes", ATTR_CCCC, false, 0, 0, attr_visible_lanes},
     // Standard C23 ([[name]]); the date is N3220 section 6.10.10.2's
-    STD_ROW("maybe_unused", false, 0, attr_unused),
+    STD_ROW("maybe_unused", false, 0, attr_unused, .gnu_name = "unused"),
     STD_ROW("deprecated", true, 0, attr_deprecated),
     STD_ROW("noreturn", true, 0, attr_noreturn),
-    STD_ROW("nodiscard", false, 0, attr_nodiscard),
+    STD_ROW("nodiscard", false, 0, attr_nodiscard,
+            .gnu_name = "warn_unused_result"),
     // fallthrough also has a GNU `__attribute__` form, so __has_attribute
     // reports it
     STD_ROW("fallthrough", true, 0, attr_fallthrough),
-    STD_ROW("no_unique_address", false, 0, attr_no_unique_address),
+    STD_ROW("no_unique_address", false, ATTR_OUT_NO_GNU,
+            attr_no_unique_address),
     // GNU (`__attribute__((name))`)
     GNU_ROW("aligned", 0, attr_aligned),
     GNU_ROW("packed", 0, attr_packed),

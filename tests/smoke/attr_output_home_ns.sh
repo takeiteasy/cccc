@@ -11,3 +11,13 @@ EOS
 
 "$CCCC" --std=c17 -E in.c >out.c || fail "-E failed"
 expect_exit 0 cc -std=c17 -fsyntax-only out.c
+
+cat >in2.c <<'EOS2'
+@comptime(attribute("tag")) void tag_handler(AttrTarget *t) { (void)t; }
+[[nodiscard]] int f(void);
+[[maybe_unused]] static int h;
+struct [[tag]] S { int x; };
+EOS2
+
+"$CCCC" --std=c17 -E in2.c >out2.c || fail "-E failed"
+expect_exit 0 cc -std=c17 -Wall -Werror -fsyntax-only out2.c

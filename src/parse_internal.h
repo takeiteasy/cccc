@@ -472,7 +472,6 @@ bool eval_truthy(VirtualMachine *vm, Node *node);
 // the fold is bit-identical to the VM's own wide-_BitInt arithmetic.
 void eval_wide(VirtualMachine *vm, Node *node, Type *ty, uint64_t *dst);
 Node *expr(VirtualMachine *vm, Token **rest, Token *tok);
-MacroFn *find_attribute_macro(VirtualMachine *vm, Token *tok);
 MacroFn *find_macro_fn(VirtualMachine *vm, Token *tok);
 TestFnRecord *find_neg_test_record(VirtualMachine *vm, const char *name);
 void resolve_test_returns(VirtualMachine *vm, const char *name,
