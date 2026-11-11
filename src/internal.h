@@ -745,6 +745,7 @@ typedef struct AttrDef {
     AttrMarker   marker;
     IncludeRoute route; // INCLUDE_ROUTE_NORMAL: not an include route
     const char  *gnu_name; // a standard attribute's GNU name, when it differs
+    const char  *msvc_name; // the __declspec name; NULL: no MSVC form
 } AttrDef;
 // The parse-time handlers the registry rows name (src/parse_types.c).
 AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,

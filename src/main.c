@@ -3363,6 +3363,7 @@ int main(int argc, const char *argv[]) {
             if (f != stdout)
                 fclose(f);
         }
+        cc_print_all_errors(&vm);
         goto BAIL;
     }
 

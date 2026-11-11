@@ -2379,7 +2379,9 @@ typedef struct {
     AttrOutKind kind;
     const char *prefix; // C23 namespace for a known home, else NULL
     Token      *ns;     // foreign namespace, spelled as written
-    const char *rename; // GNU name replacing the written one, args dropped
+    const char *rename; // name replacing the written one
+    bool        keep_args; // print the written arguments after `rename`
+    const char *warn;      // reported once per attribute when it is dropped
 } AttrOut;
 
 static bool attr_ns_is(Token *ns, const char *name) {
@@ -2418,6 +2420,26 @@ static bool next_attr_item(Token **cur, Token *close, AttrItem *it) {
     return true;
 }
 
+// MSVC has __declspec forms for a few attributes. The rest are dropped; a name
+// the registry does not know is kept as written.
+static AttrOut classify_msvc_attr(const AttrItem *it, const char *name) {
+    const AttrDef *def = lookup_attr(name, strlen(name));
+    if (!def)
+        return (AttrOut){.kind = OUT_MSVC};
+    if (!strcmp(def->name, "packed"))
+        return (AttrOut){
+            .kind = OUT_DROP,
+            .warn = "'packed' has no __declspec form under "
+                    "--attr-target=msvc and is dropped; use #pragma pack"};
+    if (!def->msvc_name)
+        return (AttrOut){.kind = OUT_DROP};
+    bool has_args = it->name->next != it->end && equal(it->name->next, "(");
+    if (!strcmp(def->msvc_name, "align") && !has_args)
+        return (AttrOut){.kind = OUT_DROP};
+    return (AttrOut){
+        .kind = OUT_MSVC, .rename = def->msvc_name, .keep_args = true};
+}
+
 // Each attribute prints in its home namespace whatever it was written in:
 // cccc attributes are dropped (kept as [[cccc::...]] under --emit-cccc), the
 // rest follow --attr-target. An unknown name in a vendor namespace is kept.
@@ -2448,7 +2470,7 @@ static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
         return (AttrOut){OUT_C23, NULL, it->ns};
 
     if (target == CCCC_ATTR_TARGET_MSVC)
-        return (AttrOut){OUT_MSVC, NULL, NULL};
+        return classify_msvc_attr(it, name);
     if (home == ATTR_STD) {
         bool c23 = target == CCCC_ATTR_TARGET_C23 ||
                    (target == CCCC_ATTR_TARGET_AUTO && vm &&
@@ -2497,6 +2519,9 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
         AttrItem it;
         for (Token *cur = payload; next_attr_item(&cur, close, &it);) {
             AttrOut out = classify_attr(vm, &it);
+            if (k == 0 && out.warn)
+                warn_tok(vm, it.name, CCCC_WARN_UNKNOWN_ATTRIBUTES, "%s",
+                         out.warn);
             if (out.kind != order[k])
                 continue;
             if (!open) {
@@ -2505,7 +2530,7 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
                 open_attr_group(f, out.kind);
                 open = any = true;
             } else {
-                fputs(", ", f);
+                fputs(out.kind == OUT_MSVC ? " " : ", ", f);
             }
             if (out.kind == OUT_C23) {
                 if (out.prefix)
@@ -2513,9 +2538,11 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
                 else if (out.ns)
                     fprintf(f, "%.*s::", out.ns->len, out.ns->loc);
             }
-            if (out.rename)
+            if (out.rename) {
                 fputs(out.rename, f);
-            else
+                if (out.keep_args)
+                    print_attr_payload(f, it.name->next, it.end);
+            } else
                 print_attr_payload(f, it.name, it.end);
         }
         if (open)

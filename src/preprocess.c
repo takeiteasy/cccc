@@ -4631,6 +4631,8 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
 
     Token *new_toks =
         tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    new_toks->at_bol    = tok->at_bol;
+    new_toks->has_space = tok->has_space;
     // Strip trailing TK_EOF and splice new tokens before `after`.
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF) {
@@ -4699,6 +4701,8 @@ static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
     char  *src = arena_format(vm, "[[cccc::%s%s]]\n", name, args_text);
     Token *new_toks =
         tokenize(vm, new_file(vm, tok->file->name, tok->file->file_no, src));
+    new_toks->at_bol    = tok->at_bol;
+    new_toks->has_space = tok->has_space;
     Token *last = new_toks;
     while (last->next && last->next->kind != TK_EOF)
         last = last->next;

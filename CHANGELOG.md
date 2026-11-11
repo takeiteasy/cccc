@@ -7,6 +7,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `-E` keeps `int * @single q;` on one line instead of breaking after `*`.
+- Fixed: `--attr-target=msvc` prints `aligned(N)` as `__declspec(align(N))` and separates `__declspec` items with spaces. Attributes MSVC lacks are dropped, and `packed` warns.
 - Changed: the structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace; `[[gnu::test]]`, `[[clang::comptime]]` and `[[gnu::template(T)]]` are errors that name the `cccc::` spelling instead of silently becoming a test or a comptime block.
 - Fixed: a file whose only cccc attribute is `test_setup` or `test_teardown` runs in test mode.
 - Changed: `__has_attribute` reports `sentinel`, `alloc_size`, `malloc`, `vector_size` and `designated_init`, and `-E` prints them in GNU spelling. A built-in attribute name is never taken over by a `@comptime(attribute("name"))` handler.
