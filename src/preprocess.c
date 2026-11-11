@@ -4398,6 +4398,7 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
         return false;
 
     Token         *marker      = NULL;
+    Token         *marker_ns   = NULL;
     TemplateMarker kind        = TM_NONE;
     Token         *list_end    = NULL; // first of the two closing tokens
     int            entries     = 0;
@@ -4426,9 +4427,12 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
         entry_start = false;
         entries++;
         Token *name = p;
+        Token *ns   = NULL;
         if (c23 && p->kind == TK_IDENT && p->next && equal(p->next, ":") &&
-            p->next->next && equal(p->next->next, ":") && p->next->next->next)
+            p->next->next && equal(p->next->next, ":") && p->next->next->next) {
+            ns   = p;
             name = p->next->next->next;
+        }
         TemplateMarker k = TM_NONE;
         if (name->kind == TK_IDENT) {
             // `template` / `specialize`, plain or as `__x__`
@@ -4439,8 +4443,9 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
                     : template_marker_kind(name->loc, name->len, true);
         }
         if ((k == TM_TEMPLATE || k == TM_SPECIALIZE) && !marker) {
-            marker = name;
-            kind   = k;
+            marker    = name;
+            marker_ns = ns;
+            kind      = k;
         }
     }
     if (!marker || !list_end || !list_end->next ||
@@ -4448,6 +4453,9 @@ static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
         return false;
 
     const char *spell = kind == TM_TEMPLATE ? "template" : "specialize";
+    if (marker_ns && !equal(marker_ns, "cccc"))
+        error_tok(vm, marker_ns, "'%s' is a cccc attribute; write [[cccc::%s]]",
+                  spell, spell);
     if (entries != 1)
         error_tok(vm, marker, "'%s' must be the only attribute in its list",
                   spell);

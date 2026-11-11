@@ -108,7 +108,7 @@ An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_
 
 `kernel`, `trusted`, `operator` and `method` need no `cccc::`; the OpenCL address spaces `global`, `local`, `constant`, `private` and `generic` keep it.
 
-The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build` and `build_target` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`.
+The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build`, `build_target`, `template` and `specialize` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`.
 
 ### Template marker spellings
 
@@ -120,7 +120,7 @@ The template markers have spellings without `@`, for sources where `@` is taken:
 | Specialization | `@specialize(T)` | `[[cccc::specialize(T)]]` | `__specialize(T)` |
 | Instance | `@inst(T) Name` | | `__inst(T) Name` |
 
-The attribute form takes any namespace or none, and `__attribute__((template(T)))`. It must be the only attribute in its list. `__template__`, `__specialize__` and `__inst__` are accepted too. The postfix instance `Name@(T)` is written with `@` only.
+The attribute form takes `cccc::` or no namespace, and `__attribute__((template(T)))`; any other namespace is an error. It must be the only attribute in its list. `__template__`, `__specialize__` and `__inst__` are accepted too. The postfix instance `Name@(T)` is written with `@` only.
 
 ## `asm("symbol")` labels
 

@@ -59,14 +59,14 @@ struct __attribute__((__packed__)) PackAttrU {
     int  i;
 };
 
-// Template markers: @template, [[template]], [[ns::template]], __template.
+// Template markers: @template, [[template]], [[cccc::template]], __template.
 [[cccc::template(T)]] struct BoxCccc {
     T v;
 };
 [[template(T)]] T add1(T a) {
     return a + 1;
 }
-[[gnu::template(T)]] T add2(T a) {
+[[cccc::template(T)]] T add2(T a) {
     return a + 2;
 }
 __attribute__((template(T, int N = 8))) struct Arr {

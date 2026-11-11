@@ -175,7 +175,7 @@ __template(T) struct Box { T v; };
 __inst(int) Box b = {1};
 ```
 
-The attribute form takes any namespace (`[[template(T)]]`, `[[gnu::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix `Name@(int)` has no other spelling.
+The attribute form takes `cccc::` or no namespace (`[[template(T)]]`, `[[cccc::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix `Name@(int)` has no other spelling.
 
 ### Pre-defining and aliasing
 
