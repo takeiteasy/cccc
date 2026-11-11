@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <cccc/derive.h>
-#include <cccc/json.h>
 
 @to_string
 @from_string

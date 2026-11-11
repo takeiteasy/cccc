@@ -607,6 +607,9 @@ static void usage(const char *argv0, int exit_code) {
     printf(
         "\t   --use-system-headers  Prefer SDK headers over CCCC polyfills for "
         "non-owned standard headers\n");
+    printf("\t   --no-implicit-derive  Do not load <cccc/derive.h>, "
+           "<cccc/json.h> and <cccc/text.h> for the built-in derive "
+           "attributes used (only reflection.h stays implicit)\n");
     printf("\t   --no-builtin-includes Do not fall back to CCCC's own bundled "
            "headers for non-owned standard headers (requires "
            "--use-system-headers)\n");
@@ -1700,6 +1703,7 @@ int main(int argc, const char *argv[]) {
     int          watch_ignores_count    = 0;
     bool         use_system_headers  = false; // --use-system-headers
     bool         no_builtin_includes = false; // --no-builtin-includes
+    bool         no_implicit_derive     = false; // --no-implicit-derive
     const char  *sysroot             = NULL;  // --sysroot <path>
 
     if (argc <= 1)
@@ -2473,6 +2477,9 @@ int main(int argc, const char *argv[]) {
             case 1151: // --run
                 run_mode = 1;
                 break;
+            case 1152: // --no-implicit-derive
+                no_implicit_derive = true;
+                break;
             case 1133: // --watch-restart
                 watch_restart = true;
                 watch         = true;
@@ -3219,6 +3226,7 @@ int main(int argc, const char *argv[]) {
     // Propagate system-header mode flags to the compiler state.
     vm.compiler.use_system_headers  = use_system_headers;
     vm.compiler.no_builtin_includes = no_builtin_includes;
+    vm.compiler.no_implicit_derive  = no_implicit_derive;
 
     for (int i = 0; i < defines_count; i++)
         parse_define(&vm, (char *)defines[i]);

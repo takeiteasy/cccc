@@ -215,6 +215,7 @@ static const struct {
     {"watch-clear", CFG_FREE},
     {"watch-restart", CFG_FREE},
     {"no-builtin-includes", CFG_FREE},
+    {"no-implicit-derive", CFG_FREE},
     {"trap-fp-divzero", CFG_FREE},
     {"w", CFG_FREE},
     {"Werror", CFG_FREE},

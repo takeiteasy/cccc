@@ -1200,21 +1200,29 @@ static Token *extract_macro_function(VirtualMachine *vm, Token *tok,
 
     // If another macro function has already claimed this attribute name (e.g.
     // a user-defined handler registered earlier in the main translation
-    // unit), skip registering this one. This gives user-defined attribute
-    // handlers precedence over the built-in derive.h handlers shipped under
-    // the same attribute name, and prevents duplicate registrations when
-    // derive.h's handlers are (re-)preprocessed.
+    // unit), register this one as a plain comptime function instead. The
+    // user's handler keeps precedence over the built-in derive.h one, and
+    // derive.h's other handlers can still call this one by name. A function
+    // already registered under this name (derive.h preprocessed twice) is
+    // skipped.
     if (attribute_name) {
+        bool claimed = false;
         for (MacroFn *existing = vm->compiler.macro_fns; existing;
-             existing          = existing->next) {
-            if (existing->is_attribute_handler && existing->attribute_name &&
-                strcmp(existing->attribute_name, attribute_name) == 0) {
-                if (vm->debug_vm)
-                    printf("Skipping comptime function '%s' for attribute '%s' "
-                           "(already claimed by '%s')\n",
-                           name, attribute_name, existing->name);
-                return body_end ? body_end : tok;
-            }
+             existing          = existing->next)
+            claimed |= existing->is_attribute_handler &&
+                       existing->attribute_name &&
+                       !strcmp(existing->attribute_name, attribute_name);
+        if (claimed)
+            for (MacroFn *existing = vm->compiler.macro_fns; existing;
+                 existing          = existing->next)
+                if (!strcmp(existing->name, name))
+                    return body_end ? body_end : tok;
+        if (claimed) {
+            if (vm->debug_vm)
+                printf("Comptime function '%s' for attribute '%s' is not the "
+                       "handler (already claimed)\n",
+                       name, attribute_name);
+            attribute_name = NULL;
         }
     }
 
@@ -3299,12 +3307,12 @@ Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag) {
 // function definition -- see cc_scan_source_for_mode_attrs's caller for why
 // (a bare identifier in ordinary code position is exactly the collision this
 // scan exists to avoid triggering on).
-void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
-                                   bool *wants_build) {
-    *wants_test  = false;
-    *wants_build = false;
+typedef void (*AttrNameFn)(const char *name, size_t len, void *ud);
 
-    FILE *f      = fopen(path, "rb");
+// Calls `fn` for each identifier in `path` that sits in attribute position
+// (see above for what counts).
+static void scan_source_attr_names(const char *path, AttrNameFn fn, void *ud) {
+    FILE *f = fopen(path, "rb");
     if (!f)
         return;
     fseek(f, 0, SEEK_END);
@@ -3321,11 +3329,8 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
     }
     size_t got = fread(buf, 1, (size_t)len, f);
     fclose(f);
-    buf[got] = '\0';
+    buf[got]      = '\0';
 
-    // Position of the last identifier's start/end, and what directly
-    // precedes it (skipping whitespace), so a match can be judged once the
-    // identifier's extent is known.
     const char *p = buf;
     while (*p) {
         // Skip comments and string/char literals verbatim.
@@ -3358,51 +3363,81 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
             const char *start = p;
             while (isalnum((unsigned char)*p) || *p == '_')
                 p++;
-            size_t len_id = (size_t)(p - start);
 
-            const AttrDef *def          = lookup_attr(start, len_id);
-            AttrMarker     marker       = def ? def->marker : ATTR_MARK_NONE;
-            bool           name_is_test = marker == ATTR_MARK_TEST ||
-                                          marker == ATTR_MARK_TEST_SETUP ||
-                                          marker == ATTR_MARK_TEST_TEARDOWN;
-            bool           name_is_build =
-                marker == ATTR_MARK_BUILD || marker == ATTR_MARK_BUILD_TARGET;
-
-            if (name_is_test || name_is_build) {
-                // Look backward (skipping whitespace) for '@', "::" preceded
-                // by "cccc", or "((" preceded by "__attribute__".
-                const char *q = start;
-                while (q > buf && isspace((unsigned char)q[-1]))
-                    q--;
-                bool in_attr_pos = false;
-                if (q > buf && q[-1] == '@') {
+            // Look backward (skipping whitespace) for '@', "::" preceded by
+            // "cccc", or "((" preceded by "__attribute__".
+            const char *q = start;
+            while (q > buf && isspace((unsigned char)q[-1]))
+                q--;
+            bool in_attr_pos = false;
+            if (q > buf && q[-1] == '@') {
+                in_attr_pos = true;
+            } else if (q - buf >= 2 && q[-1] == ':' && q[-2] == ':') {
+                const char *r = q - 2;
+                while (r > buf && isspace((unsigned char)r[-1]))
+                    r--;
+                if (r - buf >= 4 && !strncmp(r - 4, "cccc", 4))
                     in_attr_pos = true;
-                } else if (q - buf >= 2 && q[-1] == ':' && q[-2] == ':') {
-                    const char *r = q - 2;
-                    while (r > buf && isspace((unsigned char)r[-1]))
-                        r--;
-                    if (r - buf >= 4 && !strncmp(r - 4, "cccc", 4))
-                        in_attr_pos = true;
-                } else if (q - buf >= 2 && q[-1] == '(' && q[-2] == '(') {
-                    const char *r = q - 2;
-                    while (r > buf && isspace((unsigned char)r[-1]))
-                        r--;
-                    if (r - buf >= 13 && !strncmp(r - 13, "__attribute__", 13))
-                        in_attr_pos = true;
-                }
-                if (in_attr_pos) {
-                    if (name_is_test)
-                        *wants_test = true;
-                    if (name_is_build)
-                        *wants_build = true;
-                }
+            } else if (q - buf >= 2 && q[-1] == '(' && q[-2] == '(') {
+                const char *r = q - 2;
+                while (r > buf && isspace((unsigned char)r[-1]))
+                    r--;
+                if (r - buf >= 13 && !strncmp(r - 13, "__attribute__", 13))
+                    in_attr_pos = true;
             }
+            if (in_attr_pos)
+                fn(start, (size_t)(p - start), ud);
             continue;
         }
         p++;
     }
 
     free(buf);
+}
+
+typedef struct {
+    bool *wants_test;
+    bool *wants_build;
+} ModeScan;
+
+static void mode_attr_name(const char *name, size_t len, void *ud) {
+    ModeScan      *scan   = ud;
+    const AttrDef *def    = lookup_attr(name, len);
+    AttrMarker     marker = def ? def->marker : ATTR_MARK_NONE;
+    if (marker == ATTR_MARK_TEST || marker == ATTR_MARK_TEST_SETUP ||
+        marker == ATTR_MARK_TEST_TEARDOWN)
+        *scan->wants_test = true;
+    if (marker == ATTR_MARK_BUILD || marker == ATTR_MARK_BUILD_TARGET)
+        *scan->wants_build = true;
+}
+
+void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
+                                   bool *wants_build) {
+    *wants_test   = false;
+    *wants_build  = false;
+    ModeScan scan = {wants_test, wants_build};
+    scan_source_attr_names(path, mode_attr_name, &scan);
+}
+
+static void derive_attr_name(const char *name, size_t len, void *ud) {
+    int *needs = ud;
+    if (!is_derive_builtin_attr(name, (int)len))
+        return;
+    *needs                          |= DERIVE_NEEDS_DERIVE;
+    static const char *const json[]  = {"to_json", "from_json", "json", NULL};
+    static const char *const text[]  = {"from_string", "text", NULL};
+    for (int i = 0; json[i]; i++)
+        if (strlen(json[i]) == len && !strncmp(json[i], name, len))
+            *needs |= DERIVE_NEEDS_JSON;
+    for (int i = 0; text[i]; i++)
+        if (strlen(text[i]) == len && !strncmp(text[i], name, len))
+            *needs |= DERIVE_NEEDS_TEXT;
+}
+
+int cc_scan_source_for_derive_attrs(const char *path) {
+    int needs = 0;
+    scan_source_attr_names(path, derive_attr_name, &needs);
+    return needs;
 }
 
 // Splits `Name/rest` for framework lookup; false for any other spelling.

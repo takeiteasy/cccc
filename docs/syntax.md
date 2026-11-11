@@ -88,8 +88,6 @@ Node *add_one(Node *x) { return `return ${x} + 1;`; }
 `@default(expr)` on a member removes it from the `@ctor` constructor's parameters and assigns `expr` instead. A member initializer, `T m = expr;`, is the same thing written in C++ style.
 
 ```c
-#include <cccc/derive.h>
-
 @ctor struct Server {
     int   port  @default(8080);
     char *label = "untitled"; // same as @default("untitled")

@@ -141,6 +141,7 @@ const struct option cccc_long_options[] = {
     {"watch-clear", no_argument, 0, 1132},
     {"watch-restart", no_argument, 0, 1133},
     {"run", no_argument, 0, 1151},
+    {"no-implicit-derive", no_argument, 0, 1152},
     // System-header mode
     {"use-system-headers", no_argument, 0, 1112},
     {"no-builtin-includes", no_argument, 0, 1113},

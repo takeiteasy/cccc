@@ -4,13 +4,10 @@ Generate JSON encoders and decoders for a struct.
 
 ## JSON
 
-`@to_json` and `@from_json` also need `#include <cccc/json.h>`, the runtime the
-generated functions call (a missing include is a compile error that names it).
+`@to_json` and `@from_json` load `<cccc/json.h>`, the runtime the generated
+functions call, so no include is needed.
 
 ```c
-#include <cccc/derive.h>
-#include <cccc/json.h>
-
 @to_json
 @from_json
 typedef struct { int id; char name[16]; double scores[2]; } User;

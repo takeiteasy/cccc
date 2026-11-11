@@ -4369,6 +4369,8 @@ typedef struct Compiler {
     // --sysroot)
     bool use_system_headers;  // Prefer SDK headers over CCCC polyfills for
                               // non-owned std headers
+    bool no_implicit_derive;  // --no-implicit-derive: derive.h/json.h/text.h
+                              // must be #included
     bool no_builtin_includes; // Do not fall back to ./include for non-owned std
                               // headers
     const char *builtin_include_dir; // Path of CCCC's own header dir; excluded

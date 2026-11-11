@@ -312,9 +312,9 @@ C17 is a bug-fix release — no new language features or library functions were 
 | Header | Loaded | Provides |
 |---|---|---|
 | `reflection.h` | Implicitly, in every comptime program | Reflection and AST-building API, see [macros.md](macros.md) |
-| `cccc/derive.h` | `#include <cccc/derive.h>` | Handlers for `@serialize`, `@deserialize`, `@to_string`, `@from_string`, `@getters`, `@setters`, `@accessors`, `@ctor`, `@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@default`, `@validate`, `@clamp`, `@bitflags`, `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable`, `@ordered`, see [derive.md](derive.md) |
-| `cccc/json.h` | `#include <cccc/json.h>` | The runtime `@to_json` / `@from_json` call; programs use the attributes, not its functions |
-| `cccc/text.h` | `#include <cccc/text.h>` | The runtime a struct's `@from_string` calls; programs use the attribute, not its functions |
+| `cccc/derive.h` | The first built-in derive attribute in the source file, or `#include <cccc/derive.h>` | Handlers for `@serialize`, `@deserialize`, `@to_string`, `@from_string`, `@getters`, `@setters`, `@accessors`, `@ctor`, `@to_json`, `@from_json`, `@equals`, `@hash`, `@dump`, `@compare`, `@clone`, `@destroy`, `@default`, `@validate`, `@clamp`, `@bitflags`, `@json`, `@text`, `@binary`, `@lifecycle`, `@hashable`, `@ordered`, see [derive.md](derive.md) |
+| `cccc/json.h` | `@to_json` / `@from_json` / `@json` in the source file, or `#include <cccc/json.h>` | The runtime `@to_json` / `@from_json` call; programs use the attributes, not its functions |
+| `cccc/text.h` | `@from_string` / `@text` in the source file, or `#include <cccc/text.h>` | The runtime a struct's `@from_string` calls; programs use the attribute, not its functions |
 
 `reflection.h` is private: user source cannot `#include` it. `cccc/derive.h`
 adds no code to the program, so `-c=native` output carries only the generated

@@ -1,4 +1,5 @@
 // EXPECT_COMPILE_ERROR
+// CCCC_FLAGS: --no-implicit-derive
 // CCCC_EXPECT_STDERR: undefined custom attribute 'json_skip'
 // CCCC_EXPECT_STDERR: <cccc/derive.h>
 

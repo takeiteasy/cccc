@@ -71,7 +71,23 @@ Token *cc_preprocess_ex(VirtualMachine *vm, const char *path, bool opencl) {
     if (opencl && tok2)
         tok = tokenize_string(vm, "<opencl-prelude>",
                               "#include <cccc/opencl.h>\n");
+    // json.h and text.h go first so their runtime helpers precede the
+    // generated code. derive.h goes last: the first handler registered for an
+    // attribute wins, so the program's own handlers keep precedence over the
+    // built-in ones.
+    int needs = 0;
+    if (!vm->compiler.no_implicit_derive && tok2)
+        needs = cc_scan_source_for_derive_attrs(path);
+    if (needs & DERIVE_NEEDS_JSON)
+        tok = append_tokens(tok, tokenize_string(vm, "<implicit-json.h>",
+                                                 "#include <cccc/json.h>\n"));
+    if (needs & DERIVE_NEEDS_TEXT)
+        tok = append_tokens(tok, tokenize_string(vm, "<implicit-text.h>",
+                                                 "#include <cccc/text.h>\n"));
     tok = append_tokens(tok, tok2);
+    if (needs & DERIVE_NEEDS_DERIVE)
+        tok = append_tokens(tok, tokenize_string(vm, "<implicit-derive.h>",
+                                                 "#include <cccc/derive.h>\n"));
     if (!vm->compiler.skip_preprocess) {
         tok = preprocess(vm, tok);
     }

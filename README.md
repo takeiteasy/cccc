@@ -63,8 +63,6 @@ Attributes on a type generate functions for it at compile time:
 ```c
 #include <stdio.h>
 #include <string.h>
-#include <cccc/derive.h>
-#include <cccc/json.h>
 
 @to_string
 @from_string
@@ -322,6 +320,7 @@ Options:
 	-F/--framework-path <path> Add <path> to framework search paths (<Name/X.h> -> Name.framework/Headers/X.h)
 	   --iframework <path>   Add <path> to system framework search paths
 	   --use-system-headers  Prefer SDK headers over CCCC polyfills for non-owned standard headers
+	   --no-implicit-derive  Do not load <cccc/derive.h>, <cccc/json.h> and <cccc/text.h> for the built-in derive attributes used (only reflection.h stays implicit)
 	   --no-builtin-includes Do not fall back to CCCC's own bundled headers for non-owned standard headers (requires --use-system-headers)
 	   --sysroot <path>      Set SDK root; adds <path>/usr/include to system include paths (and <path>/System/Library/Frameworks to system framework paths) and implies --use-system-headers
 	-L/--library-path <path> Add <path> to dynamic library search paths

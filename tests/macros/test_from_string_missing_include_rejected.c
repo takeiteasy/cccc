@@ -1,4 +1,5 @@
 // EXPECT_COMPILE_ERROR
+// CCCC_FLAGS: --no-implicit-derive
 // CCCC_EXPECT_STDERR: @from_string needs #include <cccc/text.h>
 
 #include <cccc/derive.h>

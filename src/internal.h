@@ -670,6 +670,10 @@ char *search_include_paths(VirtualMachine *vm, char *filename, int filename_len,
 Token *tokenize_private_header(VirtualMachine *vm, char *name, char *tag);
 void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
                                    bool *wants_build); // #1272
+// Runtime headers a derive attribute needs beside derive.h.
+enum { DERIVE_NEEDS_DERIVE = 1, DERIVE_NEEDS_JSON = 2, DERIVE_NEEDS_TEXT = 4 };
+// OR of DERIVE_NEEDS_* for the built-in derive attributes `path` uses.
+int cc_scan_source_for_derive_attrs(const char *path);
 void init_macros(VirtualMachine *vm);
 void cccc_init_host_shadow_macros(
     VirtualMachine *vm); // src/host_values.c, #1315

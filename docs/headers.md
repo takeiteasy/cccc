@@ -36,6 +36,7 @@ A header CCCC has never heard of (your `"local.h"`) skips steps 2 and 3 and reso
 |---|---|
 | `--use-system-headers` | For known, non-owned headers, prefer a real SDK copy before CCCC's own |
 | `--sysroot <path>` | Adds `<path>/usr/include`, `<path>/usr/local/include` and `<path>/System/Library/Frameworks`; implies `--use-system-headers` |
+| `--no-implicit-derive` | Do not load `<cccc/derive.h>`, `<cccc/json.h>` and `<cccc/text.h>` for derive attributes; only `reflection.h` stays implicit |
 | `--no-builtin-includes` | With `--use-system-headers` only: fail instead of falling back to CCCC's copy |
 | `-F <dir>`, `--framework-path <dir>` | User framework path |
 | `--iframework <dir>` | System framework path |

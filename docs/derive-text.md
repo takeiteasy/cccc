@@ -3,8 +3,6 @@
 `@to_string` and `@from_string` convert an enum or a struct to text and back.
 
 ```c
-#include <cccc/derive.h>
-#include <cccc/text.h>
 #include <stdio.h>
 
 @text
@@ -56,8 +54,7 @@ Point_to_string(&p, NULL, 0);   // the size to allocate, minus the NUL
 `T_from_string` reads that text back into `*out` and returns `0`. It returns
 `1` for malformed or trailing text, a missing, repeated or unknown member, or a
 value that does not fit; `*out` is then left untouched. The struct form needs
-`#include <stdio.h>` to write and `#include <cccc/text.h>` to read, and
-rejects unions.
+`#include <stdio.h>` to write and rejects unions.
 
 | Text | Reads as |
 |---|---|

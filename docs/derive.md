@@ -3,12 +3,12 @@
 Attributes that generate code for a type: serializers, enum strings, accessors and more.
 
 Attach an attribute to a struct, union, enum or `typedef` and CCCC generates
-functions for it at compile time. `#include <cccc/derive.h>` once; no handler
-code needed.
+functions for it at compile time. No include and no handler code needed: the
+first built-in attribute in the source file loads `<cccc/derive.h>`, the
+JSON ones also load `<cccc/json.h>`, and `@from_string` and `@text` load
+`<cccc/text.h>`.[^implicit]
 
 ```c
-#include <cccc/derive.h>
-
 @serialize
 @accessors
 typedef struct { int x; int y; } Point;
@@ -72,10 +72,10 @@ struct Point { int x; int y; } @ctor origin;   // Point_new, and origin
 struct @equals Pair { int a; int b; } pair;    // Pair_equals, and pair
 ```
 
-Using one of these attributes without the include is a compile error that
-names `<cccc/derive.h>`. The header adds no code to the program: the handlers
-run at compile time, and `-c=native` output carries only the generated
-functions.
+`--no-implicit-derive` turns the automatic load off; an attribute used without
+`#include <cccc/derive.h>` is then a compile error that names the header. The
+header adds no code to the program: the handlers run at compile time, and
+`-c=native` output carries only the generated functions.
 
 ## Serialization
 
@@ -354,6 +354,8 @@ without the include), replaces the built-in one.
 A handler for a struct reads the attributes on its members with
 `MemberHasAttr` and `MemberAttrArg`; see
 [Member attributes](macros-attributes.md#member-attributes).
+
+[^implicit]: Only the source file named on the command line is scanned, and only for attributes written as `@name`, `[[cccc::name]]` or `__attribute__((name))`. A header that uses a derive attribute includes `<cccc/derive.h>` itself, and `<cccc/json.h>` or `<cccc/text.h>` where it needs them. An explicit include next to the automatic load is a no-op.
 
 [^size]: `@clone` also publishes `unsigned long T_clone_size(void)` (with the same prefix), the size of `T`. A struct that owns a pointer to a still-incomplete `T` calls it to allocate and to step through an `@owned("n")` array, because `sizeof(T)` is not known yet where the owner's functions are generated.
 
