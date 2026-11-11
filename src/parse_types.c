@@ -3612,15 +3612,16 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
                  attr_is(name_tok, "constant") ||
                  attr_is(name_tok, "private") || attr_is(name_tok, "generic"));
-            bool is_optimize_attr        = equal(name_tok, "optimize");
-            bool is_designated_init_attr = equal(name_tok, "designated_init");
+            bool is_optimize_attr        = attr_is(name_tok, "optimize");
+            bool is_designated_init_attr = attr_is(name_tok, "designated_init");
             bool is_checked_ptr_attr =
-                equal(name_tok, "single") || equal(name_tok, "array") ||
-                equal(name_tok, "ntarray") || equal(name_tok, "count") ||
-                equal(name_tok, "byte_count") || equal(name_tok, "bounds") ||
-                equal(name_tok, "assume") || equal(name_tok, "dynamic");
+                attr_is(name_tok, "single") || attr_is(name_tok, "array") ||
+                attr_is(name_tok, "ntarray") || attr_is(name_tok, "count") ||
+                attr_is(name_tok, "byte_count") ||
+                attr_is(name_tok, "bounds") || attr_is(name_tok, "assume") ||
+                attr_is(name_tok, "dynamic");
             bool is_checked_scope_attr =
-                equal(name_tok, "checked") || equal(name_tok, "unchecked");
+                attr_is(name_tok, "checked") || attr_is(name_tok, "unchecked");
             tok = tok->next;
 
             // Checked-pointer attributes (#770/#482-484): [[cccc::single]] /
@@ -3629,15 +3630,15 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // meaningful right after '*' in pointers() -- see
             // apply_checked_ptr_attr()'s comment.
             if (is_checked_ptr_attr) {
-                const char *name = equal(name_tok, "single")    ? "single"
-                                   : equal(name_tok, "array")   ? "array"
-                                   : equal(name_tok, "ntarray") ? "ntarray"
-                                   : equal(name_tok, "count")   ? "count"
-                                   : equal(name_tok, "byte_count")
+                const char *name = attr_is(name_tok, "single")    ? "single"
+                                   : attr_is(name_tok, "array")   ? "array"
+                                   : attr_is(name_tok, "ntarray") ? "ntarray"
+                                   : attr_is(name_tok, "count")   ? "count"
+                                   : attr_is(name_tok, "byte_count")
                                        ? "byte_count"
-                                   : equal(name_tok, "bounds") ? "bounds"
-                                   : equal(name_tok, "assume") ? "assume"
-                                                               : "dynamic";
+                                   : attr_is(name_tok, "bounds") ? "bounds"
+                                   : attr_is(name_tok, "assume") ? "assume"
+                                                                 : "dynamic";
                 tok              = apply_checked_ptr_attr(
                     vm, attr_tok, tok, ty ? ty : attr->checked_array, name);
                 continue;
@@ -3648,7 +3649,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // comment.
             if (is_checked_scope_attr) {
                 tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
-                                               equal(name_tok, "checked"));
+                                               attr_is(name_tok, "checked"));
                 attr->checked_attr_tok = name_tok;
                 continue;
             }
@@ -3725,9 +3726,9 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             // [[gnu::nonnull]] / [[gnu::nonnull(1,3)]] /
             // [[gnu::returns_nonnull]]
-            if (equal(name_tok, "nonnull") ||
-                equal(name_tok, "returns_nonnull")) {
-                bool     is_returns = equal(name_tok, "returns_nonnull");
+            if (attr_is(name_tok, "nonnull") ||
+                attr_is(name_tok, "returns_nonnull")) {
+                bool     is_returns = attr_is(name_tok, "returns_nonnull");
                 bool     all        = true;
                 uint64_t mask       = 0;
                 if (!is_returns && equal(tok, "(")) {
@@ -3765,7 +3766,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[gnu::sentinel]] / [[gnu::sentinel(N)]] (#658)
-            if (equal(name_tok, "sentinel")) {
+            if (attr_is(name_tok, "sentinel")) {
                 int pos = 0;
                 if (equal(tok, "(")) {
                     tok = tok->next;
@@ -3784,7 +3785,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[gnu::alloc_size(n)]] / [[gnu::alloc_size(n,m)]] (#649)
-            if (equal(name_tok, "alloc_size")) {
+            if (attr_is(name_tok, "alloc_size")) {
                 int idx1 = 0, idx2 = 0;
                 if (equal(tok, "(")) {
                     tok  = tok->next;
@@ -3824,7 +3825,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             // [[gnu::malloc]] (#649) -- informational, see the GNU-syntax
             // handler above for the full rationale.
-            if (equal(name_tok, "malloc")) {
+            if (attr_is(name_tok, "malloc")) {
                 if (ty && ty->kind == TY_FUNC)
                     ty->is_malloc = true;
                 if (attr)
