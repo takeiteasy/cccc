@@ -17,6 +17,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: `@template` constant parameters may be `float`, `double` or a pointer. A float argument names the instance by its shortest decimal (`Gain__1p5`, `Gain__n0p25`, `Gain__1em05`); a pointer takes a function, the address of a file-scope or `static` object, or null (`before__int__cmp_int`, `before__int__null`), and inside the body each is a `const` object. NaN, `long double`, string literals and element addresses are errors.
 - Changed: naming a template without instantiating it, such as `Vec @inst(int) a` or a file-scope `Vec g;`, reports `'Vec' is a template; instantiate it as 'Vec@(args)' or '@inst(args) Vec'` instead of `undefined variable`.
 - Changed: a repeated `@inst` of an existing instance parses each constant parameter's type once per template and builds the instance name without allocating, so a template-heavy file compiles faster and in less memory.
+- Fixed: a function `@template` may have a parenthesised name (`@template(T) T (fn)(T x) {...}`), a return type written `@inst(T) Vec` or `_Atomic(T)`, or return a function pointer; each was rejected as not a definition.
 
 ## [0.33.2] - 2026-11-09
 

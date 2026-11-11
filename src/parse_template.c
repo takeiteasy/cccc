@@ -103,18 +103,25 @@ static bool is_type_spec_kw(Token *tok) {
     return false;
 }
 
-// `@template(...) typedef ...;` declares one name. The name is the last
-// identifier outside brace bodies, brackets, parameter lists and attributes.
-// An identifier before any type specifier is the type (`Foo` in `Foo (Fn)(T)`),
-// so a `(` after it opens a grouped declarator; after the declarator's name or
-// a `)` it opens a parameter list unless it starts a grouped declarator
-// (`T (*Fn)(int)`).
-static int scan_typedef_template(Token *p, Template *t, const char **err,
-                                 Token **err_tok) {
-    Token *name = NULL, *def_tag = NULL, *prev = NULL;
+typedef struct {
+    Token *name;    // the last identifier outside brackets and parameter lists
+    Token *def_tag; // the tag of a struct, union or enum defined in the type
+    Token *params;  // the last parameter list
+} Declarator;
+
+// Walks a template's declaration from `q`. The name is the last identifier
+// outside brace bodies, brackets, parameter lists and attributes. An identifier
+// before any type specifier is the type (`Foo` in `Foo (Fn)(T)`), so a `(`
+// after it opens a grouped declarator. After the declarator's name or a `)` a
+// `(` opens a parameter list unless it starts a grouped declarator.
+// Returns the token that ends it: `;` for a typedef, and for a function the
+// `{` of its body or the `;` or `=` that shows it has none. NULL on an error.
+static Token *scan_declarator(Token *q, bool is_func, Declarator *d,
+                              const char **err, Token **err_tok) {
+    Token *prev      = NULL;
     bool   have_type = false;
-    Token *q = p->next;
-    while (q->kind != TK_EOF && !equal(q, ";")) {
+    while (q->kind != TK_EOF && !equal(q, ";") &&
+           !(is_func && (equal(q, "=") || (d->name && equal(q, "{"))))) {
         Token *g = skip_attr_groups(q);
         if (g != q) {
             q = g;
@@ -136,7 +143,7 @@ static int scan_typedef_template(Token *p, Template *t, const char **err,
             if (tag->kind == TK_IDENT) {
                 Token *after = skip_attr_groups(tag->next);
                 if (equal(after, "{") || (equal(q, "enum") && equal(after, ":")))
-                    def_tag = tag;
+                    d->def_tag = tag;
                 q    = tag->next;
                 prev = NULL;
                 continue;
@@ -155,7 +162,7 @@ static int scan_typedef_template(Token *p, Template *t, const char **err,
             if (!end) {
                 *err     = "unterminated template body";
                 *err_tok = q;
-                return -1;
+                return NULL;
             }
             q = end->next;
             continue;
@@ -173,24 +180,38 @@ static int scan_typedef_template(Token *p, Template *t, const char **err,
             continue;
         }
         if (equal(q, ",")) {
-            *err     = "a typedef template declares one name";
+            *err     = is_func ? "@template must be a struct, union, enum, "
+                                 "typedef or function definition"
+                               : "a typedef template declares one name";
             *err_tok = q;
-            return -1;
+            return NULL;
         }
         if (equal(q, "(")) {
             bool grouped = !prev || !(prev->kind == TK_IDENT || equal(prev, ")")) ||
                            equal(q->next, "*") || equal(q->next, "^") ||
                            equal(q->next, "(");
             if (!grouped) {
-                q = skip_parens(q);
+                d->params = q;
+                q         = skip_parens(q);
                 continue;
             }
         }
         if (q->kind == TK_IDENT)
-            name = q;
+            d->name = q;
         prev = q;
         q    = q->next;
     }
+    return q;
+}
+
+// `@template(...) typedef ...;` declares one name.
+static int scan_typedef_template(Token *p, Template *t, const char **err,
+                                 Token **err_tok) {
+    Declarator d = {};
+    Token     *q = scan_declarator(p->next, false, &d, err, err_tok);
+    if (!q)
+        return -1;
+    Token *name = d.name, *def_tag = d.def_tag;
     if (!equal(q, ";") || !name) {
         *err     = "a typedef template must declare a name";
         *err_tok = q;
@@ -448,43 +469,15 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     if (equal(p, "typedef"))
         return scan_typedef_template(p, t, err, err_tok);
 
-    Token *prev = NULL, *name = NULL, *q = p;
-    while (q->kind != TK_EOF) {
-        Token *g = skip_attr_groups(q);
-        if (g != q) {
-            q = g;
-            continue;
-        }
-        if (is_typeof_kw(q) && equal(q->next, "(")) {
-            q    = skip_parens(q->next);
-            prev = NULL;
-            continue;
-        }
-        if (equal(q, "(")) {
-            name = prev;
-            q    = skip_parens(q);
-            break;
-        }
-        if (equal(q, ";") || equal(q, "{") || equal(q, "=")) {
-            *err = "@template must be a struct, union, enum, typedef or "
-                   "function definition";
-            *err_tok = q;
-            return -1;
-        }
-        prev = q;
-        q    = q->next;
-    }
-    if (!name || name->kind != TK_IDENT) {
-        *err     = "@template must be a struct, union, enum, typedef or function "
-                    "definition";
-        *err_tok = p;
+    Declarator d = {};
+    Token     *q = scan_declarator(p, true, &d, err, err_tok);
+    if (!q)
         return -1;
-    }
-    while (q->kind != TK_EOF) {
-        Token *g = skip_attr_groups(q);
-        if (g == q)
-            break;
-        q = g;
+    if (!d.name || !d.params) {
+        *err = "@template must be a struct, union, enum, typedef or function "
+               "definition";
+        *err_tok = q->kind == TK_EOF ? p : q;
+        return -1;
     }
     if (!equal(q, "{")) {
         *err     = "a template must be a definition";
@@ -498,7 +491,7 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         return -1;
     }
     t->kind      = TMPL_FUNC;
-    t->name_tok  = name;
+    t->name_tok  = d.name;
     t->body_open = q;
     t->end       = end->next;
     return 1;

@@ -18,6 +18,22 @@
 @template(T) @equals struct Cell { T a; T b; };
 @template(T) union Bits { T value; unsigned char raw[sizeof(T)]; };
 @template(T) T first_of(T *p) { T v = *p; return v; }
+@template(T) T(grouped_name)(T x) {
+    return x + 1;
+}
+@template(T) @inst(T) Vec make_vec(T *p) {
+    @inst(T) Vec v = {p, 1, 1};
+    return v;
+}
+@template(T) _Atomic(T) *atomic_ptr(_Atomic(T) *p) {
+    return p;
+}
+static int double_it(int x) {
+    return x * 2;
+}
+@template(T) int (*pick_fn(T x))(int) {
+    return x ? double_it : NULL;
+}
 
 @template(T, int N) struct Arr {
     T v[N];
@@ -791,4 +807,27 @@ void test_pointer_parameter_forwards_to_another_template(void) {
 void test_object_pointer_parameter(void) {
     AssertEq(@inst(&ptr_global) deref(), 7);
     AssertEq(@inst(ptr_table) deref(), 4);
+}
+
+[[cccc::test]]
+void test_parenthesised_function_name(void) {
+    AssertEq(@inst(int) grouped_name(41), 42);
+}
+
+[[cccc::test]]
+void test_inst_return_type(void) {
+    int x = 42;
+    AssertEq(@inst(int) make_vec(&x).data[0], 42);
+}
+
+[[cccc::test]]
+void test_atomic_pointer_return_type(void) {
+    _Atomic int a = 42;
+    AssertEq(*@inst(int) atomic_ptr(&a), 42);
+}
+
+[[cccc::test]]
+void test_function_returning_function_pointer(void) {
+    AssertEq(@inst(int) pick_fn(1)(21), 42);
+    AssertTrue(@inst(int) pick_fn(0) == NULL);
 }
