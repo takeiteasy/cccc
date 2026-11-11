@@ -117,8 +117,4 @@ void test_has_attribute_spellings(void) {
     AssertFalse(__has_c_attribute(cccc::no_such_attribute));
 }
 
-// TODO(#2008): rejected or ignored today, enabled as the attribute dispatch
-// resolves by name alone:
-//   [[unknown_vendor::x]] is a parse error, not a warning
-
 #pragma cccc suite end

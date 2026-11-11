@@ -3578,22 +3578,21 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             Token *attr_tok    = tok;
             Token *name_tok    = tok;
+            Token *ns_tok      = NULL;
             bool   cccc_scoped = false;
             bool   gnu_scoped  = false;
             if (tok->next && equal(tok->next, ":") && tok->next->next &&
                 equal(tok->next->next, ":") && tok->next->next->next &&
                 (tok->next->next->next->kind == TK_IDENT ||
                  tok->next->next->next->kind == TK_KEYWORD)) {
-                if (equal(tok, "cccc")) {
-                    cccc_scoped = true;
-                } else if (equal(tok, "gnu") || equal(tok, "__gnu__")) {
-                    gnu_scoped = true;
-                }
-                if (cccc_scoped || gnu_scoped) {
-                    name_tok = tok->next->next->next;
-                    tok      = name_tok;
-                }
+                ns_tok      = tok;
+                cccc_scoped = equal(tok, "cccc");
+                gnu_scoped  = equal(tok, "gnu") || equal(tok, "__gnu__");
+                name_tok    = tok->next->next->next;
+                tok         = name_tok;
             }
+            bool   other_scoped        = ns_tok && !cccc_scoped && !gnu_scoped;
+            Token *shown_tok           = other_scoped ? ns_tok : name_tok;
 
             bool unused              = attr_is(name_tok, "maybe_unused");
             bool deprecated          = attr_is(name_tok, "deprecated");
@@ -3605,8 +3604,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             bool is_pure_attr       = attr_is(name_tok, "pure");
             bool is_func_const_attr = attr_is(name_tok, "const");
             bool is_gnu_inline_attr = attr_is(name_tok, "gnu_inline");
-            bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
-            bool is_trusted_attr = cccc_scoped && attr_is(name_tok, "trusted");
+            bool is_kernel_attr     = attr_is(name_tok, "kernel");
+            bool is_trusted_attr    = attr_is(name_tok, "trusted");
             bool is_addr_space_attr =
                 cccc_scoped &&
                 (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
@@ -3862,7 +3861,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[cccc::operator(+)]]
-            if (cccc_scoped && attr_is(name_tok, "operator")) {
+            if (attr_is(name_tok, "operator")) {
                 tok             = skip(vm, tok, "(");
                 Token      *after = NULL;
                 const char *sym   = overloadable_operator(tok, &after);
@@ -3878,7 +3877,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[cccc::method(T)]] or [[cccc::method(T, name)]]
-            if (cccc_scoped && attr_is(name_tok, "method")) {
+            if (attr_is(name_tok, "method")) {
                 tok              = skip(vm, tok, "(");
                 Type       *recv = typename(vm, &tok, tok);
                 const char *name = NULL;
@@ -4003,15 +4002,13 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                     ty->designated_init = true;
             } else if (!unused && !deprecated &&
                        !vm->compiler.in_type_lookahead &&
-                       !(gnu_scoped &&
+                       !((gnu_scoped || other_scoped) &&
                          cc_has_attribute(name_tok->loc, name_tok->len))) {
                 error_if_derive_attr_not_included(vm, name_tok);
                 warn_tok(vm, attr_tok, unknown_attr_warning(name_tok),
                          "unknown attribute '%.*s' ignored",
-                         (cccc_scoped || gnu_scoped) ? name_tok->len
-                                                     : attr_tok->len,
-                         (cccc_scoped || gnu_scoped) ? name_tok->loc
-                                                     : attr_tok->loc);
+                         (int)(name_tok->loc + name_tok->len - shown_tok->loc),
+                         shown_tok->loc);
                 apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
                                     false, NULL);
             } else {
