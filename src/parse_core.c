@@ -1366,9 +1366,7 @@ void cleanup_on_type(VirtualMachine *vm, Token *tok) {
              "'cleanup' attribute does not apply to types");
 }
 
-Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
-    drop_cleanup_attr(vm, ty, NULL, ty->name);
-    Obj *var           = new_var(vm, name, name_len, ty);
+void link_gvar(VirtualMachine *vm, Obj *var) {
     var->next          = vm->compiler.globals;
     var->is_static     = true;
     var->is_definition = true;
@@ -1379,6 +1377,12 @@ Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
     // is_macro_program_global's comment, src/cccc.h.
     var->is_macro_program_global = vm->compiler.in_macro_mode;
     vm->compiler.globals         = var;
+}
+
+Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty) {
+    drop_cleanup_attr(vm, ty, NULL, ty->name);
+    Obj *var = new_var(vm, name, name_len, ty);
+    link_gvar(vm, var);
     return var;
 }
 

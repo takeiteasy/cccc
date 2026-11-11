@@ -1,6 +1,6 @@
 # Templates
 
-Generic structs, unions, enums, typedefs and functions: write the definition once with type and integer constant parameters, instantiate it per argument list.
+Generic structs, unions, enums, typedefs and functions: write the definition once with type and constant parameters, instantiate it per argument list.
 
 ```c
 @template(T) struct Vec { T *data; size_t len, cap; };
@@ -18,7 +18,7 @@ int main(void) {
 
 | Rule | Detail |
 |---|---|
-| Parameters | One or more type names (`@template(K, V)`) or integer constants (`@template(T, int N)`), optionally with defaults |
+| Parameters | One or more type names (`@template(K, V)`) or constants (`@template(T, int N)`, `@template(double D)`, `@template(int (*F)(int))`), optionally with defaults |
 | Allowed on | A struct, union, enum, typedef or function definition at file scope |
 | Not allowed on | Prototypes, `extern`, a struct or enum that declares variables, a typedef that declares more than one name, anything inside a function |
 | Attributes | Other attributes on the declaration stay with it and apply to every instance: `@template(T) @equals struct Cell { T a; T b; };` |
@@ -26,7 +26,7 @@ int main(void) {
 
 ## Constant parameters
 
-A parameter written as a type followed by a name is an integer constant. The matching `@inst` argument is a constant expression, and the name is a constant of that type inside the body: usable in array sizes, `case` labels and `_Static_assert`, and hidden by a local of the same name.
+A parameter written as a type followed by a name is a constant; integers come first, [float and pointer constants](#float-and-pointer-constants) after. The matching `@inst` argument is a constant expression, and the name is a constant of that type inside the body: usable in array sizes, `case` labels and `_Static_assert`, and hidden by a local of the same name.
 
 ```c
 @template(T, int N) struct Arr { T v[N]; };
@@ -44,6 +44,38 @@ int r = @inst(long, 40) add_n(2);  // add_n__long__40
 | Negative | Named with an `n` prefix: `-3` gives `signed_n__n3` |
 | Enum or bool | Named by the enumerator (`Pick__GREEN`) or `true`/`false`; a value with no enumerator keeps its number[^enumname] |
 
+### Float and pointer constants
+
+A `float` or `double` parameter takes any real constant expression; a pointer parameter takes a function, the address of an object, or null. Inside the body the name is a `const` object that folds in constant expressions, so a local of the same name hides it.
+
+```c
+@template(double D) double scale(double x) { return x * D; }
+@template(T, int (*CMP)(T, T)) int before(T a, T b) { return CMP(a, b) < 0; }
+@template(const int *P) int first(void) { return *P; }
+
+static int cmp_int(int a, int b) { return a - b; }
+static int table[4];
+
+double r = @inst(1.5) scale(2.0);          // scale__1p5
+int    s = @inst(int, cmp_int) before(1, 2);  // before__int__cmp_int
+int    t = @inst(table) first();           // first__table
+```
+
+| Parameter | Argument | Instance name |
+|---|---|---|
+| `float`, `double` | Any real constant; converted to the parameter type first | Shortest decimal that reads back the same: `1.5` is `1p5`, `-0.25` is `n0p25`, `1e-5` is `1em05`, `-0.0` is `n0` |
+| Function pointer | A function, or `&function` | The function's name: `before__int__cmp_int` |
+| Object pointer | `&object`, or an array (its first element), with file-scope or `static` storage | The object's name: `first__table` |
+| Any pointer | `NULL`, `nullptr` or `0` | `null` |
+
+| Rule | Detail |
+|---|---|
+| Float values | `inf` and `-inf` are accepted (`inf`, `ninf`); NaN is an error. A finite value that overflows `float` is an error: `template argument 1e+40 does not fit 'float'` |
+| Pointer types | The argument must match the parameter: a function for a function pointer, an object for an object pointer, compatible pointee types. `void *` takes any object |
+| Not accepted | String literals (pass a named `static const char x[]` as `x`), `&a[2]`, `&s.m`, locals, block-scope statics, compound literals, thread-local objects |
+| Constant expressions | A float parameter folds (`_Static_assert(D > 1.0)`, `int a[(int)D]`). A non-null pointer parameter is a valid static initializer (`static int (*f)(int) = F;`) but not an integer constant expression |
+| Name clash | An argument spelled like another (`null` as a function name and as null) is an error: `cannot name the instance: 'f__null' is also the name of a different instance` |
+
 ## Default arguments
 
 A parameter may end in `= value`, and the instantiation then leaves its argument out. A type parameter takes a type, a constant parameter a constant expression.
@@ -53,11 +85,14 @@ A parameter may end in `= value`, and the instantiation then leaves its argument
 @template(K, V = K) struct Map { K key; V val; };
 @template(T = int) struct Id { T v; };
 @template(T, T N = 0) T add_n(T x) { return x + N; }
+@template(double D = 1.0, double E = D * 2) double span(void) { return E - D; }
+@template(int (*F)(int) = NULL) int apply(int x) { return F ? F(x) : x; }
 
 @inst(int) Arr a;            // struct Arr__int__8
 @inst(int, 8) Arr b;         // the same type
 @inst(int) Map m;            // struct Map__int__int
 @inst Id c;                  // every parameter defaulted: struct Id__int
+@inst(3.0) span;              // span__3__6
 ```
 
 | Rule | Detail |
@@ -142,6 +177,8 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `size_t` (an alias of `unsigned long`) | `unsigned_long` |
 | Constant `16`, `-3` | `16`, `n3` |
 | Enum constant `GREEN`, bool `1` | `GREEN`, `true` |
+| Float `1.5`, `-0.25`, `1e-5`, `-0.0`, infinity | `1p5`, `n0p25`, `1em05`, `n0`, `inf` |
+| Function `cmp_int`, object `table`, null | `cmp_int`, `table`, `null` |
 | `int *`, `const char *`, `int * const` | `int_ptr`, `const_char_ptr`, `int_ptr_const` |
 | `int[4]` | `int_arr4` |
 | `struct Point`, `union U`, `enum E` | `struct_Point`, `union_U`, `enum_E` |
@@ -187,7 +224,7 @@ _Bool same = Cell__int_equals(&x, &y);
 
 | Not supported | Result |
 |---|---|
-| Non-integer constant parameters (`double`, pointers, `_BitInt` over 64 bits) | Compile error |
+| `long double` or `_BitInt` over 64 bits constant parameter, a NaN argument | Compile error |
 | Specialization | A template has one definition |
 | Argument that is a checked pointer, address-space type, block, or variable-length array | Compile error naming the kind |
 | Argument that is an unnamed struct, union or enum | Compile error asking for a tag |

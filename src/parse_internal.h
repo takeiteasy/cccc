@@ -490,6 +490,7 @@ int get_vm_size(Type *ty);
 Token *global_variable(VirtualMachine *vm, Token *tok, Type *basety,
                        VarAttr *attr);
 void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var);
+void cc_finalize_const_gvar(VirtualMachine *vm, Obj *var, Node *expr);
 bool has_custom_attrs(Type *ty, VarAttr *attr);
 void init_typename_map(void);
 bool is_attr_name(Token *tok, char *name);
@@ -531,6 +532,7 @@ Node *new_binary(VirtualMachine *vm, NodeKind kind, Node *lhs, Node *rhs,
 Node *new_complex_node(VirtualMachine *vm, Node *real, Node *imag, Type *ty,
                        Token *tok);
 Obj *new_gvar(VirtualMachine *vm, char *name, int name_len, Type *ty);
+void link_gvar(VirtualMachine *vm, Obj *var);
 void link_hidden_builtin(VirtualMachine *vm, Obj *fn);
 void claim_cleanup(VirtualMachine *vm, Obj *var, VarAttr *attr);
 void drop_cleanup_attr(VirtualMachine *vm, Type *ty, VarAttr *attr, Token *tok);

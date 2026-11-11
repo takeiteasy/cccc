@@ -536,3 +536,163 @@ void test_spellings_in_macros(void) {
     PAIR_OF(int, char) q = {1, 2};
     AssertEq(q.second, 2);
 }
+
+// ---- float and pointer constant parameters ----
+
+@template(double D) double scale(double x) {
+    _Static_assert(D == 1.5, "D folds");
+    return x * D;
+}
+@template(double D) struct Gain {
+    double v;
+};
+@template(float F) float fsrc(void) {
+    return F;
+}
+@template(T, T V) T constant(void) {
+    return V;
+}
+@template(double D, double E = D * 2) double pair_sum(void) {
+    return D + E;
+}
+@template(double D = 1.0) double dflt(void) {
+    return D;
+}
+@template(double D) int array_len(void) {
+    int a[(int)D];
+    return (int)sizeof a / (int)sizeof a[0];
+}
+@template(double D) const double *addr_of(void) {
+    return &D;
+}
+@template(double D) double hidden(void) {
+    double D = 9;
+    return D;
+}
+
+@template(T, int (*CMP)(T, T)) int compare(T a, T b) {
+    static int (*saved)(T, T) = CMP;
+    if (CMP == NULL)
+        return -1000;
+    return CMP(a, b) + (saved == CMP ? 1000 : 0);
+}
+@template(int (*F)(int) = NULL) int apply(int x) {
+    return F ? F(x) : x;
+}
+@template(const int *P) int deref(void) {
+    return *P;
+}
+@template(int (*F)(int)) int through(int x) {
+    return @inst(F) apply(x);
+}
+
+static int cmp_int(int a, int b) {
+    return a - b;
+}
+static int twice(int x) {
+    return 2 * x;
+}
+static int ptr_global = 7;
+static int ptr_table[3] = {4, 5, 6};
+
+[[cccc::test]]
+void test_float_argument_spellings_share_an_instance(void) {
+    AssertEq(@inst(1.5) scale(2.0), 3.0);
+    AssertEq(@inst(3.0 / 2) scale(2.0), 3.0);
+    AssertTrue(&scale__1p5 == &scale__1p5);
+    AssertEq(sizeof(@inst(1.5) Gain), sizeof(struct Gain__1p5));
+}
+
+[[cccc::test]]
+void test_float_names(void) {
+    AssertEq(sizeof(@inst(0.25) Gain), sizeof(struct Gain__0p25));
+    AssertEq(sizeof(@inst(-0.25) Gain), sizeof(struct Gain__n0p25));
+    AssertEq(sizeof(@inst(1e-5) Gain), sizeof(struct Gain__1em05));
+    AssertEq(sizeof(@inst(1e20) Gain), sizeof(struct Gain__1e20));
+    AssertEq(sizeof(@inst(100.0) Gain), sizeof(struct Gain__100));
+    AssertEq(sizeof(@inst(0.0) Gain), sizeof(struct Gain__0));
+    AssertEq(sizeof(@inst(-0.0) Gain), sizeof(struct Gain__n0));
+    AssertEq(sizeof(@inst(__builtin_inf()) Gain), sizeof(struct Gain__inf));
+    AssertEq(sizeof(@inst(-__builtin_inf()) Gain), sizeof(struct Gain__ninf));
+}
+
+[[cccc::test]]
+void test_float_parameter_is_named_by_its_own_type(void) {
+    AssertEq(@inst(0.1) fsrc(), 0.1f);
+    AssertTrue(&fsrc__0p1 == &fsrc__0p1);
+}
+
+[[cccc::test]]
+void test_float_argument_converts_from_integer(void) {
+    AssertEq(@inst(3) dflt(), 3.0);
+    AssertTrue(&dflt__3 == &dflt__3);
+}
+
+[[cccc::test]]
+void test_constant_takes_an_earlier_type(void) {
+    AssertEq(@inst(double, 2.5) constant(), 2.5);
+    AssertEq(@inst(float, 0.5) constant(), 0.5f);
+    AssertEq(@inst(int, 7) constant(), 7);
+}
+
+[[cccc::test]]
+void test_float_defaults(void) {
+    AssertEq(@inst(2.0) pair_sum(), 6.0);
+    AssertEq(@inst(2.0, 1.0) pair_sum(), 3.0);
+    AssertEq(@inst() dflt(), 1.0);
+    AssertEq(@inst(4.0) dflt(), 4.0);
+}
+
+[[cccc::test]]
+void test_float_parameter_in_constant_expressions(void) {
+    AssertEq(@inst(3.0) array_len(), 3);
+    static double folded = 2 * 1.5;
+    AssertEq(folded, 3.0);
+}
+
+[[cccc::test]]
+void test_float_parameter_has_an_address_and_is_const(void) {
+    const double *p = @inst(2.5) addr_of();
+    AssertEq(*p, 2.5);
+    AssertTrue(p == @inst(2.5) addr_of());
+    AssertTrue(p != @inst(3.5) addr_of());
+}
+
+[[cccc::test]]
+void test_local_hides_float_parameter(void) {
+    AssertEq(@inst(2.0) hidden(), 9.0);
+}
+
+[[cccc::test]]
+void test_function_pointer_parameter(void) {
+    AssertEq(@inst(int, cmp_int) compare(5, 3), 1002);
+    AssertEq(@inst(int, &cmp_int) compare(5, 3), 1002);
+    AssertTrue(&compare__int__cmp_int == &compare__int__cmp_int);
+}
+
+[[cccc::test]]
+void test_null_function_pointer_parameter(void) {
+    AssertEq(@inst(int, NULL) compare(5, 3), -1000);
+    AssertEq(@inst(int, 0) compare(5, 3), -1000);
+    AssertEq(@inst(int, nullptr) compare(5, 3), -1000);
+    AssertEq(@inst(int, (int (*)(int, int))0) compare(5, 3), -1000);
+    AssertTrue(&compare__int__null == &compare__int__null);
+}
+
+[[cccc::test]]
+void test_function_pointer_default(void) {
+    AssertEq(@inst() apply(4), 4);
+    AssertEq(@inst(NULL) apply(4), 4);
+    AssertEq(@inst(twice) apply(4), 8);
+}
+
+[[cccc::test]]
+void test_pointer_parameter_forwards_to_another_template(void) {
+    AssertEq(@inst(twice) through(4), 8);
+}
+
+[[cccc::test]]
+void test_object_pointer_parameter(void) {
+    AssertEq(@inst(&ptr_global) deref(), 7);
+    AssertEq(@inst(ptr_table) deref(), 4);
+}

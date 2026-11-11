@@ -4101,20 +4101,25 @@ typedef enum {
     TMPL_TYPEDEF
 } TemplateKind;
 
-// One `@template` parameter: a type name, or an integer constant (`int N`)
-// whose type is the tokens from `type_start` up to `name`. A default is the
-// tokens `[def, def_end)`.
+// One `@template` parameter: a type name, or a constant (`int N`,
+// `double D`, `int (*F)(int)`) declared by the tokens `[type_start, decl_end)`.
+// A default is the tokens `[def, def_end)`.
 typedef struct TemplateParam {
     Token *name;
     Token *type_start; // NULL for a type parameter
+    Token *decl_end;   // end of a constant's declaration
     Token *def, *def_end; // NULL without a default
 } TemplateParam;
 
-// One `@inst` argument: a type, or a constant with its signedness.
+// One `@inst` argument: a type, or a constant. A constant is parsed into
+// `expr` and bound to its parameter's type once that type is known.
 typedef struct TemplateArg {
     Type   *ty;
+    Node   *expr;
     int64_t val;
     bool    val_unsigned;
+    double  fval; // float and double parameters
+    Obj    *sym;  // pointer parameters; NULL is a null pointer
 } TemplateArg;
 
 // A `@template(P...)` definition, kept as unparsed tokens until `@inst`.
@@ -4138,6 +4143,7 @@ typedef struct TemplateInstance {
     TemplateInstState state;
     Type             *ty; // struct, union, enum and typedef instances
     Obj              *fn; // function instances
+    TemplateArg      *args; // resolved arguments, to detect name clashes
 } TemplateInstance;
 
 typedef struct Compiler {

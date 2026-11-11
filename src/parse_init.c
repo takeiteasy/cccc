@@ -2033,6 +2033,25 @@ void gvar_initializer(VirtualMachine *vm, Token **rest, Token *tok, Obj *var) {
     check_static_checked_init(vm, var, init);
 }
 
+// Gives `var` the scalar constexpr value `expr` without gvar_initializer's
+// C23 rule that a constexpr pointer is null: a template parameter object holds
+// the address of a function or object.
+void cc_finalize_const_gvar(VirtualMachine *vm, Obj *var, Node *expr) {
+    Initializer *init = arena_alloc(&vm->compiler.parser_arena, sizeof(*init));
+    memset(init, 0, sizeof(*init));
+    init->ty   = var->ty;
+    init->expr = expr;
+    obj_init_mut(vm, var)->constexpr_init = init;
+    obj_init_mut(vm, var)->init_expr      = expr;
+
+    Relocation head = {};
+    char      *buf  = arena_alloc(&vm->compiler.parser_arena, var->ty->size);
+    memset(buf, 0, var->ty->size);
+    write_gvar_data(vm, &head, init, var->ty, buf, 0);
+    var->init_data = buf;
+    obj_set_rel(vm, var, head.next);
+}
+
 // Finalize global variable initializers that were deferred because their
 // scalar expression contained an ND_MACRO_CALL (see gvar_initializer above).
 // Called from cc_expand_macros after compile_all_macros and the AST transform

@@ -526,7 +526,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
         case ND_MEMBER: {
             Initializer *init = constexpr_init_for_node(node);
             if (init)
-                return init->expr ? eval(vm, init->expr) : 0;
+                return init->expr ? eval2(vm, init->expr, label) : 0;
         }
             if (!label)
                 error_tok(vm, node->tok,
@@ -541,7 +541,7 @@ int64_t eval2(VirtualMachine *vm, Node *node, char ***label) {
                 if (!expr)
                     error_tok(vm, node->tok,
                               "not a scalar compile-time constant");
-                return eval(vm, expr);
+                return eval2(vm, expr, label);
             }
             if (!label)
                 error_tok(vm, node->tok,
@@ -668,8 +668,12 @@ bool is_const_expr(VirtualMachine *vm, Node *node) {
         case ND_NUM:
             return true;
         case ND_VAR:
-        case ND_MEMBER:
-            return constexpr_init_for_node(node) != NULL;
+        case ND_MEMBER: {
+            // A template parameter object holds an address, which is not an
+            // integer constant expression.
+            Initializer *init = constexpr_init_for_node(node);
+            return init && (!init->expr || is_const_expr(vm, init->expr));
+        }
         default:
             return false;
     }
