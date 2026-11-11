@@ -2962,14 +2962,6 @@ static bool attr_is(Token *tok, const char *name) {
            !memcmp(tok->loc + 2, name, n) && !memcmp(tok->loc + 2 + n, "__", 2);
 }
 
-// attr_is() then step past the name.
-static bool consume_attr(Token **rest, Token *tok, const char *name) {
-    if (!attr_is(tok, name))
-        return false;
-    *rest = tok->next;
-    return true;
-}
-
 static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
                                     Token *tok, Type *ty) {
     if (equal(tok, "("))
@@ -3021,6 +3013,480 @@ static int format_archetype_style(Token *tok) {
     return -1;
 }
 
+// Where an attribute was written.
+typedef struct {
+    Token *attr_tok;       // first token: the namespace when there is one
+    Token *name_tok;       // the attribute name
+    Token *shown_tok;      // where an unknown-attribute warning's name starts
+    bool   cccc_scoped;
+    bool   quiet_if_known; // a name __has_attribute reports is not warned about
+    bool   allow_ty_align; // packed/aligned may change `ty`; see
+                           // c23_attribute_list_ex()
+} AttrSite;
+
+// `tok` is at "(": the string literal opening the arguments (NULL if none)
+// goes to *first_string, and the token after the matching ")" is returned.
+static Token *skip_attr_args(Token *tok, char **first_string) {
+    int depth = 1;
+    tok       = tok->next;
+    if (first_string)
+        *first_string = tok->kind == TK_STR ? tok_lit(tok)->str : NULL;
+    while (depth > 0) {
+        if (equal(tok, "("))
+            depth++;
+        else if (equal(tok, ")"))
+            depth--;
+        tok = tok->next;
+    }
+    return tok;
+}
+
+static void record_custom_attr(VirtualMachine *vm, Type *ty, VarAttr *attr,
+                               Token *name_tok, Node *args, int arg_count) {
+    if (vm->compiler.in_type_lookahead)
+        return;
+    if (attr)
+        append_custom_attr(vm, &attr->custom_attrs, name_tok, args, arg_count);
+    else if (ty)
+        append_custom_attr(vm, &type_attrs_mut(vm, ty)->custom_attrs, name_tok,
+                           args, arg_count);
+    else
+        error_tok(vm, name_tok, "custom attribute '%.*s' is not valid here",
+                  name_tok->len, name_tok->loc);
+}
+
+// Applies one attribute, whatever its spelling, to `ty` and/or `attr`.
+// `tok` is the token after the name; the token after the attribute is
+// returned.
+static Token *apply_attr(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                         Type *ty, VarAttr *attr) {
+    Token *attr_tok = site->attr_tok;
+    Token *name_tok = site->name_tok;
+    bool   in_func  = ty && ty->kind == TY_FUNC;
+
+    // Checked-pointer attributes (#770/#482-484); only meaningful right after
+    // '*' in pointers() -- see apply_checked_ptr_attr()'s comment.
+    static char *const checked_ptr_names[] = {"single", "array",      "ntarray",
+                                              "count",  "byte_count", "bounds",
+                                              "assume", "dynamic"};
+    for (size_t i = 0; i < sizeof checked_ptr_names / sizeof *checked_ptr_names;
+         i++)
+        if (attr_is(name_tok, checked_ptr_names[i]))
+            return apply_checked_ptr_attr(vm, attr_tok, tok,
+                                          ty ? ty : attr->checked_array,
+                                          checked_ptr_names[i]);
+
+    // Checked-region attributes (#485) -- see apply_checked_scope_attr().
+    if (attr_is(name_tok, "checked") || attr_is(name_tok, "unchecked")) {
+        tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
+                                       attr_is(name_tok, "checked"));
+        if (attr)
+            attr->checked_attr_tok = name_tok;
+        return tok;
+    }
+
+    if (site->cccc_scoped &&
+        (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
+         attr_is(name_tok, "constant") || attr_is(name_tok, "private") ||
+         attr_is(name_tok, "generic")))
+        return apply_addr_space_attr(vm, name_tok, tok, ty);
+
+    if (attr_is(name_tok, "optimize")) {
+        if (!equal(tok, "("))
+            error_tok(vm, attr_tok,
+                      "optimize attribute requires a level argument, "
+                      "e.g. [[cccc::optimize(2)]] or "
+                      "[[cccc::optimize(\"O2\")]]");
+        return parse_optimize_attr(vm, tok, ty, attr);
+    }
+
+    // Scope-exit callback.
+    if (attr_is(name_tok, "cleanup")) {
+        tok = skip(vm, tok, "(");
+        if (tok->kind != TK_IDENT)
+            error_tok(vm, tok, "expected function name in cleanup attribute");
+        Token *fn_tok = tok;
+        tok           = skip(vm, tok->next, ")");
+        if (!vm->compiler.in_type_lookahead && !attr)
+            cleanup_on_type(vm, fn_tok);
+        if (!vm->compiler.in_type_lookahead && attr) {
+            VarScope *sc = find_var(vm, fn_tok);
+            if (!sc || !sc->var || !sc->var->is_function)
+                error_tok(vm, fn_tok,
+                          "cleanup argument '%.*s' is not a function",
+                          fn_tok->len, fn_tok->loc);
+            attr->cleanup_fn  = sc->var;
+            attr->cleanup_tok = fn_tok;
+        }
+        return tok;
+    }
+
+    if (attr_is(name_tok, "packed")) {
+        if (ty && site->allow_ty_align)
+            ty->is_packed = true;
+        return tok;
+    }
+
+    // Two independent write targets: `ty` for the pre-tag/pointer-suffix
+    // position (aligns the type itself), and `attr->gnu_align` for declspec
+    // position (#1160). A GNU aligned(N) can only *raise* alignment (only
+    // `packed` lowers it), so this is a floor via max(), never an assignment;
+    // see effective_decl_align().
+    if (attr_is(name_tok, "aligned")) {
+        // Bare `aligned` requests the maximum useful alignment, 16 on every
+        // ABI this compiler targets.
+        int align = 16;
+        if (equal(tok, "(")) {
+            tok   = skip(vm, tok, "(");
+            align = const_expr(vm, &tok, tok);
+            tok   = skip(vm, tok, ")");
+        }
+        if (ty && site->allow_ty_align) {
+            ty->align      = align;
+            ty->user_align = true;
+        }
+        if (attr && align > attr->gnu_align)
+            attr->gnu_align = align;
+        return tok;
+    }
+
+    // Bare `nonnull` marks every pointer parameter; the indexed form marks
+    // 1-based argument positions.
+    if (attr_is(name_tok, "nonnull")) {
+        bool     all  = true;
+        uint64_t mask = 0;
+        if (equal(tok, "(")) {
+            tok = tok->next;
+            all = false;
+            if (!equal(tok, ")")) {
+                for (;;) {
+                    int idx = const_expr(vm, &tok, tok);
+                    if (idx >= 1 && idx <= 64)
+                        mask |= (1ULL << (idx - 1));
+                    if (!consume(vm, &tok, tok, ","))
+                        break;
+                }
+            }
+            tok = skip(vm, tok, ")");
+        }
+        if (in_func) {
+            if (all)
+                ty->nonnull_all = true;
+            type_attrs_mut(vm, ty)->nonnull_mask |= mask;
+        }
+        if (attr) {
+            if (all)
+                attr->nonnull_all = true;
+            attr->nonnull_mask |= mask;
+        }
+        return tok;
+    }
+
+    if (attr_is(name_tok, "returns_nonnull")) {
+        if (in_func)
+            ty->returns_nonnull = true;
+        if (attr)
+            attr->returns_nonnull = true;
+        return tok;
+    }
+
+    // The last variadic argument must be a literal NULL; sentinel(N) allows N
+    // trailing non-sentinel arguments before it (#658).
+    if (attr_is(name_tok, "sentinel")) {
+        int pos = 0;
+        if (equal(tok, "(")) {
+            tok = tok->next;
+            pos = const_expr(vm, &tok, tok);
+            tok = skip(vm, tok, ")");
+        }
+        if (in_func) {
+            ty->is_sentinel                      = true;
+            type_attrs_mut(vm, ty)->sentinel_pos = pos;
+        }
+        if (attr) {
+            attr->is_sentinel  = true;
+            attr->sentinel_pos = pos;
+        }
+        return tok;
+    }
+
+    // 1-based argument index(es) whose (product of) value(s) is the byte size
+    // of the object an allocator-shaped function returns; consulted by
+    // objsize_alloc_from_call (#649).
+    if (attr_is(name_tok, "alloc_size")) {
+        int idx1 = 0, idx2 = 0;
+        if (equal(tok, "(")) {
+            tok  = tok->next;
+            idx1 = const_expr(vm, &tok, tok);
+            if (consume(vm, &tok, tok, ","))
+                idx2 = const_expr(vm, &tok, tok);
+            tok = skip(vm, tok, ")");
+        }
+        if (in_func) {
+            type_attrs_mut(vm, ty)->alloc_size_idx  = idx1;
+            type_attrs_mut(vm, ty)->alloc_size_idx2 = idx2;
+        }
+        if (attr) {
+            attr->alloc_size_idx  = idx1;
+            attr->alloc_size_idx2 = idx2;
+        }
+        return tok;
+    }
+
+    // vector_size(N) is recorded on `attr` and applied to the base type by
+    // declspec(), or to the declarator's type by apply_var_attrs_to_type()
+    // when written after the declarator.
+    if (attr_is(name_tok, "cccc_visible_lanes")) {
+        tok       = skip(vm, tok, "(");
+        int lanes = const_expr(vm, &tok, tok);
+        tok       = skip(vm, tok, ")");
+        if (attr)
+            attr->vec_visible = lanes;
+        return tok;
+    }
+    if (attr_is(name_tok, "vector_size")) {
+        tok       = skip(vm, tok, "(");
+        int bytes = const_expr(vm, &tok, tok);
+        tok       = skip(vm, tok, ")");
+        if (attr) {
+            attr->has_vector_size   = true;
+            attr->vector_size_bytes = bytes;
+            attr->vector_size_tok   = attr_tok;
+        } else if (ty && !vm->compiler.in_type_lookahead) {
+            warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
+                     "'vector_size' ignored in this context");
+        }
+        return tok;
+    }
+
+    // Informational: not wired to nonnull inference (malloc can return NULL)
+    // or to any aliasing optimization; see #649.
+    if (attr_is(name_tok, "malloc")) {
+        if (in_func)
+            ty->is_malloc = true;
+        if (attr)
+            attr->is_malloc = true;
+        return tok;
+    }
+
+    if (attr_is(name_tok, "constructor") || attr_is(name_tok, "destructor")) {
+        bool is_ctor  = attr_is(name_tok, "constructor");
+        int  priority = CCCC_NO_INIT_PRIORITY;
+        if (equal(tok, "(")) {
+            tok      = skip(vm, tok, "(");
+            priority = const_expr(vm, &tok, tok);
+            tok      = skip(vm, tok, ")");
+        }
+        if (in_func) {
+            if (is_ctor)
+                ty->is_constructor = true;
+            else
+                ty->is_destructor = true;
+            type_attrs_mut(vm, ty)->init_priority = priority;
+        }
+        if (attr) {
+            if (is_ctor)
+                attr->is_constructor = true;
+            else
+                attr->is_destructor = true;
+            attr->init_priority = priority;
+        }
+        return tok;
+    }
+
+    // operator(+)
+    if (attr_is(name_tok, "operator")) {
+        tok               = skip(vm, tok, "(");
+        Token      *after = NULL;
+        const char *sym   = overloadable_operator(tok, &after);
+        if (!sym)
+            error_tok(vm, tok, "cannot overload '%.*s'", tok->len, tok->loc);
+        tok = skip(vm, after, ")");
+        if (in_func)
+            type_attrs_mut(vm, ty)->operator_sym = sym;
+        if (attr)
+            attr->operator_sym = sym;
+        return tok;
+    }
+
+    // method(T) or method(T, name)
+    if (attr_is(name_tok, "method")) {
+        tok              = skip(vm, tok, "(");
+        Type       *recv = typename(vm, &tok, tok);
+        const char *name = NULL;
+        if (equal(tok, ",")) {
+            tok = tok->next;
+            if (tok->kind != TK_IDENT)
+                error_tok(vm, tok, "expected a method name");
+            name = get_ident(vm, tok);
+            tok  = tok->next;
+        }
+        tok = skip(vm, tok, ")");
+        if (in_func) {
+            type_attrs_mut(vm, ty)->method_of   = recv;
+            type_attrs_mut(vm, ty)->method_name = name;
+        }
+        if (attr) {
+            attr->method_of   = recv;
+            attr->method_name = name;
+        }
+        return tok;
+    }
+
+    // format(archetype, string-index, first-to-check)
+    if (attr_is(name_tok, "format")) {
+        if (!equal(tok, "("))
+            return tok;
+        tok = tok->next;
+        if (tok->kind != TK_IDENT)
+            error_tok(vm, tok,
+                      "expected a format archetype in format attribute");
+        // Style 0 = no validation (known unchecked or unknown).
+        int style = format_archetype_style(tok);
+        if (style < 0) {
+            style = 0;
+            if (!vm->compiler.in_type_lookahead)
+                warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES,
+                         "'%s' is an unrecognized format function type; "
+                         "attribute not checked",
+                         arena_strndup(vm, tok->loc, tok->len));
+        }
+        tok           = skip(vm, tok->next, ",");
+        int fmt_idx   = const_expr(vm, &tok, tok);
+        tok           = skip(vm, tok, ",");
+        int first_arg = const_expr(vm, &tok, tok);
+        tok           = skip(vm, tok, ")");
+        if (in_func) {
+            type_attrs_mut(vm, ty)->format_style         = style;
+            type_attrs_mut(vm, ty)->format_string_index  = fmt_idx;
+            type_attrs_mut(vm, ty)->format_fmt_first_arg = first_arg;
+        }
+        if (attr) {
+            attr->format_style         = style;
+            attr->format_string_index  = fmt_idx;
+            attr->format_fmt_first_arg = first_arg;
+        }
+        return tok;
+    }
+
+    // error("msg") / warning("msg"): a diagnostic when the function is called
+    // and the call is not in a statically-dead branch (static_branch_value()).
+    if (attr_is(name_tok, "error") || attr_is(name_tok, "warning")) {
+        bool  is_error = attr_is(name_tok, "error");
+        char *message  = NULL;
+        if (equal(tok, "("))
+            tok = skip_attr_args(tok, &message);
+        if (!vm->compiler.in_type_lookahead) {
+            if (ty) {
+                if (is_error)
+                    type_attrs_mut(vm, ty)->attr_error_msg =
+                        message ? message : "";
+                else
+                    type_attrs_mut(vm, ty)->attr_warning_msg =
+                        message ? message : "";
+            }
+            if (attr) {
+                if (is_error)
+                    attr->attr_error_msg = message ? message : "";
+                else
+                    attr->attr_warning_msg = message ? message : "";
+            }
+            vm->compiler.saw_diag_attr = true;
+        }
+        return tok;
+    }
+
+    // GNU equivalent of [[nodiscard]].
+    if (attr_is(name_tok, "warn_unused_result")) {
+        apply_semantic_attr(vm, ty, attr, attr_tok, false, false, true, NULL);
+        return tok;
+    }
+
+    bool unused =
+        attr_is(name_tok, "maybe_unused") || attr_is(name_tok, "unused");
+    bool  deprecated = attr_is(name_tok, "deprecated");
+    bool  nodiscard  = attr_is(name_tok, "nodiscard");
+
+    char *message    = NULL;
+    if (find_attribute_macro(vm, name_tok)) {
+        Node *args      = NULL;
+        int   arg_count = 0;
+        if (equal(tok, "("))
+            tok = parse_custom_attr_args(vm, name_tok, tok, &args, &arg_count);
+        record_custom_attr(vm, ty, attr, name_tok, args, arg_count);
+        return tok;
+    }
+    if (equal(tok, "(")) {
+        tok = skip_attr_args(tok, &message);
+        if (!deprecated && !nodiscard)
+            message = NULL;
+    }
+
+    if (attr_is(name_tok, "noreturn")) {
+        if (ty)
+            ty->is_noreturn = true;
+        if (attr)
+            attr->is_noreturn = true;
+    } else if (nodiscard) {
+        if (ty)
+            ty->is_nodiscard = true;
+        if (attr) {
+            attr->is_nodiscard = true;
+            if (message)
+                attr->nodiscard_msg = message;
+            attr->attribute_tok = attr_tok;
+        }
+    } else if (attr_is(name_tok, "fallthrough")) {
+        if (attr)
+            attr->is_fallthrough = true;
+    } else if (attr_is(name_tok, "no_unique_address")) {
+        // Parsed but VM optimisations deferred to a future ticket
+    } else if (attr_is(name_tok, "pure")) {
+        if (ty)
+            ty->is_pure = true;
+        if (attr)
+            attr->is_pure = true;
+    } else if (attr_is(name_tok, "kernel")) {
+        if (ty)
+            ty->is_kernel = true;
+        if (attr)
+            attr->is_kernel = true;
+    } else if (attr_is(name_tok, "trusted")) {
+        if (ty)
+            ty->is_trusted = true;
+        if (attr)
+            attr->is_trusted = true;
+    } else if (attr_is(name_tok, "const")) {
+        if (ty)
+            ty->is_func_const = true;
+        if (attr)
+            attr->is_func_const = true;
+    } else if (attr_is(name_tok, "gnu_inline")) {
+        if (ty)
+            ty->is_gnu_inline = true;
+        if (attr)
+            attr->is_gnu_inline = true;
+    } else if (attr_is(name_tok, "designated_init")) {
+        if (ty)
+            ty->designated_init = true;
+    } else if (unused || deprecated) {
+        apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated, false,
+                            message);
+    } else if (name_tok->kind == TK_IDENT && !vm->compiler.in_type_lookahead) {
+        bool known = site->quiet_if_known &&
+                     (cc_has_attribute(name_tok->loc, name_tok->len) ||
+                      is_opencl_hint_attr(vm, name_tok));
+        error_if_derive_attr_not_included(vm, name_tok);
+        if (!known)
+            warn_tok(
+                vm, attr_tok, unknown_attr_warning(name_tok),
+                "unknown attribute '%.*s' ignored",
+                (int)(name_tok->loc + name_tok->len - site->shown_tok->loc),
+                site->shown_tok->loc);
+    }
+    return tok;
+}
+
 // attribute = ("__attribute__" "(" "(" attribute-list ")" ")")*
 Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
     while (consume(vm, &tok, tok, "__attribute__")) {
@@ -3032,511 +3498,14 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
         while (!consume(vm, &tok, tok, ")")) {
             if (!first)
                 tok = skip(vm, tok, ",");
-            first           = false;
+            first         = false;
 
-            Token *attr_tok = tok;
-
-            // Checked-pointer attributes (#770/#482-484): __attribute__((
-            // single/array/ntarray/count(n)/byte_count(n)/bounds(lo,hi)));
-            // only meaningful right after '*' in pointers(), which is the
-            // only call site that passes a TY_PTR ty -- see
-            // apply_checked_ptr_attr()'s comment.
-            if (is_attr_name(tok, "single") || is_attr_name(tok, "array") ||
-                is_attr_name(tok, "ntarray") || is_attr_name(tok, "count") ||
-                is_attr_name(tok, "byte_count") ||
-                is_attr_name(tok, "bounds") || is_attr_name(tok, "assume") ||
-                is_attr_name(tok, "dynamic")) {
-                const char *name = is_attr_name(tok, "single")    ? "single"
-                                   : is_attr_name(tok, "array")   ? "array"
-                                   : is_attr_name(tok, "ntarray") ? "ntarray"
-                                   : is_attr_name(tok, "count")   ? "count"
-                                   : is_attr_name(tok, "byte_count")
-                                       ? "byte_count"
-                                   : is_attr_name(tok, "bounds") ? "bounds"
-                                   : is_attr_name(tok, "assume") ? "assume"
-                                                                 : "dynamic";
-                tok =
-                    apply_checked_ptr_attr(vm, attr_tok, tok->next,
-                                           ty ? ty : attr->checked_array, name);
-                continue;
-            }
-
-            // Checked-region attributes (#485): __attribute__((checked)) /
-            // ((unchecked)) -- see apply_checked_scope_attr()'s comment.
-            if (is_attr_name(tok, "checked") ||
-                is_attr_name(tok, "unchecked")) {
-                bool is_checked = is_attr_name(tok, "checked");
-                tok = apply_checked_scope_attr(vm, attr_tok, tok->next, attr,
-                                               is_checked);
-                continue;
-            }
-
-            // Handle packed attribute
-            if (consume_attr(&tok, tok, "packed")) {
-                if (ty)
-                    ty->is_packed = true;
-                continue;
-            }
-
-            // Handle designated_init attribute: requires all initializers of
-            // this struct type to use designated (.field = value) syntax (#659)
-            if (consume_attr(&tok, tok, "designated_init")) {
-                if (ty)
-                    ty->designated_init = true;
-                continue;
-            }
-
-            // vector_size(N) is recorded on `attr` and applied to the base
-            // type by declspec(), or to the declarator's type by
-            // apply_var_attrs_to_type() when written after the declarator.
-            if (consume_attr(&tok, tok, "cccc_visible_lanes")) {
-                tok       = skip(vm, tok, "(");
-                int lanes = const_expr(vm, &tok, tok);
-                tok       = skip(vm, tok, ")");
-                if (attr)
-                    attr->vec_visible = lanes;
-                continue;
-            }
-            if (consume_attr(&tok, tok, "vector_size")) {
-                tok       = skip(vm, tok, "(");
-                int bytes = const_expr(vm, &tok, tok);
-                tok       = skip(vm, tok, ")");
-                if (attr) {
-                    attr->has_vector_size   = true;
-                    attr->vector_size_bytes = bytes;
-                    attr->vector_size_tok   = attr_tok;
-                } else if (ty && !vm->compiler.in_type_lookahead) {
-                    warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
-                             "'vector_size' ignored in this context");
-                }
-                continue;
-            }
-
-            // Handle aligned attribute. Two independent write targets:
-            // `ty` for the pre-tag/pointer-suffix position (aligns the type
-            // itself, unchanged since before #1160), and `attr->gnu_align`
-            // for declspec position (#1160) -- a GNU aligned(N) can only
-            // ever *raise* alignment (only `packed` lowers it), so this is a
-            // floor via max(), never an assignment; see
-            // effective_decl_align().
-            if (consume_attr(&tok, tok, "aligned")) {
-                // Bare `aligned` (no argument) requests the target's
-                // maximum useful/natural alignment, which is 16 on every
-                // ABI this compiler targets (macOS/Linux, aarch64/x86_64).
-                int align = 16;
-                if (equal(tok, "(")) {
-                    tok   = skip(vm, tok, "(");
-                    align = const_expr(vm, &tok, tok);
-                    tok   = skip(vm, tok, ")");
-                }
-                if (ty) {
-                    ty->align      = align;
-                    ty->user_align = true;
-                }
-                if (attr && align > attr->gnu_align)
-                    attr->gnu_align = align;
-                continue;
-            }
-
-            bool unused     = is_attr_name(tok, "unused");
-            bool deprecated = is_attr_name(tok, "deprecated");
-            if (unused || deprecated) {
-                tok           = tok->next;
-                char *message = NULL;
-                if (equal(tok, "(")) {
-                    int depth = 1;
-                    tok       = tok->next;
-                    if (deprecated && tok->kind == TK_STR)
-                        message = tok_lit(tok)->str;
-                    while (depth > 0) {
-                        if (equal(tok, "("))
-                            depth++;
-                        else if (equal(tok, ")"))
-                            depth--;
-                        tok = tok->next;
-                    }
-                }
-                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
-                                    false, message);
-                continue;
-            }
-
-            // Handle format attribute: __attribute__((format(printf, fmt_idx,
-            // first_arg)))
-            if (is_attr_name(tok, "format")) {
-                tok = tok->next;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    if (tok->kind != TK_IDENT)
-                        error_tok(vm, tok,
-                                  "expected a format archetype in format "
-                                  "attribute");
-                    // Style 0 = no validation (known unchecked or unknown).
-                    int style = format_archetype_style(tok);
-                    if (style < 0) {
-                        style = 0;
-                        if (!vm->compiler.in_type_lookahead)
-                            warn_tok(vm, tok, CCCC_WARN_ATTRIBUTES,
-                                     "'%s' is an unrecognized format function "
-                                     "type; attribute not checked",
-                                     arena_strndup(vm, tok->loc, tok->len));
-                    }
-                    tok           = tok->next;
-                    tok           = skip(vm, tok, ",");
-                    int fmt_idx   = const_expr(vm, &tok, tok);
-                    tok           = skip(vm, tok, ",");
-                    int first_arg = const_expr(vm, &tok, tok);
-                    tok           = skip(vm, tok, ")");
-                    if (ty && ty->kind == TY_FUNC) {
-                        type_attrs_mut(vm, ty)->format_style        = style;
-                        type_attrs_mut(vm, ty)->format_string_index = fmt_idx;
-                        type_attrs_mut(vm, ty)->format_fmt_first_arg =
-                            first_arg;
-                    }
-                    if (attr) {
-                        attr->format_style         = style;
-                        attr->format_string_index  = fmt_idx;
-                        attr->format_fmt_first_arg = first_arg;
-                    }
-                }
-                continue;
-            }
-
-            // Handle nonnull attribute: __attribute__((nonnull)) or
-            // __attribute__((nonnull(1,3))). Bare form marks every pointer
-            // parameter non-null; the indexed form marks specific 1-based
-            // argument positions.
-            if (is_attr_name(tok, "nonnull")) {
-                tok           = tok->next;
-                bool     all  = true;
-                uint64_t mask = 0;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    all = false;
-                    if (!equal(tok, ")")) {
-                        for (;;) {
-                            int idx = const_expr(vm, &tok, tok);
-                            if (idx >= 1 && idx <= 64)
-                                mask |= (1ULL << (idx - 1));
-                            if (!consume(vm, &tok, tok, ","))
-                                break;
-                        }
-                    }
-                    tok = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    if (all)
-                        ty->nonnull_all = true;
-                    type_attrs_mut(vm, ty)->nonnull_mask |= mask;
-                }
-                if (attr) {
-                    if (all)
-                        attr->nonnull_all = true;
-                    attr->nonnull_mask |= mask;
-                }
-                continue;
-            }
-
-            // Handle returns_nonnull attribute
-            if (is_attr_name(tok, "returns_nonnull")) {
-                tok = tok->next;
-                if (ty && ty->kind == TY_FUNC)
-                    ty->returns_nonnull = true;
-                if (attr)
-                    attr->returns_nonnull = true;
-                continue;
-            }
-
-            // Handle sentinel attribute: __attribute__((sentinel)) requires the
-            // last variadic argument to be a literal NULL;
-            // __attribute__((sentinel(N))) allows N trailing non-sentinel args
-            // before the NULL (#658).
-            if (is_attr_name(tok, "sentinel")) {
-                tok     = tok->next;
-                int pos = 0;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    pos = const_expr(vm, &tok, tok);
-                    tok = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    ty->is_sentinel  = true;
-                    type_attrs_mut(vm, ty)->sentinel_pos = pos;
-                }
-                if (attr) {
-                    attr->is_sentinel  = true;
-                    attr->sentinel_pos = pos;
-                }
-                continue;
-            }
-
-            // __attribute__((alloc_size(n))) /
-            // __attribute__((alloc_size(n,m))): 1-based argument index(es)
-            // whose (product of) value(s) is the byte size of the object
-            // returned by this allocator-shaped function. Consulted by
-            // objsize_alloc_from_call (#649) to generalize #642's hardcoded
-            // malloc-family name matching to any annotated function.
-            if (is_attr_name(tok, "alloc_size")) {
-                tok      = tok->next;
-                int idx1 = 0, idx2 = 0;
-                if (equal(tok, "(")) {
-                    tok  = tok->next;
-                    idx1 = const_expr(vm, &tok, tok);
-                    if (consume(vm, &tok, tok, ","))
-                        idx2 = const_expr(vm, &tok, tok);
-                    tok = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    type_attrs_mut(vm, ty)->alloc_size_idx  = idx1;
-                    type_attrs_mut(vm, ty)->alloc_size_idx2 = idx2;
-                }
-                if (attr) {
-                    attr->alloc_size_idx  = idx1;
-                    attr->alloc_size_idx2 = idx2;
-                }
-                continue;
-            }
-
-            // __attribute__((malloc)): the function returns a freshly
-            // allocated, non-aliasing pointer. Informational only in CCCC for
-            // now -- not wired to nonnull inference (malloc can return NULL) or
-            // to any aliasing optimization; see #649 followup.
-            if (is_attr_name(tok, "malloc")) {
-                tok = tok->next;
-                if (ty && ty->kind == TY_FUNC)
-                    ty->is_malloc = true;
-                if (attr)
-                    attr->is_malloc = true;
-                continue;
-            }
-
-            // Handle noreturn attribute
-            if (is_attr_name(tok, "noreturn")) {
-                tok = tok->next;
-                if (ty)
-                    ty->is_noreturn = true;
-                if (attr)
-                    attr->is_noreturn = true;
-                continue;
-            }
-
-            if (is_attr_name(tok, "pure")) {
-                tok = tok->next;
-                if (ty)
-                    ty->is_pure = true;
-                if (attr)
-                    attr->is_pure = true;
-                continue;
-            }
-
-            if (is_attr_name(tok, "const")) {
-                tok = tok->next;
-                if (ty)
-                    ty->is_func_const = true;
-                if (attr)
-                    attr->is_func_const = true;
-                continue;
-            }
-
-            if (is_attr_name(tok, "gnu_inline")) {
-                tok = tok->next;
-                if (ty)
-                    ty->is_gnu_inline = true;
-                if (attr)
-                    attr->is_gnu_inline = true;
-                continue;
-            }
-
-            // GNU equivalent of [[nodiscard]]: warn if return value is
-            // discarded
-            if (is_attr_name(tok, "warn_unused_result")) {
-                tok = tok->next;
-                apply_semantic_attr(vm, ty, attr, attr_tok, false, false, true,
-                                    NULL);
-                continue;
-            }
-
-            // __attribute__((error("msg"))): if this function is called (and
-            // the call is not eliminated by dead-code suppression), emit a
-            // compile-time error. DCE-aware: the diagnostic is suppressed when
-            // the call site is inside a statically-dead branch (dead_code_depth
-            // > 0).  See static_branch_value().
-            if (is_attr_name(tok, "error")) {
-                tok           = tok->next;
-                char *message = NULL;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    if (tok->kind == TK_STR)
-                        message = tok_lit(tok)->str;
-                    // Skip to closing paren
-                    int depth = 1;
-                    while (depth > 0) {
-                        if (equal(tok, "("))
-                            depth++;
-                        else if (equal(tok, ")"))
-                            depth--;
-                        tok = tok->next;
-                    }
-                }
-                if (!vm->compiler.in_type_lookahead) {
-                    if (ty)
-                        type_attrs_mut(vm, ty)->attr_error_msg =
-                            message ? message : "";
-                    if (attr)
-                        attr->attr_error_msg = message ? message : "";
-                    vm->compiler.saw_diag_attr = true;
-                }
-                continue;
-            }
-
-            // __attribute__((warning("msg"))): emit a compile-time warning when
-            // called. DCE-aware: suppressed inside statically-dead branches,
-            // same as error above.
-            if (is_attr_name(tok, "warning")) {
-                tok           = tok->next;
-                char *message = NULL;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    if (tok->kind == TK_STR)
-                        message = tok_lit(tok)->str;
-                    int depth = 1;
-                    while (depth > 0) {
-                        if (equal(tok, "("))
-                            depth++;
-                        else if (equal(tok, ")"))
-                            depth--;
-                        tok = tok->next;
-                    }
-                }
-                if (!vm->compiler.in_type_lookahead) {
-                    if (ty)
-                        type_attrs_mut(vm, ty)->attr_warning_msg =
-                            message ? message : "";
-                    if (attr)
-                        attr->attr_warning_msg = message ? message : "";
-                    vm->compiler.saw_diag_attr = true;
-                }
-                continue;
-            }
-
-            // Handle optimize attribute: __attribute__((optimize("O2"))) or
-            // optimize(2)
-            if (is_attr_name(tok, "optimize")) {
-                tok = tok->next;
-                tok = parse_optimize_attr(vm, tok, ty, attr);
-                continue;
-            }
-
-            // Handle __attribute__((cleanup(fn))) — scope-exit callback
-            if (is_attr_name(tok, "cleanup")) {
-                tok = tok->next;
-                tok = skip(vm, tok, "(");
-                if (tok->kind != TK_IDENT)
-                    error_tok(vm, tok,
-                              "expected function name in cleanup attribute");
-                Token *fn_tok = tok;
-                tok           = tok->next;
-                tok           = skip(vm, tok, ")");
-                if (!vm->compiler.in_type_lookahead && !attr)
-                    cleanup_on_type(vm, fn_tok);
-                if (!vm->compiler.in_type_lookahead && attr) {
-                    VarScope *sc = find_var(vm, fn_tok);
-                    if (!sc || !sc->var || !sc->var->is_function)
-                        error_tok(vm, fn_tok,
-                                  "cleanup argument '%.*s' is not a function",
-                                  fn_tok->len, fn_tok->loc);
-                    attr->cleanup_fn  = sc->var;
-                    attr->cleanup_tok = fn_tok;
-                }
-                continue;
-            }
-
-            // Handle __attribute__((constructor[(priority)]))
-            // __attribute__((destructor[(priority)]))
-            {
-                bool is_ctor = is_attr_name(tok, "constructor");
-                bool is_dtor = !is_ctor && is_attr_name(tok, "destructor");
-                if (is_ctor || is_dtor) {
-                    tok          = tok->next;
-                    int priority = CCCC_NO_INIT_PRIORITY;
-                    if (equal(tok, "(")) {
-                        tok      = skip(vm, tok, "(");
-                        priority = const_expr(vm, &tok, tok);
-                        tok      = skip(vm, tok, ")");
-                    }
-                    if (ty) {
-                        if (is_ctor) {
-                            ty->is_constructor = true;
-                        } else {
-                            ty->is_destructor = true;
-                        }
-                        type_attrs_mut(vm, ty)->init_priority = priority;
-                    }
-                    if (attr) {
-                        if (is_ctor) {
-                            attr->is_constructor = true;
-                        } else {
-                            attr->is_destructor = true;
-                        }
-                        attr->init_priority = priority;
-                    }
-                    continue;
-                }
-            }
-
-            if (find_attribute_macro(vm, tok)) {
-                Token *name_tok = tok;
-                tok             = tok->next;
-                Node *args      = NULL;
-                int   arg_count = 0;
-                tok = parse_custom_attr_args(vm, name_tok, tok, &args,
-                                             &arg_count);
-                if (!vm->compiler.in_type_lookahead) {
-                    if (attr)
-                        append_custom_attr(vm, &attr->custom_attrs, name_tok,
-                                           args, arg_count);
-                    else if (ty)
-                        append_custom_attr(
-                            vm, &type_attrs_mut(vm, ty)->custom_attrs, name_tok,
-                            args, arg_count);
-                    else
-                        error_tok(vm, name_tok,
-                                  "custom attribute '%.*s' is not valid here",
-                                  name_tok->len, name_tok->loc);
-                }
-                continue;
-            }
-
-            // Handle all other attributes - just consume and ignore them
-            if (tok->kind == TK_IDENT) {
-                Token *name_tok = tok;
-                tok             = tok->next;
-                error_if_derive_attr_not_included(vm, name_tok);
-                if (!vm->compiler.in_type_lookahead &&
-                    !is_opencl_hint_attr(vm, name_tok) &&
-                    !cc_has_attribute(name_tok->loc, name_tok->len))
-                    warn_tok(vm, name_tok, unknown_attr_warning(name_tok),
-                             "unknown attribute '%.*s' ignored", name_tok->len,
-                             name_tok->loc);
-
-                // Handle attributes with parameters: attr(args...)
-                if (equal(tok, "(")) {
-                    int depth = 1;
-                    tok       = tok->next;
-                    // Skip all tokens until matching closing paren
-                    while (depth > 0) {
-                        if (equal(tok, "("))
-                            depth++;
-                        else if (equal(tok, ")"))
-                            depth--;
-                        tok = tok->next;
-                    }
-                }
-                continue;
-            }
-
-            // If we hit something unexpected, just skip it
-            tok = tok->next;
+            AttrSite site = {.attr_tok       = tok,
+                             .name_tok       = tok,
+                             .shown_tok      = tok,
+                             .quiet_if_known = true,
+                             .allow_ty_align = true};
+            tok           = apply_attr(vm, tok->next, &site, ty, attr);
         }
 
         tok = skip(vm, tok, ")");
@@ -3572,449 +3541,28 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 tok = skip(vm, tok, ",");
             first = false;
 
-            // Parse attribute name
             if (tok->kind != TK_IDENT)
                 error_tok(vm, tok, "expected attribute name");
 
-            Token *attr_tok    = tok;
-            Token *name_tok    = tok;
-            Token *ns_tok      = NULL;
-            bool   cccc_scoped = false;
-            bool   gnu_scoped  = false;
-            if (tok->next && equal(tok->next, ":") && tok->next->next &&
-                equal(tok->next->next, ":") && tok->next->next->next &&
+            AttrSite site = {.attr_tok       = tok,
+                             .name_tok       = tok,
+                             .allow_ty_align = allow_ty_align};
+            Token   *ns   = NULL;
+            if (equal(tok->next, ":") && equal(tok->next->next, ":") &&
                 (tok->next->next->next->kind == TK_IDENT ||
                  tok->next->next->next->kind == TK_KEYWORD)) {
-                ns_tok      = tok;
-                cccc_scoped = equal(tok, "cccc");
-                gnu_scoped  = equal(tok, "gnu") || equal(tok, "__gnu__");
-                name_tok    = tok->next->next->next;
-                tok         = name_tok;
+                ns               = tok;
+                site.name_tok    = tok->next->next->next;
+                site.cccc_scoped = equal(ns, "cccc");
             }
-            bool   other_scoped        = ns_tok && !cccc_scoped && !gnu_scoped;
-            Token *shown_tok           = other_scoped ? ns_tok : name_tok;
-
-            bool unused              = attr_is(name_tok, "maybe_unused");
-            bool deprecated          = attr_is(name_tok, "deprecated");
-            bool is_noreturn_attr    = attr_is(name_tok, "noreturn");
-            bool is_nodiscard_attr   = attr_is(name_tok, "nodiscard");
-            bool is_fallthrough_attr = attr_is(name_tok, "fallthrough");
-            bool is_no_unique_address_attr =
-                attr_is(name_tok, "no_unique_address");
-            bool is_pure_attr       = attr_is(name_tok, "pure");
-            bool is_func_const_attr = attr_is(name_tok, "const");
-            bool is_gnu_inline_attr = attr_is(name_tok, "gnu_inline");
-            bool is_kernel_attr     = attr_is(name_tok, "kernel");
-            bool is_trusted_attr    = attr_is(name_tok, "trusted");
-            bool is_addr_space_attr =
-                cccc_scoped &&
-                (attr_is(name_tok, "global") || attr_is(name_tok, "local") ||
-                 attr_is(name_tok, "constant") ||
-                 attr_is(name_tok, "private") || attr_is(name_tok, "generic"));
-            bool is_optimize_attr        = attr_is(name_tok, "optimize");
-            bool is_designated_init_attr = attr_is(name_tok, "designated_init");
-            bool is_checked_ptr_attr =
-                attr_is(name_tok, "single") || attr_is(name_tok, "array") ||
-                attr_is(name_tok, "ntarray") || attr_is(name_tok, "count") ||
-                attr_is(name_tok, "byte_count") ||
-                attr_is(name_tok, "bounds") || attr_is(name_tok, "assume") ||
-                attr_is(name_tok, "dynamic");
-            bool is_checked_scope_attr =
-                attr_is(name_tok, "checked") || attr_is(name_tok, "unchecked");
-            tok = tok->next;
-
-            // Checked-pointer attributes (#770/#482-484): [[cccc::single]] /
-            // [[cccc::array]] / [[cccc::ntarray]] / [[cccc::count(n)]] /
-            // [[cccc::byte_count(n)]] / [[cccc::bounds(lo, hi)]]; only
-            // meaningful right after '*' in pointers() -- see
-            // apply_checked_ptr_attr()'s comment.
-            if (is_checked_ptr_attr) {
-                const char *name = attr_is(name_tok, "single")    ? "single"
-                                   : attr_is(name_tok, "array")   ? "array"
-                                   : attr_is(name_tok, "ntarray") ? "ntarray"
-                                   : attr_is(name_tok, "count")   ? "count"
-                                   : attr_is(name_tok, "byte_count")
-                                       ? "byte_count"
-                                   : attr_is(name_tok, "bounds") ? "bounds"
-                                   : attr_is(name_tok, "assume") ? "assume"
-                                                                 : "dynamic";
-                tok              = apply_checked_ptr_attr(
-                    vm, attr_tok, tok, ty ? ty : attr->checked_array, name);
-                continue;
-            }
-
-            // Checked-region attributes (#485): [[cccc::checked]] /
-            // [[cccc::unchecked]] -- see apply_checked_scope_attr()'s
-            // comment.
-            if (is_checked_scope_attr) {
-                tok = apply_checked_scope_attr(vm, attr_tok, tok, attr,
-                                               attr_is(name_tok, "checked"));
-                attr->checked_attr_tok = name_tok;
-                continue;
-            }
-
-            if (is_addr_space_attr) {
-                tok = apply_addr_space_attr(vm, name_tok, tok, ty);
-                continue;
-            }
-
-            // Optimize attribute has mandatory args: [[cccc::optimize(2)]] or
-            // ("O2")
-            if (is_optimize_attr) {
-                if (!equal(tok, "("))
-                    error_tok(vm, attr_tok,
-                              "optimize attribute requires a level argument, "
-                              "e.g. [[cccc::optimize(2)]] or "
-                              "[[cccc::optimize(\"O2\")]]");
-                tok = parse_optimize_attr(vm, tok, ty, attr);
-                continue;
-            }
-
-            // [[gnu::cleanup(fn)]] — scope-exit callback
-            if (attr_is(name_tok, "cleanup")) {
-                tok = skip(vm, tok, "(");
-                if (tok->kind != TK_IDENT)
-                    error_tok(vm, tok,
-                              "expected function name in cleanup attribute");
-                Token *fn_tok = tok;
-                tok           = tok->next;
-                tok           = skip(vm, tok, ")");
-                if (!vm->compiler.in_type_lookahead && !attr)
-                    cleanup_on_type(vm, fn_tok);
-                if (!vm->compiler.in_type_lookahead && attr) {
-                    VarScope *sc = find_var(vm, fn_tok);
-                    if (!sc || !sc->var || !sc->var->is_function)
-                        error_tok(vm, fn_tok,
-                                  "cleanup argument '%.*s' is not a function",
-                                  fn_tok->len, fn_tok->loc);
-                    attr->cleanup_fn  = sc->var;
-                    attr->cleanup_tok = fn_tok;
-                }
-                continue;
-            }
-
-            // [[gnu::packed]] (#1160) -- C23 spelling of
-            // __attribute__((packed)); see attribute_list()'s "packed" case
-            // for the ty->is_packed semantics this mirrors.
-            if (attr_is(name_tok, "packed")) {
-                if (ty && allow_ty_align)
-                    ty->is_packed = true;
-                continue;
-            }
-
-            // [[gnu::aligned]] / [[gnu::aligned(N)]] (#1160) -- C23 spelling
-            // of __attribute__((aligned(N))); see attribute_list()'s
-            // "aligned" case for the ty/attr->gnu_align split this mirrors,
-            // and c23_attribute_list_ex()'s own comment for why
-            // `allow_ty_align` exists.
-            if (attr_is(name_tok, "aligned")) {
-                int align = 16; // bare form: maximum useful alignment
-                if (equal(tok, "(")) {
-                    tok   = skip(vm, tok, "(");
-                    align = const_expr(vm, &tok, tok);
-                    tok   = skip(vm, tok, ")");
-                }
-                if (ty && allow_ty_align) {
-                    ty->align      = align;
-                    ty->user_align = true;
-                }
-                if (attr && align > attr->gnu_align)
-                    attr->gnu_align = align;
-                continue;
-            }
-
-            // [[gnu::nonnull]] / [[gnu::nonnull(1,3)]] /
-            // [[gnu::returns_nonnull]]
-            if (attr_is(name_tok, "nonnull") ||
-                attr_is(name_tok, "returns_nonnull")) {
-                bool     is_returns = attr_is(name_tok, "returns_nonnull");
-                bool     all        = true;
-                uint64_t mask       = 0;
-                if (!is_returns && equal(tok, "(")) {
-                    tok = tok->next;
-                    all = false;
-                    if (!equal(tok, ")")) {
-                        for (;;) {
-                            int idx = const_expr(vm, &tok, tok);
-                            if (idx >= 1 && idx <= 64)
-                                mask |= (1ULL << (idx - 1));
-                            if (!consume(vm, &tok, tok, ","))
-                                break;
-                        }
-                    }
-                    tok = skip(vm, tok, ")");
-                }
-                if (is_returns) {
-                    if (ty && ty->kind == TY_FUNC)
-                        ty->returns_nonnull = true;
-                    if (attr)
-                        attr->returns_nonnull = true;
-                } else {
-                    if (ty && ty->kind == TY_FUNC) {
-                        if (all)
-                            ty->nonnull_all = true;
-                        type_attrs_mut(vm, ty)->nonnull_mask |= mask;
-                    }
-                    if (attr) {
-                        if (all)
-                            attr->nonnull_all = true;
-                        attr->nonnull_mask |= mask;
-                    }
-                }
-                continue;
-            }
-
-            // [[gnu::sentinel]] / [[gnu::sentinel(N)]] (#658)
-            if (attr_is(name_tok, "sentinel")) {
-                int pos = 0;
-                if (equal(tok, "(")) {
-                    tok = tok->next;
-                    pos = const_expr(vm, &tok, tok);
-                    tok = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    ty->is_sentinel  = true;
-                    type_attrs_mut(vm, ty)->sentinel_pos = pos;
-                }
-                if (attr) {
-                    attr->is_sentinel  = true;
-                    attr->sentinel_pos = pos;
-                }
-                continue;
-            }
-
-            // [[gnu::alloc_size(n)]] / [[gnu::alloc_size(n,m)]] (#649)
-            if (attr_is(name_tok, "alloc_size")) {
-                int idx1 = 0, idx2 = 0;
-                if (equal(tok, "(")) {
-                    tok  = tok->next;
-                    idx1 = const_expr(vm, &tok, tok);
-                    if (consume(vm, &tok, tok, ","))
-                        idx2 = const_expr(vm, &tok, tok);
-                    tok = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    type_attrs_mut(vm, ty)->alloc_size_idx  = idx1;
-                    type_attrs_mut(vm, ty)->alloc_size_idx2 = idx2;
-                }
-                if (attr) {
-                    attr->alloc_size_idx  = idx1;
-                    attr->alloc_size_idx2 = idx2;
-                }
-                continue;
-            }
-
-            // [[gnu::vector_size(N)]] (tracker #72) -- same semantics as the
-            // GNU-syntax handler in attribute_list(); only meaningful in
-            // declarator-suffix position (attr non-NULL).
-            if (attr_is(name_tok, "vector_size")) {
-                tok       = skip(vm, tok, "(");
-                int bytes = const_expr(vm, &tok, tok);
-                tok       = skip(vm, tok, ")");
-                if (attr) {
-                    attr->has_vector_size   = true;
-                    attr->vector_size_bytes = bytes;
-                    attr->vector_size_tok   = attr_tok;
-                } else if (ty && !vm->compiler.in_type_lookahead) {
-                    warn_tok(vm, attr_tok, CCCC_WARN_ATTRIBUTES,
-                             "'vector_size' ignored in this context");
-                }
-                continue;
-            }
-
-            // [[gnu::malloc]] (#649) -- informational, see the GNU-syntax
-            // handler above for the full rationale.
-            if (attr_is(name_tok, "malloc")) {
-                if (ty && ty->kind == TY_FUNC)
-                    ty->is_malloc = true;
-                if (attr)
-                    attr->is_malloc = true;
-                continue;
-            }
-
-            // [[gnu::constructor]] / [[gnu::constructor(101)]]
-            // [[gnu::destructor]] / [[gnu::destructor(101)]]
-            if (attr_is(name_tok, "constructor") ||
-                attr_is(name_tok, "destructor")) {
-                bool is_ctor  = attr_is(name_tok, "constructor");
-                int  priority = CCCC_NO_INIT_PRIORITY;
-                if (equal(tok, "(")) {
-                    tok      = skip(vm, tok, "(");
-                    priority = const_expr(vm, &tok, tok);
-                    tok      = skip(vm, tok, ")");
-                }
-                if (ty && ty->kind == TY_FUNC) {
-                    if (is_ctor)
-                        ty->is_constructor = true;
-                    else
-                        ty->is_destructor = true;
-                    type_attrs_mut(vm, ty)->init_priority = priority;
-                }
-                if (attr) {
-                    if (is_ctor)
-                        attr->is_constructor = true;
-                    else
-                        attr->is_destructor = true;
-                    attr->init_priority = priority;
-                }
-                continue;
-            }
-
-            // [[cccc::operator(+)]]
-            if (attr_is(name_tok, "operator")) {
-                tok             = skip(vm, tok, "(");
-                Token      *after = NULL;
-                const char *sym   = overloadable_operator(tok, &after);
-                if (!sym)
-                    error_tok(vm, tok, "cannot overload '%.*s'", tok->len,
-                              tok->loc);
-                tok = skip(vm, after, ")");
-                if (ty && ty->kind == TY_FUNC)
-                    type_attrs_mut(vm, ty)->operator_sym = sym;
-                if (attr)
-                    attr->operator_sym = sym;
-                continue;
-            }
-
-            // [[cccc::method(T)]] or [[cccc::method(T, name)]]
-            if (attr_is(name_tok, "method")) {
-                tok              = skip(vm, tok, "(");
-                Type       *recv = typename(vm, &tok, tok);
-                const char *name = NULL;
-                if (equal(tok, ",")) {
-                    tok = tok->next;
-                    if (tok->kind != TK_IDENT)
-                        error_tok(vm, tok, "expected a method name");
-                    name = get_ident(vm, tok);
-                    tok  = tok->next;
-                }
-                tok = skip(vm, tok, ")");
-                if (ty && ty->kind == TY_FUNC) {
-                    type_attrs_mut(vm, ty)->method_of   = recv;
-                    type_attrs_mut(vm, ty)->method_name = name;
-                }
-                if (attr) {
-                    attr->method_of   = recv;
-                    attr->method_name = name;
-                }
-                continue;
-            }
-
-            char *message = NULL;
-            if (equal(tok, "(")) {
-                if (find_attribute_macro(vm, name_tok)) {
-                    Node *args      = NULL;
-                    int   arg_count = 0;
-                    tok = parse_custom_attr_args(vm, name_tok, tok, &args,
-                                                 &arg_count);
-                    if (!vm->compiler.in_type_lookahead) {
-                        if (attr)
-                            append_custom_attr(vm, &attr->custom_attrs,
-                                               name_tok, args, arg_count);
-                        else if (ty)
-                            append_custom_attr(
-                                vm, &type_attrs_mut(vm, ty)->custom_attrs,
-                                name_tok, args, arg_count);
-                        else
-                            error_tok(
-                                vm, name_tok,
-                                "custom attribute '%.*s' is not valid here",
-                                name_tok->len, name_tok->loc);
-                    }
-                    continue;
-                } else {
-                    int depth = 1;
-                    tok       = tok->next;
-                    if ((deprecated || is_nodiscard_attr) &&
-                        tok->kind == TK_STR)
-                        message = tok_lit(tok)->str;
-                    while (depth > 0) {
-                        if (equal(tok, "("))
-                            depth++;
-                        else if (equal(tok, ")"))
-                            depth--;
-                        tok = tok->next;
-                    }
-                }
-            }
-            if (find_attribute_macro(vm, name_tok)) {
-                if (!vm->compiler.in_type_lookahead) {
-                    if (attr)
-                        append_custom_attr(vm, &attr->custom_attrs, name_tok,
-                                           NULL, 0);
-                    else if (ty)
-                        append_custom_attr(
-                            vm, &type_attrs_mut(vm, ty)->custom_attrs, name_tok,
-                            NULL, 0);
-                    else
-                        error_tok(vm, name_tok,
-                                  "custom attribute '%.*s' is not valid here",
-                                  name_tok->len, name_tok->loc);
-                }
-                continue;
-            }
-            if (is_noreturn_attr) {
-                if (ty)
-                    ty->is_noreturn = true;
-                if (attr)
-                    attr->is_noreturn = true;
-            } else if (is_nodiscard_attr) {
-                if (ty)
-                    ty->is_nodiscard = true;
-                if (attr) {
-                    attr->is_nodiscard = true;
-                    if (message)
-                        attr->nodiscard_msg = message;
-                    attr->attribute_tok = attr_tok;
-                }
-            } else if (is_fallthrough_attr) {
-                if (attr)
-                    attr->is_fallthrough = true;
-            } else if (is_no_unique_address_attr) {
-                // Parsed but VM optimisations deferred to a future ticket
-            } else if (is_pure_attr) {
-                if (ty)
-                    ty->is_pure = true;
-                if (attr)
-                    attr->is_pure = true;
-            } else if (is_kernel_attr) {
-                if (ty)
-                    ty->is_kernel = true;
-                if (attr)
-                    attr->is_kernel = true;
-            } else if (is_trusted_attr) {
-                if (ty)
-                    ty->is_trusted = true;
-                if (attr)
-                    attr->is_trusted = true;
-            } else if (is_func_const_attr) {
-                if (ty)
-                    ty->is_func_const = true;
-                if (attr)
-                    attr->is_func_const = true;
-            } else if (is_gnu_inline_attr) {
-                if (ty)
-                    ty->is_gnu_inline = true;
-                if (attr)
-                    attr->is_gnu_inline = true;
-            } else if (is_designated_init_attr) {
-                if (ty)
-                    ty->designated_init = true;
-            } else if (!unused && !deprecated &&
-                       !vm->compiler.in_type_lookahead &&
-                       !((gnu_scoped || other_scoped) &&
-                         cc_has_attribute(name_tok->loc, name_tok->len))) {
-                error_if_derive_attr_not_included(vm, name_tok);
-                warn_tok(vm, attr_tok, unknown_attr_warning(name_tok),
-                         "unknown attribute '%.*s' ignored",
-                         (int)(name_tok->loc + name_tok->len - shown_tok->loc),
-                         shown_tok->loc);
-                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
-                                    false, NULL);
-            } else {
-                apply_semantic_attr(vm, ty, attr, attr_tok, unused, deprecated,
-                                    false, message);
-            }
+            // An unscoped name is warned about unless it is standard; a
+            // namespaced one resolves by name, so a known GNU name is quiet.
+            site.quiet_if_known = ns && !site.cccc_scoped;
+            site.shown_tok = ns && !site.cccc_scoped && !equal(ns, "gnu") &&
+                                     !equal(ns, "__gnu__")
+                                 ? ns
+                                 : site.name_tok;
+            tok = apply_attr(vm, site.name_tok->next, &site, ty, attr);
         }
 
         tok = skip(vm, tok, "]");

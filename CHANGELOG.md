@@ -24,6 +24,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Changed: `aligned`, `packed`, `cleanup`, `vector_size`, `gnu_inline`, `constructor` and `destructor` are accepted in every spelling: `[[aligned(16)]]`, `[[cccc::packed]]`, `[[gnu::aligned(16)]]`, `__attribute__((__packed__))`. `[[aligned(16)]]`, `[[cccc::aligned(16)]]` and the `__aligned__` forms were silently ignored.
 - Changed: the `__name__` spelling works inside `[[...]]` for `nonnull`, `returns_nonnull`, `sentinel`, `alloc_size`, `malloc`, `designated_init`, `optimize` and the checked-pointer attributes (`[[__nonnull__]]`, `[[gnu::__sentinel__]]`); each was silently ignored.
 - Changed: an attribute in any vendor namespace resolves by its name (`[[clang::aligned(16)]]`, `[[acme::packed]]`), and an unknown namespaced attribute is a `-Wattributes` warning (`unknown attribute 'foo::bar' ignored`) instead of a parse error. `[[kernel]]`, `[[trusted]]`, `[[operator]]` and `[[method]]` work without the `cccc::` prefix; a bare `[[kernel]]` now runs the kernel-code check. The OpenCL address-space names (`global`, `local`, `constant`, `private`, `generic`) still need `cccc::`.
+- Changed: an attribute behaves the same in `[[...]]` and `__attribute__((...))`. `[[gnu::warn_unused_result]]`, `[[gnu::format(...)]]`, `[[gnu::error("msg")]]`, `[[gnu::warning("msg")]]` and `[[gnu::unused]]` now take effect, and `__attribute__((nodiscard))`, `((kernel))`, `((trusted))`, `((operator(+)))` and `((method(T)))` are recognised; each was ignored in that spelling.
 
 ## [0.33.2] - 2026-11-09
 
