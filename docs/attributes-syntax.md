@@ -1,6 +1,6 @@
 # Attribute Syntax
 
-The `@` shorthand, where attributes may appear, and `asm` labels.
+Attribute spellings (`@`, `[[...]]`, `__attribute__`), where attributes may appear, and `asm` labels.
 
 ## `@` prefix
 
@@ -13,7 +13,7 @@ The `@` shorthand, where attributes may appear, and `asm` labels.
 | 3 | Custom comptime | The handler registered by `@comptime(attribute("name"))` | `@serialize struct Point { ... };` |
 | 4 | GNU or unknown | `__attribute__((name))` | `@packed`, `@aligned(16)` |
 
-`@template` and `@inst` are not attributes: the compiler handles them before this table applies ([templates.md](templates.md)).
+`@template`, `@specialize` and `@inst` are not attributes: the compiler handles them before this table applies, and each has spellings without `@` ([below](#template-marker-spellings), [templates.md](templates.md#marker-spellings)).
 
 ```c
 @comptime
@@ -27,7 +27,7 @@ struct @packed point { char x; int y; };
 
 The ready-made custom attributes (`@serialize`, `@to_string`, `@accessors`, ...) are in [derive.md](derive.md). `@` is accepted wherever the canonical form is.
 
-CCCC-specific attributes also accept `__comptime`, `__comptime__`, `__macro`, `__macro__`, `__test`, `__test__`, `__test_setup`, `__test_setup__`, `__test_teardown` and `__test_teardown__`. The plain names stay ordinary identifiers.
+CCCC-specific attributes also accept `__comptime`, `__comptime__`, `__test`, `__test__`, `__test_setup`, `__test_setup__`, `__test_teardown` and `__test_teardown__`. The plain names stay ordinary identifiers.
 
 Custom comptime attributes run on file-scope declarations (types, typedefs, functions, globals) and on members of file-scope structs and unions. Their arguments arrive as expression nodes after the target is built; read them with `StringLiteralValue` and `ConstIntValue` ([macros-attributes.md](macros-attributes.md#custom-attributes), [members](macros-attributes.md#member-attributes)). An `@name` with no handler is dropped with `-Wunknown-attributes`, on by default ([warnings.md](warnings.md)). `__declspec` is reserved as a future fourth fallback.
 
@@ -80,6 +80,35 @@ Covered: `format`, `nonnull`, `returns_nonnull`, `sentinel`, `noreturn`, `warn_u
 int buf[4] [[__gnu__::__aligned__(16)]];  // same as [[gnu::aligned(16)]]
 [[__nodiscard__]] int parse(void);        // same as [[nodiscard]]
 ```
+
+### Namespaces
+
+An attribute resolves by its name alone, in any spelling and any namespace, so every row below is the same attribute:
+
+| Spelling | Example |
+|---|---|
+| Unscoped | `[[aligned(16)]]`, `[[single]]` |
+| `gnu::` / `__gnu__::` | `[[gnu::aligned(16)]]`, `[[gnu::single]]` |
+| `cccc::` | `[[cccc::aligned(16)]]`, `[[cccc::single]]` |
+| Another vendor | `[[clang::aligned(16)]]`, `[[acme::packed]]` |
+| `__attribute__` | `__attribute__((aligned(16)))` |
+| `@` | `@aligned(16)` |
+
+An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_c_attribute(ns::name)` reports a known name in any namespace.
+
+`kernel`, `trusted`, `operator` and `method` need no `cccc::`; the OpenCL address spaces `global`, `local`, `constant`, `private` and `generic` keep it.
+
+### Template marker spellings
+
+The template markers have spellings without `@`, for sources where `@` is taken:
+
+| Marker | `@` | Attribute | Keyword |
+|---|---|---|---|
+| Template definition | `@template(T)` | `[[cccc::template(T)]]` | `__template(T)` |
+| Specialization | `@specialize(T)` | `[[cccc::specialize(T)]]` | `__specialize(T)` |
+| Instance | `@inst(T) Name` | | `__inst(T) Name` |
+
+The attribute form takes any namespace or none, and `__attribute__((template(T)))`. It must be the only attribute in its list. `__template__`, `__specialize__` and `__inst__` are accepted too. The postfix instance `Name@(T)` is written with `@` only.
 
 ## `asm("symbol")` labels
 

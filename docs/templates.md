@@ -158,6 +158,25 @@ Writing both argument lists (`@inst(int) Vec@(int)`) or `@inst(int)` with no nam
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct, union, enum or typedef template names a type, a function template names a function; using one as the other is an error.
 
+### Marker spellings
+
+Each marker also has an attribute and a keyword spelling, and all mix freely in one file:
+
+| `@` | Attribute | Keyword |
+|---|---|---|
+| `@template(T)` | `[[cccc::template(T)]]` | `__template(T)` |
+| `@specialize(int)` | `[[cccc::specialize(int)]]` | `__specialize(int)` |
+| `@inst(int) Vec` | | `__inst(int) Vec` |
+
+```c
+__template(T) struct Box { T v; };
+[[cccc::specialize(bool)]] struct Box { unsigned bits; };
+
+__inst(int) Box b = {1};
+```
+
+The attribute form takes any namespace (`[[template(T)]]`, `[[gnu::template(T)]]`, `__attribute__((template(T)))`) and must be the only attribute in its list. The postfix `Name@(int)` has no other spelling.
+
 ### Pre-defining and aliasing
 
 At file scope, `@inst(Type, ...) Name;` creates the instance without using it. This is how a derive attribute's functions come into existence when nothing else names the instance. A `typedef` or `#define` shortens repeated uses:

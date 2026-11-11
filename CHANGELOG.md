@@ -7,6 +7,10 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Added: an attribute resolves by its name in any spelling and any namespace, so `[[cccc::aligned(16)]]`, `[[gnu::single]]` and `[[clang::aligned(16)]]` work, `__x__` is accepted inside `[[...]]`, and `[[kernel]]`, `[[trusted]]`, `[[operator]]` and `[[method]]` need no `cccc::`; an unknown name in a namespace is a `-Wattributes` warning. `[[...]]` and `__attribute__((...))` share one handler, so the GNU-only attributes (`format`, `error`, `warn_unused_result`, ...) work in `[[gnu::...]]` and the standard ones in `__attribute__`. Every attribute is defined once in `src/attr_registry.c`.
+- Added: the template markers have spellings without `@`: `[[cccc::template(T)]]` (any namespace, or `__attribute__((template(T)))`), `[[cccc::specialize(T)]]`, `__template(T)`, `__specialize(T)` and `__inst(T) Name`; the marker must be the only attribute in its list. Postfix `Name@(T)` stays `@`-only.
+- Changed: `__has_c_attribute` reports a known attribute in any namespace (`cccc::aligned`, `clang::aligned`, `gnu::single`), and `__has_c_attribute(aligned)` is true.
+- Fixed: an attribute argument spelled like a cccc marker, as in `[[gnu::cleanup(comptime)]] int x;`, no longer turns the declaration into a comptime block and drops it.
 - Added: `@template(T)` marks a struct, union or function definition as a template, and `@inst(Type, ...) Name` instantiates it as `Name__Type` in any type or expression position, at file scope or inside a function; function instances are `static`, and attributes such as `@equals` apply to each instance.
 - Added: a file-scope `@inst(Type, ...) Name;` creates a template instance without using it, so its derive attributes' functions exist.
 - Added: `@template(T, int N)` takes integer constant parameters, bound as constants inside the body and given as constant expressions in `@inst(int, 16) Arr`; the instance is `Arr__int__16`, a negative value is spelled with an `n` prefix, and a value that does not fit the parameter's type is an error.

@@ -6,7 +6,8 @@ Address spaces, vector size and visible lanes.
 runs on the normal CPU build, so kernel-shaped code is caught without a GPU
 toolchain. It does not generate GPU code. To run a kernel over a grid of
 work-items in the VM, see [kernels.md](kernels.md); for OpenCL C source, see
-[opencl.md](opencl.md).
+[opencl.md](opencl.md). `[[kernel]]` needs no `cccc::`; the address-space
+attributes below keep it ([attributes-syntax.md](attributes-syntax.md#namespaces)).
 
 ```c
 #include <stdatomic.h>

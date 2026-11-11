@@ -59,6 +59,38 @@ struct __attribute__((__packed__)) PackAttrU {
     int  i;
 };
 
+// Template markers: @template, [[template]], [[ns::template]], __template.
+[[cccc::template(T)]] struct BoxCccc {
+    T v;
+};
+[[template(T)]] T add1(T a) {
+    return a + 1;
+}
+[[gnu::template(T)]] T add2(T a) {
+    return a + 2;
+}
+__attribute__((template(T, int N = 8))) struct Arr {
+    T v[N];
+};
+__template(T) T add3(T a) {
+    return a + 3;
+}
+__template__(T) T add4(T a) {
+    return a + 4;
+}
+@template(T) T add5(T a) {
+    return a + 5;
+}
+[[cccc::specialize(int)]] int add1(int a) {
+    return a + 100;
+}
+__specialize(long) long add3(long a) {
+    return a + 300;
+}
+@specialize(long) long add5(long a) {
+    return a + 500;
+}
+
 // Behaviour: cleanup runs code.
 static int cleaned;
 static void note_clean(int *p) {
@@ -104,6 +136,29 @@ void test_cleanup_spellings(void) {
     AssertEq(cleaned, 7);
 }
 
+[[cccc::test]]
+void test_template_marker_spellings(void) {
+    __inst(int) BoxCccc b = {7};
+    AssertEq(b.v, 7);
+    AssertEq(__inst(char) add1(1), 2);
+    AssertEq(__inst(int) add1(1), 101);
+    AssertEq(__inst(int) add2(1), 3);
+    AssertEq(__inst(int) add3(1), 4);
+    AssertEq(__inst(long) add3(1L), 301);
+    AssertEq(__inst(int) add4(1), 5);
+    AssertEq(@inst(int) add5(1), 6);
+    AssertEq(@inst(long) add5(1L), 501);
+    AssertEq(__inst__(int) add5(1), 6);
+}
+
+[[cccc::test]]
+void test_template_marker_defaults(void) {
+    __inst(int) Arr    a;
+    __inst(int, 4) Arr c;
+    AssertEq(sizeof a, 32);
+    AssertEq(sizeof c, 16);
+}
+
 // Introspection: every spelling a registered attribute has reports it.
 [[cccc::test]]
 void test_has_attribute_spellings(void) {
@@ -114,6 +169,10 @@ void test_has_attribute_spellings(void) {
     AssertTrue(__has_c_attribute(__gnu__::aligned));
     AssertTrue(__has_c_attribute(cccc::single));
     AssertTrue(__has_c_attribute(deprecated));
+    AssertTrue(__has_c_attribute(cccc::aligned));
+    AssertTrue(__has_c_attribute(clang::aligned));
+    AssertTrue(__has_c_attribute(aligned));
+    AssertTrue(__has_c_attribute(gnu::single));
     AssertFalse(__has_c_attribute(cccc::no_such_attribute));
 }
 

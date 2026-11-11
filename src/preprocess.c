@@ -1979,17 +1979,11 @@ static bool is_has_builtin_supported(char *name) {
     return false;
 }
 
-static long is_has_c_attribute_supported(char *vendor, char *name) {
+static long is_has_c_attribute_supported(char *name) {
     const AttrDef *a = lookup_attr(name, strlen(name));
     if (!a)
         return 0;
-    if (!vendor)
-        return (a->cat == ATTR_STD) ? a->date : 0;
-    if (!strcmp(vendor, "cccc"))
-        return (a->cat == ATTR_CCCC) ? a->date : 0;
-    if (!strcmp(vendor, "gnu") || !strcmp(vendor, "__gnu__"))
-        return a->has_attr;
-    return 0;
+    return a->cat == ATTR_GNU ? a->has_attr : a->date;
 }
 
 static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
@@ -2021,7 +2015,7 @@ static int eval_has_name(VirtualMachine *vm, Token **rest, Token *tok,
     if (!strcmp(kind, "__has_builtin"))
         return is_has_builtin_supported(name);
     if (!strcmp(kind, "__has_c_attribute"))
-        return is_has_c_attribute_supported(vendor, name);
+        return is_has_c_attribute_supported(name);
     if (!strcmp(kind, "__has_declspec_attribute"))
         // #1323: CCCC is not MSVC/clang-cl and supports no __declspec
         // attributes -- always 0, but recognised so real SDK headers using
@@ -4366,17 +4360,152 @@ static Token *matching_paren(Token *open) {
     return NULL;
 }
 
-// Rewrites the three `@inst` spellings
-//   @inst(Args) Name      @inst Name      Name@(Args)
+typedef enum { TM_NONE, TM_TEMPLATE, TM_SPECIALIZE, TM_INST } TemplateMarker;
+
+// The marker `kw` names: `template`/`specialize`/`inst` after an `@`, or the
+// `__template`/`__template__`... keyword aliases on their own.
+static TemplateMarker template_marker_kind(const char *loc, size_t len,
+                                           bool after_at) {
+    static const struct {
+        const char    *name;
+        TemplateMarker kind;
+    } names[] = {{"template", TM_TEMPLATE},
+                 {"specialize", TM_SPECIALIZE},
+                 {"inst", TM_INST}};
+    for (size_t i = 0; i < sizeof names / sizeof *names; i++) {
+        size_t n = strlen(names[i].name);
+        if (after_at) {
+            if (len == n && !strncmp(loc, names[i].name, n))
+                return names[i].kind;
+        } else if ((len == n + 2 || len == n + 4) && !strncmp(loc, "__", 2) &&
+                   !strncmp(loc + 2, names[i].name, n) &&
+                   (len == n + 2 || !strncmp(loc + 2 + n, "__", 2))) {
+            return names[i].kind;
+        }
+    }
+    return TM_NONE;
+}
+
+// Replaces `tok` .. `rest` (exclusive) with `__cccc_template` or
+// `__cccc_specialize` followed by `body_first`..`body_last`, copied.
+static Token *splice_definition_marker(VirtualMachine *vm, Token *tok,
+                                       Token *site, TemplateMarker kind,
+                                       Token *body_first, Token *body_last,
+                                       Token *rest) {
+    Token *last;
+    Token *new_toks = synth_tokens(
+        vm, tok,
+        kind == TM_TEMPLATE ? "__cccc_template " : "__cccc_specialize ", &last);
+    for (Token *p = new_toks; p != last->next; p = p->next)
+        tok_rare_mut(vm, p)->src_site = site;
+    Token *cur = last;
+    if (body_first) {
+        for (Token *p = body_first;; p = p->next) {
+            cur = cur->next = copy_token(vm, p);
+            if (p == body_last)
+                break;
+        }
+    }
+    cur->next                  = rest;
+    new_toks->at_bol           = tok->at_bol;
+    new_toks->has_space        = tok->has_space;
+    vm->compiler.saw_templates = true;
+    mark_cccc_only_file(vm, tok->file->name);
+    return new_toks;
+}
+
+// `[[template(T)]]`, `[[ns::template(T)]]` and `__attribute__((template(T)))`
+// (and `specialize`) as `@template(T)`. The marker is the only attribute in
+// its list.
+static bool try_rewrite_template_attr(VirtualMachine *vm, Token **tok_ptr) {
+    Token *tok = *tok_ptr;
+    bool   gnu = equal(tok, "__attribute__") && tok->next &&
+                 equal(tok->next, "(") && tok->next->next &&
+                 equal(tok->next->next, "(");
+    bool   c23 = equal(tok, "[") && tok->next && equal(tok->next, "[");
+    if (!gnu && !c23)
+        return false;
+
+    Token         *marker      = NULL;
+    TemplateMarker kind        = TM_NONE;
+    Token         *list_end    = NULL; // first of the two closing tokens
+    int            entries     = 0;
+    int            depth       = 0;
+    bool           entry_start = true;
+    for (Token *p = gnu ? tok->next->next->next : tok->next->next;
+         p && p->kind != TK_EOF; p = p->next) {
+        if (depth == 0) {
+            if (equal(p, gnu ? ")" : "]")) {
+                list_end = p;
+                break;
+            }
+            if (equal(p, ";") || equal(p, "{") || equal(p, "}"))
+                return false;
+            if (equal(p, ",")) {
+                entry_start = true;
+                continue;
+            }
+        }
+        if (equal(p, "(") || equal(p, "["))
+            depth++;
+        else if (equal(p, ")") || equal(p, "]"))
+            depth--;
+        if (!entry_start)
+            continue;
+        entry_start = false;
+        entries++;
+        Token *name = p;
+        if (c23 && p->kind == TK_IDENT && p->next && equal(p->next, ":") &&
+            p->next->next && equal(p->next->next, ":") && p->next->next->next)
+            name = p->next->next->next;
+        TemplateMarker k = TM_NONE;
+        if (name->kind == TK_IDENT) {
+            // `template` / `specialize`, plain or as `__x__`
+            bool wrapped = name->len > 4 && !strncmp(name->loc, "__", 2) &&
+                           !strncmp(name->loc + name->len - 2, "__", 2);
+            k = wrapped
+                    ? template_marker_kind(name->loc + 2, name->len - 4, true)
+                    : template_marker_kind(name->loc, name->len, true);
+        }
+        if ((k == TM_TEMPLATE || k == TM_SPECIALIZE) && !marker) {
+            marker = name;
+            kind   = k;
+        }
+    }
+    if (!marker || !list_end || !list_end->next ||
+        !equal(list_end->next, gnu ? ")" : "]"))
+        return false;
+
+    const char *spell = kind == TM_TEMPLATE ? "template" : "specialize";
+    if (entries != 1)
+        error_tok(vm, marker, "'%s' must be the only attribute in its list",
+                  spell);
+    if (!marker->next || !equal(marker->next, "("))
+        error_tok(vm, marker, "'%s' needs a parameter list: %s(T)", spell,
+                  spell);
+    if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
+        error_tok(vm, marker, "'%s' is not supported in comptime code", spell);
+    Token *close = matching_paren(marker->next);
+    if (!close || close->next != list_end)
+        error_tok(vm, marker, "malformed '%s' attribute", spell);
+
+    *tok_ptr = splice_definition_marker(vm, tok, marker, kind, marker->next,
+                                        close, list_end->next->next);
+    return true;
+}
+
+// Rewrites the template markers in their `@` and keyword spellings
+//   @inst(Args) Name      @inst Name      Name@(Args)     __inst(Args) Name
 // into `__cccc_inst ( Name , Args )`, the form the parser handles, and
-// `@template` into `__cccc_template` and `@specialize` into
-// `__cccc_specialize`.
+// `@template` / `__template` into `__cccc_template`, `@specialize` /
+// `__specialize` into `__cccc_specialize`.
 static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok       = *tok_ptr;
     Token *site      = NULL; // token the instantiation is reported at
     Token *name      = NULL;
     Token *args_open = NULL; // `(` of the argument list, if any
     Token *after     = NULL; // first token after the construct
+    const char *spell     = "@inst";
 
     if (tok->kind == TK_IDENT && !(tok->len == 1 && tok->loc[0] == '$') &&
         tok->next && equal(tok->next, "@") && tok->next->next &&
@@ -4384,56 +4513,48 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
         site      = tok;
         name      = tok;
         args_open = tok->next->next;
-    } else if (equal(tok, "@") && tok->next && tok->next->kind == TK_IDENT) {
-        Token *kw = tok->next;
-        bool   is_template = kw->len == 8 && !strncmp(kw->loc, "template", 8);
-        bool   is_specialize =
-            kw->len == 10 && !strncmp(kw->loc, "specialize", 10);
-        if (is_template || is_specialize) {
+    } else {
+        bool   at = equal(tok, "@") && tok->next;
+        Token *kw = at ? tok->next : tok;
+        if (kw->kind != TK_IDENT)
+            return false;
+        TemplateMarker kind = template_marker_kind(kw->loc, kw->len, at);
+        if (kind == TM_NONE)
+            return false;
+        spell =
+            arena_format(vm, "%s%.*s", at ? "@" : "", (int)kw->len, kw->loc);
+        if (kind != TM_INST) {
             if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-                error_tok(vm, tok, "@%s is not supported in comptime code",
-                          is_template ? "template" : "specialize");
-            Token *last;
-            Token *new_toks = synth_tokens(
-                vm, tok,
-                is_template ? "__cccc_template " : "__cccc_specialize ", &last);
-            tok_rare_mut(vm, last)->src_site = kw;
-            last->next                       = kw->next;
-            new_toks->at_bol                 = tok->at_bol;
-            new_toks->has_space              = tok->has_space;
-            vm->compiler.saw_templates       = true;
-            mark_cccc_only_file(vm, tok->file->name);
-            *tok_ptr = new_toks;
+                error_tok(vm, tok, "%s is not supported in comptime code",
+                          spell);
+            *tok_ptr = splice_definition_marker(vm, tok, kw, kind, NULL, NULL,
+                                                kw->next);
             return true;
         }
-        if (kw->len != 4 || strncmp(kw->loc, "inst", 4))
-            return false;
         site = kw;
         if (kw->next && equal(kw->next, "(")) {
             args_open    = kw->next;
             Token *close = matching_paren(args_open);
             if (!close)
-                error_tok(vm, tok, "unterminated '@inst('");
+                error_tok(vm, tok, "unterminated '%s('", spell);
             name = close->next;
         } else {
             name = kw->next;
         }
-    } else {
-        return false;
     }
 
     if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-        error_tok(vm, tok, "@inst is not supported in comptime code");
+        error_tok(vm, tok, "%s is not supported in comptime code", spell);
 
     Token *close = NULL;
     if (args_open) {
         close = matching_paren(args_open);
         if (!close)
-            error_tok(vm, tok, "unterminated '@inst('");
+            error_tok(vm, tok, "unterminated '%s('", spell);
     }
     bool postfix = name == tok;
     if (!postfix && (!name || name->kind != TK_IDENT))
-        error_tok(vm, name ? name : tok, "@inst needs a template name");
+        error_tok(vm, name ? name : tok, "%s needs a template name", spell);
     after = postfix ? close->next : (close ? close->next->next : name->next);
     if (!postfix && after && equal(after, "@") && after->next &&
         equal(after->next, "("))
@@ -5245,6 +5366,7 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
     Token *scan  = is_gnu_attr ? tok->next->next->next // skip __attribute__ ( (
                                : tok->next->next;      // skip [ [
     int    depth = 0;
+    int    paren_depth = 0; // [[...]] only: arguments are not attribute names
 
     for (Token *t = scan; t && t->kind != TK_EOF; t = t->next) {
         if (is_gnu_attr) {
@@ -5262,22 +5384,32 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                 continue;
             }
         } else {
+            if (equal(t, "(")) {
+                paren_depth++;
+                continue;
+            }
+            if (equal(t, ")")) {
+                if (paren_depth > 0)
+                    paren_depth--;
+                continue;
+            }
             if (equal(t, "[")) {
                 depth++;
                 continue;
             }
             if (equal(t, "]")) {
-                if (depth == 0) {
+                if (depth == 0 && paren_depth == 0) {
                     if (t->next && equal(t->next, "]"))
                         attr_end = t->next->next;
                     break;
                 }
-                depth--;
+                if (depth > 0)
+                    depth--;
                 continue;
             }
         }
 
-        if (depth != 0)
+        if (depth != 0 || paren_depth != 0)
             continue;
         if (equal(t, ","))
             continue;
@@ -6841,6 +6973,8 @@ static Token *preprocess2(VirtualMachine *vm, Token *tok) {
             if (try_rewrite_at_directive(vm, &tok))
                 continue;
             if (try_rewrite_template_marker(vm, &tok))
+                continue;
+            if (try_rewrite_template_attr(vm, &tok))
                 continue;
             if (try_rewrite_at_attr(vm, &tok))
                 continue;
