@@ -6,5 +6,5 @@
 int tu_b_value(void);
 
 int main(void) {
-    return @inst(max, int)(38, 1) + tu_b_value();   // 38 + 4
+    return @inst(int) max(38, 1) + tu_b_value(); // 38 + 4
 }

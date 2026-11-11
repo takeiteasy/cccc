@@ -17,12 +17,13 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// `@template(T, int N...)` and `@inst(Name, Arg...)`. The preprocessor turns
-// the two into the identifiers `__cccc_template` and `__cccc_inst`. A template
-// (struct, union, enum, typedef or function) is kept as unparsed tokens; the first `@inst` of an argument list clones them
-// under a mangled name and parses the clone at file scope with each type
-// parameter bound to its argument type and each constant parameter to an
-// enumerator-style constant.
+// `@template(T, int N...)` and `@inst(Arg...) Name` (also `Name@(Arg...)` and
+// bare `@inst Name`). The preprocessor turns them into the identifier
+// `__cccc_template` and the call-like `__cccc_inst ( Name, Arg... )`. A
+// template (struct, union, enum, typedef or function) is kept as unparsed
+// tokens; the first `@inst` of an argument list clones them under a mangled
+// name and parses the clone at file scope with each type parameter bound to its
+// argument type and each constant parameter to an enumerator-style constant.
 
 #include "./parse_internal.h"
 
@@ -1047,9 +1048,9 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     return inst;
 }
 
-// Parses `( Name {, Arg} )` after the `__cccc_inst` marker at `tok` and returns
-// the (possibly new) instance. Each argument is a type or a constant
-// expression according to the template's parameter at that position.
+// Parses the rewritten `( Name {, Arg} )` after the `__cccc_inst` marker at
+// `tok` and returns the (possibly new) instance. Each argument is a type or a
+// constant expression according to the template's parameter at that position.
 TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
                                          Token *tok) {
     Token *site = tok;
@@ -1076,7 +1077,7 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
     return instantiate_template(vm, t, args, n, site);
 }
 
-// `@inst(Name, Types...)` where a type is expected.
+// `@inst(Types...) Name` where a type is expected.
 Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
     TemplateInstance *inst = cc_parse_template_inst(vm, rest, tok);
     if (inst->tmpl->kind == TMPL_FUNC)
@@ -1085,7 +1086,7 @@ Type *cc_template_inst_type(VirtualMachine *vm, Token **rest, Token *tok) {
     return inst->ty;
 }
 
-// File-scope `@inst(Name, Types...);` instantiates without using the result.
+// File-scope `@inst(Types...) Name;` instantiates without using the result.
 // Returns the token after the `;`, or NULL when `tok` starts something else.
 Token *cc_template_force_inst(VirtualMachine *vm, Token *tok) {
     if (!equal(tok, "__cccc_inst") || !equal(tok->next, "("))

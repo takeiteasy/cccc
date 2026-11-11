@@ -40,22 +40,22 @@ enum Odd { n3 = 5, below = -1 };
 
 [[cccc::test(error = "takes 2 arguments, 1 given")]]
 void test_too_few_arguments(void) {
-    @inst(Pair, int) p;
+    @inst(int) Pair p;
 }
 
 [[cccc::test(error = "takes 1 argument, 2 given")]]
 void test_too_many_arguments(void) {
-    @inst(Vec, int, int) v;
+    @inst(int, int) Vec v;
 }
 
 [[cccc::test(error = "'Nope' is not a template")]]
 void test_unknown_template(void) {
-    @inst(Nope, int) v;
+    @inst(int) Nope v;
 }
 
 [[cccc::test(error = "template 'Vec' is a type, not a function")]]
 void test_struct_template_as_expression(void) {
-    int x = @inst(Vec, int);
+    int x = @inst(int) Vec;
 }
 
 [[cccc::test(error = "only allowed on a file-scope")]]
@@ -66,74 +66,79 @@ void test_template_inside_function(void) {
 [[cccc::test(error = "checked-pointer type cannot be a template argument")]]
 void test_checked_pointer_argument(void) {
     int * [[cccc::single]] p = 0;
-    @inst(Vec, typeof(p)) v;
+    @inst(typeof(p)) Vec v;
 }
 
 [[cccc::test(error = "variable-length array cannot be a template argument")]]
 void test_vla_argument(void) {
     int n = 3;
-    @inst(Vec, int[n]) v;
+    @inst(int[n]) Vec v;
 }
 
 [[cccc::test(error = "must have an integer type")]]
 void test_float_constant_parameter(void) {
-    @inst(dbl, 1)();
+    @inst(1) dbl();
 }
 
 [[cccc::test(error = "must have an integer type")]]
 void test_wide_bitint_constant_parameter(void) {
-    @inst(wide, 1)();
+    @inst(1) wide();
 }
 
 [[cccc::test(error = "template argument 300 does not fit 'unsigned char'")]]
 void test_constant_too_large(void) {
-    @inst(byte_of, 300)();
+    @inst(300) byte_of();
 }
 
 [[cccc::test(error = "template argument -1 does not fit 'unsigned char'")]]
 void test_negative_for_unsigned(void) {
-    @inst(byte_of, -1)();
+    @inst(-1) byte_of();
 }
 
 [[cccc::test(error = "not a compile-time constant")]]
 void test_non_constant_argument(void) {
     int n = 3;
-    @inst(Arr, int, n) a;
+    @inst(int, n) Arr a;
 }
 
 [[cccc::test(error = "expected")]]
 void test_type_for_constant_slot(void) {
-    @inst(Arr, int, int) a;
+    @inst(int, int) Arr a;
 }
 
 [[cccc::test(error = "expected")]]
 void test_constant_for_type_slot(void) {
-    @inst(Arr, 4, 4) a;
+    @inst(4, 4) Arr a;
 }
 
 [[cccc::test(error = "enumerator 'n3' clashes with the number n3")]]
 void test_enumerator_clashes_with_negative_number(void) {
-    @inst(odd, (enum Odd)-3)();
+    @inst((enum Odd) - 3) odd();
 }
 
 #pragma cccc suite end
 
 [[cccc::test(error = "takes 1 to 2 arguments, 0 given")]]
 void test_default_too_few(void) {
-    @inst(Dflt) d;
+    @inst Dflt d;
 }
 
 [[cccc::test(error = "takes 1 to 2 arguments, 3 given")]]
 void test_default_too_many(void) {
-    @inst(Dflt, int, 2, int) d;
+    @inst(int, 2, int) Dflt d;
 }
 
 [[cccc::test(error = "template argument 300 does not fit 'unsigned char'")]]
 void test_default_does_not_fit(void) {
-    @inst(big_dflt, int)();
+    @inst(int) big_dflt();
 }
 
 [[cccc::test(error = "missing_name")]]
 void test_default_not_constant(void) {
-    @inst(nonconst_dflt, int)();
+    @inst(int) nonconst_dflt();
+}
+
+[[cccc::test(error = "'Nope' is not a template")]]
+void test_postfix_unknown_template(void) {
+    Nope @(int) v;
 }

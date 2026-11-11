@@ -7,8 +7,8 @@ Generic structs, unions, enums, typedefs and functions: write the definition onc
 @template(T) T max(T a, T b) { return a > b ? a : b; }
 
 int main(void) {
-    @inst(Vec, int) v = {0};          // struct Vec__int
-    return @inst(max, int)(40, 42);   // max__int
+    @inst(int) Vec v = {0};          // struct Vec__int
+    return @inst(int) max(40, 42);   // max__int
 }
 ```
 
@@ -32,8 +32,8 @@ A parameter written as a type followed by a name is an integer constant. The mat
 @template(T, int N) struct Arr { T v[N]; };
 @template(T, T N) T add_n(T x) { return x + N; }
 
-@inst(Arr, int, 16) a;              // struct Arr__int__16
-int r = @inst(add_n, long, 40)(2);  // add_n__long__40
+@inst(int, 16) Arr a;              // struct Arr__int__16
+int r = @inst(long, 40) add_n(2);  // add_n__long__40
 ```
 
 | Rule | Detail |
@@ -46,16 +46,18 @@ int r = @inst(add_n, long, 40)(2);  // add_n__long__40
 
 ## Default arguments
 
-A parameter may end in `= value`, and `@inst` then leaves its argument out. A type parameter takes a type, a constant parameter a constant expression.
+A parameter may end in `= value`, and the instantiation then leaves its argument out. A type parameter takes a type, a constant parameter a constant expression.
 
 ```c
 @template(T, int N = 8) struct Arr { T v[N]; };
 @template(K, V = K) struct Map { K key; V val; };
+@template(T = int) struct Id { T v; };
 @template(T, T N = 0) T add_n(T x) { return x + N; }
 
-@inst(Arr, int) a;            // struct Arr__int__8
-@inst(Arr, int, 8) b;         // the same type
-@inst(Map, int) m;            // struct Map__int__int
+@inst(int) Arr a;            // struct Arr__int__8
+@inst(int, 8) Arr b;         // the same type
+@inst(int) Map m;            // struct Map__int__int
+@inst Id c;                  // every parameter defaulted: struct Id__int
 ```
 
 | Rule | Detail |
@@ -63,7 +65,7 @@ A parameter may end in `= value`, and `@inst` then leaves its argument out. A ty
 | Order | Defaulted parameters come last; a parameter after a default needs a default |
 | Value | May name earlier parameters (`T N = 0`, `int N = sizeof(T)`); naming itself or a later parameter is an error |
 | Evaluated | Per instance, after the earlier arguments are bound |
-| Name | Every argument is in the instance name, so `@inst(Arr, int)` and `@inst(Arr, int, 8)` are one instance |
+| Name | Every argument is in the instance name, so `@inst(int) Arr` and `@inst(int, 8) Arr` are one instance |
 | Too few or many | `template 'Arr' takes 1 to 2 arguments, 0 given` |
 
 ## Enum and typedef templates
@@ -76,10 +78,10 @@ An enum instance is `Name__Arg` and its enumerators are renamed `Name__Arg__ENUM
 @template(T, int N) typedef T Row[N];
 @template(T) typedef struct Link { T val; struct Link *next; } Link;
 
-@inst(Level, char) lv = Level__char__HIGH;   // enum Level__char
-@inst(Ptr, int) p;                           // typedef int *Ptr__int
-@inst(Row, int, 4) r;                        // typedef int Row__int__4[4]
-@inst(Link, int) l;                          // struct Link__int, typedef Link__int
+@inst(char) Level lv = Level__char__HIGH;   // enum Level__char
+@inst(int) Ptr p;                           // typedef int *Ptr__int
+@inst(int, 4) Row r;                        // typedef int Row__int__4[4]
+@inst(int) Link l;                          // struct Link__int, typedef Link__int
 ```
 
 | Rule | Detail |
@@ -90,24 +92,42 @@ An enum instance is `Name__Arg` and its enumerators are renamed `Name__Arg__ENUM
 
 ## Instantiating
 
-`@inst(Name, Type, ...)` names an instance. It works wherever a type or an expression is allowed, at file scope or inside a function: declarations, `sizeof`, casts, compound literals, parameter lists and other templates.
+`@inst(Type, ...) Name` names an instance, with the arguments before the name as `@template(T)` has them. It works wherever a type or an expression is allowed, at file scope or inside a function: declarations, `sizeof`, casts, compound literals, parameter lists and other templates.
 
 ```c
-@inst(Pair, int, float) p = {3, 1.5f};
-size_t n = sizeof(@inst(Pair, int, float));
-int m = @inst(max, long)(5, 3);
+@inst(int, float) Pair p = {3, 1.5f};
+size_t n = sizeof(@inst(int, float) Pair);
+int m = @inst(long) max(5, 3);
 ```
+
+### Spellings
+
+Three spellings name the same instance. Use whichever reads best; they mix freely in one file.
+
+| Spelling | Use |
+|---|---|
+| `@inst(int, float) Pair` | Prefix: mirrors the `@template(A, B)` definition |
+| `Pair@(int, float)` | Postfix: the name comes first, so nested arguments read left to right |
+| `@inst Pair` | All defaults: leaves out the parentheses; `Pair@()` is the postfix form |
+
+```c
+Pair@(int, Vec@(char)) p;          // struct Pair__int__struct_Vec__char
+int m = max@(long)(5, 3);          // call: the arguments, then the call parentheses
+@inst Arr a;                       // every parameter defaulted
+```
+
+Writing both argument lists (`@inst(int) Vec@(int)`) or `@inst(int)` with no name after it is an error.
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct, union, enum or typedef template names a type, a function template names a function; using one as the other is an error.
 
 ### Pre-defining and aliasing
 
-At file scope, `@inst(Name, Type, ...);` creates the instance without using it. This is how a derive attribute's functions come into existence when nothing else names the instance. A `typedef` or `#define` shortens repeated uses:
+At file scope, `@inst(Type, ...) Name;` creates the instance without using it. This is how a derive attribute's functions come into existence when nothing else names the instance. A `typedef` or `#define` shortens repeated uses:
 
 ```c
-@inst(Cell, int);                   // Cell__int and Cell__int_equals exist
-typedef @inst(Vec, int) IntVec;     // type alias
-#define max_int @inst(max, int)     // function alias
+@inst(int) Cell;                   // Cell__int and Cell__int_equals exist
+typedef @inst(int) Vec IntVec;     // type alias
+#define max_int @inst(int) max     // function alias
 ```
 
 ## Instance names
@@ -127,10 +147,10 @@ An instance is named `Name__Arg` for each argument, built from the argument's re
 | `void (*)(int)` | `fn_void_of_int_end_ptr` |
 
 ```c
-@inst(Pair, int, float) a;
+@inst(int, float) Pair a;
 struct Pair__int__float b;     // the same type
 
-@inst(Vec, size_t) c;
+@inst(size_t) Vec c;
 struct Vec__unsigned_long d;   // the same type
 ```
 
@@ -140,8 +160,8 @@ Each parameter names its argument type throughout the body, so `T a, b;` with `T
 
 ```c
 @template(T) struct Node { T val; struct Node *next; };
-@template(T) T fact(T n) { return n <= 1 ? 1 : n * @inst(fact, T)(n - 1); }
-@template(T) struct Box { @inst(Pair, T, int) inner; };
+@template(T) T fact(T n) { return n <= 1 ? 1 : n * @inst(T) fact(n - 1); }
+@template(T) struct Box { @inst(T, int) Pair inner; };
 ```
 
 Instantiation nests up to 64 levels deep.
@@ -157,7 +177,7 @@ Attributes written on a template run on each instance, after instantiation. The 
 ```c
 @template(T) @equals struct Cell { T a; T b; };
 
-@inst(Cell, int) x = {1, 2}, y = {1, 2};
+@inst(int) Cell x = {1, 2}, y = {1, 2};
 _Bool same = Cell__int_equals(&x, &y);
 ```
 

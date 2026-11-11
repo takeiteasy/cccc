@@ -4,5 +4,5 @@
 @template(T) T bad(T a) { return a.nope; }
 
 int main(void) {
-    return @inst(bad, int)(1);
+    return @inst(int) bad(1);
 }

@@ -4483,36 +4483,119 @@ static bool try_rewrite_at_directive(VirtualMachine *vm, Token **tok_ptr) {
     return true;
 }
 
-// Rewrite `@template` / `@inst` into the single identifiers `__cccc_template` /
-// `__cccc_inst`; the parser handles both, and the `(...)` stays ordinary
-// tokens.
+// Tokens of `text` (a synthetic file) without the EOF; `*last` is the final
+// one.
+static Token *synth_tokens(VirtualMachine *vm, Token *at, const char *text,
+                           Token **last) {
+    Token *toks = tokenize(
+        vm, new_file(vm, at->file->name, at->file->file_no, (char *)text));
+    Token *l = toks;
+    while (l->next && l->next->kind != TK_EOF)
+        l = l->next;
+    *last = l;
+    return toks;
+}
+
+// The `)` matching the `(` at `open`, or NULL.
+static Token *matching_paren(Token *open) {
+    int depth = 0;
+    for (Token *p = open; p && p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "("))
+            depth++;
+        else if (equal(p, ")") && --depth == 0)
+            return p;
+    }
+    return NULL;
+}
+
+// Rewrites the three `@inst` spellings
+//   @inst(Args) Name      @inst Name      Name@(Args)
+// into `__cccc_inst ( Name , Args )`, the form the parser handles, and
+// `@template` into `__cccc_template`.
 static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
-    Token *tok = *tok_ptr;
-    if (!equal(tok, "@") || !tok->next || tok->next->kind != TK_IDENT)
+    Token *tok       = *tok_ptr;
+    Token *site      = NULL; // token the instantiation is reported at
+    Token *name      = NULL;
+    Token *args_open = NULL; // `(` of the argument list, if any
+    Token *after     = NULL; // first token after the construct
+
+    if (tok->kind == TK_IDENT && !(tok->len == 1 && tok->loc[0] == '$') &&
+        tok->next && equal(tok->next, "@") && tok->next->next &&
+        equal(tok->next->next, "(")) {
+        site      = tok;
+        name      = tok;
+        args_open = tok->next->next;
+    } else if (equal(tok, "@") && tok->next && tok->next->kind == TK_IDENT) {
+        Token *kw = tok->next;
+        if (kw->len == 8 && !strncmp(kw->loc, "template", 8)) {
+            if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
+                error_tok(vm, tok,
+                          "@template is not supported in comptime code");
+            Token *last;
+            Token *new_toks = synth_tokens(vm, tok, "__cccc_template ", &last);
+            tok_rare_mut(vm, last)->src_site = kw;
+            last->next                       = kw->next;
+            new_toks->at_bol                 = tok->at_bol;
+            new_toks->has_space              = tok->has_space;
+            vm->compiler.saw_templates       = true;
+            mark_cccc_only_file(vm, tok->file->name);
+            *tok_ptr = new_toks;
+            return true;
+        }
+        if (kw->len != 4 || strncmp(kw->loc, "inst", 4))
+            return false;
+        site = kw;
+        if (kw->next && equal(kw->next, "(")) {
+            args_open    = kw->next;
+            Token *close = matching_paren(args_open);
+            if (!close)
+                error_tok(vm, tok, "unterminated '@inst('");
+            name = close->next;
+        } else {
+            name = kw->next;
+        }
+    } else {
         return false;
-    Token      *name_tok = tok->next;
-    const char *marker   = NULL;
-    if (name_tok->len == 8 && !strncmp(name_tok->loc, "template", 8))
-        marker = "__cccc_template ";
-    else if (name_tok->len == 4 && !strncmp(name_tok->loc, "inst", 4))
-        marker = "__cccc_inst ";
-    if (!marker)
-        return false;
+    }
+
     if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-        error_tok(vm, tok, "@%.*s is not supported in comptime code",
-                  (int)name_tok->len, name_tok->loc);
+        error_tok(vm, tok, "@inst is not supported in comptime code");
 
-    Token *new_toks = tokenize(
-        vm, new_file(vm, tok->file->name, tok->file->file_no, (char *)marker));
-    Token *last = new_toks;
-    while (last->next && last->next->kind != TK_EOF)
-        last = last->next;
-    tok_rare_mut(vm, last)->src_site = name_tok;
-    last->next                       = name_tok->next;
-    new_toks->at_bol                 = tok->at_bol;
-    new_toks->has_space              = tok->has_space;
+    Token *close = NULL;
+    if (args_open) {
+        close = matching_paren(args_open);
+        if (!close)
+            error_tok(vm, tok, "unterminated '@inst('");
+    }
+    bool postfix = name == tok;
+    if (!postfix && (!name || name->kind != TK_IDENT))
+        error_tok(vm, name ? name : tok, "@inst needs a template name");
+    after = postfix ? close->next : (close ? close->next->next : name->next);
+    if (!postfix && after && equal(after, "@") && after->next &&
+        equal(after->next, "("))
+        error_tok(vm, after, "a template instance takes its arguments once");
 
-    vm->compiler.saw_templates       = true;
+    Token *last;
+    Token *new_toks = synth_tokens(vm, tok, "__cccc_inst ( ", &last);
+    for (Token *p = new_toks; p != last->next; p = p->next)
+        tok_rare_mut(vm, p)->src_site = site;
+    Token *cur = last;
+    cur = cur->next = copy_token(vm, name);
+    bool has_args   = args_open && args_open->next != close;
+    if (has_args) {
+        Token *comma;
+        cur->next = synth_tokens(vm, tok, ",", &comma);
+        cur       = comma;
+        for (Token *p = args_open->next; p != close; p = p->next)
+            cur = cur->next = copy_token(vm, p);
+    }
+    Token *rparen;
+    cur->next                  = synth_tokens(vm, tok, ")", &rparen);
+    rparen->next               = after;
+
+    new_toks->at_bol           = tok->at_bol;
+    new_toks->has_space        = tok->has_space;
+    vm->compiler.saw_templates = true;
     mark_cccc_only_file(vm, tok->file->name);
     *tok_ptr = new_toks;
     return true;
