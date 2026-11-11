@@ -510,4 +510,69 @@ int test_wide_enum_underlying_type(void) {
     return 42;
 }
 
+enum __attribute__((packed)) PkByte { PK_A, PK_B };
+enum __attribute__((packed)) PkSignedByte { PK_NEG = -1, PK_ZERO };
+enum [[gnu::packed]] PkShort { PK_S = 40000 };
+enum PkTrail { PK_T = 255 } __attribute__((packed));
+enum __attribute__((packed)) PkSignedShort { PK_SS_LO = -1, PK_SS_HI = 200 };
+enum __attribute__((packed)) PkInt { PK_I = 70000 };
+enum __attribute__((packed)) PkSignedInt { PK_SI = -40000 };
+enum __attribute__((packed)) PkLong { PK_L = 1LL << 40 };
+enum __attribute__((packed)) PkFixed : int { PK_F };
+typedef enum { PK_TD } __attribute__((packed)) PkTypedef;
+struct PkHolder {
+    char        c;
+    enum PkByte e;
+};
+
+[[cccc::test]]
+void test_packed_enum_size(void) {
+    AssertEq(sizeof(enum PkByte), 1);
+    AssertEq(_Alignof(enum PkByte), 1);
+    AssertEq(sizeof(enum PkSignedByte), 1);
+    AssertEq(sizeof(enum PkShort), 2);
+    AssertEq(sizeof(enum PkTrail), 1);
+    AssertEq(sizeof(enum PkSignedShort), 2);
+    AssertEq(sizeof(enum PkInt), 4);
+    AssertEq(sizeof(enum PkSignedInt), 4);
+    AssertEq(sizeof(enum PkLong), 8);
+    AssertEq(sizeof(PkTypedef), 1);
+}
+
+[[cccc::test]]
+void test_packed_enum_signedness(void) {
+    AssertTrue((enum PkByte) - 1 > 0);
+    AssertTrue((enum PkSignedByte) - 1 < 0);
+    AssertTrue((enum PkShort) - 1 > 0);
+    AssertTrue((enum PkSignedShort) - 1 < 0);
+}
+
+[[cccc::test]]
+void test_packed_enum_in_struct(void) {
+    AssertEq(sizeof(struct PkHolder), 2);
+    struct PkHolder h = {1, PK_B};
+    AssertEq(h.e, 1);
+}
+
+[[cccc::test]]
+void test_packed_enum_enumerators_stay_int(void) {
+    AssertEq(sizeof(PK_A), 4);
+    AssertEq(sizeof(PK_NEG), 4);
+    AssertTrue(-1 < PK_ZERO + PK_B);
+    AssertEq(_Generic(PK_A, int: 1, default: 0), 1);
+}
+
+[[cccc::test]]
+void test_packed_enum_fixed_base_wins(void) {
+    AssertEq(sizeof(enum PkFixed), 4);
+}
+
+[[cccc::test]]
+void test_packed_enum_round_trip(void) {
+    enum PkShort      s = PK_S;
+    enum PkSignedByte n = PK_NEG;
+    AssertEq(s, 40000);
+    AssertEq(n, -1);
+}
+
 #pragma cccc suite end

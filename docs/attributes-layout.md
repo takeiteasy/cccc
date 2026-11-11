@@ -43,6 +43,7 @@ struct __attribute__((packed)) {
 |---|---|
 | Only implicit alignment is removed | An explicit member `aligned(N)` or `_Alignas(N)` still applies and widens that member's offset and the aggregate's alignment. A member whose *type* is `aligned(N)` does not count as explicit |
 | Unions | A packed union's alignment is lowered to 1 like a struct's |
+| Enums | A packed enum uses the smallest of 1, 2, 4 or 8 bytes that holds every enumerator, signed only if one is negative; `enum __attribute__((packed)) E { A, B }` is 1 byte. A `: type` base wins. Enumerators stay `int` |
 | `[[gnu::packed]]` | Same, but not after a definition's closing `}`, where GCC ignores it with a warning |
 | Native output | Kept in `-c=native`, `-m` and `-c=generated`, so layouts agree |
 

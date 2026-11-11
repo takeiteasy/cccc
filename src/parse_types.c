@@ -2026,6 +2026,28 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
         ty->size        = type_agg(existing_tag)->enum_base_type->size;
         ty->align       = type_agg(existing_tag)->enum_base_type->align;
         ty->is_unsigned = type_agg(existing_tag)->enum_base_type->is_unsigned;
+    } else if (!type_agg(ty)->enum_base_type && !first_enum && ty->is_packed) {
+        // Smallest integer type holding every enumerator, as gcc/clang do.
+        int size = 8;
+        if (any_neg) {
+            if (min_val >= INT8_MIN && max_uval <= INT8_MAX)
+                size = 1;
+            else if (min_val >= INT16_MIN && max_uval <= INT16_MAX)
+                size = 2;
+            else if (min_val >= INT32_MIN && max_uval <= INT32_MAX)
+                size = 4;
+        } else if (max_uval <= UINT8_MAX) {
+            size = 1;
+        } else if (max_uval <= UINT16_MAX) {
+            size = 2;
+        } else if (max_uval <= UINT32_MAX) {
+            size = 4;
+        }
+        ty->size        = size;
+        ty->align       = size;
+        ty->is_unsigned = !any_neg;
+        ty->enum_members_are_int =
+            min_val >= INT32_MIN && max_uval <= INT32_MAX;
     } else if (!type_agg(ty)->enum_base_type && !first_enum) {
         if (any_neg) {
             // Signed: needs to hold min_val and max_uval both.

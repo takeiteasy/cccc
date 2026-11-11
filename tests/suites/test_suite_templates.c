@@ -22,6 +22,7 @@
 @template(T) struct AlignedTrail { T a; } __attribute__((aligned(16)));
 @template(T) enum __attribute__((unused)) AttrEnum : T { AE_A, AE_B };
 @template(T) enum AttrEnumTrail : T { AET_A } __attribute__((unused));
+@template(int N) enum __attribute__((packed)) PackedCap { PC_A = N };
 @template(T) T first_of(T *p) { T v = *p; return v; }
 @template(T) T(grouped_name)(T x) {
     return x + 1;
@@ -857,4 +858,10 @@ void test_enum_attributes_around_tag(void) {
     @inst(int) AttrEnumTrail b = AttrEnumTrail__int__AET_A;
     AssertEq(a, 1);
     AssertEq(b, 0);
+}
+
+[[cccc::test]]
+void test_packed_enum_template(void) {
+    AssertEq(sizeof(@inst(5) PackedCap), 1);
+    AssertEq(sizeof(@inst(70000) PackedCap), 4);
 }

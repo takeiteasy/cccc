@@ -3333,6 +3333,8 @@ static void serialize_enum_def(FILE *f, SerializeContext *ctx, Type *ty) {
         fprintf(f, "\n");
     }
     fprintf(f, "}");
+    if (ty->is_packed && !type_agg(ty)->enum_base_type)
+        fprintf(f, " __attribute__((packed))");
 
     if (!tag && alias)
         fprintf(f, " %.*s", alias->name_len, alias->name);

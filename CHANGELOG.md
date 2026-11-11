@@ -7,6 +7,7 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 
 ## [Unreleased]
 
+- Fixed: `packed` on an enum (`enum __attribute__((packed)) E`, `[[gnu::packed]]`, or after the closing brace) gives it the smallest integer type that holds every enumerator, as gcc and clang do, including in template enums and `-c=native` output; an enum with a `: type` base keeps that base.
 - Added: an attribute resolves by its name in any spelling and any namespace, so `[[cccc::aligned(16)]]`, `[[gnu::single]]` and `[[clang::aligned(16)]]` work, `__x__` is accepted inside `[[...]]`, and `[[kernel]]`, `[[trusted]]`, `[[operator]]` and `[[method]]` need no `cccc::`; an unknown name in a namespace is a `-Wattributes` warning. `[[...]]` and `__attribute__((...))` share one handler, so the GNU-only attributes (`format`, `error`, `warn_unused_result`, ...) work in `[[gnu::...]]` and the standard ones in `__attribute__`. Every attribute is defined once in `src/attr_registry.c`.
 - Added: the template markers have spellings without `@`: `[[cccc::template(T)]]` (any namespace, or `__attribute__((template(T)))`), `[[cccc::specialize(T)]]`, `__template(T)`, `__specialize(T)` and `__inst(T) Name`; the marker must be the only attribute in its list. Postfix `Name@(T)` stays `@`-only.
 - Changed: `__has_c_attribute` reports a known attribute in any namespace (`cccc::aligned`, `clang::aligned`, `gnu::single`), and `__has_c_attribute(aligned)` is true.
