@@ -87,17 +87,22 @@ char *arena_strndup(VirtualMachine *vm, const char *str, int len) {
 }
 
 char *arena_format(VirtualMachine *vm, char *fmt, ...) {
-    char   *heap_buf;
-    size_t  buflen;
-    FILE   *out = open_memstream(&heap_buf, &buflen);
-
-    va_list ap;
+    char    stack_buf[256];
+    va_list ap, retry;
     va_start(ap, fmt);
-    vfprintf(out, fmt, ap);
+    va_copy(retry, ap);
+    int n = vsnprintf(stack_buf, sizeof stack_buf, fmt, ap);
     va_end(ap);
-    fclose(out);
 
-    char *arena_buf = arena_strndup(vm, heap_buf, buflen);
-    free(heap_buf);
-    return arena_buf;
+    char *out;
+    if (n < 0) {
+        out = arena_strndup(vm, "", 0);
+    } else if ((size_t)n < sizeof stack_buf) {
+        out = arena_strndup(vm, stack_buf, n);
+    } else {
+        out = arena_alloc(&vm->compiler.parser_arena, (size_t)n + 1);
+        vsnprintf(out, (size_t)n + 1, fmt, retry);
+    }
+    va_end(retry);
+    return out;
 }
