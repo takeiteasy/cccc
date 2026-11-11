@@ -5084,6 +5084,12 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
                                "must be followed by a compound statement "
                                "'{ ... }')",
                                tok->len, tok->loc, tok->len, tok->loc);
+        } else if (vm->compiler.saw_templates && cc_find_template(vm, tok)) {
+            msg = arena_format(vm,
+                               "'%.*s' is a template; instantiate it as "
+                               "'%.*s@(args)' or '@inst(args) %.*s'",
+                               tok->len, tok->loc, tok->len, tok->loc, tok->len,
+                               tok->loc);
         } else {
             msg = arena_format(vm, "undefined variable '%.*s'", tok->len,
                                tok->loc);

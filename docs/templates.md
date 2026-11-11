@@ -116,6 +116,8 @@ int m = max@(long)(5, 3);          // call: the arguments, then the call parenth
 @inst Arr a;                       // every parameter defaulted
 ```
 
+Whitespace and line breaks between the tokens are ignored, so `Vec @(int)` and `Vec @ ( int )` are the same instance. `@inst(int)` always takes the name that follows its parentheses: `Vec @inst(int) v` reads `v` as the template name, and the error says to write `Vec@(int)` or `@inst(int) Vec`.
+
 Writing both argument lists (`@inst(int) Vec@(int)`) or `@inst(int)` with no name after it is an error.
 
 The first use of an argument list instantiates the template; later uses share that instance. A struct, union, enum or typedef template names a type, a function template names a function; using one as the other is an error.
