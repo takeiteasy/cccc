@@ -2312,24 +2312,6 @@ static bool token_is_gnu_attr_start(Token *tok) {
            equal(tok->next->next, "(");
 }
 
-static bool attr_name_is_cccc(char *name) {
-    return !strcmp(name, "comptime") || !strcmp(name, "emit") ||
-           !strcmp(name, "macro") || !strcmp(name, "test") ||
-           !strcmp(name, "test_setup") || !strcmp(name, "test_teardown") ||
-           // #485: checked-region attributes. Without this, the GNU
-           // spelling __attribute__((checked)) (unscoped, unlike
-           // [[cccc::checked]]) would survive -E/-c=native/-c=generated
-           // output and get handed to the host compiler, which rejects an
-           // unknown attribute name.
-           !strcmp(name, "checked") || !strcmp(name, "unchecked");
-}
-
-static bool attr_name_is_std(char *name) {
-    return !strcmp(name, "maybe_unused") || !strcmp(name, "deprecated") ||
-           !strcmp(name, "noreturn") || !strcmp(name, "nodiscard") ||
-           !strcmp(name, "fallthrough") || !strcmp(name, "no_unique_address");
-}
-
 static void copy_attr_name(Token *tok, char *buf, size_t cap) {
     if (!tok || cap == 0) {
         return;
@@ -2344,7 +2326,7 @@ static CCCCAttrTarget effective_attr_target(VirtualMachine *vm, char *name) {
         vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
     if (target != CCCC_ATTR_TARGET_AUTO)
         return target;
-    if (vm && vm->compiler.c_std >= CCCC_STD_C23 && attr_name_is_std(name))
+    if (vm && vm->compiler.c_std >= CCCC_STD_C23 && attr_output_std(name))
         return CCCC_ATTR_TARGET_C23;
     return CCCC_ATTR_TARGET_GNU;
 }
@@ -2418,7 +2400,7 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     char name[128] = "";
     copy_attr_name(name_tok, name, sizeof(name));
     if (vm && vm->compiler.emit_cccc &&
-        (cccc_scoped || attr_name_is_cccc(name))) {
+        (cccc_scoped || attr_output_cccc(name))) {
         // --emit-cccc: preserve CCCC-scoped attrs verbatim as
         // [[cccc::name(...)]] rather than stripping them. `payload` already
         // starts at "cccc" for the explicitly-scoped form; a bare cccc-only
@@ -2431,7 +2413,7 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
         *tok_ptr = end;
         return true;
     }
-    if (cccc_scoped || attr_name_is_cccc(name) ||
+    if (cccc_scoped || attr_output_cccc(name) ||
         (vm && vm->compiler.attr_target == CCCC_ATTR_TARGET_STRIP)) {
         *tok_ptr = end;
         return true;

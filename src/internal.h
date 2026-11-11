@@ -686,8 +686,24 @@ void isolate_comptime_macros(VirtualMachine *vm);
 void drop_system_function_macros(VirtualMachine *vm);
 bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             bool emit_scan);
+// The attribute registry (src/attr_registry.c).
+typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
+enum {
+    ATTR_OUT_CCCC = 1
+}; // dropped from preprocessed output unless --emit-cccc
+typedef struct {
+    const char  *name;
+    AttrCategory cat;
+    bool         has_attr;
+    long         date; // __has_c_attribute value
+    unsigned     flags;
+} AttrDef;
+// The attribute `name` (or its `__name__` spelling), or NULL.
+const AttrDef *lookup_attr(const char *name, size_t len);
 // True when __has_attribute(name) reports the GNU attribute as recognized.
 bool cc_has_attribute(const char *name, int len);
+bool attr_output_cccc(const char *name);
+bool attr_output_std(const char *name);
 
 //
 // parse.c

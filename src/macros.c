@@ -1444,35 +1444,6 @@ static Token *implicit_reflection_tokens(VirtualMachine *vm) {
     return result;
 }
 
-// Attribute names handled by derive.h's @comptime(attribute(...)) handlers.
-// Used to hint at the missing #include when one is used without it, and by
-// the attribute registry (__has_c_attribute, @name routing). Keep in sync with
-// that header (tests/host/test_derive_attr_list.c checks it).
-static const char *const derive_attr_names[] = {
-    "serialize",      "deserialize",  "to_string", "from_string",
-    "to_string_skip", "getters",      "setters",   "accessors",
-    "ctor",           "default",      "to_json",   "from_json",
-    "json_skip",      "json_name",    "equals",    "hash",
-    "dump",           "equals_skip",  "dump_skip", "serialize_skip",
-    "accessor_skip",  "ctor_skip",    "bitflags",  "compare",
-    "compare_order",  "compare_desc", "range",     "validate",
-    "clamp",          "owned",        "clone",     "destroy",
-    "json",           "text",         "binary",    "lifecycle",
-    "hashable",       "ordered",      NULL,
-};
-
-const char *const *derive_builtin_attr_names(void) {
-    return derive_attr_names;
-}
-
-bool is_derive_builtin_attr(const char *name, int len) {
-    for (int i = 0; derive_attr_names[i]; i++)
-        if ((int)strlen(derive_attr_names[i]) == len &&
-            !strncmp(derive_attr_names[i], name, len))
-            return true;
-    return false;
-}
-
 static Token *build_combined_macro_tokens(VirtualMachine *vm,
                                           Token          *reflection_tokens,
                                           MacroFn **macros, int count) {

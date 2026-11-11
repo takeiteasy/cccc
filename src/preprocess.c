@@ -1851,148 +1851,6 @@ static bool is_has_feature_supported(VirtualMachine *vm, char *name) {
     return false;
 }
 
-typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
-typedef struct {
-    const char  *name;
-    AttrCategory cat;
-    bool         has_attr;
-    long         date;
-} AttrInfo;
-
-static const AttrInfo known_attrs[] = {
-    // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
-    {"comptime", ATTR_CCCC, true, 1},
-    {"emit", ATTR_CCCC, true, 1},
-    {"optimize", ATTR_CCCC, true, 1},
-    {"test", ATTR_CCCC, true, 1},
-    {"test_setup", ATTR_CCCC, true, 1},
-    {"test_teardown", ATTR_CCCC, true, 1},
-    // Checked C-style checked-pointer attributes (#770/#482-484). Only
-    // meaningful in post-'*' qualifier position (see pointers() in parse.c);
-    // listed here so @single/@array/... route to [[cccc::...]] instead of
-    // __attribute__((...)) and __has_c_attribute(cccc::array) etc. work.
-    {"single", ATTR_CCCC, true, 1},
-    {"array", ATTR_CCCC, true, 1},
-    {"ntarray", ATTR_CCCC, true, 1},
-    {"count", ATTR_CCCC, true, 1},
-    {"byte_count", ATTR_CCCC, true, 1},
-    {"bounds", ATTR_CCCC, true, 1},
-    // Checked-pointer bounds-cast attributes (#486): [[cccc::assume]] /
-    // [[cccc::dynamic]], cast-only (see declarator()'s post-pointers()
-    // check, src/parse_types.c). Listed here for the same @name-routing
-    // reason as the six above.
-    {"assume", ATTR_CCCC, true, 1},
-    {"dynamic", ATTR_CCCC, true, 1},
-    // Checked-region attributes (#485). Unlike the six above these
-    // appertain to a declaration or a compound statement, not to a TY_PTR
-    // (see apply_checked_scope_attr(), src/parse_types.c); listed here so
-    // @checked/@unchecked route to [[cccc::...]] the same way.
-    {"checked", ATTR_CCCC, true, 1},
-    {"unchecked", ATTR_CCCC, true, 1},
-    {"trusted", ATTR_CCCC, true, 1},
-    {"kernel", ATTR_CCCC, true, 1},
-    {"global", ATTR_CCCC, true, 1},
-    {"local", ATTR_CCCC, true, 1},
-    {"constant", ATTR_CCCC, true, 1},
-    {"private", ATTR_CCCC, true, 1},
-    {"generic", ATTR_CCCC, true, 1},
-    // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
-    {"maybe_unused", ATTR_STD, false, 202311L},
-    {"deprecated", ATTR_STD, true, 202311L},
-    {"noreturn", ATTR_STD, true, 202311L},
-    {"nodiscard", ATTR_STD, false, 202311L},
-    // fallthrough has a GNU __attribute__ form with real compiler semantics
-    // (matches GCC/Clang __has_attribute), so has_attr=true here even though
-    // it's listed under the C23 std table for __has_c_attribute's date value.
-    {"fallthrough", ATTR_STD, true, 202311L},
-    {"no_unique_address", ATTR_STD, false, 202311L},
-    // GNU-only (__attribute__((name)))
-    {"aligned", ATTR_GNU, true, 0},
-    {"packed", ATTR_GNU, true, 0},
-    {"unused", ATTR_GNU, true, 0},
-    {"__unused__", ATTR_GNU, true, 0},
-    {"__deprecated__", ATTR_GNU, true, 0},
-    {"format", ATTR_GNU, true, 0},
-    // Genuinely-implemented GNU attributes with real compiler semantics
-    // (ticket #681) — these were missing from this table despite being
-    // fully handled in src/parse.c, so __has_attribute wrongly reported 0.
-    {"cleanup", ATTR_GNU, true, 0},
-    {"error", ATTR_GNU, true, 0},
-    {"warning", ATTR_GNU, true, 0},
-    {"nonnull", ATTR_GNU, true, 0},
-    {"returns_nonnull", ATTR_GNU, true, 0},
-    {"pure", ATTR_GNU, true, 0},
-    {"const", ATTR_GNU, true, 0},
-    {"warn_unused_result", ATTR_GNU, true, 0},
-    // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
-    // output, no linker, no per-function ISA codegen, no inliner, no
-    // branch-temperature layout, no symbol-level DCE, no strict-aliasing
-    // optimizer, no machine-mode type system. Accepted silently by the
-    // attribute parsers' generic fallback (src/parse_types.c) and reported
-    // as recognized so __has_attribute matches real GCC/Clang.
-    {"visibility", ATTR_GNU, true, 0},
-    {"section", ATTR_GNU, true, 0},
-    {"weak", ATTR_GNU, true, 0},
-    {"alias", ATTR_GNU, true, 0},
-    {"target", ATTR_GNU, true, 0},
-    {"always_inline", ATTR_GNU, true, 0},
-    {"gnu_inline", ATTR_GNU, true, 0},
-    {"noinline", ATTR_GNU, true, 0},
-    {"flatten", ATTR_GNU, true, 0},
-    {"cold", ATTR_GNU, true, 0},
-    {"hot", ATTR_GNU, true, 0},
-    {"used", ATTR_GNU, true, 0},
-    {"may_alias", ATTR_GNU, true, 0},
-    {"mode", ATTR_GNU, true, 0},
-    {"transparent_union", ATTR_GNU, true, 0},
-    {"constructor", ATTR_GNU, true, 0},
-    {"destructor", ATTR_GNU, true, 0},
-    {NULL, 0, false, 0},
-};
-
-static const AttrInfo *lookup_attr_info(const char *name) {
-    for (int i = 0; known_attrs[i].name; i++)
-        if (!strcmp(name, known_attrs[i].name))
-            return &known_attrs[i];
-
-    // derive.h attributes come from derive_builtin_attr_names() (src/macros.c)
-    static const AttrInfo derive_attr = {"", ATTR_CCCC, true, 1};
-    if (is_derive_builtin_attr(name, (int)strlen(name)))
-        return &derive_attr;
-    return NULL;
-}
-
-static const AttrInfo *find_attr_info(char *name) {
-    const AttrInfo *exact = lookup_attr_info(name);
-    if (exact)
-        return exact;
-
-    // GNU __x__ alternate spelling (e.g. __pure__, __cleanup__): strip the
-    // leading/trailing "__" and retry, matching real GCC/Clang behavior
-    // (ticket #681). The explicit __unused__/__deprecated__ entries above
-    // still win via exact match first, so this is purely additive.
-    size_t len = strlen(name);
-    if (len >= 5 && len < 64 && name[0] == '_' && name[1] == '_' &&
-        name[len - 1] == '_' && name[len - 2] == '_') {
-        char   inner[64];
-        size_t inner_len = len - 4;
-        memcpy(inner, name + 2, inner_len);
-        inner[inner_len] = '\0';
-        return lookup_attr_info(inner);
-    }
-    return NULL;
-}
-
-bool cc_has_attribute(const char *name, int len) {
-    char buf[64];
-    if (len <= 0 || len >= (int)sizeof(buf))
-        return false;
-    memcpy(buf, name, (size_t)len);
-    buf[len]          = '\0';
-    const AttrInfo *a = find_attr_info(buf);
-    return a && a->has_attr;
-}
-
 static bool is_has_builtin_supported(char *name) {
     int libm_row, libm_variant;
     if (libm_builtin_lookup(name, (int)strlen(name), &libm_row, &libm_variant))
@@ -2122,7 +1980,7 @@ static bool is_has_builtin_supported(char *name) {
 }
 
 static long is_has_c_attribute_supported(char *vendor, char *name) {
-    const AttrInfo *a = find_attr_info(name);
+    const AttrDef *a = lookup_attr(name, strlen(name));
     if (!a)
         return 0;
     if (!vendor)
@@ -4655,7 +4513,7 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
         args_text = arena_format(vm, "%s)", buf);
     }
 
-    const AttrInfo *info = find_attr_info(name);
+    const AttrDef  *info = lookup_attr(name, strlen(name));
     AttrCategory    cat  = info ? info->cat : ATTR_GNU;
 
     char           *src;
