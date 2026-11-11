@@ -84,7 +84,7 @@ typedef struct {
 } VarScope;
 
 // Variable attributes such as typedef or extern.
-typedef struct {
+typedef struct VarAttr {
     bool           is_typedef;
     bool           is_static;
     bool           is_extern;

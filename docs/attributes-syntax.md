@@ -108,6 +108,8 @@ An unknown name in a namespace is ignored with a `-Wattributes` warning. `__has_
 
 `kernel`, `trusted`, `operator` and `method` need no `cccc::`; the OpenCL address spaces `global`, `local`, `constant`, `private` and `generic` keep it.
 
+The structural markers `comptime`, `test`, `test_setup`, `test_teardown`, `build` and `build_target` take `cccc::` or no namespace. In any other namespace they are an error: `[[gnu::test]]` reports `'test' is a cccc attribute; write [[cccc::test]]`.
+
 ### Template marker spellings
 
 The template markers have spellings without `@`, for sources where `@` is taken:

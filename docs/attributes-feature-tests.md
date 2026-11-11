@@ -18,6 +18,6 @@ int has_expect = __has_builtin(__builtin_expect);   // 1
 | `__has_cpp_attribute` | Always 0 |
 | `__has_declspec_attribute`, `__has_warning` | Recognised so headers parse, but always 0: there are no `__declspec` attributes and no `-W`-name registry |
 
-`error`, `warning`, `warn_unused_result` and `__warn_unused_result__` all return 1 from `__has_attribute`, since they carry real semantics.
+`error`, `warning`, `warn_unused_result` and `__warn_unused_result__` all return 1 from `__has_attribute`, since they carry real semantics. So do `sentinel`, `alloc_size`, `malloc`, `vector_size` and `designated_init`.
 
 Any other `__has_*`-shaped operator evaluates to 0 and emits a `-Wcpp` warning naming it, instead of a confusing "not a function" error.

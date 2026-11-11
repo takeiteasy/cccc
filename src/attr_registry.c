@@ -18,100 +18,108 @@
 */
 
 // The attribute registry: one table of every attribute cccc knows by name,
-// read by __has_attribute, __has_c_attribute, the `@name` rewrite and the
-// preprocessed-output re-spelling.
+// read by the attribute parser, the preprocessor's structural markers and
+// include routes, __has_attribute, __has_c_attribute, the `@name` rewrite and
+// the preprocessed-output re-spelling.
 
 #include "./internal.h"
 
+// `apply` is the parse-time handler; `marker` and `route` name the
+// preprocessor's structural uses. A row with none of them is recognized and
+// ignored.
+#define CCCC_ROW(n, ...)     {n, ATTR_CCCC, true, 1, __VA_ARGS__}
+#define STD_ROW(n, has, ...) {n, ATTR_STD, has, 202311L, __VA_ARGS__}
+#define GNU_ROW(n, ...)      {n, ATTR_GNU, true, 0, __VA_ARGS__}
+
 static const AttrDef attr_table[] = {
-    // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
-    {"comptime", ATTR_CCCC, true, 1, 0},
-    {"emit", ATTR_CCCC, true, 1, 0},
-    {"optimize", ATTR_CCCC, true, 1, ATTR_OUT_GNU},
-    {"test", ATTR_CCCC, true, 1, 0},
-    {"test_setup", ATTR_CCCC, true, 1, 0},
-    {"test_teardown", ATTR_CCCC, true, 1, 0},
-    // Checked C-style checked-pointer attributes (#770/#482-484). Only
-    // meaningful in post-'*' qualifier position (see pointers() in parse.c);
-    // listed here so @single/@array/... route to [[cccc::...]] instead of
-    // __attribute__((...)) and __has_c_attribute(cccc::array) etc. work.
-    {"single", ATTR_CCCC, true, 1, 0},
-    {"array", ATTR_CCCC, true, 1, 0},
-    {"ntarray", ATTR_CCCC, true, 1, 0},
-    {"count", ATTR_CCCC, true, 1, 0},
-    {"byte_count", ATTR_CCCC, true, 1, 0},
-    {"bounds", ATTR_CCCC, true, 1, 0},
-    // Checked-pointer bounds-cast attributes (#486): [[cccc::assume]] /
-    // [[cccc::dynamic]], cast-only (see declarator()'s post-pointers()
-    // check, src/parse_types.c). Listed here for the same @name-routing
-    // reason as the six above.
-    {"assume", ATTR_CCCC, true, 1, 0},
-    {"dynamic", ATTR_CCCC, true, 1, 0},
-    // Checked-region attributes (#485). Unlike the six above these
-    // appertain to a declaration or a compound statement, not to a TY_PTR
-    // (see apply_checked_scope_attr(), src/parse_types.c); listed here so
-    // @checked/@unchecked route to [[cccc::...]] the same way.
-    {"checked", ATTR_CCCC, true, 1, 0},
-    {"unchecked", ATTR_CCCC, true, 1, 0},
-    {"trusted", ATTR_CCCC, true, 1, 0},
-    {"kernel", ATTR_CCCC, true, 1, 0},
-    {"global", ATTR_CCCC, true, 1, 0},
-    {"local", ATTR_CCCC, true, 1, 0},
-    {"constant", ATTR_CCCC, true, 1, 0},
-    {"private", ATTR_CCCC, true, 1, 0},
-    {"generic", ATTR_CCCC, true, 1, 0},
-    // Standard C23 ([[name]]) — return C23 version date per N3220 §6.10.10.2
-    {"maybe_unused", ATTR_STD, false, 202311L, 0},
-    {"deprecated", ATTR_STD, true, 202311L, 0},
-    {"noreturn", ATTR_STD, true, 202311L, 0},
-    {"nodiscard", ATTR_STD, false, 202311L, 0},
-    // fallthrough has a GNU __attribute__ form with real compiler semantics
-    // (matches GCC/Clang __has_attribute), so has_attr=true here even though
-    // it's listed under the C23 std table for __has_c_attribute's date value.
-    {"fallthrough", ATTR_STD, true, 202311L, 0},
-    {"no_unique_address", ATTR_STD, false, 202311L, 0},
-    // GNU-only (__attribute__((name)))
-    {"aligned", ATTR_GNU, true, 0, 0},
-    {"packed", ATTR_GNU, true, 0, 0},
-    {"unused", ATTR_GNU, true, 0, 0},
-    {"__unused__", ATTR_GNU, true, 0, 0},
-    {"__deprecated__", ATTR_GNU, true, 0, 0},
-    {"format", ATTR_GNU, true, 0, 0},
-    // Genuinely-implemented GNU attributes with real compiler semantics
-    // (ticket #681) — these were missing from this table despite being
-    // fully handled in src/parse.c, so __has_attribute wrongly reported 0.
-    {"cleanup", ATTR_GNU, true, 0, 0},
-    {"error", ATTR_GNU, true, 0, 0},
-    {"warning", ATTR_GNU, true, 0, 0},
-    {"nonnull", ATTR_GNU, true, 0, 0},
-    {"returns_nonnull", ATTR_GNU, true, 0, 0},
-    {"pure", ATTR_GNU, true, 0, 0},
-    {"const", ATTR_GNU, true, 0, 0},
-    {"warn_unused_result", ATTR_GNU, true, 0, 0},
-    // Recognized but architecturally inert (ticket #657): no ELF/Mach-O
-    // output, no linker, no per-function ISA codegen, no inliner, no
-    // branch-temperature layout, no symbol-level DCE, no strict-aliasing
-    // optimizer, no machine-mode type system. Accepted silently by the
-    // attribute parsers' generic fallback (src/parse_types.c) and reported
-    // as recognized so __has_attribute matches real GCC/Clang.
-    {"visibility", ATTR_GNU, true, 0, 0},
-    {"section", ATTR_GNU, true, 0, 0},
-    {"weak", ATTR_GNU, true, 0, 0},
-    {"alias", ATTR_GNU, true, 0, 0},
-    {"target", ATTR_GNU, true, 0, 0},
-    {"always_inline", ATTR_GNU, true, 0, 0},
-    {"gnu_inline", ATTR_GNU, true, 0, 0},
-    {"noinline", ATTR_GNU, true, 0, 0},
-    {"flatten", ATTR_GNU, true, 0, 0},
-    {"cold", ATTR_GNU, true, 0, 0},
-    {"hot", ATTR_GNU, true, 0, 0},
-    {"used", ATTR_GNU, true, 0, 0},
-    {"may_alias", ATTR_GNU, true, 0, 0},
-    {"mode", ATTR_GNU, true, 0, 0},
-    {"transparent_union", ATTR_GNU, true, 0, 0},
-    {"constructor", ATTR_GNU, true, 0, 0},
-    {"destructor", ATTR_GNU, true, 0, 0},
-    {NULL, 0, false, 0, 0},
+    // CCCC-specific (cccc:: scoped); vendor attributes report 1, not a date
+    CCCC_ROW("comptime", ATTR_KEYWORD_ALIAS, NULL, ATTR_MARK_COMPTIME,
+             INCLUDE_ROUTE_COMPTIME),
+    CCCC_ROW("emit", 0, NULL, ATTR_MARK_NONE, INCLUDE_ROUTE_EMIT),
+    CCCC_ROW("shared", 0, NULL, ATTR_MARK_NONE, INCLUDE_ROUTE_SHARED),
+    CCCC_ROW("build", 0, NULL, ATTR_MARK_BUILD, INCLUDE_ROUTE_BUILD),
+    CCCC_ROW("build_target", 0, NULL, ATTR_MARK_BUILD_TARGET),
+    CCCC_ROW("optimize", ATTR_OUT_GNU, attr_optimize),
+    CCCC_ROW("test", ATTR_KEYWORD_ALIAS, NULL, ATTR_MARK_TEST,
+             INCLUDE_ROUTE_TEST),
+    CCCC_ROW("test_setup", ATTR_KEYWORD_ALIAS, NULL, ATTR_MARK_TEST_SETUP),
+    CCCC_ROW("test_teardown", ATTR_KEYWORD_ALIAS, NULL,
+             ATTR_MARK_TEST_TEARDOWN),
+    // Checked-pointer qualifiers, valid after a `*`; bounds casts, valid only
+    // in a cast
+    CCCC_ROW("single", 0, attr_checked_ptr),
+    CCCC_ROW("array", 0, attr_checked_ptr),
+    CCCC_ROW("ntarray", 0, attr_checked_ptr),
+    CCCC_ROW("count", 0, attr_checked_ptr),
+    CCCC_ROW("byte_count", 0, attr_checked_ptr),
+    CCCC_ROW("bounds", 0, attr_checked_ptr),
+    CCCC_ROW("assume", 0, attr_checked_ptr),
+    CCCC_ROW("dynamic", 0, attr_checked_ptr),
+    // Checked regions: a declaration or a compound statement
+    CCCC_ROW("checked", 0, attr_checked),
+    CCCC_ROW("unchecked", 0, attr_unchecked),
+    CCCC_ROW("trusted", 0, attr_trusted),
+    CCCC_ROW("kernel", 0, attr_kernel),
+    CCCC_ROW("operator", 0, attr_operator),
+    CCCC_ROW("method", 0, attr_method),
+    // OpenCL address spaces: the bare names are common identifiers, so they
+    // apply only under `cccc::`.
+    CCCC_ROW("global", ATTR_NS_CCCC, attr_addr_space),
+    CCCC_ROW("local", ATTR_NS_CCCC, attr_addr_space),
+    CCCC_ROW("constant", ATTR_NS_CCCC, attr_addr_space),
+    CCCC_ROW("private", ATTR_NS_CCCC, attr_addr_space),
+    CCCC_ROW("generic", ATTR_NS_CCCC, attr_addr_space),
+    {"cccc_visible_lanes", ATTR_CCCC, false, 0, 0, attr_visible_lanes},
+    // Standard C23 ([[name]]); the date is N3220 section 6.10.10.2's
+    STD_ROW("maybe_unused", false, 0, attr_unused),
+    STD_ROW("deprecated", true, 0, attr_deprecated),
+    STD_ROW("noreturn", true, 0, attr_noreturn),
+    STD_ROW("nodiscard", false, 0, attr_nodiscard),
+    // fallthrough also has a GNU `__attribute__` form, so __has_attribute
+    // reports it
+    STD_ROW("fallthrough", true, 0, attr_fallthrough),
+    STD_ROW("no_unique_address", false, 0, attr_no_unique_address),
+    // GNU (`__attribute__((name))`)
+    GNU_ROW("aligned", 0, attr_aligned),
+    GNU_ROW("packed", 0, attr_packed),
+    GNU_ROW("unused", 0, attr_unused),
+    GNU_ROW("__unused__", 0, attr_unused),
+    GNU_ROW("__deprecated__", 0, attr_deprecated),
+    GNU_ROW("format", 0, attr_format),
+    GNU_ROW("cleanup", 0, attr_cleanup),
+    GNU_ROW("error", 0, attr_error),
+    GNU_ROW("warning", 0, attr_warning),
+    GNU_ROW("nonnull", 0, attr_nonnull),
+    GNU_ROW("returns_nonnull", 0, attr_returns_nonnull),
+    GNU_ROW("pure", 0, attr_pure),
+    GNU_ROW("const", 0, attr_const),
+    GNU_ROW("warn_unused_result", 0, attr_warn_unused_result),
+    GNU_ROW("sentinel", 0, attr_sentinel),
+    GNU_ROW("alloc_size", 0, attr_alloc_size),
+    GNU_ROW("malloc", 0, attr_malloc),
+    GNU_ROW("vector_size", 0, attr_vector_size),
+    GNU_ROW("designated_init", 0, attr_designated_init),
+    GNU_ROW("gnu_inline", 0, attr_gnu_inline),
+    GNU_ROW("constructor", 0, attr_constructor),
+    GNU_ROW("destructor", 0, attr_destructor),
+    // Recognized and ignored: there is no linker, per-function ISA, inliner,
+    // branch layout, symbol-level DCE, strict-aliasing optimizer or machine
+    // mode.
+    GNU_ROW("visibility", 0),
+    GNU_ROW("section", 0),
+    GNU_ROW("weak", 0),
+    GNU_ROW("alias", 0),
+    GNU_ROW("target", 0),
+    GNU_ROW("always_inline", 0),
+    GNU_ROW("noinline", 0),
+    GNU_ROW("flatten", 0),
+    GNU_ROW("cold", 0),
+    GNU_ROW("hot", 0),
+    GNU_ROW("used", 0),
+    GNU_ROW("may_alias", 0),
+    GNU_ROW("mode", 0),
+    GNU_ROW("transparent_union", 0),
+    {NULL},
 };
 
 // Attribute names handled by derive.h's @comptime(attribute(...)) handlers.
@@ -145,7 +153,8 @@ bool is_derive_builtin_attr(const char *name, int len) {
 
 static const AttrDef *lookup_exact(const char *name, size_t len) {
     for (int i = 0; attr_table[i].name; i++)
-        if (strlen(attr_table[i].name) == len &&
+        if (attr_table[i].name[0] == name[0] &&
+            strlen(attr_table[i].name) == len &&
             !strncmp(attr_table[i].name, name, len))
             return &attr_table[i];
 

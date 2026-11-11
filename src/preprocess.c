@@ -253,15 +253,6 @@ static HashMap macro_scope_pop(VirtualMachine *vm) {
     return vm->compiler.macro_scope_stack[--vm->compiler.macro_scope_stack_len];
 }
 
-typedef enum {
-    INCLUDE_ROUTE_NORMAL,
-    INCLUDE_ROUTE_COMPTIME,
-    INCLUDE_ROUTE_EMIT,
-    INCLUDE_ROUTE_SHARED,
-    INCLUDE_ROUTE_BUILD,
-    INCLUDE_ROUTE_TEST,
-} IncludeRoute;
-
 // Some preprocessor directives such as #include allow extraneous
 // tokens before newline. This function skips such tokens.
 static Token *skip_line(VirtualMachine *vm, Token *tok) {
@@ -524,6 +515,14 @@ static void push_emit_directive(VirtualMachine *vm, char *line, bool dedup) {
     strarray_push(arr, strdup(line));
 }
 
+// The include route attribute `name` selects, or INCLUDE_ROUTE_NORMAL.
+static IncludeRoute route_of(Token *name) {
+    if (name->kind != TK_IDENT)
+        return INCLUDE_ROUTE_NORMAL;
+    const AttrDef *def = lookup_attr(name->loc, name->len);
+    return def ? def->route : INCLUDE_ROUTE_NORMAL;
+}
+
 static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
     if (!equal(tok, "[") || !tok->next || !equal(tok->next, "["))
         return false;
@@ -531,19 +530,9 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
     if (!equal(p, "cccc") || !p->next || !equal(p->next, ":") ||
         !p->next->next || !equal(p->next->next, ":") || !p->next->next->next)
         return false;
-    p = p->next->next->next;
-    IncludeRoute r;
-    if (equal(p, "comptime"))
-        r = INCLUDE_ROUTE_COMPTIME;
-    else if (equal(p, "emit"))
-        r = INCLUDE_ROUTE_EMIT;
-    else if (equal(p, "shared"))
-        r = INCLUDE_ROUTE_SHARED;
-    else if (equal(p, "build"))
-        r = INCLUDE_ROUTE_BUILD;
-    else if (equal(p, "test"))
-        r = INCLUDE_ROUTE_TEST;
-    else
+    p              = p->next->next->next;
+    IncludeRoute r = route_of(p);
+    if (r == INCLUDE_ROUTE_NORMAL)
         return false;
     if (!p->next || !equal(p->next, "]") || !p->next->next ||
         !equal(p->next->next, "]"))
@@ -556,19 +545,11 @@ static bool is_c23_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
 static bool is_at_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
     if (!equal(tok, "@") || !tok->next)
         return false;
-    if (equal(tok->next, "comptime"))
-        *route = INCLUDE_ROUTE_COMPTIME;
-    else if (equal(tok->next, "emit"))
-        *route = INCLUDE_ROUTE_EMIT;
-    else if (equal(tok->next, "shared"))
-        *route = INCLUDE_ROUTE_SHARED;
-    else if (equal(tok->next, "build"))
-        *route = INCLUDE_ROUTE_BUILD;
-    else if (equal(tok->next, "test"))
-        *route = INCLUDE_ROUTE_TEST;
-    else
+    IncludeRoute r = route_of(tok->next);
+    if (r == INCLUDE_ROUTE_NORMAL)
         return false;
-    *rest = tok->next->next;
+    *route = r;
+    *rest  = tok->next->next;
     return true;
 }
 
@@ -578,18 +559,8 @@ static bool is_gnu_route_attr(Token *tok, IncludeRoute *route, Token **rest) {
         !tok->next->next->next)
         return false;
     Token       *p = tok->next->next->next;
-    IncludeRoute r;
-    if (equal(p, "comptime"))
-        r = INCLUDE_ROUTE_COMPTIME;
-    else if (equal(p, "emit"))
-        r = INCLUDE_ROUTE_EMIT;
-    else if (equal(p, "shared"))
-        r = INCLUDE_ROUTE_SHARED;
-    else if (equal(p, "build"))
-        r = INCLUDE_ROUTE_BUILD;
-    else if (equal(p, "test"))
-        r = INCLUDE_ROUTE_TEST;
-    else
+    IncludeRoute r = route_of(p);
+    if (r == INCLUDE_ROUTE_NORMAL)
         return false;
     if (!p->next || !equal(p->next, ")") || !p->next->next ||
         !equal(p->next->next, ")"))
@@ -3389,13 +3360,13 @@ void cc_scan_source_for_mode_attrs(const char *path, bool *wants_test,
                 p++;
             size_t len_id = (size_t)(p - start);
 
-            bool   name_is_test =
-                (len_id == 4 && !strncmp(start, "test", 4)) ||
-                (len_id == 11 && !strncmp(start, "test_setup", 11)) ||
-                (len_id == 14 && !strncmp(start, "test_teardown", 14));
-            bool name_is_build =
-                (len_id == 5 && !strncmp(start, "build", 5)) ||
-                (len_id == 12 && !strncmp(start, "build_target", 12));
+            const AttrDef *def          = lookup_attr(start, len_id);
+            AttrMarker     marker       = def ? def->marker : ATTR_MARK_NONE;
+            bool           name_is_test = marker == ATTR_MARK_TEST ||
+                                          marker == ATTR_MARK_TEST_SETUP ||
+                                          marker == ATTR_MARK_TEST_TEARDOWN;
+            bool           name_is_build =
+                marker == ATTR_MARK_BUILD || marker == ATTR_MARK_BUILD_TARGET;
 
             if (name_is_test || name_is_build) {
                 // Look backward (skipping whitespace) for '@', "::" preceded
@@ -4665,16 +4636,17 @@ static bool try_rewrite_at_attr(VirtualMachine *vm, Token **tok_ptr) {
     return true;
 }
 
+// The attribute `__name` / `__name__` is a keyword spelling of, or NULL.
 static const char *cccc_keyword_alias_name(Token *tok) {
-    if (equal(tok, "__comptime") || equal(tok, "__comptime__"))
-        return "comptime";
-    if (equal(tok, "__test") || equal(tok, "__test__"))
-        return "test";
-    if (equal(tok, "__test_setup") || equal(tok, "__test_setup__"))
-        return "test_setup";
-    if (equal(tok, "__test_teardown") || equal(tok, "__test_teardown__"))
-        return "test_teardown";
-    return NULL;
+    if (tok->kind != TK_IDENT || tok->len < 4 || tok->loc[0] != '_' ||
+        tok->loc[1] != '_')
+        return NULL;
+    const char *name = tok->loc + 2;
+    size_t      len  = (size_t)tok->len - 2;
+    if (len > 2 && name[len - 1] == '_' && name[len - 2] == '_')
+        len -= 2;
+    const AttrDef *def = lookup_attr(name, len);
+    return def && (def->flags & ATTR_KEYWORD_ALIAS) ? def->name : NULL;
 }
 
 static bool try_rewrite_cccc_keyword_attr(VirtualMachine *vm, Token **tok_ptr) {
@@ -5330,6 +5302,30 @@ static void read_macro_attr_options(VirtualMachine *vm, Token *macro_tok,
     }
 }
 
+// The options of build_target(...); `p` is the first token inside the
+// parentheses. `kind=native` is the only one.
+static void read_build_target_options(VirtualMachine *vm, Token *p,
+                                      char **kind) {
+    while (p && !equal(p, ")") && p->kind != TK_EOF) {
+        if (equal(p, "kind") && p->next && equal(p->next, "=") &&
+            p->next->next && p->next->next->kind == TK_IDENT) {
+            Token *kind_tok = p->next->next;
+            if (!equal(kind_tok, "native"))
+                error_tok(vm, kind_tok,
+                          "build_target(kind=%.*s) is not supported -- the "
+                          "only valid value is kind=native",
+                          kind_tok->len, kind_tok->loc);
+            *kind = strndup(kind_tok->loc, kind_tok->len);
+            p     = kind_tok->next;
+        } else if (equal(p, ",")) {
+            p = p->next;
+        } else {
+            error_tok(vm, p, "unknown build_target option '%.*s'", p->len,
+                      p->loc);
+        }
+    }
+}
+
 bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
                             bool emit_scan) {
     Token *tok         = *tok_ptr;
@@ -5414,129 +5410,63 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
         if (equal(t, ","))
             continue;
 
-        if (equal(t, "macro")) {
-            error_tok(vm, t,
+        // `ns::name` or a bare `name`; the markers are cccc's, so only
+        // `cccc::` or no namespace names one.
+        Token *ns   = NULL;
+        Token *name = t;
+        if (is_c23_attr && t->kind == TK_IDENT && equal(t->next, ":") &&
+            equal(t->next->next, ":") && t->next->next->next &&
+            t->next->next->next->kind != TK_EOF) {
+            ns   = t;
+            name = t->next->next->next;
+        }
+        bool ours = !ns || equal(ns, "cccc");
+        if (ours && equal(name, "macro"))
+            error_tok(vm, name,
                       "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
-        } else if (equal(t, "comptime")) {
-            is_comptime_kind = true;
-            read_macro_attr_options(vm, t, &attribute_name);
-        } else if (equal(t, "cccc") && t->next && equal(t->next, ":") &&
-                   t->next->next && equal(t->next->next, ":") &&
-                   t->next->next->next) {
-            Token *after_scope = t->next->next->next;
-            if (equal(after_scope, "macro")) {
-                error_tok(
-                    vm, after_scope,
-                    "[[cccc::macro]] is deprecated; use [[cccc::comptime]]");
-            } else if (equal(after_scope, "comptime")) {
+        const AttrDef *def = name->kind == TK_IDENT || name->kind == TK_KEYWORD
+                                 ? lookup_attr(name->loc, name->len)
+                                 : NULL;
+        AttrMarker     marker = def ? def->marker : ATTR_MARK_NONE;
+        if (marker != ATTR_MARK_NONE && !ours)
+            error_tok(vm, ns,
+                      "'%.*s' is a cccc attribute; write [[cccc::%.*s]]",
+                      name->len, name->loc, name->len, name->loc);
+        Token *args =
+            name->next && equal(name->next, "(") ? name->next->next : NULL;
+        switch (marker) {
+            case ATTR_MARK_COMPTIME:
                 is_comptime_kind = true;
-                read_macro_attr_options(vm, after_scope, &attribute_name);
-            } else if (equal(after_scope, "test")) {
+                read_macro_attr_options(vm, name, &attribute_name);
+                break;
+            case ATTR_MARK_TEST:
                 is_test_kind = true;
-                if (after_scope->next && equal(after_scope->next, "(")) {
-                    Token *p = after_scope->next->next;
-                    parse_test_args(vm, &p, &ta);
-                }
-            } else if (equal(after_scope, "test_setup") ||
-                       equal(after_scope, "test_teardown")) {
-                if (equal(after_scope, "test_teardown"))
+                if (args)
+                    parse_test_args(vm, &args, &ta);
+                break;
+            case ATTR_MARK_TEST_SETUP:
+            case ATTR_MARK_TEST_TEARDOWN:
+                if (marker == ATTR_MARK_TEST_TEARDOWN)
                     is_teardown_kind = true;
                 else
                     is_setup_kind = true;
-                if (after_scope->next && equal(after_scope->next, "(")) {
-                    Token *p = after_scope->next->next;
-                    parse_test_setup_args(&p, &tsa);
-                }
-            } else if (equal(after_scope, "build")) {
+                if (args)
+                    parse_test_setup_args(&args, &tsa);
+                break;
+            case ATTR_MARK_BUILD:
                 is_build_kind = true;
-            } else if (equal(after_scope, "build_target")) {
+                break;
+            case ATTR_MARK_BUILD_TARGET:
                 is_build_target_kind = true;
-                // parse optional (kind=NAME); validate kind value now (with
-                // token)
-                if (after_scope->next && equal(after_scope->next, "(")) {
-                    Token *p = after_scope->next->next;
-                    while (p && !equal(p, ")") && p->kind != TK_EOF) {
-                        if (equal(p, "kind") && p->next &&
-                            equal(p->next, "=") && p->next->next &&
-                            p->next->next->kind == TK_IDENT) {
-                            Token *kind_tok = p->next->next;
-                            if (!equal(kind_tok, "native"))
-                                error_tok(vm, kind_tok,
-                                          "[[cccc::build_target(kind=%.*s)]] "
-                                          "is not supported — "
-                                          "the only valid value is "
-                                          "kind=native",
-                                          kind_tok->len, kind_tok->loc);
-                            build_target_kind =
-                                strndup(kind_tok->loc, kind_tok->len);
-                            p = kind_tok->next;
-                        } else if (equal(p, ",")) {
-                            p = p->next;
-                        } else {
-                            error_tok(
-                                vm, p,
-                                "unknown [[cccc::build_target]] option '%.*s'",
-                                p->len, p->loc);
-                        }
-                    }
-                }
-            }
-            // Advance past the attribute name token so the bare-name branches
-            // below don't re-process it. The for loop's t = t->next will skip
-            // to after_scope->next (e.g. '(' for args, ']' for closing
-            // bracket).
-            t = after_scope;
-        } else if (equal(t, "build_target")) {
-            // bare: __attribute__((build_target)) or
-            // __attribute__((build_target(...)))
-            is_build_target_kind = true;
-            if (t->next && equal(t->next, "(")) {
-                Token *p = t->next->next;
-                while (p && !equal(p, ")") && p->kind != TK_EOF) {
-                    if (equal(p, "kind") && p->next && equal(p->next, "=") &&
-                        p->next->next && p->next->next->kind == TK_IDENT) {
-                        Token *kind_tok = p->next->next;
-                        if (!equal(kind_tok, "native"))
-                            error_tok(
-                                vm, kind_tok,
-                                "build_target(kind=%.*s) is not supported — "
-                                "the only valid value is kind=native",
-                                kind_tok->len, kind_tok->loc);
-                        build_target_kind =
-                            strndup(kind_tok->loc, kind_tok->len);
-                        p = kind_tok->next;
-                    } else if (equal(p, ",")) {
-                        p = p->next;
-                    } else {
-                        error_tok(
-                            vm, p,
-                            "unknown build_target attribute option '%.*s'",
-                            p->len, p->loc);
-                    }
-                }
-            }
-        } else if (equal(t, "build")) {
-            // bare: __attribute__((build))
-            is_build_kind = true;
-        } else if (equal(t, "test")) {
-            // bare: __attribute__((test)) or __attribute__((test(...)))
-            is_test_kind = true;
-            if (t->next && equal(t->next, "(")) {
-                Token *p = t->next->next;
-                parse_test_args(vm, &p, &ta);
-            }
-        } else if (equal(t, "test_setup") || equal(t, "test_teardown")) {
-            // bare: __attribute__((test_setup)) or
-            // __attribute__((test_teardown))
-            if (equal(t, "test_teardown"))
-                is_teardown_kind = true;
-            else
-                is_setup_kind = true;
-            if (t->next && equal(t->next, "(")) {
-                Token *p = t->next->next;
-                parse_test_setup_args(&p, &tsa);
-            }
+                if (args)
+                    read_build_target_options(vm, args, &build_target_kind);
+                break;
+            case ATTR_MARK_NONE:
+                break;
         }
+        // Skip the name (and its namespace) so a name inside the arguments
+        // is not read as an attribute.
+        t = name;
     }
 
     // Only act on a positive comptime/test/setup/teardown/build match.

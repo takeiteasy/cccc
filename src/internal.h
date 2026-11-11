@@ -689,15 +689,66 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
 // The attribute registry (src/attr_registry.c).
 typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
 enum {
-    ATTR_OUT_GNU = 1
-}; // a cccc attribute GCC shares: preprocessed output prints it as GNU
+    ATTR_OUT_GNU = 1, // a cccc attribute GCC shares: preprocessed output prints
+                      // it as GNU
+    ATTR_NS_CCCC = 2, // applies only when written under `cccc::`
+    ATTR_KEYWORD_ALIAS = 4, // also spelled `__name` / `__name__` outside [[ ]]
+};
+// A name the preprocessor consumes structurally instead of the parser.
+typedef enum {
+    ATTR_MARK_NONE,
+    ATTR_MARK_COMPTIME,
+    ATTR_MARK_TEST,
+    ATTR_MARK_TEST_SETUP,
+    ATTR_MARK_TEST_TEARDOWN,
+    ATTR_MARK_BUILD,
+    ATTR_MARK_BUILD_TARGET,
+} AttrMarker;
+// Where `#include [[cccc::name]]` sends the included file.
+typedef enum {
+    INCLUDE_ROUTE_NORMAL,
+    INCLUDE_ROUTE_COMPTIME,
+    INCLUDE_ROUTE_EMIT,
+    INCLUDE_ROUTE_SHARED,
+    INCLUDE_ROUTE_BUILD,
+    INCLUDE_ROUTE_TEST,
+} IncludeRoute;
+typedef struct VarAttr VarAttr;
+struct AttrDef;
+// Where an attribute was written.
 typedef struct {
+    const struct AttrDef *def; // the registry row being applied
+    Token *attr_tok;           // first token: the namespace when there is one
+    Token *name_tok;           // the attribute name
+    Token *shown_tok;      // where an unknown-attribute warning's name starts
+    bool   cccc_scoped;
+    bool   quiet_if_known; // a name __has_attribute reports is not warned about
+    bool   allow_ty_align; // packed/aligned may change `ty`; see
+                           // c23_attribute_list_ex()
+} AttrSite;
+// Applies one attribute to `ty` and/or `attr`. `tok` is the token after the
+// name; the token after the attribute is returned.
+typedef Token *AttrApplyFn(VirtualMachine *vm, Token *tok, const AttrSite *site,
+                           Type *ty, VarAttr *attr);
+typedef struct AttrDef {
     const char  *name;
     AttrCategory cat;
     bool         has_attr;
     long         date; // __has_c_attribute value
     unsigned     flags;
+    AttrApplyFn *apply; // NULL: not applied by the parser
+    AttrMarker   marker;
+    IncludeRoute route; // INCLUDE_ROUTE_NORMAL: not an include route
 } AttrDef;
+// The parse-time handlers the registry rows name (src/parse_types.c).
+AttrApplyFn attr_checked_ptr, attr_checked, attr_unchecked, attr_addr_space,
+    attr_optimize, attr_cleanup, attr_packed, attr_aligned, attr_nonnull,
+    attr_returns_nonnull, attr_sentinel, attr_alloc_size, attr_visible_lanes,
+    attr_vector_size, attr_malloc, attr_constructor, attr_destructor,
+    attr_operator, attr_method, attr_format, attr_error, attr_warning,
+    attr_warn_unused_result, attr_noreturn, attr_nodiscard, attr_fallthrough,
+    attr_no_unique_address, attr_pure, attr_kernel, attr_trusted, attr_const,
+    attr_gnu_inline, attr_designated_init, attr_unused, attr_deprecated;
 // The attribute `name` (or its `__name__` spelling), or NULL.
 const AttrDef *lookup_attr(const char *name, size_t len);
 // True when __has_attribute(name) reports the GNU attribute as recognized.

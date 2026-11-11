@@ -176,4 +176,31 @@ void test_has_attribute_spellings(void) {
     AssertFalse(__has_c_attribute(cccc::no_such_attribute));
 }
 
+// Every attribute the parser handles is reported.
+[[cccc::test]]
+void test_has_attribute_handled_names(void) {
+    AssertTrue(__has_attribute(sentinel));
+    AssertTrue(__has_attribute(alloc_size));
+    AssertTrue(__has_attribute(malloc));
+    AssertTrue(__has_attribute(vector_size));
+    AssertTrue(__has_attribute(designated_init));
+    AssertTrue(__has_attribute(__malloc__));
+    AssertTrue(__has_c_attribute(cccc::operator));
+    AssertTrue(__has_c_attribute(cccc::method));
+}
+
+// The three spellings of a handled name reach the same handler.
+[[gnu::sentinel]] int sentinel_gnu(const char *fmt, ...);
+[[__gnu__::__malloc__]] void *malloc_gnu(int n);
+struct __attribute__((designated_init)) DesignatedGnu {
+    int a;
+    int b;
+};
+
+[[cccc::test]]
+void test_gnu_namespace_handlers(void) {
+    struct DesignatedGnu d = {.a = 1, .b = 2};
+    AssertTrue(d.a + d.b == 3);
+}
+
 #pragma cccc suite end
