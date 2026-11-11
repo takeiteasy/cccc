@@ -17,6 +17,11 @@
 @template(T) static inline T twice(T x) { return x + x; }
 @template(T) @equals struct Cell { T a; T b; };
 @template(T) union Bits { T value; unsigned char raw[sizeof(T)]; };
+@template(T) struct [[gnu::aligned(16)]] AlignedStd { T a; };
+@template(T) struct __attribute__((aligned(16))) AlignedGnu { T a; };
+@template(T) struct AlignedTrail { T a; } __attribute__((aligned(16)));
+@template(T) enum __attribute__((unused)) AttrEnum : T { AE_A, AE_B };
+@template(T) enum AttrEnumTrail : T { AET_A } __attribute__((unused));
 @template(T) T first_of(T *p) { T v = *p; return v; }
 @template(T) T(grouped_name)(T x) {
     return x + 1;
@@ -830,4 +835,26 @@ void test_atomic_pointer_return_type(void) {
 void test_function_returning_function_pointer(void) {
     AssertEq(@inst(int) pick_fn(1)(21), 42);
     AssertTrue(@inst(int) pick_fn(0) == NULL);
+}
+
+[[cccc::test]]
+void test_attribute_before_tag(void) {
+    @inst(char) AlignedStd s;
+    @inst(char) AlignedGnu g;
+    AssertEq(_Alignof(s), 16);
+    AssertEq(_Alignof(g), 16);
+}
+
+[[cccc::test]]
+void test_attribute_after_closing_brace(void) {
+    @inst(char) AlignedTrail t;
+    AssertEq(_Alignof(t), 16);
+}
+
+[[cccc::test]]
+void test_enum_attributes_around_tag(void) {
+    @inst(int) AttrEnum      a = AttrEnum__int__AE_B;
+    @inst(int) AttrEnumTrail b = AttrEnumTrail__int__AET_A;
+    AssertEq(a, 1);
+    AssertEq(b, 0);
 }

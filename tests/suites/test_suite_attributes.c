@@ -218,6 +218,17 @@ int test_pragma_link(void) {
     return 42;
 }
 
+enum __attribute__((unused)) AttrBeforeTag { ABT_A, ABT_B };
+enum [[gnu::unused]] AttrBeforeTagStd { ABS_A };
+enum AttrAfterBrace { AAB_A, AAB_B } __attribute__((unused));
+
+[[cccc::test]]
+void test_enum_attribute_positions(void) {
+    AssertEq(ABT_B, 1);
+    AssertEq(ABS_A, 0);
+    AssertEq(AAB_B, 1);
+}
+
 #pragma cccc suite end
 
 // [from test_at_attribute.c]

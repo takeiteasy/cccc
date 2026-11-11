@@ -55,7 +55,8 @@ static Token *match_brace(Token *open) {
 // Steps over `__attribute__((...))` and `[[...]]` groups.
 static Token *skip_attr_groups(Token *tok) {
     for (;;) {
-        if (equal(tok, "__attribute__") && equal(tok->next, "(")) {
+        if ((equal(tok, "__attribute__") || equal(tok, "__attribute")) &&
+            equal(tok->next, "(")) {
             tok = skip_parens(tok->next);
         } else if (equal(tok, "[") && equal(tok->next, "[")) {
             tok = tok->next->next;
@@ -445,14 +446,15 @@ static int template_scan(VirtualMachine *vm, Token *start, Template *t,
             *err_tok = p;
             return -1;
         }
-        Token *end = match_brace(p);
-        if (!end || !equal(end->next, ";")) {
+        Token *end  = match_brace(p);
+        Token *semi = end ? skip_attr_groups(end->next) : NULL;
+        if (!semi || !equal(semi, ";")) {
             *err = arena_format(
                 vm, "a %s struct or union cannot declare variables", what);
-            *err_tok = end ? end->next : p;
+            *err_tok = semi ? semi : p;
             return -1;
         }
-        t->end = end->next->next;
+        t->end = semi->next;
         return 1;
     }
     if (equal(p, "enum")) {
@@ -473,13 +475,14 @@ static int template_scan(VirtualMachine *vm, Token *start, Template *t,
             *err_tok = p;
             return -1;
         }
-        Token *end = match_brace(p);
-        if (!end || !equal(end->next, ";")) {
+        Token *end  = match_brace(p);
+        Token *semi = end ? skip_attr_groups(end->next) : NULL;
+        if (!semi || !equal(semi, ";")) {
             *err = arena_format(vm, "a %s enum cannot declare variables", what);
-            *err_tok = end ? end->next : p;
+            *err_tok = semi ? semi : p;
             return -1;
         }
-        t->end = end->next->next;
+        t->end = semi->next;
         return 1;
     }
     if (equal(p, "typedef"))
@@ -814,6 +817,7 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
         t->kind == TMPL_ENUM ? enumerator_names(vm, t, &nenum) : NULL;
 
     Token *prev = NULL, *prev2 = NULL;
+    Token *tag_kw = NULL, *tag_slot = NULL;
     for (Token *p                                              = t->start;
          p != (limit ? limit : t->end) && p->kind != TK_EOF; p = p->next) {
         if (p == t->marker) {
@@ -823,29 +827,29 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
         }
         Token *c = cur = cur->next     = copy_tok(vm, p);
         tok_rare_mut(vm, c)->expansion = frame;
+        if (equal(p, "struct") || equal(p, "union") || equal(p, "enum")) {
+            tag_kw   = p;
+            tag_slot = skip_attr_groups(p->next);
+        }
         bool rename = p->kind == TK_IDENT && p->len == (size_t)t->name_len &&
                       !strncmp(p->loc, t->name, t->name_len);
         if (rename) {
             bool member = prev && (equal(prev, ".") || equal(prev, "->"));
             bool inst_arg =
                 prev && prev2 && equal(prev, "(") && equal(prev2, "__cccc_inst");
+            bool is_tag = p == tag_slot;
             switch (t->kind) {
                 case TMPL_FUNC:
-                    rename = !(prev && (member || equal(prev, "struct") ||
-                                        equal(prev, "union") ||
-                                        equal(prev, "enum"))) &&
-                             !inst_arg;
+                    rename = !(member || is_tag) && !inst_arg;
                     break;
                 case TMPL_TYPEDEF:
                     rename = !member && !inst_arg;
                     break;
                 case TMPL_ENUM:
-                    rename = prev && equal(prev, "enum") && !inst_arg;
+                    rename = is_tag && equal(tag_kw, "enum") && !inst_arg;
                     break;
                 default:
-                    rename = prev &&
-                             (equal(prev, "struct") || equal(prev, "union")) &&
-                             !inst_arg;
+                    rename = is_tag && !equal(tag_kw, "enum") && !inst_arg;
             }
         }
         if (rename) {

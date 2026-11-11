@@ -1784,6 +1784,9 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
                             bool *defined) {
     Type *ty = enum_type(vm);
 
+    tok      = attribute_list(vm, tok, ty, NULL);
+    tok      = c23_attribute_list(vm, tok, ty, NULL);
+
     // Read a tag.
     Token *tag = NULL;
     if (tok->kind == TK_IDENT) {
@@ -1984,6 +1987,10 @@ static Type *enum_specifier(VirtualMachine *vm, Token **rest, Token *tok,
 
         val++;
     }
+
+    *rest = attribute_list(vm, *rest, ty, NULL);
+    *rest =
+        c23_attribute_list_ex(vm, *rest, ty, NULL, /*allow_ty_align=*/false);
 
     // #1175/#1205: select the underlying type from the enumerator values
     // actually seen, matching gcc-16/clang -- C23 6.7.2.2 requires the type

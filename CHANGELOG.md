@@ -19,6 +19,8 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Changed: naming a template without instantiating it, such as `Vec @inst(int) a` or a file-scope `Vec g;`, reports `'Vec' is a template; instantiate it as 'Vec@(args)' or '@inst(args) Vec'` instead of `undefined variable`.
 - Changed: a repeated `@inst` of an existing instance parses each constant parameter's type once per template and builds the instance name without allocating, so a template-heavy file compiles faster and in less memory.
 - Fixed: a function `@template` may have a parenthesised name (`@template(T) T (fn)(T x) {...}`), a return type written `@inst(T) Vec` or `_Atomic(T)`, or return a function pointer; each was rejected as not a definition.
+- Fixed: a template struct, union or enum may carry an attribute between the keyword and the tag or after the closing brace (`@template(T) struct __attribute__((aligned(16))) F {...}`, `struct G {...} __attribute__((aligned(16)));`); the instance was left untagged and incomplete, or rejected as declaring variables. `@specialize` takes the same positions.
+- Fixed: `enum __attribute__((unused)) E {...}`, `enum [[gnu::unused]] E {...}` and `enum E {...} __attribute__((unused))` are accepted in plain C.
 
 ## [0.33.2] - 2026-11-09
 

@@ -63,6 +63,20 @@
     int c;
 };
 
+@template(T) struct [[gnu::aligned(8)]] Tagged {
+    T x;
+};
+@specialize(char) struct __attribute__((aligned(16))) Tagged {
+    char x;
+};
+
+@template(T) struct Trailing {
+    T x;
+};
+@specialize(char) struct Trailing {
+    char x;
+} __attribute__((aligned(16)));
+
 @template(T) struct Wrap {
     @inst(T) Vec inner;
 };
@@ -184,4 +198,18 @@ void test_primary_unaffected_by_other_specialization(void) {
 [[cccc::test]]
 void test_unused_specialization_costs_nothing(void) {
     AssertTrue(@inst(int) unused(4) == 4);
+}
+
+[[cccc::test]]
+void test_specialization_attribute_before_tag(void) {
+    @inst(char) Tagged  c;
+    @inst(short) Tagged n;
+    AssertEq(_Alignof(c), 16);
+    AssertEq(_Alignof(n), 8);
+}
+
+[[cccc::test]]
+void test_specialization_attribute_after_brace(void) {
+    @inst(char) Trailing c;
+    AssertEq(_Alignof(c), 16);
 }
