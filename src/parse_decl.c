@@ -2535,6 +2535,13 @@ static Token *parse_file_scope_decls(VirtualMachine *vm, Token *tok) {
                 tok = after;
                 continue;
             }
+            if (tok->kind == TK_IDENT && cc_find_template(vm, tok) &&
+                !is_typename_ex(vm, tok, false))
+                error_tok(vm, tok,
+                          "'%.*s' is a template; instantiate it as "
+                          "'%.*s@(args)' or '@inst(args) %.*s'",
+                          tok->len, tok->loc, tok->len, tok->loc, tok->len,
+                          tok->loc);
         }
 
         if (is_file_scope_asm(tok)) {
