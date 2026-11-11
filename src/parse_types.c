@@ -2962,6 +2962,14 @@ static bool attr_is(Token *tok, const char *name) {
            !memcmp(tok->loc + 2, name, n) && !memcmp(tok->loc + 2 + n, "__", 2);
 }
 
+// attr_is() then step past the name.
+static bool consume_attr(Token **rest, Token *tok, const char *name) {
+    if (!attr_is(tok, name))
+        return false;
+    *rest = tok->next;
+    return true;
+}
+
 static Token *apply_addr_space_attr(VirtualMachine *vm, Token *name_tok,
                                     Token *tok, Type *ty) {
     if (equal(tok, "("))
@@ -3064,7 +3072,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             }
 
             // Handle packed attribute
-            if (consume(vm, &tok, tok, "packed")) {
+            if (consume_attr(&tok, tok, "packed")) {
                 if (ty)
                     ty->is_packed = true;
                 continue;
@@ -3072,7 +3080,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
 
             // Handle designated_init attribute: requires all initializers of
             // this struct type to use designated (.field = value) syntax (#659)
-            if (consume(vm, &tok, tok, "designated_init")) {
+            if (consume_attr(&tok, tok, "designated_init")) {
                 if (ty)
                     ty->designated_init = true;
                 continue;
@@ -3081,7 +3089,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             // vector_size(N) is recorded on `attr` and applied to the base
             // type by declspec(), or to the declarator's type by
             // apply_var_attrs_to_type() when written after the declarator.
-            if (consume(vm, &tok, tok, "cccc_visible_lanes")) {
+            if (consume_attr(&tok, tok, "cccc_visible_lanes")) {
                 tok       = skip(vm, tok, "(");
                 int lanes = const_expr(vm, &tok, tok);
                 tok       = skip(vm, tok, ")");
@@ -3089,7 +3097,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
                     attr->vec_visible = lanes;
                 continue;
             }
-            if (consume(vm, &tok, tok, "vector_size")) {
+            if (consume_attr(&tok, tok, "vector_size")) {
                 tok       = skip(vm, tok, "(");
                 int bytes = const_expr(vm, &tok, tok);
                 tok       = skip(vm, tok, ")");
@@ -3111,7 +3119,7 @@ Token *attribute_list(VirtualMachine *vm, Token *tok, Type *ty, VarAttr *attr) {
             // ever *raise* alignment (only `packed` lowers it), so this is a
             // floor via max(), never an assignment; see
             // effective_decl_align().
-            if (consume(vm, &tok, tok, "aligned")) {
+            if (consume_attr(&tok, tok, "aligned")) {
                 // Bare `aligned` (no argument) requests the target's
                 // maximum useful/natural alignment, which is 16 on every
                 // ABI this compiler targets (macOS/Linux, aarch64/x86_64).
@@ -3596,8 +3604,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
                 attr_is(name_tok, "no_unique_address");
             bool is_pure_attr       = attr_is(name_tok, "pure");
             bool is_func_const_attr = attr_is(name_tok, "const");
-            bool is_gnu_inline_attr =
-                gnu_scoped && attr_is(name_tok, "gnu_inline");
+            bool is_gnu_inline_attr = attr_is(name_tok, "gnu_inline");
             bool is_kernel_attr = cccc_scoped && attr_is(name_tok, "kernel");
             bool is_trusted_attr = cccc_scoped && attr_is(name_tok, "trusted");
             bool is_addr_space_attr =
@@ -3664,7 +3671,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             }
 
             // [[gnu::cleanup(fn)]] — scope-exit callback
-            if (gnu_scoped && attr_is(name_tok, "cleanup")) {
+            if (attr_is(name_tok, "cleanup")) {
                 tok = skip(vm, tok, "(");
                 if (tok->kind != TK_IDENT)
                     error_tok(vm, tok,
@@ -3689,7 +3696,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // [[gnu::packed]] (#1160) -- C23 spelling of
             // __attribute__((packed)); see attribute_list()'s "packed" case
             // for the ty->is_packed semantics this mirrors.
-            if (gnu_scoped && attr_is(name_tok, "packed")) {
+            if (attr_is(name_tok, "packed")) {
                 if (ty && allow_ty_align)
                     ty->is_packed = true;
                 continue;
@@ -3700,7 +3707,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // "aligned" case for the ty/attr->gnu_align split this mirrors,
             // and c23_attribute_list_ex()'s own comment for why
             // `allow_ty_align` exists.
-            if (gnu_scoped && attr_is(name_tok, "aligned")) {
+            if (attr_is(name_tok, "aligned")) {
                 int align = 16; // bare form: maximum useful alignment
                 if (equal(tok, "(")) {
                     tok   = skip(vm, tok, "(");
@@ -3800,7 +3807,7 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
             // [[gnu::vector_size(N)]] (tracker #72) -- same semantics as the
             // GNU-syntax handler in attribute_list(); only meaningful in
             // declarator-suffix position (attr non-NULL).
-            if (gnu_scoped && attr_is(name_tok, "vector_size")) {
+            if (attr_is(name_tok, "vector_size")) {
                 tok       = skip(vm, tok, "(");
                 int bytes = const_expr(vm, &tok, tok);
                 tok       = skip(vm, tok, ")");
@@ -3827,8 +3834,8 @@ Token *c23_attribute_list_ex(VirtualMachine *vm, Token *tok, Type *ty,
 
             // [[gnu::constructor]] / [[gnu::constructor(101)]]
             // [[gnu::destructor]] / [[gnu::destructor(101)]]
-            if (gnu_scoped && (attr_is(name_tok, "constructor") ||
-                               attr_is(name_tok, "destructor"))) {
+            if (attr_is(name_tok, "constructor") ||
+                attr_is(name_tok, "destructor")) {
                 bool is_ctor  = attr_is(name_tok, "constructor");
                 int  priority = CCCC_NO_INIT_PRIORITY;
                 if (equal(tok, "(")) {

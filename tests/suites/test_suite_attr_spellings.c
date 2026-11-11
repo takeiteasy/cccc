@@ -17,6 +17,18 @@ struct __attribute__((aligned(16))) AlignAttr {
 struct @aligned(16) AlignAt {
     char c;
 };
+struct [[aligned(16)]] AlignStd {
+    char c;
+};
+struct [[cccc::aligned(16)]] AlignCccc {
+    char c;
+};
+struct [[__aligned__(16)]] AlignStdU {
+    char c;
+};
+struct __attribute__((__aligned__(16))) AlignAttrU {
+    char c;
+};
 
 struct [[gnu::packed]] PackGnu {
     char c;
@@ -31,6 +43,18 @@ struct __attribute__((packed)) PackAttr {
     int  i;
 };
 struct @packed PackAt {
+    char c;
+    int  i;
+};
+struct [[packed]] PackStd {
+    char c;
+    int  i;
+};
+struct [[cccc::packed]] PackCccc {
+    char c;
+    int  i;
+};
+struct __attribute__((__packed__)) PackAttrU {
     char c;
     int  i;
 };
@@ -49,6 +73,10 @@ void test_aligned_spellings(void) {
     AssertEq(_Alignof(struct AlignGnuU), 16);
     AssertEq(_Alignof(struct AlignAttr), 16);
     AssertEq(_Alignof(struct AlignAt), 16);
+    AssertEq(_Alignof(struct AlignStd), 16);
+    AssertEq(_Alignof(struct AlignCccc), 16);
+    AssertEq(_Alignof(struct AlignStdU), 16);
+    AssertEq(_Alignof(struct AlignAttrU), 16);
 }
 
 [[cccc::test]]
@@ -57,6 +85,9 @@ void test_packed_spellings(void) {
     AssertEq(sizeof(struct PackGnuU), 5);
     AssertEq(sizeof(struct PackAttr), 5);
     AssertEq(sizeof(struct PackAt), 5);
+    AssertEq(sizeof(struct PackStd), 5);
+    AssertEq(sizeof(struct PackCccc), 5);
+    AssertEq(sizeof(struct PackAttrU), 5);
 }
 
 [[cccc::test]]
@@ -86,12 +117,8 @@ void test_has_attribute_spellings(void) {
     AssertFalse(__has_c_attribute(cccc::no_such_attribute));
 }
 
-// TODO(#2008): the cells below are rejected or ignored today and become
-// tests when the attribute registry resolves by name alone:
-//   [[aligned(16)]], [[cccc::aligned(16)]], [[__aligned__(16)]]   (ignored)
-//   [[packed]], [[cccc::packed]]                                   (ignored)
-//   __attribute__((__aligned__(16))), __attribute__((__packed__))  (ignored)
-//   [[gnu::single]] and [[cccc::nonnull]] resolve by accident of the chain
+// TODO(#2008): rejected or ignored today, enabled as the attribute dispatch
+// resolves by name alone:
 //   [[unknown_vendor::x]] is a parse error, not a warning
 
 #pragma cccc suite end
