@@ -71,6 +71,19 @@ enum Flags { FA = 1, FB = 2 };
 @template(R, A) typedef R (*Op)(A, A);
 @template(T) typedef struct Link { T val; struct Link *next; } Link;
 @template(T) typedef struct { T lo, hi; } Range;
+
+typedef int Count;
+struct Wrap {
+    int v;
+};
+@inst(int) Vec;
+@template(T) typedef Count(CountFn)(T);
+@template(T) typedef const Count(ConstCountFn)(T);
+@template(T) typedef struct Wrap(WrapFn)(T);
+@template(T) typedef T(SelfFn)(int);
+@template(T) typedef @inst(T) Vec(VecFn)(T);
+@template(T) typedef int(IntFn)(T);
+@template(T) typedef Count (*CountPtrFn)(T);
 @template(T) enum Level : T { LOW, MID = LOW + 2, HIGH = MID + 1 };
 @template(int N) enum Cap { SMALL = N, LARGE = N * 2 };
 
@@ -379,6 +392,54 @@ void test_typedef_template_function_pointer(void) {
     AssertEq(g(44, 2), 42);
 }
 
+static int count_fn(int x) {
+    return x;
+}
+static struct Wrap wrap_fn(int x) {
+    return (struct Wrap){x};
+}
+static long self_fn(int x) {
+    return x;
+}
+static struct Vec__int vec_fn(int x) {
+    return (struct Vec__int){0, (size_t)x, 0};
+}
+
+[[cccc::test]]
+void test_typedef_template_parenthesised_name_after_typedef_name(void) {
+    @inst(int) CountFn *a = count_fn;
+    CountFn__int       *b = a;
+    AssertEq(b(42), 42);
+    @inst(int) ConstCountFn *c = count_fn;
+    AssertEq(c(42), 42);
+}
+
+[[cccc::test]]
+void test_typedef_template_parenthesised_name_after_tag(void) {
+    @inst(int) WrapFn *w = wrap_fn;
+    AssertEq(w(42).v, 42);
+}
+
+[[cccc::test]]
+void test_typedef_template_parenthesised_name_after_type_parameter(void) {
+    @inst(long) SelfFn *s = self_fn;
+    SelfFn__long       *t = s;
+    AssertEq(t(42), 42);
+}
+
+[[cccc::test]]
+void test_typedef_template_parenthesised_name_after_inst(void) {
+    @inst(int) VecFn *v = vec_fn;
+    AssertEq(v(42).len, (size_t)42);
+}
+
+[[cccc::test]]
+void test_typedef_template_parenthesised_name_forms_unchanged(void) {
+    @inst(int) IntFn     *i = count_fn;
+    @inst(int) CountPtrFn p = count_fn;
+    AssertEq(i(21) + p(21), 42);
+}
+
 [[cccc::test]]
 void test_typedef_template_of_tagged_struct(void) {
     @inst(int) Link   b = {2, 0};
@@ -586,6 +647,11 @@ void test_spellings_in_macros(void) {
     return @inst(F) apply(x);
 }
 
+@template(T, int N, double D, int (*F)(int), bool B,
+          enum Color C) int mixed(T x) {
+    return (int)x + N + (int)D + F(1) + B + C;
+}
+
 static int cmp_int(int a, int b) {
     return a - b;
 }
@@ -601,6 +667,36 @@ void test_float_argument_spellings_share_an_instance(void) {
     AssertEq(@inst(3.0 / 2) scale(2.0), 3.0);
     AssertTrue(&scale__1p5 == &scale__1p5);
     AssertEq(sizeof(@inst(1.5) Gain), sizeof(struct Gain__1p5));
+}
+
+[[cccc::test]]
+void test_repeat_inst_of_every_constant_kind_is_one_instance(void) {
+    int r1 = @inst(int, 4, 1.5, twice, true, GREEN) mixed(30);
+    int r2 = @inst(int, 4, 1.5, twice, true, GREEN) mixed(30);
+    AssertEq(r1, r2);
+    AssertEq(r1, 30 + 4 + 1 + 2 + 1 + GREEN);
+    AssertTrue(&mixed__int__4__1p5__twice__true__GREEN ==
+               &mixed__int__4__1p5__twice__true__GREEN);
+}
+
+[[cccc::test]]
+void test_dependent_constant_type_follows_each_type_argument(void) {
+    AssertEq(@inst(int, 300) constant(), 300);
+    AssertEq(@inst(long, 300) constant(), 300L);
+    AssertEq(@inst(char, 100) constant(), 100);
+    AssertEq(@inst(int, 300) constant(), 300);
+    AssertEq(sizeof(@inst(char, 100) constant()), sizeof(char));
+    AssertEq(sizeof(@inst(long, 300) constant()), sizeof(long));
+}
+
+[[cccc::test]]
+void test_repeat_defaults_naming_earlier_float(void) {
+    AssertEq(@inst(1.0) pair_sum(), 3.0);
+    AssertEq(@inst(1.0) pair_sum(), 3.0);
+    AssertEq(@inst(1.0, 2.0) pair_sum(), 3.0);
+    AssertEq(@inst(2.0) pair_sum(), 6.0);
+    AssertEq(@inst() apply(5), 5);
+    AssertEq(@inst() apply(6), 6);
 }
 
 [[cccc::test]]

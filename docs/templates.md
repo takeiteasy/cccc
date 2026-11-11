@@ -122,7 +122,7 @@ An enum instance is `Name__Arg` and its enumerators are renamed `Name__Arg__ENUM
 | Rule | Detail |
 |---|---|
 | Enum | Needs a tag and a definition; the base type may name a parameter (`: T`) |
-| Typedef | Declares one name; a struct, union or enum tag defined inside is omitted or equals that name |
+| Typedef | Declares one name, which may be parenthesised after a type name (`typedef Count (Fn)(T);` declares `Fn`); a struct, union or enum tag defined inside is omitted or equals that name |
 | Enumerators | Renamed in the whole body, so `HIGH = LOW + 5` still resolves |
 
 ## Instantiating

@@ -17,6 +17,22 @@ Building cccc's own sources (about 100 files) on an Apple M1, 8 cores, macOS 15.
 
 Measure a build with the release binary (`./cccc --build build.c --build-target=release`, then `build/cccc-release`). The `make` binary is built at `-O0` and is about 3x slower.
 
+## Repeated `@inst`
+
+Parse time of a file with 20,000 repeat `@inst(...) f(1)` calls (`cccc -J`, release build, best of 3). A hit looks up the existing instance by name; the baseline is the same file calling a plain function.
+
+| Template parameters | Wall time | Peak memory |
+|---|---|---|
+| none (plain function) | 0.08 s | 83 MB |
+| `T` | 0.13 s | 112 MB |
+| `T, int N` | 0.15 s | 124 MB |
+| `T, double D` | 0.16 s | 125 MB |
+| `T, int (*F)(int)` | 0.16 s | 131 MB |
+| `T, int N, double D, int (*F)(int)` | 0.21 s | 156 MB |
+| `T, T N` (type depends on `T`) | 0.16 s | 146 MB |
+
+A constant parameter's type is parsed once per template unless it names an earlier parameter, which is why `T, T N` costs more than `T, int N`.
+
 ## Running code
 
 Median wall-clock milliseconds, lower is better. Each column runs the same workload end to end from source:

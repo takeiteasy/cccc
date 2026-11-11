@@ -192,6 +192,22 @@ void test_constant_too_large(void) {
     @inst(300) byte_of();
 }
 
+@template(T, T N) int dep_n(void) {
+    return (int)N;
+}
+
+[[cccc::test(error = "template argument 300 does not fit 'unsigned char'")]]
+void test_constant_too_large_after_valid_use(void) {
+    @inst(10) byte_of();
+    @inst(300) byte_of();
+}
+
+[[cccc::test(error = "template argument 300 does not fit 'T'")]]
+void test_dependent_constant_checked_per_instance(void) {
+    @inst(int, 300) dep_n();
+    @inst(char, 300) dep_n();
+}
+
 [[cccc::test(error = "template argument -1 does not fit 'unsigned char'")]]
 void test_negative_for_unsigned(void) {
     @inst(-1) byte_of();

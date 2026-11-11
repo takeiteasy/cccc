@@ -4109,6 +4109,9 @@ typedef struct TemplateParam {
     Token *type_start; // NULL for a type parameter
     Token *decl_end;   // end of a constant's declaration
     Token *def, *def_end; // NULL without a default
+    Type  *ty; // a constant's type, parsed on the first @inst unless dependent
+    bool   dependent; // its type names an earlier parameter
+    bool   needed;    // a later type or default names this parameter
 } TemplateParam;
 
 // One `@inst` argument: a type, or a constant. A constant is parsed into

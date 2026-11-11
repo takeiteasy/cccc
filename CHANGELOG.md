@@ -10,12 +10,13 @@ before the 0.1.0 reset is not relisted here — see the ticket tracker and
 - Added: `@template(T)` marks a struct, union or function definition as a template, and `@inst(Type, ...) Name` instantiates it as `Name__Type` in any type or expression position, at file scope or inside a function; function instances are `static`, and attributes such as `@equals` apply to each instance.
 - Added: a file-scope `@inst(Type, ...) Name;` creates a template instance without using it, so its derive attributes' functions exist.
 - Added: `@template(T, int N)` takes integer constant parameters, bound as constants inside the body and given as constant expressions in `@inst(int, 16) Arr`; the instance is `Arr__int__16`, a negative value is spelled with an `n` prefix, and a value that does not fit the parameter's type is an error.
-- Added: `@template` on an enum or a typedef. An enum instance is `Level__char` with enumerators renamed `Level__char__HIGH`; a typedef instance is a file-scope typedef named `Ptr__int`.
+- Added: `@template` on an enum or a typedef. An enum instance is `Level__char` with enumerators renamed `Level__char__HIGH`; a typedef instance is a file-scope typedef named `Ptr__int`; its declarator may follow a type name in parentheses, as in `@template(T) typedef Count (Fn)(T);`.
 - Changed: an enum constant argument to a template names the instance by its enumerator (`Pick__GREEN`, the first with that value; a value with none keeps its number) and a bool argument by `true` or `false`.
 - Added: `@template` parameters take defaults, `@template(T, int N = 8)` and `@template(K, V = K)`, so `@inst(int) Arr` may leave out trailing arguments; a default may name earlier parameters, and the instance is named with every argument (`Arr__int__8`) whether or not it was written.
 - Added: a template instance is also spelled `Name@(Type, ...)` (arguments after the name, so nested arguments read left to right) and `@inst Name` (every parameter defaulted); `@inst(Type, ...) Name` puts the arguments before the name as `@template(...)` does.
 - Added: `@template` constant parameters may be `float`, `double` or a pointer. A float argument names the instance by its shortest decimal (`Gain__1p5`, `Gain__n0p25`, `Gain__1em05`); a pointer takes a function, the address of a file-scope or `static` object, or null (`before__int__cmp_int`, `before__int__null`), and inside the body each is a `const` object. NaN, `long double`, string literals and element addresses are errors.
 - Changed: naming a template without instantiating it, such as `Vec @inst(int) a` or a file-scope `Vec g;`, reports `'Vec' is a template; instantiate it as 'Vec@(args)' or '@inst(args) Vec'` instead of `undefined variable`.
+- Changed: a repeated `@inst` of an existing instance parses each constant parameter's type once per template and builds the instance name without allocating, so a template-heavy file compiles faster and in less memory.
 
 ## [0.33.2] - 2026-11-09
 

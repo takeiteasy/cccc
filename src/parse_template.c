@@ -81,13 +81,38 @@ static bool is_typeof_kw(Token *tok) {
            equal(tok, "_Alignas");
 }
 
+// A type specifier written with parentheses: `typeof(x)`, `_Atomic(T)`,
+// `_BitInt(N)` or an `@inst` (`__cccc_inst ( Name, Arg... )`).
+static bool is_type_paren_kw(Token *tok) {
+    return (is_typeof_kw(tok) && !equal(tok, "_Alignas")) ||
+           equal(tok, "_Atomic") || equal(tok, "_BitInt") ||
+           equal(tok, "__cccc_inst");
+}
+
+static bool is_type_spec_kw(Token *tok) {
+    static const char *const kw[] = {
+        "void",        "_Bool",    "bool",       "char",       "short",
+        "int",         "long",     "signed",     "unsigned",   "float",
+        "double",      "_Complex", "_Imaginary", "__int128",   "__int128_t",
+        "__uint128_t", "_Float16", "_Decimal32", "_Decimal64", "_Decimal128",
+        "__auto_type",
+    };
+    for (size_t i = 0; i < sizeof kw / sizeof *kw; i++)
+        if (equal(tok, kw[i]))
+            return true;
+    return false;
+}
+
 // `@template(...) typedef ...;` declares one name. The name is the last
-// identifier outside brace bodies, brackets, parameter lists and attributes;
-// `(` opens a parameter list after an identifier or `)` unless it starts a
-// grouped declarator (`T (*Fn)(int)`).
+// identifier outside brace bodies, brackets, parameter lists and attributes.
+// An identifier before any type specifier is the type (`Foo` in `Foo (Fn)(T)`),
+// so a `(` after it opens a grouped declarator; after the declarator's name or
+// a `)` it opens a parameter list unless it starts a grouped declarator
+// (`T (*Fn)(int)`).
 static int scan_typedef_template(Token *p, Template *t, const char **err,
                                  Token **err_tok) {
     Token *name = NULL, *def_tag = NULL, *prev = NULL;
+    bool   have_type = false;
     Token *q = p->next;
     while (q->kind != TK_EOF && !equal(q, ";")) {
         Token *g = skip_attr_groups(q);
@@ -95,17 +120,35 @@ static int scan_typedef_template(Token *p, Template *t, const char **err,
             q = g;
             continue;
         }
-        if (is_typeof_kw(q) && equal(q->next, "(")) {
+        if (equal(q, "_Alignas") && equal(q->next, "(")) {
             q = skip_parens(q->next);
+            continue;
+        }
+        if (is_type_paren_kw(q) && equal(q->next, "(")) {
+            q         = skip_parens(q->next);
+            have_type = true;
+            prev      = NULL;
             continue;
         }
         if (equal(q, "struct") || equal(q, "union") || equal(q, "enum")) {
             Token *tag = skip_attr_groups(q->next);
+            have_type  = true;
             if (tag->kind == TK_IDENT) {
                 Token *after = skip_attr_groups(tag->next);
                 if (equal(after, "{") || (equal(q, "enum") && equal(after, ":")))
                     def_tag = tag;
+                q    = tag->next;
+                prev = NULL;
+                continue;
             }
+        }
+        if (is_type_spec_kw(q))
+            have_type = true;
+        else if (q->kind == TK_IDENT && !have_type) {
+            have_type = true;
+            prev      = NULL;
+            q         = q->next;
+            continue;
         }
         if (equal(q, "{")) {
             Token *end = match_brace(q);
@@ -310,6 +353,27 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
                 }
         }
     }
+    for (int i = 1; i < t->nparams; i++) {
+        TemplateParam *d = &t->params[i];
+        for (int pass = 0; pass < 2; pass++) {
+            Token *from = pass ? d->def : d->type_start;
+            Token *to   = pass ? d->def_end : d->decl_end;
+            Token *prev = NULL;
+            for (Token *k = from; from && k != to; prev = k, k = k->next) {
+                if (k->kind != TK_IDENT ||
+                    (prev && (equal(prev, "struct") || equal(prev, "union") ||
+                              equal(prev, "enum") || equal(prev, ".") ||
+                              equal(prev, "->"))))
+                    continue;
+                for (int j = 0; j < i; j++)
+                    if (t->params[j].name->len == k->len &&
+                        !strncmp(t->params[j].name->loc, k->loc, k->len)) {
+                        t->params[j].needed  = true;
+                        d->dependent        |= pass == 0;
+                    }
+            }
+        }
+    }
     if (t->nparams == 0) {
         *err     = "@template needs at least one parameter";
         *err_tok = t->marker;
@@ -480,123 +544,176 @@ void cc_template_misplaced(VirtualMachine *vm, Token *tok) {
 
 // ---- mangling -------------------------------------------------------------
 
-static char *mangle_type(VirtualMachine *vm, Type *ty, Token *site);
+// The instance name under construction. It starts on the stack and moves to
+// the arena only if it outgrows that, so a repeat `@inst` allocates nothing.
+typedef struct {
+    VirtualMachine *vm;
+    char           *p;
+    size_t          len, cap;
+    char            init[256];
+} MangleBuf;
 
-static char *mangle_tag(VirtualMachine *vm, Token *tag, const char *kw,
-                        Token *site) {
-    if (!tag)
-        error_tok(vm, site,
-                  "template argument must be a named type; give the %s a tag",
-                  kw);
-    return arena_format(vm, "%s_%.*s", kw, (int)tag->len, tag->loc);
+static void mb_init(MangleBuf *mb, VirtualMachine *vm) {
+    mb->vm      = vm;
+    mb->p       = mb->init;
+    mb->len     = 0;
+    mb->cap     = sizeof mb->init;
+    mb->init[0] = 0;
 }
 
-static char *mangle_base(VirtualMachine *vm, Type *ty, Token *site) {
+static void mb_putn(MangleBuf *mb, const char *s, size_t n) {
+    if (mb->len + n + 1 > mb->cap) {
+        size_t cap = mb->cap * 2;
+        while (cap < mb->len + n + 1)
+            cap *= 2;
+        char *grown = arena_alloc(&mb->vm->compiler.parser_arena, cap);
+        memcpy(grown, mb->p, mb->len);
+        mb->p   = grown;
+        mb->cap = cap;
+    }
+    memcpy(mb->p + mb->len, s, n);
+    mb->len        += n;
+    mb->p[mb->len]  = 0;
+}
+
+static void mb_puts(MangleBuf *mb, const char *s) {
+    mb_putn(mb, s, strlen(s));
+}
+
+static void mb_putu(MangleBuf *mb, unsigned long long v) {
+    char text[24];
+    int  n = snprintf(text, sizeof text, "%llu", v);
+    mb_putn(mb, text, n);
+}
+
+static void mangle_type(MangleBuf *mb, Type *ty, Token *site);
+
+static void mangle_tag(MangleBuf *mb, Token *tag, const char *kw, Token *site) {
+    if (!tag)
+        error_tok(mb->vm, site,
+                  "template argument must be a named type; give the %s a tag",
+                  kw);
+    mb_puts(mb, kw);
+    mb_puts(mb, "_");
+    mb_putn(mb, tag->loc, tag->len);
+}
+
+static void mangle_base(MangleBuf *mb, Type *ty, Token *site) {
     const char *u = ty->is_unsigned ? "unsigned_" : "";
     switch (ty->kind) {
         case TY_VOID:
-            return "void";
+            return mb_puts(mb, "void");
         case TY_BOOL:
-            return "bool";
+            return mb_puts(mb, "bool");
         case TY_CHAR:
-            return arena_format(vm, "%schar", u);
+            mb_puts(mb, u);
+            return mb_puts(mb, "char");
         case TY_SHORT:
-            return arena_format(vm, "%sshort", u);
+            mb_puts(mb, u);
+            return mb_puts(mb, "short");
         case TY_INT:
-            return arena_format(vm, "%sint", u);
+            mb_puts(mb, u);
+            return mb_puts(mb, "int");
         case TY_LONG:
-            return arena_format(vm, "%s%s", u,
-                                ty->is_long_long ? "long_long" : "long");
+            mb_puts(mb, u);
+            return mb_puts(mb, ty->is_long_long ? "long_long" : "long");
         case TY_FLOAT:
-            return "float";
+            return mb_puts(mb, "float");
         case TY_DOUBLE:
-            return "double";
+            return mb_puts(mb, "double");
         case TY_LDOUBLE:
-            return "long_double";
+            return mb_puts(mb, "long_double");
         case TY_FLOAT16:
-            return "_Float16";
+            return mb_puts(mb, "_Float16");
         case TY_DECIMAL32:
-            return "_Decimal32";
+            return mb_puts(mb, "_Decimal32");
         case TY_DECIMAL64:
-            return "_Decimal64";
+            return mb_puts(mb, "_Decimal64");
         case TY_DECIMAL128:
-            return "_Decimal128";
+            return mb_puts(mb, "_Decimal128");
         case TY_NULLPTR_T:
-            return "nullptr_t";
+            return mb_puts(mb, "nullptr_t");
         case TY_BITINT:
-            return arena_format(vm, "%s_BitInt%d",
-                                ty->is_unsigned ? "unsigned__" : "",
-                                ty->bit_width);
+            mb_puts(mb, ty->is_unsigned ? "unsigned__" : "");
+            mb_puts(mb, "_BitInt");
+            return mb_putu(mb, ty->bit_width);
         case TY_COMPLEX:
-            return arena_format(vm, "complex_%s",
-                                mangle_type(vm, ty->base, site));
+            mb_puts(mb, "complex_");
+            return mangle_type(mb, ty->base, site);
         case TY_VECTOR:
-            return arena_format(vm, "vec%d_%s", ty->size,
-                                mangle_type(vm, ty->base, site));
+            mb_puts(mb, "vec");
+            mb_putu(mb, ty->size);
+            mb_puts(mb, "_");
+            return mangle_type(mb, ty->base, site);
         case TY_ENUM:
-            return mangle_tag(vm, type_agg(ty)->enum_tag, "enum", site);
+            return mangle_tag(mb, type_agg(ty)->enum_tag, "enum", site);
         case TY_STRUCT:
-            return mangle_tag(vm, type_agg(ty)->struct_tag, "struct", site);
+            return mangle_tag(mb, type_agg(ty)->struct_tag, "struct", site);
         case TY_UNION:
-            return mangle_tag(vm, type_agg(ty)->struct_tag, "union", site);
+            return mangle_tag(mb, type_agg(ty)->struct_tag, "union", site);
         case TY_PTR:
-            return arena_format(vm, "%s_ptr", mangle_type(vm, ty->base, site));
+            mangle_type(mb, ty->base, site);
+            return mb_puts(mb, "_ptr");
         case TY_ARRAY:
+            mangle_type(mb, ty->base, site);
             if (ty->array_len < 0 || ty->is_flexible)
-                return arena_format(vm, "%s_arr",
-                                    mangle_type(vm, ty->base, site));
-            return arena_format(vm, "%s_arr%d", mangle_type(vm, ty->base, site),
-                                ty->array_len);
+                return mb_puts(mb, "_arr");
+            mb_puts(mb, "_arr");
+            return mb_putu(mb, ty->array_len);
         case TY_FUNC: {
-            char *s = arena_format(vm, "fn_%s_of",
-                                   mangle_type(vm, ty->return_ty, site));
-            int   n = 0;
-            for (Type *p = ty->params; p; p = p->next, n++)
-                s = arena_format(vm, "%s_%s", s, mangle_type(vm, p, site));
+            mb_puts(mb, "fn_");
+            mangle_type(mb, ty->return_ty, site);
+            mb_puts(mb, "_of");
+            int n = 0;
+            for (Type *p = ty->params; p; p = p->next, n++) {
+                mb_puts(mb, "_");
+                mangle_type(mb, p, site);
+            }
             if (!n && !ty->is_variadic)
-                s = arena_format(vm, "%s_void", s);
-            return arena_format(vm, "%s%s_end", s,
-                                ty->is_variadic ? "_va" : "");
+                mb_puts(mb, "_void");
+            mb_puts(mb, ty->is_variadic ? "_va_end" : "_end");
+            return;
         }
         case TY_VLA:
-            error_tok(vm, site,
+            error_tok(mb->vm, site,
                       "a variable-length array cannot be a template argument");
         case TY_BLOCK:
-            error_tok(vm, site, "a block type cannot be a template argument");
+            error_tok(mb->vm, site,
+                      "a block type cannot be a template argument");
         default:
-            error_tok(vm, site, "this type cannot be a template argument");
+            error_tok(mb->vm, site, "this type cannot be a template argument");
     }
 }
 
-static char *mangle_type(VirtualMachine *vm, Type *ty, Token *site) {
+static void mangle_type(MangleBuf *mb, Type *ty, Token *site) {
     if (ty->checked_kind != CHECKED_NONE)
-        error_tok(vm, site,
+        error_tok(mb->vm, site,
                   "a checked-pointer type cannot be a template argument");
     if (ty->addr_space != AS_NONE)
-        error_tok(vm, site,
+        error_tok(mb->vm, site,
                   "an address-space type cannot be a template argument");
 
-    char *s = mangle_base(vm, ty, site);
     if (ty->kind == TY_PTR) {
+        mangle_base(mb, ty, site);
         if (ty->is_const)
-            s = arena_format(vm, "%s_const", s);
+            mb_puts(mb, "_const");
         if (ty->is_volatile)
-            s = arena_format(vm, "%s_volatile", s);
+            mb_puts(mb, "_volatile");
         if (ty->is_restrict)
-            s = arena_format(vm, "%s_restrict", s);
+            mb_puts(mb, "_restrict");
         if (ty->is_atomic)
-            s = arena_format(vm, "%s_atomic", s);
-        return s;
+            mb_puts(mb, "_atomic");
+        return;
     }
-    if (ty->is_atomic)
-        s = arena_format(vm, "atomic_%s", s);
-    if (ty->is_restrict)
-        s = arena_format(vm, "restrict_%s", s);
-    if (ty->is_volatile)
-        s = arena_format(vm, "volatile_%s", s);
     if (ty->is_const)
-        s = arena_format(vm, "const_%s", s);
-    return s;
+        mb_puts(mb, "const_");
+    if (ty->is_volatile)
+        mb_puts(mb, "volatile_");
+    if (ty->is_restrict)
+        mb_puts(mb, "restrict_");
+    if (ty->is_atomic)
+        mb_puts(mb, "atomic_");
+    mangle_base(mb, ty, site);
 }
 
 // ---- instantiation --------------------------------------------------------
@@ -921,74 +1038,97 @@ static Node *pointer_value(VirtualMachine *vm, Obj *sym, Type *pty, Token *tok) 
     return new_cast(vm, n, pty);
 }
 
-// Binds parameter `i` in `bindings` to `arg` and returns the parameter's type.
-// A constant parameter's type is parsed here so it can name the type
-// parameters bound before it. A float or pointer parameter is bound to a
-// constexpr object kept in `*hidden` until the instance has its name.
-static Type *bind_param(VirtualMachine *vm, Template *t, int i, TemplateArg *arg,
-                        Scope *bindings, Token *site, Obj **hidden) {
+// The type of constant parameter `i`, parsed from its declaration so it can
+// name the type parameters bound before it. A type that names no earlier
+// parameter is the same for every instance and is kept on the template.
+static Type *param_type(VirtualMachine *vm, Template *t, int i) {
     TemplateParam *p = &t->params[i];
-    Type          *ty;
-    Node          *value = NULL;
-    if (!p->type_start) {
-        ty = arg->ty;
-    } else {
-        Token *rest;
-        Token *toks = clone_range(vm, p->type_start, p->decl_end);
-        ty          = declspec(vm, &rest, toks, NULL);
-        ty          = declarator(vm, &rest, rest, ty);
-        if (rest->kind != TK_EOF || !ty->name || ty->name->len != p->name->len ||
-            strncmp(ty->name->loc, p->name->loc, p->name->len))
-            error_tok(vm, p->name, "malformed constant template parameter '%.*s'",
-                      (int)p->name->len, p->name->loc);
-        add_type(vm, arg->expr);
-        Type *aty = arg->expr->ty;
-        if (ty->kind == TY_LDOUBLE)
-            error_tok(vm, p->name,
-                      "constant template parameter '%.*s' cannot have type "
-                      "long double",
-                      (int)p->name->len, p->name->loc);
-        if (is_integer(ty)) {
-            if (ty->size > 8 || (ty->kind == TY_BITINT && ty->bit_width > 64))
-                error_tok(vm, p->name,
-                          "constant template parameter '%.*s' must have an "
-                          "integer type of at most 64 bits",
-                          (int)p->name->len, p->name->loc);
-            arg->val          = eval(vm, arg->expr);
-            arg->val_unsigned = aty && aty->is_unsigned;
-            if (!const_fits(ty, arg->val, arg->val_unsigned))
-                error_tok(
-                    vm, site, "template argument %s does not fit '%s'",
-                    arg->val_unsigned
-                        ? arena_format(vm, "%llu", (unsigned long long)arg->val)
-                        : arena_format(vm, "%lld", (long long)arg->val),
-                    range_text(vm, p->type_start, p->name));
-        } else if (ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE) {
-            if (!aty || !is_numeric(aty) || is_complex(aty))
-                error_tok(vm, site, "template argument for '%.*s' must be a real number",
-                          (int)p->name->len, p->name->loc);
-            double v = eval_double(vm, arg->expr);
-            if (isnan(v))
-                error_tok(vm, site, "NaN is not a valid template argument");
-            if (ty->kind == TY_FLOAT) {
-                float f = (float)v;
-                if (isinf(f) && !isinf(v))
-                    error_tok(vm, site, "template argument %s does not fit 'float'",
-                              arena_format(vm, "%g", v));
-                v = f;
-            }
-            arg->fval = v;
-            value     = new_node(vm, ND_NUM, p->name);
-            node_lit_mut(vm, value)->fval = v;
-            value->ty = ty->kind == TY_FLOAT ? ty_float : ty_double;
-        } else if (ty->kind == TY_PTR) {
-            arg->sym = pointer_arg(vm, arg->expr, ty, site);
-            value    = pointer_value(vm, arg->sym, ty, p->name);
-        } else {
+    if (p->ty)
+        return p->ty;
+    Token *rest;
+    Token *toks = clone_range(vm, p->type_start, p->decl_end);
+    Type  *ty   = declspec(vm, &rest, toks, NULL);
+    ty          = declarator(vm, &rest, rest, ty);
+    if (rest->kind != TK_EOF || !ty->name || ty->name->len != p->name->len ||
+        strncmp(ty->name->loc, p->name->loc, p->name->len))
+        error_tok(vm, p->name, "malformed constant template parameter '%.*s'",
+                  (int)p->name->len, p->name->loc);
+    if (ty->kind == TY_LDOUBLE)
+        error_tok(vm, p->name,
+                  "constant template parameter '%.*s' cannot have type "
+                  "long double",
+                  (int)p->name->len, p->name->loc);
+    if (is_integer(ty)) {
+        if (ty->size > 8 || (ty->kind == TY_BITINT && ty->bit_width > 64))
             error_tok(vm, p->name,
                       "constant template parameter '%.*s' must have an "
-                      "integer, float, double or pointer type",
+                      "integer type of at most 64 bits",
                       (int)p->name->len, p->name->loc);
+    } else if (ty->kind != TY_FLOAT && ty->kind != TY_DOUBLE &&
+               ty->kind != TY_PTR) {
+        error_tok(vm, p->name,
+                  "constant template parameter '%.*s' must have an "
+                  "integer, float, double or pointer type",
+                  (int)p->name->len, p->name->loc);
+    }
+    if (!p->dependent)
+        p->ty = ty;
+    return ty;
+}
+
+// Checks constant argument `arg` against parameter `i` of type `ty` and takes
+// its value (`val`, `fval` or `sym`).
+static void param_value(VirtualMachine *vm, Template *t, int i, Type *ty,
+                        TemplateArg *arg, Token *site) {
+    TemplateParam *p = &t->params[i];
+    add_type(vm, arg->expr);
+    Type *aty = arg->expr->ty;
+    if (is_integer(ty)) {
+        arg->val          = eval(vm, arg->expr);
+        arg->val_unsigned = aty && aty->is_unsigned;
+        if (!const_fits(ty, arg->val, arg->val_unsigned))
+            error_tok(
+                vm, site, "template argument %s does not fit '%s'",
+                arg->val_unsigned
+                    ? arena_format(vm, "%llu", (unsigned long long)arg->val)
+                    : arena_format(vm, "%lld", (long long)arg->val),
+                range_text(vm, p->type_start, p->name));
+    } else if (ty->kind == TY_PTR) {
+        arg->sym = pointer_arg(vm, arg->expr, ty, site);
+    } else {
+        if (!aty || !is_numeric(aty) || is_complex(aty))
+            error_tok(vm, site,
+                      "template argument for '%.*s' must be a real number",
+                      (int)p->name->len, p->name->loc);
+        double v = eval_double(vm, arg->expr);
+        if (isnan(v))
+            error_tok(vm, site, "NaN is not a valid template argument");
+        if (ty->kind == TY_FLOAT) {
+            float f = (float)v;
+            if (isinf(f) && !isinf(v))
+                error_tok(vm, site, "template argument %s does not fit 'float'",
+                          arena_format(vm, "%g", v));
+            v = f;
+        }
+        arg->fval = v;
+    }
+}
+
+// Binds parameter `i` in `bindings` to `arg`. A float or pointer parameter is
+// bound to a constexpr object kept in `*hidden` until the instance has its
+// name.
+static void bind_param(VirtualMachine *vm, Template *t, int i, Type *ty,
+                       TemplateArg *arg, Scope *bindings, Obj **hidden) {
+    TemplateParam *p     = &t->params[i];
+    Node          *value = NULL;
+    if (p->type_start) {
+        ty = copy_type(vm, ty);
+        if (ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE) {
+            value                         = new_node(vm, ND_NUM, p->name);
+            node_lit_mut(vm, value)->fval = arg->fval;
+            value->ty = ty->kind == TY_FLOAT ? ty_float : ty_double;
+        } else if (ty->kind == TY_PTR) {
+            value = pointer_value(vm, arg->sym, ty, p->name);
         }
     }
     vm->compiler.scope = bindings;
@@ -1004,7 +1144,7 @@ static Type *bind_param(VirtualMachine *vm, Template *t, int i, TemplateArg *arg
         cc_finalize_const_gvar(vm, obj, value);
         *hidden = obj;
         vm->compiler.scope = vm->compiler.runtime_file_scope;
-        return ty;
+        return;
     }
     VarScope *vs       = push_scope(vm, p->name->loc, p->name->len);
     vm->compiler.scope = vm->compiler.runtime_file_scope;
@@ -1016,15 +1156,14 @@ static Type *bind_param(VirtualMachine *vm, Template *t, int i, TemplateArg *arg
                        ty->kind == TY_ENUM;
         vs->type_def = tagged ? ty : copy_type(vm, ty);
     }
-    return ty;
 }
 
 // The shortest decimal that reads back as `v` in the parameter's type,
 // spelled as an identifier: `n` for the sign, `p` for the point and `m` for a
 // negative exponent (1.5 is `1p5`, -0.25 is `n0p25`, 1e-5 is `1em05`).
-static char *float_name(VirtualMachine *vm, Type *ty, double v) {
+static void float_name(MangleBuf *mb, Type *ty, double v) {
     if (isinf(v))
-        return v < 0 ? "ninf" : "inf";
+        return mb_puts(mb, v < 0 ? "ninf" : "inf");
     bool   f32 = ty->kind == TY_FLOAT;
     double a   = fabs(v);
     char   sci[64];
@@ -1043,8 +1182,8 @@ static char *float_name(VirtualMachine *vm, Type *ty, double v) {
     else
         memcpy(text, sci, sizeof sci);
 
-    char *out = arena_alloc(&vm->compiler.parser_arena, strlen(text) + 2);
-    char *w   = out;
+    char  out[80];
+    char *w = out;
     if (signbit(v))
         *w++ = 'n';
     for (const char *r = text; *r; r++) {
@@ -1055,38 +1194,39 @@ static char *float_name(VirtualMachine *vm, Type *ty, double v) {
         else if (*r != '+')
             *w++ = *r;
     }
-    *w = 0;
-    return out;
+    mb_putn(mb, out, w - out);
 }
 
 // A constant argument is spelled by the first enumerator of its enum type with
 // that value, `true`/`false` for bool, else by its number (`n` prefix when
 // negative).
-static char *mangle_arg(VirtualMachine *vm, Template *t, int i, Type *ty,
-                        const TemplateArg *arg, Token *site) {
+static void mangle_arg(MangleBuf *mb, Template *t, int i, Type *ty,
+                       const TemplateArg *arg, Token *site) {
     if (!t->params[i].type_start)
-        return mangle_type(vm, arg->ty, site);
+        return mangle_type(mb, arg->ty, site);
     if (ty->kind == TY_BOOL)
-        return arg->val ? "true" : "false";
+        return mb_puts(mb, arg->val ? "true" : "false");
     if (ty->kind == TY_FLOAT || ty->kind == TY_DOUBLE)
-        return float_name(vm, ty, arg->fval);
+        return float_name(mb, ty, arg->fval);
     if (ty->kind == TY_PTR)
-        return arg->sym ? arg->sym->name : "null";
-    char *num = !arg->val_unsigned && arg->val < 0
-                    ? arena_format(vm, "n%llu", -(unsigned long long)arg->val)
-                    : arena_format(vm, "%llu", (unsigned long long)arg->val);
-    if (ty->kind != TY_ENUM)
-        return num;
-    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
-        if (ec->value == arg->val)
-            return ec->name;
-    for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
-        if (!strcmp(ec->name, num))
-            error_tok(vm, site,
-                      "cannot name the instance: enumerator '%s' clashes with "
-                      "the number %s",
-                      num, num);
-    return num;
+        return mb_puts(mb, arg->sym ? arg->sym->name : "null");
+    bool neg = !arg->val_unsigned && arg->val < 0;
+    char num[24];
+    snprintf(num, sizeof num, neg ? "n%llu" : "%llu",
+             neg ? -(unsigned long long)arg->val
+                 : (unsigned long long)arg->val);
+    if (ty->kind == TY_ENUM) {
+        for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
+            if (ec->value == arg->val)
+                return mb_puts(mb, ec->name);
+        for (EnumConstant *ec = type_agg(ty)->enum_constants; ec; ec = ec->next)
+            if (!strcmp(ec->name, num))
+                error_tok(mb->vm, site,
+                          "cannot name the instance: enumerator '%s' clashes "
+                          "with the number %s",
+                          num, num);
+    }
+    mb_puts(mb, num);
 }
 
 // Parses a constant template argument at `tok` into `out`. Its value is taken
@@ -1131,6 +1271,29 @@ static void inst_lookup(VirtualMachine *vm, TemplateInstance *inst,
     }
 }
 
+#define TMPL_STACK_PARAMS 16
+
+// Per-parameter state of one instantiation.
+typedef struct {
+    Type *ty;
+    Obj  *hidden; // the constexpr object of a bound float or pointer parameter
+    bool  bound;
+} ParamState;
+
+// Binds parameter `i` once, creating the bindings scope on first use.
+static void bind_state(VirtualMachine *vm, Template *t, int i,
+                       ParamState *state, TemplateArg *args, Scope **bindings) {
+    if (state[i].bound)
+        return;
+    if (!*bindings) {
+        *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+        memset(*bindings, 0, sizeof(Scope));
+        vm->compiler.tmpl_bindings = *bindings;
+    }
+    bind_param(vm, t, i, state[i].ty, &args[i], *bindings, &state[i].hidden);
+    state[i].bound = true;
+}
+
 TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                                        TemplateArg *args, int nargs,
                                        Token *site) {
@@ -1144,14 +1307,25 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
         error_tok(vm, site, "template '%s' takes %d to %d arguments, %d given",
                   t->name, required, t->nparams, nargs);
     }
+    // A repeat @inst keeps its state on the stack; only a new instance moves
+    // its arguments to the arena.
+    TemplateArg  stack_args[TMPL_STACK_PARAMS];
+    ParamState   stack_state[TMPL_STACK_PARAMS];
     TemplateArg *given = args;
-    args               = arena_alloc(&vm->compiler.parser_arena,
-                                     sizeof(TemplateArg) * t->nparams);
+    ParamState  *state = stack_state;
+    if (t->nparams <= TMPL_STACK_PARAMS) {
+        args = stack_args;
+    } else {
+        args  = arena_alloc(&vm->compiler.parser_arena,
+                            sizeof(TemplateArg) * t->nparams);
+        state = arena_alloc(&vm->compiler.parser_arena,
+                            sizeof(ParamState) * t->nparams);
+    }
     memcpy(args, given, sizeof(TemplateArg) * nargs);
+    memset(state, 0, sizeof(ParamState) * t->nparams);
 
     TemplateInstance *volatile inst = NULL;
-    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
-    memset(bindings, 0, sizeof(Scope));
+    Scope       *bindings           = NULL;
 
     TmplSnapshot snap;
     snapshot_save(vm, &snap);
@@ -1169,24 +1343,29 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     }
 
     snapshot_clear(vm);
-    vm->compiler.scope         = vm->compiler.runtime_file_scope;
-    vm->compiler.tmpl_bindings = bindings;
-    vm->compiler.tmpl_anchor   = vm->compiler.runtime_file_scope;
+    vm->compiler.scope       = vm->compiler.runtime_file_scope;
+    vm->compiler.tmpl_anchor = vm->compiler.runtime_file_scope;
 
-    Obj **hidden =
-        arena_alloc(&vm->compiler.parser_arena, sizeof(Obj *) * t->nparams);
-    memset(hidden, 0, sizeof(Obj *) * t->nparams);
-    char *mangled = t->name;
+    // The name is built from the arguments alone. A parameter is bound (made
+    // visible to the template's later types and defaults) only when one of
+    // them names it; the rest are bound if the instance turns out to be new.
+    MangleBuf mb;
+    mb_init(&mb, vm);
+    mb_puts(&mb, t->name);
     for (int i = 0; i < t->nparams; i++) {
+        TemplateParam *p = &t->params[i];
         if (i >= nargs)
             default_arg(vm, t, i, &args[i]);
-        Type *pty = bind_param(vm, t, i, &args[i], bindings, site, &hidden[i]);
-        mangled   = arena_format(vm, "%s__%s", mangled,
-                                 mangle_arg(vm, t, i, pty, &args[i], site));
+        state[i].ty = p->type_start ? param_type(vm, t, i) : args[i].ty;
+        if (p->type_start)
+            param_value(vm, t, i, state[i].ty, &args[i], site);
+        mb_puts(&mb, "__");
+        mangle_arg(&mb, t, i, state[i].ty, &args[i], site);
+        if (p->needed)
+            bind_state(vm, t, i, state, args, &bindings);
     }
 
-    TemplateInstance *found =
-        hashmap_get(&vm->compiler.template_insts, mangled);
+    TemplateInstance *found = hashmap_get(&vm->compiler.template_insts, mb.p);
     if (found) {
         for (int i = 0; i < t->nparams; i++) {
             const Obj *x = found->args[i].sym, *y = args[i].sym;
@@ -1194,18 +1373,24 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                 error_tok(vm, site,
                           "cannot name the instance: '%s' is also the name of "
                           "a different instance",
-                          mangled);
+                          mb.p);
         }
         snapshot_restore(vm, &snap);
         vm->error_jmp_buf = saved_jb;
         if (found->state == TI_FAILED)
-            error_tok(vm, site, "instantiation of '%s' failed earlier",
-                      mangled);
+            error_tok(vm, site, "instantiation of '%s' failed earlier", mb.p);
         return found;
     }
     if (vm->compiler.tmpl_depth >= TMPL_MAX_DEPTH)
         error_tok(vm, site, "template instantiation depth exceeds %d",
                   TMPL_MAX_DEPTH);
+
+    for (int i = 0; i < t->nparams; i++)
+        bind_state(vm, t, i, state, args, &bindings);
+    char *mangled = arena_strndup(vm, mb.p, (int)mb.len);
+    args          = memcpy(arena_alloc(&vm->compiler.parser_arena,
+                                       sizeof(TemplateArg) * t->nparams),
+                           args, sizeof(TemplateArg) * t->nparams);
 
     inst = arena_alloc(&vm->compiler.parser_arena, sizeof(*inst));
     memset(inst, 0, sizeof(*inst));
@@ -1217,11 +1402,11 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     vm->compiler.tmpl_depth++;
 
     for (int i = 0; i < t->nparams; i++)
-        if (hidden[i]) {
-            hidden[i]->name = arena_format(vm, "__cccc_tp_%s__%.*s", mangled,
-                                           (int)t->params[i].name->len,
-                                           t->params[i].name->loc);
-            link_gvar(vm, hidden[i]);
+        if (state[i].hidden) {
+            state[i].hidden->name = arena_format(
+                vm, "__cccc_tp_%s__%.*s", mangled, (int)t->params[i].name->len,
+                t->params[i].name->loc);
+            link_gvar(vm, state[i].hidden);
         }
 
     ExpansionFrame *frame =
