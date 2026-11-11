@@ -28,6 +28,7 @@
 #include "./parse_internal.h"
 
 #define TMPL_MAX_DEPTH 64
+#define TMPL_MAX_ARGS  16
 
 static Token *skip_parens(Token *tok) {
     int depth = 0;
@@ -230,51 +231,10 @@ static int scan_typedef_template(Token *p, Template *t, const char **err,
     return 1;
 }
 
-// Classifies the declaration at `start`. Returns 0 when it is not a template,
-// 1 with `t` filled in when it is, and -1 with `err`/`err_tok` set when it is a
-// malformed one. Allocates only the parameter array.
-int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
-                     const char **err, Token **err_tok) {
-    memset(t, 0, sizeof(*t));
-    t->start = start;
-
-    Token *p = start;
-    for (;;) {
-        Token *q = skip_attr_groups(p);
-        if (q != p) {
-            p = q;
-            continue;
-        }
-        if (equal(p, "typedef") || equal(p, "extern")) {
-            Token *probe = p;
-            while (probe->kind != TK_EOF && !equal(probe, ";") &&
-                   !equal(probe, "{") && !equal(probe, "__cccc_template"))
-                probe = probe->next;
-            if (!equal(probe, "__cccc_template"))
-                return 0;
-            *err     = "a template cannot be typedef or extern";
-            *err_tok = p;
-            return -1;
-        }
-        if (is_linkage_kw(p)) {
-            p = p->next;
-            continue;
-        }
-        break;
-    }
-    if (!equal(p, "__cccc_template"))
-        return 0;
-
-    t->marker = p;
-    p         = p->next;
-    if (!equal(p, "(")) {
-        *err     = "expected '(' after @template";
-        *err_tok = p;
-        return -1;
-    }
-    Token *close  = skip_parens(p);
-    t->marker_end = close;
-
+// Parses the parameter list between `p` (the `(`) and `close`, the token after
+// its `)`, into `t`. Returns 0, or -1 with `err`/`err_tok` set.
+static int scan_params(VirtualMachine *vm, Token *p, Token *close, Template *t,
+                       const char **err, Token **err_tok) {
     int n         = 0;
     for (Token *a = p->next; a != close->next && !equal(a, ")"); a = a->next)
         n++;
@@ -400,6 +360,60 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         *err_tok = t->marker;
         return -1;
     }
+    return 0;
+}
+
+// Classifies the declaration at `start`. Returns 0 when it is not a template
+// (or, with `special`, a specialization), 1 with `t` filled in when it is, and
+// -1 with `err`/`err_tok` set when it is a malformed one. Allocates only the
+// parameter array; a specialization's argument list is left unparsed.
+static int template_scan(VirtualMachine *vm, Token *start, Template *t,
+                         const char **err, Token **err_tok, bool special) {
+    const char *marker_kw = special ? "__cccc_specialize" : "__cccc_template";
+    const char *what      = special ? "specialization" : "template";
+    memset(t, 0, sizeof(*t));
+    t->start = start;
+
+    Token *p = start;
+    for (;;) {
+        Token *q = skip_attr_groups(p);
+        if (q != p) {
+            p = q;
+            continue;
+        }
+        if (equal(p, "typedef") || equal(p, "extern")) {
+            Token *probe = p;
+            while (probe->kind != TK_EOF && !equal(probe, ";") &&
+                   !equal(probe, "{") && !equal(probe, marker_kw))
+                probe = probe->next;
+            if (!equal(probe, marker_kw))
+                return 0;
+            *err = arena_format(vm, "a %s cannot be typedef or extern", what);
+            *err_tok = p;
+            return -1;
+        }
+        if (is_linkage_kw(p)) {
+            p = p->next;
+            continue;
+        }
+        break;
+    }
+    if (!equal(p, marker_kw))
+        return 0;
+
+    t->marker = p;
+    p         = p->next;
+    if (!equal(p, "(")) {
+        *err     = special ? "expected '(' after @specialize"
+                           : "expected '(' after @template";
+        *err_tok = p;
+        return -1;
+    }
+    Token *close  = skip_parens(p);
+    t->marker_end = close;
+
+    if (!special && scan_params(vm, p, close, t, err, err_tok) < 0)
+        return -1;
 
     p = t->marker_end;
     for (;;) {
@@ -419,20 +433,22 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         t->kind = equal(p, "struct") ? TMPL_STRUCT : TMPL_UNION;
         p       = skip_attr_groups(p->next);
         if (p->kind != TK_IDENT) {
-            *err     = "a template struct or union needs a tag name";
+            *err =
+                arena_format(vm, "a %s struct or union needs a tag name", what);
             *err_tok = p;
             return -1;
         }
         t->name_tok = p;
         p           = skip_attr_groups(p->next);
         if (!equal(p, "{")) {
-            *err     = "a template must be a definition";
+            *err     = arena_format(vm, "a %s must be a definition", what);
             *err_tok = p;
             return -1;
         }
         Token *end = match_brace(p);
         if (!end || !equal(end->next, ";")) {
-            *err     = "a template struct or union cannot declare variables";
+            *err = arena_format(
+                vm, "a %s struct or union cannot declare variables", what);
             *err_tok = end ? end->next : p;
             return -1;
         }
@@ -443,7 +459,7 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
         t->kind = TMPL_ENUM;
         p       = skip_attr_groups(p->next);
         if (p->kind != TK_IDENT) {
-            *err     = "a template enum needs a tag name";
+            *err     = arena_format(vm, "a %s enum needs a tag name", what);
             *err_tok = p;
             return -1;
         }
@@ -453,13 +469,13 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
             while (p->kind != TK_EOF && !equal(p, "{") && !equal(p, ";"))
                 p = p->next;
         if (!equal(p, "{")) {
-            *err     = "a template must be a definition";
+            *err     = arena_format(vm, "a %s must be a definition", what);
             *err_tok = p;
             return -1;
         }
         Token *end = match_brace(p);
         if (!end || !equal(end->next, ";")) {
-            *err     = "a template enum cannot declare variables";
+            *err = arena_format(vm, "a %s enum cannot declare variables", what);
             *err_tok = end ? end->next : p;
             return -1;
         }
@@ -474,19 +490,21 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     if (!q)
         return -1;
     if (!d.name || !d.params) {
-        *err = "@template must be a struct, union, enum, typedef or function "
-               "definition";
+        *err     = arena_format(vm,
+                                "@%s must be a struct, union, enum, typedef or "
+                                "function definition",
+                                special ? "specialize" : "template");
         *err_tok = q->kind == TK_EOF ? p : q;
         return -1;
     }
     if (!equal(q, "{")) {
-        *err     = "a template must be a definition";
+        *err     = arena_format(vm, "a %s must be a definition", what);
         *err_tok = q;
         return -1;
     }
     Token *end = match_brace(q);
     if (!end) {
-        *err     = "unterminated template body";
+        *err     = arena_format(vm, "unterminated %s body", what);
         *err_tok = q;
         return -1;
     }
@@ -495,6 +513,11 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     t->body_open = q;
     t->end       = end->next;
     return 1;
+}
+
+int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
+                     const char **err, Token **err_tok) {
+    return template_scan(vm, start, t, err, err_tok, false);
 }
 
 // Capture arm of parse_file_scope_decls: records a `@template` definition and
@@ -528,11 +551,12 @@ Template *cc_find_template(VirtualMachine *vm, Token *name) {
     return hashmap_get2(&vm->compiler.templates, name->loc, name->len);
 }
 
-// Reports a stray `@template` the capture arm did not consume.
+// Reports a stray `@template` or `@specialize` the capture arm did not consume.
 void cc_template_misplaced(VirtualMachine *vm, Token *tok) {
     error_tok(vm, tok,
-              "@template is only allowed on a file-scope struct, union, enum, "
-              "typedef or function definition");
+              "@%s is only allowed on a file-scope struct, union, enum, "
+              "typedef or function definition",
+              equal(tok, "__cccc_specialize") ? "specialize" : "template");
 }
 
 // ---- mangling -------------------------------------------------------------
@@ -1287,9 +1311,11 @@ static void bind_state(VirtualMachine *vm, Template *t, int i,
     state[i].bound = true;
 }
 
-TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
-                                       TemplateArg *args, int nargs,
-                                       Token *site) {
+// With `def`, registers it as the hand-written definition of the argument list
+// instead of instantiating; the first `@inst` of that list parses it.
+static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
+                                     TemplateArg *args, int nargs, Token *site,
+                                     Template *def) {
     int required = t->nparams;
     while (required > 0 && t->params[required - 1].def)
         required--;
@@ -1359,6 +1385,29 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     }
 
     TemplateInstance *found = hashmap_get(&vm->compiler.template_insts, mb.p);
+    if (def && found)
+        error_tok(vm, site,
+                  found->state == TI_SPECIALIZED
+                      ? "redefinition of specialization '%s'"
+                      : "specialization of '%s' after its first use",
+                  mb.p);
+    if (def) {
+        TemplateInstance *spec =
+            arena_alloc(&vm->compiler.parser_arena, sizeof(*spec));
+        memset(spec, 0, sizeof(*spec));
+        spec->tmpl    = t;
+        spec->mangled = arena_strndup(vm, mb.p, (int)mb.len);
+        spec->state   = TI_SPECIALIZED;
+        spec->spec    = def;
+        spec->args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
+                                           sizeof(TemplateArg) * t->nparams),
+                               args, sizeof(TemplateArg) * t->nparams);
+        hashmap_put(&vm->compiler.template_insts, spec->mangled, spec);
+        snapshot_restore(vm, &snap);
+        vm->error_jmp_buf = saved_jb;
+        return spec;
+    }
+    bool from_spec = found && found->state == TI_SPECIALIZED;
     if (found) {
         for (int i = 0; i < t->nparams; i++) {
             const Obj *x = found->args[i].sym, *y = args[i].sym;
@@ -1368,33 +1417,46 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
                           "a different instance",
                           mb.p);
         }
-        snapshot_restore(vm, &snap);
-        vm->error_jmp_buf = saved_jb;
-        if (found->state == TI_FAILED)
-            error_tok(vm, site, "instantiation of '%s' failed earlier", mb.p);
-        return found;
+        if (!from_spec) {
+            snapshot_restore(vm, &snap);
+            vm->error_jmp_buf = saved_jb;
+            if (found->state == TI_FAILED)
+                error_tok(vm, site, "instantiation of '%s' failed earlier",
+                          mb.p);
+            return found;
+        }
     }
     if (vm->compiler.tmpl_depth >= TMPL_MAX_DEPTH)
         error_tok(vm, site, "template instantiation depth exceeds %d",
                   TMPL_MAX_DEPTH);
 
-    for (int i = 0; i < t->nparams; i++)
-        bind_state(vm, t, i, state, args, &bindings);
-    char *mangled = arena_strndup(vm, mb.p, (int)mb.len);
-    args          = memcpy(arena_alloc(&vm->compiler.parser_arena,
-                                       sizeof(TemplateArg) * t->nparams),
-                           args, sizeof(TemplateArg) * t->nparams);
+    char *mangled;
+    if (from_spec) {
+        // The definition is plain C: the parameter names are not visible.
+        mangled                    = found->mangled;
+        inst                       = found;
+        inst->state                = TI_IN_PROGRESS;
+        vm->compiler.tmpl_bindings = NULL;
+        t                          = found->spec;
+    } else {
+        for (int i = 0; i < t->nparams; i++)
+            bind_state(vm, t, i, state, args, &bindings);
+        mangled = arena_strndup(vm, mb.p, (int)mb.len);
+        args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
+                                     sizeof(TemplateArg) * t->nparams),
+                         args, sizeof(TemplateArg) * t->nparams);
 
-    inst = arena_alloc(&vm->compiler.parser_arena, sizeof(*inst));
-    memset(inst, 0, sizeof(*inst));
-    inst->tmpl    = t;
-    inst->mangled = mangled;
-    inst->state   = TI_IN_PROGRESS;
-    inst->args    = args;
-    hashmap_put(&vm->compiler.template_insts, mangled, inst);
+        inst    = arena_alloc(&vm->compiler.parser_arena, sizeof(*inst));
+        memset(inst, 0, sizeof(*inst));
+        inst->tmpl    = t;
+        inst->mangled = mangled;
+        inst->state   = TI_IN_PROGRESS;
+        inst->args    = args;
+        hashmap_put(&vm->compiler.template_insts, mangled, inst);
+    }
     vm->compiler.tmpl_depth++;
 
-    for (int i = 0; i < t->nparams; i++)
+    for (int i = 0; i < t->nparams && !from_spec; i++)
         if (state[i].hidden) {
             state[i].hidden->name = arena_format(
                 vm, "__cccc_tp_%s__%.*s", mangled, (int)t->params[i].name->len,
@@ -1441,6 +1503,25 @@ TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
     return inst;
 }
 
+TemplateInstance *instantiate_template(VirtualMachine *vm, Template *t,
+                                       TemplateArg *args, int nargs,
+                                       Token *site) {
+    return instantiate(vm, t, args, nargs, site, NULL);
+}
+
+// Parses argument `n` of `t` at `tok`: a type, or a constant expression where
+// the template's parameter is a constant.
+static void parse_inst_arg(VirtualMachine *vm, Template *t, int n, Token **rest,
+                           Token *tok, TemplateArg *out) {
+    if (n == TMPL_MAX_ARGS)
+        error_tok(vm, tok, "too many template arguments");
+    memset(out, 0, sizeof(*out));
+    if (n < t->nparams && t->params[n].type_start)
+        parse_const_arg(vm, rest, tok, out);
+    else
+        out->ty = typename(vm, rest, tok);
+}
+
 // Parses the rewritten `( Name {, Arg} )` after the `__cccc_inst` marker at
 // `tok` and returns the (possibly new) instance. Each argument is a type or a
 // constant expression according to the template's parameter at that position.
@@ -1453,17 +1534,10 @@ TemplateInstance *cc_parse_template_inst(VirtualMachine *vm, Token **rest,
         error_tok(vm, tok, "'%.*s' is not a template", (int)tok->len, tok->loc);
     tok = tok->next;
 
-    TemplateArg args[16];
+    TemplateArg args[TMPL_MAX_ARGS];
     int         n = 0;
     while (equal(tok, ",")) {
-        if (n == 16)
-            error_tok(vm, tok, "too many template arguments");
-        memset(&args[n], 0, sizeof(args[n]));
-        if (n < t->nparams && t->params[n].type_start) {
-            parse_const_arg(vm, &tok, tok->next, &args[n]);
-        } else {
-            args[n].ty = typename(vm, &tok, tok->next);
-        }
+        parse_inst_arg(vm, t, n, &tok, tok->next, &args[n]);
         n++;
     }
     *rest = skip(vm, tok, ")");
@@ -1489,4 +1563,68 @@ Token *cc_template_force_inst(VirtualMachine *vm, Token *tok) {
         return NULL;
     cc_parse_template_inst(vm, &after, tok);
     return skip(vm, after, ";");
+}
+
+int cc_specialize_scan(VirtualMachine *vm, Token *start, Template *t,
+                       const char **err, Token **err_tok) {
+    return template_scan(vm, start, t, err, err_tok, true);
+}
+
+static const char *kind_name(TemplateKind kind) {
+    switch (kind) {
+        case TMPL_STRUCT:
+            return "struct";
+        case TMPL_UNION:
+            return "union";
+        case TMPL_ENUM:
+            return "enum";
+        case TMPL_TYPEDEF:
+            return "typedef";
+        default:
+            return "function";
+    }
+}
+
+// Capture arm of parse_file_scope_decls: records `@specialize(Args) decl` as
+// the definition of that argument list and returns the token after it, or NULL
+// when `tok` starts something else.
+Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
+    Template    scan;
+    const char *err     = NULL;
+    Token      *err_tok = NULL;
+    int         r       = cc_specialize_scan(vm, tok, &scan, &err, &err_tok);
+    if (r < 0)
+        error_tok(vm, err_tok, "%s", err);
+    if (r == 0)
+        return NULL;
+    if (vm->compiler.in_macro_mode)
+        error_tok(vm, scan.marker,
+                  "@specialize is not supported in comptime code");
+
+    Template *t = cc_find_template(vm, scan.name_tok);
+    if (!t)
+        error_tok(vm, scan.name_tok, "'%.*s' is not a template",
+                  (int)scan.name_tok->len, scan.name_tok->loc);
+    if (t->kind != scan.kind)
+        error_tok(vm, scan.name_tok, "'%s' is a %s template, not a %s", t->name,
+                  kind_name(t->kind), kind_name(scan.kind));
+
+    TemplateArg args[TMPL_MAX_ARGS];
+    int         n = 0;
+    Token      *a = scan.marker->next->next;
+    while (!equal(a, ")")) {
+        parse_inst_arg(vm, t, n, &a, a, &args[n]);
+        n++;
+        if (equal(a, ","))
+            a = a->next;
+        else if (!equal(a, ")"))
+            error_tok(vm, a, "expected ',' or ')' in @specialize");
+    }
+
+    Template *def = arena_alloc(&vm->compiler.parser_arena, sizeof(Template));
+    *def          = scan;
+    def->name     = t->name;
+    def->name_len = t->name_len;
+    instantiate(vm, t, args, n, scan.marker, def);
+    return scan.end;
 }

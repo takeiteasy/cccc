@@ -4730,7 +4730,8 @@ static Node *primary(VirtualMachine *vm, Token **rest, Token *tok) {
         return call;
     }
 
-    if (vm->compiler.saw_templates && equal(tok, "__cccc_template"))
+    if (vm->compiler.saw_templates &&
+        (equal(tok, "__cccc_template") || equal(tok, "__cccc_specialize")))
         cc_template_misplaced(vm, tok);
 
     if (vm->compiler.saw_templates && equal(tok, "__cccc_inst")) {

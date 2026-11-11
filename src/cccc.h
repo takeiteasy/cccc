@@ -4138,7 +4138,12 @@ typedef struct Template {
     Token       *name_tok;
 } Template;
 
-typedef enum { TI_IN_PROGRESS, TI_DONE, TI_FAILED } TemplateInstState;
+typedef enum {
+    TI_SPECIALIZED, // hand-written, parsed on first use
+    TI_IN_PROGRESS,
+    TI_DONE,
+    TI_FAILED
+} TemplateInstState;
 
 typedef struct TemplateInstance {
     Template         *tmpl;
@@ -4147,6 +4152,7 @@ typedef struct TemplateInstance {
     Type             *ty; // struct, union, enum and typedef instances
     Obj              *fn; // function instances
     TemplateArg      *args; // resolved arguments, to detect name clashes
+    Template         *spec; // TI_SPECIALIZED: the hand-written definition
 } TemplateInstance;
 
 typedef struct Compiler {

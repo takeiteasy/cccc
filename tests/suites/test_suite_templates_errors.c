@@ -81,6 +81,13 @@ void test_template_inside_function(void) {
     @template(T) T inner(T a) { return a; }
 }
 
+[[cccc::test(error = "@specialize is only allowed on a file-scope")]]
+void test_specialize_inside_function(void) {
+    @specialize(int) struct Vec {
+        int a;
+    };
+}
+
 [[cccc::test(error = "checked-pointer type cannot be a template argument")]]
 void test_checked_pointer_argument(void) {
     int * [[cccc::single]] p = 0;

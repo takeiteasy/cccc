@@ -8,7 +8,7 @@ CCCC is a C bytecode compiler and VM that acts as a drop-in frontend for `cc`/`c
 |---|---|
 | **Compile-time macros** | `@comptime` functions run during compilation: rewrite call sites, generate functions, globals and types ([macros.md](macros.md)) |
 | **Derive attributes** | `@serialize`, `@to_json`, `@to_string`, `@equals`, ... generate code for a type ([derive.md](derive.md)) |
-| **Templates** | `@template(T, int N = 8)` structs, unions, enums, typedefs and functions, instantiated with `@inst(Type, 16) Name` ([templates.md](templates.md)) |
+| **Templates** | `@template(T, int N = 8)` structs, unions, enums, typedefs and functions, instantiated with `@inst(Type, 16) Name` and specialised per argument list with `@specialize` ([templates.md](templates.md)) |
 | **Attributes** | GNU `__attribute__`, C23 `[[...]]` and the `@name` shorthand ([attributes.md](attributes.md)) |
 | **Operators and methods** | `[[cccc::operator(+)]]` and `[[cccc::method(T)]]` bind operators and `s.f(x)` calls to functions on structs, written free or in the struct body ([operators.md](operators.md), [methods.md](methods.md)) |
 | **Syntax extensions** | `@name` attributes, struct-body methods and operators, `<=>`, `^^name` reflection, quasi-quotes ([syntax.md](syntax.md)) |

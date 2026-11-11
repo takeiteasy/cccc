@@ -4511,7 +4511,8 @@ static Token *matching_paren(Token *open) {
 // Rewrites the three `@inst` spellings
 //   @inst(Args) Name      @inst Name      Name@(Args)
 // into `__cccc_inst ( Name , Args )`, the form the parser handles, and
-// `@template` into `__cccc_template`.
+// `@template` into `__cccc_template` and `@specialize` into
+// `__cccc_specialize`.
 static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
     Token *tok       = *tok_ptr;
     Token *site      = NULL; // token the instantiation is reported at
@@ -4527,12 +4528,17 @@ static bool try_rewrite_template_marker(VirtualMachine *vm, Token **tok_ptr) {
         args_open = tok->next->next;
     } else if (equal(tok, "@") && tok->next && tok->next->kind == TK_IDENT) {
         Token *kw = tok->next;
-        if (kw->len == 8 && !strncmp(kw->loc, "template", 8)) {
+        bool   is_template = kw->len == 8 && !strncmp(kw->loc, "template", 8);
+        bool   is_specialize =
+            kw->len == 10 && !strncmp(kw->loc, "specialize", 10);
+        if (is_template || is_specialize) {
             if (ctx_top(vm) && ctx_top(vm)->type == CTX_COMPTIME)
-                error_tok(vm, tok,
-                          "@template is not supported in comptime code");
+                error_tok(vm, tok, "@%s is not supported in comptime code",
+                          is_template ? "template" : "specialize");
             Token *last;
-            Token *new_toks = synth_tokens(vm, tok, "__cccc_template ", &last);
+            Token *new_toks = synth_tokens(
+                vm, tok,
+                is_template ? "__cccc_template " : "__cccc_specialize ", &last);
             tok_rare_mut(vm, last)->src_site = kw;
             last->next                       = kw->next;
             new_toks->at_bol                 = tok->at_bol;

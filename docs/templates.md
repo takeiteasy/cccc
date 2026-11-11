@@ -168,6 +168,34 @@ typedef @inst(int) Vec IntVec;     // type alias
 #define max_int @inst(int) max     // function alias
 ```
 
+## Specialization
+
+`@specialize(Args) <definition>` replaces the template's body for one argument list. It takes the arguments `@inst` does, defaults included, and the same kind of definition as the template: a struct, union, enum, typedef or function.
+
+```c
+@template(T) struct Vec { T *data; size_t len; };
+@specialize(bool) struct Vec { uint64_t bits; size_t len; };
+
+@template(T) T pick(T a, T b) { return a > b ? a : b; }
+@specialize(bool) bool pick(bool a, bool b) { return a || b; }
+
+@inst(bool) Vec v = {5, 2};      // the specialization: struct Vec__bool
+@inst(int) Vec w = {0};          // the template: struct Vec__int
+```
+
+| Rule | Detail |
+|---|---|
+| Order | The template comes first; a specialization comes before the first `@inst` of its argument list |
+| Kind | Matches the template: a struct template takes a struct specialization |
+| Body | Plain C. The template's parameter names are not visible, and the template's own name stands for the instance as it does in a template body |
+| Attributes | Only those written on the specialization: `@specialize(int) @equals struct Cell {...}` generates `Cell__int_equals` |
+| Signature | A function specialization is not checked against the template's signature |
+| Unused | A specialization nobody instantiates is never compiled |
+| Where | File scope only; not in comptime code |
+| Errors | `redefinition of specialization 'Vec__bool'`, `specialization of 'Vec__bool' after its first use`, `'Vec' is a struct template, not a union` |
+
+A specialization in a header applies in every file that includes it.
+
 ## Instance names
 
 An instance is named `Name__Arg` for each argument, built from the argument's resolved type, so `size_t` and `unsigned long` are the same instance. Use the mangled name directly once the instance exists.
@@ -226,10 +254,10 @@ _Bool same = Cell__int_equals(&x, &y);
 | Not supported | Result |
 |---|---|
 | `long double` or `_BitInt` over 64 bits constant parameter, a NaN argument | Compile error |
-| Specialization | A template has one definition |
+| Partial specialization | `@specialize` names every argument |
 | Argument that is a checked pointer, address-space type, block, or variable-length array | Compile error naming the kind |
 | Argument that is an unnamed struct, union or enum | Compile error asking for a tag |
-| `@template` or `@inst` in comptime code | Compile error |
+| `@template`, `@inst` or `@specialize` in comptime code | Compile error |
 | Defining a template after its first `@inst` | The template must come first |
 
 ## Diagnostics

@@ -814,7 +814,8 @@ static void cc_comptime_index_build(VirtualMachine *vm, Token **input_tokens,
                 Template    tmpl;
                 const char *err;
                 Token      *err_tok;
-                if (cc_template_scan(vm, tok, &tmpl, &err, &err_tok) > 0) {
+                if (cc_template_scan(vm, tok, &tmpl, &err, &err_tok) > 0 ||
+                    cc_specialize_scan(vm, tok, &tmpl, &err, &err_tok) > 0) {
                     tok = tmpl.end;
                     continue;
                 }
