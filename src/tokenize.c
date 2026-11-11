@@ -2321,16 +2321,6 @@ static void copy_attr_name(Token *tok, char *buf, size_t cap) {
     buf[len] = '\0';
 }
 
-static CCCCAttrTarget effective_attr_target(VirtualMachine *vm, char *name) {
-    CCCCAttrTarget target =
-        vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
-    if (target != CCCC_ATTR_TARGET_AUTO)
-        return target;
-    if (vm && vm->compiler.c_std >= CCCC_STD_C23 && attr_output_std(name))
-        return CCCC_ATTR_TARGET_C23;
-    return CCCC_ATTR_TARGET_GNU;
-}
-
 static Token *find_c23_attr_close(Token *tok) {
     if (!token_is_c23_attr_start(tok))
         return NULL;
@@ -2375,6 +2365,110 @@ static void print_attr_payload(FILE *f, Token *start, Token *end) {
     }
 }
 
+typedef enum { OUT_DROP, OUT_GNU, OUT_C23, OUT_MSVC } AttrOutKind;
+
+// One `[ns::]name[(args)]` item of an attribute list; `end` is the following
+// ',' or the list's closing token.
+typedef struct {
+    Token *ns;
+    Token *name;
+    Token *end;
+} AttrItem;
+
+typedef struct {
+    AttrOutKind kind;
+    const char *prefix; // C23 namespace for a known home, else NULL
+    Token      *ns;     // foreign namespace, spelled as written
+} AttrOut;
+
+static bool attr_ns_is(Token *ns, const char *name) {
+    char dunder[32];
+    snprintf(dunder, sizeof dunder, "__%s__", name);
+    return ns && (equal(ns, name) || equal(ns, dunder));
+}
+
+static bool next_attr_item(Token **cur, Token *close, AttrItem *it) {
+    Token *p = *cur;
+    while (p != close && equal(p, ","))
+        p = p->next;
+    if (p == close)
+        return false;
+    it->ns = NULL;
+    if (p->next != close &&
+        (equal(p->next, "::") ||
+         (equal(p->next, ":") && p->next->next && equal(p->next->next, ":")))) {
+        it->ns = p;
+        p      = equal(p->next, "::") ? p->next->next : p->next->next->next;
+        if (p == close)
+            return false;
+    }
+    it->name  = p;
+    int depth = 0;
+    for (; p != close && p->kind != TK_EOF; p = p->next) {
+        if (equal(p, "(") || equal(p, "[") || equal(p, "{"))
+            depth++;
+        else if (equal(p, ")") || equal(p, "]") || equal(p, "}"))
+            depth--;
+        else if (depth == 0 && equal(p, ","))
+            break;
+    }
+    it->end = p;
+    *cur    = p;
+    return true;
+}
+
+// Each attribute prints in its home namespace whatever it was written in:
+// cccc attributes are dropped (kept as [[cccc::...]] under --emit-cccc), the
+// rest follow --attr-target. An unknown name in a vendor namespace is kept.
+static AttrOut classify_attr(VirtualMachine *vm, const AttrItem *it) {
+    char name[128] = "";
+    copy_attr_name(it->name, name, sizeof(name));
+
+    CCCCAttrTarget target =
+        vm ? vm->compiler.attr_target : CCCC_ATTR_TARGET_AUTO;
+    bool emit_cccc = vm && vm->compiler.emit_cccc;
+    int  home      = attr_output_home(name, strlen(name));
+    bool foreign   = false;
+    if (home < 0) {
+        if (attr_ns_is(it->ns, "cccc"))
+            home = ATTR_CCCC;
+        else if (!it->ns || attr_ns_is(it->ns, "gnu"))
+            home = ATTR_GNU;
+        else
+            foreign = true;
+    }
+
+    if (home == ATTR_CCCC && !foreign)
+        return (AttrOut){emit_cccc ? OUT_C23 : OUT_DROP, "cccc::", NULL};
+    if (target == CCCC_ATTR_TARGET_STRIP)
+        return (AttrOut){OUT_DROP, NULL, NULL};
+    if (foreign)
+        return (AttrOut){OUT_C23, NULL, it->ns};
+
+    if (target == CCCC_ATTR_TARGET_MSVC)
+        return (AttrOut){OUT_MSVC, NULL, NULL};
+    if (home == ATTR_STD) {
+        bool c23 = target == CCCC_ATTR_TARGET_C23 ||
+                   (target == CCCC_ATTR_TARGET_AUTO && vm &&
+                    vm->compiler.c_std >= CCCC_STD_C23);
+        return (AttrOut){c23 ? OUT_C23 : OUT_GNU, NULL, NULL};
+    }
+    if (target == CCCC_ATTR_TARGET_C23)
+        return (AttrOut){OUT_C23, "gnu::", NULL};
+    return (AttrOut){OUT_GNU, NULL, NULL};
+}
+
+static void open_attr_group(FILE *f, AttrOutKind kind) {
+    fputs(kind == OUT_C23    ? "[["
+          : kind == OUT_MSVC ? "__declspec("
+                             : "__attribute__((",
+          f);
+}
+
+static void close_attr_group(FILE *f, AttrOutKind kind) {
+    fputs(kind == OUT_C23 ? "]]" : kind == OUT_MSVC ? ")" : "))", f);
+}
+
 static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     Token *tok = *tok_ptr;
     bool   c23 = token_is_c23_attr_start(tok);
@@ -2386,61 +2480,39 @@ static bool output_attr(FILE *f, VirtualMachine *vm, Token **tok_ptr) {
     Token *close   = c23 ? find_c23_attr_close(tok) : find_gnu_attr_close(tok);
     if (!close)
         return false;
-    Token *end         = c23 ? close->next->next : close->next->next;
 
-    Token *name_tok    = payload;
-    bool   cccc_scoped = false;
-    if (c23 && equal(name_tok, "cccc") && name_tok->next &&
-        equal(name_tok->next, ":") && name_tok->next->next &&
-        equal(name_tok->next->next, ":") && name_tok->next->next->next) {
-        cccc_scoped = true;
-        name_tok    = name_tok->next->next->next;
+    // One group per spelling, [[...]] first: gcc rejects it after
+    // __attribute__.
+    static const AttrOutKind order[] = {OUT_C23, OUT_GNU, OUT_MSVC};
+    bool                     any     = false;
+    for (int k = 0; k < 3; k++) {
+        bool     open = false;
+        AttrItem it;
+        for (Token *cur = payload; next_attr_item(&cur, close, &it);) {
+            AttrOut out = classify_attr(vm, &it);
+            if (out.kind != order[k])
+                continue;
+            if (!open) {
+                if (any)
+                    fputc(' ', f);
+                open_attr_group(f, out.kind);
+                open = any = true;
+            } else {
+                fputs(", ", f);
+            }
+            if (out.kind == OUT_C23) {
+                if (out.prefix)
+                    fputs(out.prefix, f);
+                else if (out.ns)
+                    fprintf(f, "%.*s::", out.ns->len, out.ns->loc);
+            }
+            print_attr_payload(f, it.name, it.end);
+        }
+        if (open)
+            close_attr_group(f, order[k]);
     }
 
-    char name[128] = "";
-    copy_attr_name(name_tok, name, sizeof(name));
-    if (vm && vm->compiler.emit_cccc &&
-        (cccc_scoped || attr_output_cccc(name))) {
-        // --emit-cccc: preserve CCCC-scoped attrs verbatim as
-        // [[cccc::name(...)]] rather than stripping them. `payload` already
-        // starts at "cccc" for the explicitly-scoped form; a bare cccc-only
-        // name (e.g. [[comptime]]) needs the "cccc::" prefix added back.
-        fprintf(f, "[[");
-        if (!cccc_scoped)
-            fprintf(f, "cccc::");
-        print_attr_payload(f, payload, close);
-        fprintf(f, "]]");
-        *tok_ptr = end;
-        return true;
-    }
-    if (cccc_scoped || attr_output_cccc(name) ||
-        (vm && vm->compiler.attr_target == CCCC_ATTR_TARGET_STRIP)) {
-        *tok_ptr = end;
-        return true;
-    }
-
-    CCCCAttrTarget target = effective_attr_target(vm, name);
-    switch (target) {
-        case CCCC_ATTR_TARGET_C23:
-            fprintf(f, "[[");
-            print_attr_payload(f, payload, close);
-            fprintf(f, "]]");
-            break;
-        case CCCC_ATTR_TARGET_MSVC:
-            fprintf(f, "__declspec(");
-            print_attr_payload(f, payload, close);
-            fprintf(f, ")");
-            break;
-        case CCCC_ATTR_TARGET_GNU:
-        case CCCC_ATTR_TARGET_AUTO:
-        default:
-            fprintf(f, "__attribute__((");
-            print_attr_payload(f, payload, close);
-            fprintf(f, "))");
-            break;
-    }
-
-    *tok_ptr = end;
+    *tok_ptr = close->next->next;
     return true;
 }
 

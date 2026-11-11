@@ -643,7 +643,7 @@ static void usage(const char *argv0, int exit_code) {
     printf("\t   --emit-only           With -c=generated: only emit explicitly "
            "tagged "
            "content ([[cccc::emit]])\n");
-    printf("\t   --attr-target=TARGET  Attribute spelling in generated output: "
+    printf("\t   --attr-target=TARGET  Attribute spelling in -E output: "
            "auto, c23, gnu, msvc, strip\n");
     printf("\t   --compiler-family=FAM  Host family CCCC's front end models "
            "where gcc/clang\n"
@@ -1707,6 +1707,10 @@ int main(int argc, const char *argv[]) {
 
     const struct option *long_options = cccc_long_options;
     const char         **orig_argv = argv; // watch restarts re-read the config
+    bool                 attr_target_on_cmdline = false;
+    for (int i = 1; i < argc && strcmp(argv[i], "--"); i++)
+        if (!strncmp(argv[i], "--attr-target", 13))
+            attr_target_on_cmdline = true;
     argv                           = cccc_config_expand(&argc, argv);
 
     // Find "--" separator: args after it are forwarded to the compiled program
@@ -2898,6 +2902,9 @@ int main(int argc, const char *argv[]) {
     vm.compiler.emit_strict             = emit_only;
     vm.compiler.emit_generated_only     = (bool)emit_generated_only;
     vm.compiler.attr_target             = attr_target;
+    // Only the command line: a project .cccc.toml may set it for -E use.
+    if (attr_target_on_cmdline && !preprocess_only)
+        fprintf(stderr, "warning: --attr-target only affects -E output\n");
     // Resolve --compiler-family=auto now, before any parsing -- the
     // front-end type-compat helpers (src/type.c) and __CCCC_COMPILER_FAMILY__
     // both need a settled value, never AUTO. `auto` probes CCCC_NATIVE_CC's

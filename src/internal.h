@@ -689,8 +689,8 @@ bool try_extract_attr_macro(VirtualMachine *vm, Token **tok_ptr,
 // The attribute registry (src/attr_registry.c).
 typedef enum { ATTR_CCCC, ATTR_STD, ATTR_GNU } AttrCategory;
 enum {
-    ATTR_OUT_CCCC = 1
-}; // dropped from preprocessed output unless --emit-cccc
+    ATTR_OUT_GNU = 1
+}; // a cccc attribute GCC shares: preprocessed output prints it as GNU
 typedef struct {
     const char  *name;
     AttrCategory cat;
@@ -702,8 +702,8 @@ typedef struct {
 const AttrDef *lookup_attr(const char *name, size_t len);
 // True when __has_attribute(name) reports the GNU attribute as recognized.
 bool cc_has_attribute(const char *name, int len);
-bool attr_output_cccc(const char *name);
-bool attr_output_std(const char *name);
+// The AttrCategory whose spelling preprocessed output uses, or -1 if unknown.
+int attr_output_home(const char *name, size_t len);
 
 //
 // parse.c

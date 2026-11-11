@@ -25,12 +25,12 @@
 
 static const AttrDef attr_table[] = {
     // CCCC-specific (cccc:: scoped) — vendor attrs report 1, not a date
-    {"comptime", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
-    {"emit", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
-    {"optimize", ATTR_CCCC, true, 1, 0},
-    {"test", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
-    {"test_setup", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
-    {"test_teardown", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
+    {"comptime", ATTR_CCCC, true, 1, 0},
+    {"emit", ATTR_CCCC, true, 1, 0},
+    {"optimize", ATTR_CCCC, true, 1, ATTR_OUT_GNU},
+    {"test", ATTR_CCCC, true, 1, 0},
+    {"test_setup", ATTR_CCCC, true, 1, 0},
+    {"test_teardown", ATTR_CCCC, true, 1, 0},
     // Checked C-style checked-pointer attributes (#770/#482-484). Only
     // meaningful in post-'*' qualifier position (see pointers() in parse.c);
     // listed here so @single/@array/... route to [[cccc::...]] instead of
@@ -51,8 +51,8 @@ static const AttrDef attr_table[] = {
     // appertain to a declaration or a compound statement, not to a TY_PTR
     // (see apply_checked_scope_attr(), src/parse_types.c); listed here so
     // @checked/@unchecked route to [[cccc::...]] the same way.
-    {"checked", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
-    {"unchecked", ATTR_CCCC, true, 1, ATTR_OUT_CCCC},
+    {"checked", ATTR_CCCC, true, 1, 0},
+    {"unchecked", ATTR_CCCC, true, 1, 0},
     {"trusted", ATTR_CCCC, true, 1, 0},
     {"kernel", ATTR_CCCC, true, 1, 0},
     {"global", ATTR_CCCC, true, 1, 0},
@@ -173,12 +173,13 @@ bool cc_has_attribute(const char *name, int len) {
     return a && a->has_attr;
 }
 
-bool attr_output_cccc(const char *name) {
-    const AttrDef *a = lookup_exact(name, strlen(name));
-    return (a && (a->flags & ATTR_OUT_CCCC)) || !strcmp(name, "macro");
-}
-
-bool attr_output_std(const char *name) {
-    const AttrDef *a = lookup_exact(name, strlen(name));
-    return a && a->cat == ATTR_STD;
+// The category whose spelling preprocessed output uses for `name`, or -1 when
+// the name is unknown.
+int attr_output_home(const char *name, size_t len) {
+    if (len == 5 && !strncmp(name, "macro", 5))
+        return ATTR_CCCC;
+    const AttrDef *a = lookup_attr(name, len);
+    if (!a)
+        return -1;
+    return (a->flags & ATTR_OUT_GNU) ? ATTR_GNU : (int)a->cat;
 }

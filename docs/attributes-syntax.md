@@ -33,13 +33,23 @@ Custom comptime attributes run on file-scope declarations (types, typedefs, func
 
 ## Output
 
-`-E`, `-m`, `-c=generated` and `-c=native` strip CCCC-only attributes and route markers, so the output is portable C.
+`-E` prints each attribute in its home namespace, whatever namespace it was written in, and drops CCCC-only attributes and route markers, so the output is portable C. `-m`, `-c=generated` and `-c=native` print only the attributes the output needs, in GNU spelling[^serializer].
+
+| Home | `-E` prints | Examples |
+|---|---|---|
+| CCCC | Nothing (`[[cccc::name]]` with `--emit-cccc`) | `[[single]]`, `[[gnu::single]]`, `[[cccc::test]]` |
+| Standard C23 | `[[name]]` in C23 mode, else `__attribute__((name))` | `[[gnu::nodiscard]]` prints `[[nodiscard]]` |
+| GNU | `__attribute__((name))` | `[[cccc::packed]]` and `[[clang::cold]]` print `__attribute__((packed))` and `__attribute__((cold))` |
+| Unknown name in a namespace | `[[ns::name]]` as written | `[[acme::foo(1)]]` |
+
+A list that mixes homes prints one group per spelling, `[[...]]` first.
 
 | Flag | Effect |
 |---|---|
-| `--attr-target=auto\|c23\|gnu\|msvc\|strip` | How remaining attributes are printed. `auto` emits standard C23 attributes as `[[...]]` in C23 mode and GNU `__attribute__` otherwise; GNU-only ones such as `packed` stay GNU |
+| `--attr-target=auto\|c23\|gnu\|msvc\|strip` | How `-E` prints the remaining attributes. `auto` is the table above; `c23` prints GNU ones as `[[gnu::name]]`; `gnu` always uses `__attribute__`; `msvc` uses `__declspec`; `strip` drops them. Without `-E` it warns on the command line |
 | `--emit-cccc` | Keep `[[cccc::...]]` attributes and route markers, re-emit cccc-only includes, print checked-pointer qualifiers after the `*`, and keep `_Checked[N]`/`_Nt_checked[N]` array declarators[^emit] |
 
+[^serializer]: `--attr-target` does not change them: a packed struct is `} __attribute__((packed));` whichever namespace it was written in.
 [^emit]: `test`, `comptime`, `test_setup`, `test_teardown` and `build` are consumed structurally during preprocessing whatever the flag says; `--emit-cccc` only affects attributes that would be stripped cosmetically, such as `[[cccc::emit]]`. With `-c=native` it disables the `PATH` search, so `CCCC_NATIVE_CC` must name a compiler, since a plain `cc` is not guaranteed to tolerate `[[cccc::...]]`. A checked array keeps its keyword only where it can be spelled again, as a plain declared name (`int a _Checked[4]`); in other positions, such as a pointer to a checked array, it prints as a plain array.
 
 ## Where attributes may appear
