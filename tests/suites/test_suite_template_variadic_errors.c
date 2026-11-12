@@ -22,6 +22,9 @@
 @template(Ts...) int nested(Ts... xs) {
     return sum2(sum2(xs...)...);
 }
+@template(Ts...) int nested_fold(Ts... xs) {
+    return sum2((xs + ... + 0)...);
+}
 @template(Ts...) int two_per_item(Ts... xs) {
     return h(xs... + xs...);
 }
@@ -74,9 +77,14 @@ void test_empty_fold_without_an_identity(void) {
     empty_fold @()();
 }
 
-[[cccc::test(error = "a pack expansion cannot be nested in another")]]
-void test_nested_expansion(void) {
+[[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
+void test_outer_pattern_without_a_free_pack(void) {
     nested @(int)(1);
+}
+
+[[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
+void test_outer_pattern_of_only_a_fold(void) {
+    nested_fold @(int)(1);
 }
 
 [[cccc::test(error = "a list item can hold only one pack expansion")]]

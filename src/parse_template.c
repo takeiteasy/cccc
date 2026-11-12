@@ -960,6 +960,7 @@ static bool is_enumerator(Token **names, int count, Token *p) {
 //   Ts... xs             a declaration per element: `T0 xs0, T1 xs1`
 //   f(xs)...             the pattern once per element, comma separated
 //   (xs + ...)           a fold over the elements
+// A pattern may hold expansions and folds of its own: g(h(xs, xs...)...).
 
 static bool tmpl_has_pack(const Template *t) {
     return t->nparams && t->params[t->nparams - 1].is_pack;
@@ -1110,6 +1111,22 @@ static int ex_item_end(Expander *ex, int d) {
     return i;
 }
 
+// Like ex_has_pack, but skips the items and folds that have their own `...`:
+// their packs belong to them, not to an enclosing pattern.
+static bool ex_has_free_pack(Expander *ex, int from, int to) {
+    for (int i = from; i < to;) {
+        if (ex->item_dots[i] >= 0)
+            i = ex_item_end(ex, ex->item_dots[i]);
+        else if (ex->fold_close[i] >= 0)
+            i = ex->fold_close[i] + 1;
+        else if (ex_pack_at(ex, i) >= 0)
+            return true;
+        else
+            i++;
+    }
+    return false;
+}
+
 static Token *ex_elem(Expander *ex, int pack, int k, Token *like) {
     const Pack *p = &ex->packs[pack];
     Token      *c = copy_tok(ex->vm, like);
@@ -1156,21 +1173,21 @@ static bool ex_fold_shape(Expander *ex, int o, int d, int c, FoldShape *f) {
         f->op = d + 1;
         f->a  = d + 2;
         f->b  = c;
-        return ex_has_pack(ex, f->a, f->b);
+        return ex_has_free_pack(ex, f->a, f->b);
     }
     if (d == c - 1 && lop) { // ( E op ... )
         f->op    = d - 1;
         f->a     = o + 1;
         f->b     = d - 1;
         f->right = true;
-        return ex_has_pack(ex, f->a, f->b);
+        return ex_has_free_pack(ex, f->a, f->b);
     }
     if (lop && rop) { // ( E op ... op I ) or ( I op ... op E )
         Token *l = ex->toks[d - 1], *r = ex->toks[d + 1];
         if (l->len != r->len || strncmp(l->loc, r->loc, l->len))
             return false;
-        bool pl = ex_has_pack(ex, o + 1, d - 1);
-        bool pr = ex_has_pack(ex, d + 2, c);
+        bool pl = ex_has_free_pack(ex, o + 1, d - 1);
+        bool pr = ex_has_free_pack(ex, d + 2, c);
         if (pl && pr)
             error_tok(ex->vm, ex->toks[d],
                       "only one side of a binary fold can hold a parameter "
@@ -1196,14 +1213,14 @@ static void ex_operand(Expander *ex, int a, int b, int k) {
 }
 
 // Replaces the parenthesised fold at `o` by explicitly nested parentheses.
-static void ex_fold(Expander *ex, int o) {
+static void ex_fold(Expander *ex, int o, int k) {
     FoldShape f;
     ex_fold_shape(ex, o, ex->fold_dots[o], ex->fold_close[o], &f);
     Token *op = ex->toks[f.op];
     int    n  = ex->n;
     if (n == 0) {
         if (f.binary)
-            ex_operand(ex, f.ia, f.ib, -1);
+            ex_operand(ex, f.ia, f.ib, k);
         else if (equal(op, "&&"))
             ex_text(ex, "(1)");
         else if (equal(op, "||"))
@@ -1222,23 +1239,23 @@ static void ex_fold(Expander *ex, int o) {
         for (int i = 0; i < opens; i++)
             ex_punct(ex, ex->lp);
         if (f.binary)
-            ex_operand(ex, f.ia, f.ib, -1);
+            ex_operand(ex, f.ia, f.ib, k);
         else
             ex_operand(ex, f.a, f.b, 0);
-        for (int k = f.binary ? 0 : 1; k < n; k++) {
+        for (int j = f.binary ? 0 : 1; j < n; j++) {
             ex_punct(ex, op);
-            ex_operand(ex, f.a, f.b, k);
+            ex_operand(ex, f.a, f.b, j);
             ex_punct(ex, ex->rp);
         }
         return;
     }
-    for (int k = 0; k < opens; k++) {
+    for (int j = 0; j < opens; j++) {
         ex_punct(ex, ex->lp);
-        ex_operand(ex, f.a, f.b, k);
+        ex_operand(ex, f.a, f.b, j);
         ex_punct(ex, op);
     }
     if (f.binary)
-        ex_operand(ex, f.ia, f.ib, -1);
+        ex_operand(ex, f.ia, f.ib, k);
     else
         ex_operand(ex, f.a, f.b, n - 1);
     for (int i = 0; i < opens; i++)
@@ -1279,6 +1296,7 @@ static int ex_item(Expander *ex, int s) {
             ex_range(ex, d + 2, e, k);
         }
     }
+    ex->item_dots[s] = d; // a nested item expands again per outer element
     return e;
 }
 
@@ -1288,19 +1306,13 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
     VirtualMachine *vm = ex->vm;
     for (int i = lo; i < hi;) {
         Token *tok = ex->toks[i];
-        if (ex->fold_close[i] >= 0) {
-            if (k >= 0)
-                error_tok(vm, tok,
-                          "a fold cannot be nested in a pack expansion");
-            ex_fold(ex, i);
-            i = ex->fold_close[i] + 1;
+        if (ex->item_dots[i] >= 0) {
+            i = ex_item(ex, i);
             continue;
         }
-        if (ex->item_dots[i] >= 0) {
-            if (k >= 0)
-                error_tok(vm, ex->toks[ex->item_dots[i]],
-                          "a pack expansion cannot be nested in another");
-            i = ex_item(ex, i);
+        if (ex->fold_close[i] >= 0) {
+            ex_fold(ex, i, k);
+            i = ex->fold_close[i] + 1;
             continue;
         }
         if (equal(tok, "sizeof") && i + 1 < hi &&
@@ -1435,7 +1447,10 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain,
             ex.kind[d] = DOTS_OTHER;
             continue;
         }
-        if (!ex_has_pack(&ex, s, d)) {
+        if (ex.item_dots[s] >= 0)
+            error_tok(vm, ex.toks[d],
+                      "a list item can hold only one pack expansion");
+        if (!ex_has_free_pack(&ex, s, d)) {
             Token *next = d + 1 < count ? ex.toks[d + 1] : NULL;
             if (!next || equal(next, ",") || equal(next, ")") ||
                 equal(next, ";"))
@@ -1445,9 +1460,6 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain,
             ex.kind[d] = DOTS_OTHER;
             continue;
         }
-        if (ex.item_dots[s] >= 0)
-            error_tok(vm, ex.toks[d],
-                      "a list item can hold only one pack expansion");
         ex.kind[d]      = DOTS_ITEM;
         ex.item_dots[s] = d;
     }

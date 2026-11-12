@@ -98,6 +98,26 @@
     return r + (xs + ... + 0);
 }
 
+static int mix3(int a, int b, int c) {
+    return a * 100 + b * 10 + c;
+}
+static int add2(int a, int b) {
+    return a + b;
+}
+@template(Ts...) int cross(Ts... xs) {
+    return add2(mix3(xs, xs...)...);
+}
+@template(Ts...) int scaled(Ts... xs) {
+    return add2((xs + ... + 0) * xs...);
+}
+@template(Ts...) int weighted(Ts... xs) {
+    return sum @(Ts...)(sum @(Ts...)(xs...) * xs...);
+}
+@template(Ts...) int size_cross(void) {
+    int a[] = {mix3(sizeof(Ts), sizeof(Ts)...)...};
+    return a[0] + a[1];
+}
+
 @template(int... Ns) int add_all(void) {
     return (Ns + ... + 0);
 }
@@ -355,4 +375,22 @@ void test_defaulted_constant_before_pack(void) {
     AssertEq(widths @(int, 2, 3, 4)(), 202);
     AssertEq(defd_count @(int)(), 40);
     AssertEq(defd_count @(int, char, long, long)(), 12);
+}
+
+[[cccc::test]]
+void test_expansion_inside_a_pattern(void) {
+    AssertEq(cross @(int, int)(1, 2), 112 + 212);
+    AssertEq(size_cross @(char, short)(), 112 + 212);
+}
+
+[[cccc::test]]
+void test_fold_inside_a_pattern(void) {
+    AssertEq(scaled @(int, int)(1, 2), 9);
+}
+
+[[cccc::test]]
+void test_nested_expansion_lengths(void) {
+    AssertEq(weighted @()(), 0);
+    AssertEq(weighted @(int)(5), 25);
+    AssertEq(weighted @(int, int, int)(1, 2, 3), 36);
 }

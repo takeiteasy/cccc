@@ -75,7 +75,14 @@ A declared pack has the same length as the template's pack, and expands the same
 @template(T, Ts...) struct Wrap        { @inst(T, Ts...) Tuple t; };   // forwarding
 ```
 
-A pattern holds one pack expansion and may not contain another.
+A pattern may hold expansions and folds of its own. Each `...` expands the packs inside its own pattern, and the outer pattern must name a pack outside them.
+
+```c
+@template(Ts...) int cross(Ts... xs) { return add2(mix3(xs, xs...)...); }  // add2(mix3(x0, x0, x1), mix3(x1, x0, x1))
+@template(Ts...) int scaled(Ts... xs) { return add2((xs + ... + 0) * xs ...); }
+```
+
+`g(h(xs...)...)` is an error: `the pattern before '...' contains no parameter pack`.
 
 ### Folds
 
@@ -163,7 +170,6 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | Not supported | Result |
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
-| A pack expansion inside another pack's pattern | Compile error |
 | Expanding another instance's members (`t.v0...`) | Compile error |
 
 [^names]: Two argument lists can mangle to one name, for example when an argument's own name contains `__`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.
