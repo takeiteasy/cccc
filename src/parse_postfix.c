@@ -200,6 +200,17 @@ Node *unary(VirtualMachine *vm, Token **rest, Token *tok) {
 // member "a" of the anonymous struct as "x.a".
 //
 // This function takes care of anonymous structs.
+// `Ts... name;` declared by a variadic template instance: only name0, name1,
+// ... are members.
+static bool is_member_pack(Type *ty, Token *tok) {
+    while (ty->origin)
+        ty = ty->origin;
+    for (const MemberPack *mp = type_agg(ty)->member_packs; mp; mp = mp->next)
+        if (mp->len == tok->len && !strncmp(mp->name, tok->loc, mp->len))
+            return true;
+    return false;
+}
+
 static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
     add_type(vm, node);
 
@@ -235,14 +246,17 @@ static Node *struct_ref(VirtualMachine *vm, Node *node, Token *tok) {
     for (;;) {
         Member *mem = get_struct_member(ty, tok);
         if (!mem) {
+            char *what = is_member_pack(ty, tok)
+                             ? "member pack '%.*s' must be expanded with "
+                               "'...'"
+                             : "no such member '%.*s'";
             if (vm->collect_errors &&
-                error_tok_recover(vm, tok, "no such member '%.*s'", tok->len,
-                                  tok->loc)) {
+                error_tok_recover(vm, tok, what, tok->len, tok->loc)) {
                 Node *err_node = new_node(vm, ND_MEMBER, tok);
                 err_node->ty   = ty_error;
                 return err_node;
             }
-            error_tok(vm, tok, "no such member '%.*s'", tok->len, tok->loc);
+            error_tok(vm, tok, what, tok->len, tok->loc);
         }
         node         = new_unary(vm, ND_MEMBER, node, tok);
         node->member = mem;

@@ -961,6 +961,8 @@ static bool is_enumerator(Token **names, int count, Token *p) {
 //   f(xs)...             the pattern once per element, comma separated
 //   (xs + ...)           a fold over the elements
 // A pattern may hold expansions and folds of its own: g(h(xs, xs...)...).
+// `t.v...` over an instance's member pack is left alone here and expanded by
+// cc_expand_member_packs() once the type of `t` is known.
 
 static bool tmpl_has_pack(const Template *t) {
     return t->nparams && t->params[t->nparams - 1].is_pack;
@@ -980,6 +982,9 @@ typedef struct {
     const char *name;
     int         len;
     bool        declared; // `Ts... xs`: its elements are xs0, xs1, ...
+    bool        member;   // `t.v`: a member pack of an instance, see mpack
+    int         n;        // its elements
+    const char *key;      // member: the object's spelling and the name
 } Pack;
 
 typedef struct {
@@ -992,7 +997,10 @@ typedef struct {
 typedef struct {
     VirtualMachine *vm;
     Token         **toks;
-    int             ntoks, n;   // n: elements in every pack
+    int             ntoks, n;      // n: elements of a template pack
+    bool            defer_members; // leave `t.v...` for the parser
+    bool            copy_all;      // never relink the input tokens
+    int            *mpack;      // by token: the member pack it names, else -1
     int            *match, *encl;
     DotsKind       *kind;
     int            *item_dots;  // by item start: the item's `...`, else -1
@@ -1060,6 +1068,8 @@ static int ex_pack_at(Expander *ex, int i) {
     Token *t = ex->toks[i];
     if (t->kind != TK_IDENT)
         return -1;
+    if (ex->mpack && ex->mpack[i] >= 0)
+        return ex->mpack[i];
     if (i > 0) {
         Token *p = ex->toks[i - 1];
         if (equal(p, ".") || equal(p, "->") || equal(p, "struct") ||
@@ -1067,10 +1077,19 @@ static int ex_pack_at(Expander *ex, int i) {
             return -1;
     }
     for (int k = 0; k < ex->npacks; k++)
-        if (ex->packs[k].len == (int)t->len &&
+        if (!ex->packs[k].member && ex->packs[k].len == (int)t->len &&
             !strncmp(ex->packs[k].name, t->loc, t->len))
             return k;
     return -1;
+}
+
+// True when `[from, to)` holds `. name` or `-> name`.
+static bool ex_member_access(Expander *ex, int from, int to) {
+    for (int i = from + 1; i < to; i++)
+        if (ex->toks[i]->kind == TK_IDENT &&
+            (equal(ex->toks[i - 1], ".") || equal(ex->toks[i - 1], "->")))
+            return true;
+    return false;
 }
 
 static bool ex_has_pack(Expander *ex, int from, int to) {
@@ -1130,17 +1149,43 @@ static bool ex_has_free_pack(Expander *ex, int from, int to) {
 static Token *ex_elem(Expander *ex, int pack, int k, Token *like) {
     const Pack *p = &ex->packs[pack];
     Token      *c = copy_tok(ex->vm, like);
-    c->loc = p->declared ? arena_format(ex->vm, "%.*s%d", p->len, p->name, k)
-                         : arena_format(ex->vm, "__cccc_pk_%.*s_%d", p->len,
-                                        p->name, k);
+    c->loc =
+        p->declared || p->member
+            ? arena_format(ex->vm, "%.*s%d", p->len, p->name, k)
+            : arena_format(ex->vm, "__cccc_pk_%.*s_%d", p->len, p->name, k);
     c->len = strlen(c->loc);
     return c;
 }
 
 static void ex_range(Expander *ex, int lo, int hi, int k);
 
-// The constant pack index in `[from, to)`.
-static int ex_index(Expander *ex, int from, int to, Token *site) {
+// The length of the packs a pattern in `[from, to)` expands; they must agree.
+static int ex_count(Expander *ex, int from, int to, Token *site) {
+    int n = -1;
+    for (int i = from; i < to;) {
+        if (ex->item_dots[i] >= 0) {
+            i = ex_item_end(ex, ex->item_dots[i]);
+            continue;
+        }
+        if (ex->fold_close[i] >= 0) {
+            i = ex->fold_close[i] + 1;
+            continue;
+        }
+        int pk = ex_pack_at(ex, i++);
+        if (pk < 0)
+            continue;
+        if (n >= 0 && ex->packs[pk].n != n)
+            error_tok(ex->vm, site,
+                      "the packs in one pattern have different lengths (%d "
+                      "and %d)",
+                      n, ex->packs[pk].n);
+        n = ex->packs[pk].n;
+    }
+    return n >= 0 ? n : ex->n;
+}
+
+// The constant index of pack `pk` in `[from, to)`.
+static int ex_index(Expander *ex, int pk, int from, int to, Token *site) {
     VirtualMachine *vm   = ex->vm;
     Token           head = {};
     Token          *cur  = &head;
@@ -1159,9 +1204,10 @@ static int ex_index(Expander *ex, int from, int to, Token *site) {
     if (!is_integer(expr->ty) || !is_const_expr(vm, expr))
         error_tok(vm, site, "a pack index must be an integer constant");
     int64_t v = eval(vm, expr);
-    if (v < 0 || v >= ex->n)
+    int     n = ex->packs[pk].n;
+    if (v < 0 || v >= n)
         error_tok(vm, site, "pack index %lld is out of range for %d element%s",
-                  (long long)v, ex->n, ex->n == 1 ? "" : "s");
+                  (long long)v, n, n == 1 ? "" : "s");
     return (int)v;
 }
 
@@ -1217,7 +1263,7 @@ static void ex_fold(Expander *ex, int o, int k) {
     FoldShape f;
     ex_fold_shape(ex, o, ex->fold_dots[o], ex->fold_close[o], &f);
     Token *op = ex->toks[f.op];
-    int    n  = ex->n;
+    int    n  = ex_count(ex, f.a, f.b, op);
     if (n == 0) {
         if (f.binary)
             ex_operand(ex, f.ia, f.ib, k);
@@ -1271,7 +1317,8 @@ static int ex_item(Expander *ex, int s) {
     if (decl && ex->toks[d + 1]->kind != TK_IDENT)
         error_tok(ex->vm, ex->toks[d + 1], "expected a name after '...'");
     bool semi = e < ex->ntoks && equal(ex->toks[e], ";");
-    if (ex->n == 0) {
+    int  n    = ex_count(ex, s, d, ex->toks[d]);
+    if (n == 0) {
         if (semi || (e < ex->ntoks && equal(ex->toks[e], ",")))
             return e + 1;
         if (s > 0 && ex->nout && ex->out[ex->nout - 1] == ex->toks[s - 1] &&
@@ -1287,7 +1334,7 @@ static int ex_item(Expander *ex, int s) {
                 !strncmp(ex->packs[i].name, ex->toks[d + 1]->loc,
                          ex->packs[i].len))
                 pk = i;
-    for (int k = 0; k < ex->n; k++) {
+    for (int k = 0; k < n; k++) {
         if (k)
             ex_punct(ex, semi ? ex->semi : ex->comma);
         ex_range(ex, s, d, k);
@@ -1317,16 +1364,19 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
         }
         if (equal(tok, "sizeof") && i + 1 < hi &&
             ex->kind[i + 1] == DOTS_SIZEOF) {
-            ex_put(ex, synth_token(vm, arena_format(vm, "%d", ex->n)));
-            i += 5;
+            int close = ex->match[i + 2];
+            int pack  = ex_pack_at(ex, close - 1);
+            ex_put(ex,
+                   synth_token(vm, arena_format(vm, "%d", ex->packs[pack].n)));
+            i = close + 1;
             continue;
         }
         int pk = ex_pack_at(ex, i);
         if (pk >= 0) {
             if (i + 1 < hi && ex->kind[i + 1] == DOTS_INDEX) {
                 int close = ex->match[i + 2];
-                ex_put(ex,
-                       ex_elem(ex, pk, ex_index(ex, i + 3, close, tok), tok));
+                ex_put(ex, ex_elem(ex, pk, ex_index(ex, pk, i + 3, close, tok),
+                                   tok));
                 i = close + 1;
                 continue;
             }
@@ -1338,71 +1388,163 @@ static void ex_range(Expander *ex, int lo, int hi, int k) {
             i++;
             continue;
         }
-        ex_put(ex, k < 0 ? tok : copy_tok(vm, tok));
+        ex_put(ex, k < 0 && !ex->copy_all ? tok : copy_tok(vm, tok));
         i++;
     }
 }
 
-// Rewrites the cloned chain `chain` of template `t`, whose pack has `n`
-// elements; returns the new chain, which ends in the same EOF.
-static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain,
-                           int n) {
+// Splits the chain from `from` up to `to` (NULL: its EOF) into the Expander's
+// token arrays; returns the token it stopped at.
+static Token *ex_setup(Expander *ex, VirtualMachine *vm, Token *from,
+                       Token *to) {
     int count = 0;
-    for (Token *p = chain; p->kind != TK_EOF; p = p->next)
+    for (Token *p = from; p != to && p->kind != TK_EOF; p = p->next)
         count++;
-    if (!count)
-        return chain;
-    Arena   *a  = &vm->compiler.parser_arena;
+    Arena *a    = &vm->compiler.parser_arena;
 
-    Expander ex = {};
-    ex.vm       = vm;
-    ex.n        = n;
-    ex.ntoks    = count;
-    ex.toks     = arena_alloc(a, sizeof(Token *) * count);
-    Token *eof  = chain;
-    for (int i = 0; i < count; i++, eof = eof->next)
-        ex.toks[i] = eof;
-    ex.match      = arena_alloc(a, sizeof(int) * count);
-    ex.encl       = arena_alloc(a, sizeof(int) * count);
-    ex.kind       = arena_alloc(a, sizeof(DotsKind) * count);
-    ex.item_dots  = arena_alloc(a, sizeof(int) * count);
-    ex.fold_close = arena_alloc(a, sizeof(int) * count);
-    ex.fold_dots  = arena_alloc(a, sizeof(int) * count);
-    int *cnt      = arena_alloc(a, sizeof(int) * count);
-    ex.packs      = arena_alloc(a, sizeof(Pack) * (count + 1));
-    memset(ex.kind, 0, sizeof(DotsKind) * count);
-    memset(cnt, 0, sizeof(int) * count);
+    ex->vm      = vm;
+    ex->ntoks   = count;
+    ex->toks    = arena_alloc(a, sizeof(Token *) * (count + 1));
+    Token *stop = from;
+    for (int i = 0; i < count; i++, stop = stop->next)
+        ex->toks[i] = stop;
+    ex->match      = arena_alloc(a, sizeof(int) * (count + 1));
+    ex->encl       = arena_alloc(a, sizeof(int) * (count + 1));
+    ex->kind       = arena_alloc(a, sizeof(DotsKind) * (count + 1));
+    ex->item_dots  = arena_alloc(a, sizeof(int) * (count + 1));
+    ex->fold_close = arena_alloc(a, sizeof(int) * (count + 1));
+    ex->fold_dots  = arena_alloc(a, sizeof(int) * (count + 1));
+    ex->packs      = arena_alloc(a, sizeof(Pack) * (count + 1));
+    memset(ex->kind, 0, sizeof(DotsKind) * (count + 1));
     for (int i = 0; i < count; i++)
-        ex.match[i] = ex.item_dots[i] = ex.fold_close[i] = -1;
+        ex->match[i] = ex->item_dots[i] = ex->fold_close[i] = -1;
 
-    // Bracket structure.
-    int *stack = arena_alloc(a, sizeof(int) * count);
+    int *stack = arena_alloc(a, sizeof(int) * (count + 1));
     int  sp    = 0;
     for (int i = 0; i < count; i++) {
-        Token *tok = ex.toks[i];
-        ex.encl[i] = sp ? stack[sp - 1] : -1;
+        Token *tok  = ex->toks[i];
+        ex->encl[i] = sp ? stack[sp - 1] : -1;
         if (tok_is_open(tok)) {
             stack[sp++] = i;
         } else if (tok_is_close(tok)) {
-            if (!sp || !brackets_pair(ex.toks[stack[sp - 1]], tok))
+            if (!sp || !brackets_pair(ex->toks[stack[sp - 1]], tok))
                 error_tok(vm, tok, "unbalanced '%.*s' in a template body",
                           (int)tok->len, tok->loc);
-            int o       = stack[--sp];
-            ex.match[o] = i;
-            ex.match[i] = o;
-            ex.encl[i]  = sp ? stack[sp - 1] : -1;
+            int o        = stack[--sp];
+            ex->match[o] = i;
+            ex->match[i] = o;
+            ex->encl[i]  = sp ? stack[sp - 1] : -1;
         }
     }
     if (sp)
         error_tok(
-            vm, ex.toks[stack[sp - 1]], "unbalanced '%.*s' in a template body",
-            (int)ex.toks[stack[sp - 1]]->len, ex.toks[stack[sp - 1]]->loc);
+            vm, ex->toks[stack[sp - 1]], "unbalanced '%.*s' in a template body",
+            (int)ex->toks[stack[sp - 1]]->len, ex->toks[stack[sp - 1]]->loc);
+    return stop;
+}
+
+// What each `...` is, once the packs are known.
+static void ex_classify(Expander *ex) {
+    VirtualMachine *vm    = ex->vm;
+    int             count = ex->ntoks;
+    int            *cnt =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(int) * (count + 1));
+    memset(cnt, 0, sizeof(int) * (count + 1));
+
+    for (int d = 0; d < count; d++) {
+        if (!equal(ex->toks[d], "..."))
+            continue;
+        if (d > 0 && equal(ex->toks[d - 1], "sizeof")) {
+            int  close = d + 1 < count && equal(ex->toks[d + 1], "(")
+                             ? ex->match[d + 1]
+                             : -1;
+            bool ok =
+                close > d + 2 && ex_pack_at(ex, close - 1) >= 0 &&
+                (close == d + 3 || (ex->mpack && ex->mpack[close - 1] >= 0));
+            if (ok)
+                ex->kind[d] = DOTS_SIZEOF;
+            else if (ex->defer_members && close > d + 2 &&
+                     ex_member_access(ex, d + 2, close))
+                ex->kind[d] = DOTS_OTHER;
+            else
+                error_tok(vm, ex->toks[d], "expected 'sizeof...(pack)'");
+        } else if (d > 0 && d + 1 < count && equal(ex->toks[d + 1], "[") &&
+                   ex_pack_at(ex, d - 1) >= 0) {
+            ex->kind[d] = DOTS_INDEX;
+        } else {
+            ex->kind[d] = DOTS_PENDING;
+            if (ex->encl[d] >= 0)
+                cnt[ex->encl[d]]++;
+        }
+    }
+    for (int d = 0; d < count; d++) {
+        if (ex->kind[d] != DOTS_PENDING)
+            continue;
+        int       o = ex->encl[d];
+        FoldShape f;
+        if (o >= 0 && equal(ex->toks[o], "(") && cnt[o] == 1 &&
+            ex_fold_shape(ex, o, d, ex->match[o], &f)) {
+            ex->kind[d]       = DOTS_FOLD;
+            ex->fold_close[o] = ex->match[o];
+            ex->fold_dots[o]  = d;
+            continue;
+        }
+        int s = ex_item_start(ex, d);
+        if (s == d) {
+            ex->kind[d] = DOTS_OTHER;
+            continue;
+        }
+        if (ex->item_dots[s] >= 0)
+            error_tok(vm, ex->toks[d],
+                      "a list item can hold only one pack expansion");
+        if (!ex_has_free_pack(ex, s, d)) {
+            Token *next = d + 1 < count ? ex->toks[d + 1] : NULL;
+            if (!(ex->defer_members && ex_member_access(ex, s, d)) &&
+                (!next || equal(next, ",") || equal(next, ")") ||
+                 equal(next, ";")))
+                error_tok(vm, ex->toks[d],
+                          "the pattern before '...' contains no parameter "
+                          "pack");
+            ex->kind[d] = DOTS_OTHER;
+            continue;
+        }
+        ex->kind[d]      = DOTS_ITEM;
+        ex->item_dots[s] = d;
+    }
+
+    ex->comma = synth_token(vm, ",");
+    ex->semi  = synth_token(vm, ";");
+    ex->lp    = synth_token(vm, "(");
+    ex->rp    = synth_token(vm, ")");
+}
+
+// Links the expanded tokens, which end in `stop`; returns the new chain.
+static Token *ex_finish(Expander *ex, Token *stop) {
+    if (!ex->nout)
+        return stop;
+    for (int i = 0; i + 1 < ex->nout; i++)
+        ex->out[i]->next = ex->out[i + 1];
+    ex->out[ex->nout - 1]->next = stop;
+    return ex->out[0];
+}
+
+// Rewrites the cloned chain `chain` of template `t`, whose pack has `n`
+// elements; returns the new chain, which ends in the same EOF. The packs a
+// struct declares directly in its body go to `out_members`.
+static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain, int n,
+                           MemberPack **out_members) {
+    Expander ex = {};
+    ex.n        = n;
+    Token *eof  = ex_setup(&ex, vm, chain, NULL);
+    if (!ex.ntoks)
+        return chain;
+    ex.defer_members        = true;
 
     const TemplateParam *pp = &t->params[t->nparams - 1];
     ex.packs[ex.npacks++]   = (Pack){pp->name->loc, (int)pp->name->len, false};
 
     // Packs declared by `Pattern... name`.
-    for (int d = 1; d + 1 < count; d++) {
+    for (int d = 1; d + 1 < ex.ntoks; d++) {
         if (!equal(ex.toks[d], "...") || equal(ex.toks[d - 1], "sizeof") ||
             ex.toks[d + 1]->kind != TK_IDENT || ex_pack_at(&ex, d + 1) >= 0)
             continue;
@@ -1410,72 +1552,188 @@ static Token *expand_packs(VirtualMachine *vm, Template *t, Token *chain,
             continue;
         Token *name           = ex.toks[d + 1];
         ex.packs[ex.npacks++] = (Pack){name->loc, (int)name->len, true};
+        int o                 = ex.encl[d];
+        if (out_members && o >= 0 && equal(ex.toks[o], "{") && ex.encl[o] < 0) {
+            MemberPack *mp =
+                arena_alloc(&vm->compiler.parser_arena, sizeof(*mp));
+            mp->name     = name->loc;
+            mp->len      = (int)name->len;
+            mp->count    = n;
+            mp->next     = *out_members;
+            *out_members = mp;
+        }
     }
+    for (int k = 0; k < ex.npacks; k++)
+        ex.packs[k].n = n;
 
-    // What each `...` is.
-    for (int d = 0; d < count; d++) {
+    ex_classify(&ex);
+    ex_range(&ex, 0, ex.ntoks, -1);
+    return ex_finish(&ex, eof);
+}
+
+// ---- member packs -----------------------------------------------------------
+//
+// `Ts... v;` in an instance's struct declares v0, v1, ...; the instance's type
+// keeps the pack (TypeAgg.member_packs). `t.v...` is expanded by
+// cc_expand_member_packs() when the statement is about to be parsed, because
+// only then is the type of `t` known.
+
+static bool is_stmt_head(Token *t) {
+    return equal(t, "if") || equal(t, "while") || equal(t, "for") ||
+           equal(t, "switch");
+}
+
+// The token that ends the statement starting at `tok`: its `;`, or the `{`
+// opening a nested block or the `}` closing the enclosing one.
+static Token *stmt_range_end(Token *tok) {
+    Token *prev = NULL, *paren_prev = NULL;
+    bool   head_paren = false;
+    int    depth      = 0;
+    for (Token *p = tok; p->kind != TK_EOF; prev = p, p = p->next) {
+        if (depth == 0) {
+            if (equal(p, ";") || equal(p, "}") || equal(p, ")") ||
+                equal(p, "]"))
+                return p;
+            if (equal(p, "{")) {
+                bool block = p == tok || equal(prev, "else") ||
+                             equal(prev, "do") || equal(prev, ":") ||
+                             (equal(prev, ")") && head_paren);
+                if (block)
+                    return p;
+            }
+            if (equal(p, "("))
+                paren_prev = prev;
+        }
+        if (tok_is_open(p)) {
+            depth++;
+        } else if (tok_is_close(p)) {
+            if (--depth == 0 && equal(p, ")"))
+                head_paren = paren_prev && (is_stmt_head(paren_prev) ||
+                                            paren_prev->kind == TK_IDENT);
+        }
+    }
+    return tok;
+}
+
+// The first token of the postfix chain that ends before the `.` or `->` at
+// `dot`, else -1.
+static int ex_object_start(Expander *ex, int dot) {
+    int j = dot - 1;
+    while (j >= 0) {
+        Token *t = ex->toks[j];
+        if (t->kind == TK_IDENT) {
+            if (j >= 1 &&
+                (equal(ex->toks[j - 1], ".") || equal(ex->toks[j - 1], "->"))) {
+                j -= 2;
+                continue;
+            }
+            return j;
+        }
+        if (!equal(t, ")") && !equal(t, "]"))
+            return -1;
+        int open = ex->match[j];
+        if (equal(t, "]")) {
+            j = open - 1;
+            continue;
+        }
+        int before = open - 1;
+        if (before < 0)
+            return open;
+        Token *b = ex->toks[before];
+        if (equal(b, ")") && ex->match[before] > 0 &&
+            is_stmt_head(ex->toks[ex->match[before] - 1]))
+            return open;
+        if (b->kind != TK_IDENT && !equal(b, ")") && !equal(b, "]"))
+            return open;
+        j = before;
+    }
+    return -1;
+}
+
+// Makes the member name at `i` (after `.` or `->`) a pack when the object
+// before it has a member pack of that name.
+static void ex_bind_member(Expander *ex, int i) {
+    VirtualMachine *vm    = ex->vm;
+    int             dot   = i - 1;
+    int             start = ex_object_start(ex, dot);
+    if (start < 0)
+        return;
+    Token *lead = ex->toks[start];
+    if (lead->kind == TK_IDENT && !find_var(vm, lead))
+        return;
+
+    Token  head = {};
+    Token *cur  = &head;
+    for (int k = start; k < dot; k++)
+        cur = cur->next = copy_tok(vm, ex->toks[k]);
+    cur->next = synth_token(vm, "");
+    Token *rest;
+    Node  *obj = conditional(vm, &rest, head.next);
+    if (rest->kind != TK_EOF)
+        return;
+    add_type(vm, obj);
+    Type *root = obj->ty ? root_aggregate(obj->ty) : NULL;
+    if (!root)
+        return;
+    Token      *name = ex->toks[i];
+    MemberPack *mp   = type_agg(root)->member_packs;
+    while (mp &&
+           !(mp->len == name->len && !strncmp(mp->name, name->loc, mp->len)))
+        mp = mp->next;
+    if (!mp)
+        return;
+
+    const char *key = "";
+    for (int k = start; k < dot; k++)
+        key = arena_format(vm, "%s%.*s ", key, (int)ex->toks[k]->len,
+                           ex->toks[k]->loc);
+    key    = arena_format(vm, "%s%.*s", key, (int)name->len, name->loc);
+    int pk = 0;
+    while (pk < ex->npacks &&
+           !(ex->packs[pk].member && !strcmp(ex->packs[pk].key, key)))
+        pk++;
+    if (pk == ex->npacks)
+        ex->packs[ex->npacks++] =
+            (Pack){name->loc, (int)name->len, false, true, mp->count, key};
+    ex->mpack[i] = pk;
+}
+
+Token *cc_expand_member_packs(VirtualMachine *vm, Token *tok) {
+    Token *end  = stmt_range_end(tok);
+    bool   dots = false;
+    for (Token *p = tok; p != end && !dots; p = p->next)
+        dots = equal(p, "...");
+    if (!dots)
+        return tok;
+
+    Expander ex = {};
+    ex_setup(&ex, vm, tok, end);
+    ex.copy_all = true;
+    ex.mpack =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(int) * (ex.ntoks + 1));
+    for (int i = 0; i < ex.ntoks; i++)
+        ex.mpack[i] = -1;
+
+    bool access = false;
+    for (int d = 0; d < ex.ntoks; d++) {
         if (!equal(ex.toks[d], "..."))
             continue;
-        if (d > 0 && equal(ex.toks[d - 1], "sizeof")) {
-            if (!(d + 3 < count && equal(ex.toks[d + 1], "(") &&
-                  ex_pack_at(&ex, d + 2) >= 0 && equal(ex.toks[d + 3], ")")))
-                error_tok(vm, ex.toks[d], "expected 'sizeof...(pack)'");
-            ex.kind[d] = DOTS_SIZEOF;
-        } else if (d > 0 && d + 1 < count && equal(ex.toks[d + 1], "[") &&
-                   ex_pack_at(&ex, d - 1) >= 0) {
-            ex.kind[d] = DOTS_INDEX;
-        } else {
-            ex.kind[d] = DOTS_PENDING;
-            if (ex.encl[d] >= 0)
-                cnt[ex.encl[d]]++;
+        int e = ex_item_end(&ex, d);
+        for (int i = ex_item_start(&ex, d) + 1; i < e; i++) {
+            if (ex.toks[i]->kind != TK_IDENT || ex.mpack[i] >= 0 ||
+                !(equal(ex.toks[i - 1], ".") || equal(ex.toks[i - 1], "->")))
+                continue;
+            access = true;
+            ex_bind_member(&ex, i);
         }
     }
-    for (int d = 0; d < count; d++) {
-        if (ex.kind[d] != DOTS_PENDING)
-            continue;
-        int       o = ex.encl[d];
-        FoldShape f;
-        if (o >= 0 && equal(ex.toks[o], "(") && cnt[o] == 1 &&
-            ex_fold_shape(&ex, o, d, ex.match[o], &f)) {
-            ex.kind[d]       = DOTS_FOLD;
-            ex.fold_close[o] = ex.match[o];
-            ex.fold_dots[o]  = d;
-            continue;
-        }
-        int s = ex_item_start(&ex, d);
-        if (s == d) {
-            ex.kind[d] = DOTS_OTHER;
-            continue;
-        }
-        if (ex.item_dots[s] >= 0)
-            error_tok(vm, ex.toks[d],
-                      "a list item can hold only one pack expansion");
-        if (!ex_has_free_pack(&ex, s, d)) {
-            Token *next = d + 1 < count ? ex.toks[d + 1] : NULL;
-            if (!next || equal(next, ",") || equal(next, ")") ||
-                equal(next, ";"))
-                error_tok(vm, ex.toks[d],
-                          "the pattern before '...' contains no parameter "
-                          "pack");
-            ex.kind[d] = DOTS_OTHER;
-            continue;
-        }
-        ex.kind[d]      = DOTS_ITEM;
-        ex.item_dots[s] = d;
-    }
-
-    ex.comma = synth_token(vm, ",");
-    ex.semi  = synth_token(vm, ";");
-    ex.lp    = synth_token(vm, "(");
-    ex.rp    = synth_token(vm, ")");
-    ex_range(&ex, 0, count, -1);
-
-    if (!ex.nout)
-        return eof;
-    for (int i = 0; i + 1 < ex.nout; i++)
-        ex.out[i]->next = ex.out[i + 1];
-    ex.out[ex.nout - 1]->next = eof;
-    return ex.out[0];
+    if (!access)
+        return tok;
+    ex_classify(&ex);
+    if (!ex.npacks)
+        return tok;
+    ex_range(&ex, 0, ex.ntoks, -1);
+    return ex_finish(&ex, end);
 }
 
 static bool has_linkage_static(Template *t) {
@@ -1492,7 +1750,8 @@ static bool has_linkage_static(Template *t) {
 // instance is `static`.
 static Token *clone_template(VirtualMachine *vm, Template *t,
                              const char *mangled, Token *limit, bool prototype,
-                             bool internal, ExpansionFrame *frame, int npack) {
+                             bool internal, ExpansionFrame *frame, int npack,
+                             MemberPack **out_members) {
     Token  head = {};
     Token *cur  = &head;
     if (internal && t->kind == TMPL_FUNC && !has_linkage_static(t))
@@ -1558,7 +1817,8 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
         cur = cur->next = synth_token(vm, ";");
     Token *eof = synth_token(vm, "");
     cur->next  = eof;
-    return npack >= 0 ? expand_packs(vm, t, head.next, npack) : head.next;
+    return npack >= 0 ? expand_packs(vm, t, head.next, npack, out_members)
+                      : head.next;
 }
 
 typedef struct {
@@ -2811,7 +3071,7 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     Token *forward = NULL;
     if (t->kind == TMPL_FUNC) {
         forward = clone_template(vm, impl, mangled, impl->body_open, true,
-                                 local, frame, npack);
+                                 local, frame, npack, NULL);
     } else if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION) {
         forward = tokenize_string(
             vm, "<template>",
@@ -2819,8 +3079,13 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                          t->kind == TMPL_UNION ? "union" : "struct", mangled));
         convert_pp_tokens(vm, forward);
     }
-    Token *whole =
-        clone_template(vm, impl, mangled, NULL, false, local, frame, npack);
+    MemberPack *member_packs = NULL;
+    bool        aggregate = t->kind == TMPL_STRUCT || t->kind == TMPL_UNION ||
+                            t->kind == TMPL_TYPEDEF;
+    if (aggregate && tmpl_has_pack(t))
+        vm->compiler.saw_variadic_aggregate = true;
+    Token *whole = clone_template(vm, impl, mangled, NULL, false, local, frame,
+                                  npack, aggregate ? &member_packs : NULL);
 
     Token *name_probe = synth_token(vm, mangled);
     if (forward) {
@@ -2832,6 +3097,10 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     if (!inst->fn && !inst->ty)
         inst_lookup(vm, inst, name_probe);
     mark_instance(vm, inst, impl);
+    if (member_packs && inst->ty) {
+        Type *root                           = root_aggregate(inst->ty);
+        type_agg_mut(vm, root)->member_packs = member_packs;
+    }
     if (local && inst->ty && t->kind != TMPL_TYPEDEF) {
         Type *root = inst->ty;
         while (root->origin)

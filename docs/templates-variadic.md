@@ -95,6 +95,26 @@ A pattern may hold expansions and folds of its own. Each `...` expands the packs
 
 `op` is a binary operator, including `&&`, `||`, `,` and the assignments. Only one side of a binary fold holds a pack.
 
+### Member packs
+
+`Ts... name;` in a struct declares `name0`, `name1`, ... in every instance. `t.name...` expands those members of an instance `t`: in a call, an initializer list, a fold, `sizeof...` and `...[k]`.
+
+```c
+@template(Ts...) struct Tuple { Ts... v; };
+
+Tuple@(long, long) t = {4, 2};
+int a = add(t.v...);            // add(t.v0, t.v1)
+int b = (t.v + ...);            // (t.v0 + t.v1)
+int n = sizeof...(t.v);         // 2
+int c = t.v...[1];              // t.v1
+```
+
+`t` is any expression of the instance type (`o.inner`, `p->`, `(*p)`, `get()`), and it is repeated for each member, so `get().v...` calls `get` once per member. An instance holds the pack its selected specialization declares: `Tuple@(int, char)` with `@specialize(int, Ts...) struct Tuple { int first; }` has no `v`, and `t.v...` is an error: `the pattern before '...' contains no parameter pack`. A bare `t.v` is an error too: `member pack 'v' must be expanded with '...'`.
+
+A pattern may name several instances (`a.v + b.v ...`) when their packs have the same length: `the packs in one pattern have different lengths (2 and 3)`.
+
+The object must be declared before the statement that expands it, so a `for (Tuple t = ...; ...; f(t.v...))` header cannot expand its own `t`. The condition of a `do ... while (f(t.v...));` is not expanded.
+
 ### Empty packs
 
 An empty pack removes its list item and one adjacent comma, so `f(int a, Ts... rest)` becomes `f(int a)`. A member declaration disappears with its semicolon. An empty unary fold is `1` for `&&`, `0` for `||` and `(void)0` for `,`; any other operator needs the binary form: `a fold over '+' of an empty pack needs an initial value`.
@@ -170,6 +190,6 @@ An instance is `Name__Arg` for each argument, as for any template[^names].
 | Not supported | Result |
 |---|---|
 | A pack parameter in the middle of the list, or two packs | Compile error |
-| Expanding another instance's members (`t.v0...`) | Compile error |
+| A template pack and an instance member pack in one pattern (`xs + t.v ...`) | Compile error |
 
 [^names]: Two argument lists can mangle to one name, for example when an argument's own name contains `__`. The instance clash check compares the argument count and each argument, so such a pair is an error (`cannot name the instance`), not a silent merge.

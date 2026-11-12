@@ -44,6 +44,18 @@
 @template(T, U, V = T, Ts...) struct Needs2 {
     T x;
 };
+@template(Ts...) struct Tup {
+    Ts... v;
+};
+@template(Ts...) @specialize(int, Ts...) struct Tup {
+    int first;
+};
+struct Plain {
+    int v0, v1;
+};
+static int pair(int a, int b) {
+    return a + b;
+}
 
 #pragma cccc suite begin "template_variadic_errors"
 
@@ -153,4 +165,48 @@ void test_element_pattern_ambiguity(void) {
 [[cccc::test(error = "takes at least 2 arguments, 1 given")]]
 void test_too_few_arguments_before_defaults(void) {
     @inst(int) Needs2 n;
+}
+
+[[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
+void test_member_pack_dropped_by_a_partial(void) {
+    Tup @(int, char) t = {1};
+    pair(t.v...);
+}
+
+[[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
+void test_member_named_like_a_pack_element(void) {
+    Tup @(long, long) t = {1, 2};
+    struct Plain p      = {1, 2};
+    pair(p.v...);
+}
+
+[[cccc::test(
+    error = "the packs in one pattern have different lengths (2 and 3)")]]
+void test_member_packs_of_different_lengths(void) {
+    Tup @(long, long) a       = {1, 2};
+    Tup @(long, long, long) b = {1, 2, 3};
+    pair(a.v + b.v...);
+}
+
+[[cccc::test(error = "pack index 2 is out of range for 2 elements")]]
+void test_member_pack_index_out_of_range(void) {
+    Tup @(long, long) a = {1, 2};
+    int x               = a.v...[2];
+}
+
+[[cccc::test(error = "member pack 'v' must be expanded with '...'")]]
+void test_member_pack_without_dots(void) {
+    Tup @(long, long) a = {1, 2};
+    int x               = a.v;
+}
+
+// TODO: a template pattern mixing a template pack and a member pack (#2032)
+// has no negative test: the error inside the instance body crashes codegen
+// under --testing (#2031).
+
+[[cccc::test(error = "the pattern before '...' contains no parameter pack")]]
+void test_object_declared_in_the_same_statement(void) {
+    Tup @(long, long) a = {1, 2};
+    for (Tup @(long, long) b = a; pair(b.v...) < 0;) {
+    }
 }

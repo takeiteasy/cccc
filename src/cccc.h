@@ -1651,8 +1651,17 @@ typedef struct VirtualMachine VirtualMachine;
 // every allocated group, so a copy never shares a group with its original.
 
 // struct/union/enum definition data
+// A `Ts... name;` member of a template instance: its elements are name0, name1,
+// ... and `count` of them were declared (0 when the pack was empty).
+typedef struct MemberPack {
+    const char        *name;
+    int                len, count;
+    struct MemberPack *next;
+} MemberPack;
+
 typedef struct TypeAgg {
     struct Member *members;
+    MemberPack    *member_packs;
     // `_Static_assert` written in the member list, in source order, for native
     // re-emission inside the struct body.
     struct StaticAssertRecord *member_asserts;
@@ -4214,6 +4223,7 @@ typedef struct Compiler {
     // Preprocessor state
     bool         skip_preprocess; // Skip preprocessing step
     bool         saw_templates;   // `@template`/`@inst` appeared in the input
+    bool         saw_variadic_aggregate; // a variadic struct was instantiated
     HashMap      templates;       // name -> Template *
     HashMap      template_insts;  // mangled name -> TemplateInstance *
     HashMap      template_aggs; // block-scope aggregate spelling -> root Type *

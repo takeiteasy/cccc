@@ -619,6 +619,8 @@ static void warn_switch_fallthrough(VirtualMachine *vm, Node *sw);
 //      | "{" compound-stmt
 //      | expr-stmt
 Node *stmt(VirtualMachine *vm, Token **rest, Token *tok) {
+    if (vm->compiler.saw_variadic_aggregate)
+        tok = cc_expand_member_packs(vm, tok);
     if (equal(tok, "__cccc_omp"))
         return omp_directive(vm, rest, tok);
 
@@ -1314,6 +1316,8 @@ Node *compound_stmt(VirtualMachine *vm, Token **rest, Token *tok,
     bool scope_has_cleanup =
         false; // true once first cleanup var is seen in this scope
     while (!equal(tok, "}") && !omp_at_section(vm, tok)) {
+        if (vm->compiler.saw_variadic_aggregate)
+            tok = cc_expand_member_packs(vm, tok);
         if ((is_decl_start(vm, tok) || cc_checked_spec_start(vm, tok)) &&
             !equal(tok->next, ":")) {
             if (seen_stmt && vm->compiler.c_std < CCCC_STD_C99)
