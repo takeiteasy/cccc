@@ -427,6 +427,13 @@ static int template_scan(VirtualMachine *vm, Token *start, Template *t,
             p = p->next;
             continue;
         }
+        if (!special && !t->pattern && equal(p, "__cccc_specialize") &&
+            equal(p->next, "(")) {
+            t->pattern     = p;
+            t->pattern_end = skip_parens(p->next);
+            p              = t->pattern_end;
+            continue;
+        }
         break;
     }
 
@@ -523,6 +530,8 @@ int cc_template_scan(VirtualMachine *vm, Token *start, Template *t,
     return template_scan(vm, start, t, err, err_tok, false);
 }
 
+static void register_partial(VirtualMachine *vm, Template *pt);
+
 // Capture arm of parse_file_scope_decls: records a `@template` definition and
 // returns the token after it, or NULL when `tok` starts something else.
 Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
@@ -542,6 +551,10 @@ Token *cc_template_capture(VirtualMachine *vm, Token *tok) {
     *t          = scan;
     t->name     = arena_strndup(vm, t->name_tok->loc, t->name_tok->len);
     t->name_len = t->name_tok->len;
+    if (t->pattern) {
+        register_partial(vm, t);
+        return t->end;
+    }
     if (hashmap_get2(&vm->compiler.templates, t->name, t->name_len))
         error_tok(vm, t->name_tok, "redefinition of template '%s'", t->name);
     hashmap_put2(&vm->compiler.templates, t->name, t->name_len, t);
@@ -924,6 +937,11 @@ static Token *clone_template(VirtualMachine *vm, Template *t,
          p != (limit ? limit : t->end) && p->kind != TK_EOF; p = p->next) {
         if (p == t->marker) {
             p = t->marker_end;
+            if (p == (limit ? limit : t->end))
+                break;
+        }
+        if (p == t->pattern) {
+            p = t->pattern_end;
             if (p == (limit ? limit : t->end))
                 break;
         }
@@ -1447,6 +1465,226 @@ static void bind_state(VirtualMachine *vm, Template *t, int i,
     state[i].bound = true;
 }
 
+// ---- partial specialization -----------------------------------------------
+
+// What a partial specialization's variables stood for in one match.
+typedef struct {
+    Type   *ty[TMPL_MAX_ARGS];
+    int64_t val[TMPL_MAX_ARGS];
+    bool    unsig[TMPL_MAX_ARGS];
+} Deduced;
+
+// The variable of `pt` that placeholder type `ty` stands for, or -1.
+static int pattern_var(const Template *pt, Type *ty) {
+    while (ty->origin)
+        ty = ty->origin;
+    for (int k = 0; k < pt->nparams; k++)
+        if (pt->vars[k] == ty)
+            return k;
+    return -1;
+}
+
+static bool pattern_has_var(const Template *pt, Type *ty) {
+    if (!ty)
+        return false;
+    if (pattern_var(pt, ty) >= 0)
+        return true;
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_ARRAY:
+            return pattern_has_var(pt, ty->base);
+        case TY_FUNC:
+        case TY_BLOCK:
+            if (pattern_has_var(pt, ty->return_ty))
+                return true;
+            for (Type *p = ty->params; p; p = p->next)
+                if (pattern_has_var(pt, p))
+                    return true;
+            return false;
+        default:
+            return false;
+    }
+}
+
+static void pattern_mark_vars(const Template *pt, Type *ty, bool *used) {
+    if (!ty)
+        return;
+    int k = pattern_var(pt, ty);
+    if (k >= 0) {
+        used[k] = true;
+        return;
+    }
+    switch (ty->kind) {
+        case TY_PTR:
+        case TY_ARRAY:
+            return pattern_mark_vars(pt, ty->base, used);
+        case TY_FUNC:
+        case TY_BLOCK:
+            pattern_mark_vars(pt, ty->return_ty, used);
+            for (Type *p = ty->params; p; p = p->next)
+                pattern_mark_vars(pt, p, used);
+            return;
+        default:
+            return;
+    }
+}
+
+// Two arguments are one type when they name the same instance.
+static bool same_arg_type(VirtualMachine *vm, Type *a, Type *b, Token *site) {
+    MangleBuf x, y;
+    mb_init(&x, vm);
+    mb_init(&y, vm);
+    mangle_type(&x, a, site);
+    mangle_type(&y, b, site);
+    return !strcmp(x.p, y.p) && root_aggregate(a) == root_aggregate(b);
+}
+
+static bool quals_within(const Type *pat, const Type *arg) {
+    return (!pat->is_const || arg->is_const) &&
+           (!pat->is_volatile || arg->is_volatile) &&
+           (!pat->is_restrict || arg->is_restrict) &&
+           (!pat->is_atomic || arg->is_atomic);
+}
+
+static bool quals_equal(const Type *a, const Type *b) {
+    return a->is_const == b->is_const && a->is_volatile == b->is_volatile &&
+           a->is_restrict == b->is_restrict && a->is_atomic == b->is_atomic;
+}
+
+// Matches `arg` against pattern type `pat`, binding variables in `d`. A
+// variable written with qualifiers (`const T`) binds the argument without them.
+static bool match_type(VirtualMachine *vm, const Template *pt, Type *pat,
+                       Type *arg, Deduced *d, Token *site) {
+    int k = pattern_var(pt, pat);
+    if (k >= 0) {
+        if (!quals_within(pat, arg))
+            return false;
+        Type *bound = arg;
+        if (pat->is_const || pat->is_volatile || pat->is_restrict ||
+            pat->is_atomic) {
+            bound               = copy_type(vm, arg);
+            bound->is_const    &= !pat->is_const;
+            bound->is_volatile &= !pat->is_volatile;
+            bound->is_restrict &= !pat->is_restrict;
+            bound->is_atomic   &= !pat->is_atomic;
+        }
+        if (d->ty[k])
+            return same_arg_type(vm, d->ty[k], bound, site);
+        d->ty[k] = bound;
+        return true;
+    }
+    if (!pattern_has_var(pt, pat))
+        return same_arg_type(vm, pat, arg, site);
+    if (pat->kind != arg->kind || !quals_equal(pat, arg) ||
+        pat->addr_space != arg->addr_space)
+        return false;
+    switch (pat->kind) {
+        case TY_PTR:
+            return pat->checked_kind == arg->checked_kind &&
+                   match_type(vm, pt, pat->base, arg->base, d, site);
+        case TY_ARRAY:
+            return pat->array_len == arg->array_len &&
+                   pat->is_flexible == arg->is_flexible &&
+                   pat->checked_kind == arg->checked_kind &&
+                   match_type(vm, pt, pat->base, arg->base, d, site);
+        case TY_FUNC:
+        case TY_BLOCK: {
+            if (pat->is_variadic != arg->is_variadic ||
+                !match_type(vm, pt, pat->return_ty, arg->return_ty, d, site))
+                return false;
+            Type *p = pat->params, *a = arg->params;
+            for (; p && a; p = p->next, a = a->next)
+                if (!match_type(vm, pt, p, a, d, site))
+                    return false;
+            return !p && !a;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool same_const(const TemplateArg *a, const TemplateArg *b) {
+    return a->val == b->val && !memcmp(&a->fval, &b->fval, sizeof(double)) &&
+           (a->sym == b->sym ||
+            (a->sym && b->sym && !strcmp(a->sym->name, b->sym->name)));
+}
+
+// Whether the instance with `args` is one that partial specialization `pt`
+// covers; `d` receives the values of its variables.
+static bool match_partial(VirtualMachine *vm, Template *pt,
+                          const TemplateArg *args, Deduced *d, Token *site) {
+    Template *t = pt->primary;
+    memset(d, 0, sizeof(*d));
+    for (int i = 0; i < t->nparams; i++) {
+        if (!t->params[i].type_start) {
+            if (!match_type(vm, pt, pt->pat[i].ty, args[i].ty, d, site))
+                return false;
+            continue;
+        }
+        int k = pt->pat_var[i];
+        if (k < 0) {
+            if (!same_const(&pt->pat[i], &args[i]))
+                return false;
+            continue;
+        }
+        d->val[k]   = args[i].val;
+        d->unsig[k] = args[i].val_unsigned;
+        if (!const_fits(param_type(vm, pt, k), args[i].val,
+                        args[i].val_unsigned))
+            return false;
+    }
+    return true;
+}
+
+// Whether every instance covered by `a` is also covered by `b`.
+static bool pattern_covers(VirtualMachine *vm, Template *b, Template *a,
+                           Token *site) {
+    Deduced d = {};
+    for (int i = 0; i < b->primary->nparams; i++) {
+        if (!b->primary->params[i].type_start) {
+            if (!match_type(vm, b, b->pat[i].ty, a->pat[i].ty, &d, site))
+                return false;
+        } else if (b->pat_var[i] < 0 &&
+                   (a->pat_var[i] >= 0 || !same_const(&b->pat[i], &a->pat[i])))
+            return false;
+    }
+    return true;
+}
+
+static bool more_specialised(VirtualMachine *vm, Template *a, Template *b,
+                             Token *site) {
+    return pattern_covers(vm, b, a, site) && !pattern_covers(vm, a, b, site);
+}
+
+// The most specialised partial specialization of `t` covering `args`, with its
+// variables in `out`; NULL when none does.
+static Template *select_partial(VirtualMachine *vm, Template *t,
+                                const TemplateArg *args, Deduced *out,
+                                Token *site, const char *mangled) {
+    bool    any = false;
+    Deduced d;
+    for (Template *c = t->partials; c; c = c->next_partial) {
+        if (!match_partial(vm, c, args, &d, site))
+            continue;
+        any       = true;
+        bool best = true;
+        for (Template *o = t->partials; o && best; o = o->next_partial) {
+            Deduced od;
+            best = o == c || !match_partial(vm, o, args, &od, site) ||
+                   more_specialised(vm, c, o, site);
+        }
+        if (best) {
+            match_partial(vm, c, args, out, site);
+            return c;
+        }
+    }
+    if (any)
+        error_tok(vm, site,
+                  "ambiguous partial specializations of '%s' for '%s'", t->name,
+                  mangled);
+    return NULL;
+}
+
 // With `def`, registers it as the hand-written definition of the argument list
 // instead of instantiating; the first `@inst` of that list parses it.
 static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
@@ -1572,8 +1810,9 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
 
     // The instance is private to this file when a block-scope type is among
     // its arguments, so the linker never merges it with another file's.
-    bool  local = mb.local && !from_spec;
-    char *mangled;
+    bool      local = mb.local && !from_spec;
+    char     *mangled;
+    Template *impl = NULL; // the definition cloned: t, or a partial of it
     if (from_spec) {
         // The definition is plain C: the parameter names are not visible.
         mangled                    = found->mangled;
@@ -1582,8 +1821,29 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         vm->compiler.tmpl_bindings = NULL;
         t                          = found->spec;
     } else {
-        for (int i = 0; i < t->nparams; i++)
-            bind_state(vm, t, i, state, args, &bindings);
+        Deduced deduced;
+        impl = t->partials ? select_partial(vm, t, args, &deduced, site, mb.p)
+                           : NULL;
+        if (impl) {
+            // The partial's variables replace the primary's parameters.
+            bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+            memset(bindings, 0, sizeof(Scope));
+            vm->compiler.tmpl_bindings = bindings;
+            for (int k = 0; k < impl->nparams; k++) {
+                TemplateArg var    = {};
+                Type       *var_ty = deduced.ty[k];
+                if (impl->params[k].type_start) {
+                    var.val          = deduced.val[k];
+                    var.val_unsigned = deduced.unsig[k];
+                    var_ty           = param_type(vm, impl, k);
+                }
+                Obj *unused = NULL;
+                bind_param(vm, impl, k, var_ty, &var, bindings, &unused);
+            }
+        } else {
+            for (int i = 0; i < t->nparams; i++)
+                bind_state(vm, t, i, state, args, &bindings);
+        }
         mangled = arena_strndup(vm, mb.p, (int)mb.len);
         args    = memcpy(arena_alloc(&vm->compiler.parser_arena,
                                      sizeof(TemplateArg) * t->nparams),
@@ -1596,10 +1856,14 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
         inst->state   = TI_IN_PROGRESS;
         inst->args    = args;
         hashmap_put(&vm->compiler.template_insts, mangled, inst);
+        inst->next_inst = t->insts;
+        t->insts        = inst;
     }
+    if (!impl)
+        impl = t;
     vm->compiler.tmpl_depth++;
 
-    for (int i = 0; i < t->nparams && !from_spec; i++)
+    for (int i = 0; i < t->nparams && !from_spec && impl == t; i++)
         if (state[i].hidden) {
             state[i].hidden->name = arena_format(
                 vm, "__cccc_tp_%s__%.*s", mangled, (int)t->params[i].name->len,
@@ -1620,8 +1884,8 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
     // the instance (recursion, `struct M *next`). Enums and typedefs have none.
     Token *forward = NULL;
     if (t->kind == TMPL_FUNC) {
-        forward =
-            clone_template(vm, t, mangled, t->body_open, true, local, frame);
+        forward = clone_template(vm, impl, mangled, impl->body_open, true,
+                                 local, frame);
     } else if (t->kind == TMPL_STRUCT || t->kind == TMPL_UNION) {
         forward = tokenize_string(
             vm, "<template>",
@@ -1629,18 +1893,18 @@ static TemplateInstance *instantiate(VirtualMachine *vm, Template *t,
                          t->kind == TMPL_UNION ? "union" : "struct", mangled));
         convert_pp_tokens(vm, forward);
     }
-    Token *whole = clone_template(vm, t, mangled, NULL, false, local, frame);
+    Token *whole = clone_template(vm, impl, mangled, NULL, false, local, frame);
 
     Token *name_probe = synth_token(vm, mangled);
     if (forward) {
         cc_parse_file_scope_chain(vm, forward);
         inst_lookup(vm, inst, name_probe);
-        mark_instance(vm, inst, t);
+        mark_instance(vm, inst, impl);
     }
     cc_parse_file_scope_chain(vm, whole);
     if (!inst->fn && !inst->ty)
         inst_lookup(vm, inst, name_probe);
-    mark_instance(vm, inst, t);
+    mark_instance(vm, inst, impl);
     if (local && inst->ty && t->kind != TMPL_TYPEDEF) {
         Type *root = inst->ty;
         while (root->origin)
@@ -1779,4 +2043,242 @@ Token *cc_specialize_capture(VirtualMachine *vm, Token *tok) {
     def->name_len = t->name_len;
     instantiate(vm, t, args, n, scan.marker, def);
     return scan.end;
+}
+
+// The end of the pattern argument starting at `a`: its `,` or the closing `)`.
+static Token *pattern_arg_end(Token *a) {
+    int depth = 0;
+    for (; a->kind != TK_EOF; a = a->next) {
+        if (equal(a, "(") || equal(a, "[") || equal(a, "{"))
+            depth++;
+        else if (equal(a, ")") || equal(a, "]") || equal(a, "}")) {
+            if (depth-- == 0)
+                break;
+        } else if (depth == 0 && equal(a, ","))
+            break;
+    }
+    return a;
+}
+
+static bool default_names_param(const Template *t, int i) {
+    const TemplateParam *d = &t->params[i];
+    for (Token *k = d->def; k != d->def_end; k = k->next)
+        if (k->kind == TK_IDENT)
+            for (int j = 0; j < i; j++)
+                if (t->params[j].name->len == k->len &&
+                    !strncmp(t->params[j].name->loc, k->loc, k->len))
+                    return true;
+    return false;
+}
+
+// Stores the exact value of a pattern's constant argument `i`.
+static void pattern_const(VirtualMachine *vm, Template *pt, int i,
+                          Token *site) {
+    Template *t = pt->primary;
+    if (t->params[i].dependent)
+        error_tok(vm, site,
+                  "a partial specialization cannot give a value for '%.*s': "
+                  "its type depends on another parameter",
+                  (int)t->params[i].name->len, t->params[i].name->loc);
+    param_value(vm, t, i, param_type(vm, t, i), &pt->pat[i], site);
+}
+
+// Registers `@template(V...) @specialize(Pattern...) <definition>` as a partial
+// specialization of the template it names. Each V is a variable the pattern
+// binds; the pattern is parsed once, with every type variable standing for a
+// placeholder type.
+static void register_partial(VirtualMachine *vm, Template *pt) {
+    Token    *site = pt->pattern;
+    Template *t    = cc_find_template(vm, pt->name_tok);
+    if (!t)
+        error_tok(vm, pt->name_tok, "'%.*s' is not a template",
+                  (int)pt->name_tok->len, pt->name_tok->loc);
+    if (t->kind != pt->kind)
+        error_tok(vm, pt->name_tok, "'%s' is a %s template, not a %s", t->name,
+                  kind_name(t->kind), kind_name(pt->kind));
+    if (vm->compiler.in_macro_mode)
+        error_tok(vm, site, "@specialize is not supported in comptime code");
+    if (pt->nparams > TMPL_MAX_ARGS)
+        error_tok(vm, pt->params[TMPL_MAX_ARGS].name,
+                  "a partial specialization takes at most %d parameters",
+                  TMPL_MAX_ARGS);
+    for (int k = 0; k < pt->nparams; k++) {
+        TemplateParam *p = &pt->params[k];
+        if (p->def)
+            error_tok(vm, p->name,
+                      "a partial specialization parameter cannot have a "
+                      "default");
+        if (p->dependent)
+            error_tok(vm, p->name,
+                      "the type of '%.*s' cannot name another parameter of a "
+                      "partial specialization",
+                      (int)p->name->len, p->name->loc);
+    }
+
+    pt->primary = t;
+    pt->vars =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(Type *) * pt->nparams);
+    pt->pat = arena_alloc(&vm->compiler.parser_arena,
+                          sizeof(TemplateArg) * t->nparams);
+    pt->pat_var =
+        arena_alloc(&vm->compiler.parser_arena, sizeof(int) * t->nparams);
+    memset(pt->vars, 0, sizeof(Type *) * pt->nparams);
+    memset(pt->pat, 0, sizeof(TemplateArg) * t->nparams);
+    for (int i = 0; i < t->nparams; i++)
+        pt->pat_var[i] = -1;
+
+    TmplSnapshot snap;
+    snapshot_save(vm, &snap);
+    jmp_buf  jb;
+    jmp_buf *saved_jb = vm->error_jmp_buf;
+    vm->error_jmp_buf = &jb;
+    if (setjmp(jb)) {
+        snapshot_restore(vm, &snap);
+        vm->error_jmp_buf = saved_jb;
+        longjmp(*saved_jb, 1);
+    }
+    snapshot_clear(vm);
+    vm->compiler.scope       = vm->compiler.runtime_file_scope;
+    vm->compiler.tmpl_anchor = vm->compiler.runtime_file_scope;
+    Scope *bindings = arena_alloc(&vm->compiler.parser_arena, sizeof(Scope));
+    memset(bindings, 0, sizeof(Scope));
+    vm->compiler.tmpl_bindings = bindings;
+
+    for (int k = 0; k < pt->nparams; k++) {
+        if (pt->params[k].type_start) {
+            Type *ty = param_type(vm, pt, k);
+            if (!is_integer(ty))
+                error_tok(vm, pt->params[k].name,
+                          "a partial specialization constant must have an "
+                          "integer type");
+            continue;
+        }
+        Type *ph                         = struct_type(vm);
+        ph->size                         = 1;
+        type_agg_mut(vm, ph)->struct_tag = pt->params[k].name;
+        ph->name                         = pt->params[k].name;
+        pt->vars[k]                      = ph;
+        Obj *unused                      = NULL;
+        bind_param(vm, pt, k, ph, NULL, bindings, &unused);
+    }
+
+    int    given                      = 0;
+    bool   bound_const[TMPL_MAX_ARGS] = {};
+    Token *a                          = pt->pattern->next->next;
+    while (!equal(a, ")")) {
+        if (given == t->nparams)
+            error_tok(vm, a, "template '%s' takes %d argument%s, more given",
+                      t->name, t->nparams, t->nparams == 1 ? "" : "s");
+        Token *e = pattern_arg_end(a);
+        if (e->kind == TK_EOF)
+            error_tok(vm, a, "unterminated @specialize");
+        for (Token *q = a; q != e; q = q->next)
+            if (equal(q, "__cccc_inst"))
+                error_tok(vm, q,
+                          "a partial specialization pattern over a template "
+                          "instance is not supported");
+        int bare = -1;
+        if (a->next == e && a->kind == TK_IDENT)
+            for (int k = 0; k < pt->nparams; k++)
+                if (pt->params[k].type_start &&
+                    pt->params[k].name->len == a->len &&
+                    !strncmp(pt->params[k].name->loc, a->loc, a->len))
+                    bare = k;
+        Token *rest = NULL;
+        if (t->params[given].type_start) {
+            if (bare >= 0) {
+                if (t->params[given].dependent ||
+                    !is_integer(param_type(vm, t, given)))
+                    error_tok(vm, a,
+                              "'%.*s' cannot bind a parameter that is not a "
+                              "plain integer constant",
+                              (int)a->len, a->loc);
+                if (bound_const[bare]++)
+                    error_tok(vm, a, "'%.*s' appears twice in the pattern",
+                              (int)a->len, a->loc);
+                pt->pat_var[given] = bare;
+            } else {
+                parse_const_arg(vm, &rest, a, &pt->pat[given]);
+                if (rest != e)
+                    error_tok(vm, rest, "unexpected token in the pattern");
+                pattern_const(vm, pt, given, a);
+            }
+        } else {
+            if (bare >= 0)
+                error_tok(vm, a, "constant '%.*s' cannot be a type argument",
+                          (int)a->len, a->loc);
+            parse_inst_arg(vm, t, given, &rest, a, &pt->pat[given]);
+            if (rest != e)
+                error_tok(vm, rest, "unexpected token in the pattern");
+        }
+        given++;
+        a = equal(e, ",") ? e->next : e;
+    }
+    for (int i = given; i < t->nparams; i++) {
+        TemplateParam *p = &t->params[i];
+        if (!p->def)
+            error_tok(vm, site, "template '%s' takes %d argument%s, %d given",
+                      t->name, i, i == 1 ? "" : "s", given);
+        if (default_names_param(t, i))
+            error_tok(vm, site,
+                      "partial specialization must give argument '%.*s': its "
+                      "default names an earlier parameter",
+                      (int)p->name->len, p->name->loc);
+        default_arg(vm, t, i, &pt->pat[i]);
+        if (p->type_start)
+            pattern_const(vm, pt, i, site);
+    }
+
+    bool used[TMPL_MAX_ARGS] = {};
+    bool generic             = true;
+    for (int i = 0; i < t->nparams; i++) {
+        if (t->params[i].type_start) {
+            if (pt->pat_var[i] < 0)
+                generic = false;
+            else
+                used[pt->pat_var[i]] = true;
+            continue;
+        }
+        pattern_mark_vars(pt, pt->pat[i].ty, used);
+        int k = pattern_var(pt, pt->pat[i].ty);
+        if (k < 0 || pt->vars[k] != pt->pat[i].ty)
+            generic = false;
+    }
+    for (int k = 0; k < pt->nparams; k++)
+        if (!used[k])
+            error_tok(vm, pt->params[k].name,
+                      "partial specialization parameter '%.*s' is not "
+                      "deduced by the pattern",
+                      (int)pt->params[k].name->len, pt->params[k].name->loc);
+    if (generic) {
+        for (int i = 0; i < t->nparams && generic; i++)
+            for (int j = 0; j < i; j++)
+                if (!t->params[i].type_start && !t->params[j].type_start &&
+                    pattern_var(pt, pt->pat[i].ty) ==
+                        pattern_var(pt, pt->pat[j].ty))
+                    generic = false;
+        if (generic)
+            error_tok(vm, site,
+                      "a partial specialization must be more specific than "
+                      "the primary template");
+    }
+
+    for (TemplateInstance *in = t->insts; in; in = in->next_inst) {
+        Deduced d;
+        if (match_partial(vm, pt, in->args, &d, site))
+            error_tok(vm, site,
+                      "partial specialization of '%s' after '%s' was "
+                      "instantiated",
+                      t->name, in->mangled);
+    }
+    for (Template *o = t->partials; o; o = o->next_partial)
+        if (pattern_covers(vm, o, pt, site) && pattern_covers(vm, pt, o, site))
+            error_tok(vm, site,
+                      "redefinition of partial specialization of '%s'",
+                      t->name);
+
+    pt->next_partial = t->partials;
+    t->partials      = pt;
+    snapshot_restore(vm, &snap);
+    vm->error_jmp_buf = saved_jb;
 }

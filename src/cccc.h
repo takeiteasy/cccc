@@ -4143,6 +4143,16 @@ typedef struct Template {
     Token       *marker, *marker_end; // `__cccc_template ( ... )` to strip
     Token       *body_open;           // functions: the body's `{`
     Token       *name_tok;
+    // A partial specialization (`@template(T) @specialize(T *) ...`) is a
+    // Template of its own, hung on the template it specializes.
+    Token *pattern, *pattern_end; // `__cccc_specialize ( ... )` to strip
+    struct Template *primary;     // partial: the template it specializes
+    struct Template *partials;    // primary: its partial specializations
+    struct Template *next_partial;
+    TemplateArg     *pat; // partial: the pattern argument per primary parameter
+    int *pat_var;       // partial: constant variable a position binds, else -1
+    struct Type **vars; // partial: the placeholder type of each type variable
+    struct TemplateInstance *insts; // primary: the instances made from it
 } Template;
 
 typedef enum {
@@ -4160,6 +4170,7 @@ typedef struct TemplateInstance {
     Obj              *fn; // function instances
     TemplateArg      *args; // resolved arguments, to detect name clashes
     Template         *spec; // TI_SPECIALIZED: the hand-written definition
+    struct TemplateInstance *next_inst; // the template's other instances
 } TemplateInstance;
 
 typedef struct Compiler {
